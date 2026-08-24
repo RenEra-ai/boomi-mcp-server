@@ -412,9 +412,24 @@ class LineageWalkV1(NamedTuple):
     truncated: bool
 
 
-#: Terminals that end the process NORMALLY. `exception` is deliberately absent:
-#: it terminates abnormally, so state it had written promises a caller nothing.
-_NORMAL_EXIT_KINDS = frozenset({"stop", "return_documents"})
+#: Exit ROLES that end the process normally, named from the compiler's own
+#: `CfgExitRoleV1` vocabulary rather than guessed from semantic kinds.
+#:
+#: Keying on semantic kind was both a second model of a fact the CFG already
+#: carries and WRONG: a `target` ending a Branch leg or a Decision arm is a
+#: normal exit — the emission plan grows it a synthetic Stop — but its semantic
+#: kind is `connector`, so that path was omitted from the meet entirely. The
+#: result was an OVER-CLAIM, the one direction a guarantee must never take: a
+#: Decision whose true arm routes to a target and whose false arm writes
+#: `dpp:P` reported `P` as definitely written.
+#:
+#: The three excluded roles are excluded for distinct reasons. `exception` ends
+#: abnormally, so what it wrote promises nobody anything. `cache_stage` is a
+#: target-less staging leg, not a process exit at all. `process_call` ends the
+#: path here but the CALLED process decides what happens next, so this process
+#: guarantees nothing at that point — and a child containing one is inert
+#: anyway.
+_NORMAL_EXIT_ROLES = frozenset({"stop", "return_documents", "routed_target"})
 
 
 def _walk_lineage(
@@ -637,7 +652,7 @@ def _walk_lineage(
         # --- successors -----------------------------------------------------
         edges = prepared.successors(node_id)
         if not edges:
-            if semantic.semantic_kind in _NORMAL_EXIT_KINDS:
+            if node.exit_role in _NORMAL_EXIT_ROLES:
                 normal_exits.append(state)
             return state
 

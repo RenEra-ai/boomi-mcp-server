@@ -44,6 +44,15 @@ from boomi_mcp.authoring.vetted_scripts import (  # noqa: E402
 _SCRIPT = "def out = 1\n"
 
 
+def io_read(path):
+    """Read a repo-relative fixture as text."""
+    import io as _io
+    import os as _os
+
+    root = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
+    return _io.open(_os.path.join(root, path), encoding="utf-8").read()
+
+
 def _symbols():
     return SymbolTableV1(symbols=(
         ComponentSymbolV1(ref="$ref:MAP", component_id="m-1", component_type="transform.map"),
@@ -2641,3 +2650,128 @@ def test_only_an_endpoint_nothing_can_resolve_is_still_deferred():
     assert _derive_literal(
         config, {source_uuid: "not-a-dict", target_uuid: "not-a-dict"}
     ) is None, "a supplied-but-malformed index is a real refusal"
+
+
+# ---------------------------------------------------------------------------
+# Stage-2 r15 — three defects introduced by the §6 eval-2 batch
+# ---------------------------------------------------------------------------
+
+
+def test_a_routed_target_is_a_normal_exit():
+    """Stage-2 r15 P1. The meet omitted a whole normal path and OVER-CLAIMED.
+
+    A `target` ending a Branch leg or a Decision arm completes normally — the
+    emission plan grows it a synthetic Stop — but its SEMANTIC KIND is
+    `connector`, so classifying exits by kind skipped it. A Decision whose true
+    arm routes to a target and whose false arm writes `dpp:P` then reported `P`
+    as definitely written, and a trusted summary carrying that could suppress a
+    real read-before-write downstream. Over-claiming is the one direction a
+    guarantee must never take.
+    """
+    import json as _json
+
+    from boomi_mcp.authoring.process_ir_effects import derive_subprocess_effect
+
+    fixture = _json.loads(io_read(
+        "tests/fixtures/process_ir/issue154/source_target_return_documents.json"))
+    source = fixture["body"]["steps"][0]
+    target = [s for s in fixture["body"]["steps"] if s.get("kind") == "target"][0]
+    write_p = {"kind": "set_dpp", "name": "P",
+               "source_values": [{"value_type": "static", "value": "v"}]}
+
+    def child(true_steps):
+        return parse_process_ir_v1({"version": "1", "body": {"kind": "sequence", "steps": [
+            source, {"kind": "decision", "label": "d", "comparison": "equals",
+                     "left": {"value_type": "static", "static_value": "a"},
+                     "right": {"value_type": "static", "static_value": "b"},
+                     "true_arm": {"steps": true_steps, "terminal": target},
+                     "false_arm": {"steps": [write_p],
+                                   "terminal": {"kind": "stop"}}}]}})
+
+    # the routed path does NOT write P, so P is no guarantee
+    _reads, writes, _replay = derive_subprocess_effect(child([])).effect
+    assert ("dpp", "P") not in writes, writes
+    # CONTROL: when the routed path DOES write it, it is a guarantee — so the
+    # fix counts that exit rather than merely ignoring targets.
+    _reads, writes, _replay = derive_subprocess_effect(child([write_p])).effect
+    assert ("dpp", "P") in writes, writes
+
+
+def test_a_caller_supplied_profile_index_survives_offline_planning():
+    """Stage-2 r15 P1. Gating index resolution on a live client threw away
+    indexes the CALLER supplied.
+
+    The shared resolver checks `profile_indexes_by_component_id` BEFORE
+    attempting discovery, and its discovery helper already returns None on any
+    failure — so a null client still resolves everything the caller supplied.
+    Discarding them sent offline planning back to the no-index deferral, where
+    it could accept an effect for a map the caller's own index disproves.
+    """
+    from boomi_mcp.authoring.workflow import _literal_profile_indexes
+    from boomi_mcp.categories.components.builders.json_profile_builder import (
+        JSONGeneratedProfileBuilder,
+    )
+
+    _depends_on, by_key = _plan_context()
+    uuid = "aaaaaaaa-1111-1111-1111-111111111111"
+    index = JSONGeneratedProfileBuilder.build_field_index(by_key["SP"].config)
+
+    class _Spec:
+        components = [IntegrationComponentSpec(
+            key="MAP", type="transform.map", depends_on=["SP", "TP"],
+            config=dict(_valid_map_config("direct"), source_profile_id=uuid))]
+        profile_indexes_by_component_id = {
+            uuid: {"component_id": uuid, "profile_component_type": "profile.json",
+                   "field_index_by_path": index}}
+
+    class _Normalized:
+        integration_spec = _Spec()
+
+    resolved = _literal_profile_indexes(None, _Normalized())
+    assert resolved and uuid in resolved, resolved
+    assert sorted(resolved[uuid]["field_index_by_path"]) == sorted(index)
+
+
+def test_two_declarations_naming_one_component_are_a_finding_not_a_crash():
+    """Stage-2 r15 P2. Canonical binding made raw-ref uniqueness insufficient.
+
+    The public model rejects duplicates by REFERENCE SPELLING, which stopped
+    being the identity once binding went canonical: two legal aliases of one
+    component passed that check, expanded to the same occurrence, and produced
+    two rows carrying one binding key. The internal capabilities model rejects
+    that correctly — with a pydantic error that escaped as a CRASH instead of a
+    value-free finding on the caller's own payload.
+    """
+    symbols = _aliased_symbols()
+    root = parse_process_ir_v1({"version": "1", "body": {"kind": "sequence", "steps": [
+        {"kind": "source", "connection_ref": "$ref:CONN", "operation_ref": "$ref:GETOP"},
+        {"kind": "map_ref", "map_ref": "$ref:MAP"},
+        {"kind": "return_documents"}]}})
+    config = _valid_map_config("direct")
+    components = _components(
+        IntegrationComponentSpec(key="MAP", type="transform.map",
+                                 depends_on=["SP", "TP"], config=config),
+        IntegrationComponentSpec(key="MAP_ALIAS", type="transform.map",
+                                 depends_on=["SP", "TP"], config=config))
+
+    duplicate = ProcessIREffectDeclarationsV1(map_effects=(
+        ProcessIRMapEffectDeclarationV1(
+            map_ref="$ref:MAP", effect=_effect(replay_safe=True)),
+        ProcessIRMapEffectDeclarationV1(
+            map_ref="$ref:MAP_ALIAS", effect=_effect(replay_safe=True))))
+    resolution = resolve_process_ir_effect_declarations(
+        [("p", root)], duplicate, symbols, components, conflict_policy="fail")
+    assert not resolution.ok
+    assert [f.reason for f in resolution.findings] == ["duplicate-binding"]
+    # the pointer addresses the SECOND declaration, which is the one to remove
+    assert resolution.findings[0].path.endswith("/1"), resolution.findings[0].path
+
+    # CONTROL: ONE declaration through the alias still binds and still rebinds
+    # to the root's own spelling, so this is a duplicate check and not a ban.
+    single = ProcessIREffectDeclarationsV1(map_effects=(
+        ProcessIRMapEffectDeclarationV1(
+            map_ref="$ref:MAP_ALIAS", effect=_effect(replay_safe=True)),))
+    ok = resolve_process_ir_effect_declarations(
+        [("p", root)], single, symbols, components, conflict_policy="fail")
+    assert ok.ok, ok.findings
+    assert [r.map_ref for r in ok.capabilities_by_root["p"].map_effects] == ["$ref:MAP"]

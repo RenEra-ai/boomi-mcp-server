@@ -1270,6 +1270,10 @@ _EFFECT_DECLARATION_MESSAGES = {
         "this effect declaration disagrees with what the server derived from "
         "the resolved component"
     ),
+    "duplicate-binding": (
+        "two effect declarations in this family name the same component; "
+        "identity is the component, not the reference spelling"
+    ),
 }
 
 _EFFECT_DECLARATION_REMEDIATIONS = {
@@ -1292,6 +1296,11 @@ _EFFECT_DECLARATION_REMEDIATIONS = {
         "registry, never from the declaration. Match the derived effect, or omit "
         "the declaration and accept the strict findings."
     ),
+    "duplicate-binding": (
+        "Keep ONE declaration per component. Two references may legally name the "
+        "same component, so declaring both is a duplicate even though the "
+        "reference strings differ."
+    ),
 }
 
 
@@ -1300,11 +1309,15 @@ def _literal_profile_indexes(boomi_client: Any, normalized: Any):
 
     #179. Reuses the integration builder's own resolver — the same one the plan
     path uses — rather than modelling profile-index resolution a second time.
-    Returns None when there is no client or nothing to resolve, which is exactly
-    the pre-#179 behaviour, so a caller planning without a client is unchanged.
+
+    NOT gated on a live client. That resolver checks the caller's own
+    `profile_indexes_by_component_id` BEFORE attempting discovery, and its
+    discovery helper already returns None on any failure, so a null client
+    still resolves every index the caller supplied. Gating on the client threw
+    those away and sent offline planning straight back to the deferral — which
+    could then accept an effect for a map the caller's OWN index disproves,
+    and offline plans skip the legacy echo that would otherwise catch it.
     """
-    if boomi_client is None:
-        return None
     try:
         from ..categories.integration_builder import _resolve_literal_profile_indexes
 

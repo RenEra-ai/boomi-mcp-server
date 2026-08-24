@@ -854,12 +854,38 @@ def resolve_process_ir_effect_declarations(
     child_roots = dict(child_roots or {})
 
     # --- maps -------------------------------------------------------------
+    #: Canonical component identity already claimed, per family. The public
+    #: model rejects duplicate binding keys by RAW REF, which stopped being the
+    #: identity when binding went canonical: two legal aliases of one component
+    #: passed that check, then expanded to the SAME occurrence spellings and
+    #: produced two rows with one binding key. The internal capabilities model
+    #: rejects that — correctly — with a pydantic error that escaped the tool
+    #: as a crash instead of a value-free finding on the caller's own payload.
+    claimed: Dict[str, Dict[str, str]] = {}
+
+    def _claim(family: str, ref: str, pointer: str) -> bool:
+        """True when this declaration may proceed; records a finding if not."""
+        symbol = _symbol(symbols, ref)
+        identity = getattr(symbol, "component_id", None) if symbol else None
+        if not identity:
+            return True
+        seen = claimed.setdefault(family, {})
+        if identity in seen:
+            findings.append(
+                EffectAuthorityFindingV1(_INVALID, pointer, "duplicate-binding")
+            )
+            return False
+        seen[identity] = ref
+        return True
+
     map_rows: Dict[str, Any] = {}
     for index, item in enumerate(declarations.map_effects):
         pointer = "/effect_declarations/map_effects/{0}".format(index)
         # One (root, spelling) pair per occurrence: a root may name the same map
         # through more than one alias, and lineage looks the contract up by the
         # NODE's ref, so each spelling needs its own row.
+        if not _claim("map_effects", item.map_ref, pointer):
+            continue
         alias = _aliases(symbols, item.map_ref)
         bound = [
             (key, spelling)
@@ -945,6 +971,8 @@ def resolve_process_ir_effect_declarations(
         # nothing. Turning "this proves nothing" into "your payload is invalid"
         # is the same overreach as trusting an unverified claim, pointed the
         # other way.
+        if not _claim("external_writers", item.cache_ref, pointer):
+            continue
         alias = _aliases(symbols, item.cache_ref)
         bound = [
             (key, spelling)
@@ -982,6 +1010,8 @@ def resolve_process_ir_effect_declarations(
     subprocess_rows: List[Tuple[List[str], Any]] = []
     for index, item in enumerate(declarations.subprocess_effects):
         pointer = "/effect_declarations/subprocess_effects/{0}".format(index)
+        if not _claim("subprocess_effects", item.process_ref, pointer):
+            continue
         alias = _aliases(symbols, item.process_ref)
         bound = [
             (key, spelling)
