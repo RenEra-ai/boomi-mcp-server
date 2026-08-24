@@ -652,7 +652,16 @@ def _walk_lineage(
         # --- successors -----------------------------------------------------
         edges = prepared.successors(node_id)
         if not edges:
-            if node.exit_role in _NORMAL_EXIT_ROLES:
+            # A routed target ends its PATH, but only a Decision arm's end is an
+            # alternative exit of the PROCESS. Branch legs run SEQUENTIALLY: a
+            # leg that routes to a target is followed by the next leg, so
+            # recording its state as a process exit meets away everything a
+            # later leg guarantees — `[target]` then `[set dpp:P, stop]` lost
+            # `P`, rejecting a truthful declaration. `leg` is non-None exactly
+            # inside a branch leg (a Decision arm inherits its enclosing leg),
+            # which is the distinction the lattice already tracks.
+            routed_inside_a_leg = node.exit_role == "routed_target" and leg is not None
+            if node.exit_role in _NORMAL_EXIT_ROLES and not routed_inside_a_leg:
                 normal_exits.append(state)
             return state
 

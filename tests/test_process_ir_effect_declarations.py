@@ -2775,3 +2775,54 @@ def test_two_declarations_naming_one_component_are_a_finding_not_a_crash():
         [("p", root)], single, symbols, components, conflict_policy="fail")
     assert ok.ok, ok.findings
     assert [r.map_ref for r in ok.capabilities_by_root["p"].map_effects] == ["$ref:MAP"]
+
+
+def test_a_branch_leg_routing_to_a_target_is_not_a_process_exit():
+    """Stage-2 r16 P1. Branch legs run SEQUENTIALLY, Decision arms exclusively.
+
+    Adding routed targets to a single global meet treated an early leg's end as
+    an alternative process exit, so `[target]` followed by `[set dpp:P, stop]`
+    lost `P` — meeting away a write that ALWAYS happens, and rejecting a
+    truthful declaration. The distinction is the one the lattice already
+    tracks: `leg` is non-None exactly inside a branch leg, and a Decision arm
+    inherits its enclosing leg.
+
+    All three cases must hold AT ONCE — this is the third revision of this
+    rule, and each earlier one fixed one case by breaking another.
+    """
+    import json as _json
+
+    from boomi_mcp.authoring.process_ir_effects import derive_subprocess_effect
+
+    fixture = _json.loads(io_read(
+        "tests/fixtures/process_ir/issue154/source_target_return_documents.json"))
+    source = fixture["body"]["steps"][0]
+    target = [s for s in fixture["body"]["steps"] if s.get("kind") == "target"][0]
+    write_p = {"kind": "set_dpp", "name": "P",
+               "source_values": [{"value_type": "static", "value": "v"}]}
+
+    def root(step):
+        return parse_process_ir_v1({"version": "1", "body": {
+            "kind": "sequence", "steps": [source, step]}})
+
+    def decision(true_steps):
+        return {"kind": "decision", "label": "d", "comparison": "equals",
+                "left": {"value_type": "static", "static_value": "a"},
+                "right": {"value_type": "static", "static_value": "b"},
+                "true_arm": {"steps": true_steps, "terminal": target},
+                "false_arm": {"steps": [write_p], "terminal": {"kind": "stop"}}}
+
+    # 1. SEQUENTIAL: the later leg always runs, so its write IS guaranteed.
+    branch = {"kind": "branch", "label": "b", "legs": [
+        {"steps": [], "terminal": target},
+        {"steps": [write_p], "terminal": {"kind": "stop"}}]}
+    _r, writes, _s = derive_subprocess_effect(root(branch)).effect
+    assert ("dpp", "P") in writes, writes
+
+    # 2. EXCLUSIVE: the routed arm never writes it, so it is NOT guaranteed.
+    _r, writes, _s = derive_subprocess_effect(root(decision([]))).effect
+    assert ("dpp", "P") not in writes, writes
+
+    # 3. EXCLUSIVE and both arms write it, so it IS guaranteed.
+    _r, writes, _s = derive_subprocess_effect(root(decision([write_p]))).effect
+    assert ("dpp", "P") in writes, writes
