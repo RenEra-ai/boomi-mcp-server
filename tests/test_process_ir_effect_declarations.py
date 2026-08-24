@@ -2939,3 +2939,63 @@ def test_an_exception_terminal_is_not_a_normal_exit():
     _reads, writes, _replay = derive_subprocess_effect(
         _catch_terminal_child(False, False)).effect
     assert ("dpp", "K") in writes, writes
+
+
+def test_the_exit_rule_holds_on_every_shape_at_once():
+    """The FOURTH revision of the normal-exit rule, so every case is asserted
+    together. Each earlier version fixed one shape by breaking another:
+
+    1. the original scan ignored control bodies entirely;
+    2. r15 fixed a Decision over-claim by widening the exit set globally, which
+       broke sequential Branch legs;
+    3. r16 made routed targets leg-local, which left a Branch whose legs ALL
+       route with no completion point at all;
+    4. r17 records the Branch's own completion, which no leaf can record.
+
+    They were never asserted together, which is exactly why each fix could
+    trade one shape for another without anything failing.
+    """
+    import json as _json
+
+    from boomi_mcp.authoring.process_ir_effects import derive_subprocess_effect
+
+    fixture = _json.loads(io_read(
+        "tests/fixtures/process_ir/issue154/source_target_return_documents.json"))
+    source = fixture["body"]["steps"][0]
+    target = [s for s in fixture["body"]["steps"] if s.get("kind") == "target"][0]
+    write_p = {"kind": "set_dpp", "name": "P",
+               "source_values": [{"value_type": "static", "value": "v"}]}
+
+    def root(steps):
+        return parse_process_ir_v1({"version": "1", "body": {
+            "kind": "sequence", "steps": [source] + steps}})
+
+    def writes(steps):
+        _reads, written, _replay = derive_subprocess_effect(root(steps)).effect
+        return written
+
+    all_routed = {"kind": "branch", "label": "b", "legs": [
+        {"steps": [], "terminal": target}, {"steps": [], "terminal": target}]}
+    mixed = {"kind": "branch", "label": "b", "legs": [
+        {"steps": [], "terminal": target},
+        {"steps": [write_p], "terminal": {"kind": "stop"}}]}
+
+    def decision(true_steps):
+        return {"kind": "decision", "label": "d", "comparison": "equals",
+                "left": {"value_type": "static", "static_value": "a"},
+                "right": {"value_type": "static", "static_value": "b"},
+                "true_arm": {"steps": true_steps, "terminal": target},
+                "false_arm": {"steps": [write_p], "terminal": {"kind": "stop"}}}
+
+    # 1. a write BEFORE a fully-routed branch survives (r17)
+    assert ("dpp", "P") in writes([write_p, all_routed])
+    # 2. a later sequential leg's write survives an earlier routed leg (r16)
+    assert ("dpp", "P") in writes([mixed])
+    # 3. an exclusive routed arm that never writes it does NOT promise it (r15)
+    assert ("dpp", "P") not in writes([decision([])])
+    # 4. ...and two writing arms still do
+    assert ("dpp", "P") in writes([decision([write_p])])
+    # 5. NEGATIVE CONTROL: nothing writes it, so nothing promises it. Without
+    #    this every assertion above passes for a derivation that claims
+    #    everything.
+    assert ("dpp", "P") not in writes([all_routed])

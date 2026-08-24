@@ -680,6 +680,19 @@ def _walk_lineage(
                     (node.node_id, edge.leg_ordinal or edge.local_ordinal),
                 )
                 carried = _State(entry.document, carried.execution | leg_end.execution)
+            # The BRANCH's own completion, recorded here because no leaf can
+            # record it. Legs run sequentially, so the state after the last leg
+            # is what holds when the branch finishes — individual leg ends are
+            # not alternatives, which is why a leg ending on a routed target or
+            # a staged cache is deliberately not a process exit. In the ordinary
+            # fan-out where EVERY leg routes to a target, that left no exit at
+            # all and the guarantee set came back empty even for a write made
+            # before the branch.
+            #
+            # Only when nothing follows the branch: otherwise the successor
+            # carries on and its own path end is the completion point.
+            if not any(edge.kind != "branch_leg" for edge in edges):
+                normal_exits.append(carried)
             return carried
 
         if semantic.semantic_kind == "decision":
