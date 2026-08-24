@@ -282,7 +282,7 @@ def test_state_visibility_descriptor_is_load_bearing_not_a_second_copy():
     assert STATE_VISIBILITY_V1["dpp"]["read_before_write"] == "rejected"
     assert (
         STATE_VISIBILITY_V1["cache"]["read_before_write"]
-        == "rejected_unless_external_writer_declared"
+        == "rejected_unless_external_writer_authored_and_verified"
     )
 
 

@@ -44,6 +44,9 @@ from boomi_mcp.authoring.vetted_scripts import (  # noqa: E402
 _SCRIPT = "def out = 1\n"
 
 
+import pathlib as _pathlib
+
+
 def io_read(path):
     """Read a repo-relative fixture as text."""
     import io as _io
@@ -2062,13 +2065,14 @@ def test_the_inspectable_and_opaque_child_kinds_partition_the_vocabulary():
         vocabulary.update(typing.get_args(annotation))
     assert vocabulary, "no semantic kinds discovered — the probe itself is vacuous"
 
-    # The kinds excluded at the KIND level. `data_process` is deliberately not
-    # among them: whether it is inspectable is a per-NODE question the lineage
-    # authority answers (a scripted step is opaque, a pure split/combine is
-    # not), so it is admitted here and gated by `_node_is_inspectable`.
-    # Excluding the whole kind refused pure children while the served rule said
-    # only a SCRIPTED data process is uninspectable.
-    opaque = {"map", "process_call"}
+    # The kinds a typed CONTRACT can make inspectable — decided per NODE by the
+    # lineage authority, never per kind. Gating them at the kind level
+    # short-circuited that check, so a child map with a verified contract
+    # stayed opaque and the contract bought nothing.
+    from boomi_mcp.authoring.process_ir_effects import CONTRACT_GATED_CHILD_KINDS
+
+    opaque = set(CONTRACT_GATED_CHILD_KINDS)
+    assert opaque == {"map", "data_process", "process_call"}, opaque
     assert INSPECTABLE_CHILD_KINDS | opaque == vocabulary, (
         "unclassified kinds: {0}".format(
             vocabulary ^ (INSPECTABLE_CHILD_KINDS | opaque)))
@@ -3038,3 +3042,330 @@ def test_the_exit_rule_holds_on_every_shape_at_once():
     #    this every assertion above passes for a derivation that claims
     #    everything.
     assert ("dpp", "P") not in writes([all_routed])
+
+
+# ---------------------------------------------------------------------------
+# §6 eval-3 (the capped final architect gate)
+# ---------------------------------------------------------------------------
+
+
+def test_a_legs_normal_write_reaches_the_next_leg():
+    """§6 eval-3 F1. The next leg was seeded from a CONTINUATION, not a guarantee.
+
+    A leg whose only normal path writes `dpp:P` and whose other arm throws
+    hands back a MEET without `P`. Seeding the next leg from that reported a
+    read of `P` in a later leg as read-before-write, and made the derived
+    summary both REQUIRE and GUARANTEE the same key — a contradiction no caller
+    could satisfy.
+    """
+    import json as _json
+
+    from boomi_mcp.authoring.process_ir_effects import derive_subprocess_effect
+    from boomi_mcp.compiler.process_ir.contracts import SymbolTableV1
+    from boomi_mcp.compiler.process_ir.semantic_validation.pipeline import (
+        validate_process_ir,
+    )
+
+    fixture = _json.loads(io_read(
+        "tests/fixtures/process_ir/issue154/source_target_return_documents.json"))
+    source = fixture["body"]["steps"][0]
+    write_p = {"kind": "set_dpp", "name": "P",
+               "source_values": [{"value_type": "static", "value": "v"}]}
+    read_p = {"kind": "set_dpp", "name": "OUT",
+              "source_values": [{"value_type": "dpp", "property_name": "P"}]}
+    throwing = {"kind": "decision", "label": "d", "comparison": "equals",
+                "left": {"value_type": "static", "static_value": "a"},
+                "right": {"value_type": "static", "static_value": "b"},
+                "true_arm": {"steps": [write_p], "terminal": {"kind": "stop"}},
+                "false_arm": {"steps": [], "terminal": {
+                    "kind": "exception", "message_template": "x {1}"}}}
+    child = parse_process_ir_v1({"version": "1", "body": {"kind": "sequence", "steps": [
+        source, {"kind": "branch", "label": "b", "legs": [
+            {"steps": [], "terminal": throwing},
+            {"steps": [read_p], "terminal": {"kind": "stop"}}]}]}})
+
+    assert validate_process_ir(child, SymbolTableV1(symbols=())).errors == ()
+    reads, writes, _replay = derive_subprocess_effect(child).effect
+    assert ("dpp", "P") not in reads, reads
+    assert ("dpp", "P") in writes, writes
+
+
+def test_the_connector_entry_invariant_reconciles_edges_with_ordinals():
+    """§6 eval-3 F3. An ordinal sort alone is self-consistent under mutation.
+
+    Moving BOTH the source paths and the roles leaves the ordinal order
+    agreeing with the roles, so the check passed a graph whose execution-first
+    call carried `downstream` — emission then gives the two calls each other's
+    shapes. A guard that reads only what the lowering wrote cannot catch the
+    lowering; execution order now comes from the ordering EDGES and must agree.
+    """
+    import copy as _copy
+
+    import pytest
+
+    from boomi_mcp.compiler.process_ir.invariants import check_cfg_invariants
+    from boomi_mcp.compiler.process_ir.lowering import lower_process_ir_to_cfg
+
+    ir = parse_process_ir_v1({"version": "1", "body": {"kind": "sequence", "steps": [
+        {"kind": "connector_call", "operation_ref": "$ref:GETOP"},
+        {"kind": "connector_call", "operation_ref": "$ref:PATCHOP"},
+        {"kind": "stop"}]}})
+    cfg = lower_process_ir_to_cfg(ir)
+    check_cfg_invariants(cfg)  # CONTROL: the honest graph passes
+
+    def mutated(swap_roles):
+        graph = _copy.deepcopy(cfg)
+        calls = [n for n in graph.nodes
+                 if n.semantic.semantic_kind == "connector_call"]
+        object.__setattr__(calls[0], "source_path", "/body/steps/1")
+        object.__setattr__(calls[1], "source_path", "/body/steps/0")
+        if swap_roles:
+            object.__setattr__(calls[0].semantic, "role", "downstream")
+            object.__setattr__(calls[1].semantic, "role", "entry")
+        return graph
+
+    # paths only — caught since the previous round
+    with pytest.raises(Exception):
+        check_cfg_invariants(mutated(False))
+    # paths AND roles — self-consistent under an ordinal sort, and the one the
+    # previous closure did not cover
+    with pytest.raises(Exception):
+        check_cfg_invariants(mutated(True))
+
+
+def test_content_authority_is_resolved_through_identity_in_both_directions():
+    """§6 eval-3 F4. Binding used identity; CONTENT still used the spelling.
+
+    In the REVERSE alias case — declaration through the alias, occurrence and
+    authored spec under the canonical ref — identity matched and the content
+    lookup then found nothing, so the request resolved `ok` with no row and no
+    diagnostic. Silently establishing nothing is the failure mode this channel
+    exists to remove.
+    """
+    symbols = _aliased_symbols()
+    root = parse_process_ir_v1({"version": "1", "body": {"kind": "sequence", "steps": [
+        {"kind": "source", "connection_ref": "$ref:CONN", "operation_ref": "$ref:GETOP"},
+        {"kind": "map_ref", "map_ref": "$ref:MAP"},
+        {"kind": "return_documents"}]}})
+    components = _components(IntegrationComponentSpec(
+        key="MAP", type="transform.map", depends_on=["SP", "TP"],
+        config=_valid_map_config("direct")))
+
+    for spelling in ("$ref:MAP_ALIAS", "$ref:MAP"):
+        declarations = ProcessIREffectDeclarationsV1(map_effects=(
+            ProcessIRMapEffectDeclarationV1(
+                map_ref=spelling, effect=_effect(replay_safe=True)),))
+        resolution = resolve_process_ir_effect_declarations(
+            [("p", root)], declarations, symbols, components, conflict_policy="fail")
+        assert resolution.ok, (spelling, resolution.findings)
+        assert not resolution.inert, (spelling, resolution.inert)
+        assert [r.map_ref for r in resolution.capabilities_by_root["p"].map_effects] == [
+            "$ref:MAP"], spelling
+
+
+def test_the_public_language_alias_is_importable_from_the_package():
+    """§6 eval-3 F5. It was added to the defining module's `__all__` only.
+
+    `boomi_mcp.models.ProcessIRScriptLanguageV1` is the import a caller writes,
+    and it did not exist — so the ledger row recording the export as fixed was
+    false.
+    """
+    import boomi_mcp.models as models
+
+    assert hasattr(models, "ProcessIRScriptLanguageV1")
+    assert "ProcessIRScriptLanguageV1" in models.__all__
+
+
+def test_a_verified_contract_makes_a_child_step_inspectable():
+    """§6 eval-3 F2. Child inspection ran against the STRICT default.
+
+    A contract exists precisely so the thing it covers stops being opaque. The
+    child's own verified rows were resolved and then not passed, and the kind
+    gate short-circuited the per-node check anyway, so a child containing a map
+    whose effect the SERVER derived stayed `uninspectable_step` — the map
+    declaration bound, and its parent's subprocess declaration went silently
+    inert.
+    """
+    from boomi_mcp.authoring.process_ir_effects import derive_subprocess_effect
+    from boomi_mcp.compiler.process_ir.semantic_validation.contracts import (
+        MapEffectContractV1,
+        ProcessIRValidationCapabilitiesV1,
+        StateEffectV1,
+    )
+
+    child = parse_process_ir_v1({"version": "1", "body": {"kind": "sequence", "steps": [
+        {"kind": "source", "connection_ref": "$ref:CONN", "operation_ref": "$ref:GETOP"},
+        {"kind": "map_ref", "map_ref": "$ref:MAP"},
+        {"kind": "return_documents"}]}})
+
+    # CONTROL: with nothing vouching for the map, the child is inert.
+    bare = derive_subprocess_effect(child)
+    assert bare.effect is None and bare.inert_reason == "uninspectable_step", bare
+
+    covered = derive_subprocess_effect(child, capabilities=(
+        ProcessIRValidationCapabilitiesV1(map_effects=(MapEffectContractV1(
+            map_ref="$ref:MAP",
+            effect=StateEffectV1(reads=(), writes=(("dpp", "M"),), replay_safe=True)),))))
+    assert covered.effect is not None, covered
+    _reads, writes, _replay = covered.effect
+    # the contract's own write reaches the child summary
+    assert ("dpp", "M") in writes, writes
+
+
+def test_a_child_map_declaration_unblocks_its_parents_subprocess_declaration():
+    """§6 eval-3 F2, end to end through the resolver's own wiring.
+
+    The direct-derivation test above proves the check consults the capabilities
+    it is handed; this proves the RESOLVER hands over the right ones. A child
+    root carrying a map, a map declaration bound inside that child, and a
+    subprocess declaration in the parent: before the fix the parent's
+    declaration resolved `ok` and went silently INERT, because the child was
+    inspected with only its external writers.
+    """
+    from boomi_mcp.models.authoring_workflow import (
+        ProcessIRSubprocessEffectDeclarationV1,
+    )
+
+    child = parse_process_ir_v1({"version": "1", "body": {"kind": "sequence", "steps": [
+        {"kind": "source", "connection_ref": "$ref:CONN", "operation_ref": "$ref:GETOP"},
+        {"kind": "map_ref", "map_ref": "$ref:MAP"},
+        {"kind": "return_documents"}]}})
+    parent = parse_process_ir_v1({"version": "1", "body": {"kind": "sequence", "steps": [
+        {"kind": "process_call", "process_ref": "$ref:CHILD"}]}})
+    components = _components(IntegrationComponentSpec(
+        key="MAP", type="transform.map", depends_on=["SP", "TP"],
+        config=_valid_map_config("direct")))
+
+    declarations = ProcessIREffectDeclarationsV1(
+        map_effects=(ProcessIRMapEffectDeclarationV1(
+            map_ref="$ref:MAP", effect=_effect(replay_safe=True)),),
+        subprocess_effects=(ProcessIRSubprocessEffectDeclarationV1(
+            process_ref="$ref:CHILD", effect=_effect(replay_safe=False)),))
+    resolution = resolve_process_ir_effect_declarations(
+        [("parent", parent), ("CHILD", child)], declarations, _symbols(), components,
+        child_roots={"$ref:CHILD": child, "CHILD": child}, conflict_policy="fail")
+
+    assert resolution.ok, resolution.findings
+    assert resolution.inert == (), resolution.inert
+    rows = resolution.capabilities_by_root["parent"].subprocess_summaries
+    assert [r.process_ref for r in rows] == ["$ref:CHILD"], rows
+
+
+# ---------------------------------------------------------------------------
+# §6 eval-3 F7 — the channel through the PUBLIC plan boundary
+# ---------------------------------------------------------------------------
+
+
+def test_an_external_writer_declaration_changes_the_public_plan_verdict():
+    """§6 eval-3 F7. Every other test here calls the resolver directly.
+
+    That proves the resolver agrees with itself. This drives
+    `plan_authoring_request_v1` — the entry a caller actually reaches — and
+    asserts the declaration changes the VERDICT: a `cache_get` authoring
+    `external_writer` over a cache nothing in the request writes blocks the
+    plan, and the same request carrying the declaration plans clean.
+
+    The pair is the point. Asserting only the second half would pass for a
+    build that never validated cache lineage at all.
+    """
+    import copy as _copy
+    import sys as _sys
+
+    _sys.path.insert(0, str(_pathlib.Path(__file__).resolve().parent))
+    from _m12_11_support import (
+        VALID_IR_DOC,
+        process_ir_request,
+        supporting_components,
+    )
+
+    from boomi_mcp.authoring.workflow import plan_authoring_request_v1
+    from boomi_mcp.models.authoring_workflow import (
+        ProcessIRExternalWriterDeclarationV1,
+    )
+
+    document = _copy.deepcopy(VALID_IR_DOC)
+    document["body"]["steps"].insert(1, {
+        "kind": "cache_get", "cache_ref": "$ref:cache", "external_writer": True})
+    spec_type = type(supporting_components()[0])
+    cache = spec_type(
+        key="cache", type="documentcache", action="create", name="qa cache",
+        config={"component_name": "qa cache", "cache_index": [
+            {"name": "k", "keys": [
+                {"profile_ref": "$ref:api_op", "element_path": "id"}]}]})
+
+    def plan(declarations):
+        extra = {} if declarations is None else {
+            "effect_declarations": declarations}
+        request = process_ir_request(doc=document, **extra)
+        request = request.model_copy(update={"intent": request.intent.model_copy(
+            update={"components": tuple(supporting_components()) + (cache,)})})
+        return plan_authoring_request_v1(
+            request, profile="qa_profile", account_id="qa_account")[0]
+
+    # CONTROL: nothing vouches for a writer, so the plan is refused.
+    without = plan(None)
+    assert without.validation_report.is_valid is False
+    assert any("COMPILE_BLOCKED" in e.code for e in without.errors), without.errors
+
+    # ...and the declaration is what changes the answer.
+    with_declaration = plan(ProcessIREffectDeclarationsV1(external_writers=(
+        ProcessIRExternalWriterDeclarationV1(cache_ref="$ref:cache"),)))
+    assert with_declaration.validation_report.is_valid is True, with_declaration.errors
+    assert with_declaration.errors == ()
+
+
+def test_a_throwing_arm_does_not_drop_what_the_continuing_arm_established():
+    """§6 eval-3 F1, at the seam that actually governs it.
+
+    The Decision meet folded in an arm that only THROWS. Nothing downstream of
+    the Decision runs for the document that took that arm, so meeting its state
+    into the continuation dropped whatever the other arm established for every
+    document that DOES continue.
+
+    Fixing this by seeding the next Branch leg from that leg's normal
+    COMPLETIONS instead looked equivalent and was not: a leg ending in a WAITING
+    `process_call` records no completion — that exit role is deliberately not a
+    normal exit — so the next leg stopped seeing the write the call
+    established, and five orchestration tests went red. The correction belongs
+    at the Decision, not at the Branch.
+    """
+    import json as _json
+
+    from boomi_mcp.authoring.process_ir_effects import derive_subprocess_effect
+    from boomi_mcp.compiler.process_ir.contracts import SymbolTableV1
+    from boomi_mcp.compiler.process_ir.semantic_validation.pipeline import (
+        validate_process_ir,
+    )
+
+    fixture = _json.loads(io_read(
+        "tests/fixtures/process_ir/issue154/source_target_return_documents.json"))
+    source = fixture["body"]["steps"][0]
+    write_p = {"kind": "set_dpp", "name": "P",
+               "source_values": [{"value_type": "static", "value": "v"}]}
+    read_p = {"kind": "set_dpp", "name": "OUT",
+              "source_values": [{"value_type": "dpp", "property_name": "P"}]}
+
+    def child(false_terminal):
+        decision = {"kind": "decision", "label": "d", "comparison": "equals",
+                    "left": {"value_type": "static", "static_value": "a"},
+                    "right": {"value_type": "static", "static_value": "b"},
+                    "true_arm": {"steps": [write_p], "terminal": {"kind": "stop"}},
+                    "false_arm": {"steps": [], "terminal": false_terminal}}
+        return parse_process_ir_v1({"version": "1", "body": {"kind": "sequence", "steps": [
+            source, {"kind": "branch", "label": "b", "legs": [
+                {"steps": [], "terminal": decision},
+                {"steps": [read_p], "terminal": {"kind": "stop"}}]}]}})
+
+    throwing = child({"kind": "exception", "message_template": "x {1}"})
+    assert validate_process_ir(throwing, SymbolTableV1(symbols=())).errors == ()
+    reads, writes, _replay = derive_subprocess_effect(throwing).effect
+    assert ("dpp", "P") not in reads, reads
+    assert ("dpp", "P") in writes, writes
+
+    # CONTROL: when the other arm CONTINUES without writing `P`, the meet is
+    # correct to drop it — so this is about throwing arms, not about ignoring
+    # the false arm.
+    continuing = child({"kind": "stop"})
+    codes = {e.code for e in
+             validate_process_ir(continuing, SymbolTableV1(symbols=())).errors}
+    assert any("READ_BEFORE_WRITE" in c for c in codes), codes

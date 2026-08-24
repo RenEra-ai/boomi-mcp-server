@@ -250,6 +250,25 @@ def _component(components: Sequence[Any], ref: str):
     return None
 
 
+def _by_identity(aliases, lookup):
+    """The first alias for which ``lookup`` yields something.
+
+    CONTENT must be resolved through canonical identity for the same reason
+    BINDING is. Fetching it by the declaration's own spelling made the reverse
+    alias case silently INERT: the declaration named the component through a
+    legal alias, the occurrence and the authored spec used the canonical ref,
+    identity matched, and then the content lookup found nothing — so the
+    request resolved `ok` with no row and no diagnostic at all.
+
+    Aliases are sorted so the answer cannot depend on symbol-table order.
+    """
+    for alias in sorted(aliases):
+        found = lookup(alias)
+        if found is not None:
+            return found
+    return None
+
+
 def _map_type_vocabularies() -> Tuple[FrozenSet[str], FrozenSet[str]]:
     """``(function-map types, direct-map types)`` — ASKED of the builders.
 
@@ -611,9 +630,17 @@ def derive_map_effect(
 #: `test_the_inspectable_and_opaque_child_kinds_partition_the_vocabulary` pins
 #: this bidirectionally against the compiler's own semantic-kind union, so a
 #: nineteenth kind fails that test rather than silently landing on one side.
+#: Kinds a typed CONTRACT can make inspectable. Exactly the three
+#: `_opaque_reason` covers, and each decided per NODE, never per kind: a map
+#: whose effect the server derived is not opaque, and neither is a data process
+#: whose scripts are registry-matched nor a call whose child summary is already
+#: verified. Gating them at the KIND level short-circuited the per-node check,
+#: so a child map with a verified contract stayed `uninspectable_step` and its
+#: parent's declaration went silently inert — the contract bought nothing.
+CONTRACT_GATED_CHILD_KINDS = frozenset({"map", "data_process", "process_call"})
+
 INSPECTABLE_CHILD_KINDS = frozenset({
     "branch",
-    "data_process",
     "connector",
     "connector_call",
     "cache_get",
@@ -661,7 +688,7 @@ from ..compiler.process_ir.semantic_validation.contracts import (
 )
 
 
-def _node_is_inspectable(semantic) -> bool:
+def _node_is_inspectable(semantic, capabilities=None) -> bool:
     """Whether the lineage authority accounts for THIS node's state.
 
     Asks `_opaque_reason` rather than re-deciding, because for `data_process`
@@ -670,13 +697,23 @@ def _node_is_inspectable(semantic) -> bool:
     one is not. Kind-level exclusion got that wrong in the refusing direction
     and contradicted the served rule.
 
-    Called with the STRICT default capabilities, which corroborate nothing — so
-    "inspectable" here means "needs no contract to be understood", never "a
-    caller said so".
+    ``capabilities`` are the CHILD's own verified contracts — the map and script
+    effects the server derived for rows bound inside that child, and its
+    external writers. Passing them is what makes inspection COMPOSITIONAL: a
+    child containing a map whose effect the server itself derived is no longer
+    opaque, which is the whole point of a typed contract. Calling with the
+    strict default instead left such a child `uninspectable_step`, so a valid
+    child map declaration bound while its parent's subprocess declaration went
+    silently inert.
+
+    Nothing here is a caller's word: every row in ``capabilities`` was derived
+    or registry-matched server-side before it reached this call.
     """
     from ..compiler.process_ir.semantic_validation.lineage import _opaque_reason
 
-    return _opaque_reason(semantic, DEFAULT_VALIDATION_CAPABILITIES) is None
+    return _opaque_reason(
+        semantic, capabilities or DEFAULT_VALIDATION_CAPABILITIES
+    ) is None
 
 
 def subprocess_inert_reasons() -> Tuple[Tuple[str, str], ...]:
@@ -761,7 +798,11 @@ def derive_subprocess_effect(
     for node in prepared.cfg.nodes:
         semantic = node.semantic
         kind = semantic.semantic_kind
-        if kind not in INSPECTABLE_CHILD_KINDS or not _node_is_inspectable(semantic):
+        if kind in CONTRACT_GATED_CHILD_KINDS:
+            inspectable = _node_is_inspectable(semantic, capabilities)
+        else:
+            inspectable = kind in INSPECTABLE_CHILD_KINDS
+        if not inspectable:
             return ChildSummaryV1(None, INERT_UNINSPECTABLE_STEP)
         # A cache write is not replayable: re-running the child would write the
         # cache twice. A persisted process property survives the execution, so
@@ -899,7 +940,7 @@ def resolve_process_ir_effect_declarations(
         if symbol is None or getattr(symbol, "component_type", None) != "transform.map":
             findings.append(EffectAuthorityFindingV1(_INVALID, pointer, "unresolved-or-wrong-type"))
             continue
-        spec = _component(components, item.map_ref)
+        spec = _by_identity(alias, lambda ref: _component(components, ref))
         derived = (
             derive_map_effect(
                 getattr(spec, "config", None) or {},
@@ -1025,10 +1066,13 @@ def resolve_process_ir_effect_declarations(
         if symbol is None or getattr(symbol, "component_type", None) != "process":
             findings.append(EffectAuthorityFindingV1(_INVALID, pointer, "unresolved-or-wrong-type"))
             continue
-        child = child_roots.get(item.process_ref)
-        if child is None:
-            key = item.process_ref[len("$ref:"):] if item.process_ref.startswith("$ref:") else item.process_ref
-            child = child_roots.get(key)
+        def _child_for(ref):
+            if ref in child_roots:
+                return child_roots[ref]
+            bare = ref[len("$ref:"):] if ref.startswith("$ref:") else ref
+            return child_roots.get(bare)
+
+        child = _by_identity(alias, _child_for)
         # The child's OWN trusted context. Deriving its summary against the
         # STRICT default asked a different question than the child's validation
         # answers: a cache read the child itself declares an external writer for
@@ -1038,7 +1082,24 @@ def resolve_process_ir_effect_declarations(
             item.process_ref[len("$ref:"):]
             if item.process_ref.startswith("$ref:") else item.process_ref
         )
+        # The child's OWN verified contracts, all resolved before this loop:
+        # its map effects, its registry-matched scripts, and its external
+        # writers. Handing over only the writers made a contracted child map
+        # opaque and its parent's declaration silently inert.
         child_capabilities = ProcessIRValidationCapabilitiesV1(
+            map_effects=tuple(
+                row
+                for _bound, rows in map_rows.values()
+                for root_key, row in rows
+                if root_key == child_key
+            ),
+            # script rows carry a bound-key LIST, not a single key — the same
+            # shape the per-root assembly below uses. Comparing a list to a key
+            # would have matched nothing and read as "this child has no
+            # scripts", silently.
+            script_effects=tuple(
+                row for bound_keys, row in script_rows if child_key in bound_keys
+            ),
             external_writers=tuple(
                 row for root_key, row in writer_rows if root_key == child_key
             ),

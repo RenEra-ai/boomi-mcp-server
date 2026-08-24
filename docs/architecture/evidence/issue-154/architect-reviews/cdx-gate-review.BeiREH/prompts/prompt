@@ -1,0 +1,613 @@
+You are performing the THIRD and FINAL architect implementation review for GitHub issue #154 — "M12.16: ProcessIR grammar and effect foundation (T2 + T8)" — in the boomi-mcp-server repository.
+
+This gate is capped at three evaluations by a standing repository rule (`docs/architecture/COMPLETION_WORKFLOW_RULES.md`). This is the third. Whatever you report, the architect loop ENDS here: I apply this round's batched correction, run the repo's own commit review over that correction delta until it returns CLEAN, and close on that. There is no fourth evaluation.
+
+That makes ONE thing more valuable than anything else you could tell me: **something the plan REQUIRES that is missing outright, or something shipped that is WRONG and would reach a caller.** A stylistic note or a nice-to-have costs a round I do not have.
+
+Your job is NOT to review the code on its own merits. The repo's own Codex commit-review gate has done that twenty times and closed CLEAN on the current tip with zero findings. Your job is the one that gate structurally cannot do: judge the IMPLEMENTATION AGAINST THE ARCHITECT DESIGN PLAN, inlined verbatim below.
+
+## What to review
+
+The full slice delta: `git diff c41bcf085fcc0dcdc1efa5dde119c61932599175..HEAD`.
+HEAD is `e8788f1`. Branch `codex/issue-154` (a `codex/issue-177` name appears in older records; same branch).
+
+Ignore everything under `docs/architecture/evidence/issue-154/` — an append-only attestation archive of the review rounds, not implementation.
+
+## What the two previous evaluations found, and what changed
+
+Evaluation 1 (`architect-reviews/cdx-gate-review.WuVWnP/review.md`) raised nine findings; evaluation 2 (`architect-reviews/cdx-gate-architect.VRDHvl/review.md`) raised nine more, two P1. All eighteen are reconciled in `docs/architecture/ISSUE_154_AUDIT_LEDGER.md`, one row each with its disposition. Read both reviews and the ledger before starting so you do not re-report settled ground.
+
+Since evaluation 2, the following changed:
+
+- **Subprocess effects are compositional.** A child's derived required reads are seeded as its ENTRY state, so a child that consumes caller state no longer reports read-before-write against itself; the demand lands on the caller, where it belongs.
+- **The normal-exit rule was rewritten six times** and finally derived rather than patched. The two state compartments aggregate differently at a Branch: EXECUTION (DPP, cache) accumulates because every leg runs; DOCUMENT (DDP) does not, because each leg re-copies the pre-Branch documents. Each leg contributes one completion carrying its own document copies and the execution state all legs guarantee.
+- **Binding is by canonical component identity** with per-occurrence rebinding, and two declarations naming one component are a value-free finding rather than a crash.
+- **Issue #179 was absorbed** into this slice by owner instruction: `literal_indexes` is threaded into the effect gate, so the plan authority answers instead of deferring. #179's acceptance criteria and required tests now live in #154's own description.
+- **The parallel `effect_authority.*` served namespace was deleted**, folding those facts into the `semantic_rule.effect.*` ids the plan specified.
+
+## What I most want you to attack
+
+1. **Plan fidelity, item by item.** Walk the plan's numbered items. For each: realized, narrowed, or diverged — name the item number. A DOCUMENTED narrowing is not automatically a defect; say so if it is honest, and flag it if the documentation overstates what shipped.
+2. **Anything the plan REQUIRES that is simply absent**, with nothing in the ledger or the issue acknowledging it. Highest-value finding available to you.
+3. **The subprocess summary as a caller-facing contract.** Six rounds of P1s landed there. Is the shipped model now right, or right-looking? Attack the compartment rule specifically.
+4. **Over-delivery** — anything shipped the plan did not ask for that must now be maintained or served. Served contract text counts.
+5. **Whether the ledger's claims match the code.** Several findings this slice were false statements recorded beside correct ones. If a disposition claims something the tree does not do, that is worth more than a code nit.
+
+## Ground rules
+
+- Verify before reporting; paths and line numbers have moved many times.
+- Name the file and the concrete gap. A finding I cannot act on costs the round.
+- No style, naming, or comment-density notes. Do not re-litigate the twenty commit reviews.
+- If the implementation is faithful, say so plainly. A clean verdict from this gate is a real result.
+
+END with a verdict on its OWN FINAL line: exactly `VERDICT: NO ISSUES` or exactly `VERDICT: ISSUES FOUND`.
+
+
+=== CHANGED FILES (implementation only; evidence archive omitted) ===
+docs/architecture/ISSUE_154_AUDIT_LEDGER.md
+docs/architecture/M12_COMPATIBILITY_INVENTORY.md
+src/boomi_mcp/authoring/contract.py
+src/boomi_mcp/authoring/process_ir_effects.py
+src/boomi_mcp/authoring/process_ir_projection.py
+src/boomi_mcp/authoring/process_materialization.py
+src/boomi_mcp/authoring/vetted_scripts.py
+src/boomi_mcp/authoring/workflow.py
+src/boomi_mcp/categories/components/builders/map_function_registry.py
+src/boomi_mcp/categories/meta_tools.py
+src/boomi_mcp/compiler/process_ir/body_capabilities.py
+src/boomi_mcp/compiler/process_ir/invariants.py
+src/boomi_mcp/compiler/process_ir/lowering.py
+src/boomi_mcp/compiler/process_ir/semantic_validation/contracts.py
+src/boomi_mcp/compiler/process_ir/semantic_validation/findings.py
+src/boomi_mcp/compiler/process_ir/semantic_validation/lineage.py
+src/boomi_mcp/errors.py
+src/boomi_mcp/models/__init__.py
+src/boomi_mcp/models/authoring_workflow.py
+src/boomi_mcp/models/process_ir.py
+src/boomi_mcp/recipes/engine.py
+tests/_wave_gate_golden_corpus.py
+tests/fixtures/authoring_contract/process_ir_authoring_v1.contract.json
+tests/fixtures/golden_xml/issue154_catch_cache_put_exception.xml
+tests/fixtures/golden_xml/issue154_connector_linear_interleave.xml
+tests/fixtures/golden_xml/issue154_source_target_return_documents.xml
+tests/fixtures/golden_xml/issue154_try_data_process.xml
+tests/fixtures/golden_xml/issue154_try_flow_control.xml
+tests/fixtures/golden_xml/issue154_try_return_documents.xml
+tests/fixtures/m12_12/legacy_reachability_inventory.json
+tests/fixtures/process_ir/issue154/PROVENANCE.md
+tests/fixtures/process_ir/issue154/catch_cache_put_exception.json
+tests/fixtures/process_ir/issue154/connector_linear_interleave.json
+tests/fixtures/process_ir/issue154/source_target_return_documents.json
+tests/fixtures/process_ir/issue154/try_data_process.json
+tests/fixtures/process_ir/issue154/try_flow_control.json
+tests/fixtures/process_ir/issue154/try_return_documents.json
+tests/fixtures/process_ir/process_ir_v1.schema.json
+tests/fixtures/process_ir/semantic_report_linear_flow.json
+tests/fixtures/wave_gate/goldens.jsonl
+tests/test_issue_154_grammar_goldens.py
+tests/test_process_ir_authoring_contract_parity.py
+tests/test_process_ir_compiler_invariants.py
+tests/test_process_ir_effect_declarations.py
+tests/test_process_ir_models.py
+tests/test_process_ir_rich_control_bodies.py
+tests/test_recipe_validation_gate.py
+tests/test_system_topology_models.py
+tests/test_wave_gate.py
+
+
+=== ARCHITECT DESIGN PLAN (verbatim) ===
+# #154 — ProcessIR grammar and verified effect declarations
+
+## Summary
+
+Implement one structural grammar widening and one server-owned effect-authority boundary:
+
+- Derive every control-body placement row from the corresponding Pydantic union.
+- Make the six legacy-proven shapes compile through existing emitters without changing existing XML bytes.
+- Add optional public effect declarations to `AuthoringRequestV1`, but translate them into fresh, root-local internal capabilities only after identity verification and server-side content derivation.
+- Leave legacy policy lookup, emitter registrations, legacy spellings, and apply/materialization support unchanged.
+
+Grounding was performed at HEAD `c41bcf085fcc0dcdc1efa5dde119c61932599175`. Several issue line numbers have shifted; implementation should anchor on symbols, not the quoted numbers. The legacy builder is currently under `categories/components/builders/process_flow_builder.py`, and validation policy under `compiler/process_ir/semantic_validation/validation_policy.py`.
+
+## Design decisions
+
+### 1. `flow_control` and `data_process` in Try/Catch bodies
+
+Introduce one `ControlBodyStepV1` union equal to `LinearNodeV1 + ConnectorCallNodeV1`. Alias `BranchLegStepV1`, both Decision step aliases, and `TryCatchBodyStepV1` to it.
+
+This admits both kinds in process-scoped try bodies and, by the existing “caught documents are ordinary documents” invariant, in catch bodies too. Connector-scoped try bodies retain their semantic restriction to optional `set_ddp`/`set_dpp` followed by exactly one connector call.
+
+Rejected:
+
+- Adding the two kinds only to `TryCatchBodyStepV1`, which would preserve another duplicated vocabulary.
+- Patching only the matrix rows, which would disagree with the parser union.
+- Broadening nested control or `process_call`; those remain placement failures.
+
+### 2. `return_documents` as a try terminal
+
+Change `TryCatchTryBodyV1.terminal` to `Union[StopNodeV1, ReturnDocumentsNodeV1]`. The matrix terminal row will move automatically because it is derived from this field.
+
+`return_documents` remains absent from catch terminals, Branch legs, and Decision arms. `ExceptionNodeV1` remains absent from the try terminal.
+
+Rejected:
+
+- Editing the current `{"stop"}` matrix literal.
+- Adding `return_documents` to a shared terminal vocabulary, which would widen unrelated slots.
+
+### 3. `target` followed by `return_documents`
+
+Treat `target + return_documents` as a second explicit root terminal suffix alongside `target + stop`. Do not add `target` to `_ROOT_LINEAR_KINDS`.
+
+Valid:
+
+- `[source, target, return_documents]`
+- `[source, <linear steps>, target, return_documents]`
+
+Still invalid:
+
+- A target in the linear middle.
+- More than one target.
+- Anything between target and its stop/return terminal.
+
+This preserves target positional semantics instead of turning it into a generally movable step.
+
+### 4. Catch-only trailing `cache_put`
+
+Keep `_check_cache_put_followed_by_read` unchanged for non-final step positions. In `TryCatchCatchBodyV1._catch_body_rules`, allow a final step-position `cache_put` only when the terminal is `stop` or `exception`.
+
+The distinction is structural: the exception lives only in the catch-body model validator. Try bodies, root sequences, Branch legs, and Decision arms keep their existing adjacency rules.
+
+Rejected:
+
+- Relaxing the shared cache helper globally.
+- Requiring callers to move the write into the catch terminal, which cannot express the legacy write-then-exception shape.
+
+### 5. Root linear steps and connector entry role
+
+For generalized `connector_call` roots:
+
+- Permit the full `LinearNodeV1` vocabulary before the first call and between calls.
+- Preserve the existing terminal allowlist.
+- Require at least one call and require the root body to end on a call; a linear suffix after the last call remains unsupported.
+- Preserve cache-put adjacency.
+- Require every `map_ref` to be immediately preceded and followed by connector calls. The explicit predecessor check becomes necessary once arbitrary linear nodes may appear between calls.
+
+The legacy `source` rule is not widened: a source remains unique and exactly root index 0. Thus two sources or any source after a prefix still raises `PROCESS_IR_SCHEMA_INVALID_CARDINALITY`; source/generalized-call mixing retains its existing capability refusal.
+
+Replace `entry=index == 0` in lowering with:
+
+1. Precompute the index of the first root-level `connector_call`.
+2. Give only that call `role="entry"`.
+3. Give later root calls and every nested-body call `role="downstream"`.
+
+`cfg.entry_node_id` remains the actual first CFG node, which may now be a linear prefix. The CFG invariant independently derives root-sequence nodes from their root source paths and ordering edges, then requires exactly the first root call—and no nested call—to carry the entry role. Zero root calls means zero entry roles.
+
+Rejected:
+
+- Treating the first CFG node as the connector entry.
+- Assigning entry role to every call after a linear prefix.
+- Moving the legacy source away from index 0.
+- Admitting a trailing linear suffix after the last connector call.
+
+### 6. Derived placement matrix and union pins
+
+Add:
+
+```text
+BODY_SLOT_AUTHORITIES_V1:
+    (context, slot) -> (Pydantic body model, field name)
+```
+
+It contains the ten semantic slots: five body contexts × `steps`/`terminal`. It does not contain node-kind sets.
+
+`derive_body_capabilities_v1(authorities=BODY_SLOT_AUTHORITIES_V1)` will recursively unwrap `Annotated`, collection, union, and model annotations and read each member model’s `kind: Literal[...]`. `BODY_CAPABILITIES_V1` becomes an immutable mapping produced by that function.
+
+Authority hierarchy:
+
+1. The body model field annotation is the runtime grammar authority.
+2. `BODY_SLOT_AUTHORITIES_V1` only maps public/compiler context names to those fields.
+3. The matrix, served placement rows, and tests consume the derived result.
+
+Coverage guards:
+
+- Matrix keys must exactly equal all ten authority keys.
+- Every derived row must be non-empty.
+- The set of models in the authority table must equal the ProcessIR schema’s full reachable set of definitions carrying both `steps` and `terminal`. A newly introduced body context therefore cannot be omitted silently.
+- `_ROOT_LINEAR_KINDS` becomes `frozenset(LINEAR_BODY_KINDS)` so the root vocabulary derives from `LinearNodeV1`.
+
+Non-vacuity witnesses:
+
+- Define a synthetic try-body model whose terminal union adds `ExceptionNodeV1`; assert the mutant schema actually contains `exception`, derive its row, then prove the stale production matrix parity assertion fails specifically at `(try_body, terminal)`.
+- Define a synthetic additional body context in the coverage fixture; assert it is present before proving the authority-coverage check rejects the missing context.
+- Hand a model-constructed catch body a `return_documents` terminal and prove compiler placement enforcement raises `PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY`.
+
+Rejected:
+
+- Tests iterating only current matrix keys.
+- A test expectation derived through the same production helper it is meant to verify.
+- Literal terminal pins or a second hand-written union-to-kind table.
+
+### 7–8. Public declarations and server-owned effect authority
+
+Add the optional request field:
+
+```text
+effect_declarations: Optional[ProcessIREffectDeclarationsV1] = None
+```
+
+The container has canonical, duplicate-free tuples:
+
+- `map_effects: Tuple[MapEffectContractV1, ...]`
+- `script_effects: Tuple[ScriptEffectContractV1, ...]`
+- `subprocess_effects: Tuple[SubprocessEffectContractV1, ...]`
+- `external_writers: Tuple[ExternalWriterContractV1, ...]`
+
+Public supporting models:
+
+- `PropertyEffectReferenceV1(scope="ddp"|"dpp", name=...)`
+- `CacheEffectReferenceV1(scope="cache", cache_ref=...)`
+- `StateEffectDeclarationV1(reads, writes, replay_safe)`
+- The four binding contracts above.
+
+`SubprocessEffectContractV1` is the necessary fourth public binding model: item 7 requires verification of `process_ref` and cross-checking of derived subprocess summaries, although item 8 names only three public models. Automatically deriving child summaries merely because an empty declaration object was supplied would violate the opt-in/fail-closed requirement.
+
+`source_sha256` uses the repository’s `sha256:<64 lowercase hex>` `DigestString`. The server hashes the exact UTF-8 script source with no newline or whitespace normalization. The internal raw-hex spelling is constructed only after equality succeeds.
+
+Empty declaration containers normalize to `None`. When the field is absent/empty:
+
+- No resolver-derived capability object is passed.
+- `_normalized_payload` omits the key entirely.
+- Existing diagnostics, XML, canonical artifacts, and default behavior remain unchanged.
+- `contract_version` remains `"2"`; the schema and capability hashes rotate, but existing version-2 requests remain valid.
+
+Identity is resolved through the symbol table and canonical component identity, not raw string equality. Internal rows are rebound to each root’s exact occurrence spelling so `$ref` aliases cannot break internal matching. A declaration unbound anywhere, unresolved, wrong-typed, or digest-mismatched produces `PROCESS_IR_CAPABILITY_EFFECT_CONTRACT_INVALID` at `/effect_declarations/...`, with value-free evidence.
+
+If any declaration has an identity/content error, the request gets no partially trusted capability set. Valid-but-uninspectable declarations are instead INERT and do not invalidate independent valid declarations.
+
+#### Trust boundary
+
+| Declaration model | Identity check | Effect-content authority | What it can establish |
+|---|---|---|---|
+| `MapEffectContractV1` | `map_ref` must occur in a root, resolve through the symbol table, and identify the same `transform.map` component | Inspection of the validated structured map config; native function effects come from required metadata on the full function registry; embedded scripts require the vetted script registry; raw/unknown map forms are opaque | Only the exact server-derived reads, writes, and replay flag, after equality with the caller declaration |
+| `ScriptEffectContractV1` | `(language, caller digest)` must match an actual `custom_scripting` operation after the server recomputes its exact-source digest | Immutable server-owned registry keyed by recomputed `(language, digest)` and retaining the corresponding source and effect | Only the registry effect; an exact but unregistered script is INERT |
+| `SubprocessEffectContractV1` | `process_ref` must occur on a process call and resolve as a process; an authored child root is inspected, while a reference-only external child has no content authority | Recursive, path-sensitive inspection of the child ProcessIR using the same state-flow transfer rules as lineage; cycles, opaque descendants, or uninspectable children are INERT | The derived required reads, definitely-established writes, and conservative replay flag, after exact declaration equality |
+| `ExternalWriterContractV1` | `cache_ref` must resolve as a document cache and occur on a `cache_get` in the target root | The narrow caller assertion is the recorded exception because the external writer is not present in the artifact | Establishes no cache write. Only when the node also authors `external_writer=true` may it replace the blocking missing-writer error with `PROCESS_IR_SEMANTIC_LINEAGE_EXTERNAL_WRITER_ASSUMED` warning |
+| Omitted declaration / INERT declaration | No trusted binding | None | Nothing; all strict findings remain |
+
+Map inspection rules:
+
+- Direct maps derive an empty, replay-safe effect.
+- Every `FunctionFamily` gains required effect metadata: optional parameter-bound reads/writes and an explicit replay flag. Pure functions use empty effects; dynamic process/document property functions derive their exact DPP/DDP effects; sequential-value behavior is empty-state but replay-unsafe.
+- Defined Process Property functions and any other effect whose tracked scope cannot be represented are explicitly opaque, not mislabeled as DPP.
+- Script maps are derivable only when every embedded script has a vetted registry entry.
+- Document-cache joins contribute exact cache reads from the resolved component config.
+- Raw XML, unvalidated config, unknown function families, or partially opaque maps make the whole map effect INERT; no partial effect is treated as complete.
+
+Subprocess summaries start with empty state, collect reads that can occur before an in-child write, intersect definite writes at every normal exit, preserve existing DDP versus execution-state visibility, and mark replay safe only when every reachable effect is proven safe. The implementation refactors the existing lineage transfer into one shared analysis rather than adding a second walker.
+
+Capabilities are built per root. A declaration may bind occurrences in several roots, but each root receives a fresh `ProcessIRValidationCapabilitiesV1` containing only rows that bind inside that root. This avoids the existing unbound-contract diagnostic that a global capabilities object would trigger.
+
+The public declaration object or its dump is never forwarded to the compiler. Translation constructs new internal contract instances solely from derived/registry data. Legacy `lookup_policy(adapter)` remains unchanged and remains reachable only from legacy adapters.
+
+### 9. Recorded cache spelling decision
+
+Keep `DocumentCacheRetrieveNodeV1` unchanged and document `cache_get` as the canonical spelling for an externally populated cache.
+
+Rationale:
+
+- `DocumentCacheRetrieveNodeV1` is the exact legacy parity shape.
+- `cache_get` already owns the authored `external_writer` flag and lowers through the same existing cache-retrieve emitter.
+- Adding the flag to both models would create two semantic spellings that must remain synchronized.
+
+A caller needing the exception must author:
+
+```text
+cache_get.external_writer = true
++ matching ExternalWriterContractV1
+```
+
+`external_writer` on `DocumentCacheRetrieveNodeV1` remains an unknown field and raises `PROCESS_IR_SCHEMA_UNKNOWN_FIELD`.
+
+### 10. Served schema and contract
+
+Update all machine-served model descriptions and the `process_ir_authoring` projection in the same change.
+
+The projection gains generated `semantic_rule.effect.*` entries for map, script, subprocess, external-writer, and INERT behavior. Their facts derive from an `effect_authority_rows()` accessor, and coverage asserts every tuple field on `ProcessIREffectDeclarationsV1` has exactly one authority row.
+
+`get_schema_template("AuthoringRequestV1@2")` exposes the exact public models. `get_schema_template("process_ir_authoring")` exposes the authority/trust rules and the cache spelling decision. Placement entries continue to derive automatically from `body_placement_rows()`.
+
+Rejected:
+
+- Updating prose without the served schema.
+- Publishing the internal capabilities model.
+- Hand-restating the widened placement rows in the projection.
+
+## File-by-file changes
+
+### Production code
+
+- `src/boomi_mcp/models/process_ir.py`
+  - Add `ProcessIRScriptLanguageV1` and use it for custom scripting.
+  - Add `ControlBodyStepV1`; alias all four control step types to it.
+  - Derive `TRY_CATCH_BODY_KINDS` and `_ROOT_LINEAR_KINDS`.
+  - Widen the try terminal, catch trailing-cache rule, target/return suffix, and generalized-call root grammar.
+  - Update all affected model docstrings.
+  - Preserve the invariant that no new node kind or legacy spelling is introduced.
+
+- `src/boomi_mcp/compiler/process_ir/body_capabilities.py`
+  - Add `BODY_SLOT_AUTHORITIES_V1`, `_kinds_from_annotation`, and `derive_body_capabilities_v1`.
+  - Build immutable `BODY_CAPABILITIES_V1` from model fields.
+  - Keep `is_allowed`, enforcement, public-context translation, and `body_placement_rows` consuming the derived matrix.
+  - Preserve absence-as-denial.
+
+- `src/boomi_mcp/compiler/process_ir/lowering.py`
+  - Precompute the first root connector-call index and derive `role="entry"` from that logical position.
+  - Preserve `cfg.entry_node_id` as the actual first CFG node and preserve all existing node/edge ordering.
+
+- `src/boomi_mcp/compiler/process_ir/invariants.py`
+  - Replace the “entry role must equal CFG entry node” check with a root-spine check.
+  - Require zero or one entry roles as appropriate, reject wrong/duplicate/nested entry roles with `PROCESS_IR_COMPILE_INTERNAL`.
+
+- `src/boomi_mcp/compiler/process_ir/pipeline.py`
+  - Keep the API and exemption semantics unchanged.
+  - Clarify that `capabilities=` accepts internal, server-constructed context only; it is not a public declaration surface.
+
+- `src/boomi_mcp/compiler/process_ir/semantic_validation/contracts.py`
+  - Update internal contract documentation to distinguish trusted server context from authored declarations.
+  - Rename `writes_cache_externally` to `has_external_writer_assumption`; no state-write semantics are attached to this row.
+
+- `src/boomi_mcp/compiler/process_ir/semantic_validation/lineage.py`
+  - Factor the existing reads/writes/state-transfer logic into one reusable path-sensitive analysis.
+  - Add `derive_process_state_effect(...)` for subprocess inspection.
+  - Keep lineage diagnostics consuming the same transfer result, so summary and validation cannot drift.
+
+- `src/boomi_mcp/compiler/process_ir/semantic_validation/effects.py`
+  - Consume the shared state-effect helpers after the lineage refactor; connector retry policy remains untouched.
+
+- `src/boomi_mcp/categories/components/builders/map_function_registry.py`
+  - Add required effect metadata to `FunctionFamily` and every current registry row.
+  - Make `FUNCTION_FAMILIES` immutable.
+  - Add a sanitized `function_effect_rows()` accessor for derivation/revision coverage.
+  - Preserve every emitter-facing field and byte ordering.
+
+- `src/boomi_mcp/models/authoring_workflow.py`
+  - Add the public effect reference, state declaration, binding, and container models.
+  - Add optional `AuthoringRequestV1.effect_declarations`.
+  - Canonicalize ordering, reject duplicate binding keys, normalize an empty container to `None`, and keep contract version 2.
+  - Use strict/frozen/repr-safe authoring model behavior.
+
+- `src/boomi_mcp/models/__init__.py`
+  - Export the new public declaration models and language alias.
+  - Do not export `ProcessIRValidationCapabilitiesV1`.
+
+- `src/boomi_mcp/authoring/process_ir_effects.py` — new
+  - Add `EffectResolutionV1`, `resolve_process_ir_effect_declarations`, map/script/subprocess derivation helpers, root partitioning, and value-free authority findings.
+  - Add `effect_authority_rows()` and `effect_authority_revision_payload()`.
+  - Preserve the invariant that public objects never cross into compiler context.
+
+- `src/boomi_mcp/recipes/vetted_scripts.py` — new
+  - Add immutable `VettedScriptContractV1`, registry construction, production accessor, and revision rows.
+  - Store source plus effect and derive the registry key from the source.
+  - Production seed set is empty at this HEAD because recipe contributions explicitly prohibit scripting; tests use an internal server-owned fixture row. Do not invent a digest-only production row.
+
+- `src/boomi_mcp/authoring/workflow.py`
+  - Pass declarations into recipe normalization.
+  - Make `_validate_processes` resolve declarations once, merge authority findings, and validate each root with its root-local capabilities.
+  - Store the capability map on `_PlanInternals`.
+  - Pass the correct root context through `build_artifact_descriptors` and `_build_compile_time_plan`.
+  - Conditionally include non-empty declarations in `_normalized_payload`.
+
+- `src/boomi_mcp/authoring/process_materialization.py`
+  - Add an optional internal `capabilities` keyword to `build_materialization_plan` and pass it to the compile it owns.
+  - Do not store capabilities in `ProcessComponentMaterializationPlanV1` or alter its fingerprint schema; the declarations are bound by the semantic/compile hashes and authority revisions.
+  - Apply remains out of scope. Existing dry materialization will refuse any apply whose validity actually depends on unavailable effect context before mutation.
+
+- `src/boomi_mcp/recipes/engine.py`
+  - Add optional `effect_declarations` to `run_recipes`.
+  - Build symbols including composed process keys, resolve declarations after component resolution/composition, and pass root-local capabilities to `_compile_processes`.
+  - Preserve `validation_policy=None`.
+  - Translate authority failures to `RECIPE_CONSTRAINT_FAILED` with `PROCESS_IR_CAPABILITY_EFFECT_CONTRACT_INVALID` as a cause.
+
+- `src/boomi_mcp/authoring/process_ir_projection.py`
+  - Project generated effect-authority semantic rules.
+  - Update stale node facts for try placement, target/return, catch cache handoff, connector entry, verified map/script effects, and the `cache_get` spelling.
+  - Keep compiler imports function-local.
+
+- `src/boomi_mcp/authoring/contract.py`
+  - Include the complete effect-authority revision payload—map-function metadata and vetted script digest/effect rows—in `compiler_revision`.
+  - Ensure schema revision moves for the new public models and capability revision moves for authority-content changes.
+
+- `src/boomi_mcp/errors.py`
+  - Update served summaries for unknown effects, invalid declarations, and external-writer assumptions to state the inspection/registry boundary accurately.
+  - Add no dialect- or effect-specific exemption code.
+
+- `src/boomi_mcp/compiler/process_ir/semantic_validation/findings.py`
+  - Update static messages/remediations to request a verified declaration backed by server authority, not a caller-asserted effect payload.
+
+### Intentionally unchanged production authorities
+
+- `compiler/process_ir/semantic_validation/validation_policy.py`: no new policy, adapter key, or exemption.
+- `compiler/process_ir/emitter_registry.py`: no registration or renderer changes.
+- `categories/components/builders/process_flow_builder.py`: parity oracle only.
+- `categories/components/canonical_process_apply.py` and mutation code: no effect-context apply support.
+- `DocumentCacheRetrieveNodeV1`: no `external_writer` field.
+
+### Tests and fixtures
+
+- `tests/test_process_ir_models.py`
+  - Grammar positives/rejections, source uniqueness, target suffixes, catch-only cache rule, and schema snapshot checks.
+
+- `tests/test_process_ir_rich_control_bodies.py`
+  - Full derived matrix parity, body-context coverage, shared-union sweep, mutated-model enforcement, and matrix non-vacuity mutants.
+
+- `tests/test_process_ir_compiler.py`
+  - Compile/CFG cases for all widened shapes and generalized-call entry role.
+
+- `tests/test_process_ir_compiler_invariants.py`
+  - Wrong, absent, duplicate, and nested entry-role mutants, each asserting the mutation took effect before expecting `PROCESS_IR_COMPILE_INTERNAL`.
+
+- `tests/test_process_ir_entrypoint_diagnostic_parity.py`
+  - Parser/model/compiler parity for every new positive and still-rejected neighbor.
+
+- `tests/test_process_emitter_parity.py`
+  - Raw-byte golden comparisons and graph verification for all new grammar/effect fixtures.
+
+- `tests/test_process_emitter_registry.py`
+  - Pin the existing emitter-key set; prove no new registration or fallback path was introduced.
+
+- `tests/test_process_ir_effect_declarations.py` — new
+  - Public model, identity resolution, map inspection, script registry, subprocess derivation, INERT behavior, root partitioning, and no-forwarding tests.
+
+- `tests/test_process_ir_semantic_lineage.py`
+  - External-writer four-case truth table and shared state-analysis parity.
+
+- `tests/test_process_ir_semantic_effects.py`
+  - Derived subprocess replay/order behavior and one-arm-write non-vacuity mutant.
+
+- `tests/test_process_ir_semantic_pipeline.py`
+  - Prove root-local partitioning prevents internal unbound-contract findings.
+
+- `tests/test_m12_11_authoring_plan.py`
+  - Public plan path, value-free identity diagnostics, omitted/empty declaration parity, and no declaration echo.
+
+- `tests/test_m12_11_authoring_compile.py`
+  - Plan → compile artifact path with verified map/script/subprocess/external effects and fresh internal capability objects.
+
+- `tests/test_process_materialization_plan.py`
+  - Compile-time plan accepts internal capabilities without adding a plan field or moving unrelated plan fingerprints.
+
+- `tests/test_m12_11_apply_verify.py`
+  - An effect-dependent apply is refused during existing pre-write dry materialization; mutation mocks remain untouched.
+
+- `tests/test_recipe_validation_gate.py`
+  - Recipe engine default parity, verified capability use, invalid declaration translation, and registry-backed script behavior through a server-owned test registry.
+
+- `tests/test_recipe_contribution_models.py`
+  - Keep the scripting/script-body/language prohibition pinned; #154 adds no recipe contribution spelling.
+
+- `tests/test_process_ir_semantic_policy.py`
+  - Prove typed authoring/recipes never consult `lookup_policy`, while legacy adapters still do.
+
+- `tests/test_process_ir_authoring_contract_parity.py`
+  - Effect-authority row coverage, widened placement projection, schema/entry parity, and snapshot updates.
+
+- `tests/test_process_ir_served_text_enforcement.py`
+  - Reject stale claims that caller declarations are trusted, return documents is root-only, or every cache put must be followed by a read.
+
+- `tests/test_m12_11_schema_templates.py`
+  - Verify `AuthoringRequestV1@2` exposes the public contracts, omits the internal capabilities model, and `process_ir_authoring` exposes all five effect semantic rules.
+
+- `tests/test_m12_11_capabilities.py`
+  - Mutation witnesses proving map metadata, a vetted script effect, and the public declaration schema each move the appropriate revisions.
+
+- `tests/fixtures/process_ir/process_ir_v1.schema.json`
+  - Regenerate only for the deliberate union/docstring changes.
+
+- `tests/fixtures/authoring_contract/process_ir_authoring_v1.contract.json`
+  - Regenerate for placement, effect rules, and served wording.
+
+- `tests/fixtures/authoring_contract/process_ir_authoring_v1.schema.json`
+  - Change only if the page model itself changes; the planned semantic-rule entries fit the current page model, so this file should remain byte-identical.
+
+- `tests/fixtures/process_ir/emitter_parity/`
+  - Add raw-byte fixtures:
+    - `issue154_try_flow_control.process.xml`
+    - `issue154_try_data_process.process.xml`
+    - `issue154_try_return_documents.process.xml`
+    - `issue154_source_target_return_documents.process.xml`
+    - `issue154_catch_cache_put_exception.process.xml`
+    - `issue154_connector_linear_interleave.process.xml`
+    - `issue154_effect_map_writer.process.xml`
+    - `issue154_effect_vetted_script_writer.process.xml`
+    - `issue154_effect_external_cache_read.process.xml`
+
+- `tests/fixtures/process_ir/issue154_fixture_provenance.json`
+  - Record the pre-change legacy-builder configuration/capture, baseline SHA, operability evidence, and corresponding new golden for every shape. No fixture may be generated from the new compiler and then used as its own oracle.
+
+## Test plan
+
+### Grammar slots
+
+| Widening | Positive | Still-rejected neighbor and code | Raw-byte golden | Non-vacuity |
+|---|---|---|---|---|
+| Try step: `flow_control` | Process-scoped try beginning with a call, then flow control, then stop | Same step in connector-scoped try → `PROCESS_IR_CAPABILITY_ERROR_SCOPE_UNSUPPORTED`; nested control/process call in step slot → `PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY` | `issue154_try_flow_control.process.xml` | Remove flow control from a synthetic shared union; assert the mutant took effect and matrix parity fails |
+| Try step: `data_process` | Process-scoped try call → data process → stop | Connector-scoped try → `PROCESS_IR_CAPABILITY_ERROR_SCOPE_UNSUPPORTED` | `issue154_try_data_process.process.xml` | Same shared-union mutant discipline |
+| Try terminal: `return_documents` | Process-scoped try with return terminal | Catch return or try exception → `PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY` | `issue154_try_return_documents.process.xml` | Synthetic try terminal adds exception; derived row changes and stale parity fails |
+| Root `target + return_documents` | `[source, message, target, return_documents]` | `[source, target, message, return_documents]`, duplicate/mid target → `PROCESS_IR_SCHEMA_INVALID_CARDINALITY` | `issue154_source_target_return_documents.process.xml` | Mutate suffix classifier to treat target as linear; midpoint rejection test must fail |
+| Catch `cache_put` before stop/exception | Catch steps `[cache_put]`, terminal exception; repeat with stop | Same shape in try/root, or catch `cache_put → message` → `PROCESS_IR_SCHEMA_INVALID_CARDINALITY` | `issue154_catch_cache_put_exception.process.xml` | Move the exception into the shared helper in a mutant; a try-body control must detect the accidental widening |
+| Linear before/between connector calls | Prefix `set_dpp`, first GET call, `set_ddp`, second Send call, stop | Linear suffix after final call → `PROCESS_IR_CAPABILITY_UNSUPPORTED`; unbracketed map → `PROCESS_IR_SCHEMA_INVALID_CARDINALITY`; REST POST → `PROCESS_IR_CAPABILITY_CONNECTOR_ACTION_UNSUPPORTED` | `issue154_connector_linear_interleave.process.xml` | Corrupt entry role to first CFG node/no call/two calls; invariant must raise `PROCESS_IR_COMPILE_INTERNAL` |
+
+Additional retained failures:
+
+- Two sources or a source not at root index 0 → `PROCESS_IR_SCHEMA_INVALID_CARDINALITY`.
+- Source plus generalized connector call → existing `PROCESS_IR_CAPABILITY_UNSUPPORTED` precedence.
+- Any step after Branch/Decision/TryCatch → `PROCESS_IR_SEMANTIC_CONTROL_CONTINUATION_UNSUPPORTED`.
+- Connector-action, nesting, process-call continuation, and return-path gates remain unchanged.
+
+### Effect authority
+
+- Omitted and empty declarations:
+  - Compare exact validation report JSON, diagnostics, normalized payload shape, emission bytes, and compile artifacts with the pre-change path.
+  - Assert no `effect_declarations: null` key enters hashes.
+
+- Map:
+  - A structured function map whose registry metadata derives a DPP write satisfies a downstream read only when the public declaration exactly matches.
+  - Forged content or wrong component type → `PROCESS_IR_CAPABILITY_EFFECT_CONTRACT_INVALID`.
+  - A raw/opaque map declaration is INERT; unknown-effect and strict read findings remain.
+  - Mutate `dynamic_process_property_set` metadata to remove its write, assert the metadata mutant took effect, and prove cross-check/strict validation fails.
+
+- Script:
+  - A test-only server-owned vetted source passes through public plan/compile and emits the golden.
+  - Wrong supplied digest → invalid contract.
+  - Exact digest with no registry row → INERT and the strict read remains.
+  - Mutate one source byte, assert its recomputed key changes, and prove the old declaration cannot bind.
+
+- Subprocess:
+  - A waiting child with a definitely established write satisfies a later Branch-leg read only after the caller declaration equals the server-derived summary.
+  - Unresolved/reference-only child or cycle → INERT.
+  - Mutate the child so only one Decision arm writes, assert the mutant CFG contains the one-arm write, and prove the derived definite-write set drops it.
+
+- External writer:
+  - Test all four `(flag, declaration)` combinations.
+  - Only `(true, matching declaration)` produces `PROCESS_IR_SEMANTIC_LINEAGE_EXTERNAL_WRITER_ASSUMED`.
+  - Every other combination retains `PROCESS_IR_SEMANTIC_LINEAGE_CACHE_WRITER_MISSING`.
+  - No combination adds a cache write to state.
+  - `DocumentCacheRetrieveNodeV1(external_writer=...)` remains `PROCESS_IR_SCHEMA_UNKNOWN_FIELD`.
+
+- Multi-root:
+  - One global declaration binds only roots containing the identified occurrence.
+  - No root receives an unrelated internal contract, and no `...EFFECT_CONTRACT_INVALID` is generated from cross-root leakage.
+
+- Boundary:
+  - Spy on all compile calls and assert arguments are fresh internal capabilities, never public model instances or public dumps.
+  - Assert internal effects equal server-derived/registry effects even when the caller object is structurally similar.
+
+### Golden and integration validation
+
+- Compare with `actual.encode("utf-8") == fixture.read_bytes()`; never parse/canonicalize before the byte assertion.
+- Run CFG and emission-plan invariant checks for every new fixture.
+- Keep every pre-existing XML golden byte-identical.
+- Separately compare shape/config/edge structure with the legacy builder where full component envelopes differ.
+- Run the full non-KB Python 3.11 suite.
+- Run one public MCP live-QA pass over all six grammar shapes plus map, vetted-script, and external-writer effect paths; plan/compile only, no deploy.
+- After QA is clean, commit the coherent tree and run one Codex review. If a blocking correction is needed, run affected QA and one delta-scoped re-review; do not exceed the requested two review evaluations.
+
+## Risks, ordering, and assumptions
+
+1. Land the shared union and derived matrix first, with mutation witnesses, before widening behavior.
+2. Add root/catch/terminal grammar and entry-role invariants together; otherwise an intermediate tree can emit the wrong connector role.
+3. Add public declaration models, immutable map metadata, vetted registry, and shared state analysis before wiring callers.
+4. Add the authority resolver, then authoring/recipe/materialization call sites, then revision coverage.
+5. Update served text, schemas, projection snapshots, and independently sourced goldens last—but in the same coherent commit.
+
+Key risks:
+
+- A wrong connector-entry role changes emitter selection. Existing index-0 call goldens plus prefixed-call role mutants guard it.
+- A matrix test derived from an empty or incomplete key set is vacuous. The terminal and new-context mutants guard both failure modes.
+- Passing one capability object to every root produces false unbound-contract errors. Root-local partitioning is mandatory.
+- Map metadata can overclaim. Any uncertain family/config is opaque; partial knowledge is never promoted to a complete effect.
+- Effect authority changes must rotate compiler/capability revisions. The new revision payload and mutation tests make that structural.
+- Apply does not carry trusted effect context in this issue. Compile-time materialization receives it only to build the read-only artifact; existing apply dry materialization remains a pre-write fail-closed boundary.
+- The current repository ships no recipe-produced custom script: recipe contribution validation explicitly rejects script, script-body, custom-scripting, and language keys. Therefore the production vetted registry is honestly empty at this HEAD, and the registered-script acceptance case uses an internal server-owned test fixture. Adding a real production seed requires a separately identified server-owned script/recipe and must not be improvised as a digest-only row.
+- `AUTHORING_CONTRACT_VERSION`, `PROCESS_IR_VERSION`, and the `process_ir_authoring` contract version remain unchanged; exact schema/capability/compiler hashes record the additive changes.
+- The quoted issue probe commit and several quoted line numbers were not re-live-probed in this read-only turn. Current source behavior, current goldens, emitter registrations, and the absence of recipe-shipped scripts were verified at the stated HEAD.

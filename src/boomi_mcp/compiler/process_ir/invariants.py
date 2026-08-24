@@ -157,6 +157,28 @@ def _fail(code: str, phase: str, path: str, message: str, node_id: Optional[str]
     )
 
 
+def _root_execution_rank(cfg: "SemanticCfgV1") -> Dict[str, int]:
+    """Position of each node along the ROOT SPINE, walked from the CFG entry.
+
+    Derived from the ordering EDGES, which is the fact a source-path sort does
+    not have. The two together are what make the connector-entry invariant
+    independent of the lowering it checks: a mutation must now corrupt the
+    edges AND the paths AND the roles consistently to pass.
+    """
+    outgoing: Dict[str, List[Any]] = {}
+    for edge in cfg.edges:
+        outgoing.setdefault(edge.source_node_id, []).append(edge)
+    rank: Dict[str, int] = {}
+    cursor = cfg.entry_node_id
+    while cursor is not None and cursor not in rank:
+        rank[cursor] = len(rank)
+        following = [
+            edge for edge in outgoing.get(cursor, ()) if edge.kind == "ordering"
+        ]
+        cursor = following[0].target_node_id if len(following) == 1 else None
+    return rank
+
+
 def check_cfg_invariants(cfg: SemanticCfgV1) -> None:
     """Validate every structural invariant of a semantic CFG.
 
@@ -449,17 +471,42 @@ def check_cfg_invariants(cfg: SemanticCfgV1) -> None:
     ]
     if calls:
         entries = [node for node in calls if node.semantic.role == ENTRY_CALL_ROLE]
-        # DERIVE "first" from the authored step ORDINAL, never from position in
-        # the node list. `root_calls[0]` read the order the lowering itself
-        # produced, so the check agreed with exactly the correlated defect it
-        # exists to catch: swapping two root calls' source paths while leaving
-        # node order and edges intact left the entry role on the call the
-        # authored payload places SECOND, and the invariant passed.
-        root_calls = sorted(
+        # DERIVE "first" TWICE, from two independent facts, and require them to
+        # agree. Ordinals alone were not enough: a mutation that moves BOTH the
+        # source paths and the roles is self-consistent under an ordinal sort,
+        # so the check passed a graph whose execution-first call carried
+        # `downstream` and whose execution-second carried `entry` — emission
+        # then gives the two calls each other's shapes. A guard that reads only
+        # what the lowering wrote cannot catch the lowering.
+        root_calls_by_ordinal = sorted(
             (node for node in calls if _ROOT_STEP_PATH.fullmatch(node.source_path)),
             key=lambda node: int(node.source_path.rsplit("/", 1)[1]),
         )
-        expected_entry = root_calls[0] if root_calls else None
+        execution_rank = _root_execution_rank(cfg)
+        root_calls_by_execution = sorted(
+            (
+                node
+                for node in root_calls_by_ordinal
+                if node.node_id in execution_rank
+            ),
+            key=lambda node: execution_rank[node.node_id],
+        )
+        if root_calls_by_execution and (
+            [node.node_id for node in root_calls_by_execution]
+            != [
+                node.node_id
+                for node in root_calls_by_ordinal
+                if node.node_id in execution_rank
+            ]
+        ):
+            raise _fail(
+                PROCESS_IR_COMPILE_INTERNAL,
+                _SEMANTIC_PHASE,
+                root_calls_by_execution[0].source_path,
+                "root connector call order disagrees with the ordering edges",
+                root_calls_by_execution[0].node_id,
+            )
+        expected_entry = root_calls_by_ordinal[0] if root_calls_by_ordinal else None
         if expected_entry is None:
             # Every call is nested in a control body: no call is the flow's
             # connector entry, so no call may carry the role.

@@ -474,7 +474,9 @@ _NODE_FACTS: Mapping[str, Mapping[str, Any]] = {
         ),
         _ORDERING: (
             "A cache read with no preceding write on the same path is reported "
-            "unless an external writer is declared.",
+            "unless the node authors external_writer AND a verified capability "
+            "vouches for that writer. The declaration alone never suppresses "
+            "it — both factors are required.",
         ),
         _DOCS: ("optional", "stream_replacing", "all_documents"),
         _REFS: (("cache_ref", True),),
@@ -836,8 +838,13 @@ _SEMANTIC_RULES: Tuple[Tuple[str, str, str, str, Tuple[str, ...], Tuple[str, ...
         "A called child's summary is derived by inspecting its authored process "
         "definition, walking every path. A read the child does not itself "
         "establish first is required of the caller, wherever in the child it "
-        "sits; a write counts as established only where every converging path "
-        "makes it, so a write inside one Branch path or Decision arm does not. "
+        "sits. A write counts as established only where every path that "
+        "completes makes it, which differs by SCOPE at a Branch: process and "
+        "cache state accumulate, because every leg runs, so a write in one leg "
+        "holds afterwards; document properties do not, because each leg "
+        "re-copies the documents, so a write in one leg is absent from the "
+        "copies another leg routed out. A Decision's arms are exclusive, so a "
+        "write in one arm alone is never established. "
         + _subprocess_inert_sentence() +
         " A connector is not such a step: it moves documents "
         "rather than tracked state, so it leaves both sets unchanged and instead "

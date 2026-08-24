@@ -1,0 +1,19 @@
+Approvals and tool escalations are unavailable in this read-only review session — nothing you request will be granted, and waiting for one will simply end the turn with no output.
+
+Proceed with what you can read directly from the repository at HEAD, and emit your COMPLETE architect implementation review as plain text NOW.
+
+Review the slice delta `git diff c41bcf085fcc0dcdc1efa5dde119c61932599175..HEAD` against the architect design plan inlined in the original prompt. Judge the IMPLEMENTATION AGAINST THE PLAN — not the code on its own merits, which the repo's own commit-review gate has covered twenty times and closed clean.
+
+This is the THIRD and FINAL evaluation of a capped gate, so prioritise accordingly: something the plan REQUIRES that is missing outright, or something shipped that is WRONG and reaches a caller, is worth far more than a nice-to-have.
+
+Cover, in this order:
+
+1. Plan fidelity item by item, naming each plan item number and whether the implementation realizes, narrows, or diverges from it.
+2. Anything the plan requires that is absent, with nothing in `docs/architecture/ISSUE_154_AUDIT_LEDGER.md` acknowledging it.
+3. The subprocess summary as a caller-facing contract — attack the Branch compartment rule (execution accumulates across legs, document does not) specifically.
+4. Over-delivery: anything shipped the plan did not ask for that must now be maintained or served.
+5. Ledger claims that do not match the code.
+
+Skip style, naming and comment density. Do not re-litigate the commit reviews.
+
+END with a verdict on its OWN FINAL line: exactly `VERDICT: NO ISSUES` or exactly `VERDICT: ISSUES FOUND`.

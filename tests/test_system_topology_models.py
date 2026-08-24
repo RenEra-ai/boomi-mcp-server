@@ -1452,6 +1452,7 @@ def test_models_package_exports_are_pinned():
         "ProcessIRMapEffectDeclarationV1",
         "ProcessIRScriptEffectDeclarationV1",
         "ProcessIRStateEffectDeclarationV1",
+        "ProcessIRScriptLanguageV1",
         "ProcessIRStateReferenceV1",
         "ProcessIRSubprocessEffectDeclarationV1",
         "AuthoringRevisionBindingV1",

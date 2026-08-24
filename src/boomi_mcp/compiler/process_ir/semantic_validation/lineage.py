@@ -118,10 +118,14 @@ STATE_VISIBILITY_V1: "Mapping[str, Mapping[str, object]]" = MappingProxyType(
                 "survives_branch_path_entry": True,
                 "visible_across_sibling_paths": True,
                 "convergence": "intersection",
-                # A cache may legitimately be populated outside this process, so
-                # a read with no in-process writer is reported only when the
-                # caller has NOT declared an external writer.
-                "read_before_write": "rejected_unless_external_writer_declared",
+                # A cache may legitimately be populated outside this process,
+                # but a DECLARATION alone never buys that: the node must author
+                # `external_writer` AND a verified capability must vouch for the
+                # writer. The served token said "declared", which described a
+                # free-form trust assertion this module deliberately refuses.
+                "read_before_write": (
+                    "rejected_unless_external_writer_authored_and_verified"
+                ),
             }
         ),
     }
@@ -458,6 +462,11 @@ def _walk_lineage(
     # it had written is no promise to anyone. A terminal-less path end (a Branch
     # leg, a cache-staging leg) is not a process exit at all.
     normal_exits: List[_State] = []
+    #: Path ends that THREW. A Decision arm that only throws does not carry its
+    #: state forward — nothing downstream of the Decision runs for that
+    #: document — so meeting it into the continuation drops whatever the other
+    #: arm established for everything that DOES continue.
+    threw: List[str] = []
     leg_writes = _leg_write_index(prepared, capabilities)
 
     def _report(code: str, node, severity="error", evidence=()) -> None:
@@ -657,6 +666,8 @@ def _walk_lineage(
             role = node.exit_role
             if role is not None and role not in _ABNORMAL_EXIT_ROLES:
                 normal_exits.append(state)
+            elif role == "exception":
+                threw.append(node_id)
             return state
 
         if semantic.semantic_kind == "branch":
@@ -691,7 +702,22 @@ def _walk_lineage(
                     leg_documents.append(leg_document)
                     # every leg RUNS, so what a leg guarantees holds afterwards
                     guaranteed_execution = guaranteed_execution | leg_execution
-                carried = _State(entry.document, carried.execution | leg_end.execution)
+                    # ...including for the NEXT leg. Seeding it from `leg_end`
+                    # used a CONTINUATION, and a continuation is a meet over all
+                    # paths including the abnormal ones: a leg whose only normal
+                    # path writes a key and whose other arm throws handed the
+                    # next leg a state without it, so a later leg reading it was
+                    # reported read-before-write and the summary both REQUIRED
+                    # and GUARANTEED the same key.
+                # the NEXT leg is seeded from the CONTINUATION, which is now
+                # throw-aware at the Decision above. Seeding it from this leg's
+                # normal COMPLETIONS instead looked right and broke sequencing:
+                # a leg ending in a WAITING `process_call` records no completion
+                # — that role is deliberately not a normal exit — so the next
+                # leg stopped seeing the write the call established.
+                carried = _State(
+                    entry.document, carried.execution | leg_end.execution
+                )
             # ONE completion per leg that can finish: its own document copies,
             # and the execution state every leg together guarantees. A leg with
             # no normal end contributes none, so an all-throwing branch promises
@@ -702,8 +728,24 @@ def _walk_lineage(
             return carried
 
         if semantic.semantic_kind == "decision":
-            # Arms are EXCLUSIVE. Meet, not union.
-            results = [_visit(e.target_node_id, state, depth + 1, leg) for e in edges]
+            # Arms are EXCLUSIVE. Meet, not union — but only over arms that can
+            # CONTINUE. An arm that only throws carries nothing forward: nothing
+            # downstream runs for the document that took it, so meeting it in
+            # dropped whatever the other arm established for every document that
+            # does continue. When every arm throws there is nothing to meet and
+            # the pre-Decision state stands.
+            results = []
+            for edge in edges:
+                before_normal, before_threw = len(normal_exits), len(threw)
+                arm = _visit(edge.target_node_id, state, depth + 1, leg)
+                only_threw = (
+                    len(threw) > before_threw
+                    and len(normal_exits) == before_normal
+                )
+                if not only_threw:
+                    results.append(arm)
+            if not results:
+                return state
             merged = results[0]
             for item in results[1:]:
                 merged = merged.merged_with(item)
