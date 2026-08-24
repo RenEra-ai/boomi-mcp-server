@@ -2239,3 +2239,51 @@ def test_a_registry_authority_is_served_as_a_registry():
         assert provenance == expected, (source_id, provenance)
     # Non-vacuity: at least one of each kind is actually served.
     assert set(by_source.values()) == {"runtime_registry", "runtime_model"}, by_source
+
+
+def test_every_inert_reason_is_reachable_and_served():
+    """Stage-2 r11 P2. The inert-case list went stale TWICE as prose.
+
+    Each time the derivation gained a way to refuse — opacity widening past
+    "bare reference", then the depth bound — the sentence enumerating them was
+    a separate edit someone had to remember, and both times it was missed. The
+    rule now composes that sentence from the resolver's own rows, and this test
+    closes the loop from the other side: every served reason gets a constructed
+    child that actually triggers it, so a row describing a branch that no
+    longer exists fails instead of remaining served fiction.
+    """
+    from boomi_mcp.authoring.process_ir_effects import (
+        derive_subprocess_effect,
+        subprocess_inert_reasons,
+    )
+    from boomi_mcp.authoring.process_ir_projection import _SEMANTIC_RULES
+
+    witnesses = {
+        # nothing to inspect: no authored child root reaches the derivation
+        "bare_reference": None,
+        # a map's state effect is knowable only from a contract
+        "uninspectable_step": parse_process_ir_v1(
+            {"version": "1", "body": {"kind": "sequence", "steps": [
+                {"kind": "source", "connection_ref": "$ref:CONN",
+                 "operation_ref": "$ref:GETOP"},
+                {"kind": "map_ref", "map_ref": "$ref:MAP"},
+                {"kind": "return_documents"}]}}),
+        "walk_truncated": _linear_child(400),
+    }
+    reasons = subprocess_inert_reasons()
+    assert {token for token, _wording in reasons} == set(witnesses), reasons
+
+    for token, child in witnesses.items():
+        if child is None:
+            continue
+        assert derive_subprocess_effect(child) is None, token
+
+    # CONTROL: a child matching none of the reasons still derives, so "inert"
+    # is a property of these cases and not of the derivation being broken.
+    assert derive_subprocess_effect(_linear_child(5)) is not None
+
+    # ... and every reason's wording actually reaches the served rule.
+    rule = next(r for r in _SEMANTIC_RULES
+                if r[0] == "semantic_rule.effect.subprocess_inspection")
+    for _token, wording in reasons:
+        assert wording in rule[3], wording

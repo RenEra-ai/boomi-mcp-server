@@ -693,6 +693,24 @@ _NODE_FACTS: Mapping[str, Mapping[str, Any]] = {
 # Parity-pinned cross-cutting semantic rules
 # ---------------------------------------------------------------------------
 
+def _subprocess_inert_sentence() -> str:
+    """The inert-case sentence, composed from the resolver's own reason rows.
+
+    Hand-listing them went stale twice — once when opacity stopped meaning "a
+    bare reference", once when the depth bound became a refusal — because the
+    list lived only in prose. Composing it means a new reason reaches the
+    served contract with the branch that creates it.
+    """
+    from .process_ir_effects import subprocess_inert_reasons
+
+    reasons = [wording for _token, wording in subprocess_inert_reasons()]
+    return (
+        "A child is inert — establishing nothing either way — when "
+        + "; or when ".join(reasons)
+        + "."
+    )
+
+
 _SEMANTIC_RULES: Tuple[Tuple[str, str, str, str, Tuple[str, ...], Tuple[str, ...]], ...] = (
     (
         "semantic_rule.branch.path_order",
@@ -819,10 +837,8 @@ _SEMANTIC_RULES: Tuple[Tuple[str, str, str, str, Tuple[str, ...], Tuple[str, ...
         "establish first is required of the caller, wherever in the child it "
         "sits; a write counts as established only where every converging path "
         "makes it, so a write inside one Branch path or Decision arm does not. "
-        "A child is inert — establishing nothing either way — when it is a bare "
-        "reference, or when it contains a step whose own state effect is "
-        "knowable only from a contract: a map, a scripted data process, or a "
-        "further call. A connector is not such a step: it moves documents "
+        + _subprocess_inert_sentence() +
+        " A connector is not such a step: it moves documents "
         "rather than tracked state, so it leaves both sets unchanged and instead "
         "makes the child replay-unsafe.",
         ("process_call",),

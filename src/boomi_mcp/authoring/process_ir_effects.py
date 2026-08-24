@@ -551,6 +551,31 @@ INSPECTABLE_CHILD_KINDS = frozenset({
 })
 
 
+def subprocess_inert_reasons() -> Tuple[Tuple[str, str], ...]:
+    """Every reason a child summary is INERT, as (token, served wording).
+
+    Served, and named here rather than restated in the rule text, because this
+    list has now gone stale twice: each time the derivation gained a way to
+    refuse, the sentence that enumerates them was a separate edit somebody had
+    to remember. The rule composes its sentence from these rows, so a fourth
+    reason cannot be added without appearing in the contract.
+
+    `test_every_inert_reason_is_reachable_and_served` constructs a child for
+    each row, so a row that no longer corresponds to a branch fails rather than
+    lingering as served fiction.
+    """
+    return (
+        ("bare_reference",
+         "it is a bare reference with no authored definition to inspect"),
+        ("uninspectable_step",
+         "it contains a step whose own state effect is knowable only from a "
+         "contract — a map, a scripted data process, or a further call"),
+        ("walk_truncated",
+         "it is deep enough that the walk stops at its bound, leaving both "
+         "sets partial rather than exact"),
+    )
+
+
 def derive_subprocess_effect(child_ir: Any) -> Optional[Tuple[tuple, tuple, bool]]:
     """``(required_reads, must_writes, replay_safe)`` derived from a child's own IR.
 
