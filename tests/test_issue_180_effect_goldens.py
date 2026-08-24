@@ -268,3 +268,122 @@ def test_the_recorded_context_is_covered_by_the_plan_fingerprint():
     stripped = plan.model_copy(update={"effect_capabilities": None})
     assert canonical_plan_material(stripped) != material
     assert process_plan_fingerprint(stripped)[0] != plan.plan_fingerprint
+
+
+def _two_writer_plan(order):
+    """A root reading two external-writer caches, declared in `order`.
+
+    Returns the compiled plan plus the served compile hash, so the assertions
+    below can speak about BOTH digests a caller can be pinned to.
+    """
+    from boomi_mcp.authoring.workflow import compile_authoring_request_v1
+    from boomi_mcp.models.authoring_workflow import (
+        AuthoringRequestV1,
+        ProcessIRAuthoringIntentV1,
+        ProcessIREffectDeclarationsV1,
+        ProcessIRExternalWriterDeclarationV1,
+    )
+    from boomi_mcp.models.process_component import (
+        ProcessAuthoringUnitV1,
+        ProcessComponentEnvelopeV1,
+    )
+    from boomi_mcp.models.process_ir import parse_process_ir_v1
+
+    conn = {"key": "conn", "type": "connector-settings", "name": "c",
+            "action": "create",
+            "config": {"connector_type": "rest", "component_name": "c",
+                       "base_url": "https://x.invalid", "auth": "NONE"}}
+    op = {"key": "op", "type": "connector-action", "name": "o", "action": "create",
+          "depends_on": ["conn"],
+          "config": {"connector_type": "rest", "operation_mode": "execute",
+                     "component_name": "o", "connection_ref_key": "conn",
+                     "method": "GET", "path": "/v1/t"}}
+    profile = {"key": "cp", "type": "profile.json", "name": "cp", "action": "create",
+               "config": {"component_type": "profile.json",
+                          "profile_type": "json.generated", "component_name": "cp",
+                          "root": {"name": "root", "kind": "object", "children": [
+                              {"name": "a", "kind": "simple",
+                               "data_type": "character"}]}}}
+
+    def cache(key):
+        return {"key": key, "type": "documentcache", "name": key,
+                "action": "create", "depends_on": ["cp"],
+                "config": {"component_name": key, "component_type": "documentcache",
+                           "profile_id": "$ref:cp", "profile_type": "profile.json",
+                           "indexes": [{"index_id": 1, "index_name": "by a", "keys": [
+                               {"element_key": "1", "id": 1, "name": "a (root/a)"}]}]}}
+
+    unit = ProcessAuthoringUnitV1(
+        envelope=ProcessComponentEnvelopeV1(
+            component_key="proc", name="p", action="create",
+            depends_on=("c1", "c2", "conn", "cp", "op")),
+        process_ir=parse_process_ir_v1({
+            "version": "1", "body": {"kind": "sequence", "steps": [
+                {"kind": "source", "connection_ref": "$ref:conn",
+                 "operation_ref": "$ref:op"},
+                {"kind": "cache_get", "cache_ref": "$ref:c1",
+                 "external_writer": True},
+                {"kind": "cache_get", "cache_ref": "$ref:c2",
+                 "external_writer": True},
+                {"kind": "return_documents"}]}}))
+    request = AuthoringRequestV1(
+        intent=ProcessIRAuthoringIntentV1(
+            integration_name="I", units=(unit,),
+            components=(conn, op, profile, cache("c1"), cache("c2")),
+            conflict_policy="fail"),
+        effect_declarations=ProcessIREffectDeclarationsV1(external_writers=tuple(
+            ProcessIRExternalWriterDeclarationV1(cache_ref="$ref:" + key)
+            for key in order)))
+    result, internals = compile_authoring_request_v1(
+        request, profile="golden", account_id="golden")
+    return internals.materialization_plans["proc"], result.revision_binding.compile_hash
+
+
+def test_authored_declaration_order_does_not_move_the_plan_fingerprint():
+    """Stage-2 P2. The order-independence contract, one layer down.
+
+    `ProcessIREffectDeclarationsV1.canonical_payload()` deliberately sorts for
+    hashing so two requests declaring the same things in a different order are
+    the same request. The resolver, correctly, preserves authored order in the
+    capability rows it builds. Covering those rows in the plan material as-is
+    reintroduced the dependency the payload had removed: swapping two equivalent
+    `external_writers` produced a different plan fingerprint and a different
+    compile hash, so a caller who reordered a list they were told was unordered
+    got a needless stale binding.
+
+    Measured before the fix: `sha256:180b6a54...` vs `sha256:35fc0d25...`.
+    """
+    first, first_hash = _two_writer_plan(["c1", "c2"])
+    second, second_hash = _two_writer_plan(["c2", "c1"])
+
+    # THE MUTATION TOOK EFFECT: the stored rows really are in different orders,
+    # so this is a test about canonicalisation and not about two identical
+    # objects agreeing with each other.
+    assert [w.cache_ref for w in first.effect_capabilities.external_writers] != [
+        w.cache_ref for w in second.effect_capabilities.external_writers]
+
+    assert first.plan_fingerprint == second.plan_fingerprint
+    assert first_hash == second_hash
+
+
+def test_a_genuinely_different_context_still_moves_the_plan_fingerprint():
+    """The opposite-direction control for the canonicalisation above.
+
+    Sorting for the hash must not flatten the field into a constant. A context
+    that differs in CONTENT — not merely in order — has to keep moving the
+    digest, or the coverage this field was added for is gone.
+    """
+    from boomi_mcp.authoring.process_materialization import (
+        canonical_plan_material,
+    )
+
+    plan, _hash = _two_writer_plan(["c1", "c2"])
+    material = canonical_plan_material(plan)
+
+    dropped = plan.model_copy(update={
+        "effect_capabilities": plan.effect_capabilities.model_copy(update={
+            "external_writers": plan.effect_capabilities.external_writers[:1]})})
+    assert canonical_plan_material(dropped) != material
+
+    stripped = plan.model_copy(update={"effect_capabilities": None})
+    assert canonical_plan_material(stripped) != material

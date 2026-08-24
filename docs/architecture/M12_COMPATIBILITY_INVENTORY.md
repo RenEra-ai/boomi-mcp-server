@@ -2098,9 +2098,9 @@ rather than aspirational.
 | LG-ceea4ac3 | legacy_transitive_call | server.py | prepare_component_edit | 1 | 1970 | #160 | follow the callee's row; this is an edge, not a site |
 | LG-334a4633 | legacy_transitive_call | server.py | search_marketplace_recipes | 1 | 2292 | #160 | follow the callee's row; this is an edge, not a site |
 | LG-af3aef13 | legacy_transitive_call | src/boomi_mcp/authoring/workflow.py | _legacy_plan_echo | 1 | 1036 | #160 | follow the callee's row; this is an edge, not a site |
-| LG-b7cd58ae | legacy_transitive_call | src/boomi_mcp/authoring/workflow.py | compile_authoring_request_v1 | 1 | 2295 | #160 | follow the callee's row; this is an edge, not a site |
+| LG-b7cd58ae | legacy_transitive_call | src/boomi_mcp/authoring/workflow.py | compile_authoring_request_v1 | 1 | 2301 | #160 | follow the callee's row; this is an edge, not a site |
 | LG-14572d6c | legacy_transitive_call | src/boomi_mcp/authoring/workflow.py | plan_authoring_request_v1 | 1 | 1778 | #160 | follow the callee's row; this is an edge, not a site |
-| LG-f57fd778 | legacy_transitive_call | src/boomi_mcp/authoring/workflow.py | preflight_typed_apply_v1 | 1 | 2534 | #160 | follow the callee's row; this is an edge, not a site |
+| LG-f57fd778 | legacy_transitive_call | src/boomi_mcp/authoring/workflow.py | preflight_typed_apply_v1 | 1 | 2540 | #160 | follow the callee's row; this is an edge, not a site |
 | LG-3f49de44 | legacy_transitive_call | src/boomi_mcp/categories/components/analyze_component.py | analyze_component_action | 1 | 900 | #160 | follow the callee's row; this is an edge, not a site |
 | LG-bb10b9ca | legacy_transitive_call | src/boomi_mcp/categories/components/builders/process_flow_builder.py | ProcessFlowBuilder.build | 3 | 1079 | #160 | follow the callee's row; this is an edge, not a site |
 | LG-a4d26b62 | legacy_transitive_call | src/boomi_mcp/categories/components/builders/process_flow_builder.py | _emit_branch_shapes | 2 | 3329 | #160 | follow the callee's row; this is an edge, not a site |
@@ -2708,3 +2708,34 @@ layer — bounded to `boomi_mcp.patterns.*` modules that a clause-3 invoker impo
 excludes every module `test_the_downstream_compiler_is_not_in_the_layer_digest` forbids, asserted
 directly rather than described; it is a necessary condition, not a characterization, and the explicit
 pair plus that boundary pin are what actually fix membership.
+
+
+## 12.6 Served-artifact movement (issue #180)
+
+Issue #180 edited exactly one module inside `RECIPE_LAYER_MODULES` —
+`src/boomi_mcp/authoring/workflow.py`, the first entry — and the edit was a COMMENT: a stale claim
+that the materialization plan is "NOT stored ... rebuilt at apply", sitting three lines above the
+statement that stores it (QA-180-r1-03). The layer digest is over module SOURCE TEXT, so a comment
+moves it exactly as code does. The same five served artifacts were rebaselined as in §12.5:
+`SS-CAPABILITY-CATALOG:authoring_contract`, the `AuthoringRequestV1` / `AuthoringPlanResultV1` /
+`AuthoringCompileResultV1` schema templates, and `SS-SCHEMA-TEMPLATES:walked_surface_digest`.
+
+**Verified benign before acceptance**, to the same standard §12.5 sets. A leaf-by-leaf diff of the
+whole frozen inventory (22 172 leaves) found **zero** added, removed or retyped fields and 34 changed
+leaves, all of which are one of two things:
+
+- **Four `evidence_line` values**, each moved by exactly +6 — the length of the comment — at
+  `census[111]`, `census[113]` and the two `ledger_rows` that mirror them. Both name
+  `src/boomi_mcp/authoring/workflow.py`.
+- **Thirty digest echoes of ONE value.** `capability_revision` moved
+  `sha256:d14f7449...` -> `sha256:078f0a9f...`, and every other changed leaf is that value being
+  re-served (`capability_comparison.actual_capability_revision`,
+  `revision_binding.capability_revision`), the `recipe_registry.registry_revision` it is computed
+  from, or a per-artifact `sha256` / per-schema digest that contains it. No served `json_schema` body
+  changed.
+
+**The plan model gained a field in this slice and it did NOT move these artifacts.**
+`ProcessComponentMaterializationPlanV1.effect_capabilities` lives in
+`src/boomi_mcp/authoring/process_materialization.py`, which is not in the layer; measured by running
+the freeze test with only the comment reverted, which passes. Recorded because the opposite is the
+intuitive guess, and a rebaseline attributed to the wrong cause is a rebaseline nobody can re-derive.

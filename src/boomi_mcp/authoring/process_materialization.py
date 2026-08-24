@@ -428,6 +428,33 @@ def covered_plan_fields() -> Tuple[str, ...]:
     )
 
 
+def _canonical_capabilities(capabilities: Any) -> Any:
+    """The trusted context in an ORDER-INDEPENDENT shape, for hashing only.
+
+    #180 Stage-2 P2. The resolver preserves the caller's authored order in these
+    collections, while ``ProcessIREffectDeclarationsV1.canonical_payload()``
+    deliberately makes that order hash-independent — two requests that declare
+    the same external writers in a different order are the same request. Once
+    this context became covered plan material, dumping it as-is reintroduced the
+    dependency one layer down: swapping two equivalent declarations moved the
+    plan fingerprint and therefore the compile hash, forcing a needless
+    stale-binding replan.
+
+    Only the MATERIAL is canonicalized. The stored field keeps the resolver's
+    own ordering, exactly as the parsed request keeps the caller's — lineage
+    looks a contract up by ref, never by position, so the two cannot disagree.
+
+    Sorting by each row's canonical bytes gives a total order that does not
+    depend on Python's own comparison rules for the row models.
+    """
+    dumped = capabilities.model_dump(mode="json")
+    return {
+        key: (sorted(value, key=canonical_json_bytes)
+              if isinstance(value, list) else value)
+        for key, value in dumped.items()
+    }
+
+
 def _dump(value: Any) -> Any:
     if isinstance(value, BaseModel):
         return value.model_dump(mode="json")
@@ -477,6 +504,11 @@ def canonical_plan_material(plan: "ProcessComponentMaterializationPlanV1") -> by
                 "policy_id": value.policy_id,
                 **json.loads(value.canonical_policy_json),
             }
+        elif name == "effect_capabilities":
+            # Order-independent, per the note on `_canonical_capabilities`.
+            payload[name] = (
+                None if value is None else _canonical_capabilities(value)
+            )
         elif name in ("compiler_revision", "emitter_revision", "materializer_revision"):
             payload["revisions"][name] = value
         else:
