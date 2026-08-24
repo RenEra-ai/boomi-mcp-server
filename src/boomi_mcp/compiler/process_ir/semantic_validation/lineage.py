@@ -402,6 +402,14 @@ class LineageWalkV1(NamedTuple):
     findings: Tuple[ValidationDiagnosticV1, ...]
     unestablished_reads: Tuple[StateKey, ...]
     established_at_exit: Tuple[StateKey, ...]
+    #: Whether the walk hit its depth bound and stopped short of some path.
+    #:
+    #: The bound is a HANG GUARD, and for reporting findings, stopping short
+    #: merely means the deepest nodes go unreported. For any caller that
+    #: TRUSTS the state sets, it means something else entirely: both sets are
+    #: silently partial, so an exact-looking summary omits whatever lay past
+    #: the cutoff. Such a caller must treat a truncated walk as no answer.
+    truncated: bool
 
 
 def _walk_lineage(
@@ -421,6 +429,9 @@ def _walk_lineage(
     # finding, and dropping the second key with the duplicate finding would
     # under-report the dependency set.
     unmet: List[StateKey] = []
+    # A list rather than a flag so the nested `_visit` can set it without a
+    # `nonlocal` declaration, matching how `findings` and `unmet` are handled.
+    truncated: List[bool] = []
     leg_writes = _leg_write_index(prepared, capabilities)
 
     def _report(code: str, node, severity="error", evidence=()) -> None:
@@ -517,7 +528,10 @@ def _walk_lineage(
 
     def _visit(node_id: str, state: _State, depth: int, leg=None) -> _State:
         node = prepared.node(node_id)
-        if node is None or depth > 256:
+        if node is None:
+            return state
+        if depth > 256:
+            truncated.append(True)
             return state
 
         semantic = node.semantic
@@ -644,6 +658,7 @@ def _walk_lineage(
         established_at_exit=tuple(
             sorted(exit_state.document | exit_state.execution)
         ),
+        truncated=bool(truncated),
     )
 
 

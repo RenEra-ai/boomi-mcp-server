@@ -622,6 +622,14 @@ def derive_subprocess_effect(child_ir: Any) -> Optional[Tuple[tuple, tuple, bool
             replay_safe = False
 
     walk = walk_lineage(prepared)
+    if walk.truncated:
+        # The walk stopped at its depth bound, so both sets are partial and a
+        # late read or write is simply missing. Publishing them as an exact
+        # summary is the same unsound ACCEPTANCE an exact-empty summary for an
+        # uninspectable child was: a caller declaration matching the truncated
+        # sets would be trusted. A root sequence has no length bound, so this
+        # is reachable by an ordinary long child, not just a pathological one.
+        return None
     return (walk.unestablished_reads, walk.established_at_exit, replay_safe)
 
 

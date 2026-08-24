@@ -2142,3 +2142,100 @@ def test_every_effect_authority_family_has_served_wording():
     # ... and every row actually carries its wording through to the served entry.
     for entry in _effect_authority_entries():
         assert entry.summary.strip(), entry.contract_entry_id
+
+
+def _linear_child(filler):
+    """A child whose LAST stateful step reads a key nothing establishes."""
+    steps = [{"kind": "source", "connection_ref": "$ref:CONN",
+              "operation_ref": "$ref:GETOP"}]
+    steps += [{"kind": "set_dpp", "name": "FILLER%d" % i,
+               "source_values": [{"value_type": "static", "value": "v"}]}
+              for i in range(filler)]
+    steps.append({"kind": "set_dpp", "name": "OUT",
+                  "source_values": [{"value_type": "dpp", "property_name": "LATE"}]})
+    steps.append({"kind": "return_documents"})
+    return parse_process_ir_v1(
+        {"version": "1", "body": {"kind": "sequence", "steps": steps}})
+
+
+def test_a_child_the_walk_truncates_is_INERT_not_exact():
+    """Stage-2 r10 P1. The walk's depth bound is a HANG GUARD, and inheriting it
+    silently turned a partial answer into an exact-looking summary.
+
+    A root sequence has no length bound, so this is an ordinary long child, not
+    a pathological one: past the cutoff the late read vanished from
+    required_reads and the write set stopped at exactly the bound, so a caller
+    declaring the truncated sets — or nothing at all — matched and was TRUSTED.
+    """
+    from boomi_mcp.authoring.process_ir_effects import derive_subprocess_effect
+
+    # CONTROL: below the bound the late read IS required, so the assertion
+    # below is about truncation and not about long children failing to parse.
+    reads, _writes, _replay = derive_subprocess_effect(_linear_child(5))
+    assert ("dpp", "LATE") in reads, reads
+
+    assert derive_subprocess_effect(_linear_child(400)) is None
+
+
+def test_the_lineage_walk_reports_its_own_truncation():
+    """The flag is set by the walk, not inferred by its caller counting nodes.
+
+    A caller that re-derived "was this too deep?" from the node count would be
+    a second model of the walk's own bound — the exact defect class this whole
+    derivation was rewritten to remove.
+    """
+    from boomi_mcp.compiler.process_ir.contracts import SymbolTableV1
+    from boomi_mcp.compiler.process_ir.semantic_validation.context import (
+        prepare_validation_context,
+    )
+    from boomi_mcp.compiler.process_ir.semantic_validation.lineage import walk_lineage
+
+    empty = SymbolTableV1(symbols=())
+    assert walk_lineage(prepare_validation_context(_linear_child(400), empty)).truncated
+    assert not walk_lineage(prepare_validation_context(_linear_child(5), empty)).truncated
+
+
+def test_the_two_served_surfaces_do_not_both_state_the_derivation_rule():
+    """Stage-2 r10 P2. The rule was stated in TWO served texts; one was fixed.
+
+    `semantic_rule.effect.subprocess_inspection` and the generated
+    `effect_authority.subprocess_effects` entry both described HOW the summary
+    is derived, so correcting one left the other contradicting it — a caller
+    receives both from the same contract. The duplicate statement is removed
+    rather than guarded: the authority entry says where the fact comes from and
+    points at the rule, which is the only surface that states it.
+    """
+    from boomi_mcp.authoring.process_ir_projection import _EFFECT_AUTHORITY_PROSE
+
+    prose = _EFFECT_AUTHORITY_PROSE["server-inspection:child-process-ir"]
+    # The specific claims that went stale, both now false of the walk.
+    assert "root sequence" not in prose, prose
+    assert "a call, a script, a map" not in prose, prose
+    # It must still point somewhere the rule IS stated.
+    assert "semantic_rule.effect.subprocess_inspection" in prose, prose
+
+
+def test_a_registry_authority_is_served_as_a_registry():
+    """Stage-2 r10 P2. Source id was derived; provenance stayed hardcoded.
+
+    They are one fact about the authority, so an entry citing a registry while
+    labelled as coming from a runtime model is internally contradictory.
+    """
+    from boomi_mcp.authoring.process_ir_effects import effect_authority_rows
+    from boomi_mcp.authoring.process_ir_projection import (
+        _EFFECT_AUTHORITY_SOURCES,
+        _effect_authority_entries,
+    )
+
+    authorities = {authority for _family, authority in effect_authority_rows()}
+    assert set(_EFFECT_AUTHORITY_SOURCES) == authorities
+
+    by_source = {}
+    for entry in _effect_authority_entries():
+        for source in entry.sources:
+            by_source[source.source_id] = source.provenance
+    for source_id, provenance in by_source.items():
+        expected = "runtime_registry" if "registry" in source_id else "runtime_model"
+        assert provenance == expected, (source_id, provenance)
+    # Non-vacuity: at least one of each kind is actually served.
+    assert set(by_source.values()) == {"runtime_registry", "runtime_model"}, by_source

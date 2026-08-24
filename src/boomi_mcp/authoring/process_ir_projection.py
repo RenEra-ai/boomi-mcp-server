@@ -1570,16 +1570,24 @@ _SEMANTIC_RULE_SOURCES = {
 #: `test_every_effect_authority_row_names_its_own_authority` requires this map
 #: to be TOTAL over `effect_authority_rows()`, so a family added there without a
 #: source fails loudly instead of inheriting a wrong one.
+#: ... and with WHAT KIND of thing that module is, which the served source
+#: carries as a separate closed token. Deriving the id while leaving the
+#: provenance hardcoded made the pair internally contradictory: an entry citing
+#: a registry was still labelled as coming from a runtime model, so a consumer
+#: could not tell registry-derived facts from model-derived ones. The two are
+#: one fact about the authority and are derived together.
 _EFFECT_AUTHORITY_SOURCES = {
-    "server-inspection:map-function-registry": SOURCE_MAP_FUNCTIONS,
-    "server-registry:vetted-scripts": SOURCE_VETTED_SCRIPTS,
+    "server-inspection:map-function-registry":
+        (SOURCE_MAP_FUNCTIONS, "runtime_registry"),
+    "server-registry:vetted-scripts":
+        (SOURCE_VETTED_SCRIPTS, "runtime_registry"),
     # A child summary is read off the lineage walk, which is what
     # `semantic_rule.effect.subprocess_inspection` cites too.
-    "server-inspection:child-process-ir": SOURCE_STATE,
-    "caller-assertion:no-state-established": SOURCE_STATE,
+    "server-inspection:child-process-ir": (SOURCE_STATE, "runtime_model"),
+    "caller-assertion:no-state-established": (SOURCE_STATE, "runtime_model"),
     # Not a fact about any upstream registry: it is the resolver's own policy
     # for what a declaration it cannot verify does NOT buy.
-    "none:every-strict-finding-stands": SOURCE_EFFECT_RESOLVER,
+    "none:every-strict-finding-stands": (SOURCE_EFFECT_RESOLVER, "runtime_model"),
 }
 
 
@@ -1598,10 +1606,12 @@ _EFFECT_AUTHORITY_PROSE = {
         "vetted contract. A script whose digest matches no entry is INERT: the server "
         "knows which script it is and still has no authority for what it does.",
     "server-inspection:child-process-ir":
-        "Derived by inspecting the child's authored definition. Only writes on the "
-        "child's root sequence are established, and a read the child satisfies itself "
-        "is not required of the caller. A child containing anything uninspectable — a "
-        "call, a script, a map, a further subprocess — is INERT rather than empty.",
+        "Derived by inspecting the child's authored definition, on the same "
+        "walk the compiler uses for lineage — so the reads it requires and the "
+        "writes it guarantees are exactly what that walk establishes. A child "
+        "the walk cannot fully account for establishes nothing: see "
+        "semantic_rule.effect.subprocess_inspection for which children those "
+        "are and how the two sets are derived.",
     "caller-assertion:no-state-established":
         "The one declaration with no server-side content authority, because an outside "
         "writer is not present in the artifact. It never establishes a cache write; "
@@ -1650,9 +1660,9 @@ def _effect_authority_entries() -> List[ProcessIRAuthoringContractEntryV1]:
                 ordering_facts=("Authority: {0}.".format(authority),),
                 sources=(
                     _source(
-                        _EFFECT_AUTHORITY_SOURCES[authority],
+                        _EFFECT_AUTHORITY_SOURCES[authority][0],
                         "generated",
-                        "runtime_model",
+                        _EFFECT_AUTHORITY_SOURCES[authority][1],
                         "compiler",
                         family,
                     ),
