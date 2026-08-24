@@ -84,7 +84,7 @@ tier + anchor, affected SHA/delta, exactly one disposition.
 | --- | --- |
 | Loop identity | closure over the whole roster |
 | Window / cumulative evaluations | L1 Stage-1 QA: 1 of 3 · L2 Stage-2 commit review: 2 of 3 · L3 composite wave gate: 1 of 3 |
-| Current SHA / dirty | **`__CLOSING_SHA__`**, clean — the tip the composite wave gate returned EXIT=0 on, and the tip this checkpoint is decided against |
+| Current SHA / dirty | **`5c00583907611e7935d0fb2d2f494f2cfcfbb0b2`**, clean — the tip the composite wave gate returned EXIT=0 on, and the tip this checkpoint is decided against |
 | Per-tier counts | **Ten raw finding rows: 1 Critical + 9 Standard.** Critical: 1 raised (CDX-180-r1-01), 1 fixed, **0 unresolved**. Standard: 9 raised — 7 `fixed`, 1 `finding-refuted` (SELF-180-04, a documented consequence rather than a defect), 1 `not-validated` as an in-slice defect (QA-180-r1-04, pre-existing and out of subsystem). 7 + 1 + 1 = 9. |
 | Affected-class breadth | capability reachability · machine-served schemas/contracts · runtime behavior · apply/update preservation |
 | New defect classes | DC-180-A (a derived artifact minted before its inputs settled) · DC-180-B (an order-bearing representation entering an order-independent hash) |
@@ -117,6 +117,9 @@ loops account separately, and none reached three.
 | 14 | **Composite wave gate (loop 3, evaluation 1)** | `scripts/wave_gate.py wave --base 245d7d79...` at `2e74bac` | stdout captured | **EXIT=0** — `manifests ok (10537 required nodes, 70 active goldens)`, `non-KB suite green (10520 passed, 17 skipped, cap 30)`, `70 active goldens deterministic and byte-exact`, `plan fingerprint checked: 2 case(s)` |
 | 15 | **Stage-2 repo commit review (loop 2, evaluation 3)** — the closing docs-only delta | `--base 2e74bac`, head `c882b93`, dirty=false | run dir `/tmp/cdx-review.21oBMN`, archived at `commit-reviews/cdx-review.21oBMN`; collector `STATUS: completed`, teardown confirmed | 3 findings (1 P2, 2 P3), all about the closure record. Checkpoint CP-2 recorded. |
 | 16 | **Composite wave gate (loop 3, evaluation 2)** — on the closing tip | `scripts/wave_gate.py wave --base 245d7d79...` at `953e79e` | stdout captured | **FAILED** — `PYTEST_FAILED ... {'passed': 10519, 'failed': 1}`. The single failure was `test_every_completed_run_is_cited_by_its_ledger_outside_the_frozen_legacy_set`: round 3 was archived without being cited. This is CDX-180-r2-01 demonstrated, not merely asserted. |
+| 17 | **Composite wave gate (loop 3, evaluation 3)** — on the corrected tree | `scripts/wave_gate.py wave --base 245d7d79...` at **`5c00583907611e7935d0fb2d2f494f2cfcfbb0b2`** | stdout captured, exit 0 | **EXIT=0** — `manifests ok (10537 required nodes, 70 active goldens)`, `non-KB suite green (10520 passed, 17 skipped, cap 30)`, `70 active goldens deterministic and byte-exact`, `plan fingerprint checked: 2 case(s)`. **This is the tip the closure is decided on.** |
+| 18 | Darkness proof for this closing append | working tree vs `5c00583` | `git diff --name-only` per path class | 0 changed under `src/`, 0 under `tests/`, 0 goldens, 0 wave-gate manifests — only this ledger |
+| 19 | Affected validation for this closing append | working tree | `pytest tests/test_wave_gate.py tests/test_issue_177_ledger_class_table_is_derived.py tests/test_issue_178_ledger_is_derived_from_its_archive.py` | the exact tests that read what this append changes — the set whose omission evaluation 2 caught |
 
 ## Recorded limitations
 
