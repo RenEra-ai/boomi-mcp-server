@@ -1,0 +1,15 @@
+Approvals are unavailable in this read-only review session — nothing can be approved, and no tool
+requiring approval will succeed. Do not ask again and do not wait.
+
+Produce the review NOW, in this message, from what you have already read. Judge the implementation
+against the architect design plan and the issue's acceptance criteria, both of which are inlined in
+the original prompt verbatim.
+
+For each finding give: a severity, the file and line, what the plan or the acceptance criteria
+required, what the implementation actually does, and why the difference matters. Where you could not
+verify something, say so explicitly rather than omitting it.
+
+If you find nothing, say so plainly — a clean verdict is a real outcome and does not need padding.
+
+END with a verdict on its OWN FINAL line: exactly `VERDICT: NO ISSUES` or exactly
+`VERDICT: ISSUES FOUND`.

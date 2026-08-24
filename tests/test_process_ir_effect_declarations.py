@@ -399,22 +399,51 @@ def test_an_external_writer_contract_carries_no_effect_payload_at_all():
     assert set(ProcessIRExternalWriterDeclarationV1.model_fields) == {"cache_ref"}
 
 
-def test_external_writer_binds_only_when_the_node_authored_the_flag():
+def test_the_external_writer_flag_governs_the_EFFECT_not_the_IDENTITY():
+    """The four-case truth table, as the design plan states it.
+
+    Identity is "a cache_get in this root names this cache". The authored flag
+    decides whether the missing-writer error may downgrade — not whether the
+    declaration is about a real thing.
+
+    The first implementation gated IDENTITY on the flag, so an unflagged but
+    matching declaration was rejected as unbound. That is a different answer from
+    the design's: such a declaration is VALID and simply establishes nothing.
+    Turning "this proves nothing" into "your payload is invalid" is the same
+    overreach as trusting an unverified claim, pointed the other way — and the
+    delta-scoped gate could not see it, because it confirmed the implementation
+    against itself rather than against the plan.
+    """
     declarations = ProcessIREffectDeclarationsV1(external_writers=(
         ProcessIRExternalWriterDeclarationV1(cache_ref="$ref:CACHE"),))
-    ok = resolve_process_ir_effect_declarations(
-        [("p", _root_with_external_cache_read())], declarations, _symbols(), [])
-    assert ok.ok, ok.findings
-    assert ok.capabilities_by_root["p"].external_writers[0].cache_ref == "$ref:CACHE"
 
-    # the same declaration against a read that did NOT author the flag
+    # (1) flag authored + declaration -> the contract binds
+    flagged = resolve_process_ir_effect_declarations(
+        [("p", _root_with_external_cache_read())], declarations, _symbols(), [])
+    assert flagged.ok, flagged.findings
+    assert flagged.capabilities_by_root["p"].external_writers[0].cache_ref == "$ref:CACHE"
+    assert flagged.inert == ()
+
+    # (2) cache_get present but UNFLAGGED -> valid, and INERT rather than rejected
     unflagged = parse_process_ir_v1({"version": "1", "body": {"kind": "sequence", "steps": [
         {"kind": "source", "connection_ref": "$ref:CONN", "operation_ref": "$ref:GETOP"},
         {"kind": "cache_get", "cache_ref": "$ref:CACHE"},
         {"kind": "return_documents"}]}})
-    bad = resolve_process_ir_effect_declarations(
+    inert = resolve_process_ir_effect_declarations(
         [("p", unflagged)], declarations, _symbols(), [])
-    assert [f.reason for f in bad.findings] == ["unbound"]
+    assert inert.ok, inert.findings
+    assert inert.inert == ("/effect_declarations/external_writers/0",)
+    assert inert.capabilities_by_root["p"].external_writers == ()
+
+    # (3) flag authored, NO declaration -> nothing established
+    none_supplied = resolve_process_ir_effect_declarations(
+        [("p", _root_with_external_cache_read())], None, _symbols(), [])
+    assert none_supplied.capabilities_by_root["p"] is None
+
+    # (4) no cache_get names this cache at all -> genuinely unbound
+    no_read = resolve_process_ir_effect_declarations(
+        [("p", _root_with_map())], declarations, _symbols(), [])
+    assert [f.reason for f in no_read.findings] == ["unbound"]
 
 
 def test_an_external_writer_never_adds_a_cache_write_to_state():
@@ -1647,3 +1676,216 @@ def test_the_deferred_branch_is_the_one_carrying_only_a_side_detail():
     assert set((with_index.details or {})) == {"side", "index_type", "declared_type"}, (
         with_index.details
     )
+
+
+# ---------------------------------------------------------------------------
+# §6 architect review: plan-conformance corrections
+# ---------------------------------------------------------------------------
+
+
+def _cache_plan_context():
+    """Plan context including an indexable document cache, for join fixtures."""
+    depends_on, by_key = _plan_context()
+    by_key = dict(by_key)
+    by_key["CACHE"] = IntegrationComponentSpec(
+        key="CACHE", type="documentcache", action="create", name="CACHE",
+        config={"component_name": "CACHE",
+                "indexes": [{"index_id": 1, "keys": [{"id": 1, "name": "a (Root/a)"}]}]},
+    )
+    return depends_on + ["CACHE"], by_key
+
+
+def _join(**over):
+    join = {"document_cache_id": "$ref:CACHE", "cache_index": 1, "join_id": 1,
+            "src_parent_key": "1",
+            "key_values": [{"cache_key_id": 1, "cache_key_name": "a (Root/a)",
+                            "src_link_key": "2"}]}
+    join.update(over)
+    return join
+
+
+@pytest.mark.parametrize("map_type", ["direct", "function"])
+def test_a_map_document_cache_join_is_a_cache_READ(map_type):
+    """§6 P1. `document_cache_joins` were never inspected, so a map carrying one
+    reported reading nothing — on BOTH routes.
+
+    The repository already owns this fact: `cache_property_lineage` records one
+    cache read per join. Deriving map effects without asking the joins made this
+    module a second, incomplete model of a fact that had an owner — the defect
+    class this issue exists to remove, reproduced inside the fix for it.
+    """
+    depends_on, by_key = _cache_plan_context()
+    overrides = {"document_cache_joins": [_join()]}
+    if map_type == "function":
+        overrides["function_mappings"] = [_accepted("dynamic_process_property_set")]
+    config = _valid_map_config(map_type, **overrides)
+    reads, writes, _replay = derive_map_effect(
+        config, depends_on=depends_on, components_by_key=by_key)
+    assert ("cache", "$ref:CACHE") in reads, (map_type, reads)
+    if map_type == "function":
+        assert ("dpp", "OUT") in writes, writes
+    # CONTROL: the same map without the join records no cache read.
+    plain = _valid_map_config(map_type, **{k: v for k, v in overrides.items()
+                                           if k != "document_cache_joins"})
+    assert derive_map_effect(
+        plain, depends_on=depends_on, components_by_key=by_key)[0] == ()
+
+
+def test_an_externally_written_join_records_no_read():
+    """Mirrors the existing authority, which marks such a join externally
+    satisfied. A contract read carries no such flag and lineage treats every one
+    as strict, so recording it would turn a valid flow into a false
+    missing-writer error — the same reasoning as a defaulted property get."""
+    depends_on, by_key = _cache_plan_context()
+    config = _valid_map_config("direct", document_cache_joins=[_join(external_writer=True)])
+    assert derive_map_effect(
+        config, depends_on=depends_on, components_by_key=by_key) == ((), (), True)
+
+
+def test_a_subprocess_read_the_child_satisfies_is_not_required_of_the_caller():
+    """§6 P1(a). Reporting it made a valid payload invalid purely by declaring
+    the child's truthful summary, so the only way to stay green was to omit the
+    declaration — which costs exactly what the channel exists for."""
+    from boomi_mcp.authoring.process_ir_effects import derive_subprocess_effect
+
+    values = [{"value_type": "static", "value": "v"}]
+    read_p = [{"value_type": "dpp", "property_name": "P"}]
+    src = {"kind": "source", "connection_ref": "$ref:CONN", "operation_ref": "$ref:GETOP"}
+
+    satisfied = parse_process_ir_v1({"version": "1", "body": {"kind": "sequence", "steps": [
+        src, {"kind": "set_dpp", "name": "P", "source_values": values},
+        {"kind": "set_ddp", "name": "D", "source_values": read_p},
+        {"kind": "return_documents"}]}})
+    reads, writes, _ = derive_subprocess_effect(satisfied)
+    assert ("dpp", "P") not in reads, reads
+    assert ("dpp", "P") in writes
+
+    # CONTROL: the same read with NO preceding write IS required of the caller.
+    unsatisfied = parse_process_ir_v1({"version": "1", "body": {"kind": "sequence", "steps": [
+        src, {"kind": "set_ddp", "name": "D", "source_values": read_p},
+        {"kind": "return_documents"}]}})
+    assert ("dpp", "P") in derive_subprocess_effect(unsatisfied)[0]
+
+
+def test_a_subprocess_that_writes_a_cache_is_not_replay_safe():
+    """§6 P1(c). Re-running the child would write the cache twice."""
+    from boomi_mcp.authoring.process_ir_effects import derive_subprocess_effect
+
+    child = parse_process_ir_v1({"version": "1", "body": {"kind": "sequence", "steps": [
+        {"kind": "source", "connection_ref": "$ref:CONN", "operation_ref": "$ref:GETOP"},
+        {"kind": "cache_put", "cache_ref": "$ref:DC"},
+        {"kind": "cache_get", "cache_ref": "$ref:DC"},
+        {"kind": "return_documents"}]}})
+    _reads, writes, replay_safe = derive_subprocess_effect(child)
+    assert ("cache", "$ref:DC") in writes
+    assert replay_safe is False
+
+
+def test_a_child_with_an_uninspectable_step_is_INERT_not_exact_empty():
+    """§6 P1(d). An exact-empty summary for an uninspectable child was an unsound
+    ACCEPTANCE — it asserted "this child touches nothing" about contents nobody
+    read, and a declaration matching that fabrication was then trusted."""
+    from boomi_mcp.authoring.process_ir_effects import derive_subprocess_effect
+
+    opaque = parse_process_ir_v1({"version": "1", "body": {"kind": "sequence", "steps": [
+        {"kind": "connector_call", "operation_ref": "$ref:GETOP"}, {"kind": "stop"}]}})
+    assert derive_subprocess_effect(opaque) is None
+    # CONTROL: an inspectable child still derives, so INERT is about the opaque
+    # step rather than about derivation having stopped working.
+    plain = parse_process_ir_v1({"version": "1", "body": {"kind": "sequence", "steps": [
+        {"kind": "source", "connection_ref": "$ref:CONN", "operation_ref": "$ref:GETOP"},
+        {"kind": "set_dpp", "name": "P",
+         "source_values": [{"value_type": "static", "value": "v"}]},
+        {"kind": "return_documents"}]}})
+    assert derive_subprocess_effect(plain) == ((), (("dpp", "P"),), True)
+
+
+def test_declaration_families_are_canonically_ordered():
+    """§6 §6. These tuples enter the payload the semantic hash covers, so two
+    requests declaring the SAME effects in a different order produced different
+    plan and compile hashes and forced a re-plan that established nothing."""
+    a = ProcessIREffectDeclarationsV1(external_writers=(
+        ProcessIRExternalWriterDeclarationV1(cache_ref="$ref:B"),
+        ProcessIRExternalWriterDeclarationV1(cache_ref="$ref:A")))
+    b = ProcessIREffectDeclarationsV1(external_writers=(
+        ProcessIRExternalWriterDeclarationV1(cache_ref="$ref:A"),
+        ProcessIRExternalWriterDeclarationV1(cache_ref="$ref:B")))
+    assert a.model_dump(mode="json") == b.model_dump(mode="json")
+    assert [w.cache_ref for w in a.external_writers] == ["$ref:A", "$ref:B"]
+
+
+def test_the_public_script_language_matches_the_compilers_own():
+    """§6 §6. Accepting any non-empty string let a declaration name a language the
+    authored step cannot carry, surfacing only as a failed digest lookup later."""
+    import typing
+
+    from boomi_mcp.models.authoring_workflow import (
+        ProcessIRScriptLanguageV1, _script_languages,
+    )
+
+    assert set(typing.get_args(ProcessIRScriptLanguageV1)) == set(_script_languages())
+    with pytest.raises(Exception):
+        ProcessIRScriptEffectDeclarationV1(
+            language="python", source_sha256="sha256:" + "a" * 64,
+            effect=ProcessIRStateEffectDeclarationV1())
+
+
+def test_a_declared_map_effect_reaches_compile_and_emit_on_the_legacy_topology():
+    """§6 §7. The audit record claimed NO map_ref compiles through the public
+    path, and every checked-in test drove resolvers directly or substituted a
+    fake — so the claim was never contradicted by coverage.
+
+    It is false. The bracketed `connector_call` form is blocked by call-pair
+    profile checking, but the LEGACY `source -> map_ref -> return_documents` form
+    deliberately bypasses that check, and compiles. This drives a real declared
+    map effect through resolve -> compile -> emit on that topology.
+    """
+    import sys as _sys
+    from pathlib import Path as _P
+
+    _here = str(_P(__file__).resolve().parent)
+    if _here not in _sys.path:
+        _sys.path.insert(0, _here)
+    from _wave_gate_golden_corpus import error_symbols
+
+    from boomi_mcp.categories.components.process_graph_verifier import verify_process_graph
+    from boomi_mcp.compiler.process_ir.contracts import ComponentSymbolV1
+    from boomi_mcp.compiler.process_ir.emitter_registry import emit_process
+    from boomi_mcp.compiler.process_ir.pipeline import compile_process_ir_v1
+
+    symbols = error_symbols(
+        ComponentSymbolV1(ref="$ref:MAP", component_id="m-1", component_type="transform.map"))
+    root = parse_process_ir_v1({"version": "1", "body": {"kind": "sequence", "steps": [
+        {"kind": "source", "connection_ref": "$ref:CONN", "operation_ref": "$ref:GETOP"},
+        {"kind": "map_ref", "map_ref": "$ref:MAP"},
+        {"kind": "return_documents"}]}})
+
+    depends_on, by_key = _plan_context()
+    map_spec = IntegrationComponentSpec(
+        key="MAP", type="transform.map", action="create", name="M12.16 map",
+        depends_on=depends_on,
+        config=_valid_map_config("function", function_mappings=[
+            _accepted("dynamic_process_property_set")]),
+    )
+    declarations = ProcessIREffectDeclarationsV1(map_effects=(
+        ProcessIRMapEffectDeclarationV1(
+            map_ref="$ref:MAP",
+            effect=_effect(writes=[("dpp", "OUT")], replay_safe=True)),))
+
+    resolution = resolve_process_ir_effect_declarations(
+        [("p", root)], declarations, symbols, _components(map_spec), conflict_policy="fail")
+    assert resolution.ok, resolution.findings
+    assert resolution.inert == (), "the declaration went inert — it establishes nothing"
+    capabilities = resolution.capabilities_by_root["p"]
+    assert capabilities.map_effect("$ref:MAP").writes == (("dpp", "OUT"),)
+
+    # ...and the SAME context reaches a real compile, which then emits.
+    _cfg, plan = compile_process_ir_v1(root, symbols, capabilities=capabilities)
+    xml = emit_process(plan, symbols).process_xml
+    assert "<bns:" in xml or "shapetype" in xml
+    assert not verify_process_graph(xml).get("errors")
+
+    # CONTROL: without the declaration the same root still compiles, so the
+    # assertion above is about the effect arriving rather than about the compile.
+    _cfg2, plan2 = compile_process_ir_v1(root, symbols)
+    assert emit_process(plan2, symbols).process_xml == xml

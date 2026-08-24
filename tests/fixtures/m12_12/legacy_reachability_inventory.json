@@ -7292,7 +7292,7 @@
       },
       "producer": "meta_tools.list_capabilities_action()",
       "selector": "authoring_contract",
-      "sha256": "7182f011a50fd13b0d7555b63982d948f013ec97316c9bab66678a2d856ec5d8",
+      "sha256": "e82d56c897203d428bc1b1dca00e1c47bb134e0a9613743afc0c5172d783a6e3",
       "surface_class": "SS-CAPABILITY-CATALOG",
       "value": {
         "actions": [
@@ -7397,11 +7397,11 @@
           }
         ],
         "capability_comparison": {
-          "actual_capability_revision": "sha256:d45113f03269f272bf53079f765171cf3606157d277dc525e57efd84253da0cb",
+          "actual_capability_revision": "sha256:351566bbfd15d958bb9400775fdfa1557d9eec8f54a3c453b3b36514bd90d240",
           "status": "not_requested"
         },
-        "capability_revision": "sha256:d45113f03269f272bf53079f765171cf3606157d277dc525e57efd84253da0cb",
-        "compiler_revision": "sha256:b89bcaf37858711dff0b01f0173f1e9ec1a16056e196cb66599a0a4fe8568357",
+        "capability_revision": "sha256:351566bbfd15d958bb9400775fdfa1557d9eec8f54a3c453b3b36514bd90d240",
+        "compiler_revision": "sha256:f17565809b8a91a5431537239134901ca7650b4587e2c4a411648dc04f3a31b8",
         "contract_version": "2",
         "intent_kinds": [
           "integration_spec",
@@ -7410,7 +7410,7 @@
         ],
         "manifest_version": "1",
         "process_ir_authoring": {
-          "entry_count": 187,
+          "entry_count": 192,
           "entry_counts_by_type": {
             "capability": 27,
             "connector_action": 5,
@@ -7420,7 +7420,7 @@
             "placement": 10,
             "recipe": 8,
             "recipe_contribution": 4,
-            "semantic_rule": 12,
+            "semantic_rule": 17,
             "state_visibility": 4
           },
           "entry_types": [
@@ -7638,7 +7638,7 @@
           "schema_version": "1",
           "source_version": "0.1.0"
         },
-        "schema_revision": "sha256:c2f2699c3c5db48536ca39e4bfb884ff2455d48d50e01e057d243461576dd3de",
+        "schema_revision": "sha256:1752586c3082e2c591645b5915ed456027f2e0dd4246165e800e182f2013a3fe",
         "schemas": [
           {
             "owned_by_authoring_contract": true,
@@ -7664,7 +7664,7 @@
           {
             "owned_by_authoring_contract": true,
             "provenance": "runtime_schema_registry",
-            "schema_hash": "sha256:d20acbc4f5869c0986912149c37247f67f5caa2349e2fb883ceaf9b77f871397",
+            "schema_hash": "sha256:3152aa6a3406f1e4b452b2314c62844d956a0276943de77231d239f5dc0d9cce",
             "schema_version": "2",
             "selector": "AuthoringRequestV1"
           },
@@ -13849,7 +13849,7 @@
       },
       "producer": "meta_tools.get_schema_template_action(...)",
       "selector": "schema_name=AuthoringCompileResultV1",
-      "sha256": "1c2a8ccbd3d415ee912eac7bcb12a02058ede08c84f321ffd0b9d56bbc047e62",
+      "sha256": "ab69a74eccb20948541de77e988b5b859867953ad0171a22778398be43698cdc",
       "surface_class": "SS-SCHEMA-TEMPLATES",
       "value": {
         "_success": true,
@@ -17056,10 +17056,10 @@
         "raw_xml_exposed": false,
         "read_only": true,
         "revision_binding": {
-          "capability_revision": "sha256:d45113f03269f272bf53079f765171cf3606157d277dc525e57efd84253da0cb",
-          "compiler_revision": "sha256:b89bcaf37858711dff0b01f0173f1e9ec1a16056e196cb66599a0a4fe8568357",
+          "capability_revision": "sha256:351566bbfd15d958bb9400775fdfa1557d9eec8f54a3c453b3b36514bd90d240",
+          "compiler_revision": "sha256:f17565809b8a91a5431537239134901ca7650b4587e2c4a411648dc04f3a31b8",
           "contract_version": "2",
-          "schema_revision": "sha256:c2f2699c3c5db48536ca39e4bfb884ff2455d48d50e01e057d243461576dd3de"
+          "schema_revision": "sha256:1752586c3082e2c591645b5915ed456027f2e0dd4246165e800e182f2013a3fe"
         },
         "schema_hash": "sha256:7a412ec1a6e1a8318fc3fd3f849ef331376548515411b1dc23b8274782c577d0",
         "schema_name": "AuthoringCompileResultV1",
@@ -17077,7 +17077,7 @@
       },
       "producer": "meta_tools.get_schema_template_action(...)",
       "selector": "schema_name=AuthoringPlanResultV1",
-      "sha256": "3461c6b9cea6bcd382b73a8e2565da2a7783e7c26360d74ba7f86999e8ad7ba9",
+      "sha256": "6b2292037db5f67e716dc7ecd258b43400e88bbeedff0301faa3ec6fdc7b18a4",
       "surface_class": "SS-SCHEMA-TEMPLATES",
       "value": {
         "_success": true,
@@ -20214,10 +20214,10 @@
         "raw_xml_exposed": false,
         "read_only": true,
         "revision_binding": {
-          "capability_revision": "sha256:d45113f03269f272bf53079f765171cf3606157d277dc525e57efd84253da0cb",
-          "compiler_revision": "sha256:b89bcaf37858711dff0b01f0173f1e9ec1a16056e196cb66599a0a4fe8568357",
+          "capability_revision": "sha256:351566bbfd15d958bb9400775fdfa1557d9eec8f54a3c453b3b36514bd90d240",
+          "compiler_revision": "sha256:f17565809b8a91a5431537239134901ca7650b4587e2c4a411648dc04f3a31b8",
           "contract_version": "2",
-          "schema_revision": "sha256:c2f2699c3c5db48536ca39e4bfb884ff2455d48d50e01e057d243461576dd3de"
+          "schema_revision": "sha256:1752586c3082e2c591645b5915ed456027f2e0dd4246165e800e182f2013a3fe"
         },
         "schema_hash": "sha256:7b61d8875b364d83f7915212c5e6cfa69f657977d506fc10ebeb003407093d3f",
         "schema_name": "AuthoringPlanResultV1",
@@ -20228,7 +20228,7 @@
     },
     {
       "artifact_id": "SS-SCHEMA-TEMPLATES:schema_name=AuthoringRequestV1",
-      "canonical_length": 94824,
+      "canonical_length": 94828,
       "legacy_excerpt": {
         "json_schema.$defs.IntegrationComponentSpec.properties.config.description": "Type-specific configuration payload. For type='process', config.process_kind selects a structured process-flow builder (e.g. 'database_to_api_sync' or 'wrapper_subprocess' — issue #25) and is REQUIRED for any authoring action that emits or rebuilds process XML (create / create_clone / update): such a process without process_kind is rejected at plan time with PROCESS_KIND_REQUIRED (legacy freeform JSON-to-XML process authoring has been removed). A reference-only reuse of an existing process (no XML emitted) may omit it. Use manage_component for an explicit raw process XML escape hatch.",
         "json_schema.$defs.IntegrationSpecV1.properties.processes.description": "Issue #153 M12.15 — canonical process roots authored as ProcessIR. Each entry is one ProcessAuthoringUnitV1: exactly one ProcessComponentEnvelopeV1 plus exactly one ProcessIRV1 root. These are compiled by the canonical chain and materialized by the neutral ProcessComponentMaterializer — they resolve NO legacy process_kind. 'components' remains the home of supporting components and of reference-only existing processes. 'components' and 'processes' share ONE key namespace: a key used by a component and by a process envelope is a duplicate, and all four depends_on directions (component->component, component->process, process->component, process->process) enter one topological order with one cycle check. A TUPLE, per the plan's field type: pydantic coerces list input, so the wire shape is an ordinary JSON array and no caller sends anything different — but unlike this model's legacy List siblings, mutating the collection itself is unrepresentable. Per-element immutability lives on the frozen ProcessAuthoringUnitV1 entries.",
@@ -20236,7 +20236,7 @@
       },
       "producer": "meta_tools.get_schema_template_action(...)",
       "selector": "schema_name=AuthoringRequestV1",
-      "sha256": "90894dd95ef549f8f08a22d46a8ad1b371502e5e937d0fa523c3ec44e2ece42b",
+      "sha256": "4ecfad56cc7c60fdee807c599eb160c46ba75333e8f21faf7a61b9ffc727612d",
       "surface_class": "SS-SCHEMA-TEMPLATES",
       "value": {
         "_success": true,
@@ -22298,7 +22298,7 @@
                   "$ref": "#/$defs/ProcessIRStateEffectDeclarationV1"
                 },
                 "language": {
-                  "minLength": 1,
+                  "const": "groovy2",
                   "title": "Language",
                   "type": "string"
                 },
@@ -23944,12 +23944,12 @@
         "raw_xml_exposed": false,
         "read_only": true,
         "revision_binding": {
-          "capability_revision": "sha256:d45113f03269f272bf53079f765171cf3606157d277dc525e57efd84253da0cb",
-          "compiler_revision": "sha256:b89bcaf37858711dff0b01f0173f1e9ec1a16056e196cb66599a0a4fe8568357",
+          "capability_revision": "sha256:351566bbfd15d958bb9400775fdfa1557d9eec8f54a3c453b3b36514bd90d240",
+          "compiler_revision": "sha256:f17565809b8a91a5431537239134901ca7650b4587e2c4a411648dc04f3a31b8",
           "contract_version": "2",
-          "schema_revision": "sha256:c2f2699c3c5db48536ca39e4bfb884ff2455d48d50e01e057d243461576dd3de"
+          "schema_revision": "sha256:1752586c3082e2c591645b5915ed456027f2e0dd4246165e800e182f2013a3fe"
         },
-        "schema_hash": "sha256:d20acbc4f5869c0986912149c37247f67f5caa2349e2fb883ceaf9b77f871397",
+        "schema_hash": "sha256:3152aa6a3406f1e4b452b2314c62844d956a0276943de77231d239f5dc0d9cce",
         "schema_name": "AuthoringRequestV1",
         "schema_version": "2",
         "surface": "MCP authoring contract (issue #146 M12.11)"
@@ -37426,7 +37426,7 @@
       "legacy_excerpt": {},
       "producer": "meta_tools.get_schema_template_action(...) [all axes]",
       "selector": "walked_surface_digest",
-      "sha256": "a7d58db916e49eb53655bd50e54028b83290edb19eb40b5c6763fc769a7a5b2b",
+      "sha256": "a47d66762a5db37a4a0ca32a4cd3b4899644aaa5ab6c32d4a10d5457544cf2ba",
       "surface_class": "SS-SCHEMA-TEMPLATES",
       "value": {
         "resource_type=component": "8327243ec482fa1641f49265c87694e33616f12db015b3f234dc73db9ed8057c",
@@ -37708,14 +37708,14 @@
         "resource_type=trading_partner|operation=update|standard=rosettanet": "83537ac74be6088a4607997d0e200d76ec7c6367c900aa9923e823d610dd27e1",
         "resource_type=trading_partner|operation=update|standard=tradacoms": "83537ac74be6088a4607997d0e200d76ec7c6367c900aa9923e823d610dd27e1",
         "resource_type=trading_partner|operation=update|standard=x12": "83537ac74be6088a4607997d0e200d76ec7c6367c900aa9923e823d610dd27e1",
-        "schema_name=AuthoringBuildProvenanceV1": "26431140566fc83b670339be1b676b3609861f7560fff87b4428b7c6bcd99ac7",
-        "schema_name=AuthoringCompileResultV1": "1c2a8ccbd3d415ee912eac7bcb12a02058ede08c84f321ffd0b9d56bbc047e62",
-        "schema_name=AuthoringPlanResultV1": "3461c6b9cea6bcd382b73a8e2565da2a7783e7c26360d74ba7f86999e8ad7ba9",
-        "schema_name=AuthoringRequestV1": "90894dd95ef549f8f08a22d46a8ad1b371502e5e937d0fa523c3ec44e2ece42b",
-        "schema_name=AuthoringRevisionBindingV1": "0bc2e4b518ce9f00d667d7803169b0dbf62fdd7d76cba585445af508194590e8",
+        "schema_name=AuthoringBuildProvenanceV1": "f3238239d470441a70f5e0f6d001c59e6c6e5400b5adc80cd28c67fadd1c3aad",
+        "schema_name=AuthoringCompileResultV1": "ab69a74eccb20948541de77e988b5b859867953ad0171a22778398be43698cdc",
+        "schema_name=AuthoringPlanResultV1": "6b2292037db5f67e716dc7ecd258b43400e88bbeedff0301faa3ec6fdc7b18a4",
+        "schema_name=AuthoringRequestV1": "4ecfad56cc7c60fdee807c599eb160c46ba75333e8f21faf7a61b9ffc727612d",
+        "schema_name=AuthoringRevisionBindingV1": "0ba43b359d34b922aa4dd170604a3adba1c51366bf37a9f0afbd8a41105db314",
         "schema_name=IntegrationSpecV1": "a7ca9b8e65d7e0a058e0ecc9923968e3639d39ac4672cdd70861e46a2abda377",
-        "schema_name=ProcessIRV1": "c86bb7d33234063c23f9286cd3fd1e98dc669e32825aa70c1e9b7c74434962c4",
-        "schema_name=SystemTopologySpecV1": "1435d51912264f46aef266955a14d7fc95086882bb62a7a77b9bda0788b6d9f1",
+        "schema_name=ProcessIRV1": "66cdc5761a0eb0405bfd08e22c9172d51dd88fdf95e93659a4d2d23dac556fc8",
+        "schema_name=SystemTopologySpecV1": "c32e49a404ffd119b3b245b9145cf31d711cd76253817ac3515519741b2d05ac",
         "schema_name=account_governance": "d0773b315a5b59bad4bbb0021a2468e5cb4d3a85c4dbac216a887f0194a2ecdc",
         "schema_name=api_service": "c7be12ec5b2c503bd54088bd2c7b00adfa435e3f3fc9610bae0b91117657911b",
         "schema_name=archetype:api_to_api_sync": "7e4653429bdfc56d53ecb1c07fb7f477e11c2180c3afdfad94566cab1ca716e7",
@@ -37724,7 +37724,7 @@
         "schema_name=archetype:http_listener_to_db": "b21d41d870324ce66e872957fa09126dc641354753a0d7681d14d3489f7dcf3f",
         "schema_name=archetype:http_listener_to_rest": "cdd6c9c6fb51cd8afda5c7245a2ef37548939610c1c5235cd9abe1ed9deac3d9",
         "schema_name=archetype:stub_minimal_integration": "28f1d13a8568cea1df47bb1b361708d17e490204c7425787999e80df63f4b0fc",
-        "schema_name=authoring_workflow": "1290b7a7b7ab73d594618e23a363df25d7cbed73f50128ae13bbfad0b7623bc9",
+        "schema_name=authoring_workflow": "222a78e34fc52c080f760b50b4620b323a5c6faf7f1a3ef301cd42bbe88376ee",
         "schema_name=cache_property_authoring": "ccce138186570a6e4d8091aa1a05eb471d8e82f39b6394551f8f24f3f964d083",
         "schema_name=compose_archetypes": "ec23808a15913ec8ce1d6e510ff941952be25b006a42128216b891d05f1a9d7f",
         "schema_name=design_doctrine": "b47bc0062bf52054609a4b81b8ea98dd5b363c716b079ed0413c1f89bee08a7b",
@@ -37787,7 +37787,7 @@
         "schema_name=governance_pattern:support_folder_isolation_and_privacy": "4f0b206e14ad2f2272b03dfc8c9575dbcc3d454d28894a42602a9cca546de2ed",
         "schema_name=governance_pattern:tools_utilities_folder_non_integration": "50ddcf761e63e68f305271b4f079d8a7effd9b750726a8be784c2c52993c2cbc",
         "schema_name=governance_pattern:tracked_field_naming_generic_and_unique": "42ae3917d1ddb0f23a9dd0e9083a9106a3ed6c18bc06e740a1c07014830204d1",
-        "schema_name=process_ir_authoring": "f7a286e6524006938b41b1a6f5062fe775659d4ebfa6add40d6a5440f5de7bca",
+        "schema_name=process_ir_authoring": "05baa4775ed7189fbaf867a330ba109ea145b9fe5bb45cafc8398d34c2f20f93",
         "schema_name=process_property": "43c9cf66e73fb39b6f1625d00a9a01f876005bfa94b34fb99cb14e0deebe699b",
         "schema_name=recipe:boomi.adapter.api_to_api_sync@1.0.0": "094675c617c2f43990c85ae0ca6840fb7a3f85d8e8c2f90a305b5d86e108d4b9",
         "schema_name=recipe:boomi.adapter.api_to_database_sync@1.0.0": "f8de36c566c8691ca1fc3b6a87814369d500a5ee06485a4990bbd37bb0d512da",
@@ -37801,7 +37801,7 @@
         "schema_name=recipe_registry": "177a9cf871b5b0402ce9a788fd5cf29399102a48a3545139b76603ae676f02c6",
         "schema_name=script_dataprocess": "86d6cac0e593188c5c6a253e684097dadda0a6c3c331a1d71672c827133af143",
         "schema_name=script_mapping": "165e78ea08d24f54221f6da5973cbe20c7747d1a37f9fde496a42876b594e029",
-        "schema_name=validation_report": "99d4d38d8f6115548d9e2221465cedf0a3f985dce11eeae4350669b003c68085",
+        "schema_name=validation_report": "91c365c68fe2a1fdb8e54299c13a409393f4e25151d9275b025c6ff8984f4321",
         "schema_name=workflow:build_and_verify_http_listener": "bf6ab2e405f375735cd6aaed29da0dbc6b717909dc1c184ba8dbe341f2b95800",
         "schema_name=workflow:build_integration_from_description": "72a20b29bbaf7a0ce39e06fb8514e13831968332bc5d0373d7f100bd7a943be0",
         "schema_name=workflow:compose_multi_target_integration": "6b04f2d192bcaf817a983a1aefda2f2f7b9674ce1c996737137c7ce8d6b932e0",

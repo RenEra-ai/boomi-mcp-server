@@ -1194,8 +1194,11 @@ ERROR_TAXONOMY: Dict[str, ErrorCodeSpec] = {
             retryable=False,
             summary=(
                 "A map or script has no typed effect contract, so its reads and "
-                "writes are unknown. Unknown effects never establish state; "
-                "supply a contract or write the state explicitly."
+                "writes are unknown. Unknown effects never establish state. "
+                "Supply a contract whose content a server-side authority backs — "
+                "inspection of the resolved component, or a vetted script "
+                "registry entry — or write the state explicitly; a declaration "
+                "the server cannot corroborate is inert."
             ),
             owner="#143",
         ),

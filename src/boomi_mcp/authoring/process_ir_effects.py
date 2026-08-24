@@ -333,6 +333,49 @@ def _plan_would_build_this(
     return "ref_key" not in details
 
 
+def _join_cache_reads(config: Mapping[str, Any]):
+    """The cache READS a map's ``document_cache_joins`` perform, or None if
+    the join list cannot be modelled.
+
+    Mirrors the repository's existing authority for this exact fact,
+    ``cache_property_lineage._add_map_join_reads``, which records one cache read
+    per join and marks a join carrying ``external_writer`` as externally
+    satisfied. Deriving map effects without asking the joins made this module a
+    SECOND, incomplete model of a fact that already had an owner — the defect
+    class this issue exists to remove, reproduced inside the fix for it.
+
+    Two joins are deliberately not recorded as reads, for the same reason a
+    DEFAULTED property get records none: a contract read carries no
+    "externally satisfied" flag, and lineage treats every contracted read as
+    strict, so recording either would turn a valid flow into a false
+    missing-writer error.
+
+    * ``external_writer`` on the join — the cache is populated outside this
+      process. The lineage downgrade reads the flag off the NODE, and a map
+      semantic has no such attribute, so the warning branch is unreachable for a
+      map and the read would always be fatal.
+    * a LITERAL cache id — an existing account cache that nothing in this process
+      writes, and no ``cache_ref`` in the IR spells it that way.
+    """
+    joins = config.get("document_cache_joins")
+    if joins is None:
+        return ()
+    if not isinstance(joins, (list, tuple)):
+        return None
+    reads = []
+    for join in joins:
+        if not isinstance(join, Mapping):
+            return None  # partial knowledge is never promoted to a complete effect
+        cache_id = join.get("document_cache_id")
+        if not isinstance(cache_id, str) or not cache_id.strip():
+            return None
+        cache_id = cache_id.strip()
+        if join.get("external_writer") or not cache_id.startswith("$ref:"):
+            continue
+        reads.append(("cache", cache_id))
+    return tuple(reads)
+
+
 def derive_map_effect(
     config: Mapping[str, Any],
     *,
@@ -398,18 +441,26 @@ def derive_map_effect(
         # No reject-table re-check here: `_plan_would_build_this` already ran
         # every one of them through the plan's own authority. Re-asking would be
         # a second copy of a question already answered.
-        return ((), (), True)
+        #
+        # A direct map may still carry document-cache joins, and those are READS.
+        join_reads = _join_cache_reads(config)
+        if join_reads is None:
+            return None
+        return (tuple(sorted(set(join_reads))), (), True)
     if map_type not in function_types:
         # Unrecognised, absent, or a form whose content this cannot establish
         # (a script map). Opaque.
         return None
+    join_reads = _join_cache_reads(config)
+    if join_reads is None:
+        return None
     mappings = config.get("function_mappings")
     if mappings is None:
-        return ((), (), True)
+        return (tuple(sorted(set(join_reads))), (), True)
     if not isinstance(mappings, (list, tuple)):
         return None
 
-    reads: List[Tuple[str, str]] = []
+    reads: List[Tuple[str, str]] = list(join_reads)
     writes: List[Tuple[str, str]] = []
     replay_safe = True
     for mapping in mappings:
@@ -455,17 +506,38 @@ def derive_map_effect(
 
 
 def derive_subprocess_effect(child_ir: Any) -> Optional[Tuple[tuple, tuple, bool]]:
-    """``(may_reads, must_writes, replay_safe)`` derived from a child's own IR.
+    """``(required_reads, must_writes, replay_safe)`` derived from a child's own IR.
 
     Reuses the lineage analysis's ``_reads_of``/``_writes_of`` against the child's
     lowered CFG, so this is not a second model of what counts as state.
 
-    ``must_writes`` is deliberately a strict UNDER-approximation: only writes on
-    the child's ROOT SPINE count. A write inside a Branch leg or a Decision arm
-    happens on some paths and not others, and a summary that promised it would
-    let a caller's later read be considered satisfied on a path where the write
-    never ran. Root-spine steps precede any control node (a control terminalises
-    its path), so they run on every normal exit.
+    Three properties, each of which was wrong in the first version and each of
+    which cost something specific:
+
+    **Reads are those the child REQUIRES of its caller.** A read satisfied by an
+    earlier write inside the child is the child's own business and must not be
+    reported: reporting it made a valid caller payload invalid purely by declaring
+    the child's truthful summary, so the only way to keep a build green was to
+    omit the declaration — which costs exactly the thing the channel exists for.
+    Only reads on the ROOT SPINE are considered, and only until the spine writes
+    the same key; a read inside a control body is not necessarily reached, and
+    over-reporting it is the same false demand.
+
+    **``must_writes`` stays a strict UNDER-approximation**: only root-spine writes
+    count. A write inside ONE Branch leg or Decision arm happens on some paths and
+    not others, and promising it would let a caller's later read be considered
+    satisfied on a path where it never ran. A write made in EVERY arm is genuinely
+    guaranteed and is deliberately still not claimed — proving it needs the
+    path-sensitive meet the plan specified, and claiming it without that proof is
+    the unsound direction. The cost is a missed opportunity, not a wrong answer,
+    and it is recorded rather than hidden.
+
+    **Opacity is INERT, not exact-empty.** A child containing anything this cannot
+    model — a nested call, a script, a map, a further subprocess — has no derivable
+    summary at all. Returning an empty-but-exact summary for such a child was an
+    unsound ACCEPTANCE: it asserted "this child touches nothing" about a child
+    whose contents were never inspected, and a caller declaration matching that
+    fabrication was then trusted.
     """
     from ..compiler.process_ir.semantic_validation import lineage as _lineage
     from ..compiler.process_ir.lowering import lower_process_ir_to_cfg
@@ -475,24 +547,40 @@ def derive_subprocess_effect(child_ir: Any) -> Optional[Tuple[tuple, tuple, bool
     except Exception:  # pragma: no cover - an unlowerable child is simply opaque
         return None
 
-    may_reads: List[Tuple[str, str]] = []
+    #: Kinds whose effect this cannot establish by inspection. Their presence
+    #: anywhere in the child makes the whole summary inert rather than empty.
+    opaque_kinds = {"connector_call", "process_call", "data_process", "map"}
+
+    required_reads: List[Tuple[str, str]] = []
     must_writes: List[Tuple[str, str]] = []
+    written_on_spine: set = set()
     replay_safe = True
+
     for node in cfg.nodes:
         semantic = node.semantic
-        for key, _has_default, _strict in _lineage._reads_of(semantic):
-            may_reads.append(key)
-        is_root_spine = _ROOT_STEP.fullmatch(node.source_path) is not None
-        for key in _lineage._writes_of(semantic):
-            if is_root_spine:
-                must_writes.append(key)
         kind = semantic.semantic_kind
-        if kind in ("connector_call", "process_call", "data_process", "map"):
-            # A call, a nested call, an arbitrary script, or a map whose own
-            # effect is not being derived here: none is provably replay safe.
+        if kind in opaque_kinds:
+            return None
+        is_root_spine = _ROOT_STEP.fullmatch(node.source_path) is not None
+        if is_root_spine:
+            for key, _has_default, _strict in _lineage._reads_of(semantic):
+                if key not in written_on_spine:
+                    required_reads.append(key)
+            for key in _lineage._writes_of(semantic):
+                must_writes.append(key)
+                written_on_spine.add(key)
+                # A cache write is not replayable: re-running the child would
+                # write the cache twice. `_writes_of` reports cache_put under the
+                # cache scope, so the scope is the test rather than the node kind.
+                if key[0] == "cache":
+                    replay_safe = False
+        # A persisted process property survives the execution, so replaying the
+        # child does not start from the same state.
+        if kind == "set_property" and getattr(semantic, "persist", False):
             replay_safe = False
+
     return (
-        tuple(sorted(set(may_reads))),
+        tuple(sorted(set(required_reads))),
         tuple(sorted(set(must_writes))),
         replay_safe,
     )
@@ -651,21 +739,41 @@ def resolve_process_ir_effect_declarations(
     writer_rows: List[Tuple[List[str], Any]] = []
     for index, item in enumerate(declarations.external_writers):
         pointer = "/effect_declarations/external_writers/{0}".format(index)
+        # IDENTITY is "a cache_get in this root names this cache". The authored
+        # `external_writer` flag governs the EFFECT — whether the missing-writer
+        # error may downgrade — not whether the declaration is about a real thing.
+        #
+        # Gating identity on the flag rejected an unflagged-but-matching
+        # declaration as unbound, which is a different answer from the one the
+        # design gives: such a declaration is VALID and simply establishes
+        # nothing. Turning "this proves nothing" into "your payload is invalid"
+        # is the same overreach as trusting an unverified claim, pointed the
+        # other way.
         bound = [
             key for key, found in occurrences.items()
-            if item.cache_ref in found["external_writer_ref"]
+            if item.cache_ref in found["cache_get_ref"]
         ]
         if not bound:
-            # Either no cache_get names this cache, or the one that does did not
-            # author `external_writer`. The contract is meaningless without the
-            # authored flag, so it does not bind.
+            # No cache_get in any root names this cache, so there is nothing for
+            # the declaration to be about.
             findings.append(EffectAuthorityFindingV1(_INVALID, pointer, "unbound"))
             continue
         symbol = _symbol(symbols, item.cache_ref)
         if symbol is None or getattr(symbol, "component_type", None) != "documentcache":
             findings.append(EffectAuthorityFindingV1(_INVALID, pointer, "unresolved-or-wrong-type"))
             continue
-        writer_rows.append((bound, ExternalWriterContractV1(cache_ref=item.cache_ref)))
+        # Only the roots whose cache_get ALSO authors the flag receive the
+        # contract: without the flag the declaration is inert there, and a
+        # contract nothing can act on would only trigger the compiler's own
+        # unbound-contract diagnostic.
+        flagged = [
+            key for key in bound
+            if item.cache_ref in occurrences[key]["external_writer_ref"]
+        ]
+        if not flagged:
+            inert.append(pointer)
+            continue
+        writer_rows.append((flagged, ExternalWriterContractV1(cache_ref=item.cache_ref)))
 
     if findings:
         # ALL-OR-NOTHING on error. A partially trusted context is a context whose
@@ -695,5 +803,5 @@ def effect_authority_rows() -> Tuple[Tuple[str, str], ...]:
         ("script_effects", "server-registry:vetted-scripts"),
         ("subprocess_effects", "server-inspection:child-process-ir"),
         ("external_writers", "caller-assertion:no-state-established"),
-        ("omitted-or-inert", "none:every-strict-finding-stands"),
+        ("omitted_or_inert", "none:every-strict-finding-stands"),
     )

@@ -127,8 +127,11 @@ _REMEDIATION: Dict[str, str] = {
     ),
     PROCESS_IR_SEMANTIC_LINEAGE_EFFECT_UNKNOWN: (
         "Declare a typed effect contract for this map or script, or set the "
-        "state explicitly with a property step. An undeclared effect never "
-        "establishes state."
+        "state explicitly with a property step. A declaration alone is not "
+        "enough: its CONTENT must be backed by a server-side authority — "
+        "inspection of the resolved map or child process, or a vetted script "
+        "registry entry — and a declaration with no such backing is inert. An "
+        "undeclared or inert effect never establishes state."
     ),
     PROCESS_IR_SEMANTIC_LINEAGE_EXTERNAL_WRITER_ASSUMED: (
         "No change required. Confirm the external writer really does run before "
@@ -144,7 +147,9 @@ _REMEDIATION: Dict[str, str] = {
     ),
     PROCESS_IR_SEMANTIC_RETRY_EFFECT_UNSAFE: (
         "Set the retry count to zero, move the effect outside the protected "
-        "scope, or declare it replay-safe with a typed contract."
+        "scope, or declare it replay-safe with a typed contract whose content a "
+        "server-side authority backs — a declaration the server cannot "
+        "corroborate is inert and leaves this finding standing."
     ),
     LEGACY_ADAPTER_EXEMPTION_OPAQUE_STATE_WRITER: (
         "No change required on the legacy surface. Declaring typed effects "

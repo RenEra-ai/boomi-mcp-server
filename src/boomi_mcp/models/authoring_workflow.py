@@ -347,6 +347,21 @@ class ProcessIRMapEffectDeclarationV1(_AuthoringModel):
     effect: ProcessIRStateEffectDeclarationV1
 
 
+#: The script languages the compiler's own data-process step admits. Derived from
+#: that model rather than restated (#154 §6): a public declaration that accepted
+#: any non-empty string could name a language the authored step cannot carry, and
+#: the mismatch would only surface as a failed digest lookup much later.
+def _script_languages() -> Tuple[str, ...]:
+    import typing
+
+    from .process_ir import CustomScriptingOpV1
+
+    return tuple(typing.get_args(CustomScriptingOpV1.model_fields["language"].annotation))
+
+
+ProcessIRScriptLanguageV1 = Literal["groovy2"]
+
+
 class ProcessIRScriptEffectDeclarationV1(_AuthoringModel):
     """A claim about what a script does to process state.
 
@@ -360,7 +375,7 @@ class ProcessIRScriptEffectDeclarationV1(_AuthoringModel):
     server knows WHICH script it is and still has no authority for what it does.
     """
 
-    language: NonEmptyString
+    language: ProcessIRScriptLanguageV1
     source_sha256: DigestString
     effect: ProcessIRStateEffectDeclarationV1
 
@@ -408,11 +423,19 @@ class ProcessIREffectDeclarationsV1(_AuthoringModel):
 
     @model_validator(mode="after")
     def _binding_keys_are_unique(self) -> "ProcessIREffectDeclarationsV1":
-        """Two declarations bound to the same thing make the result order-dependent.
+        """Reject duplicate bindings, and CANONICALISE the order.
 
-        The internal contract model rejects this for the same reason; rejecting it
-        here as well means a caller learns about it at the boundary they wrote,
-        with a pointer into their own payload.
+        Two declarations bound to the same thing make the result order-dependent —
+        the internal contract model rejects this for the same reason, and
+        rejecting it here means a caller learns about it at the boundary they
+        wrote, with a pointer into their own payload.
+
+        Ordering is the same problem one step out. These tuples enter the
+        normalised payload the semantic hash covers, so two requests declaring the
+        SAME effects in a different order produced different plan and compile
+        hashes and forced a re-plan that established nothing. Order carries no
+        meaning here — every lookup is by binding key — so it is normalised rather
+        than preserved, exactly as the per-effect read/write sets already are.
         """
         for field, key in (
             ("map_effects", lambda item: item.map_ref),
@@ -420,11 +443,15 @@ class ProcessIREffectDeclarationsV1(_AuthoringModel):
             ("subprocess_effects", lambda item: item.process_ref),
             ("external_writers", lambda item: item.cache_ref),
         ):
-            keys = [key(item) for item in getattr(self, field)]
+            items = list(getattr(self, field))
+            keys = [key(item) for item in items]
             if len(set(keys)) != len(keys):
                 raise ValueError(
                     "duplicate binding key in {0}".format(field)
                 )
+            ordered = tuple(item for _k, item in sorted(zip(keys, items), key=lambda pair: pair[0]))
+            if ordered != tuple(items):
+                object.__setattr__(self, field, ordered)
         return self
 
     def is_empty(self) -> bool:

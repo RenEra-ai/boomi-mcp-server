@@ -1116,19 +1116,30 @@ class ExceptionNodeV1(_ProcessIRBase):
 # root ``SequenceNodeV1`` admits between its endpoints, and widening it would
 # change legacy sequences. The richer control-body vocabularies below are
 # separate unions (#141, M12.6).
+#: The linear member models, named ONCE. Every alias below is built from this
+#: tuple rather than repeating it (#154).
+#:
+#: Spelling the members out twice — once for the root vocabulary and once for the
+#: control-body one — is the duplicate-authority defect this issue exists to
+#: remove, and the first version of the fix reproduced it: the two kind SETS were
+#: equal, so every derived row and every pin agreed, and a linear kind added to
+#: one list would simply not have reached the other. Composition removes the
+#: possibility rather than testing for it.
+_LINEAR_MEMBERS = (
+    FlowControlNodeV1,
+    MessageNodeV1,
+    MapRefNodeV1,
+    DataProcessNodeV1,
+    CachePutNodeV1,
+    DocumentCacheRetrieveNodeV1,
+    CacheGetNodeV1,
+    CacheRemoveNodeV1,
+    SetDdpNodeV1,
+    SetDppNodeV1,
+)
+
 LinearNodeV1 = Annotated[
-    Union[
-        FlowControlNodeV1,
-        MessageNodeV1,
-        MapRefNodeV1,
-        DataProcessNodeV1,
-        CachePutNodeV1,
-        DocumentCacheRetrieveNodeV1,
-        CacheGetNodeV1,
-        CacheRemoveNodeV1,
-        SetDdpNodeV1,
-        SetDppNodeV1,
-    ],
+    Union[_LINEAR_MEMBERS],
     Field(discriminator="kind"),
 ]
 
@@ -1181,20 +1192,11 @@ LINEAR_BODY_KINDS: Tuple[str, ...] = _kinds_of(LinearNodeV1)
 # Nested control is a TERMINAL, never a step: a step is by definition followed by
 # something on the same path, and a control node terminalizes its path. A
 # ``process_call`` is terminal for the same structural reason.
+#: COMPOSED from the linear members plus ``connector_call`` — never respelled.
+#: A linear kind added to ``_LINEAR_MEMBERS`` reaches every control body by
+#: construction.
 ControlBodyStepV1 = Annotated[
-    Union[
-        FlowControlNodeV1,
-        MessageNodeV1,
-        MapRefNodeV1,
-        DataProcessNodeV1,
-        CachePutNodeV1,
-        DocumentCacheRetrieveNodeV1,
-        CacheGetNodeV1,
-        CacheRemoveNodeV1,
-        SetDdpNodeV1,
-        SetDppNodeV1,
-        ConnectorCallNodeV1,
-    ],
+    Union[_LINEAR_MEMBERS + (ConnectorCallNodeV1,)],
     Field(discriminator="kind"),
 ]
 

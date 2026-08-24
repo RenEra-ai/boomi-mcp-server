@@ -1368,15 +1368,34 @@ def test_every_semantic_rule_names_the_authority_it_states_a_fact_about():
         set(_SEMANTIC_RULE_SOURCES) ^ declared
     )
 
+    # Scoped to the HAND-WRITTEN rules. #154 added generated effect-authority
+    # entries which are also `semantic_rule` type but carry their own source,
+    # derived from the resolver's authority table rather than from this map —
+    # requiring them here would put the generated rows back into a hand-kept
+    # list, which is the drift this whole entry family was moved away from.
     served = {
         entry.contract_entry_id: tuple(sorted(s.source_id for s in entry.sources))
         for entry in entries()
         if entry.entry_type == "semantic_rule"
+        and entry.contract_entry_id.startswith("semantic_rule.")
     }
     assert served == {
         rule_id: tuple(sorted(source_ids))
         for rule_id, source_ids in _SEMANTIC_RULE_SOURCES.items()
     }
+
+    # The generated family is covered in BOTH directions by its own rule: one
+    # served entry per row of the resolver's table, and nothing else.
+    from boomi_mcp.authoring.process_ir_effects import effect_authority_rows
+
+    generated = {
+        entry.contract_entry_id for entry in entries()
+        if entry.contract_entry_id.startswith("effect_authority.")
+    }
+    assert generated == {
+        "effect_authority.{0}".format(family) for family, _authority in effect_authority_rows()
+    }
+    assert generated, "no generated authority rows — the check would be vacuous"
 
     # ...and they are not all the same source again, which is the state this
     # finding describes.

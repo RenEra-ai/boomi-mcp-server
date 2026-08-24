@@ -313,7 +313,9 @@ _NODE_FACTS: Mapping[str, Mapping[str, Any]] = {
             "and the operation reference."
         ),
         _ORDERING: (
-            "On the legacy linear path a target is immediately followed by a stop.",
+            "On the legacy linear path a target is immediately followed by its "
+            "terminal — a stop, or a return_documents when the flow hands its "
+            "documents back to a caller.",
             "A target is a legal terminal of a Branch path and of a Decision true arm; "
             "it is not admitted on a Decision false arm.",
             "It consumes inbound documents. Whether it RETURNS any is decided by "
@@ -460,9 +462,12 @@ _NODE_FACTS: Mapping[str, Mapping[str, Any]] = {
         "category": "state",
         "title": "Cache get",
         "summary": (
-            "All-document cache read. external_writer declares that the cache is "
-            "populated outside this process, which is what makes a read with no "
-            "in-process writer legitimate."
+            "All-document cache read. external_writer ASSERTS that the cache is "
+            "populated outside this process; on its own it establishes nothing, "
+            "because nothing in the artifact can confirm an outside writer. "
+            "Combined with a verified external-writer declaration it downgrades "
+            "the missing-writer error to a named warning, so the assumption stays "
+            "visible in the record rather than passing silently."
         ),
         _ORDERING: (
             "A cache read with no preceding write on the same path is reported "
@@ -1544,10 +1549,85 @@ _SEMANTIC_RULE_SOURCES = {
 }
 
 
+#: Served wording for each effect-authority row, keyed by the authority token the
+#: resolver publishes. The TOKENS come from `effect_authority_rows()`; only the
+#: prose lives here, so a family added there without wording fails loudly rather
+#: than going unserved.
+_EFFECT_AUTHORITY_PROSE = {
+    "server-inspection:map-function-registry":
+        "Derived by inspecting the resolved map: its function mappings through the "
+        "map-function registry, and its document-cache joins as cache reads. A map "
+        "the plan would not build, or one containing any function whose effect is "
+        "unannotated, is opaque — partial knowledge is never reported as complete.",
+    "server-registry:vetted-scripts":
+        "Admitted only when the recomputed (language, digest) matches a server-owned "
+        "vetted contract. A script whose digest matches no entry is INERT: the server "
+        "knows which script it is and still has no authority for what it does.",
+    "server-inspection:child-process-ir":
+        "Derived by inspecting the child's authored definition. Only writes on the "
+        "child's root sequence are established, and a read the child satisfies itself "
+        "is not required of the caller. A child containing anything uninspectable — a "
+        "call, a script, a map, a further subprocess — is INERT rather than empty.",
+    "caller-assertion:no-state-established":
+        "The one declaration with no server-side content authority, because an outside "
+        "writer is not present in the artifact. It never establishes a cache write; "
+        "combined with an authored external_writer flag it downgrades the "
+        "missing-writer error to a named warning. Without that flag the declaration is "
+        "valid and simply inert.",
+    "none:every-strict-finding-stands":
+        "A declaration that is omitted, or that passes identity with no server-side "
+        "authority behind its content, is INERT: it establishes nothing and every "
+        "strict finding still fires. Inert is not an error — an unregistered script is "
+        "a legal thing to author, it just proves nothing.",
+}
+
+
+def _effect_authority_entries() -> List[ProcessIRAuthoringContractEntryV1]:
+    """One served rule per declaration family, GENERATED from the resolver's table.
+
+    The families were hand-listed here, which made the served trust boundary a
+    second copy of a fact the resolver owns — and left the resolver's own
+    `effect_authority_rows()` with no consumer at all despite describing itself as
+    served. A family added there now reaches the contract by construction, and one
+    without wording raises instead of going unserved.
+    """
+    from .process_ir_effects import effect_authority_rows
+
+    entries = []
+    for family, authority in effect_authority_rows():
+        prose = _EFFECT_AUTHORITY_PROSE.get(authority)
+        if prose is None:
+            raise KeyError(
+                "no served wording for effect authority {0!r} (family {1!r})".format(
+                    authority, family
+                )
+            )
+        entries.append(
+            ProcessIRAuthoringContractEntryV1(
+                contract_entry_id="effect_authority.{0}".format(family),
+                entry_type="semantic_rule",
+                category="state",
+                subject=family,
+                title="Effect authority for {0}".format(family.replace("_", " ")),
+                summary=prose,
+                node_kinds=(),
+                workflow_stages=("author", "plan", "repair"),
+                related_entry_ids=("semantic_rule.effect.declaration_boundary",),
+                ordering_facts=("Authority: {0}.".format(authority),),
+                sources=(
+                    _source(
+                        SOURCE_MODELS, "generated", "runtime_model", "compiler", family
+                    ),
+                ),
+            )
+        )
+    return entries
+
+
 def _semantic_rule_entries(
     sources: ProjectionSourcesV1,
 ) -> List[ProcessIRAuthoringContractEntryV1]:
-    return [
+    return _effect_authority_entries() + [
         ProcessIRAuthoringContractEntryV1(
             contract_entry_id=entry_id,
             entry_type="semantic_rule",
