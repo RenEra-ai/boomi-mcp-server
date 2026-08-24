@@ -2867,17 +2867,15 @@ def test_the_exit_role_partition_is_total():
     from boomi_mcp.compiler.process_ir import contracts as C
     from boomi_mcp.compiler.process_ir.semantic_validation.lineage import (
         _ABNORMAL_EXIT_ROLES,
-        _LEG_LOCAL_EXIT_ROLES,
     )
 
     roles = set(typing.get_args(C.CfgExitRoleV1))
     assert roles, "no exit roles discovered — the probe itself is vacuous"
     assert _ABNORMAL_EXIT_ROLES <= roles, _ABNORMAL_EXIT_ROLES - roles
-    assert _LEG_LOCAL_EXIT_ROLES <= roles, _LEG_LOCAL_EXIT_ROLES - roles
-    assert not (_ABNORMAL_EXIT_ROLES & _LEG_LOCAL_EXIT_ROLES)
-    # the unlisted remainder is what counts as a normal exit everywhere
-    assert roles - _ABNORMAL_EXIT_ROLES - _LEG_LOCAL_EXIT_ROLES == {
-        "stop", "return_documents"}, roles
+    # everything else COMPLETES; which completions a Branch may meet together
+    # is decided per compartment at the Branch, not by suppressing path ends.
+    assert roles - _ABNORMAL_EXIT_ROLES == {
+        "stop", "return_documents", "routed_target", "cache_stage"}, roles
 
 
 def _catch_terminal_child(catch_terminal_is_cache_put, catch_writes_k):
@@ -2951,9 +2949,15 @@ def test_the_exit_rule_holds_on_every_shape_at_once():
     3. r16 made routed targets leg-local, which left a Branch whose legs ALL
        route with no completion point at all;
     4. r17 records the Branch's own completion, which no leaf can record;
-    5. r18 makes that synthetic completion conditional, because it was built
-       from leg CONTINUATIONS — and a continuation is a meet that folds an
-       exception arm back into a set built to exclude it.
+    5. r18 made that synthetic completion conditional, because it was built
+       from leg CONTINUATIONS — a meet that folds an exception arm back in;
+    6. r19 replaced all of it. The root was never the shapes: the two state
+       COMPARTMENTS aggregate differently at a Branch and every earlier version
+       treated them alike. Execution (DPP, cache) accumulates because every leg
+       runs; document (DDP) does not, because each leg re-copies the documents.
+       Nothing is suppressed and nothing synthesised now — each leg contributes
+       one completion carrying its own document copies and the execution state
+       all legs together guarantee.
 
     They were never asserted together, which is exactly why each fix could
     trade one shape for another without anything failing.
@@ -3010,7 +3014,27 @@ def test_the_exit_rule_holds_on_every_shape_at_once():
         {"steps": [], "terminal": throwing}, {"steps": [], "terminal": target}]}])
     # 6. ...and the same Decision at the ROOT, with no Branch around it
     assert ("dpp", "P") in writes([throwing])
-    # 7. NEGATIVE CONTROL: nothing writes it, so nothing promises it. Without
+    # 7. DOCUMENT scope does NOT accumulate across legs: each leg re-copies the
+    #    pre-Branch documents, so a DDP written in one leg is absent from the
+    #    copies another leg routed out, and must not be promised (r19).
+    write_d = {"kind": "set_ddp", "name": "D",
+               "source_values": [{"value_type": "static", "value": "v"}]}
+    ddp_mixed = {"kind": "branch", "label": "b", "legs": [
+        {"steps": [], "terminal": target},
+        {"steps": [write_d], "terminal": {"kind": "stop"}}]}
+    assert ("ddp", "D") not in writes([ddp_mixed])
+    #    ...and when EVERY leg writes it, every emitted copy has it, so it IS
+    #    promised. Without this pair the rule passes for a derivation that
+    #    simply never promises a document write.
+    ddp_all = {"kind": "branch", "label": "b", "legs": [
+        {"steps": [write_d], "terminal": {"kind": "stop"}},
+        {"steps": [write_d], "terminal": {"kind": "stop"}}]}
+    assert ("ddp", "D") in writes([ddp_all])
+    # ...while the SAME shape writing an execution-scoped key DOES promise it,
+    # because every leg runs. This pair is the whole rule.
+    assert ("dpp", "P") in writes([mixed])
+
+    # 8. NEGATIVE CONTROL: nothing writes it, so nothing promises it. Without
     #    this every assertion above passes for a derivation that claims
     #    everything.
     assert ("dpp", "P") not in writes([all_routed])

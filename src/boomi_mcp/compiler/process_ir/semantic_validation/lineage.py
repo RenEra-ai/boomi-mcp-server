@@ -429,12 +429,6 @@ class LineageWalkV1(NamedTuple):
 #: `test_the_exit_role_partition_is_total` pins this against `CfgExitRoleV1`.
 _ABNORMAL_EXIT_ROLES = frozenset({"exception", "process_call"})
 
-#: Roles that end a path WITHOUT ending the process when they sit inside a
-#: Branch leg. Legs run SEQUENTIALLY, so a leg that routes to a target or stages
-#: a cache is followed by the next leg; treating its state as a process exit
-#: meets away everything a later leg guarantees. A `stop` or `return_documents`
-#: in a leg genuinely does end the process and still counts.
-_LEG_LOCAL_EXIT_ROLES = frozenset({"routed_target", "cache_stage"})
 
 
 def _walk_lineage(
@@ -657,12 +651,11 @@ def _walk_lineage(
         # --- successors -----------------------------------------------------
         edges = prepared.successors(node_id)
         if not edges:
-            # `leg` is non-None exactly inside a Branch leg — a Decision arm
-            # inherits its enclosing leg — which is the distinction the lattice
-            # already tracks between exclusive alternatives and sequential legs.
+            # EVERY path end that is not abnormal is a completion. Which ones
+            # a Branch may meet together is decided at the Branch, per
+            # COMPARTMENT — not here, by suppressing some of them.
             role = node.exit_role
-            leg_local = leg is not None and role in _LEG_LOCAL_EXIT_ROLES
-            if role is not None and role not in _ABNORMAL_EXIT_ROLES and not leg_local:
+            if role is not None and role not in _ABNORMAL_EXIT_ROLES:
                 normal_exits.append(state)
             return state
 
@@ -673,41 +666,39 @@ def _walk_lineage(
             entry = state.entering_branch_leg()
             carried = entry
             recorded_before = len(normal_exits)
+            # Per leg: the state its own completions agree on. Collected here
+            # rather than read off `carried`, because `carried` is built from
+            # CONTINUATIONS and a continuation is a meet — a leg ending in a
+            # Decision with one throwing arm hands back a state missing whatever
+            # only the normal arm wrote.
+            leg_documents = []
+            guaranteed_execution = entry.execution
             for edge in edges:
+                first = len(normal_exits)
                 leg_end = _visit(
                     edge.target_node_id,
                     _State(entry.document, carried.execution),
                     depth + 1,
                     (node.node_id, edge.leg_ordinal or edge.local_ordinal),
                 )
+                completions = normal_exits[first:]
+                if completions:
+                    leg_document = completions[0].document
+                    leg_execution = completions[0].execution
+                    for other in completions[1:]:
+                        leg_document = leg_document & other.document
+                        leg_execution = leg_execution & other.execution
+                    leg_documents.append(leg_document)
+                    # every leg RUNS, so what a leg guarantees holds afterwards
+                    guaranteed_execution = guaranteed_execution | leg_execution
                 carried = _State(entry.document, carried.execution | leg_end.execution)
-            # The BRANCH's own completion, recorded here because no leaf can
-            # record it. Legs run sequentially, so the state after the last leg
-            # is what holds when the branch finishes — individual leg ends are
-            # not alternatives, which is why a leg ending on a routed target or
-            # a staged cache is deliberately not a process exit. In the ordinary
-            # fan-out where EVERY leg routes to a target, that left no exit at
-            # all and the guarantee set came back empty even for a write made
-            # before the branch.
-            #
-            # Only when nothing follows the branch — otherwise the successor
-            # carries on and its own path end is the completion point — AND only
-            # when no path inside the branch completed on its own.
-            #
-            # That second condition is what keeps abnormal paths out. `carried`
-            # is built from leg CONTINUATIONS, and a continuation is a MEET: a
-            # leg ending in a Decision whose one arm stops and whose other
-            # throws hands back the meet of both, which lacks whatever only the
-            # normal arm wrote. Appending that unconditionally re-folded the
-            # exception path into a set built to exclude it, dropping a write
-            # the sole normal exit does make. When a leg completes normally its
-            # own terminal already recorded the right state; the synthetic
-            # completion exists only for the fan-out where none of them can.
-            if (
-                len(normal_exits) == recorded_before
-                and not any(edge.kind != "branch_leg" for edge in edges)
-            ):
-                normal_exits.append(carried)
+            # ONE completion per leg that can finish: its own document copies,
+            # and the execution state every leg together guarantees. A leg with
+            # no normal end contributes none, so an all-throwing branch promises
+            # nothing rather than promising the meet of abnormal paths.
+            del normal_exits[recorded_before:]
+            for leg_document in leg_documents:
+                normal_exits.append(_State(leg_document, guaranteed_execution))
             return carried
 
         if semantic.semantic_kind == "decision":
