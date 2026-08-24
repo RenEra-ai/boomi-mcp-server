@@ -2950,7 +2950,10 @@ def test_the_exit_rule_holds_on_every_shape_at_once():
        broke sequential Branch legs;
     3. r16 made routed targets leg-local, which left a Branch whose legs ALL
        route with no completion point at all;
-    4. r17 records the Branch's own completion, which no leaf can record.
+    4. r17 records the Branch's own completion, which no leaf can record;
+    5. r18 makes that synthetic completion conditional, because it was built
+       from leg CONTINUATIONS — and a continuation is a meet that folds an
+       exception arm back into a set built to exclude it.
 
     They were never asserted together, which is exactly why each fix could
     trade one shape for another without anything failing.
@@ -2995,7 +2998,19 @@ def test_the_exit_rule_holds_on_every_shape_at_once():
     assert ("dpp", "P") not in writes([decision([])])
     # 4. ...and two writing arms still do
     assert ("dpp", "P") in writes([decision([write_p])])
-    # 5. NEGATIVE CONTROL: nothing writes it, so nothing promises it. Without
+    # 5. a leg ending in a Decision whose only NORMAL arm writes it keeps the
+    #    guarantee — the abnormal arm must not fold back in (r18)
+    throwing = {"kind": "decision", "label": "d", "comparison": "equals",
+                "left": {"value_type": "static", "static_value": "a"},
+                "right": {"value_type": "static", "static_value": "b"},
+                "true_arm": {"steps": [write_p], "terminal": {"kind": "stop"}},
+                "false_arm": {"steps": [], "terminal": {
+                    "kind": "exception", "message_template": "boom {1}"}}}
+    assert ("dpp", "P") in writes([{"kind": "branch", "label": "b", "legs": [
+        {"steps": [], "terminal": throwing}, {"steps": [], "terminal": target}]}])
+    # 6. ...and the same Decision at the ROOT, with no Branch around it
+    assert ("dpp", "P") in writes([throwing])
+    # 7. NEGATIVE CONTROL: nothing writes it, so nothing promises it. Without
     #    this every assertion above passes for a derivation that claims
     #    everything.
     assert ("dpp", "P") not in writes([all_routed])

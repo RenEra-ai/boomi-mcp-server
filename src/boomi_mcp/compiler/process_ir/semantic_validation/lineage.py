@@ -672,6 +672,7 @@ def _walk_lineage(
             # not, because each leg re-copies the pre-Branch documents.
             entry = state.entering_branch_leg()
             carried = entry
+            recorded_before = len(normal_exits)
             for edge in edges:
                 leg_end = _visit(
                     edge.target_node_id,
@@ -689,9 +690,23 @@ def _walk_lineage(
             # all and the guarantee set came back empty even for a write made
             # before the branch.
             #
-            # Only when nothing follows the branch: otherwise the successor
-            # carries on and its own path end is the completion point.
-            if not any(edge.kind != "branch_leg" for edge in edges):
+            # Only when nothing follows the branch — otherwise the successor
+            # carries on and its own path end is the completion point — AND only
+            # when no path inside the branch completed on its own.
+            #
+            # That second condition is what keeps abnormal paths out. `carried`
+            # is built from leg CONTINUATIONS, and a continuation is a MEET: a
+            # leg ending in a Decision whose one arm stops and whose other
+            # throws hands back the meet of both, which lacks whatever only the
+            # normal arm wrote. Appending that unconditionally re-folded the
+            # exception path into a set built to exclude it, dropping a write
+            # the sole normal exit does make. When a leg completes normally its
+            # own terminal already recorded the right state; the synthetic
+            # completion exists only for the fan-out where none of them can.
+            if (
+                len(normal_exits) == recorded_before
+                and not any(edge.kind != "branch_leg" for edge in edges)
+            ):
                 normal_exits.append(carried)
             return carried
 
