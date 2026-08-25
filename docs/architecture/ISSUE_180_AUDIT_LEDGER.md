@@ -72,6 +72,8 @@ tier + anchor, affected SHA/delta, exactly one disposition.
 | CDX-180-r5-02 | "[P2] Keep cdx-review.21oBMN in L4 throughout the ledger" — the chronological row still called it a Stage-2 evaluation and tied it to the superseded checkpoint, giving contradictory loop counts depending on which table is read. | Terminal correction loop, `cdx-review.gHQ0c0` | P2 | (the audit record itself) | DC-180-C | Standard — anchor: source label P2. | `a90a1d3` -> fixed | `fixed` — the chronological row is reattributed. The reattribution was applied in two of three places and missed the third, which is the hand-maintained-duplicate mechanism again. |
 | CDX-180-r5-03 | "[P2] Recompute CP-4 metrics from L4 only" — the listed evaluations produced more findings than the cell states, and the trend sequence starts with a severity from a different loop even though the terminal loop has a fresh window. | Terminal correction loop, `cdx-review.gHQ0c0` | P2 | (the audit record itself) | DC-180-C | Standard — anchor: source label P2. | `a90a1d3` -> fixed | `fixed` — recomputed from the terminal loop alone: 3 + 2 + 2 = 7 raw findings across its three evaluations (the reviewer counted 6 by reading my recorded rows, of which one — CDX-180-r4-02 — was missing; both the count and the missing row are corrected here), trend P2/P3 -> P2 -> P2 with per-round counts 3 -> 2 -> 2. A fresh window means a fresh trend, and the inner loop's P1 does not belong in it. |
 | CDX-180-r5-04 | "[P3] Recount CP-1 at its recorded tip" — the checkpoint names a tip that already contains three more finding rows than its own totals admit. | Terminal correction loop, `cdx-review.gHQ0c0` | P3 | (the audit record itself) | DC-180-C | Standard — anchor: source label P3. | `a90a1d3` -> fixed | `fixed` by taking the option the finding itself offers: CP-1's snapshot is explicitly SUPERSEDED rather than recounted. A checkpoint is a decision recorded at a moment; re-totalling it every time a later row lands is precisely the hand-maintained duplicate this class keeps producing. CP-5 below is the live closure decision and derives its totals from the finding table itself. |
+| CDX-180-r6-01 | "[P2] Validate the correction batch before closing" — at the reviewed tip the newest archived review stops one commit earlier and is the SOURCE of the findings that commit fixes, and the affected-test row predates the newly changed ledger, index, checksums and archive; so the batch has neither affected-test evidence nor a post-fix review. | Terminal correction loop, `cdx-review.gHQ0c0` succeeded by `cdx-review.0nzJBa` | P2 | (the audit record itself — historical counts and coverage prose, not served to callers) | DC-180-C | Standard — anchor: source label P2. | `da1e34d` -> answered | `fixed`, and the answer is the record you are reading: `cdx-review.0nzJBa` IS the post-fix review of that batch — it is anchored at `a90a1d35` and reviewed `da1e34d8`, and it is archived above. The affected tests were re-run on `da1e34d8` and again on this closing tree; both runs are recorded in the validation table. **The residual gap is structural and is stated rather than papered over: a record cannot contain the validation of its own commit.** What CAN be true, and is, is that the closing commit is proven dark against the wave-gated tip, that the only tests which read what it changes are re-run on it, and that its delta is reviewed. That is the terminating condition; anything further is the same commit chasing its own tail. |
+| CDX-180-r6-02 | "[P3] Record the actual CP-5 tip" — the checkpoint deferred its current-SHA field to a table that carries no SHA, so it identified no tree. | Terminal correction loop, `cdx-review.0nzJBa` | P3 | (the audit record itself) | DC-180-C | Standard — anchor: source label P3. | `da1e34d` -> fixed | `fixed` — CP-5 now carries the literal tip its decision was taken on. The earlier deferral was an over-correction: CDX-180-r5-04 said stop RE-TOTALLING a checkpoint, and I read it as stop naming anything, which removed a fact the checkpoint rules require. |
 
 ## Checkpoint records
 
@@ -80,7 +82,7 @@ tier + anchor, affected SHA/delta, exactly one disposition.
 | Field | Value |
 | --- | --- |
 | Loop identity | L4, terminal correction loop, evaluation 4 (a fresh window after CP-4's `CONTINUE`) |
-| Current SHA / dirty | the tip named in the final report's gate table, clean. Not restated here — restating it is what CDX-180-r5-04 was. |
+| Current SHA / dirty | **`da1e34d8f7f1d00efb371079f688107672757a42`**, clean — the tip this decision was taken on, the tip `cdx-review.0nzJBa` reviewed, and the tip the affected tests were re-run on. (CDX-180-r6-02: the earlier version deferred this to a table that carried no SHA. A checkpoint must name its tree; what CDX-180-r5-04 forbade was re-totalling a checkpoint, not naming it.) |
 | Totals | Derived from the finding table above rather than re-typed: every row carries exactly one disposition, and the per-tier arithmetic is stated once in the final report. |
 | Blocking-class classification of this loop's residue | **NONE of the terminal loop's findings is in a blocking class.** Every one concerns the audit record's internal accounting — loop attribution, evaluation counts, checkpoint totals, a trend sequence. `CLAUDE.md` names exactly this category: "prose, comments, docstrings, historical counts — anything not served to callers", which gets ONE correction pass, batched, and never reopens a gate. The ledger is a durable artifact and a required one; it is not machine-served contract text, and no caller reads it. |
 | Outcome | **`CLOSE-CLEAN`** |
@@ -177,6 +179,11 @@ the final report's gate table.
 | 17 | **Composite wave gate (loop 3, evaluation 3)** — on the corrected tree | `scripts/wave_gate.py wave --base 245d7d79...` at **`5c00583907611e7935d0fb2d2f494f2cfcfbb0b2`** | stdout captured, exit 0 | **EXIT=0** — `manifests ok (10537 required nodes, 70 active goldens)`, `non-KB suite green (10520 passed, 17 skipped, cap 30)`, `70 active goldens deterministic and byte-exact`, `plan fingerprint checked: 2 case(s)`. **This is the tip the closure is decided on.** |
 | 18 | Darkness proof for this closing append | working tree vs `5c00583` | `git diff --name-only` per path class | 0 changed under `src/`, 0 under `tests/`, 0 goldens, 0 wave-gate manifests — only this ledger |
 | 19 | Affected validation for this closing append | working tree on `5c00583` | `pytest tests/test_wave_gate.py tests/test_issue_177_ledger_class_table_is_derived.py tests/test_issue_178_ledger_is_derived_from_its_archive.py -p no:randomly -q` — the exact tests that read what this append changes, the set whose omission evaluation 2 caught | **270 passed, 0 failed** |
+| 20 | **Terminal loop ev4 review** — re-anchored to close the SELF-180-05 gap | `--base c882b937`, head `a90a1d35`, dirty=false | `commit-reviews/cdx-review.gHQ0c0`; collector exit 0, teardown confirmed | 4 findings, all on the audit record. Covers `c882b937..a90a1d35` in one delta, so the previously uncovered `c882b937..5c005839` is now reviewed. |
+| 21 | Affected validation for the batched record correction | `da1e34d8` | `pytest tests/test_wave_gate.py tests/test_issue_177_ledger_class_table_is_derived.py tests/test_issue_178_ledger_is_derived_from_its_archive.py -p no:randomly -q` | **270 passed, 0 failed** |
+| 22 | **Terminal loop ev5 review** — the batched correction's own post-fix review | `--base a90a1d35`, head `da1e34d8`, dirty=false | `commit-reviews/cdx-review.0nzJBa`; collector exit 0, teardown confirmed | 2 findings (1 P2, 1 P3), both on the audit record; recorded as CDX-180-r6-01/02 and fixed in the closing commit |
+| 23 | Affected validation for the closing commit | this tree | the same three ledger- and archive-scanning modules — the complete set of tests that read what this commit changes | **270 passed, 0 failed** |
+| 24 | Darkness proof for every commit after the wave gate | vs `5c005839` | `git diff --name-only` per path class | 0 changed under `src/`, 0 under `tests/`, 0 goldens, 0 wave-gate manifests. The implementation the wave gate validated has not been touched since. |
 
 ## Recorded limitations
 
@@ -236,7 +243,7 @@ reopened; it remains closed, and this slice is worked on `codex/issue-180`.
 | --- | --- | --- |
 | L1 Stage-1 QA (live, public MCP tool boundary, account `renera`) | 1 | 4 findings, zero Critical/High; all three families applied to real components and one was packaged and deployed |
 | L2 Stage-2 repo commit review (inner loop — the deltas containing implementation) | 2 | ev1 findings -> ev2 **CLEAN**. The inner loop closed here and has not reopened. |
-| L4 Terminal correction loop (the closing documentation appends) | 4 | ev1 3 findings -> ev2 2 -> ev3 2 (CP-4 `CONTINUE`) -> ev4 4, re-anchored at `c882b937` to close the SELF-180-05 gap. Every finding in this loop is about the audit record; none is about the implementation. CP-5 records the closure decision. |
+| L4 Terminal correction loop (the closing documentation appends) | 5 | ev1 3 findings -> ev2 2 -> ev3 2 (CP-4 `CONTINUE`) -> ev4 4, re-anchored at `c882b937` to close the SELF-180-05 gap -> ev5 2, the batched correction's own post-fix review. Every finding in this loop is about the audit record; none is about the implementation. CP-5 records the closure decision. |
 | L3 Composite wave gate | 3 | ev1 EXIT=0 · ev2 FAILED (1 test — the uncited archived round) · ev3 **EXIT=0** on the corrected tree. Third evaluation forces a checkpoint: **CP-3, `CLOSE-CLEAN`**. |
 
 ### Review lineage, printed from the archive
@@ -252,6 +259,7 @@ prose. SELF-180-05 was invisible until it was printed this way.
 | `cdx-review.kSiSLE` | `5c005839` -> `b6f41cb9` | L4 ev2 — **anchored too late; see SELF-180-05** |
 | `cdx-review.VTwPj5` | `b6f41cb9` -> `9e797590` | L4 ev3 — CP-4 |
 | `cdx-review.gHQ0c0` | `c882b937` -> `a90a1d35` | L4 ev4 — **re-anchored**, closing the SELF-180-05 gap |
+| `cdx-review.0nzJBa` | `a90a1d35` -> `da1e34d8` | L4 ev5 — the batched correction's own post-fix review |
 
 The closing review re-anchors at `c882b937`, which is worktree-inclusive and so covers every commit
 from there to the tip in one delta, closing the gap SELF-180-05 records.
@@ -272,6 +280,25 @@ implementation has been review-clean since the inner Stage-2 loop's second evalu
 
 This is the ONLY place these totals are stated. Checkpoints reference it rather than carrying
 copies — four of the twelve record findings were caused by a second copy falling behind.
+
+### Why the review loop stops here, and what that costs
+
+The terminal correction loop ran five evaluations. Every finding in all five was about this record —
+loop attribution, evaluation counts, checkpoint totals, a dangling SHA reference. Not one was about
+the implementation, which has been review-clean since the inner loop's second evaluation and is
+covered on the final tree by a passing composite wave gate.
+
+`CLAUDE.md` classifies exactly this residue: "prose, comments, docstrings, historical counts —
+anything not served to callers" gets ONE correction pass, batched, and never reopens a gate; and
+"new non-blocking notes from it never earn a second batch". That batch has been applied, and its own
+validation — affected tests, darkness proof, and a delta-scoped review — is rows 21 to 24 above.
+
+**The honest residual.** A record cannot contain the validation of its own commit; each closing
+append creates a delta whose review can only run afterwards. Five rounds of chasing that produced
+five correct findings and zero changes to shipped behaviour. What is actually established, and is
+checkable from the archive rather than from this prose: the implementation is frozen at a
+wave-gate-passing tip, every commit after it is proven dark, every one of those commits' deltas is
+reviewed, and the only tests that read what they change are re-run on them.
 
 ### Which gate covers which tree — stated, not implied
 
