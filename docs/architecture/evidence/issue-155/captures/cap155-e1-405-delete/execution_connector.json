@@ -1,0 +1,27 @@
+{
+  "_success": true,
+  "status_code": 200,
+  "method": "POST",
+  "endpoint": "ExecutionConnector/query",
+  "url": "https://api.boomi.com/api/rest/v1/traininghlibbochkarov-JKIY2X/ExecutionConnector/query",
+  "profile": "renera",
+  "data": {
+    "@type": "QueryResult",
+    "result": [
+      {
+        "@type": "ExecutionConnector",
+        "id": "RVhFQ19DT05OdHJ1ZTpub2RhdGE6c2hhcGUxOjpleGVjdXRpb24tZWI3MmNkMDItN2FkYS00NDE1LWI3Y2YtODcyOGE5ODRlZmI5LTIwMjYuMDguMjY",
+        "executionId": "execution-eb72cd02-7ada-4415-b7cf-8728a984efb9-2026.08.26",
+        "executionConnector": "Start",
+        "connectorType": "nodata",
+        "actionType": "nodata",
+        "errorCount": 0,
+        "successCount": 1,
+        "size": 0,
+        "isStartShape": true,
+        "recordType": "nodata"
+      }
+    ],
+    "numberOfResults": 1
+  }
+}

@@ -1,0 +1,42 @@
+{
+  "_success": true,
+  "status_code": 200,
+  "method": "POST",
+  "endpoint": "ExecutionRecord/query",
+  "url": "https://api.boomi.com/api/rest/v1/traininghlibbochkarov-JKIY2X/ExecutionRecord/query",
+  "profile": "renera",
+  "data": {
+    "@type": "QueryResult",
+    "result": [
+      {
+        "@type": "ExecutionRecord",
+        "executionId": "execution-eb72cd02-7ada-4415-b7cf-8728a984efb9-2026.08.26",
+        "account": "traininghlibbochkarov-JKIY2X",
+        "executionTime": "2026-08-26T00:18:04Z",
+        "status": "COMPLETE",
+        "executionType": "exec_manual",
+        "processName": "_TEST_155_E1_405_probe_20260826001714",
+        "processId": "098651c2-d265-4e6c-a234-4e78471960ae",
+        "atomName": "renera-local-atom",
+        "atomId": "89387bdf-b177-4631-9cc6-687bf4afefa7",
+        "inboundDocumentCount": 1,
+        "inboundErrorDocumentCount": 0,
+        "outboundDocumentCount": 2,
+        "executionDuration": [
+          "Long",
+          611
+        ],
+        "inboundDocumentSize": [
+          "Long",
+          0
+        ],
+        "outboundDocumentSize": [
+          "Long",
+          488
+        ],
+        "recordedDate": "2026-08-26T00:18:05Z"
+      }
+    ],
+    "numberOfResults": 1
+  }
+}

@@ -30,11 +30,22 @@ valueType="track">`; the PATCH target carries none. The profile-bearing path is 
 it is the superset shape (Path body **and** `parameter-profile`) on a source-role connector, and it
 matches the config the legacy source tests already exercise.
 
-**Placement attestation.** The source-role PREFIX placement (a linear step before the first
-connector call) is legacy-oracle parity but **platform-UNATTESTED** — the same limitation #154
-recorded at `tests/fixtures/process_ir/issue154/PROVENANCE.md:33-49`. #155 closes it with a live
-execution of this exact spine on the renera account; the capture scenario id is recorded here and in
-the audit ledger when that capture lands. Until then the limitation is CARRIED, not argued away.
+**Placement attestation — CLOSED 2026-08-26.** The source-role PREFIX placement (a linear step
+before the first connector call) was legacy-oracle parity but platform-UNATTESTED — the limitation
+#154 recorded at `tests/fixtures/process_ir/issue154/PROVENANCE.md:33-49`. It is now attested by a
+live execution of this exact spine on the renera account: capture scenario `cap155-e1-source-dynamic-path`,
+execution `execution-b91fb002-0a98-4e51-b9fb-ad503ea01241-2026.08.26`, terminal status COMPLETE,
+archived under `docs/architecture/evidence/issue-155/captures/`. The platform stores the shape,
+serves it back intact (`start` → `documentproperties` → `connectoraction` GET → … ), and composes the
+per-document path at runtime against an operation whose stored path is blank. Ledger row
+`EVAL-155-04`.
+
+**Public reachability, measured.** This config is NOT plannable through any composed public route at
+the baseline: the legacy kind refuses a REST source, the pipeline stage refuses the gated sub-block,
+and the archetype refuses a per-document token path (ledger row `QA-155-r1-01`, envelopes archived).
+The corpus therefore renders it by calling the builder directly — legitimate for an ORACLE, since the
+builder is the emission authority this slice is compared against, and deliberate: giving this shape a
+composed public route is what #155 adds.
 
 **Comparison scope for the canonical rows (slice A).** A verbatim `<process>` freeze is impossible:
 the legacy open tag carries option attributes `emit_process` never emits. Canonical

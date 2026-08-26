@@ -1,0 +1,29 @@
+[
+  {
+    "scenario": "cap155-e1-execution-connector",
+    "file": "vocabulary.json",
+    "utc": "2026-08-26T00:26:15.533170+00:00",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "sha256": "64df27634d6241f815d1c32f01beb0928fca0721c0de013da41c245b1ec85648",
+    "byte_length": 2339,
+    "archive_path": "/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/.claude/agent-memory/boomi-qa-tester/evidence/issue-155/cap155-e1-execution-connector/vocabulary.json",
+    "kind": "consolidated ExecutionConnector vocabulary"
+  },
+  {
+    "scenario": "cap155-e1-execution-connector",
+    "kind": "summary",
+    "utc": "2026-08-26T00:26:15.533313+00:00",
+    "verbatim_finding": "REST Client rows serve connectorType='officialboomi-X3979C-rest-prod' and actionType='EXECUTE' for GET, DELETE and PATCH alike; the start shape serves connectorType='nodata' actionType='nodata'."
+  },
+  {
+    "scenario": "cap155-e1-execution-connector",
+    "file": "delete_405_response_document.json",
+    "utc": "2026-08-26T00:26:50.822913+00:00",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "sha256": "8291638d0b5ff9fcff93285799596be8250e4f947fd47d229d5b0aea5c592b91",
+    "byte_length": 681,
+    "archive_path": "/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/.claude/agent-memory/boomi-qa-tester/evidence/issue-155/cap155-e1-execution-connector/delete_405_response_document.json",
+    "kind": "monitor_platform download_connector_document (405 DELETE row)",
+    "generic_connector_record_id": "R0VOX0NPTk5fUkVDX2V4ZWN1dGlvbi1lYjcyY2QwMi03YWRhLTQ0MTUtYjdjZi04NzI4YTk4NGVmYjktMjAyNi4wOC4yNjpjb25uZWN0b3ItNzFmZGQyNzAtNWQwMy00ZWI3LTg0OTMtM2I0Y2IxZmY1MmZm"
+  }
+]

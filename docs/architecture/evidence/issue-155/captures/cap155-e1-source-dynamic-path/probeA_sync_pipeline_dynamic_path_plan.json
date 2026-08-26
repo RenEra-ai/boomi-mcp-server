@@ -1,0 +1,136 @@
+{
+  "_success": true,
+  "integration_spec": {
+    "version": "1.0",
+    "name": "_TEST_155_E1_probeA",
+    "mode": "lift_shift",
+    "components": [
+      {
+        "key": "conn_rest",
+        "type": "connector-settings",
+        "action": "create",
+        "name": "Sandbox CDS Mock REST (no-auth)",
+        "component_id": null,
+        "config": {
+          "connector_type": "rest",
+          "base_url": "http://host.docker.internal:8081",
+          "auth": "NONE"
+        },
+        "depends_on": []
+      },
+      {
+        "key": "proc",
+        "type": "process",
+        "action": "create",
+        "name": "_TEST_155_E1_probeA_proc",
+        "component_id": null,
+        "config": {
+          "process_kind": "sync_pipeline",
+          "pipeline": {
+            "stages": [
+              {
+                "key": "s_fetch",
+                "kind": "fetch",
+                "config": {
+                  "primitive": "rest_fetch",
+                  "connection_id": "$ref:conn_rest",
+                  "operation_id": "547becc5-c291-4f6a-a739-a4c845ad4493",
+                  "action_type": "GET",
+                  "dynamic_path": {
+                    "ddp_name": "DDP_PATH_CLIENTS",
+                    "segments": [
+                      {
+                        "type": "static",
+                        "value": "/admin/cdscm/api/v1/clients/"
+                      },
+                      {
+                        "type": "dpp",
+                        "property_name": "key"
+                      }
+                    ]
+                  }
+                }
+              },
+              {
+                "key": "s_send",
+                "kind": "send",
+                "config": {
+                  "primitive": "rest_send",
+                  "connection_id": "$ref:conn_rest",
+                  "operation_id": "547becc5-c291-4f6a-a739-a4c845ad4493",
+                  "action_type": "GET"
+                }
+              }
+            ],
+            "dependencies": [
+              {
+                "from_stage": "s_fetch",
+                "to_stage": "s_send"
+              }
+            ]
+          }
+        },
+        "depends_on": [
+          "conn_rest"
+        ]
+      }
+    ],
+    "processes": [],
+    "goals": [],
+    "endpoints": [],
+    "flows": [],
+    "naming": {},
+    "folders": {},
+    "runtime": {},
+    "validation_rules": {},
+    "profile_indexes_by_component_id": null,
+    "pipeline": null
+  },
+  "conflict_policy": "reuse",
+  "execution_order": [
+    "conn_rest",
+    "proc"
+  ],
+  "steps": [
+    {
+      "key": "conn_rest",
+      "type": "connector-settings",
+      "declared_action": "create",
+      "planned_action": "reuse",
+      "name": "Sandbox CDS Mock REST (no-auth)",
+      "depends_on": [],
+      "existing_component_id": "c4281346-83e9-4026-856d-ede718ec68a0",
+      "route": "connector_builder_or_xml",
+      "candidates": [
+        {
+          "component_id": "c4281346-83e9-4026-856d-ede718ec68a0",
+          "name": "Sandbox CDS Mock REST (no-auth)",
+          "folder_name": "Training-Hlib-Bochkarov"
+        }
+      ]
+    },
+    {
+      "key": "proc",
+      "type": "process",
+      "declared_action": "create",
+      "planned_action": "error_process_validation",
+      "name": "_TEST_155_E1_probeA_proc",
+      "depends_on": [
+        "conn_rest"
+      ],
+      "existing_component_id": null,
+      "route": "process_flow_xml",
+      "validation_error": {
+        "error_code": "SYNC_PIPELINE_CONFIG_INVALID",
+        "error": "sync_pipeline fetch stage 's_fetch' has unsupported config key(s) ['dynamic_path'].",
+        "field": "pipeline.stages[s_fetch].config",
+        "hint": "Allowed keys: ['action_type', 'connection_id', 'connector_type', 'label', 'operation_id', 'primitive']. Gated sub-blocks (e.g. dynamic_path, reliability, runtime_bindings) are not lowered by the thin sync_pipeline stage \u2014 express a #96 runtime binding on the rest_fetch/rest_send operation config."
+      }
+    }
+  ],
+  "warnings": [
+    "[FOLDER_REQUIRED_ON_CREATE] Component 'conn_rest' is created with no folder_id or folder_name and would land in the account root. Set a resolved folder so components are organized, never at root.",
+    "[FOLDER_REQUIRED_ON_CREATE] Component 'proc' is created with no folder_id or folder_name and would land in the account root. Set a resolved folder so components are organized, never at root."
+  ],
+  "profile": "renera"
+}

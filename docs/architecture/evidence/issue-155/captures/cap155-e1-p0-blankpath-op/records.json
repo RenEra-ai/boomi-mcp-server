@@ -1,0 +1,63 @@
+[
+  {
+    "scenario": "cap155-e1-p0-blankpath-op",
+    "file": "negative_bare_blank_path_plan.json",
+    "utc": "2026-08-26T00:20:28.879804+00:00",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "sha256": "ced1a5fcc7f0e1e692a5031f283425e7097aae6df8af75c87ae1d3cd2f3e5d83",
+    "byte_length": 3087,
+    "archive_path": "/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/.claude/agent-memory/boomi-qa-tester/evidence/issue-155/cap155-e1-p0-blankpath-op/negative_bare_blank_path_plan.json",
+    "kind": "negative control plan (bare blank path)"
+  },
+  {
+    "scenario": "cap155-e1-p0-blankpath-op",
+    "file": "plan.json",
+    "utc": "2026-08-26T00:20:43.385704+00:00",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "sha256": "bcb6d5a08793faff235ad5c57aa4037dc8fa9cefaa8aa7e04bdd016304c82b7a",
+    "byte_length": 2751,
+    "archive_path": "/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/.claude/agent-memory/boomi-qa-tester/evidence/issue-155/cap155-e1-p0-blankpath-op/plan.json",
+    "kind": "plan_envelope"
+  },
+  {
+    "scenario": "cap155-e1-p0-blankpath-op",
+    "file": "apply.json",
+    "utc": "2026-08-26T00:20:57.451546+00:00",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "sha256": "aee6dfa260b0b56448099ac9579a71c4cd1cc5dc3869208c62555837d0a3e828",
+    "byte_length": 1455,
+    "archive_path": "/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/.claude/agent-memory/boomi-qa-tester/evidence/issue-155/cap155-e1-p0-blankpath-op/apply.json",
+    "kind": "apply_envelope"
+  },
+  {
+    "scenario": "cap155-e1-p0-blankpath-op",
+    "file": "op_p0_readback.xml",
+    "utc": "2026-08-26T00:20:57.673676+00:00",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "sha256": "430598f16438db21662fe0e46109878adc4ef3d22f34a433f6d1ef1bd4f4956d",
+    "byte_length": 1373,
+    "archive_path": "/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/.claude/agent-memory/boomi-qa-tester/evidence/issue-155/cap155-e1-p0-blankpath-op/op_p0_readback.xml",
+    "kind": "Component XML readback",
+    "component_id": "547becc5-c291-4f6a-a739-a4c845ad4493"
+  },
+  {
+    "scenario": "cap155-e1-p0-blankpath-op",
+    "kind": "summary",
+    "started_utc": "2026-08-26T00:20:15.510577+00:00",
+    "freeze_stamp": "538d9d4151d2/clean/7d82b275a913",
+    "negative_bare_blank_path": {
+      "plan_success": true,
+      "validation_error": {
+        "error_code": "REST_PATH_REQUIRED",
+        "error": "path is required for REST operations",
+        "field": "path",
+        "hint": "Provide the endpoint path appended onto the connection's base_url (e.g. '/v1/items/{id}'). REST Client preserves the path verbatim in emitted XML. For a per-document dynamic path, declare path_replacements so the operation path may be blank and the path is supplied at the connector step."
+      }
+    },
+    "op_p0_component_id": "547becc5-c291-4f6a-a739-a4c845ad4493",
+    "path_field_verbatim": "<field id=\"path\" type=\"string\" value=\"\"/>",
+    "persisted_name": "_QA_FIXTURE_155_blankpath_GET",
+    "blank_path_confirmed": true,
+    "finished_utc": "2026-08-26T00:20:57.673927+00:00"
+  }
+]

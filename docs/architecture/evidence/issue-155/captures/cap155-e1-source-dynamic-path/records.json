@@ -1,0 +1,202 @@
+[
+  {
+    "scenario": "cap155-e1-source-dynamic-path",
+    "file": "probeA_sync_pipeline_dynamic_path_plan.json",
+    "utc": "2026-08-26T00:23:25.377412+00:00",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "sha256": "c84acee8abd980d4b5703fcbe7d4209a7ff43fd1e199db4bb03c94e40be4a512",
+    "byte_length": 4420,
+    "archive_path": "/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/.claude/agent-memory/boomi-qa-tester/evidence/issue-155/cap155-e1-source-dynamic-path/probeA_sync_pipeline_dynamic_path_plan.json",
+    "kind": "refusal probe: sync_pipeline stage dynamic_path"
+  },
+  {
+    "scenario": "cap155-e1-source-dynamic-path",
+    "file": "probeB_archetype_contract.json",
+    "utc": "2026-08-26T00:23:25.421715+00:00",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "sha256": "245944ac6cad51c93640908ab6a64a1dcb9f396cc4847b37b043757f6b94ed9b",
+    "byte_length": 42776,
+    "archive_path": "/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/.claude/agent-memory/boomi-qa-tester/evidence/issue-155/cap155-e1-source-dynamic-path/probeB_archetype_contract.json",
+    "kind": "get_integration_archetype(api_to_api_sync)"
+  },
+  {
+    "scenario": "cap155-e1-source-dynamic-path",
+    "file": "probeB_archetype_token_path.json",
+    "utc": "2026-08-26T00:23:25.421841+00:00",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "sha256": "128ba8ef5eb10027fa8b65be683e669d3738d59681c76436c984f160f5115e27",
+    "byte_length": 179,
+    "archive_path": "/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/.claude/agent-memory/boomi-qa-tester/evidence/issue-155/cap155-e1-source-dynamic-path/probeB_archetype_token_path.json",
+    "kind": "refusal probe: archetype '{token}' path"
+  },
+  {
+    "scenario": "cap155-e1-source-dynamic-path",
+    "file": "patch_op_apply.json",
+    "utc": "2026-08-26T00:23:40.740179+00:00",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "sha256": "be9bfac4f3ec4de1f28a416a2510f9bdce549d65569c76ade6712720c3b89c13",
+    "byte_length": 1511,
+    "archive_path": "/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/.claude/agent-memory/boomi-qa-tester/evidence/issue-155/cap155-e1-source-dynamic-path/patch_op_apply.json",
+    "kind": "apply_envelope (PATCH op)"
+  },
+  {
+    "scenario": "cap155-e1-source-dynamic-path",
+    "file": "emitted_process.xml",
+    "utc": "2026-08-26T00:23:40.740839+00:00",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "sha256": "325b08f97763702524aca5eefb50f15ad45d74db95ea3c969223cdf9ee2b8bf7",
+    "byte_length": 3145,
+    "archive_path": "/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/.claude/agent-memory/boomi-qa-tester/evidence/issue-155/cap155-e1-source-dynamic-path/emitted_process.xml",
+    "kind": "baseline-emitter XML (pre-create)",
+    "emitter": "ProcessFlowBuilder.build @ 9860842 baseline"
+  },
+  {
+    "scenario": "cap155-e1-source-dynamic-path",
+    "file": "create_component.json",
+    "utc": "2026-08-26T00:23:41.238785+00:00",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "sha256": "a153f194275844fbdf209dab42a127d577c136f0f7a8c83c2458a18ba91a860c",
+    "byte_length": 251,
+    "archive_path": "/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/.claude/agent-memory/boomi-qa-tester/evidence/issue-155/cap155-e1-source-dynamic-path/create_component.json",
+    "kind": "manage_component create (raw XML escape hatch)"
+  },
+  {
+    "scenario": "cap155-e1-source-dynamic-path",
+    "file": "deploy.json",
+    "utc": "2026-08-26T00:23:43.343562+00:00",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "sha256": "77e61407893edb5beecaf24a18edf43f377ac25151cef4ae6b0ea875f6e4a749",
+    "byte_length": 1068,
+    "archive_path": "/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/.claude/agent-memory/boomi-qa-tester/evidence/issue-155/cap155-e1-source-dynamic-path/deploy.json",
+    "kind": "deploy_envelope"
+  },
+  {
+    "scenario": "cap155-e1-source-dynamic-path",
+    "file": "execute.json",
+    "utc": "2026-08-26T00:23:55.377468+00:00",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "sha256": "59ccd532f40393de200572cd1ba2edfced920ab94359922bf2e6d120eff2eeea",
+    "byte_length": 912,
+    "archive_path": "/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/.claude/agent-memory/boomi-qa-tester/evidence/issue-155/cap155-e1-source-dynamic-path/execute.json",
+    "kind": "execute_envelope",
+    "dynamic_properties": {
+      "key": "AC-0001"
+    }
+  },
+  {
+    "scenario": "cap155-e1-source-dynamic-path",
+    "file": "execution_record.json",
+    "utc": "2026-08-26T00:23:55.622425+00:00",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "sha256": "1d8e6b845803d89ea56eb55bed10fa5fc22d176c769854d32322311e7276ea72",
+    "byte_length": 1229,
+    "archive_path": "/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/.claude/agent-memory/boomi-qa-tester/evidence/issue-155/cap155-e1-source-dynamic-path/execution_record.json",
+    "kind": "ExecutionRecord/query",
+    "row_count": 1
+  },
+  {
+    "scenario": "cap155-e1-source-dynamic-path",
+    "file": "execution_connector.json",
+    "utc": "2026-08-26T00:25:10.840175+00:00",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "sha256": "084deb6eec538c49c2d965dc129462b06078d78aa383fe8637cbe22e3a164d86",
+    "byte_length": 2157,
+    "archive_path": "/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/.claude/agent-memory/boomi-qa-tester/evidence/issue-155/cap155-e1-source-dynamic-path/execution_connector.json",
+    "kind": "ExecutionConnector/query (75s post)"
+  },
+  {
+    "scenario": "cap155-e1-source-dynamic-path",
+    "file": "generic_connector_record.json",
+    "utc": "2026-08-26T00:25:11.158978+00:00",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "sha256": "a5b1cbb2e155dc52f7bf0b2b98f85173c8ef06c723f2901568bbb1cb6e85c280",
+    "byte_length": 5121,
+    "archive_path": "/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/.claude/agent-memory/boomi-qa-tester/evidence/issue-155/cap155-e1-source-dynamic-path/generic_connector_record.json",
+    "kind": "GenericConnectorRecord/query (75s post)"
+  },
+  {
+    "scenario": "cap155-e1-source-dynamic-path",
+    "file": "stored_process.xml",
+    "utc": "2026-08-26T00:25:11.472525+00:00",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "sha256": "c3355a59e6813707a02a9d75b4856d59d28d9de3dbd57adf5ee368a0f9d5f17b",
+    "byte_length": 3515,
+    "archive_path": "/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/.claude/agent-memory/boomi-qa-tester/evidence/issue-155/cap155-e1-source-dynamic-path/stored_process.xml",
+    "kind": "Component XML readback (post-deploy)",
+    "component_id": "15867657-4452-409c-aa04-d2fd3619f022"
+  },
+  {
+    "scenario": "cap155-e1-source-dynamic-path",
+    "kind": "summary",
+    "started_utc": "2026-08-26T00:23:12.046012+00:00",
+    "freeze_stamp": "538d9d4151d2/clean/7d82b275a913",
+    "p0_op_id": "547becc5-c291-4f6a-a739-a4c845ad4493",
+    "probeA_sync_pipeline_dynamic_path": {
+      "error_code": "SYNC_PIPELINE_CONFIG_INVALID",
+      "error": "sync_pipeline fetch stage 's_fetch' has unsupported config key(s) ['dynamic_path'].",
+      "field": "pipeline.stages[s_fetch].config",
+      "hint": "Allowed keys: ['action_type', 'connection_id', 'connector_type', 'label', 'operation_id', 'primitive']. Gated sub-blocks (e.g. dynamic_path, reliability, runtime_bindings) are not lowered by the thin sync_pipeline stage \u2014 express a #96 runtime binding on the rest_fetch/rest_send operation config."
+    },
+    "build_from_archetype_signature": "(name: str, parameters: dict = None, recipe_version: str = None)",
+    "probeB_static_path_refusal_present": false,
+    "op_patch_component_id": "5717df63-0e55-4d9a-ab87-54cb193c8fd2",
+    "emitted_shape_order": [
+      "start",
+      "documentproperties",
+      "connectoraction",
+      "connectoraction",
+      "stop"
+    ],
+    "emitted_path_propertyvalue": "<propertyvalue childKey=\"\" key=\"path\" name=\"Path\" valueType=\"track\">",
+    "process_component_id": "15867657-4452-409c-aa04-d2fd3619f022",
+    "process_persisted_name": "_TEST_155_E1_srcdynpath_20260826002312",
+    "package_id": "9ff5c334-6e65-43f7-8e2f-d36c08caff2f",
+    "deployment": {
+      "deployment_id": "84921ee0-7603-4c93-a955-6cc2b6442465",
+      "package_id": "9ff5c334-6e65-43f7-8e2f-d36c08caff2f",
+      "component_id": "15867657-4452-409c-aa04-d2fd3619f022",
+      "component_type": "process",
+      "environment_id": "c8d9140d-6d34-4ca6-91ff-bfd263556d5b",
+      "package_version": "1.0.0",
+      "deployed_date": "2026-08-26T00:23:42Z",
+      "deployed_by": "gleb@renera.ai",
+      "active": true,
+      "version": 1
+    },
+    "execution_id": "execution-b91fb002-0a98-4e51-b9fb-ad503ea01241-2026.08.26",
+    "execution_status": "COMPLETE",
+    "execution_record": {
+      "executionId": "execution-b91fb002-0a98-4e51-b9fb-ad503ea01241-2026.08.26",
+      "status": "COMPLETE",
+      "inboundDocumentCount": 1,
+      "outboundDocumentCount": 2,
+      "inboundErrorDocumentCount": 0,
+      "executionTime": "2026-08-26T00:23:49Z",
+      "executionDuration": [
+        "Long",
+        93
+      ],
+      "message": null
+    },
+    "stored_shape_order": [
+      "start",
+      "documentproperties",
+      "connectoraction",
+      "connectoraction",
+      "stop"
+    ],
+    "stored_path_propertyvalue": "<propertyvalue childKey=\"\" key=\"path\" name=\"Path\" valueType=\"track\">",
+    "stored_prefix_placement_ok": true,
+    "finished_utc": "2026-08-26T00:25:11.472634+00:00"
+  },
+  {
+    "scenario": "cap155-e1-source-dynamic-path",
+    "file": "probeB_archetype_token_path_fixup.json",
+    "utc": "2026-08-26T00:25:14.092552+00:00",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "sha256": "44eeb355692c733055a9585ba7e8601f09901b3056d09db82975f53dc91f953d",
+    "byte_length": 1667,
+    "archive_path": "/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/.claude/agent-memory/boomi-qa-tester/evidence/issue-155/cap155-e1-source-dynamic-path/probeB_archetype_token_path_fixup.json",
+    "kind": "refusal probe: archetype '{token}' path (corrected invocation)"
+  }
+]

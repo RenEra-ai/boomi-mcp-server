@@ -1,0 +1,55 @@
+{
+  "_success": false,
+  "error_code": "PARAM_VALIDATION_FAILED",
+  "error": "Parameter validation failed",
+  "suggestion": "Inspect field_errors[] for per-field problems.",
+  "retryable": false,
+  "context": {},
+  "field_errors": [
+    {
+      "field_path": "naming.integration_name",
+      "message": "Field required",
+      "error_type": "missing"
+    },
+    {
+      "field_path": "naming.component_prefix",
+      "message": "Field required",
+      "error_type": "missing"
+    },
+    {
+      "field_path": "naming.prefix",
+      "message": "Extra inputs are not permitted",
+      "error_type": "extra_forbidden"
+    },
+    {
+      "field_path": "source.fetch_request.path",
+      "message": "Value error, path must be static for this sync_pipeline preset; a '{token}' per-document dynamic path is runtime-bound behavior owned by #96 (M5.4a) and is not exposed here. Use a static path.",
+      "error_type": "value_error"
+    },
+    {
+      "field_path": "source.response_profile.root",
+      "message": "Field required",
+      "error_type": "missing"
+    },
+    {
+      "field_path": "source.response_profile.name",
+      "message": "Extra inputs are not permitted",
+      "error_type": "extra_forbidden"
+    },
+    {
+      "field_path": "target.payload_profile.root",
+      "message": "Field required",
+      "error_type": "missing"
+    },
+    {
+      "field_path": "target.payload_profile.name",
+      "message": "Extra inputs are not permitted",
+      "error_type": "extra_forbidden"
+    },
+    {
+      "field_path": "transform.operations",
+      "message": "List should have at least 1 item after validation, not 0",
+      "error_type": "too_short"
+    }
+  ]
+}

@@ -1,0 +1,175 @@
+{
+  "_success": true,
+  "integration_spec": {
+    "version": "1.0",
+    "name": "_TEST_155_E1_405_build_20260826001231",
+    "mode": "lift_shift",
+    "components": [
+      {
+        "key": "conn_rest",
+        "type": "connector-settings",
+        "action": "create",
+        "name": "Sandbox CDS Mock REST (no-auth)",
+        "component_id": null,
+        "config": {
+          "connector_type": "rest",
+          "base_url": "http://host.docker.internal:8081",
+          "auth": "NONE"
+        },
+        "depends_on": []
+      },
+      {
+        "key": "op_get_static",
+        "type": "connector-action",
+        "action": "create",
+        "name": "_TEST_155_E1_GET_static_20260826001231",
+        "component_id": null,
+        "config": {
+          "connector_type": "rest",
+          "operation_mode": "execute",
+          "method": "GET",
+          "path": "/admin/cdscm/api/v1/clients/AC-0001",
+          "connection_ref_key": "conn_rest"
+        },
+        "depends_on": [
+          "conn_rest"
+        ]
+      },
+      {
+        "key": "op_delete",
+        "type": "connector-action",
+        "action": "create",
+        "name": "_TEST_155_E1_DELETE_static_20260826001231",
+        "component_id": null,
+        "config": {
+          "connector_type": "rest",
+          "operation_mode": "execute",
+          "method": "DELETE",
+          "path": "/admin/cdscm/api/v1/clients/AC-0001",
+          "connection_ref_key": "conn_rest"
+        },
+        "depends_on": [
+          "conn_rest"
+        ]
+      },
+      {
+        "key": "proc",
+        "type": "process",
+        "action": "create",
+        "name": "_TEST_155_E1_405_probe_20260826001231",
+        "component_id": null,
+        "config": {
+          "process_kind": "database_to_api_sync",
+          "source": {
+            "connector_type": "rest",
+            "action_type": "GET",
+            "connection_id": "$ref:conn_rest",
+            "operation_id": "$ref:op_get_static"
+          },
+          "transform": {
+            "mode": "message",
+            "message_text": "{}"
+          },
+          "target": {
+            "connector_type": "rest",
+            "action_type": "DELETE",
+            "connection_id": "$ref:conn_rest",
+            "operation_id": "$ref:op_delete"
+          }
+        },
+        "depends_on": [
+          "conn_rest",
+          "op_get_static",
+          "op_delete"
+        ]
+      }
+    ],
+    "processes": [],
+    "goals": [],
+    "endpoints": [],
+    "flows": [],
+    "naming": {},
+    "folders": {},
+    "runtime": {},
+    "validation_rules": {},
+    "profile_indexes_by_component_id": null,
+    "pipeline": null
+  },
+  "conflict_policy": "reuse",
+  "execution_order": [
+    "conn_rest",
+    "op_delete",
+    "op_get_static",
+    "proc"
+  ],
+  "steps": [
+    {
+      "key": "conn_rest",
+      "type": "connector-settings",
+      "declared_action": "create",
+      "planned_action": "reuse",
+      "name": "Sandbox CDS Mock REST (no-auth)",
+      "depends_on": [],
+      "existing_component_id": "c4281346-83e9-4026-856d-ede718ec68a0",
+      "route": "connector_builder_or_xml",
+      "candidates": [
+        {
+          "component_id": "c4281346-83e9-4026-856d-ede718ec68a0",
+          "name": "Sandbox CDS Mock REST (no-auth)",
+          "folder_name": "Training-Hlib-Bochkarov"
+        }
+      ]
+    },
+    {
+      "key": "op_delete",
+      "type": "connector-action",
+      "declared_action": "create",
+      "planned_action": "create",
+      "name": "_TEST_155_E1_DELETE_static_20260826001231",
+      "depends_on": [
+        "conn_rest"
+      ],
+      "existing_component_id": null,
+      "route": "connector_builder_or_xml"
+    },
+    {
+      "key": "op_get_static",
+      "type": "connector-action",
+      "declared_action": "create",
+      "planned_action": "create",
+      "name": "_TEST_155_E1_GET_static_20260826001231",
+      "depends_on": [
+        "conn_rest"
+      ],
+      "existing_component_id": null,
+      "route": "connector_builder_or_xml"
+    },
+    {
+      "key": "proc",
+      "type": "process",
+      "declared_action": "create",
+      "planned_action": "error_process_validation",
+      "name": "_TEST_155_E1_405_probe_20260826001231",
+      "depends_on": [
+        "conn_rest",
+        "op_get_static",
+        "op_delete"
+      ],
+      "existing_component_id": null,
+      "route": "process_flow_xml",
+      "validation_error": {
+        "error_code": "PROCESS_CONNECTOR_BINDING_INVALID",
+        "error": "source.connector_type must be 'database' for database_to_api_sync; got 'rest'.",
+        "field": "source.connector_type",
+        "hint": "Database is the only source connector for database_to_api_sync; a REST source is expressed via a sync_pipeline fetch stage (rest_fetch)."
+      }
+    }
+  ],
+  "warnings": [
+    "[FOLDER_REQUIRED_ON_CREATE] Component 'conn_rest' is created with no folder_id or folder_name and would land in the account root. Set a resolved folder so components are organized, never at root.",
+    "[FOLDER_REQUIRED_ON_CREATE] Component 'op_get_static' is created with no folder_id or folder_name and would land in the account root. Set a resolved folder so components are organized, never at root.",
+    "[FOLDER_REQUIRED_ON_CREATE] Component 'op_delete' is created with no folder_id or folder_name and would land in the account root. Set a resolved folder so components are organized, never at root.",
+    "[FOLDER_REQUIRED_ON_CREATE] Component 'proc' is created with no folder_id or folder_name and would land in the account root. Set a resolved folder so components are organized, never at root."
+  ],
+  "profile": "renera"
+}

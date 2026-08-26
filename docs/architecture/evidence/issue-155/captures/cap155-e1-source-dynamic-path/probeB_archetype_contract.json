@@ -1,0 +1,1048 @@
+{
+  "_success": true,
+  "archetype": {
+    "metadata": {
+      "name": "api_to_api_sync",
+      "version": "0.1.0",
+      "kind": "archetype",
+      "description": "Archetype for replicating records from a REST API source to a REST API target as a thin preset over the M5 sync_pipeline. Validates parameters (caller-supplied JSON source response profile and target payload profile trees plus typed transform operations) and emits an executable IntegrationSpecV1 whose main process carries process_kind='sync_pipeline' with an intact fetch -> map -> send stage graph (NOT a custom pairwise process builder). Every byte of XML is produced by the existing component builders through the rest_fetch / field_map / rest_send primitives; the archetype emits JSON component specs only and never calls Boomi. Static REST only \u2014 runtime-bound path/query/header (#96), pagination, retry/DLQ, watermark, and schedule activation are out of scope for this preset.",
+      "tags": [
+        "api",
+        "rest",
+        "sync",
+        "m5",
+        "sync-pipeline",
+        "no-boomi-mutation"
+      ],
+      "use_cases": [
+        "replicate records from a REST API source to a REST API target",
+        "stand up a REST fetch -> transform -> REST send pipeline as a preset"
+      ],
+      "not_for": [
+        "database sources or targets (use database_to_api_sync)",
+        "runtime-bound query/path/header or watermark behavior (#96 M5.4a)",
+        "pagination loops, retry/DLQ, or deploying/scheduling the process"
+      ]
+    },
+    "parameter_schema": {
+      "$defs": {
+        "ApiFetchRequest": {
+          "additionalProperties": false,
+          "description": "Static REST GET fetch-request configuration for the source stage.",
+          "properties": {
+            "path": {
+              "description": "Static endpoint path appended to the source connection base_url (e.g. '/v1/customers'). Must be non-blank and must NOT contain a '{token}' dynamic segment \u2014 runtime path binding is #96 (M5.4a) and is out of scope for this preset.",
+              "title": "Path",
+              "type": "string"
+            },
+            "query_parameters": {
+              "anyOf": [
+                {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Optional static query-string parameters applied to the GET request. REST Client query parameters are static (Boomi UI verified); a per-request dynamic value is out of scope (#96).",
+              "title": "Query Parameters"
+            },
+            "request_headers": {
+              "anyOf": [
+                {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Optional static request headers applied to the GET request.",
+              "title": "Request Headers"
+            },
+            "follow_redirects": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Redirect policy: NONE | STRICT | LAX.",
+              "title": "Follow Redirects"
+            },
+            "return_application_errors": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Whether the operation surfaces application-level errors instead of failing.",
+              "title": "Return Application Errors"
+            },
+            "track_response": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Whether the connector tracks the response document.",
+              "title": "Track Response"
+            }
+          },
+          "required": [
+            "path"
+          ],
+          "title": "ApiFetchRequest",
+          "type": "object"
+        },
+        "ApiSendRequest": {
+          "additionalProperties": false,
+          "description": "Static REST send-request configuration for the target stage.",
+          "properties": {
+            "method": {
+              "default": "POST",
+              "description": "HTTP method used for the REST send request.",
+              "enum": [
+                "GET",
+                "POST",
+                "PUT",
+                "PATCH",
+                "DELETE"
+              ],
+              "title": "Method",
+              "type": "string"
+            },
+            "path": {
+              "description": "Static endpoint path appended to the target connection base_url (e.g. '/v1/items'). Must be non-blank and must NOT contain a '{token}' dynamic segment \u2014 runtime path binding is #96 (M5.4a) and is out of scope for this preset.",
+              "title": "Path",
+              "type": "string"
+            },
+            "query_parameters": {
+              "anyOf": [
+                {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Optional static query-string parameters applied to the send request.",
+              "title": "Query Parameters"
+            },
+            "request_headers": {
+              "anyOf": [
+                {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Optional static request headers applied to the send request.",
+              "title": "Request Headers"
+            },
+            "expected_status_codes": {
+              "description": "HTTP status codes considered successful for the send (recorded as metadata; routing of other codes through retry/DLQ is out of scope for this preset). Defaults to 200/201/202.",
+              "items": {
+                "type": "integer"
+              },
+              "title": "Expected Status Codes",
+              "type": "array"
+            }
+          },
+          "required": [
+            "path"
+          ],
+          "title": "ApiSendRequest",
+          "type": "object"
+        },
+        "ApiSource": {
+          "additionalProperties": false,
+          "properties": {
+            "binding": {
+              "$ref": "#/$defs/RestConnectionBinding",
+              "description": "How the REST SOURCE connector is materialized (create new settings or reuse an existing Boomi component). Create-mode supports auth 'none' only; secured auth requires mode='reuse'."
+            },
+            "fetch_request": {
+              "$ref": "#/$defs/ApiFetchRequest",
+              "description": "Static REST GET fetch-request configuration for the source."
+            },
+            "response_profile": {
+              "$ref": "#/$defs/JSONPayloadProfile",
+              "description": "Caller-supplied JSON profile tree describing the source API response body. The preset emits a generated JSON profile from this tree and binds it as the fetch source's output shape; transform source_path references resolve against its simple leaves."
+            }
+          },
+          "required": [
+            "binding",
+            "fetch_request",
+            "response_profile"
+          ],
+          "title": "ApiSource",
+          "type": "object"
+        },
+        "ApiTarget": {
+          "additionalProperties": false,
+          "properties": {
+            "binding": {
+              "$ref": "#/$defs/RestConnectionBinding",
+              "description": "How the REST TARGET connector is materialized (create new settings or reuse an existing Boomi component). Create-mode supports auth 'none' only; secured auth requires mode='reuse'."
+            },
+            "send_request": {
+              "$ref": "#/$defs/ApiSendRequest",
+              "description": "Static REST send-request configuration for the target."
+            },
+            "payload_profile": {
+              "$ref": "#/$defs/JSONPayloadProfile",
+              "description": "Caller-supplied JSON profile tree describing the target request body. The preset generates a JSON profile + transform map from it; only kind='simple' leaves are valid transform targets."
+            }
+          },
+          "required": [
+            "binding",
+            "send_request",
+            "payload_profile"
+          ],
+          "title": "ApiTarget",
+          "type": "object"
+        },
+        "ApiTransformConfig": {
+          "additionalProperties": false,
+          "properties": {
+            "operations": {
+              "description": "Typed transform operations moving source response leaves into target payload leaves. Discriminated by operation_type: 'direct' (#26), 'map_function' (#40), 'map_script' (#41). operation_type='xslt' is rejected with a pointer to issue #42.",
+              "items": {
+                "discriminator": {
+                  "mapping": {
+                    "direct": "#/$defs/DirectApiTransformOperation",
+                    "map_function": "#/$defs/MapFunctionApiTransformOperation",
+                    "map_script": "#/$defs/MapScriptApiTransformOperation"
+                  },
+                  "propertyName": "operation_type"
+                },
+                "oneOf": [
+                  {
+                    "$ref": "#/$defs/DirectApiTransformOperation"
+                  },
+                  {
+                    "$ref": "#/$defs/MapFunctionApiTransformOperation"
+                  },
+                  {
+                    "$ref": "#/$defs/MapScriptApiTransformOperation"
+                  }
+                ]
+              },
+              "minItems": 1,
+              "title": "Operations",
+              "type": "array"
+            }
+          },
+          "required": [
+            "operations"
+          ],
+          "title": "ApiTransformConfig",
+          "type": "object"
+        },
+        "DirectApiTransformOperation": {
+          "additionalProperties": false,
+          "properties": {
+            "documentation_hint": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Optional non-executable human-readable note about the operation's intent. Downstream builders must not parse or execute the value.",
+              "title": "Documentation Hint"
+            },
+            "operation_type": {
+              "const": "direct",
+              "description": "Discriminator: 'direct' routes to a one-to-one Boomi map step (#26).",
+              "title": "Operation Type",
+              "type": "string"
+            },
+            "source_path": {
+              "description": "Logical leaf path inside source.response_profile (slash-separated, e.g. 'Root/id' or 'Root/items[]/sku'). Must reference a kind='simple' leaf; the cross-field validator rejects unknown paths.",
+              "title": "Source Path",
+              "type": "string"
+            },
+            "target_path": {
+              "description": "Logical leaf path inside target.payload_profile. Must reference a kind='simple' leaf; object and array nodes cannot be transform targets.",
+              "title": "Target Path",
+              "type": "string"
+            }
+          },
+          "required": [
+            "operation_type",
+            "source_path",
+            "target_path"
+          ],
+          "title": "DirectApiTransformOperation",
+          "type": "object"
+        },
+        "JSONPayloadProfile": {
+          "additionalProperties": false,
+          "properties": {
+            "format": {
+              "const": "json",
+              "default": "json",
+              "description": "Profile format. M2 supports 'json' only; XML / EDI / flat-file target profile families are deferred to a later milestone.",
+              "title": "Format",
+              "type": "string"
+            },
+            "root": {
+              "$ref": "#/$defs/JSONProfileNode",
+              "description": "Root node of the JSON payload profile. Must be kind='object'; arrays and simple leaves are not valid JSON profile roots in M2 (Boomi JSON profiles require exactly one root object)."
+            }
+          },
+          "required": [
+            "root"
+          ],
+          "title": "JSONPayloadProfile",
+          "type": "object"
+        },
+        "JSONProfileNode": {
+          "additionalProperties": false,
+          "description": "A node in the caller-supplied JSON payload profile tree.\n\nThe contract represents the target payload as a deterministic profile tree\nrather than as a raw body template. Downstream builders (issue #43 for the\nJSON profile, #26/#40/#41 for transforms) consume this tree to generate a\nBoomi JSON profile and map. Only ``kind='simple'`` nodes are valid\ntransform targets.",
+          "properties": {
+            "name": {
+              "description": "Profile node name. Used as the JSON object entry name, the array name (with '[]' appended when forming logical paths), or the root element name.",
+              "title": "Name",
+              "type": "string"
+            },
+            "kind": {
+              "description": "Profile node kind. 'simple' is a leaf value (transform-targetable); 'object' contains named children as object entries; 'array' repeats its children as the element shape.",
+              "enum": [
+                "simple",
+                "object",
+                "array"
+              ],
+              "title": "Kind",
+              "type": "string"
+            },
+            "data_type": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "character",
+                    "number",
+                    "datetime",
+                    "boolean"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Leaf data type. Required when kind='simple'; must be omitted for kind='object' and kind='array'. Boolean is supported for JSON leaves; DB source result fields stay character/number/datetime until DB profile builders expand their supported set.",
+              "title": "Data Type"
+            },
+            "required": {
+              "default": false,
+              "description": "Whether the JSON node is required in the emitted payload. Surfaced verbatim to downstream profile/map builders.",
+              "title": "Required",
+              "type": "boolean"
+            },
+            "description": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Optional human-readable description of the JSON node. Non-executable.",
+              "title": "Description"
+            },
+            "children": {
+              "anyOf": [
+                {
+                  "items": {
+                    "$ref": "#/$defs/JSONProfileNode"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Child nodes. Required and non-empty for kind='object' (named entries) and kind='array' (element shape, expressed as the entries reached under the array repetition segment). Must be omitted for kind='simple'.",
+              "title": "Children"
+            }
+          },
+          "required": [
+            "name",
+            "kind"
+          ],
+          "title": "JSONProfileNode",
+          "type": "object"
+        },
+        "MapFunctionApiTransformOperation": {
+          "additionalProperties": false,
+          "properties": {
+            "documentation_hint": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Optional non-executable human-readable note about the operation's intent. Downstream builders must not parse or execute the value.",
+              "title": "Documentation Hint"
+            },
+            "operation_type": {
+              "const": "map_function",
+              "description": "Discriminator: 'map_function' routes to a Boomi map function step (#40).",
+              "title": "Operation Type",
+              "type": "string"
+            },
+            "function_type": {
+              "description": "Task-authored function route name (e.g. 'trim', 'uppercase', 'concat'). Surfaced verbatim; issue #40 owns the concrete allowed-set.",
+              "title": "Function Type",
+              "type": "string"
+            },
+            "inputs": {
+              "description": "One or more function inputs. Each entry must reference a kind='simple' leaf path in source.response_profile.",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1,
+              "title": "Inputs",
+              "type": "array"
+            },
+            "target_path": {
+              "description": "Logical leaf path inside target.payload_profile. Must reference a kind='simple' leaf.",
+              "title": "Target Path",
+              "type": "string"
+            },
+            "parameters": {
+              "anyOf": [
+                {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Optional opaque parameter object surfaced verbatim to issue #40. The contract does not interpret keys or values.",
+              "title": "Parameters"
+            }
+          },
+          "required": [
+            "operation_type",
+            "function_type",
+            "inputs",
+            "target_path"
+          ],
+          "title": "MapFunctionApiTransformOperation",
+          "type": "object"
+        },
+        "MapScriptApiTransformOperation": {
+          "additionalProperties": false,
+          "properties": {
+            "documentation_hint": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Optional non-executable human-readable note about the operation's intent. Downstream builders must not parse or execute the value.",
+              "title": "Documentation Hint"
+            },
+            "operation_type": {
+              "const": "map_script",
+              "description": "Discriminator: 'map_script' routes to a Boomi map script step rendered as an in-map FunctionStep referencing a script.mapping component materialized from an inline script_body (#41).",
+              "title": "Operation Type",
+              "type": "string"
+            },
+            "script_slot": {
+              "description": "Stable task-authored slot name identifying the script's role in the summary.",
+              "title": "Script Slot",
+              "type": "string"
+            },
+            "language": {
+              "description": "Script language (groovy2 recommended; groovy = legacy Groovy 1; javascript).",
+              "enum": [
+                "groovy2",
+                "groovy",
+                "javascript"
+              ],
+              "title": "Language",
+              "type": "string"
+            },
+            "inputs": {
+              "description": "Source leaf paths consumed by the script (each a kind='simple' leaf in source.response_profile). The in-script variable for each path is its final segment sanitized to a language-safe identifier (e.g. 'Root/order-id' -> 'order_id'); two paths that derive the same variable name (across inputs AND outputs) are rejected.",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1,
+              "title": "Inputs",
+              "type": "array"
+            },
+            "outputs": {
+              "description": "Target leaf paths populated by the script (each a kind='simple' leaf in target.payload_profile). The in-script variable for each path is its final segment sanitized to a language-safe identifier; it must not collide with another input/output variable name.",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1,
+              "title": "Outputs",
+              "type": "array"
+            },
+            "script_component_ref": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "External script-component reuse is NOT supported by this preset (the referenced component is not part of the emitted spec). Provide script_body instead; #51 owns external script reuse.",
+              "title": "Script Component Ref"
+            },
+            "script_body": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Caller-authored script source materialized into an in-spec script.mapping component referenced by the transform.map.",
+              "title": "Script Body"
+            }
+          },
+          "required": [
+            "operation_type",
+            "script_slot",
+            "language",
+            "inputs",
+            "outputs"
+          ],
+          "title": "MapScriptApiTransformOperation",
+          "type": "object"
+        },
+        "NamingConfig": {
+          "additionalProperties": false,
+          "properties": {
+            "integration_name": {
+              "description": "Logical integration name; used as the emitted IntegrationSpecV1.name and as the human-facing label for downstream component naming.",
+              "title": "Integration Name",
+              "type": "string"
+            },
+            "component_prefix": {
+              "description": "Prefix applied to every emitted Boomi component's default display name (e.g. '<prefix> DB Connection'). Recorded under spec.naming.component_prefix. Per-role overrides via component_names take precedence over the prefixed default.",
+              "title": "Component Prefix",
+              "type": "string"
+            },
+            "component_names": {
+              "anyOf": [
+                {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Optional explicit overrides for individual component display names, keyed by component role (e.g. 'db_connection', 'rest_connection'). Values that pass this contract are surfaced verbatim under spec.naming.component_names; the contract does not assign defaults.",
+              "title": "Component Names"
+            },
+            "folder_path": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Optional Boomi folder path under which components will be created by future executable builders (e.g. 'Integrations/CRM/Sync'). Echoed in spec.folders.path without normalization.",
+              "title": "Folder Path"
+            },
+            "runtime_hints": {
+              "anyOf": [
+                {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Optional free-form runtime hints (e.g. atom selection, environment tags). Surfaced verbatim under spec.runtime; the contract does not interpret keys.",
+              "title": "Runtime Hints"
+            },
+            "convention": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Optional component-naming convention to activate in the emitted spec's naming block (issue #102 D1). Set to 'bracketed' to have build_integration's name-governance lint flag names that do not follow the bracketed account convention. Default None (off) \u2014 the archetype emits descriptive names that are not bracketed, so activating it by default would flag the archetype's own output; it is the caller's opt-in.",
+              "title": "Convention"
+            }
+          },
+          "required": [
+            "integration_name",
+            "component_prefix"
+          ],
+          "title": "NamingConfig",
+          "type": "object"
+        },
+        "RestConnectionBinding": {
+          "additionalProperties": false,
+          "properties": {
+            "mode": {
+              "description": "How to materialize the REST connector. 'create' builds a new Boomi connector from settings (later milestone); 'reuse' references an existing connector by component_id or component_name.",
+              "enum": [
+                "create",
+                "reuse"
+              ],
+              "title": "Mode",
+              "type": "string"
+            },
+            "settings": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/RestCreateSettings"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "REST connector settings to create. Required when mode='create'; must be omitted when mode='reuse'."
+            },
+            "component_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Existing Boomi connector component id to reuse. Supply exactly one of component_id or component_name when mode='reuse'; must be omitted when mode='create'.",
+              "title": "Component Id"
+            },
+            "component_name": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Existing Boomi connector component name to reuse (resolved at execution time). Supply exactly one of component_id or component_name when mode='reuse'; must be omitted when mode='create'.",
+              "title": "Component Name"
+            }
+          },
+          "required": [
+            "mode"
+          ],
+          "title": "RestConnectionBinding",
+          "type": "object"
+        },
+        "RestCreateSettings": {
+          "additionalProperties": false,
+          "properties": {
+            "base_url": {
+              "description": "Absolute http(s) base URL for the REST target (e.g. 'https://api.example.com'). The contract validates the scheme and overall shape only; it does not call the URL.",
+              "title": "Base Url",
+              "type": "string"
+            },
+            "auth_mode": {
+              "description": "Authentication mode for the REST target. 'none' requires no credential_ref; every other mode requires a credential_ref that resolves to the appropriate secret at execution time.",
+              "enum": [
+                "none",
+                "basic",
+                "bearer_token",
+                "oauth2_client_credentials"
+              ],
+              "title": "Auth Mode",
+              "type": "string"
+            },
+            "credential_ref": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Opaque reference to a secret-store entry that resolves to the REST credential at execution time. Required when auth_mode is not 'none'; must be omitted when auth_mode='none'. The contract never resolves, validates, or transmits the underlying secret.",
+              "title": "Credential Ref"
+            },
+            "default_headers": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "description": "Optional default headers applied to every REST request (e.g. 'Content-Type' -> 'application/json'). Surfaced verbatim to downstream builders.",
+              "title": "Default Headers",
+              "type": "object"
+            }
+          },
+          "required": [
+            "base_url",
+            "auth_mode"
+          ],
+          "title": "RestCreateSettings",
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "properties": {
+        "naming": {
+          "$ref": "#/$defs/NamingConfig",
+          "description": "Naming, folder, and runtime-hint configuration for the emitted integration."
+        },
+        "source": {
+          "$ref": "#/$defs/ApiSource",
+          "description": "REST source: connector binding, static fetch request, and JSON response profile tree."
+        },
+        "target": {
+          "$ref": "#/$defs/ApiTarget",
+          "description": "REST target: connector binding, static send request, and JSON payload profile tree."
+        },
+        "transform": {
+          "$ref": "#/$defs/ApiTransformConfig",
+          "description": "Typed transform operations moving source response leaves into target payload leaves (direct/map_function/map_script; xslt rejected)."
+        }
+      },
+      "required": [
+        "naming",
+        "source",
+        "target",
+        "transform"
+      ],
+      "title": "ApiToApiSyncParameters",
+      "type": "object"
+    },
+    "capability_notes": [
+      "Discoverable, fully-typed parameter contract for a REST -> REST sync.",
+      "Strict per-field validation surfaces structured PARAM_VALIDATION_FAILED errors.",
+      "Emits a main process with process_kind='sync_pipeline' and an intact fetch -> map -> send stage graph; build_integration routes it through the verified-linear SyncPipelineBuilder.",
+      "Caller-supplied JSON source response profile and target payload profile trees are the source of truth; the preset generates the source profile and binds it as the fetch output shape.",
+      "Emits executable component specs (REST source, JSON transform, REST target, process) for build_integration(action='plan').",
+      "All XML is produced by the existing component builders through the shipped rest_fetch / field_map / rest_send primitives; the archetype emits JSON component specs only.",
+      "The generated plan is inspectable through the existing MCP planning/review flows (build_integration plan, review_transformation, plan_integration_design).",
+      "Sets spec.pipeline to the same semantic stage graph so the plan is inspectable as a pipeline.",
+      "Credentials cross the contract only as opaque credential_ref values and are never echoed in errors."
+    ],
+    "limitations": [
+      "Emits JSON component specs only; performs no Boomi mutation and exposes no raw XML or payload/body templates.",
+      "REST source is GET-only; REST target carries the configured HTTP method.",
+      "Static REST only: a '{token}' dynamic path is rejected (runtime path binding is #96 M5.4a); query parameters and headers are static.",
+      "Pagination, conditional requests, retry/DLQ, watermark, and schedule activation are out of scope for this preset.",
+      "REST create-mode emits only auth='none'; secured auth (basic / bearer / oauth2) requires binding.mode='reuse'.",
+      "Create-mode connection default_headers are applied as operation-level request headers (operation-specific headers win on conflict); a reuse-mode connection carries its own configured headers.",
+      "map_script materializes only an inline script_body; external script_component_ref reuse is rejected (#51). Each in-script variable is a path's sanitized final segment; two map_script paths that derive the same variable name are rejected (rename the colliding leaves).",
+      "Does not mix map_function and map_script in one call (UNSUPPORTED_TRANSFORM_ROUTE); split into separate maps.",
+      "operation_type='xslt' is rejected; the XSLT decision is owned by issue #42.",
+      "credential_ref values are opaque end-to-end; the contract never resolves or validates secrets."
+    ],
+    "examples": [
+      {
+        "name": "minimal_rest_to_rest_sync",
+        "description": "Smallest valid payload: create-mode REST source with no auth and a one-leaf JSON response profile, create-mode REST target with no auth and a one-leaf JSON payload profile, a single direct transform operation. Placeholder sentinels only \u2014 not a reusable template.",
+        "parameters": {
+          "naming": {
+            "integration_name": "demo-api-to-api-sync",
+            "component_prefix": "DEMO"
+          },
+          "source": {
+            "binding": {
+              "mode": "create",
+              "settings": {
+                "base_url": "https://source.example.com",
+                "auth_mode": "none"
+              }
+            },
+            "fetch_request": {
+              "path": "/v1/<<source resource>>"
+            },
+            "response_profile": {
+              "format": "json",
+              "root": {
+                "name": "Root",
+                "kind": "object",
+                "children": [
+                  {
+                    "name": "source_a",
+                    "kind": "simple",
+                    "data_type": "character"
+                  }
+                ]
+              }
+            }
+          },
+          "target": {
+            "binding": {
+              "mode": "create",
+              "settings": {
+                "base_url": "https://target.example.com",
+                "auth_mode": "none"
+              }
+            },
+            "send_request": {
+              "method": "POST",
+              "path": "/v1/<<target resource>>"
+            },
+            "payload_profile": {
+              "format": "json",
+              "root": {
+                "name": "Root",
+                "kind": "object",
+                "children": [
+                  {
+                    "name": "target_a",
+                    "kind": "simple",
+                    "data_type": "character"
+                  }
+                ]
+              }
+            }
+          },
+          "transform": {
+            "operations": [
+              {
+                "operation_type": "direct",
+                "source_path": "Root/source_a",
+                "target_path": "Root/target_a"
+              }
+            ]
+          }
+        },
+        "is_template": false,
+        "template_status": "example_only_not_reusable_template"
+      },
+      {
+        "name": "reuse_connections_with_function",
+        "description": "Fuller payload: reuse-mode REST source and target by component id (secured auth uses connection reuse) with nested JSON profiles and two transform operations (one direct, one map_function). Examples deliberately exclude map_script declarations to keep the published payload free of language tokens.",
+        "parameters": {
+          "naming": {
+            "integration_name": "demo-api-to-api-enriched",
+            "component_prefix": "DEMO-ENR",
+            "folder_path": "Integrations/API/Sync",
+            "runtime_hints": {
+              "atom_pool": "primary"
+            }
+          },
+          "source": {
+            "binding": {
+              "mode": "reuse",
+              "component_id": "<<existing REST source connection id>>"
+            },
+            "fetch_request": {
+              "path": "/v1/<<source resource>>",
+              "query_parameters": {
+                "limit": "100"
+              }
+            },
+            "response_profile": {
+              "format": "json",
+              "root": {
+                "name": "Root",
+                "kind": "object",
+                "children": [
+                  {
+                    "name": "id",
+                    "kind": "simple",
+                    "data_type": "character",
+                    "required": true
+                  },
+                  {
+                    "name": "updated_at",
+                    "kind": "simple",
+                    "data_type": "datetime"
+                  }
+                ]
+              }
+            }
+          },
+          "target": {
+            "binding": {
+              "mode": "reuse",
+              "component_id": "<<existing REST target connection id>>"
+            },
+            "send_request": {
+              "method": "PUT",
+              "path": "/v1/<<target resource>>"
+            },
+            "payload_profile": {
+              "format": "json",
+              "root": {
+                "name": "Root",
+                "kind": "object",
+                "children": [
+                  {
+                    "name": "external_id",
+                    "kind": "simple",
+                    "data_type": "character",
+                    "required": true
+                  },
+                  {
+                    "name": "modified",
+                    "kind": "simple",
+                    "data_type": "datetime"
+                  }
+                ]
+              }
+            }
+          },
+          "transform": {
+            "operations": [
+              {
+                "operation_type": "direct",
+                "source_path": "Root/id",
+                "target_path": "Root/external_id",
+                "documentation_hint": "carry the source id verbatim"
+              },
+              {
+                "operation_type": "map_function",
+                "function_type": "date_format",
+                "inputs": [
+                  "Root/updated_at"
+                ],
+                "target_path": "Root/modified",
+                "parameters": {
+                  "input_format": "<<source datetime format>>",
+                  "output_format": "<<target datetime format>>"
+                }
+              }
+            ]
+          }
+        },
+        "is_template": false,
+        "template_status": "example_only_not_reusable_template"
+      }
+    ],
+    "example_policy": "example_only_not_reusable_template"
+  },
+  "raw_xml_exposed": false,
+  "next_tool": "build_from_archetype",
+  "recipe_descriptor": {
+    "schema_version": "1",
+    "recipe_id": "boomi.adapter.api_to_api_sync",
+    "recipe_version": "1.0.0",
+    "is_default": true,
+    "entry_kind": "compatibility_adapter",
+    "input_schema_id": null,
+    "input_schema_sha256": null,
+    "output_types": [],
+    "prerequisites": [],
+    "capability_requirements": {
+      "count": 0,
+      "note": "Capability subjects name internal compiler-authority keys and are not published. They are enforced at recipe preflight; an unmet requirement fails with RECIPE_CAPABILITY_GATED."
+    },
+    "conflict_policy": null,
+    "adapter_target": {
+      "recipe_id": "boomi.archetype.api_to_api_sync",
+      "recipe_version": "0.1.0"
+    },
+    "provenance": {
+      "package_name": "boomi_mcp",
+      "package_version": "0.1.0",
+      "source_revision": "source-sha256:5731152b4d29842f6b9d3476506684329534ab0ebbe5c61d7d644287d5ad08c3",
+      "module": "boomi_mcp.recipes.builtins.catalog",
+      "symbol": "boomi.adapter.api_to_api_sync",
+      "implementation_sha256": "dd7c7b69aeba80b62deea16340025ead5ee603c2292016348175cf0a844dc105",
+      "descriptor_sha256": "db756124824bcafc7e5bc819b57b67a1f44683bc3ee74e97d4dd30bcf0fc8c46"
+    }
+  },
+  "recipe_executable_descriptor": {
+    "schema_version": "1",
+    "recipe_id": "boomi.archetype.api_to_api_sync",
+    "recipe_version": "0.1.0",
+    "is_default": true,
+    "entry_kind": "executable_recipe",
+    "input_schema_id": "boomi_mcp.recipes.builtins.sync.SyncRecipeInputV1",
+    "input_schema_sha256": "111e04636c99827d11904d9c3aa66997ce3dfd07798c295efeb72c4697fbd489",
+    "output_types": [
+      "component_contribution",
+      "constraint_requirement",
+      "process_ir_patch"
+    ],
+    "prerequisites": [],
+    "capability_requirements": {
+      "count": 3,
+      "note": "Capability subjects name internal compiler-authority keys and are not published. They are enforced at recipe preflight; an unmet requirement fails with RECIPE_CAPABILITY_GATED."
+    },
+    "conflict_policy": {
+      "mode": "error_unless_declared",
+      "merge_rules": [
+        "dedupe_identical_constraint"
+      ]
+    },
+    "adapter_target": null,
+    "provenance": {
+      "package_name": "boomi_mcp",
+      "package_version": "0.1.0",
+      "source_revision": "source-sha256:5731152b4d29842f6b9d3476506684329534ab0ebbe5c61d7d644287d5ad08c3",
+      "module": "boomi_mcp.recipes.builtins.sync",
+      "symbol": "emit_api_to_api_sync",
+      "implementation_sha256": "7012cfa6fde6efbed8f5663d827dcc34ff567d981a5e638bdb730f11f8bb3b15",
+      "descriptor_sha256": "772b5c760ba5f8d6e2d21d370c8f3df8544c547af253dbb7a6537aac5e3309c2"
+    }
+  }
+}

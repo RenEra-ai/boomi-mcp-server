@@ -1,0 +1,37 @@
+{
+  "_success": true,
+  "build_id": "8123047b-8444-4918-bb74-e47c0fb36cdc",
+  "message": "Applied integration '_TEST_155_E1_p0_build' with 2 steps.",
+  "execution_order": [
+    "conn_rest",
+    "op_p0"
+  ],
+  "results": {
+    "conn_rest": {
+      "status": "reused",
+      "component_id": "c4281346-83e9-4026-856d-ede718ec68a0",
+      "type": "connector-settings",
+      "name": "Sandbox CDS Mock REST (no-auth)"
+    },
+    "op_p0": {
+      "status": "created",
+      "component_id": "547becc5-c291-4f6a-a739-a4c845ad4493",
+      "type": "connector-action",
+      "name": "_QA_FIXTURE_155_blankpath_GET",
+      "result": {
+        "_success": true,
+        "message": "Created officialboomi-X3979C-rest-prod execute operation '_QA_FIXTURE_155_blankpath_GET'",
+        "component_id": "547becc5-c291-4f6a-a739-a4c845ad4493",
+        "name": "_QA_FIXTURE_155_blankpath_GET",
+        "type": "connector-action",
+        "sub_type": "officialboomi-X3979C-rest-prod",
+        "profile": "renera"
+      }
+    }
+  },
+  "warnings": [
+    "[FOLDER_REQUIRED_ON_CREATE] Component 'conn_rest' is created with no folder_id or folder_name and would land in the account root. Set a resolved folder so components are organized, never at root.",
+    "[FOLDER_REQUIRED_ON_CREATE] Component 'op_p0' is created with no folder_id or folder_name and would land in the account root. Set a resolved folder so components are organized, never at root."
+  ],
+  "profile": "renera"
+}

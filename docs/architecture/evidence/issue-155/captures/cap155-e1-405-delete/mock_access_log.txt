@@ -1,0 +1,2 @@
+INFO:     172.19.0.1:60970 - "GET /admin/cdscm/api/v1/clients/AC-0001 HTTP/1.1" 200 OK
+INFO:     172.19.0.1:60978 - "DELETE /admin/cdscm/api/v1/clients/AC-0001 HTTP/1.1" 405 Method Not Allowed

@@ -1,0 +1,32 @@
+{
+  "package": {
+    "_success": true,
+    "package": {
+      "package_id": "f1ec3553-9b83-4ce9-bea4-a9f946af9561",
+      "component_id": "098651c2-d265-4e6c-a234-4e78471960ae",
+      "component_type": "process",
+      "package_version": "1.0.0",
+      "component_version": 1,
+      "branch_name": "main",
+      "notes": "cap155-e1-405-delete 20260826001714",
+      "created_by": "gleb@renera.ai",
+      "created_date": "2026-08-26T00:17:58Z"
+    },
+    "hint": "Use action='deploy' with the returned package_id to deploy to an environment."
+  },
+  "deploy": {
+    "_success": true,
+    "deployment": {
+      "deployment_id": "b9a304bc-9db9-4893-bb29-fc443b42abfb",
+      "package_id": "f1ec3553-9b83-4ce9-bea4-a9f946af9561",
+      "component_id": "098651c2-d265-4e6c-a234-4e78471960ae",
+      "component_type": "process",
+      "environment_id": "c8d9140d-6d34-4ca6-91ff-bfd263556d5b",
+      "package_version": "1.0.0",
+      "deployed_date": "2026-08-26T00:17:59Z",
+      "deployed_by": "gleb@renera.ai",
+      "active": true,
+      "version": 1
+    }
+  }
+}

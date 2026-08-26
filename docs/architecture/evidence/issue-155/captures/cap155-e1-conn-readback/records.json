@@ -1,0 +1,44 @@
+[
+  {
+    "scenario": "cap155-e1-conn-readback",
+    "capture": "rest-conn-c4281346",
+    "component_id": "c4281346-83e9-4026-856d-ede718ec68a0",
+    "utc": "2026-08-26T00:04:58.622598+00:00",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "endpoint": "Component/c4281346-83e9-4026-856d-ede718ec68a0",
+    "status_code": 200,
+    "truncated": false,
+    "version_marker": "2",
+    "component_name": "Sandbox CDS Mock REST (no-auth)",
+    "sha256_archived_bytes": "4aa643c3849ca5ddb8468f84350788999fe0af1f92f82b27e7d602d2214a2378",
+    "byte_length": 2889,
+    "credential_like_field_ids": [
+      "awsPrivateKey",
+      "awsSecretKey",
+      "password"
+    ],
+    "credential_value_hits": [],
+    "redacted_before_archive": false,
+    "encrypted_values_block_present": true,
+    "archive_path": "/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/.claude/agent-memory/boomi-qa-tester/evidence/issue-155/cap155-e1-conn-readback/rest-conn-c4281346.xml"
+  },
+  {
+    "scenario": "cap155-e1-conn-readback",
+    "capture": "db-conn-35813b90",
+    "component_id": "35813b90-1f42-4dcb-98f5-82d8f96be61d",
+    "utc": "2026-08-26T00:04:58.808656+00:00",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "endpoint": "Component/35813b90-1f42-4dcb-98f5-82d8f96be61d",
+    "status_code": 200,
+    "truncated": false,
+    "version_marker": "2",
+    "component_name": "Sandbox MSSQL Expert (jtds)",
+    "sha256_archived_bytes": "bdf2311644b5801a2f3567ee87276a64974d469b8312825964c2c82eb99783a3",
+    "byte_length": 1327,
+    "credential_like_field_ids": [],
+    "credential_value_hits": [],
+    "redacted_before_archive": false,
+    "encrypted_values_block_present": true,
+    "archive_path": "/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/.claude/agent-memory/boomi-qa-tester/evidence/issue-155/cap155-e1-conn-readback/db-conn-35813b90.xml"
+  }
+]

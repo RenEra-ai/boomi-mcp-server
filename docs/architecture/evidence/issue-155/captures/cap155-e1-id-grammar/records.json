@@ -1,0 +1,137 @@
+[
+  {
+    "scenario": "cap155-e1-id-grammar",
+    "file": "execution_records_by_atom.json",
+    "utc": "2026-08-26T00:25:41.307479+00:00",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "sha256": "59fe5d5855aa880d558d07b7da37a5b0da696bfa7664a27d07b9b9a69c6f0bcb",
+    "byte_length": 27935,
+    "archive_path": "/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/.claude/agent-memory/boomi-qa-tester/evidence/issue-155/cap155-e1-id-grammar/execution_records_by_atom.json",
+    "kind": "ExecutionRecord/query atomId EQUALS",
+    "row_count": 28
+  },
+  {
+    "scenario": "cap155-e1-id-grammar",
+    "kind": "summary",
+    "started_utc": "2026-08-26T00:25:40.494060+00:00",
+    "regex": "^execution-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}-[0-9]{4}\\.[0-9]{2}\\.[0-9]{2}$",
+    "execution_ids": [
+      {
+        "execution_id": "execution-021747c1-eaad-4014-b20d-c4c7ecf29bf2-2026.08.20",
+        "matches": true
+      },
+      {
+        "execution_id": "execution-06ee13a7-9bb9-4d25-a6ef-07dadb6f8e07-2026.08.20",
+        "matches": true
+      },
+      {
+        "execution_id": "execution-10adb302-6e46-4c8e-a817-97f4def90c53-2026.08.20",
+        "matches": true
+      },
+      {
+        "execution_id": "execution-19240be4-6204-4d4c-952b-f3959c5ebc4f-2026.08.22",
+        "matches": true
+      },
+      {
+        "execution_id": "execution-1fffa7c1-cebe-4d44-bcff-8d1b59738b85-2026.08.20",
+        "matches": true
+      },
+      {
+        "execution_id": "execution-22d994b4-29f3-48f7-bd46-25272525f7ee-2026.08.20",
+        "matches": true
+      },
+      {
+        "execution_id": "execution-25600896-ae38-4596-855a-e53ab3ec7165-2026.08.20",
+        "matches": true
+      },
+      {
+        "execution_id": "execution-39136bbc-aeff-4ad7-9ec7-b581f7a01d13-2026.07.25",
+        "matches": true
+      },
+      {
+        "execution_id": "execution-3945996a-255a-402b-a6a8-e3fa644dd122-2026.08.20",
+        "matches": true
+      },
+      {
+        "execution_id": "execution-47348114-39c8-4f2e-bfb0-0ad15695ae54-2026.08.20",
+        "matches": true
+      },
+      {
+        "execution_id": "execution-67fe504a-6e3c-4a27-9380-e75435d20f98-2026.08.22",
+        "matches": true
+      },
+      {
+        "execution_id": "execution-6a9b5851-f879-442c-90c1-8ec251490c65-2026.07.25",
+        "matches": true
+      },
+      {
+        "execution_id": "execution-6c4c7a06-c893-4aad-80df-957f669ff6c4-2026.08.20",
+        "matches": true
+      },
+      {
+        "execution_id": "execution-72bce51f-8acf-4cc6-9916-2fcdd4f4e0ad-2026.08.20",
+        "matches": true
+      },
+      {
+        "execution_id": "execution-81a861ca-08d6-4983-af07-cd7e46bc494d-2026.08.20",
+        "matches": true
+      },
+      {
+        "execution_id": "execution-81e7f709-8700-408a-b21b-26a24be2a247-2026.07.25",
+        "matches": true
+      },
+      {
+        "execution_id": "execution-86182a8d-e1dd-4a97-a336-350b5800bca2-2026.08.20",
+        "matches": true
+      },
+      {
+        "execution_id": "execution-86d04c5a-abb2-4780-81e1-26b495c9721f-2026.07.25",
+        "matches": true
+      },
+      {
+        "execution_id": "execution-8b2ad699-c2b3-4c43-a64d-8af283e1e568-2026.08.22",
+        "matches": true
+      },
+      {
+        "execution_id": "execution-959dc7e4-e48d-486b-9570-ae2746d0793c-2026.08.22",
+        "matches": true
+      },
+      {
+        "execution_id": "execution-b4070fcc-6789-4a23-be39-be5d77641a63-2026.08.22",
+        "matches": true
+      },
+      {
+        "execution_id": "execution-b6c41e54-3073-44ee-9bb7-f83401d649dd-2026.07.25",
+        "matches": true
+      },
+      {
+        "execution_id": "execution-b91fb002-0a98-4e51-b9fb-ad503ea01241-2026.08.26",
+        "matches": true
+      },
+      {
+        "execution_id": "execution-cda84058-d453-4ecd-865f-b62f01063576-2026.08.20",
+        "matches": true
+      },
+      {
+        "execution_id": "execution-eb14c376-f647-4a5c-8c4f-98a910d2ccc8-2026.08.22",
+        "matches": true
+      },
+      {
+        "execution_id": "execution-eb72cd02-7ada-4415-b7cf-8728a984efb9-2026.08.26",
+        "matches": true
+      },
+      {
+        "execution_id": "execution-ee213bdf-fe98-4d9b-8e63-7061fe564de6-2026.08.20",
+        "matches": true
+      },
+      {
+        "execution_id": "execution-f1ff4a3f-3e0b-4c9b-be9e-b0681ce70ae6-2026.08.20",
+        "matches": true
+      }
+    ],
+    "deviations": [],
+    "request_id_sample": "executionrecord-260b76c0-02d3-4b7a-bb1b-663984c18046 (execute_process request_id \u2014 a DIFFERENT grammar, not an execution id)",
+    "component_id_shape": "UUID v4 (e.g. 547becc5-c291-4f6a-a739-a4c845ad4493); folder ids are base64 (Rjo4NjY5Njc2); ExecutionConnector/GenericConnectorRecord row ids are base64 blobs",
+    "finished_utc": "2026-08-26T00:25:41.307586+00:00"
+  }
+]

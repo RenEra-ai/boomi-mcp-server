@@ -1,0 +1,158 @@
+[
+  {
+    "scenario": "cap155-e1-405-delete",
+    "file": "plan.json",
+    "utc": "2026-08-26T00:17:33.904513+00:00",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "sha256": "2bdf53403e25a031853a8eb6f70213475b5b7b5dbbc2056c4c6ae54951d00824",
+    "byte_length": 5795,
+    "archive_path": "/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/.claude/agent-memory/boomi-qa-tester/evidence/issue-155/cap155-e1-405-delete/plan.json",
+    "kind": "plan_envelope"
+  },
+  {
+    "scenario": "cap155-e1-405-delete",
+    "file": "apply.json",
+    "utc": "2026-08-26T00:17:58.123858+00:00",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "sha256": "adc86114344769d93077e7c0049b13c17b8dbb2ff7cf779d0c821d6e44e1e808",
+    "byte_length": 3293,
+    "archive_path": "/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/.claude/agent-memory/boomi-qa-tester/evidence/issue-155/cap155-e1-405-delete/apply.json",
+    "kind": "apply_envelope"
+  },
+  {
+    "scenario": "cap155-e1-405-delete",
+    "file": "deploy.json",
+    "utc": "2026-08-26T00:18:00.491950+00:00",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "sha256": "6ea48e8cd3f25e19cf6da070d0bea4ce3e0464744af5b937883506509b9f15b2",
+    "byte_length": 1059,
+    "archive_path": "/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/.claude/agent-memory/boomi-qa-tester/evidence/issue-155/cap155-e1-405-delete/deploy.json",
+    "kind": "deploy_envelope"
+  },
+  {
+    "scenario": "cap155-e1-405-delete",
+    "file": "execute.json",
+    "utc": "2026-08-26T00:18:14.916754+00:00",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "sha256": "2ac26b8b1aa3547151eabcbbe612a0b79754e7bcd340f65508672116a3a5c907",
+    "byte_length": 860,
+    "archive_path": "/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/.claude/agent-memory/boomi-qa-tester/evidence/issue-155/cap155-e1-405-delete/execute.json",
+    "kind": "execute_envelope"
+  },
+  {
+    "scenario": "cap155-e1-405-delete",
+    "file": "execution_record.json",
+    "utc": "2026-08-26T00:18:15.167087+00:00",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "sha256": "eddb661d914bb0ebc86a6ffc25693327e31635461c7775a38e0480aaa7a6567e",
+    "byte_length": 1229,
+    "archive_path": "/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/.claude/agent-memory/boomi-qa-tester/evidence/issue-155/cap155-e1-405-delete/execution_record.json",
+    "kind": "ExecutionRecord/query",
+    "row_count": 1
+  },
+  {
+    "scenario": "cap155-e1-405-delete",
+    "file": "execution_connector.json",
+    "utc": "2026-08-26T00:18:15.400699+00:00",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "sha256": "b9426e5cf1f80346400399e9298777a69ddbf3c0fb0661cb6f07d8965427f89e",
+    "byte_length": 832,
+    "archive_path": "/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/.claude/agent-memory/boomi-qa-tester/evidence/issue-155/cap155-e1-405-delete/execution_connector.json",
+    "kind": "ExecutionConnector/query"
+  },
+  {
+    "scenario": "cap155-e1-405-delete",
+    "file": "generic_connector_record.json",
+    "utc": "2026-08-26T00:18:15.879346+00:00",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "sha256": "b7a4709327f82ccb61357fe956b79b1bc48ac869dd4b4655c2c0af42afee95c8",
+    "byte_length": 2392,
+    "archive_path": "/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/.claude/agent-memory/boomi-qa-tester/evidence/issue-155/cap155-e1-405-delete/generic_connector_record.json",
+    "kind": "GenericConnectorRecord/query"
+  },
+  {
+    "scenario": "cap155-e1-405-delete",
+    "file": "deployed_process.xml",
+    "utc": "2026-08-26T00:18:16.085165+00:00",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "sha256": "8bcc37af80cad5d703abc21defb9909b764c6584ff5e2137bade06f4633d82fd",
+    "byte_length": 2404,
+    "archive_path": "/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/.claude/agent-memory/boomi-qa-tester/evidence/issue-155/cap155-e1-405-delete/deployed_process.xml",
+    "kind": "Component XML readback",
+    "component_id": "098651c2-d265-4e6c-a234-4e78471960ae"
+  },
+  {
+    "scenario": "cap155-e1-405-delete",
+    "kind": "summary",
+    "started_utc": "2026-08-26T00:17:14.732129+00:00",
+    "freeze_stamp": "538d9d4151d2/clean/7d82b275a913",
+    "apply_results": {
+      "conn_rest": {
+        "status": "reused",
+        "component_id": "c4281346-83e9-4026-856d-ede718ec68a0"
+      },
+      "op_delete": {
+        "status": "created",
+        "component_id": "5308b7e5-0a07-49e8-8bed-9bbbfbffe07f"
+      },
+      "op_get_static": {
+        "status": "created",
+        "component_id": "3e7a675f-117a-4f4b-b1ae-f2a8812d3f0d"
+      },
+      "proc": {
+        "status": "created",
+        "component_id": "098651c2-d265-4e6c-a234-4e78471960ae"
+      }
+    },
+    "package_id": "f1ec3553-9b83-4ce9-bea4-a9f946af9561",
+    "deployment": {
+      "deployment_id": "b9a304bc-9db9-4893-bb29-fc443b42abfb",
+      "package_id": "f1ec3553-9b83-4ce9-bea4-a9f946af9561",
+      "component_id": "098651c2-d265-4e6c-a234-4e78471960ae",
+      "component_type": "process",
+      "environment_id": "c8d9140d-6d34-4ca6-91ff-bfd263556d5b",
+      "package_version": "1.0.0",
+      "deployed_date": "2026-08-26T00:17:59Z",
+      "deployed_by": "gleb@renera.ai",
+      "active": true,
+      "version": 1
+    },
+    "execution_id": "execution-eb72cd02-7ada-4415-b7cf-8728a984efb9-2026.08.26",
+    "execution_record": {
+      "executionId": "execution-eb72cd02-7ada-4415-b7cf-8728a984efb9-2026.08.26",
+      "status": "COMPLETE",
+      "inboundDocumentCount": 1,
+      "outboundDocumentCount": 2,
+      "inboundErrorDocumentCount": 0,
+      "executionTime": "2026-08-26T00:18:04Z",
+      "executionDuration": [
+        "Long",
+        611
+      ],
+      "message": null
+    },
+    "finished_utc": "2026-08-26T00:18:16.085192+00:00"
+  },
+  {
+    "scenario": "cap155-e1-405-delete",
+    "file": "execution_connector_requery.json",
+    "utc": "2026-08-26T00:19:39.400906+00:00",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "sha256": "6c3d23df09af09ba75625e430f4ae98124523c0a10b2bd4540303d126d6f77d4",
+    "byte_length": 2167,
+    "archive_path": "/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/.claude/agent-memory/boomi-qa-tester/evidence/issue-155/cap155-e1-405-delete/execution_connector_requery.json",
+    "kind": "ExecutionConnector/query (requery)",
+    "execution_id": "execution-eb72cd02-7ada-4415-b7cf-8728a984efb9-2026.08.26"
+  },
+  {
+    "scenario": "cap155-e1-405-delete",
+    "file": "generic_connector_record_requery.json",
+    "utc": "2026-08-26T00:19:39.742312+00:00",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "sha256": "a736d460f387e036f5a4ff7540a2d5f09aa68e7c0b2ab717ca7be933321784ce",
+    "byte_length": 5270,
+    "archive_path": "/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/.claude/agent-memory/boomi-qa-tester/evidence/issue-155/cap155-e1-405-delete/generic_connector_record_requery.json",
+    "kind": "GenericConnectorRecord/query (requery)",
+    "execution_id": "execution-eb72cd02-7ada-4415-b7cf-8728a984efb9-2026.08.26"
+  }
+]

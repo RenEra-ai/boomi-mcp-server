@@ -1,0 +1,21 @@
+{
+  "_success": false,
+  "error": "Plan contains unresolvable steps. No operations were executed.",
+  "unresolvable_steps": [
+    {
+      "key": "proc",
+      "planned_action": "error_process_validation",
+      "candidates": [],
+      "validation_error": {
+        "error_code": "PROCESS_CONNECTOR_BINDING_INVALID",
+        "error": "source.connector_type must be 'database' for database_to_api_sync; got 'rest'.",
+        "field": "source.connector_type",
+        "hint": "Database is the only source connector for database_to_api_sync; a REST source is expressed via a sync_pipeline fetch stage (rest_fetch)."
+      }
+    }
+  ],
+  "details": [
+    "Component '_TEST_155_E1_405_probe_20260826001231' failed process-flow validation: PROCESS_CONNECTOR_BINDING_INVALID on field 'source.connector_type'."
+  ],
+  "profile": "renera"
+}

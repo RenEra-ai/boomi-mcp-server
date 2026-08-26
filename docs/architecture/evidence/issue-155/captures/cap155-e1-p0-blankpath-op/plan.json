@@ -1,0 +1,97 @@
+{
+  "_success": true,
+  "integration_spec": {
+    "version": "1.0",
+    "name": "_TEST_155_E1_p0_build",
+    "mode": "lift_shift",
+    "components": [
+      {
+        "key": "conn_rest",
+        "type": "connector-settings",
+        "action": "create",
+        "name": "Sandbox CDS Mock REST (no-auth)",
+        "component_id": null,
+        "config": {
+          "connector_type": "rest",
+          "base_url": "http://host.docker.internal:8081",
+          "auth": "NONE"
+        },
+        "depends_on": []
+      },
+      {
+        "key": "op_p0",
+        "type": "connector-action",
+        "action": "create",
+        "name": "_QA_FIXTURE_155_blankpath_GET",
+        "component_id": null,
+        "config": {
+          "connector_type": "rest",
+          "operation_mode": "execute",
+          "method": "GET",
+          "path": "",
+          "path_replacements": [
+            {
+              "name": "key",
+              "target_path": "clientId"
+            }
+          ],
+          "connection_ref_key": "conn_rest"
+        },
+        "depends_on": [
+          "conn_rest"
+        ]
+      }
+    ],
+    "processes": [],
+    "goals": [],
+    "endpoints": [],
+    "flows": [],
+    "naming": {},
+    "folders": {},
+    "runtime": {},
+    "validation_rules": {},
+    "profile_indexes_by_component_id": null,
+    "pipeline": null
+  },
+  "conflict_policy": "reuse",
+  "execution_order": [
+    "conn_rest",
+    "op_p0"
+  ],
+  "steps": [
+    {
+      "key": "conn_rest",
+      "type": "connector-settings",
+      "declared_action": "create",
+      "planned_action": "reuse",
+      "name": "Sandbox CDS Mock REST (no-auth)",
+      "depends_on": [],
+      "existing_component_id": "c4281346-83e9-4026-856d-ede718ec68a0",
+      "route": "connector_builder_or_xml",
+      "candidates": [
+        {
+          "component_id": "c4281346-83e9-4026-856d-ede718ec68a0",
+          "name": "Sandbox CDS Mock REST (no-auth)",
+          "folder_name": "Training-Hlib-Bochkarov"
+        }
+      ]
+    },
+    {
+      "key": "op_p0",
+      "type": "connector-action",
+      "declared_action": "create",
+      "planned_action": "create",
+      "name": "_QA_FIXTURE_155_blankpath_GET",
+      "depends_on": [
+        "conn_rest"
+      ],
+      "existing_component_id": null,
+      "route": "connector_builder_or_xml"
+    }
+  ],
+  "warnings": [
+    "[FOLDER_REQUIRED_ON_CREATE] Component 'conn_rest' is created with no folder_id or folder_name and would land in the account root. Set a resolved folder so components are organized, never at root.",
+    "[FOLDER_REQUIRED_ON_CREATE] Component 'op_p0' is created with no folder_id or folder_name and would land in the account root. Set a resolved folder so components are organized, never at root."
+  ],
+  "profile": "renera"
+}
