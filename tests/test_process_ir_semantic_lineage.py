@@ -1044,26 +1044,28 @@ def test_the_stream_replacing_authority_matches_the_served_contract():
     }
 
 
-@pytest.mark.parametrize(
-    "replacing",
-    [
-        pytest.param({"kind": "message", "text": "hello"}, id="message"),
-        pytest.param(
-            {"kind": "data_process", "steps": [
-                {"operation": "split_documents", "profile_type": "json",
-                 "profile_ref": "$ref:PROF", "link_element_key": "1",
-                 "link_element_name": "root"}]},
-            id="data_process_split",
-        ),
-        pytest.param(
-            {"kind": "data_process", "steps": [
-                {"operation": "custom_scripting", "language": "groovy2",
-                 "script": "// emits its own documents"}]},
-            id="data_process_script",
-        ),
-        pytest.param({"kind": "cache_get", "cache_ref": "$ref:CACHE"}, id="cache_get"),
-    ],
-)
+#: One authored instance of each stream-replacing kind. Shared by every test
+#: that needs a replacement, so a kind added to one is not missed by the other.
+_REPLACING_KINDS = [
+    pytest.param({"kind": "message", "text": "hello"}, id="message"),
+    pytest.param(
+        {"kind": "data_process", "steps": [
+            {"operation": "split_documents", "profile_type": "json",
+             "profile_ref": "$ref:PROF", "link_element_key": "1",
+             "link_element_name": "root"}]},
+        id="data_process_split",
+    ),
+    pytest.param(
+        {"kind": "data_process", "steps": [
+            {"operation": "custom_scripting", "language": "groovy2",
+             "script": "// emits its own documents"}]},
+        id="data_process_script",
+    ),
+    pytest.param({"kind": "cache_get", "cache_ref": "$ref:CACHE"}, id="cache_get"),
+]
+
+
+@pytest.mark.parametrize("replacing", _REPLACING_KINDS)
 def test_a_document_replacement_between_the_writer_and_the_call_is_refused(replacing):
     """Every replacing kind, not just the two the first version happened to name.
 
@@ -1377,3 +1379,53 @@ def test_the_served_current_description_states_the_rule_at_the_scope_it_holds():
     assert "empty string" in text
     # ...and it must no longer assert the requirement without qualification.
     assert "lineage validation still requires an earlier write" not in text
+
+
+@pytest.mark.parametrize("replacing", _REPLACING_KINDS)
+def test_a_current_value_does_not_survive_a_document_replacement(replacing):
+    """CDX round 2 P1. The `current` check must ask which documents carry the value.
+
+    A property written before a stream-replacing node, then APPENDED to after it
+    with a `current` source, was accepted: the state model reports the key as
+    established — deliberately, since #154's model answers "was this written
+    anywhere on this path" — but the documents reaching the writer are new ones
+    that carry none of it. The composed path is then the appended fragment
+    alone, and the request addresses a different resource.
+
+    The check is asked of the reaching-writer map instead, which IS cleared of
+    document-scoped keys at a replacement, so it answers the question the rule
+    needs: does a writer exist whose value THESE documents still carry. Reusing
+    that clearing is also why the fix needs no second provenance model.
+    """
+    writer = {"kind": "set_ddp", "name": "P", "source_values": [_STATIC]}
+    appender = {"kind": "set_ddp", "name": "P", "source_values": [_STATIC, _CURRENT]}
+    codes = _dynpath_codes([writer, replacing, appender, _BOUND, {"kind": "stop"}])
+    assert PROCESS_IR_SEMANTIC_DYNAMIC_PATH_DDP_NOT_ESTABLISHED in codes, codes
+
+
+@pytest.mark.parametrize("replacing", _REPLACING_KINDS)
+def test_a_replacement_does_not_refuse_a_writer_that_needs_no_earlier_value(replacing):
+    """The over-fire control: only a `current` source depends on what came before.
+
+    A writer that composes entirely from sources of its own is unaffected by a
+    replacement, so re-writing the property after one must still satisfy the
+    bound-path rule — the rule is about a value that has to survive, not about
+    replacement itself.
+
+    Asserted as the ABSENCE of this rule's code rather than as an empty result,
+    because one of these kinds is refused here for an unrelated reason: a cache
+    read with no cache writer. Demanding a clean compile would have made this
+    control fail for something it does not test, and weakening it to a
+    try/except would have hidden a real firing.
+    """
+    writer = {"kind": "set_ddp", "name": "P", "source_values": [_STATIC]}
+    rewriter = {"kind": "set_ddp", "name": "P", "source_values": [_STATIC, _DPPSEG]}
+    codes = _dynpath_codes([writer, replacing, rewriter, _BOUND, {"kind": "stop"}])
+    assert PROCESS_IR_SEMANTIC_DYNAMIC_PATH_DDP_NOT_ESTABLISHED not in codes, codes
+
+
+def test_appending_to_a_value_with_no_replacement_between_still_compiles():
+    """The other control: without a replacement the value is still there."""
+    writer = {"kind": "set_ddp", "name": "P", "source_values": [_STATIC]}
+    appender = {"kind": "set_ddp", "name": "P", "source_values": [_STATIC, _CURRENT]}
+    assert _dynpath_codes([writer, appender, _BOUND, {"kind": "stop"}]) == ()

@@ -836,7 +836,21 @@ def _walk_lineage(
                 # addresses the wrong resource, and does it silently. `state` is
                 # read before this node's own write is applied, so this asks
                 # whether anything established the property EARLIER.
-                if not state.establishes(key) and any(
+                # Asked of `writers`, NOT of `state`, and the difference is the
+                # whole correctness of the rule. `state` answers "was this key
+                # written somewhere on this path", which stays true across a
+                # stream-replacing node because #154's state model deliberately
+                # says so. `writers` is cleared of document-scoped keys at such a
+                # node, so it answers the question this rule actually needs:
+                # does a writer exist whose value THESE documents still carry.
+                #
+                # With `state` the check was fail-open for a value written
+                # before a replacement and appended to after it — the new
+                # documents carry nothing, so the composed path is the appended
+                # fragment alone and the request addresses a different resource.
+                # Reusing the clearing that already happens at replacement is
+                # also why this needs no second provenance model.
+                if key not in writers and any(
                     getattr(source, "value_type", None) == "current"
                     for source in getattr(semantic, "source_values", ()) or ()
                 ):
