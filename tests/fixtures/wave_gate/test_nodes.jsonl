@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 10632, "minimum_collected": 10632, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 10633, "minimum_collected": 10633, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -10671,3 +10671,4 @@
 {"kind": "test", "id": "pytest-010670", "node_id": "tests/test_process_ir_semantic_lineage.py::test_two_refs_naming_DIFFERENT_profile_components_still_mismatch[$ref:PROF_OTHER-$ref:PROF-writer names a different component]", "state": "active"}
 {"kind": "test", "id": "pytest-010671", "node_id": "tests/test_process_ir_semantic_lineage.py::test_two_refs_naming_one_profile_component_agree[$ref:PROF-$ref:PROF_ALIAS]", "state": "active"}
 {"kind": "test", "id": "pytest-010672", "node_id": "tests/test_process_ir_semantic_lineage.py::test_two_refs_naming_one_profile_component_agree[$ref:PROF_ALIAS-$ref:PROF]", "state": "active"}
+{"kind": "test", "id": "pytest-010673", "node_id": "tests/test_process_ir_semantic_lineage.py::test_the_served_current_description_states_the_rule_at_the_scope_it_holds", "state": "active"}

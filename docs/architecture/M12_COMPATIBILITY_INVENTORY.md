@@ -2825,6 +2825,19 @@ long-standing gaps the hand-list had never carried.
 needed regeneration: unit 4 shifted no census evidence line. Four rebaselines, four distinct served
 surfaces, each verified against its own before/after.
 
+**Unit 6 rebaselined a sixth time, moving SEVEN — and the count is the diagnosis.** Correcting one
+served description on the ProcessIR schema, so that it states the scope at which its rule actually
+holds, moved the five recipe-layer artifacts AND `IntegrationSpecV1` and `recipe_contributions`.
+Those last two embed the ProcessIR schema, which is precisely why they moved here and did not move
+for units 2 and 4: a change to the authoring CONTRACT moves five, a change to the ProcessIR SCHEMA
+moves seven. The set is a reliable read on which surface actually changed, and it was used that way
+rather than accepted as "the inventory moved again".
+
+The schema delta itself is exactly one leaf — the description of the current-value property source —
+measured leaf by leaf rather than inferred from the file differing. `scan_contract` did not move (216
+sources, 0 unscanned assets), no census or ledger evidence line shifted, and no section-11 table
+needed regeneration.
+
 **Unit 5 is the first rebaseline in this slice where `scan_contract` DID move, and the first that
 needed section-11 regenerated.** Two things happened at once and they are recorded separately
 because they have nothing to do with each other.

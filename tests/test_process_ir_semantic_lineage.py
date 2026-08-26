@@ -1347,3 +1347,33 @@ def test_two_refs_naming_DIFFERENT_profile_components_still_mismatch(
 
     codes = _dynpath_codes_aliased([writer, bound, {"kind": "stop"}])
     assert PROCESS_IR_SEMANTIC_DYNAMIC_PATH_PROFILE_BINDING_MISMATCH in codes, (label, codes)
+
+
+def test_the_served_current_description_states_the_rule_at_the_scope_it_holds():
+    """QA-155-r13-02. Served text is machine-facing API and must be true.
+
+    The description said an earlier write is "still required" without
+    qualification. Before this slice that was false everywhere — nothing
+    enforced it. After the bound-path rule it is true at a path binding and
+    false elsewhere, deliberately: an unestablished `current` composes the empty
+    string, which the platform runs and the legacy chain emits, so requiring a
+    writer generally would refuse documents that execute correctly.
+
+    Pinned against the SERVED schema rather than the source docstring, because
+    the served copy is what a caller reads.
+    """
+    import json
+
+    from boomi_mcp.models.process_ir import canonical_process_ir_schema_json
+
+    served = json.loads(canonical_process_ir_schema_json())
+    text = " ".join(
+        served["$defs"]["CurrentPropertySourceV1"]["description"].lower().split()
+    )
+    # It must SCOPE the requirement...
+    assert "request path" in text
+    assert "path binding" in text
+    # ...and say what holds elsewhere, so a caller is not left inferring it.
+    assert "empty string" in text
+    # ...and it must no longer assert the requirement without qualification.
+    assert "lineage validation still requires an earlier write" not in text

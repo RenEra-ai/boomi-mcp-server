@@ -813,8 +813,16 @@ class CurrentPropertySourceV1(_ProcessIRBase):
     Carries no payload — the value is whatever the property already holds at
     this point on the path. Combined with other sources in ``source_values``, it
     is how a set-property step appends to, rather than replaces, what an earlier
-    write established. Because it READS the property, lineage validation still
-    requires an earlier write on the same path to establish it.
+    write established.
+
+    It READS the property, so an earlier write on the same path is required
+    WHERE THE COMPOSED VALUE BECOMES A REQUEST PATH — a connector path binding
+    naming this property. Elsewhere no write is required, and that is not an
+    oversight: with nothing established the value is the empty string, which the
+    platform runs and which the legacy chain emits, so demanding a writer would
+    refuse documents that execute correctly. As a request path the same empty
+    value addresses a different resource instead of failing, which is why the
+    bound case is strict.
     """
 
     value_type: Literal["current"]
