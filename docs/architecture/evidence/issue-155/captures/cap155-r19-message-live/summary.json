@@ -1,0 +1,79 @@
+{
+ "freeze": "2c1c9c78746e/clean/66651006a19d",
+ "account": "traininghlibbochkarov-JKIY2X",
+ "authored_at": "1fe3840 (pre-rule tree)",
+ "MESSAGE": {
+  "compiled": true,
+  "applied": true,
+  "process_component_id": "ce0f85a7-4bbf-4684-ad34-5f619c95a096",
+  "deployment_id": "bdbc173b-d92c-43f2-9724-f6f1e947b27c",
+  "package_id": "bbc7fdd6-4b55-4a27-b41d-3b52954a55ac",
+  "execution_status": "COMPLETE",
+  "execution_id": "execution-11a7b757-5104-4bfa-8dac-0f9292a32656-2026.08.26",
+  "unique_key": "ZSMG22",
+  "mock_lines_carrying_the_unique_value": [
+   "INFO:     192.168.65.1:24453 - \"GET /admin/cdscm/api/v1/clients/ZSMG22 HTTP/1.1\" 404 Not Found"
+  ],
+  "ALL_requests_in_this_execution_window": [
+   "INFO:     192.168.65.1:34242 - \"GET / HTTP/1.1\" 404 Not Found",
+   "INFO:     192.168.65.1:24453 - \"GET /admin/cdscm/api/v1/clients/ZSMG22 HTTP/1.1\" 404 Not Found"
+  ],
+  "value_reached_the_wire": true,
+  "error_details": null,
+  "note": "message (in-run control, r16 said SURVIVES)"
+ },
+ "CTLPLAIN": {
+  "compiled": true,
+  "applied": true,
+  "process_component_id": "5776c6b4-2815-4534-92ab-d59e85532db2",
+  "deployment_id": "4957aee6-7ac5-410d-a076-8be8ac700f4a",
+  "package_id": "a33e3112-555f-42d7-85c2-bf639125a43a",
+  "execution_status": "COMPLETE",
+  "execution_id": "execution-e9c10770-a292-4e6d-ac27-b77c4d78aae9-2026.08.26",
+  "unique_key": "ZSCP21",
+  "mock_lines_carrying_the_unique_value": [
+   "INFO:     192.168.65.1:37443 - \"GET /admin/cdscm/api/v1/clients/ZSCP21 HTTP/1.1\" 404 Not Found"
+  ],
+  "ALL_requests_in_this_execution_window": [
+   "INFO:     192.168.65.1:60362 - \"GET / HTTP/1.1\" 404 Not Found",
+   "INFO:     192.168.65.1:37443 - \"GET /admin/cdscm/api/v1/clients/ZSCP21 HTTP/1.1\" 404 Not Found"
+  ],
+  "value_reached_the_wire": true,
+  "error_details": null,
+  "note": "no replacing step (instrument control)"
+ },
+ "SPLIT": {
+  "compiled": false,
+  "codes": [
+   "PROCESS_IR_SEMANTIC_DYNAMIC_PATH_DDP_NOT_ESTABLISHED"
+  ]
+ },
+ "CACHEGET": {
+  "compiled": false,
+  "codes": [
+   "PROCESS_IR_SEMANTIC_DYNAMIC_PATH_DDP_NOT_ESTABLISHED"
+  ]
+ },
+ "created_components": [
+  {
+   "component_id": "00d0bfb6-ad1a-4cb6-8e42-cfbe0874d069",
+   "name": "_TEST_155A_RT_PATCH_20260826214505",
+   "type": "connector-action"
+  },
+  {
+   "component_id": "972a85a1-1256-4039-93bc-1fbb4687e395",
+   "name": "_TEST_155A_RT_rp_20260826214505",
+   "type": "profile.json"
+  },
+  {
+   "component_id": "ce0f85a7-4bbf-4684-ad34-5f619c95a096",
+   "name": "_TEST_155A_RT_MESSAGE_20260826214505",
+   "type": "process"
+  },
+  {
+   "component_id": "5776c6b4-2815-4534-92ab-d59e85532db2",
+   "name": "_TEST_155A_RT_CTLPLAIN_20260826214505",
+   "type": "process"
+  }
+ ]
+}

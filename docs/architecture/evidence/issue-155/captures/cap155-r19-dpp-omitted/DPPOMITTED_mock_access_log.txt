@@ -1,0 +1,2 @@
+INFO:     192.168.65.1:44971 - "GET / HTTP/1.1" 404 Not Found
+INFO:     192.168.65.1:59129 - "GET /admin/cdscm/api/v1/clients/ HTTP/1.1" 307 Temporary Redirect

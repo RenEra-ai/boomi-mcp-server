@@ -1,0 +1,64 @@
+{
+ "freeze": "2c1c9c78746e/clean/66651006a19d",
+ "account": "traininghlibbochkarov-JKIY2X",
+ "authored_at": "1fe3840 (pre-rule tree)",
+ "DPPSUPPLIED": {
+  "compiled": true,
+  "applied": true,
+  "process_component_id": "78f60e16-b15d-471b-9fd4-1c39437b439a",
+  "deployment_id": "86f7f6d6-0f8c-4ffc-b0f1-9aeaf96c8238",
+  "package_id": "8201371c-670d-4c85-9e81-39015ccf20ca",
+  "execution_status": "COMPLETE",
+  "execution_id": "execution-70de1c81-e6e1-45fd-b172-a93d04048e75-2026.08.26",
+  "unique_key": "ZVDP31",
+  "mock_lines_carrying_the_unique_value": [
+   "INFO:     192.168.65.1:19011 - \"GET /admin/cdscm/api/v1/clients/ZVDP31 HTTP/1.1\" 404 Not Found"
+  ],
+  "ALL_requests_in_this_execution_window": [
+   "INFO:     192.168.65.1:17273 - \"GET / HTTP/1.1\" 404 Not Found",
+   "INFO:     192.168.65.1:19011 - \"GET /admin/cdscm/api/v1/clients/ZVDP31 HTTP/1.1\" 404 Not Found"
+  ],
+  "value_reached_the_wire": true,
+  "error_details": null,
+  "note": "dpp supplied at execute (the shape the text describes)"
+ },
+ "DPPOMITTED": {
+  "compiled": true,
+  "applied": true,
+  "process_component_id": "23b0d478-7e1c-4883-a96d-146ce96822be",
+  "deployment_id": "1cdc3b5b-812c-459c-b30c-d33a317d14a9",
+  "package_id": "eefc74e2-8b7e-4d5c-a818-0b1a7efe5d1f",
+  "execution_status": "COMPLETE",
+  "execution_id": "execution-1cfa6695-7524-4da8-9a96-b69bf7834e95-2026.08.26",
+  "unique_key": null,
+  "mock_lines_carrying_the_unique_value": [],
+  "ALL_requests_in_this_execution_window": [
+   "INFO:     192.168.65.1:44971 - \"GET / HTTP/1.1\" 404 Not Found"
+  ],
+  "value_reached_the_wire": false,
+  "error_details": null,
+  "note": "dpp OMITTED at execute \u2014 does the path go to the bare prefix?"
+ },
+ "created_components": [
+  {
+   "component_id": "0cba8898-a2c0-4abd-81ed-fd80302f593f",
+   "name": "_TEST_155A_RV_PATCH_20260826215449",
+   "type": "connector-action"
+  },
+  {
+   "component_id": "9edfc513-938c-4d60-a7a7-678e6bcc74ab",
+   "name": "_TEST_155A_RV_rp_20260826215449",
+   "type": "profile.json"
+  },
+  {
+   "component_id": "78f60e16-b15d-471b-9fd4-1c39437b439a",
+   "name": "_TEST_155A_RV_DPPSUPPLIED_20260826215449",
+   "type": "process"
+  },
+  {
+   "component_id": "23b0d478-7e1c-4883-a96d-146ce96822be",
+   "name": "_TEST_155A_RV_DPPOMITTED_20260826215449",
+   "type": "process"
+  }
+ ]
+}

@@ -1673,11 +1673,21 @@ def test_the_public_names_do_not_collide():
 
 
 def test_every_published_action_row_carries_the_joined_family_fields():
-    """The join actually happens — the point of the whole table.
+    """The join actually happens, and carries the right VALUE for the right row.
 
     Without this, the map could be total and injective and still never reach a
     caller, which is the shape of defect this slice has already hit once at the
     served surface.
+
+    Asserting only that the KEY is present is not enough, and that was this
+    test's first form: QA gutted the joined value to a constant and all four
+    family tests stayed green. The only thing that fired was the frozen
+    contract snapshot, which by its own docstring cannot say whether a value is
+    TRUE — it just forces a reviewable diff. That left a served value's sole
+    protection as a human reading a snapshot, so a wrong value landing beside a
+    regenerated snapshot would pass. The value is checked against the FAMILY'S
+    OWN capability row, which pins correct-row-ness at the same time: a join
+    that attached the right shape to the wrong family fails here too.
     """
     _families, _model, public, rows = _family_capability_symbols()
 
@@ -1686,6 +1696,15 @@ def test_every_published_action_row_carries_the_joined_family_fields():
     for name in public.values():
         missing = [r for r in published if name not in r]
         assert not missing, (name, [r.get("family") for r in missing[:3]])
+
+    for field, name in public.items():
+        for row in published:
+            expected = getattr(_families[row["family"]], field)
+            assert row[name] == list(expected), (row["family"], field, row[name], expected)
+
+    # Non-vacuity: at least one published row must carry a NON-EMPTY joined
+    # value, or every assertion above is satisfied by emptiness.
+    assert any(row[name] for name in public.values() for row in published), published[:2]
 
 
 def test_the_rest_family_is_the_only_one_declaring_a_bindable_location():
