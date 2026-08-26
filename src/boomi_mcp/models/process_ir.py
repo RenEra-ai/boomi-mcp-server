@@ -53,12 +53,14 @@ from collections.abc import (
 from types import MappingProxyType
 from typing import (
     Any,
+    ForwardRef,
     FrozenSet,
     List,
     Literal,
     Mapping,
     Optional,
     Tuple,
+    TypeVar,
     Union,
     get_args,
     get_origin,
@@ -359,6 +361,20 @@ def _annotation_mentions_component_ref(annotation, _seen=()) -> bool:
     return False
 
 
+def _is_unreasonable_annotation(annotation) -> bool:
+    """Is this annotation one the guard can draw no conclusion from?
+
+    Refused rather than passed, because passing it is the failure mode: the
+    field then carries whatever a use site or a later resolution decides, and
+    the walk steps past a reference without anyone noticing.
+    """
+    if isinstance(annotation, TypeVar):
+        return True
+    if isinstance(annotation, ForwardRef):
+        return True
+    return annotation is Any
+
+
 def _is_container_class_annotation(annotation) -> bool:
     """Is this annotation a NON-GENERIC container class?
 
@@ -386,6 +402,34 @@ def _is_container_class_annotation(annotation) -> bool:
     return issubclass(annotation, _ABCCollection)
 
 
+def models_reachable_by_the_reference_walk(*roots):
+    """Every model the reference walk can reach from ``roots``, transitively.
+
+    The guard's universe is DERIVED from the walk's own reachability rather than
+    from a snapshot of a module's contents. QA's counterexamples to the earlier
+    design were both universe failures rather than logic failures — a shape the
+    guard's rules would have refused, sitting on a model the guard never looked
+    at — and a module snapshot has two independent ways to be wrong: it includes
+    foreign models that happen to be imported (the framework's own base class
+    among them) and it excludes any model reached from elsewhere.
+
+    Reachability is the property that actually matters: a model the walk cannot
+    reach cannot contribute a reference to any served answer, and one it can
+    reach must be checked wherever it was defined.
+    """
+    seen, pending = [], list(roots)
+    while pending:
+        current = pending.pop()
+        if not (isinstance(current, type) and issubclass(current, BaseModel)):
+            continue
+        if current in seen:
+            continue
+        seen.append(current)
+        for field_info in current.model_fields.values():
+            pending.extend(_models_reachable_from(getattr(field_info, "annotation", None)))
+    return tuple(seen)
+
+
 def assert_component_refs_are_declared_in_supported_shapes(models) -> None:
     """Refuse any model that declares a reference in a shape the walk mis-serves.
 
@@ -405,7 +449,19 @@ def assert_component_refs_are_declared_in_supported_shapes(models) -> None:
         for name, field_info in getattr(model, "model_fields", {}).items():
             annotation = getattr(field_info, "annotation", None)
             where = "{0}.{1}: {2!r}".format(model.__name__, name, annotation)
-            # The SHAPE rule first, and it asks nothing about references: a
+            # An annotation the guard cannot REASON about at all is refused
+            # before any rule is applied to it. QA produced two: an unbound type
+            # variable, whose real type is chosen at a use site this guard never
+            # sees, and a whole annotation still held as a forward reference,
+            # which happens while a model is incomplete because its referent did
+            # not exist yet. `Any` joins them because it asserts nothing — a
+            # field declared that way could hold a reference the walk would step
+            # straight past. None of the three occurs today (measured); refusing
+            # them keeps the guard's remaining rules total over what is left.
+            if _is_unreasonable_annotation(annotation):
+                offenders.append(where)
+                continue
+            # The SHAPE rule next, and it asks nothing about references: a
             # non-generic container is refused outright, so the guard never has
             # to read member annotations it cannot resolve.
             if _is_container_class_annotation(annotation):

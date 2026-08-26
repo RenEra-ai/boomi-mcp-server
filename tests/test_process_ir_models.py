@@ -2192,24 +2192,36 @@ def test_no_model_declares_a_reference_in_an_unsupported_shape():
 
     from boomi_mcp.models import process_ir as ir_models
     from boomi_mcp.models.process_ir import (
+        ProcessIRV1,
         assert_component_refs_are_declared_in_supported_shapes,
+        models_reachable_by_the_reference_walk,
     )
 
-    models = [
-        obj
-        for obj in vars(ir_models).values()
-        if isinstance(obj, type) and issubclass(obj, BaseModel)
-    ]
-    # Non-vacuity: the guard would pass over an empty list, and it must be
-    # asserted that it actually saw the models carrying references.
-    assert len(models) > 30, len(models)
-    carriers = [
-        m for m in models
-        if any(_is_ref(f) for f in m.model_fields.values())
-    ]
+    reachable = models_reachable_by_the_reference_walk(ProcessIRV1)
+
+    # Non-vacuity: the guard passes trivially over an empty universe, so the
+    # universe is asserted to contain the models that actually carry references.
+    assert len(reachable) > 30, len(reachable)
+    carriers = [m for m in reachable if any(_is_ref(f) for f in m.model_fields.values())]
     assert len(carriers) >= 8, [m.__name__ for m in carriers]
 
-    assert_component_refs_are_declared_in_supported_shapes(models)
+    assert_component_refs_are_declared_in_supported_shapes(reachable)
+
+    # ...and the derived universe must not be SMALLER than the module's own
+    # models where it matters: every model in this module that carries a
+    # reference must be reachable from the root. A model the walk cannot reach
+    # contributes to no served answer; one it can reach and the guard misses is
+    # exactly the universe failure this derivation replaced a snapshot to avoid.
+    in_module = [
+        obj
+        for obj in vars(ir_models).values()
+        if isinstance(obj, type)
+        and issubclass(obj, BaseModel)
+        and obj.__module__ == ir_models.__name__
+        and any(_is_ref(f) for f in obj.model_fields.values())
+    ]
+    unreachable = [m.__name__ for m in in_module if m not in reachable]
+    assert not unreachable, unreachable
 
 
 @pytest.mark.parametrize(
@@ -2429,3 +2441,75 @@ def test_an_arbitrary_class_cannot_carry_a_reference_past_the_models():
             held: _Holder
 
     assert "arbitrary_types_allowed" in str(excinfo.value)
+
+
+@pytest.mark.parametrize("label", ["type_variable", "forward_reference", "any"])
+def test_the_guard_refuses_an_annotation_it_cannot_reason_about(label):
+    """QA-155-r11-01: the two counterexamples to the trichotomy, plus `Any`.
+
+    I claimed a field annotation here could only be a bare class, a generic
+    alias or an annotated type, each closed by its own mechanism. QA refuted it
+    with two stored annotation kinds that are none of the three and were passed
+    silently: an unbound type variable, whose real type is chosen at a use site
+    the guard never sees, and a whole annotation still held as a forward
+    reference, which is what a model stores while it is incomplete because its
+    referent did not exist yet. `Any` is added on the same reasoning — it is a
+    class, so it slipped through as kind one while asserting nothing at all.
+
+    None occurs in the models today. They are refused so that the guard's other
+    rules are total over what remains, rather than silently inapplicable.
+    """
+    from typing import Any, ForwardRef, TypeVar
+
+    from pydantic.fields import FieldInfo
+
+    from boomi_mcp.models.process_ir import (
+        StopNodeV1,
+        assert_component_refs_are_declared_in_supported_shapes,
+    )
+
+    annotation = {
+        "type_variable": TypeVar("T"),
+        "forward_reference": ForwardRef("Optional[List[Later]]"),
+        "any": Any,
+    }[label]
+
+    class _Planted(StopNodeV1):
+        pass
+
+    planted = FieldInfo.from_annotation(str)
+    planted.annotation = annotation
+    _Planted.model_fields = dict(StopNodeV1.model_fields, planted=planted)
+
+    with pytest.raises(TypeError, match="component references must be declared"):
+        assert_component_refs_are_declared_in_supported_shapes([_Planted])
+
+
+def test_the_guard_universe_is_derived_from_reachability_not_a_snapshot():
+    """Both counterexamples were UNIVERSE failures, not logic failures.
+
+    A module snapshot is wrong in two independent ways: it sweeps in foreign
+    models that merely happen to be imported — the framework's own base class
+    among them, which is permanently incomplete and would now be refused — and
+    it misses any model reached from somewhere else. Reachability from the root
+    is the property that matters, since a model the walk cannot reach cannot
+    contribute a reference to a served answer.
+    """
+    from pydantic import BaseModel
+
+    from boomi_mcp.models.process_ir import (
+        ProcessIRV1,
+        StopNodeV1,
+        models_reachable_by_the_reference_walk,
+    )
+
+    reachable = models_reachable_by_the_reference_walk(ProcessIRV1)
+
+    assert ProcessIRV1 in reachable
+    assert StopNodeV1 in reachable
+    # The framework's base is NOT swept in by reachability, though a snapshot of
+    # the module's contents does contain it.
+    assert BaseModel not in reachable
+    # Reachability is transitive, not one level: a node's nested body models are
+    # included, or the guard would check only the root's own fields.
+    assert len(reachable) > 30, len(reachable)
