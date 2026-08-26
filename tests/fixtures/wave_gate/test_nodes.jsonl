@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 10583, "minimum_collected": 10583, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 10597, "minimum_collected": 10597, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -10616,9 +10616,23 @@
 {"kind": "test", "id": "pytest-010615", "node_id": "tests/test_process_ir_models.py::test_every_admitted_reference_shape_is_also_walkable[set-Set[ComponentRefV1]-value4]", "state": "active"}
 {"kind": "test", "id": "pytest-010616", "node_id": "tests/test_process_ir_models.py::test_every_admitted_reference_shape_is_also_walkable[frozenset-FrozenSet[ComponentRefV1]-value5]", "state": "active"}
 {"kind": "test", "id": "pytest-010617", "node_id": "tests/test_process_ir_models.py::test_every_admitted_reference_shape_is_also_walkable[sequence-Sequence[ComponentRefV1]-value6]", "state": "active"}
-{"kind": "test", "id": "pytest-010618", "node_id": "tests/test_process_ir_models.py::test_every_admitted_reference_shape_is_also_walkable[iterable-Iterable[ComponentRefV1]-value7]", "state": "active"}
-{"kind": "test", "id": "pytest-010619", "node_id": "tests/test_process_ir_models.py::test_every_admitted_reference_shape_is_also_walkable[optional_tuple-Optional[Tuple[ComponentRefV1, ...]]-value8]", "state": "active"}
-{"kind": "test", "id": "pytest-010620", "node_id": "tests/test_process_ir_models.py::test_every_admitted_reference_shape_is_also_walkable[optional_sequence-Optional[Sequence[ComponentRefV1]]-value9]", "state": "active"}
-{"kind": "test", "id": "pytest-010621", "node_id": "tests/test_process_ir_models.py::test_a_shape_the_walk_cannot_resolve_is_not_admitted[Tuple[Tuple[ComponentRefV1, ...], ...]]", "state": "active"}
-{"kind": "test", "id": "pytest-010622", "node_id": "tests/test_process_ir_models.py::test_a_shape_the_walk_cannot_resolve_is_not_admitted[Dict[str, ComponentRefV1]]", "state": "active"}
-{"kind": "test", "id": "pytest-010623", "node_id": "tests/test_process_ir_models.py::test_a_shape_the_walk_cannot_resolve_is_not_admitted[Mapping[str, ComponentRefV1]]", "state": "active"}
+{"kind": "test", "id": "pytest-010618", "node_id": "tests/test_process_ir_models.py::test_every_admitted_reference_shape_is_also_walkable[optional_tuple-Optional[Tuple[ComponentRefV1, ...]]-value8]", "state": "active"}
+{"kind": "test", "id": "pytest-010619", "node_id": "tests/test_process_ir_models.py::test_every_admitted_reference_shape_is_also_walkable[optional_sequence-Optional[Sequence[ComponentRefV1]]-value9]", "state": "active"}
+{"kind": "test", "id": "pytest-010620", "node_id": "tests/test_process_ir_models.py::test_a_shape_the_walk_cannot_resolve_is_not_admitted[Tuple[Tuple[ComponentRefV1, ...], ...]]", "state": "active"}
+{"kind": "test", "id": "pytest-010621", "node_id": "tests/test_process_ir_models.py::test_a_shape_the_walk_cannot_resolve_is_not_admitted[Dict[str, ComponentRefV1]]", "state": "active"}
+{"kind": "test", "id": "pytest-010622", "node_id": "tests/test_process_ir_models.py::test_a_shape_the_walk_cannot_resolve_is_not_admitted[Mapping[str, ComponentRefV1]]", "state": "active"}
+{"kind": "test", "id": "pytest-010623", "node_id": "tests/test_process_ir_models.py::test_a_named_tuple_of_references_is_recognised_and_walked", "state": "active"}
+{"kind": "test", "id": "pytest-010624", "node_id": "tests/test_process_ir_models.py::test_a_named_tuple_that_is_not_all_references_is_refused", "state": "active"}
+{"kind": "test", "id": "pytest-010625", "node_id": "tests/test_process_ir_models.py::test_a_one_shot_value_is_refused_by_the_value_side_too", "state": "active"}
+{"kind": "test", "id": "pytest-010626", "node_id": "tests/test_process_ir_models.py::test_a_shape_the_walk_cannot_resolve_is_not_admitted[Iterable[ComponentRefV1]]", "state": "active"}
+{"kind": "test", "id": "pytest-010627", "node_id": "tests/test_process_ir_models.py::test_an_admitted_reference_field_survives_being_read[bare-ComponentRefV1-$ref:A]", "state": "active"}
+{"kind": "test", "id": "pytest-010628", "node_id": "tests/test_process_ir_models.py::test_an_admitted_reference_field_survives_being_read[deque-Deque[ComponentRefV1]-value7]", "state": "active"}
+{"kind": "test", "id": "pytest-010629", "node_id": "tests/test_process_ir_models.py::test_an_admitted_reference_field_survives_being_read[frozenset-FrozenSet[ComponentRefV1]-value5]", "state": "active"}
+{"kind": "test", "id": "pytest-010630", "node_id": "tests/test_process_ir_models.py::test_an_admitted_reference_field_survives_being_read[list-List[ComponentRefV1]-value3]", "state": "active"}
+{"kind": "test", "id": "pytest-010631", "node_id": "tests/test_process_ir_models.py::test_an_admitted_reference_field_survives_being_read[optional-Optional[ComponentRefV1]-$ref:A]", "state": "active"}
+{"kind": "test", "id": "pytest-010632", "node_id": "tests/test_process_ir_models.py::test_an_admitted_reference_field_survives_being_read[optional_sequence-Optional[Sequence[ComponentRefV1]]-value9]", "state": "active"}
+{"kind": "test", "id": "pytest-010633", "node_id": "tests/test_process_ir_models.py::test_an_admitted_reference_field_survives_being_read[optional_tuple-Optional[Tuple[ComponentRefV1, ...]]-value8]", "state": "active"}
+{"kind": "test", "id": "pytest-010634", "node_id": "tests/test_process_ir_models.py::test_an_admitted_reference_field_survives_being_read[sequence-Sequence[ComponentRefV1]-value6]", "state": "active"}
+{"kind": "test", "id": "pytest-010635", "node_id": "tests/test_process_ir_models.py::test_an_admitted_reference_field_survives_being_read[set-Set[ComponentRefV1]-value4]", "state": "active"}
+{"kind": "test", "id": "pytest-010636", "node_id": "tests/test_process_ir_models.py::test_an_admitted_reference_field_survives_being_read[tuple-Tuple[ComponentRefV1, ...]-value2]", "state": "active"}
+{"kind": "test", "id": "pytest-010637", "node_id": "tests/test_process_ir_models.py::test_every_admitted_reference_shape_is_also_walkable[deque-Deque[ComponentRefV1]-value7]", "state": "active"}

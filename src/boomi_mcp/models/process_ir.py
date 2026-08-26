@@ -45,7 +45,7 @@ branch leg bounds). CFG-aware semantics (reachability, lineage) stay with
 from __future__ import annotations
 
 import json
-from collections.abc import Iterable as _ABCIterable, Mapping as _ABCMapping
+from collections.abc import Collection as _ABCCollection, Mapping as _ABCMapping
 from types import MappingProxyType
 from typing import (
     Any,
@@ -301,7 +301,19 @@ def _is_component_ref_field(field_info) -> bool:
         if len(arms) != 1:
             return False
         annotation = arms[0]
-    if not _is_walkable_collection_origin(get_origin(annotation)):
+    origin = get_origin(annotation)
+    if origin is None:
+        # A NON-GENERIC container states its member types on itself. A
+        # `NamedTuple` is the case that occurs: it reports no origin, so the
+        # generic path above sees nothing, yet a value of it IS a tuple the
+        # walk iterates. Reading the type's own annotations is reading ITS
+        # authority — the same move as reading `get_args` from a generic — not
+        # a hand-model of which containers exist.
+        hints = getattr(annotation, "__annotations__", None)
+        if not (isinstance(annotation, type) and hints and issubclass(annotation, tuple)):
+            return False
+        return all(_annotation_is_component_ref(hint) for hint in hints.values())
+    if not _is_walkable_collection_origin(origin):
         return False
     arms = [arm for arm in get_args(annotation) if arm is not Ellipsis]
     # Homogeneous only. A heterogeneous tuple would make "the field is a
@@ -345,12 +357,21 @@ def _is_walkable_collection_origin(origin) -> bool:
     because iterating one yields keys; the walk excludes both for the same
     reason, so the two sides now answer the same question. Their agreement is
     pinned per admitted shape by a test rather than asserted here.
+
+    The floor is COLLECTION, not iterable, and that one level matters: pydantic
+    validates an ``Iterable[...]`` field to a LAZY iterator, so walking such a
+    field consumes it. There are four consumers of the walk — the first would
+    win and the other three would see an empty field — and reading would MUTATE
+    the document, which nothing detects because the exhausted value is still
+    iterable. A collection is sized and re-iterable by contract, which is the
+    property actually required here; QA measured the two floors against real
+    re-iterability and only the iterable floor admitted a shape that fails it.
     """
     if not isinstance(origin, type):
         return False
     if issubclass(origin, (str, bytes, bytearray)) or issubclass(origin, _ABCMapping):
         return False
-    return issubclass(origin, _ABCIterable)
+    return issubclass(origin, _ABCCollection)
 
 
 def _is_walkable_collection_value(value) -> bool:
@@ -363,7 +384,7 @@ def _is_walkable_collection_value(value) -> bool:
     """
     if isinstance(value, (str, bytes, bytearray)) or isinstance(value, _ABCMapping):
         return False
-    return isinstance(value, _ABCIterable)
+    return isinstance(value, _ABCCollection)
 
 
 def iter_component_refs(node: Any, path: str = ""):

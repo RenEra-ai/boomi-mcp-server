@@ -1787,7 +1787,7 @@ _REF_SHAPES = [
     ("set", "Set[ComponentRefV1]", {"$ref:A"}),
     ("frozenset", "FrozenSet[ComponentRefV1]", frozenset({"$ref:A"})),
     ("sequence", "Sequence[ComponentRefV1]", ["$ref:A"]),
-    ("iterable", "Iterable[ComponentRefV1]", ["$ref:A"]),
+    ("deque", "Deque[ComponentRefV1]", ["$ref:A"]),
     ("optional_tuple", "Optional[Tuple[ComponentRefV1, ...]]", ("$ref:A",)),
     ("optional_sequence", "Optional[Sequence[ComponentRefV1]]", ["$ref:A"]),
 ]
@@ -1844,6 +1844,10 @@ def test_every_admitted_reference_shape_is_also_walkable(label, annotation_src, 
         "Tuple[Tuple[ComponentRefV1, ...], ...]",
         "Dict[str, ComponentRefV1]",
         "Mapping[str, ComponentRefV1]",
+        # Pydantic validates this one to a LAZY iterator, so the walk would
+        # consume it — see the re-iterability test below for why that is worse
+        # than not recognising it at all.
+        "Iterable[ComponentRefV1]",
     ],
 )
 def test_a_shape_the_walk_cannot_resolve_is_not_admitted(annotation_src):
@@ -1887,3 +1891,135 @@ def test_the_widening_did_not_admit_a_shape_that_is_not_a_reference():
         Union[ComponentRefV1, int],
     ):
         assert not _is_component_ref_field(FieldInfo.from_annotation(annotation)), annotation
+
+
+@pytest.mark.parametrize("label, annotation_src, value", _REF_SHAPES)
+def test_an_admitted_reference_field_survives_being_read(label, annotation_src, value):
+    """QA-155-r8-01: the walk must not CONSUME the document it reads.
+
+    This is why the container floor is `Collection` and not `Iterable`. Pydantic
+    validates an `Iterable[...]` field to a lazy iterator, so the first of the
+    four consumers of this walk would drain it and the other three would see an
+    empty field — and the read would MUTATE the document, with nothing to
+    detect it, because an exhausted iterator is still iterable.
+
+    A collection is re-iterable by contract, so the property is asserted the
+    only way it can be: read the same field four times and require the same
+    answer. Reading once would pass on the broken tree.
+    """
+    import typing
+
+    from pydantic.fields import FieldInfo
+
+    from boomi_mcp.models.process_ir import (
+        ComponentRefV1,
+        StopNodeV1,
+        iter_component_refs,
+    )
+
+    namespace = dict(vars(typing))
+    namespace["ComponentRefV1"] = ComponentRefV1
+    annotation = eval(annotation_src, namespace)  # noqa: S307 - fixed table above
+
+    node = StopNodeV1.model_construct(kind="stop")
+    object.__setattr__(node, "planted", value)
+    fields = dict(StopNodeV1.model_fields)
+    fields["planted"] = FieldInfo.from_annotation(annotation)
+    try:
+        StopNodeV1.model_fields = fields
+        reads = [{ref for _p, ref in iter_component_refs(node)} for _ in range(4)]
+    finally:
+        StopNodeV1.model_fields = {k: v for k, v in fields.items() if k != "planted"}
+
+    expected = {value} if isinstance(value, str) else set(value)
+    assert reads == [expected] * 4, (label, reads)
+
+
+def test_a_one_shot_value_is_refused_by_the_value_side_too():
+    """The value-domain half of the same floor.
+
+    The annotation side cannot catch everything — a field typed as a collection
+    could still be handed a generator by `model_construct`, which performs no
+    validation. Both spellings therefore carry the floor, and this pins the one
+    that has no annotation to consult.
+    """
+    from boomi_mcp.models.process_ir import _is_walkable_collection_value
+
+    for admitted in (["a"], ("a",), {"a"}, frozenset({"a"})):
+        assert _is_walkable_collection_value(admitted), admitted
+    for refused in ((x for x in "ab"), iter(["a"]), "abc", b"ab", {"a": 1}):
+        assert not _is_walkable_collection_value(refused), refused
+
+
+def test_a_named_tuple_of_references_is_recognised_and_walked():
+    """QA-155-r8-02: refused although walkable — now closed, not recorded.
+
+    I first wrote this down as a limitation, on the reasoning that closing it
+    meant special-casing a non-generic container and that special cases are the
+    class this predicate had just stopped carrying. Measuring the claim killed
+    it: a `NamedTuple` states its member types in its own `__annotations__`,
+    agreeing with `_fields`, so reading them is reading THAT TYPE's authority —
+    exactly what `get_args` does for a generic. The limitation's stated reason
+    was wrong, so the limitation went rather than the reason being reworded.
+
+    Both halves are asserted, because admitting the shape is only correct if
+    the walk then resolves it: a named tuple IS a tuple, so it does.
+    """
+    from typing import NamedTuple
+
+    from pydantic.fields import FieldInfo
+
+    from boomi_mcp.models.process_ir import (
+        ComponentRefV1,
+        StopNodeV1,
+        _is_component_ref_field,
+        iter_component_refs,
+    )
+
+    class _RefPair(NamedTuple):
+        first: ComponentRefV1
+        second: ComponentRefV1
+
+    assert _is_component_ref_field(FieldInfo.from_annotation(_RefPair))
+
+    node = StopNodeV1.model_construct(kind="stop")
+    object.__setattr__(node, "planted", _RefPair("$ref:A", "$ref:B"))
+    fields = dict(StopNodeV1.model_fields)
+    fields["planted"] = FieldInfo.from_annotation(_RefPair)
+    try:
+        StopNodeV1.model_fields = fields
+        reads = [{ref for _p, ref in iter_component_refs(node)} for _ in range(3)]
+    finally:
+        StopNodeV1.model_fields = {k: v for k, v in fields.items() if k != "planted"}
+    assert reads == [{"$ref:A", "$ref:B"}] * 3, reads
+
+
+def test_a_named_tuple_that_is_not_all_references_is_refused():
+    """The over-fire control for the shape above.
+
+    Homogeneity is required here for the same reason it is for a tuple: the
+    walk yields per element with no way to tell a reference position from a
+    plain one. A named tuple mixing the two, and one holding none, are both
+    refused.
+    """
+    from typing import NamedTuple
+
+    from pydantic.fields import FieldInfo
+
+    from boomi_mcp.models.process_ir import ComponentRefV1, _is_component_ref_field
+
+    class _Mixed(NamedTuple):
+        first: ComponentRefV1
+        second: str
+
+    class _Plain(NamedTuple):
+        a: str
+        b: int
+
+    assert not _is_component_ref_field(FieldInfo.from_annotation(_Mixed))
+    assert not _is_component_ref_field(FieldInfo.from_annotation(_Plain))
+    # ...and an ordinary class with annotations is not a container at all.
+    class _NotATuple:
+        __annotations__ = {"ref": ComponentRefV1}
+
+    assert not _is_component_ref_field(FieldInfo.from_annotation(_NotATuple))
