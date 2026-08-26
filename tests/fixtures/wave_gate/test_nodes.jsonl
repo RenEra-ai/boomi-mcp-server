@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 10568, "minimum_collected": 10568, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 10570, "minimum_collected": 10570, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -10607,3 +10607,5 @@
 {"kind": "test", "id": "pytest-010606", "node_id": "tests/test_integration_build_basics_guards.py::test_the_canonical_warning_names_the_process_component_and_is_byte_identical", "state": "active"}
 {"kind": "test", "id": "pytest-010607", "node_id": "tests/test_process_ir_models.py::test_the_property_write_walk_derives_its_models_from_the_shared_validator", "state": "active"}
 {"kind": "test", "id": "pytest-010608", "node_id": "tests/test_process_ir_models.py::test_a_new_property_writing_kind_is_picked_up_with_no_edit", "state": "active"}
+{"kind": "test", "id": "pytest-010609", "node_id": "tests/test_process_ir_models.py::test_a_collection_of_references_is_recognised_and_walked", "state": "active"}
+{"kind": "test", "id": "pytest-010610", "node_id": "tests/test_process_ir_models.py::test_the_widening_did_not_admit_a_shape_that_is_not_a_reference", "state": "active"}

@@ -1731,3 +1731,68 @@ def test_a_new_property_writing_kind_is_picked_up_with_no_edit():
 
     node = _NewWriterNodeV1.model_construct(kind="invented_writer", name="invented.bad")
     assert list(iter_property_writes(node)) == [("/name", "invented.bad")]
+
+
+def test_a_collection_of_references_is_recognised_and_walked():
+    """QA-155-r6-01: the collection branch was unreachable, and said otherwise.
+
+    `iter_component_refs` has always carried a branch for a field holding
+    several references, under a comment promising a future
+    `Tuple[ComponentRefV1, ...]` would need no edit. The predicate answered
+    False for exactly that annotation, so the branch was dead and the promise
+    was false — the same defect as the optional one, one container level over.
+
+    No model field has this shape today, so the witness plants one. Without it
+    the fix is unobservable: every real field is bare or optional, and the suite
+    would stay green with the branch dead again.
+    """
+    from typing import Optional, Tuple
+
+    from pydantic.fields import FieldInfo
+
+    from boomi_mcp.models.process_ir import (
+        ComponentRefV1,
+        StopNodeV1,
+        _is_component_ref_field,
+        iter_component_refs,
+    )
+
+    for annotation in (Tuple[ComponentRefV1, ...], Optional[Tuple[ComponentRefV1, ...]]):
+        assert _is_component_ref_field(FieldInfo.from_annotation(annotation)), annotation
+
+    node = StopNodeV1.model_construct(kind="stop")
+    object.__setattr__(node, "many_refs", ("$ref:A", "$ref:B"))
+    fields = dict(StopNodeV1.model_fields)
+    fields["many_refs"] = FieldInfo.from_annotation(Tuple[ComponentRefV1, ...])
+    try:
+        StopNodeV1.model_fields = fields
+        assert list(iter_component_refs(node)) == [
+            ("/many_refs/0", "$ref:A"),
+            ("/many_refs/1", "$ref:B"),
+        ]
+    finally:
+        StopNodeV1.model_fields = {k: v for k, v in fields.items() if k != "many_refs"}
+
+
+def test_the_widening_did_not_admit_a_shape_that_is_not_a_reference():
+    """The other direction — a predicate that says yes to everything is worse.
+
+    A heterogeneous tuple and a wide union are both refused: in the first the
+    claim would be true of some positions and false of others, and in the second
+    which arm a value took is not a schema fact. Both were reachable regressions
+    of this widening, so both are pinned.
+    """
+    from typing import List, Optional, Tuple, Union
+
+    from pydantic.fields import FieldInfo
+
+    from boomi_mcp.models.process_ir import ComponentRefV1, _is_component_ref_field
+
+    for annotation in (
+        str,
+        Optional[str],
+        List[str],
+        Tuple[ComponentRefV1, str],
+        Union[ComponentRefV1, int],
+    ):
+        assert not _is_component_ref_field(FieldInfo.from_annotation(annotation)), annotation

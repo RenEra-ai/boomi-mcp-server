@@ -1,0 +1,244 @@
+{
+ "_success": true,
+ "action": "compile",
+ "mutation_performed": false,
+ "authoring_result": {
+  "contract_version": "2",
+  "revision_binding": {
+   "contract_version": "2",
+   "schema_revision": "sha256:2c8b0705d220647903fd1f131b6e49793b78a73033f75206a3ad02ae21c9f9de",
+   "capability_revision": "sha256:c02919f9f820ead54a3f2152e641d96ac665ae893e29ea4f7361715b1f91fa27",
+   "compiler_revision": "sha256:f6d7d270200bceff17c11320b1d86bac12de7659843038e78e6a4602937cb022",
+   "account_scope_hash": "sha256:8bd1a7d1668eab242ef0c5fe64cbf58126c193a8482ebb83ab8443a541dba7dd",
+   "semantic_hash": "sha256:ef72568ef620f417605427971f61c282a67a2b62ff2d93766630dc267e279973",
+   "plan_hash": "sha256:5f2035d620197901650a2e9836c222c434db804aa5d4c6f27650e000268a404d",
+   "compile_hash": "sha256:6c624c16230f34f27b709b7958682c980d2099238399569a771b682d9e2822bd"
+  },
+  "mutation_performed": false,
+  "integration_spec_preview": {
+   "version": "1.0",
+   "name": "_TEST_155A_R6_p1_20260826082505",
+   "mode": "lift_shift",
+   "components": [
+    {
+     "key": "conn_rest",
+     "type": "connector-settings",
+     "action": "create",
+     "name": "Sandbox CDS Mock REST (no-auth)",
+     "component_id": null,
+     "config": {
+      "connector_type": "rest",
+      "component_name": "Sandbox CDS Mock REST (no-auth)",
+      "base_url": "http://host.docker.internal:8081",
+      "auth": "NONE"
+     },
+     "depends_on": []
+    },
+    {
+     "key": "op_get",
+     "type": "connector-action",
+     "action": "create",
+     "name": "_QA_FIXTURE_155_blankpath_GET",
+     "component_id": null,
+     "config": {
+      "connector_type": "rest",
+      "operation_mode": "execute",
+      "component_name": "_QA_FIXTURE_155_blankpath_GET",
+      "connection_ref_key": "conn_rest",
+      "method": "GET",
+      "path": "",
+      "path_replacements": [
+       {
+        "name": "key",
+        "target_path": "clientId"
+       }
+      ]
+     },
+     "depends_on": [
+      "conn_rest"
+     ]
+    },
+    {
+     "key": "op_patch",
+     "type": "connector-action",
+     "action": "create",
+     "name": "_TEST_155A_R6_PATCH_20260826082505",
+     "component_id": null,
+     "config": {
+      "connector_type": "rest",
+      "operation_mode": "execute",
+      "component_name": "_TEST_155A_R6_PATCH_20260826082505",
+      "connection_ref_key": "conn_rest",
+      "method": "PATCH",
+      "path": "/admin/cdscm/api/v1/clients/AC-0001"
+     },
+     "depends_on": [
+      "conn_rest"
+     ]
+    }
+   ],
+   "processes": [],
+   "goals": [],
+   "endpoints": [],
+   "flows": [],
+   "naming": {},
+   "folders": {},
+   "runtime": {},
+   "validation_rules": {},
+   "profile_indexes_by_component_id": null,
+   "pipeline": null
+  },
+  "pipeline_stages": [],
+  "process_cfg": [
+   {
+    "component_key": "proc",
+    "node_count": 4,
+    "edge_count": 3,
+    "terminal_kinds": [
+     "stop"
+    ]
+   }
+  ],
+  "component_dependencies": [
+   {
+    "component_key": "op_get",
+    "depends_on": "conn_rest"
+   },
+   {
+    "component_key": "op_patch",
+    "depends_on": "conn_rest"
+   },
+   {
+    "component_key": "proc",
+    "depends_on": "conn_rest"
+   },
+   {
+    "component_key": "proc",
+    "depends_on": "op_get"
+   },
+   {
+    "component_key": "proc",
+    "depends_on": "op_patch"
+   }
+  ],
+  "topology_relations": [],
+  "resolved_references": [
+   {
+    "ref": "$ref:conn_rest",
+    "component_type": "connector-settings",
+    "resolved": true,
+    "component_id": "c4281346-83e9-4026-856d-ede718ec68a0",
+    "version_marker": "2"
+   },
+   {
+    "ref": "$ref:op_get",
+    "component_type": "connector-action",
+    "resolved": true,
+    "component_id": "547becc5-c291-4f6a-a739-a4c845ad4493",
+    "version_marker": "1"
+   },
+   {
+    "ref": "$ref:op_patch",
+    "component_type": "connector-action",
+    "resolved": true,
+    "component_id": null,
+    "version_marker": null
+   },
+   {
+    "ref": "$ref:proc",
+    "component_type": "process",
+    "resolved": true,
+    "component_id": null,
+    "version_marker": null
+   }
+  ],
+  "validation_report": {
+   "is_valid": true,
+   "error_count": 0,
+   "warning_count": 3,
+   "advisory_count": 0,
+   "codes": [
+    "LEGACY_PLAN_WARNING"
+   ]
+  },
+  "errors": [],
+  "warnings": [
+   {
+    "code": "AUTHORING_COMPILE_BLOCKED",
+    "severity": "warning",
+    "path": "",
+    "subject_kind": "component_plan",
+    "subject_id": "",
+    "message": "[FOLDER_REQUIRED_ON_CREATE] Component 'conn_rest' is created with no folder_id or folder_name and would land in the account root. Set a resolved folder so components are organized, never at root.",
+    "remediation": "Review the component-plan lint before applying.",
+    "cause_codes": [
+     "LEGACY_PLAN_WARNING"
+    ],
+    "node_identity": "",
+    "evidence": [],
+    "authoring_contract_entry_ids": []
+   },
+   {
+    "code": "AUTHORING_COMPILE_BLOCKED",
+    "severity": "warning",
+    "path": "",
+    "subject_kind": "component_plan",
+    "subject_id": "",
+    "message": "[FOLDER_REQUIRED_ON_CREATE] Component 'op_get' is created with no folder_id or folder_name and would land in the account root. Set a resolved folder so components are organized, never at root.",
+    "remediation": "Review the component-plan lint before applying.",
+    "cause_codes": [
+     "LEGACY_PLAN_WARNING"
+    ],
+    "node_identity": "",
+    "evidence": [],
+    "authoring_contract_entry_ids": []
+   },
+   {
+    "code": "AUTHORING_COMPILE_BLOCKED",
+    "severity": "warning",
+    "path": "",
+    "subject_kind": "component_plan",
+    "subject_id": "",
+    "message": "[FOLDER_REQUIRED_ON_CREATE] Component 'op_patch' is created with no folder_id or folder_name and would land in the account root. Set a resolved folder so components are organized, never at root.",
+    "remediation": "Review the component-plan lint before applying.",
+    "cause_codes": [
+     "LEGACY_PLAN_WARNING"
+    ],
+    "node_identity": "",
+    "evidence": [],
+    "authoring_contract_entry_ids": []
+   }
+  ],
+  "capability_gaps": [],
+  "required_decisions": [],
+  "phase": "compile",
+  "artifact_fingerprints": [
+   {
+    "component_key": "proc",
+    "component_type": "process",
+    "artifact_kind": "process_component_materialization_plan",
+    "artifact_version": "1",
+    "byte_length": 4703,
+    "digest": "sha256:810fae803ffbe3d336b237be586fd475edeec14e8442afe21d1a3b67297e4b6b"
+   },
+   {
+    "component_key": "proc",
+    "component_type": "process",
+    "artifact_kind": "process_ir_emission_plan",
+    "artifact_version": "1",
+    "byte_length": 2601,
+    "digest": "sha256:9ec6f3d7c8fd87532d14b0072f7c3c181145ff011954e1d88a6d5281d63f0feb"
+   },
+   {
+    "component_key": "proc",
+    "component_type": "process",
+    "artifact_kind": "process_ir_normalized",
+    "artifact_version": "1",
+    "byte_length": 593,
+    "digest": "sha256:4b57d15864bc0c256420f06c998fe6be50225567b4fdd1a3a435b4cbb87b051c"
+   }
+  ],
+  "normalized_intent_digest": "sha256:3d80e5c88afb00856f97d54bed755eff202ba2a1ec5bb6a6f5a3aac837e88fba"
+ },
+ "profile": "renera"
+}

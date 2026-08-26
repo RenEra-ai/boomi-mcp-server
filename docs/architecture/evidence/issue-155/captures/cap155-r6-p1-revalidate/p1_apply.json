@@ -1,0 +1,180 @@
+{
+ "_success": true,
+ "build_id": "dd74c0c4-d65b-4bd7-8bd7-7aa2b710798c",
+ "message": "Applied integration '_TEST_155A_R6_p1_20260826082505' with 4 steps.",
+ "execution_order": [
+  "conn_rest",
+  "op_get",
+  "op_patch",
+  "proc"
+ ],
+ "results": {
+  "conn_rest": {
+   "status": "reused",
+   "component_id": "c4281346-83e9-4026-856d-ede718ec68a0",
+   "type": "connector-settings",
+   "name": "Sandbox CDS Mock REST (no-auth)"
+  },
+  "op_get": {
+   "status": "reused",
+   "component_id": "547becc5-c291-4f6a-a739-a4c845ad4493",
+   "type": "connector-action",
+   "name": "_QA_FIXTURE_155_blankpath_GET"
+  },
+  "op_patch": {
+   "status": "created",
+   "component_id": "6dfdfa9f-48b3-40bd-b1bd-50ccbb4c0169",
+   "type": "connector-action",
+   "name": "_TEST_155A_R6_PATCH_20260826082505",
+   "result": {
+    "_success": true,
+    "message": "Created officialboomi-X3979C-rest-prod execute operation '_TEST_155A_R6_PATCH_20260826082505'",
+    "component_id": "6dfdfa9f-48b3-40bd-b1bd-50ccbb4c0169",
+    "name": "_TEST_155A_R6_PATCH_20260826082505",
+    "type": "connector-action",
+    "sub_type": "officialboomi-X3979C-rest-prod",
+    "profile": "renera"
+   }
+  },
+  "proc": {
+   "type": "process",
+   "name": "_TEST_155A_R6_p1_20260826082505",
+   "requested_name": "_TEST_155A_R6_p1_20260826082505",
+   "applied_name_verified": true,
+   "status": "created",
+   "component_id": "ddb4db05-25af-4755-8c74-b9eaf9152fec",
+   "result": {
+    "_success": true,
+    "message": "Created component '_TEST_155A_R6_p1_20260826082505'",
+    "component_id": "ddb4db05-25af-4755-8c74-b9eaf9152fec",
+    "name": "_TEST_155A_R6_p1_20260826082505",
+    "type": "process",
+    "profile": "renera"
+   },
+   "_success": true
+  }
+ },
+ "process_mutations": [
+  {
+   "component_key": "proc",
+   "plan_fingerprint": "sha256:810fae803ffbe3d336b237be586fd475edeec14e8442afe21d1a3b67297e4b6b",
+   "account_scope_hash": "sha256:8bd1a7d1668eab242ef0c5fe64cbf58126c193a8482ebb83ab8443a541dba7dd",
+   "action": "create",
+   "target_component_id": null,
+   "result_component_id": "ddb4db05-25af-4755-8c74-b9eaf9152fec",
+   "resolved_placement": {
+    "folder_name": null,
+    "folder_id": null
+   },
+   "submitted_xml_digest": "sha256:143ed86826c41f8860a64994239bb5ea11159da3156916aee84e4f52a8e931da"
+  }
+ ],
+ "process_readbacks": [
+  {
+   "component_key": "proc",
+   "component_id": "ddb4db05-25af-4755-8c74-b9eaf9152fec",
+   "digest": "sha256:d14eab8a8531fc8677b7b5019149345113b58c5abf71e8ac24a952011dd6e20a"
+  }
+ ],
+ "mutation_performed": true,
+ "authoring_provenance": {
+  "contract_version": "2",
+  "revision_binding": {
+   "contract_version": "2",
+   "schema_revision": "sha256:2c8b0705d220647903fd1f131b6e49793b78a73033f75206a3ad02ae21c9f9de",
+   "capability_revision": "sha256:c02919f9f820ead54a3f2152e641d96ac665ae893e29ea4f7361715b1f91fa27",
+   "compiler_revision": "sha256:f6d7d270200bceff17c11320b1d86bac12de7659843038e78e6a4602937cb022",
+   "account_scope_hash": "sha256:8bd1a7d1668eab242ef0c5fe64cbf58126c193a8482ebb83ab8443a541dba7dd",
+   "semantic_hash": "sha256:ef72568ef620f417605427971f61c282a67a2b62ff2d93766630dc267e279973",
+   "plan_hash": "sha256:5f2035d620197901650a2e9836c222c434db804aa5d4c6f27650e000268a404d",
+   "compile_hash": "sha256:6c624c16230f34f27b709b7958682c980d2099238399569a771b682d9e2822bd"
+  },
+  "artifact_fingerprints": [
+   {
+    "component_key": "proc",
+    "component_type": "process",
+    "artifact_kind": "process_component_materialization_plan",
+    "artifact_version": "1",
+    "byte_length": 4703,
+    "digest": "sha256:810fae803ffbe3d336b237be586fd475edeec14e8442afe21d1a3b67297e4b6b"
+   },
+   {
+    "component_key": "proc",
+    "component_type": "process",
+    "artifact_kind": "process_ir_emission_plan",
+    "artifact_version": "1",
+    "byte_length": 2601,
+    "digest": "sha256:9ec6f3d7c8fd87532d14b0072f7c3c181145ff011954e1d88a6d5281d63f0feb"
+   },
+   {
+    "component_key": "proc",
+    "component_type": "process",
+    "artifact_kind": "process_ir_normalized",
+    "artifact_version": "1",
+    "byte_length": 593,
+    "digest": "sha256:4b57d15864bc0c256420f06c998fe6be50225567b4fdd1a3a435b4cbb87b051c"
+   }
+  ],
+  "resolved_references": [
+   {
+    "ref": "$ref:conn_rest",
+    "component_type": "connector-settings",
+    "resolved": true,
+    "component_id": "c4281346-83e9-4026-856d-ede718ec68a0",
+    "version_marker": "2"
+   },
+   {
+    "ref": "$ref:op_get",
+    "component_type": "connector-action",
+    "resolved": true,
+    "component_id": "547becc5-c291-4f6a-a739-a4c845ad4493",
+    "version_marker": "1"
+   },
+   {
+    "ref": "$ref:op_patch",
+    "component_type": "connector-action",
+    "resolved": true,
+    "component_id": null,
+    "version_marker": null
+   },
+   {
+    "ref": "$ref:proc",
+    "component_type": "process",
+    "resolved": true,
+    "component_id": null,
+    "version_marker": null
+   }
+  ],
+  "live_comparison": null,
+  "process_mutations": [
+   {
+    "component_key": "proc",
+    "plan_fingerprint": "sha256:810fae803ffbe3d336b237be586fd475edeec14e8442afe21d1a3b67297e4b6b",
+    "account_scope_hash": "sha256:8bd1a7d1668eab242ef0c5fe64cbf58126c193a8482ebb83ab8443a541dba7dd",
+    "action": "create",
+    "target_component_id": null,
+    "result_component_id": "ddb4db05-25af-4755-8c74-b9eaf9152fec",
+    "resolved_placement": {
+     "folder_name": null,
+     "folder_id": null
+    },
+    "submitted_xml_digest": "sha256:143ed86826c41f8860a64994239bb5ea11159da3156916aee84e4f52a8e931da"
+   }
+  ],
+  "process_readbacks": [
+   {
+    "component_key": "proc",
+    "component_id": "ddb4db05-25af-4755-8c74-b9eaf9152fec",
+    "digest": "sha256:d14eab8a8531fc8677b7b5019149345113b58c5abf71e8ac24a952011dd6e20a"
+   }
+  ]
+ },
+ "warnings": [
+  "[FOLDER_REQUIRED_ON_CREATE] Component 'conn_rest' is created with no folder_id or folder_name and would land in the account root. Set a resolved folder so components are organized, never at root.",
+  "[FOLDER_REQUIRED_ON_CREATE] Component 'op_get' is created with no folder_id or folder_name and would land in the account root. Set a resolved folder so components are organized, never at root.",
+  "[FOLDER_REQUIRED_ON_CREATE] Component 'op_patch' is created with no folder_id or folder_name and would land in the account root. Set a resolved folder so components are organized, never at root."
+ ],
+ "action": "apply",
+ "mutation_status": "performed",
+ "profile": "renera"
+}

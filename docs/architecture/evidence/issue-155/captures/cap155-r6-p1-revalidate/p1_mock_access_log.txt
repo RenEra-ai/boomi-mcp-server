@@ -1,0 +1,30 @@
+INFO:     192.168.65.1:40044 - "POST /api/v1/clients HTTP/1.1" 404 Not Found
+INFO:     192.168.65.1:41887 - "POST /api/v1/clients HTTP/1.1" 404 Not Found
+INFO:     192.168.65.1:36169 - "GET /api/v1/clients/AC-LIVE-155 HTTP/1.1" 404 Not Found
+INFO:     192.168.65.1:23155 - "DELETE /api/v1/clients/AC-LIVE-155 HTTP/1.1" 404 Not Found
+INFO:     192.168.65.1:56586 - "GET /openapi.json HTTP/1.1" 200 OK
+INFO:     192.168.65.1:59781 - "POST /admin/cdscm/api/v1/clients HTTP/1.1" 201 Created
+INFO:     192.168.65.1:16528 - "POST /admin/cdscm/api/v1/clients HTTP/1.1" 409 Conflict
+INFO:     192.168.65.1:53911 - "GET /admin/cdscm/api/v1/clients/AC-LIVE-155 HTTP/1.1" 200 OK
+INFO:     192.168.65.1:29983 - "POST /admin/cdscm/api/v1/clients HTTP/1.1" 201 Created
+INFO:     192.168.65.1:41511 - "DELETE /admin/cdscm/api/v1/clients/AC-LIVE-155 HTTP/1.1" 204 No Content
+INFO:     192.168.65.1:36943 - "DELETE /admin/cdscm/api/v1/clients/AC-LIVE-156 HTTP/1.1" 204 No Content
+INFO:     192.168.65.1:35463 - "POST /admin/cdscm/api/v1/clients HTTP/1.1" 201 Created
+INFO:     192.168.65.1:36508 - "POST /admin/cdscm/api/v1/clients HTTP/1.1" 409 Conflict
+INFO:     192.168.65.1:44417 - "GET /admin/cdscm/api/v1/clients/AC-LIVE-157 HTTP/1.1" 200 OK
+INFO:     192.168.65.1:26696 - "DELETE /admin/cdscm/api/v1/clients/AC-LIVE-157 HTTP/1.1" 204 No Content
+INFO:     192.168.65.1:27103 - "GET /admin/cdscm/api/v1/clients HTTP/1.1" 401 Unauthorized
+INFO:     192.168.65.1:27763 - "GET /admin/cdscm/api/v1/clients/AC-0001 HTTP/1.1" 200 OK
+INFO:     192.168.65.1:28371 - "PATCH /admin/cdscm/api/v1/clients/AC-0001 HTTP/1.1" 200 OK
+INFO:     Started server process [1]
+INFO:     Waiting for application startup.
+INFO:     Started server process [1]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Application startup complete.
+INFO:     Application startup complete.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8080 (Press CTRL+C to quit)
+INFO:     Uvicorn running on http://0.0.0.0:8081 (Press CTRL+C to quit)
+INFO:     Uvicorn running on http://0.0.0.0:8082 (Press CTRL+C to quit)
+INFO:     Uvicorn running on http://0.0.0.0:8083 (Press CTRL+C to quit)

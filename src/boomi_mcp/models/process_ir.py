@@ -271,16 +271,42 @@ def _is_component_ref_field(field_info) -> bool:
     ``None``). A wider union is left alone: which arm a value took is not
     knowable from the annotation, so claiming the field IS a reference would be
     a guess rather than a schema fact.
+
+    A HOMOGENEOUS COLLECTION of references is unwrapped for the same reason the
+    Optional is. ``iter_component_refs`` has always carried a branch for a field
+    holding several references, and a comment promising that a future
+    ``Tuple[ComponentRefV1, ...]`` would need no edit — but this predicate
+    answered False for exactly that shape, so the branch was unreachable and the
+    promise was false. That is the same defect as the optional one, one
+    container level over: the field would be skipped whole, invisible to every
+    consumer, silently. QA found it while grading the optional fix.
+
+    No such field exists today (measured: every component reference in the
+    models is bare or optional), so this changes no served output now. It is
+    fixed rather than documented away because the alternative is a comment that
+    tells the next author the case is handled when it is not.
     """
     if _carries_component_ref_validator(getattr(field_info, "metadata", ())):
         return True
-    annotation = getattr(field_info, "annotation", None)
-    if get_origin(annotation) is not Union:
-        return False
-    arms = [arm for arm in get_args(annotation) if arm is not type(None)]
-    if len(arms) != 1:
-        return False
-    return _carries_component_ref_validator(getattr(arms[0], "__metadata__", ()))
+    return _annotation_is_component_ref(getattr(field_info, "annotation", None))
+
+
+def _annotation_is_component_ref(annotation) -> bool:
+    """Does this annotation hold a component reference, one container level in?"""
+    if _carries_component_ref_validator(getattr(annotation, "__metadata__", ())):
+        return True
+    origin = get_origin(annotation)
+    if origin is Union:
+        arms = [arm for arm in get_args(annotation) if arm is not type(None)]
+        # Exactly one non-None arm: a genuine Optional, never a wider union.
+        return len(arms) == 1 and _annotation_is_component_ref(arms[0])
+    if origin in (list, tuple, set, frozenset):
+        arms = [arm for arm in get_args(annotation) if arm is not Ellipsis]
+        # Homogeneous only. A heterogeneous tuple would make "the field is a
+        # reference" true of some positions and false of others, and the walk
+        # yields per element with no way to tell them apart.
+        return bool(arms) and all(_annotation_is_component_ref(arm) for arm in arms)
+    return False
 
 
 def iter_component_refs(node: Any, path: str = ""):

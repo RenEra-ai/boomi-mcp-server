@@ -5024,6 +5024,19 @@ def _lint_property_names(spec: IntegrationSpecV1) -> List[str]:
     first-class nodes, anywhere a node may sit. Until this lint walked them, a
     canonical author got no naming feedback at all — the lint was reading a
     block their document does not have.
+
+    NOT covered, deliberately and as a recorded gap: a property name authored
+    through a map FUNCTION — the property get/set families a `transform.map`
+    component configures, whose name rides in
+    `function_mappings[].parameters` under whichever key that family's registry
+    entry declares as its effect parameter. That is the same naming convention
+    at a third route, but its authority is the map-function registry rather
+    than the ProcessIR models, and the repo's structural rule is explicit that
+    the same mechanism under a DIFFERENT runtime authority is a recorded
+    recurrence and a follow-up — never a same-slice cross-subsystem refactor.
+    The gap pre-dates this change and is recorded as `QA-155-r6-02`; closing it
+    means deriving the parameter key from that registry, not hand-listing the
+    three keys it currently uses.
     """
     from ..models.process_ir import iter_property_writes
 
