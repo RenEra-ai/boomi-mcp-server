@@ -1774,6 +1774,97 @@ def test_a_collection_of_references_is_recognised_and_walked():
         StopNodeV1.model_fields = {k: v for k, v in fields.items() if k != "many_refs"}
 
 
+#: Every annotation shape the reference predicate is asked about, with a runtime
+#: value of that shape. The shapes are named for what QA measured about them: the
+#: first version of the container fix admitted `Set`/`FrozenSet` the walk never
+#: iterated, and rejected `Sequence`/`Iterable` that pydantic coerces to a list
+#: the walk would have iterated. Both directions are pinned here.
+_REF_SHAPES = [
+    ("bare", "ComponentRefV1", "$ref:A"),
+    ("optional", "Optional[ComponentRefV1]", "$ref:A"),
+    ("tuple", "Tuple[ComponentRefV1, ...]", ("$ref:A", "$ref:B")),
+    ("list", "List[ComponentRefV1]", ["$ref:A"]),
+    ("set", "Set[ComponentRefV1]", {"$ref:A"}),
+    ("frozenset", "FrozenSet[ComponentRefV1]", frozenset({"$ref:A"})),
+    ("sequence", "Sequence[ComponentRefV1]", ["$ref:A"]),
+    ("iterable", "Iterable[ComponentRefV1]", ["$ref:A"]),
+    ("optional_tuple", "Optional[Tuple[ComponentRefV1, ...]]", ("$ref:A",)),
+    ("optional_sequence", "Optional[Sequence[ComponentRefV1]]", ["$ref:A"]),
+]
+
+
+@pytest.mark.parametrize("label, annotation_src, value", _REF_SHAPES)
+def test_every_admitted_reference_shape_is_also_walkable(label, annotation_src, value):
+    """QA-155-r7-01: the predicate and the walk must answer ONE question.
+
+    The predicate reads ANNOTATIONS and the walk reads VALUES, so they cannot
+    share code — and the first container fix therefore wrote the rule twice, as
+    an origin list on one side and an isinstance tuple on the other. They
+    disagreed immediately and in both directions, the worse of which advertises
+    a reference in the served contract that the walk then never resolves.
+
+    This test is the authority the two spellings answer to: for every shape the
+    predicate admits, a real value of that shape must resolve through the walk.
+    A future divergence fails here instead of in a QA round.
+    """
+    import typing
+
+    from pydantic.fields import FieldInfo
+
+    from boomi_mcp.models.process_ir import (
+        ComponentRefV1,
+        StopNodeV1,
+        _is_component_ref_field,
+        iter_component_refs,
+    )
+
+    namespace = dict(vars(typing))
+    namespace["ComponentRefV1"] = ComponentRefV1
+    annotation = eval(annotation_src, namespace)  # noqa: S307 - fixed table above
+
+    assert _is_component_ref_field(FieldInfo.from_annotation(annotation)), annotation_src
+
+    node = StopNodeV1.model_construct(kind="stop")
+    object.__setattr__(node, "planted", value)
+    fields = dict(StopNodeV1.model_fields)
+    fields["planted"] = FieldInfo.from_annotation(annotation)
+    try:
+        StopNodeV1.model_fields = fields
+        found = {ref for _path, ref in iter_component_refs(node)}
+    finally:
+        StopNodeV1.model_fields = {k: v for k, v in fields.items() if k != "planted"}
+
+    expected = {value} if isinstance(value, str) else set(value)
+    assert found == expected, (label, found, expected)
+
+
+@pytest.mark.parametrize(
+    "annotation_src",
+    [
+        "Tuple[Tuple[ComponentRefV1, ...], ...]",
+        "Dict[str, ComponentRefV1]",
+        "Mapping[str, ComponentRefV1]",
+    ],
+)
+def test_a_shape_the_walk_cannot_resolve_is_not_admitted(annotation_src):
+    """The other half of the biconditional, and the direction that misleads.
+
+    A nested collection is flattened one level by the walk and a mapping
+    iterates its KEYS, so neither resolves to references. Admitting either
+    would publish a reference the walk cannot find — silence would be better.
+    """
+    import typing
+
+    from pydantic.fields import FieldInfo
+
+    from boomi_mcp.models.process_ir import ComponentRefV1, _is_component_ref_field
+
+    namespace = dict(vars(typing))
+    namespace["ComponentRefV1"] = ComponentRefV1
+    annotation = eval(namespace and annotation_src, namespace)  # noqa: S307
+    assert not _is_component_ref_field(FieldInfo.from_annotation(annotation)), annotation_src
+
+
 def test_the_widening_did_not_admit_a_shape_that_is_not_a_reference():
     """The other direction — a predicate that says yes to everything is worse.
 

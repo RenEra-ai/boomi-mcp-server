@@ -5034,9 +5034,17 @@ def _lint_property_names(spec: IntegrationSpecV1) -> List[str]:
     than the ProcessIR models, and the repo's structural rule is explicit that
     the same mechanism under a DIFFERENT runtime authority is a recorded
     recurrence and a follow-up — never a same-slice cross-subsystem refactor.
-    The gap pre-dates this change and is recorded as `QA-155-r6-02`; closing it
-    means deriving the parameter key from that registry, not hand-listing the
-    three keys it currently uses.
+    The gap pre-dates this change and is recorded as `QA-155-r6-02`.
+
+    Closing it means READING that key from the registry, never hand-listing it:
+    four of the twenty families declare an effect parameter today, under two
+    distinct keys. The two `defined_*` property families deliberately declare
+    none, and excluding them is correct rather than an oversight — a defined
+    process property is backed by its own component, so its name is not a
+    freely-authored token this convention governs. Note also that the document
+    families already validate their name, but only for the bare form; that
+    check says nothing about the UPPER_SNAKE convention, so it does not
+    partially close this gap.
     """
     from ..models.process_ir import iter_property_writes
 

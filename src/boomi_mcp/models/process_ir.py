@@ -45,6 +45,7 @@ branch leg bounds). CFG-aware semantics (reachability, lineage) stay with
 from __future__ import annotations
 
 import json
+from collections.abc import Iterable as _ABCIterable, Mapping as _ABCMapping
 from types import MappingProxyType
 from typing import (
     Any,
@@ -288,25 +289,81 @@ def _is_component_ref_field(field_info) -> bool:
     """
     if _carries_component_ref_validator(getattr(field_info, "metadata", ())):
         return True
-    return _annotation_is_component_ref(getattr(field_info, "annotation", None))
+    annotation = getattr(field_info, "annotation", None)
+    if _annotation_is_component_ref(annotation):
+        return True
+
+    # ...or ONE container of them. An Optional wrapping the container is
+    # unwrapped first, so `Optional[Tuple[ComponentRefV1, ...]]` is admitted
+    # while `Optional[ComponentRefV1]` was already handled above.
+    if get_origin(annotation) is Union:
+        arms = [arm for arm in get_args(annotation) if arm is not type(None)]
+        if len(arms) != 1:
+            return False
+        annotation = arms[0]
+    if not _is_walkable_collection_origin(get_origin(annotation)):
+        return False
+    arms = [arm for arm in get_args(annotation) if arm is not Ellipsis]
+    # Homogeneous only. A heterogeneous tuple would make "the field is a
+    # reference" true of some positions and false of others, and the walk
+    # yields per element with no way to tell them apart.
+    return bool(arms) and all(_annotation_is_component_ref(arm) for arm in arms)
 
 
 def _annotation_is_component_ref(annotation) -> bool:
-    """Does this annotation hold a component reference, one container level in?"""
+    """Is this annotation ONE component reference (bare, or a genuine Optional)?
+
+    Never a container: containers are handled one level up, by the field test,
+    so that a nested collection of collections cannot be admitted. The walk
+    flattens exactly one level, so an annotation the predicate accepted two
+    levels deep would be advertised and then never resolved.
+    """
     if _carries_component_ref_validator(getattr(annotation, "__metadata__", ())):
         return True
-    origin = get_origin(annotation)
-    if origin is Union:
+    if get_origin(annotation) is Union:
         arms = [arm for arm in get_args(annotation) if arm is not type(None)]
         # Exactly one non-None arm: a genuine Optional, never a wider union.
         return len(arms) == 1 and _annotation_is_component_ref(arms[0])
-    if origin in (list, tuple, set, frozenset):
-        arms = [arm for arm in get_args(annotation) if arm is not Ellipsis]
-        # Homogeneous only. A heterogeneous tuple would make "the field is a
-        # reference" true of some positions and false of others, and the walk
-        # yields per element with no way to tell them apart.
-        return bool(arms) and all(_annotation_is_component_ref(arm) for arm in arms)
     return False
+
+
+def _is_walkable_collection_origin(origin) -> bool:
+    """Would a value of this origin be ITERATED element-wise by the walk?
+
+    DERIVED from the abc hierarchy rather than enumerated, and this is the whole
+    point of the function. The first version of this check listed
+    ``(list, tuple, set, frozenset)`` while the walk it gates tested
+    ``isinstance(value, (list, tuple))`` — two hand-written spellings of one
+    fact, which promptly disagreed in both directions: a set of references was
+    ADVERTISED by the served contract and then never resolved, while a
+    ``Sequence`` of them was skipped whole although pydantic coerces it to a
+    list the walk would have iterated. QA found both, and the first is worse
+    than the gap the enumeration was added to close — before it, the predicate
+    and the walk were at least silently consistent.
+
+    A string is excluded because iterating one yields characters, and a mapping
+    because iterating one yields keys; the walk excludes both for the same
+    reason, so the two sides now answer the same question. Their agreement is
+    pinned per admitted shape by a test rather than asserted here.
+    """
+    if not isinstance(origin, type):
+        return False
+    if issubclass(origin, (str, bytes, bytearray)) or issubclass(origin, _ABCMapping):
+        return False
+    return issubclass(origin, _ABCIterable)
+
+
+def _is_walkable_collection_value(value) -> bool:
+    """The value-domain mirror of :func:`_is_walkable_collection_origin`.
+
+    Same question, asked of a runtime value instead of an annotation. The two
+    cannot share code — one inspects types, the other objects — so a test pins
+    them to agree for every admitted shape. That test is the authority; these
+    two functions are its two spellings.
+    """
+    if isinstance(value, (str, bytes, bytearray)) or isinstance(value, _ABCMapping):
+        return False
+    return isinstance(value, _ABCIterable)
 
 
 def iter_component_refs(node: Any, path: str = ""):
@@ -336,7 +393,7 @@ def iter_component_refs(node: Any, path: str = ""):
                 # handled so a future `Tuple[ComponentRefV1, ...]` needs no edit.
                 if isinstance(value, str):
                     yield child, value
-                elif isinstance(value, (list, tuple)):
+                elif _is_walkable_collection_value(value):
                     for index, item in enumerate(value):
                         if isinstance(item, str):
                             yield "{0}/{1}".format(child, index), item
