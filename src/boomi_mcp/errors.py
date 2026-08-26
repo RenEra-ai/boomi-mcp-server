@@ -130,6 +130,12 @@ PROCESS_IR_REFERENCE_CONNECTION_MISMATCH = "PROCESS_IR_REFERENCE_CONNECTION_MISM
 PROCESS_IR_CAPABILITY_CONNECTOR_ACTION_UNSUPPORTED = (
     "PROCESS_IR_CAPABILITY_CONNECTOR_ACTION_UNSUPPORTED"
 )
+# #155 M12.17. Per-document path binding is a FAMILY capability: the family's
+# connector step either exposes a bindable location or it does not, whatever
+# action is called.
+PROCESS_IR_CAPABILITY_DYNAMIC_PATH_UNSUPPORTED = (
+    "PROCESS_IR_CAPABILITY_DYNAMIC_PATH_UNSUPPORTED"
+)
 PROCESS_IR_SEMANTIC_PROFILE_MISMATCH = "PROCESS_IR_SEMANTIC_PROFILE_MISMATCH"
 PROCESS_IR_SEMANTIC_CARDINALITY_MISMATCH = "PROCESS_IR_SEMANTIC_CARDINALITY_MISMATCH"
 PROCESS_IR_COMPILE_CONNECTOR_BINDING_INVALID = (
@@ -930,6 +936,17 @@ ERROR_TAXONOMY: Dict[str, ErrorCodeSpec] = {
                 "than the operation's."
             ),
             owner="#140",
+        ),
+        ErrorCodeSpec(
+            code=PROCESS_IR_CAPABILITY_DYNAMIC_PATH_UNSUPPORTED,
+            category="process_ir",
+            retryable=False,
+            summary=(
+                "The connector family exposes no per-document bindable request "
+                "location, so a path binding on this call has nothing to bind "
+                "to. Which locations a family exposes is published per family."
+            ),
+            owner="#155",
         ),
         ErrorCodeSpec(
             code=PROCESS_IR_SEMANTIC_PROFILE_MISMATCH,

@@ -1317,9 +1317,23 @@ def _connector_entries(
                         if not row["output_documents"]
                         else "Produces documents that downstream steps may consume."
                     ),
+                    # GENERATED from the family's own published tuple, never
+                    # written per action: every action of a family binds the same
+                    # locations, so a hand-written sentence here would be N
+                    # copies of one fact and would drift the first time a family
+                    # gained a location.
+                    (
+                        "Per-document bindable request locations: {0}.".format(
+                            ", ".join(row["per_document_bindable_locations"])
+                        )
+                        if row["per_document_bindable_locations"]
+                        else "No per-document bindable request location: a path "
+                        "binding on this family is rejected."
+                    ),
                 ),
                 diagnostic_codes=(
                     "PROCESS_IR_CAPABILITY_CONNECTOR_ACTION_UNSUPPORTED",
+                    "PROCESS_IR_CAPABILITY_DYNAMIC_PATH_UNSUPPORTED",
                 ),
                 related_entry_ids=(
                     "node.connector_call",

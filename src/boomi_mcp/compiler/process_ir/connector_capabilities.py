@@ -37,7 +37,7 @@ Nothing else crosses: no binding, no resolution machinery, no symbol table.
 from __future__ import annotations
 
 from types import MappingProxyType
-from typing import Dict, Literal, Mapping, Optional, Tuple
+from typing import Any, Dict, Literal, Mapping, Optional, Tuple
 
 from pydantic import Field
 
@@ -285,6 +285,61 @@ def canonicalize_connector_metadata(
 #:
 #: TOTAL and INJECTIVE over the model's fields, pinned in both directions, so the
 #: projection loses no fact and cannot merge two facts into one.
+class ConnectorFamilyCapabilityV1(_CompilerModel):
+    """What a connector FAMILY offers, independent of which action is called.
+
+    Per-document path binding is a property of the family's connector step, not
+    of one verb: every REST Client action exposes the same single dynamic
+    operation property, and no database or SOAP action exposes any. Keeping it
+    here — one row per family, joined onto the action rows at projection time —
+    is what stops it becoming N hand-written copies of one fact as the action
+    table grows.
+
+    ``bindable_locations`` is a closed tuple of the dynamic operation properties
+    a caller may bind per document. It is deliberately not a boolean: the wire
+    name is what the emitted shape carries, and a family that later exposes a
+    second location extends this tuple rather than growing a parallel flag.
+    """
+
+    family: str
+    bindable_locations: Tuple[Literal["Path"], ...] = ()
+
+
+#: One row per family in the action allowlist. The pairing is checked both ways
+#: by tests — every family with an action row has a family row, and no family
+#: row is unused — so a new family cannot arrive without declaring what it binds.
+CONNECTOR_FAMILY_CAPABILITIES_V1: Mapping[str, ConnectorFamilyCapabilityV1] = (
+    MappingProxyType(
+        {
+            # The REST Client exposes exactly ONE dynamic operation property,
+            # "Path" — the product's only per-document request location. Query
+            # parameters and headers are static operation configuration.
+            REST_FAMILY: ConnectorFamilyCapabilityV1(
+                family=REST_FAMILY, bindable_locations=("Path",)
+            ),
+            # SOAP EXECUTE addresses one configured endpoint, and a database
+            # action addresses a statement, not a route. Neither has a
+            # per-document location to bind, so a binding on either is refused
+            # rather than silently ignored.
+            SOAP_FAMILY: ConnectorFamilyCapabilityV1(family=SOAP_FAMILY),
+            DATABASE_FAMILY: ConnectorFamilyCapabilityV1(family=DATABASE_FAMILY),
+        }
+    )
+)
+
+
+def lookup_connector_family_capability(
+    family: str,
+) -> Optional[ConnectorFamilyCapabilityV1]:
+    """Resolve one CANONICAL family, or ``None`` when the family is unknown.
+
+    Unknown means unsupported: an unrecognised family has no declared binding
+    location, so a binding on it fails closed exactly as an absent action row
+    does.
+    """
+    return CONNECTOR_FAMILY_CAPABILITIES_V1.get(family)
+
+
 PUBLIC_CAPABILITY_FIELDS: Mapping[str, str] = MappingProxyType(
     {
         "family": "family",
@@ -294,6 +349,14 @@ PUBLIC_CAPABILITY_FIELDS: Mapping[str, str] = MappingProxyType(
         "side_effect": "side_effect",
         "retry_safety": "replay_classification",
     }
+)
+
+#: The family-level fields joined onto every published action row, under their
+#: own public names. Separate from :data:`PUBLIC_CAPABILITY_FIELDS` because the
+#: two models are projected separately and the totality of each is pinned on its
+#: own; merging them would hide a field that belongs to neither.
+PUBLIC_FAMILY_CAPABILITY_FIELDS: Mapping[str, str] = MappingProxyType(
+    {"bindable_locations": "per_document_bindable_locations"}
 )
 
 
@@ -312,11 +375,15 @@ def connector_capability_rows() -> Tuple[Mapping[str, Any], ...]:
     rows = []
     for spec in CONNECTOR_CALL_CAPABILITIES_V1.values():
         dumped = spec.model_dump(mode="json")
-        rows.append(
-            MappingProxyType(
-                {PUBLIC_CAPABILITY_FIELDS[key]: value for key, value in dumped.items()}
-            )
-        )
+        row = {PUBLIC_CAPABILITY_FIELDS[key]: value for key, value in dumped.items()}
+        # The family fact is JOINED, never restated per action: an action row
+        # added later inherits its family's binding locations automatically, so
+        # the published answer cannot drift from the enforced one.
+        family_spec = CONNECTOR_FAMILY_CAPABILITIES_V1[spec.family]
+        family_dumped = family_spec.model_dump(mode="json")
+        for key, public in PUBLIC_FAMILY_CAPABILITY_FIELDS.items():
+            row[public] = family_dumped[key]
+        rows.append(MappingProxyType(row))
     return tuple(sorted(rows, key=lambda row: (row["family"], row["action"])))
 
 
@@ -333,10 +400,14 @@ def lookup_capability(family: str, action: str) -> Optional[ConnectorCapabilityV
 
 __all__ = [
     "CONNECTOR_CALL_CAPABILITIES_V1",
+    "CONNECTOR_FAMILY_CAPABILITIES_V1",
     "GATED_CONNECTOR_CALL_REASONS",
     "PUBLIC_CAPABILITY_FIELDS",
+    "PUBLIC_FAMILY_CAPABILITY_FIELDS",
     "ConnectorCapabilityV1",
+    "ConnectorFamilyCapabilityV1",
     "canonicalize_connector_metadata",
     "connector_capability_rows",
+    "lookup_connector_family_capability",
     "lookup_capability",
 ]

@@ -38,6 +38,7 @@ from ...errors import (
     PROCESS_IR_SEMANTIC_NESTING_LIMIT,
     PROCESS_IR_SEMANTIC_UNTERMINATED_PATH,
     PROCESS_IR_CAPABILITY_CONNECTOR_ACTION_UNSUPPORTED,
+    PROCESS_IR_CAPABILITY_DYNAMIC_PATH_UNSUPPORTED,
     PROCESS_IR_CAPABILITY_UNSUPPORTED,
     PROCESS_IR_COMPILE_CONNECTOR_BINDING_INVALID,
     PROCESS_IR_COMPILE_EMISSION_PLAN_INVALID,
@@ -199,6 +200,12 @@ _REMEDIATION = {
         "get_schema_template(schema_name='process_ir_authoring', "
         "category='connector_action')."
     ),
+    PROCESS_IR_CAPABILITY_DYNAMIC_PATH_UNSUPPORTED: (
+        "Remove the path binding, or move the call to a connector family that "
+        "exposes a per-document request location. Each family publishes the "
+        "locations it binds at get_schema_template("
+        "schema_name='process_ir_authoring', category='connector_action')."
+    ),
     PROCESS_IR_SEMANTIC_PROFILE_MISMATCH: (
         "Make the map's source profile the preceding call's output profile and its "
         "target profile the following call's input profile."
@@ -321,6 +328,9 @@ _MESSAGES = {
     ),
     PROCESS_IR_CAPABILITY_CONNECTOR_ACTION_UNSUPPORTED: (
         "the connector family/action pair is not a verified connector-call capability"
+    ),
+    PROCESS_IR_CAPABILITY_DYNAMIC_PATH_UNSUPPORTED: (
+        "the connector family exposes no per-document bindable request location"
     ),
     PROCESS_IR_SEMANTIC_PROFILE_MISMATCH: (
         "a map's profile does not match the connector call adjacent to it"

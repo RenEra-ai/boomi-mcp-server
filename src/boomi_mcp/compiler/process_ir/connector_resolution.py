@@ -34,6 +34,7 @@ from pydantic import Field
 
 from ...errors import (
     PROCESS_IR_CAPABILITY_CONNECTOR_ACTION_UNSUPPORTED,
+    PROCESS_IR_CAPABILITY_DYNAMIC_PATH_UNSUPPORTED,
     PROCESS_IR_REFERENCE_CONNECTION_MISMATCH,
     PROCESS_IR_REFERENCE_CONNECTION_NOT_FOUND,
     PROCESS_IR_REFERENCE_OPERATION_NOT_FOUND,
@@ -45,6 +46,7 @@ from .connector_capabilities import (
     ConnectorCapabilityV1,
     canonicalize_connector_metadata,
     lookup_capability,
+    lookup_connector_family_capability,
 )
 from .contracts import ComponentSymbolV1, SemanticCfgV1, SymbolTableV1, _CompilerModel
 from .diagnostics import raise_compile_error
@@ -637,6 +639,44 @@ def _walk_paths(cfg: SemanticCfgV1, index, binding_by_node) -> None:
             stack.append((edge.target_node_id, child))
 
 
+def validate_dynamic_path_capability(
+    cfg: SemanticCfgV1, symbols: SymbolTableV1
+) -> None:
+    """Refuse a path binding on a family that exposes no bindable location (#155).
+
+    Runs over BOTH connector dialects, and deliberately not inside
+    :func:`validate_connector_call_semantics`: that pass returns early when a
+    document has no first-class ``connector_call`` bindings, so a legacy
+    ``target`` carrying a binding would have been gated by nothing.
+
+    The question is per FAMILY, never per action — the family's connector step
+    either exposes a per-document location or it does not — so this needs no
+    action row and stays silent about which actions are callable. That is what
+    lets a family's verbs be evidenced later without touching this gate.
+    """
+    index = symbols.build_index()
+    for node in cfg.nodes:
+        semantic = node.semantic
+        if getattr(semantic, "path_binding", None) is None:
+            continue
+        operation = index.get(semantic.operation_ref)
+        # An unresolvable operation is reported by reference resolution with its
+        # own code; saying "unsupported family" for it would blame the binding
+        # for a missing symbol.
+        family = getattr(operation, "connector_type", None) if operation else None
+        if not family:
+            continue
+        canonical, _action = canonicalize_connector_metadata(family, "")
+        capability = lookup_connector_family_capability(canonical)
+        if capability is None or not capability.bindable_locations:
+            raise raise_compile_error(
+                PROCESS_IR_CAPABILITY_DYNAMIC_PATH_UNSUPPORTED,
+                "reference_resolution",
+                node.source_path,
+                internal_node_id=node.node_id,
+            )
+
+
 def validate_connector_calls(cfg: SemanticCfgV1, symbols: SymbolTableV1) -> None:
     """Every pass, in order. The single entry point the pipeline calls.
 
@@ -654,6 +694,7 @@ def validate_connector_calls(cfg: SemanticCfgV1, symbols: SymbolTableV1) -> None
     an unsafe retry is reported as an unsafe retry, rather than surfacing as
     whichever cardinality/profile complaint the same payload happens to trip.
     """
+    validate_dynamic_path_capability(cfg, symbols)
     bindings = resolve_connector_call_bindings(cfg, symbols)
     validate_error_handling(cfg, bindings, symbols)
     validate_connector_call_semantics(cfg, bindings, symbols)
@@ -661,6 +702,7 @@ def validate_connector_calls(cfg: SemanticCfgV1, symbols: SymbolTableV1) -> None
 
 __all__ = [
     "ConnectorCallBindingV1",
+    "validate_dynamic_path_capability",
     "resolve_connector_call_bindings",
     "validate_connector_call_semantics",
     "validate_connector_calls",

@@ -2775,3 +2775,16 @@ and 63 changed:
 0, because unit 1 adds no module and no packaged asset. Recorded because a later slice in this issue
 DOES add both (a new package plus its packaged registry data), and that slice's rebaseline must show
 those counts moving; if they move here, something landed in the wrong slice.
+
+**Unit 2 rebaselined again, and moved a DIFFERENT set.** Adding the family-level bindable-location
+sentence and the four new diagnostics to the served authoring contract moved the FIVE artifacts of
+the recipe-layer digest set (`SS-CAPABILITY-CATALOG:authoring_contract`, the three `Authoring*`
+schema templates, `SS-SCHEMA-TEMPLATES:walked_surface_digest`) — the same set §12.5 and §12.6 moved,
+and a subset of unit 1's seven. `IntegrationSpecV1` and `recipe_contributions` did NOT move again,
+because they embed the ProcessIR schema (unit 1's change) and not the authoring contract. The
+served-contract diff, keyed by entry id rather than by list index: four diagnostic entries ADDED,
+five `connector_action` entries each gaining one generated sentence naming the family's bindable
+locations plus the new diagnostic code, zero entries removed, zero other fields changed.
+
+`scan_contract` again did NOT move (216 sources, 0 unscanned assets), and no section-11 table needed
+regeneration: unit 2 shifted no census evidence line.
