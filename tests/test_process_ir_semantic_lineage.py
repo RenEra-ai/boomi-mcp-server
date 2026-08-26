@@ -37,6 +37,7 @@ from boomi_mcp.compiler.process_ir.semantic_validation.lineage import (
     collect_lineage_findings,
 )
 from boomi_mcp.errors import (
+    PROCESS_IR_SEMANTIC_DYNAMIC_PATH_DDP_NOT_ESTABLISHED,
     PROCESS_IR_SEMANTIC_LINEAGE_BRANCH_ORDER_INVALID,
     PROCESS_IR_SEMANTIC_LINEAGE_CACHE_WRITER_MISSING,
     PROCESS_IR_SEMANTIC_LINEAGE_DDP_SCOPE_INVALID,
@@ -957,3 +958,137 @@ def test_a_later_leg_async_write_keeps_the_precise_ordering_code():
     codes = {f.code for f in validate_process_ir(
         parse_process_ir_v1(doc), symbols, caps).errors}
     assert PROCESS_IR_SEMANTIC_LINEAGE_BRANCH_ORDER_INVALID in codes
+
+
+# ---------------------------------------------------------------------------
+# #155 M12.17 — the per-document request path and the writer that composes it
+# ---------------------------------------------------------------------------
+
+
+def _dynpath_symbols():
+    from boomi_mcp.compiler.process_ir.contracts import ComponentSymbolV1
+
+    rest = "officialboomi-X3979C-rest-prod"
+    return SymbolTableV1(
+        symbols=[
+            ComponentSymbolV1(ref="$ref:CONN", component_id="C",
+                              component_type="connector-settings", connector_type=rest),
+            ComponentSymbolV1(ref="$ref:GETOP", component_id="O",
+                              component_type="connector-action", connector_type=rest,
+                              action_type="GET", connection_ref="$ref:CONN"),
+            ComponentSymbolV1(ref="$ref:PROF", component_id="P",
+                              component_type="profile.json"),
+            ComponentSymbolV1(ref="$ref:CACHE", component_id="K",
+                              component_type="documentcache"),
+        ]
+    )
+
+
+_STATIC = {"value_type": "static", "value": "/admin/cdscm/api/v1/clients/"}
+_DPPSEG = {"value_type": "dpp", "property_name": "key", "default_value": ""}
+_WRITER = {"kind": "set_ddp", "name": "P", "source_values": [_STATIC, _DPPSEG]}
+_BOUND = {"kind": "connector_call", "operation_ref": "$ref:GETOP",
+          "path_binding": {"property_name": "P"}}
+
+
+def _dynpath_codes(steps):
+    """Compile a document and return the diagnostic codes it is refused with."""
+    from boomi_mcp.compiler.process_ir.diagnostics import ProcessIRCompileError
+    from boomi_mcp.compiler.process_ir.pipeline import compile_process_ir_v1
+
+    doc = {"version": "1", "body": {"kind": "sequence", "steps": steps}}
+    try:
+        compile_process_ir_v1(parse_process_ir_v1(doc), _dynpath_symbols())
+    except ProcessIRCompileError as exc:
+        # `diagnostics` is the accessor; `codes` exists only in the repr, and
+        # reading it returns None — a helper that did so would report every
+        # refusal as an empty tuple and quietly pass a test that never ran.
+        return tuple(item.code for item in exc.diagnostics)
+    return ()
+
+
+def test_the_stream_replacing_authority_matches_the_served_contract():
+    """ONE authority, pinned to the published answer in BOTH directions.
+
+    The dynamic-path rule reads `DOCUMENT_STREAM_REPLACING_KINDS` and nothing
+    else. The served authoring contract publishes the same fact per node as
+    `document_semantics.output_documents == "stream_replacing"`. If the two ever
+    disagree — a kind added to one and not the other — the compiler would refuse
+    (or admit) a binding the contract says the opposite about, which is precisely
+    the drift a hand-written second copy produces.
+
+    This test exists because the first version of the rule DID hold a second copy:
+    it qualified `data_process` to split/combine and gated the cache reads on a
+    `load_all_documents` field that `CacheGetSemanticV1` does not have, so the
+    canonical cache read fell through fail-open. Two wrong entries in one 37-line
+    change is what a derived-and-pinned authority prevents.
+    """
+    from boomi_mcp.authoring.process_ir_projection import (
+        process_ir_authoring_revision_payload,
+    )
+    from boomi_mcp.compiler.process_ir.semantic_validation.lineage import (
+        DOCUMENT_STREAM_REPLACING_KINDS,
+    )
+
+    served = {
+        entry["subject"]
+        for entry in process_ir_authoring_revision_payload()["entries"]
+        if entry.get("entry_type") == "node"
+        and (entry.get("document_semantics") or {}).get("output_documents")
+        == "stream_replacing"
+    }
+    assert served, "the served contract published no stream-replacing node — the pin would be vacuous"
+    assert DOCUMENT_STREAM_REPLACING_KINDS == served, {
+        "only_in_compiler": sorted(DOCUMENT_STREAM_REPLACING_KINDS - served),
+        "only_in_served_contract": sorted(served - DOCUMENT_STREAM_REPLACING_KINDS),
+    }
+
+
+@pytest.mark.parametrize(
+    "replacing",
+    [
+        pytest.param({"kind": "message", "text": "hello"}, id="message"),
+        pytest.param(
+            {"kind": "data_process", "steps": [
+                {"operation": "split_documents", "profile_type": "json",
+                 "profile_ref": "$ref:PROF", "link_element_key": "1",
+                 "link_element_name": "root"}]},
+            id="data_process_split",
+        ),
+        pytest.param(
+            {"kind": "data_process", "steps": [
+                {"operation": "custom_scripting", "language": "groovy2",
+                 "script": "// emits its own documents"}]},
+            id="data_process_script",
+        ),
+        pytest.param({"kind": "cache_get", "cache_ref": "$ref:CACHE"}, id="cache_get"),
+    ],
+)
+def test_a_document_replacement_between_the_writer_and_the_call_is_refused(replacing):
+    """Every replacing kind, not just the two the first version happened to name.
+
+    `cache_get` and `message` are the regressions this parametrisation exists for:
+    both were accepted by the first rule, and both hand a bound call documents that
+    never carried the property composing its request path — so the request would
+    have addressed the wrong resource rather than failed.
+    """
+    codes = _dynpath_codes([_WRITER, replacing, _BOUND, {"kind": "stop"}])
+    assert PROCESS_IR_SEMANTIC_DYNAMIC_PATH_DDP_NOT_ESTABLISHED in codes, codes
+
+
+def test_the_replacement_rule_does_not_over_fire():
+    """The three controls that make the test above mean something.
+
+    A rule that refused everything would pass the parametrisation and be useless.
+    """
+    # No replacement at all: the ordinary valid form.
+    assert _dynpath_codes([_WRITER, _BOUND, {"kind": "stop"}]) == ()
+    # Writing AFTER the replacement is legitimate — the new documents carry it.
+    assert _dynpath_codes(
+        [{"kind": "message", "text": "hello"}, _WRITER, _BOUND, {"kind": "stop"}]
+    ) == ()
+    # A replacement with no binding anywhere is simply not this rule's business.
+    assert _dynpath_codes(
+        [_WRITER, {"kind": "message", "text": "hello"},
+         {"kind": "connector_call", "operation_ref": "$ref:GETOP"}, {"kind": "stop"}]
+    ) == ()

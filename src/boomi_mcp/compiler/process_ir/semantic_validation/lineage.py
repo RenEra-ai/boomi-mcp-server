@@ -267,6 +267,31 @@ def _reads_of(semantic) -> Tuple[Tuple[StateKey, bool, bool], ...]:
     return tuple(reads)
 
 
+#: Semantic kinds that hand downstream steps DIFFERENT documents than they
+#: received (#155). ONE authority, stated as data.
+#:
+#: LOAD-BEARING, exactly as :data:`STATE_VISIBILITY_V1` above is: the dynamic-path
+#: rule reads this and nothing else, and
+#: ``test_the_stream_replacing_authority_matches_the_served_contract`` asserts it
+#: equals the set the served authoring contract publishes as
+#: ``output_documents == "stream_replacing"``, in BOTH directions. So the rule and
+#: the published answer cannot disagree — a kind added to one and not the other
+#: fails that test rather than silently changing behaviour.
+#:
+#: Membership is UNQUALIFIED, and that is deliberate. The first version of this
+#: rule qualified two entries — ``data_process`` only for split/combine, the cache
+#: reads only for an all-documents load — and QA measured both qualifications
+#: wrong: ``CacheGetSemanticV1`` carries no ``load_all_documents`` field at all, so
+#: that branch was dead and the canonical cache read fell through fail-OPEN; and a
+#: ``data_process`` running only a custom script can emit different documents just
+#: as a split can. The published contract states the kinds unqualified; a
+#: qualification is a second model of the same fact, and it was wrong twice in one
+#: change.
+DOCUMENT_STREAM_REPLACING_KINDS: FrozenSet[str] = frozenset(
+    {"data_process", "message", "cache_get", "document_cache_retrieve"}
+)
+
+
 def _replaces_document_stream(semantic) -> bool:
     """Does this node hand downstream steps DIFFERENT documents than it received? (#155)
 
@@ -275,23 +300,12 @@ def _replaces_document_stream(semantic) -> bool:
     that promise silently: the new documents carry no per-document property the old
     ones had, so the request path resolves empty and addresses the wrong resource.
 
-    The replacing steps are the ones the served contract already names — splitting
-    or combining documents, and an all-documents cache read that discards the
-    current stream. This is deliberately consulted ONLY by the dynamic-path rule
-    and never by ``_State``: the general lineage model's treatment of document
-    replacement is #154's and is not changed here, because widening it would move
-    every DDP read in the repo rather than the one case whose consequence is a
-    wrong request URL.
+    Consulted ONLY by the dynamic-path rule, never by ``_State``: the general
+    lineage model's treatment of document replacement is #154's and is not changed
+    here, because widening it would move every DDP read in the repo rather than the
+    one case whose consequence is a wrong request URL.
     """
-    kind = semantic.semantic_kind
-    if kind == "data_process":
-        return any(
-            getattr(step, "operation", None) in ("split_documents", "combine_documents")
-            for step in getattr(semantic, "steps", ()) or ()
-        )
-    if kind in ("cache_get", "document_cache_retrieve"):
-        return bool(getattr(semantic, "load_all_documents", False))
-    return False
+    return semantic.semantic_kind in DOCUMENT_STREAM_REPLACING_KINDS
 
 
 def _writes_of(semantic) -> Tuple[StateKey, ...]:

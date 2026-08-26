@@ -1,0 +1,227 @@
+[
+ {
+  "file": "p1_compile.json",
+  "utc": "2026-08-26T04:16:04.258808+00:00",
+  "account_id": "traininghlibbochkarov-JKIY2X",
+  "sha256": "cc839a57830db5582e638c275eabe08d6828394bf65ba9d90324346c37181e23",
+  "byte_length": 6953,
+  "archive_path": "/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/.claude/agent-memory/boomi-qa-tester/evidence/issue-155/cap155-r3-p1-revalidate/p1_compile.json",
+  "kind": "compile envelope"
+ },
+ {
+  "file": "p1_apply.json",
+  "utc": "2026-08-26T04:17:13.686594+00:00",
+  "account_id": "traininghlibbochkarov-JKIY2X",
+  "sha256": "12fcdd189a0763dcf72cb7a5ecbb64f2f512f05726a686fb7d07548855933003",
+  "byte_length": 6358,
+  "archive_path": "/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/.claude/agent-memory/boomi-qa-tester/evidence/issue-155/cap155-r3-p1-revalidate/p1_apply.json",
+  "kind": "apply envelope (dry_run=false)"
+ },
+ {
+  "file": "p1_stored_process.xml",
+  "utc": "2026-08-26T04:17:13.897999+00:00",
+  "account_id": "traininghlibbochkarov-JKIY2X",
+  "sha256": "4302b91b966e0fb9791d1df0d1146699275ce5a0534c67422f109f729b68348c",
+  "byte_length": 3531,
+  "archive_path": "/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/.claude/agent-memory/boomi-qa-tester/evidence/issue-155/cap155-r3-p1-revalidate/p1_stored_process.xml",
+  "kind": "Component XML readback",
+  "component_id": "81285e01-6107-4c3e-9a08-6b452a230279"
+ },
+ {
+  "file": "p1_shapes_canonical.xml",
+  "utc": "2026-08-26T04:17:13.899421+00:00",
+  "account_id": "traininghlibbochkarov-JKIY2X",
+  "sha256": "7c34cc6d661e3d7134d0c0e9183150913c875ac4d3b6bb4cf79dfe3bf28878d3",
+  "byte_length": 2606,
+  "archive_path": "/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/.claude/agent-memory/boomi-qa-tester/evidence/issue-155/cap155-r3-p1-revalidate/p1_shapes_canonical.xml"
+ },
+ {
+  "file": "p1_shapes_e1_oracle.xml",
+  "utc": "2026-08-26T04:17:13.899622+00:00",
+  "account_id": "traininghlibbochkarov-JKIY2X",
+  "sha256": "38fdcd1f04724a642447708918d514348b71ae3e841a0dbf8e9f3702b8ec52df",
+  "byte_length": 2583,
+  "archive_path": "/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/.claude/agent-memory/boomi-qa-tester/evidence/issue-155/cap155-r3-p1-revalidate/p1_shapes_e1_oracle.xml"
+ },
+ {
+  "file": "p1_shapes_diff.txt",
+  "utc": "2026-08-26T04:17:13.899977+00:00",
+  "account_id": "traininghlibbochkarov-JKIY2X",
+  "sha256": "f76611ea1954537b265f60eab085c4e0695047305059396141a94806b74cae6d",
+  "byte_length": 2477,
+  "archive_path": "/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/.claude/agent-memory/boomi-qa-tester/evidence/issue-155/cap155-r3-p1-revalidate/p1_shapes_diff.txt"
+ },
+ {
+  "file": "p1_deploy.json",
+  "utc": "2026-08-26T04:17:15.950628+00:00",
+  "account_id": "traininghlibbochkarov-JKIY2X",
+  "sha256": "3073ca6addb6834622c61d0e5921f833c0aafaef145a64b5a0d97f36e758f5d4",
+  "byte_length": 978,
+  "archive_path": "/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/.claude/agent-memory/boomi-qa-tester/evidence/issue-155/cap155-r3-p1-revalidate/p1_deploy.json",
+  "kind": "deploy envelope"
+ },
+ {
+  "file": "p1_execute.json",
+  "utc": "2026-08-26T04:17:32.404896+00:00",
+  "account_id": "traininghlibbochkarov-JKIY2X",
+  "sha256": "1f56481f0906d3d3d7351f7d84a2a6613bd415f4c4fbf79ca12bcf06249b5e93",
+  "byte_length": 867,
+  "archive_path": "/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/.claude/agent-memory/boomi-qa-tester/evidence/issue-155/cap155-r3-p1-revalidate/p1_execute.json",
+  "kind": "execute envelope",
+  "dynamic_properties": {
+   "key": "AC-0001"
+  }
+ },
+ {
+  "file": "p1_mock_access_log.txt",
+  "utc": "2026-08-26T04:17:32.436138+00:00",
+  "account_id": "traininghlibbochkarov-JKIY2X",
+  "sha256": "f8b320ce6768c75317272ee37a55db682fb4cb833d3c096a7b9a4d5d325db776",
+  "byte_length": 2725,
+  "archive_path": "/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/.claude/agent-memory/boomi-qa-tester/evidence/issue-155/cap155-r3-p1-revalidate/p1_mock_access_log.txt",
+  "kind": "cds-mock docker log tail (post-execute)"
+ },
+ {
+  "file": "p1_execution_record.json",
+  "utc": "2026-08-26T04:17:32.665360+00:00",
+  "account_id": "traininghlibbochkarov-JKIY2X",
+  "sha256": "2e4ae04f18da91b6aa0dae3438c472eff3b304550f5adbe83b18ba6561362199",
+  "byte_length": 1090,
+  "archive_path": "/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/.claude/agent-memory/boomi-qa-tester/evidence/issue-155/cap155-r3-p1-revalidate/p1_execution_record.json",
+  "kind": "ExecutionRecord/query"
+ },
+ {
+  "kind": "summary",
+  "freeze": "0762d81ebbc7/clean/738eccad8886",
+  "started_utc": "2026-08-26T04:15:15.422283+00:00",
+  "account": "traininghlibbochkarov-JKIY2X",
+  "P1": {
+   "name": "p1",
+   "compile_success": true,
+   "compile_error": null,
+   "revision_binding": {
+    "contract_version": "2",
+    "schema_revision": "sha256:fc9a5af6edddd78f89a0044037acc692455ac08c2a0e88a986dab7c4b441e80c",
+    "capability_revision": "sha256:89121641309f344cb3cc6ef99489154d3af284fc76d5040a015461cb7f4de55c",
+    "compiler_revision": "sha256:5e8b504b503a99d357018c695c60f099634e008ed926d81f4749d695718fadee",
+    "account_scope_hash": "sha256:8bd1a7d1668eab242ef0c5fe64cbf58126c193a8482ebb83ab8443a541dba7dd",
+    "semantic_hash": "sha256:b150cf00260ce04e05b3afe9006ba3a106f7a1820d64ada359179bf916669213",
+    "plan_hash": "sha256:18a005f9d905209fa5f62ba12e45f44d90db8a5b9726aae4a5e4c39e1b1d8ee3",
+    "compile_hash": "sha256:070ba0069c7e4a4e8b0909374b4be96223545d299d775fab6e78520c2cf9e56f"
+   },
+   "apply_success": true,
+   "apply_error": null,
+   "results": {
+    "conn_rest": {
+     "component_id": "c4281346-83e9-4026-856d-ede718ec68a0",
+     "status": "reused",
+     "name": "Sandbox CDS Mock REST (no-auth)",
+     "type": "connector-settings"
+    },
+    "op_get": {
+     "component_id": "547becc5-c291-4f6a-a739-a4c845ad4493",
+     "status": "reused",
+     "name": "_QA_FIXTURE_155_blankpath_GET",
+     "type": "connector-action"
+    },
+    "op_patch": {
+     "component_id": "8b01e76f-edb2-4fd6-a03d-3be3b4e20bcd",
+     "status": "created",
+     "name": "_TEST_155A_L3_PATCH_20260826041514",
+     "type": "connector-action"
+    },
+    "proc": {
+     "component_id": "81285e01-6107-4c3e-9a08-6b452a230279",
+     "status": "created",
+     "name": "_TEST_155A_L3_p1_20260826041514",
+     "type": "process"
+    }
+   },
+   "process_component_id": "81285e01-6107-4c3e-9a08-6b452a230279",
+   "stored_shape_order": [
+    "start",
+    "documentproperties",
+    "connectoraction",
+    "connectoraction",
+    "stop"
+   ],
+   "stored_path_propertyvalue": "<propertyvalue childKey=\"\" key=\"path\" name=\"Path\" valueType=\"track\">",
+   "stored_path_track": "<propertyvalue childKey=\"\" key=\"path\" name=\"Path\" valueType=\"track\"><trackparameter defaultValue=\"\" propertyId=\"dynamicdocument.DDP_PATH_CLIENTS\" propertyName=\"Dynamic Document Property - DDP_PATH_CLIENTS\"/>",
+   "parameter_profile_attrs": [],
+   "get_connectoraction_tags": [
+    "<connectoraction actionType=\"GET\" allowDynamicCredentials=\"NONE\" connectionId=\"c4281346-83e9-4026-856d-ede718ec68a0\" connectorType=\"officialboomi-X3979C-rest-prod\" hideSettings=\"false\" operationId=\"547becc5-c291-4f6a-a739-a4c845ad4493\">"
+   ],
+   "documentproperties_before_first_connectoraction": true,
+   "shapes_differential_identical": false,
+   "shapes_diff_head": [
+    "--- e1_legacy_oracle",
+    "+++ canonical_1fe3840",
+    "@@ -4,2 +4,2 @@",
+    "-<shape image=\"connectoraction_icon\" name=\"shape3\" shapetype=\"connectoraction\" userlabel=\"\" x=\"416.0\" y=\"96.0\"><configuration><connectoraction actionType=\"GET\" allowDynamicCredentials=\"NONE\" connectionId=\"<GUID>\" connectorType=\"officialboomi-X3979C-rest-prod\" hideSettings=\"false\" operationId=\"<GUID>\"><parameters/><dynamicProperties><propertyvalue childKey=\"\" key=\"path\" name=\"Path\" valueType=\"track\"><trackparameter defaultValue=\"\" propertyId=\"dynamicdocument.DDP_PATH_CLIENTS\" propertyName=\"Dynamic Document Property - DDP_PATH_CLIENTS\"/></propertyvalue></dynamicProperties></connectoraction></configuration><dragpoints><dragpoint name=\"shape3.dragpoint1\" toShape=\"shape4\" x=\"560.0\" y=\"104.0\"/></dragpoints></shape>",
+    "-<shape image=\"connectoraction_icon\" name=\"shape4\" shapetype=\"connectoraction\" userlabel=\"\" x=\"576.0\" y=\"96.0\"><configuration><connectoraction actionType=\"PATCH\" allowDynamicCredentials=\"NONE\" connectionId=\"<GUID>\" connectorType=\"officialboomi-X3979C-rest-prod\" hideSettings=\"false\" operationId=\"<GUID>\"><parameters/><dynamicProperties/></connectoraction></configuration><dragpoints><dragpoint name=\"shape4.dragpoint1\" toShape=\"shape5\" x=\"720.0\" y=\"104.0\"/></dragpoints></shape>",
+    "+<shape image=\"connectoraction_icon\" name=\"shape3\" shapetype=\"connectoraction\" userlabel=\"GET clients\" x=\"416.0\" y=\"96.0\"><configuration><connectoraction actionType=\"GET\" allowDynamicCredentials=\"NONE\" connectionId=\"<GUID>\" connectorType=\"officialboomi-X3979C-rest-prod\" hideSettings=\"false\" operationId=\"<GUID>\"><parameters/><dynamicProperties><propertyvalue childKey=\"\" key=\"path\" name=\"Path\" valueType=\"track\"><trackparameter defaultValue=\"\" propertyId=\"dynamicdocument.DDP_PATH_CLIENTS\" propertyName=\"Dynamic Document Property - DDP_PATH_CLIENTS\"/></propertyvalue></dynamicProperties></connectoraction></configuration><dragpoints><dragpoint name=\"shape3.dragpoint1\" toShape=\"shape4\" x=\"560.0\" y=\"104.0\"/></dragpoints></shape>",
+    "+<shape image=\"connectoraction_icon\" name=\"shape4\" shapetype=\"connectoraction\" userlabel=\"PATCH client\" x=\"576.0\" y=\"96.0\"><configuration><connectoraction actionType=\"PATCH\" allowDynamicCredentials=\"NONE\" connectionId=\"<GUID>\" connectorType=\"officialboomi-X3979C-rest-prod\" hideSettings=\"false\" operationId=\"<GUID>\"><parameters/><dynamicProperties/></connectoraction></configuration><dragpoints><dragpoint name=\"shape4.dragpoint1\" toShape=\"shape5\" x=\"720.0\" y=\"104.0\"/></dragpoints></shape>"
+   ]
+  },
+  "P1_runtime": {
+   "package_id": "8a485e90-0ee2-4499-9411-6111d59d8950",
+   "package_success": true,
+   "deploy_success": true,
+   "deployment": {
+    "deployment_id": "86f66ff7-8cf9-453a-9732-ef25495ec020",
+    "package_id": "8a485e90-0ee2-4499-9411-6111d59d8950",
+    "component_id": "81285e01-6107-4c3e-9a08-6b452a230279",
+    "component_type": "process",
+    "environment_id": "c8d9140d-6d34-4ca6-91ff-bfd263556d5b",
+    "package_version": "1.0.0",
+    "deployed_date": "2026-08-26T04:17:14Z",
+    "deployed_by": "gleb@renera.ai",
+    "active": true,
+    "version": 1
+   },
+   "deployment_id": "86f66ff7-8cf9-453a-9732-ef25495ec020",
+   "execute_success": true,
+   "execution_id": "execution-831219bd-3efc-473f-b44e-7db74415639d-2026.08.26",
+   "execution_status": "COMPLETE",
+   "mock_log_tail": [
+    "INFO:     172.19.0.1:55692 - \"GET /admin/cdscm/api/v1/clients/AC-0001 HTTP/1.1\" 200 OK",
+    "INFO:     172.19.0.1:62650 - \"GET /admin/cdscm/api/v1/clients/AC-0001 HTTP/1.1\" 200 OK",
+    "INFO:     172.19.0.1:62654 - \"PATCH /admin/cdscm/api/v1/clients/AC-0001 HTTP/1.1\" 200 OK",
+    "INFO:     172.19.0.1:58758 - \"GET / HTTP/1.1\" 404 Not Found",
+    "INFO:     172.19.0.1:58712 - \"GET /admin/cdscm/api/v1/clients/AC-0001 HTTP/1.1\" 200 OK",
+    "INFO:     172.19.0.1:58728 - \"PATCH /admin/cdscm/api/v1/clients/AC-0001 HTTP/1.1\" 200 OK"
+   ],
+   "pre_execute_log_tail": [
+    "INFO:     172.19.0.1:62654 - \"PATCH /admin/cdscm/api/v1/clients/AC-0001 HTTP/1.1\" 200 OK",
+    "INFO:     172.19.0.1:58758 - \"GET / HTTP/1.1\" 404 Not Found"
+   ],
+   "execution_record": {
+    "executionId": "execution-831219bd-3efc-473f-b44e-7db74415639d-2026.08.26",
+    "status": "COMPLETE",
+    "inboundDocumentCount": 1,
+    "outboundDocumentCount": 2,
+    "inboundErrorDocumentCount": 0,
+    "executionTime": "2026-08-26T04:17:23Z",
+    "message": null
+   }
+  },
+  "P1_teardown_deploy": {
+   "undeploy": true,
+   "delete_package": true
+  },
+  "created_components": [
+   {
+    "component_id": "8b01e76f-edb2-4fd6-a03d-3be3b4e20bcd",
+    "name": "_TEST_155A_L3_PATCH_20260826041514",
+    "type": "connector-action"
+   },
+   {
+    "component_id": "81285e01-6107-4c3e-9a08-6b452a230279",
+    "name": "_TEST_155A_L3_p1_20260826041514",
+    "type": "process"
+   }
+  ],
+  "deleted": 2,
+  "finished_utc": "2026-08-26T04:17:36.269967+00:00"
+ }
+]
