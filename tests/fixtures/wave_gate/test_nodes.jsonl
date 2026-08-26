@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 10642, "minimum_collected": 10642, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 10645, "minimum_collected": 10645, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -10681,3 +10681,6 @@
 {"kind": "test", "id": "pytest-010680", "node_id": "tests/test_process_ir_semantic_lineage.py::test_a_replacement_does_not_refuse_a_writer_that_needs_no_earlier_value[data_process_split]", "state": "active"}
 {"kind": "test", "id": "pytest-010681", "node_id": "tests/test_process_ir_semantic_lineage.py::test_a_replacement_does_not_refuse_a_writer_that_needs_no_earlier_value[message]", "state": "active"}
 {"kind": "test", "id": "pytest-010682", "node_id": "tests/test_process_ir_semantic_lineage.py::test_appending_to_a_value_with_no_replacement_between_still_compiles", "state": "active"}
+{"kind": "test", "id": "pytest-010683", "node_id": "tests/test_process_ir_semantic_lineage.py::test_a_caller_declared_entry_value_establishes_one_too", "state": "active"}
+{"kind": "test", "id": "pytest-010684", "node_id": "tests/test_process_ir_semantic_lineage.py::test_a_contract_declared_write_establishes_a_value_current_may_append_to", "state": "active"}
+{"kind": "test", "id": "pytest-010685", "node_id": "tests/test_process_ir_semantic_lineage.py::test_a_declaring_node_that_replaces_the_stream_keeps_its_own_write", "state": "active"}

@@ -717,7 +717,8 @@ def _walk_lineage(
                 evidence=(("reader_count", len(pairs)),),
             )
 
-    def _visit(node_id: str, state: _State, depth: int, leg=None, writers=None) -> _State:
+    def _visit(node_id: str, state: _State, depth: int, leg=None, writers=None,
+               on_documents=None) -> _State:
         node = prepared.node(node_id)
         if node is None:
             return state
@@ -727,6 +728,14 @@ def _walk_lineage(
         # Per-path, copy-on-write, and deliberately NOT part of `_State`: it is
         # never merged, so it cannot perturb the meet the whole module rests on.
         writers = writers if writers is not None else {}
+        # Document-scoped keys whose value the documents AT THIS POINT carry.
+        # One notion, fed by every channel that establishes a key and emptied
+        # by the one event that invalidates them — see `_check_path_binding`.
+        on_documents = on_documents if on_documents is not None else frozenset()
+        # What THIS node establishes, kept separately: a node that replaces the
+        # stream still writes onto the documents it emits, so its own writes
+        # must survive its own replacement.
+        established_here = set()
 
         semantic = node.semantic
 
@@ -784,6 +793,9 @@ def _walk_lineage(
                 continue
             for key in effect.writes:
                 state = state.with_write((key[0], key[1]))
+                if key[0] == DDP:
+                    on_documents = on_documents | {(key[0], key[1])}
+                    established_here.add((key[0], key[1]))
 
         # --- opaque effects contribute uncertainty, never proof -------------
         opaque = _opaque_reason(semantic, capabilities)
@@ -850,13 +862,16 @@ def _walk_lineage(
                 # fragment alone and the request addresses a different resource.
                 # Reusing the clearing that already happens at replacement is
                 # also why this needs no second provenance model.
-                if key not in writers and any(
+                if key not in on_documents and any(
                     getattr(source, "value_type", None) == "current"
                     for source in getattr(semantic, "source_values", ()) or ()
                 ):
                     unmet_here = unmet_here + (key,)
                 writers = {**writers, key: (semantic, unmet_here)}
             state = state.with_write(key)
+            if key[0] == DDP:
+                on_documents = on_documents | {key}
+                established_here.add(key)
 
         # --- a bound request path, against this path's reaching writer -------
         _check_path_binding(node, semantic, state, writers)
@@ -870,6 +885,12 @@ def _walk_lineage(
             writers = {
                 key: value for key, value in writers.items() if key[0] != DDP
             }
+            # It holds document-scoped keys only, so replacement empties it —
+            # EXCEPT what this node itself established. A contracted script that
+            # declares it writes a property replaces the stream and writes onto
+            # the documents it emits, so discarding its own declaration here
+            # refused a document whose value genuinely survives.
+            on_documents = frozenset(established_here)
 
         # --- successors -----------------------------------------------------
         edges = prepared.successors(node_id)
@@ -906,6 +927,7 @@ def _walk_lineage(
                     depth + 1,
                     (node.node_id, edge.leg_ordinal or edge.local_ordinal),
                     writers,
+                    on_documents,
                 )
                 completions = normal_exits[first:]
                 if completions:
@@ -952,7 +974,7 @@ def _walk_lineage(
             results = []
             for edge in edges:
                 before_normal, before_threw = len(normal_exits), len(threw)
-                arm = _visit(edge.target_node_id, state, depth + 1, leg, writers)
+                arm = _visit(edge.target_node_id, state, depth + 1, leg, writers, on_documents)
                 only_threw = (
                     len(threw) > before_threw
                     and len(normal_exits) == before_normal
@@ -971,18 +993,22 @@ def _walk_lineage(
             # document. A write inside the try body may not have happened when
             # the failure occurred, so it cannot be assumed visible to catch.
             for edge in edges:
-                _visit(edge.target_node_id, state, depth + 1, leg, writers)
+                _visit(edge.target_node_id, state, depth + 1, leg, writers, on_documents)
             return state
 
         result = state
         for edge in edges:
-            result = _visit(edge.target_node_id, state, depth + 1, leg, writers)
+            result = _visit(edge.target_node_id, state, depth + 1, leg, writers, on_documents)
         return result
 
     entry_state = _State()
+    entry_documents = set()
     for key in capabilities.established_at_entry:
         entry_state = entry_state.with_write((key[0], key[1]))
-    _visit(prepared.cfg.entry_node_id, entry_state, 0)
+        if key[0] == DDP:
+            entry_documents.add((key[0], key[1]))
+    _visit(prepared.cfg.entry_node_id, entry_state, 0,
+           on_documents=frozenset(entry_documents))
     # The MEET over normal exits. Using the traversal's returned state instead
     # answered a different question: `try_catch` hands back its SCOPE-ENTRY
     # state, so a key written on the try path AND on the catch path — a genuine

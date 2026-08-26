@@ -1429,3 +1429,110 @@ def test_appending_to_a_value_with_no_replacement_between_still_compiles():
     writer = {"kind": "set_ddp", "name": "P", "source_values": [_STATIC]}
     appender = {"kind": "set_ddp", "name": "P", "source_values": [_STATIC, _CURRENT]}
     assert _dynpath_codes([writer, appender, _BOUND, {"kind": "stop"}]) == ()
+
+
+def _script_step(source: str):
+    return {"kind": "data_process", "steps": [
+        {"operation": "custom_scripting", "language": "groovy2", "script": source}]}
+
+
+def _declaring(source: str, *keys):
+    """Capabilities in which a script CONTRACTS to write `keys`."""
+    import hashlib
+
+    from boomi_mcp.compiler.process_ir.semantic_validation.contracts import (
+        ProcessIRValidationCapabilitiesV1,
+        ScriptEffectContractV1,
+        StateEffectV1,
+    )
+
+    return ProcessIRValidationCapabilitiesV1(
+        script_effects=(
+            ScriptEffectContractV1(
+                language="groovy2",
+                source_sha256=hashlib.sha256(source.encode()).hexdigest(),
+                effect=StateEffectV1(writes=tuple(keys)),
+            ),
+        )
+    )
+
+
+def _codes_with(steps, capabilities=None):
+    from boomi_mcp.compiler.process_ir.diagnostics import ProcessIRCompileError
+    from boomi_mcp.compiler.process_ir.pipeline import compile_process_ir_v1
+
+    doc = {"version": "1", "body": {"kind": "sequence", "steps": steps}}
+    kwargs = {"capabilities": capabilities} if capabilities is not None else {}
+    try:
+        compile_process_ir_v1(parse_process_ir_v1(doc), _dynpath_symbols(), **kwargs)
+    except ProcessIRCompileError as exc:
+        return tuple(item.code for item in exc.diagnostics)
+    return ()
+
+
+def test_a_contract_declared_write_establishes_a_value_current_may_append_to():
+    """QA-155-r15-01. Three channels establish a key; the rule must see all three.
+
+    The first version of this rule asked the state model, which is too BROAD —
+    it survives a document replacement. The second asked the reaching-writer
+    map, which is too NARROW — that map is populated only by authored property
+    nodes, so a write a trusted script CONTRACTS to perform was discarded along
+    with the stale ones. Both are proxies for one fact, and this is that fact:
+    which document-scoped keys the documents at this point actually carry, fed
+    by every channel that establishes one and emptied by the single event that
+    invalidates them.
+
+    The pair below differs ONLY in whether the declaration is supplied.
+    """
+    source = "// declares that it writes P"
+    steps = [_script_step(source),
+             {"kind": "set_ddp", "name": "P", "source_values": [_STATIC, _CURRENT]},
+             _BOUND, {"kind": "stop"}]
+
+    assert _codes_with(steps, _declaring(source, ("ddp", "P"))) == ()
+
+    undeclared = _codes_with(steps)
+    assert PROCESS_IR_SEMANTIC_DYNAMIC_PATH_DDP_NOT_ESTABLISHED in undeclared, undeclared
+
+
+def test_a_declaring_node_that_replaces_the_stream_keeps_its_own_write():
+    """The ordering half, and it is not a detail.
+
+    A contracted script both REPLACES the document stream and writes onto the
+    documents it emits. Emptying the carried set at such a node without keeping
+    what the node itself established refused a value that genuinely survives —
+    the declaration is about the emitted documents.
+    """
+    source = "// declares that it writes P"
+    caps = _declaring(source, ("ddp", "P"))
+    appended = {"kind": "set_ddp", "name": "P", "source_values": [_STATIC, _CURRENT]}
+
+    # Its own write survives its own replacement...
+    assert _codes_with([_script_step(source), appended, _BOUND, {"kind": "stop"}], caps) == ()
+    # ...but a LATER replacement still invalidates it.
+    later = _codes_with(
+        [_script_step(source), {"kind": "message", "text": "hi"}, appended, _BOUND,
+         {"kind": "stop"}], caps)
+    assert PROCESS_IR_SEMANTIC_DYNAMIC_PATH_DDP_NOT_ESTABLISHED in later, later
+
+
+def test_a_caller_declared_entry_value_establishes_one_too():
+    """The third channel: a key the caller declares established at entry.
+
+    Same question asked of the same one notion, so this needs no rule of its
+    own — it needs the notion to be fed from here as well.
+    """
+    from boomi_mcp.compiler.process_ir.semantic_validation.contracts import (
+        ProcessIRValidationCapabilitiesV1,
+    )
+
+    appended = {"kind": "set_ddp", "name": "P", "source_values": [_STATIC, _CURRENT]}
+    steps = [appended, _BOUND, {"kind": "stop"}]
+
+    at_entry = ProcessIRValidationCapabilitiesV1(established_at_entry=(("ddp", "P"),))
+    assert _codes_with(steps, at_entry) == ()
+
+    # Control: without the declaration, and with a replacement after it.
+    assert PROCESS_IR_SEMANTIC_DYNAMIC_PATH_DDP_NOT_ESTABLISHED in _codes_with(steps)
+    replaced = _codes_with([{"kind": "message", "text": "hi"}] + steps, at_entry)
+    assert PROCESS_IR_SEMANTIC_DYNAMIC_PATH_DDP_NOT_ESTABLISHED in replaced, replaced
