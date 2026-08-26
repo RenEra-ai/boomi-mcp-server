@@ -45,7 +45,7 @@ branch leg bounds). CFG-aware semantics (reachability, lineage) stay with
 from __future__ import annotations
 
 import json
-from collections.abc import Collection as _ABCCollection, Mapping as _ABCMapping
+from collections.abc import Mapping as _ABCMapping, Sequence as _ABCSequence
 from types import MappingProxyType
 from typing import (
     Any,
@@ -287,39 +287,115 @@ def _is_component_ref_field(field_info) -> bool:
     fixed rather than documented away because the alternative is a comment that
     tells the next author the case is handled when it is not.
     """
-    if _carries_component_ref_validator(getattr(field_info, "metadata", ())):
-        return True
-    annotation = getattr(field_info, "annotation", None)
-    if _annotation_is_component_ref(annotation):
-        return True
+    return _component_ref_shape(getattr(field_info, "annotation", None)) is not None or \
+        _carries_component_ref_validator(getattr(field_info, "metadata", ()))
 
-    # ...or ONE container of them. An Optional wrapping the container is
-    # unwrapped first, so `Optional[Tuple[ComponentRefV1, ...]]` is admitted
-    # while `Optional[ComponentRefV1]` was already handled above.
+
+#: The ONLY shapes a component reference may be declared in. Named rather than
+#: implied so the guard below can report which one a field failed to be.
+REFERENCE_SHAPES_V1: Tuple[str, ...] = ("reference", "optional_reference", "reference_sequence")
+
+
+def _component_ref_shape(annotation):
+    """Which admitted shape this annotation is, or None if it is not one.
+
+    Three forms, and the closed list is the point. Classifying an OPEN space of
+    annotations is what failed four times running here — each version was
+    correct about the shapes it had been shown and wrong about the next one,
+    because the space of ways to spell "a container of X" has no end: a named
+    tuple that inherits, a tuple subclass carrying annotations, a structurally
+    typed collection, a set whose iteration order moves between processes.
+
+    So the space is closed instead of chased. These three forms are admitted;
+    `assert_component_refs_are_declared_in_supported_shapes` refuses to let a
+    model declare a reference any other way. Adding a fourth form is then a
+    deliberate act with a failing test in front of it, rather than a silent
+    mis-service discovered by whoever reads the served contract next.
+    """
+    if _annotation_is_component_ref(annotation):
+        return "optional_reference" if get_origin(annotation) is Union else "reference"
+
+    # An Optional may wrap the SEQUENCE too, so unwrap once before classifying
+    # it. `Optional[ComponentRefV1]` was already answered above.
+    optional = False
     if get_origin(annotation) is Union:
         arms = [arm for arm in get_args(annotation) if arm is not type(None)]
         if len(arms) != 1:
-            return False
-        annotation = arms[0]
-    origin = get_origin(annotation)
-    if origin is None:
-        # A NON-GENERIC container states its member types on itself. A
-        # `NamedTuple` is the case that occurs: it reports no origin, so the
-        # generic path above sees nothing, yet a value of it IS a tuple the
-        # walk iterates. Reading the type's own annotations is reading ITS
-        # authority — the same move as reading `get_args` from a generic — not
-        # a hand-model of which containers exist.
-        hints = getattr(annotation, "__annotations__", None)
-        if not (isinstance(annotation, type) and hints and issubclass(annotation, tuple)):
-            return False
-        return all(_annotation_is_component_ref(hint) for hint in hints.values())
-    if not _is_walkable_collection_origin(origin):
-        return False
+            return None
+        annotation, optional = arms[0], True
+    if not _is_walkable_collection_origin(get_origin(annotation)):
+        return None
     arms = [arm for arm in get_args(annotation) if arm is not Ellipsis]
-    # Homogeneous only. A heterogeneous tuple would make "the field is a
-    # reference" true of some positions and false of others, and the walk
-    # yields per element with no way to tell them apart.
-    return bool(arms) and all(_annotation_is_component_ref(arm) for arm in arms)
+    # Homogeneous only: the walk yields per element with no way to tell a
+    # reference position from a plain one.
+    if arms and all(_annotation_is_component_ref(arm) for arm in arms):
+        return "reference_sequence"
+    return None
+
+
+def _annotation_mentions_component_ref(annotation, _seen=()) -> bool:
+    """Does a component reference appear ANYWHERE in this annotation?
+
+    Deliberately over-approximate, and the opposite job from
+    :func:`_component_ref_shape`: that one must be exactly right about a closed
+    set of forms, this one only has to never MISS a mention. It scans generic
+    arguments, annotated metadata, and the member annotations a non-generic
+    container carries — so a named tuple of references, a tuple subclass with
+    annotations, a set, a mapping and a lazily-validated iterable all answer
+    True, and every one of them is then refused a shape and fails the guard.
+    """
+    if annotation in _seen:
+        return False
+    _seen = _seen + (annotation,)
+    if _carries_component_ref_validator(getattr(annotation, "__metadata__", ())):
+        return True
+    for arg in get_args(annotation):
+        if arg is not Ellipsis and _annotation_mentions_component_ref(arg, _seen):
+            return True
+    if isinstance(annotation, type):
+        # The whole MRO, not the class's own `__annotations__`: a subclass of a
+        # named tuple reports an EMPTY mapping while still carrying its parent's
+        # members, so reading only the class itself MISSED it — and a shape this
+        # scanner misses is a shape the guard never sees. Over-reporting here is
+        # harmless (it only forces a field into one of the admitted forms);
+        # under-reporting is the failure this function exists to prevent.
+        for base in getattr(annotation, "__mro__", (annotation,)):
+            members = getattr(base, "__annotations__", None)
+            if not isinstance(members, dict):
+                continue
+            for member in members.values():
+                if _annotation_mentions_component_ref(member, _seen):
+                    return True
+    return False
+
+
+def assert_component_refs_are_declared_in_supported_shapes(models) -> None:
+    """Refuse any model that declares a reference in a shape the walk mis-serves.
+
+    This is what closes the space. Without it, every consumer of
+    :func:`iter_component_refs` — the served reference list, the relocatability
+    gate, symbol-slot derivation, the dependency preflight — silently believes
+    a field is not a reference, or worse, receives a plain string as one.
+    Neither failure has a symptom at the point it is introduced; both surface
+    much later as an omission in a served contract.
+
+    Raises :class:`TypeError` naming the field and the shapes it may use, so a
+    model author who needs a fourth form gets a failing build and a decision to
+    make, rather than a contract that is quietly wrong about their field.
+    """
+    offenders = []
+    for model in models:
+        for name, field_info in getattr(model, "model_fields", {}).items():
+            annotation = getattr(field_info, "annotation", None)
+            if not _annotation_mentions_component_ref(annotation):
+                continue
+            if _component_ref_shape(annotation) is None:
+                offenders.append("{0}.{1}: {2!r}".format(model.__name__, name, annotation))
+    if offenders:
+        raise TypeError(
+            "component references must be declared as one of {0}; offending "
+            "field(s): {1}".format(", ".join(REFERENCE_SHAPES_V1), "; ".join(sorted(offenders)))
+        )
 
 
 def _annotation_is_component_ref(annotation) -> bool:
@@ -340,38 +416,37 @@ def _annotation_is_component_ref(annotation) -> bool:
 
 
 def _is_walkable_collection_origin(origin) -> bool:
-    """Would a value of this origin be ITERATED element-wise by the walk?
+    """Would a value of this origin be walked element-wise, IN A STABLE ORDER?
 
-    DERIVED from the abc hierarchy rather than enumerated, and this is the whole
-    point of the function. The first version of this check listed
-    ``(list, tuple, set, frozenset)`` while the walk it gates tested
-    ``isinstance(value, (list, tuple))`` — two hand-written spellings of one
-    fact, which promptly disagreed in both directions: a set of references was
-    ADVERTISED by the served contract and then never resolved, while a
-    ``Sequence`` of them was skipped whole although pydantic coerces it to a
-    list the walk would have iterated. QA found both, and the first is worse
-    than the gap the enumeration was added to close — before it, the predicate
-    and the walk were at least silently consistent.
+    The floor is SEQUENCE, and the four rounds it took to get here are the
+    argument for it. The first version enumerated ``(list, tuple, set,
+    frozenset)`` against a walk that tested ``isinstance(value, (list,
+    tuple))`` — two spellings of one fact, disagreeing both ways. Deriving the
+    rule instead of listing it fixed that but set the floor at ``Iterable``,
+    which admitted a lazily-validated field the walk then CONSUMED. Raising it
+    to ``Collection`` fixed the consumption and still admitted unordered
+    containers — and the walk yields ``<field>/<index>``, so the index IS the
+    identity every consumer receives. A set-typed reference field therefore
+    produced a different path for the same reference in each process: measured
+    across four hash seeds, four different maps, while the list control was
+    identical in all four. That varies the served path, the relocatability
+    diagnostic, the symbol slot and the dependency preflight by process.
 
-    A string is excluded because iterating one yields characters, and a mapping
-    because iterating one yields keys; the walk excludes both for the same
-    reason, so the two sides now answer the same question. Their agreement is
-    pinned per admitted shape by a test rather than asserted here.
+    Ordered re-iteration is the property the walk actually needs, and
+    ``Sequence`` is exactly it. A string and a mapping are excluded because
+    iterating them yields characters and keys respectively; the walk excludes
+    both for the same reason, and their agreement is pinned per shape by a test.
 
-    The floor is COLLECTION, not iterable, and that one level matters: pydantic
-    validates an ``Iterable[...]`` field to a LAZY iterator, so walking such a
-    field consumes it. There are four consumers of the walk — the first would
-    win and the other three would see an empty field — and reading would MUTATE
-    the document, which nothing detects because the exhausted value is still
-    iterable. A collection is sized and re-iterable by contract, which is the
-    property actually required here; QA measured the two floors against real
-    re-iterability and only the iterable floor admitted a shape that fails it.
+    This test no longer has to be RIGHT about every conceivable annotation,
+    which is what made the previous three versions fail: `_component_ref_shape`
+    below forbids any other shape from existing, so the space it classifies is
+    closed rather than open.
     """
     if not isinstance(origin, type):
         return False
     if issubclass(origin, (str, bytes, bytearray)) or issubclass(origin, _ABCMapping):
         return False
-    return issubclass(origin, _ABCCollection)
+    return issubclass(origin, _ABCSequence)
 
 
 def _is_walkable_collection_value(value) -> bool:
@@ -384,7 +459,7 @@ def _is_walkable_collection_value(value) -> bool:
     """
     if isinstance(value, (str, bytes, bytearray)) or isinstance(value, _ABCMapping):
         return False
-    return isinstance(value, _ABCCollection)
+    return isinstance(value, _ABCSequence)
 
 
 def iter_component_refs(node: Any, path: str = ""):

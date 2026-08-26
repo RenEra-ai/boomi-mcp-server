@@ -1784,8 +1784,6 @@ _REF_SHAPES = [
     ("optional", "Optional[ComponentRefV1]", "$ref:A"),
     ("tuple", "Tuple[ComponentRefV1, ...]", ("$ref:A", "$ref:B")),
     ("list", "List[ComponentRefV1]", ["$ref:A"]),
-    ("set", "Set[ComponentRefV1]", {"$ref:A"}),
-    ("frozenset", "FrozenSet[ComponentRefV1]", frozenset({"$ref:A"})),
     ("sequence", "Sequence[ComponentRefV1]", ["$ref:A"]),
     ("deque", "Deque[ComponentRefV1]", ["$ref:A"]),
     ("optional_tuple", "Optional[Tuple[ComponentRefV1, ...]]", ("$ref:A",)),
@@ -1848,6 +1846,10 @@ def test_every_admitted_reference_shape_is_also_walkable(label, annotation_src, 
         # consume it — see the re-iterability test below for why that is worse
         # than not recognising it at all.
         "Iterable[ComponentRefV1]",
+        # Unordered: the walk's index IS the identity every consumer receives,
+        # and these produce a different one per process.
+        "Set[ComponentRefV1]",
+        "FrozenSet[ComponentRefV1]",
     ],
 )
 def test_a_shape_the_walk_cannot_resolve_is_not_admitted(annotation_src):
@@ -1945,27 +1947,49 @@ def test_a_one_shot_value_is_refused_by_the_value_side_too():
     """
     from boomi_mcp.models.process_ir import _is_walkable_collection_value
 
-    for admitted in (["a"], ("a",), {"a"}, frozenset({"a"})):
+    for admitted in (["a"], ("a",)):
         assert _is_walkable_collection_value(admitted), admitted
-    for refused in ((x for x in "ab"), iter(["a"]), "abc", b"ab", {"a": 1}):
+    # A set is refused HERE too, not only in the annotation: the walk's index is
+    # the identity its consumers receive, and set iteration order moves between
+    # processes. Measured across four hash seeds: four different path-to-
+    # reference maps, while the list control was identical in all four.
+    for refused in ({"a"}, frozenset({"a"}), (x for x in "ab"), iter(["a"]),
+                    "abc", b"ab", {"a": 1}):
         assert not _is_walkable_collection_value(refused), refused
 
 
-def test_a_named_tuple_of_references_is_recognised_and_walked():
-    """QA-155-r8-02: refused although walkable — now closed, not recorded.
+#: Every annotation shape the reference predicate is asked about, with a runtime
+#: value of that shape. The shapes are named for what QA measured about them: the
+#: first version of the container fix admitted `Set`/`FrozenSet` the walk never
+#: iterated, and rejected `Sequence`/`Iterable` that pydantic coerces to a list
+#: the walk would have iterated. Both directions are pinned here.
+_REF_SHAPES = [
+    ("bare", "ComponentRefV1", "$ref:A"),
+    ("optional", "Optional[ComponentRefV1]", "$ref:A"),
+    ("tuple", "Tuple[ComponentRefV1, ...]", ("$ref:A", "$ref:B")),
+    ("list", "List[ComponentRefV1]", ["$ref:A"]),
+    ("sequence", "Sequence[ComponentRefV1]", ["$ref:A"]),
+    ("deque", "Deque[ComponentRefV1]", ["$ref:A"]),
+    ("optional_tuple", "Optional[Tuple[ComponentRefV1, ...]]", ("$ref:A",)),
+    ("optional_sequence", "Optional[Sequence[ComponentRefV1]]", ["$ref:A"]),
+]
 
-    I first wrote this down as a limitation, on the reasoning that closing it
-    meant special-casing a non-generic container and that special cases are the
-    class this predicate had just stopped carrying. Measuring the claim killed
-    it: a `NamedTuple` states its member types in its own `__annotations__`,
-    agreeing with `_fields`, so reading them is reading THAT TYPE's authority —
-    exactly what `get_args` does for a generic. The limitation's stated reason
-    was wrong, so the limitation went rather than the reason being reworded.
 
-    Both halves are asserted, because admitting the shape is only correct if
-    the walk then resolves it: a named tuple IS a tuple, so it does.
+@pytest.mark.parametrize("label, annotation_src, value", _REF_SHAPES)
+def test_every_admitted_reference_shape_is_also_walkable(label, annotation_src, value):
+    """QA-155-r7-01: the predicate and the walk must answer ONE question.
+
+    The predicate reads ANNOTATIONS and the walk reads VALUES, so they cannot
+    share code — and the first container fix therefore wrote the rule twice, as
+    an origin list on one side and an isinstance tuple on the other. They
+    disagreed immediately and in both directions, the worse of which advertises
+    a reference in the served contract that the walk then never resolves.
+
+    This test is the authority the two spellings answer to: for every shape the
+    predicate admits, a real value of that shape must resolve through the walk.
+    A future divergence fails here instead of in a QA round.
     """
-    from typing import NamedTuple
+    import typing
 
     from pydantic.fields import FieldInfo
 
@@ -1976,22 +2000,146 @@ def test_a_named_tuple_of_references_is_recognised_and_walked():
         iter_component_refs,
     )
 
-    class _RefPair(NamedTuple):
-        first: ComponentRefV1
-        second: ComponentRefV1
+    namespace = dict(vars(typing))
+    namespace["ComponentRefV1"] = ComponentRefV1
+    annotation = eval(annotation_src, namespace)  # noqa: S307 - fixed table above
 
-    assert _is_component_ref_field(FieldInfo.from_annotation(_RefPair))
+    assert _is_component_ref_field(FieldInfo.from_annotation(annotation)), annotation_src
 
     node = StopNodeV1.model_construct(kind="stop")
-    object.__setattr__(node, "planted", _RefPair("$ref:A", "$ref:B"))
+    object.__setattr__(node, "planted", value)
     fields = dict(StopNodeV1.model_fields)
-    fields["planted"] = FieldInfo.from_annotation(_RefPair)
+    fields["planted"] = FieldInfo.from_annotation(annotation)
     try:
         StopNodeV1.model_fields = fields
-        reads = [{ref for _p, ref in iter_component_refs(node)} for _ in range(3)]
+        found = {ref for _path, ref in iter_component_refs(node)}
     finally:
         StopNodeV1.model_fields = {k: v for k, v in fields.items() if k != "planted"}
-    assert reads == [{"$ref:A", "$ref:B"}] * 3, reads
+
+    expected = {value} if isinstance(value, str) else set(value)
+    assert found == expected, (label, found, expected)
+
+
+@pytest.mark.parametrize(
+    "annotation_src",
+    [
+        "Tuple[Tuple[ComponentRefV1, ...], ...]",
+        "Dict[str, ComponentRefV1]",
+        "Mapping[str, ComponentRefV1]",
+        # Pydantic validates this one to a LAZY iterator, so the walk would
+        # consume it — see the re-iterability test below for why that is worse
+        # than not recognising it at all.
+        "Iterable[ComponentRefV1]",
+        # Unordered: the walk's index IS the identity every consumer receives,
+        # and these produce a different one per process.
+        "Set[ComponentRefV1]",
+        "FrozenSet[ComponentRefV1]",
+    ],
+)
+def test_a_shape_the_walk_cannot_resolve_is_not_admitted(annotation_src):
+    """The other half of the biconditional, and the direction that misleads.
+
+    A nested collection is flattened one level by the walk and a mapping
+    iterates its KEYS, so neither resolves to references. Admitting either
+    would publish a reference the walk cannot find — silence would be better.
+    """
+    import typing
+
+    from pydantic.fields import FieldInfo
+
+    from boomi_mcp.models.process_ir import ComponentRefV1, _is_component_ref_field
+
+    namespace = dict(vars(typing))
+    namespace["ComponentRefV1"] = ComponentRefV1
+    annotation = eval(namespace and annotation_src, namespace)  # noqa: S307
+    assert not _is_component_ref_field(FieldInfo.from_annotation(annotation)), annotation_src
+
+
+def test_the_widening_did_not_admit_a_shape_that_is_not_a_reference():
+    """The other direction — a predicate that says yes to everything is worse.
+
+    A heterogeneous tuple and a wide union are both refused: in the first the
+    claim would be true of some positions and false of others, and in the second
+    which arm a value took is not a schema fact. Both were reachable regressions
+    of this widening, so both are pinned.
+    """
+    from typing import List, Optional, Tuple, Union
+
+    from pydantic.fields import FieldInfo
+
+    from boomi_mcp.models.process_ir import ComponentRefV1, _is_component_ref_field
+
+    for annotation in (
+        str,
+        Optional[str],
+        List[str],
+        Tuple[ComponentRefV1, str],
+        Union[ComponentRefV1, int],
+    ):
+        assert not _is_component_ref_field(FieldInfo.from_annotation(annotation)), annotation
+
+
+@pytest.mark.parametrize("label, annotation_src, value", _REF_SHAPES)
+def test_an_admitted_reference_field_survives_being_read(label, annotation_src, value):
+    """QA-155-r8-01: the walk must not CONSUME the document it reads.
+
+    This is why the container floor is `Collection` and not `Iterable`. Pydantic
+    validates an `Iterable[...]` field to a lazy iterator, so the first of the
+    four consumers of this walk would drain it and the other three would see an
+    empty field — and the read would MUTATE the document, with nothing to
+    detect it, because an exhausted iterator is still iterable.
+
+    A collection is re-iterable by contract, so the property is asserted the
+    only way it can be: read the same field four times and require the same
+    answer. Reading once would pass on the broken tree.
+    """
+    import typing
+
+    from pydantic.fields import FieldInfo
+
+    from boomi_mcp.models.process_ir import (
+        ComponentRefV1,
+        StopNodeV1,
+        iter_component_refs,
+    )
+
+    namespace = dict(vars(typing))
+    namespace["ComponentRefV1"] = ComponentRefV1
+    annotation = eval(annotation_src, namespace)  # noqa: S307 - fixed table above
+
+    node = StopNodeV1.model_construct(kind="stop")
+    object.__setattr__(node, "planted", value)
+    fields = dict(StopNodeV1.model_fields)
+    fields["planted"] = FieldInfo.from_annotation(annotation)
+    try:
+        StopNodeV1.model_fields = fields
+        reads = [{ref for _p, ref in iter_component_refs(node)} for _ in range(4)]
+    finally:
+        StopNodeV1.model_fields = {k: v for k, v in fields.items() if k != "planted"}
+
+    expected = {value} if isinstance(value, str) else set(value)
+    assert reads == [expected] * 4, (label, reads)
+
+
+def test_a_one_shot_value_is_refused_by_the_value_side_too():
+    """The value-domain half of the same floor.
+
+    The annotation side cannot catch everything — a field typed as a collection
+    could still be handed a generator by `model_construct`, which performs no
+    validation. Both spellings therefore carry the floor, and this pins the one
+    that has no annotation to consult.
+    """
+    from boomi_mcp.models.process_ir import _is_walkable_collection_value
+
+    for admitted in (["a"], ("a",)):
+        assert _is_walkable_collection_value(admitted), admitted
+    # A set is refused HERE too, not only in the annotation: the walk's index is
+    # the identity its consumers receive, and set iteration order moves between
+    # processes. Measured across four hash seeds: four different path-to-
+    # reference maps, while the list control was identical in all four.
+    for refused in ({"a"}, frozenset({"a"}), (x for x in "ab"), iter(["a"]),
+                    "abc", b"ab", {"a": 1}):
+        assert not _is_walkable_collection_value(refused), refused
 
 
 def test_a_named_tuple_that_is_not_all_references_is_refused():
@@ -2023,3 +2171,133 @@ def test_a_named_tuple_that_is_not_all_references_is_refused():
         __annotations__ = {"ref": ComponentRefV1}
 
     assert not _is_component_ref_field(FieldInfo.from_annotation(_NotATuple))
+
+
+def _is_ref(field_info) -> bool:
+    from boomi_mcp.models.process_ir import _is_component_ref_field
+
+    return _is_component_ref_field(field_info)
+
+
+def test_no_model_declares_a_reference_in_an_unsupported_shape():
+    """The guard that CLOSES the space, run over every real model.
+
+    Four rounds of QA findings on this predicate all had one shape: it was
+    correct about the annotations it had been shown and wrong about the next
+    one, because "a container of X" has no finite set of spellings. This test
+    is why the fifth version does not need to be right about all of them — any
+    shape outside the three admitted forms cannot exist in the first place.
+    """
+    from pydantic import BaseModel
+
+    from boomi_mcp.models import process_ir as ir_models
+    from boomi_mcp.models.process_ir import (
+        assert_component_refs_are_declared_in_supported_shapes,
+    )
+
+    models = [
+        obj
+        for obj in vars(ir_models).values()
+        if isinstance(obj, type) and issubclass(obj, BaseModel)
+    ]
+    # Non-vacuity: the guard would pass over an empty list, and it must be
+    # asserted that it actually saw the models carrying references.
+    assert len(models) > 30, len(models)
+    carriers = [
+        m for m in models
+        if any(_is_ref(f) for f in m.model_fields.values())
+    ]
+    assert len(carriers) >= 8, [m.__name__ for m in carriers]
+
+    assert_component_refs_are_declared_in_supported_shapes(models)
+
+
+@pytest.mark.parametrize(
+    "annotation_src",
+    [
+        "Set[ComponentRefV1]",
+        "FrozenSet[ComponentRefV1]",
+        "Iterable[ComponentRefV1]",
+        "Dict[str, ComponentRefV1]",
+        "Tuple[Tuple[ComponentRefV1, ...], ...]",
+        "Tuple[ComponentRefV1, str]",
+    ],
+)
+def test_the_guard_refuses_each_unsupported_shape(annotation_src):
+    """NON-VACUITY: a guard that passes because it finds nothing is not a guard.
+
+    Every shape here was measured to mis-serve — unordered iteration gives a
+    different path per process, a lazy iterable is consumed by the first of the
+    walk's consumers, a mapping iterates keys, a nested collection is flattened
+    one level, a heterogeneous tuple has no per-position answer.
+    """
+    import typing
+
+    from pydantic.fields import FieldInfo
+
+    from boomi_mcp.models.process_ir import (
+        ComponentRefV1,
+        StopNodeV1,
+        assert_component_refs_are_declared_in_supported_shapes,
+    )
+
+    namespace = dict(vars(typing))
+    namespace["ComponentRefV1"] = ComponentRefV1
+    annotation = eval(annotation_src, namespace)  # noqa: S307 - fixed table above
+
+    class _Planted(StopNodeV1):
+        pass
+
+    _Planted.model_fields = dict(
+        StopNodeV1.model_fields, planted=FieldInfo.from_annotation(annotation)
+    )
+    with pytest.raises(TypeError, match="component references must be declared"):
+        assert_component_refs_are_declared_in_supported_shapes([_Planted])
+
+
+def test_the_guard_refuses_the_named_tuple_shapes_that_emit_WRONG_references():
+    """The direction that is worse than invisibility, and how it was found.
+
+    A previous version of this predicate read a `NamedTuple`'s `__annotations__`
+    as its member list. They agree only for a directly-declared one: a subclass
+    reports an EMPTY mapping (its references become invisible), and a subclass
+    that adds a non-member annotation reports that instead — so the walk yielded
+    every position as a reference, handing a plain string to the dependency
+    preflight and the relocatability gate as a component id. A tuple subclass
+    carrying annotations did the same while being no named tuple at all.
+
+    Both are now refused a shape and caught by the guard, which is the only
+    outcome that does not depend on classifying them correctly.
+    """
+    from typing import NamedTuple
+
+    from pydantic.fields import FieldInfo
+
+    from boomi_mcp.models.process_ir import (
+        ComponentRefV1,
+        StopNodeV1,
+        assert_component_refs_are_declared_in_supported_shapes,
+    )
+
+    class _NTRefs(NamedTuple):
+        a: ComponentRefV1
+        b: ComponentRefV1
+
+    class _ChildBare(_NTRefs):
+        pass
+
+    class _ChildRefAnn(_NTRefs):
+        extra: ComponentRefV1
+
+    class _TupleSubclass(tuple):
+        __annotations__ = {"a": ComponentRefV1}
+
+    for annotation in (_NTRefs, _ChildBare, _ChildRefAnn, _TupleSubclass):
+        class _Planted(StopNodeV1):
+            pass
+
+        _Planted.model_fields = dict(
+            StopNodeV1.model_fields, planted=FieldInfo.from_annotation(annotation)
+        )
+        with pytest.raises(TypeError, match="component references must be declared"):
+            assert_component_refs_are_declared_in_supported_shapes([_Planted])
