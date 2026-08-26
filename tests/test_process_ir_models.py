@@ -2513,3 +2513,37 @@ def test_the_guard_universe_is_derived_from_reachability_not_a_snapshot():
     # Reachability is transitive, not one level: a node's nested body models are
     # included, or the guard would check only the root's own fields.
     assert len(reachable) > 30, len(reachable)
+
+
+def test_no_model_in_the_guard_universe_subclasses_another():
+    """QA-155-r12-01: makes the last residue structurally impossible.
+
+    Reachability walks ANNOTATIONS while the walk itself reads a value's runtime
+    `model_fields`. Those part company for exactly one shape: an instance of a
+    subclass held in a field declared as its parent. Such a model is walked but
+    never enumerated, so a reference it declares in a refused shape is skipped
+    in silence rather than refused loudly.
+
+    It cannot be reached the way callers construct — validating the equivalent
+    document is rejected, because the base forbids extra fields, and only
+    in-process Python construction preserves the subclass. So this is not a
+    defect at the tool boundary; QA said as much and did not gate on it.
+
+    It is asserted anyway because the assertion is derivable from the universe
+    the guard already computes, and it converts "no model happens to subclass
+    another" from a fact that is true today into one that cannot quietly stop
+    being true.
+    """
+    from boomi_mcp.models.process_ir import (
+        ProcessIRV1,
+        models_reachable_by_the_reference_walk,
+    )
+
+    reachable = models_reachable_by_the_reference_walk(ProcessIRV1)
+    offenders = [
+        "{0} subclasses {1}".format(child.__name__, parent.__name__)
+        for child in reachable
+        for parent in reachable
+        if child is not parent and issubclass(child, parent)
+    ]
+    assert not offenders, offenders

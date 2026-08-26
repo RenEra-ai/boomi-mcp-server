@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 10613, "minimum_collected": 10613, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 10614, "minimum_collected": 10614, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -10652,3 +10652,4 @@
 {"kind": "test", "id": "pytest-010651", "node_id": "tests/test_process_ir_models.py::test_the_guard_refuses_an_annotation_it_cannot_reason_about[forward_reference]", "state": "active"}
 {"kind": "test", "id": "pytest-010652", "node_id": "tests/test_process_ir_models.py::test_the_guard_refuses_an_annotation_it_cannot_reason_about[type_variable]", "state": "active"}
 {"kind": "test", "id": "pytest-010653", "node_id": "tests/test_process_ir_models.py::test_the_guard_universe_is_derived_from_reachability_not_a_snapshot", "state": "active"}
+{"kind": "test", "id": "pytest-010654", "node_id": "tests/test_process_ir_models.py::test_no_model_in_the_guard_universe_subclasses_another", "state": "active"}
