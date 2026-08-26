@@ -550,6 +550,41 @@ def dynpath_config(*, dynamic_path=None, reliability=None):
     return cfg
 
 
+def dynpath_source_role_config(source_dynamic_path=None):
+    """The SOURCE-role dynamic path (#96 M5.4a): a REST GET entry carrying the path binding.
+
+    Both #100 goldens (``dynamic_path:target_profile``, ``dynamic_path:source_ddp``) are
+    TARGET-side PATCH shapes — "source" in the latter names the DDP *segment* source, not the
+    connector role. So no golden pinned the source ROLE, whose emitted spine differs: the Set
+    Properties shape precedes the source ``connectoraction`` and the Path property rides the GET
+    (``process_flow_builder.py:931-961``). #155 freezes it here, before touching the compiler, as
+    the legacy-oracle parity target for the canonical source-role binding and as the #160
+    differential oracle.
+
+    Defaults to the profile-bearing path, so the frozen bytes carry BOTH the ``Path``
+    ``dynamicProperties`` body and the ``parameter-profile`` attribute on a source-role shape.
+    """
+    if source_dynamic_path is None:
+        source_dynamic_path = dynpath_dynamic_path()
+    return {
+        "process_kind": "database_to_api_sync",
+        "source": {
+            "connector_type": "rest",
+            "action_type": "GET",
+            "connection_id": "RCONN",
+            "operation_id": "ROP",
+            "dynamic_path": source_dynamic_path,
+        },
+        "transform": {"mode": "map_ref", "map_ref": "MAP-UUID"},
+        "target": {
+            "connector_type": "rest",
+            "action_type": "PATCH",
+            "connection_id": "CONN-UUID",
+            "operation_id": "OP-UUID",
+        },
+    }
+
+
 def _dynpath_builder():
     # The bare spelling — the one tests/test_process_flow_builder_dynamic_path.py uses.
     from boomi_mcp.categories.components.builders.process_flow_builder import (
@@ -571,6 +606,14 @@ def _case_dynamic_path_source_ddp():
     return _dynpath_builder().build(
         dynpath_config(dynamic_path=dynpath_ddp_dynamic_path()),
         name="Dynamic Path DDP Golden",
+        folder_name="Golden/Fixtures",
+    )
+
+
+def _case_dynamic_path_source_role_profile():
+    return _dynpath_builder().build(
+        dynpath_source_role_config(),
+        name="Dynamic Path Source Role Golden",
         folder_name="Golden/Fixtures",
     )
 
@@ -1701,6 +1744,7 @@ def _build_registry():
         # B — dynamic path
         "dynamic_path:target_profile": ("process-component-v1", _case_dynamic_path_target_profile),
         "dynamic_path:source_ddp": ("process-component-v1", _case_dynamic_path_source_ddp),
+        "dynamic_path:source_role_profile": ("process-component-v1", _case_dynamic_path_source_role_profile),
         # C — scoped try/catch + DLQ
         "trycatch_dlq:document_cache": ("process-component-v1", _case_try_catch_dlq_document_cache),
         "trycatch_dlq:document_cache_retry2": ("process-component-v1", _case_try_catch_dlq_retry_count_2),

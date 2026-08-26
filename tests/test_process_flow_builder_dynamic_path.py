@@ -322,24 +322,9 @@ def test_connector_scoped_setproperties_inside_target_retry():
 # ---------------------------------------------------------------------------
 
 
-def _rest_source_config(source_dynamic_path):
-    return {
-        "process_kind": "database_to_api_sync",
-        "source": {
-            "connector_type": "rest",
-            "action_type": "GET",
-            "connection_id": "RCONN",
-            "operation_id": "ROP",
-            "dynamic_path": source_dynamic_path,
-        },
-        "transform": {"mode": "map_ref", "map_ref": "MAP-UUID"},
-        "target": {
-            "connector_type": "rest",
-            "action_type": "PATCH",
-            "connection_id": "CONN-UUID",
-            "operation_id": "OP-UUID",
-        },
-    }
+# The corpus owns this config (#165): it renders golden `dynamic_path:source_role_profile`,
+# so a second copy here would let the pinned bytes and the assertions below drift apart.
+_rest_source_config = _corpus.dynpath_source_role_config
 
 
 def test_source_dynamic_path_emits_setproperties_before_source():

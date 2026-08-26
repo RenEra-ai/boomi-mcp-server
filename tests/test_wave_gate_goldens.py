@@ -703,7 +703,15 @@ def test_every_active_golden_renders_with_all_test_modules_unimportable(tmp_path
         for row in MANIFEST.active
         if row["disposition"] in ("transitional_oracle", "deletion_only")
     }
-    assert set(special) == {"golden-000056", "golden-000057", "golden-000060"}, special
+    # golden-000071 (#155) joins them deliberately: it renders the LEGACY source-role
+    # dynamic path, the spelling #160 deletes, so it retires at that cutover rather
+    # than surviving it — the same role the #159 rows carry.
+    assert set(special) == {
+        "golden-000056",
+        "golden-000057",
+        "golden-000060",
+        "golden-000071",
+    }, special
     assert set(special) <= set(report["shas"])
 
     # And the child really finished with no test module loaded — by name, and
