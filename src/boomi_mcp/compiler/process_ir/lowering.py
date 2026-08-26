@@ -534,11 +534,22 @@ def _idempotency_semantic(evidence: Any) -> Any:
 
 
 def _path_binding_semantic(binding: Any) -> Any:
-    """Snapshot an authored per-document path binding, or ``None`` (#155)."""
+    """Snapshot an authored per-document path binding, or ``None`` (#155).
+
+    The property name is STRIPPED, for the same reason the property writer's own
+    name is stripped one function over and the emitter strips it again before
+    writing the wire attribute: surrounding whitespace is accepted by the name
+    validator but means nothing at runtime, so ``" P "`` and ``"P"`` are one
+    property. Leaving it unstripped here made the binding the only place that
+    disagreed — a document whose writer said ``"P"`` and whose binding said
+    ``" P "`` was refused as unestablished although both emit the same
+    attribute, while the mirror pair compiled. A validator that compares a
+    weaker key than the runtime uses reports a defect that is not there.
+    """
     if binding is None:
         return None
     return ConnectorPathBindingSemanticV1(
-        property_name=binding.property_name,
+        property_name=binding.property_name.strip(),
         request_profile_ref=getattr(binding, "request_profile_ref", None),
     )
 

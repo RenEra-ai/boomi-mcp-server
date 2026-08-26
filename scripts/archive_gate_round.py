@@ -72,10 +72,21 @@ WAVE_GATE_FILES = (
     "suite.log",
 )
 
+#: subdir, files, collector, indexed. `indexed` is the load-bearing column.
+#:
+#: A wave-gate round is archived but NOT indexed, and that is a contract with
+#: the repository's archive scanner rather than an omission. That scanner reads
+#: `start.json` for every indexed row and takes its `threadId` as the round's
+#: identity, accepting only the two collectors that produce one. A wave-gate run
+#: has no daemon and therefore no thread: indexing it wrote a row the scanner
+#: refuses, so the mode advertised here would have produced an archive that
+#: fails the very gate it exists to evidence. Its files are still archived and
+#: still covered by the checksum manifest — what it does not get is a row
+#: claiming a collector attested it, because none did.
 KINDS = {
-    "commit-review": ("commit-reviews", COMMIT_REVIEW_FILES, "commit-review-collect"),
-    "architect-review": ("architect-reviews", ARCHITECT_FILES, "gate-attest"),
-    "wave-gate": ("wave-gate", WAVE_GATE_FILES, "wave_gate"),
+    "commit-review": ("commit-reviews", COMMIT_REVIEW_FILES, "commit-review-collect", True),
+    "architect-review": ("architect-reviews", ARCHITECT_FILES, "gate-attest", True),
+    "wave-gate": ("wave-gate", WAVE_GATE_FILES, "wave_gate", False),
 }
 
 
@@ -113,7 +124,7 @@ def derive_row(kind: str, run_dir: Path, durable: Path, rel_root: Path,
     A row that repeated what the caller claimed would attest the caller, not the
     round. Everything here is read back out of the archive directory.
     """
-    subdir, _files, collector = KINDS[kind]
+    subdir, _files, collector, _indexed = KINDS[kind]
     files = {}
     for path in sorted(durable.rglob("*")):
         if path.is_file():
@@ -204,7 +215,7 @@ def main() -> int:
         print(f"run directory not found: {args.run_dir}", file=sys.stderr)
         return 1
 
-    subdir, wanted, _collector = KINDS[args.kind]
+    subdir, wanted, _collector, indexed = KINDS[args.kind]
     root = repo / "docs" / "architecture" / "evidence" / f"issue-{args.issue}"
     if not root.is_dir():
         print(f"no evidence archive for issue {args.issue} at {root}", file=sys.stderr)
@@ -234,14 +245,21 @@ def main() -> int:
 
     row = derive_row(args.kind, args.run_dir, durable, root,
                      args.logical_loop, args.status, args.wave_sha)
-    index = root / "index.jsonl"
-    with index.open("a") as handle:
-        handle.write(json.dumps(row, sort_keys=True) + "\n")
+    if indexed:
+        with (root / "index.jsonl").open("a") as handle:
+            handle.write(json.dumps(row, sort_keys=True) + "\n")
+    else:
+        # Recorded BESIDE the round instead of in the shared index, so the
+        # evidence exists and is checksummed without claiming an attestation
+        # the scanner would then look for and not find.
+        (durable / "round.json").write_text(json.dumps(row, sort_keys=True, indent=1) + "\n")
 
     listed = regenerate_sums(root)
     print(f"archived {len(copied)} file(s) to {durable.relative_to(repo)}")
     print(f"  status={row['status']} reviewed_sha={row.get('reviewed_sha')}")
-    print(f"  index row appended; SHA256SUMS lists {listed} files")
+    print("  {0}; SHA256SUMS lists {1} files".format(
+        "index row appended" if indexed else "recorded in round.json, NOT indexed "
+        "(a wave-gate run has no collector attestation to index)", listed))
     print(f"\nNEXT: git add {(root).relative_to(repo)} — the scanners compare "
           f"SHA256SUMS against the GIT INDEX, so an unstaged file fails as "
           f"listed-but-untracked.")

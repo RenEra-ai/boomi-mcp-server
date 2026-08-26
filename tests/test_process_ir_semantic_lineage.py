@@ -1175,3 +1175,175 @@ def test_a_bound_paths_profile_ref_is_enumerated_as_a_component_reference():
         if not value.startswith("$ref:")
     }
     assert "/body/steps/1/path_binding/request_profile_ref" in literals, sorted(literals)
+
+
+# ---------------------------------------------------------------------------
+# Stage-2 review round 1 (#155): the bound path's key must be the RUNTIME key
+# ---------------------------------------------------------------------------
+
+
+_CURRENT = {"value_type": "current"}
+
+
+def test_a_bound_path_composed_from_an_unestablished_current_value_is_refused():
+    """CDX round 1 P1. A `current` source reads the property's own value.
+
+    The served model says so outright — "Because it READS the property, lineage
+    validation still requires an earlier write on the same path to establish
+    it" — but nothing recorded that read, while the rule that demands a dynamic
+    segment counted `current` as one. So a writer whose only dynamic segment was
+    `current`, with nothing having written the property, satisfied the rule and
+    emitted a Path bound to an empty value: the request addresses the wrong
+    resource, and does it silently.
+    """
+    writer = {"kind": "set_ddp", "name": "P", "source_values": [_STATIC, _CURRENT]}
+    codes = _dynpath_codes([writer, _BOUND, {"kind": "stop"}])
+    assert PROCESS_IR_SEMANTIC_DYNAMIC_PATH_DDP_NOT_ESTABLISHED in codes, codes
+
+
+def test_a_bound_path_may_append_to_a_value_an_earlier_step_established():
+    """The over-fire control, and the shape `current` exists for.
+
+    Appending to what an earlier write established is the whole point of a
+    `current` source. Refusing it would break the composition pattern rather
+    than the defect.
+    """
+    established = {"kind": "set_ddp", "name": "P", "source_values": [_STATIC]}
+    appender = {"kind": "set_ddp", "name": "P", "source_values": [_CURRENT, _DPPSEG]}
+    assert _dynpath_codes([established, appender, _BOUND, {"kind": "stop"}]) == ()
+
+
+def test_the_current_read_is_recognised_only_for_a_BOUND_path():
+    """The scope of the fix, pinned — and it is deliberately narrow.
+
+    The reviewer proposed recording this read in the general lineage model. That
+    would have been wrong for this repository: the LEGACY chain accepts a
+    `current` composition with no earlier write, and the shipped parity golden
+    freezes exactly that shape, so the general model would have diverged from
+    the oracle this compiler is measured against. An ordinary property composed
+    from an unset `current` is an empty string, which the platform runs; the
+    same value as a request PATH addresses the wrong resource. The rule
+    therefore lives where that distinction is decided.
+    """
+    unbound_call = {"kind": "connector_call", "operation_ref": "$ref:GETOP"}
+    writer = {"kind": "set_ddp", "name": "P", "source_values": [_STATIC, _CURRENT]}
+    assert _dynpath_codes([writer, unbound_call, {"kind": "stop"}]) == ()
+
+
+@pytest.mark.parametrize(
+    "writer_name, binding_name",
+    [(" P ", "P"), ("P", " P "), (" P ", " P "), ("P", "P")],
+)
+def test_surrounding_whitespace_does_not_change_which_property_is_named(
+    writer_name, binding_name
+):
+    """CDX round 1 P2. The name validator accepts padding; the runtime ignores it.
+
+    The property writer's name is stripped when it is lowered, and the emitter
+    strips the binding's name again before writing the wire attribute — so
+    `" P "` and `"P"` are one property in every sense that reaches the platform.
+    The binding snapshot was the only place that kept the padding, which made
+    one of these four pairings refuse and its mirror compile, for a document
+    that emits identically either way.
+    """
+    writer = {"kind": "set_ddp", "name": writer_name, "source_values": [_STATIC, _DPPSEG]}
+    bound = {"kind": "connector_call", "operation_ref": "$ref:GETOP",
+             "path_binding": {"property_name": binding_name}}
+    assert _dynpath_codes([writer, bound, {"kind": "stop"}]) == ()
+
+
+def test_a_binding_naming_a_genuinely_different_property_still_refuses():
+    """The over-fire control for the normalization above."""
+    bound = {"kind": "connector_call", "operation_ref": "$ref:GETOP",
+             "path_binding": {"property_name": "SOMETHING_ELSE"}}
+    codes = _dynpath_codes([_WRITER, bound, {"kind": "stop"}])
+    assert PROCESS_IR_SEMANTIC_DYNAMIC_PATH_DDP_NOT_ESTABLISHED in codes, codes
+
+
+def _dynpath_symbols_with_profile_alias():
+    """The dynamic-path symbols plus a SECOND ref naming the same profile.
+
+    Two authored keys resolving to one component is an ordinary outcome of a
+    plan that reuses an existing profile under more than one key.
+    """
+    from boomi_mcp.compiler.process_ir.contracts import ComponentSymbolV1
+
+    base = _dynpath_symbols()
+    return SymbolTableV1(
+        symbols=list(base.symbols)
+        + [
+            ComponentSymbolV1(ref="$ref:PROF_ALIAS", component_id="P",
+                              component_type="profile.json"),
+            ComponentSymbolV1(ref="$ref:PROF_OTHER", component_id="P2",
+                              component_type="profile.json"),
+        ],
+        idempotency_contracts=base.idempotency_contracts,
+    )
+
+
+def _dynpath_codes_aliased(steps):
+    from boomi_mcp.compiler.process_ir.diagnostics import ProcessIRCompileError
+    from boomi_mcp.compiler.process_ir.pipeline import compile_process_ir_v1
+
+    doc = {"version": "1", "body": {"kind": "sequence", "steps": steps}}
+    try:
+        compile_process_ir_v1(parse_process_ir_v1(doc), _dynpath_symbols_with_profile_alias())
+    except ProcessIRCompileError as exc:
+        return tuple(item.code for item in exc.diagnostics)
+    return ()
+
+
+def _profile_source(ref):
+    return {"value_type": "profile", "profile_ref": ref, "profile_type": "json",
+            "element_id": "3", "element_name": "clientId (Root/Object/clientId)"}
+
+
+@pytest.mark.parametrize(
+    "writer_ref, binding_ref",
+    [("$ref:PROF", "$ref:PROF_ALIAS"), ("$ref:PROF_ALIAS", "$ref:PROF")],
+)
+def test_two_refs_naming_one_profile_component_agree(writer_ref, binding_ref):
+    """CDX round 1 P2. The emitter writes the RESOLVED id, so that is the identity.
+
+    Comparing the authored tokens reported a mismatch for a pair that emits a
+    byte-identical `parameter-profile` attribute — the validator's key was
+    weaker than the runtime's, which is the same defect as the whitespace one in
+    its other half.
+    """
+    writer = {"kind": "set_ddp", "name": "P",
+              "source_values": [_STATIC, _profile_source(writer_ref)]}
+    bound = {"kind": "connector_call", "operation_ref": "$ref:GETOP",
+             "path_binding": {"property_name": "P", "request_profile_ref": binding_ref}}
+    assert _dynpath_codes_aliased([writer, bound, {"kind": "stop"}]) == ()
+
+
+def test_several_sources_aliased_to_one_profile_are_one_profile():
+    """The `len(pairs) > 1` half: aliases are not several profiles."""
+    writer = {"kind": "set_ddp", "name": "P", "source_values": [
+        _STATIC, _profile_source("$ref:PROF"), _profile_source("$ref:PROF_ALIAS")]}
+    bound = {"kind": "connector_call", "operation_ref": "$ref:GETOP",
+             "path_binding": {"property_name": "P", "request_profile_ref": "$ref:PROF"}}
+    assert _dynpath_codes_aliased([writer, bound, {"kind": "stop"}]) == ()
+
+
+@pytest.mark.parametrize(
+    "writer_ref, binding_ref, label",
+    [
+        ("$ref:PROF", "$ref:PROF_OTHER", "binding names a different component"),
+        ("$ref:PROF_OTHER", "$ref:PROF", "writer names a different component"),
+    ],
+)
+def test_two_refs_naming_DIFFERENT_profile_components_still_mismatch(
+    writer_ref, binding_ref, label
+):
+    """The over-fire control: resolving identity must not collapse real differences."""
+    writer = {"kind": "set_ddp", "name": "P",
+              "source_values": [_STATIC, _profile_source(writer_ref)]}
+    bound = {"kind": "connector_call", "operation_ref": "$ref:GETOP",
+             "path_binding": {"property_name": "P", "request_profile_ref": binding_ref}}
+    from boomi_mcp.errors import (
+        PROCESS_IR_SEMANTIC_DYNAMIC_PATH_PROFILE_BINDING_MISMATCH,
+    )
+
+    codes = _dynpath_codes_aliased([writer, bound, {"kind": "stop"}])
+    assert PROCESS_IR_SEMANTIC_DYNAMIC_PATH_PROFILE_BINDING_MISMATCH in codes, (label, codes)

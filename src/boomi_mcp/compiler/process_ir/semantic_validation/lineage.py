@@ -618,6 +618,19 @@ def _walk_lineage(
                 evidence=(("state_scope", scope),) + extra,
             )
 
+    def _profile_identity(ref):
+        """An authored profile ref as the identity the EMITTER will use.
+
+        The resolved component id when the symbol table knows the ref, and the
+        ref itself when it does not — an unresolvable ref is already reported by
+        the reference phase, and inventing an identity for it here would either
+        collapse two unknown refs into one or make a ref unequal to itself.
+        """
+        if ref is None:
+            return None
+        symbol = prepared.symbol(ref)
+        return getattr(symbol, "component_id", None) or ref
+
     def _check_path_binding(node, semantic, state, writers) -> None:
         """A bound request path is only as sound as the writer that composes it (#155).
 
@@ -675,8 +688,16 @@ def _walk_lineage(
         # binding's own ``request_profile_ref`` a pinned fact rather than a
         # second copy: the emitted parameter-profile attribute is meaningful
         # only with a profile element, so the two must agree exactly.
+        # Compared by RESOLVED IDENTITY, not by the authored token. What the
+        # emitter writes is the resolved component id, so two different refs
+        # that name one component are one profile and must agree — comparing
+        # tokens reported a mismatch for a pair that emits identically, and
+        # rejected several sources aliased to one component as "several
+        # profiles". This is the same defect as the whitespace one above, in its
+        # other half: a validator whose key is weaker than the runtime's.
         pairs = {
-            (getattr(s, "profile_ref", None), getattr(s, "profile_type", None))
+            (_profile_identity(getattr(s, "profile_ref", None)),
+             getattr(s, "profile_type", None))
             for s in sources
             if getattr(s, "value_type", None) == "profile"
         }
@@ -687,7 +708,7 @@ def _walk_lineage(
                 evidence=(("reader_count", len(pairs)),),
             )
             return
-        declared = binding.request_profile_ref
+        declared = _profile_identity(binding.request_profile_ref)
         expected = next(iter(pairs))[0] if pairs else None
         if declared != expected:
             _report(
@@ -800,6 +821,26 @@ def _walk_lineage(
                     for read_key, _has_default, _strict in _reads_of(semantic)
                     if read_key[0] == DDP and not state.establishes(read_key)
                 )
+                # A `current` source re-uses the property's OWN value — the
+                # served model calls it a read in as many words — but it is not
+                # one `_reads_of` records, because the LEGACY chain accepts a
+                # `current` composition with no earlier write and the shipped
+                # parity golden freezes exactly that shape. Teaching the general
+                # lineage model to refuse it would break the oracle this
+                # compiler is measured against, so the read is recognised HERE,
+                # where it is decided only for a bound request path.
+                #
+                # The distinction is real, not a convenience: an ordinary
+                # property composed from an unset `current` is an empty string,
+                # which the platform runs. The same value as a request PATH
+                # addresses the wrong resource, and does it silently. `state` is
+                # read before this node's own write is applied, so this asks
+                # whether anything established the property EARLIER.
+                if not state.establishes(key) and any(
+                    getattr(source, "value_type", None) == "current"
+                    for source in getattr(semantic, "source_values", ()) or ()
+                ):
+                    unmet_here = unmet_here + (key,)
                 writers = {**writers, key: (semantic, unmet_here)}
             state = state.with_write(key)
 

@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 10614, "minimum_collected": 10614, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 10632, "minimum_collected": 10632, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -10653,3 +10653,21 @@
 {"kind": "test", "id": "pytest-010652", "node_id": "tests/test_process_ir_models.py::test_the_guard_refuses_an_annotation_it_cannot_reason_about[type_variable]", "state": "active"}
 {"kind": "test", "id": "pytest-010653", "node_id": "tests/test_process_ir_models.py::test_the_guard_universe_is_derived_from_reachability_not_a_snapshot", "state": "active"}
 {"kind": "test", "id": "pytest-010654", "node_id": "tests/test_process_ir_models.py::test_no_model_in_the_guard_universe_subclasses_another", "state": "active"}
+{"kind": "test", "id": "pytest-010655", "node_id": "tests/test_archive_gate_round.py::test_a_commit_review_round_IS_indexed", "state": "active"}
+{"kind": "test", "id": "pytest-010656", "node_id": "tests/test_archive_gate_round.py::test_a_round_whose_reviewed_sha_disagrees_is_not_recorded_as_completed", "state": "active"}
+{"kind": "test", "id": "pytest-010657", "node_id": "tests/test_archive_gate_round.py::test_a_wave_gate_round_is_archived_but_never_indexed", "state": "active"}
+{"kind": "test", "id": "pytest-010658", "node_id": "tests/test_archive_gate_round.py::test_the_machine_local_sidecars_are_never_archived[cache-dir]", "state": "active"}
+{"kind": "test", "id": "pytest-010659", "node_id": "tests/test_archive_gate_round.py::test_the_machine_local_sidecars_are_never_archived[missing-probes]", "state": "active"}
+{"kind": "test", "id": "pytest-010660", "node_id": "tests/test_process_ir_semantic_lineage.py::test_a_binding_naming_a_genuinely_different_property_still_refuses", "state": "active"}
+{"kind": "test", "id": "pytest-010661", "node_id": "tests/test_process_ir_semantic_lineage.py::test_a_bound_path_composed_from_an_unestablished_current_value_is_refused", "state": "active"}
+{"kind": "test", "id": "pytest-010662", "node_id": "tests/test_process_ir_semantic_lineage.py::test_a_bound_path_may_append_to_a_value_an_earlier_step_established", "state": "active"}
+{"kind": "test", "id": "pytest-010663", "node_id": "tests/test_process_ir_semantic_lineage.py::test_several_sources_aliased_to_one_profile_are_one_profile", "state": "active"}
+{"kind": "test", "id": "pytest-010664", "node_id": "tests/test_process_ir_semantic_lineage.py::test_surrounding_whitespace_does_not_change_which_property_is_named[ P - P ]", "state": "active"}
+{"kind": "test", "id": "pytest-010665", "node_id": "tests/test_process_ir_semantic_lineage.py::test_surrounding_whitespace_does_not_change_which_property_is_named[ P -P]", "state": "active"}
+{"kind": "test", "id": "pytest-010666", "node_id": "tests/test_process_ir_semantic_lineage.py::test_surrounding_whitespace_does_not_change_which_property_is_named[P- P ]", "state": "active"}
+{"kind": "test", "id": "pytest-010667", "node_id": "tests/test_process_ir_semantic_lineage.py::test_surrounding_whitespace_does_not_change_which_property_is_named[P-P]", "state": "active"}
+{"kind": "test", "id": "pytest-010668", "node_id": "tests/test_process_ir_semantic_lineage.py::test_the_current_read_is_recognised_only_for_a_BOUND_path", "state": "active"}
+{"kind": "test", "id": "pytest-010669", "node_id": "tests/test_process_ir_semantic_lineage.py::test_two_refs_naming_DIFFERENT_profile_components_still_mismatch[$ref:PROF-$ref:PROF_OTHER-binding names a different component]", "state": "active"}
+{"kind": "test", "id": "pytest-010670", "node_id": "tests/test_process_ir_semantic_lineage.py::test_two_refs_naming_DIFFERENT_profile_components_still_mismatch[$ref:PROF_OTHER-$ref:PROF-writer names a different component]", "state": "active"}
+{"kind": "test", "id": "pytest-010671", "node_id": "tests/test_process_ir_semantic_lineage.py::test_two_refs_naming_one_profile_component_agree[$ref:PROF-$ref:PROF_ALIAS]", "state": "active"}
+{"kind": "test", "id": "pytest-010672", "node_id": "tests/test_process_ir_semantic_lineage.py::test_two_refs_naming_one_profile_component_agree[$ref:PROF_ALIAS-$ref:PROF]", "state": "active"}
