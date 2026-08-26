@@ -108,6 +108,39 @@ Dispositions: `fixed` · `finding-refuted` · `severity-refuted` · `not-validat
 (issue, reason class, placement). An original label is never edited — a revision is a new dated
 row whose id carries an `a` suffix, with the original retained and a Supersession map entry.
 
+## Slice A — implementation record (what landed, and what validation it still owes)
+
+Commits on `codex/issue-155` from the step-0 baseline, each with the full non-KB suite green at
+that commit:
+
+| Commit | Unit | What it establishes |
+| --- | --- | --- |
+| `538d9d4` | day 0 | the source-role legacy oracle frozen BEFORE any source edit, this ledger, the evidence archive |
+| `b462546` | day 0 | the live captures and the four measurements they settled |
+| `802f19d` | 1 | the authored path binding, its semantic mirrors on both connector kinds, and node-local emitter derivation |
+| `2fae024` | 2 | the reaching-writer rule: a bound path its writer cannot compose is refused |
+| `47ce52c` | 2 | the per-family bindable-location authority, joined into published rows, gating both dialects |
+| `cc53ebb` | 3 | the explicit replay acknowledgement, and both capabilities published with executable witnesses |
+| `1fe3840` | 1-3 | three canonical goldens; two are byte-identical to the legacy emitter |
+
+Suite at `1fe3840`: 10524 passed, 17 skipped. Manifests: 74 active goldens, 10541 required nodes —
+both floors moved deliberately, each against a measured collection diff.
+
+**Validation still OWED before this slice can be called complete** (recorded so the state cannot be
+mistaken for a closure — the completion workflow's first rule is that a skipped gate is not a pass):
+
+1. Stage-1 live QA through the public MCP boundary — dispatched, in flight at the time of writing.
+2. Stage-1.5 commit of the QA-validated tree, then the Stage-2 repo commit review from the step-0
+   baseline, every round collected and archived.
+3. The architect implementation review, capped at three evaluations.
+4. The composite wave gate on the final tree, its passing SHA named in a checkpoint row.
+5. The closing protocol.
+
+Three items remain unimplemented in this slice and are NOT deferrals — they are simply not yet
+written: the naming lint's recursion into canonical property names, the primitive-layer re-lowering
+onto the canonical pair, and deriving the served reference list from model annotations rather than
+the hand-written copy. Each gets its own commit and its own validation before the gates above run.
+
 ## Checkpoints (written IN FLIGHT at every third evaluation of each loop, in the batch it governs)
 
 | Loop | Evaluation (window / cumulative) | SHA (+dirty) | Outcome | Rationale |
