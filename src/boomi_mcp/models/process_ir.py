@@ -45,7 +45,11 @@ branch leg bounds). CFG-aware semantics (reachability, lineage) stay with
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping as _ABCMapping, Sequence as _ABCSequence
+from collections.abc import (
+    Collection as _ABCCollection,
+    Mapping as _ABCMapping,
+    Sequence as _ABCSequence,
+)
 from types import MappingProxyType
 from typing import (
     Any,
@@ -352,21 +356,34 @@ def _annotation_mentions_component_ref(annotation, _seen=()) -> bool:
     for arg in get_args(annotation):
         if arg is not Ellipsis and _annotation_mentions_component_ref(arg, _seen):
             return True
-    if isinstance(annotation, type):
-        # The whole MRO, not the class's own `__annotations__`: a subclass of a
-        # named tuple reports an EMPTY mapping while still carrying its parent's
-        # members, so reading only the class itself MISSED it — and a shape this
-        # scanner misses is a shape the guard never sees. Over-reporting here is
-        # harmless (it only forces a field into one of the admitted forms);
-        # under-reporting is the failure this function exists to prevent.
-        for base in getattr(annotation, "__mro__", (annotation,)):
-            members = getattr(base, "__annotations__", None)
-            if not isinstance(members, dict):
-                continue
-            for member in members.values():
-                if _annotation_mentions_component_ref(member, _seen):
-                    return True
     return False
+
+
+def _is_container_class_annotation(annotation) -> bool:
+    """Is this annotation a NON-GENERIC container class?
+
+    Answered from the TYPE alone, deliberately, because reading such a class's
+    member annotations is the one thing that cannot be done reliably here: this
+    module compiles under postponed annotation evaluation, so a foreign class's
+    `__annotations__` hold strings and forward references rather than types.
+    Pydantic resolves a FIELD's annotation, which is why every generic shape is
+    readable — but it does not resolve the internals of an unrelated class, and
+    a scanner that reads them silently saw nothing. QA proved it end to end: the
+    same named tuple of references passed the guard when declared in a module
+    with postponed evaluation and was refused when declared without it.
+
+    So the members are not consulted at all. A non-generic container is refused
+    as a field annotation whether or not it carries a reference, which needs no
+    resolution and therefore has no blind axis. Nothing declares one today
+    (measured: every bare-class field annotation in these models is a string, a
+    bool, an int or a nested model), so the rule costs nothing and closes the
+    only axis on which the shape guard could be evaded.
+    """
+    if not isinstance(annotation, type) or get_origin(annotation) is not None:
+        return False
+    if issubclass(annotation, (str, bytes, bytearray)) or issubclass(annotation, BaseModel):
+        return False
+    return issubclass(annotation, _ABCCollection)
 
 
 def assert_component_refs_are_declared_in_supported_shapes(models) -> None:
@@ -387,14 +404,24 @@ def assert_component_refs_are_declared_in_supported_shapes(models) -> None:
     for model in models:
         for name, field_info in getattr(model, "model_fields", {}).items():
             annotation = getattr(field_info, "annotation", None)
-            if not _annotation_mentions_component_ref(annotation):
+            where = "{0}.{1}: {2!r}".format(model.__name__, name, annotation)
+            # The SHAPE rule first, and it asks nothing about references: a
+            # non-generic container is refused outright, so the guard never has
+            # to read member annotations it cannot resolve.
+            if _is_container_class_annotation(annotation):
+                offenders.append(where)
                 continue
-            if _component_ref_shape(annotation) is None:
-                offenders.append("{0}.{1}: {2!r}".format(model.__name__, name, annotation))
+            if _annotation_mentions_component_ref(annotation) and (
+                _component_ref_shape(annotation) is None
+            ):
+                offenders.append(where)
     if offenders:
         raise TypeError(
-            "component references must be declared as one of {0}; offending "
-            "field(s): {1}".format(", ".join(REFERENCE_SHAPES_V1), "; ".join(sorted(offenders)))
+            "component references must be declared as one of {0}, and a "
+            "non-generic container may not be a field annotation at all; "
+            "offending field(s): {1}".format(
+                ", ".join(REFERENCE_SHAPES_V1), "; ".join(sorted(offenders))
+            )
         )
 
 

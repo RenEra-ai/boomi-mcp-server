@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 10602, "minimum_collected": 10602, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 10609, "minimum_collected": 10609, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -10641,3 +10641,10 @@
 {"kind": "test", "id": "pytest-010640", "node_id": "tests/test_process_ir_models.py::test_the_guard_refuses_each_unsupported_shape[Tuple[ComponentRefV1, str]]", "state": "active"}
 {"kind": "test", "id": "pytest-010641", "node_id": "tests/test_process_ir_models.py::test_the_guard_refuses_each_unsupported_shape[Tuple[Tuple[ComponentRefV1, ...], ...]]", "state": "active"}
 {"kind": "test", "id": "pytest-010642", "node_id": "tests/test_process_ir_models.py::test_the_guard_refuses_the_named_tuple_shapes_that_emit_WRONG_references", "state": "active"}
+{"kind": "test", "id": "pytest-010643", "node_id": "tests/test_process_ir_models.py::test_an_arbitrary_class_cannot_carry_a_reference_past_the_models", "state": "active"}
+{"kind": "test", "id": "pytest-010644", "node_id": "tests/test_process_ir_models.py::test_pydantic_resolves_field_annotations_under_postponed_evaluation", "state": "active"}
+{"kind": "test", "id": "pytest-010645", "node_id": "tests/test_process_ir_models.py::test_the_shape_guard_does_not_depend_on_resolving_annotations", "state": "active"}
+{"kind": "test", "id": "pytest-010646", "node_id": "tests/test_process_ir_models.py::test_the_shape_guard_does_not_refuse_an_ordinary_field[StopNodeV1]", "state": "active"}
+{"kind": "test", "id": "pytest-010647", "node_id": "tests/test_process_ir_models.py::test_the_shape_guard_does_not_refuse_an_ordinary_field[bool]", "state": "active"}
+{"kind": "test", "id": "pytest-010648", "node_id": "tests/test_process_ir_models.py::test_the_shape_guard_does_not_refuse_an_ordinary_field[int]", "state": "active"}
+{"kind": "test", "id": "pytest-010649", "node_id": "tests/test_process_ir_models.py::test_the_shape_guard_does_not_refuse_an_ordinary_field[str]", "state": "active"}

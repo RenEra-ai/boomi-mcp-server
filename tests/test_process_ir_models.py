@@ -2301,3 +2301,131 @@ def test_the_guard_refuses_the_named_tuple_shapes_that_emit_WRONG_references():
         )
         with pytest.raises(TypeError, match="component references must be declared"):
             assert_component_refs_are_declared_in_supported_shapes([_Planted])
+
+
+def test_the_shape_guard_does_not_depend_on_resolving_annotations():
+    """QA-155-r10-01: the closure's one blind axis, removed rather than patched.
+
+    The guard used to decide whether a non-generic container carried a reference
+    by reading that class's member annotations. This module compiles under
+    postponed annotation evaluation, so a foreign class's `__annotations__` hold
+    strings and forward references — and the scanner, which resolves neither,
+    saw nothing. QA proved it end to end: the same named tuple of references
+    passed the guard when declared with postponed evaluation and was refused
+    without it, while the field really carried two references and the walk
+    yielded none.
+
+    The fix does not teach the scanner to resolve. It stops asking: a
+    non-generic container is refused as a field annotation whatever its members
+    are. This test forces the exact condition — members as strings, and as
+    forward references — and requires refusal from the shape alone, asserting
+    that the scanner still cannot see them so the refusal cannot be coming from
+    there.
+    """
+    from typing import ForwardRef, NamedTuple
+
+    from pydantic.fields import FieldInfo
+
+    from boomi_mcp.models.process_ir import (
+        ComponentRefV1,
+        StopNodeV1,
+        _annotation_mentions_component_ref,
+        assert_component_refs_are_declared_in_supported_shapes,
+    )
+
+    class _Resolved(NamedTuple):
+        a: ComponentRefV1
+        b: ComponentRefV1
+
+    class _Strings(NamedTuple):
+        a: ComponentRefV1
+        b: ComponentRefV1
+
+    _Strings.__annotations__ = {"a": "ComponentRefV1", "b": "ComponentRefV1"}
+
+    class _Forward(NamedTuple):
+        a: ComponentRefV1
+        b: ComponentRefV1
+
+    _Forward.__annotations__ = {"a": ForwardRef("ComponentRefV1")}
+
+    class _TupleSubclass(tuple):
+        __annotations__ = {"a": "ComponentRefV1"}
+
+    for annotation in (_Resolved, _Strings, _Forward, _TupleSubclass):
+        # The scanner is blind to every one of these...
+        assert not _annotation_mentions_component_ref(annotation), annotation
+        # ...and every one is refused anyway, which is the whole point.
+        class _Planted(StopNodeV1):
+            pass
+
+        _Planted.model_fields = dict(
+            StopNodeV1.model_fields, planted=FieldInfo.from_annotation(annotation)
+        )
+        with pytest.raises(TypeError, match="non-generic container"):
+            assert_component_refs_are_declared_in_supported_shapes([_Planted])
+
+
+@pytest.mark.parametrize("annotation_src", ["str", "int", "bool", "StopNodeV1"])
+def test_the_shape_guard_does_not_refuse_an_ordinary_field(annotation_src):
+    """The over-fire control. A rule that refuses containers must not refuse
+    a string — which IS a sequence — a scalar, or a nested model."""
+    from pydantic.fields import FieldInfo
+
+    from boomi_mcp.models.process_ir import (
+        StopNodeV1,
+        assert_component_refs_are_declared_in_supported_shapes,
+    )
+
+    annotation = {"str": str, "int": int, "bool": bool, "StopNodeV1": StopNodeV1}[annotation_src]
+
+    class _Planted(StopNodeV1):
+        pass
+
+    _Planted.model_fields = dict(
+        StopNodeV1.model_fields, planted=FieldInfo.from_annotation(annotation)
+    )
+    assert_component_refs_are_declared_in_supported_shapes([_Planted])
+
+
+def test_pydantic_resolves_field_annotations_under_postponed_evaluation():
+    """The assumption the SCANNER rests on, pinned rather than assumed.
+
+    The shape rule above needs no resolution, but the mention scanner still
+    reads generic arguments — and it is only safe to do so because pydantic
+    resolves a model's field annotations when it builds the model, even in a
+    module using postponed evaluation. If that ever stopped being true, generic
+    shapes would go blind exactly as the non-generic ones did, and this test is
+    what would say so.
+    """
+    from boomi_mcp.models.process_ir import (
+        ConnectorPathBindingV1,
+        _annotation_mentions_component_ref,
+    )
+
+    # This model lives in THIS module, which uses postponed evaluation.
+    annotation = ConnectorPathBindingV1.model_fields["request_profile_ref"].annotation
+    assert "ForwardRef" not in repr(annotation), annotation
+    assert _annotation_mentions_component_ref(annotation)
+
+
+def test_an_arbitrary_class_cannot_carry_a_reference_past_the_models():
+    """The third axis, closed by the base model rather than by this guard.
+
+    A non-container class holding a reference would be walked by nothing and
+    caught by no shape rule — but it cannot be declared at all: the ProcessIR
+    base forbids arbitrary types, so pydantic refuses the field outright. Pinned
+    because the guard's completeness argument depends on it.
+    """
+    from boomi_mcp.models.process_ir import ComponentRefV1, _ProcessIRBase
+
+    assert _ProcessIRBase.model_config.get("arbitrary_types_allowed", False) is False
+
+    class _Holder:
+        ref: ComponentRefV1
+
+    with pytest.raises(Exception) as excinfo:
+        class _Model(_ProcessIRBase):
+            held: _Holder
+
+    assert "arbitrary_types_allowed" in str(excinfo.value)
