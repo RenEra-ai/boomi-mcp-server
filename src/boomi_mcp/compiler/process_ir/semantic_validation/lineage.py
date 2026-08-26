@@ -267,6 +267,33 @@ def _reads_of(semantic) -> Tuple[Tuple[StateKey, bool, bool], ...]:
     return tuple(reads)
 
 
+def _replaces_document_stream(semantic) -> bool:
+    """Does this node hand downstream steps DIFFERENT documents than it received? (#155)
+
+    A dynamic-path binding promises that the writer composing the path wrote it on
+    the SAME document the call then sends. A step that replaces the stream breaks
+    that promise silently: the new documents carry no per-document property the old
+    ones had, so the request path resolves empty and addresses the wrong resource.
+
+    The replacing steps are the ones the served contract already names — splitting
+    or combining documents, and an all-documents cache read that discards the
+    current stream. This is deliberately consulted ONLY by the dynamic-path rule
+    and never by ``_State``: the general lineage model's treatment of document
+    replacement is #154's and is not changed here, because widening it would move
+    every DDP read in the repo rather than the one case whose consequence is a
+    wrong request URL.
+    """
+    kind = semantic.semantic_kind
+    if kind == "data_process":
+        return any(
+            getattr(step, "operation", None) in ("split_documents", "combine_documents")
+            for step in getattr(semantic, "steps", ()) or ()
+        )
+    if kind in ("cache_get", "document_cache_retrieve"):
+        return bool(getattr(semantic, "load_all_documents", False))
+    return False
+
+
 def _writes_of(semantic) -> Tuple[StateKey, ...]:
     """State keys a node definitely establishes."""
     kind = semantic.semantic_kind
@@ -764,6 +791,16 @@ def _walk_lineage(
 
         # --- a bound request path, against this path's reaching writer -------
         _check_path_binding(node, semantic, state, writers)
+
+        # A step that replaces the document stream ends every reaching writer's
+        # claim: the documents leaving it never carried those properties. Applied
+        # AFTER the check above so a binding ON the replacing node still sees the
+        # writer that reached it, and only to `writers` — `_State` keeps #154's
+        # model untouched.
+        if _replaces_document_stream(semantic):
+            writers = {
+                key: value for key, value in writers.items() if key[0] != DDP
+            }
 
         # --- successors -----------------------------------------------------
         edges = prepared.successors(node_id)

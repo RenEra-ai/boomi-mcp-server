@@ -1,0 +1,171 @@
+{
+ "_success": true,
+ "build_id": "82e686e4-8638-41cd-b3af-f1fe588c19c0",
+ "message": "Applied integration '_TEST_155A_L_p11_20260826031805' with 4 steps.",
+ "execution_order": [
+  "conn_rest",
+  "op_get",
+  "op_patch",
+  "proc"
+ ],
+ "results": {
+  "conn_rest": {
+   "status": "reused",
+   "component_id": "c4281346-83e9-4026-856d-ede718ec68a0",
+   "type": "connector-settings",
+   "name": "Sandbox CDS Mock REST (no-auth)"
+  },
+  "op_get": {
+   "status": "reused",
+   "component_id": "547becc5-c291-4f6a-a739-a4c845ad4493",
+   "type": "connector-action",
+   "name": "_QA_FIXTURE_155_blankpath_GET"
+  },
+  "op_patch": {
+   "status": "reused",
+   "component_id": "4b21a850-a6e4-4204-8cde-dbca15d6d63d",
+   "type": "connector-action",
+   "name": "_TEST_155A_L_PATCH_20260826031805"
+  },
+  "proc": {
+   "type": "process",
+   "name": "_TEST_155A_L_p11_20260826031805",
+   "requested_name": "_TEST_155A_L_p11_20260826031805",
+   "applied_name_verified": true,
+   "status": "created",
+   "component_id": "10b46183-1b57-404f-b8d7-6ad180149e94",
+   "result": {
+    "_success": true,
+    "message": "Created component '_TEST_155A_L_p11_20260826031805'",
+    "component_id": "10b46183-1b57-404f-b8d7-6ad180149e94",
+    "name": "_TEST_155A_L_p11_20260826031805",
+    "type": "process",
+    "profile": "renera"
+   },
+   "_success": true
+  }
+ },
+ "process_mutations": [
+  {
+   "component_key": "proc",
+   "plan_fingerprint": "sha256:e2b114f7828f38213db20e3a94b512470d0706ebd65f0fd6b3825a3ef9c8055d",
+   "account_scope_hash": "sha256:8bd1a7d1668eab242ef0c5fe64cbf58126c193a8482ebb83ab8443a541dba7dd",
+   "action": "create",
+   "target_component_id": null,
+   "result_component_id": "10b46183-1b57-404f-b8d7-6ad180149e94",
+   "resolved_placement": {
+    "folder_name": null,
+    "folder_id": null
+   },
+   "submitted_xml_digest": "sha256:e6ac73220a200a4603083e472e0f96f96d5c115106d3dc221ccce0846b499670"
+  }
+ ],
+ "process_readbacks": [
+  {
+   "component_key": "proc",
+   "component_id": "10b46183-1b57-404f-b8d7-6ad180149e94",
+   "digest": "sha256:1594495203284852006b4322a1b6fb15d1b9d58970624eb3e4a3b65c950fb40d"
+  }
+ ],
+ "mutation_performed": true,
+ "authoring_provenance": {
+  "contract_version": "2",
+  "revision_binding": {
+   "contract_version": "2",
+   "schema_revision": "sha256:fc9a5af6edddd78f89a0044037acc692455ac08c2a0e88a986dab7c4b441e80c",
+   "capability_revision": "sha256:89121641309f344cb3cc6ef99489154d3af284fc76d5040a015461cb7f4de55c",
+   "compiler_revision": "sha256:5e8b504b503a99d357018c695c60f099634e008ed926d81f4749d695718fadee",
+   "account_scope_hash": "sha256:8bd1a7d1668eab242ef0c5fe64cbf58126c193a8482ebb83ab8443a541dba7dd",
+   "semantic_hash": "sha256:8bfc3af62bbaad6ddc687da4e9a89486bfb0b7209c92bc0da2529e294b1f5444",
+   "plan_hash": "sha256:a9a6a65349d5ab3aaef2344ea3c45d3e9e405141a055b6f84249134795ae44d6",
+   "compile_hash": "sha256:dbc78193dc94cdab3a788b74e35f1e1db1b3c304768e288b451c38807d6ba953"
+  },
+  "artifact_fingerprints": [
+   {
+    "component_key": "proc",
+    "component_type": "process",
+    "artifact_kind": "process_component_materialization_plan",
+    "artifact_version": "1",
+    "byte_length": 4392,
+    "digest": "sha256:e2b114f7828f38213db20e3a94b512470d0706ebd65f0fd6b3825a3ef9c8055d"
+   },
+   {
+    "component_key": "proc",
+    "component_type": "process",
+    "artifact_kind": "process_ir_emission_plan",
+    "artifact_version": "1",
+    "byte_length": 2546,
+    "digest": "sha256:63980fd44c122e2fe6aee1a132517fd2d557cfc7c9884289aee36d9df030cb59"
+   },
+   {
+    "component_key": "proc",
+    "component_type": "process",
+    "artifact_kind": "process_ir_normalized",
+    "artifact_version": "1",
+    "byte_length": 442,
+    "digest": "sha256:91023fea4909f1d833d796af3dedbd9678fbcebb25067f9c612d92d09728c68c"
+   }
+  ],
+  "resolved_references": [
+   {
+    "ref": "$ref:conn_rest",
+    "component_type": "connector-settings",
+    "resolved": true,
+    "component_id": "c4281346-83e9-4026-856d-ede718ec68a0",
+    "version_marker": "2"
+   },
+   {
+    "ref": "$ref:op_get",
+    "component_type": "connector-action",
+    "resolved": true,
+    "component_id": "547becc5-c291-4f6a-a739-a4c845ad4493",
+    "version_marker": "1"
+   },
+   {
+    "ref": "$ref:op_patch",
+    "component_type": "connector-action",
+    "resolved": true,
+    "component_id": "4b21a850-a6e4-4204-8cde-dbca15d6d63d",
+    "version_marker": "1"
+   },
+   {
+    "ref": "$ref:proc",
+    "component_type": "process",
+    "resolved": true,
+    "component_id": null,
+    "version_marker": null
+   }
+  ],
+  "live_comparison": null,
+  "process_mutations": [
+   {
+    "component_key": "proc",
+    "plan_fingerprint": "sha256:e2b114f7828f38213db20e3a94b512470d0706ebd65f0fd6b3825a3ef9c8055d",
+    "account_scope_hash": "sha256:8bd1a7d1668eab242ef0c5fe64cbf58126c193a8482ebb83ab8443a541dba7dd",
+    "action": "create",
+    "target_component_id": null,
+    "result_component_id": "10b46183-1b57-404f-b8d7-6ad180149e94",
+    "resolved_placement": {
+     "folder_name": null,
+     "folder_id": null
+    },
+    "submitted_xml_digest": "sha256:e6ac73220a200a4603083e472e0f96f96d5c115106d3dc221ccce0846b499670"
+   }
+  ],
+  "process_readbacks": [
+   {
+    "component_key": "proc",
+    "component_id": "10b46183-1b57-404f-b8d7-6ad180149e94",
+    "digest": "sha256:1594495203284852006b4322a1b6fb15d1b9d58970624eb3e4a3b65c950fb40d"
+   }
+  ]
+ },
+ "warnings": [
+  "[FOLDER_REQUIRED_ON_CREATE] Component 'conn_rest' is created with no folder_id or folder_name and would land in the account root. Set a resolved folder so components are organized, never at root.",
+  "[FOLDER_REQUIRED_ON_CREATE] Component 'op_get' is created with no folder_id or folder_name and would land in the account root. Set a resolved folder so components are organized, never at root.",
+  "[FOLDER_REQUIRED_ON_CREATE] Component 'op_patch' is created with no folder_id or folder_name and would land in the account root. Set a resolved folder so components are organized, never at root."
+ ],
+ "action": "apply",
+ "mutation_status": "performed",
+ "profile": "renera"
+}

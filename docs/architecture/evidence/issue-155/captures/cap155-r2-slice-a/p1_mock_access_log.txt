@@ -1,0 +1,30 @@
+INFO:     172.19.0.1:64128 - "PUT /admin/cdscm/api/v1/clients HTTP/1.1" 405 Method Not Allowed
+INFO:     172.19.0.1:64140 - "PUT /admin/cdscm/api/v1/clients HTTP/1.1" 405 Method Not Allowed
+INFO:     172.19.0.1:64150 - "DELETE /admin/cdscm/api/v1/clients HTTP/1.1" 405 Method Not Allowed
+INFO:     172.19.0.1:64162 - "DELETE /admin/cdscm/api/v1/clients HTTP/1.1" 405 Method Not Allowed
+INFO:     172.19.0.1:64166 - "OPTIONS /admin/cdscm/api/v1/clients HTTP/1.1" 405 Method Not Allowed
+INFO:     172.19.0.1:64172 - "OPTIONS /admin/cdscm/api/v1/clients HTTP/1.1" 405 Method Not Allowed
+INFO:     172.19.0.1:64180 - "TRACE /admin/cdscm/api/v1/clients HTTP/1.1" 405 Method Not Allowed
+INFO:     172.19.0.1:64186 - "TRACE /admin/cdscm/api/v1/clients HTTP/1.1" 405 Method Not Allowed
+INFO:     172.19.0.1:63978 - "HEAD /admin/cdscm/api/v1/clients HTTP/1.1" 405 Method Not Allowed
+INFO:     172.19.0.1:63984 - "GET /openapi.json HTTP/1.1" 200 OK
+INFO:     172.19.0.1:64336 - "GET /admin/cdscm/api/v1/clients/AC-0001 HTTP/1.1" 200 OK
+INFO:     172.19.0.1:64340 - "HEAD /admin/cdscm/api/v1/clients/AC-0001 HTTP/1.1" 405 Method Not Allowed
+INFO:     172.19.0.1:55664 - "OPTIONS /admin/cdscm/api/v1/clients/AC-0001 HTTP/1.1" 405 Method Not Allowed
+INFO:     172.19.0.1:55668 - "TRACE /admin/cdscm/api/v1/clients/AC-0001 HTTP/1.1" 405 Method Not Allowed
+INFO:     172.19.0.1:55674 - "POST /admin/cdscm/api/v1/clients/AC-0001 HTTP/1.1" 405 Method Not Allowed
+INFO:     172.19.0.1:55680 - "PUT /admin/cdscm/api/v1/clients/AC-0001 HTTP/1.1" 405 Method Not Allowed
+INFO:     172.19.0.1:55684 - "DELETE /admin/cdscm/api/v1/clients/AC-0001 HTTP/1.1" 405 Method Not Allowed
+INFO:     172.19.0.1:62292 - "POST /oauth/token HTTP/1.1" 400 Bad Request
+INFO:     172.19.0.1:55690 - "GET /health HTTP/1.1" 200 OK
+INFO:     172.19.0.1:64904 - "GET /health HTTP/1.1" 200 OK
+INFO:     172.19.0.1:64912 - "OPTIONS /admin/cdscm/api/v1/clients/AC-0001 HTTP/1.1" 405 Method Not Allowed
+INFO:     172.19.0.1:64916 - "HEAD /admin/cdscm/api/v1/clients/AC-0001 HTTP/1.1" 405 Method Not Allowed
+INFO:     172.19.0.1:61290 - "GET /admin/cdscm/api/v1/clients/AC-0001 HTTP/1.1" 200 OK
+INFO:     172.19.0.1:60970 - "GET /admin/cdscm/api/v1/clients/AC-0001 HTTP/1.1" 200 OK
+INFO:     172.19.0.1:60978 - "DELETE /admin/cdscm/api/v1/clients/AC-0001 HTTP/1.1" 405 Method Not Allowed
+INFO:     172.19.0.1:63040 - "GET /admin/cdscm/api/v1/clients/AC-0001 HTTP/1.1" 200 OK
+INFO:     172.19.0.1:63052 - "PATCH /admin/cdscm/api/v1/clients/AC-0001 HTTP/1.1" 200 OK
+INFO:     172.19.0.1:55692 - "GET /admin/cdscm/api/v1/clients/AC-0001 HTTP/1.1" 200 OK
+INFO:     172.19.0.1:62650 - "GET /admin/cdscm/api/v1/clients/AC-0001 HTTP/1.1" 200 OK
+INFO:     172.19.0.1:62654 - "PATCH /admin/cdscm/api/v1/clients/AC-0001 HTTP/1.1" 200 OK

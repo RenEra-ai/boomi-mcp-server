@@ -1,0 +1,156 @@
+{
+ "_success": true,
+ "build_id": "33ecb9f9-e43f-4eba-8433-075cef1c3d3e",
+ "message": "Applied integration '_TEST_155A_L2_p11r_20260826032533' with 3 steps.",
+ "execution_order": [
+  "conn_rest",
+  "op_get",
+  "proc"
+ ],
+ "results": {
+  "conn_rest": {
+   "status": "reused",
+   "component_id": "c4281346-83e9-4026-856d-ede718ec68a0",
+   "type": "connector-settings",
+   "name": "Sandbox CDS Mock REST (no-auth)"
+  },
+  "op_get": {
+   "status": "reused",
+   "component_id": "547becc5-c291-4f6a-a739-a4c845ad4493",
+   "type": "connector-action",
+   "name": "_QA_FIXTURE_155_blankpath_GET"
+  },
+  "proc": {
+   "type": "process",
+   "name": "_TEST_155A_L2_p11r_20260826032533",
+   "requested_name": "_TEST_155A_L2_p11r_20260826032533",
+   "applied_name_verified": true,
+   "status": "created",
+   "component_id": "90a49740-9706-494b-a76d-55d14899f04d",
+   "result": {
+    "_success": true,
+    "message": "Created component '_TEST_155A_L2_p11r_20260826032533'",
+    "component_id": "90a49740-9706-494b-a76d-55d14899f04d",
+    "name": "_TEST_155A_L2_p11r_20260826032533",
+    "type": "process",
+    "profile": "renera"
+   },
+   "_success": true
+  }
+ },
+ "process_mutations": [
+  {
+   "component_key": "proc",
+   "plan_fingerprint": "sha256:ec320af42418854d088973a97ad46265e284ed3b8834b3d8c5ee661b289c6457",
+   "account_scope_hash": "sha256:8bd1a7d1668eab242ef0c5fe64cbf58126c193a8482ebb83ab8443a541dba7dd",
+   "action": "create",
+   "target_component_id": null,
+   "result_component_id": "90a49740-9706-494b-a76d-55d14899f04d",
+   "resolved_placement": {
+    "folder_name": null,
+    "folder_id": null
+   },
+   "submitted_xml_digest": "sha256:67016ac868c69b91631fb344646b254d87f5e8f989b563eeb526b8d03c58498c"
+  }
+ ],
+ "process_readbacks": [
+  {
+   "component_key": "proc",
+   "component_id": "90a49740-9706-494b-a76d-55d14899f04d",
+   "digest": "sha256:316a14b2bd12aedc6b451af8e2c0ce8a527cb824e3d6dfa77a80da46514016cc"
+  }
+ ],
+ "mutation_performed": true,
+ "authoring_provenance": {
+  "contract_version": "2",
+  "revision_binding": {
+   "contract_version": "2",
+   "schema_revision": "sha256:fc9a5af6edddd78f89a0044037acc692455ac08c2a0e88a986dab7c4b441e80c",
+   "capability_revision": "sha256:89121641309f344cb3cc6ef99489154d3af284fc76d5040a015461cb7f4de55c",
+   "compiler_revision": "sha256:5e8b504b503a99d357018c695c60f099634e008ed926d81f4749d695718fadee",
+   "account_scope_hash": "sha256:8bd1a7d1668eab242ef0c5fe64cbf58126c193a8482ebb83ab8443a541dba7dd",
+   "semantic_hash": "sha256:cb85bbd56b1f8ce9076cc6b6004b92c33e1b7c694fca3de5cfb2ef16401e3678",
+   "plan_hash": "sha256:0c98856fcf9d32c6446421da1371bbbac672e6892522b97f36d711244867ec45",
+   "compile_hash": "sha256:d95c7dbecac984ccb4835a348bd30fccccbbc1292f7b89b8c78dc5fecec1d64a"
+  },
+  "artifact_fingerprints": [
+   {
+    "component_key": "proc",
+    "component_type": "process",
+    "artifact_kind": "process_component_materialization_plan",
+    "artifact_version": "1",
+    "byte_length": 4390,
+    "digest": "sha256:ec320af42418854d088973a97ad46265e284ed3b8834b3d8c5ee661b289c6457"
+   },
+   {
+    "component_key": "proc",
+    "component_type": "process",
+    "artifact_kind": "process_ir_emission_plan",
+    "artifact_version": "1",
+    "byte_length": 2546,
+    "digest": "sha256:63980fd44c122e2fe6aee1a132517fd2d557cfc7c9884289aee36d9df030cb59"
+   },
+   {
+    "component_key": "proc",
+    "component_type": "process",
+    "artifact_kind": "process_ir_normalized",
+    "artifact_version": "1",
+    "byte_length": 449,
+    "digest": "sha256:6613d4eca254ff0aa05e34d3cf7c570f9c0ce20a1fd3dda0848b2d57b8b2c48c"
+   }
+  ],
+  "resolved_references": [
+   {
+    "ref": "$ref:conn_rest",
+    "component_type": "connector-settings",
+    "resolved": true,
+    "component_id": "c4281346-83e9-4026-856d-ede718ec68a0",
+    "version_marker": "2"
+   },
+   {
+    "ref": "$ref:op_get",
+    "component_type": "connector-action",
+    "resolved": true,
+    "component_id": "547becc5-c291-4f6a-a739-a4c845ad4493",
+    "version_marker": "1"
+   },
+   {
+    "ref": "$ref:proc",
+    "component_type": "process",
+    "resolved": true,
+    "component_id": null,
+    "version_marker": null
+   }
+  ],
+  "live_comparison": null,
+  "process_mutations": [
+   {
+    "component_key": "proc",
+    "plan_fingerprint": "sha256:ec320af42418854d088973a97ad46265e284ed3b8834b3d8c5ee661b289c6457",
+    "account_scope_hash": "sha256:8bd1a7d1668eab242ef0c5fe64cbf58126c193a8482ebb83ab8443a541dba7dd",
+    "action": "create",
+    "target_component_id": null,
+    "result_component_id": "90a49740-9706-494b-a76d-55d14899f04d",
+    "resolved_placement": {
+     "folder_name": null,
+     "folder_id": null
+    },
+    "submitted_xml_digest": "sha256:67016ac868c69b91631fb344646b254d87f5e8f989b563eeb526b8d03c58498c"
+   }
+  ],
+  "process_readbacks": [
+   {
+    "component_key": "proc",
+    "component_id": "90a49740-9706-494b-a76d-55d14899f04d",
+    "digest": "sha256:316a14b2bd12aedc6b451af8e2c0ce8a527cb824e3d6dfa77a80da46514016cc"
+   }
+  ]
+ },
+ "warnings": [
+  "[FOLDER_REQUIRED_ON_CREATE] Component 'conn_rest' is created with no folder_id or folder_name and would land in the account root. Set a resolved folder so components are organized, never at root.",
+  "[FOLDER_REQUIRED_ON_CREATE] Component 'op_get' is created with no folder_id or folder_name and would land in the account root. Set a resolved folder so components are organized, never at root."
+ ],
+ "action": "apply",
+ "mutation_status": "performed",
+ "profile": "renera"
+}
