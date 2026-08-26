@@ -703,6 +703,43 @@ DecisionOperandV1 = Annotated[
 # ---------------------------------------------------------------------------
 
 
+class ConnectorPathBindingV1(_ProcessIRBase):
+    """Binds a connector call's per-document request path to a dynamic document property.
+
+    The platform exposes exactly ONE per-document bindable location on a REST call —
+    the "Path" dynamic operation property — so this binding names WHICH property feeds
+    it and nothing else. Which families offer that location is published per family;
+    a family that offers none rejects the binding.
+
+    It deliberately carries NO path segments. The ordered segments live on the
+    ``set_ddp`` node that writes ``property_name`` upstream — one authority for the
+    path's composition — and duplicating them here would be a second copy of a fact
+    the writer already owns. What the emitted shape needs beyond the property name is
+    only whether a profile element participates, which is exactly what
+    ``request_profile_ref`` records.
+
+    ``request_profile_ref`` is present if and only if the reaching writer contains a
+    profile-valued source, and then names that same profile. That biconditional is
+    enforced by semantic validation, which is what makes this field a pinned closed
+    contract rather than a hand-copy: the emitted ``parameter-profile`` attribute is
+    meaningful only with a profile element, and the operation symbol does not carry
+    the request profile in a production symbol table.
+    """
+
+    property_name: str = Field(
+        ...,
+        min_length=1,
+        description="Bare dynamic document property name feeding the request path (no wire prefix)",
+    )
+    request_profile_ref: Optional[ComponentRefV1] = None
+
+    @model_validator(mode="after")
+    def _name_rules(self) -> "ConnectorPathBindingV1":
+        # Resolved at call time; the shared validator is defined with the property nodes.
+        _validate_bare_property_name(self.property_name)
+        return self
+
+
 class SourceEndpointV1(_ProcessIRBase):
     """Current-parity source placeholder. Connector family/action metadata is
     NEVER authored — the compiler derives it from the component symbol table."""
@@ -714,11 +751,20 @@ class SourceEndpointV1(_ProcessIRBase):
 
 
 class TargetEndpointV1(_ProcessIRBase):
-    """Current-parity target placeholder (see SourceEndpointV1)."""
+    """Current-parity target placeholder (see SourceEndpointV1).
+
+    ``path_binding`` is the per-document request path (see
+    :class:`ConnectorPathBindingV1`). It is offered HERE and on ``connector_call``,
+    but never on ``source``: a source endpoint may only be the first step, so no
+    ``set_ddp`` can precede it to establish the property the binding reads. The
+    source ROLE authors its path through the first generalized ``connector_call``
+    instead, which admits a linear prefix.
+    """
 
     kind: Literal["target"]
     connection_ref: ComponentRefV1
     operation_ref: ComponentRefV1
+    path_binding: Optional[ConnectorPathBindingV1] = None
     label: Optional[str] = None
 
 
@@ -791,6 +837,7 @@ class ConnectorCallNodeV1(_ProcessIRBase):
     operation_ref: ComponentRefV1
     action: Optional[str] = None
     idempotency: Optional[IdempotencyEvidenceV1] = None
+    path_binding: Optional[ConnectorPathBindingV1] = None
     label: Optional[str] = None
 
     @field_validator("action")

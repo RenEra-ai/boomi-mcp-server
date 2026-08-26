@@ -2184,7 +2184,7 @@ rather than aspirational.
 | LG-2ae43575 | unclassified_reference | src/boomi_mcp/categories/integration_builder.py | build_structured_update_xml | 7 | 3349 | #160 | residue: a watched name mentioned in a shape the census does not classify |
 | LG-1ffb629c | unclassified_reference | src/boomi_mcp/categories/integration_import.py | _derive_preset_parameters | 1 | 1058 | #160 | residue: a watched name mentioned in a shape the census does not classify |
 | LG-feb448d7 | unclassified_reference | src/boomi_mcp/categories/meta_tools.py | <module> | 5 | 8017 | #160 | retract the served legacy guidance / guard the raw route |
-| LG-de5e36cb | unclassified_reference | src/boomi_mcp/compiler/process_ir/emitter_registry.py | <module> | 15 | 596 | #160 | residue: a watched name mentioned in a shape the census does not classify |
+| LG-de5e36cb | unclassified_reference | src/boomi_mcp/compiler/process_ir/emitter_registry.py | <module> | 15 | 621 | #160 | residue: a watched name mentioned in a shape the census does not classify |
 | LG-ea29df03 | unclassified_reference | src/boomi_mcp/compiler/process_ir/legacy_adapters/authority.py | <module> | 2 | 114 | #151 | re-home onto the neutral extraction |
 | LG-1e6a1bac | unclassified_reference | src/boomi_mcp/compiler/process_ir/legacy_adapters/authority.py | _core_from_authored_pipeline | 1 | 256 | #151 | re-home onto the neutral extraction |
 | LG-e2f5e378 | unclassified_reference | src/boomi_mcp/compiler/process_ir/legacy_adapters/authority.py | _core_from_submitted_config | 3 | 280 | #151 | re-home onto the neutral extraction |
@@ -2739,3 +2739,39 @@ leaves, all of which are one of two things:
 `src/boomi_mcp/authoring/process_materialization.py`, which is not in the layer; measured by running
 the freeze test with only the comment reverted, which passes. Recorded because the opposite is the
 intuitive guess, and a rebaseline attributed to the wrong cause is a rebaseline nobody can re-derive.
+
+
+## 12.7 Served-artifact movement (issue #155, slice A unit 1)
+
+Unit 1 adds ONE optional authored field — the connector per-document path binding — to the ProcessIR
+model. The ProcessIR JSON schema is embedded in served payloads, so **seven** served artifacts were
+rebaselined, two more than §12.5/§12.6 moved: `SS-CAPABILITY-CATALOG:authoring_contract`, the
+`AuthoringRequestV1` / `AuthoringPlanResultV1` / `AuthoringCompileResultV1` schema templates,
+`SS-SCHEMA-TEMPLATES:walked_surface_digest`, and — the two additional ones — the `IntegrationSpecV1`
+and `recipe_contributions` schema templates, which embed the same schema.
+
+The cause is different from §12.5/§12.6 and is worth stating, because both of those moved digests
+only. This movement is a **served SHAPE change**: the schema really does carry a new optional
+property, so a caller reading the served contract sees it. That is the point of the slice, not a
+side effect of it.
+
+**Verified benign before acceptance**, to the standard §12.5 sets. A leaf-by-leaf diff of the whole
+frozen inventory (22 172 -> 22 272 leaves) found **zero removed and zero retyped** fields, 100 added
+and 63 changed:
+
+- **100 added leaves**, every one under `$defs.ConnectorPathBindingV1` (the new definition) or the
+  `path_binding` property on `$defs.ConnectorCallNodeV1` / `$defs.TargetEndpointV1`. No existing
+  served field gained, lost or changed a key.
+- **Five `description` leaves**, all the same edit: `TargetEndpointV1`'s docstring gained the
+  paragraph explaining why the binding is offered on the target and the generalized call but never on
+  the source endpoint. Served text, changed deliberately.
+- **Sixteen `evidence_line` values**, all in `src/boomi_mcp/models/process_ir.py`, each shifted by the
+  length of the inserted definition. Same evidence, moved lines.
+- **The remaining changed leaves are one digest cascade**: `capability_revision` and
+  `schema_revision` moving, plus every per-artifact `sha256`, per-schema `schema_hash` and
+  `canonical_length` that contains them.
+
+**`scan_contract` did NOT move** — `python_source_count` stays 216 and `unscanned_asset_count` stays
+0, because unit 1 adds no module and no packaged asset. Recorded because a later slice in this issue
+DOES add both (a new package plus its packaged registry data), and that slice's rebaseline must show
+those counts moving; if they move here, something landed in the wrong slice.

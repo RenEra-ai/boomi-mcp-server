@@ -46,6 +46,8 @@ from .contracts import (
     ComponentSymbolV1,
     ConnectorActionInputV1,
     ConnectorCallSemanticV1,
+    ConnectorDynamicPathInputV1,
+    ConnectorPathBindingSemanticV1,
     ConnectorSemanticV1,
     DataProcessInputV1,
     DataProcessSemanticV1,
@@ -267,6 +269,7 @@ def _semantic_for(node: Any, *, routed: bool = False, entry: bool = False) -> An
             role="source" if kind == "source" else "target",
             connection_ref=node.connection_ref,
             operation_ref=node.operation_ref,
+            path_binding=_path_binding_semantic(getattr(node, "path_binding", None)),
             label=label,
         )
     if kind == "connector_call":
@@ -278,6 +281,7 @@ def _semantic_for(node: Any, *, routed: bool = False, entry: bool = False) -> An
         return ConnectorCallSemanticV1(
             role="entry" if entry else "downstream",
             operation_ref=node.operation_ref,
+            path_binding=_path_binding_semantic(getattr(node, "path_binding", None)),
             action_intent=node.action,
             idempotency=_idempotency_semantic(getattr(node, "idempotency", None)),
             label=label,
@@ -525,6 +529,16 @@ def _idempotency_semantic(evidence: Any) -> Any:
     return IdempotencyEvidenceSemanticV1(
         kind=evidence.kind,
         contract_ref=getattr(evidence, "contract_ref", None),
+    )
+
+
+def _path_binding_semantic(binding: Any) -> Any:
+    """Snapshot an authored per-document path binding, or ``None`` (#155)."""
+    if binding is None:
+        return None
+    return ConnectorPathBindingSemanticV1(
+        property_name=binding.property_name,
+        request_profile_ref=getattr(binding, "request_profile_ref", None),
     )
 
 
@@ -784,6 +798,37 @@ def _resolved_dataprocess_step(
     )
 
 
+def _dynamic_path_input(
+    semantic: Any, symbols: Mapping[str, Any], path: str, node_id: str
+) -> Any:
+    """Bind an authored path binding into its emitter input, from THIS node alone (#155).
+
+    Shared by both connector arms — the legacy endpoints and the generalized call lower
+    to the same emitter input, so a second copy of this derivation is a second place the
+    two roles could diverge.
+
+    Everything here is a fact of the node plus the symbol index, which is the property
+    ``check_emission_plan_invariants`` relies on when it recomputes each input and
+    compares it exactly. In particular ``has_profile_segment`` is derived from the
+    binding's own ``request_profile_ref`` rather than from the reaching writer: semantic
+    validation has already established that the binding names a request profile if and
+    only if that writer contributes a profile element, so reading the writer here would
+    consult a different node to learn something this one already states.
+    """
+    binding = getattr(semantic, "path_binding", None)
+    if binding is None:
+        return None
+    profile_ref = binding.request_profile_ref
+    if profile_ref is None:
+        return ConnectorDynamicPathInputV1(property_name=binding.property_name)
+    profile = _resolve(symbols, profile_ref, path, node_id)
+    return ConnectorDynamicPathInputV1(
+        property_name=binding.property_name,
+        request_profile_id=profile.component_id,
+        has_profile_segment=True,
+    )
+
+
 def _emitter_input_for(node: CfgNodeV1, symbols: Mapping[str, Any]) -> Any:
     """Resolve one CFG node into its fully-bound emitter input.
 
@@ -855,6 +900,7 @@ def _emitter_input_for(node: CfgNodeV1, symbols: Mapping[str, Any]) -> Any:
             action_type=action_type,
             connection_id=connection.component_id,
             operation_id=operation.component_id,
+            dynamic_path=_dynamic_path_input(semantic, symbols, path, node_id),
             userlabel=label,
         )
 
@@ -905,6 +951,7 @@ def _emitter_input_for(node: CfgNodeV1, symbols: Mapping[str, Any]) -> Any:
             action_type=action_type,
             connection_id=connection.component_id,
             operation_id=operation.component_id,
+            dynamic_path=_dynamic_path_input(semantic, symbols, path, node_id),
             userlabel=label,
         )
 

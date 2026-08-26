@@ -1426,7 +1426,7 @@ def test_every_process_ir_def_has_a_non_empty_description():
     guess at or discover by failing a compile.
     """
     defs = process_ir_v1_json_schema()["$defs"]
-    assert len(defs) == 39
+    assert len(defs) == 40
     undescribed = sorted(name for name, body in defs.items() if not body.get("description"))
     assert undescribed == []
 

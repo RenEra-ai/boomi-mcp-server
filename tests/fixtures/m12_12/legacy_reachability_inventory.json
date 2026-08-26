@@ -2953,7 +2953,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 611,
+      "evidence_line": 636,
       "form": "_emit_branch (unclassified reference)",
       "path": "src/boomi_mcp/compiler/process_ir/emitter_registry.py",
       "row_id": "UR-5a756388",
@@ -2962,7 +2962,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 613,
+      "evidence_line": 638,
       "form": "_emit_catcherrors (unclassified reference)",
       "path": "src/boomi_mcp/compiler/process_ir/emitter_registry.py",
       "row_id": "UR-a154f9d0",
@@ -2971,7 +2971,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 599,
+      "evidence_line": 624,
       "form": "_emit_dataprocess (unclassified reference)",
       "path": "src/boomi_mcp/compiler/process_ir/emitter_registry.py",
       "row_id": "UR-a7ceae01",
@@ -2980,7 +2980,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 612,
+      "evidence_line": 637,
       "form": "_emit_decision (unclassified reference)",
       "path": "src/boomi_mcp/compiler/process_ir/emitter_registry.py",
       "row_id": "UR-49bf579b",
@@ -2989,7 +2989,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 600,
+      "evidence_line": 625,
       "form": "_emit_doccacheload (unclassified reference)",
       "path": "src/boomi_mcp/compiler/process_ir/emitter_registry.py",
       "row_id": "UR-b767d23e",
@@ -2998,7 +2998,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 602,
+      "evidence_line": 627,
       "form": "_emit_doccacheremove (unclassified reference)",
       "path": "src/boomi_mcp/compiler/process_ir/emitter_registry.py",
       "row_id": "UR-a92bf099",
@@ -3007,7 +3007,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 601,
+      "evidence_line": 626,
       "form": "_emit_doccacheretrieve (unclassified reference)",
       "path": "src/boomi_mcp/compiler/process_ir/emitter_registry.py",
       "row_id": "UR-688b8a54",
@@ -3016,7 +3016,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 614,
+      "evidence_line": 639,
       "form": "_emit_exception (unclassified reference)",
       "path": "src/boomi_mcp/compiler/process_ir/emitter_registry.py",
       "row_id": "UR-524f34f4",
@@ -3025,7 +3025,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 598,
+      "evidence_line": 623,
       "form": "_emit_flowcontrol (unclassified reference)",
       "path": "src/boomi_mcp/compiler/process_ir/emitter_registry.py",
       "row_id": "UR-9c933362",
@@ -3034,7 +3034,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 597,
+      "evidence_line": 622,
       "form": "_emit_map (unclassified reference)",
       "path": "src/boomi_mcp/compiler/process_ir/emitter_registry.py",
       "row_id": "UR-ff9294a1",
@@ -3043,7 +3043,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 596,
+      "evidence_line": 621,
       "form": "_emit_message (unclassified reference)",
       "path": "src/boomi_mcp/compiler/process_ir/emitter_registry.py",
       "row_id": "UR-8a1177ad",
@@ -3052,7 +3052,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 610,
+      "evidence_line": 635,
       "form": "_emit_processcall (unclassified reference)",
       "path": "src/boomi_mcp/compiler/process_ir/emitter_registry.py",
       "row_id": "UR-b6e4be49",
@@ -3061,7 +3061,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 616,
+      "evidence_line": 641,
       "form": "_emit_returndocuments (unclassified reference)",
       "path": "src/boomi_mcp/compiler/process_ir/emitter_registry.py",
       "row_id": "UR-5cfe1e40",
@@ -3070,7 +3070,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 603,
+      "evidence_line": 628,
       "form": "_emit_setproperties (unclassified reference)",
       "path": "src/boomi_mcp/compiler/process_ir/emitter_registry.py",
       "row_id": "UR-0b3b3cf0",
@@ -3079,7 +3079,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 615,
+      "evidence_line": 640,
       "form": "_emit_stop (unclassified reference)",
       "path": "src/boomi_mcp/compiler/process_ir/emitter_registry.py",
       "row_id": "UR-2df1446f",
@@ -6308,7 +6308,7 @@
     {
       "census": "unclassified_reference",
       "disposition": "residue: a watched name mentioned in a shape the census does not classify",
-      "evidence_line": 596,
+      "evidence_line": 621,
       "forms": [
         "_emit_branch (unclassified reference)",
         "_emit_catcherrors (unclassified reference)",
@@ -7292,7 +7292,7 @@
       },
       "producer": "meta_tools.list_capabilities_action()",
       "selector": "authoring_contract",
-      "sha256": "e2e812d04c0d186b77c8a5e07e95aca51bc5c041ca6300c3d581b814a991edac",
+      "sha256": "5f92307509965d331608543f1350ad7f8403d7b4338a024f0a582141f298b7eb",
       "surface_class": "SS-CAPABILITY-CATALOG",
       "value": {
         "actions": [
@@ -7397,10 +7397,10 @@
           }
         ],
         "capability_comparison": {
-          "actual_capability_revision": "sha256:078f0a9f87af1d7de9e1bfd6e5aacb4700cb7f06cde1c68dc84c1bd6c33ecef2",
+          "actual_capability_revision": "sha256:71f3cdf42391ed6b885940944a2592b1214ddb3fd23a0f50c16c006142d09a2c",
           "status": "not_requested"
         },
-        "capability_revision": "sha256:078f0a9f87af1d7de9e1bfd6e5aacb4700cb7f06cde1c68dc84c1bd6c33ecef2",
+        "capability_revision": "sha256:71f3cdf42391ed6b885940944a2592b1214ddb3fd23a0f50c16c006142d09a2c",
         "compiler_revision": "sha256:3a2d844983067d5dca4e7d63ed30e77348047e496928671b2ab822fad35f885c",
         "contract_version": "2",
         "intent_kinds": [
@@ -7638,7 +7638,7 @@
           "schema_version": "1",
           "source_version": "0.1.0"
         },
-        "schema_revision": "sha256:55707a0512cec51c0267e86dcfa2232553a80fa3f8919cc0302dd4659f49804f",
+        "schema_revision": "sha256:26f634387cd839bb91987f1f852f7040c185afe4adf3327e123d04fe0c9ab6a9",
         "schemas": [
           {
             "owned_by_authoring_contract": true,
@@ -7650,21 +7650,21 @@
           {
             "owned_by_authoring_contract": true,
             "provenance": "runtime_schema_registry",
-            "schema_hash": "sha256:7a412ec1a6e1a8318fc3fd3f849ef331376548515411b1dc23b8274782c577d0",
+            "schema_hash": "sha256:923cbfa061e2dab6a94bb97ad278296804c1bdc7358f452e4c35f8b3d617aa9c",
             "schema_version": "2",
             "selector": "AuthoringCompileResultV1"
           },
           {
             "owned_by_authoring_contract": true,
             "provenance": "runtime_schema_registry",
-            "schema_hash": "sha256:7b61d8875b364d83f7915212c5e6cfa69f657977d506fc10ebeb003407093d3f",
+            "schema_hash": "sha256:c2327a39a2a553d094a595a1737f1ed3e36cfea14dbced08f6667b7070dd9af2",
             "schema_version": "2",
             "selector": "AuthoringPlanResultV1"
           },
           {
             "owned_by_authoring_contract": true,
             "provenance": "runtime_schema_registry",
-            "schema_hash": "sha256:3152aa6a3406f1e4b452b2314c62844d956a0276943de77231d239f5dc0d9cce",
+            "schema_hash": "sha256:f9b6556913c61d71292df7067d9959cc4b3974535a5d851746b3efa61f686334",
             "schema_version": "2",
             "selector": "AuthoringRequestV1"
           },
@@ -7678,13 +7678,13 @@
           {
             "owned_by_authoring_contract": false,
             "provenance": "runtime_schema_registry",
-            "schema_hash": "sha256:47a22867cd80e36627ec150ba32e3c17f43905235a16788d49930b4032588b3e",
+            "schema_hash": "sha256:3078e47325f566d3e5bfcf102257767012705b45a0e4aa5c9a51f84112b5c0ae",
             "selector": "IntegrationSpecV1"
           },
           {
             "owned_by_authoring_contract": true,
             "provenance": "runtime_schema_registry",
-            "schema_hash": "sha256:3baecc415b2687aba0577d0557125b4f00bc3b294dc061532133ad9b52bd06e3",
+            "schema_hash": "sha256:0b510334a224fb0072510c35f52a3086d8dc10f43cac2965f6b5b907c1ce634b",
             "schema_version": "1",
             "selector": "ProcessIRV1"
           },
@@ -7753,7 +7753,7 @@
           {
             "owned_by_authoring_contract": false,
             "provenance": "runtime_schema_registry",
-            "schema_hash": "sha256:06a4caca3b853eff4749efe17c8da7d5072771988b575dcceb3158f34bc33433",
+            "schema_hash": "sha256:366bf1d41842b2d89b4b6a592ce99538e5981d94ed4d10b9cc1bcfe37fdb6e2d",
             "selector": "recipe_contributions"
           },
           {
@@ -13842,14 +13842,14 @@
     },
     {
       "artifact_id": "SS-SCHEMA-TEMPLATES:schema_name=AuthoringCompileResultV1",
-      "canonical_length": 78362,
+      "canonical_length": 80777,
       "legacy_excerpt": {
         "json_schema.$defs.IntegrationComponentSpec.properties.config.description": "Type-specific configuration payload. For type='process', config.process_kind selects a structured process-flow builder (e.g. 'database_to_api_sync' or 'wrapper_subprocess' — issue #25) and is REQUIRED for any authoring action that emits or rebuilds process XML (create / create_clone / update): such a process without process_kind is rejected at plan time with PROCESS_KIND_REQUIRED (legacy freeform JSON-to-XML process authoring has been removed). A reference-only reuse of an existing process (no XML emitted) may omit it. Use manage_component for an explicit raw process XML escape hatch.",
         "json_schema.$defs.IntegrationSpecV1.properties.processes.description": "Issue #153 M12.15 — canonical process roots authored as ProcessIR. Each entry is one ProcessAuthoringUnitV1: exactly one ProcessComponentEnvelopeV1 plus exactly one ProcessIRV1 root. These are compiled by the canonical chain and materialized by the neutral ProcessComponentMaterializer — they resolve NO legacy process_kind. 'components' remains the home of supporting components and of reference-only existing processes. 'components' and 'processes' share ONE key namespace: a key used by a component and by a process envelope is a duplicate, and all four depends_on directions (component->component, component->process, process->component, process->process) enter one topological order with one cycle check. A TUPLE, per the plan's field type: pydantic coerces list input, so the wire shape is an ordinary JSON array and no caller sends anything different — but unlike this model's legacy List siblings, mutating the collection itself is unrepresentable. Per-element immutability lives on the frozen ProcessAuthoringUnitV1 entries."
       },
       "producer": "meta_tools.get_schema_template_action(...)",
       "selector": "schema_name=AuthoringCompileResultV1",
-      "sha256": "b2ad9d67557ad18a77261150dc7adc37208a948b1b9f7fdd74d24b69d6f43072",
+      "sha256": "158d387de7648005e5366424fdc4bf3bccba7c2a13771b67d9d89bb79fcaa9c0",
       "surface_class": "SS-SCHEMA-TEMPLATES",
       "value": {
         "_success": true,
@@ -14526,6 +14526,17 @@
                   "description": "Opaque component reference: exact '$ref:KEY' token or literal component id",
                   "title": "Operation Ref",
                   "type": "string"
+                },
+                "path_binding": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/ConnectorPathBindingV1"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null
                 }
               },
               "required": [
@@ -14533,6 +14544,36 @@
                 "operation_ref"
               ],
               "title": "ConnectorCallNodeV1",
+              "type": "object"
+            },
+            "ConnectorPathBindingV1": {
+              "additionalProperties": false,
+              "description": "Binds a connector call's per-document request path to a dynamic document property.\n\nThe platform exposes exactly ONE per-document bindable location on a REST call —\nthe \"Path\" dynamic operation property — so this binding names WHICH property feeds\nit and nothing else. Which families offer that location is published per family;\na family that offers none rejects the binding.\n\nIt deliberately carries NO path segments. The ordered segments live on the\n``set_ddp`` node that writes ``property_name`` upstream — one authority for the\npath's composition — and duplicating them here would be a second copy of a fact\nthe writer already owns. What the emitted shape needs beyond the property name is\nonly whether a profile element participates, which is exactly what\n``request_profile_ref`` records.\n\n``request_profile_ref`` is present if and only if the reaching writer contains a\nprofile-valued source, and then names that same profile. That biconditional is\nenforced by semantic validation, which is what makes this field a pinned closed\ncontract rather than a hand-copy: the emitted ``parameter-profile`` attribute is\nmeaningful only with a profile element, and the operation symbol does not carry\nthe request profile in a production symbol table.",
+              "properties": {
+                "property_name": {
+                  "description": "Bare dynamic document property name feeding the request path (no wire prefix)",
+                  "minLength": 1,
+                  "title": "Property Name",
+                  "type": "string"
+                },
+                "request_profile_ref": {
+                  "anyOf": [
+                    {
+                      "description": "Opaque component reference: exact '$ref:KEY' token or literal component id",
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "title": "Request Profile Ref"
+                }
+              },
+              "required": [
+                "property_name"
+              ],
+              "title": "ConnectorPathBindingV1",
               "type": "object"
             },
             "CurrentPropertySourceV1": {
@@ -16495,7 +16536,7 @@
             },
             "TargetEndpointV1": {
               "additionalProperties": false,
-              "description": "Current-parity target placeholder (see SourceEndpointV1).",
+              "description": "Current-parity target placeholder (see SourceEndpointV1).\n\n``path_binding`` is the per-document request path (see\n:class:`ConnectorPathBindingV1`). It is offered HERE and on ``connector_call``,\nbut never on ``source``: a source endpoint may only be the first step, so no\n``set_ddp`` can precede it to establish the property the binding reads. The\nsource ROLE authors its path through the first generalized ``connector_call``\ninstead, which admits a linear prefix.",
               "properties": {
                 "connection_ref": {
                   "description": "Opaque component reference: exact '$ref:KEY' token or literal component id",
@@ -16523,6 +16564,17 @@
                   "description": "Opaque component reference: exact '$ref:KEY' token or literal component id",
                   "title": "Operation Ref",
                   "type": "string"
+                },
+                "path_binding": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/ConnectorPathBindingV1"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null
                 }
               },
               "required": [
@@ -17056,12 +17108,12 @@
         "raw_xml_exposed": false,
         "read_only": true,
         "revision_binding": {
-          "capability_revision": "sha256:078f0a9f87af1d7de9e1bfd6e5aacb4700cb7f06cde1c68dc84c1bd6c33ecef2",
+          "capability_revision": "sha256:71f3cdf42391ed6b885940944a2592b1214ddb3fd23a0f50c16c006142d09a2c",
           "compiler_revision": "sha256:3a2d844983067d5dca4e7d63ed30e77348047e496928671b2ab822fad35f885c",
           "contract_version": "2",
-          "schema_revision": "sha256:55707a0512cec51c0267e86dcfa2232553a80fa3f8919cc0302dd4659f49804f"
+          "schema_revision": "sha256:26f634387cd839bb91987f1f852f7040c185afe4adf3327e123d04fe0c9ab6a9"
         },
-        "schema_hash": "sha256:7a412ec1a6e1a8318fc3fd3f849ef331376548515411b1dc23b8274782c577d0",
+        "schema_hash": "sha256:923cbfa061e2dab6a94bb97ad278296804c1bdc7358f452e4c35f8b3d617aa9c",
         "schema_name": "AuthoringCompileResultV1",
         "schema_version": "2",
         "surface": "MCP authoring contract (issue #146 M12.11)"
@@ -17070,14 +17122,14 @@
     },
     {
       "artifact_id": "SS-SCHEMA-TEMPLATES:schema_name=AuthoringPlanResultV1",
-      "canonical_length": 77036,
+      "canonical_length": 79451,
       "legacy_excerpt": {
         "json_schema.$defs.IntegrationComponentSpec.properties.config.description": "Type-specific configuration payload. For type='process', config.process_kind selects a structured process-flow builder (e.g. 'database_to_api_sync' or 'wrapper_subprocess' — issue #25) and is REQUIRED for any authoring action that emits or rebuilds process XML (create / create_clone / update): such a process without process_kind is rejected at plan time with PROCESS_KIND_REQUIRED (legacy freeform JSON-to-XML process authoring has been removed). A reference-only reuse of an existing process (no XML emitted) may omit it. Use manage_component for an explicit raw process XML escape hatch.",
         "json_schema.$defs.IntegrationSpecV1.properties.processes.description": "Issue #153 M12.15 — canonical process roots authored as ProcessIR. Each entry is one ProcessAuthoringUnitV1: exactly one ProcessComponentEnvelopeV1 plus exactly one ProcessIRV1 root. These are compiled by the canonical chain and materialized by the neutral ProcessComponentMaterializer — they resolve NO legacy process_kind. 'components' remains the home of supporting components and of reference-only existing processes. 'components' and 'processes' share ONE key namespace: a key used by a component and by a process envelope is a duplicate, and all four depends_on directions (component->component, component->process, process->component, process->process) enter one topological order with one cycle check. A TUPLE, per the plan's field type: pydantic coerces list input, so the wire shape is an ordinary JSON array and no caller sends anything different — but unlike this model's legacy List siblings, mutating the collection itself is unrepresentable. Per-element immutability lives on the frozen ProcessAuthoringUnitV1 entries."
       },
       "producer": "meta_tools.get_schema_template_action(...)",
       "selector": "schema_name=AuthoringPlanResultV1",
-      "sha256": "f72b27ee331895f812a1f542494e1a705113da5779f61767cb2ec8f020f6567f",
+      "sha256": "92cce55ab78f39c800f5cf3779f24b19e8f6868f830eeb9f7091e5bc5aa04220",
       "surface_class": "SS-SCHEMA-TEMPLATES",
       "value": {
         "_success": true,
@@ -17705,6 +17757,17 @@
                   "description": "Opaque component reference: exact '$ref:KEY' token or literal component id",
                   "title": "Operation Ref",
                   "type": "string"
+                },
+                "path_binding": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/ConnectorPathBindingV1"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null
                 }
               },
               "required": [
@@ -17712,6 +17775,36 @@
                 "operation_ref"
               ],
               "title": "ConnectorCallNodeV1",
+              "type": "object"
+            },
+            "ConnectorPathBindingV1": {
+              "additionalProperties": false,
+              "description": "Binds a connector call's per-document request path to a dynamic document property.\n\nThe platform exposes exactly ONE per-document bindable location on a REST call —\nthe \"Path\" dynamic operation property — so this binding names WHICH property feeds\nit and nothing else. Which families offer that location is published per family;\na family that offers none rejects the binding.\n\nIt deliberately carries NO path segments. The ordered segments live on the\n``set_ddp`` node that writes ``property_name`` upstream — one authority for the\npath's composition — and duplicating them here would be a second copy of a fact\nthe writer already owns. What the emitted shape needs beyond the property name is\nonly whether a profile element participates, which is exactly what\n``request_profile_ref`` records.\n\n``request_profile_ref`` is present if and only if the reaching writer contains a\nprofile-valued source, and then names that same profile. That biconditional is\nenforced by semantic validation, which is what makes this field a pinned closed\ncontract rather than a hand-copy: the emitted ``parameter-profile`` attribute is\nmeaningful only with a profile element, and the operation symbol does not carry\nthe request profile in a production symbol table.",
+              "properties": {
+                "property_name": {
+                  "description": "Bare dynamic document property name feeding the request path (no wire prefix)",
+                  "minLength": 1,
+                  "title": "Property Name",
+                  "type": "string"
+                },
+                "request_profile_ref": {
+                  "anyOf": [
+                    {
+                      "description": "Opaque component reference: exact '$ref:KEY' token or literal component id",
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "title": "Request Profile Ref"
+                }
+              },
+              "required": [
+                "property_name"
+              ],
+              "title": "ConnectorPathBindingV1",
               "type": "object"
             },
             "CurrentPropertySourceV1": {
@@ -19674,7 +19767,7 @@
             },
             "TargetEndpointV1": {
               "additionalProperties": false,
-              "description": "Current-parity target placeholder (see SourceEndpointV1).",
+              "description": "Current-parity target placeholder (see SourceEndpointV1).\n\n``path_binding`` is the per-document request path (see\n:class:`ConnectorPathBindingV1`). It is offered HERE and on ``connector_call``,\nbut never on ``source``: a source endpoint may only be the first step, so no\n``set_ddp`` can precede it to establish the property the binding reads. The\nsource ROLE authors its path through the first generalized ``connector_call``\ninstead, which admits a linear prefix.",
               "properties": {
                 "connection_ref": {
                   "description": "Opaque component reference: exact '$ref:KEY' token or literal component id",
@@ -19702,6 +19795,17 @@
                   "description": "Opaque component reference: exact '$ref:KEY' token or literal component id",
                   "title": "Operation Ref",
                   "type": "string"
+                },
+                "path_binding": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/ConnectorPathBindingV1"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null
                 }
               },
               "required": [
@@ -20214,12 +20318,12 @@
         "raw_xml_exposed": false,
         "read_only": true,
         "revision_binding": {
-          "capability_revision": "sha256:078f0a9f87af1d7de9e1bfd6e5aacb4700cb7f06cde1c68dc84c1bd6c33ecef2",
+          "capability_revision": "sha256:71f3cdf42391ed6b885940944a2592b1214ddb3fd23a0f50c16c006142d09a2c",
           "compiler_revision": "sha256:3a2d844983067d5dca4e7d63ed30e77348047e496928671b2ab822fad35f885c",
           "contract_version": "2",
-          "schema_revision": "sha256:55707a0512cec51c0267e86dcfa2232553a80fa3f8919cc0302dd4659f49804f"
+          "schema_revision": "sha256:26f634387cd839bb91987f1f852f7040c185afe4adf3327e123d04fe0c9ab6a9"
         },
-        "schema_hash": "sha256:7b61d8875b364d83f7915212c5e6cfa69f657977d506fc10ebeb003407093d3f",
+        "schema_hash": "sha256:c2327a39a2a553d094a595a1737f1ed3e36cfea14dbced08f6667b7070dd9af2",
         "schema_name": "AuthoringPlanResultV1",
         "schema_version": "2",
         "surface": "MCP authoring contract (issue #146 M12.11)"
@@ -20228,7 +20332,7 @@
     },
     {
       "artifact_id": "SS-SCHEMA-TEMPLATES:schema_name=AuthoringRequestV1",
-      "canonical_length": 94828,
+      "canonical_length": 97243,
       "legacy_excerpt": {
         "json_schema.$defs.IntegrationComponentSpec.properties.config.description": "Type-specific configuration payload. For type='process', config.process_kind selects a structured process-flow builder (e.g. 'database_to_api_sync' or 'wrapper_subprocess' — issue #25) and is REQUIRED for any authoring action that emits or rebuilds process XML (create / create_clone / update): such a process without process_kind is rejected at plan time with PROCESS_KIND_REQUIRED (legacy freeform JSON-to-XML process authoring has been removed). A reference-only reuse of an existing process (no XML emitted) may omit it. Use manage_component for an explicit raw process XML escape hatch.",
         "json_schema.$defs.IntegrationSpecV1.properties.processes.description": "Issue #153 M12.15 — canonical process roots authored as ProcessIR. Each entry is one ProcessAuthoringUnitV1: exactly one ProcessComponentEnvelopeV1 plus exactly one ProcessIRV1 root. These are compiled by the canonical chain and materialized by the neutral ProcessComponentMaterializer — they resolve NO legacy process_kind. 'components' remains the home of supporting components and of reference-only existing processes. 'components' and 'processes' share ONE key namespace: a key used by a component and by a process envelope is a duplicate, and all four depends_on directions (component->component, component->process, process->component, process->process) enter one topological order with one cycle check. A TUPLE, per the plan's field type: pydantic coerces list input, so the wire shape is an ordinary JSON array and no caller sends anything different — but unlike this model's legacy List siblings, mutating the collection itself is unrepresentable. Per-element immutability lives on the frozen ProcessAuthoringUnitV1 entries.",
@@ -20236,7 +20340,7 @@
       },
       "producer": "meta_tools.get_schema_template_action(...)",
       "selector": "schema_name=AuthoringRequestV1",
-      "sha256": "2e2f9a035821ac67719514dc1146258284d0ba46182ed48f0f0aa5511d9398a8",
+      "sha256": "80f1b18cba1387f97be5f493e918d28338d35cad7e37c97aae50b6251423e381",
       "surface_class": "SS-SCHEMA-TEMPLATES",
       "value": {
         "_success": true,
@@ -20673,6 +20777,17 @@
                   "description": "Opaque component reference: exact '$ref:KEY' token or literal component id",
                   "title": "Operation Ref",
                   "type": "string"
+                },
+                "path_binding": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/ConnectorPathBindingV1"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null
                 }
               },
               "required": [
@@ -20680,6 +20795,36 @@
                 "operation_ref"
               ],
               "title": "ConnectorCallNodeV1",
+              "type": "object"
+            },
+            "ConnectorPathBindingV1": {
+              "additionalProperties": false,
+              "description": "Binds a connector call's per-document request path to a dynamic document property.\n\nThe platform exposes exactly ONE per-document bindable location on a REST call —\nthe \"Path\" dynamic operation property — so this binding names WHICH property feeds\nit and nothing else. Which families offer that location is published per family;\na family that offers none rejects the binding.\n\nIt deliberately carries NO path segments. The ordered segments live on the\n``set_ddp`` node that writes ``property_name`` upstream — one authority for the\npath's composition — and duplicating them here would be a second copy of a fact\nthe writer already owns. What the emitted shape needs beyond the property name is\nonly whether a profile element participates, which is exactly what\n``request_profile_ref`` records.\n\n``request_profile_ref`` is present if and only if the reaching writer contains a\nprofile-valued source, and then names that same profile. That biconditional is\nenforced by semantic validation, which is what makes this field a pinned closed\ncontract rather than a hand-copy: the emitted ``parameter-profile`` attribute is\nmeaningful only with a profile element, and the operation symbol does not carry\nthe request profile in a production symbol table.",
+              "properties": {
+                "property_name": {
+                  "description": "Bare dynamic document property name feeding the request path (no wire prefix)",
+                  "minLength": 1,
+                  "title": "Property Name",
+                  "type": "string"
+                },
+                "request_profile_ref": {
+                  "anyOf": [
+                    {
+                      "description": "Opaque component reference: exact '$ref:KEY' token or literal component id",
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "title": "Request Profile Ref"
+                }
+              },
+              "required": [
+                "property_name"
+              ],
+              "title": "ConnectorPathBindingV1",
               "type": "object"
             },
             "CurrentPropertySourceV1": {
@@ -23499,7 +23644,7 @@
             },
             "TargetEndpointV1": {
               "additionalProperties": false,
-              "description": "Current-parity target placeholder (see SourceEndpointV1).",
+              "description": "Current-parity target placeholder (see SourceEndpointV1).\n\n``path_binding`` is the per-document request path (see\n:class:`ConnectorPathBindingV1`). It is offered HERE and on ``connector_call``,\nbut never on ``source``: a source endpoint may only be the first step, so no\n``set_ddp`` can precede it to establish the property the binding reads. The\nsource ROLE authors its path through the first generalized ``connector_call``\ninstead, which admits a linear prefix.",
               "properties": {
                 "connection_ref": {
                   "description": "Opaque component reference: exact '$ref:KEY' token or literal component id",
@@ -23527,6 +23672,17 @@
                   "description": "Opaque component reference: exact '$ref:KEY' token or literal component id",
                   "title": "Operation Ref",
                   "type": "string"
+                },
+                "path_binding": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/ConnectorPathBindingV1"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null
                 }
               },
               "required": [
@@ -23944,12 +24100,12 @@
         "raw_xml_exposed": false,
         "read_only": true,
         "revision_binding": {
-          "capability_revision": "sha256:078f0a9f87af1d7de9e1bfd6e5aacb4700cb7f06cde1c68dc84c1bd6c33ecef2",
+          "capability_revision": "sha256:71f3cdf42391ed6b885940944a2592b1214ddb3fd23a0f50c16c006142d09a2c",
           "compiler_revision": "sha256:3a2d844983067d5dca4e7d63ed30e77348047e496928671b2ab822fad35f885c",
           "contract_version": "2",
-          "schema_revision": "sha256:55707a0512cec51c0267e86dcfa2232553a80fa3f8919cc0302dd4659f49804f"
+          "schema_revision": "sha256:26f634387cd839bb91987f1f852f7040c185afe4adf3327e123d04fe0c9ab6a9"
         },
-        "schema_hash": "sha256:3152aa6a3406f1e4b452b2314c62844d956a0276943de77231d239f5dc0d9cce",
+        "schema_hash": "sha256:f9b6556913c61d71292df7067d9959cc4b3974535a5d851746b3efa61f686334",
         "schema_name": "AuthoringRequestV1",
         "schema_version": "2",
         "surface": "MCP authoring contract (issue #146 M12.11)"
@@ -23958,14 +24114,14 @@
     },
     {
       "artifact_id": "SS-SCHEMA-TEMPLATES:schema_name=IntegrationSpecV1",
-      "canonical_length": 66474,
+      "canonical_length": 68889,
       "legacy_excerpt": {
         "json_schema.$defs.IntegrationComponentSpec.properties.config.description": "Type-specific configuration payload. For type='process', config.process_kind selects a structured process-flow builder (e.g. 'database_to_api_sync' or 'wrapper_subprocess' — issue #25) and is REQUIRED for any authoring action that emits or rebuilds process XML (create / create_clone / update): such a process without process_kind is rejected at plan time with PROCESS_KIND_REQUIRED (legacy freeform JSON-to-XML process authoring has been removed). A reference-only reuse of an existing process (no XML emitted) may omit it. Use manage_component for an explicit raw process XML escape hatch.",
         "json_schema.properties.processes.description": "Issue #153 M12.15 — canonical process roots authored as ProcessIR. Each entry is one ProcessAuthoringUnitV1: exactly one ProcessComponentEnvelopeV1 plus exactly one ProcessIRV1 root. These are compiled by the canonical chain and materialized by the neutral ProcessComponentMaterializer — they resolve NO legacy process_kind. 'components' remains the home of supporting components and of reference-only existing processes. 'components' and 'processes' share ONE key namespace: a key used by a component and by a process envelope is a duplicate, and all four depends_on directions (component->component, component->process, process->component, process->process) enter one topological order with one cycle check. A TUPLE, per the plan's field type: pydantic coerces list input, so the wire shape is an ordinary JSON array and no caller sends anything different — but unlike this model's legacy List siblings, mutating the collection itself is unrepresentable. Per-element immutability lives on the frozen ProcessAuthoringUnitV1 entries."
       },
       "producer": "meta_tools.get_schema_template_action(...)",
       "selector": "schema_name=IntegrationSpecV1",
-      "sha256": "a7ca9b8e65d7e0a058e0ecc9923968e3639d39ac4672cdd70861e46a2abda377",
+      "sha256": "41bb52dee4d0d8947a7ea6a98eff0545dfd2b2a2377af701088fbe3a1d9096b1",
       "surface_class": "SS-SCHEMA-TEMPLATES",
       "value": {
         "_success": true,
@@ -24354,6 +24510,17 @@
                   "description": "Opaque component reference: exact '$ref:KEY' token or literal component id",
                   "title": "Operation Ref",
                   "type": "string"
+                },
+                "path_binding": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/ConnectorPathBindingV1"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null
                 }
               },
               "required": [
@@ -24361,6 +24528,36 @@
                 "operation_ref"
               ],
               "title": "ConnectorCallNodeV1",
+              "type": "object"
+            },
+            "ConnectorPathBindingV1": {
+              "additionalProperties": false,
+              "description": "Binds a connector call's per-document request path to a dynamic document property.\n\nThe platform exposes exactly ONE per-document bindable location on a REST call —\nthe \"Path\" dynamic operation property — so this binding names WHICH property feeds\nit and nothing else. Which families offer that location is published per family;\na family that offers none rejects the binding.\n\nIt deliberately carries NO path segments. The ordered segments live on the\n``set_ddp`` node that writes ``property_name`` upstream — one authority for the\npath's composition — and duplicating them here would be a second copy of a fact\nthe writer already owns. What the emitted shape needs beyond the property name is\nonly whether a profile element participates, which is exactly what\n``request_profile_ref`` records.\n\n``request_profile_ref`` is present if and only if the reaching writer contains a\nprofile-valued source, and then names that same profile. That biconditional is\nenforced by semantic validation, which is what makes this field a pinned closed\ncontract rather than a hand-copy: the emitted ``parameter-profile`` attribute is\nmeaningful only with a profile element, and the operation symbol does not carry\nthe request profile in a production symbol table.",
+              "properties": {
+                "property_name": {
+                  "description": "Bare dynamic document property name feeding the request path (no wire prefix)",
+                  "minLength": 1,
+                  "title": "Property Name",
+                  "type": "string"
+                },
+                "request_profile_ref": {
+                  "anyOf": [
+                    {
+                      "description": "Opaque component reference: exact '$ref:KEY' token or literal component id",
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "title": "Request Profile Ref"
+                }
+              },
+              "required": [
+                "property_name"
+              ],
+              "title": "ConnectorPathBindingV1",
               "type": "object"
             },
             "CurrentPropertySourceV1": {
@@ -26062,7 +26259,7 @@
             },
             "TargetEndpointV1": {
               "additionalProperties": false,
-              "description": "Current-parity target placeholder (see SourceEndpointV1).",
+              "description": "Current-parity target placeholder (see SourceEndpointV1).\n\n``path_binding`` is the per-document request path (see\n:class:`ConnectorPathBindingV1`). It is offered HERE and on ``connector_call``,\nbut never on ``source``: a source endpoint may only be the first step, so no\n``set_ddp`` can precede it to establish the property the binding reads. The\nsource ROLE authors its path through the first generalized ``connector_call``\ninstead, which admits a linear prefix.",
               "properties": {
                 "connection_ref": {
                   "description": "Opaque component reference: exact '$ref:KEY' token or literal component id",
@@ -26090,6 +26287,17 @@
                   "description": "Opaque component reference: exact '$ref:KEY' token or literal component id",
                   "title": "Operation Ref",
                   "type": "string"
+                },
+                "path_binding": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/ConnectorPathBindingV1"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null
                 }
               },
               "required": [
@@ -33829,13 +34037,13 @@
     },
     {
       "artifact_id": "SS-SCHEMA-TEMPLATES:schema_name=recipe_contributions",
-      "canonical_length": 82341,
+      "canonical_length": 84756,
       "legacy_excerpt": {
         "authoring_note": "These are the ONLY values a registered recipe may return. They carry opaque references and closed enumerations — never configuration, credentials, headers, SQL, raw XML, executable code, JSON pointers, or caller-authored graph edges. Recipe output is validated exactly as direct ProcessIR/topology/component authoring and cannot be exempted."
       },
       "producer": "meta_tools.get_schema_template_action(...)",
       "selector": "schema_name=recipe_contributions",
-      "sha256": "47413852c533c08f43e1633e8bae2c02338c9fe24571b063d46f291334a4ab50",
+      "sha256": "5262382bb09afd8c124ed5dc01aae9ee06e1df6a25a8a04ab43ca386d1d7a63a",
       "surface_class": "SS-SCHEMA-TEMPLATES",
       "value": {
         "_success": true,
@@ -34546,6 +34754,17 @@
                   "description": "Opaque component reference: exact '$ref:KEY' token or literal component id",
                   "title": "Operation Ref",
                   "type": "string"
+                },
+                "path_binding": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/ConnectorPathBindingV1"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null
                 }
               },
               "required": [
@@ -34553,6 +34772,36 @@
                 "operation_ref"
               ],
               "title": "ConnectorCallNodeV1",
+              "type": "object"
+            },
+            "ConnectorPathBindingV1": {
+              "additionalProperties": false,
+              "description": "Binds a connector call's per-document request path to a dynamic document property.\n\nThe platform exposes exactly ONE per-document bindable location on a REST call —\nthe \"Path\" dynamic operation property — so this binding names WHICH property feeds\nit and nothing else. Which families offer that location is published per family;\na family that offers none rejects the binding.\n\nIt deliberately carries NO path segments. The ordered segments live on the\n``set_ddp`` node that writes ``property_name`` upstream — one authority for the\npath's composition — and duplicating them here would be a second copy of a fact\nthe writer already owns. What the emitted shape needs beyond the property name is\nonly whether a profile element participates, which is exactly what\n``request_profile_ref`` records.\n\n``request_profile_ref`` is present if and only if the reaching writer contains a\nprofile-valued source, and then names that same profile. That biconditional is\nenforced by semantic validation, which is what makes this field a pinned closed\ncontract rather than a hand-copy: the emitted ``parameter-profile`` attribute is\nmeaningful only with a profile element, and the operation symbol does not carry\nthe request profile in a production symbol table.",
+              "properties": {
+                "property_name": {
+                  "description": "Bare dynamic document property name feeding the request path (no wire prefix)",
+                  "minLength": 1,
+                  "title": "Property Name",
+                  "type": "string"
+                },
+                "request_profile_ref": {
+                  "anyOf": [
+                    {
+                      "description": "Opaque component reference: exact '$ref:KEY' token or literal component id",
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "title": "Request Profile Ref"
+                }
+              },
+              "required": [
+                "property_name"
+              ],
+              "title": "ConnectorPathBindingV1",
               "type": "object"
             },
             "ConstraintRequirementV1": {
@@ -36785,7 +37034,7 @@
             },
             "TargetEndpointV1": {
               "additionalProperties": false,
-              "description": "Current-parity target placeholder (see SourceEndpointV1).",
+              "description": "Current-parity target placeholder (see SourceEndpointV1).\n\n``path_binding`` is the per-document request path (see\n:class:`ConnectorPathBindingV1`). It is offered HERE and on ``connector_call``,\nbut never on ``source``: a source endpoint may only be the first step, so no\n``set_ddp`` can precede it to establish the property the binding reads. The\nsource ROLE authors its path through the first generalized ``connector_call``\ninstead, which admits a linear prefix.",
               "properties": {
                 "connection_ref": {
                   "description": "Opaque component reference: exact '$ref:KEY' token or literal component id",
@@ -36813,6 +37062,17 @@
                   "description": "Opaque component reference: exact '$ref:KEY' token or literal component id",
                   "title": "Operation Ref",
                   "type": "string"
+                },
+                "path_binding": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/ConnectorPathBindingV1"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null
                 }
               },
               "required": [
@@ -37426,7 +37686,7 @@
       "legacy_excerpt": {},
       "producer": "meta_tools.get_schema_template_action(...) [all axes]",
       "selector": "walked_surface_digest",
-      "sha256": "f68c2b93bdaf898e2df33c36a99ece66c14a8b109a754837adb1afbae966bb9c",
+      "sha256": "b8a7d663f4b531c7b626e6691bdae6d01265a5fe3e416bcccedf28be1be30cc6",
       "surface_class": "SS-SCHEMA-TEMPLATES",
       "value": {
         "resource_type=component": "8327243ec482fa1641f49265c87694e33616f12db015b3f234dc73db9ed8057c",
@@ -37708,14 +37968,14 @@
         "resource_type=trading_partner|operation=update|standard=rosettanet": "83537ac74be6088a4607997d0e200d76ec7c6367c900aa9923e823d610dd27e1",
         "resource_type=trading_partner|operation=update|standard=tradacoms": "83537ac74be6088a4607997d0e200d76ec7c6367c900aa9923e823d610dd27e1",
         "resource_type=trading_partner|operation=update|standard=x12": "83537ac74be6088a4607997d0e200d76ec7c6367c900aa9923e823d610dd27e1",
-        "schema_name=AuthoringBuildProvenanceV1": "90bcb7dec8e0a477ff877debe308dfd29ef0cce01851cb44b1e635c3f9ec24de",
-        "schema_name=AuthoringCompileResultV1": "b2ad9d67557ad18a77261150dc7adc37208a948b1b9f7fdd74d24b69d6f43072",
-        "schema_name=AuthoringPlanResultV1": "f72b27ee331895f812a1f542494e1a705113da5779f61767cb2ec8f020f6567f",
-        "schema_name=AuthoringRequestV1": "2e2f9a035821ac67719514dc1146258284d0ba46182ed48f0f0aa5511d9398a8",
-        "schema_name=AuthoringRevisionBindingV1": "fc37eacab1148120fb9f69103f4e5babbdde3d18908dfbe29d001c30b0012f9f",
-        "schema_name=IntegrationSpecV1": "a7ca9b8e65d7e0a058e0ecc9923968e3639d39ac4672cdd70861e46a2abda377",
-        "schema_name=ProcessIRV1": "adfdf692bcb8b3c9f755b9b8b223e044dc5960a15c51b1c0af49b02c7adfab15",
-        "schema_name=SystemTopologySpecV1": "b9c1275e2edf481e41fc0d6b627dd113e79d494e367264e11c171192a1379089",
+        "schema_name=AuthoringBuildProvenanceV1": "8999111d843767d306ce2fc7a423579fd7abe4a34ad3f678bde7499633ee1c1a",
+        "schema_name=AuthoringCompileResultV1": "158d387de7648005e5366424fdc4bf3bccba7c2a13771b67d9d89bb79fcaa9c0",
+        "schema_name=AuthoringPlanResultV1": "92cce55ab78f39c800f5cf3779f24b19e8f6868f830eeb9f7091e5bc5aa04220",
+        "schema_name=AuthoringRequestV1": "80f1b18cba1387f97be5f493e918d28338d35cad7e37c97aae50b6251423e381",
+        "schema_name=AuthoringRevisionBindingV1": "91a5afc8cc02f9ef11daa812be3e953ed12772b8f62a2e9027b0075c684f6dcb",
+        "schema_name=IntegrationSpecV1": "41bb52dee4d0d8947a7ea6a98eff0545dfd2b2a2377af701088fbe3a1d9096b1",
+        "schema_name=ProcessIRV1": "b5e74076fa9bcf3e497310ccfd1659bc15d2bf13817e33e2110357c31bb58763",
+        "schema_name=SystemTopologySpecV1": "8332ad54555a14efbdac53567dc2f972f286e1e532c7232121cd518b7e61e782",
         "schema_name=account_governance": "d0773b315a5b59bad4bbb0021a2468e5cb4d3a85c4dbac216a887f0194a2ecdc",
         "schema_name=api_service": "c7be12ec5b2c503bd54088bd2c7b00adfa435e3f3fc9610bae0b91117657911b",
         "schema_name=archetype:api_to_api_sync": "7e4653429bdfc56d53ecb1c07fb7f477e11c2180c3afdfad94566cab1ca716e7",
@@ -37724,7 +37984,7 @@
         "schema_name=archetype:http_listener_to_db": "b21d41d870324ce66e872957fa09126dc641354753a0d7681d14d3489f7dcf3f",
         "schema_name=archetype:http_listener_to_rest": "cdd6c9c6fb51cd8afda5c7245a2ef37548939610c1c5235cd9abe1ed9deac3d9",
         "schema_name=archetype:stub_minimal_integration": "28f1d13a8568cea1df47bb1b361708d17e490204c7425787999e80df63f4b0fc",
-        "schema_name=authoring_workflow": "86554e51c9a3fd5738afb1f2ef194e17a934a34773ff32e86bf8a8c42c5390d0",
+        "schema_name=authoring_workflow": "0769c33ca97d7d8f41aa1bce28d3d3fb0ad6d26137e0c5b80f7f9f4505fae4cf",
         "schema_name=cache_property_authoring": "484017df545d247be99c71ef4be4edf8d47013e565a6e05119c357699229ed6f",
         "schema_name=compose_archetypes": "ec23808a15913ec8ce1d6e510ff941952be25b006a42128216b891d05f1a9d7f",
         "schema_name=design_doctrine": "b47bc0062bf52054609a4b81b8ea98dd5b363c716b079ed0413c1f89bee08a7b",
@@ -37787,7 +38047,7 @@
         "schema_name=governance_pattern:support_folder_isolation_and_privacy": "4f0b206e14ad2f2272b03dfc8c9575dbcc3d454d28894a42602a9cca546de2ed",
         "schema_name=governance_pattern:tools_utilities_folder_non_integration": "50ddcf761e63e68f305271b4f079d8a7effd9b750726a8be784c2c52993c2cbc",
         "schema_name=governance_pattern:tracked_field_naming_generic_and_unique": "42ae3917d1ddb0f23a9dd0e9083a9106a3ed6c18bc06e740a1c07014830204d1",
-        "schema_name=process_ir_authoring": "8222ac04db4332cb9e3879cf13fcfa6e4371e42ede158e56f31db36ea3f1432d",
+        "schema_name=process_ir_authoring": "6850e972b4d8fe31c286489e4578f877c38ded3174dd4e656bfd50da617d713f",
         "schema_name=process_property": "43c9cf66e73fb39b6f1625d00a9a01f876005bfa94b34fb99cb14e0deebe699b",
         "schema_name=recipe:boomi.adapter.api_to_api_sync@1.0.0": "280f2452c95aaa3ddff0800bf0fc2c64cd3f7327e2e366123a86d4424b38a52b",
         "schema_name=recipe:boomi.adapter.api_to_database_sync@1.0.0": "0b675ce4f9a86711dec17430be3eecdd90752d6e28e745d667226ef316210b5b",
@@ -37797,11 +38057,11 @@
         "schema_name=recipe:boomi.archetype.api_to_database_sync@0.1.0": "1863e1e40f10cac2308b9f0ec300c3f883bf4bb6a791bee250ee577509e04a79",
         "schema_name=recipe:boomi.compose.db_rest_fanout@1.0.0": "fe61a055c6a5eb6ec289c660cd1867f460737c7f38b9605904a9368dcf1c4b4d",
         "schema_name=recipe:boomi.constraint.inbound_validate@1.0.0": "dedadcf78923b95109eef4373b17f55646fc7a54867e9c789825da5c22ae2670",
-        "schema_name=recipe_contributions": "47413852c533c08f43e1633e8bae2c02338c9fe24571b063d46f291334a4ab50",
+        "schema_name=recipe_contributions": "5262382bb09afd8c124ed5dc01aae9ee06e1df6a25a8a04ab43ca386d1d7a63a",
         "schema_name=recipe_registry": "3e1e03c192929450209f576ccbb9e411e535dd6539583ab89150b4b25c0b3096",
         "schema_name=script_dataprocess": "86d6cac0e593188c5c6a253e684097dadda0a6c3c331a1d71672c827133af143",
         "schema_name=script_mapping": "165e78ea08d24f54221f6da5973cbe20c7747d1a37f9fde496a42876b594e029",
-        "schema_name=validation_report": "88abaf4a729e77de4d4861aefbe717a881ebbfb752207a70b2515261b2d5a531",
+        "schema_name=validation_report": "b20c33426db92db222ef7557120c01cce23127832eee3ea7c11d6cfaa3898358",
         "schema_name=workflow:build_and_verify_http_listener": "bf6ab2e405f375735cd6aaed29da0dbc6b717909dc1c184ba8dbe341f2b95800",
         "schema_name=workflow:build_integration_from_description": "72a20b29bbaf7a0ce39e06fb8514e13831968332bc5d0373d7f100bd7a943be0",
         "schema_name=workflow:compose_multi_target_integration": "6b04f2d192bcaf817a983a1aefda2f2f7b9674ce1c996737137c7ce8d6b932e0",

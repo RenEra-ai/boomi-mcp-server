@@ -430,11 +430,26 @@ DataProcessOpSemanticV1 = Annotated[
 ]
 
 
+class ConnectorPathBindingSemanticV1(_CompilerModel):
+    """The AUTHORED per-document path binding, snapshotted for the semantic layer.
+
+    It rides BOTH connector semantics because both lower to the one connector-action
+    emitter input. It carries what the caller authored and nothing derived: the
+    ordered segments stay on the reaching ``set_ddp`` writer, and whether a profile
+    element participates is read back off ``request_profile_ref`` rather than
+    recomputed here, so no CFG node holds a second copy of the writer's shape.
+    """
+
+    property_name: str
+    request_profile_ref: Optional[str] = None
+
+
 class ConnectorSemanticV1(_CompilerModel):
     semantic_kind: Literal["connector"] = "connector"
     role: Literal["source", "target"]
     connection_ref: str
     operation_ref: str
+    path_binding: Optional[ConnectorPathBindingSemanticV1] = None
     label: Optional[str] = None
 
 
@@ -474,6 +489,7 @@ class ConnectorCallSemanticV1(_CompilerModel):
     semantic_kind: Literal["connector_call"] = "connector_call"
     role: Literal["entry", "downstream"]
     operation_ref: str
+    path_binding: Optional[ConnectorPathBindingSemanticV1] = None
     action_intent: Optional[str] = None
     # #142: the AUTHORED retry-safety evidence, carried so the retry check can see
     # what the caller claimed. Like ``action_intent`` above, it is an assertion,
@@ -790,12 +806,29 @@ class StartNoActionInputV1(_CompilerModel):
     emitter_kind: Literal["start_noaction"] = "start_noaction"
 
 
+class ConnectorDynamicPathInputV1(_CompilerModel):
+    """The fully-bound per-document path, as the connector-action renderer takes it.
+
+    ``has_profile_segment`` is DERIVED, never carried from the writer: it is exactly
+    ``request_profile_ref is not None`` on the authored binding, because the binding
+    names a request profile if and only if the reaching writer contributes a profile
+    element. Keeping it a derivation of one node's own facts is what lets the emission
+    plan be recomputed from (CFG node + symbol index) and compared exactly — a value
+    read off a DIFFERENT node could not be.
+    """
+
+    property_name: str
+    request_profile_id: str = ""
+    has_profile_segment: bool = False
+
+
 class ConnectorActionInputV1(_CompilerModel):
     emitter_kind: Literal["connectoraction_source", "connectoraction_target"]
     connector_type: str
     action_type: str
     connection_id: str
     operation_id: str
+    dynamic_path: Optional[ConnectorDynamicPathInputV1] = None
     userlabel: str = ""
 
 

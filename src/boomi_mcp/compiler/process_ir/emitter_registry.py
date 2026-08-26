@@ -38,6 +38,7 @@ from pydantic import BaseModel, TypeAdapter
 
 from ...categories.components.builders.process_emitters import rendering
 from ...categories.components.builders.process_emitters.rendering import (
+    RenderConnectorDynamicPath,
     RenderDataProcessStep,
     RenderDecisionValue,
     RenderExceptionBinding,
@@ -312,6 +313,7 @@ def _emit_start(inp, ctx):
 
 
 def _emit_connector(inp, ctx):
+    dynamic_path = getattr(inp, "dynamic_path", None)
     return rendering.render_connectoraction(
         _shape_context(ctx.node),
         userlabel=inp.userlabel,
@@ -319,6 +321,18 @@ def _emit_connector(inp, ctx):
         action_type=inp.action_type,
         connection_id=inp.connection_id,
         operation_id=inp.operation_id,
+        # The renderer owns the "Path" template and the parameter-profile
+        # derivation (#100 G2); this passes neutral values into it and adds no
+        # emitter kind — absent binding keeps the existing empty-body branch.
+        dynamic_path=(
+            None
+            if dynamic_path is None
+            else RenderConnectorDynamicPath(
+                ddp_name=dynamic_path.property_name,
+                request_profile_id=dynamic_path.request_profile_id,
+                has_profile_segment=dynamic_path.has_profile_segment,
+            )
+        ),
     )
 
 
@@ -444,10 +458,21 @@ def _no_requirements(inp) -> Tuple[SymbolRequirement, ...]:
 
 
 def _req_connector(inp) -> Tuple[SymbolRequirement, ...]:
-    return (
+    reqs = [
         SymbolRequirement("connection", inp.connection_id, _CONNECTOR_SETTINGS_TYPES),
         SymbolRequirement("operation", inp.operation_id, _CONNECTOR_ACTION_TYPES),
-    )
+    ]
+    # The request profile is required ONLY when the path binding names one (#155).
+    # Requiring it unconditionally would make every ddp/dpp-only dynamic path — a
+    # shape the legacy chain emits today with no profile at all — unsatisfiable.
+    dynamic_path = getattr(inp, "dynamic_path", None)
+    if dynamic_path is not None and dynamic_path.has_profile_segment:
+        reqs.append(
+            SymbolRequirement(
+                "profile", dynamic_path.request_profile_id, _SETPROP_PROFILE_TYPES
+            )
+        )
+    return tuple(reqs)
 
 
 def _req_map(inp) -> Tuple[SymbolRequirement, ...]:
