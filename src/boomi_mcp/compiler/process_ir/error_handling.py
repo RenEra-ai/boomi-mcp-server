@@ -49,6 +49,8 @@ from types import MappingProxyType
 from typing import Any, Dict, FrozenSet, List, Mapping, Optional, Tuple
 
 from ...errors import (
+    PROCESS_IR_SEMANTIC_RETRY_SOURCE_POLICY_REQUIRES_RETRY,
+    PROCESS_IR_SEMANTIC_RETRY_SOURCE_POLICY_SCOPE_INVALID,
     PROCESS_IR_COMPILE_ERROR_REGION_INVALID,
     PROCESS_IR_SEMANTIC_IDEMPOTENCY_EVIDENCE_MISSING,
     PROCESS_IR_SEMANTIC_RETRY_NON_IDEMPOTENT_WRITE,
@@ -92,6 +94,8 @@ class ErrorRegionV1(_CompilerModel):
     try_catch_node_id: str
     source_path: str
     retry_count: int
+    scope: str
+    source_replay_policy: str
     try_node_ids: Tuple[str, ...]
     catch_node_ids: Tuple[str, ...]
 
@@ -205,6 +209,8 @@ def derive_error_regions(cfg: SemanticCfgV1) -> Tuple[ErrorRegionV1, ...]:
                 try_catch_node_id=node.node_id,
                 source_path=node.source_path,
                 retry_count=node.semantic.retry_count,
+                scope=node.semantic.scope,
+                source_replay_policy=node.semantic.source_replay_policy,
                 try_node_ids=try_ids,
                 catch_node_ids=catch_ids,
             )
@@ -280,6 +286,29 @@ def validate_error_handling(
     contracts = symbols.build_idempotency_index()
 
     for region in regions:
+        # --- the acknowledgement is legal BY VALUE, before anything else -----
+        # Checked ahead of the retry-zero short circuit on purpose: a policy
+        # authored on a region that never retries would otherwise be accepted in
+        # silence, reading as protection the document does not have. And by
+        # VALUE, never by field presence — a defaulted "forbid" is serialised, so
+        # a presence rule would reject the document's own dump-and-reparse.
+        if region.source_replay_policy == "allow_duplicates":
+            policy_path = "{0}/retry/source_replay_policy".format(region.source_path)
+            if region.scope != "process":
+                raise raise_compile_error(
+                    PROCESS_IR_SEMANTIC_RETRY_SOURCE_POLICY_SCOPE_INVALID,
+                    _SEMANTIC_PHASE,
+                    policy_path,
+                    internal_node_id=region.try_catch_node_id,
+                )
+            if region.retry_count == 0:
+                raise raise_compile_error(
+                    PROCESS_IR_SEMANTIC_RETRY_SOURCE_POLICY_REQUIRES_RETRY,
+                    _SEMANTIC_PHASE,
+                    policy_path,
+                    internal_node_id=region.try_catch_node_id,
+                )
+
         if region.retry_count == 0:
             # Retry zero re-runs nothing, so neither source isolation nor replay
             # safety can be violated. A write with no retry is ordinary.
@@ -289,7 +318,16 @@ def validate_error_handling(
         # Nothing upstream produced the documents, so the producer is INSIDE the
         # retried region: replaying it re-runs the producer and duplicates
         # everything it already emitted.
-        if not _producers_upstream_of(cfg, region.try_catch_node_id):
+        #
+        # An explicit acknowledgement lifts THIS refusal and nothing else: the
+        # caller has said duplicates are acceptable, which is exactly what this
+        # guard protects against. The write-safety checks below are structurally
+        # independent and still run — accepting duplicate READS says nothing
+        # about replaying a write.
+        if (
+            region.source_replay_policy != "allow_duplicates"
+            and not _producers_upstream_of(cfg, region.try_catch_node_id)
+        ):
             raise raise_compile_error(
                 PROCESS_IR_SEMANTIC_RETRY_SOURCE_REEXECUTION,
                 _SEMANTIC_PHASE,

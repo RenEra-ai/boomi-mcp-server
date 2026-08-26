@@ -348,6 +348,7 @@ def _semantic_for(node: Any, *, routed: bool = False, entry: bool = False) -> An
         return TryCatchSemanticV1(
             scope=node.scope,
             retry_count=node.retry_count,
+            source_replay_policy=node.source_replay_policy,
             label=label,
         )
     if kind == "branch":

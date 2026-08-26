@@ -1403,10 +1403,12 @@ def test_capability_manifest_immutable_and_complete():
     ) == [
         "bounded_retry",
         "connector_call_in_control_body",
+        "dynamic_path",
         "generalized_connector_call",
         "mixed_connector_execution",
         "rich_branch_decision_bodies",
         "scoped_try_catch",
+        "source_replay_policy",
         "terminal_process_call",
         "typed_idempotency_evidence",
     ]

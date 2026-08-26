@@ -183,6 +183,13 @@ PROCESS_IR_SCHEMA_RETRY_COUNT = "PROCESS_IR_SCHEMA_RETRY_COUNT"
 PROCESS_IR_CAPABILITY_ERROR_SCOPE_UNSUPPORTED = (
     "PROCESS_IR_CAPABILITY_ERROR_SCOPE_UNSUPPORTED"
 )
+# #155 M12.17. The explicit whole-process replay acknowledgement.
+PROCESS_IR_SEMANTIC_RETRY_SOURCE_POLICY_SCOPE_INVALID = (
+    "PROCESS_IR_SEMANTIC_RETRY_SOURCE_POLICY_SCOPE_INVALID"
+)
+PROCESS_IR_SEMANTIC_RETRY_SOURCE_POLICY_REQUIRES_RETRY = (
+    "PROCESS_IR_SEMANTIC_RETRY_SOURCE_POLICY_REQUIRES_RETRY"
+)
 PROCESS_IR_SEMANTIC_RETRY_SOURCE_REEXECUTION = (
     "PROCESS_IR_SEMANTIC_RETRY_SOURCE_REEXECUTION"
 )
@@ -936,6 +943,30 @@ ERROR_TAXONOMY: Dict[str, ErrorCodeSpec] = {
                 "than the operation's."
             ),
             owner="#140",
+        ),
+        ErrorCodeSpec(
+            code=PROCESS_IR_SEMANTIC_RETRY_SOURCE_POLICY_SCOPE_INVALID,
+            category="process_ir",
+            retryable=False,
+            summary=(
+                "Accepting duplicate documents from a replayed producer is only "
+                "meaningful on a region that contains the producer. A "
+                "connector-scope region leaves the producer outside it, so the "
+                "acknowledgement would describe something that cannot happen."
+            ),
+            owner="#155",
+        ),
+        ErrorCodeSpec(
+            code=PROCESS_IR_SEMANTIC_RETRY_SOURCE_POLICY_REQUIRES_RETRY,
+            category="process_ir",
+            retryable=False,
+            summary=(
+                "Accepting duplicate documents from a replayed producer requires "
+                "a region that actually retries. With no retry attempts nothing "
+                "replays, so the acknowledgement authorises nothing and would "
+                "read as protection the document does not have."
+            ),
+            owner="#155",
         ),
         ErrorCodeSpec(
             code=PROCESS_IR_CAPABILITY_DYNAMIC_PATH_UNSUPPORTED,

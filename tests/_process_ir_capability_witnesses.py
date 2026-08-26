@@ -1003,6 +1003,92 @@ def _w_verified_write_replay_safety():
     )
 
 
+def _w_dynamic_path():
+    # The source ROLE: a linear writer, then the first connector_call bound to it.
+    # No frozen fixture exists for the canonical form — #155 introduces it — so the
+    # document is inline and declared as such.
+    doc = _doc(
+        [
+            {
+                "kind": "set_ddp",
+                "name": "DDP_PATH_CLIENTS",
+                "source_values": [
+                    {"value_type": "static", "value": "/admin/cdscm/api/v1/clients/"},
+                    {
+                        "value_type": "profile",
+                        "element_id": "3",
+                        "element_name": "clientId",
+                        "profile_ref": "$ref:P1",
+                        "profile_type": "profile.json",
+                    },
+                ],
+            },
+            {
+                "kind": "connector_call",
+                "operation_ref": "$ref:GETOP",
+                "path_binding": {
+                    "property_name": "DDP_PATH_CLIENTS",
+                    "request_profile_ref": "$ref:P1",
+                },
+            },
+            {"kind": "stop"},
+        ]
+    )
+
+    def run():
+        from boomi_mcp.compiler.process_ir.emitter_registry import emit_process
+
+        symbols = error_symbols()
+        _cfg, plan = _compiles(doc, symbols)
+        return emit_process(plan, symbols).process_xml
+
+    def observe(process_xml):
+        # The EMITTED strings, verbatim from the renderer — not the authored model
+        # and not the plan. `parameter-profile` is an ATTRIBUTE on the connector
+        # element, and the property rides a `key="path" name="Path"` propertyvalue;
+        # asserting any other spelling would pass against a compiler that emitted
+        # nothing. Both assertions were hand-run against a mutant with the binding
+        # dropped, and both fail there.
+        assert '<propertyvalue childKey="" key="path" name="Path"' in process_xml, process_xml
+        assert 'propertyId="dynamicdocument.DDP_PATH_CLIENTS"' in process_xml, process_xml
+        assert ' parameter-profile="prof-1"' in process_xml, process_xml
+
+    return CapabilityWitness(
+        "dynamic_path", "admits", PROVENANCE_INLINE_ADMISSION, run, observe
+    )
+
+
+def _w_source_replay_policy():
+    doc = _process_scope(retry={"count": 2, "source_replay_policy": "allow_duplicates"})
+
+    def run():
+        from boomi_mcp.compiler.process_ir.emitter_registry import emit_process
+
+        symbols = error_symbols()
+        cfg, plan = _compiles(doc, symbols)
+        return cfg, emit_process(plan, symbols).process_xml
+
+    def observe(result):
+        cfg, process_xml = result
+        # The acknowledgement reaches the semantic layer...
+        policies = [
+            node.semantic.source_replay_policy
+            for node in cfg.nodes
+            if type(node.semantic).__name__ == "TryCatchSemanticV1"
+        ]
+        assert policies == ["allow_duplicates"], policies
+        # ...and changes NO emitted byte. The wire carries an all-errors flag and a
+        # retry count; the policy is a compile-time acknowledgement, so a shape that
+        # advertised it would be inventing a field the platform does not have.
+        assert "catcherrors" in process_xml, process_xml
+        assert "allow_duplicates" not in process_xml, process_xml
+        assert "source_replay_policy" not in process_xml, process_xml
+
+    return CapabilityWitness(
+        "source_replay_policy", "admits", PROVENANCE_INLINE_ADMISSION, run, observe
+    )
+
+
 def _cfg_gated(key, build, code):
     """Refusal observed at the CFG-invariant boundary.
 
@@ -1118,6 +1204,8 @@ _ENTRIES: Tuple[object, ...] = (
     _w_keyed_cache(),
     _w_definedparameter_property_source(),
     _w_verified_write_replay_safety(),
+    _w_dynamic_path(),
+    _w_source_replay_policy(),
     _cfg_gated("joins", _join_cfg, "PROCESS_IR_SEMANTIC_JOIN_UNSUPPORTED"),
     # MEASURED, not assumed: a two-node cycle is refused as AMBIGUOUS_FLOW — flow past
     # a terminal is detected before any loop-specific rule, so that is the refusal a

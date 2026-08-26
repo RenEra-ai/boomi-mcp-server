@@ -606,6 +606,10 @@ class TryCatchSemanticV1(_CompilerModel):
     semantic_kind: Literal["try_catch"] = "try_catch"
     scope: Literal["process", "connector"]
     retry_count: int = Field(..., ge=0, le=5)
+    # #155: the authored acknowledgement, carried so the source-isolation guard
+    # can read it. Normalised like ``retry_count``: an absent authored retry
+    # arrives as the default, so the guard has one value to reason about.
+    source_replay_policy: Literal["forbid", "allow_duplicates"] = "forbid"
     label: Optional[str] = None
 
 

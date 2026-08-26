@@ -7285,14 +7285,14 @@
     },
     {
       "artifact_id": "SS-CAPABILITY-CATALOG:authoring_contract",
-      "canonical_length": 11505,
+      "canonical_length": 11543,
       "legacy_excerpt": {
         "archetypes[2].name": "database_to_api_sync",
         "schemas[10].selector": "archetype:database_to_api_sync"
       },
       "producer": "meta_tools.list_capabilities_action()",
       "selector": "authoring_contract",
-      "sha256": "63e51230c76f4f352520ea7d8bb01c0b5f228c609236e0e4fd37f2cd8f680161",
+      "sha256": "a3c96078e82e031e04814f332f340311a9ea1b1ddda0e393628733b3d8c21c75",
       "surface_class": "SS-CAPABILITY-CATALOG",
       "value": {
         "actions": [
@@ -7397,11 +7397,11 @@
           }
         ],
         "capability_comparison": {
-          "actual_capability_revision": "sha256:9cbab401e73cf894cca0f24cd10c0c21e5a1af6cfade87de086a9d6b5e0e18d0",
+          "actual_capability_revision": "sha256:89121641309f344cb3cc6ef99489154d3af284fc76d5040a015461cb7f4de55c",
           "status": "not_requested"
         },
-        "capability_revision": "sha256:9cbab401e73cf894cca0f24cd10c0c21e5a1af6cfade87de086a9d6b5e0e18d0",
-        "compiler_revision": "sha256:bca0dafa81d57a39d4202e04545aad1908a53bf73356b4d1d36ef2960c401311",
+        "capability_revision": "sha256:89121641309f344cb3cc6ef99489154d3af284fc76d5040a015461cb7f4de55c",
+        "compiler_revision": "sha256:5e8b504b503a99d357018c695c60f099634e008ed926d81f4749d695718fadee",
         "contract_version": "2",
         "intent_kinds": [
           "integration_spec",
@@ -7410,11 +7410,11 @@
         ],
         "manifest_version": "1",
         "process_ir_authoring": {
-          "entry_count": 191,
+          "entry_count": 195,
           "entry_counts_by_type": {
-            "capability": 27,
+            "capability": 29,
             "connector_action": 5,
-            "diagnostic": 61,
+            "diagnostic": 63,
             "doctrine": 39,
             "node": 21,
             "placement": 10,
@@ -7444,6 +7444,7 @@
               "connector_call_in_control_body",
               "continuation_after_branch_or_decision",
               "definedparameter_property_source",
+              "dynamic_path",
               "flow_control_parallel_chunks",
               "generalized_connector_call",
               "joins",
@@ -7460,6 +7461,7 @@
               "rich_branch_decision_bodies",
               "scoped_try_catch",
               "secret_values",
+              "source_replay_policy",
               "terminal_process_call",
               "typed_idempotency_evidence",
               "verified_write_replay_safety",
@@ -7638,7 +7640,7 @@
           "schema_version": "1",
           "source_version": "0.1.0"
         },
-        "schema_revision": "sha256:26f634387cd839bb91987f1f852f7040c185afe4adf3327e123d04fe0c9ab6a9",
+        "schema_revision": "sha256:fc9a5af6edddd78f89a0044037acc692455ac08c2a0e88a986dab7c4b441e80c",
         "schemas": [
           {
             "owned_by_authoring_contract": true,
@@ -7650,21 +7652,21 @@
           {
             "owned_by_authoring_contract": true,
             "provenance": "runtime_schema_registry",
-            "schema_hash": "sha256:923cbfa061e2dab6a94bb97ad278296804c1bdc7358f452e4c35f8b3d617aa9c",
+            "schema_hash": "sha256:650ebb878f2a70154015886a73e61751e0780cb3a7df1f8ba20377e26d49f26f",
             "schema_version": "2",
             "selector": "AuthoringCompileResultV1"
           },
           {
             "owned_by_authoring_contract": true,
             "provenance": "runtime_schema_registry",
-            "schema_hash": "sha256:c2327a39a2a553d094a595a1737f1ed3e36cfea14dbced08f6667b7070dd9af2",
+            "schema_hash": "sha256:4779e993aede1b4aa8d7b2ef6e6dabb4dd6890bab8fb39e3384aa7dd1ef00971",
             "schema_version": "2",
             "selector": "AuthoringPlanResultV1"
           },
           {
             "owned_by_authoring_contract": true,
             "provenance": "runtime_schema_registry",
-            "schema_hash": "sha256:f9b6556913c61d71292df7067d9959cc4b3974535a5d851746b3efa61f686334",
+            "schema_hash": "sha256:9b0234179f2c656c1ae024450f7dd176cbd1f6d29b0695ab24058f57672a9d6e",
             "schema_version": "2",
             "selector": "AuthoringRequestV1"
           },
@@ -7678,13 +7680,13 @@
           {
             "owned_by_authoring_contract": false,
             "provenance": "runtime_schema_registry",
-            "schema_hash": "sha256:3078e47325f566d3e5bfcf102257767012705b45a0e4aa5c9a51f84112b5c0ae",
+            "schema_hash": "sha256:3945946dc0e74740377dcdf4b0938d93d1b9107877fe7de286e4a16230c6fa24",
             "selector": "IntegrationSpecV1"
           },
           {
             "owned_by_authoring_contract": true,
             "provenance": "runtime_schema_registry",
-            "schema_hash": "sha256:0b510334a224fb0072510c35f52a3086d8dc10f43cac2965f6b5b907c1ce634b",
+            "schema_hash": "sha256:a98096a13fde2802f8a632c321509ce2e00b528d71ab197f210c484ed2257464",
             "schema_version": "1",
             "selector": "ProcessIRV1"
           },
@@ -7753,7 +7755,7 @@
           {
             "owned_by_authoring_contract": false,
             "provenance": "runtime_schema_registry",
-            "schema_hash": "sha256:366bf1d41842b2d89b4b6a592ce99538e5981d94ed4d10b9cc1bcfe37fdb6e2d",
+            "schema_hash": "sha256:861fe3348f4fdee84a0804bdfba9695f89ca4fa65ad58431fec95adcb6c10b04",
             "selector": "recipe_contributions"
           },
           {
@@ -13842,14 +13844,14 @@
     },
     {
       "artifact_id": "SS-SCHEMA-TEMPLATES:schema_name=AuthoringCompileResultV1",
-      "canonical_length": 80777,
+      "canonical_length": 81483,
       "legacy_excerpt": {
         "json_schema.$defs.IntegrationComponentSpec.properties.config.description": "Type-specific configuration payload. For type='process', config.process_kind selects a structured process-flow builder (e.g. 'database_to_api_sync' or 'wrapper_subprocess' — issue #25) and is REQUIRED for any authoring action that emits or rebuilds process XML (create / create_clone / update): such a process without process_kind is rejected at plan time with PROCESS_KIND_REQUIRED (legacy freeform JSON-to-XML process authoring has been removed). A reference-only reuse of an existing process (no XML emitted) may omit it. Use manage_component for an explicit raw process XML escape hatch.",
         "json_schema.$defs.IntegrationSpecV1.properties.processes.description": "Issue #153 M12.15 — canonical process roots authored as ProcessIR. Each entry is one ProcessAuthoringUnitV1: exactly one ProcessComponentEnvelopeV1 plus exactly one ProcessIRV1 root. These are compiled by the canonical chain and materialized by the neutral ProcessComponentMaterializer — they resolve NO legacy process_kind. 'components' remains the home of supporting components and of reference-only existing processes. 'components' and 'processes' share ONE key namespace: a key used by a component and by a process envelope is a duplicate, and all four depends_on directions (component->component, component->process, process->component, process->process) enter one topological order with one cycle check. A TUPLE, per the plan's field type: pydantic coerces list input, so the wire shape is an ordinary JSON array and no caller sends anything different — but unlike this model's legacy List siblings, mutating the collection itself is unrepresentable. Per-element immutability lives on the frozen ProcessAuthoringUnitV1 entries."
       },
       "producer": "meta_tools.get_schema_template_action(...)",
       "selector": "schema_name=AuthoringCompileResultV1",
-      "sha256": "25f68165bf0a8468b645e026e681ce54d735ca20a4026a44e973fd93b99c53ef",
+      "sha256": "16adde2e2e6c0d9a6c8db47f652ec5d51c15a3b045fb3e79940be53722bb2c84",
       "surface_class": "SS-SCHEMA-TEMPLATES",
       "value": {
         "_success": true,
@@ -15948,7 +15950,7 @@
             },
             "RetryPolicyV1": {
               "additionalProperties": false,
-              "description": "Bounded retry intent for a protected region.\n\n``count`` is the whole policy. The platform owns everything else: the wait\nbefore each attempt is fixed and not authorable, and retries are skipped\nentirely in test runs. Authoring a delay, a backoff curve, or a per-attempt\npolicy is therefore not a feature this version withholds — there is no field\non the wire to carry it.",
+              "description": "Bounded retry intent for a protected region.\n\n``count`` is the whole retry SCHEDULE. The platform owns everything else: the\nwait before each attempt is fixed and not authorable, and retries are skipped\nentirely in test runs. Authoring a delay, a backoff curve, or a per-attempt\npolicy is therefore not a feature this version withholds — there is no field\non the wire to carry it.\n\n``source_replay_policy`` is not part of the schedule. It records what the\ncaller accepts when the retried region contains the producer of its own\ndocuments, and it is the ONLY thing that lifts the source-isolation refusal.\nLegality is decided BY VALUE, never by whether the field was written: a\ndefaulted ``forbid`` survives a dump and reparse, so a presence rule would\nreject the document's own round trip.",
               "properties": {
                 "count": {
                   "description": "Retry attempts for a failed document (0-5); 0 means no retry",
@@ -15956,6 +15958,16 @@
                   "minimum": 0,
                   "title": "Count",
                   "type": "integer"
+                },
+                "source_replay_policy": {
+                  "default": "forbid",
+                  "description": "Whether replaying the region's own document producer is accepted; 'allow_duplicates' is legal only on a process-scope region that retries",
+                  "enum": [
+                    "forbid",
+                    "allow_duplicates"
+                  ],
+                  "title": "Source Replay Policy",
+                  "type": "string"
                 }
               },
               "required": [
@@ -17108,12 +17120,12 @@
         "raw_xml_exposed": false,
         "read_only": true,
         "revision_binding": {
-          "capability_revision": "sha256:9cbab401e73cf894cca0f24cd10c0c21e5a1af6cfade87de086a9d6b5e0e18d0",
-          "compiler_revision": "sha256:bca0dafa81d57a39d4202e04545aad1908a53bf73356b4d1d36ef2960c401311",
+          "capability_revision": "sha256:89121641309f344cb3cc6ef99489154d3af284fc76d5040a015461cb7f4de55c",
+          "compiler_revision": "sha256:5e8b504b503a99d357018c695c60f099634e008ed926d81f4749d695718fadee",
           "contract_version": "2",
-          "schema_revision": "sha256:26f634387cd839bb91987f1f852f7040c185afe4adf3327e123d04fe0c9ab6a9"
+          "schema_revision": "sha256:fc9a5af6edddd78f89a0044037acc692455ac08c2a0e88a986dab7c4b441e80c"
         },
-        "schema_hash": "sha256:923cbfa061e2dab6a94bb97ad278296804c1bdc7358f452e4c35f8b3d617aa9c",
+        "schema_hash": "sha256:650ebb878f2a70154015886a73e61751e0780cb3a7df1f8ba20377e26d49f26f",
         "schema_name": "AuthoringCompileResultV1",
         "schema_version": "2",
         "surface": "MCP authoring contract (issue #146 M12.11)"
@@ -17122,14 +17134,14 @@
     },
     {
       "artifact_id": "SS-SCHEMA-TEMPLATES:schema_name=AuthoringPlanResultV1",
-      "canonical_length": 79451,
+      "canonical_length": 80157,
       "legacy_excerpt": {
         "json_schema.$defs.IntegrationComponentSpec.properties.config.description": "Type-specific configuration payload. For type='process', config.process_kind selects a structured process-flow builder (e.g. 'database_to_api_sync' or 'wrapper_subprocess' — issue #25) and is REQUIRED for any authoring action that emits or rebuilds process XML (create / create_clone / update): such a process without process_kind is rejected at plan time with PROCESS_KIND_REQUIRED (legacy freeform JSON-to-XML process authoring has been removed). A reference-only reuse of an existing process (no XML emitted) may omit it. Use manage_component for an explicit raw process XML escape hatch.",
         "json_schema.$defs.IntegrationSpecV1.properties.processes.description": "Issue #153 M12.15 — canonical process roots authored as ProcessIR. Each entry is one ProcessAuthoringUnitV1: exactly one ProcessComponentEnvelopeV1 plus exactly one ProcessIRV1 root. These are compiled by the canonical chain and materialized by the neutral ProcessComponentMaterializer — they resolve NO legacy process_kind. 'components' remains the home of supporting components and of reference-only existing processes. 'components' and 'processes' share ONE key namespace: a key used by a component and by a process envelope is a duplicate, and all four depends_on directions (component->component, component->process, process->component, process->process) enter one topological order with one cycle check. A TUPLE, per the plan's field type: pydantic coerces list input, so the wire shape is an ordinary JSON array and no caller sends anything different — but unlike this model's legacy List siblings, mutating the collection itself is unrepresentable. Per-element immutability lives on the frozen ProcessAuthoringUnitV1 entries."
       },
       "producer": "meta_tools.get_schema_template_action(...)",
       "selector": "schema_name=AuthoringPlanResultV1",
-      "sha256": "d1a33fce7b0e4b214cf6dbd6cfae0f0de2d61a23ac98ab8f95439d3cc5eaabc6",
+      "sha256": "a1bf66840e235d95f3414bdf4712130a1862c8d4eb81c65267504b453257552e",
       "surface_class": "SS-SCHEMA-TEMPLATES",
       "value": {
         "_success": true,
@@ -19179,7 +19191,7 @@
             },
             "RetryPolicyV1": {
               "additionalProperties": false,
-              "description": "Bounded retry intent for a protected region.\n\n``count`` is the whole policy. The platform owns everything else: the wait\nbefore each attempt is fixed and not authorable, and retries are skipped\nentirely in test runs. Authoring a delay, a backoff curve, or a per-attempt\npolicy is therefore not a feature this version withholds — there is no field\non the wire to carry it.",
+              "description": "Bounded retry intent for a protected region.\n\n``count`` is the whole retry SCHEDULE. The platform owns everything else: the\nwait before each attempt is fixed and not authorable, and retries are skipped\nentirely in test runs. Authoring a delay, a backoff curve, or a per-attempt\npolicy is therefore not a feature this version withholds — there is no field\non the wire to carry it.\n\n``source_replay_policy`` is not part of the schedule. It records what the\ncaller accepts when the retried region contains the producer of its own\ndocuments, and it is the ONLY thing that lifts the source-isolation refusal.\nLegality is decided BY VALUE, never by whether the field was written: a\ndefaulted ``forbid`` survives a dump and reparse, so a presence rule would\nreject the document's own round trip.",
               "properties": {
                 "count": {
                   "description": "Retry attempts for a failed document (0-5); 0 means no retry",
@@ -19187,6 +19199,16 @@
                   "minimum": 0,
                   "title": "Count",
                   "type": "integer"
+                },
+                "source_replay_policy": {
+                  "default": "forbid",
+                  "description": "Whether replaying the region's own document producer is accepted; 'allow_duplicates' is legal only on a process-scope region that retries",
+                  "enum": [
+                    "forbid",
+                    "allow_duplicates"
+                  ],
+                  "title": "Source Replay Policy",
+                  "type": "string"
                 }
               },
               "required": [
@@ -20318,12 +20340,12 @@
         "raw_xml_exposed": false,
         "read_only": true,
         "revision_binding": {
-          "capability_revision": "sha256:9cbab401e73cf894cca0f24cd10c0c21e5a1af6cfade87de086a9d6b5e0e18d0",
-          "compiler_revision": "sha256:bca0dafa81d57a39d4202e04545aad1908a53bf73356b4d1d36ef2960c401311",
+          "capability_revision": "sha256:89121641309f344cb3cc6ef99489154d3af284fc76d5040a015461cb7f4de55c",
+          "compiler_revision": "sha256:5e8b504b503a99d357018c695c60f099634e008ed926d81f4749d695718fadee",
           "contract_version": "2",
-          "schema_revision": "sha256:26f634387cd839bb91987f1f852f7040c185afe4adf3327e123d04fe0c9ab6a9"
+          "schema_revision": "sha256:fc9a5af6edddd78f89a0044037acc692455ac08c2a0e88a986dab7c4b441e80c"
         },
-        "schema_hash": "sha256:c2327a39a2a553d094a595a1737f1ed3e36cfea14dbced08f6667b7070dd9af2",
+        "schema_hash": "sha256:4779e993aede1b4aa8d7b2ef6e6dabb4dd6890bab8fb39e3384aa7dd1ef00971",
         "schema_name": "AuthoringPlanResultV1",
         "schema_version": "2",
         "surface": "MCP authoring contract (issue #146 M12.11)"
@@ -20332,7 +20354,7 @@
     },
     {
       "artifact_id": "SS-SCHEMA-TEMPLATES:schema_name=AuthoringRequestV1",
-      "canonical_length": 97243,
+      "canonical_length": 97949,
       "legacy_excerpt": {
         "json_schema.$defs.IntegrationComponentSpec.properties.config.description": "Type-specific configuration payload. For type='process', config.process_kind selects a structured process-flow builder (e.g. 'database_to_api_sync' or 'wrapper_subprocess' — issue #25) and is REQUIRED for any authoring action that emits or rebuilds process XML (create / create_clone / update): such a process without process_kind is rejected at plan time with PROCESS_KIND_REQUIRED (legacy freeform JSON-to-XML process authoring has been removed). A reference-only reuse of an existing process (no XML emitted) may omit it. Use manage_component for an explicit raw process XML escape hatch.",
         "json_schema.$defs.IntegrationSpecV1.properties.processes.description": "Issue #153 M12.15 — canonical process roots authored as ProcessIR. Each entry is one ProcessAuthoringUnitV1: exactly one ProcessComponentEnvelopeV1 plus exactly one ProcessIRV1 root. These are compiled by the canonical chain and materialized by the neutral ProcessComponentMaterializer — they resolve NO legacy process_kind. 'components' remains the home of supporting components and of reference-only existing processes. 'components' and 'processes' share ONE key namespace: a key used by a component and by a process envelope is a duplicate, and all four depends_on directions (component->component, component->process, process->component, process->process) enter one topological order with one cycle check. A TUPLE, per the plan's field type: pydantic coerces list input, so the wire shape is an ordinary JSON array and no caller sends anything different — but unlike this model's legacy List siblings, mutating the collection itself is unrepresentable. Per-element immutability lives on the frozen ProcessAuthoringUnitV1 entries.",
@@ -20340,7 +20362,7 @@
       },
       "producer": "meta_tools.get_schema_template_action(...)",
       "selector": "schema_name=AuthoringRequestV1",
-      "sha256": "d7fa9daa05c1138fe41e32b203d15908973efce3805661ea5cf434fdf9da1752",
+      "sha256": "c8af56ae5cf93a61a62f731878215e6c86b0306df20314db3807630d1193f2e5",
       "surface_class": "SS-SCHEMA-TEMPLATES",
       "value": {
         "_success": true,
@@ -22844,7 +22866,7 @@
             },
             "RetryPolicyV1": {
               "additionalProperties": false,
-              "description": "Bounded retry intent for a protected region.\n\n``count`` is the whole policy. The platform owns everything else: the wait\nbefore each attempt is fixed and not authorable, and retries are skipped\nentirely in test runs. Authoring a delay, a backoff curve, or a per-attempt\npolicy is therefore not a feature this version withholds — there is no field\non the wire to carry it.",
+              "description": "Bounded retry intent for a protected region.\n\n``count`` is the whole retry SCHEDULE. The platform owns everything else: the\nwait before each attempt is fixed and not authorable, and retries are skipped\nentirely in test runs. Authoring a delay, a backoff curve, or a per-attempt\npolicy is therefore not a feature this version withholds — there is no field\non the wire to carry it.\n\n``source_replay_policy`` is not part of the schedule. It records what the\ncaller accepts when the retried region contains the producer of its own\ndocuments, and it is the ONLY thing that lifts the source-isolation refusal.\nLegality is decided BY VALUE, never by whether the field was written: a\ndefaulted ``forbid`` survives a dump and reparse, so a presence rule would\nreject the document's own round trip.",
               "properties": {
                 "count": {
                   "description": "Retry attempts for a failed document (0-5); 0 means no retry",
@@ -22852,6 +22874,16 @@
                   "minimum": 0,
                   "title": "Count",
                   "type": "integer"
+                },
+                "source_replay_policy": {
+                  "default": "forbid",
+                  "description": "Whether replaying the region's own document producer is accepted; 'allow_duplicates' is legal only on a process-scope region that retries",
+                  "enum": [
+                    "forbid",
+                    "allow_duplicates"
+                  ],
+                  "title": "Source Replay Policy",
+                  "type": "string"
                 }
               },
               "required": [
@@ -24100,12 +24132,12 @@
         "raw_xml_exposed": false,
         "read_only": true,
         "revision_binding": {
-          "capability_revision": "sha256:9cbab401e73cf894cca0f24cd10c0c21e5a1af6cfade87de086a9d6b5e0e18d0",
-          "compiler_revision": "sha256:bca0dafa81d57a39d4202e04545aad1908a53bf73356b4d1d36ef2960c401311",
+          "capability_revision": "sha256:89121641309f344cb3cc6ef99489154d3af284fc76d5040a015461cb7f4de55c",
+          "compiler_revision": "sha256:5e8b504b503a99d357018c695c60f099634e008ed926d81f4749d695718fadee",
           "contract_version": "2",
-          "schema_revision": "sha256:26f634387cd839bb91987f1f852f7040c185afe4adf3327e123d04fe0c9ab6a9"
+          "schema_revision": "sha256:fc9a5af6edddd78f89a0044037acc692455ac08c2a0e88a986dab7c4b441e80c"
         },
-        "schema_hash": "sha256:f9b6556913c61d71292df7067d9959cc4b3974535a5d851746b3efa61f686334",
+        "schema_hash": "sha256:9b0234179f2c656c1ae024450f7dd176cbd1f6d29b0695ab24058f57672a9d6e",
         "schema_name": "AuthoringRequestV1",
         "schema_version": "2",
         "surface": "MCP authoring contract (issue #146 M12.11)"
@@ -24114,14 +24146,14 @@
     },
     {
       "artifact_id": "SS-SCHEMA-TEMPLATES:schema_name=IntegrationSpecV1",
-      "canonical_length": 68889,
+      "canonical_length": 69595,
       "legacy_excerpt": {
         "json_schema.$defs.IntegrationComponentSpec.properties.config.description": "Type-specific configuration payload. For type='process', config.process_kind selects a structured process-flow builder (e.g. 'database_to_api_sync' or 'wrapper_subprocess' — issue #25) and is REQUIRED for any authoring action that emits or rebuilds process XML (create / create_clone / update): such a process without process_kind is rejected at plan time with PROCESS_KIND_REQUIRED (legacy freeform JSON-to-XML process authoring has been removed). A reference-only reuse of an existing process (no XML emitted) may omit it. Use manage_component for an explicit raw process XML escape hatch.",
         "json_schema.properties.processes.description": "Issue #153 M12.15 — canonical process roots authored as ProcessIR. Each entry is one ProcessAuthoringUnitV1: exactly one ProcessComponentEnvelopeV1 plus exactly one ProcessIRV1 root. These are compiled by the canonical chain and materialized by the neutral ProcessComponentMaterializer — they resolve NO legacy process_kind. 'components' remains the home of supporting components and of reference-only existing processes. 'components' and 'processes' share ONE key namespace: a key used by a component and by a process envelope is a duplicate, and all four depends_on directions (component->component, component->process, process->component, process->process) enter one topological order with one cycle check. A TUPLE, per the plan's field type: pydantic coerces list input, so the wire shape is an ordinary JSON array and no caller sends anything different — but unlike this model's legacy List siblings, mutating the collection itself is unrepresentable. Per-element immutability lives on the frozen ProcessAuthoringUnitV1 entries."
       },
       "producer": "meta_tools.get_schema_template_action(...)",
       "selector": "schema_name=IntegrationSpecV1",
-      "sha256": "41bb52dee4d0d8947a7ea6a98eff0545dfd2b2a2377af701088fbe3a1d9096b1",
+      "sha256": "986eca9167c21589b15b1cfc1b6c8fa184aebade91b37d190c01dfa500c53280",
       "surface_class": "SS-SCHEMA-TEMPLATES",
       "value": {
         "_success": true,
@@ -25671,7 +25703,7 @@
             },
             "RetryPolicyV1": {
               "additionalProperties": false,
-              "description": "Bounded retry intent for a protected region.\n\n``count`` is the whole policy. The platform owns everything else: the wait\nbefore each attempt is fixed and not authorable, and retries are skipped\nentirely in test runs. Authoring a delay, a backoff curve, or a per-attempt\npolicy is therefore not a feature this version withholds — there is no field\non the wire to carry it.",
+              "description": "Bounded retry intent for a protected region.\n\n``count`` is the whole retry SCHEDULE. The platform owns everything else: the\nwait before each attempt is fixed and not authorable, and retries are skipped\nentirely in test runs. Authoring a delay, a backoff curve, or a per-attempt\npolicy is therefore not a feature this version withholds — there is no field\non the wire to carry it.\n\n``source_replay_policy`` is not part of the schedule. It records what the\ncaller accepts when the retried region contains the producer of its own\ndocuments, and it is the ONLY thing that lifts the source-isolation refusal.\nLegality is decided BY VALUE, never by whether the field was written: a\ndefaulted ``forbid`` survives a dump and reparse, so a presence rule would\nreject the document's own round trip.",
               "properties": {
                 "count": {
                   "description": "Retry attempts for a failed document (0-5); 0 means no retry",
@@ -25679,6 +25711,16 @@
                   "minimum": 0,
                   "title": "Count",
                   "type": "integer"
+                },
+                "source_replay_policy": {
+                  "default": "forbid",
+                  "description": "Whether replaying the region's own document producer is accepted; 'allow_duplicates' is legal only on a process-scope region that retries",
+                  "enum": [
+                    "forbid",
+                    "allow_duplicates"
+                  ],
+                  "title": "Source Replay Policy",
+                  "type": "string"
                 }
               },
               "required": [
@@ -34037,13 +34079,13 @@
     },
     {
       "artifact_id": "SS-SCHEMA-TEMPLATES:schema_name=recipe_contributions",
-      "canonical_length": 84756,
+      "canonical_length": 85462,
       "legacy_excerpt": {
         "authoring_note": "These are the ONLY values a registered recipe may return. They carry opaque references and closed enumerations — never configuration, credentials, headers, SQL, raw XML, executable code, JSON pointers, or caller-authored graph edges. Recipe output is validated exactly as direct ProcessIR/topology/component authoring and cannot be exempted."
       },
       "producer": "meta_tools.get_schema_template_action(...)",
       "selector": "schema_name=recipe_contributions",
-      "sha256": "5262382bb09afd8c124ed5dc01aae9ee06e1df6a25a8a04ab43ca386d1d7a63a",
+      "sha256": "e6621378f1d94f637dffaa78003499670055a97fcf4c766236abc0ce2c3498a2",
       "surface_class": "SS-SCHEMA-TEMPLATES",
       "value": {
         "_success": true,
@@ -36404,7 +36446,7 @@
             },
             "RetryPolicyV1": {
               "additionalProperties": false,
-              "description": "Bounded retry intent for a protected region.\n\n``count`` is the whole policy. The platform owns everything else: the wait\nbefore each attempt is fixed and not authorable, and retries are skipped\nentirely in test runs. Authoring a delay, a backoff curve, or a per-attempt\npolicy is therefore not a feature this version withholds — there is no field\non the wire to carry it.",
+              "description": "Bounded retry intent for a protected region.\n\n``count`` is the whole retry SCHEDULE. The platform owns everything else: the\nwait before each attempt is fixed and not authorable, and retries are skipped\nentirely in test runs. Authoring a delay, a backoff curve, or a per-attempt\npolicy is therefore not a feature this version withholds — there is no field\non the wire to carry it.\n\n``source_replay_policy`` is not part of the schedule. It records what the\ncaller accepts when the retried region contains the producer of its own\ndocuments, and it is the ONLY thing that lifts the source-isolation refusal.\nLegality is decided BY VALUE, never by whether the field was written: a\ndefaulted ``forbid`` survives a dump and reparse, so a presence rule would\nreject the document's own round trip.",
               "properties": {
                 "count": {
                   "description": "Retry attempts for a failed document (0-5); 0 means no retry",
@@ -36412,6 +36454,16 @@
                   "minimum": 0,
                   "title": "Count",
                   "type": "integer"
+                },
+                "source_replay_policy": {
+                  "default": "forbid",
+                  "description": "Whether replaying the region's own document producer is accepted; 'allow_duplicates' is legal only on a process-scope region that retries",
+                  "enum": [
+                    "forbid",
+                    "allow_duplicates"
+                  ],
+                  "title": "Source Replay Policy",
+                  "type": "string"
                 }
               },
               "required": [
@@ -37686,7 +37738,7 @@
       "legacy_excerpt": {},
       "producer": "meta_tools.get_schema_template_action(...) [all axes]",
       "selector": "walked_surface_digest",
-      "sha256": "6bd3ec1effd3a4b21876f0724c87cab6b3c0972437333c62c61cc7a66e2060ac",
+      "sha256": "2ddfb80cd889a5cbf02bc01b4ffa86fd5aef04da09c324c7904e09c8cfb33c5f",
       "surface_class": "SS-SCHEMA-TEMPLATES",
       "value": {
         "resource_type=component": "8327243ec482fa1641f49265c87694e33616f12db015b3f234dc73db9ed8057c",
@@ -37968,14 +38020,14 @@
         "resource_type=trading_partner|operation=update|standard=rosettanet": "83537ac74be6088a4607997d0e200d76ec7c6367c900aa9923e823d610dd27e1",
         "resource_type=trading_partner|operation=update|standard=tradacoms": "83537ac74be6088a4607997d0e200d76ec7c6367c900aa9923e823d610dd27e1",
         "resource_type=trading_partner|operation=update|standard=x12": "83537ac74be6088a4607997d0e200d76ec7c6367c900aa9923e823d610dd27e1",
-        "schema_name=AuthoringBuildProvenanceV1": "624a0da35fe37bc1fcce7552bf79311dc8f1e322a6c25b85f83b98dc3a186af1",
-        "schema_name=AuthoringCompileResultV1": "25f68165bf0a8468b645e026e681ce54d735ca20a4026a44e973fd93b99c53ef",
-        "schema_name=AuthoringPlanResultV1": "d1a33fce7b0e4b214cf6dbd6cfae0f0de2d61a23ac98ab8f95439d3cc5eaabc6",
-        "schema_name=AuthoringRequestV1": "d7fa9daa05c1138fe41e32b203d15908973efce3805661ea5cf434fdf9da1752",
-        "schema_name=AuthoringRevisionBindingV1": "d3818bb996dc4105ebbf81130b82ff1bcc0267c63caa20ec5ab38c25710a5cde",
-        "schema_name=IntegrationSpecV1": "41bb52dee4d0d8947a7ea6a98eff0545dfd2b2a2377af701088fbe3a1d9096b1",
-        "schema_name=ProcessIRV1": "2a649fbd2b209c0ded7089b349089ceb98ff6508f88cc717f287fdec89005565",
-        "schema_name=SystemTopologySpecV1": "d0ca4fc6cf75d9bd9530b6c1adfae75a2900e7e6f284cb069df266f901494604",
+        "schema_name=AuthoringBuildProvenanceV1": "ce79c5e18eba57927b8544f7b1b85af1f480917f3757e1b3ac96b136463d3fff",
+        "schema_name=AuthoringCompileResultV1": "16adde2e2e6c0d9a6c8db47f652ec5d51c15a3b045fb3e79940be53722bb2c84",
+        "schema_name=AuthoringPlanResultV1": "a1bf66840e235d95f3414bdf4712130a1862c8d4eb81c65267504b453257552e",
+        "schema_name=AuthoringRequestV1": "c8af56ae5cf93a61a62f731878215e6c86b0306df20314db3807630d1193f2e5",
+        "schema_name=AuthoringRevisionBindingV1": "7b116494df6ad941a155041cca86727876765ef05891e79ee08819d6f68ea04b",
+        "schema_name=IntegrationSpecV1": "986eca9167c21589b15b1cfc1b6c8fa184aebade91b37d190c01dfa500c53280",
+        "schema_name=ProcessIRV1": "164b93f8e303d088197e1e4b8c18eaee04e54b13f05b090f240fee4cbfe937e5",
+        "schema_name=SystemTopologySpecV1": "cb08e6069abde22df54bd629f087efd018645d561f326c7141df80ac7fd6bc98",
         "schema_name=account_governance": "d0773b315a5b59bad4bbb0021a2468e5cb4d3a85c4dbac216a887f0194a2ecdc",
         "schema_name=api_service": "c7be12ec5b2c503bd54088bd2c7b00adfa435e3f3fc9610bae0b91117657911b",
         "schema_name=archetype:api_to_api_sync": "7e4653429bdfc56d53ecb1c07fb7f477e11c2180c3afdfad94566cab1ca716e7",
@@ -37984,7 +38036,7 @@
         "schema_name=archetype:http_listener_to_db": "b21d41d870324ce66e872957fa09126dc641354753a0d7681d14d3489f7dcf3f",
         "schema_name=archetype:http_listener_to_rest": "cdd6c9c6fb51cd8afda5c7245a2ef37548939610c1c5235cd9abe1ed9deac3d9",
         "schema_name=archetype:stub_minimal_integration": "28f1d13a8568cea1df47bb1b361708d17e490204c7425787999e80df63f4b0fc",
-        "schema_name=authoring_workflow": "d4cebbce2b37a84778c2e3e90790142c905c9fae6880011579ade972598b437e",
+        "schema_name=authoring_workflow": "e85af008c51802c88a361de3ddbd36e86f1832c61e2bd15ca80c6c6fd22f2f86",
         "schema_name=cache_property_authoring": "484017df545d247be99c71ef4be4edf8d47013e565a6e05119c357699229ed6f",
         "schema_name=compose_archetypes": "ec23808a15913ec8ce1d6e510ff941952be25b006a42128216b891d05f1a9d7f",
         "schema_name=design_doctrine": "b47bc0062bf52054609a4b81b8ea98dd5b363c716b079ed0413c1f89bee08a7b",
@@ -38047,7 +38099,7 @@
         "schema_name=governance_pattern:support_folder_isolation_and_privacy": "4f0b206e14ad2f2272b03dfc8c9575dbcc3d454d28894a42602a9cca546de2ed",
         "schema_name=governance_pattern:tools_utilities_folder_non_integration": "50ddcf761e63e68f305271b4f079d8a7effd9b750726a8be784c2c52993c2cbc",
         "schema_name=governance_pattern:tracked_field_naming_generic_and_unique": "42ae3917d1ddb0f23a9dd0e9083a9106a3ed6c18bc06e740a1c07014830204d1",
-        "schema_name=process_ir_authoring": "497c14d94c8be16750de3292112235133d64de7c9a0288e7e3c0163451eb65f6",
+        "schema_name=process_ir_authoring": "3fcbcff4d7354bd145d4cff2573e7729684dd6fed69d6a0df02f54e2f61bfc5d",
         "schema_name=process_property": "43c9cf66e73fb39b6f1625d00a9a01f876005bfa94b34fb99cb14e0deebe699b",
         "schema_name=recipe:boomi.adapter.api_to_api_sync@1.0.0": "280f2452c95aaa3ddff0800bf0fc2c64cd3f7327e2e366123a86d4424b38a52b",
         "schema_name=recipe:boomi.adapter.api_to_database_sync@1.0.0": "0b675ce4f9a86711dec17430be3eecdd90752d6e28e745d667226ef316210b5b",
@@ -38057,11 +38109,11 @@
         "schema_name=recipe:boomi.archetype.api_to_database_sync@0.1.0": "1863e1e40f10cac2308b9f0ec300c3f883bf4bb6a791bee250ee577509e04a79",
         "schema_name=recipe:boomi.compose.db_rest_fanout@1.0.0": "fe61a055c6a5eb6ec289c660cd1867f460737c7f38b9605904a9368dcf1c4b4d",
         "schema_name=recipe:boomi.constraint.inbound_validate@1.0.0": "dedadcf78923b95109eef4373b17f55646fc7a54867e9c789825da5c22ae2670",
-        "schema_name=recipe_contributions": "5262382bb09afd8c124ed5dc01aae9ee06e1df6a25a8a04ab43ca386d1d7a63a",
-        "schema_name=recipe_registry": "3e1e03c192929450209f576ccbb9e411e535dd6539583ab89150b4b25c0b3096",
+        "schema_name=recipe_contributions": "e6621378f1d94f637dffaa78003499670055a97fcf4c766236abc0ce2c3498a2",
+        "schema_name=recipe_registry": "220788b6ccbb92a52479683a855f16a34345f577b6ccf05cf3399874eec95758",
         "schema_name=script_dataprocess": "86d6cac0e593188c5c6a253e684097dadda0a6c3c331a1d71672c827133af143",
         "schema_name=script_mapping": "165e78ea08d24f54221f6da5973cbe20c7747d1a37f9fde496a42876b594e029",
-        "schema_name=validation_report": "1caf4c2918f51d7c2c8b5b81ff3a52798235033b223f497209368d707dadb59c",
+        "schema_name=validation_report": "e60c0308e1aefe9551051e350544b1c52ed9ebaab2e0e1aca0679bf721201f3f",
         "schema_name=workflow:build_and_verify_http_listener": "bf6ab2e405f375735cd6aaed29da0dbc6b717909dc1c184ba8dbe341f2b95800",
         "schema_name=workflow:build_integration_from_description": "72a20b29bbaf7a0ce39e06fb8514e13831968332bc5d0373d7f100bd7a943be0",
         "schema_name=workflow:compose_multi_target_integration": "6b04f2d192bcaf817a983a1aefda2f2f7b9674ce1c996737137c7ce8d6b932e0",

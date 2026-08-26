@@ -1815,14 +1815,31 @@ TryCatchBodyStepV1 = ControlBodyStepV1
 TRY_CATCH_BODY_KINDS: Tuple[str, ...] = _kinds_of(TryCatchBodyStepV1)
 
 
+#: What a caller accepts when a retried region replays its own document producer.
+#:
+#: ``forbid`` is the default and the safe reading: replaying a region that
+#: contains the producer re-runs the producer, so every document it already
+#: emitted is emitted again. ``allow_duplicates`` is an ACKNOWLEDGEMENT, not an
+#: optimisation — it says the caller knows duplicates result and accepts them.
+#: It never relaxes the write-safety rules, which are checked independently.
+SourceReplayPolicyV1 = Literal["forbid", "allow_duplicates"]
+
+
 class RetryPolicyV1(_ProcessIRBase):
     """Bounded retry intent for a protected region.
 
-    ``count`` is the whole policy. The platform owns everything else: the wait
-    before each attempt is fixed and not authorable, and retries are skipped
+    ``count`` is the whole retry SCHEDULE. The platform owns everything else: the
+    wait before each attempt is fixed and not authorable, and retries are skipped
     entirely in test runs. Authoring a delay, a backoff curve, or a per-attempt
     policy is therefore not a feature this version withholds — there is no field
     on the wire to carry it.
+
+    ``source_replay_policy`` is not part of the schedule. It records what the
+    caller accepts when the retried region contains the producer of its own
+    documents, and it is the ONLY thing that lifts the source-isolation refusal.
+    Legality is decided BY VALUE, never by whether the field was written: a
+    defaulted ``forbid`` survives a dump and reparse, so a presence rule would
+    reject the document's own round trip.
     """
 
     count: StrictInt = Field(
@@ -1830,6 +1847,14 @@ class RetryPolicyV1(_ProcessIRBase):
         ge=0,
         le=5,
         description="Retry attempts for a failed document (0-5); 0 means no retry",
+    )
+    source_replay_policy: SourceReplayPolicyV1 = Field(
+        "forbid",
+        description=(
+            "Whether replaying the region's own document producer is accepted; "
+            "'allow_duplicates' is legal only on a process-scope region that "
+            "retries"
+        ),
     )
 
 
@@ -1946,6 +1971,16 @@ class TryCatchNodeV1(_ProcessIRBase):
         sees one value; the two forms compile to identical output.
         """
         return 0 if self.retry is None else self.retry.count
+
+    @property
+    def source_replay_policy(self) -> str:
+        """Absent retry is exactly the default policy — the same normalization.
+
+        Derived for the same reason ``retry_count`` is: the authored document
+        keeps the distinction between an absent retry and an explicit one, while
+        every consumer reads one value.
+        """
+        return "forbid" if self.retry is None else self.retry.source_replay_policy
 
     @model_validator(mode="after")
     def _try_catch_rules(self) -> "TryCatchNodeV1":
@@ -2415,6 +2450,12 @@ PROCESS_IR_V1_CAPABILITIES: Mapping[str, str] = MappingProxyType(
         # authoring contract. "replay safety" is the public term throughout.
         # Safe to rename: the manifest key had never been served.
         "verified_write_replay_safety": "gated",  # #142
+        # #155 M12.17. The per-document request path, and the explicit
+        # acknowledgement that a retried process-scope region may replay its own
+        # document producer. Both are SUPPORTED: authorable through this
+        # contract, with an executable admission witness each.
+        "dynamic_path": "supported",
+        "source_replay_policy": "supported",
         "listener_error_scope": "gated",  # #142
         "nested_try_catch": "gated",  # #142
         "keyed_cache": "gated",  # no live-captured wire shape (#119 census)

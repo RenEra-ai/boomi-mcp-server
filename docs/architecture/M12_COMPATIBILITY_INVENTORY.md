@@ -2788,3 +2788,16 @@ locations plus the new diagnostic code, zero entries removed, zero other fields 
 
 `scan_contract` again did NOT move (216 sources, 0 unscanned assets), and no section-11 table needed
 regeneration: unit 2 shifted no census evidence line.
+
+**Unit 3 rebaselined a third time, moving SEVEN again.** Adding the two capability-manifest keys
+(`dynamic_path`, `source_replay_policy`) and the replay-policy field to the retry model moved the
+same seven artifacts unit 1 did — the five recipe-layer ones plus `IntegrationSpecV1` and
+`recipe_contributions`, because the retry field is part of the embedded ProcessIR schema. The
+served contract gained exactly two entries (`capability.dynamic_path`,
+`capability.source_replay_policy`), removed none, and changed none. `scan_contract` again did not
+move, and again no section-11 table needed regeneration.
+
+Three rebaselines in one slice is expected here and is not churn: each unit changed a different
+served surface, and each was verified against its own before/after rather than accepted as "the
+inventory moved again". The FINAL committed state of every derived artifact in this slice is
+regenerated from the slice's final tree, which is what the freeze test then re-derives.

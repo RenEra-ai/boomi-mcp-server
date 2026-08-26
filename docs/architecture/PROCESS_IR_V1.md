@@ -389,6 +389,8 @@ Published as the immutable `PROCESS_IR_V1_CAPABILITIES` manifest (not an authore
 | `queue_topology` — creating queues / Event Streams objects | **unsupported** | #142 — out of scope; zero live queue components (capture §G5) |
 | `catch_failure_trigger_selection` — choosing document-errors vs all-errors | gated | #142 — semantics known, emitter fixed (capture §G2/§G3) |
 | `verified_write_replay_safety` — a stock write action classified replay-safe | gated | #142 — no authoritative classification (capture §G4) |
+| `dynamic_path` — binding a connector call's per-document request path to a dynamic document property | **supported** | #155 (shipped) — the family publishes which locations it binds; the writer composing the path is checked on every reaching path |
+| `source_replay_policy` — explicitly accepting that a retried process-scope region replays its own document producer | **supported** | #155 (shipped) — an acknowledgement, never a relaxation: the write-safety rules are checked independently and unchanged |
 | `listener_error_scope` | gated | #142 — the fused listener start rejects reliability composition |
 | `nested_try_catch` | gated | #142 — composition rewrites the outer error selection (capture §G6) |
 | `parallel_branch_execution` — Branch legs executing concurrently | **unsupported** | #146 — legs are ordered and sequential by construction; concurrency is different semantics, not more speed |
