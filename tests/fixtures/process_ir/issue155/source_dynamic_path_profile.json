@@ -1,0 +1,44 @@
+{
+ "body": {
+  "kind": "sequence",
+  "steps": [
+   {
+    "kind": "set_ddp",
+    "name": "DDP_PATH_CLIENTS",
+    "source_values": [
+     {
+      "value": "/admin/cdscm/api/v1/clients/",
+      "value_type": "static"
+     },
+     {
+      "element_id": "3",
+      "element_name": "clientId (Root/Object/clientId)",
+      "profile_ref": "$ref:PROF",
+      "profile_type": "profile.json",
+      "value_type": "profile"
+     }
+    ]
+   },
+   {
+    "kind": "connector_call",
+    "operation_ref": "$ref:ROP",
+    "path_binding": {
+     "property_name": "DDP_PATH_CLIENTS",
+     "request_profile_ref": "$ref:PROF"
+    }
+   },
+   {
+    "kind": "map_ref",
+    "map_ref": "$ref:MAP"
+   },
+   {
+    "kind": "connector_call",
+    "operation_ref": "$ref:OP"
+   },
+   {
+    "kind": "stop"
+   }
+  ]
+ },
+ "version": "1"
+}

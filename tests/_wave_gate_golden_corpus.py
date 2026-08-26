@@ -1197,6 +1197,64 @@ def _issue154_case(name):
     return render
 
 
+def issue155_symbols():
+    """Symbols for the #155 dynamic-path cases, with the LEGACY goldens' ids.
+
+    A separate table rather than an extension of ``error_symbols``: two of these
+    cases are byte-parity oracles against the #100 legacy goldens, whose emitted
+    XML carries those goldens' component ids verbatim (``DBCONN``, ``MAP-UUID``,
+    ``CONN-UUID``, ``OP-UUID``, ``PROFILE-UUID``). Widening the shared table to
+    carry them would change ids other cases already pin, and renaming theirs
+    would break the parity this whole set exists to prove.
+    """
+    from boomi_mcp.compiler.process_ir import connector_capabilities as CC
+    from boomi_mcp.compiler.process_ir.contracts import ComponentSymbolV1, SymbolTableV1
+
+    rest = CC.REST_FAMILY
+    return SymbolTableV1(
+        symbols=[
+            ComponentSymbolV1(ref="$ref:DBCONN", component_id="DBCONN",
+                              component_type="connector-settings", connector_type="database"),
+            ComponentSymbolV1(ref="$ref:DBOP", component_id="DBOP",
+                              component_type="connector-action", connector_type="database",
+                              action_type="Get", connection_ref="$ref:DBCONN",
+                              output_profile_ref="$ref:PROF"),
+            ComponentSymbolV1(ref="$ref:RCONN", component_id="RCONN",
+                              component_type="connector-settings", connector_type=rest),
+            ComponentSymbolV1(ref="$ref:ROP", component_id="ROP",
+                              component_type="connector-action", connector_type=rest,
+                              action_type="GET", connection_ref="$ref:RCONN",
+                              output_profile_ref="$ref:PROF"),
+            ComponentSymbolV1(ref="$ref:CONN", component_id="CONN-UUID",
+                              component_type="connector-settings", connector_type=rest),
+            ComponentSymbolV1(ref="$ref:OP", component_id="OP-UUID",
+                              component_type="connector-action", connector_type=rest,
+                              action_type="PATCH", connection_ref="$ref:CONN",
+                              input_profile_ref="$ref:PROF"),
+            ComponentSymbolV1(ref="$ref:MAP", component_id="MAP-UUID",
+                              component_type="transform.map",
+                              input_profile_ref="$ref:PROF", output_profile_ref="$ref:PROF"),
+            ComponentSymbolV1(ref="$ref:PROF", component_id="PROFILE-UUID",
+                              component_type="profile.json"),
+        ]
+    )
+
+
+def _issue155_case(name):
+    def render():
+        from boomi_mcp.compiler.process_ir.emitter_registry import emit_process
+
+        doc = json.loads(
+            (_HERE / "fixtures" / "process_ir" / "issue155" / (name + ".json"))
+            .read_text(encoding="utf-8")
+        )
+        symbols = issue155_symbols()
+        _cfg, plan = error_compile(doc, symbols)
+        return emit_process(plan, symbols).process_xml
+
+    return render
+
+
 def _issue180_effect_case(case):
     """#180: an effect-declaration golden, rendered through the PUBLIC chain.
 
@@ -1776,6 +1834,10 @@ def _build_registry():
         "issue154:source_target_return_documents": ("process-xml-v1", _issue154_case("source_target_return_documents")),
         "issue154:catch_cache_put_exception": ("process-xml-v1", _issue154_case("catch_cache_put_exception")),
         "issue154:connector_linear_interleave": ("process-xml-v1", _issue154_case("connector_linear_interleave")),
+        # H4 — #155 the canonical per-document request path, both connector roles
+        "issue155:source_dynamic_path_profile": ("process-xml-v1", _issue155_case("source_dynamic_path_profile")),
+        "issue155:target_dynamic_path_profile": ("process-xml-v1", _issue155_case("target_dynamic_path_profile")),
+        "issue155:target_dynamic_path_ddp": ("process-xml-v1", _issue155_case("target_dynamic_path_ddp")),
         # H3 — #180 the effect-declaration channel, through the PUBLIC chain
         "issue180:map_declared_effect": ("process-component-v1", _issue180_effect_case("map_declared_effect")),
         "issue180:subprocess_declared_effect": ("process-component-v1", _issue180_effect_case("subprocess_declared_effect")),

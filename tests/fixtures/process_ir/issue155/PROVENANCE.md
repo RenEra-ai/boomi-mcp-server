@@ -52,3 +52,36 @@ the legacy open tag carries option attributes `emit_process` never emits. Canoni
 `process-xml-v1` rows compare the `<shapes>…</shapes>` element; expected bytes are
 `"<process xmlns=\"\">" + legacy_shapes + "</process>"`. The transform is recorded with each
 canonical row when it lands.
+
+
+## The three canonical goldens (`issue155:*`)
+
+| Golden | Case | Parity oracle |
+| --- | --- | --- |
+| `golden-000072` | `issue155:source_dynamic_path_profile` | `<shapes>` byte-equal to `dynamic_path_source_role_profile.xml` (golden-000071) |
+| `golden-000073` | `issue155:target_dynamic_path_profile` | `<shapes>` byte-equal to `dynamic_path_target_profile.xml` (golden-000015) |
+| `golden-000074` | `issue155:target_dynamic_path_ddp` | none — canonical-only, see below |
+
+Renderer `process-xml-v1` (the bare `<process>` element from `emit_process`), symbols from
+`issue155_symbols()`. Provenance class: **legacy-oracle parity capture** for the first two — their
+expected bytes are the ones the untouched legacy chain produces, so the canonical chain is measured
+against the emitter it must replace, never against itself. Comparison scope is `<shapes>`: the
+legacy renderer wraps its output in a full component envelope carrying process option attributes
+`emit_process` never emits, so a whole-document freeze could not match by construction.
+
+### Why the third has no legacy oracle — a deliberate refusal, recorded
+
+The legacy fixture `dynamic_path_source_ddp.xml` (golden-000014) composes its path from a dynamic
+document property `client_id` that **nothing in that process writes**. The legacy chain does not
+check state lineage, so it emits the shape; at runtime the segment resolves empty and the request
+addresses `/v1/items//notes/<run_id>` — a wrong URL, silently. That is exactly the failure #155's
+DDP-established rule exists to prevent, so the canonical chain REFUSES that document with
+`PROCESS_IR_SEMANTIC_DYNAMIC_PATH_DDP_NOT_ESTABLISHED` (measured).
+
+`golden-000074` is therefore the SAFE equivalent: the same ddp/dpp path composition, with the
+document property established by an upstream writer. It pins canonical bytes only.
+
+**Consequence for #160**: the unsafe legacy shape has no canonical spelling and is not meant to have
+one. The cutover must not read golden-000014's absence from the canonical set as a coverage gap —
+the canonical chain is deliberately stricter here, which is the issue's stated intent
+("a segment referencing a DDP requires a set_ddp upstream on every path to the connector call").

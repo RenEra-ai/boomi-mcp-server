@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 10538, "minimum_collected": 10538, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 10541, "minimum_collected": 10541, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -10577,3 +10577,6 @@
 {"kind": "test", "id": "pytest-010576", "node_id": "tests/test_wave_gate_goldens.py::test_golden_manifest_row[golden-000069]", "state": "active"}
 {"kind": "test", "id": "pytest-010577", "node_id": "tests/test_wave_gate_goldens.py::test_golden_manifest_row[golden-000070]", "state": "active"}
 {"kind": "test", "id": "pytest-010578", "node_id": "tests/test_wave_gate_goldens.py::test_golden_manifest_row[golden-000071]", "state": "active"}
+{"kind": "test", "id": "pytest-010579", "node_id": "tests/test_wave_gate_goldens.py::test_golden_manifest_row[golden-000072]", "state": "active"}
+{"kind": "test", "id": "pytest-010580", "node_id": "tests/test_wave_gate_goldens.py::test_golden_manifest_row[golden-000073]", "state": "active"}
+{"kind": "test", "id": "pytest-010581", "node_id": "tests/test_wave_gate_goldens.py::test_golden_manifest_row[golden-000074]", "state": "active"}

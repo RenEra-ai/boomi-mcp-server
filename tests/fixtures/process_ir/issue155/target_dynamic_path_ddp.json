@@ -1,0 +1,62 @@
+{
+ "body": {
+  "kind": "sequence",
+  "steps": [
+   {
+    "connection_ref": "$ref:DBCONN",
+    "kind": "source",
+    "operation_ref": "$ref:DBOP"
+   },
+   {
+    "kind": "map_ref",
+    "map_ref": "$ref:MAP"
+   },
+   {
+    "kind": "set_ddp",
+    "name": "client_id",
+    "source_values": [
+     {
+      "value": "AC-0001",
+      "value_type": "static"
+     }
+    ]
+   },
+   {
+    "kind": "set_ddp",
+    "name": "DDP_PATH_ITEMS",
+    "source_values": [
+     {
+      "value": "/v1/items/",
+      "value_type": "static"
+     },
+     {
+      "default_value": "",
+      "property_name": "client_id",
+      "value_type": "ddp"
+     },
+     {
+      "value": "/notes/",
+      "value_type": "static"
+     },
+     {
+      "default_value": "",
+      "property_name": "run_id",
+      "value_type": "dpp"
+     }
+    ]
+   },
+   {
+    "connection_ref": "$ref:CONN",
+    "kind": "target",
+    "operation_ref": "$ref:OP",
+    "path_binding": {
+     "property_name": "DDP_PATH_ITEMS"
+    }
+   },
+   {
+    "kind": "stop"
+   }
+  ]
+ },
+ "version": "1"
+}
