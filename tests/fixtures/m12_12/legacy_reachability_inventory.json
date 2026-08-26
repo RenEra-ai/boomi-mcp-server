@@ -7292,7 +7292,7 @@
       },
       "producer": "meta_tools.list_capabilities_action()",
       "selector": "authoring_contract",
-      "sha256": "a3c96078e82e031e04814f332f340311a9ea1b1ddda0e393628733b3d8c21c75",
+      "sha256": "f2c4a7d9f31658462df1065bb226b20e3c7ccb7f9590048b7bf2eaab43db1078",
       "surface_class": "SS-CAPABILITY-CATALOG",
       "value": {
         "actions": [
@@ -7397,11 +7397,11 @@
           }
         ],
         "capability_comparison": {
-          "actual_capability_revision": "sha256:89121641309f344cb3cc6ef99489154d3af284fc76d5040a015461cb7f4de55c",
+          "actual_capability_revision": "sha256:c02919f9f820ead54a3f2152e641d96ac665ae893e29ea4f7361715b1f91fa27",
           "status": "not_requested"
         },
-        "capability_revision": "sha256:89121641309f344cb3cc6ef99489154d3af284fc76d5040a015461cb7f4de55c",
-        "compiler_revision": "sha256:5e8b504b503a99d357018c695c60f099634e008ed926d81f4749d695718fadee",
+        "capability_revision": "sha256:c02919f9f820ead54a3f2152e641d96ac665ae893e29ea4f7361715b1f91fa27",
+        "compiler_revision": "sha256:f6d7d270200bceff17c11320b1d86bac12de7659843038e78e6a4602937cb022",
         "contract_version": "2",
         "intent_kinds": [
           "integration_spec",
@@ -7640,7 +7640,7 @@
           "schema_version": "1",
           "source_version": "0.1.0"
         },
-        "schema_revision": "sha256:fc9a5af6edddd78f89a0044037acc692455ac08c2a0e88a986dab7c4b441e80c",
+        "schema_revision": "sha256:2c8b0705d220647903fd1f131b6e49793b78a73033f75206a3ad02ae21c9f9de",
         "schemas": [
           {
             "owned_by_authoring_contract": true,
@@ -7748,7 +7748,7 @@
           {
             "owned_by_authoring_contract": true,
             "provenance": "runtime_schema_registry",
-            "schema_hash": "sha256:dd101accb22210ef1e0a4721116f40648ffa4fc921693ab0d31d05c311bc0c36",
+            "schema_hash": "sha256:0ecc786dbb20ba114fd689fbd954d8d9c68e3802886c49263db36923b6dc9968",
             "schema_version": "1",
             "selector": "process_ir_authoring"
           },
@@ -13851,7 +13851,7 @@
       },
       "producer": "meta_tools.get_schema_template_action(...)",
       "selector": "schema_name=AuthoringCompileResultV1",
-      "sha256": "16adde2e2e6c0d9a6c8db47f652ec5d51c15a3b045fb3e79940be53722bb2c84",
+      "sha256": "3da6cc36627ae4b8d08af912d2d985b11eafb482bcfb507f68620b0dcbde3a94",
       "surface_class": "SS-SCHEMA-TEMPLATES",
       "value": {
         "_success": true,
@@ -17120,10 +17120,10 @@
         "raw_xml_exposed": false,
         "read_only": true,
         "revision_binding": {
-          "capability_revision": "sha256:89121641309f344cb3cc6ef99489154d3af284fc76d5040a015461cb7f4de55c",
-          "compiler_revision": "sha256:5e8b504b503a99d357018c695c60f099634e008ed926d81f4749d695718fadee",
+          "capability_revision": "sha256:c02919f9f820ead54a3f2152e641d96ac665ae893e29ea4f7361715b1f91fa27",
+          "compiler_revision": "sha256:f6d7d270200bceff17c11320b1d86bac12de7659843038e78e6a4602937cb022",
           "contract_version": "2",
-          "schema_revision": "sha256:fc9a5af6edddd78f89a0044037acc692455ac08c2a0e88a986dab7c4b441e80c"
+          "schema_revision": "sha256:2c8b0705d220647903fd1f131b6e49793b78a73033f75206a3ad02ae21c9f9de"
         },
         "schema_hash": "sha256:650ebb878f2a70154015886a73e61751e0780cb3a7df1f8ba20377e26d49f26f",
         "schema_name": "AuthoringCompileResultV1",
@@ -17141,7 +17141,7 @@
       },
       "producer": "meta_tools.get_schema_template_action(...)",
       "selector": "schema_name=AuthoringPlanResultV1",
-      "sha256": "a1bf66840e235d95f3414bdf4712130a1862c8d4eb81c65267504b453257552e",
+      "sha256": "1509c3ba303ddd67f672e7eb8dc3d04573704258c0980bbd4dffffead27eec52",
       "surface_class": "SS-SCHEMA-TEMPLATES",
       "value": {
         "_success": true,
@@ -20340,10 +20340,10 @@
         "raw_xml_exposed": false,
         "read_only": true,
         "revision_binding": {
-          "capability_revision": "sha256:89121641309f344cb3cc6ef99489154d3af284fc76d5040a015461cb7f4de55c",
-          "compiler_revision": "sha256:5e8b504b503a99d357018c695c60f099634e008ed926d81f4749d695718fadee",
+          "capability_revision": "sha256:c02919f9f820ead54a3f2152e641d96ac665ae893e29ea4f7361715b1f91fa27",
+          "compiler_revision": "sha256:f6d7d270200bceff17c11320b1d86bac12de7659843038e78e6a4602937cb022",
           "contract_version": "2",
-          "schema_revision": "sha256:fc9a5af6edddd78f89a0044037acc692455ac08c2a0e88a986dab7c4b441e80c"
+          "schema_revision": "sha256:2c8b0705d220647903fd1f131b6e49793b78a73033f75206a3ad02ae21c9f9de"
         },
         "schema_hash": "sha256:4779e993aede1b4aa8d7b2ef6e6dabb4dd6890bab8fb39e3384aa7dd1ef00971",
         "schema_name": "AuthoringPlanResultV1",
@@ -20362,7 +20362,7 @@
       },
       "producer": "meta_tools.get_schema_template_action(...)",
       "selector": "schema_name=AuthoringRequestV1",
-      "sha256": "c8af56ae5cf93a61a62f731878215e6c86b0306df20314db3807630d1193f2e5",
+      "sha256": "9d3ec3834ded6550fca3dbab5b3487276f4d0d733ac5bea9d78f6a5a2ace85eb",
       "surface_class": "SS-SCHEMA-TEMPLATES",
       "value": {
         "_success": true,
@@ -24132,10 +24132,10 @@
         "raw_xml_exposed": false,
         "read_only": true,
         "revision_binding": {
-          "capability_revision": "sha256:89121641309f344cb3cc6ef99489154d3af284fc76d5040a015461cb7f4de55c",
-          "compiler_revision": "sha256:5e8b504b503a99d357018c695c60f099634e008ed926d81f4749d695718fadee",
+          "capability_revision": "sha256:c02919f9f820ead54a3f2152e641d96ac665ae893e29ea4f7361715b1f91fa27",
+          "compiler_revision": "sha256:f6d7d270200bceff17c11320b1d86bac12de7659843038e78e6a4602937cb022",
           "contract_version": "2",
-          "schema_revision": "sha256:fc9a5af6edddd78f89a0044037acc692455ac08c2a0e88a986dab7c4b441e80c"
+          "schema_revision": "sha256:2c8b0705d220647903fd1f131b6e49793b78a73033f75206a3ad02ae21c9f9de"
         },
         "schema_hash": "sha256:9b0234179f2c656c1ae024450f7dd176cbd1f6d29b0695ab24058f57672a9d6e",
         "schema_name": "AuthoringRequestV1",
@@ -37738,7 +37738,7 @@
       "legacy_excerpt": {},
       "producer": "meta_tools.get_schema_template_action(...) [all axes]",
       "selector": "walked_surface_digest",
-      "sha256": "2ddfb80cd889a5cbf02bc01b4ffa86fd5aef04da09c324c7904e09c8cfb33c5f",
+      "sha256": "42593683d0ffdad678aeb5a723440d823983b5b9b5157deff29943c0ab899524",
       "surface_class": "SS-SCHEMA-TEMPLATES",
       "value": {
         "resource_type=component": "8327243ec482fa1641f49265c87694e33616f12db015b3f234dc73db9ed8057c",
@@ -38020,14 +38020,14 @@
         "resource_type=trading_partner|operation=update|standard=rosettanet": "83537ac74be6088a4607997d0e200d76ec7c6367c900aa9923e823d610dd27e1",
         "resource_type=trading_partner|operation=update|standard=tradacoms": "83537ac74be6088a4607997d0e200d76ec7c6367c900aa9923e823d610dd27e1",
         "resource_type=trading_partner|operation=update|standard=x12": "83537ac74be6088a4607997d0e200d76ec7c6367c900aa9923e823d610dd27e1",
-        "schema_name=AuthoringBuildProvenanceV1": "ce79c5e18eba57927b8544f7b1b85af1f480917f3757e1b3ac96b136463d3fff",
-        "schema_name=AuthoringCompileResultV1": "16adde2e2e6c0d9a6c8db47f652ec5d51c15a3b045fb3e79940be53722bb2c84",
-        "schema_name=AuthoringPlanResultV1": "a1bf66840e235d95f3414bdf4712130a1862c8d4eb81c65267504b453257552e",
-        "schema_name=AuthoringRequestV1": "c8af56ae5cf93a61a62f731878215e6c86b0306df20314db3807630d1193f2e5",
-        "schema_name=AuthoringRevisionBindingV1": "7b116494df6ad941a155041cca86727876765ef05891e79ee08819d6f68ea04b",
+        "schema_name=AuthoringBuildProvenanceV1": "794ab1ce054bb0355a61b482f420a03d2e2ae8f62167e42d0eea6acc0a1b581d",
+        "schema_name=AuthoringCompileResultV1": "3da6cc36627ae4b8d08af912d2d985b11eafb482bcfb507f68620b0dcbde3a94",
+        "schema_name=AuthoringPlanResultV1": "1509c3ba303ddd67f672e7eb8dc3d04573704258c0980bbd4dffffead27eec52",
+        "schema_name=AuthoringRequestV1": "9d3ec3834ded6550fca3dbab5b3487276f4d0d733ac5bea9d78f6a5a2ace85eb",
+        "schema_name=AuthoringRevisionBindingV1": "fa0806b49734005d656ea14925435aafcba355b1ed6c7df4f45a3c28c9b0323f",
         "schema_name=IntegrationSpecV1": "986eca9167c21589b15b1cfc1b6c8fa184aebade91b37d190c01dfa500c53280",
-        "schema_name=ProcessIRV1": "164b93f8e303d088197e1e4b8c18eaee04e54b13f05b090f240fee4cbfe937e5",
-        "schema_name=SystemTopologySpecV1": "cb08e6069abde22df54bd629f087efd018645d561f326c7141df80ac7fd6bc98",
+        "schema_name=ProcessIRV1": "550a1e753825077825d55b960fd24f808d39e449e9a1315038f761ce8674907f",
+        "schema_name=SystemTopologySpecV1": "2caeb6141d2a123684382b3c68464f154f9a886d0d4c72cd2b61387ae9f23bc4",
         "schema_name=account_governance": "d0773b315a5b59bad4bbb0021a2468e5cb4d3a85c4dbac216a887f0194a2ecdc",
         "schema_name=api_service": "c7be12ec5b2c503bd54088bd2c7b00adfa435e3f3fc9610bae0b91117657911b",
         "schema_name=archetype:api_to_api_sync": "7e4653429bdfc56d53ecb1c07fb7f477e11c2180c3afdfad94566cab1ca716e7",
@@ -38036,7 +38036,7 @@
         "schema_name=archetype:http_listener_to_db": "b21d41d870324ce66e872957fa09126dc641354753a0d7681d14d3489f7dcf3f",
         "schema_name=archetype:http_listener_to_rest": "cdd6c9c6fb51cd8afda5c7245a2ef37548939610c1c5235cd9abe1ed9deac3d9",
         "schema_name=archetype:stub_minimal_integration": "28f1d13a8568cea1df47bb1b361708d17e490204c7425787999e80df63f4b0fc",
-        "schema_name=authoring_workflow": "e85af008c51802c88a361de3ddbd36e86f1832c61e2bd15ca80c6c6fd22f2f86",
+        "schema_name=authoring_workflow": "fa85ff42abaaf1575f9cbe765c72724d833225b891cc976c8e2f6ab9973478dc",
         "schema_name=cache_property_authoring": "484017df545d247be99c71ef4be4edf8d47013e565a6e05119c357699229ed6f",
         "schema_name=compose_archetypes": "ec23808a15913ec8ce1d6e510ff941952be25b006a42128216b891d05f1a9d7f",
         "schema_name=design_doctrine": "b47bc0062bf52054609a4b81b8ea98dd5b363c716b079ed0413c1f89bee08a7b",
@@ -38099,7 +38099,7 @@
         "schema_name=governance_pattern:support_folder_isolation_and_privacy": "4f0b206e14ad2f2272b03dfc8c9575dbcc3d454d28894a42602a9cca546de2ed",
         "schema_name=governance_pattern:tools_utilities_folder_non_integration": "50ddcf761e63e68f305271b4f079d8a7effd9b750726a8be784c2c52993c2cbc",
         "schema_name=governance_pattern:tracked_field_naming_generic_and_unique": "42ae3917d1ddb0f23a9dd0e9083a9106a3ed6c18bc06e740a1c07014830204d1",
-        "schema_name=process_ir_authoring": "3fcbcff4d7354bd145d4cff2573e7729684dd6fed69d6a0df02f54e2f61bfc5d",
+        "schema_name=process_ir_authoring": "bbc9e914aa11ee333c8b394baa345acd53f50525bb331032eb720e3acd4e063c",
         "schema_name=process_property": "43c9cf66e73fb39b6f1625d00a9a01f876005bfa94b34fb99cb14e0deebe699b",
         "schema_name=recipe:boomi.adapter.api_to_api_sync@1.0.0": "280f2452c95aaa3ddff0800bf0fc2c64cd3f7327e2e366123a86d4424b38a52b",
         "schema_name=recipe:boomi.adapter.api_to_database_sync@1.0.0": "0b675ce4f9a86711dec17430be3eecdd90752d6e28e745d667226ef316210b5b",
@@ -38113,7 +38113,7 @@
         "schema_name=recipe_registry": "220788b6ccbb92a52479683a855f16a34345f577b6ccf05cf3399874eec95758",
         "schema_name=script_dataprocess": "86d6cac0e593188c5c6a253e684097dadda0a6c3c331a1d71672c827133af143",
         "schema_name=script_mapping": "165e78ea08d24f54221f6da5973cbe20c7747d1a37f9fde496a42876b594e029",
-        "schema_name=validation_report": "e60c0308e1aefe9551051e350544b1c52ed9ebaab2e0e1aca0679bf721201f3f",
+        "schema_name=validation_report": "2dff27ded5780aefed04b6ae8189b1875cbc1b8bbe7f8ae0835495aa90c165b3",
         "schema_name=workflow:build_and_verify_http_listener": "bf6ab2e405f375735cd6aaed29da0dbc6b717909dc1c184ba8dbe341f2b95800",
         "schema_name=workflow:build_integration_from_description": "72a20b29bbaf7a0ce39e06fb8514e13831968332bc5d0373d7f100bd7a943be0",
         "schema_name=workflow:compose_multi_target_integration": "6b04f2d192bcaf817a983a1aefda2f2f7b9674ce1c996737137c7ce8d6b932e0",

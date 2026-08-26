@@ -271,7 +271,6 @@ def _canonical_state(vocabulary: str, source_state: str) -> Tuple[str, bool]:
 
 _ORDERING = "ordering_facts"
 _DOCS = "document_semantics"
-_REFS = "required_references"
 _CAPS = "capability_ids"
 _CODES = "diagnostic_codes"
 _RELATED = "related_entry_ids"
@@ -305,7 +304,6 @@ _NODE_FACTS: Mapping[str, Mapping[str, Any]] = {
             "It takes no inbound documents. What it RETURNS is decided by its "
             "family/action row, not by the node.",
         ),
-        _REFS: (("connection_ref", True), ("operation_ref", True)),
         _STAGES: ("author",),
     },
     "target": {
@@ -325,7 +323,6 @@ _NODE_FACTS: Mapping[str, Mapping[str, Any]] = {
             "its family/action row — a database Send returns nothing, a REST "
             "PATCH does.",
         ),
-        _REFS: (("connection_ref", True), ("operation_ref", True)),
         _STAGES: ("author",),
     },
     "connector_call": {
@@ -351,7 +348,6 @@ _NODE_FACTS: Mapping[str, Mapping[str, Any]] = {
         # "produces documents" on the node entry let a caller place a downstream
         # consumer after a terminal call — the exact error the per-action rows
         # exist to prevent. The related entries below carry the real answer.
-        _REFS: (("operation_ref", True),),
         _CAPS: (
             "generalized_connector_call",
             "mixed_connector_execution",
@@ -404,7 +400,6 @@ _NODE_FACTS: Mapping[str, Mapping[str, Any]] = {
             "declares them, so state written only inside a map is not established.",
         ),
         _DOCS: ("required", "documents", "per_document"),
-        _REFS: (("map_ref", True),),
         _STAGES: ("author", "repair"),
     },
     "data_process": {
@@ -441,7 +436,6 @@ _NODE_FACTS: Mapping[str, Mapping[str, Any]] = {
         ),
         _ORDERING: (),
         _DOCS: ("required", "consumed", "all_documents"),
-        _REFS: (("cache_ref", True),),
         _RELATED: ("state_visibility.cache",),
         _STAGES: ("author", "repair"),
     },
@@ -456,7 +450,6 @@ _NODE_FACTS: Mapping[str, Mapping[str, Any]] = {
             "Retrieval is all-document; keyed or indexed retrieval is capability-gated.",
         ),
         _DOCS: ("optional", "stream_replacing", "all_documents"),
-        _REFS: (("cache_ref", True),),
         _CAPS: ("keyed_cache",),
         _RELATED: ("state_visibility.cache",),
         _STAGES: ("author",),
@@ -479,7 +472,6 @@ _NODE_FACTS: Mapping[str, Mapping[str, Any]] = {
             "it — both factors are required.",
         ),
         _DOCS: ("optional", "stream_replacing", "all_documents"),
-        _REFS: (("cache_ref", True),),
         _CAPS: ("keyed_cache",),
         _RELATED: ("state_visibility.cache",),
         _STAGES: ("author", "repair"),
@@ -495,7 +487,6 @@ _NODE_FACTS: Mapping[str, Mapping[str, Any]] = {
             "this path.",
         ),
         _DOCS: ("optional", "documents", "all_documents"),
-        _REFS: (("cache_ref", True),),
         _CAPS: ("keyed_cache",),
         _RELATED: ("state_visibility.cache",),
         _STAGES: ("author",),
@@ -556,7 +547,6 @@ _NODE_FACTS: Mapping[str, Mapping[str, Any]] = {
             "paths, or separate wrappers — rather than chaining calls.",
         ),
         _DOCS: ("required", "documents", "per_document"),
-        _REFS: (("process_ref", True),),
         _CAPS: ("process_call_connector_mixing", "terminal_process_call",
                 "process_call_return_path_binding"),
         _STAGES: ("author", "repair"),
@@ -1060,6 +1050,8 @@ def _hand_written_ordering(kind, facts) -> Tuple[str, ...]:
 def _node_entries(
     sources: ProjectionSourcesV1,
 ) -> List[ProcessIRAuthoringContractEntryV1]:
+    from ..models.process_ir import process_ir_v1_node_reference_paths
+
     placements_by_kind: Dict[str, List[ProcessIRAuthoringPlacementV1]] = {}
     for context, slot, kinds in sources.placement_rows:
         canonical, applicable = _canonical_state("body_placement_registry", "admitted")
@@ -1072,6 +1064,12 @@ def _node_entries(
                     source_state="admitted",
                 )
             )
+
+    # DERIVED from the model annotations, never hand-listed: a second copy of
+    # this fact went stale the moment #155 added a reference to the connector
+    # path binding, and the served answer was silently incomplete about the
+    # very field that slice shipped.
+    reference_paths = process_ir_v1_node_reference_paths()
 
     connector_action_ids = tuple(
         sorted(
@@ -1132,7 +1130,7 @@ def _node_entries(
                 ),
                 required_references=tuple(
                     ProcessIRAuthoringReferenceV1(field=field, required=required)
-                    for field, required in facts.get(_REFS, ())
+                    for field, required in reference_paths.get(kind, ())
                 ),
                 related_entry_ids=tuple(facts.get(_RELATED, ()))
                 + tuple(f"capability.{cap}" for cap in facts.get(_CAPS, ()))

@@ -3202,6 +3202,99 @@ def process_ir_v1_node_kinds() -> Tuple[str, ...]:
     return tuple(sorted(_NODE_KIND_TAGS | {"sequence"}))
 
 
+def _models_reachable_from(annotation) -> Tuple[Any, ...]:
+    """Every model class an annotation can hold, unwrapping containers and unions."""
+    found: List[Any] = []
+    pending = [annotation]
+    while pending:
+        current = pending.pop()
+        if isinstance(current, type) and issubclass(current, BaseModel):
+            found.append(current)
+            continue
+        args = get_args(current)
+        if args:
+            pending.extend(arg for arg in args if arg is not type(None))
+    return tuple(found)
+
+
+def _is_branchy(annotation) -> bool:
+    """Could this edge be absent, or hold one of several shapes?
+
+    A path through such an edge cannot be promised on every document of the kind,
+    so a reference beneath it is reported as not-always-required.
+    """
+    origin = get_origin(annotation)
+    if origin is Union:
+        return True
+    if origin in (list, tuple, set, frozenset):
+        return True
+    return len(_models_reachable_from(annotation)) > 1
+
+
+def process_ir_v1_node_reference_paths():
+    """Per node kind, the COMPONENT REFERENCES it can carry, as ``(path, required)``.
+
+    DERIVED from the annotations, for the reason the kind list above is: the
+    served contract used to carry a hand-written table of these, and a
+    hand-written table is a second statement of a fact the models already own.
+    It went stale exactly as predicted — #155 added an optional profile
+    reference to the connector path binding and the table said nothing about it,
+    so the served answer was silently incomplete about that slice's own feature.
+
+    ``path`` is dotted from the node root with list indices elided
+    (``path_binding.request_profile_ref``, ``source_values.profile_ref``), so a
+    top-level reference keeps the bare field name it has always been served as.
+
+    The walk STOPS at any nested node or body: a Branch leg's steps are their own
+    kinds with their own entries, and attributing their references to the Branch
+    would tell a caller that authoring a Branch requires a process reference.
+    Without that rule the branch entry alone gains 22 paths. A ``seen`` guard
+    rides alongside because a Branch can nest a Branch through its terminal.
+
+    ``required`` means every valid document of this kind must carry it. It is
+    False as soon as any edge on the path is optional, repeated, or one of
+    several shapes — a caller who supplies such a reference is never wrong, and
+    one who omits a required one always is.
+    """
+    models = {}
+    for member in get_args(get_args(ProcessNodeV1)[0]):
+        models[get_args(member.model_fields["kind"].annotation)[0]] = member
+    models["sequence"] = SequenceNodeV1
+    boundary = set(_NODE_KIND_TAGS) | {"sequence"}
+
+    def walk(model, prefix, required, seen):
+        for name, field_info in model.model_fields.items():
+            if _is_component_ref_field(field_info):
+                here = "{0}{1}".format(prefix, name)
+                still = required and field_info.is_required() and not _is_branchy(
+                    field_info.annotation
+                )
+                yield here, still
+                continue
+            edge_required = required and field_info.is_required() and not _is_branchy(
+                field_info.annotation
+            )
+            for child in _models_reachable_from(field_info.annotation):
+                kind_field = child.model_fields.get("kind")
+                if kind_field is not None:
+                    tags = get_args(kind_field.annotation)
+                    if tags and tags[0] in boundary:
+                        continue  # a nested node owns its own entry
+                if child in seen:
+                    continue
+                yield from walk(
+                    child, "{0}{1}.".format(prefix, name), edge_required, seen + (child,)
+                )
+
+    out = {}
+    for kind, model in models.items():
+        collected = {}
+        for path, required in walk(model, "", True, (model,)):
+            collected[path] = collected.get(path, True) and required
+        out[kind] = tuple(sorted(collected.items()))
+    return out
+
+
 def _complete_spec_rows(messages, remediation, layer):
     """(code, message, remediation) rows, or a hard failure — never a blank field.
 

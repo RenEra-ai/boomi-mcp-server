@@ -2801,3 +2801,26 @@ Three rebaselines in one slice is expected here and is not churn: each unit chan
 served surface, and each was verified against its own before/after rather than accepted as "the
 inventory moved again". The FINAL committed state of every derived artifact in this slice is
 regenerated from the slice's final tree, which is what the freeze test then re-derives.
+
+**Unit 4 rebaselined a fourth time, moving the same FIVE as unit 2.** Deriving the served
+`required_references` from the model annotations — deleting the nine hand-written rows that had
+carried it — moved `SS-CAPABILITY-CATALOG:authoring_contract` (the entries changed) and the four
+schema-template artifacts that bind the revision triple. All three revisions moved, which is
+correct and was measured rather than assumed: `capability_revision` because five contract entries
+changed, and `schema_revision` because the reference model's served description was amended to
+document dotted paths — that description is part of the `process_ir_authoring` page schema, which
+`schema_revision` covers through `_INHERITED_SCHEMA_SELECTORS`. `IntegrationSpecV1` and
+`recipe_contributions` did NOT move: the walker adds no model field, so the embedded ProcessIR
+schema is byte-identical.
+
+The served-contract diff, keyed by entry id: zero entries added, zero removed, and exactly FIVE
+changed, each in `required_references` only — `node.set_ddp` and `node.set_dpp` gain
+`source_values.profile_ref`, `node.data_process` gains `steps.profile_ref`, and `node.target` and
+`node.connector_call` gain `path_binding.request_profile_ref`. The last two are the reason the
+derivation happened at all: that field is this slice's own new reference, and the hand-written
+table had been silently omitting it. The other three were already omitted before this slice —
+long-standing gaps the hand-list had never carried.
+
+`scan_contract` again did NOT move (216 sources, 0 unscanned assets), and again no section-11 table
+needed regeneration: unit 4 shifted no census evidence line. Four rebaselines, four distinct served
+surfaces, each verified against its own before/after.

@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 10549, "minimum_collected": 10549, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 10558, "minimum_collected": 10558, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -10588,3 +10588,12 @@
 {"kind": "test", "id": "pytest-010587", "node_id": "tests/test_process_ir_semantic_lineage.py::test_the_stream_replacing_authority_matches_the_served_contract", "state": "active"}
 {"kind": "test", "id": "pytest-010588", "node_id": "tests/test_process_ir_semantic_lineage.py::test_a_bound_paths_profile_ref_is_enumerated_as_a_component_reference", "state": "active"}
 {"kind": "test", "id": "pytest-010589", "node_id": "tests/test_process_ir_semantic_lineage.py::test_an_optional_component_ref_field_is_recognised", "state": "active"}
+{"kind": "test", "id": "pytest-010590", "node_id": "tests/test_process_ir_models.py::test_the_derived_reference_table_covers_exactly_the_node_vocabulary", "state": "active"}
+{"kind": "test", "id": "pytest-010591", "node_id": "tests/test_process_ir_models.py::test_the_connector_path_binding_profile_is_served[connector_call]", "state": "active"}
+{"kind": "test", "id": "pytest-010592", "node_id": "tests/test_process_ir_models.py::test_the_connector_path_binding_profile_is_served[target]", "state": "active"}
+{"kind": "test", "id": "pytest-010593", "node_id": "tests/test_process_ir_models.py::test_a_directly_held_reference_keeps_its_bare_name_and_required_flag", "state": "active"}
+{"kind": "test", "id": "pytest-010594", "node_id": "tests/test_process_ir_models.py::test_a_reference_reached_through_a_list_is_served_once_and_not_required", "state": "active"}
+{"kind": "test", "id": "pytest-010595", "node_id": "tests/test_process_ir_models.py::test_adding_a_reference_to_a_model_grows_the_served_list[required-True]", "state": "active"}
+{"kind": "test", "id": "pytest-010596", "node_id": "tests/test_process_ir_models.py::test_adding_a_reference_to_a_model_grows_the_served_list[optional-False]", "state": "active"}
+{"kind": "test", "id": "pytest-010597", "node_id": "tests/test_process_ir_models.py::test_the_walk_stops_at_nested_nodes_and_that_rule_is_load_bearing", "state": "active"}
+{"kind": "test", "id": "pytest-010598", "node_id": "tests/test_process_ir_models.py::test_the_served_contract_agrees_with_the_derived_table", "state": "active"}

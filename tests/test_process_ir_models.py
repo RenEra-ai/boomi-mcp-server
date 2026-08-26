@@ -1529,3 +1529,150 @@ def test_every_illegal_process_call_root_returns_a_typed_diagnostic(
         == PROCESS_IR_CAPABILITY_PROCESS_CALL_RETURN_PATH_BINDING_UNSUPPORTED
     ), (label, codes_of(err))
     assert err.diagnostics[0].path == expected_pointer, (label, codes_of(err))
+
+
+# ---------------------------------------------------------------------------
+# Issue #155 — the served reference list is DERIVED from these models
+# ---------------------------------------------------------------------------
+#
+# The authoring contract used to carry a hand-written table of which references
+# each node kind requires. It went stale exactly the way a second copy of a fact
+# does: #155 added `path_binding.request_profile_ref` to two node kinds and the
+# table said nothing about it, so the served answer was silently incomplete
+# about the very field that slice shipped. The table is gone; these tests pin
+# the walker that replaced it.
+
+
+def _ref_paths():
+    from boomi_mcp.models.process_ir import process_ir_v1_node_reference_paths
+
+    return process_ir_v1_node_reference_paths()
+
+
+def test_the_derived_reference_table_covers_exactly_the_node_vocabulary():
+    """Totality against the authority, not against a list written beside it."""
+    from boomi_mcp.models.process_ir import process_ir_v1_node_kinds
+
+    assert set(_ref_paths()) == set(process_ir_v1_node_kinds())
+
+
+@pytest.mark.parametrize("kind", ["connector_call", "target"])
+def test_the_connector_path_binding_profile_is_served(kind):
+    """The regression that motivated deriving the list at all.
+
+    Both node kinds that accept a path binding can carry a profile reference
+    inside it, and neither must: a binding whose segment needs no profile is
+    valid. A caller reading the contract has to be told the field exists.
+    """
+    assert ("path_binding.request_profile_ref", False) in _ref_paths()[kind]
+
+
+def test_a_directly_held_reference_keeps_its_bare_name_and_required_flag():
+    """A top-level required ref is served exactly as it always was."""
+    paths = _ref_paths()
+    assert ("operation_ref", True) in paths["connector_call"]
+    assert ("connection_ref", True) in paths["target"]
+    assert ("map_ref", True) in paths["map_ref"]
+
+
+def test_a_reference_reached_through_a_list_is_served_once_and_not_required():
+    """`steps.profile_ref` — indices elided, and never promised."""
+    assert _ref_paths()["data_process"] == (("steps.profile_ref", False),)
+
+
+@pytest.mark.parametrize(
+    "annotation, expected_required",
+    [
+        ("required", True),
+        ("optional", False),
+    ],
+)
+def test_adding_a_reference_to_a_model_grows_the_served_list(
+    annotation, expected_required, monkeypatch
+):
+    """NON-VACUITY: the walker reads the models, it does not recite a constant.
+
+    A field planted on a node kind must appear, with the `required` flag its
+    annotation implies. Without this the whole table could be a frozen literal
+    and every other test here would still pass.
+    """
+    from typing import Optional
+
+    from pydantic.fields import FieldInfo
+
+    from boomi_mcp.models.process_ir import ComponentRefV1, StopNodeV1
+
+    assert _ref_paths()["stop"] == ()
+
+    planted = FieldInfo.from_annotation(
+        ComponentRefV1 if annotation == "required" else Optional[ComponentRefV1]
+    )
+    fields = dict(StopNodeV1.model_fields)
+    fields["planted_ref"] = planted
+    monkeypatch.setattr(StopNodeV1, "model_fields", fields)
+
+    assert _ref_paths()["stop"] == (("planted_ref", expected_required),)
+
+
+def test_the_walk_stops_at_nested_nodes_and_that_rule_is_load_bearing():
+    """The stop rule is what keeps a Branch's entry about the BRANCH.
+
+    A Branch leg holds steps, and those steps are node kinds with their own
+    contract entries. Attributing their references upward would tell a caller
+    that authoring a Branch requires an operation reference, a process
+    reference, a map reference — every reference in the IR, reachable through
+    two legs of arbitrary content.
+
+    The control is a deliberately naive walk written here, independent of the
+    implementation: it recurses through everything and is asserted to find the
+    leak the real walker excludes. Without it "branch has no references" would
+    be indistinguishable from a walker that found nothing at all.
+    """
+    from typing import Union, get_args, get_origin
+
+    from pydantic import BaseModel
+
+    from boomi_mcp.models.process_ir import BranchNodeV1, _is_component_ref_field
+
+    def naive(model, prefix, seen):
+        for name, field_info in model.model_fields.items():
+            if _is_component_ref_field(field_info):
+                yield "{0}{1}".format(prefix, name)
+                continue
+            pending, reachable = [field_info.annotation], []
+            while pending:
+                current = pending.pop()
+                if isinstance(current, type) and issubclass(current, BaseModel):
+                    reachable.append(current)
+                    continue
+                pending.extend(a for a in get_args(current) if a is not type(None))
+            for child in reachable:
+                if child in seen:
+                    continue
+                yield from naive(child, "{0}{1}.".format(prefix, name), seen + (child,))
+
+    leaked = set(naive(BranchNodeV1, "", (BranchNodeV1,)))
+    assert len(leaked) >= 20, sorted(leaked)
+    assert any(path.endswith("operation_ref") for path in leaked)
+    assert _ref_paths()["branch"] == ()
+
+
+def test_the_served_contract_agrees_with_the_derived_table():
+    """Bidirectional pin: the projection may not carry its own answer.
+
+    The frozen contract snapshot would catch a change in the served bytes, but
+    not a projection that quietly stopped consulting the models and started
+    hand-listing again — the bytes could still match on the day of the edit.
+    """
+    from boomi_mcp.authoring.process_ir_projection import (
+        build_process_ir_authoring_entries,
+        collect_projection_sources,
+    )
+
+    derived = _ref_paths()
+    served = {
+        entry.subject: tuple((ref.field, ref.required) for ref in entry.required_references)
+        for entry in build_process_ir_authoring_entries(collect_projection_sources())
+        if entry.entry_type == "node"
+    }
+    assert served == derived

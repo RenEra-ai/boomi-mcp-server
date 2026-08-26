@@ -222,6 +222,18 @@ class ProcessIRAuthoringReferenceV1(_ContractModel):
     contract is authored as a ``$ref:KEY`` token or a literal component id, and
     NOTHING about the referenced component — its configuration, its connection,
     its credentials — is ever authored alongside it.
+
+    ``field`` is a path from the node, dotted where the reference sits inside a
+    nested object (``path_binding.request_profile_ref``) and with list indices
+    elided (``steps.profile_ref`` means every step may carry one). A reference a
+    node holds directly keeps its bare field name. The list stops at nested
+    nodes: a Branch leg's steps are their own kinds with their own entries, so
+    their references are never attributed to the node containing them.
+
+    ``required`` means every valid document of this kind carries the reference.
+    It is ``False`` wherever the path runs through something optional, repeated,
+    or admitting more than one shape — supplying such a reference is never
+    wrong, omitting a required one always is.
     """
 
     field: NonEmptyString
