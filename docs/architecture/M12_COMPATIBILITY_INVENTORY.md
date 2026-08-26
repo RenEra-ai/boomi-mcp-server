@@ -2838,6 +2838,26 @@ measured leaf by leaf rather than inferred from the file differing. `scan_contra
 sources, 0 unscanned assets), no census or ledger evidence line shifted, and no section-11 table
 needed regeneration.
 
+**Unit 7 rebaselined a seventh time, moving the same SEVEN — and the count was used as the check.**
+A sweep of the served surfaces measured a family of sentences this slice had made false, and
+correcting them moved the ProcessIR-schema set again rather than the contract-only set, which is
+what a description change on the models should do. Four served descriptions changed and one served
+diagnostic: the writer-side and reader-side statements of same-path property visibility, which
+promised a guarantee the platform does not give for a step that drops properties; the defaulted-read
+statement, which promised a discharge the bound-path rule deliberately withholds; the retry
+statement, which called a refusal unconditional after this slice added the policy that lifts it;
+and the bound-path diagnostic, whose remediation named an action the author had already taken while
+the action that actually clears it was named nowhere.
+
+One of those corrections was found by a pin rather than by the sweep: making the document-scoped
+description state its exception falsified a CROSS-REFERENCE in the process-scoped one, which said
+the two behave alike. They no longer do, and the asymmetry is now the pinned property — measured in
+both directions rather than asserted, because a process property arrives with the run request and a
+document property does not.
+
+`scan_contract` did not move (216 sources, 0 unscanned assets), no census or ledger evidence line
+shifted, and no section-11 table needed regeneration.
+
 **Unit 5 is the first rebaseline in this slice where `scan_contract` DID move, and the first that
 needed section-11 regenerated.** Two things happened at once and they are recorded separately
 because they have nothing to do with each other.

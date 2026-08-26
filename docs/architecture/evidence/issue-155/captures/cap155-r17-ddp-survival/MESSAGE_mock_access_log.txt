@@ -1,0 +1,2 @@
+INFO:     192.168.65.1:33930 - "GET / HTTP/1.1" 404 Not Found
+INFO:     192.168.65.1:42474 - "GET /admin/cdscm/api/v1/clients/ZSMG22 HTTP/1.1" 404 Not Found

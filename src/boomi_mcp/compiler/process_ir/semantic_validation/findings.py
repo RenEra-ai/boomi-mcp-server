@@ -65,8 +65,10 @@ _MESSAGES: Dict[str, str] = {
         "a document cache is read on a path with no preceding write"
     ),
     PROCESS_IR_SEMANTIC_DYNAMIC_PATH_DDP_NOT_ESTABLISHED: (
-        "a bound request path reads a document property that is not established "
-        "on every path to the call"
+        "a bound request path is not provably composed on the documents this "
+        "call sends — no writer reaches the call, a step between the writer and "
+        "the call handed on documents that do not carry the property, or the "
+        "writer composed the path from a value nothing established"
     ),
     PROCESS_IR_SEMANTIC_DYNAMIC_PATH_NO_DYNAMIC_SEGMENT: (
         "the writer composing a bound request path contributes only literal values"
@@ -135,9 +137,14 @@ _REMEDIATION: Dict[str, str] = {
         "Add a cache write ahead of this read on the same path."
     ),
     PROCESS_IR_SEMANTIC_DYNAMIC_PATH_DDP_NOT_ESTABLISHED: (
-        "Write the property on every path that reaches the call. A default does "
-        "not discharge it here: the property IS the request path, so a defaulted "
-        "value would address the wrong resource rather than fail."
+        "Write the property on every path that reaches the call, DOWNSTREAM of "
+        "any step that hands on documents not carrying it — a split or a cache "
+        "retrieval does, a Message does not — because such a step gives the call "
+        "new documents and a write placed before it establishes nothing here. A "
+        "default does not discharge it either: the property IS the request path, "
+        "so a defaulted value addresses the wrong resource rather than failing. "
+        "Nor does declaring the property established at process entry: with no "
+        "writer in this process there is no composition to check."
     ),
     PROCESS_IR_SEMANTIC_DYNAMIC_PATH_NO_DYNAMIC_SEGMENT: (
         "Give the writer at least one non-literal source — a profile element or "

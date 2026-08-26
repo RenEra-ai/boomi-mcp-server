@@ -7292,7 +7292,7 @@
       },
       "producer": "meta_tools.list_capabilities_action()",
       "selector": "authoring_contract",
-      "sha256": "fdde9b23f956e5f6ae9ee68591b46ed9358e8d194d59cc9e632a6a1342c48f1e",
+      "sha256": "7210e4d9337c29d46fbc3b7931c6c0b9bd023ec838e52f7467ddafa740742d51",
       "surface_class": "SS-CAPABILITY-CATALOG",
       "value": {
         "actions": [
@@ -7397,11 +7397,11 @@
           }
         ],
         "capability_comparison": {
-          "actual_capability_revision": "sha256:5a136248f3153748415689f5202bb564e9ea458ed311e26612c0a97bfa382704",
+          "actual_capability_revision": "sha256:781089620971c7e05f4e30bb1d3973944b4bc6a00f1037278c9378964cec8618",
           "status": "not_requested"
         },
-        "capability_revision": "sha256:5a136248f3153748415689f5202bb564e9ea458ed311e26612c0a97bfa382704",
-        "compiler_revision": "sha256:f6d7d270200bceff17c11320b1d86bac12de7659843038e78e6a4602937cb022",
+        "capability_revision": "sha256:781089620971c7e05f4e30bb1d3973944b4bc6a00f1037278c9378964cec8618",
+        "compiler_revision": "sha256:6089d948485fcf83ea5fccadbaa2bb5a2d33fa49f2c3f24af2ee2d439f35e203",
         "contract_version": "2",
         "intent_kinds": [
           "integration_spec",
@@ -7640,7 +7640,7 @@
           "schema_version": "1",
           "source_version": "0.1.0"
         },
-        "schema_revision": "sha256:1fe846d70f018e135971537ba64259884f5baae33ca95c86141b582b9bf3d99c",
+        "schema_revision": "sha256:8c94a060881505ad940dea587951d2efe2bdf47c9ba894db394c6fc51bb385d3",
         "schemas": [
           {
             "owned_by_authoring_contract": true,
@@ -7652,21 +7652,21 @@
           {
             "owned_by_authoring_contract": true,
             "provenance": "runtime_schema_registry",
-            "schema_hash": "sha256:c45a9487f0d0e5c7aa044b01ad88302fda658ce86915777f8b9795554c8924c4",
+            "schema_hash": "sha256:995d320bd5466dc2d20b705272fb1f6c686c29a6d5fe924a241f932b0de82fa4",
             "schema_version": "2",
             "selector": "AuthoringCompileResultV1"
           },
           {
             "owned_by_authoring_contract": true,
             "provenance": "runtime_schema_registry",
-            "schema_hash": "sha256:6767f74c208a024868040007d0f2a81940d69123657bfd49d5196699260fba66",
+            "schema_hash": "sha256:c16e8f3a91bd2730767525a90242592e53fe716934079edbc1b019970b6e2670",
             "schema_version": "2",
             "selector": "AuthoringPlanResultV1"
           },
           {
             "owned_by_authoring_contract": true,
             "provenance": "runtime_schema_registry",
-            "schema_hash": "sha256:5438eaf633899c3ade0fcf308a10d0dcb4b797e1ea0ab6acd7f45de46d16f43a",
+            "schema_hash": "sha256:b98ee87358ca26e5d27e86184223df34ffd81d4207651cc5b2dd2a313188e03d",
             "schema_version": "2",
             "selector": "AuthoringRequestV1"
           },
@@ -7680,13 +7680,13 @@
           {
             "owned_by_authoring_contract": false,
             "provenance": "runtime_schema_registry",
-            "schema_hash": "sha256:934a6ccf8a2880e94de0306cb4149afc8e1029d4496c4bf84834cc576c8cc64e",
+            "schema_hash": "sha256:0ce8034bc4e79230a0c3e4421c9079353980904de9449ae264e300a39eb93edb",
             "selector": "IntegrationSpecV1"
           },
           {
             "owned_by_authoring_contract": true,
             "provenance": "runtime_schema_registry",
-            "schema_hash": "sha256:c69f7e7f751054cb8b3538f01d8cd7c46542a38dcca3304e023cd0bd6d5f9c6e",
+            "schema_hash": "sha256:3613ec06c134eb9ce7776523bec7a6210b07d424280effc571d10615d320118b",
             "schema_version": "1",
             "selector": "ProcessIRV1"
           },
@@ -7755,7 +7755,7 @@
           {
             "owned_by_authoring_contract": false,
             "provenance": "runtime_schema_registry",
-            "schema_hash": "sha256:e0ae081ca97f8c269b2c72787ddf668f1a771ac24dfcc6c483019a18b5b06d4b",
+            "schema_hash": "sha256:afbefe0eb5976c037edf57fc873b14df0cc6fb71ebf06d209a8e4f64094e5973",
             "selector": "recipe_contributions"
           },
           {
@@ -13844,14 +13844,14 @@
     },
     {
       "artifact_id": "SS-SCHEMA-TEMPLATES:schema_name=AuthoringCompileResultV1",
-      "canonical_length": 81919,
+      "canonical_length": 83573,
       "legacy_excerpt": {
         "json_schema.$defs.IntegrationComponentSpec.properties.config.description": "Type-specific configuration payload. For type='process', config.process_kind selects a structured process-flow builder (e.g. 'database_to_api_sync' or 'wrapper_subprocess' — issue #25) and is REQUIRED for any authoring action that emits or rebuilds process XML (create / create_clone / update): such a process without process_kind is rejected at plan time with PROCESS_KIND_REQUIRED (legacy freeform JSON-to-XML process authoring has been removed). A reference-only reuse of an existing process (no XML emitted) may omit it. Use manage_component for an explicit raw process XML escape hatch.",
         "json_schema.$defs.IntegrationSpecV1.properties.processes.description": "Issue #153 M12.15 — canonical process roots authored as ProcessIR. Each entry is one ProcessAuthoringUnitV1: exactly one ProcessComponentEnvelopeV1 plus exactly one ProcessIRV1 root. These are compiled by the canonical chain and materialized by the neutral ProcessComponentMaterializer — they resolve NO legacy process_kind. 'components' remains the home of supporting components and of reference-only existing processes. 'components' and 'processes' share ONE key namespace: a key used by a component and by a process envelope is a duplicate, and all four depends_on directions (component->component, component->process, process->component, process->process) enter one topological order with one cycle check. A TUPLE, per the plan's field type: pydantic coerces list input, so the wire shape is an ordinary JSON array and no caller sends anything different — but unlike this model's legacy List siblings, mutating the collection itself is unrepresentable. Per-element immutability lives on the frozen ProcessAuthoringUnitV1 entries."
       },
       "producer": "meta_tools.get_schema_template_action(...)",
       "selector": "schema_name=AuthoringCompileResultV1",
-      "sha256": "8b31499c3205246df7d05ff42643a834e7309dc02c83b293ff8e69474721cf79",
+      "sha256": "567979e6bd408b5d371e764d8370d86f2536b54387eeb948a0582fd67b43e8de",
       "surface_class": "SS-SCHEMA-TEMPLATES",
       "value": {
         "_success": true,
@@ -14685,7 +14685,7 @@
             },
             "DdpPropertySourceV1": {
               "additionalProperties": false,
-              "description": "Reads a DYNAMIC DOCUMENT property (per-document scope).\n\n``property_name`` is the bare name — the wire prefix is owned by the\nemitter and must not be authored. A dynamic document property travels with\nits own document copy: it is visible to later steps on the same path, and it\nis NOT visible across sibling Branch legs, because each leg receives an\nindependent copy of the document stream.\n\n``default_value`` supplies a value when the property has not been written,\nand supplying it DISCHARGES the read-before-write rule: a defaulted read\ncannot fail, because the default establishes the value. Omit it when you\nwant an unmet read reported rather than silently defaulted.",
+              "description": "Reads a DYNAMIC DOCUMENT property (per-document scope).\n\n``property_name`` is the bare name — the wire prefix is owned by the\nemitter and must not be authored. A dynamic document property travels with\nits own document copy: it is visible to later steps on the same path until a\nstep hands them DIFFERENT documents that do not carry it, and it is NOT\nvisible across sibling Branch legs, because each leg receives an independent\ncopy of the document stream. Which steps drop it is measured per kind — a\nMessage keeps the properties, a split and a cache retrieval lose them.\n\n``default_value`` supplies a value when the property has not been written,\nand supplying it discharges the ordinary read-before-write rule: for an\nordinary read the default IS the value. Omit it when you want an unmet read\nreported rather than silently defaulted.\n\nIt does NOT discharge the read when the composed value becomes a connector\nrequest path. There the default is deliberately ignored, because a defaulted\npath is a well-formed request to the WRONG resource — it succeeds against\nsomething, silently, instead of failing. So a bound path requires a real\nwriter even where a defaulted read would otherwise be satisfied.",
               "properties": {
                 "default_value": {
                   "anyOf": [
@@ -15049,7 +15049,7 @@
             },
             "DppPropertySourceV1": {
               "additionalProperties": false,
-              "description": "Reads a DYNAMIC PROCESS property (per-execution scope).\n\n``property_name`` is the bare name — the wire prefix is owned by the\nemitter. Unlike a dynamic DOCUMENT property, a dynamic PROCESS property is\nscoped to the whole execution, so a value written in an earlier Branch leg\nIS visible in a later leg. That ordering matters: legs run in the authored\norder, so reading in leg 0 what leg 1 writes is rejected rather than\nsilently reading nothing.\n\n``default_value`` supplies a value when the property is unset, and — as with\nthe document-scoped source — supplying it DISCHARGES the read-before-write\nrule: a defaulted read cannot fail. Omit it when you want an unmet read\nreported rather than silently defaulted.",
+              "description": "Reads a DYNAMIC PROCESS property (per-execution scope).\n\n``property_name`` is the bare name — the wire prefix is owned by the\nemitter. Unlike a dynamic DOCUMENT property, a dynamic PROCESS property is\nscoped to the whole execution, so a value written in an earlier Branch leg\nIS visible in a later leg. That ordering matters: legs run in the authored\norder, so reading in leg 0 what leg 1 writes is rejected rather than\nsilently reading nothing.\n\n``default_value`` supplies a value when the property is unset, and supplying\nit discharges the ordinary read-before-write rule: a defaulted read cannot\nfail. Omit it when you want an unmet read reported rather than silently\ndefaulted.\n\nUNLIKE the document-scoped source, that holds even where the composed value\nbecomes a connector request path: an execution supplies dynamic process\nproperties with the run request, so the value genuinely arrives rather than\ndefaulting to nothing. This is why a bound path may take a process property\nas its dynamic segment with no in-process writer — the shape the live\nsource-role capture exercises — while the same document-scoped read is\nrefused.",
               "properties": {
                 "default_value": {
                   "anyOf": [
@@ -16117,7 +16117,7 @@
             },
             "SetDdpNodeV1": {
               "additionalProperties": false,
-              "description": "Writes a DYNAMIC DOCUMENT property (per-document scope).\n\n``name`` is the BARE property name — the emitter owns the wire prefix, so a\nprefixed name is rejected rather than double-prefixed. ``source_values`` is\na non-empty ordered list; the sources are concatenated in the authored\norder, which is how ``current`` composes with a literal to append.\n\nScope is the document copy. A value written here is visible to later steps\non the same path and is NOT visible in a sibling Branch leg, because each\nleg gets its own copy of the stream. Where paths converge, only state\nwritten on EVERY incoming path counts as established.\n\nSee the ``process_ir_authoring`` entry ``state_visibility.ddp``.",
+              "description": "Writes a DYNAMIC DOCUMENT property (per-document scope).\n\n``name`` is the BARE property name — the emitter owns the wire prefix, so a\nprefixed name is rejected rather than double-prefixed. ``source_values`` is\na non-empty ordered list; the sources are concatenated in the authored\norder, which is how ``current`` composes with a literal to append.\n\nScope is the document copy, and the value RIDES ON THOSE DOCUMENTS. It is\nvisible to later steps on the same path until a step hands downstream steps\nDIFFERENT documents that do not carry it, and it is NOT visible in a sibling\nBranch leg, because each leg gets its own copy of the stream. Where paths\nconverge, only state written on EVERY incoming path counts as established.\n\nWhich steps drop it is a measured platform fact, not a consequence of\nreplacing the stream: a Message replaces the document stream and KEEPS the\nproperties, while a split and a cache retrieval lose them. Naming only the\nBranch exception, as this text used to, reads as a guarantee for the linear\ncase that the platform does not give.\n\nSee the ``process_ir_authoring`` entry ``state_visibility.ddp``.",
               "properties": {
                 "kind": {
                   "const": "set_ddp",
@@ -16785,7 +16785,7 @@
             },
             "TryCatchNodeV1": {
               "additionalProperties": false,
-              "description": "Scoped error handling with bounded retry (#142, M12.7).\n\nPlacement is part of the contract, because scope is not a free-form label —\neach value names a placement the compiler has a verified shape for:\n\n* ``process`` is the sole root step, and its protected path begins with the\n  call that produces the flow's documents;\n* ``connector`` is the terminal step of a call sequence, and protects exactly\n  one downstream call plus the property steps that prepare it.\n\nNothing may follow a Try/Catch: both paths terminate independently and there\nis no join.\n\nRetry is bounded and additionally CONSTRAINED BY SAFETY, not just by range: a\npositive count is rejected when the protected region would re-run the flow's\ndocument source, and when a retried call writes without registry-backed\nreplay safety. Those checks run before anything is emitted.",
+              "description": "Scoped error handling with bounded retry (#142, M12.7).\n\nPlacement is part of the contract, because scope is not a free-form label —\neach value names a placement the compiler has a verified shape for:\n\n* ``process`` is the sole root step, and its protected path begins with the\n  call that produces the flow's documents;\n* ``connector`` is the terminal step of a call sequence, and protects exactly\n  one downstream call plus the property steps that prepare it.\n\nNothing may follow a Try/Catch: both paths terminate independently and there\nis no join.\n\nRetry is bounded and additionally CONSTRAINED BY SAFETY, not just by range.\nA positive count is rejected when the protected region would re-run the\nflow's document source — UNLESS ``retry.source_replay_policy`` is set to\n``allow_duplicates``, which is how a caller states that re-reading the\nsource is acceptable for this process and lifts that one refusal. It is\nalso rejected when a retried call writes without registry-backed replay\nsafety, and that refusal has no such escape. Those checks run before\nanything is emitted.",
               "properties": {
                 "catch_body": {
                   "$ref": "#/$defs/TryCatchCatchBodyV1"
@@ -17120,12 +17120,12 @@
         "raw_xml_exposed": false,
         "read_only": true,
         "revision_binding": {
-          "capability_revision": "sha256:5a136248f3153748415689f5202bb564e9ea458ed311e26612c0a97bfa382704",
-          "compiler_revision": "sha256:f6d7d270200bceff17c11320b1d86bac12de7659843038e78e6a4602937cb022",
+          "capability_revision": "sha256:781089620971c7e05f4e30bb1d3973944b4bc6a00f1037278c9378964cec8618",
+          "compiler_revision": "sha256:6089d948485fcf83ea5fccadbaa2bb5a2d33fa49f2c3f24af2ee2d439f35e203",
           "contract_version": "2",
-          "schema_revision": "sha256:1fe846d70f018e135971537ba64259884f5baae33ca95c86141b582b9bf3d99c"
+          "schema_revision": "sha256:8c94a060881505ad940dea587951d2efe2bdf47c9ba894db394c6fc51bb385d3"
         },
-        "schema_hash": "sha256:c45a9487f0d0e5c7aa044b01ad88302fda658ce86915777f8b9795554c8924c4",
+        "schema_hash": "sha256:995d320bd5466dc2d20b705272fb1f6c686c29a6d5fe924a241f932b0de82fa4",
         "schema_name": "AuthoringCompileResultV1",
         "schema_version": "2",
         "surface": "MCP authoring contract (issue #146 M12.11)"
@@ -17134,14 +17134,14 @@
     },
     {
       "artifact_id": "SS-SCHEMA-TEMPLATES:schema_name=AuthoringPlanResultV1",
-      "canonical_length": 80593,
+      "canonical_length": 82247,
       "legacy_excerpt": {
         "json_schema.$defs.IntegrationComponentSpec.properties.config.description": "Type-specific configuration payload. For type='process', config.process_kind selects a structured process-flow builder (e.g. 'database_to_api_sync' or 'wrapper_subprocess' — issue #25) and is REQUIRED for any authoring action that emits or rebuilds process XML (create / create_clone / update): such a process without process_kind is rejected at plan time with PROCESS_KIND_REQUIRED (legacy freeform JSON-to-XML process authoring has been removed). A reference-only reuse of an existing process (no XML emitted) may omit it. Use manage_component for an explicit raw process XML escape hatch.",
         "json_schema.$defs.IntegrationSpecV1.properties.processes.description": "Issue #153 M12.15 — canonical process roots authored as ProcessIR. Each entry is one ProcessAuthoringUnitV1: exactly one ProcessComponentEnvelopeV1 plus exactly one ProcessIRV1 root. These are compiled by the canonical chain and materialized by the neutral ProcessComponentMaterializer — they resolve NO legacy process_kind. 'components' remains the home of supporting components and of reference-only existing processes. 'components' and 'processes' share ONE key namespace: a key used by a component and by a process envelope is a duplicate, and all four depends_on directions (component->component, component->process, process->component, process->process) enter one topological order with one cycle check. A TUPLE, per the plan's field type: pydantic coerces list input, so the wire shape is an ordinary JSON array and no caller sends anything different — but unlike this model's legacy List siblings, mutating the collection itself is unrepresentable. Per-element immutability lives on the frozen ProcessAuthoringUnitV1 entries."
       },
       "producer": "meta_tools.get_schema_template_action(...)",
       "selector": "schema_name=AuthoringPlanResultV1",
-      "sha256": "acd3f4cf584e8529519d049bf6481315de67b566d6f7caeaed7282a5bfe07df6",
+      "sha256": "8055e6b72aea59743a8ac5e18f18f25f31620077db664347bce8e399401f971a",
       "surface_class": "SS-SCHEMA-TEMPLATES",
       "value": {
         "_success": true,
@@ -17926,7 +17926,7 @@
             },
             "DdpPropertySourceV1": {
               "additionalProperties": false,
-              "description": "Reads a DYNAMIC DOCUMENT property (per-document scope).\n\n``property_name`` is the bare name — the wire prefix is owned by the\nemitter and must not be authored. A dynamic document property travels with\nits own document copy: it is visible to later steps on the same path, and it\nis NOT visible across sibling Branch legs, because each leg receives an\nindependent copy of the document stream.\n\n``default_value`` supplies a value when the property has not been written,\nand supplying it DISCHARGES the read-before-write rule: a defaulted read\ncannot fail, because the default establishes the value. Omit it when you\nwant an unmet read reported rather than silently defaulted.",
+              "description": "Reads a DYNAMIC DOCUMENT property (per-document scope).\n\n``property_name`` is the bare name — the wire prefix is owned by the\nemitter and must not be authored. A dynamic document property travels with\nits own document copy: it is visible to later steps on the same path until a\nstep hands them DIFFERENT documents that do not carry it, and it is NOT\nvisible across sibling Branch legs, because each leg receives an independent\ncopy of the document stream. Which steps drop it is measured per kind — a\nMessage keeps the properties, a split and a cache retrieval lose them.\n\n``default_value`` supplies a value when the property has not been written,\nand supplying it discharges the ordinary read-before-write rule: for an\nordinary read the default IS the value. Omit it when you want an unmet read\nreported rather than silently defaulted.\n\nIt does NOT discharge the read when the composed value becomes a connector\nrequest path. There the default is deliberately ignored, because a defaulted\npath is a well-formed request to the WRONG resource — it succeeds against\nsomething, silently, instead of failing. So a bound path requires a real\nwriter even where a defaulted read would otherwise be satisfied.",
               "properties": {
                 "default_value": {
                   "anyOf": [
@@ -18290,7 +18290,7 @@
             },
             "DppPropertySourceV1": {
               "additionalProperties": false,
-              "description": "Reads a DYNAMIC PROCESS property (per-execution scope).\n\n``property_name`` is the bare name — the wire prefix is owned by the\nemitter. Unlike a dynamic DOCUMENT property, a dynamic PROCESS property is\nscoped to the whole execution, so a value written in an earlier Branch leg\nIS visible in a later leg. That ordering matters: legs run in the authored\norder, so reading in leg 0 what leg 1 writes is rejected rather than\nsilently reading nothing.\n\n``default_value`` supplies a value when the property is unset, and — as with\nthe document-scoped source — supplying it DISCHARGES the read-before-write\nrule: a defaulted read cannot fail. Omit it when you want an unmet read\nreported rather than silently defaulted.",
+              "description": "Reads a DYNAMIC PROCESS property (per-execution scope).\n\n``property_name`` is the bare name — the wire prefix is owned by the\nemitter. Unlike a dynamic DOCUMENT property, a dynamic PROCESS property is\nscoped to the whole execution, so a value written in an earlier Branch leg\nIS visible in a later leg. That ordering matters: legs run in the authored\norder, so reading in leg 0 what leg 1 writes is rejected rather than\nsilently reading nothing.\n\n``default_value`` supplies a value when the property is unset, and supplying\nit discharges the ordinary read-before-write rule: a defaulted read cannot\nfail. Omit it when you want an unmet read reported rather than silently\ndefaulted.\n\nUNLIKE the document-scoped source, that holds even where the composed value\nbecomes a connector request path: an execution supplies dynamic process\nproperties with the run request, so the value genuinely arrives rather than\ndefaulting to nothing. This is why a bound path may take a process property\nas its dynamic segment with no in-process writer — the shape the live\nsource-role capture exercises — while the same document-scoped read is\nrefused.",
               "properties": {
                 "default_value": {
                   "anyOf": [
@@ -19358,7 +19358,7 @@
             },
             "SetDdpNodeV1": {
               "additionalProperties": false,
-              "description": "Writes a DYNAMIC DOCUMENT property (per-document scope).\n\n``name`` is the BARE property name — the emitter owns the wire prefix, so a\nprefixed name is rejected rather than double-prefixed. ``source_values`` is\na non-empty ordered list; the sources are concatenated in the authored\norder, which is how ``current`` composes with a literal to append.\n\nScope is the document copy. A value written here is visible to later steps\non the same path and is NOT visible in a sibling Branch leg, because each\nleg gets its own copy of the stream. Where paths converge, only state\nwritten on EVERY incoming path counts as established.\n\nSee the ``process_ir_authoring`` entry ``state_visibility.ddp``.",
+              "description": "Writes a DYNAMIC DOCUMENT property (per-document scope).\n\n``name`` is the BARE property name — the emitter owns the wire prefix, so a\nprefixed name is rejected rather than double-prefixed. ``source_values`` is\na non-empty ordered list; the sources are concatenated in the authored\norder, which is how ``current`` composes with a literal to append.\n\nScope is the document copy, and the value RIDES ON THOSE DOCUMENTS. It is\nvisible to later steps on the same path until a step hands downstream steps\nDIFFERENT documents that do not carry it, and it is NOT visible in a sibling\nBranch leg, because each leg gets its own copy of the stream. Where paths\nconverge, only state written on EVERY incoming path counts as established.\n\nWhich steps drop it is a measured platform fact, not a consequence of\nreplacing the stream: a Message replaces the document stream and KEEPS the\nproperties, while a split and a cache retrieval lose them. Naming only the\nBranch exception, as this text used to, reads as a guarantee for the linear\ncase that the platform does not give.\n\nSee the ``process_ir_authoring`` entry ``state_visibility.ddp``.",
               "properties": {
                 "kind": {
                   "const": "set_ddp",
@@ -20026,7 +20026,7 @@
             },
             "TryCatchNodeV1": {
               "additionalProperties": false,
-              "description": "Scoped error handling with bounded retry (#142, M12.7).\n\nPlacement is part of the contract, because scope is not a free-form label —\neach value names a placement the compiler has a verified shape for:\n\n* ``process`` is the sole root step, and its protected path begins with the\n  call that produces the flow's documents;\n* ``connector`` is the terminal step of a call sequence, and protects exactly\n  one downstream call plus the property steps that prepare it.\n\nNothing may follow a Try/Catch: both paths terminate independently and there\nis no join.\n\nRetry is bounded and additionally CONSTRAINED BY SAFETY, not just by range: a\npositive count is rejected when the protected region would re-run the flow's\ndocument source, and when a retried call writes without registry-backed\nreplay safety. Those checks run before anything is emitted.",
+              "description": "Scoped error handling with bounded retry (#142, M12.7).\n\nPlacement is part of the contract, because scope is not a free-form label —\neach value names a placement the compiler has a verified shape for:\n\n* ``process`` is the sole root step, and its protected path begins with the\n  call that produces the flow's documents;\n* ``connector`` is the terminal step of a call sequence, and protects exactly\n  one downstream call plus the property steps that prepare it.\n\nNothing may follow a Try/Catch: both paths terminate independently and there\nis no join.\n\nRetry is bounded and additionally CONSTRAINED BY SAFETY, not just by range.\nA positive count is rejected when the protected region would re-run the\nflow's document source — UNLESS ``retry.source_replay_policy`` is set to\n``allow_duplicates``, which is how a caller states that re-reading the\nsource is acceptable for this process and lifts that one refusal. It is\nalso rejected when a retried call writes without registry-backed replay\nsafety, and that refusal has no such escape. Those checks run before\nanything is emitted.",
               "properties": {
                 "catch_body": {
                   "$ref": "#/$defs/TryCatchCatchBodyV1"
@@ -20340,12 +20340,12 @@
         "raw_xml_exposed": false,
         "read_only": true,
         "revision_binding": {
-          "capability_revision": "sha256:5a136248f3153748415689f5202bb564e9ea458ed311e26612c0a97bfa382704",
-          "compiler_revision": "sha256:f6d7d270200bceff17c11320b1d86bac12de7659843038e78e6a4602937cb022",
+          "capability_revision": "sha256:781089620971c7e05f4e30bb1d3973944b4bc6a00f1037278c9378964cec8618",
+          "compiler_revision": "sha256:6089d948485fcf83ea5fccadbaa2bb5a2d33fa49f2c3f24af2ee2d439f35e203",
           "contract_version": "2",
-          "schema_revision": "sha256:1fe846d70f018e135971537ba64259884f5baae33ca95c86141b582b9bf3d99c"
+          "schema_revision": "sha256:8c94a060881505ad940dea587951d2efe2bdf47c9ba894db394c6fc51bb385d3"
         },
-        "schema_hash": "sha256:6767f74c208a024868040007d0f2a81940d69123657bfd49d5196699260fba66",
+        "schema_hash": "sha256:c16e8f3a91bd2730767525a90242592e53fe716934079edbc1b019970b6e2670",
         "schema_name": "AuthoringPlanResultV1",
         "schema_version": "2",
         "surface": "MCP authoring contract (issue #146 M12.11)"
@@ -20354,7 +20354,7 @@
     },
     {
       "artifact_id": "SS-SCHEMA-TEMPLATES:schema_name=AuthoringRequestV1",
-      "canonical_length": 98385,
+      "canonical_length": 100039,
       "legacy_excerpt": {
         "json_schema.$defs.IntegrationComponentSpec.properties.config.description": "Type-specific configuration payload. For type='process', config.process_kind selects a structured process-flow builder (e.g. 'database_to_api_sync' or 'wrapper_subprocess' — issue #25) and is REQUIRED for any authoring action that emits or rebuilds process XML (create / create_clone / update): such a process without process_kind is rejected at plan time with PROCESS_KIND_REQUIRED (legacy freeform JSON-to-XML process authoring has been removed). A reference-only reuse of an existing process (no XML emitted) may omit it. Use manage_component for an explicit raw process XML escape hatch.",
         "json_schema.$defs.IntegrationSpecV1.properties.processes.description": "Issue #153 M12.15 — canonical process roots authored as ProcessIR. Each entry is one ProcessAuthoringUnitV1: exactly one ProcessComponentEnvelopeV1 plus exactly one ProcessIRV1 root. These are compiled by the canonical chain and materialized by the neutral ProcessComponentMaterializer — they resolve NO legacy process_kind. 'components' remains the home of supporting components and of reference-only existing processes. 'components' and 'processes' share ONE key namespace: a key used by a component and by a process envelope is a duplicate, and all four depends_on directions (component->component, component->process, process->component, process->process) enter one topological order with one cycle check. A TUPLE, per the plan's field type: pydantic coerces list input, so the wire shape is an ordinary JSON array and no caller sends anything different — but unlike this model's legacy List siblings, mutating the collection itself is unrepresentable. Per-element immutability lives on the frozen ProcessAuthoringUnitV1 entries.",
@@ -20362,7 +20362,7 @@
       },
       "producer": "meta_tools.get_schema_template_action(...)",
       "selector": "schema_name=AuthoringRequestV1",
-      "sha256": "49710c6eaddd5a79828044bdc76ac587cd4cf7b3723c75afd4f74cf47aac5269",
+      "sha256": "d33286d1047f572fb974aa4306490ec9eb73b252f3b9b632d213d608a385505e",
       "surface_class": "SS-SCHEMA-TEMPLATES",
       "value": {
         "_success": true,
@@ -20956,7 +20956,7 @@
             },
             "DdpPropertySourceV1": {
               "additionalProperties": false,
-              "description": "Reads a DYNAMIC DOCUMENT property (per-document scope).\n\n``property_name`` is the bare name — the wire prefix is owned by the\nemitter and must not be authored. A dynamic document property travels with\nits own document copy: it is visible to later steps on the same path, and it\nis NOT visible across sibling Branch legs, because each leg receives an\nindependent copy of the document stream.\n\n``default_value`` supplies a value when the property has not been written,\nand supplying it DISCHARGES the read-before-write rule: a defaulted read\ncannot fail, because the default establishes the value. Omit it when you\nwant an unmet read reported rather than silently defaulted.",
+              "description": "Reads a DYNAMIC DOCUMENT property (per-document scope).\n\n``property_name`` is the bare name — the wire prefix is owned by the\nemitter and must not be authored. A dynamic document property travels with\nits own document copy: it is visible to later steps on the same path until a\nstep hands them DIFFERENT documents that do not carry it, and it is NOT\nvisible across sibling Branch legs, because each leg receives an independent\ncopy of the document stream. Which steps drop it is measured per kind — a\nMessage keeps the properties, a split and a cache retrieval lose them.\n\n``default_value`` supplies a value when the property has not been written,\nand supplying it discharges the ordinary read-before-write rule: for an\nordinary read the default IS the value. Omit it when you want an unmet read\nreported rather than silently defaulted.\n\nIt does NOT discharge the read when the composed value becomes a connector\nrequest path. There the default is deliberately ignored, because a defaulted\npath is a well-formed request to the WRONG resource — it succeeds against\nsomething, silently, instead of failing. So a bound path requires a real\nwriter even where a defaulted read would otherwise be satisfied.",
               "properties": {
                 "default_value": {
                   "anyOf": [
@@ -21466,7 +21466,7 @@
             },
             "DppPropertySourceV1": {
               "additionalProperties": false,
-              "description": "Reads a DYNAMIC PROCESS property (per-execution scope).\n\n``property_name`` is the bare name — the wire prefix is owned by the\nemitter. Unlike a dynamic DOCUMENT property, a dynamic PROCESS property is\nscoped to the whole execution, so a value written in an earlier Branch leg\nIS visible in a later leg. That ordering matters: legs run in the authored\norder, so reading in leg 0 what leg 1 writes is rejected rather than\nsilently reading nothing.\n\n``default_value`` supplies a value when the property is unset, and — as with\nthe document-scoped source — supplying it DISCHARGES the read-before-write\nrule: a defaulted read cannot fail. Omit it when you want an unmet read\nreported rather than silently defaulted.",
+              "description": "Reads a DYNAMIC PROCESS property (per-execution scope).\n\n``property_name`` is the bare name — the wire prefix is owned by the\nemitter. Unlike a dynamic DOCUMENT property, a dynamic PROCESS property is\nscoped to the whole execution, so a value written in an earlier Branch leg\nIS visible in a later leg. That ordering matters: legs run in the authored\norder, so reading in leg 0 what leg 1 writes is rejected rather than\nsilently reading nothing.\n\n``default_value`` supplies a value when the property is unset, and supplying\nit discharges the ordinary read-before-write rule: a defaulted read cannot\nfail. Omit it when you want an unmet read reported rather than silently\ndefaulted.\n\nUNLIKE the document-scoped source, that holds even where the composed value\nbecomes a connector request path: an execution supplies dynamic process\nproperties with the run request, so the value genuinely arrives rather than\ndefaulting to nothing. This is why a bound path may take a process property\nas its dynamic segment with no in-process writer — the shape the live\nsource-role capture exercises — while the same document-scoped read is\nrefused.",
               "properties": {
                 "default_value": {
                   "anyOf": [
@@ -23123,7 +23123,7 @@
             },
             "SetDdpNodeV1": {
               "additionalProperties": false,
-              "description": "Writes a DYNAMIC DOCUMENT property (per-document scope).\n\n``name`` is the BARE property name — the emitter owns the wire prefix, so a\nprefixed name is rejected rather than double-prefixed. ``source_values`` is\na non-empty ordered list; the sources are concatenated in the authored\norder, which is how ``current`` composes with a literal to append.\n\nScope is the document copy. A value written here is visible to later steps\non the same path and is NOT visible in a sibling Branch leg, because each\nleg gets its own copy of the stream. Where paths converge, only state\nwritten on EVERY incoming path counts as established.\n\nSee the ``process_ir_authoring`` entry ``state_visibility.ddp``.",
+              "description": "Writes a DYNAMIC DOCUMENT property (per-document scope).\n\n``name`` is the BARE property name — the emitter owns the wire prefix, so a\nprefixed name is rejected rather than double-prefixed. ``source_values`` is\na non-empty ordered list; the sources are concatenated in the authored\norder, which is how ``current`` composes with a literal to append.\n\nScope is the document copy, and the value RIDES ON THOSE DOCUMENTS. It is\nvisible to later steps on the same path until a step hands downstream steps\nDIFFERENT documents that do not carry it, and it is NOT visible in a sibling\nBranch leg, because each leg gets its own copy of the stream. Where paths\nconverge, only state written on EVERY incoming path counts as established.\n\nWhich steps drop it is a measured platform fact, not a consequence of\nreplacing the stream: a Message replaces the document stream and KEEPS the\nproperties, while a split and a cache retrieval lose them. Naming only the\nBranch exception, as this text used to, reads as a guarantee for the linear\ncase that the platform does not give.\n\nSee the ``process_ir_authoring`` entry ``state_visibility.ddp``.",
               "properties": {
                 "kind": {
                   "const": "set_ddp",
@@ -23863,7 +23863,7 @@
             },
             "TryCatchNodeV1": {
               "additionalProperties": false,
-              "description": "Scoped error handling with bounded retry (#142, M12.7).\n\nPlacement is part of the contract, because scope is not a free-form label —\neach value names a placement the compiler has a verified shape for:\n\n* ``process`` is the sole root step, and its protected path begins with the\n  call that produces the flow's documents;\n* ``connector`` is the terminal step of a call sequence, and protects exactly\n  one downstream call plus the property steps that prepare it.\n\nNothing may follow a Try/Catch: both paths terminate independently and there\nis no join.\n\nRetry is bounded and additionally CONSTRAINED BY SAFETY, not just by range: a\npositive count is rejected when the protected region would re-run the flow's\ndocument source, and when a retried call writes without registry-backed\nreplay safety. Those checks run before anything is emitted.",
+              "description": "Scoped error handling with bounded retry (#142, M12.7).\n\nPlacement is part of the contract, because scope is not a free-form label —\neach value names a placement the compiler has a verified shape for:\n\n* ``process`` is the sole root step, and its protected path begins with the\n  call that produces the flow's documents;\n* ``connector`` is the terminal step of a call sequence, and protects exactly\n  one downstream call plus the property steps that prepare it.\n\nNothing may follow a Try/Catch: both paths terminate independently and there\nis no join.\n\nRetry is bounded and additionally CONSTRAINED BY SAFETY, not just by range.\nA positive count is rejected when the protected region would re-run the\nflow's document source — UNLESS ``retry.source_replay_policy`` is set to\n``allow_duplicates``, which is how a caller states that re-reading the\nsource is acceptable for this process and lifts that one refusal. It is\nalso rejected when a retried call writes without registry-backed replay\nsafety, and that refusal has no such escape. Those checks run before\nanything is emitted.",
               "properties": {
                 "catch_body": {
                   "$ref": "#/$defs/TryCatchCatchBodyV1"
@@ -24132,12 +24132,12 @@
         "raw_xml_exposed": false,
         "read_only": true,
         "revision_binding": {
-          "capability_revision": "sha256:5a136248f3153748415689f5202bb564e9ea458ed311e26612c0a97bfa382704",
-          "compiler_revision": "sha256:f6d7d270200bceff17c11320b1d86bac12de7659843038e78e6a4602937cb022",
+          "capability_revision": "sha256:781089620971c7e05f4e30bb1d3973944b4bc6a00f1037278c9378964cec8618",
+          "compiler_revision": "sha256:6089d948485fcf83ea5fccadbaa2bb5a2d33fa49f2c3f24af2ee2d439f35e203",
           "contract_version": "2",
-          "schema_revision": "sha256:1fe846d70f018e135971537ba64259884f5baae33ca95c86141b582b9bf3d99c"
+          "schema_revision": "sha256:8c94a060881505ad940dea587951d2efe2bdf47c9ba894db394c6fc51bb385d3"
         },
-        "schema_hash": "sha256:5438eaf633899c3ade0fcf308a10d0dcb4b797e1ea0ab6acd7f45de46d16f43a",
+        "schema_hash": "sha256:b98ee87358ca26e5d27e86184223df34ffd81d4207651cc5b2dd2a313188e03d",
         "schema_name": "AuthoringRequestV1",
         "schema_version": "2",
         "surface": "MCP authoring contract (issue #146 M12.11)"
@@ -24146,14 +24146,14 @@
     },
     {
       "artifact_id": "SS-SCHEMA-TEMPLATES:schema_name=IntegrationSpecV1",
-      "canonical_length": 70031,
+      "canonical_length": 71685,
       "legacy_excerpt": {
         "json_schema.$defs.IntegrationComponentSpec.properties.config.description": "Type-specific configuration payload. For type='process', config.process_kind selects a structured process-flow builder (e.g. 'database_to_api_sync' or 'wrapper_subprocess' — issue #25) and is REQUIRED for any authoring action that emits or rebuilds process XML (create / create_clone / update): such a process without process_kind is rejected at plan time with PROCESS_KIND_REQUIRED (legacy freeform JSON-to-XML process authoring has been removed). A reference-only reuse of an existing process (no XML emitted) may omit it. Use manage_component for an explicit raw process XML escape hatch.",
         "json_schema.properties.processes.description": "Issue #153 M12.15 — canonical process roots authored as ProcessIR. Each entry is one ProcessAuthoringUnitV1: exactly one ProcessComponentEnvelopeV1 plus exactly one ProcessIRV1 root. These are compiled by the canonical chain and materialized by the neutral ProcessComponentMaterializer — they resolve NO legacy process_kind. 'components' remains the home of supporting components and of reference-only existing processes. 'components' and 'processes' share ONE key namespace: a key used by a component and by a process envelope is a duplicate, and all four depends_on directions (component->component, component->process, process->component, process->process) enter one topological order with one cycle check. A TUPLE, per the plan's field type: pydantic coerces list input, so the wire shape is an ordinary JSON array and no caller sends anything different — but unlike this model's legacy List siblings, mutating the collection itself is unrepresentable. Per-element immutability lives on the frozen ProcessAuthoringUnitV1 entries."
       },
       "producer": "meta_tools.get_schema_template_action(...)",
       "selector": "schema_name=IntegrationSpecV1",
-      "sha256": "41f65c310dd279865685ddd75742118f6aaaf501ba33b7fbb6f674d3614603a5",
+      "sha256": "b4dfcfbfe781b54897e419c4b2ca8632108e3e5197c6bc30b0bcf5e1bb81a85c",
       "surface_class": "SS-SCHEMA-TEMPLATES",
       "value": {
         "_success": true,
@@ -24699,7 +24699,7 @@
             },
             "DdpPropertySourceV1": {
               "additionalProperties": false,
-              "description": "Reads a DYNAMIC DOCUMENT property (per-document scope).\n\n``property_name`` is the bare name — the wire prefix is owned by the\nemitter and must not be authored. A dynamic document property travels with\nits own document copy: it is visible to later steps on the same path, and it\nis NOT visible across sibling Branch legs, because each leg receives an\nindependent copy of the document stream.\n\n``default_value`` supplies a value when the property has not been written,\nand supplying it DISCHARGES the read-before-write rule: a defaulted read\ncannot fail, because the default establishes the value. Omit it when you\nwant an unmet read reported rather than silently defaulted.",
+              "description": "Reads a DYNAMIC DOCUMENT property (per-document scope).\n\n``property_name`` is the bare name — the wire prefix is owned by the\nemitter and must not be authored. A dynamic document property travels with\nits own document copy: it is visible to later steps on the same path until a\nstep hands them DIFFERENT documents that do not carry it, and it is NOT\nvisible across sibling Branch legs, because each leg receives an independent\ncopy of the document stream. Which steps drop it is measured per kind — a\nMessage keeps the properties, a split and a cache retrieval lose them.\n\n``default_value`` supplies a value when the property has not been written,\nand supplying it discharges the ordinary read-before-write rule: for an\nordinary read the default IS the value. Omit it when you want an unmet read\nreported rather than silently defaulted.\n\nIt does NOT discharge the read when the composed value becomes a connector\nrequest path. There the default is deliberately ignored, because a defaulted\npath is a well-formed request to the WRONG resource — it succeeds against\nsomething, silently, instead of failing. So a bound path requires a real\nwriter even where a defaulted read would otherwise be satisfied.",
               "properties": {
                 "default_value": {
                   "anyOf": [
@@ -25063,7 +25063,7 @@
             },
             "DppPropertySourceV1": {
               "additionalProperties": false,
-              "description": "Reads a DYNAMIC PROCESS property (per-execution scope).\n\n``property_name`` is the bare name — the wire prefix is owned by the\nemitter. Unlike a dynamic DOCUMENT property, a dynamic PROCESS property is\nscoped to the whole execution, so a value written in an earlier Branch leg\nIS visible in a later leg. That ordering matters: legs run in the authored\norder, so reading in leg 0 what leg 1 writes is rejected rather than\nsilently reading nothing.\n\n``default_value`` supplies a value when the property is unset, and — as with\nthe document-scoped source — supplying it DISCHARGES the read-before-write\nrule: a defaulted read cannot fail. Omit it when you want an unmet read\nreported rather than silently defaulted.",
+              "description": "Reads a DYNAMIC PROCESS property (per-execution scope).\n\n``property_name`` is the bare name — the wire prefix is owned by the\nemitter. Unlike a dynamic DOCUMENT property, a dynamic PROCESS property is\nscoped to the whole execution, so a value written in an earlier Branch leg\nIS visible in a later leg. That ordering matters: legs run in the authored\norder, so reading in leg 0 what leg 1 writes is rejected rather than\nsilently reading nothing.\n\n``default_value`` supplies a value when the property is unset, and supplying\nit discharges the ordinary read-before-write rule: a defaulted read cannot\nfail. Omit it when you want an unmet read reported rather than silently\ndefaulted.\n\nUNLIKE the document-scoped source, that holds even where the composed value\nbecomes a connector request path: an execution supplies dynamic process\nproperties with the run request, so the value genuinely arrives rather than\ndefaulting to nothing. This is why a bound path may take a process property\nas its dynamic segment with no in-process writer — the shape the live\nsource-role capture exercises — while the same document-scoped read is\nrefused.",
               "properties": {
                 "default_value": {
                   "anyOf": [
@@ -25870,7 +25870,7 @@
             },
             "SetDdpNodeV1": {
               "additionalProperties": false,
-              "description": "Writes a DYNAMIC DOCUMENT property (per-document scope).\n\n``name`` is the BARE property name — the emitter owns the wire prefix, so a\nprefixed name is rejected rather than double-prefixed. ``source_values`` is\na non-empty ordered list; the sources are concatenated in the authored\norder, which is how ``current`` composes with a literal to append.\n\nScope is the document copy. A value written here is visible to later steps\non the same path and is NOT visible in a sibling Branch leg, because each\nleg gets its own copy of the stream. Where paths converge, only state\nwritten on EVERY incoming path counts as established.\n\nSee the ``process_ir_authoring`` entry ``state_visibility.ddp``.",
+              "description": "Writes a DYNAMIC DOCUMENT property (per-document scope).\n\n``name`` is the BARE property name — the emitter owns the wire prefix, so a\nprefixed name is rejected rather than double-prefixed. ``source_values`` is\na non-empty ordered list; the sources are concatenated in the authored\norder, which is how ``current`` composes with a literal to append.\n\nScope is the document copy, and the value RIDES ON THOSE DOCUMENTS. It is\nvisible to later steps on the same path until a step hands downstream steps\nDIFFERENT documents that do not carry it, and it is NOT visible in a sibling\nBranch leg, because each leg gets its own copy of the stream. Where paths\nconverge, only state written on EVERY incoming path counts as established.\n\nWhich steps drop it is a measured platform fact, not a consequence of\nreplacing the stream: a Message replaces the document stream and KEEPS the\nproperties, while a split and a cache retrieval lose them. Naming only the\nBranch exception, as this text used to, reads as a guarantee for the linear\ncase that the platform does not give.\n\nSee the ``process_ir_authoring`` entry ``state_visibility.ddp``.",
               "properties": {
                 "kind": {
                   "const": "set_ddp",
@@ -26488,7 +26488,7 @@
             },
             "TryCatchNodeV1": {
               "additionalProperties": false,
-              "description": "Scoped error handling with bounded retry (#142, M12.7).\n\nPlacement is part of the contract, because scope is not a free-form label —\neach value names a placement the compiler has a verified shape for:\n\n* ``process`` is the sole root step, and its protected path begins with the\n  call that produces the flow's documents;\n* ``connector`` is the terminal step of a call sequence, and protects exactly\n  one downstream call plus the property steps that prepare it.\n\nNothing may follow a Try/Catch: both paths terminate independently and there\nis no join.\n\nRetry is bounded and additionally CONSTRAINED BY SAFETY, not just by range: a\npositive count is rejected when the protected region would re-run the flow's\ndocument source, and when a retried call writes without registry-backed\nreplay safety. Those checks run before anything is emitted.",
+              "description": "Scoped error handling with bounded retry (#142, M12.7).\n\nPlacement is part of the contract, because scope is not a free-form label —\neach value names a placement the compiler has a verified shape for:\n\n* ``process`` is the sole root step, and its protected path begins with the\n  call that produces the flow's documents;\n* ``connector`` is the terminal step of a call sequence, and protects exactly\n  one downstream call plus the property steps that prepare it.\n\nNothing may follow a Try/Catch: both paths terminate independently and there\nis no join.\n\nRetry is bounded and additionally CONSTRAINED BY SAFETY, not just by range.\nA positive count is rejected when the protected region would re-run the\nflow's document source — UNLESS ``retry.source_replay_policy`` is set to\n``allow_duplicates``, which is how a caller states that re-reading the\nsource is acceptable for this process and lifts that one refusal. It is\nalso rejected when a retried call writes without registry-backed replay\nsafety, and that refusal has no such escape. Those checks run before\nanything is emitted.",
               "properties": {
                 "catch_body": {
                   "$ref": "#/$defs/TryCatchCatchBodyV1"
@@ -34079,13 +34079,13 @@
     },
     {
       "artifact_id": "SS-SCHEMA-TEMPLATES:schema_name=recipe_contributions",
-      "canonical_length": 85898,
+      "canonical_length": 87552,
       "legacy_excerpt": {
         "authoring_note": "These are the ONLY values a registered recipe may return. They carry opaque references and closed enumerations — never configuration, credentials, headers, SQL, raw XML, executable code, JSON pointers, or caller-authored graph edges. Recipe output is validated exactly as direct ProcessIR/topology/component authoring and cannot be exempted."
       },
       "producer": "meta_tools.get_schema_template_action(...)",
       "selector": "schema_name=recipe_contributions",
-      "sha256": "4f5f4cf764de9dc7e4cfeeab59e1d3376eb512e569672bfe96e6e0cd76955b84",
+      "sha256": "0080b4de8a489e22442391ab452e5c2edeb7c654f9aad27cc73eeff8fa4cb3a2",
       "surface_class": "SS-SCHEMA-TEMPLATES",
       "value": {
         "_success": true,
@@ -35015,7 +35015,7 @@
             },
             "DdpPropertySourceV1": {
               "additionalProperties": false,
-              "description": "Reads a DYNAMIC DOCUMENT property (per-document scope).\n\n``property_name`` is the bare name — the wire prefix is owned by the\nemitter and must not be authored. A dynamic document property travels with\nits own document copy: it is visible to later steps on the same path, and it\nis NOT visible across sibling Branch legs, because each leg receives an\nindependent copy of the document stream.\n\n``default_value`` supplies a value when the property has not been written,\nand supplying it DISCHARGES the read-before-write rule: a defaulted read\ncannot fail, because the default establishes the value. Omit it when you\nwant an unmet read reported rather than silently defaulted.",
+              "description": "Reads a DYNAMIC DOCUMENT property (per-document scope).\n\n``property_name`` is the bare name — the wire prefix is owned by the\nemitter and must not be authored. A dynamic document property travels with\nits own document copy: it is visible to later steps on the same path until a\nstep hands them DIFFERENT documents that do not carry it, and it is NOT\nvisible across sibling Branch legs, because each leg receives an independent\ncopy of the document stream. Which steps drop it is measured per kind — a\nMessage keeps the properties, a split and a cache retrieval lose them.\n\n``default_value`` supplies a value when the property has not been written,\nand supplying it discharges the ordinary read-before-write rule: for an\nordinary read the default IS the value. Omit it when you want an unmet read\nreported rather than silently defaulted.\n\nIt does NOT discharge the read when the composed value becomes a connector\nrequest path. There the default is deliberately ignored, because a defaulted\npath is a well-formed request to the WRONG resource — it succeeds against\nsomething, silently, instead of failing. So a bound path requires a real\nwriter even where a defaulted read would otherwise be satisfied.",
               "properties": {
                 "default_value": {
                   "anyOf": [
@@ -35503,7 +35503,7 @@
             },
             "DppPropertySourceV1": {
               "additionalProperties": false,
-              "description": "Reads a DYNAMIC PROCESS property (per-execution scope).\n\n``property_name`` is the bare name — the wire prefix is owned by the\nemitter. Unlike a dynamic DOCUMENT property, a dynamic PROCESS property is\nscoped to the whole execution, so a value written in an earlier Branch leg\nIS visible in a later leg. That ordering matters: legs run in the authored\norder, so reading in leg 0 what leg 1 writes is rejected rather than\nsilently reading nothing.\n\n``default_value`` supplies a value when the property is unset, and — as with\nthe document-scoped source — supplying it DISCHARGES the read-before-write\nrule: a defaulted read cannot fail. Omit it when you want an unmet read\nreported rather than silently defaulted.",
+              "description": "Reads a DYNAMIC PROCESS property (per-execution scope).\n\n``property_name`` is the bare name — the wire prefix is owned by the\nemitter. Unlike a dynamic DOCUMENT property, a dynamic PROCESS property is\nscoped to the whole execution, so a value written in an earlier Branch leg\nIS visible in a later leg. That ordering matters: legs run in the authored\norder, so reading in leg 0 what leg 1 writes is rejected rather than\nsilently reading nothing.\n\n``default_value`` supplies a value when the property is unset, and supplying\nit discharges the ordinary read-before-write rule: a defaulted read cannot\nfail. Omit it when you want an unmet read reported rather than silently\ndefaulted.\n\nUNLIKE the document-scoped source, that holds even where the composed value\nbecomes a connector request path: an execution supplies dynamic process\nproperties with the run request, so the value genuinely arrives rather than\ndefaulting to nothing. This is why a bound path may take a process property\nas its dynamic segment with no in-process writer — the shape the live\nsource-role capture exercises — while the same document-scoped read is\nrefused.",
               "properties": {
                 "default_value": {
                   "anyOf": [
@@ -36703,7 +36703,7 @@
             },
             "SetDdpNodeV1": {
               "additionalProperties": false,
-              "description": "Writes a DYNAMIC DOCUMENT property (per-document scope).\n\n``name`` is the BARE property name — the emitter owns the wire prefix, so a\nprefixed name is rejected rather than double-prefixed. ``source_values`` is\na non-empty ordered list; the sources are concatenated in the authored\norder, which is how ``current`` composes with a literal to append.\n\nScope is the document copy. A value written here is visible to later steps\non the same path and is NOT visible in a sibling Branch leg, because each\nleg gets its own copy of the stream. Where paths converge, only state\nwritten on EVERY incoming path counts as established.\n\nSee the ``process_ir_authoring`` entry ``state_visibility.ddp``.",
+              "description": "Writes a DYNAMIC DOCUMENT property (per-document scope).\n\n``name`` is the BARE property name — the emitter owns the wire prefix, so a\nprefixed name is rejected rather than double-prefixed. ``source_values`` is\na non-empty ordered list; the sources are concatenated in the authored\norder, which is how ``current`` composes with a literal to append.\n\nScope is the document copy, and the value RIDES ON THOSE DOCUMENTS. It is\nvisible to later steps on the same path until a step hands downstream steps\nDIFFERENT documents that do not carry it, and it is NOT visible in a sibling\nBranch leg, because each leg gets its own copy of the stream. Where paths\nconverge, only state written on EVERY incoming path counts as established.\n\nWhich steps drop it is a measured platform fact, not a consequence of\nreplacing the stream: a Message replaces the document stream and KEEPS the\nproperties, while a split and a cache retrieval lose them. Naming only the\nBranch exception, as this text used to, reads as a guarantee for the linear\ncase that the platform does not give.\n\nSee the ``process_ir_authoring`` entry ``state_visibility.ddp``.",
               "properties": {
                 "kind": {
                   "const": "set_ddp",
@@ -37273,7 +37273,7 @@
             },
             "TryCatchNodeV1": {
               "additionalProperties": false,
-              "description": "Scoped error handling with bounded retry (#142, M12.7).\n\nPlacement is part of the contract, because scope is not a free-form label —\neach value names a placement the compiler has a verified shape for:\n\n* ``process`` is the sole root step, and its protected path begins with the\n  call that produces the flow's documents;\n* ``connector`` is the terminal step of a call sequence, and protects exactly\n  one downstream call plus the property steps that prepare it.\n\nNothing may follow a Try/Catch: both paths terminate independently and there\nis no join.\n\nRetry is bounded and additionally CONSTRAINED BY SAFETY, not just by range: a\npositive count is rejected when the protected region would re-run the flow's\ndocument source, and when a retried call writes without registry-backed\nreplay safety. Those checks run before anything is emitted.",
+              "description": "Scoped error handling with bounded retry (#142, M12.7).\n\nPlacement is part of the contract, because scope is not a free-form label —\neach value names a placement the compiler has a verified shape for:\n\n* ``process`` is the sole root step, and its protected path begins with the\n  call that produces the flow's documents;\n* ``connector`` is the terminal step of a call sequence, and protects exactly\n  one downstream call plus the property steps that prepare it.\n\nNothing may follow a Try/Catch: both paths terminate independently and there\nis no join.\n\nRetry is bounded and additionally CONSTRAINED BY SAFETY, not just by range.\nA positive count is rejected when the protected region would re-run the\nflow's document source — UNLESS ``retry.source_replay_policy`` is set to\n``allow_duplicates``, which is how a caller states that re-reading the\nsource is acceptable for this process and lifts that one refusal. It is\nalso rejected when a retried call writes without registry-backed replay\nsafety, and that refusal has no such escape. Those checks run before\nanything is emitted.",
               "properties": {
                 "catch_body": {
                   "$ref": "#/$defs/TryCatchCatchBodyV1"
@@ -37738,7 +37738,7 @@
       "legacy_excerpt": {},
       "producer": "meta_tools.get_schema_template_action(...) [all axes]",
       "selector": "walked_surface_digest",
-      "sha256": "b588ebbaca86af811c85ac33dc797dc1d57ab8dd8ca3b53e43b353566a628729",
+      "sha256": "ec6d2c36e4101f3fda8a3669a1282e80aa0a1abbbdcf0388e9ab5dd725cc6917",
       "surface_class": "SS-SCHEMA-TEMPLATES",
       "value": {
         "resource_type=component": "8327243ec482fa1641f49265c87694e33616f12db015b3f234dc73db9ed8057c",
@@ -38020,14 +38020,14 @@
         "resource_type=trading_partner|operation=update|standard=rosettanet": "83537ac74be6088a4607997d0e200d76ec7c6367c900aa9923e823d610dd27e1",
         "resource_type=trading_partner|operation=update|standard=tradacoms": "83537ac74be6088a4607997d0e200d76ec7c6367c900aa9923e823d610dd27e1",
         "resource_type=trading_partner|operation=update|standard=x12": "83537ac74be6088a4607997d0e200d76ec7c6367c900aa9923e823d610dd27e1",
-        "schema_name=AuthoringBuildProvenanceV1": "461410d96c945c18a7a51c4f22744992b49c896cddd437629799e9d12d46a0de",
-        "schema_name=AuthoringCompileResultV1": "8b31499c3205246df7d05ff42643a834e7309dc02c83b293ff8e69474721cf79",
-        "schema_name=AuthoringPlanResultV1": "acd3f4cf584e8529519d049bf6481315de67b566d6f7caeaed7282a5bfe07df6",
-        "schema_name=AuthoringRequestV1": "49710c6eaddd5a79828044bdc76ac587cd4cf7b3723c75afd4f74cf47aac5269",
-        "schema_name=AuthoringRevisionBindingV1": "2d37b092b6e060fc34f4f72cbb5ee99ad535035088a4123c32d4b4d2fe6d0b09",
-        "schema_name=IntegrationSpecV1": "41f65c310dd279865685ddd75742118f6aaaf501ba33b7fbb6f674d3614603a5",
-        "schema_name=ProcessIRV1": "35bf14e6998261858795db5e63401ae7c51ea8efff9fcb67ea7e7776dc1a04eb",
-        "schema_name=SystemTopologySpecV1": "9de746c0efc5c04bd33752cd84afc4087f6fe5217848ac06ebfe05c8868d0a34",
+        "schema_name=AuthoringBuildProvenanceV1": "8fa9d11bfadd197dde5754b218fa4b719a4ea9e9fdf265affc3ce037443e514c",
+        "schema_name=AuthoringCompileResultV1": "567979e6bd408b5d371e764d8370d86f2536b54387eeb948a0582fd67b43e8de",
+        "schema_name=AuthoringPlanResultV1": "8055e6b72aea59743a8ac5e18f18f25f31620077db664347bce8e399401f971a",
+        "schema_name=AuthoringRequestV1": "d33286d1047f572fb974aa4306490ec9eb73b252f3b9b632d213d608a385505e",
+        "schema_name=AuthoringRevisionBindingV1": "40d7e094095eed75b708172967aa0f8480086a9e54c7c9daceb6af6da635b59e",
+        "schema_name=IntegrationSpecV1": "b4dfcfbfe781b54897e419c4b2ca8632108e3e5197c6bc30b0bcf5e1bb81a85c",
+        "schema_name=ProcessIRV1": "9ad7e7964a2a521e99fcbf9404dfa8e9cfcf45fe0de9f3163875311b734f353e",
+        "schema_name=SystemTopologySpecV1": "e23a047f588948511a191afb05cd4700e10f0bd1a7516dfad296b53e9fede0fc",
         "schema_name=account_governance": "d0773b315a5b59bad4bbb0021a2468e5cb4d3a85c4dbac216a887f0194a2ecdc",
         "schema_name=api_service": "c7be12ec5b2c503bd54088bd2c7b00adfa435e3f3fc9610bae0b91117657911b",
         "schema_name=archetype:api_to_api_sync": "7e4653429bdfc56d53ecb1c07fb7f477e11c2180c3afdfad94566cab1ca716e7",
@@ -38036,7 +38036,7 @@
         "schema_name=archetype:http_listener_to_db": "b21d41d870324ce66e872957fa09126dc641354753a0d7681d14d3489f7dcf3f",
         "schema_name=archetype:http_listener_to_rest": "cdd6c9c6fb51cd8afda5c7245a2ef37548939610c1c5235cd9abe1ed9deac3d9",
         "schema_name=archetype:stub_minimal_integration": "28f1d13a8568cea1df47bb1b361708d17e490204c7425787999e80df63f4b0fc",
-        "schema_name=authoring_workflow": "d8df44b0dc4edf18915d6f7c7a7daa2efcfba532f77529674d49fe3fec9188f2",
+        "schema_name=authoring_workflow": "47b38a98c1d1d239e1461290853c8cee67727110b6a430858b5c6abdcdfba063",
         "schema_name=cache_property_authoring": "484017df545d247be99c71ef4be4edf8d47013e565a6e05119c357699229ed6f",
         "schema_name=compose_archetypes": "ec23808a15913ec8ce1d6e510ff941952be25b006a42128216b891d05f1a9d7f",
         "schema_name=design_doctrine": "b47bc0062bf52054609a4b81b8ea98dd5b363c716b079ed0413c1f89bee08a7b",
@@ -38099,7 +38099,7 @@
         "schema_name=governance_pattern:support_folder_isolation_and_privacy": "4f0b206e14ad2f2272b03dfc8c9575dbcc3d454d28894a42602a9cca546de2ed",
         "schema_name=governance_pattern:tools_utilities_folder_non_integration": "50ddcf761e63e68f305271b4f079d8a7effd9b750726a8be784c2c52993c2cbc",
         "schema_name=governance_pattern:tracked_field_naming_generic_and_unique": "42ae3917d1ddb0f23a9dd0e9083a9106a3ed6c18bc06e740a1c07014830204d1",
-        "schema_name=process_ir_authoring": "1ae6cfdcfc40b9ae9556119e3a89a8bb24f7f2d1f244e3ff7409000a82d81cb3",
+        "schema_name=process_ir_authoring": "ae606065570265c1c6d066801322c14444db06fed518ceee1027ca3007dded3e",
         "schema_name=process_property": "43c9cf66e73fb39b6f1625d00a9a01f876005bfa94b34fb99cb14e0deebe699b",
         "schema_name=recipe:boomi.adapter.api_to_api_sync@1.0.0": "280f2452c95aaa3ddff0800bf0fc2c64cd3f7327e2e366123a86d4424b38a52b",
         "schema_name=recipe:boomi.adapter.api_to_database_sync@1.0.0": "0b675ce4f9a86711dec17430be3eecdd90752d6e28e745d667226ef316210b5b",
@@ -38109,11 +38109,11 @@
         "schema_name=recipe:boomi.archetype.api_to_database_sync@0.1.0": "1863e1e40f10cac2308b9f0ec300c3f883bf4bb6a791bee250ee577509e04a79",
         "schema_name=recipe:boomi.compose.db_rest_fanout@1.0.0": "fe61a055c6a5eb6ec289c660cd1867f460737c7f38b9605904a9368dcf1c4b4d",
         "schema_name=recipe:boomi.constraint.inbound_validate@1.0.0": "dedadcf78923b95109eef4373b17f55646fc7a54867e9c789825da5c22ae2670",
-        "schema_name=recipe_contributions": "4f5f4cf764de9dc7e4cfeeab59e1d3376eb512e569672bfe96e6e0cd76955b84",
+        "schema_name=recipe_contributions": "0080b4de8a489e22442391ab452e5c2edeb7c654f9aad27cc73eeff8fa4cb3a2",
         "schema_name=recipe_registry": "220788b6ccbb92a52479683a855f16a34345f577b6ccf05cf3399874eec95758",
         "schema_name=script_dataprocess": "86d6cac0e593188c5c6a253e684097dadda0a6c3c331a1d71672c827133af143",
         "schema_name=script_mapping": "165e78ea08d24f54221f6da5973cbe20c7747d1a37f9fde496a42876b594e029",
-        "schema_name=validation_report": "60ff275074a59813bfa0690a4c1362d4da40c449c926ee6ecfce37c3d58dd71c",
+        "schema_name=validation_report": "d53fc268f88d80333e22218537c1c009812253d069c23f62a138aa468f8a7e67",
         "schema_name=workflow:build_and_verify_http_listener": "bf6ab2e405f375735cd6aaed29da0dbc6b717909dc1c184ba8dbe341f2b95800",
         "schema_name=workflow:build_integration_from_description": "72a20b29bbaf7a0ce39e06fb8514e13831968332bc5d0373d7f100bd7a943be0",
         "schema_name=workflow:compose_multi_target_integration": "6b04f2d192bcaf817a983a1aefda2f2f7b9674ce1c996737137c7ce8d6b932e0",

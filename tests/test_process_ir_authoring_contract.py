@@ -1115,14 +1115,31 @@ def test_the_default_value_description_matches_what_the_validator_does():
     ``_reads_of`` marks a defaulted read ``has_default=True`` and the lineage
     walk then skips the unmet-read check, so the rejection the descriptions
     promised never happens. A caller would repair a flow that was never broken.
+
+    #155 made the two sources ASYMMETRIC, and the asymmetry is now the property
+    pinned here — measured, both ways:
+
+      * a defaulted DDP read discharges the ordinary rule but NOT a bound
+        request path (bound refuses, the identical unbound document compiles);
+      * a defaulted DPP read discharges both (bound and unbound both compile),
+        because an execution supplies dynamic process properties with the run
+        request, so the value genuinely arrives.
+
+    So the DDP description must state the exception and the DPP description must
+    NOT — a symmetric claim would now be false for whichever half it flattened.
     """
     from boomi_mcp.models.process_ir import process_ir_v1_json_schema
 
     defs = process_ir_v1_json_schema()["$defs"]
     for name in ("DdpPropertySourceV1", "DppPropertySourceV1"):
         description = " ".join(defs[name]["description"].split())
-        assert "DISCHARGES the read-before-write rule" in description, name
-        assert "does not discharge" not in description, name
+        assert "discharges the ordinary read-before-write rule" in description.lower(), name
+
+    ddp = " ".join(defs["DdpPropertySourceV1"]["description"].split()).lower()
+    dpp = " ".join(defs["DppPropertySourceV1"]["description"].split()).lower()
+    assert "does not discharge" in ddp, "the DDP exception must be served"
+    assert "request path" in ddp
+    assert "does not discharge" not in dpp, "there is no DPP exception to state"
 
 
 def test_direct_process_ir_next_steps_are_internally_consistent_about_apply():

@@ -1563,3 +1563,144 @@ def test_the_cache_put_summary_does_not_contradict_its_ordering_facts():
     trailing = [f for f in entry.ordering_facts if "LAST step" in f]
     assert len(trailing) == 1, entry.ordering_facts
     assert "MID-LIST" in trailing[0]
+
+
+# ---------------------------------------------------------------------------
+# Issue #155: the connector FAMILY capability authority
+# ---------------------------------------------------------------------------
+#
+# This slice added a per-family table declaring which request locations are
+# bindable per document, and joined it onto every published action row. The
+# source comment claimed the pairing was "checked both ways by tests" and that
+# the public field map's totality was "pinned on its own". Neither test existed
+# — measured: zero references to any of these symbols anywhere under tests/,
+# and injecting an unused family row left the published rows byte-identical
+# with the whole suite green. A comment vouching for evidence that does not
+# exist is worse than no comment, because it stops the next person looking.
+
+
+def _family_capability_symbols():
+    from boomi_mcp.compiler.process_ir.connector_capabilities import (
+        CONNECTOR_FAMILY_CAPABILITIES_V1,
+        ConnectorFamilyCapabilityV1,
+        PUBLIC_FAMILY_CAPABILITY_FIELDS,
+        connector_capability_rows,
+    )
+
+    return (
+        CONNECTOR_FAMILY_CAPABILITIES_V1,
+        ConnectorFamilyCapabilityV1,
+        PUBLIC_FAMILY_CAPABILITY_FIELDS,
+        connector_capability_rows,
+    )
+
+
+def test_every_action_family_has_a_capability_row_and_none_is_unused():
+    """The pairing, both directions — the claim the comment made and nothing kept.
+
+    Forward: a family that appears in an action row but declares no capability
+    row would be joined against nothing, and a caller asking what that family
+    can bind gets silence rather than an answer.
+
+    Backward: a family row nothing joins to is a fact about a connector this
+    compiler does not serve. It cannot be wrong in a way anyone notices, which
+    is exactly why it rots.
+    """
+    families, _model, _public, rows = _family_capability_symbols()
+
+    in_action_rows = {row["family"] for row in rows()}
+    declared = set(families)
+
+    assert in_action_rows, "no action rows — the pairing test would be vacuous"
+    assert not (in_action_rows - declared), sorted(in_action_rows - declared)
+    assert not (declared - in_action_rows), sorted(declared - in_action_rows)
+
+
+def test_an_unused_family_row_is_caught():
+    """NON-VACUITY, and the mutation that proved the gap.
+
+    Injecting a family nothing joins to left the published rows byte-identical
+    and the entire suite green. The pairing assertion above is the only thing
+    that sees it, so it is exercised here against a perturbed table rather than
+    trusted to fire.
+    """
+    families, model, _public, rows = _family_capability_symbols()
+
+    perturbed = dict(families)
+    perturbed["a-connector-family-nothing-serves"] = model(
+        family="a-connector-family-nothing-serves", bindable_locations=()
+    )
+    in_action_rows = {row["family"] for row in rows()}
+    assert set(perturbed) - in_action_rows == {"a-connector-family-nothing-serves"}
+
+
+def test_an_action_family_with_no_capability_row_is_caught():
+    """The other direction of the same non-vacuity."""
+    families, _model, _public, rows = _family_capability_symbols()
+
+    in_action_rows = {row["family"] for row in rows()} | {"a-family-with-no-declaration"}
+    assert in_action_rows - set(families) == {"a-family-with-no-declaration"}
+
+
+def test_the_public_field_map_is_total_over_the_joined_fields():
+    """Total over what it PUBLISHES — deliberately excluding the join key.
+
+    The naive claim, that the map covers every field of the model, is false and
+    was written that way in the source: `family` is a field of the model and is
+    NOT in this map, because the action row already carries it from its own
+    projection. Publishing it twice under two names is the thing to avoid.
+
+    So the pinned property is: every field except the join key has a public
+    name, and no public name is invented for a field that does not exist.
+    """
+    _families, model, public, _rows = _family_capability_symbols()
+
+    JOIN_KEY = "family"
+    declared_fields = set(model.model_fields) - {JOIN_KEY}
+
+    assert set(public) == declared_fields, {
+        "fields_without_a_public_name": sorted(declared_fields - set(public)),
+        "public_names_for_no_field": sorted(set(public) - declared_fields),
+    }
+    assert JOIN_KEY not in public, "the join key must not be published twice"
+
+
+def test_the_public_names_do_not_collide():
+    """Injective: two fields sharing a served name would silently drop one."""
+    _families, _model, public, _rows = _family_capability_symbols()
+
+    assert len(set(public.values())) == len(public), sorted(public.items())
+
+
+def test_every_published_action_row_carries_the_joined_family_fields():
+    """The join actually happens — the point of the whole table.
+
+    Without this, the map could be total and injective and still never reach a
+    caller, which is the shape of defect this slice has already hit once at the
+    served surface.
+    """
+    _families, _model, public, rows = _family_capability_symbols()
+
+    published = rows()
+    assert published, "no published rows — this assertion would be vacuous"
+    for name in public.values():
+        missing = [r for r in published if name not in r]
+        assert not missing, (name, [r.get("family") for r in missing[:3]])
+
+
+def test_the_rest_family_is_the_only_one_declaring_a_bindable_location():
+    """The fact the slice exists to publish, pinned against the authority.
+
+    Live-attested: a REST connector binds its request Path per document, and the
+    other served families bind nothing per document. If a future family declares
+    a location, this fails and someone has to confirm the platform agrees rather
+    than the table simply growing.
+    """
+    families, _model, _public, _rows = _family_capability_symbols()
+
+    with_locations = {
+        name: tuple(cap.bindable_locations)
+        for name, cap in families.items()
+        if cap.bindable_locations
+    }
+    assert with_locations == {"officialboomi-X3979C-rest-prod": ("Path",)}, with_locations

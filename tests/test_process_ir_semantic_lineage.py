@@ -1044,10 +1044,18 @@ def test_the_stream_replacing_authority_matches_the_served_contract():
     }
 
 
-#: One authored instance of each stream-replacing kind. Shared by every test
-#: that needs a replacement, so a kind added to one is not missed by the other.
+#: One authored instance of each stream-replacing kind that MEASURABLY DISCARDS
+#: document properties. Shared by every test that needs a replacement to
+#: invalidate, so a kind added to one is not missed by the other.
+#:
+#: `message` is deliberately NOT here. It replaces the document stream — the
+#: served contract says so and that is correct — but the platform was measured
+#: to KEEP the document properties across it (capture `cap155-r17-ddp-survival`,
+#: read off the wire). The bound-path rule keys on property survival, not on
+#: stream replacement, and those two facts differ exactly here. Its preserving
+#: behaviour is pinned separately below, so the boundary is asserted from both
+#: sides rather than one list quietly covering both.
 _REPLACING_KINDS = [
-    pytest.param({"kind": "message", "text": "hello"}, id="message"),
     pytest.param(
         {"kind": "data_process", "steps": [
             {"operation": "split_documents", "profile_type": "json",
@@ -1062,6 +1070,11 @@ _REPLACING_KINDS = [
         id="data_process_script",
     ),
     pytest.param({"kind": "cache_get", "cache_ref": "$ref:CACHE"}, id="cache_get"),
+]
+
+#: Stream-replacing kinds the platform was MEASURED to carry properties across.
+_PROPERTY_PRESERVING_KINDS = [
+    pytest.param({"kind": "message", "text": "hello"}, id="message"),
 ]
 
 
@@ -1511,8 +1524,8 @@ def test_a_declaring_node_that_replaces_the_stream_keeps_its_own_write():
     assert _codes_with([_script_step(source), appended, _BOUND, {"kind": "stop"}], caps) == ()
     # ...but a LATER replacement still invalidates it.
     later = _codes_with(
-        [_script_step(source), {"kind": "message", "text": "hi"}, appended, _BOUND,
-         {"kind": "stop"}], caps)
+        [_script_step(source), {"kind": "cache_get", "cache_ref": "$ref:CACHE"},
+         appended, _BOUND, {"kind": "stop"}], caps)
     assert PROCESS_IR_SEMANTIC_DYNAMIC_PATH_DDP_NOT_ESTABLISHED in later, later
 
 
@@ -1534,5 +1547,161 @@ def test_a_caller_declared_entry_value_establishes_one_too():
 
     # Control: without the declaration, and with a replacement after it.
     assert PROCESS_IR_SEMANTIC_DYNAMIC_PATH_DDP_NOT_ESTABLISHED in _codes_with(steps)
-    replaced = _codes_with([{"kind": "message", "text": "hi"}] + steps, at_entry)
+    replaced = _codes_with(
+        [{"kind": "cache_get", "cache_ref": "$ref:CACHE"}] + steps, at_entry)
     assert PROCESS_IR_SEMANTIC_DYNAMIC_PATH_DDP_NOT_ESTABLISHED in replaced, replaced
+
+
+@pytest.mark.parametrize("preserving", _PROPERTY_PRESERVING_KINDS)
+def test_a_replacement_that_KEEPS_the_properties_does_not_invalidate_the_path(preserving):
+    """The boundary, asserted from the side that used to be wrong.
+
+    This rule refused every stream-replacing kind, on the reasoning that the
+    replacing step discarded the property. The platform disagrees for one of
+    them: measured on the wire, a Message replaces the document stream and the
+    property still reaches the request path (capture `cap155-r17-ddp-survival`).
+    So the rule was refusing documents that run.
+
+    The original finding this rule came from cited the served sentence about a
+    property written before a SPLIT — and split measures lost. Generalising from
+    split to every replacing kind is what was wrong, and this is the cell that
+    would have caught it.
+    """
+    writer = {"kind": "set_ddp", "name": "P", "source_values": [_STATIC, _DPPSEG]}
+    assert _dynpath_codes([writer, preserving, _BOUND, {"kind": "stop"}]) == ()
+
+
+@pytest.mark.parametrize("preserving", _PROPERTY_PRESERVING_KINDS)
+def test_a_current_value_survives_a_replacement_that_keeps_properties(preserving):
+    """The same boundary for an appending write, which is the harder case."""
+    writer = {"kind": "set_ddp", "name": "P", "source_values": [_STATIC]}
+    appender = {"kind": "set_ddp", "name": "P", "source_values": [_STATIC, _CURRENT]}
+    assert _dynpath_codes([writer, preserving, appender, _BOUND, {"kind": "stop"}]) == ()
+
+
+def test_the_survival_table_is_pinned_to_what_was_measured():
+    """The table is EVIDENCE, not an opinion, so it is pinned to its capture.
+
+    Every entry here was read off the wire on the live platform. Changing one
+    silently would change which documents this compiler refuses, on no evidence
+    — so a change has to come here and be justified against a new measurement.
+
+    The two sets are also asserted to DIFFER: if a future edit made property
+    survival track stream replacement again, the rule would be back to keying on
+    the adjacent fact, and every test above would still pass.
+    """
+    from boomi_mcp.compiler.process_ir.semantic_validation.lineage import (
+        DOCUMENT_STREAM_REPLACING_KINDS,
+        PROPERTY_SURVIVAL_V1,
+    )
+
+    assert dict(PROPERTY_SURVIVAL_V1) == {
+        ("message", None): "survives",
+        ("cache_get", None): "lost",
+        ("document_cache_retrieve", None): "lost",
+        ("data_process", "split_documents"): "lost",
+        ("data_process", "custom_scripting"): "script_dependent",
+        ("data_process", "combine_documents"): "unmeasured",
+    }
+
+    # Every replacing kind has a verdict — an unlisted kind would silently fall
+    # through to "not surviving", which is safe but would hide that nobody looked.
+    keyed = {kind for kind, _op in PROPERTY_SURVIVAL_V1}
+    assert DOCUMENT_STREAM_REPLACING_KINDS <= keyed, DOCUMENT_STREAM_REPLACING_KINDS - keyed
+
+    # ...and the two facts are NOT the same fact.
+    preserving = {kind for (kind, _op), v in PROPERTY_SURVIVAL_V1.items() if v == "survives"}
+    assert preserving & DOCUMENT_STREAM_REPLACING_KINDS == {"message"}, preserving
+
+
+def _served_diagnostic(code):
+    from boomi_mcp.compiler.process_ir.semantic_validation.findings import finding_specs
+
+    return next(d for d in finding_specs() if d.get("code") == code)
+
+
+def test_the_bound_path_diagnostic_names_the_action_that_actually_clears_it():
+    """A remediation must name a REMEDY, not an action the author already took.
+
+    A sweep of the served surfaces found this one telling the author to "write
+    the property on every path that reaches the call" — for a document whose
+    only path writes it as the immediately preceding step. Obeying it harder
+    does not help; writing it twice is refused identically. The action that
+    clears it, moving the write downstream of the step that drops the property,
+    was named nowhere in the served text.
+
+    So the remediation is pinned to the three things that genuinely discharge or
+    fail to discharge this refusal, each of which is measured elsewhere in this
+    file: placement relative to a property-dropping step, the default, and a
+    caller's entry declaration.
+    """
+    text = " ".join(
+        _served_diagnostic(PROCESS_IR_SEMANTIC_DYNAMIC_PATH_DDP_NOT_ESTABLISHED)
+        ["remediation"].lower().split()
+    )
+    assert "downstream" in text
+    assert "message does not" in text          # the measured exception
+    assert "default does not discharge" in text
+    assert "process entry" in text             # the caller-declaration case
+    # ...and it no longer states the bare instruction the author has satisfied.
+    assert not text.startswith("write the property on every path that reaches the call.")
+
+
+def test_the_bound_path_diagnostic_message_covers_every_way_it_fires():
+    """The message named one of four causes, and not the common one.
+
+    Measured: for a document refused after a property-dropping step, asking the
+    compiler directly whether the property is established answers YES — the
+    unbound probe compiles. So the served sentence "not established on every
+    path" described a state the compiler contradicts in the same run.
+    """
+    text = " ".join(
+        _served_diagnostic(PROCESS_IR_SEMANTIC_DYNAMIC_PATH_DDP_NOT_ESTABLISHED)
+        ["message"].lower().split()
+    )
+    assert "do not carry the property" in text or "not carry" in text
+    assert "nothing established" in text
+    assert "not established on every path to the call" not in text
+
+
+def test_the_probe_behind_that_message_still_contradicts_the_old_wording():
+    """Non-vacuity for the test above: the contradiction is real, not historical.
+
+    The bound document is refused while the identical document with an UNBOUND
+    call compiles — so the property IS established in the compiler's own lineage
+    model, and the refusal is about composition on these documents, not about
+    establishment. If this ever stops holding, the wording above needs revisiting
+    rather than preserving.
+    """
+    writer = {"kind": "set_ddp", "name": "P", "source_values": [_STATIC, _DPPSEG]}
+    split = {"kind": "data_process", "steps": [
+        {"operation": "split_documents", "profile_type": "json",
+         "profile_ref": "$ref:PROF", "link_element_key": "1",
+         "link_element_name": "root"}]}
+    unbound = {"kind": "connector_call", "operation_ref": "$ref:GETOP"}
+
+    refused = _dynpath_codes([writer, split, _BOUND, {"kind": "stop"}])
+    assert PROCESS_IR_SEMANTIC_DYNAMIC_PATH_DDP_NOT_ESTABLISHED in refused, refused
+    assert _dynpath_codes([writer, split, unbound, {"kind": "stop"}]) == ()
+
+
+def test_the_served_retry_description_states_the_escape_this_slice_added():
+    """B1: the description called the source refusal unconditional; it is not.
+
+    Measured: a positive count with the default policy refuses, and the same
+    count with `allow_duplicates` compiles clean — the refusal is lifted, not
+    relocated. The sentence promised a rejection the code no longer performs,
+    while the retry model's own docstring already stated the rule correctly, so
+    the served surface contradicted itself.
+    """
+    import json
+
+    from boomi_mcp.models.process_ir import canonical_process_ir_schema_json
+
+    served = json.loads(canonical_process_ir_schema_json())
+    text = " ".join(served["$defs"]["TryCatchNodeV1"]["description"].lower().split())
+    assert "allow_duplicates" in text
+    assert "unless" in text
+    # The write-safety refusal genuinely has no escape, and must not be softened
+    # by the same edit.
+    assert "no such escape" in text

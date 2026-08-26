@@ -292,6 +292,71 @@ DOCUMENT_STREAM_REPLACING_KINDS: FrozenSet[str] = frozenset(
 )
 
 
+#: What the PLATFORM does to a document property at each step that replaces the
+#: document stream — MEASURED, and keyed by `(semantic kind, step operation)`
+#: because the answer is not a property of the node kind.
+#:
+#: The bound-path rule used to key on :data:`DOCUMENT_STREAM_REPLACING_KINDS`,
+#: which answers a DIFFERENT question: does this step replace the document
+#: CONTENT. That is the served contract's own question and is correctly answered
+#: there. Whether the documents keep their PROPERTIES is a separate fact, and the
+#: two sets differ — a Message replaces the stream and keeps the properties. The
+#: rule was refusing documents the platform runs.
+#:
+#: Measured live before the account roll (capture `cap155-r17-ddp-survival`),
+#: read off the WIRE rather than out of the emitted graph: every cell ends in a
+#: connector call whose path is bound to the property, so "survives" means the
+#: platform issued the request with the value in the path. One invariant held in
+#: all six cells — survives iff two outbound documents iff the bound call issued
+#: a request; when the property is lost the call emits nothing at all.
+#:
+#: `document_cache_retrieve` is not inferred from `cache_get`: both kinds lower
+#: to the SAME pair of platform steps, so they cannot differ.
+PROPERTY_SURVIVAL_V1: Mapping[Tuple[str, Optional[str]], str] = MappingProxyType({
+    ("message", None): "survives",
+    ("cache_get", None): "lost",
+    ("document_cache_retrieve", None): "lost",
+    ("data_process", "split_documents"): "lost",
+    # Measured to SURVIVE for the one script exercised — which stored a brand-new
+    # stream with an empty properties object and kept the property anyway, so it
+    # is not carried the obvious way. Whether another script can drop it is
+    # unmeasured, so the rule treats it as not surviving: a wrong "survives"
+    # sends a request to the wrong resource, a wrong "lost" refuses a document
+    # that runs, and only one of those is silent.
+    ("data_process", "custom_scripting"): "script_dependent",
+    ("data_process", "combine_documents"): "unmeasured",
+})
+
+#: Only a MEASURED survival preserves the carried set.
+_PROPERTIES_SURVIVE = "survives"
+
+
+def _replacing_step_operation(semantic) -> Optional[str]:
+    """The step operation this kind's answer depends on, or None if it does not.
+
+    A node whose steps disagree yields None, which lands on "not measured to
+    survive" — the fail-closed side — without needing a case of its own.
+    """
+    steps = getattr(semantic, "steps", None) or ()
+    operations = {getattr(step, "operation", None) for step in steps}
+    return next(iter(operations)) if len(operations) == 1 else None
+
+
+def _discards_document_properties(semantic) -> bool:
+    """Do the documents leaving this step lose their document properties?
+
+    The question the bound-path rule needs, as opposed to the adjacent one it
+    used to ask. Anything not measured to survive discards, so a kind or
+    operation nobody has measured is refused rather than trusted.
+    """
+    if not _replaces_document_stream(semantic):
+        return False
+    verdict = PROPERTY_SURVIVAL_V1.get(
+        (semantic.semantic_kind, _replacing_step_operation(semantic))
+    )
+    return verdict != _PROPERTIES_SURVIVE
+
+
 def _replaces_document_stream(semantic) -> bool:
     """Does this node hand downstream steps DIFFERENT documents than it received? (#155)
 
@@ -875,7 +940,7 @@ def _walk_lineage(
         # AFTER the check above so a binding ON the replacing node still sees the
         # writer that reached it, and only to `writers` — `_State` keeps #154's
         # model untouched.
-        if _replaces_document_stream(semantic):
+        if _discards_document_properties(semantic):
             writers = {
                 key: value for key, value in writers.items() if key[0] != DDP
             }

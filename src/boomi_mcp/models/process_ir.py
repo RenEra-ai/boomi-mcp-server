@@ -867,14 +867,22 @@ class DdpPropertySourceV1(_ProcessIRBase):
 
     ``property_name`` is the bare name — the wire prefix is owned by the
     emitter and must not be authored. A dynamic document property travels with
-    its own document copy: it is visible to later steps on the same path, and it
-    is NOT visible across sibling Branch legs, because each leg receives an
-    independent copy of the document stream.
+    its own document copy: it is visible to later steps on the same path until a
+    step hands them DIFFERENT documents that do not carry it, and it is NOT
+    visible across sibling Branch legs, because each leg receives an independent
+    copy of the document stream. Which steps drop it is measured per kind — a
+    Message keeps the properties, a split and a cache retrieval lose them.
 
     ``default_value`` supplies a value when the property has not been written,
-    and supplying it DISCHARGES the read-before-write rule: a defaulted read
-    cannot fail, because the default establishes the value. Omit it when you
-    want an unmet read reported rather than silently defaulted.
+    and supplying it discharges the ordinary read-before-write rule: for an
+    ordinary read the default IS the value. Omit it when you want an unmet read
+    reported rather than silently defaulted.
+
+    It does NOT discharge the read when the composed value becomes a connector
+    request path. There the default is deliberately ignored, because a defaulted
+    path is a well-formed request to the WRONG resource — it succeeds against
+    something, silently, instead of failing. So a bound path requires a real
+    writer even where a defaulted read would otherwise be satisfied.
     """
 
     value_type: Literal["ddp"]
@@ -897,10 +905,18 @@ class DppPropertySourceV1(_ProcessIRBase):
     order, so reading in leg 0 what leg 1 writes is rejected rather than
     silently reading nothing.
 
-    ``default_value`` supplies a value when the property is unset, and — as with
-    the document-scoped source — supplying it DISCHARGES the read-before-write
-    rule: a defaulted read cannot fail. Omit it when you want an unmet read
-    reported rather than silently defaulted.
+    ``default_value`` supplies a value when the property is unset, and supplying
+    it discharges the ordinary read-before-write rule: a defaulted read cannot
+    fail. Omit it when you want an unmet read reported rather than silently
+    defaulted.
+
+    UNLIKE the document-scoped source, that holds even where the composed value
+    becomes a connector request path: an execution supplies dynamic process
+    properties with the run request, so the value genuinely arrives rather than
+    defaulting to nothing. This is why a bound path may take a process property
+    as its dynamic segment with no in-process writer — the shape the live
+    source-role capture exercises — while the same document-scoped read is
+    refused.
     """
 
     value_type: Literal["dpp"]
@@ -1400,10 +1416,17 @@ class SetDdpNodeV1(_ProcessIRBase):
     a non-empty ordered list; the sources are concatenated in the authored
     order, which is how ``current`` composes with a literal to append.
 
-    Scope is the document copy. A value written here is visible to later steps
-    on the same path and is NOT visible in a sibling Branch leg, because each
-    leg gets its own copy of the stream. Where paths converge, only state
-    written on EVERY incoming path counts as established.
+    Scope is the document copy, and the value RIDES ON THOSE DOCUMENTS. It is
+    visible to later steps on the same path until a step hands downstream steps
+    DIFFERENT documents that do not carry it, and it is NOT visible in a sibling
+    Branch leg, because each leg gets its own copy of the stream. Where paths
+    converge, only state written on EVERY incoming path counts as established.
+
+    Which steps drop it is a measured platform fact, not a consequence of
+    replacing the stream: a Message replaces the document stream and KEEPS the
+    properties, while a split and a cache retrieval lose them. Naming only the
+    Branch exception, as this text used to, reads as a guarantee for the linear
+    case that the platform does not give.
 
     See the ``process_ir_authoring`` entry ``state_visibility.ddp``.
     """
@@ -2314,10 +2337,14 @@ class TryCatchNodeV1(_ProcessIRBase):
     Nothing may follow a Try/Catch: both paths terminate independently and there
     is no join.
 
-    Retry is bounded and additionally CONSTRAINED BY SAFETY, not just by range: a
-    positive count is rejected when the protected region would re-run the flow's
-    document source, and when a retried call writes without registry-backed
-    replay safety. Those checks run before anything is emitted.
+    Retry is bounded and additionally CONSTRAINED BY SAFETY, not just by range.
+    A positive count is rejected when the protected region would re-run the
+    flow's document source — UNLESS ``retry.source_replay_policy`` is set to
+    ``allow_duplicates``, which is how a caller states that re-reading the
+    source is acceptable for this process and lifts that one refusal. It is
+    also rejected when a retried call writes without registry-backed replay
+    safety, and that refusal has no such escape. Those checks run before
+    anything is emitted.
     """
 
     kind: Literal["try_catch"]

@@ -306,8 +306,13 @@ class ConnectorFamilyCapabilityV1(_CompilerModel):
 
 
 #: One row per family in the action allowlist. The pairing is checked both ways
-#: by tests — every family with an action row has a family row, and no family
-#: row is unused — so a new family cannot arrive without declaring what it binds.
+#: — every family with an action row has a family row, and no family row is
+#: unused — so a new family cannot arrive without declaring what it binds.
+#:
+#: The tests are `test_every_action_family_has_a_capability_row_and_none_is_unused`
+#: and its two non-vacuity cases in `test_process_ir_authoring_contract_parity.py`.
+#: They are named because this comment previously asserted they existed when they
+#: did not: an unused family row could be added and the ENTIRE suite stayed green.
 CONNECTOR_FAMILY_CAPABILITIES_V1: Mapping[str, ConnectorFamilyCapabilityV1] = (
     MappingProxyType(
         {
@@ -355,6 +360,13 @@ PUBLIC_CAPABILITY_FIELDS: Mapping[str, str] = MappingProxyType(
 #: own public names. Separate from :data:`PUBLIC_CAPABILITY_FIELDS` because the
 #: two models are projected separately and the totality of each is pinned on its
 #: own; merging them would hide a field that belongs to neither.
+#:
+#: Total over every field of :class:`ConnectorFamilyCapabilityV1` EXCEPT the join
+#: key `family`, which the action row already carries from its own projection —
+#: publishing it twice under two names is the thing being avoided. The earlier
+#: wording claimed totality over the model's fields outright, which is false as
+#: stated and was pinned by nothing; `test_the_public_field_map_is_total_over_the_joined_fields`
+#: now pins the claim in the form that is actually true.
 PUBLIC_FAMILY_CAPABILITY_FIELDS: Mapping[str, str] = MappingProxyType(
     {"bindable_locations": "per_document_bindable_locations"}
 )
