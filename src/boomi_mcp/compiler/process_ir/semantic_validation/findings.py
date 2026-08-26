@@ -27,6 +27,9 @@ from ....errors import (
     PROCESS_IR_REFERENCE_COMPONENT_TYPE_MISMATCH,
     PROCESS_IR_SEMANTIC_LINEAGE_AMBIGUOUS_LAST_WRITE,
     PROCESS_IR_SEMANTIC_LINEAGE_BRANCH_ORDER_INVALID,
+    PROCESS_IR_SEMANTIC_DYNAMIC_PATH_DDP_NOT_ESTABLISHED,
+    PROCESS_IR_SEMANTIC_DYNAMIC_PATH_NO_DYNAMIC_SEGMENT,
+    PROCESS_IR_SEMANTIC_DYNAMIC_PATH_PROFILE_BINDING_MISMATCH,
     PROCESS_IR_SEMANTIC_LINEAGE_CACHE_WRITER_MISSING,
     PROCESS_IR_SEMANTIC_LINEAGE_DDP_SCOPE_INVALID,
     PROCESS_IR_SEMANTIC_LINEAGE_EFFECT_UNKNOWN,
@@ -60,6 +63,16 @@ _MESSAGES: Dict[str, str] = {
     ),
     PROCESS_IR_SEMANTIC_LINEAGE_CACHE_WRITER_MISSING: (
         "a document cache is read on a path with no preceding write"
+    ),
+    PROCESS_IR_SEMANTIC_DYNAMIC_PATH_DDP_NOT_ESTABLISHED: (
+        "a bound request path reads a document property that is not established "
+        "on every path to the call"
+    ),
+    PROCESS_IR_SEMANTIC_DYNAMIC_PATH_NO_DYNAMIC_SEGMENT: (
+        "the writer composing a bound request path contributes only literal values"
+    ),
+    PROCESS_IR_SEMANTIC_DYNAMIC_PATH_PROFILE_BINDING_MISMATCH: (
+        "a bound request path and its writer disagree about the request profile"
     ),
     PROCESS_IR_SEMANTIC_LINEAGE_AMBIGUOUS_LAST_WRITE: (
         "converging paths leave the last writer undetermined"
@@ -120,6 +133,21 @@ _REMEDIATION: Dict[str, str] = {
     ),
     PROCESS_IR_SEMANTIC_LINEAGE_CACHE_WRITER_MISSING: (
         "Add a cache write ahead of this read on the same path."
+    ),
+    PROCESS_IR_SEMANTIC_DYNAMIC_PATH_DDP_NOT_ESTABLISHED: (
+        "Write the property on every path that reaches the call. A default does "
+        "not discharge it here: the property IS the request path, so a defaulted "
+        "value would address the wrong resource rather than fail."
+    ),
+    PROCESS_IR_SEMANTIC_DYNAMIC_PATH_NO_DYNAMIC_SEGMENT: (
+        "Give the writer at least one non-literal source — a profile element or "
+        "another property — or drop the binding and configure a static path on "
+        "the operation instead."
+    ),
+    PROCESS_IR_SEMANTIC_DYNAMIC_PATH_PROFILE_BINDING_MISMATCH: (
+        "Name on the binding the same profile the writer reads its elements "
+        "from, name none when the writer reads no profile element, and compose "
+        "the path from elements of a single profile."
     ),
     PROCESS_IR_SEMANTIC_LINEAGE_AMBIGUOUS_LAST_WRITE: (
         "Make every converging path establish the same last writer, or move the "

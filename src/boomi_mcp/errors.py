@@ -240,6 +240,19 @@ PROCESS_IR_SEMANTIC_LINEAGE_CACHE_WRITER_MISSING = (
 PROCESS_IR_SEMANTIC_LINEAGE_AMBIGUOUS_LAST_WRITE = (
     "PROCESS_IR_SEMANTIC_LINEAGE_AMBIGUOUS_LAST_WRITE"
 )
+
+# #155 M12.17. A connector call binding its per-document request path to a
+# dynamic document property depends on the writer that composes that path, so
+# these are lineage facts: which writer reaches the call, and what it contains.
+PROCESS_IR_SEMANTIC_DYNAMIC_PATH_DDP_NOT_ESTABLISHED = (
+    "PROCESS_IR_SEMANTIC_DYNAMIC_PATH_DDP_NOT_ESTABLISHED"
+)
+PROCESS_IR_SEMANTIC_DYNAMIC_PATH_NO_DYNAMIC_SEGMENT = (
+    "PROCESS_IR_SEMANTIC_DYNAMIC_PATH_NO_DYNAMIC_SEGMENT"
+)
+PROCESS_IR_SEMANTIC_DYNAMIC_PATH_PROFILE_BINDING_MISMATCH = (
+    "PROCESS_IR_SEMANTIC_DYNAMIC_PATH_PROFILE_BINDING_MISMATCH"
+)
 PROCESS_IR_SEMANTIC_LINEAGE_EFFECT_UNKNOWN = (
     "PROCESS_IR_SEMANTIC_LINEAGE_EFFECT_UNKNOWN"
 )
@@ -1176,6 +1189,41 @@ ERROR_TAXONOMY: Dict[str, ErrorCodeSpec] = {
                 "that cache."
             ),
             owner="#143",
+        ),
+        ErrorCodeSpec(
+            code=PROCESS_IR_SEMANTIC_DYNAMIC_PATH_DDP_NOT_ESTABLISHED,
+            category="process_ir",
+            retryable=False,
+            summary=(
+                "A connector call binds its per-document request path to a "
+                "dynamic document property that is not established on every "
+                "path reaching the call, so the request path would be composed "
+                "from a value nothing wrote."
+            ),
+            owner="#155",
+        ),
+        ErrorCodeSpec(
+            code=PROCESS_IR_SEMANTIC_DYNAMIC_PATH_NO_DYNAMIC_SEGMENT,
+            category="process_ir",
+            retryable=False,
+            summary=(
+                "The writer composing a bound request path contributes only "
+                "literal values, so the path is the same for every document "
+                "and is not per-document at all."
+            ),
+            owner="#155",
+        ),
+        ErrorCodeSpec(
+            code=PROCESS_IR_SEMANTIC_DYNAMIC_PATH_PROFILE_BINDING_MISMATCH,
+            category="process_ir",
+            retryable=False,
+            summary=(
+                "A bound request path and the writer composing it disagree "
+                "about the request profile: the binding names one the writer "
+                "does not read from, omits one the writer needs, or the writer "
+                "reads elements from more than one profile."
+            ),
+            owner="#155",
         ),
         ErrorCodeSpec(
             code=PROCESS_IR_SEMANTIC_LINEAGE_AMBIGUOUS_LAST_WRITE,

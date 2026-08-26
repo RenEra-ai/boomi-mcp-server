@@ -41,6 +41,9 @@ from types import MappingProxyType
 from typing import Dict, FrozenSet, List, Mapping, NamedTuple, Optional, Set, Tuple
 
 from ....errors import (
+    PROCESS_IR_SEMANTIC_DYNAMIC_PATH_DDP_NOT_ESTABLISHED,
+    PROCESS_IR_SEMANTIC_DYNAMIC_PATH_NO_DYNAMIC_SEGMENT,
+    PROCESS_IR_SEMANTIC_DYNAMIC_PATH_PROFILE_BINDING_MISMATCH,
     PROCESS_IR_SEMANTIC_LINEAGE_BRANCH_ORDER_INVALID,
     PROCESS_IR_SEMANTIC_LINEAGE_CACHE_WRITER_MISSING,
     PROCESS_IR_SEMANTIC_LINEAGE_DDP_SCOPE_INVALID,
@@ -574,13 +577,94 @@ def _walk_lineage(
                 evidence=(("state_scope", scope),) + extra,
             )
 
-    def _visit(node_id: str, state: _State, depth: int, leg=None) -> _State:
+    def _check_path_binding(node, semantic, state, writers) -> None:
+        """A bound request path is only as sound as the writer that composes it (#155).
+
+        Runs at the CONNECTOR, against the state and the reaching writer on THIS
+        path — not against the meet at exit, which answers a different question
+        (what holds when the process finishes) and is both too weak and too
+        strong for "established on every path to this call". ``_report`` dedups
+        by (code, node), so a violation on any one path is reported once.
+
+        The reaching writer is a singleton per path: the CFG is a tree, so
+        ``writers`` carries the LAST writer of each key along the path walked to
+        get here. Nothing is merged — a Decision arm that composes the path
+        differently is its own path and is checked as one.
+        """
+        binding = getattr(semantic, "path_binding", None)
+        if binding is None:
+            return
+        # Evidence stays STRUCTURAL. The property name is caller-authored text,
+        # and evidence is served — the node's own source_path already points the
+        # author at the binding, so naming it here would buy nothing and leak.
+        key = (DDP, binding.property_name)
+        writer = writers.get(key)
+        # Established, and established by a writer this process can see. A key
+        # the CALLER declares established at entry has no writer here, so its
+        # composition cannot be checked at all — which is exactly the case the
+        # binding must not be allowed to rest on.
+        if not state.establishes(key) or writer is None:
+            _report(
+                PROCESS_IR_SEMANTIC_DYNAMIC_PATH_DDP_NOT_ESTABLISHED,
+                node,
+                evidence=(("state_scope", DDP),),
+            )
+            return
+        writer_semantic, unmet_reads = writer
+        if unmet_reads:
+            # The writer itself composes from a property nothing established.
+            # A default on that read does NOT discharge it here: for an ordinary
+            # read a default is a defined value, but this one becomes the request
+            # PATH, so defaulting addresses the wrong resource instead of failing.
+            _report(
+                PROCESS_IR_SEMANTIC_DYNAMIC_PATH_DDP_NOT_ESTABLISHED,
+                node,
+                evidence=(("state_scope", unmet_reads[0][0]),),
+            )
+            return
+        sources = tuple(getattr(writer_semantic, "source_values", ()) or ())
+        if not any(getattr(s, "value_type", None) != "static" for s in sources):
+            _report(
+                PROCESS_IR_SEMANTIC_DYNAMIC_PATH_NO_DYNAMIC_SEGMENT,
+                node,
+                evidence=(("state_scope", DDP),),
+            )
+            return
+        # The profile pairing is a biconditional, and it is what makes the
+        # binding's own ``request_profile_ref`` a pinned fact rather than a
+        # second copy: the emitted parameter-profile attribute is meaningful
+        # only with a profile element, so the two must agree exactly.
+        pairs = {
+            (getattr(s, "profile_ref", None), getattr(s, "profile_type", None))
+            for s in sources
+            if getattr(s, "value_type", None) == "profile"
+        }
+        if len(pairs) > 1:
+            _report(
+                PROCESS_IR_SEMANTIC_DYNAMIC_PATH_PROFILE_BINDING_MISMATCH,
+                node,
+                evidence=(("reader_count", len(pairs)),),
+            )
+            return
+        declared = binding.request_profile_ref
+        expected = next(iter(pairs))[0] if pairs else None
+        if declared != expected:
+            _report(
+                PROCESS_IR_SEMANTIC_DYNAMIC_PATH_PROFILE_BINDING_MISMATCH,
+                node,
+                evidence=(("reader_count", len(pairs)),),
+            )
+
+    def _visit(node_id: str, state: _State, depth: int, leg=None, writers=None) -> _State:
         node = prepared.node(node_id)
         if node is None:
             return state
         if depth > 256:
             truncated.append(True)
             return state
+        # Per-path, copy-on-write, and deliberately NOT part of `_State`: it is
+        # never merged, so it cannot perturb the meet the whole module rests on.
+        writers = writers if writers is not None else {}
 
         semantic = node.semantic
 
@@ -655,7 +739,31 @@ def _walk_lineage(
         # on one node: `_writes_of` covers set_property / cache_put, while
         # `_trusted_effects` covers map / process_call / data_process.
         for key in _writes_of(semantic):
+            # Record WHICH node established the key on this path, along with any
+            # of its own property reads that nothing had established yet (#155).
+            # Both are captured HERE, against the state the writer actually ran
+            # under — recovering them at the consumer would mean re-walking.
+            if key[0] == DDP:
+                # DDP sources only, and a default does NOT discharge them: a
+                # document property has no source outside this process, so a
+                # defaulted one composes the request path from a value nothing
+                # wrote. A DPP source is deliberately NOT included — an
+                # execution supplies dynamic process properties with the run
+                # request, which is how the live-attested source-role path is
+                # driven (capture `cap155-e1-source-dynamic-path`, where the
+                # path's `key` segment arrives with the execution), so requiring
+                # an in-process writer for it would refuse a shape the platform
+                # runs green.
+                unmet_here = tuple(
+                    read_key
+                    for read_key, _has_default, _strict in _reads_of(semantic)
+                    if read_key[0] == DDP and not state.establishes(read_key)
+                )
+                writers = {**writers, key: (semantic, unmet_here)}
             state = state.with_write(key)
+
+        # --- a bound request path, against this path's reaching writer -------
+        _check_path_binding(node, semantic, state, writers)
 
         # --- successors -----------------------------------------------------
         edges = prepared.successors(node_id)
@@ -691,6 +799,7 @@ def _walk_lineage(
                     _State(entry.document, carried.execution),
                     depth + 1,
                     (node.node_id, edge.leg_ordinal or edge.local_ordinal),
+                    writers,
                 )
                 completions = normal_exits[first:]
                 if completions:
@@ -737,7 +846,7 @@ def _walk_lineage(
             results = []
             for edge in edges:
                 before_normal, before_threw = len(normal_exits), len(threw)
-                arm = _visit(edge.target_node_id, state, depth + 1, leg)
+                arm = _visit(edge.target_node_id, state, depth + 1, leg, writers)
                 only_threw = (
                     len(threw) > before_threw
                     and len(normal_exits) == before_normal
@@ -756,12 +865,12 @@ def _walk_lineage(
             # document. A write inside the try body may not have happened when
             # the failure occurred, so it cannot be assumed visible to catch.
             for edge in edges:
-                _visit(edge.target_node_id, state, depth + 1, leg)
+                _visit(edge.target_node_id, state, depth + 1, leg, writers)
             return state
 
         result = state
         for edge in edges:
-            result = _visit(edge.target_node_id, state, depth + 1, leg)
+            result = _visit(edge.target_node_id, state, depth + 1, leg, writers)
         return result
 
     entry_state = _State()
