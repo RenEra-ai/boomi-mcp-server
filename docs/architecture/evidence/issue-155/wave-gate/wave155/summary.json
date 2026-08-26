@@ -1,0 +1,3 @@
+{"status":"completed","wave_sha":"29021b178c8311fc6bc74ecf38ee3559ec4813cc","base":"9860842e5932c2e091a115e4697722bd8429953c",
+ "suite":"10659 passed, 17 skipped","goldens":"74 active, deterministic and byte-exact",
+ "plan_fingerprint_cases":2,"exit_code":0}

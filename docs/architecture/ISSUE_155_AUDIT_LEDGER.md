@@ -219,11 +219,39 @@ the hand-written copy. Each gets its own commit and its own validation before th
 | L1 Stage-1 QA, slice A | 3 / 9 | `66c1d6e`, clean | `CLOSE-CLEAN` | Zero blocking residue: every finding of this window is fixed and validated, and the protected surface has never been wrong. The evidence is a MEASURED claim, deliberately not the exhaustiveness claim I made and the gate refuted — every model the reference walk can reach is in the set the guard checks, derived from reachability rather than asserted, with the module's own reference carriers additionally asserted reachable so the derivation cannot shrink silently. Alongside it, six consecutive rounds with five pinned constants unmoved: the reference-field census, the served reference map, the three revision digests, the emission control and the two relocatability results, each re-measured independently by the gate at every revision. Trend across the window: findings 2, 1, 1 and the highest label Low, Medium, Low; the one non-low label was against the ENFORCEMENT rather than the served surface, and the gate reads that as narrowing, which I record with its reasoning rather than as my own conclusion. The failure surface changed category twice — from which container spellings exist, which is unbounded, to whether anything can escape the scan, to which models the guard sees, which is finite and was settled in a single measurement. The gate also recorded the pattern that argues against closing: in each of the last three rounds the mechanism introduced in THAT round failed on first adversarial contact, three for three. I weigh it and still close, on the gate's own grounds — nothing has been re-broken after being addressed, these are first-contact defects in successively smaller mechanisms, and the scan that failed was removed rather than widened, which the gate verified. No deferral is recorded because no residue is being set aside. |
 | L1 Stage-1 QA, slice A | 4 / 10 | `50ecabf`, clean | `CLOSE-CLEAN` | The window's closure EARNED, and recorded separately because the row above was not. That decision was written on the state validated at `66c1d6e` and I then applied two corrections, so by the rule that an applied correction owes its validation before any decision to close, the closure was premature as recorded. This row is that owed validation discharged and the decision re-made on the tree it actually governs. Zero blocking residue; the round's single finding is outside the blocking classes, cannot be reached through the public tool boundary, and was fixed rather than carried. Trend closed the window: findings 2, 1, 1, 1 with the highest label Low, Medium, Low, Low, and the failure surface narrowed at every step until this round's residue was the first that cannot be produced by writing an annotation at all — it sits behind the validation boundary rather than in front of it. Seven rounds, five pinned constants, zero movement: nothing in this sequence was ever mis-served to a caller, measured independently at every revision. The gate's own argument against closing — that in three consecutive rounds the mechanism introduced in that round failed on first contact — did not recur here, which it reported unprompted and which I record because it was the reason I nearly did not close. The gate's judgement, asked for explicitly and adopted: Stage 1 is genuinely finished for this slice, nothing further before closing. |
 | L2 Stage-2 Codex commit review, slice A | 4 / 4 | `8e6475a`, clean | `CLOSE-CLEAN` | The fourth review returned NO findings, over a delta that included the correction the third round's findings produced — so Stage 2 closes on a clean read of its own last mutation rather than on a round count. Every raw finding from the four rounds carries exactly one disposition: five fixed, one `finding-refuted` on live platform evidence that contradicted the citation the reviewer relied on, and no critical residue anywhere. The two P1 findings were both fixed and both validated live. Trend across the loop: four, one, two, zero findings, and the corrections changed KIND rather than accumulating — an instance patch, then a scoped rule, then one measured table replacing two proxies. The fourth round is the first in this slice's entire history, across fourteen QA rounds and four reviews, to return nothing at all. Review coverage is an unbroken chain from the step-0 baseline to this tip with no gap, every round collected through the collector and archived with its teardown confirmed. No deferral is recorded at this checkpoint. Stage 2 is closed; the slice is NOT — the architect review, the wave gate and the closing protocol have never run, and one deferral's enumeration is still owed in another issue's body, which is recorded at `EVAL-155-02a` precisely so closure cannot be claimed over it. |
+| L4 composite wave gate, slice A | 1 / 1 | `29021b1`, clean | `CLOSE-CLEAN` | The wave gate PASSES on the tree it was run against, exit 0, and that SHA is **W = `29021b178c8311fc6bc74ecf38ee3559ec4813cc`**. Its three arms each reported: the full non-KB suite green at 10659 passed and 17 skipped against a skip cap of 30; all 74 active goldens deterministic and byte-exact, rendered twice; and the plan-fingerprint seam checked over two cases. One composite evaluation, no findings, so no correction is owed and the wave set does not re-run. Recorded as its own logical loop with a fresh window, as the roster declares — the counts spent in the Stage-1 and Stage-2 loops are irrelevant to it. The round is archived under `wave-gate/wave155` and deliberately NOT indexed: a wave-gate run has no daemon and therefore no collector attestation, and indexing it would produce an archive the repository's own scanner rejects. |
 
 ## Deferrals
 
-Pointer-only — reason class, placement and lineage live on the finding row. `EVAL-155-02` is the
-only open deferral; it is `out-of-scope-by-design`, so it carries no window-exhausted budget.
+Pointer-only — reason class, placement and lineage live on the finding row. SEVEN deferrals are
+open. **None carries a `window-exhausted` reason class**, so none consumes the single-use budget that
+class allows, and no deferral in this slice was made because a window ran out.
+
+To #155 slice C, `blocked-by-mechanism`, both waiting on the same missing mechanism — a trusted
+connector-resolution snapshot, which is a mechanism rather than a comparison and is why the slice
+rather than a patch is the right home:
+
+- `QA-155-r2-01` — the family gate reads the caller-DECLARED connector family.
+- `QA-155-r13-01` (revised by `QA-155-r13-01a`) — profile identity cannot be resolved in a phase
+  specified to run before any id lookup.
+
+To #160, `out-of-scope-by-design`, all four being cutover inputs rather than defects in this tree:
+
+- `EVAL-155-02` (revised by `EVAL-155-02a`) — the mapped both-sides composition has no canonical
+  spelling.
+- `SELF-155-r5-03` — the primitive path-binding helper has no reachable consumer to re-lower against.
+- `SELF-155-r5-04` — a stale authority comment, and a served key-type divergence between producers.
+- `ARCH-155-e1-03` — the generic and specific diagnostics both fire for one defect, on two different
+  nodes, so joining them needs machinery the diagnostic surface does not yet have.
+- `ARCH-155-e1-05` — the missing source-DDP legacy oracle, which cannot be produced without
+  rendering a document this slice deliberately refuses; the architect gate itself concluded the
+  acceptance clause needs an amendment rather than a code change.
+
+**`EVAL-155-02a` is the one that blocks closure.** A deferral's enumeration must live in the target
+issue's body. It is now written into the #155 description; it is NOT yet in #160's, and cross-issue
+edits are not this loop's to make, so the text is prepared and surfaced to the owner. Until it is
+pasted there this slice may not close over that deferral, and this line exists so that cannot be
+overlooked.
 
 ## Evidence index
 
@@ -242,3 +270,15 @@ account is active when it lands. Captures are archived under `captures/` as they
 
 | Gate | Evidence (quoted output / run URL / archived round) | SHA |
 | --- | --- | --- |
+| L1 Stage-1 QA (`boomi-qa-tester`, public tool boundary) | Fourteen rounds; the last live arm executed COMPLETE with the bound value on the wire, and the closing round confirmed the reversal end to end. Captures archived under `captures/`, digests verifying. | `2c1c9c7` (last live round) |
+| L2 Stage-2 Codex commit review | Four rounds, every one COLLECTED and archived: `cdx-review.cBMJBB`, `cdx-review.jLCRC3`, `cdx-review.yJE6Lx`, `cdx-review.OLFE4Y`. Unbroken chain `9860842 → 075b107 → 5d63762 → 8be705c → 8e6475a`; the fourth returned no findings. | `8e6475a` |
+| L3 §6 architect implementation review | Evaluation 1 of 3, `cdx-gate-review.CHAIO3`, attested `ok:true` with the plan's bytes verified inside the prompt and teardown confirmed. Verdict ISSUES FOUND; six fixed, two refuted on measurement, two deferred to #160. | `2c1c9c7` reviewed; corrections at `29021b1` |
+| L4 composite wave gate | `scripts/wave_gate.py wave --base 9860842…` exit 0: suite 10659 passed / 17 skipped against a cap of 30, 74 active goldens deterministic and byte-exact, plan fingerprint checked over 2 cases. Archived `wave-gate/wave155`. | **W = `29021b178c8311fc6bc74ecf38ee3559ec4813cc`** |
+| L5 closing protocol | NOT YET COMPLETE — see the note below. |  |
+
+**Which gate covers which tree.** The wave gate passed on **W = `29021b178c8311fc6bc74ecf38ee3559ec4813cc`**. The architect review read
+the tree at `2c1c9c7` and its corrections landed at `29021b1`, which IS W — so the corrections are
+inside the wave gate's tree rather than after it. What is still owed before this slice can close:
+a final fix-only commit review over the delta since `8e6475a`, its archive and citation, and the
+`scratch/**` preflight on the closing commit. The slice is NOT closed, and this table is filled to
+the point the evidence actually reaches rather than in anticipation.
