@@ -1,0 +1,2 @@
+INFO:     192.168.65.1:37643 - "GET / HTTP/1.1" 404 Not Found
+INFO:     192.168.65.1:28046 - "GET /admin/cdscm/api/v1/clients/ZRCR13 HTTP/1.1" 404 Not Found

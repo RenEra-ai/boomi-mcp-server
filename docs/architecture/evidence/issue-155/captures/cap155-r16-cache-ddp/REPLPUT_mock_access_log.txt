@@ -1,0 +1,76 @@
+INFO:     192.168.65.1:40044 - "POST /api/v1/clients HTTP/1.1" 404 Not Found
+INFO:     192.168.65.1:41887 - "POST /api/v1/clients HTTP/1.1" 404 Not Found
+INFO:     192.168.65.1:36169 - "GET /api/v1/clients/AC-LIVE-155 HTTP/1.1" 404 Not Found
+INFO:     192.168.65.1:23155 - "DELETE /api/v1/clients/AC-LIVE-155 HTTP/1.1" 404 Not Found
+INFO:     192.168.65.1:56586 - "GET /openapi.json HTTP/1.1" 200 OK
+INFO:     192.168.65.1:59781 - "POST /admin/cdscm/api/v1/clients HTTP/1.1" 201 Created
+INFO:     192.168.65.1:16528 - "POST /admin/cdscm/api/v1/clients HTTP/1.1" 409 Conflict
+INFO:     192.168.65.1:53911 - "GET /admin/cdscm/api/v1/clients/AC-LIVE-155 HTTP/1.1" 200 OK
+INFO:     192.168.65.1:29983 - "POST /admin/cdscm/api/v1/clients HTTP/1.1" 201 Created
+INFO:     192.168.65.1:41511 - "DELETE /admin/cdscm/api/v1/clients/AC-LIVE-155 HTTP/1.1" 204 No Content
+INFO:     192.168.65.1:36943 - "DELETE /admin/cdscm/api/v1/clients/AC-LIVE-156 HTTP/1.1" 204 No Content
+INFO:     192.168.65.1:35463 - "POST /admin/cdscm/api/v1/clients HTTP/1.1" 201 Created
+INFO:     192.168.65.1:36508 - "POST /admin/cdscm/api/v1/clients HTTP/1.1" 409 Conflict
+INFO:     192.168.65.1:44417 - "GET /admin/cdscm/api/v1/clients/AC-LIVE-157 HTTP/1.1" 200 OK
+INFO:     192.168.65.1:26696 - "DELETE /admin/cdscm/api/v1/clients/AC-LIVE-157 HTTP/1.1" 204 No Content
+INFO:     192.168.65.1:27103 - "GET /admin/cdscm/api/v1/clients HTTP/1.1" 401 Unauthorized
+INFO:     192.168.65.1:27763 - "GET /admin/cdscm/api/v1/clients/AC-0001 HTTP/1.1" 200 OK
+INFO:     192.168.65.1:28371 - "PATCH /admin/cdscm/api/v1/clients/AC-0001 HTTP/1.1" 200 OK
+INFO:     192.168.65.1:54647 - "GET /health HTTP/1.1" 200 OK
+INFO:     192.168.65.1:65383 - "GET /health HTTP/1.1" 200 OK
+INFO:     192.168.65.1:37985 - "GET /health HTTP/1.1" 200 OK
+INFO:     192.168.65.1:24134 - "GET /health HTTP/1.1" 200 OK
+INFO:     192.168.65.1:38920 - "GET /health HTTP/1.1" 200 OK
+INFO:     192.168.65.1:48788 - "GET /health HTTP/1.1" 200 OK
+INFO:     192.168.65.1:65217 - "GET /health HTTP/1.1" 200 OK
+INFO:     192.168.65.1:16648 - "GET /health HTTP/1.1" 200 OK
+INFO:     192.168.65.1:45658 - "GET /health HTTP/1.1" 200 OK
+INFO:     192.168.65.1:52956 - "GET /health HTTP/1.1" 200 OK
+INFO:     192.168.65.1:52131 - "GET /health HTTP/1.1" 200 OK
+INFO:     192.168.65.1:41381 - "GET /health HTTP/1.1" 200 OK
+INFO:     192.168.65.1:42113 - "GET /health HTTP/1.1" 200 OK
+INFO:     192.168.65.1:55029 - "GET /admin/cdscm/api/v1/clients HTTP/1.1" 200 OK
+INFO:     192.168.65.1:51935 - "GET /admin/cdscm/api/v1/clients HTTP/1.1" 401 Unauthorized
+INFO:     192.168.65.1:63810 - "POST /oauth/token HTTP/1.1" 200 OK
+INFO:     192.168.65.1:48504 - "GET /admin/cdscm/api/v1/clients HTTP/1.1" 200 OK
+INFO:     192.168.65.1:33999 - "GET /admin/cdscm/api/v1/clients HTTP/1.1" 401 Unauthorized
+INFO:     192.168.65.1:65410 - "GET /admin/cdscm/api/v1/clients HTTP/1.1" 401 Unauthorized
+INFO:     192.168.65.1:20500 - "GET /admin/cdscm/api/v1/clients HTTP/1.1" 200 OK
+INFO:     192.168.65.1:42261 - "POST /oauth/token HTTP/1.1" 200 OK
+INFO:     192.168.65.1:31811 - "GET /admin/cdscm/api/v1/clients/AC-0001 HTTP/1.1" 200 OK
+INFO:     192.168.65.1:62635 - "PATCH /admin/cdscm/api/v1/clients/AC-0001 HTTP/1.1" 200 OK
+INFO:     192.168.65.1:53461 - "GET /health HTTP/1.1" 200 OK
+INFO:     192.168.65.1:56669 - "GET /health HTTP/1.1" 200 OK
+INFO:     192.168.65.1:34462 - "GET /health HTTP/1.1" 200 OK
+INFO:     192.168.65.1:37119 - "GET /health HTTP/1.1" 200 OK
+INFO:     192.168.65.1:35554 - "GET /health HTTP/1.1" 200 OK
+INFO:     192.168.65.1:52793 - "GET /admin/cdscm/api/v1/clients/ZQCP02 HTTP/1.1" 404 Not Found
+INFO:     192.168.65.1:38668 - "PATCH /admin/cdscm/api/v1/clients/AC-0001 HTTP/1.1" 200 OK
+INFO:     192.168.65.1:48034 - "GET /admin/cdscm/api/v1/clients/ZQCR03 HTTP/1.1" 404 Not Found
+INFO:     192.168.65.1:23753 - "PATCH /admin/cdscm/api/v1/clients/AC-0001 HTTP/1.1" 200 OK
+INFO:     192.168.65.1:63694 - "GET / HTTP/1.1" 404 Not Found
+INFO:     192.168.65.1:37902 - "GET /admin/cdscm/api/v1/clients/ZRCP11 HTTP/1.1" 404 Not Found
+INFO:     192.168.65.1:64306 - "GET / HTTP/1.1" 404 Not Found
+INFO:     192.168.65.1:34045 - "GET / HTTP/1.1" 404 Not Found
+INFO:     192.168.65.1:26192 - "GET /admin/cdscm/api/v1/clients/ZRCR13 HTTP/1.1" 404 Not Found
+INFO:     192.168.65.1:60131 - "GET / HTTP/1.1" 404 Not Found
+2026-08-26 07:41:10,785 INFO root: cds-mock clientcred -> http://0.0.0.0:8080
+2026-08-26 07:41:10,802 INFO root: cds-mock noauth     -> http://0.0.0.0:8081
+2026-08-26 07:41:10,826 INFO root: cds-mock basic      -> http://0.0.0.0:8082
+2026-08-26 07:41:10,848 INFO root: cds-mock authcode   -> http://0.0.0.0:8083
+INFO:     Started server process [1]
+INFO:     Waiting for application startup.
+INFO:     Started server process [1]
+INFO:     Waiting for application startup.
+INFO:     Started server process [1]
+INFO:     Waiting for application startup.
+INFO:     Started server process [1]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Application startup complete.
+INFO:     Application startup complete.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8080 (Press CTRL+C to quit)
+INFO:     Uvicorn running on http://0.0.0.0:8081 (Press CTRL+C to quit)
+INFO:     Uvicorn running on http://0.0.0.0:8082 (Press CTRL+C to quit)
+INFO:     Uvicorn running on http://0.0.0.0:8083 (Press CTRL+C to quit)

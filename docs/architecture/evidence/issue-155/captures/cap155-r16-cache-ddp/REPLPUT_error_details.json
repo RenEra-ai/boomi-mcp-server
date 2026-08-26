@@ -1,0 +1,27 @@
+{
+ "_success": true,
+ "execution": {
+  "execution_id": "execution-59ceab99-e4c7-4086-9daa-3f64c78418cd-2026.08.26",
+  "status": "ERROR",
+  "process_name": "_TEST_155A_RP_REPLPUT_20260826182830",
+  "process_id": "56a03f7d-bf34-44a2-81fe-81b4e7383c5d",
+  "atom_name": "renera-local-atom",
+  "atom_id": "89387bdf-b177-4631-9cc6-687bf4afefa7",
+  "execution_time": "2026-08-26T18:38:55Z",
+  "execution_duration": 54,
+  "message": "Unable to create JSON files from data, the document may not be well-formed json; Caused by: Unrecognized token 'stream': was expecting (JSON String, Number, Array, Object or token 'null', 'true' or 'false')\n at [Source: (com.boomi.util.io.FastByteArrayInputStream); line: 1, column: 8]",
+  "inbound_document_count": 1,
+  "outbound_document_count": 1,
+  "inbound_error_document_count": 1
+ },
+ "error_analysis": {
+  "error_category": "Document Processing Error",
+  "severity": "Medium",
+  "troubleshooting_tips": [
+   "Check input document format and structure",
+   "Verify data mapping and transformation logic",
+   "Review connector configuration and endpoints",
+   "Use fetch_logs=true in config to download process logs for detailed stack traces"
+  ]
+ }
+}

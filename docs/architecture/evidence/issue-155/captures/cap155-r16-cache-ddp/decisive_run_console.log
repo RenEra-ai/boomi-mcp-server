@@ -1,0 +1,151 @@
+[freeze] PRE  head=7f61d129c768 tree=clean code=e3b0c44298fc files=0
+[INFO] Using local file-based secrets storage
+[INFO] Storage file: /Users/gleb/.boomi_mcp_local_secrets.json
+[INFO] Trading partner tools loaded successfully
+[INFO] Process tools loaded successfully
+[INFO] Organization tools loaded successfully
+[INFO] Component query tools loaded successfully
+[INFO] Component management tools loaded successfully
+[INFO] Component analysis tools loaded successfully
+[INFO] Safe component edit workflow loaded successfully
+[INFO] Connector tools loaded successfully
+[INFO] Connection reuse discovery tool loaded successfully
+[INFO] Marketplace recipe search tool loaded successfully
+[INFO] index_profile_component discovery tool loaded successfully
+[INFO] Schema discovery tools loaded successfully
+[INFO] Folder tools loaded successfully
+[INFO] Monitoring tools loaded successfully
+[INFO] Schema template tools loaded successfully
+[INFO] Generic API invoker loaded successfully
+[INFO] List capabilities loaded successfully
+[INFO] Plan integration design loaded successfully
+[INFO] Environment tools loaded successfully
+[INFO] Runtime tools loaded successfully
+[INFO] Deployment tools loaded successfully
+[INFO] Deployment orchestration tool loaded successfully
+[INFO] Execution tools loaded successfully
+[INFO] Shared resources tools loaded successfully
+[INFO] Troubleshooting tools loaded successfully
+[INFO] Schedule tools loaded successfully
+[INFO] Account tools loaded successfully
+[INFO] Listener tools loaded successfully
+[INFO] Integration pack tools loaded successfully
+[INFO] Account group tools loaded successfully
+[INFO] Integration builder tool loaded successfully
+[INFO] Integration authoring tools loaded successfully
+[INFO] Transformation review tool loaded successfully
+[INFO] Profile inference tool loaded successfully
+[INFO] Integration import tool loaded successfully
+[INFO] Trading partner tool registered successfully (1 consolidated tool)
+[INFO] Process tool registered successfully (read-only list/get)
+[INFO] Monitoring tool registered successfully (1 consolidated tool)
+[INFO] Component query tool registered successfully (1 consolidated tool)
+[INFO] Component management tool registered successfully (1 consolidated tool)
+[INFO] Component analysis tool registered successfully (1 consolidated tool)
+[INFO] Safe component edit (prepare) tool registered successfully
+[INFO] Safe component edit (apply) tool registered successfully
+[INFO] Connector tool registered successfully (1 consolidated tool)
+[INFO] suggest_connection_reuse tool registered successfully
+[INFO] search_marketplace_recipes tool registered successfully
+[INFO] Integration builder tool registered successfully
+[INFO] list_integration_archetypes tool registered successfully
+[INFO] get_integration_archetype tool registered successfully
+[INFO] build_from_archetype tool registered successfully
+[INFO] compose_archetypes tool registered successfully
+[INFO] review_transformation tool registered successfully
+[INFO] infer_profile_fields tool registered successfully
+[INFO] index_profile_component tool registered successfully
+[INFO] import_integration_draft tool registered successfully
+[INFO] discover_openapi_spec tool registered successfully
+[INFO] discover_soap_wsdl tool registered successfully
+[INFO] discover_odata_metadata tool registered successfully
+[INFO] discover_db_schema tool registered successfully
+[INFO] Folder management tool registered successfully (1 consolidated tool)
+[INFO] Schema template tool registered successfully
+[INFO] Generic API invoker tool registered successfully
+[INFO] List capabilities tool registered successfully
+[INFO] Plan integration design tool registered successfully
+[INFO] Environment management tool registered successfully (1 consolidated tool)
+[INFO] Runtime management tool registered successfully (1 consolidated tool)
+[INFO] Deployment management tool registered successfully
+[INFO] Deployment orchestration tool registered successfully
+[INFO] Execute process tool registered successfully
+[INFO] Troubleshoot execution tool registered successfully
+[INFO] Shared resources management tool registered successfully
+[INFO] Account management tool registered successfully (1 consolidated tool)
+[INFO] Schedule management tool registered successfully
+[INFO] Listener management tool registered successfully
+[INFO] Integration pack management tool registered successfully
+[INFO] Account group management tool registered successfully
+[freeze] POST head=7f61d129c768 code=e7f9a335d039 files=133 import_race=NO
+FREEZE 7f61d129c768/clean/e7f9a335d039 files 133
+
+########## CTLPLAIN  key=ZRCP11 :: fetch -> set_ddp -> bound  (positive control) ##########
+[INFO] build_integration called by user: local-dev-user, profile: renera, action: compile
+[INFO] build_integration called by user: local-dev-user, profile: renera, action: apply
+   apply=True process=7fb4976c-ccb0-4347-9383-ba19b3b8e78f
+[INFO] manage_deployment called by user: local-dev-user, profile: renera, action: create_package
+[INFO] manage_deployment called by user: local-dev-user, profile: renera, action: deploy
+[INFO] execute_process called by user: local-dev-user, profile: renera
+   execution=COMPLETE id=execution-0bb8ceee-a563-40b8-9c5d-6ce1ff13b1a4-2026.08.26
+   mock lines carrying ZRCP11: 1
+      INFO:     192.168.65.1:62393 - "GET /admin/cdscm/api/v1/clients/ZRCP11 HTTP/1.1" 404 Not Found
+   ALL requests in this execution's window (2):
+      INFO:     192.168.65.1:38958 - "GET / HTTP/1.1" 404 Not Found
+      INFO:     192.168.65.1:62393 - "GET /admin/cdscm/api/v1/clients/ZRCP11 HTTP/1.1" 404 Not Found
+   >>> VALUE REACHED THE WIRE: True
+[INFO] manage_deployment called by user: local-dev-user, profile: renera, action: undeploy
+[INFO] manage_deployment called by user: local-dev-user, profile: renera, action: delete_package
+
+########## RT  key=ZRRT12 :: fetch -> set_ddp -> cache_put -> cache_get -> bound  (THE QUESTION) ##########
+[INFO] build_integration called by user: local-dev-user, profile: renera, action: compile
+[INFO] build_integration called by user: local-dev-user, profile: renera, action: apply
+   apply=True process=bdeb8a7c-f802-4a2e-a185-b64ce033e47c
+[INFO] manage_deployment called by user: local-dev-user, profile: renera, action: create_package
+[INFO] manage_deployment called by user: local-dev-user, profile: renera, action: deploy
+[INFO] execute_process called by user: local-dev-user, profile: renera
+   execution=COMPLETE id=execution-11ae6258-a055-467d-8478-4b50065b6db3-2026.08.26
+   mock lines carrying ZRRT12: 0
+   ALL requests in this execution's window (1):
+      INFO:     192.168.65.1:38724 - "GET / HTTP/1.1" 404 Not Found
+   >>> VALUE REACHED THE WIRE: False
+[INFO] manage_deployment called by user: local-dev-user, profile: renera, action: undeploy
+[INFO] manage_deployment called by user: local-dev-user, profile: renera, action: delete_package
+
+########## CTLREPL  key=ZRCR13 :: fetch -> set_ddp -> message -> bound  (is a DDP document-scoped?) ##########
+[INFO] build_integration called by user: local-dev-user, profile: renera, action: compile
+[INFO] build_integration called by user: local-dev-user, profile: renera, action: apply
+   apply=True process=ef1533ac-f2c2-4fb9-9703-abe0e1910c7d
+[INFO] manage_deployment called by user: local-dev-user, profile: renera, action: create_package
+[INFO] manage_deployment called by user: local-dev-user, profile: renera, action: deploy
+[INFO] execute_process called by user: local-dev-user, profile: renera
+   execution=COMPLETE id=execution-9eeee347-6d95-4d2f-ad87-80041080befb-2026.08.26
+   mock lines carrying ZRCR13: 1
+      INFO:     192.168.65.1:28046 - "GET /admin/cdscm/api/v1/clients/ZRCR13 HTTP/1.1" 404 Not Found
+   ALL requests in this execution's window (2):
+      INFO:     192.168.65.1:37643 - "GET / HTTP/1.1" 404 Not Found
+      INFO:     192.168.65.1:28046 - "GET /admin/cdscm/api/v1/clients/ZRCR13 HTTP/1.1" 404 Not Found
+   >>> VALUE REACHED THE WIRE: True
+[INFO] manage_deployment called by user: local-dev-user, profile: renera, action: undeploy
+[INFO] manage_deployment called by user: local-dev-user, profile: renera, action: delete_package
+
+########## TEARDOWN ##########
+[INFO] manage_component called by user: local-dev-user, profile: renera, action: delete
+   DELETED _TEST_155A_RR_CTLPLAIN_20260826184643 (process) 7fb4976c-ccb0-4347-9383-ba19b3b8e78f
+[INFO] manage_component called by user: local-dev-user, profile: renera, action: delete
+   DELETED _TEST_155A_RR_RT_20260826184643 (process) bdeb8a7c-f802-4a2e-a185-b64ce033e47c
+[INFO] manage_component called by user: local-dev-user, profile: renera, action: delete
+   DELETED _TEST_155A_RR_CTLREPL_20260826184643 (process) ef1533ac-f2c2-4fb9-9703-abe0e1910c7d
+[INFO] manage_component called by user: local-dev-user, profile: renera, action: delete
+   DELETED _TEST_155A_RR_PATCH_20260826184643 (connector-action) 5958d7a6-01da-40cb-bec8-3448d31fa52e
+[INFO] manage_component called by user: local-dev-user, profile: renera, action: delete
+   DELETED _TEST_155A_RR_rp_20260826184643 (profile.json) 4162265b-86ac-41a8-a3ca-ef018acc8f8b
+[INFO] manage_component called by user: local-dev-user, profile: renera, action: delete
+   DELETED _TEST_155A_RR_dc1_20260826184643 (documentcache) 3b31d92f-08b5-4bd6-90dd-3763a0e28b10
+
+=== SUMMARY ===
+   CTLPLAIN  compiled=True exec=COMPLETE valueOnWire=True
+   RT        compiled=True exec=COMPLETE valueOnWire=False
+   CTLREPL   compiled=True exec=COMPLETE valueOnWire=True
+[freeze]   (50 file(s) lazily loaded during '155 r16 cache DDP round trip' — not a violation)
+[freeze] ATTEST '155 r16 cache DDP round trip': code_stable=True worktree_moved=False stamp=7f61d129c768/clean/e7f9a335d039

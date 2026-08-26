@@ -833,35 +833,29 @@ def _walk_lineage(
                     for read_key, _has_default, _strict in _reads_of(semantic)
                     if read_key[0] == DDP and not state.establishes(read_key)
                 )
-                # A `current` source re-uses the property's OWN value — the
-                # served model calls it a read in as many words — but it is not
-                # one `_reads_of` records, because the LEGACY chain accepts a
-                # `current` composition with no earlier write and the shipped
-                # parity golden freezes exactly that shape. Teaching the general
-                # lineage model to refuse it would break the oracle this
-                # compiler is measured against, so the read is recognised HERE,
-                # where it is decided only for a bound request path.
+                # A `current` source re-uses the property's OWN value. The
+                # served model calls that a read, but `_reads_of` does not record
+                # one, and deliberately: the LEGACY chain accepts a `current`
+                # composition with no earlier write and the shipped parity golden
+                # freezes that shape, so teaching the general lineage model to
+                # refuse it would break the oracle this compiler is measured
+                # against. The read is recognised HERE, where it is decided only
+                # for a bound request path — an ordinary property composed from
+                # an unset `current` is an empty string the platform runs, while
+                # the same value as a request PATH addresses the wrong resource
+                # and does so silently.
                 #
-                # The distinction is real, not a convenience: an ordinary
-                # property composed from an unset `current` is an empty string,
-                # which the platform runs. The same value as a request PATH
-                # addresses the wrong resource, and does it silently. `state` is
-                # read before this node's own write is applied, so this asks
-                # whether anything established the property EARLIER.
-                # Asked of `writers`, NOT of `state`, and the difference is the
-                # whole correctness of the rule. `state` answers "was this key
-                # written somewhere on this path", which stays true across a
-                # stream-replacing node because #154's state model deliberately
-                # says so. `writers` is cleared of document-scoped keys at such a
-                # node, so it answers the question this rule actually needs:
-                # does a writer exist whose value THESE documents still carry.
-                #
-                # With `state` the check was fail-open for a value written
-                # before a replacement and appended to after it — the new
-                # documents carry nothing, so the composed path is the appended
-                # fragment alone and the request addresses a different resource.
-                # Reusing the clearing that already happens at replacement is
-                # also why this needs no second provenance model.
+                # Asked of `on_documents`, and the choice of key IS the rule.
+                # Two weaker keys were tried and both were wrong, in opposite
+                # directions: `state` answers "was this written anywhere on this
+                # path" and stays true across a document replacement, so it was
+                # fail-open for a value written before one and appended to after;
+                # `writers` holds only AUTHORED property nodes, so it discarded
+                # writes a trusted contract or the caller had truthfully
+                # declared, and was fail-closed for those. `on_documents` is
+                # neither proxy but the fact itself — which document-scoped keys
+                # the documents at this point carry — fed by every channel that
+                # establishes one and emptied by the event that invalidates them.
                 if key not in on_documents and any(
                     getattr(source, "value_type", None) == "current"
                     for source in getattr(semantic, "source_values", ()) or ()

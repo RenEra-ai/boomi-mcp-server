@@ -1,0 +1,94 @@
+{
+ "freeze": "7f61d129c768/clean/e7f9a335d039",
+ "account": "traininghlibbochkarov-JKIY2X",
+ "authored_at": "1fe3840 (pre-rule tree)",
+ "CTLPLAIN": {
+  "compiled": true,
+  "applied": true,
+  "process_component_id": "7fb4976c-ccb0-4347-9383-ba19b3b8e78f",
+  "deployment_id": "c8938842-d92b-4e70-821f-e2df42fce111",
+  "package_id": "05b5886b-c447-4a89-8c71-9d9adfef7701",
+  "execution_status": "COMPLETE",
+  "execution_id": "execution-0bb8ceee-a563-40b8-9c5d-6ce1ff13b1a4-2026.08.26",
+  "unique_key": "ZRCP11",
+  "mock_lines_carrying_the_unique_value": [
+   "INFO:     192.168.65.1:62393 - \"GET /admin/cdscm/api/v1/clients/ZRCP11 HTTP/1.1\" 404 Not Found"
+  ],
+  "ALL_requests_in_this_execution_window": [
+   "INFO:     192.168.65.1:38958 - \"GET / HTTP/1.1\" 404 Not Found",
+   "INFO:     192.168.65.1:62393 - \"GET /admin/cdscm/api/v1/clients/ZRCP11 HTTP/1.1\" 404 Not Found"
+  ],
+  "value_reached_the_wire": true,
+  "error_details": null,
+  "note": "fetch -> set_ddp -> bound  (positive control)"
+ },
+ "RT": {
+  "compiled": true,
+  "applied": true,
+  "process_component_id": "bdeb8a7c-f802-4a2e-a185-b64ce033e47c",
+  "deployment_id": "11a39979-6538-48b2-96f6-98203b678861",
+  "package_id": "545c96a6-aa89-40be-a2cf-cc4c3bb067f6",
+  "execution_status": "COMPLETE",
+  "execution_id": "execution-11ae6258-a055-467d-8478-4b50065b6db3-2026.08.26",
+  "unique_key": "ZRRT12",
+  "mock_lines_carrying_the_unique_value": [],
+  "ALL_requests_in_this_execution_window": [
+   "INFO:     192.168.65.1:38724 - \"GET / HTTP/1.1\" 404 Not Found"
+  ],
+  "value_reached_the_wire": false,
+  "error_details": null,
+  "note": "fetch -> set_ddp -> cache_put -> cache_get -> bound  (THE QUESTION)"
+ },
+ "CTLREPL": {
+  "compiled": true,
+  "applied": true,
+  "process_component_id": "ef1533ac-f2c2-4fb9-9703-abe0e1910c7d",
+  "deployment_id": "c3d05f8c-8868-4190-b83f-18f9da3ebde8",
+  "package_id": "73d5c657-a277-4d93-9af3-ca892d7fa3c5",
+  "execution_status": "COMPLETE",
+  "execution_id": "execution-9eeee347-6d95-4d2f-ad87-80041080befb-2026.08.26",
+  "unique_key": "ZRCR13",
+  "mock_lines_carrying_the_unique_value": [
+   "INFO:     192.168.65.1:28046 - \"GET /admin/cdscm/api/v1/clients/ZRCR13 HTTP/1.1\" 404 Not Found"
+  ],
+  "ALL_requests_in_this_execution_window": [
+   "INFO:     192.168.65.1:37643 - \"GET / HTTP/1.1\" 404 Not Found",
+   "INFO:     192.168.65.1:28046 - \"GET /admin/cdscm/api/v1/clients/ZRCR13 HTTP/1.1\" 404 Not Found"
+  ],
+  "value_reached_the_wire": true,
+  "error_details": null,
+  "note": "fetch -> set_ddp -> message -> bound  (is a DDP document-scoped?)"
+ },
+ "created_components": [
+  {
+   "component_id": "5958d7a6-01da-40cb-bec8-3448d31fa52e",
+   "name": "_TEST_155A_RR_PATCH_20260826184643",
+   "type": "connector-action"
+  },
+  {
+   "component_id": "4162265b-86ac-41a8-a3ca-ef018acc8f8b",
+   "name": "_TEST_155A_RR_rp_20260826184643",
+   "type": "profile.json"
+  },
+  {
+   "component_id": "7fb4976c-ccb0-4347-9383-ba19b3b8e78f",
+   "name": "_TEST_155A_RR_CTLPLAIN_20260826184643",
+   "type": "process"
+  },
+  {
+   "component_id": "3b31d92f-08b5-4bd6-90dd-3763a0e28b10",
+   "name": "_TEST_155A_RR_dc1_20260826184643",
+   "type": "documentcache"
+  },
+  {
+   "component_id": "bdeb8a7c-f802-4a2e-a185-b64ce033e47c",
+   "name": "_TEST_155A_RR_RT_20260826184643",
+   "type": "process"
+  },
+  {
+   "component_id": "ef1533ac-f2c2-4fb9-9703-abe0e1910c7d",
+   "name": "_TEST_155A_RR_CTLREPL_20260826184643",
+   "type": "process"
+  }
+ ]
+}

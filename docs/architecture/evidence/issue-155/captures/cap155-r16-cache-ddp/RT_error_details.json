@@ -1,0 +1,27 @@
+{
+ "_success": true,
+ "execution": {
+  "execution_id": "execution-a31ba992-5638-4bf6-ae58-8f080d880ca8-2026.08.26",
+  "status": "ERROR",
+  "process_name": "_TEST_155A_RN_RT_20260826181927",
+  "process_id": "dd9f160d-9bec-4ca0-945a-fbcccb16f04f",
+  "atom_name": "renera-local-atom",
+  "atom_id": "89387bdf-b177-4631-9cc6-687bf4afefa7",
+  "execution_time": "2026-08-26T18:24:29Z",
+  "execution_duration": 45,
+  "message": "[Input ProfileLocation: Root; DocumentLocation: /Root]: Unable to create JSON files from data, the document may not be well-formed json",
+  "inbound_document_count": 1,
+  "outbound_document_count": 0,
+  "inbound_error_document_count": 1
+ },
+ "error_analysis": {
+  "error_category": "Document Processing Error",
+  "severity": "Medium",
+  "troubleshooting_tips": [
+   "Check input document format and structure",
+   "Verify data mapping and transformation logic",
+   "Review connector configuration and endpoints",
+   "Use fetch_logs=true in config to download process logs for detailed stack traces"
+  ]
+ }
+}
