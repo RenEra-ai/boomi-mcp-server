@@ -761,3 +761,64 @@ def test_issue_153_codes_carry_distinct_registered_categories():
     assert {code for code, spec in owned.items() if spec.retryable} == {
         "PROCESS_MATERIALIZATION_FINALIZATION_FAILED"
     }, sorted(code for code, spec in owned.items() if spec.retryable)
+
+
+# ---------------------------------------------------------------------------
+# Issue #155 — the codes this slice OWNS, pinned non-vacuously
+# ---------------------------------------------------------------------------
+
+
+import pytest  # noqa: E402 — this module had no parametrised test before
+
+ISSUE_155_CODES = (
+    "PROCESS_IR_CAPABILITY_DYNAMIC_PATH_UNSUPPORTED",
+    "PROCESS_IR_SEMANTIC_DYNAMIC_PATH_DDP_NOT_ESTABLISHED",
+    "PROCESS_IR_SEMANTIC_DYNAMIC_PATH_NO_DYNAMIC_SEGMENT",
+    "PROCESS_IR_SEMANTIC_DYNAMIC_PATH_PROFILE_BINDING_MISMATCH",
+    "PROCESS_IR_SEMANTIC_RETRY_SOURCE_POLICY_REQUIRES_RETRY",
+    "PROCESS_IR_SEMANTIC_RETRY_SOURCE_POLICY_SCOPE_INVALID",
+)
+
+
+def test_issue_155_owns_exactly_these_codes_and_they_are_fully_specified():
+    """A presence-and-ownership pin, which the taxonomy suite otherwise lacks.
+
+    Everything else here checks the SHAPE of whatever rows happen to exist, so a
+    slice could delete one of its codes, or hand it to another owner, and the
+    suite would stay green. The set is asserted by equality rather than by
+    containment so a code silently added under this owner also fails — an owner
+    is a claim about who is accountable for the text, not a label.
+    """
+    from boomi_mcp.errors import ERROR_TAXONOMY
+
+    owned = {code for code, spec in ERROR_TAXONOMY.items() if spec.owner == "#155"}
+    assert owned == set(ISSUE_155_CODES), {
+        "missing": sorted(set(ISSUE_155_CODES) - owned),
+        "unexpected": sorted(owned - set(ISSUE_155_CODES)),
+    }
+
+    for code in ISSUE_155_CODES:
+        spec = ERROR_TAXONOMY[code]
+        assert spec.summary and spec.summary.strip(), code
+        assert spec.category and spec.category.strip(), code
+        # Served text: a summary citing a document a caller cannot fetch sends
+        # them nowhere, and this repo's sweep already found one such class.
+        assert "docs/" not in spec.summary, code
+
+
+@pytest.mark.parametrize("code", ISSUE_155_CODES)
+def test_each_issue_155_code_is_raised_somewhere_in_the_source(code):
+    """Registered-but-unraised is a code that can never reach a caller.
+
+    The complement — raised but unregistered — is covered by the emission-roots
+    sweep already in this repo. This is the direction that sweep cannot see.
+    """
+    import subprocess
+
+    hits = subprocess.run(
+        ["grep", "-rl", code, "src/boomi_mcp"],
+        capture_output=True, text=True,
+    ).stdout.split()
+    # errors.py itself declares it; a raiser is any OTHER module.
+    raisers = [h for h in hits if not h.endswith("errors.py")]
+    assert raisers, code

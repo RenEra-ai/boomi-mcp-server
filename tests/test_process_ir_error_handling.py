@@ -45,6 +45,8 @@ from boomi_mcp.errors import (
     PROCESS_IR_SEMANTIC_IDEMPOTENCY_EVIDENCE_MISSING,
     PROCESS_IR_SEMANTIC_PROFILE_MISMATCH,
     PROCESS_IR_SEMANTIC_RETRY_NON_IDEMPOTENT_WRITE,
+    PROCESS_IR_SEMANTIC_RETRY_SOURCE_POLICY_REQUIRES_RETRY,
+    PROCESS_IR_SEMANTIC_RETRY_SOURCE_POLICY_SCOPE_INVALID,
     PROCESS_IR_SEMANTIC_RETRY_SOURCE_REEXECUTION,
 )
 from boomi_mcp.models.process_ir import (
@@ -1366,3 +1368,87 @@ def test_a_bare_stop_catch_is_refused_but_a_bare_exception_or_cache_sink_is_not(
             catch_terminal={"kind": "cache_put", "cache_ref": "$ref:CACHE"},
         )
     )
+
+
+# ---------------------------------------------------------------------------
+# Issue #155 — `source_replay_policy`, the acceptance matrix the plan names
+# ---------------------------------------------------------------------------
+#
+# The plan's acceptance arms for this unit are: connector-scope refusal,
+# retry-zero refusal, the default surviving a dump/reparse, authored `forbid`
+# behaving as the default does, and independence from the write-safety refusal.
+# Only the propagation-and-XML-omission witness existed, which proves the field
+# reaches the emitter but says nothing about when it is REFUSED.
+
+
+ALLOW = {"source_replay_policy": "allow_duplicates"}
+
+
+def test_allow_duplicates_lifts_the_source_reexecution_refusal():
+    """The capability itself: the one refusal this policy is allowed to lift."""
+    _compile(_process_scope(retry={"count": 2, **ALLOW}))
+
+
+@pytest.mark.parametrize("count", [1, 3, 5])
+def test_the_default_policy_still_refuses_at_every_positive_count(count):
+    """The paired negative — the lift is opt-in, not a weakening of the rule."""
+    diag = _compile_error(_process_scope(retry={"count": count}))
+    assert diag.code == PROCESS_IR_SEMANTIC_RETRY_SOURCE_REEXECUTION
+
+
+def test_authored_forbid_behaves_exactly_as_the_default_does():
+    """Authoring the default explicitly must not change the verdict.
+
+    If it did, the default would be doing something other than what it names,
+    and a caller reading the served description would be misled about which of
+    the two states they are in.
+    """
+    authored = _compile_error(
+        _process_scope(retry={"count": 2, "source_replay_policy": "forbid"}))
+    defaulted = _compile_error(_process_scope(retry={"count": 2}))
+    assert authored.code == defaulted.code == PROCESS_IR_SEMANTIC_RETRY_SOURCE_REEXECUTION
+    assert authored.path == defaulted.path
+
+
+def test_the_policy_is_refused_on_a_connector_scope():
+    """Scope arm: the policy speaks about the flow's document SOURCE.
+
+    A connector-scoped region provably excludes the producer, so the policy has
+    nothing to permit there and asserting it is a caller error rather than a
+    no-op — a no-op would let an author believe they had granted something.
+    """
+    diag = _compile_error(_connector_scope(retry={"count": 2, **ALLOW}))
+    assert diag.code == PROCESS_IR_SEMANTIC_RETRY_SOURCE_POLICY_SCOPE_INVALID
+
+
+def test_the_policy_is_refused_at_retry_zero():
+    """Retry arm: with no retry there is no re-execution to permit."""
+    diag = _compile_error(_process_scope(retry={"count": 0, **ALLOW}))
+    assert diag.code == PROCESS_IR_SEMANTIC_RETRY_SOURCE_POLICY_REQUIRES_RETRY
+
+
+def test_the_policy_survives_a_dump_and_reparse_in_both_states():
+    """A defaulted value must round-trip as the same document.
+
+    A field that serialises to something the parser reads back differently makes
+    every downstream comparison — goldens, fingerprints, plan equality — a
+    comparison of the serialiser rather than of the document.
+    """
+    for retry in ({"count": 2, **ALLOW}, {"count": 2}):
+        doc = _process_scope(retry=retry)
+        ir = parse_process_ir_v1(doc)
+        again = parse_process_ir_v1(ir.model_dump(mode="json"))
+        assert again.model_dump(mode="json") == ir.model_dump(mode="json")
+
+
+def test_the_policy_does_not_lift_the_write_safety_refusal():
+    """Independence: it lifts ONE refusal, and the plan says which.
+
+    This is the arm that matters most. The write-safety refusal protects against
+    replaying a non-idempotent write, which re-reading a source has nothing to
+    do with — a policy that quietly lifted both would turn an opt-in about
+    duplicate READS into permission to duplicate WRITES.
+    """
+    doc = _process_scope(retry={"count": 2, **ALLOW}, op="$ref:PATCHOP")
+    diag = _compile_error(doc)
+    assert diag.code == PROCESS_IR_SEMANTIC_RETRY_NON_IDEMPOTENT_WRITE

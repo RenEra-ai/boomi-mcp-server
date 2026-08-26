@@ -205,6 +205,10 @@ def main() -> int:
     parser.add_argument("--wave-sha", default=None)
     parser.add_argument("--name", default=None,
                         help="archive directory name (defaults to the run dir's name)")
+    parser.add_argument("--prompts", type=Path, default=None,
+                        help="directory holding the gate's prompt files, when it is "
+                             "not the run directory (the dispatcher-owned seam keeps "
+                             "them apart on purpose)")
     parser.add_argument("--repo", type=Path, default=None)
     args = parser.parse_args()
 
@@ -233,9 +237,25 @@ def main() -> int:
         if source.is_file():
             shutil.copy2(source, durable / name)
             copied.append(name)
-    if args.kind == "architect-review" and (args.run_dir / "prompts").is_dir():
-        shutil.copytree(args.run_dir / "prompts", durable / "prompts")
-        copied.append("prompts/")
+    if args.kind == "architect-review":
+        # The prompts are REQUIRED evidence for a gate round — the archive
+        # scanner hashes every file under `prompts/` and refuses a round without
+        # it. They may not live in the run directory: the dispatcher-owned seam
+        # deliberately keeps them in a separate share directory, because the run
+        # directory holds `start.json`, the collector's root of trust, and the
+        # helper that drives the turn is a process that can write files. So the
+        # location is a parameter, defaulting to the run directory.
+        source = args.prompts or (args.run_dir / "prompts")
+        if source.is_dir():
+            shutil.copytree(source, durable / "prompts")
+            copied.append("prompts/")
+        else:
+            for name in ("prompt", "retry"):
+                candidate = (args.prompts or args.run_dir) / name
+                if candidate.is_file():
+                    (durable / "prompts").mkdir(exist_ok=True)
+                    shutil.copy2(candidate, durable / "prompts" / name)
+                    copied.append("prompts/" + name)
 
     if not copied:
         shutil.rmtree(durable)

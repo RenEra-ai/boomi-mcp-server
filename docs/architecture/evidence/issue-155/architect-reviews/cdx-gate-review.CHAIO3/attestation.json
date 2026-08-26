@@ -1,0 +1,38 @@
+{
+  "schema": 1,
+  "gateProtocol": 2,
+  "gate": "review",
+  "collectedAt": "2026-08-26T22:50:29.909Z",
+  "start": {
+    "threadId": "01a04036-526f-7002-bb6f-36860b61cbcb",
+    "pid": 69073,
+    "socket": "/Users/gleb/.codex-drive/d-69072-mtao953g.sock",
+    "cwd": "/Users/gleb/Documents/Projects/Renera/boomi-mcp-server",
+    "private": true
+  },
+  "prompt": {
+    "allowedSha256": [
+      "9c5d046724624dd5fb207da990d92b886bf4c79f3c2d0f05d65c8d1f80f3cb56",
+      "9675c6b5024ac8648cdf528699fecceda0a8d151df313a3173a498e34bdde6b4"
+    ],
+    "actualSha256": "9c5d046724624dd5fb207da990d92b886bf4c79f3c2d0f05d65c8d1f80f3cb56",
+    "path": "/tmp/cdx-gate-prompts.xHVf68/prompt",
+    "verified": true
+  },
+  "turn": {
+    "status": "completed",
+    "kind": "turn",
+    "turnToken": 1,
+    "messageSha256": "2190dbd92cc92ee3bcebff41f0bc94f4a82b3c002796798bbcf7d924080dd76c"
+  },
+  "artifact": {
+    "path": "/tmp/cdx-gate-review.CHAIO3/review.md",
+    "sha256": "998185504225cf75cf2bc227e080195b9d2abddfd2a3269c793fc766f9df1b69"
+  },
+  "inputPlan": {
+    "path": "/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/.codex/plans/issue-155.md",
+    "sha256": "d60496a6fb2083f9c371deae8dc84009051aa44551204fe157aa45b3fee00f0d"
+  },
+  "parsedVerdict": "ISSUES FOUND",
+  "teardown": "confirmed"
+}

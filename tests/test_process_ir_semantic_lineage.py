@@ -1705,3 +1705,81 @@ def test_the_served_retry_description_states_the_escape_this_slice_added():
     # The write-safety refusal genuinely has no escape, and must not be softened
     # by the same edit.
     assert "no such escape" in text
+
+
+# ---------------------------------------------------------------------------
+# Architect review round 1: the bound fan-out witnesses the plan requires
+# ---------------------------------------------------------------------------
+
+
+def test_a_bound_target_inherits_the_existing_placement_rules():
+    """Fan-out witness 1 of 3. A bound TARGET is placed like any target.
+
+    The plan records the composition decision that bound connector nodes
+    introduce NO new placement refusal — they inherit what already governs their
+    kind. Existing coverage started from a linear connector call, so nothing
+    demonstrated the decision for the other two carriers. These three witnesses
+    are what make "no new refusal" a checked claim instead of an intention.
+    """
+    writer = {"kind": "set_ddp", "name": "P", "source_values": [_STATIC, _DPPSEG]}
+    bound_target = {"kind": "target", "connection_ref": "$ref:CONN",
+                    "operation_ref": "$ref:GETOP",
+                    "path_binding": {"property_name": "P"}}
+    doc = {"version": "1", "body": {"kind": "sequence", "steps": [
+        {"kind": "source", "connection_ref": "$ref:CONN", "operation_ref": "$ref:GETOP"},
+        writer, bound_target, {"kind": "stop"}]}}
+    assert _dynpath_codes(doc["body"]["steps"]) == ()
+
+
+def test_a_bound_connector_call_inherits_the_existing_placement_rules():
+    """Fan-out witness 2 of 3 — the linear carrier, stated explicitly."""
+    writer = {"kind": "set_ddp", "name": "P", "source_values": [_STATIC, _DPPSEG]}
+    assert _dynpath_codes([writer, _BOUND, {"kind": "stop"}]) == ()
+
+
+def test_a_bound_call_is_admitted_as_a_control_body_entry():
+    """Fan-out witness 3 of 3: the bound call as the ENTRY of a control body.
+
+    This is the placement most likely to have acquired an accidental refusal,
+    because the bound-path rule walks control bodies to find the reaching
+    writer. The writer sits outside the Decision and the bound call opens an
+    arm, so the rule has to carry the writer across the boundary — and admit it.
+    """
+    writer = {"kind": "set_ddp", "name": "P", "source_values": [_STATIC, _DPPSEG]}
+    # A control-only root is EXACTLY one control node, so the writer lives inside
+    # the arm rather than before it — the placement rule this witness must not
+    # accidentally violate while testing a different one.
+    decision = {
+        "kind": "decision", "comparison": "equals",
+        "left": {"static_value": "a", "value_type": "static"},
+        "right": {"static_value": "b", "value_type": "static"},
+        "true_arm": {"steps": [writer, _BOUND], "terminal": {"kind": "stop"}},
+        "false_arm": {"steps": [{"kind": "message", "text": "x"}],
+                      "terminal": {"kind": "stop"}},
+    }
+    assert _dynpath_codes([decision]) == ()
+
+
+def test_the_fan_out_witnesses_are_not_vacuous():
+    """Each carrier must still REFUSE when the writer is genuinely missing.
+
+    Without this the three witnesses above could pass on a rule that never
+    fires for those carriers at all, which is the failure they exist to exclude.
+    """
+    bound_target = {"kind": "target", "connection_ref": "$ref:CONN",
+                    "operation_ref": "$ref:GETOP",
+                    "path_binding": {"property_name": "P"}}
+    src = {"kind": "source", "connection_ref": "$ref:CONN", "operation_ref": "$ref:GETOP"}
+    assert PROCESS_IR_SEMANTIC_DYNAMIC_PATH_DDP_NOT_ESTABLISHED in _dynpath_codes(
+        [src, bound_target, {"kind": "stop"}])
+    assert PROCESS_IR_SEMANTIC_DYNAMIC_PATH_DDP_NOT_ESTABLISHED in _dynpath_codes(
+        [_BOUND, {"kind": "stop"}])
+    decision = {
+        "kind": "decision", "comparison": "equals",
+        "left": {"static_value": "a", "value_type": "static"},
+        "right": {"static_value": "b", "value_type": "static"},
+        "true_arm": {"steps": [_BOUND], "terminal": {"kind": "stop"}},
+        "false_arm": {"steps": [{"kind": "message", "text": "x"}],
+                      "terminal": {"kind": "stop"}},
+    }
+    assert PROCESS_IR_SEMANTIC_DYNAMIC_PATH_DDP_NOT_ESTABLISHED in _dynpath_codes([decision])

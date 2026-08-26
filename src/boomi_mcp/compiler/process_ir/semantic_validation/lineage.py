@@ -578,10 +578,18 @@ def _walk_lineage(
     threw: List[str] = []
     leg_writes = _leg_write_index(prepared, capabilities)
 
-    def _report(code: str, node, severity="error", evidence=()) -> None:
+    def _report(code: str, node, severity="error", evidence=(), sub_path="") -> None:
         # One finding per (code, node). The report dedups too, but stopping the
         # duplicate here keeps a diamond-shaped graph from generating the same
         # finding once per path.
+        #
+        # `sub_path` addresses a finding BELOW the node — the dynamic-path rules
+        # use `/path_binding`, because every one of them is about the binding and
+        # a node carrying several authored fields would otherwise leave the
+        # caller guessing which. It is a parameter rather than a second reporter
+        # on purpose: the served-text scanner pins how many places construct a
+        # finding from a dynamic code, and a second construction site is exactly
+        # the drift that pin exists to catch.
         key = (code, node.node_id)
         if key in reported:
             return
@@ -591,7 +599,7 @@ def _walk_lineage(
                 code,
                 severity,
                 _LINEAGE_PHASE,
-                node.source_path,
+                node.source_path + sub_path,
                 evidence=evidence,
                 internal_node_id=node.node_id,
             )
@@ -727,6 +735,7 @@ def _walk_lineage(
                 PROCESS_IR_SEMANTIC_DYNAMIC_PATH_DDP_NOT_ESTABLISHED,
                 node,
                 evidence=(("state_scope", DDP),),
+                sub_path="/path_binding",
             )
             return
         writer_semantic, unmet_reads = writer
@@ -739,6 +748,7 @@ def _walk_lineage(
                 PROCESS_IR_SEMANTIC_DYNAMIC_PATH_DDP_NOT_ESTABLISHED,
                 node,
                 evidence=(("state_scope", unmet_reads[0][0]),),
+                sub_path="/path_binding",
             )
             return
         sources = tuple(getattr(writer_semantic, "source_values", ()) or ())
@@ -747,6 +757,7 @@ def _walk_lineage(
                 PROCESS_IR_SEMANTIC_DYNAMIC_PATH_NO_DYNAMIC_SEGMENT,
                 node,
                 evidence=(("state_scope", DDP),),
+                sub_path="/path_binding",
             )
             return
         # The profile pairing is a biconditional, and it is what makes the
@@ -771,6 +782,7 @@ def _walk_lineage(
                 PROCESS_IR_SEMANTIC_DYNAMIC_PATH_PROFILE_BINDING_MISMATCH,
                 node,
                 evidence=(("reader_count", len(pairs)),),
+                sub_path="/path_binding",
             )
             return
         declared = _profile_identity(binding.request_profile_ref)
@@ -780,6 +792,7 @@ def _walk_lineage(
                 PROCESS_IR_SEMANTIC_DYNAMIC_PATH_PROFILE_BINDING_MISMATCH,
                 node,
                 evidence=(("reader_count", len(pairs)),),
+                sub_path="/path_binding",
             )
 
     def _visit(node_id: str, state: _State, depth: int, leg=None, writers=None,

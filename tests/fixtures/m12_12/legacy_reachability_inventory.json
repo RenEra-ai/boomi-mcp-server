@@ -7292,7 +7292,7 @@
       },
       "producer": "meta_tools.list_capabilities_action()",
       "selector": "authoring_contract",
-      "sha256": "7210e4d9337c29d46fbc3b7931c6c0b9bd023ec838e52f7467ddafa740742d51",
+      "sha256": "178c0b935dd1bb1c015d3deff1e7abeb5831a06c3af0f602efe6e7c1cf312cbb",
       "surface_class": "SS-CAPABILITY-CATALOG",
       "value": {
         "actions": [
@@ -7397,11 +7397,11 @@
           }
         ],
         "capability_comparison": {
-          "actual_capability_revision": "sha256:781089620971c7e05f4e30bb1d3973944b4bc6a00f1037278c9378964cec8618",
+          "actual_capability_revision": "sha256:a723a7f0631f162df72321884998e740c60c24ef878cc97e325834d0175b5327",
           "status": "not_requested"
         },
-        "capability_revision": "sha256:781089620971c7e05f4e30bb1d3973944b4bc6a00f1037278c9378964cec8618",
-        "compiler_revision": "sha256:6089d948485fcf83ea5fccadbaa2bb5a2d33fa49f2c3f24af2ee2d439f35e203",
+        "capability_revision": "sha256:a723a7f0631f162df72321884998e740c60c24ef878cc97e325834d0175b5327",
+        "compiler_revision": "sha256:39e74def80678aedd325541e3725d09dea7718490c5a19c8c966805c62f48e1f",
         "contract_version": "2",
         "intent_kinds": [
           "integration_spec",
@@ -7640,7 +7640,7 @@
           "schema_version": "1",
           "source_version": "0.1.0"
         },
-        "schema_revision": "sha256:8c94a060881505ad940dea587951d2efe2bdf47c9ba894db394c6fc51bb385d3",
+        "schema_revision": "sha256:492b1dff364cc737fa339b54e1afa5193ca6edf13eb3f4820339187306311ddb",
         "schemas": [
           {
             "owned_by_authoring_contract": true,
@@ -7652,21 +7652,21 @@
           {
             "owned_by_authoring_contract": true,
             "provenance": "runtime_schema_registry",
-            "schema_hash": "sha256:995d320bd5466dc2d20b705272fb1f6c686c29a6d5fe924a241f932b0de82fa4",
+            "schema_hash": "sha256:99678e296a6e12040c34f7242747c01f41769416c78dc5a646240e9bbfa178c7",
             "schema_version": "2",
             "selector": "AuthoringCompileResultV1"
           },
           {
             "owned_by_authoring_contract": true,
             "provenance": "runtime_schema_registry",
-            "schema_hash": "sha256:c16e8f3a91bd2730767525a90242592e53fe716934079edbc1b019970b6e2670",
+            "schema_hash": "sha256:f35d3eb964de3f24689e86b613e08829a0af3eba6eb965bdef70138bbe280cc0",
             "schema_version": "2",
             "selector": "AuthoringPlanResultV1"
           },
           {
             "owned_by_authoring_contract": true,
             "provenance": "runtime_schema_registry",
-            "schema_hash": "sha256:b98ee87358ca26e5d27e86184223df34ffd81d4207651cc5b2dd2a313188e03d",
+            "schema_hash": "sha256:4a0246ae3b447dab2b7fa2885e716a91366fb27f4b8b88e4cf941c6975fb238e",
             "schema_version": "2",
             "selector": "AuthoringRequestV1"
           },
@@ -7680,13 +7680,13 @@
           {
             "owned_by_authoring_contract": false,
             "provenance": "runtime_schema_registry",
-            "schema_hash": "sha256:0ce8034bc4e79230a0c3e4421c9079353980904de9449ae264e300a39eb93edb",
+            "schema_hash": "sha256:3aa5c936a8b0f8d393dd619064b16d53e59b967cc87cee06412f6ae9ac7be2bf",
             "selector": "IntegrationSpecV1"
           },
           {
             "owned_by_authoring_contract": true,
             "provenance": "runtime_schema_registry",
-            "schema_hash": "sha256:3613ec06c134eb9ce7776523bec7a6210b07d424280effc571d10615d320118b",
+            "schema_hash": "sha256:039549a98f710466fe9677e4e19e18ca205060780133ee4b43bb9fa4b1b3fff7",
             "schema_version": "1",
             "selector": "ProcessIRV1"
           },
@@ -7755,7 +7755,7 @@
           {
             "owned_by_authoring_contract": false,
             "provenance": "runtime_schema_registry",
-            "schema_hash": "sha256:afbefe0eb5976c037edf57fc873b14df0cc6fb71ebf06d209a8e4f64094e5973",
+            "schema_hash": "sha256:7165544f7888f5dc209df76ec3f4632bd4909694509f48c02069e3a6827775e2",
             "selector": "recipe_contributions"
           },
           {
@@ -13844,14 +13844,14 @@
     },
     {
       "artifact_id": "SS-SCHEMA-TEMPLATES:schema_name=AuthoringCompileResultV1",
-      "canonical_length": 83573,
+      "canonical_length": 83987,
       "legacy_excerpt": {
         "json_schema.$defs.IntegrationComponentSpec.properties.config.description": "Type-specific configuration payload. For type='process', config.process_kind selects a structured process-flow builder (e.g. 'database_to_api_sync' or 'wrapper_subprocess' — issue #25) and is REQUIRED for any authoring action that emits or rebuilds process XML (create / create_clone / update): such a process without process_kind is rejected at plan time with PROCESS_KIND_REQUIRED (legacy freeform JSON-to-XML process authoring has been removed). A reference-only reuse of an existing process (no XML emitted) may omit it. Use manage_component for an explicit raw process XML escape hatch.",
         "json_schema.$defs.IntegrationSpecV1.properties.processes.description": "Issue #153 M12.15 — canonical process roots authored as ProcessIR. Each entry is one ProcessAuthoringUnitV1: exactly one ProcessComponentEnvelopeV1 plus exactly one ProcessIRV1 root. These are compiled by the canonical chain and materialized by the neutral ProcessComponentMaterializer — they resolve NO legacy process_kind. 'components' remains the home of supporting components and of reference-only existing processes. 'components' and 'processes' share ONE key namespace: a key used by a component and by a process envelope is a duplicate, and all four depends_on directions (component->component, component->process, process->component, process->process) enter one topological order with one cycle check. A TUPLE, per the plan's field type: pydantic coerces list input, so the wire shape is an ordinary JSON array and no caller sends anything different — but unlike this model's legacy List siblings, mutating the collection itself is unrepresentable. Per-element immutability lives on the frozen ProcessAuthoringUnitV1 entries."
       },
       "producer": "meta_tools.get_schema_template_action(...)",
       "selector": "schema_name=AuthoringCompileResultV1",
-      "sha256": "567979e6bd408b5d371e764d8370d86f2536b54387eeb948a0582fd67b43e8de",
+      "sha256": "8afe55df2a2d9ec38ecea80442214a29c9dd3994424fa4a020d5f774d8667549",
       "surface_class": "SS-SCHEMA-TEMPLATES",
       "value": {
         "_success": true,
@@ -14550,7 +14550,7 @@
             },
             "ConnectorPathBindingV1": {
               "additionalProperties": false,
-              "description": "Binds a connector call's per-document request path to a dynamic document property.\n\nThe platform exposes exactly ONE per-document bindable location on a REST call —\nthe \"Path\" dynamic operation property — so this binding names WHICH property feeds\nit and nothing else. Which families offer that location is published per family;\na family that offers none rejects the binding.\n\nIt deliberately carries NO path segments. The ordered segments live on the\n``set_ddp`` node that writes ``property_name`` upstream — one authority for the\npath's composition — and duplicating them here would be a second copy of a fact\nthe writer already owns. What the emitted shape needs beyond the property name is\nonly whether a profile element participates, which is exactly what\n``request_profile_ref`` records.\n\n``request_profile_ref`` is present if and only if the reaching writer contains a\nprofile-valued source, and then names that same profile. That biconditional is\nenforced by semantic validation, which is what makes this field a pinned closed\ncontract rather than a hand-copy: the emitted ``parameter-profile`` attribute is\nmeaningful only with a profile element, and the operation symbol does not carry\nthe request profile in a production symbol table.",
+              "description": "Binds a connector call's per-document request path to a dynamic document property.\n\nThe platform exposes exactly ONE per-document bindable location on a REST call —\nthe \"Path\" dynamic operation property — so this binding names WHICH property feeds\nit and nothing else. Which families offer that location is published per family;\na family that offers none rejects the binding.\n\nIt deliberately carries NO path segments. The ordered segments live on the\n``set_ddp`` node that writes ``property_name`` upstream — one authority for the\npath's composition — and duplicating them here would be a second copy of a fact\nthe writer already owns. What the emitted shape needs beyond the property name is\nonly whether a profile element participates, which is exactly what\n``request_profile_ref`` records.\n\n``request_profile_ref`` is present if and only if the reaching writer contains a\nprofile-valued source, and then names that same profile. That biconditional is\nenforced by semantic validation, which is what makes this field a pinned closed\ncontract rather than a hand-copy: the emitted ``parameter-profile`` attribute is\nmeaningful only with a profile element, and the operation symbol does not carry\nthe request profile in a production symbol table.\n\nFROZEN as well as extra-forbidden, per the design plan. The binding is a\nsnapshot the compiler carries into the emission plan and re-derives against\nwhen it checks that plan's invariants; a value mutated after the snapshot was\ntaken would leave the two disagreeing about a request path with nothing to\nnotice. It inherits `extra=\"forbid\"` from the base but not immutability, so\nthat half is stated here.",
               "properties": {
                 "property_name": {
                   "description": "Bare dynamic document property name feeding the request path (no wire prefix)",
@@ -17120,12 +17120,12 @@
         "raw_xml_exposed": false,
         "read_only": true,
         "revision_binding": {
-          "capability_revision": "sha256:781089620971c7e05f4e30bb1d3973944b4bc6a00f1037278c9378964cec8618",
-          "compiler_revision": "sha256:6089d948485fcf83ea5fccadbaa2bb5a2d33fa49f2c3f24af2ee2d439f35e203",
+          "capability_revision": "sha256:a723a7f0631f162df72321884998e740c60c24ef878cc97e325834d0175b5327",
+          "compiler_revision": "sha256:39e74def80678aedd325541e3725d09dea7718490c5a19c8c966805c62f48e1f",
           "contract_version": "2",
-          "schema_revision": "sha256:8c94a060881505ad940dea587951d2efe2bdf47c9ba894db394c6fc51bb385d3"
+          "schema_revision": "sha256:492b1dff364cc737fa339b54e1afa5193ca6edf13eb3f4820339187306311ddb"
         },
-        "schema_hash": "sha256:995d320bd5466dc2d20b705272fb1f6c686c29a6d5fe924a241f932b0de82fa4",
+        "schema_hash": "sha256:99678e296a6e12040c34f7242747c01f41769416c78dc5a646240e9bbfa178c7",
         "schema_name": "AuthoringCompileResultV1",
         "schema_version": "2",
         "surface": "MCP authoring contract (issue #146 M12.11)"
@@ -17134,14 +17134,14 @@
     },
     {
       "artifact_id": "SS-SCHEMA-TEMPLATES:schema_name=AuthoringPlanResultV1",
-      "canonical_length": 82247,
+      "canonical_length": 82661,
       "legacy_excerpt": {
         "json_schema.$defs.IntegrationComponentSpec.properties.config.description": "Type-specific configuration payload. For type='process', config.process_kind selects a structured process-flow builder (e.g. 'database_to_api_sync' or 'wrapper_subprocess' — issue #25) and is REQUIRED for any authoring action that emits or rebuilds process XML (create / create_clone / update): such a process without process_kind is rejected at plan time with PROCESS_KIND_REQUIRED (legacy freeform JSON-to-XML process authoring has been removed). A reference-only reuse of an existing process (no XML emitted) may omit it. Use manage_component for an explicit raw process XML escape hatch.",
         "json_schema.$defs.IntegrationSpecV1.properties.processes.description": "Issue #153 M12.15 — canonical process roots authored as ProcessIR. Each entry is one ProcessAuthoringUnitV1: exactly one ProcessComponentEnvelopeV1 plus exactly one ProcessIRV1 root. These are compiled by the canonical chain and materialized by the neutral ProcessComponentMaterializer — they resolve NO legacy process_kind. 'components' remains the home of supporting components and of reference-only existing processes. 'components' and 'processes' share ONE key namespace: a key used by a component and by a process envelope is a duplicate, and all four depends_on directions (component->component, component->process, process->component, process->process) enter one topological order with one cycle check. A TUPLE, per the plan's field type: pydantic coerces list input, so the wire shape is an ordinary JSON array and no caller sends anything different — but unlike this model's legacy List siblings, mutating the collection itself is unrepresentable. Per-element immutability lives on the frozen ProcessAuthoringUnitV1 entries."
       },
       "producer": "meta_tools.get_schema_template_action(...)",
       "selector": "schema_name=AuthoringPlanResultV1",
-      "sha256": "8055e6b72aea59743a8ac5e18f18f25f31620077db664347bce8e399401f971a",
+      "sha256": "91a11fc2b6bcde9fa488d3640bd3bdad614eb544bf83426bcefd382d7c150977",
       "surface_class": "SS-SCHEMA-TEMPLATES",
       "value": {
         "_success": true,
@@ -17791,7 +17791,7 @@
             },
             "ConnectorPathBindingV1": {
               "additionalProperties": false,
-              "description": "Binds a connector call's per-document request path to a dynamic document property.\n\nThe platform exposes exactly ONE per-document bindable location on a REST call —\nthe \"Path\" dynamic operation property — so this binding names WHICH property feeds\nit and nothing else. Which families offer that location is published per family;\na family that offers none rejects the binding.\n\nIt deliberately carries NO path segments. The ordered segments live on the\n``set_ddp`` node that writes ``property_name`` upstream — one authority for the\npath's composition — and duplicating them here would be a second copy of a fact\nthe writer already owns. What the emitted shape needs beyond the property name is\nonly whether a profile element participates, which is exactly what\n``request_profile_ref`` records.\n\n``request_profile_ref`` is present if and only if the reaching writer contains a\nprofile-valued source, and then names that same profile. That biconditional is\nenforced by semantic validation, which is what makes this field a pinned closed\ncontract rather than a hand-copy: the emitted ``parameter-profile`` attribute is\nmeaningful only with a profile element, and the operation symbol does not carry\nthe request profile in a production symbol table.",
+              "description": "Binds a connector call's per-document request path to a dynamic document property.\n\nThe platform exposes exactly ONE per-document bindable location on a REST call —\nthe \"Path\" dynamic operation property — so this binding names WHICH property feeds\nit and nothing else. Which families offer that location is published per family;\na family that offers none rejects the binding.\n\nIt deliberately carries NO path segments. The ordered segments live on the\n``set_ddp`` node that writes ``property_name`` upstream — one authority for the\npath's composition — and duplicating them here would be a second copy of a fact\nthe writer already owns. What the emitted shape needs beyond the property name is\nonly whether a profile element participates, which is exactly what\n``request_profile_ref`` records.\n\n``request_profile_ref`` is present if and only if the reaching writer contains a\nprofile-valued source, and then names that same profile. That biconditional is\nenforced by semantic validation, which is what makes this field a pinned closed\ncontract rather than a hand-copy: the emitted ``parameter-profile`` attribute is\nmeaningful only with a profile element, and the operation symbol does not carry\nthe request profile in a production symbol table.\n\nFROZEN as well as extra-forbidden, per the design plan. The binding is a\nsnapshot the compiler carries into the emission plan and re-derives against\nwhen it checks that plan's invariants; a value mutated after the snapshot was\ntaken would leave the two disagreeing about a request path with nothing to\nnotice. It inherits `extra=\"forbid\"` from the base but not immutability, so\nthat half is stated here.",
               "properties": {
                 "property_name": {
                   "description": "Bare dynamic document property name feeding the request path (no wire prefix)",
@@ -20340,12 +20340,12 @@
         "raw_xml_exposed": false,
         "read_only": true,
         "revision_binding": {
-          "capability_revision": "sha256:781089620971c7e05f4e30bb1d3973944b4bc6a00f1037278c9378964cec8618",
-          "compiler_revision": "sha256:6089d948485fcf83ea5fccadbaa2bb5a2d33fa49f2c3f24af2ee2d439f35e203",
+          "capability_revision": "sha256:a723a7f0631f162df72321884998e740c60c24ef878cc97e325834d0175b5327",
+          "compiler_revision": "sha256:39e74def80678aedd325541e3725d09dea7718490c5a19c8c966805c62f48e1f",
           "contract_version": "2",
-          "schema_revision": "sha256:8c94a060881505ad940dea587951d2efe2bdf47c9ba894db394c6fc51bb385d3"
+          "schema_revision": "sha256:492b1dff364cc737fa339b54e1afa5193ca6edf13eb3f4820339187306311ddb"
         },
-        "schema_hash": "sha256:c16e8f3a91bd2730767525a90242592e53fe716934079edbc1b019970b6e2670",
+        "schema_hash": "sha256:f35d3eb964de3f24689e86b613e08829a0af3eba6eb965bdef70138bbe280cc0",
         "schema_name": "AuthoringPlanResultV1",
         "schema_version": "2",
         "surface": "MCP authoring contract (issue #146 M12.11)"
@@ -20354,7 +20354,7 @@
     },
     {
       "artifact_id": "SS-SCHEMA-TEMPLATES:schema_name=AuthoringRequestV1",
-      "canonical_length": 100039,
+      "canonical_length": 100453,
       "legacy_excerpt": {
         "json_schema.$defs.IntegrationComponentSpec.properties.config.description": "Type-specific configuration payload. For type='process', config.process_kind selects a structured process-flow builder (e.g. 'database_to_api_sync' or 'wrapper_subprocess' — issue #25) and is REQUIRED for any authoring action that emits or rebuilds process XML (create / create_clone / update): such a process without process_kind is rejected at plan time with PROCESS_KIND_REQUIRED (legacy freeform JSON-to-XML process authoring has been removed). A reference-only reuse of an existing process (no XML emitted) may omit it. Use manage_component for an explicit raw process XML escape hatch.",
         "json_schema.$defs.IntegrationSpecV1.properties.processes.description": "Issue #153 M12.15 — canonical process roots authored as ProcessIR. Each entry is one ProcessAuthoringUnitV1: exactly one ProcessComponentEnvelopeV1 plus exactly one ProcessIRV1 root. These are compiled by the canonical chain and materialized by the neutral ProcessComponentMaterializer — they resolve NO legacy process_kind. 'components' remains the home of supporting components and of reference-only existing processes. 'components' and 'processes' share ONE key namespace: a key used by a component and by a process envelope is a duplicate, and all four depends_on directions (component->component, component->process, process->component, process->process) enter one topological order with one cycle check. A TUPLE, per the plan's field type: pydantic coerces list input, so the wire shape is an ordinary JSON array and no caller sends anything different — but unlike this model's legacy List siblings, mutating the collection itself is unrepresentable. Per-element immutability lives on the frozen ProcessAuthoringUnitV1 entries.",
@@ -20362,7 +20362,7 @@
       },
       "producer": "meta_tools.get_schema_template_action(...)",
       "selector": "schema_name=AuthoringRequestV1",
-      "sha256": "d33286d1047f572fb974aa4306490ec9eb73b252f3b9b632d213d608a385505e",
+      "sha256": "4c0ef865983aa5007d8adfdb45ab1261001cef36841cd2c71a5d6dd44ebf9570",
       "surface_class": "SS-SCHEMA-TEMPLATES",
       "value": {
         "_success": true,
@@ -20821,7 +20821,7 @@
             },
             "ConnectorPathBindingV1": {
               "additionalProperties": false,
-              "description": "Binds a connector call's per-document request path to a dynamic document property.\n\nThe platform exposes exactly ONE per-document bindable location on a REST call —\nthe \"Path\" dynamic operation property — so this binding names WHICH property feeds\nit and nothing else. Which families offer that location is published per family;\na family that offers none rejects the binding.\n\nIt deliberately carries NO path segments. The ordered segments live on the\n``set_ddp`` node that writes ``property_name`` upstream — one authority for the\npath's composition — and duplicating them here would be a second copy of a fact\nthe writer already owns. What the emitted shape needs beyond the property name is\nonly whether a profile element participates, which is exactly what\n``request_profile_ref`` records.\n\n``request_profile_ref`` is present if and only if the reaching writer contains a\nprofile-valued source, and then names that same profile. That biconditional is\nenforced by semantic validation, which is what makes this field a pinned closed\ncontract rather than a hand-copy: the emitted ``parameter-profile`` attribute is\nmeaningful only with a profile element, and the operation symbol does not carry\nthe request profile in a production symbol table.",
+              "description": "Binds a connector call's per-document request path to a dynamic document property.\n\nThe platform exposes exactly ONE per-document bindable location on a REST call —\nthe \"Path\" dynamic operation property — so this binding names WHICH property feeds\nit and nothing else. Which families offer that location is published per family;\na family that offers none rejects the binding.\n\nIt deliberately carries NO path segments. The ordered segments live on the\n``set_ddp`` node that writes ``property_name`` upstream — one authority for the\npath's composition — and duplicating them here would be a second copy of a fact\nthe writer already owns. What the emitted shape needs beyond the property name is\nonly whether a profile element participates, which is exactly what\n``request_profile_ref`` records.\n\n``request_profile_ref`` is present if and only if the reaching writer contains a\nprofile-valued source, and then names that same profile. That biconditional is\nenforced by semantic validation, which is what makes this field a pinned closed\ncontract rather than a hand-copy: the emitted ``parameter-profile`` attribute is\nmeaningful only with a profile element, and the operation symbol does not carry\nthe request profile in a production symbol table.\n\nFROZEN as well as extra-forbidden, per the design plan. The binding is a\nsnapshot the compiler carries into the emission plan and re-derives against\nwhen it checks that plan's invariants; a value mutated after the snapshot was\ntaken would leave the two disagreeing about a request path with nothing to\nnotice. It inherits `extra=\"forbid\"` from the base but not immutability, so\nthat half is stated here.",
               "properties": {
                 "property_name": {
                   "description": "Bare dynamic document property name feeding the request path (no wire prefix)",
@@ -24132,12 +24132,12 @@
         "raw_xml_exposed": false,
         "read_only": true,
         "revision_binding": {
-          "capability_revision": "sha256:781089620971c7e05f4e30bb1d3973944b4bc6a00f1037278c9378964cec8618",
-          "compiler_revision": "sha256:6089d948485fcf83ea5fccadbaa2bb5a2d33fa49f2c3f24af2ee2d439f35e203",
+          "capability_revision": "sha256:a723a7f0631f162df72321884998e740c60c24ef878cc97e325834d0175b5327",
+          "compiler_revision": "sha256:39e74def80678aedd325541e3725d09dea7718490c5a19c8c966805c62f48e1f",
           "contract_version": "2",
-          "schema_revision": "sha256:8c94a060881505ad940dea587951d2efe2bdf47c9ba894db394c6fc51bb385d3"
+          "schema_revision": "sha256:492b1dff364cc737fa339b54e1afa5193ca6edf13eb3f4820339187306311ddb"
         },
-        "schema_hash": "sha256:b98ee87358ca26e5d27e86184223df34ffd81d4207651cc5b2dd2a313188e03d",
+        "schema_hash": "sha256:4a0246ae3b447dab2b7fa2885e716a91366fb27f4b8b88e4cf941c6975fb238e",
         "schema_name": "AuthoringRequestV1",
         "schema_version": "2",
         "surface": "MCP authoring contract (issue #146 M12.11)"
@@ -24146,14 +24146,14 @@
     },
     {
       "artifact_id": "SS-SCHEMA-TEMPLATES:schema_name=IntegrationSpecV1",
-      "canonical_length": 71685,
+      "canonical_length": 72099,
       "legacy_excerpt": {
         "json_schema.$defs.IntegrationComponentSpec.properties.config.description": "Type-specific configuration payload. For type='process', config.process_kind selects a structured process-flow builder (e.g. 'database_to_api_sync' or 'wrapper_subprocess' — issue #25) and is REQUIRED for any authoring action that emits or rebuilds process XML (create / create_clone / update): such a process without process_kind is rejected at plan time with PROCESS_KIND_REQUIRED (legacy freeform JSON-to-XML process authoring has been removed). A reference-only reuse of an existing process (no XML emitted) may omit it. Use manage_component for an explicit raw process XML escape hatch.",
         "json_schema.properties.processes.description": "Issue #153 M12.15 — canonical process roots authored as ProcessIR. Each entry is one ProcessAuthoringUnitV1: exactly one ProcessComponentEnvelopeV1 plus exactly one ProcessIRV1 root. These are compiled by the canonical chain and materialized by the neutral ProcessComponentMaterializer — they resolve NO legacy process_kind. 'components' remains the home of supporting components and of reference-only existing processes. 'components' and 'processes' share ONE key namespace: a key used by a component and by a process envelope is a duplicate, and all four depends_on directions (component->component, component->process, process->component, process->process) enter one topological order with one cycle check. A TUPLE, per the plan's field type: pydantic coerces list input, so the wire shape is an ordinary JSON array and no caller sends anything different — but unlike this model's legacy List siblings, mutating the collection itself is unrepresentable. Per-element immutability lives on the frozen ProcessAuthoringUnitV1 entries."
       },
       "producer": "meta_tools.get_schema_template_action(...)",
       "selector": "schema_name=IntegrationSpecV1",
-      "sha256": "b4dfcfbfe781b54897e419c4b2ca8632108e3e5197c6bc30b0bcf5e1bb81a85c",
+      "sha256": "bbfc21ee2bc41b0449d83cf69086ec7a44207899315bb1e027daa0fb5e1cb61d",
       "surface_class": "SS-SCHEMA-TEMPLATES",
       "value": {
         "_success": true,
@@ -24564,7 +24564,7 @@
             },
             "ConnectorPathBindingV1": {
               "additionalProperties": false,
-              "description": "Binds a connector call's per-document request path to a dynamic document property.\n\nThe platform exposes exactly ONE per-document bindable location on a REST call —\nthe \"Path\" dynamic operation property — so this binding names WHICH property feeds\nit and nothing else. Which families offer that location is published per family;\na family that offers none rejects the binding.\n\nIt deliberately carries NO path segments. The ordered segments live on the\n``set_ddp`` node that writes ``property_name`` upstream — one authority for the\npath's composition — and duplicating them here would be a second copy of a fact\nthe writer already owns. What the emitted shape needs beyond the property name is\nonly whether a profile element participates, which is exactly what\n``request_profile_ref`` records.\n\n``request_profile_ref`` is present if and only if the reaching writer contains a\nprofile-valued source, and then names that same profile. That biconditional is\nenforced by semantic validation, which is what makes this field a pinned closed\ncontract rather than a hand-copy: the emitted ``parameter-profile`` attribute is\nmeaningful only with a profile element, and the operation symbol does not carry\nthe request profile in a production symbol table.",
+              "description": "Binds a connector call's per-document request path to a dynamic document property.\n\nThe platform exposes exactly ONE per-document bindable location on a REST call —\nthe \"Path\" dynamic operation property — so this binding names WHICH property feeds\nit and nothing else. Which families offer that location is published per family;\na family that offers none rejects the binding.\n\nIt deliberately carries NO path segments. The ordered segments live on the\n``set_ddp`` node that writes ``property_name`` upstream — one authority for the\npath's composition — and duplicating them here would be a second copy of a fact\nthe writer already owns. What the emitted shape needs beyond the property name is\nonly whether a profile element participates, which is exactly what\n``request_profile_ref`` records.\n\n``request_profile_ref`` is present if and only if the reaching writer contains a\nprofile-valued source, and then names that same profile. That biconditional is\nenforced by semantic validation, which is what makes this field a pinned closed\ncontract rather than a hand-copy: the emitted ``parameter-profile`` attribute is\nmeaningful only with a profile element, and the operation symbol does not carry\nthe request profile in a production symbol table.\n\nFROZEN as well as extra-forbidden, per the design plan. The binding is a\nsnapshot the compiler carries into the emission plan and re-derives against\nwhen it checks that plan's invariants; a value mutated after the snapshot was\ntaken would leave the two disagreeing about a request path with nothing to\nnotice. It inherits `extra=\"forbid\"` from the base but not immutability, so\nthat half is stated here.",
               "properties": {
                 "property_name": {
                   "description": "Bare dynamic document property name feeding the request path (no wire prefix)",
@@ -34079,13 +34079,13 @@
     },
     {
       "artifact_id": "SS-SCHEMA-TEMPLATES:schema_name=recipe_contributions",
-      "canonical_length": 87552,
+      "canonical_length": 87966,
       "legacy_excerpt": {
         "authoring_note": "These are the ONLY values a registered recipe may return. They carry opaque references and closed enumerations — never configuration, credentials, headers, SQL, raw XML, executable code, JSON pointers, or caller-authored graph edges. Recipe output is validated exactly as direct ProcessIR/topology/component authoring and cannot be exempted."
       },
       "producer": "meta_tools.get_schema_template_action(...)",
       "selector": "schema_name=recipe_contributions",
-      "sha256": "0080b4de8a489e22442391ab452e5c2edeb7c654f9aad27cc73eeff8fa4cb3a2",
+      "sha256": "892710db4735b2ce1a13f7bc1eff4a1b7984a894b782f7c7699ed01b41da51dd",
       "surface_class": "SS-SCHEMA-TEMPLATES",
       "value": {
         "_success": true,
@@ -34818,7 +34818,7 @@
             },
             "ConnectorPathBindingV1": {
               "additionalProperties": false,
-              "description": "Binds a connector call's per-document request path to a dynamic document property.\n\nThe platform exposes exactly ONE per-document bindable location on a REST call —\nthe \"Path\" dynamic operation property — so this binding names WHICH property feeds\nit and nothing else. Which families offer that location is published per family;\na family that offers none rejects the binding.\n\nIt deliberately carries NO path segments. The ordered segments live on the\n``set_ddp`` node that writes ``property_name`` upstream — one authority for the\npath's composition — and duplicating them here would be a second copy of a fact\nthe writer already owns. What the emitted shape needs beyond the property name is\nonly whether a profile element participates, which is exactly what\n``request_profile_ref`` records.\n\n``request_profile_ref`` is present if and only if the reaching writer contains a\nprofile-valued source, and then names that same profile. That biconditional is\nenforced by semantic validation, which is what makes this field a pinned closed\ncontract rather than a hand-copy: the emitted ``parameter-profile`` attribute is\nmeaningful only with a profile element, and the operation symbol does not carry\nthe request profile in a production symbol table.",
+              "description": "Binds a connector call's per-document request path to a dynamic document property.\n\nThe platform exposes exactly ONE per-document bindable location on a REST call —\nthe \"Path\" dynamic operation property — so this binding names WHICH property feeds\nit and nothing else. Which families offer that location is published per family;\na family that offers none rejects the binding.\n\nIt deliberately carries NO path segments. The ordered segments live on the\n``set_ddp`` node that writes ``property_name`` upstream — one authority for the\npath's composition — and duplicating them here would be a second copy of a fact\nthe writer already owns. What the emitted shape needs beyond the property name is\nonly whether a profile element participates, which is exactly what\n``request_profile_ref`` records.\n\n``request_profile_ref`` is present if and only if the reaching writer contains a\nprofile-valued source, and then names that same profile. That biconditional is\nenforced by semantic validation, which is what makes this field a pinned closed\ncontract rather than a hand-copy: the emitted ``parameter-profile`` attribute is\nmeaningful only with a profile element, and the operation symbol does not carry\nthe request profile in a production symbol table.\n\nFROZEN as well as extra-forbidden, per the design plan. The binding is a\nsnapshot the compiler carries into the emission plan and re-derives against\nwhen it checks that plan's invariants; a value mutated after the snapshot was\ntaken would leave the two disagreeing about a request path with nothing to\nnotice. It inherits `extra=\"forbid\"` from the base but not immutability, so\nthat half is stated here.",
               "properties": {
                 "property_name": {
                   "description": "Bare dynamic document property name feeding the request path (no wire prefix)",
@@ -37738,7 +37738,7 @@
       "legacy_excerpt": {},
       "producer": "meta_tools.get_schema_template_action(...) [all axes]",
       "selector": "walked_surface_digest",
-      "sha256": "ec6d2c36e4101f3fda8a3669a1282e80aa0a1abbbdcf0388e9ab5dd725cc6917",
+      "sha256": "3614d37e3899baca71b543406371beb18aece166eefa7c4622a3b54d8f42ffad",
       "surface_class": "SS-SCHEMA-TEMPLATES",
       "value": {
         "resource_type=component": "8327243ec482fa1641f49265c87694e33616f12db015b3f234dc73db9ed8057c",
@@ -38020,14 +38020,14 @@
         "resource_type=trading_partner|operation=update|standard=rosettanet": "83537ac74be6088a4607997d0e200d76ec7c6367c900aa9923e823d610dd27e1",
         "resource_type=trading_partner|operation=update|standard=tradacoms": "83537ac74be6088a4607997d0e200d76ec7c6367c900aa9923e823d610dd27e1",
         "resource_type=trading_partner|operation=update|standard=x12": "83537ac74be6088a4607997d0e200d76ec7c6367c900aa9923e823d610dd27e1",
-        "schema_name=AuthoringBuildProvenanceV1": "8fa9d11bfadd197dde5754b218fa4b719a4ea9e9fdf265affc3ce037443e514c",
-        "schema_name=AuthoringCompileResultV1": "567979e6bd408b5d371e764d8370d86f2536b54387eeb948a0582fd67b43e8de",
-        "schema_name=AuthoringPlanResultV1": "8055e6b72aea59743a8ac5e18f18f25f31620077db664347bce8e399401f971a",
-        "schema_name=AuthoringRequestV1": "d33286d1047f572fb974aa4306490ec9eb73b252f3b9b632d213d608a385505e",
-        "schema_name=AuthoringRevisionBindingV1": "40d7e094095eed75b708172967aa0f8480086a9e54c7c9daceb6af6da635b59e",
-        "schema_name=IntegrationSpecV1": "b4dfcfbfe781b54897e419c4b2ca8632108e3e5197c6bc30b0bcf5e1bb81a85c",
-        "schema_name=ProcessIRV1": "9ad7e7964a2a521e99fcbf9404dfa8e9cfcf45fe0de9f3163875311b734f353e",
-        "schema_name=SystemTopologySpecV1": "e23a047f588948511a191afb05cd4700e10f0bd1a7516dfad296b53e9fede0fc",
+        "schema_name=AuthoringBuildProvenanceV1": "85e674d9046c0779c99f63fd64fba55cc6967999817617ea8d9ced4e56fe5b0f",
+        "schema_name=AuthoringCompileResultV1": "8afe55df2a2d9ec38ecea80442214a29c9dd3994424fa4a020d5f774d8667549",
+        "schema_name=AuthoringPlanResultV1": "91a11fc2b6bcde9fa488d3640bd3bdad614eb544bf83426bcefd382d7c150977",
+        "schema_name=AuthoringRequestV1": "4c0ef865983aa5007d8adfdb45ab1261001cef36841cd2c71a5d6dd44ebf9570",
+        "schema_name=AuthoringRevisionBindingV1": "58b19d8ba1a3e0b4ddecbf806e9ef8ca922627f4e9ce8a1d0dec386dbd80333e",
+        "schema_name=IntegrationSpecV1": "bbfc21ee2bc41b0449d83cf69086ec7a44207899315bb1e027daa0fb5e1cb61d",
+        "schema_name=ProcessIRV1": "05edf8e3888e76d1fdf4a5623b8c65111c99bcca81799d77204022c52fa0f863",
+        "schema_name=SystemTopologySpecV1": "2f719ba21112a66d043f3d9f5d7d74e1065d0c8bf8838d59a1620608fbba9ee9",
         "schema_name=account_governance": "d0773b315a5b59bad4bbb0021a2468e5cb4d3a85c4dbac216a887f0194a2ecdc",
         "schema_name=api_service": "c7be12ec5b2c503bd54088bd2c7b00adfa435e3f3fc9610bae0b91117657911b",
         "schema_name=archetype:api_to_api_sync": "7e4653429bdfc56d53ecb1c07fb7f477e11c2180c3afdfad94566cab1ca716e7",
@@ -38036,7 +38036,7 @@
         "schema_name=archetype:http_listener_to_db": "b21d41d870324ce66e872957fa09126dc641354753a0d7681d14d3489f7dcf3f",
         "schema_name=archetype:http_listener_to_rest": "cdd6c9c6fb51cd8afda5c7245a2ef37548939610c1c5235cd9abe1ed9deac3d9",
         "schema_name=archetype:stub_minimal_integration": "28f1d13a8568cea1df47bb1b361708d17e490204c7425787999e80df63f4b0fc",
-        "schema_name=authoring_workflow": "47b38a98c1d1d239e1461290853c8cee67727110b6a430858b5c6abdcdfba063",
+        "schema_name=authoring_workflow": "5717df590126d1699fe450f481ec92c276a3a2d092f6c4919d90f9376a5c14e0",
         "schema_name=cache_property_authoring": "484017df545d247be99c71ef4be4edf8d47013e565a6e05119c357699229ed6f",
         "schema_name=compose_archetypes": "ec23808a15913ec8ce1d6e510ff941952be25b006a42128216b891d05f1a9d7f",
         "schema_name=design_doctrine": "b47bc0062bf52054609a4b81b8ea98dd5b363c716b079ed0413c1f89bee08a7b",
@@ -38099,7 +38099,7 @@
         "schema_name=governance_pattern:support_folder_isolation_and_privacy": "4f0b206e14ad2f2272b03dfc8c9575dbcc3d454d28894a42602a9cca546de2ed",
         "schema_name=governance_pattern:tools_utilities_folder_non_integration": "50ddcf761e63e68f305271b4f079d8a7effd9b750726a8be784c2c52993c2cbc",
         "schema_name=governance_pattern:tracked_field_naming_generic_and_unique": "42ae3917d1ddb0f23a9dd0e9083a9106a3ed6c18bc06e740a1c07014830204d1",
-        "schema_name=process_ir_authoring": "ae606065570265c1c6d066801322c14444db06fed518ceee1027ca3007dded3e",
+        "schema_name=process_ir_authoring": "2fc443bd3139024c0155e0600dd2f45aca824731e79537445b629ab721c3515a",
         "schema_name=process_property": "43c9cf66e73fb39b6f1625d00a9a01f876005bfa94b34fb99cb14e0deebe699b",
         "schema_name=recipe:boomi.adapter.api_to_api_sync@1.0.0": "280f2452c95aaa3ddff0800bf0fc2c64cd3f7327e2e366123a86d4424b38a52b",
         "schema_name=recipe:boomi.adapter.api_to_database_sync@1.0.0": "0b675ce4f9a86711dec17430be3eecdd90752d6e28e745d667226ef316210b5b",
@@ -38109,11 +38109,11 @@
         "schema_name=recipe:boomi.archetype.api_to_database_sync@0.1.0": "1863e1e40f10cac2308b9f0ec300c3f883bf4bb6a791bee250ee577509e04a79",
         "schema_name=recipe:boomi.compose.db_rest_fanout@1.0.0": "fe61a055c6a5eb6ec289c660cd1867f460737c7f38b9605904a9368dcf1c4b4d",
         "schema_name=recipe:boomi.constraint.inbound_validate@1.0.0": "dedadcf78923b95109eef4373b17f55646fc7a54867e9c789825da5c22ae2670",
-        "schema_name=recipe_contributions": "0080b4de8a489e22442391ab452e5c2edeb7c654f9aad27cc73eeff8fa4cb3a2",
+        "schema_name=recipe_contributions": "892710db4735b2ce1a13f7bc1eff4a1b7984a894b782f7c7699ed01b41da51dd",
         "schema_name=recipe_registry": "220788b6ccbb92a52479683a855f16a34345f577b6ccf05cf3399874eec95758",
         "schema_name=script_dataprocess": "86d6cac0e593188c5c6a253e684097dadda0a6c3c331a1d71672c827133af143",
         "schema_name=script_mapping": "165e78ea08d24f54221f6da5973cbe20c7747d1a37f9fde496a42876b594e029",
-        "schema_name=validation_report": "d53fc268f88d80333e22218537c1c009812253d069c23f62a138aa468f8a7e67",
+        "schema_name=validation_report": "fbf907411510fe6a55a6dd436234c8035f64955c362ebe0601f26c0069f24864",
         "schema_name=workflow:build_and_verify_http_listener": "bf6ab2e405f375735cd6aaed29da0dbc6b717909dc1c184ba8dbe341f2b95800",
         "schema_name=workflow:build_integration_from_description": "72a20b29bbaf7a0ce39e06fb8514e13831968332bc5d0373d7f100bd7a943be0",
         "schema_name=workflow:compose_multi_target_integration": "6b04f2d192bcaf817a983a1aefda2f2f7b9674ce1c996737137c7ce8d6b932e0",

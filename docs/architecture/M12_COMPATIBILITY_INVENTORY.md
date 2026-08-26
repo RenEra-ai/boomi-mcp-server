@@ -2858,6 +2858,17 @@ document property does not.
 `scan_contract` did not move (216 sources, 0 unscanned assets), no census or ledger evidence line
 shifted, and no section-11 table needed regeneration.
 
+**Unit 8 rebaselined an eighth time, moving the same SEVEN.** The architect implementation review
+produced corrections that touch the ProcessIR schema and the authoring contract together, so the
+seven-artifact signature is again the expected one and was used as the check rather than accepted.
+The schema delta is exactly one leaf — the path-binding model's description, which now states that
+the model is frozen as well as extra-forbidden — and the contract delta is two entries, each in
+`related_entry_ids` only: the two node kinds that AUTHOR a per-document path binding now link to the
+capability, which the manifest published while node-centric discovery said nothing.
+
+`scan_contract` did not move (216 sources, 0 unscanned assets), no census or ledger evidence line
+shifted, and no section-11 table needed regeneration.
+
 **Unit 5 is the first rebaseline in this slice where `scan_contract` DID move, and the first that
 needed section-11 regenerated.** Two things happened at once and they are recorded separately
 because they have nothing to do with each other.

@@ -1105,7 +1105,16 @@ class ConnectorPathBindingV1(_ProcessIRBase):
     contract rather than a hand-copy: the emitted ``parameter-profile`` attribute is
     meaningful only with a profile element, and the operation symbol does not carry
     the request profile in a production symbol table.
+
+    FROZEN as well as extra-forbidden, per the design plan. The binding is a
+    snapshot the compiler carries into the emission plan and re-derives against
+    when it checks that plan's invariants; a value mutated after the snapshot was
+    taken would leave the two disagreeing about a request path with nothing to
+    notice. It inherits `extra="forbid"` from the base but not immutability, so
+    that half is stated here.
     """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
     property_name: str = Field(
         ...,

@@ -1,0 +1,24 @@
+Approvals and tool calls are unavailable in this read-only review session, and no further input is
+coming. Do not ask a clarifying question and do not request permission — neither can be answered.
+
+Produce the review NOW, as plain text, from what you have already read.
+
+You are reviewing issue #155 slice A of the boomi-mcp-server repository against the architect design
+plan you were given. The question is plan-versus-implementation faithfulness, not code correctness —
+the repo's own commit review has already gated the code across four rounds and returned clean.
+
+Report, concretely and with file:line plus the plan clause for each:
+
+1. Any requirement the plan makes of SLICE A that the implementation does not meet.
+2. Anything built in slice A that the plan does not authorize.
+3. Any place the implementation honours the plan's wording while defeating its intent.
+4. Your judgement on the four knowingly-recorded departures described in the brief — the narrowed
+   dynamic-path rule, the measured platform table replacing the served stream-replacing set, the
+   un-lowered primitive helper, and the profile-identity comparison deferred to slice C.
+
+Absences belonging to slices B through F are NOT findings — only slice A was implemented, and the
+plan says so. Do not report them.
+
+If slice A faithfully realizes the plan, say that plainly.
+
+END with a verdict on its OWN FINAL line: exactly 'VERDICT: NO ISSUES' or 'VERDICT: ISSUES FOUND'.

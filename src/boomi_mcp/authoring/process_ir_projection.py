@@ -313,6 +313,9 @@ _NODE_FACTS: Mapping[str, Mapping[str, Any]] = {
             "A routed destination connector call. Authors both the connection "
             "and the operation reference."
         ),
+        # The other node that AUTHORS a per-document path binding — see the
+        # connector-call entry for why node-centric discovery must say so.
+        _CAPS: ("dynamic_path",),
         _ORDERING: (
             "On the legacy linear path a target is immediately followed by its "
             "terminal — a stop, or a return_documents when the flow hands its "
@@ -353,6 +356,11 @@ _NODE_FACTS: Mapping[str, Mapping[str, Any]] = {
             "mixed_connector_execution",
             "connector_call_in_control_body",
             "typed_idempotency_evidence",
+            # This node AUTHORS the per-document path binding, so node-centric
+            # discovery has to link it to the capability. The manifest published
+            # support while the nodes that offer it said nothing, which leaves a
+            # caller browsing by node unable to find the feature at all.
+            "dynamic_path",
         ),
         _STAGES: ("author", "repair"),
     },
