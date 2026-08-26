@@ -5012,13 +5012,21 @@ def _lint_folder_placement(spec: IntegrationSpecV1) -> List[str]:
 def _lint_property_names(spec: IntegrationSpecV1) -> List[str]:
     """Property-naming lint (#102 D2): ``DPP_``/``DDP_`` UPPER_SNAKE, no period.
 
-    Warning-only. Today the typed builders emit a property name via the dynamic
+    Warning-only, over BOTH routes a property name can be authored through.
+
+    The legacy route: the typed builders emit a property name via the dynamic
     document-property path the process flow builder consumes —
     ``config.target.dynamic_path.ddp_name`` → ``dynamicdocument.<name>`` (the
     archetype sets ``config['target']['dynamic_path']``; a top-level
-    ``config.dynamic_path`` is accepted too for hand-authored specs). Flag a name
-    that does not match the document-property convention.
+    ``config.dynamic_path`` is accepted too for hand-authored specs).
+
+    The canonical route (#155): a ProcessIR document writes properties as
+    first-class nodes, anywhere a node may sit. Until this lint walked them, a
+    canonical author got no naming feedback at all — the lint was reading a
+    block their document does not have.
     """
+    from ..models.process_ir import iter_property_writes
+
     warnings: List[str] = []
     for comp in spec.components:
         if comp.action != "create":
@@ -5036,13 +5044,43 @@ def _lint_property_names(spec: IntegrationSpecV1) -> List[str]:
         if not isinstance(ddp_name, str) or not ddp_name.strip():
             continue
         name = ddp_name.strip()
-        if "." in name or not _PROPERTY_NAME_RE.match(name):
-            warnings.append(
-                f"[PROPERTY_NAMING] Component '{comp.key}' document property "
-                f"'{name}' does not follow the DDP_/DPP_ UPPER_SNAKE convention "
-                "(no period) — e.g. 'DDP_REST_PATH'."
-            )
+        warning = _property_naming_warning(comp.key, name)
+        if warning:
+            warnings.append(warning)
+
+    # ...and the same convention over CANONICAL property writers (#155). The
+    # loop above reads the legacy builder's dynamic-path block, which is the
+    # only place a property name appeared when this lint was written. A
+    # canonical document writes them as first-class nodes instead, and those
+    # nodes are authorable in a Branch leg, either Decision arm and either
+    # try/catch body — so the walk recurses rather than reading the root.
+    #
+    # One warning per OCCURRENCE, deliberately not deduplicated: the existing
+    # loop does not deduplicate either, and two components that both misname a
+    # property are two things to fix. The envelope action is not filtered on for
+    # the same reason an update re-authors the whole body.
+    for unit in getattr(spec, "processes", ()) or ():
+        for _path, raw in iter_property_writes(unit.process_ir):
+            warning = _property_naming_warning(unit.envelope.component_key, raw.strip())
+            if warning:
+                warnings.append(warning)
     return warnings
+
+
+def _property_naming_warning(component_key: str, name: str) -> Optional[str]:
+    """One property-naming warning for ``name``, or None when it conforms.
+
+    ONE definition of the served sentence. It had been written inline, and a
+    second caller would otherwise have meant a second copy of caller-facing text
+    that must stay byte-identical between them.
+    """
+    if "." in name or not _PROPERTY_NAME_RE.match(name):
+        return (
+            f"[PROPERTY_NAMING] Component '{component_key}' document property "
+            f"'{name}' does not follow the DDP_/DPP_ UPPER_SNAKE convention "
+            "(no period) — e.g. 'DDP_REST_PATH'."
+        )
+    return None
 
 
 def _bracketed_naming_warning(comp: "IntegrationComponentSpec", name: str) -> Optional[str]:

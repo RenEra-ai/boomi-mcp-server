@@ -434,3 +434,225 @@ def test_create_without_folder_warns_but_does_not_block():
 def test_create_with_folder_no_warning():
     plan = _plan([_db_conn("conn_a", "Orders DB")])  # _db_conn sets folder_name
     assert not _has_warn(plan, "FOLDER_REQUIRED_ON_CREATE")
+
+
+# ---------------------------------------------------------------------------
+# D2 continued — the same lint over CANONICAL property writers (#155)
+# ---------------------------------------------------------------------------
+#
+# The lint above reads the legacy builder's dynamic-path block. A canonical
+# ProcessIR document has no such block: it writes properties as first-class
+# nodes, in any body slot. Until the walk recursed, a canonical author got no
+# naming feedback at all — the lint was inspecting a shape their spec does not
+# contain, and passing for that reason rather than because the names conformed.
+
+import copy
+import json
+from pathlib import Path
+
+_FIXTURES = Path(__file__).parent / "fixtures" / "process_ir"
+
+
+def _writer(name):
+    return {
+        "kind": "set_ddp",
+        "name": name,
+        "source_values": [{"value": "x", "value_type": "static"}],
+    }
+
+
+def _declared_refs(obj):
+    """Every `$ref:` key the document carries, read from the parsed model.
+
+    A root must declare what it references, so a fixture-derived body would
+    otherwise be refused for a dependency reason before the lint ever runs.
+    Derived rather than hand-listed: a fixture that gains a reference must not
+    silently turn these cases into dependency refusals that still pass.
+    """
+    from boomi_mcp.models.process_ir import iter_component_refs, parse_process_ir_v1
+
+    ir = parse_process_ir_v1({"version": "1", "body": obj})
+    return tuple(sorted({
+        ref[len("$ref:"):] for _p, ref in iter_component_refs(ir)
+        if ref.startswith("$ref:")
+    }))
+
+
+def _ref_stub(key):
+    """A minimal connector-action component to satisfy one `$ref:` by key."""
+    return {
+        "key": key,
+        "type": "connector-action",
+        "name": f"Stub {key}",
+        "action": "create",
+        "depends_on": [f"{key}_CONN"],
+        "config": {
+            "connector_type": "rest",
+            "operation_mode": "execute",
+            "component_name": f"Stub {key}",
+            "connection_ref_key": f"{key}_CONN",
+            "method": "GET",
+            "path": "/v1/things",
+        },
+    }
+
+
+def _ref_conn_stub(key):
+    return {
+        "key": f"{key}_CONN",
+        "type": "connector-settings",
+        "name": f"Stub {key} conn",
+        "action": "create",
+        "config": {
+            "connector_type": "rest",
+            "component_name": f"Stub {key} conn",
+            "base_url": "https://example.invalid",
+            "auth_type": "none",
+        },
+    }
+
+
+def _ir_plan(body, key="proc"):
+    """A plan over a spec whose process unit carries `body` as its IR."""
+    refs = _declared_refs(body)
+    spec = {
+        "version": "1.0",
+        "name": "test-integration",
+        # Stub components for whatever the body references. A root must not
+        # only DECLARE its references but resolve them, so a fixture-derived
+        # body needs its referenced components present or the plan refuses on a
+        # dependency before reaching the lint.
+        "components": [c for ref in refs for c in (_ref_conn_stub(ref), _ref_stub(ref))],
+        "processes": [
+            {
+                "envelope": {
+                    "component_key": key,
+                    "name": "Proc",
+                    "action": "create",
+                    "depends_on": refs,
+                },
+                "process_ir": {"version": "1", "body": body},
+            }
+        ],
+    }
+    return _build_plan(MagicMock(), {"conflict_policy": "reuse", "integration_spec": spec})
+
+
+def _naming_warnings(plan):
+    return [w for w in _warnings(plan) if "PROPERTY_NAMING" in w]
+
+
+_STOP = {"kind": "stop"}
+_MSG = {"kind": "message", "text": "hi"}
+_STATIC = {"static_value": "a", "value_type": "static"}
+
+
+def _decision(true_steps, false_steps):
+    return {
+        "kind": "decision",
+        "comparison": "equals",
+        "left": _STATIC,
+        "right": dict(_STATIC, static_value="b"),
+        "true_arm": {"steps": true_steps, "terminal": _STOP},
+        "false_arm": {"steps": false_steps, "terminal": _STOP},
+    }
+
+
+def _try_catch_body(slot, node):
+    """A real try/catch fixture with `node` injected into the named body.
+
+    Built from the committed corpus rather than by hand: a scoped try/catch is
+    only legal around an actual connector, so a hand-rolled one is refused at
+    parse time for reasons that have nothing to do with this lint.
+    """
+    doc = json.loads((_FIXTURES / "issue154" / "try_data_process.json").read_text())
+
+    def inject(obj):
+        if isinstance(obj, dict):
+            if obj.get("kind") == "try_catch":
+                # Position 1 in the try body, never 0: a connector-scope try
+                # body must still OPEN on the connector it protects.
+                at = 1 if slot == "try_body" else 0
+                obj[slot]["steps"].insert(at, copy.deepcopy(node))
+                return True
+            return any(inject(v) for v in obj.values())
+        if isinstance(obj, list):
+            return any(inject(v) for v in obj)
+        return False
+
+    assert inject(doc), "the fixture no longer contains a try/catch"
+    return doc["body"]
+
+
+@pytest.mark.parametrize(
+    "slot, body",
+    [
+        (
+            "branch_leg",
+            {"kind": "sequence", "steps": [{"kind": "branch", "legs": [
+                {"steps": [_writer("leg.bad")], "terminal": _STOP},
+                {"steps": [_MSG], "terminal": _STOP},
+            ]}]},
+        ),
+        (
+            "decision_true_arm",
+            {"kind": "sequence", "steps": [_decision([_writer("true.bad")], [_MSG])]},
+        ),
+        (
+            "decision_false_arm",
+            {"kind": "sequence", "steps": [_decision([_MSG], [_writer("false.bad")])]},
+        ),
+        ("try_body", _try_catch_body("try_body", _writer("try.bad"))),
+        ("catch_body", _try_catch_body("catch_body", _writer("catch.bad"))),
+    ],
+)
+def test_a_canonical_property_name_is_linted_in_every_body_slot(slot, body):
+    """NON-VACUITY: a writer is authorable in all of these, so all are walked.
+
+    A root-only walk passes every one of these cases while reporting nothing —
+    which is precisely the shape of the bug: silence that looks like approval.
+    """
+    plan = _ir_plan(body)
+    assert _naming_warnings(plan), (slot, _warnings(plan))
+
+
+def test_two_badly_named_writers_produce_two_warnings():
+    """One warning per OCCURRENCE — deliberately not deduplicated.
+
+    The legacy loop does not deduplicate either, and two writers to fix are two
+    warnings. Pinned because a dedup would be a silent behaviour change that no
+    other assertion here would notice.
+    """
+    body = {"kind": "sequence", "steps": [{"kind": "branch", "legs": [
+        {"steps": [_writer("first.bad")], "terminal": _STOP},
+        {"steps": [_writer("second.bad")], "terminal": _STOP},
+    ]}]}
+    assert len(_naming_warnings(_ir_plan(body))) == 2
+
+
+def test_conformant_canonical_names_are_clean():
+    """The over-fire control: the walk must not warn about correct names."""
+    body = {"kind": "sequence", "steps": [{"kind": "branch", "legs": [
+        {"steps": [_writer("DDP_REST_PATH")], "terminal": _STOP},
+        {"steps": [_writer("DDP_CLIENT_ID")], "terminal": _STOP},
+    ]}]}
+    assert _naming_warnings(_ir_plan(body)) == []
+
+
+def test_the_canonical_warning_names_the_process_component_and_is_byte_identical():
+    """The served sentence has ONE definition, shared with the legacy route.
+
+    Two routes producing near-identical caller-facing text is how the two drift.
+    Asserting equality here is what makes the shared helper load-bearing rather
+    than a refactor nobody would notice reverting.
+    """
+    body = {"kind": "sequence", "steps": [{"kind": "branch", "legs": [
+        {"steps": [_writer("rest.path")], "terminal": _STOP},
+        {"steps": [_MSG], "terminal": _STOP},
+    ]}]}
+    canonical = _naming_warnings(_ir_plan(body, key="p1"))[0]
+
+    legacy = _naming_warnings(
+        _plan([_process("p1", "Proc", target={"dynamic_path": {"ddp_name": "rest.path"}})])
+    )[0]
+    assert canonical == legacy

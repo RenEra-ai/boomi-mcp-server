@@ -1,0 +1,75 @@
+[
+  {
+    "label": "run1",
+    "execution_id": "execution-5927d759-5a64-4ecc-9f77-4c3970460b72-2026.08.26",
+    "utc": "2026-08-26T07:08:34.647128+00:00",
+    "status": "COMPLETE",
+    "inbound": 1,
+    "outbound": 2,
+    "readback_path": "/admin/cdscm/api/v1/clients/df0c8de9-3a8b-4e13-b9a6-e08819540b24",
+    "http_before": 200,
+    "http_after": 404,
+    "sha_before": "09ea2da876c87d05",
+    "sha_after": "21fe55e549a7f9de",
+    "raw_changed": true,
+    "volatile_only": false,
+    "substantive_diff": {
+      "clientId": [
+        "_E2_DEL_20260826070447",
+        null
+      ],
+      "developerMessage": [
+        null,
+        "Clients record 'df0c8de9-3a8b-4e13-b9a6-e08819540b24' not found"
+      ],
+      "errors": [
+        null,
+        []
+      ],
+      "key": [
+        "df0c8de9-3a8b-4e13-b9a6-e08819540b24",
+        null
+      ],
+      "message": [
+        null,
+        "Clients record 'df0c8de9-3a8b-4e13-b9a6-e08819540b24' not found"
+      ],
+      "name": [
+        "DELETE Target",
+        null
+      ]
+    },
+    "full_diff_keys": [
+      "clientId",
+      "createdBy",
+      "createdOn",
+      "developerMessage",
+      "errors",
+      "key",
+      "message",
+      "modifiedBy",
+      "modifiedOn",
+      "name",
+      "timestamp"
+    ]
+  },
+  {
+    "label": "replay",
+    "execution_id": "execution-0baf90d8-55b6-459f-94af-4678cd179e94-2026.08.26",
+    "utc": "2026-08-26T07:08:45.076697+00:00",
+    "status": "COMPLETE",
+    "inbound": 1,
+    "outbound": 2,
+    "readback_path": "/admin/cdscm/api/v1/clients/df0c8de9-3a8b-4e13-b9a6-e08819540b24",
+    "http_before": 404,
+    "http_after": 404,
+    "sha_before": "e155710f1145f2f9",
+    "sha_after": "45584e7d63924fc2",
+    "raw_changed": true,
+    "volatile_only": true,
+    "substantive_diff": {},
+    "full_diff_keys": [
+      "timestamp"
+    ]
+  }
+]

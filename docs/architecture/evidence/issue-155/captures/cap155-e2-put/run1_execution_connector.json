@@ -1,0 +1,53 @@
+{
+  "_success": true,
+  "status_code": 200,
+  "method": "POST",
+  "endpoint": "ExecutionConnector/query",
+  "url": "https://api.boomi.com/api/rest/v1/traininghlibbochkarov-JKIY2X/ExecutionConnector/query",
+  "profile": "renera",
+  "data": {
+    "@type": "QueryResult",
+    "result": [
+      {
+        "@type": "ExecutionConnector",
+        "id": "RVhFQ19DT05OZmFsc2U6RVhFQ1VURTpjNDI4MTM0Ni04M2U5LTQwMjYtODU2ZC1lZGU3MThlYzY4YTA6NWZmYzA5MDUtYmY3OC00NDgyLTk1NTgtOTEwNGU3ZmEwOWI5OmV4ZWN1dGlvbi1mOTY5NDQyMy1lYWNkLTQxODEtOGUxMi1mYTdmM2IyODAwMTEtMjAyNi4wOC4yNg",
+        "executionId": "execution-f9694423-eacd-4181-8e12-fa7f3b280011-2026.08.26",
+        "executionConnector": "_TEST_155E2_PUT_20260826070453",
+        "connectorType": "officialboomi-X3979C-rest-prod",
+        "actionType": "EXECUTE",
+        "errorCount": 0,
+        "successCount": 1,
+        "size": 253,
+        "isStartShape": false,
+        "recordType": "connector"
+      },
+      {
+        "@type": "ExecutionConnector",
+        "id": "RVhFQ19DT05OZmFsc2U6RVhFQ1VURTpjNDI4MTM0Ni04M2U5LTQwMjYtODU2ZC1lZGU3MThlYzY4YTA6MTNhZmEyNTYtOTc1OS00MTY3LThhYzAtOGNmNjMwYTAzMjc4OmV4ZWN1dGlvbi1mOTY5NDQyMy1lYWNkLTQxODEtOGUxMi1mYTdmM2IyODAwMTEtMjAyNi4wOC4yNg",
+        "executionId": "execution-f9694423-eacd-4181-8e12-fa7f3b280011-2026.08.26",
+        "executionConnector": "_TEST_155E2_src_GET_20260826070453",
+        "connectorType": "officialboomi-X3979C-rest-prod",
+        "actionType": "EXECUTE",
+        "errorCount": 0,
+        "successCount": 1,
+        "size": 253,
+        "isStartShape": false,
+        "recordType": "connector"
+      },
+      {
+        "@type": "ExecutionConnector",
+        "id": "RVhFQ19DT05OdHJ1ZTpub2RhdGE6c2hhcGUxOjpleGVjdXRpb24tZjk2OTQ0MjMtZWFjZC00MTgxLThlMTItZmE3ZjNiMjgwMDExLTIwMjYuMDguMjY",
+        "executionId": "execution-f9694423-eacd-4181-8e12-fa7f3b280011-2026.08.26",
+        "executionConnector": "Start",
+        "connectorType": "nodata",
+        "actionType": "nodata",
+        "errorCount": 0,
+        "successCount": 1,
+        "size": 0,
+        "isStartShape": true,
+        "recordType": "nodata"
+      }
+    ],
+    "numberOfResults": 3
+  }
+}

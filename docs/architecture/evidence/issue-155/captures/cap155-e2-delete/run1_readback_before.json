@@ -1,0 +1,16 @@
+{
+  "utc": "2026-08-26T07:08:14.944650+00:00",
+  "path": "/admin/cdscm/api/v1/clients/df0c8de9-3a8b-4e13-b9a6-e08819540b24",
+  "status": 200,
+  "sha256": "09ea2da876c87d055800f4d5328344aa178e0abaa5c5ba202658c07c99bb37a6",
+  "bytes": 237,
+  "body": {
+    "clientId": "_E2_DEL_20260826070447",
+    "name": "DELETE Target",
+    "key": "df0c8de9-3a8b-4e13-b9a6-e08819540b24",
+    "createdOn": "2026-08-26T07:04:47.673Z",
+    "createdBy": "integration",
+    "modifiedOn": "2026-08-26T07:04:47.673Z",
+    "modifiedBy": "integration"
+  }
+}

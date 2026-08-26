@@ -1,0 +1,14 @@
+{
+  "utc": "2026-08-26T07:08:45.076686+00:00",
+  "path": "/admin/cdscm/api/v1/clients/df0c8de9-3a8b-4e13-b9a6-e08819540b24",
+  "status": 404,
+  "sha256": "45584e7d63924fc26309271e3bfc3730b4f89cf1eb9197e76038b6efebc7396c",
+  "bytes": 225,
+  "body": {
+    "message": "Clients record 'df0c8de9-3a8b-4e13-b9a6-e08819540b24' not found",
+    "developerMessage": "Clients record 'df0c8de9-3a8b-4e13-b9a6-e08819540b24' not found",
+    "errors": [],
+    "data": null,
+    "timestamp": "2026-08-26T07:08:45.075Z"
+  }
+}

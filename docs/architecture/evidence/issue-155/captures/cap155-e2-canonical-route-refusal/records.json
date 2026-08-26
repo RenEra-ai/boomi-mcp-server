@@ -1,0 +1,105 @@
+{
+  "record": {
+    "scenario_id": "cap155-e2-canonical-route-refusal",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "captured_utc": "2026-08-26T07:18:50.674337+00:00",
+    "what": "the canonical process_ir connector_call route refuses all six verbs",
+    "served_supported_connector_actions": [
+      "connector_action.database.get",
+      "connector_action.database.send",
+      "connector_action.rest.get",
+      "connector_action.rest.patch",
+      "connector_action.soap.execute"
+    ],
+    "refusal_code": "PROCESS_IR_CAPABILITY_CONNECTOR_ACTION_UNSUPPORTED",
+    "refused_verbs": [
+      "POST",
+      "PUT",
+      "DELETE",
+      "HEAD",
+      "OPTIONS",
+      "TRACE"
+    ],
+    "route_used_for_the_captures": "legacy integration_spec / sync_pipeline"
+  },
+  "artifacts": [
+    {
+      "scenario": "cap155-e2-canonical-route-refusal",
+      "file": "canonical_refusal_POST.json",
+      "utc": "2026-08-26T07:15:39.676988+00:00",
+      "account_id": "traininghlibbochkarov-JKIY2X",
+      "sha256": "e5bf88f60b5cefe8bea072c188f8c724e9be94416574cec797e481516e14cffb",
+      "byte_length": 1097,
+      "kind": "canonical-route-refusal",
+      "verb": "POST"
+    },
+    {
+      "scenario": "cap155-e2-canonical-route-refusal",
+      "file": "canonical_refusal_PUT.json",
+      "utc": "2026-08-26T07:16:19.397380+00:00",
+      "account_id": "traininghlibbochkarov-JKIY2X",
+      "sha256": "e5bf88f60b5cefe8bea072c188f8c724e9be94416574cec797e481516e14cffb",
+      "byte_length": 1097,
+      "kind": "canonical-route-refusal",
+      "verb": "PUT"
+    },
+    {
+      "scenario": "cap155-e2-canonical-route-refusal",
+      "file": "canonical_refusal_DELETE.json",
+      "utc": "2026-08-26T07:16:55.562173+00:00",
+      "account_id": "traininghlibbochkarov-JKIY2X",
+      "sha256": "e5bf88f60b5cefe8bea072c188f8c724e9be94416574cec797e481516e14cffb",
+      "byte_length": 1097,
+      "kind": "canonical-route-refusal",
+      "verb": "DELETE"
+    },
+    {
+      "scenario": "cap155-e2-canonical-route-refusal",
+      "file": "canonical_refusal_HEAD.json",
+      "utc": "2026-08-26T07:17:32.958922+00:00",
+      "account_id": "traininghlibbochkarov-JKIY2X",
+      "sha256": "e5bf88f60b5cefe8bea072c188f8c724e9be94416574cec797e481516e14cffb",
+      "byte_length": 1097,
+      "kind": "canonical-route-refusal",
+      "verb": "HEAD"
+    },
+    {
+      "scenario": "cap155-e2-canonical-route-refusal",
+      "file": "canonical_refusal_OPTIONS.json",
+      "utc": "2026-08-26T07:18:12.645549+00:00",
+      "account_id": "traininghlibbochkarov-JKIY2X",
+      "sha256": "e5bf88f60b5cefe8bea072c188f8c724e9be94416574cec797e481516e14cffb",
+      "byte_length": 1097,
+      "kind": "canonical-route-refusal",
+      "verb": "OPTIONS"
+    },
+    {
+      "scenario": "cap155-e2-canonical-route-refusal",
+      "file": "canonical_refusal_TRACE.json",
+      "utc": "2026-08-26T07:18:50.670392+00:00",
+      "account_id": "traininghlibbochkarov-JKIY2X",
+      "sha256": "e5bf88f60b5cefe8bea072c188f8c724e9be94416574cec797e481516e14cffb",
+      "byte_length": 1097,
+      "kind": "canonical-route-refusal",
+      "verb": "TRACE"
+    },
+    {
+      "scenario": "cap155-e2-canonical-route-refusal",
+      "file": "served_connector_action_catalog.json",
+      "utc": "2026-08-26T07:18:50.674103+00:00",
+      "account_id": "traininghlibbochkarov-JKIY2X",
+      "sha256": "c7fe230e107c7a23d2e07e5b192d618088a4fbff05e2189ed0cfc4dd5382848d",
+      "byte_length": 39239,
+      "kind": "served-catalog"
+    },
+    {
+      "scenario": "cap155-e2-canonical-route-refusal",
+      "file": "summary.json",
+      "utc": "2026-08-26T07:18:50.674327+00:00",
+      "account_id": "traininghlibbochkarov-JKIY2X",
+      "sha256": "f6fc6c4a9b105783fdc221c238aaeb7ed60c408c45a4b90e7fce462e4ca1a922",
+      "byte_length": 8785,
+      "kind": "summary"
+    }
+  ]
+}

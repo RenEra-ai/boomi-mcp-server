@@ -1,0 +1,53 @@
+{
+  "_success": true,
+  "status_code": 200,
+  "method": "POST",
+  "endpoint": "ExecutionConnector/query",
+  "url": "https://api.boomi.com/api/rest/v1/traininghlibbochkarov-JKIY2X/ExecutionConnector/query",
+  "profile": "renera",
+  "data": {
+    "@type": "QueryResult",
+    "result": [
+      {
+        "@type": "ExecutionConnector",
+        "id": "RVhFQ19DT05OZmFsc2U6RVhFQ1VURTpjNDI4MTM0Ni04M2U5LTQwMjYtODU2ZC1lZGU3MThlYzY4YTA6MTNhZmEyNTYtOTc1OS00MTY3LThhYzAtOGNmNjMwYTAzMjc4OmV4ZWN1dGlvbi0zYjVmNjFkOC03Mjc1LTRlMjgtYTY5OS00ZWU5N2JhYzE3N2EtMjAyNi4wOC4yNg",
+        "executionId": "execution-3b5f61d8-7275-4e28-a699-4ee97bac177a-2026.08.26",
+        "executionConnector": "_TEST_155E2_src_GET_20260826070453",
+        "connectorType": "officialboomi-X3979C-rest-prod",
+        "actionType": "EXECUTE",
+        "errorCount": 0,
+        "successCount": 1,
+        "size": 253,
+        "isStartShape": false,
+        "recordType": "connector"
+      },
+      {
+        "@type": "ExecutionConnector",
+        "id": "RVhFQ19DT05OdHJ1ZTpub2RhdGE6c2hhcGUxOjpleGVjdXRpb24tM2I1ZjYxZDgtNzI3NS00ZTI4LWE2OTktNGVlOTdiYWMxNzdhLTIwMjYuMDguMjY",
+        "executionId": "execution-3b5f61d8-7275-4e28-a699-4ee97bac177a-2026.08.26",
+        "executionConnector": "Start",
+        "connectorType": "nodata",
+        "actionType": "nodata",
+        "errorCount": 0,
+        "successCount": 1,
+        "size": 0,
+        "isStartShape": true,
+        "recordType": "nodata"
+      },
+      {
+        "@type": "ExecutionConnector",
+        "id": "RVhFQ19DT05OZmFsc2U6RVhFQ1VURTpjNDI4MTM0Ni04M2U5LTQwMjYtODU2ZC1lZGU3MThlYzY4YTA6YTQ1ODliNmQtODAxZC00N2I3LTkzOTgtNmQxOWYwZWEyOTM2OmV4ZWN1dGlvbi0zYjVmNjFkOC03Mjc1LTRlMjgtYTY5OS00ZWU5N2JhYzE3N2EtMjAyNi4wOC4yNg",
+        "executionId": "execution-3b5f61d8-7275-4e28-a699-4ee97bac177a-2026.08.26",
+        "executionConnector": "_TEST_155E2_HEAD_20260826070453",
+        "connectorType": "officialboomi-X3979C-rest-prod",
+        "actionType": "EXECUTE",
+        "errorCount": 0,
+        "successCount": 1,
+        "size": 0,
+        "isStartShape": false,
+        "recordType": "connector"
+      }
+    ],
+    "numberOfResults": 3
+  }
+}

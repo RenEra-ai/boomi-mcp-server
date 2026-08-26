@@ -1,0 +1,390 @@
+{
+  "record": {
+    "scenario_id": "cap155-e2-head",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "boomi_env_id": "c8d9140d-6d34-4ca6-91ff-bfd263556d5b",
+    "boomi_atom_id": "89387bdf-b177-4631-9cc6-687bf4afefa7",
+    "rest_connection_id": "c4281346-83e9-4026-856d-ede718ec68a0",
+    "counterparty_sha": "68ddb681cf9942305bd5bc7129bf286d3df8920d",
+    "captured_utc": "2026-08-26T07:14:34.116232+00:00",
+    "verb": "HEAD",
+    "route": "legacy integration_spec / sync_pipeline: fetch(REST GET) -> send(REST HEAD)",
+    "process_component_id": "def295f1-c8c1-4ff4-9a15-2f0d94e6ef5f",
+    "operation_component_id": "a4589b6d-801d-47b7-9398-6d19f0ea2936",
+    "source_operation_component_id": "13afa256-9759-4167-8ac0-8cf630a03278",
+    "executions": [
+      {
+        "label": "run1",
+        "execution_id": "execution-1cff8516-308e-4eca-8660-21bedba7874b-2026.08.26",
+        "utc": "2026-08-26T07:08:57.623106+00:00",
+        "status": "COMPLETE",
+        "inbound_document_count": 1,
+        "outbound_document_count": 2
+      },
+      {
+        "label": "replay",
+        "execution_id": "execution-3b5f61d8-7275-4e28-a699-4ee97bac177a-2026.08.26",
+        "utc": "2026-08-26T07:09:14.495767+00:00",
+        "status": "COMPLETE",
+        "inbound_document_count": 1,
+        "outbound_document_count": 2
+      }
+    ],
+    "readback_path": "/admin/cdscm/api/v1/clients/ee9eaee2-bc25-46f6-b9ee-891252654736"
+  },
+  "artifacts": [
+    {
+      "scenario": "cap155-e2-head",
+      "file": "run1_readback_before.json",
+      "utc": "2026-08-26T07:14:34.114999+00:00",
+      "account_id": "traininghlibbochkarov-JKIY2X",
+      "sha256": "871c6c091c74ea9af18c89a851239ed23a87f385d50cf488c5fff24fd8059710",
+      "byte_length": 558,
+      "kind": "readback",
+      "phase": "before",
+      "execution_id": "execution-1cff8516-308e-4eca-8660-21bedba7874b-2026.08.26"
+    },
+    {
+      "scenario": "cap155-e2-head",
+      "file": "run1_readback_after.json",
+      "utc": "2026-08-26T07:14:34.115054+00:00",
+      "account_id": "traininghlibbochkarov-JKIY2X",
+      "sha256": "e930cb35a37a0956a5fa8858f90528d98ed91cdaaf4b81852cbd08aceefa359f",
+      "byte_length": 558,
+      "kind": "readback",
+      "phase": "after",
+      "execution_id": "execution-1cff8516-308e-4eca-8660-21bedba7874b-2026.08.26"
+    },
+    {
+      "scenario": "cap155-e2-head",
+      "file": "run1_execute.json",
+      "utc": "2026-08-26T07:14:34.115107+00:00",
+      "account_id": "traininghlibbochkarov-JKIY2X",
+      "sha256": "9eb16daff4ab7c6f39b99e40c75437d90b9e6b4259e706f2a35235d79ee1c1cf",
+      "byte_length": 857,
+      "kind": "execute-response",
+      "execution_id": "execution-1cff8516-308e-4eca-8660-21bedba7874b-2026.08.26"
+    },
+    {
+      "scenario": "cap155-e2-head",
+      "file": "run1_execution_record.json",
+      "utc": "2026-08-26T07:14:34.115167+00:00",
+      "account_id": "traininghlibbochkarov-JKIY2X",
+      "sha256": "6dabed2f1d8b3e52a7aca68529814d1db2562d0a0363636bd0ac3103ec3aae22",
+      "byte_length": 1227,
+      "kind": "ExecutionRecord",
+      "execution_id": "execution-1cff8516-308e-4eca-8660-21bedba7874b-2026.08.26"
+    },
+    {
+      "scenario": "cap155-e2-head",
+      "file": "run1_execution_connector.json",
+      "utc": "2026-08-26T07:14:34.115230+00:00",
+      "account_id": "traininghlibbochkarov-JKIY2X",
+      "sha256": "f817ecb89091dcac279d52e9ebd47dfdf98b9d9da7f92266846e8a1cb7e71843",
+      "byte_length": 2151,
+      "kind": "ExecutionConnector",
+      "execution_id": "execution-1cff8516-308e-4eca-8660-21bedba7874b-2026.08.26",
+      "rows": [
+        {
+          "executionConnector": "Start",
+          "connectorType": "nodata",
+          "actionType": "nodata",
+          "isStartShape": true,
+          "recordType": "nodata",
+          "successCount": 1,
+          "errorCount": 0,
+          "size": 0,
+          "id": "RVhFQ19DT05OdHJ1ZTpub2RhdGE6c2hhcGUxOjpleGVjdXRpb24tMWNmZjg1MTYtMzA4ZS00ZWNhLTg2NjAtMjFiZWRiYTc4NzRiLTIwMjYuMDguMjY"
+        },
+        {
+          "executionConnector": "_TEST_155E2_HEAD_20260826070453",
+          "connectorType": "officialboomi-X3979C-rest-prod",
+          "actionType": "EXECUTE",
+          "isStartShape": false,
+          "recordType": "connector",
+          "successCount": 1,
+          "errorCount": 0,
+          "size": 0,
+          "id": "RVhFQ19DT05OZmFsc2U6RVhFQ1VURTpjNDI4MTM0Ni04M2U5LTQwMjYtODU2ZC1lZGU3MThlYzY4YTA6YTQ1ODliNmQtODAxZC00N2I3LTkzOTgtNmQxOWYwZWEyOTM2OmV4ZWN1dGlvbi0xY2ZmODUxNi0zMDhlLTRlY2EtODY2MC0yMWJlZGJhNzg3NGItMjAyNi4wOC4yNg"
+        },
+        {
+          "executionConnector": "_TEST_155E2_src_GET_20260826070453",
+          "connectorType": "officialboomi-X3979C-rest-prod",
+          "actionType": "EXECUTE",
+          "isStartShape": false,
+          "recordType": "connector",
+          "successCount": 1,
+          "errorCount": 0,
+          "size": 253,
+          "id": "RVhFQ19DT05OZmFsc2U6RVhFQ1VURTpjNDI4MTM0Ni04M2U5LTQwMjYtODU2ZC1lZGU3MThlYzY4YTA6MTNhZmEyNTYtOTc1OS00MTY3LThhYzAtOGNmNjMwYTAzMjc4OmV4ZWN1dGlvbi0xY2ZmODUxNi0zMDhlLTRlY2EtODY2MC0yMWJlZGJhNzg3NGItMjAyNi4wOC4yNg"
+        }
+      ]
+    },
+    {
+      "scenario": "cap155-e2-head",
+      "file": "run1_generic_connector_record.json",
+      "utc": "2026-08-26T07:14:34.115356+00:00",
+      "account_id": "traininghlibbochkarov-JKIY2X",
+      "sha256": "50e2b049ee4b972bf7f713a5f14b7f223acddaccf3d701779d30d494455bf509",
+      "byte_length": 4954,
+      "kind": "GenericConnectorRecord",
+      "execution_id": "execution-1cff8516-308e-4eca-8660-21bedba7874b-2026.08.26",
+      "rows": [
+        {
+          "id": "R0VOX0NPTk5fUkVDX2V4ZWN1dGlvbi0xY2ZmODUxNi0zMDhlLTRlY2EtODY2MC0yMWJlZGJhNzg3NGItMjAyNi4wOC4yNjpjb25uZWN0b3ItNGM4OWZiMjgtZjY0Zi00ZmJkLWE0NmYtM2YwYWUxYTNkMzFi",
+          "connectorType": "nodata",
+          "actionType": "nodata",
+          "operationName": "shape1",
+          "status": "SUCCESS",
+          "size": 0,
+          "errorMessage": null,
+          "documentIndex": 0
+        },
+        {
+          "id": "R0VOX0NPTk5fUkVDX2V4ZWN1dGlvbi0xY2ZmODUxNi0zMDhlLTRlY2EtODY2MC0yMWJlZGJhNzg3NGItMjAyNi4wOC4yNjpjb25uZWN0b3ItNzZkNTQ0ODAtYjA4OC00MTE1LWJkM2EtMjE5MzZkZjYzYzJk",
+          "connectorType": "officialboomi-X3979C-rest-prod",
+          "actionType": "EXECUTE",
+          "operationName": "_TEST_155E2_HEAD_20260826070453",
+          "status": "SUCCESS",
+          "size": 0,
+          "errorMessage": null,
+          "documentIndex": 0
+        },
+        {
+          "id": "R0VOX0NPTk5fUkVDX2V4ZWN1dGlvbi0xY2ZmODUxNi0zMDhlLTRlY2EtODY2MC0yMWJlZGJhNzg3NGItMjAyNi4wOC4yNjpjb25uZWN0b3ItYmNmMmY4Y2UtZGVhNC00ODNiLTlmYmQtNDJkNWM5NWQ1ZGQy",
+          "connectorType": "officialboomi-X3979C-rest-prod",
+          "actionType": "EXECUTE",
+          "operationName": "_TEST_155E2_src_GET_20260826070453",
+          "status": "SUCCESS",
+          "size": 253,
+          "errorMessage": null,
+          "documentIndex": 0
+        }
+      ]
+    },
+    {
+      "scenario": "cap155-e2-head",
+      "file": "run1_response_document_0.json",
+      "utc": "2026-08-26T07:14:34.115412+00:00",
+      "account_id": "traininghlibbochkarov-JKIY2X",
+      "sha256": "798633eb2419af912f6755fbb50a6d83c45ff411359b3a408237c732016b8344",
+      "byte_length": 734,
+      "kind": "connector-document",
+      "execution_id": "execution-1cff8516-308e-4eca-8660-21bedba7874b-2026.08.26",
+      "gcr_id": "R0VOX0NPTk5fUkVDX2V4ZWN1dGlvbi0xY2ZmODUxNi0zMDhlLTRlY2EtODY2MC0yMWJlZGJhNzg3NGItMjAyNi4wOC4yNjpjb25uZWN0b3ItNGM4OWZiMjgtZjY0Zi00ZmJkLWE0NmYtM2YwYWUxYTNkMzFi"
+    },
+    {
+      "scenario": "cap155-e2-head",
+      "file": "run1_response_document_1.json",
+      "utc": "2026-08-26T07:14:34.115466+00:00",
+      "account_id": "traininghlibbochkarov-JKIY2X",
+      "sha256": "7858b92a1a00a74d8ac6f7048a5d2748f5870e645763132d7ad89cb5d82f8f01",
+      "byte_length": 734,
+      "kind": "connector-document",
+      "execution_id": "execution-1cff8516-308e-4eca-8660-21bedba7874b-2026.08.26",
+      "gcr_id": "R0VOX0NPTk5fUkVDX2V4ZWN1dGlvbi0xY2ZmODUxNi0zMDhlLTRlY2EtODY2MC0yMWJlZGJhNzg3NGItMjAyNi4wOC4yNjpjb25uZWN0b3ItNzZkNTQ0ODAtYjA4OC00MTE1LWJkM2EtMjE5MzZkZjYzYzJk"
+    },
+    {
+      "scenario": "cap155-e2-head",
+      "file": "run1_response_document_2.json",
+      "utc": "2026-08-26T07:14:34.115521+00:00",
+      "account_id": "traininghlibbochkarov-JKIY2X",
+      "sha256": "95920b2b7a7971b03da49d3e978139a4bd7784baf2a73ddf05268b08d62ecb60",
+      "byte_length": 1021,
+      "kind": "connector-document",
+      "execution_id": "execution-1cff8516-308e-4eca-8660-21bedba7874b-2026.08.26",
+      "gcr_id": "R0VOX0NPTk5fUkVDX2V4ZWN1dGlvbi0xY2ZmODUxNi0zMDhlLTRlY2EtODY2MC0yMWJlZGJhNzg3NGItMjAyNi4wOC4yNjpjb25uZWN0b3ItYmNmMmY4Y2UtZGVhNC00ODNiLTlmYmQtNDJkNWM5NWQ1ZGQy"
+    },
+    {
+      "scenario": "cap155-e2-head",
+      "file": "replay_readback_before.json",
+      "utc": "2026-08-26T07:14:34.115574+00:00",
+      "account_id": "traininghlibbochkarov-JKIY2X",
+      "sha256": "68efcf3ff8bbc2fe3954df4159465d580a0cd7c7067306c355455ccd3e819574",
+      "byte_length": 558,
+      "kind": "readback",
+      "phase": "before",
+      "execution_id": "execution-3b5f61d8-7275-4e28-a699-4ee97bac177a-2026.08.26"
+    },
+    {
+      "scenario": "cap155-e2-head",
+      "file": "replay_readback_after.json",
+      "utc": "2026-08-26T07:14:34.115626+00:00",
+      "account_id": "traininghlibbochkarov-JKIY2X",
+      "sha256": "ea210c1d26348a6f49d1de2173e4a6b8cb047fd9742ef5aea6c756228ba55adf",
+      "byte_length": 558,
+      "kind": "readback",
+      "phase": "after",
+      "execution_id": "execution-3b5f61d8-7275-4e28-a699-4ee97bac177a-2026.08.26"
+    },
+    {
+      "scenario": "cap155-e2-head",
+      "file": "replay_execute.json",
+      "utc": "2026-08-26T07:14:34.115678+00:00",
+      "account_id": "traininghlibbochkarov-JKIY2X",
+      "sha256": "f5207485fca75b1bb14002ce8f9f3efdab07503b44d47ddf8395f485be181b4e",
+      "byte_length": 858,
+      "kind": "execute-response",
+      "execution_id": "execution-3b5f61d8-7275-4e28-a699-4ee97bac177a-2026.08.26"
+    },
+    {
+      "scenario": "cap155-e2-head",
+      "file": "replay_execution_record.json",
+      "utc": "2026-08-26T07:14:34.115739+00:00",
+      "account_id": "traininghlibbochkarov-JKIY2X",
+      "sha256": "4be6336d68af68c2dc8b48c5b6cb19e401d023bc1c50205e397ba0ad15cbe9d8",
+      "byte_length": 1227,
+      "kind": "ExecutionRecord",
+      "execution_id": "execution-3b5f61d8-7275-4e28-a699-4ee97bac177a-2026.08.26"
+    },
+    {
+      "scenario": "cap155-e2-head",
+      "file": "replay_execution_connector.json",
+      "utc": "2026-08-26T07:14:34.115808+00:00",
+      "account_id": "traininghlibbochkarov-JKIY2X",
+      "sha256": "49a31ca0e8b581ca7c172d2e73a620c552d52cbea359521b24cb0213ccea6256",
+      "byte_length": 2151,
+      "kind": "ExecutionConnector",
+      "execution_id": "execution-3b5f61d8-7275-4e28-a699-4ee97bac177a-2026.08.26",
+      "rows": [
+        {
+          "executionConnector": "_TEST_155E2_src_GET_20260826070453",
+          "connectorType": "officialboomi-X3979C-rest-prod",
+          "actionType": "EXECUTE",
+          "isStartShape": false,
+          "recordType": "connector",
+          "successCount": 1,
+          "errorCount": 0,
+          "size": 253,
+          "id": "RVhFQ19DT05OZmFsc2U6RVhFQ1VURTpjNDI4MTM0Ni04M2U5LTQwMjYtODU2ZC1lZGU3MThlYzY4YTA6MTNhZmEyNTYtOTc1OS00MTY3LThhYzAtOGNmNjMwYTAzMjc4OmV4ZWN1dGlvbi0zYjVmNjFkOC03Mjc1LTRlMjgtYTY5OS00ZWU5N2JhYzE3N2EtMjAyNi4wOC4yNg"
+        },
+        {
+          "executionConnector": "Start",
+          "connectorType": "nodata",
+          "actionType": "nodata",
+          "isStartShape": true,
+          "recordType": "nodata",
+          "successCount": 1,
+          "errorCount": 0,
+          "size": 0,
+          "id": "RVhFQ19DT05OdHJ1ZTpub2RhdGE6c2hhcGUxOjpleGVjdXRpb24tM2I1ZjYxZDgtNzI3NS00ZTI4LWE2OTktNGVlOTdiYWMxNzdhLTIwMjYuMDguMjY"
+        },
+        {
+          "executionConnector": "_TEST_155E2_HEAD_20260826070453",
+          "connectorType": "officialboomi-X3979C-rest-prod",
+          "actionType": "EXECUTE",
+          "isStartShape": false,
+          "recordType": "connector",
+          "successCount": 1,
+          "errorCount": 0,
+          "size": 0,
+          "id": "RVhFQ19DT05OZmFsc2U6RVhFQ1VURTpjNDI4MTM0Ni04M2U5LTQwMjYtODU2ZC1lZGU3MThlYzY4YTA6YTQ1ODliNmQtODAxZC00N2I3LTkzOTgtNmQxOWYwZWEyOTM2OmV4ZWN1dGlvbi0zYjVmNjFkOC03Mjc1LTRlMjgtYTY5OS00ZWU5N2JhYzE3N2EtMjAyNi4wOC4yNg"
+        }
+      ]
+    },
+    {
+      "scenario": "cap155-e2-head",
+      "file": "replay_generic_connector_record.json",
+      "utc": "2026-08-26T07:14:34.115902+00:00",
+      "account_id": "traininghlibbochkarov-JKIY2X",
+      "sha256": "b3d29724773b6ebc263e29a7f91d1782f01895f921159f5bd73f1b06e173aada",
+      "byte_length": 4954,
+      "kind": "GenericConnectorRecord",
+      "execution_id": "execution-3b5f61d8-7275-4e28-a699-4ee97bac177a-2026.08.26",
+      "rows": [
+        {
+          "id": "R0VOX0NPTk5fUkVDX2V4ZWN1dGlvbi0zYjVmNjFkOC03Mjc1LTRlMjgtYTY5OS00ZWU5N2JhYzE3N2EtMjAyNi4wOC4yNjpjb25uZWN0b3ItZThiOWEzYTItODBkMC00YTgzLWJkMTYtNmI0MDQ4MmZiY2Vh",
+          "connectorType": "nodata",
+          "actionType": "nodata",
+          "operationName": "shape1",
+          "status": "SUCCESS",
+          "size": 0,
+          "errorMessage": null,
+          "documentIndex": 0
+        },
+        {
+          "id": "R0VOX0NPTk5fUkVDX2V4ZWN1dGlvbi0zYjVmNjFkOC03Mjc1LTRlMjgtYTY5OS00ZWU5N2JhYzE3N2EtMjAyNi4wOC4yNjpjb25uZWN0b3ItNmYzYTk1MDAtYjg4MC00NDc2LTgwZmEtMTdjNGFkY2NjNmFk",
+          "connectorType": "officialboomi-X3979C-rest-prod",
+          "actionType": "EXECUTE",
+          "operationName": "_TEST_155E2_HEAD_20260826070453",
+          "status": "SUCCESS",
+          "size": 0,
+          "errorMessage": null,
+          "documentIndex": 0
+        },
+        {
+          "id": "R0VOX0NPTk5fUkVDX2V4ZWN1dGlvbi0zYjVmNjFkOC03Mjc1LTRlMjgtYTY5OS00ZWU5N2JhYzE3N2EtMjAyNi4wOC4yNjpjb25uZWN0b3ItM2YzMGM2NTctOTQ0Mi00ZGI1LWJiOWUtODQ4MTgxOWI1Yzlj",
+          "connectorType": "officialboomi-X3979C-rest-prod",
+          "actionType": "EXECUTE",
+          "operationName": "_TEST_155E2_src_GET_20260826070453",
+          "status": "SUCCESS",
+          "size": 253,
+          "errorMessage": null,
+          "documentIndex": 0
+        }
+      ]
+    },
+    {
+      "scenario": "cap155-e2-head",
+      "file": "replay_response_document_0.json",
+      "utc": "2026-08-26T07:14:34.115957+00:00",
+      "account_id": "traininghlibbochkarov-JKIY2X",
+      "sha256": "cf7fdd46c2cb22adf441e70080f9b125431f72cfa57e14ffc36a5f30303786f1",
+      "byte_length": 734,
+      "kind": "connector-document",
+      "execution_id": "execution-3b5f61d8-7275-4e28-a699-4ee97bac177a-2026.08.26",
+      "gcr_id": "R0VOX0NPTk5fUkVDX2V4ZWN1dGlvbi0zYjVmNjFkOC03Mjc1LTRlMjgtYTY5OS00ZWU5N2JhYzE3N2EtMjAyNi4wOC4yNjpjb25uZWN0b3ItZThiOWEzYTItODBkMC00YTgzLWJkMTYtNmI0MDQ4MmZiY2Vh"
+    },
+    {
+      "scenario": "cap155-e2-head",
+      "file": "replay_response_document_1.json",
+      "utc": "2026-08-26T07:14:34.116014+00:00",
+      "account_id": "traininghlibbochkarov-JKIY2X",
+      "sha256": "6ef32aa64654292d0bcb9cd31fceafaff86d1caa2d38e57c7d3e2fa4ab865765",
+      "byte_length": 734,
+      "kind": "connector-document",
+      "execution_id": "execution-3b5f61d8-7275-4e28-a699-4ee97bac177a-2026.08.26",
+      "gcr_id": "R0VOX0NPTk5fUkVDX2V4ZWN1dGlvbi0zYjVmNjFkOC03Mjc1LTRlMjgtYTY5OS00ZWU5N2JhYzE3N2EtMjAyNi4wOC4yNjpjb25uZWN0b3ItNmYzYTk1MDAtYjg4MC00NDc2LTgwZmEtMTdjNGFkY2NjNmFk"
+    },
+    {
+      "scenario": "cap155-e2-head",
+      "file": "replay_response_document_2.json",
+      "utc": "2026-08-26T07:14:34.116068+00:00",
+      "account_id": "traininghlibbochkarov-JKIY2X",
+      "sha256": "b8229471cdbc95d9d025ef2e189db3afb2afa455009751ac148863eb34b24194",
+      "byte_length": 1021,
+      "kind": "connector-document",
+      "execution_id": "execution-3b5f61d8-7275-4e28-a699-4ee97bac177a-2026.08.26",
+      "gcr_id": "R0VOX0NPTk5fUkVDX2V4ZWN1dGlvbi0zYjVmNjFkOC03Mjc1LTRlMjgtYTY5OS00ZWU5N2JhYzE3N2EtMjAyNi4wOC4yNjpjb25uZWN0b3ItM2YzMGM2NTctOTQ0Mi00ZGI1LWJiOWUtODQ4MTgxOWI1Yzlj"
+    },
+    {
+      "scenario": "cap155-e2-head",
+      "file": "operation_component.xml",
+      "utc": "2026-08-26T07:14:34.116116+00:00",
+      "account_id": "traininghlibbochkarov-JKIY2X",
+      "sha256": "a1e8c0cfaf9e8a30f4916ca1a4ab7da71d854fab6e095c32da4c9977bae79849",
+      "byte_length": 1440,
+      "kind": "operation-component-xml",
+      "component_id": "a4589b6d-801d-47b7-9398-6d19f0ea2936"
+    },
+    {
+      "scenario": "cap155-e2-head",
+      "file": "source_operation_component.xml",
+      "utc": "2026-08-26T07:14:34.116168+00:00",
+      "account_id": "traininghlibbochkarov-JKIY2X",
+      "sha256": "279806a7551e99079c1879fac6b8ca36ce5c64d2c408b16a01ce8a2957205add",
+      "byte_length": 1442,
+      "kind": "source-operation-component-xml",
+      "component_id": "13afa256-9759-4167-8ac0-8cf630a03278"
+    },
+    {
+      "scenario": "cap155-e2-head",
+      "file": "readback_delta.json",
+      "utc": "2026-08-26T07:14:34.116228+00:00",
+      "account_id": "traininghlibbochkarov-JKIY2X",
+      "sha256": "050d73e988d5af226a98607bff0cffe3504fa429ed9266252887d9ee473ed763",
+      "byte_length": 1082,
+      "kind": "substantive-readback-delta"
+    }
+  ]
+}

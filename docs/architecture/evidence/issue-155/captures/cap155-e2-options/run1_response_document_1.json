@@ -1,0 +1,14 @@
+{
+  "gcr_id": "R0VOX0NPTk5fUkVDX2V4ZWN1dGlvbi1kODcwZDY0Mi1kOTk4LTQxZGMtYWJmZC1kZmI0ZWMzNDE5MzAtMjAyNi4wOC4yNjpjb25uZWN0b3ItMzQxMjdlZjQtZGFhYS00MDQ1LWIzNDctNDg0MWYwNzAxYmE0",
+  "resp": {
+    "_success": true,
+    "generic_connector_record_id": "R0VOX0NPTk5fUkVDX2V4ZWN1dGlvbi1kODcwZDY0Mi1kOTk4LTQxZGMtYWJmZC1kZmI0ZWMzNDE5MzAtMjAyNi4wOC4yNjpjb25uZWN0b3ItMzQxMjdlZjQtZGFhYS00MDQ1LWIzNDctNDg0MWYwNzAxYmE0",
+    "download_url": "https://platform.boomi.com/account/traininghlibbochkarov-JKIY2X/api/download/ConnectorDocument-c02058a3-67f4-4eca-8a19-61055f2f365c",
+    "status_code": 202,
+    "message": "Beginning download.",
+    "_downloaded": true,
+    "content": "",
+    "content_type": "text/*; charset=UTF-8",
+    "size_bytes": 0
+  }
+}

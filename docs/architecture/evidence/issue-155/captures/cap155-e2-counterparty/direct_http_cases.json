@@ -1,0 +1,242 @@
+{
+  "utc": "2026-08-26T07:11:42.817890+00:00",
+  "counterparty": "../sandbox-services @68ddb681cf9942305bd5bc7129bf286d3df8920d",
+  "base_url": "http://localhost:8081",
+  "cases": [
+    {
+      "case": "POST-create",
+      "description": "POST collection creates",
+      "expected": 201,
+      "observed": 201,
+      "verdict": "MATCH",
+      "utc": "2026-08-26T07:11:42.764162+00:00"
+    },
+    {
+      "case": "POST-replay-nokey",
+      "description": "replayed POST, body carries NO server key (the shape a connector resends)",
+      "expected": 409,
+      "observed": 201,
+      "verdict": "MISMATCH",
+      "utc": "2026-08-26T07:11:42.768017+00:00",
+      "detail": {
+        "note": "the dispatch predicts 409 here",
+        "body": {
+          "clientId": "_CP_POST_1",
+          "name": "cp probe",
+          "key": "a5849671-2617-46f7-9396-d2a9bf05b362",
+          "createdOn": "2026-08-26T07:11:42.757Z",
+          "createdBy": "integration",
+          "modifiedOn": "2026-08-26T07:11:42.764Z",
+          "modifiedBy": "integration"
+        }
+      }
+    },
+    {
+      "case": "POST-replay-withkey",
+      "description": "replayed POST whose body carries the stored key",
+      "expected": 409,
+      "observed": 409,
+      "verdict": "MATCH",
+      "utc": "2026-08-26T07:11:42.769582+00:00",
+      "detail": {
+        "body": {
+          "message": "Clients record already exists",
+          "developerMessage": "a record with this key is already stored; use PUT or PATCH",
+          "errors": [],
+          "data": null,
+          "timestamp": "2026-08-26T07:11:42.768Z"
+        }
+      }
+    },
+    {
+      "case": "POST-replay-effect",
+      "description": "readback after the keyless replay is still one record",
+      "expected": 200,
+      "observed": 200,
+      "verdict": "MATCH",
+      "utc": "2026-08-26T07:11:42.771099+00:00",
+      "detail": {
+        "record": {
+          "clientId": "_CP_POST_1",
+          "name": "cp probe",
+          "key": "a5849671-2617-46f7-9396-d2a9bf05b362",
+          "createdOn": "2026-08-26T07:11:42.757Z",
+          "createdBy": "integration",
+          "modifiedOn": "2026-08-26T07:11:42.764Z",
+          "modifiedBy": "integration"
+        }
+      }
+    },
+    {
+      "case": "PUT-replace",
+      "description": "PUT item replaces the whole body",
+      "expected": 200,
+      "observed": 200,
+      "verdict": "MATCH",
+      "utc": "2026-08-26T07:11:42.777696+00:00"
+    },
+    {
+      "case": "PUT-drops-omitted-field",
+      "description": "a field omitted from the PUT body is REMOVED",
+      "expected": true,
+      "observed": true,
+      "verdict": "MATCH",
+      "utc": "2026-08-26T07:11:42.777703+00:00",
+      "detail": {
+        "after": {
+          "clientId": "_CP_PUT_1",
+          "name": "replaced",
+          "key": "b5a1750d-73ac-4f92-8ac2-3e5d559fd64b",
+          "createdOn": "2026-08-26T07:11:42.771Z",
+          "createdBy": "integration",
+          "modifiedOn": "2026-08-26T07:11:42.775Z",
+          "modifiedBy": "integration"
+        }
+      }
+    },
+    {
+      "case": "PUT-replay-converges",
+      "description": "a replayed PUT converges (identical but for modifiedOn)",
+      "expected": true,
+      "observed": true,
+      "verdict": "MATCH",
+      "utc": "2026-08-26T07:11:42.780112+00:00"
+    },
+    {
+      "case": "DELETE-removes",
+      "description": "DELETE item removes",
+      "expected": 204,
+      "observed": 204,
+      "verdict": "MATCH",
+      "utc": "2026-08-26T07:11:42.788108+00:00"
+    },
+    {
+      "case": "DELETE-gone",
+      "description": "readback after DELETE is absent",
+      "expected": 404,
+      "observed": 404,
+      "verdict": "MATCH",
+      "utc": "2026-08-26T07:11:42.789307+00:00"
+    },
+    {
+      "case": "DELETE-replay",
+      "description": "a replayed DELETE finds nothing",
+      "expected": 404,
+      "observed": 404,
+      "verdict": "MATCH",
+      "utc": "2026-08-26T07:11:42.790531+00:00"
+    },
+    {
+      "case": "HEAD-status",
+      "description": "HEAD item status",
+      "expected": 200,
+      "observed": 200,
+      "verdict": "MATCH",
+      "utc": "2026-08-26T07:11:42.794945+00:00",
+      "detail": {
+        "body_bytes": 0,
+        "allow": null
+      }
+    },
+    {
+      "case": "HEAD-bodyless",
+      "description": "HEAD returns no body",
+      "expected": 0,
+      "observed": 0,
+      "verdict": "MATCH",
+      "utc": "2026-08-26T07:11:42.794951+00:00"
+    },
+    {
+      "case": "OPTIONS-status",
+      "description": "OPTIONS item status",
+      "expected": 204,
+      "observed": 204,
+      "verdict": "MATCH",
+      "utc": "2026-08-26T07:11:42.795690+00:00",
+      "detail": {
+        "body_bytes": 0,
+        "allow": "GET, HEAD, PUT, PATCH, DELETE, OPTIONS, TRACE"
+      }
+    },
+    {
+      "case": "OPTIONS-bodyless",
+      "description": "OPTIONS returns no body",
+      "expected": 0,
+      "observed": 0,
+      "verdict": "MATCH",
+      "utc": "2026-08-26T07:11:42.795694+00:00"
+    },
+    {
+      "case": "TRACE-status",
+      "description": "TRACE item status",
+      "expected": 200,
+      "observed": 200,
+      "verdict": "MATCH",
+      "utc": "2026-08-26T07:11:42.796459+00:00",
+      "detail": {
+        "body_bytes": 0,
+        "allow": null
+      }
+    },
+    {
+      "case": "TRACE-bodyless",
+      "description": "TRACE returns no body",
+      "expected": 0,
+      "observed": 0,
+      "verdict": "MATCH",
+      "utc": "2026-08-26T07:11:42.796462+00:00"
+    },
+    {
+      "case": "RO-no-state-change",
+      "description": "readback identical before and after HEAD+OPTIONS+TRACE",
+      "expected": "06b98c907820979bc4ce96635bb16498b7190015c3edde103b81dd7c0ae98558",
+      "observed": "06b98c907820979bc4ce96635bb16498b7190015c3edde103b81dd7c0ae98558",
+      "verdict": "MATCH",
+      "utc": "2026-08-26T07:11:42.797481+00:00"
+    },
+    {
+      "case": "XE-absent-before",
+      "description": "the key is novel in the matters entity",
+      "expected": 404,
+      "observed": 404,
+      "verdict": "MATCH",
+      "utc": "2026-08-26T07:11:42.800883+00:00"
+    },
+    {
+      "case": "XE-create",
+      "description": "POST of a clients document to matters creates",
+      "expected": 201,
+      "observed": 201,
+      "verdict": "MATCH",
+      "utc": "2026-08-26T07:11:42.803143+00:00"
+    },
+    {
+      "case": "XE-present-after",
+      "description": "readback after the cross-entity POST",
+      "expected": 200,
+      "observed": 200,
+      "verdict": "MATCH",
+      "utc": "2026-08-26T07:11:42.804042+00:00"
+    },
+    {
+      "case": "XE-replay-409",
+      "description": "replaying that POST conflicts",
+      "expected": 409,
+      "observed": 409,
+      "verdict": "MATCH",
+      "utc": "2026-08-26T07:11:42.804908+00:00",
+      "detail": {
+        "body": {
+          "message": "Matters record already exists",
+          "developerMessage": "a record with this key is already stored; use PUT or PATCH",
+          "errors": [],
+          "data": null,
+          "timestamp": "2026-08-26T07:11:42.804Z"
+        }
+      }
+    }
+  ],
+  "mismatches": [
+    "POST-replay-nokey"
+  ]
+}

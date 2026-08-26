@@ -1,0 +1,32 @@
+{
+  "_success": false,
+  "action": "compile",
+  "mutation_performed": false,
+  "error_code": "AUTHORING_COMPILE_BLOCKED",
+  "error": "semantic validation rejected the payload",
+  "authoring_diagnostics": [
+    {
+      "code": "AUTHORING_COMPILE_BLOCKED",
+      "severity": "error",
+      "path": "/body/steps/0/operation_ref",
+      "subject_kind": "process",
+      "subject_id": "p",
+      "message": "semantic validation rejected the payload",
+      "remediation": "Fetch this code's authoring rule with get_schema_template(schema_name='process_ir_authoring', category='diagnostic').",
+      "cause_codes": [
+        "PROCESS_IR_CAPABILITY_CONNECTOR_ACTION_UNSUPPORTED"
+      ],
+      "node_identity": "/body/steps/0",
+      "evidence": [],
+      "authoring_contract_entry_ids": [
+        "connector_action.database.get",
+        "connector_action.database.send",
+        "connector_action.rest.get",
+        "connector_action.rest.patch",
+        "connector_action.soap.execute",
+        "diagnostic.process_ir_capability_connector_action_unsupported"
+      ]
+    }
+  ],
+  "profile": "renera"
+}

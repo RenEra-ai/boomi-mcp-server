@@ -1,0 +1,14 @@
+{
+  "utc": "2026-08-26T07:07:08.827378+00:00",
+  "path": "/admin/cdscm/api/v1/matters/c4016c66-fb7c-4fab-bb2e-edda725d6b89",
+  "status": 404,
+  "sha256": "c5426113e9ce00823dc4cd3321ebae964ab03b524afede6874e397f921ee6cec",
+  "bytes": 225,
+  "body": {
+    "message": "Matters record 'c4016c66-fb7c-4fab-bb2e-edda725d6b89' not found",
+    "developerMessage": "Matters record 'c4016c66-fb7c-4fab-bb2e-edda725d6b89' not found",
+    "errors": [],
+    "data": null,
+    "timestamp": "2026-08-26T07:07:08.826Z"
+  }
+}

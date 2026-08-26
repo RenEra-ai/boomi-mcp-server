@@ -1,0 +1,14 @@
+{
+  "gcr_id": "R0VOX0NPTk5fUkVDX2V4ZWN1dGlvbi02NmY5ZmJjMC0wOTVlLTRkNDQtOTc0YS04M2M1MmIyMmJhYzItMjAyNi4wOC4yNjpjb25uZWN0b3ItZTExMzExMzItNTM1My00Y2NkLTllMDctYTNiZTlmNDllNGUx",
+  "resp": {
+    "_success": true,
+    "generic_connector_record_id": "R0VOX0NPTk5fUkVDX2V4ZWN1dGlvbi02NmY5ZmJjMC0wOTVlLTRkNDQtOTc0YS04M2M1MmIyMmJhYzItMjAyNi4wOC4yNjpjb25uZWN0b3ItZTExMzExMzItNTM1My00Y2NkLTllMDctYTNiZTlmNDllNGUx",
+    "download_url": "https://platform.boomi.com/account/traininghlibbochkarov-JKIY2X/api/download/ConnectorDocument-682d1460-8a85-4985-9715-3d07aa1db635",
+    "status_code": 202,
+    "message": "Beginning download.",
+    "_downloaded": true,
+    "content": "{\"clientId\":\"_E2_TPL_20260826070447\",\"name\":\"E2 Template\",\"status\":\"ACTIVE\",\"key\":\"c4016c66-fb7c-4fab-bb2e-edda725d6b89\",\"createdOn\":\"2026-08-26T07:04:47.660Z\",\"createdBy\":\"integration\",\"modifiedOn\":\"2026-08-26T07:04:47.660Z\",\"modifiedBy\":\"integration\"}",
+    "content_type": "text/*; charset=UTF-8",
+    "size_bytes": 253
+  }
+}

@@ -1,0 +1,251 @@
+{
+  "refusals": {
+    "POST": {
+      "_success": false,
+      "cause_codes": [
+        "PROCESS_IR_CAPABILITY_CONNECTOR_ACTION_UNSUPPORTED"
+      ],
+      "paths": [
+        "/body/steps/0/operation_ref"
+      ],
+      "served_supported_set": [
+        "connector_action.database.get",
+        "connector_action.database.send",
+        "connector_action.rest.get",
+        "connector_action.rest.patch",
+        "connector_action.soap.execute"
+      ],
+      "diagnostics": [
+        {
+          "code": "AUTHORING_COMPILE_BLOCKED",
+          "severity": "error",
+          "path": "/body/steps/0/operation_ref",
+          "subject_kind": "process",
+          "subject_id": "p",
+          "message": "semantic validation rejected the payload",
+          "remediation": "Fetch this code's authoring rule with get_schema_template(schema_name='process_ir_authoring', category='diagnostic').",
+          "cause_codes": [
+            "PROCESS_IR_CAPABILITY_CONNECTOR_ACTION_UNSUPPORTED"
+          ],
+          "node_identity": "/body/steps/0",
+          "evidence": [],
+          "authoring_contract_entry_ids": [
+            "connector_action.database.get",
+            "connector_action.database.send",
+            "connector_action.rest.get",
+            "connector_action.rest.patch",
+            "connector_action.soap.execute",
+            "diagnostic.process_ir_capability_connector_action_unsupported"
+          ]
+        }
+      ]
+    },
+    "PUT": {
+      "_success": false,
+      "cause_codes": [
+        "PROCESS_IR_CAPABILITY_CONNECTOR_ACTION_UNSUPPORTED"
+      ],
+      "paths": [
+        "/body/steps/0/operation_ref"
+      ],
+      "served_supported_set": [
+        "connector_action.database.get",
+        "connector_action.database.send",
+        "connector_action.rest.get",
+        "connector_action.rest.patch",
+        "connector_action.soap.execute"
+      ],
+      "diagnostics": [
+        {
+          "code": "AUTHORING_COMPILE_BLOCKED",
+          "severity": "error",
+          "path": "/body/steps/0/operation_ref",
+          "subject_kind": "process",
+          "subject_id": "p",
+          "message": "semantic validation rejected the payload",
+          "remediation": "Fetch this code's authoring rule with get_schema_template(schema_name='process_ir_authoring', category='diagnostic').",
+          "cause_codes": [
+            "PROCESS_IR_CAPABILITY_CONNECTOR_ACTION_UNSUPPORTED"
+          ],
+          "node_identity": "/body/steps/0",
+          "evidence": [],
+          "authoring_contract_entry_ids": [
+            "connector_action.database.get",
+            "connector_action.database.send",
+            "connector_action.rest.get",
+            "connector_action.rest.patch",
+            "connector_action.soap.execute",
+            "diagnostic.process_ir_capability_connector_action_unsupported"
+          ]
+        }
+      ]
+    },
+    "DELETE": {
+      "_success": false,
+      "cause_codes": [
+        "PROCESS_IR_CAPABILITY_CONNECTOR_ACTION_UNSUPPORTED"
+      ],
+      "paths": [
+        "/body/steps/0/operation_ref"
+      ],
+      "served_supported_set": [
+        "connector_action.database.get",
+        "connector_action.database.send",
+        "connector_action.rest.get",
+        "connector_action.rest.patch",
+        "connector_action.soap.execute"
+      ],
+      "diagnostics": [
+        {
+          "code": "AUTHORING_COMPILE_BLOCKED",
+          "severity": "error",
+          "path": "/body/steps/0/operation_ref",
+          "subject_kind": "process",
+          "subject_id": "p",
+          "message": "semantic validation rejected the payload",
+          "remediation": "Fetch this code's authoring rule with get_schema_template(schema_name='process_ir_authoring', category='diagnostic').",
+          "cause_codes": [
+            "PROCESS_IR_CAPABILITY_CONNECTOR_ACTION_UNSUPPORTED"
+          ],
+          "node_identity": "/body/steps/0",
+          "evidence": [],
+          "authoring_contract_entry_ids": [
+            "connector_action.database.get",
+            "connector_action.database.send",
+            "connector_action.rest.get",
+            "connector_action.rest.patch",
+            "connector_action.soap.execute",
+            "diagnostic.process_ir_capability_connector_action_unsupported"
+          ]
+        }
+      ]
+    },
+    "HEAD": {
+      "_success": false,
+      "cause_codes": [
+        "PROCESS_IR_CAPABILITY_CONNECTOR_ACTION_UNSUPPORTED"
+      ],
+      "paths": [
+        "/body/steps/0/operation_ref"
+      ],
+      "served_supported_set": [
+        "connector_action.database.get",
+        "connector_action.database.send",
+        "connector_action.rest.get",
+        "connector_action.rest.patch",
+        "connector_action.soap.execute"
+      ],
+      "diagnostics": [
+        {
+          "code": "AUTHORING_COMPILE_BLOCKED",
+          "severity": "error",
+          "path": "/body/steps/0/operation_ref",
+          "subject_kind": "process",
+          "subject_id": "p",
+          "message": "semantic validation rejected the payload",
+          "remediation": "Fetch this code's authoring rule with get_schema_template(schema_name='process_ir_authoring', category='diagnostic').",
+          "cause_codes": [
+            "PROCESS_IR_CAPABILITY_CONNECTOR_ACTION_UNSUPPORTED"
+          ],
+          "node_identity": "/body/steps/0",
+          "evidence": [],
+          "authoring_contract_entry_ids": [
+            "connector_action.database.get",
+            "connector_action.database.send",
+            "connector_action.rest.get",
+            "connector_action.rest.patch",
+            "connector_action.soap.execute",
+            "diagnostic.process_ir_capability_connector_action_unsupported"
+          ]
+        }
+      ]
+    },
+    "OPTIONS": {
+      "_success": false,
+      "cause_codes": [
+        "PROCESS_IR_CAPABILITY_CONNECTOR_ACTION_UNSUPPORTED"
+      ],
+      "paths": [
+        "/body/steps/0/operation_ref"
+      ],
+      "served_supported_set": [
+        "connector_action.database.get",
+        "connector_action.database.send",
+        "connector_action.rest.get",
+        "connector_action.rest.patch",
+        "connector_action.soap.execute"
+      ],
+      "diagnostics": [
+        {
+          "code": "AUTHORING_COMPILE_BLOCKED",
+          "severity": "error",
+          "path": "/body/steps/0/operation_ref",
+          "subject_kind": "process",
+          "subject_id": "p",
+          "message": "semantic validation rejected the payload",
+          "remediation": "Fetch this code's authoring rule with get_schema_template(schema_name='process_ir_authoring', category='diagnostic').",
+          "cause_codes": [
+            "PROCESS_IR_CAPABILITY_CONNECTOR_ACTION_UNSUPPORTED"
+          ],
+          "node_identity": "/body/steps/0",
+          "evidence": [],
+          "authoring_contract_entry_ids": [
+            "connector_action.database.get",
+            "connector_action.database.send",
+            "connector_action.rest.get",
+            "connector_action.rest.patch",
+            "connector_action.soap.execute",
+            "diagnostic.process_ir_capability_connector_action_unsupported"
+          ]
+        }
+      ]
+    },
+    "TRACE": {
+      "_success": false,
+      "cause_codes": [
+        "PROCESS_IR_CAPABILITY_CONNECTOR_ACTION_UNSUPPORTED"
+      ],
+      "paths": [
+        "/body/steps/0/operation_ref"
+      ],
+      "served_supported_set": [
+        "connector_action.database.get",
+        "connector_action.database.send",
+        "connector_action.rest.get",
+        "connector_action.rest.patch",
+        "connector_action.soap.execute"
+      ],
+      "diagnostics": [
+        {
+          "code": "AUTHORING_COMPILE_BLOCKED",
+          "severity": "error",
+          "path": "/body/steps/0/operation_ref",
+          "subject_kind": "process",
+          "subject_id": "p",
+          "message": "semantic validation rejected the payload",
+          "remediation": "Fetch this code's authoring rule with get_schema_template(schema_name='process_ir_authoring', category='diagnostic').",
+          "cause_codes": [
+            "PROCESS_IR_CAPABILITY_CONNECTOR_ACTION_UNSUPPORTED"
+          ],
+          "node_identity": "/body/steps/0",
+          "evidence": [],
+          "authoring_contract_entry_ids": [
+            "connector_action.database.get",
+            "connector_action.database.send",
+            "connector_action.rest.get",
+            "connector_action.rest.patch",
+            "connector_action.soap.execute",
+            "diagnostic.process_ir_capability_connector_action_unsupported"
+          ]
+        }
+      ]
+    }
+  },
+  "served_supported": [
+    "connector_action.database.get",
+    "connector_action.database.send",
+    "connector_action.rest.get",
+    "connector_action.rest.patch",
+    "connector_action.soap.execute"
+  ]
+}

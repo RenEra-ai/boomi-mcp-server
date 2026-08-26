@@ -1,0 +1,119 @@
+{
+  "_success": true,
+  "status_code": 200,
+  "method": "POST",
+  "endpoint": "GenericConnectorRecord/query",
+  "url": "https://api.boomi.com/api/rest/v1/traininghlibbochkarov-JKIY2X/GenericConnectorRecord/query",
+  "profile": "renera",
+  "data": {
+    "@type": "QueryResult",
+    "result": [
+      {
+        "@type": "GenericConnectorRecord",
+        "id": "R0VOX0NPTk5fUkVDX2V4ZWN1dGlvbi1hMjYwZWM5ZS0zYmVmLTQzYjUtYjEyMC0xM2JiMTBmOWJkY2MtMjAyNi4wOC4yNjpjb25uZWN0b3ItY2Y2ODk4YjUtZmJjOC00ODEyLTg2NGItN2NiMmJhMjg4MjIx",
+        "executionConnectorId": "RVhFQ19DT05OdHJ1ZTpub2RhdGE6bm9kYXRhOnNoYXBlMTpleGVjdXRpb24tYTI2MGVjOWUtM2JlZi00M2I1LWIxMjAtMTNiYjEwZjliZGNjLTIwMjYuMDguMjY",
+        "executionId": "execution-a260ec9e-3bef-43b5-b120-13bb10f9bdcc-2026.08.26",
+        "atomId": "89387bdf-b177-4631-9cc6-687bf4afefa7",
+        "dateProcessed": "2026-08-26T07:09:34Z",
+        "actionType": "nodata",
+        "connectorType": "nodata",
+        "connectionName": "Start",
+        "operationName": "shape1",
+        "connectionId": "nodata",
+        "operationId": "shape1",
+        "documentIndex": 0,
+        "incrementalDocumentIndex": 1,
+        "status": "SUCCESS",
+        "startShape": true,
+        "retryable": true,
+        "size": 0
+      },
+      {
+        "@type": "GenericConnectorRecord",
+        "connectorFields": {
+          "@type": "ConnectorFields",
+          "connectorField": [
+            {
+              "@type": "ConnectorField",
+              "name": "response_date",
+              "value": "Wed, 26 Aug 2026 07:09:33 GMT"
+            },
+            {
+              "@type": "ConnectorField",
+              "name": "response_content-type",
+              "value": "application/json"
+            },
+            {
+              "@type": "ConnectorField",
+              "name": "response_server",
+              "value": "uvicorn"
+            },
+            {
+              "@type": "ConnectorField",
+              "name": "response_content-length",
+              "value": "253"
+            }
+          ]
+        },
+        "id": "R0VOX0NPTk5fUkVDX2V4ZWN1dGlvbi1hMjYwZWM5ZS0zYmVmLTQzYjUtYjEyMC0xM2JiMTBmOWJkY2MtMjAyNi4wOC4yNjpjb25uZWN0b3ItOTQ1ZWMyYjItMjI4NC00OTE4LWFlNTMtOWEyMjBiYmYzNjdh",
+        "executionConnectorId": "RVhFQ19DT05OZmFsc2U6RVhFQ1VURTpjNDI4MTM0Ni04M2U5LTQwMjYtODU2ZC1lZGU3MThlYzY4YTA6MTNhZmEyNTYtOTc1OS00MTY3LThhYzAtOGNmNjMwYTAzMjc4OmV4ZWN1dGlvbi1hMjYwZWM5ZS0zYmVmLTQzYjUtYjEyMC0xM2JiMTBmOWJkY2MtMjAyNi4wOC4yNg",
+        "executionId": "execution-a260ec9e-3bef-43b5-b120-13bb10f9bdcc-2026.08.26",
+        "atomId": "89387bdf-b177-4631-9cc6-687bf4afefa7",
+        "dateProcessed": "2026-08-26T07:09:34Z",
+        "actionType": "EXECUTE",
+        "connectorType": "officialboomi-X3979C-rest-prod",
+        "connectionName": "Sandbox CDS Mock REST (no-auth)",
+        "operationName": "_TEST_155E2_src_GET_20260826070453",
+        "connectionId": "c4281346-83e9-4026-856d-ede718ec68a0",
+        "operationId": "13afa256-9759-4167-8ac0-8cf630a03278",
+        "documentIndex": 0,
+        "incrementalDocumentIndex": 2,
+        "status": "SUCCESS",
+        "startShape": false,
+        "retryable": false,
+        "size": 253
+      },
+      {
+        "@type": "GenericConnectorRecord",
+        "connectorFields": {
+          "@type": "ConnectorFields",
+          "connectorField": [
+            {
+              "@type": "ConnectorField",
+              "name": "response_date",
+              "value": "Wed, 26 Aug 2026 07:09:33 GMT"
+            },
+            {
+              "@type": "ConnectorField",
+              "name": "response_server",
+              "value": "uvicorn"
+            },
+            {
+              "@type": "ConnectorField",
+              "name": "response_allow",
+              "value": "GET, HEAD, PUT, PATCH, DELETE, OPTIONS, TRACE"
+            }
+          ]
+        },
+        "id": "R0VOX0NPTk5fUkVDX2V4ZWN1dGlvbi1hMjYwZWM5ZS0zYmVmLTQzYjUtYjEyMC0xM2JiMTBmOWJkY2MtMjAyNi4wOC4yNjpjb25uZWN0b3ItYmZiNjc0OGMtN2EwYy00NzgzLWJjOGMtMTYzZTBkMTk3Zjg5",
+        "executionConnectorId": "RVhFQ19DT05OZmFsc2U6RVhFQ1VURTpjNDI4MTM0Ni04M2U5LTQwMjYtODU2ZC1lZGU3MThlYzY4YTA6YzUwZmY2YWMtODU4Yi00YWIwLWJkODItOGY2MTY4YTVhM2YwOmV4ZWN1dGlvbi1hMjYwZWM5ZS0zYmVmLTQzYjUtYjEyMC0xM2JiMTBmOWJkY2MtMjAyNi4wOC4yNg",
+        "executionId": "execution-a260ec9e-3bef-43b5-b120-13bb10f9bdcc-2026.08.26",
+        "atomId": "89387bdf-b177-4631-9cc6-687bf4afefa7",
+        "dateProcessed": "2026-08-26T07:09:34Z",
+        "actionType": "EXECUTE",
+        "connectorType": "officialboomi-X3979C-rest-prod",
+        "connectionName": "Sandbox CDS Mock REST (no-auth)",
+        "operationName": "_TEST_155E2_OPTIONS_20260826070453",
+        "connectionId": "c4281346-83e9-4026-856d-ede718ec68a0",
+        "operationId": "c50ff6ac-858b-4ab0-bd82-8f6168a5a3f0",
+        "documentIndex": 0,
+        "incrementalDocumentIndex": 3,
+        "status": "SUCCESS",
+        "startShape": false,
+        "retryable": false,
+        "size": 0
+      }
+    ],
+    "numberOfResults": 3
+  }
+}

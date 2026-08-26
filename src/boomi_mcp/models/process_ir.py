@@ -324,6 +324,74 @@ def iter_component_refs(node: Any, path: str = ""):
             yield from iter_component_refs(item, "{0}/{1}".format(path, key))
 
 
+def _property_name_field(model) -> Optional[str]:
+    """The field this model validates as a BARE property name, or None.
+
+    Derived from the shared validator rather than from a list of class names.
+    The set of node kinds that write a property is not a fact worth writing
+    down twice: a model earns membership by enforcing the rule, and the field
+    it enforces it on is read off the same validator. A new property-writing
+    kind is therefore picked up with no edit here — the failure mode a
+    hand-written pair list has, twice already in this slice, is that it stays
+    correct only until someone adds the third entry and forgets this one.
+
+    Detection is by NAME in the validator's code object, which covers the two
+    ways a validator reaches the rule: a module-global call and an attribute
+    access on the module. A validator that captured the rule as a closure
+    variable would be missed — no model does that, and the totality test pins
+    the resulting set, so a future one that did would show up as a changed set
+    rather than as silence.
+    """
+    decorators = getattr(model, "__pydantic_decorators__", None)
+    if decorators is None:
+        return None
+    for decorator in decorators.model_validators.values():
+        code = getattr(decorator.func, "__code__", None)
+        names = getattr(code, "co_names", ())
+        if "_validate_bare_property_name" not in names:
+            continue
+        for field in model.model_fields:
+            if field in names:
+                return field
+    return None
+
+
+def iter_property_writes(node: Any, path: str = ""):
+    """Every canonical PROPERTY WRITE in a ProcessIR document, as ``(path, name)``.
+
+    Yields one entry per occurrence, in document order, walking the whole typed
+    tree — Branch legs, both Decision arms and both try/catch bodies included.
+    A property writer is authorable in every one of those slots, so a lint that
+    looked only at the root would pass a document whose every bad name sits one
+    level down.
+
+    Only NODES are yielded. The connector path binding names a property too, but
+    it NAMES one another step wrote rather than writing it, so reporting it would
+    warn twice about a single authored name in a well-formed document — and
+    warn about a name whose spelling the author may not own.
+
+    Yields nothing for a non-model node, so it is safe to call on any subtree.
+    """
+    if isinstance(node, BaseModel):
+        model = type(node)
+        if "kind" in model.model_fields:
+            field = _property_name_field(model)
+            if field is not None:
+                value = getattr(node, field, None)
+                if isinstance(value, str):
+                    yield "{0}/{1}".format(path, field), value
+        for name in model.model_fields:
+            yield from iter_property_writes(
+                getattr(node, name, None), "{0}/{1}".format(path, name)
+            )
+    elif isinstance(node, (list, tuple)):
+        for index, item in enumerate(node):
+            yield from iter_property_writes(item, "{0}/{1}".format(path, index))
+    elif isinstance(node, Mapping):
+        for key, item in node.items():
+            yield from iter_property_writes(item, "{0}/{1}".format(path, key))
+
+
 def _validate_contract_ref(value: str) -> str:
     """#142: idempotency-contract reference — ``$ref:KEY`` token ONLY.
 

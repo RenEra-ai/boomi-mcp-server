@@ -1,0 +1,61 @@
+[
+  {
+    "label": "run1",
+    "execution_id": "execution-f9694423-eacd-4181-8e12-fa7f3b280011-2026.08.26",
+    "utc": "2026-08-26T07:07:55.610103+00:00",
+    "status": "COMPLETE",
+    "inbound": 1,
+    "outbound": 2,
+    "readback_path": "/admin/cdscm/api/v1/clients/0265a8ec-da14-4347-ab5d-fcf7850b4636",
+    "http_before": 200,
+    "http_after": 200,
+    "sha_before": "bd772853a093bc30",
+    "sha_after": "ef904f0f0c3865ed",
+    "raw_changed": true,
+    "volatile_only": false,
+    "substantive_diff": {
+      "clientId": [
+        "_E2_PUT_20260826070447",
+        "_E2_TPL_20260826070447"
+      ],
+      "doomedField": [
+        "this field must disappear on replace",
+        null
+      ],
+      "name": [
+        "PUT Target Before",
+        "E2 Template"
+      ],
+      "status": [
+        "PENDING",
+        "ACTIVE"
+      ]
+    },
+    "full_diff_keys": [
+      "clientId",
+      "doomedField",
+      "modifiedOn",
+      "name",
+      "status"
+    ]
+  },
+  {
+    "label": "replay",
+    "execution_id": "execution-6a328658-2d95-40e6-bc90-c5e7684964f4-2026.08.26",
+    "utc": "2026-08-26T07:08:14.941660+00:00",
+    "status": "COMPLETE",
+    "inbound": 1,
+    "outbound": 2,
+    "readback_path": "/admin/cdscm/api/v1/clients/0265a8ec-da14-4347-ab5d-fcf7850b4636",
+    "http_before": 200,
+    "http_after": 200,
+    "sha_before": "ef904f0f0c3865ed",
+    "sha_after": "5d7614a6bd998af5",
+    "raw_changed": true,
+    "volatile_only": true,
+    "substantive_diff": {},
+    "full_diff_keys": [
+      "modifiedOn"
+    ]
+  }
+]

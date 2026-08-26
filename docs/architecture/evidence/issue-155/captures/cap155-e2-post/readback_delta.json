@@ -1,0 +1,78 @@
+[
+  {
+    "label": "run1",
+    "execution_id": "execution-1957bb8f-9a89-4254-b169-9ddbf41fddf8-2026.08.26",
+    "utc": "2026-08-26T07:07:23.666809+00:00",
+    "status": "COMPLETE",
+    "inbound": 1,
+    "outbound": 2,
+    "readback_path": "/admin/cdscm/api/v1/matters/c4016c66-fb7c-4fab-bb2e-edda725d6b89",
+    "http_before": 404,
+    "http_after": 200,
+    "sha_before": "c5426113e9ce0082",
+    "sha_after": "b78c0089a26d2f4d",
+    "raw_changed": true,
+    "volatile_only": false,
+    "substantive_diff": {
+      "clientId": [
+        null,
+        "_E2_TPL_20260826070447"
+      ],
+      "developerMessage": [
+        "Matters record 'c4016c66-fb7c-4fab-bb2e-edda725d6b89' not found",
+        null
+      ],
+      "errors": [
+        [],
+        null
+      ],
+      "key": [
+        null,
+        "c4016c66-fb7c-4fab-bb2e-edda725d6b89"
+      ],
+      "message": [
+        "Matters record 'c4016c66-fb7c-4fab-bb2e-edda725d6b89' not found",
+        null
+      ],
+      "name": [
+        null,
+        "E2 Template"
+      ],
+      "status": [
+        null,
+        "ACTIVE"
+      ]
+    },
+    "full_diff_keys": [
+      "clientId",
+      "createdBy",
+      "createdOn",
+      "developerMessage",
+      "errors",
+      "key",
+      "message",
+      "modifiedBy",
+      "modifiedOn",
+      "name",
+      "status",
+      "timestamp"
+    ]
+  },
+  {
+    "label": "replay",
+    "execution_id": "execution-66f9fbc0-095e-4d44-974a-83c52b22bac2-2026.08.26",
+    "utc": "2026-08-26T07:07:36.241747+00:00",
+    "status": "COMPLETE",
+    "inbound": 1,
+    "outbound": 2,
+    "readback_path": "/admin/cdscm/api/v1/matters/c4016c66-fb7c-4fab-bb2e-edda725d6b89",
+    "http_before": 200,
+    "http_after": 200,
+    "sha_before": "b78c0089a26d2f4d",
+    "sha_after": "b78c0089a26d2f4d",
+    "raw_changed": false,
+    "volatile_only": false,
+    "substantive_diff": {},
+    "full_diff_keys": []
+  }
+]

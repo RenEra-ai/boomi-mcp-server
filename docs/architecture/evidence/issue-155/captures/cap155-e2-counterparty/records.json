@@ -1,0 +1,41 @@
+{
+  "record": {
+    "scenario_id": "cap155-e2-counterparty",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "boomi_env_id": "c8d9140d-6d34-4ca6-91ff-bfd263556d5b",
+    "boomi_atom_id": "89387bdf-b177-4631-9cc6-687bf4afefa7",
+    "rest_connection_id": "c4281346-83e9-4026-856d-ede718ec68a0",
+    "counterparty_sha": "68ddb681cf9942305bd5bc7129bf286d3df8920d",
+    "captured_utc": "2026-08-26T07:14:34.109870+00:00",
+    "what": "direct-HTTP re-measurement of the counterparty before any Boomi build",
+    "verdict": "21 cases, 1 mismatch",
+    "mismatches": [
+      "POST-replay-nokey"
+    ]
+  },
+  "artifacts": [
+    {
+      "scenario": "cap155-e2-counterparty",
+      "file": "direct_http_cases.json",
+      "utc": "2026-08-26T07:14:34.109753+00:00",
+      "account_id": "traininghlibbochkarov-JKIY2X",
+      "sha256": "09116c72d47b0f17c691788fb80505a9a20972a27ce5e567789811fb8042e435",
+      "byte_length": 7071,
+      "kind": "counterparty-verification",
+      "cases": 21,
+      "mismatches": [
+        "POST-replay-nokey"
+      ]
+    },
+    {
+      "scenario": "cap155-e2-counterparty",
+      "file": "entities_router_source.py",
+      "utc": "2026-08-26T07:14:34.109863+00:00",
+      "account_id": "traininghlibbochkarov-JKIY2X",
+      "sha256": "b76fdfb42f069a415031e0e60dab9fabab13ea20baf834f5100a94343c351cb0",
+      "byte_length": 4978,
+      "kind": "counterparty-source",
+      "provenance": "../sandbox-services @68ddb681cf9942305bd5bc7129bf286d3df8920d"
+    }
+  ]
+}

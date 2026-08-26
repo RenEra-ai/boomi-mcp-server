@@ -1,0 +1,30 @@
+INFO:     192.168.65.1:38061 - "POST /admin/cdscm/api/v1/clients HTTP/1.1" 201 Created
+INFO:     192.168.65.1:57010 - "POST /admin/cdscm/api/v1/clients HTTP/1.1" 409 Conflict
+INFO:     192.168.65.1:61914 - "PUT /admin/cdscm/api/v1/clients/_O2_PROBE_1787725132 HTTP/1.1" 200 OK
+INFO:     192.168.65.1:55989 - "GET /admin/cdscm/api/v1/clients/_O2_PROBE_1787725132 HTTP/1.1" 200 OK
+INFO:     192.168.65.1:63711 - "PUT /admin/cdscm/api/v1/clients/_O2_PROBE_1787725132 HTTP/1.1" 200 OK
+INFO:     192.168.65.1:46559 - "GET /admin/cdscm/api/v1/clients/_O2_PROBE_1787725132 HTTP/1.1" 200 OK
+INFO:     192.168.65.1:42616 - "HEAD /admin/cdscm/api/v1/clients/_O2_PROBE_1787725132 HTTP/1.1" 200 OK
+INFO:     192.168.65.1:48308 - "OPTIONS /admin/cdscm/api/v1/clients/_O2_PROBE_1787725132 HTTP/1.1" 204 No Content
+INFO:     192.168.65.1:25039 - "TRACE /admin/cdscm/api/v1/clients/_O2_PROBE_1787725132 HTTP/1.1" 200 OK
+INFO:     192.168.65.1:29167 - "DELETE /admin/cdscm/api/v1/clients/_O2_PROBE_1787725132 HTTP/1.1" 204 No Content
+INFO:     192.168.65.1:59147 - "DELETE /admin/cdscm/api/v1/clients/_O2_PROBE_1787725132 HTTP/1.1" 404 Not Found
+INFO:     192.168.65.1:27099 - "GET /admin/cdscm/api/v1/clients?limit=1 HTTP/1.1" 200 OK
+INFO:     192.168.65.1:47832 - "PATCH /admin/cdscm/api/v1/clients/_O2_REGRESSION HTTP/1.1" 200 OK
+INFO:     192.168.65.1:64252 - "DELETE /admin/cdscm/api/v1/clients/_O2_REGRESSION HTTP/1.1" 204 No Content
+INFO:     192.168.65.1:31020 - "GET /admin/cdscm/api/v1/clients/AC-0001 HTTP/1.1" 200 OK
+INFO:     192.168.65.1:27494 - "PATCH /admin/cdscm/api/v1/clients/AC-0001 HTTP/1.1" 200 OK
+INFO:     192.168.65.1:28634 - "GET /admin/cdscm/api/v1/clients/AC-0001 HTTP/1.1" 200 OK
+INFO:     192.168.65.1:48712 - "PATCH /admin/cdscm/api/v1/clients/AC-0001 HTTP/1.1" 200 OK
+INFO:     Started server process [1]
+INFO:     Waiting for application startup.
+INFO:     Started server process [1]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Application startup complete.
+INFO:     Application startup complete.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8080 (Press CTRL+C to quit)
+INFO:     Uvicorn running on http://0.0.0.0:8081 (Press CTRL+C to quit)
+INFO:     Uvicorn running on http://0.0.0.0:8082 (Press CTRL+C to quit)
+INFO:     Uvicorn running on http://0.0.0.0:8083 (Press CTRL+C to quit)

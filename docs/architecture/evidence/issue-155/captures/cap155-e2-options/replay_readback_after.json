@@ -1,0 +1,17 @@
+{
+  "utc": "2026-08-26T07:09:46.318250+00:00",
+  "path": "/admin/cdscm/api/v1/clients/ee9eaee2-bc25-46f6-b9ee-891252654736",
+  "status": 200,
+  "sha256": "15bf05bfbfbb644fc9ce2baeb56f84976b309050d39b9afda3aa6f378a0ebc3b",
+  "bytes": 257,
+  "body": {
+    "clientId": "_E2_RO_20260826070447",
+    "name": "Read-only Target",
+    "status": "ACTIVE",
+    "key": "ee9eaee2-bc25-46f6-b9ee-891252654736",
+    "createdOn": "2026-08-26T07:04:47.680Z",
+    "createdBy": "integration",
+    "modifiedOn": "2026-08-26T07:04:47.680Z",
+    "modifiedBy": "integration"
+  }
+}

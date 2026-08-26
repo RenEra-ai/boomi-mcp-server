@@ -1,0 +1,17 @@
+{
+  "utc": "2026-08-26T07:07:23.666796+00:00",
+  "path": "/admin/cdscm/api/v1/matters/c4016c66-fb7c-4fab-bb2e-edda725d6b89",
+  "status": 200,
+  "sha256": "b78c0089a26d2f4d358faa6314d1b3e952f292bc8c6465be0ffed0aa2b603e0a",
+  "bytes": 253,
+  "body": {
+    "clientId": "_E2_TPL_20260826070447",
+    "name": "E2 Template",
+    "status": "ACTIVE",
+    "key": "c4016c66-fb7c-4fab-bb2e-edda725d6b89",
+    "createdOn": "2026-08-26T07:07:10.533Z",
+    "createdBy": "integration",
+    "modifiedOn": "2026-08-26T07:07:10.533Z",
+    "modifiedBy": "integration"
+  }
+}

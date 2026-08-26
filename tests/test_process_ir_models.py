@@ -1676,3 +1676,58 @@ def test_the_served_contract_agrees_with_the_derived_table():
         if entry.entry_type == "node"
     }
     assert served == derived
+
+
+def test_the_property_write_walk_derives_its_models_from_the_shared_validator():
+    """The set of property-writing kinds is READ, not listed (#155).
+
+    Both writer kinds must be found, and the connector path binding must not be:
+    it names a property another step wrote rather than writing one, and it is
+    not a node. Asserting the exact set is what makes this a derivation rather
+    than a coincidence — a predicate that matched everything would pass a test
+    that only checked the two writers were present.
+    """
+    from pydantic import BaseModel
+
+    from boomi_mcp.models import process_ir as m
+    from boomi_mcp.models.process_ir import _property_name_field
+
+    found = {}
+    for attr in dir(m):
+        obj = getattr(m, attr)
+        if isinstance(obj, type) and issubclass(obj, BaseModel):
+            field = _property_name_field(obj)
+            if field is not None:
+                found[obj.__name__] = (field, "kind" in obj.model_fields)
+
+    assert found == {
+        "ConnectorPathBindingV1": ("property_name", False),
+        "SetDdpNodeV1": ("name", True),
+        "SetDppNodeV1": ("name", True),
+    }, found
+
+
+def test_a_new_property_writing_kind_is_picked_up_with_no_edit():
+    """NON-VACUITY for the derivation: membership is earned, not granted.
+
+    A model that enforces the bare-name rule is walked because it enforces it.
+    This is the property a hand-written class list does NOT have, and the reason
+    the list was not written: it stays correct only until the next kind lands.
+    """
+    from pydantic import model_validator
+
+    from boomi_mcp.models import process_ir as m
+    from boomi_mcp.models.process_ir import _ProcessIRBase, iter_property_writes
+
+    class _NewWriterNodeV1(_ProcessIRBase):
+        kind: str = "invented_writer"
+        name: str = "invented.bad"
+
+        @model_validator(mode="after")
+        def _name_rules(self):
+            # Reached through the module, the way every real writer reaches it.
+            m._validate_bare_property_name(self.name)
+            return self
+
+    node = _NewWriterNodeV1.model_construct(kind="invented_writer", name="invented.bad")
+    assert list(iter_property_writes(node)) == [("/name", "invented.bad")]

@@ -1,0 +1,18 @@
+{
+  "utc": "2026-08-26T07:07:36.244748+00:00",
+  "path": "/admin/cdscm/api/v1/clients/0265a8ec-da14-4347-ab5d-fcf7850b4636",
+  "status": 200,
+  "sha256": "bd772853a093bc30338b3995388e5888bb902df720a0369ce90c91ff11b99ecc",
+  "bytes": 313,
+  "body": {
+    "clientId": "_E2_PUT_20260826070447",
+    "name": "PUT Target Before",
+    "status": "PENDING",
+    "doomedField": "this field must disappear on replace",
+    "key": "0265a8ec-da14-4347-ab5d-fcf7850b4636",
+    "createdOn": "2026-08-26T07:04:47.668Z",
+    "createdBy": "integration",
+    "modifiedOn": "2026-08-26T07:04:47.668Z",
+    "modifiedBy": "integration"
+  }
+}

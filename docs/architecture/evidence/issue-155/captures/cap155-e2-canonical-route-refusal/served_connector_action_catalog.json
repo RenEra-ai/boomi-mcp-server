@@ -1,0 +1,1200 @@
+{
+  "_success": true,
+  "schema_name": "process_ir_authoring",
+  "surface": "MCP authoring contract (issue #146 M12.11)",
+  "read_only": true,
+  "raw_xml_exposed": false,
+  "boomi_mutation": false,
+  "schema_version": "1",
+  "schema_hash": "sha256:dd101accb22210ef1e0a4721116f40648ffa4fc921693ab0d31d05c311bc0c36",
+  "revision_binding": {
+    "contract_version": "2",
+    "schema_revision": "sha256:fc9a5af6edddd78f89a0044037acc692455ac08c2a0e88a986dab7c4b441e80c",
+    "capability_revision": "sha256:89121641309f344cb3cc6ef99489154d3af284fc76d5040a015461cb7f4de55c",
+    "compiler_revision": "sha256:5e8b504b503a99d357018c695c60f099634e008ed926d81f4749d695718fadee"
+  },
+  "json_schema": {
+    "$defs": {
+      "ProcessIRAuthoringContractEntryV1": {
+        "additionalProperties": false,
+        "description": "One authoring fact, addressable by a stable id.\n\nThe id is the citation handle: served remediations name it, and the\nclean-room test fixtures cite it, so CI can prove every citation resolves\nagainst the contract actually served.",
+        "properties": {
+          "contract_entry_id": {
+            "pattern": "^[a-z0-9_]+(\\.[a-z0-9_]+)*$",
+            "title": "Contract Entry Id",
+            "type": "string"
+          },
+          "entry_type": {
+            "enum": [
+              "capability",
+              "connector_action",
+              "diagnostic",
+              "doctrine",
+              "node",
+              "placement",
+              "recipe",
+              "recipe_contribution",
+              "semantic_rule",
+              "state_visibility"
+            ],
+            "title": "Entry Type",
+            "type": "string"
+          },
+          "category": {
+            "minLength": 1,
+            "title": "Category",
+            "type": "string"
+          },
+          "subject": {
+            "minLength": 1,
+            "title": "Subject",
+            "type": "string"
+          },
+          "title": {
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          },
+          "summary": {
+            "default": "",
+            "title": "Summary",
+            "type": "string"
+          },
+          "capability_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Capability Id"
+          },
+          "canonical_state": {
+            "anyOf": [
+              {
+                "enum": [
+                  "gated",
+                  "supported",
+                  "unsupported"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Canonical State"
+          },
+          "source_state": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Source State"
+          },
+          "applicable": {
+            "default": true,
+            "title": "Applicable",
+            "type": "boolean"
+          },
+          "node_kinds": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Node Kinds",
+            "type": "array"
+          },
+          "workflow_stages": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Workflow Stages",
+            "type": "array"
+          },
+          "schema_refs": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Schema Refs",
+            "type": "array"
+          },
+          "placements": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/ProcessIRAuthoringPlacementV1"
+            },
+            "title": "Placements",
+            "type": "array"
+          },
+          "document_semantics": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/ProcessIRDocumentSemanticsV1"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "ordering_facts": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Ordering Facts",
+            "type": "array"
+          },
+          "required_references": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/ProcessIRAuthoringReferenceV1"
+            },
+            "title": "Required References",
+            "type": "array"
+          },
+          "diagnostic_codes": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Diagnostic Codes",
+            "type": "array"
+          },
+          "related_entry_ids": {
+            "default": [],
+            "items": {
+              "pattern": "^[a-z0-9_]+(\\.[a-z0-9_]+)*$",
+              "type": "string"
+            },
+            "title": "Related Entry Ids",
+            "type": "array"
+          },
+          "display_aliases": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Display Aliases",
+            "type": "array"
+          },
+          "doctrine_selector": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Doctrine Selector"
+          },
+          "recipe_selector": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Recipe Selector"
+          },
+          "sources": {
+            "items": {
+              "$ref": "#/$defs/ProcessIRAuthoringSourceV1"
+            },
+            "minItems": 1,
+            "title": "Sources",
+            "type": "array"
+          }
+        },
+        "required": [
+          "contract_entry_id",
+          "entry_type",
+          "category",
+          "subject",
+          "title",
+          "sources"
+        ],
+        "title": "ProcessIRAuthoringContractEntryV1",
+        "type": "object"
+      },
+      "ProcessIRAuthoringFacetsV1": {
+        "additionalProperties": false,
+        "description": "Every filterable value in the catalog, so a caller can filter blind.\n\nReturned even on a bare retrieval that carries zero entries: discovering\nwhat you may ask for must not require already having asked for something.",
+        "properties": {
+          "entry_types": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Entry Types",
+            "type": "array"
+          },
+          "categories": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Categories",
+            "type": "array"
+          },
+          "node_kinds": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Node Kinds",
+            "type": "array"
+          },
+          "capability_ids": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Capability Ids",
+            "type": "array"
+          },
+          "workflow_stages": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Workflow Stages",
+            "type": "array"
+          }
+        },
+        "title": "ProcessIRAuthoringFacetsV1",
+        "type": "object"
+      },
+      "ProcessIRAuthoringPlacementV1": {
+        "additionalProperties": false,
+        "description": "One (context, slot) position, and whether a kind may appear there.\n\n``context`` is the PUBLIC body-context name \u2014 a Branch outlet is a\n``branch_path`` here, which is the platform's own word for it. The compiler\nspells some of these differently internally; the projection maps every one\nthrough a total, injective, parity-pinned rename, so no fact is lost and no\ninternal identifier reaches this surface.",
+        "properties": {
+          "context": {
+            "enum": [
+              "branch_path",
+              "decision_true_arm",
+              "decision_false_arm",
+              "try_body",
+              "catch_body",
+              "root_sequence"
+            ],
+            "title": "Context",
+            "type": "string"
+          },
+          "slot": {
+            "enum": [
+              "step",
+              "terminal"
+            ],
+            "title": "Slot",
+            "type": "string"
+          },
+          "canonical_state": {
+            "enum": [
+              "gated",
+              "supported",
+              "unsupported"
+            ],
+            "title": "Canonical State",
+            "type": "string"
+          },
+          "source_state": {
+            "minLength": 1,
+            "title": "Source State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "context",
+          "slot",
+          "canonical_state",
+          "source_state"
+        ],
+        "title": "ProcessIRAuthoringPlacementV1",
+        "type": "object"
+      },
+      "ProcessIRAuthoringQueryV1": {
+        "additionalProperties": false,
+        "description": "The query this page answers, echoed back verbatim.\n\nEchoed so a paged result is self-describing: a caller resuming from\n``next_after_entry_id`` can reconstruct the request without keeping state.",
+        "properties": {
+          "authoring_entry_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Authoring Entry Id"
+          },
+          "node_kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Node Kind"
+          },
+          "category": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Category"
+          },
+          "capability_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Capability Id"
+          },
+          "workflow_stage": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Workflow Stage"
+          },
+          "after_entry_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "After Entry Id"
+          },
+          "limit": {
+            "default": 20,
+            "title": "Limit",
+            "type": "integer"
+          }
+        },
+        "title": "ProcessIRAuthoringQueryV1",
+        "type": "object"
+      },
+      "ProcessIRAuthoringReferenceV1": {
+        "additionalProperties": false,
+        "description": "A component reference a node requires, and what may satisfy it.\n\n``opaque`` is fixed ``True`` and is not a formality: every reference in this\ncontract is authored as a ``$ref:KEY`` token or a literal component id, and\nNOTHING about the referenced component \u2014 its configuration, its connection,\nits credentials \u2014 is ever authored alongside it.",
+        "properties": {
+          "field": {
+            "minLength": 1,
+            "title": "Field",
+            "type": "string"
+          },
+          "required": {
+            "title": "Required",
+            "type": "boolean"
+          },
+          "opaque": {
+            "const": true,
+            "default": true,
+            "title": "Opaque",
+            "type": "boolean"
+          },
+          "accepted_component_types": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Accepted Component Types",
+            "type": "array"
+          }
+        },
+        "required": [
+          "field",
+          "required"
+        ],
+        "title": "ProcessIRAuthoringReferenceV1",
+        "type": "object"
+      },
+      "ProcessIRAuthoringSourceV1": {
+        "additionalProperties": false,
+        "description": "Which runtime authority backs one entry, and how it is kept honest.\n\n``source_id`` is SYMBOLIC (``runtime.body_placement_registry``), never a\nfilesystem path or a Python identifier. A path in a served response\ndescribes the server's disk, which the caller cannot see and must not depend\non \u2014 and the registry names themselves are compiler-internal identifiers the\nserved surface may not carry at all.\n\n``projection`` is the honesty field:\n\n* ``generated`` \u2014 the entry's facts are computed FROM the named source at\n  build time, so they cannot disagree with it;\n* ``parity_pinned`` \u2014 the entry states something prose must say (a live-\n  captured platform behaviour, an ordering guarantee), so it cannot be\n  computed from the source and is instead held by CI: its identity and its\n  named source are asserted two-way, and its full served text is frozen in\n  a committed snapshot, so any change to it lands in a diff a reviewer must\n  approve. That is a REVIEW GATE on the wording, not a proof that the\n  wording is true \u2014 no test can derive an English sentence from a registry.\n  An earlier version of this description promised the stronger thing.\n\n``revision_role`` records which of the three shipped revisions moves when\nthis source moves, so a caller who sees a revision change can tell what kind\nof thing changed.",
+        "properties": {
+          "source_id": {
+            "minLength": 1,
+            "title": "Source Id",
+            "type": "string"
+          },
+          "source_subject": {
+            "default": "",
+            "title": "Source Subject",
+            "type": "string"
+          },
+          "projection": {
+            "enum": [
+              "generated",
+              "parity_pinned"
+            ],
+            "title": "Projection",
+            "type": "string"
+          },
+          "provenance": {
+            "enum": [
+              "runtime_registry",
+              "runtime_model",
+              "live_capture_attested",
+              "official_documentation"
+            ],
+            "title": "Provenance",
+            "type": "string"
+          },
+          "revision_role": {
+            "enum": [
+              "schema",
+              "capability",
+              "compiler"
+            ],
+            "title": "Revision Role",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source_id",
+          "projection",
+          "provenance",
+          "revision_role"
+        ],
+        "title": "ProcessIRAuthoringSourceV1",
+        "type": "object"
+      },
+      "ProcessIRAuthoringStateMappingV1": {
+        "additionalProperties": false,
+        "description": "One source state, and the canonical state it maps to.\n\nPublished WITH the entries rather than documented separately so a caller can\nverify the mapping themselves instead of trusting it. ``applicable=False``\nmarks a source state that is not a capability claim at all \u2014 doctrine's\n``guidance_only`` and ``na`` describe advice, not something this contract can\nauthor \u2014 so a reader is not told \"unsupported\" about a thing that was never\na feature.",
+        "properties": {
+          "source_vocabulary": {
+            "minLength": 1,
+            "title": "Source Vocabulary",
+            "type": "string"
+          },
+          "source_state": {
+            "minLength": 1,
+            "title": "Source State",
+            "type": "string"
+          },
+          "canonical_state": {
+            "enum": [
+              "gated",
+              "supported",
+              "unsupported"
+            ],
+            "title": "Canonical State",
+            "type": "string"
+          },
+          "applicable": {
+            "default": true,
+            "title": "Applicable",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "source_vocabulary",
+          "source_state",
+          "canonical_state"
+        ],
+        "title": "ProcessIRAuthoringStateMappingV1",
+        "type": "object"
+      },
+      "ProcessIRDocumentSemanticsV1": {
+        "additionalProperties": false,
+        "description": "What a node does to the document stream.\n\nThe three questions a caller must answer to place a node correctly: does it\nneed documents arriving, what does it leave behind, and does it act per\ndocument or per group. ``stream_replacing`` is called out separately from\n``documents`` because a node that REPLACES the stream discards what came\nbefore it, which is how a per-document property silently stops existing.",
+        "properties": {
+          "input_documents": {
+            "enum": [
+              "none",
+              "optional",
+              "required"
+            ],
+            "title": "Input Documents",
+            "type": "string"
+          },
+          "output_documents": {
+            "enum": [
+              "none",
+              "documents",
+              "stream_replacing",
+              "consumed"
+            ],
+            "title": "Output Documents",
+            "type": "string"
+          },
+          "grouping": {
+            "enum": [
+              "per_document",
+              "per_batch",
+              "all_documents",
+              "not_applicable",
+              "unspecified"
+            ],
+            "title": "Grouping",
+            "type": "string"
+          }
+        },
+        "required": [
+          "input_documents",
+          "output_documents",
+          "grouping"
+        ],
+        "title": "ProcessIRDocumentSemanticsV1",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "description": "One bounded page of the authoring contract.\n\n``catalog_entry_count`` (everything), ``matched_entry_count`` (everything\nthe filter selected) and ``returned_entry_count`` (what is in this page) are\nthree different numbers and all three are published. A caller who sees only\nthe third cannot tell a narrow filter from a truncated page.\n\nThe two ``unlisted_*_state`` fields publish the ALLOWLIST RULE once. The\nunderlying registries are closed \u2014 a placement or a connector action that is\nnot listed is rejected \u2014 so enumerating the complement would mean shipping a\ncombinatorial table that silently goes wrong every time a node kind is\nadded. One field states the rule instead.",
+    "properties": {
+      "contract_version": {
+        "const": "1",
+        "default": "1",
+        "title": "Contract Version",
+        "type": "string"
+      },
+      "state_mappings": {
+        "items": {
+          "$ref": "#/$defs/ProcessIRAuthoringStateMappingV1"
+        },
+        "title": "State Mappings",
+        "type": "array"
+      },
+      "unlisted_placement_state": {
+        "const": "unsupported",
+        "default": "unsupported",
+        "title": "Unlisted Placement State",
+        "type": "string"
+      },
+      "unlisted_connector_action_state": {
+        "const": "unsupported",
+        "default": "unsupported",
+        "title": "Unlisted Connector Action State",
+        "type": "string"
+      },
+      "diagnostic_label_legend": {
+        "const": "Each bracketed label in an entry's ordering_facts names the layer that AUTHORED that text (parser, semantic validator, compiler). Any phase that runs a layer can surface its text, so a compile can return parser-authored wording.",
+        "default": "Each bracketed label in an entry's ordering_facts names the layer that AUTHORED that text (parser, semantic validator, compiler). Any phase that runs a layer can surface its text, so a compile can return parser-authored wording.",
+        "title": "Diagnostic Label Legend",
+        "type": "string"
+      },
+      "query": {
+        "$ref": "#/$defs/ProcessIRAuthoringQueryV1"
+      },
+      "catalog_entry_count": {
+        "title": "Catalog Entry Count",
+        "type": "integer"
+      },
+      "matched_entry_count": {
+        "title": "Matched Entry Count",
+        "type": "integer"
+      },
+      "returned_entry_count": {
+        "title": "Returned Entry Count",
+        "type": "integer"
+      },
+      "limit": {
+        "title": "Limit",
+        "type": "integer"
+      },
+      "truncated": {
+        "default": false,
+        "title": "Truncated",
+        "type": "boolean"
+      },
+      "next_after_entry_id": {
+        "anyOf": [
+          {
+            "pattern": "^[a-z0-9_]+(\\.[a-z0-9_]+)*$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Next After Entry Id"
+      },
+      "facets": {
+        "$ref": "#/$defs/ProcessIRAuthoringFacetsV1"
+      },
+      "entries": {
+        "default": [],
+        "items": {
+          "$ref": "#/$defs/ProcessIRAuthoringContractEntryV1"
+        },
+        "title": "Entries",
+        "type": "array"
+      }
+    },
+    "required": [
+      "state_mappings",
+      "query",
+      "catalog_entry_count",
+      "matched_entry_count",
+      "returned_entry_count",
+      "limit",
+      "facets"
+    ],
+    "title": "ProcessIRAuthoringContractPageV1",
+    "type": "object"
+  },
+  "contract_page": {
+    "contract_version": "1",
+    "state_mappings": [
+      {
+        "source_vocabulary": "design_doctrine",
+        "source_state": "guidance_only",
+        "canonical_state": "unsupported",
+        "applicable": false
+      },
+      {
+        "source_vocabulary": "design_doctrine",
+        "source_state": "na",
+        "canonical_state": "unsupported",
+        "applicable": false
+      },
+      {
+        "source_vocabulary": "design_doctrine",
+        "source_state": "gated",
+        "canonical_state": "gated",
+        "applicable": true
+      },
+      {
+        "source_vocabulary": "process_ir_capability_manifest",
+        "source_state": "gated",
+        "canonical_state": "gated",
+        "applicable": true
+      },
+      {
+        "source_vocabulary": "cache_property_authoring",
+        "source_state": "gated_no_verified_wire_shape",
+        "canonical_state": "gated",
+        "applicable": true
+      },
+      {
+        "source_vocabulary": "body_placement_registry",
+        "source_state": "admitted",
+        "canonical_state": "supported",
+        "applicable": true
+      },
+      {
+        "source_vocabulary": "design_doctrine",
+        "source_state": "emittable_today",
+        "canonical_state": "supported",
+        "applicable": true
+      },
+      {
+        "source_vocabulary": "cache_property_authoring",
+        "source_state": "executable",
+        "canonical_state": "supported",
+        "applicable": true
+      },
+      {
+        "source_vocabulary": "connector_capability_registry",
+        "source_state": "listed",
+        "canonical_state": "supported",
+        "applicable": true
+      },
+      {
+        "source_vocabulary": "process_ir_capability_manifest",
+        "source_state": "supported",
+        "canonical_state": "supported",
+        "applicable": true
+      },
+      {
+        "source_vocabulary": "body_placement_registry",
+        "source_state": "absent",
+        "canonical_state": "unsupported",
+        "applicable": true
+      },
+      {
+        "source_vocabulary": "connector_capability_registry",
+        "source_state": "absent",
+        "canonical_state": "unsupported",
+        "applicable": true
+      },
+      {
+        "source_vocabulary": "cache_property_authoring",
+        "source_state": "reserved_not_executable",
+        "canonical_state": "unsupported",
+        "applicable": true
+      },
+      {
+        "source_vocabulary": "process_ir_capability_manifest",
+        "source_state": "unsupported",
+        "canonical_state": "unsupported",
+        "applicable": true
+      }
+    ],
+    "unlisted_placement_state": "unsupported",
+    "unlisted_connector_action_state": "unsupported",
+    "diagnostic_label_legend": "Each bracketed label in an entry's ordering_facts names the layer that AUTHORED that text (parser, semantic validator, compiler). Any phase that runs a layer can surface its text, so a compile can return parser-authored wording.",
+    "query": {
+      "authoring_entry_id": null,
+      "node_kind": null,
+      "category": "connector_action",
+      "capability_id": null,
+      "workflow_stage": null,
+      "after_entry_id": null,
+      "limit": 20
+    },
+    "catalog_entry_count": 195,
+    "matched_entry_count": 5,
+    "returned_entry_count": 5,
+    "limit": 20,
+    "truncated": false,
+    "next_after_entry_id": null,
+    "facets": {
+      "entry_types": [
+        "capability",
+        "connector_action",
+        "diagnostic",
+        "doctrine",
+        "node",
+        "placement",
+        "recipe",
+        "recipe_contribution",
+        "semantic_rule",
+        "state_visibility"
+      ],
+      "categories": [
+        "capability",
+        "connector",
+        "connector_action",
+        "control",
+        "diagnostic",
+        "doctrine",
+        "orchestration",
+        "placement",
+        "recipe",
+        "reliability",
+        "state",
+        "structure",
+        "terminal",
+        "transform"
+      ],
+      "node_kinds": [
+        "branch",
+        "cache_get",
+        "cache_put",
+        "cache_remove",
+        "connector_call",
+        "data_process",
+        "decision",
+        "document_cache_retrieve",
+        "exception",
+        "flow_control",
+        "map_ref",
+        "message",
+        "process_call",
+        "return_documents",
+        "sequence",
+        "set_ddp",
+        "set_dpp",
+        "source",
+        "stop",
+        "target",
+        "try_catch"
+      ],
+      "capability_ids": [
+        "bounded_retry",
+        "caller_authored_cfg_edges",
+        "catch_error_type_lists",
+        "catch_failure_trigger_selection",
+        "connector_call_in_control_body",
+        "continuation_after_branch_or_decision",
+        "definedparameter_property_source",
+        "dynamic_path",
+        "flow_control_parallel_chunks",
+        "generalized_connector_call",
+        "joins",
+        "keyed_cache",
+        "listener_error_scope",
+        "loops",
+        "mixed_connector_execution",
+        "nested_try_catch",
+        "parallel_branch_execution",
+        "process_call_connector_mixing",
+        "process_call_return_path_binding",
+        "queue_topology",
+        "retry_backoff_authoring",
+        "rich_branch_decision_bodies",
+        "scoped_try_catch",
+        "secret_values",
+        "source_replay_policy",
+        "terminal_process_call",
+        "typed_idempotency_evidence",
+        "verified_write_replay_safety",
+        "xml_or_layout_or_shape_ids"
+      ],
+      "workflow_stages": [
+        "author",
+        "compile",
+        "discover",
+        "plan",
+        "repair"
+      ]
+    },
+    "entries": [
+      {
+        "contract_entry_id": "connector_action.database.get",
+        "entry_type": "connector_action",
+        "category": "connector_action",
+        "subject": "database Get",
+        "title": "DATABASE Get",
+        "summary": "A callable connector family/action pair. The registry is a closed allowlist: a pair absent from it is rejected.",
+        "capability_id": null,
+        "canonical_state": "supported",
+        "source_state": "listed",
+        "applicable": true,
+        "node_kinds": [
+          "connector_call",
+          "source",
+          "target"
+        ],
+        "workflow_stages": [
+          "author",
+          "plan",
+          "repair"
+        ],
+        "schema_refs": [],
+        "placements": [],
+        "document_semantics": {
+          "input_documents": "optional",
+          "output_documents": "documents",
+          "grouping": "unspecified"
+        },
+        "ordering_facts": [
+          "May sit inside a retried region.",
+          "No idempotency evidence is required.",
+          "No per-document bindable request location: a path binding on this family is rejected.",
+          "Produces documents that downstream steps may consume.",
+          "Side effect: read. Replay classification: read_only."
+        ],
+        "required_references": [],
+        "diagnostic_codes": [
+          "PROCESS_IR_CAPABILITY_CONNECTOR_ACTION_UNSUPPORTED",
+          "PROCESS_IR_CAPABILITY_DYNAMIC_PATH_UNSUPPORTED"
+        ],
+        "related_entry_ids": [
+          "node.connector_call",
+          "semantic_rule.retry.replay_safety"
+        ],
+        "display_aliases": [],
+        "doctrine_selector": null,
+        "recipe_selector": null,
+        "sources": [
+          {
+            "source_id": "runtime.connector_capability_registry",
+            "source_subject": "database Get",
+            "projection": "generated",
+            "provenance": "runtime_registry",
+            "revision_role": "compiler"
+          },
+          {
+            "source_id": "runtime.replay_safety_rules",
+            "source_subject": "read_only",
+            "projection": "generated",
+            "provenance": "runtime_registry",
+            "revision_role": "compiler"
+          }
+        ]
+      },
+      {
+        "contract_entry_id": "connector_action.database.send",
+        "entry_type": "connector_action",
+        "category": "connector_action",
+        "subject": "database Send",
+        "title": "DATABASE Send",
+        "summary": "A callable connector family/action pair. The registry is a closed allowlist: a pair absent from it is rejected.",
+        "capability_id": null,
+        "canonical_state": "supported",
+        "source_state": "listed",
+        "applicable": true,
+        "node_kinds": [
+          "connector_call",
+          "source",
+          "target"
+        ],
+        "workflow_stages": [
+          "author",
+          "plan",
+          "repair"
+        ],
+        "schema_refs": [],
+        "placements": [],
+        "document_semantics": {
+          "input_documents": "required",
+          "output_documents": "none",
+          "grouping": "unspecified"
+        },
+        "ordering_facts": [
+          "May NOT sit inside a retried region: no evidence a caller attaches can authorise a replay.",
+          "No idempotency evidence is required.",
+          "No per-document bindable request location: a path binding on this family is rejected.",
+          "Produces no documents, so nothing may consume its output.",
+          "Side effect: write. Replay classification: unverified."
+        ],
+        "required_references": [],
+        "diagnostic_codes": [
+          "PROCESS_IR_CAPABILITY_CONNECTOR_ACTION_UNSUPPORTED",
+          "PROCESS_IR_CAPABILITY_DYNAMIC_PATH_UNSUPPORTED"
+        ],
+        "related_entry_ids": [
+          "node.connector_call",
+          "semantic_rule.retry.replay_safety"
+        ],
+        "display_aliases": [],
+        "doctrine_selector": null,
+        "recipe_selector": null,
+        "sources": [
+          {
+            "source_id": "runtime.connector_capability_registry",
+            "source_subject": "database Send",
+            "projection": "generated",
+            "provenance": "runtime_registry",
+            "revision_role": "compiler"
+          },
+          {
+            "source_id": "runtime.replay_safety_rules",
+            "source_subject": "unverified",
+            "projection": "generated",
+            "provenance": "runtime_registry",
+            "revision_role": "compiler"
+          }
+        ]
+      },
+      {
+        "contract_entry_id": "connector_action.rest.get",
+        "entry_type": "connector_action",
+        "category": "connector_action",
+        "subject": "officialboomi-X3979C-rest-prod GET",
+        "title": "REST GET",
+        "summary": "A callable connector family/action pair. The registry is a closed allowlist: a pair absent from it is rejected.",
+        "capability_id": null,
+        "canonical_state": "supported",
+        "source_state": "listed",
+        "applicable": true,
+        "node_kinds": [
+          "connector_call",
+          "source",
+          "target"
+        ],
+        "workflow_stages": [
+          "author",
+          "plan",
+          "repair"
+        ],
+        "schema_refs": [],
+        "placements": [],
+        "document_semantics": {
+          "input_documents": "optional",
+          "output_documents": "documents",
+          "grouping": "unspecified"
+        },
+        "ordering_facts": [
+          "May sit inside a retried region.",
+          "No idempotency evidence is required.",
+          "Per-document bindable request locations: Path.",
+          "Produces documents that downstream steps may consume.",
+          "Side effect: read. Replay classification: read_only."
+        ],
+        "required_references": [],
+        "diagnostic_codes": [
+          "PROCESS_IR_CAPABILITY_CONNECTOR_ACTION_UNSUPPORTED",
+          "PROCESS_IR_CAPABILITY_DYNAMIC_PATH_UNSUPPORTED"
+        ],
+        "related_entry_ids": [
+          "node.connector_call",
+          "semantic_rule.retry.replay_safety"
+        ],
+        "display_aliases": [],
+        "doctrine_selector": null,
+        "recipe_selector": null,
+        "sources": [
+          {
+            "source_id": "runtime.connector_capability_registry",
+            "source_subject": "officialboomi-X3979C-rest-prod GET",
+            "projection": "generated",
+            "provenance": "runtime_registry",
+            "revision_role": "compiler"
+          },
+          {
+            "source_id": "runtime.replay_safety_rules",
+            "source_subject": "read_only",
+            "projection": "generated",
+            "provenance": "runtime_registry",
+            "revision_role": "compiler"
+          }
+        ]
+      },
+      {
+        "contract_entry_id": "connector_action.rest.patch",
+        "entry_type": "connector_action",
+        "category": "connector_action",
+        "subject": "officialboomi-X3979C-rest-prod PATCH",
+        "title": "REST PATCH",
+        "summary": "A callable connector family/action pair. The registry is a closed allowlist: a pair absent from it is rejected.",
+        "capability_id": null,
+        "canonical_state": "supported",
+        "source_state": "listed",
+        "applicable": true,
+        "node_kinds": [
+          "connector_call",
+          "source",
+          "target"
+        ],
+        "workflow_stages": [
+          "author",
+          "plan",
+          "repair"
+        ],
+        "schema_refs": [],
+        "placements": [],
+        "document_semantics": {
+          "input_documents": "required",
+          "output_documents": "documents",
+          "grouping": "unspecified"
+        },
+        "ordering_facts": [
+          "May NOT sit inside a retried region: no evidence a caller attaches can authorise a replay.",
+          "No idempotency evidence is required.",
+          "Per-document bindable request locations: Path.",
+          "Produces documents that downstream steps may consume.",
+          "Side effect: write. Replay classification: unverified."
+        ],
+        "required_references": [],
+        "diagnostic_codes": [
+          "PROCESS_IR_CAPABILITY_CONNECTOR_ACTION_UNSUPPORTED",
+          "PROCESS_IR_CAPABILITY_DYNAMIC_PATH_UNSUPPORTED"
+        ],
+        "related_entry_ids": [
+          "node.connector_call",
+          "semantic_rule.retry.replay_safety"
+        ],
+        "display_aliases": [],
+        "doctrine_selector": null,
+        "recipe_selector": null,
+        "sources": [
+          {
+            "source_id": "runtime.connector_capability_registry",
+            "source_subject": "officialboomi-X3979C-rest-prod PATCH",
+            "projection": "generated",
+            "provenance": "runtime_registry",
+            "revision_role": "compiler"
+          },
+          {
+            "source_id": "runtime.replay_safety_rules",
+            "source_subject": "unverified",
+            "projection": "generated",
+            "provenance": "runtime_registry",
+            "revision_role": "compiler"
+          }
+        ]
+      },
+      {
+        "contract_entry_id": "connector_action.soap.execute",
+        "entry_type": "connector_action",
+        "category": "connector_action",
+        "subject": "wssoapclientsdk EXECUTE",
+        "title": "SOAP EXECUTE",
+        "summary": "A callable connector family/action pair. The registry is a closed allowlist: a pair absent from it is rejected.",
+        "capability_id": null,
+        "canonical_state": "supported",
+        "source_state": "listed",
+        "applicable": true,
+        "node_kinds": [
+          "connector_call",
+          "source",
+          "target"
+        ],
+        "workflow_stages": [
+          "author",
+          "plan",
+          "repair"
+        ],
+        "schema_refs": [],
+        "placements": [],
+        "document_semantics": {
+          "input_documents": "optional",
+          "output_documents": "documents",
+          "grouping": "unspecified"
+        },
+        "ordering_facts": [
+          "May NOT sit inside a retried region: no evidence a caller attaches can authorise a replay.",
+          "No idempotency evidence is required.",
+          "No per-document bindable request location: a path binding on this family is rejected.",
+          "Produces documents that downstream steps may consume.",
+          "Side effect: read. Replay classification: unverified."
+        ],
+        "required_references": [],
+        "diagnostic_codes": [
+          "PROCESS_IR_CAPABILITY_CONNECTOR_ACTION_UNSUPPORTED",
+          "PROCESS_IR_CAPABILITY_DYNAMIC_PATH_UNSUPPORTED"
+        ],
+        "related_entry_ids": [
+          "node.connector_call",
+          "semantic_rule.retry.replay_safety"
+        ],
+        "display_aliases": [],
+        "doctrine_selector": null,
+        "recipe_selector": null,
+        "sources": [
+          {
+            "source_id": "runtime.connector_capability_registry",
+            "source_subject": "wssoapclientsdk EXECUTE",
+            "projection": "generated",
+            "provenance": "runtime_registry",
+            "revision_role": "compiler"
+          },
+          {
+            "source_id": "runtime.replay_safety_rules",
+            "source_subject": "unverified",
+            "projection": "generated",
+            "provenance": "runtime_registry",
+            "revision_role": "compiler"
+          }
+        ]
+      }
+    ]
+  }
+}
