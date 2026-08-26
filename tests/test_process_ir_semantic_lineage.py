@@ -1092,3 +1092,86 @@ def test_the_replacement_rule_does_not_over_fire():
         [_WRITER, {"kind": "message", "text": "hello"},
          {"kind": "connector_call", "operation_ref": "$ref:GETOP"}, {"kind": "stop"}]
     ) == ()
+
+
+# ---------------------------------------------------------------------------
+# #155 — an OPTIONAL component reference is still a component reference
+# ---------------------------------------------------------------------------
+
+
+def test_an_optional_component_ref_field_is_recognised():
+    """The predicate must look one level into an Optional, in both directions.
+
+    pydantic does not lift a `ComponentRefV1`'s metadata onto
+    `Optional[ComponentRefV1]`: the field's own `metadata` is empty and the
+    validator sits on the non-None arm. Reading only the outer metadata answered
+    False for every optional reference — and #155 shipped
+    `path_binding.request_profile_ref` as exactly that shape, so the served
+    reference list, the relocatability gate, symbol-slot derivation and the
+    dependency preflight all skipped it while reporting success.
+
+    The negative half matters as much: the unwrap must find THIS validator, not
+    any `AfterValidator`, or every annotated string in the model becomes a
+    "reference".
+    """
+    from boomi_mcp.models.process_ir import (
+        ConnectorCallNodeV1,
+        ConnectorPathBindingV1,
+        SourceEndpointV1,
+        _is_component_ref_field,
+    )
+
+    # Optional ref — the case that was silently missed.
+    assert _is_component_ref_field(
+        ConnectorPathBindingV1.model_fields["request_profile_ref"]
+    )
+    # Plain refs still work.
+    assert _is_component_ref_field(SourceEndpointV1.model_fields["connection_ref"])
+    assert _is_component_ref_field(ConnectorCallNodeV1.model_fields["operation_ref"])
+    # Not references: a constrained string beside a ref, and a plain optional.
+    assert not _is_component_ref_field(
+        ConnectorPathBindingV1.model_fields["property_name"]
+    )
+    assert not _is_component_ref_field(ConnectorCallNodeV1.model_fields["action"])
+
+
+def test_a_bound_paths_profile_ref_is_enumerated_as_a_component_reference():
+    """The consumer-visible half: the walker must YIELD the optional ref.
+
+    Asserting the predicate alone would not prove this — `iter_component_refs`
+    could still drop the value on its own path. The literal-id case is the one
+    with teeth: `envelope_relocatability_offenders` and `derive_symbol_slots`
+    both read this walker, so a ref it does not yield is a component id that
+    reaches a plan claiming to be relocatable.
+    """
+    from boomi_mcp.models.process_ir import iter_component_refs, parse_process_ir_v1
+
+    profile_source = {
+        "value_type": "profile", "element_id": "3", "element_name": "clientId",
+        "profile_ref": "$ref:PROF", "profile_type": "profile.json",
+    }
+    ir = parse_process_ir_v1({"version": "1", "body": {"kind": "sequence", "steps": [
+        {"kind": "set_ddp", "name": "P", "source_values": [
+            {"value_type": "static", "value": "/c/"}, profile_source]},
+        {"kind": "connector_call", "operation_ref": "$ref:GETOP",
+         "path_binding": {"property_name": "P", "request_profile_ref": "$ref:PROF"}},
+        {"kind": "stop"},
+    ]}})
+    paths = {path for path, _value in iter_component_refs(ir)}
+    assert "/body/steps/1/path_binding/request_profile_ref" in paths, sorted(paths)
+
+    # And a LITERAL component id there is now visible to the relocatability gate.
+    literal = "1a2b3c4d-0000-0000-0000-000000000000"
+    ir_literal = parse_process_ir_v1({"version": "1", "body": {"kind": "sequence", "steps": [
+        {"kind": "set_ddp", "name": "P", "source_values": [
+            {"value_type": "static", "value": "/c/"},
+            {**profile_source, "profile_ref": literal}]},
+        {"kind": "connector_call", "operation_ref": "$ref:GETOP",
+         "path_binding": {"property_name": "P", "request_profile_ref": literal}},
+        {"kind": "stop"},
+    ]}})
+    literals = {
+        path for path, value in iter_component_refs(ir_literal)
+        if not value.startswith("$ref:")
+    }
+    assert "/body/steps/1/path_binding/request_profile_ref" in literals, sorted(literals)

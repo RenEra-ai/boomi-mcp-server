@@ -56,6 +56,7 @@ from typing import (
     Tuple,
     Union,
     get_args,
+    get_origin,
 )
 
 from pydantic import (
@@ -243,17 +244,43 @@ ComponentRefV1 = Annotated[
 ]
 
 
+def _carries_component_ref_validator(metadata) -> bool:
+    return any(
+        isinstance(meta, AfterValidator) and meta.func is _validate_component_ref
+        for meta in metadata or ()
+    )
+
+
 def _is_component_ref_field(field_info) -> bool:
     """Is this field a :data:`ComponentRefV1`? Asked of the ANNOTATION, not the name.
 
-    The discriminator is the validator's own identity in the field's metadata.
-    A name list (``*_ref``) would be a hand-model of the same fact and would go
-    stale the moment a reference field is named anything else.
+    The discriminator is the validator's own identity. A name list (``*_ref``)
+    would be a hand-model of the same fact and would go stale the moment a
+    reference field is named anything else.
+
+    An OPTIONAL ref is looked for one level in, because pydantic does not lift a
+    ``ComponentRefV1``'s metadata onto ``Optional[ComponentRefV1]`` — the field's
+    own ``metadata`` is empty and the validator sits on the non-None arm. Reading
+    only the outer metadata therefore answered False for every optional
+    reference, silently: #155 shipped ``path_binding.request_profile_ref`` as
+    exactly that shape, and every consumer of this predicate — the served
+    reference list, the relocatability gate, symbol-slot derivation, the
+    dependency preflight — skipped it while reporting success.
+
+    Only a genuine Optional is unwrapped (a union of exactly one type plus
+    ``None``). A wider union is left alone: which arm a value took is not
+    knowable from the annotation, so claiming the field IS a reference would be
+    a guess rather than a schema fact.
     """
-    return any(
-        isinstance(meta, AfterValidator) and meta.func is _validate_component_ref
-        for meta in getattr(field_info, "metadata", ()) or ()
-    )
+    if _carries_component_ref_validator(getattr(field_info, "metadata", ())):
+        return True
+    annotation = getattr(field_info, "annotation", None)
+    if get_origin(annotation) is not Union:
+        return False
+    arms = [arm for arm in get_args(annotation) if arm is not type(None)]
+    if len(arms) != 1:
+        return False
+    return _carries_component_ref_validator(getattr(arms[0], "__metadata__", ()))
 
 
 def iter_component_refs(node: Any, path: str = ""):
