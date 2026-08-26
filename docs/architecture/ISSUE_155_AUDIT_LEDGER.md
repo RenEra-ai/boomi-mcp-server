@@ -152,10 +152,11 @@ file or subsystem within a loop.
 | QA-155-r13-01a | Revision of `QA-155-r13-01` (original retained, byte-frozen), raised by dispatch QA-A6 | Same finding; the DISPOSITION's stated blocker was wrong in two ways | Medium (unchanged) | capability reachability (unchanged) | unchanged | standard (unchanged) | `18273e9` | deferred — the deferral STANDS and is better founded. Two corrections, both verified by me rather than accepted: there are FOUR symbol-table call sites taking the default resolver, not the two I wrote; and the blocker is not the resolver default but the ACCOUNT-INDEPENDENCE INVARIANT the validation bridge states in its own words — component ids are not resolved there because validation runs before any lookup, and every semantic rule keys on the reference and its declared component type, never on a live id. That distinction is the load-bearing part: the obvious local fix, passing a resolving resolver at one call site, would not merely be incomplete — it would silently reintroduce account-dependence into a phase specified to run before any lookup. The gate also established that the correction is inert EVERYWHERE rather than only where real ids are absent, since the id is an injective function of the authored ref on every route: equivalent to token comparison, never better and never worse, so keeping it is safe. Reason class `blocked-by-mechanism` — the mechanism is a trusted resolution snapshot, which is a mechanism rather than a comparison, and that is why slice C is its home. Placement unchanged: #155 slice C |
 row whose id carries an `a` suffix, with the original retained and a Supersession map entry.
 
-**Supersession map.** `QA-155-r13-01a` supersedes the DISPOSITION of `QA-155-r13-01`; the
-original row is retained byte-frozen. The finding, its label, class and tier are unchanged — what
-changed is the stated blocker, which named the resolver default where the real one is the
-account-independence invariant, and a call-site count that was two where it is four.
+**Supersession map** — `QA-155-r13-01a → QA-155-r13-01`.
+The original row is retained byte-frozen. The finding, its label, its blocking class and its tier
+are unchanged; what the revision corrects is the stated blocker, which named the resolver default
+where the real one is the account-independence invariant, and a call-site count that was two where
+it is four.
 
 ## Slice A — implementation record (what landed, and what validation it still owes)
 
