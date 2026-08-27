@@ -22,7 +22,11 @@ from boomi_mcp.errors import CONNECTOR_REPLAY_REGISTRY_INVALID
 
 from .models import (
     CapabilityEvidenceRecordV1,
+    ComponentProjectionAllowlistV1,
+    ConnectorReplayRegistryV1,
     ConnectorVocabularyMappingV1,
+    ContractKeySemanticsDefinitionV1,
+    OperationContractRecordV1,
     RetrySafetyV1,
 )
 
@@ -50,12 +54,14 @@ class ReplayRegistry:
         vocabulary: tuple[ConnectorVocabularyMappingV1, ...],
         evidence: tuple[CapabilityEvidenceRecordV1, ...],
         operation_records: tuple = (),
-        projection_allowlists: dict | None = None,
+        projection_allowlists: tuple = (),
+        semantics_definitions: tuple = (),
     ) -> None:
         self._vocabulary = vocabulary
         self._evidence = evidence
         self._operation_records = operation_records
-        self._projection_allowlists = projection_allowlists or {}
+        self._projection_allowlists = projection_allowlists
+        self._semantics_definitions = semantics_definitions
         by_type: dict[str, ConnectorVocabularyMappingV1] = {}
         for entry in vocabulary:
             if entry.platform_connector_type in by_type:
@@ -83,9 +89,21 @@ class ReplayRegistry:
         return self._evidence
 
     @property
-    def projection_allowlists(self) -> dict:
-        """Per-component-kind projection specs. Data, so extending them needs a capture."""
+    def projection_allowlists(self) -> tuple:
+        """Typed per-component-kind projection specs. Data, so extending needs a capture."""
         return self._projection_allowlists
+
+    @property
+    def semantics_definitions(self) -> tuple:
+        """Versioned key-semantics definitions. Empty here; a later slice mints them."""
+        return self._semantics_definitions
+
+    def projection_for(self, component_kind: str):
+        """The projection spec for a component kind, or None."""
+        for spec in self._projection_allowlists:
+            if spec.component_kind == component_kind:
+                return spec
+        return None
 
     @property
     def operation_records(self) -> tuple:
@@ -139,7 +157,8 @@ def _parse(payload: Any) -> ReplayRegistry:
     # REQUIRED, not defaulted. `payload.get(key, [])` turned a truncated or
     # corrupted packaged file into an apparently valid deny-all registry: the
     # safe-looking outcome silently replaced the real one, and nothing said so.
-    for section in ("vocabulary", "evidence_records", "operation_records"):
+    for section in ("vocabulary", "evidence_records", "operation_records",
+                    "projection_allowlists", "semantics_definitions"):
         if section not in payload:
             raise RegistryInvalid(
                 f"registry is missing the required {section!r} section. An absent "
@@ -150,15 +169,11 @@ def _parse(payload: Any) -> ReplayRegistry:
             raise RegistryInvalid(f"registry section {section!r} must be a list")
     try:
         vocabulary = tuple(
-            ConnectorVocabularyMappingV1(
-                **{k: v for k, v in entry.items() if not k.startswith("_")}
-            )
+            ConnectorVocabularyMappingV1(**entry)
             for entry in payload.get("vocabulary", [])
         )
         evidence = tuple(
-            CapabilityEvidenceRecordV1(
-                **{k: v for k, v in row.items() if not k.startswith("_")}
-            )
+            CapabilityEvidenceRecordV1(**row)
             for row in payload.get("evidence_records", [])
         )
     except Exception as exc:  # pydantic ValidationError, TypeError on a non-mapping
@@ -168,18 +183,38 @@ def _parse(payload: Any) -> ReplayRegistry:
     # rest — including `operation_records`, which the shipped file advertises. A
     # loader that silently drops a key its own data declares will one day drop the
     # rows that decide whether a write may be retried, and it would do so quietly.
-    known = {"schema_version", "vocabulary", "evidence_records", "operation_records",
-             "projection_allowlists"}
-    unknown = sorted(k for k in payload if not k.startswith("_") and k not in known)
+    known = set(ConnectorReplayRegistryV1.model_fields)
+    # No underscore carve-out. Narrative keys were being STRIPPED here, which is the
+    # silent version of the same problem the design forbids: a served contract that
+    # also carries prose invites the prose to drift from the contract, and stripping
+    # it means the file can say something the loader never reads. Prose belongs
+    # beside the registry, not inside it.
+    unknown = sorted(k for k in payload if k not in known)
     if unknown:
         raise RegistryInvalid(
             "registry carries keys this build does not understand: {0}. Refusing "
             "rather than ignoring them — a key present in the data and absent from "
             "the reader is a disagreement, not a default.".format(unknown)
         )
-    operation_records = payload["operation_records"]
-    return ReplayRegistry(vocabulary, evidence, tuple(operation_records),
-                          payload.get("projection_allowlists", {}))
+    # TYPED, not passed through. Untyped dictionaries used to load here, so an
+    # arbitrary object could sit in `operation_records` and be indistinguishable
+    # from a real one — in a registry whose records decide whether a write may be
+    # retried.
+    try:
+        operation_records = tuple(
+            OperationContractRecordV1(**row) for row in payload["operation_records"]
+        )
+        allowlists = tuple(
+            ComponentProjectionAllowlistV1(**row)
+            for row in payload["projection_allowlists"]
+        )
+        semantics = tuple(
+            ContractKeySemanticsDefinitionV1(**row)
+            for row in payload["semantics_definitions"]
+        )
+    except Exception as exc:
+        raise RegistryInvalid(f"registry content is not valid: {exc}") from exc
+    return ReplayRegistry(vocabulary, evidence, operation_records, allowlists, semantics)
 
 
 @lru_cache(maxsize=1)

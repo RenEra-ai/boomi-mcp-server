@@ -1,9 +1,9 @@
 {
   "evidence_records": [],
   "operation_records": [],
-  "projection_allowlists": {
-    "connection": {
-      "attributes": [],
+  "projection_allowlists": [
+    {
+      "component_kind": "connection",
       "excluded_fields": [
         "auth",
         "awsAccessKey",
@@ -37,27 +37,34 @@
         "username",
         "workstation"
       ],
-      "property_fields": [],
-      "value_fields": [
+      "family": "rest",
+      "included_attributes": [],
+      "included_property_fields": [],
+      "included_value_fields": [
         "url"
-      ]
+      ],
+      "projection_version": 1
     },
-    "operation": {
-      "attributes": [
+    {
+      "component_kind": "operation",
+      "excluded_fields": [],
+      "family": "rest",
+      "included_attributes": [
         "customOperationType"
       ],
-      "excluded_fields": [],
-      "property_fields": [
+      "included_property_fields": [
         "queryParameters",
         "requestHeaders"
       ],
-      "value_fields": [
+      "included_value_fields": [
         "path",
         "followRedirects"
-      ]
+      ],
+      "projection_version": 1
     }
-  },
+  ],
   "schema_version": 1,
+  "semantics_definitions": [],
   "vocabulary": [
     {
       "action_source": "operation_component",

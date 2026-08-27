@@ -325,9 +325,14 @@ def _projection_spec(kind: str, registry=None) -> dict:
             registry = load_registry()
         except Exception:  # a registry that cannot load must not silently widen this
             registry = None
-    spec = registry.projection_allowlists.get(kind) if registry is not None else None
-    if spec:
-        return spec
+    typed = registry.projection_for(kind) if registry is not None else None
+    if typed is not None:
+        return {
+            "attributes": list(typed.included_attributes),
+            "value_fields": list(typed.included_value_fields),
+            "property_fields": list(typed.included_property_fields),
+            "excluded_fields": list(typed.excluded_fields),
+        }
     return {
         "attributes": list(_OPERATION_ATTRS) if kind == "operation" else [],
         "value_fields": sorted(_OPERATION_FIELDS if kind == "operation" else _CONNECTION_FIELDS),
