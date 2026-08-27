@@ -102,8 +102,13 @@ def test_the_registry_layer_loads_without_the_authoring_stack():
     repo = Path(__file__).resolve().parents[1]
     code = (
         "import sys\n"
-        "import boomi_mcp.connector_replay.ids\n"
-        "import boomi_mcp.connector_replay.digests\n"
+        "import importlib, pkgutil\n"
+        "import boomi_mcp.connector_replay as pkg\n"
+        # Import EVERY submodule, discovered rather than listed: a module added
+        # later would otherwise never be checked, and the one that breaks this
+        # property is always the one nobody remembered to add here.
+        "for m in pkgutil.iter_modules(pkg.__path__):\n"
+        "    importlib.import_module('boomi_mcp.connector_replay.' + m.name)\n"
         "leaked = sorted(k for k in sys.modules if k.startswith('boomi_mcp.categories')"
         " or k.startswith('boomi_mcp.compiler'))\n"
         "print(';'.join(leaked))\n"
