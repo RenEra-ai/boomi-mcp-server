@@ -359,6 +359,7 @@ def _make_coherent(att, run):
     if review.is_file():
         att.setdefault("artifact", {})["sha256"] = hashlib.sha256(
             review.read_bytes()).hexdigest()
+        att["artifact"]["path"] = str(review)
     return att
 
 
@@ -1107,6 +1108,9 @@ def test_a_file_NO_ROW_references_cannot_vanish_unreported_either(tmp_path):
     second.mkdir()
     for name in ("start.json", "attestation.json", "review.md"):
         (second / name).write_text((run / name).read_text())
+    (second / "attestation.json").write_text(json.dumps(
+        _make_coherent(json.loads((second / "attestation.json").read_text()),
+                       second)) + "\n")
     # A capture arrived outside this script, so listing it is now something the
     # operator ASKS for. Without the flag this refuses — checked here, because
     # the silent absorption it replaces is exactly how an unlisted file used to
@@ -1173,6 +1177,9 @@ def test_ARCHIVING_a_round_may_add_names_but_still_never_loses_one(tmp_path):
     second_run.mkdir()
     for name in ("start.json", "attestation.json", "review.md"):
         (second_run / name).write_text((run / name).read_text())
+    (second_run / "attestation.json").write_text(json.dumps(
+        _make_coherent(json.loads((second_run / "attestation.json").read_text()),
+                       second_run)) + "\n")
     out, _ = _archive_gate(tmp_path, second_run, prompts)
     assert out.returncode != 0, out.stdout
     assert "no longer on disk" in out.stderr
@@ -1269,6 +1276,9 @@ def test_ARCHIVING_refuses_before_the_destination_exists(tmp_path):
     second.mkdir()
     for name in ("start.json", "attestation.json", "review.md"):
         (second / name).write_text((run / name).read_text())
+    (second / "attestation.json").write_text(json.dumps(
+        _make_coherent(json.loads((second / "attestation.json").read_text()),
+                       second)) + "\n")
 
     out, _ = _archive_gate(tmp_path, second, prompts)
     assert out.returncode != 0, out.stdout
@@ -1306,6 +1316,9 @@ def test_a_PRE_EXISTING_unlisted_file_is_not_laundered_by_archiving_a_round(tmp_
     second.mkdir()
     for name in ("start.json", "attestation.json", "review.md"):
         (second / name).write_text((run / name).read_text())
+    (second / "attestation.json").write_text(json.dumps(
+        _make_coherent(json.loads((second / "attestation.json").read_text()),
+                       second)) + "\n")
 
     out, _ = _archive_gate(tmp_path, second, prompts)
     assert out.returncode != 0, out.stdout
@@ -1335,6 +1348,9 @@ def test_accepting_a_foreign_file_is_RECORDED_not_silent(tmp_path):
     second.mkdir()
     for name in ("start.json", "attestation.json", "review.md"):
         (second / name).write_text((run / name).read_text())
+    (second / "attestation.json").write_text(json.dumps(
+        _make_coherent(json.loads((second / "attestation.json").read_text()),
+                       second)) + "\n")
 
     out, _ = _archive_gate(tmp_path, second, prompts, accept_new=True)
     assert out.returncode == 0, out.stderr
@@ -1348,6 +1364,9 @@ def test_accepting_a_foreign_file_is_RECORDED_not_silent(tmp_path):
     third.mkdir()
     for name in ("start.json", "attestation.json", "review.md"):
         (third / name).write_text((run / name).read_text())
+    (third / "attestation.json").write_text(json.dumps(
+        _make_coherent(json.loads((third / "attestation.json").read_text()),
+                       third)) + "\n")
     lost, _ = _archive_gate(tmp_path, third, prompts, accept_new=True)
     assert lost.returncode != 0, lost.stdout
     assert "no longer on disk" in lost.stderr
@@ -1432,6 +1451,9 @@ def test_a_failed_archive_is_ROLLED_BACK_and_the_retry_succeeds(tmp_path):
     second.mkdir()
     for name in ("start.json", "attestation.json", "review.md"):
         (second / name).write_text((run / name).read_text())
+    (second / "attestation.json").write_text(json.dumps(
+        _make_coherent(json.loads((second / "attestation.json").read_text()),
+                       second)) + "\n")
 
     out, _ = _archive_gate(tmp_path, second, prompts)
     try:
@@ -1470,6 +1492,9 @@ def test_a_file_inside_an_ARCHIVED_round_is_not_absorbable(tmp_path):
     second.mkdir()
     for name in ("start.json", "attestation.json", "review.md"):
         (second / name).write_text((run / name).read_text())
+    (second / "attestation.json").write_text(json.dumps(
+        _make_coherent(json.loads((second / "attestation.json").read_text()),
+                       second)) + "\n")
 
     out, _ = _archive_gate(tmp_path, second, prompts, accept_new=True)
     assert out.returncode != 0, out.stdout
@@ -1501,6 +1526,9 @@ def test_a_failure_while_COPYING_leaves_the_destination_untouched(tmp_path):
     second.mkdir()
     for name in ("start.json", "attestation.json", "review.md"):
         (second / name).write_text((run / name).read_text())
+    (second / "attestation.json").write_text(json.dumps(
+        _make_coherent(json.loads((second / "attestation.json").read_text()),
+                       second)) + "\n")
     (second / "review.md").chmod(0o000)
 
     index_before = (root / "index.jsonl").read_bytes()
@@ -1551,6 +1579,9 @@ def test_the_manifest_is_written_ATOMICALLY(tmp_path):
         second.mkdir()
         for name in ("start.json", "attestation.json", "review.md"):
             (second / name).write_text((run / name).read_text())
+        (second / "attestation.json").write_text(json.dumps(
+            _make_coherent(json.loads((second / "attestation.json").read_text()),
+                           second)) + "\n")
         out, _ = _archive_gate(tmp_path, second, prompts)
         assert out.returncode == 0, out.stderr
         assert sums.read_bytes() != before
@@ -1607,6 +1638,9 @@ def test_a_rollback_that_cannot_COMPLETE_says_so_instead_of_claiming_success(tmp
     second.mkdir()
     for name in ("start.json", "attestation.json", "review.md"):
         (second / name).write_text((run / name).read_text())
+    (second / "attestation.json").write_text(json.dumps(
+        _make_coherent(json.loads((second / "attestation.json").read_text()),
+                       second)) + "\n")
 
     try:
         out, _ = _archive_gate(tmp_path, second, prompts)
@@ -1787,6 +1821,9 @@ def test_a_refusal_does_not_remove_a_directory_it_did_not_create(tmp_path):
     second.mkdir()
     for name in ("start.json", "attestation.json", "review.md"):
         (second / name).write_text((run / name).read_text())
+    (second / "attestation.json").write_text(json.dumps(
+        _make_coherent(json.loads((second / "attestation.json").read_text()),
+                       second)) + "\n")
 
     try:
         out, _ = _archive_gate(tmp_path, second, prompts)
@@ -1846,6 +1883,9 @@ def test_a_failed_PUBLICATION_leaves_no_staging_behind(tmp_path):
     second.mkdir()
     for name in ("start.json", "attestation.json", "review.md"):
         (second / name).write_text((run / name).read_text())
+    (second / "attestation.json").write_text(json.dumps(
+        _make_coherent(json.loads((second / "attestation.json").read_text()),
+                       second)) + "\n")
 
     # The publication specifically — not an earlier step. A read-only kind
     # directory fails at staging creation and never reaches the rename, so it
@@ -1898,6 +1938,9 @@ def test_a_publication_failure_whose_CLEANUP_also_fails_reports_unknown(tmp_path
     second.mkdir()
     for name in ("start.json", "attestation.json", "review.md"):
         (second / name).write_text((run / name).read_text())
+    (second / "attestation.json").write_text(json.dumps(
+        _make_coherent(json.loads((second / "attestation.json").read_text()),
+                       second)) + "\n")
 
     module = _archiver_module()
 
@@ -1982,6 +2025,9 @@ def test_a_dangling_staging_symlink_is_reported_not_claimed_clean(tmp_path):
     second.mkdir()
     for name in ("start.json", "attestation.json", "review.md"):
         (second / name).write_text((run / name).read_text())
+    (second / "attestation.json").write_text(json.dumps(
+        _make_coherent(json.loads((second / "attestation.json").read_text()),
+                       second)) + "\n")
 
     module = _archiver_module()
     kind = root / "architect-reviews"
@@ -2038,6 +2084,9 @@ def test_the_ROLLBACK_also_confirms_its_removal_rather_than_assuming_it(tmp_path
     second.mkdir()
     for name in ("start.json", "attestation.json", "review.md"):
         (second / name).write_text((run / name).read_text())
+    (second / "attestation.json").write_text(json.dumps(
+        _make_coherent(json.loads((second / "attestation.json").read_text()),
+                       second)) + "\n")
 
     module = _archiver_module()
     index = root / "index.jsonl"
@@ -2087,6 +2136,9 @@ def test_a_copy_failure_whose_cleanup_also_fails_reports_unknown(tmp_path):
     second.mkdir()
     for name in ("start.json", "attestation.json", "review.md"):
         (second / name).write_text((run / name).read_text())
+    (second / "attestation.json").write_text(json.dumps(
+        _make_coherent(json.loads((second / "attestation.json").read_text()),
+                       second)) + "\n")
 
     module = _archiver_module()
     kind = root / "architect-reviews"
@@ -2363,3 +2415,40 @@ def test_a_failed_manifest_REPLACE_leaves_no_partial_behind(tmp_path):
 
     leftovers = [p.name for p in root.iterdir() if p.name.startswith(".SHA256SUMS.partial")]
     assert leftovers == [], leftovers
+
+
+@pytest.mark.parametrize("break_it,expect", [
+    (lambda run, att: (run / "start.json").unlink(),
+     "the session record carries no thread identifier"),
+    (lambda run, att: (run / "start.json").write_text(json.dumps({"socket": "/s"}) + "\n"),
+     "the session record carries no thread identifier"),
+    (lambda run, att: att["start"].pop("threadId"),
+     # Caught by the presence check first — earlier, and still a refusal.
+     "the archive scanner requires"),
+    (lambda run, att: (run / "review.md").unlink(),
+     "absent or not a regular file"),
+    (lambda run, att: att["artifact"].pop("sha256"),
+     "the archive scanner requires"),
+    (lambda run, att: att["artifact"].pop("path"),
+     "the archive scanner requires"),
+    (lambda run, att: att["artifact"].update(path="/somewhere/else/review.md"),
+     "names something other than this round's review"),
+])
+def test_a_MISSING_binding_side_is_refused_not_skipped(tmp_path, break_it, expect):
+    """Absence skipped the check, and absence is the case the consumer rejects.
+
+    The first version of these bindings compared two values only when BOTH were
+    truthy, so removing either side silently satisfied it. The archive scanner
+    reads the session record unconditionally and requires the identifiers to be
+    present AND equal — so a check that excuses absence enforces a coincidence
+    rather than a binding, and publishes exactly the round the consumer refuses.
+    """
+    run, prompts = _gate_run(tmp_path)
+    att = json.loads((run / "attestation.json").read_text())
+    break_it(run, att)
+    (run / "attestation.json").write_text(json.dumps(att) + "\n")
+
+    result, root = _archive_gate(tmp_path, run, prompts)
+    assert result.returncode == 1, (expect, result.stdout)
+    assert expect in result.stderr, (expect, result.stderr)
+    assert not (root / "architect-reviews" / run.name).exists(), expect

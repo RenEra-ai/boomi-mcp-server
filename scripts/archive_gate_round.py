@@ -779,39 +779,63 @@ def refuse_unusable_json(source: Path, kind: str) -> None:
     if kind == "architect-review" and "attestation.json" not in unusable:
         att = read_json(source, "attestation.json")
         if isinstance(att, dict):
+            # MANDATORY, not conditional. The previous form compared two values
+            # only when BOTH were truthy, so a missing side skipped the check
+            # entirely — and a missing side is precisely the case the consumer
+            # rejects: its scanner reads the session record unconditionally and
+            # requires the identifiers to be present AND equal. A check that
+            # excuses absence is not enforcing a binding, it is enforcing a
+            # coincidence.
             start = read_json(source, "start.json")
             start_thread = _dig(start, ("threadId",)) if isinstance(start, dict) else None
             att_thread = _dig(att, ("start", "threadId"))
-            if start_thread and att_thread and start_thread != att_thread:
-                unusable["attestation.json"] = (
+            review = source / "review.md"
+            claimed = _dig(att, ("artifact", "sha256"))
+            claimed_path = _dig(att, ("artifact", "path"))
+
+            problems = []
+            if not start_thread:
+                problems.append("the session record carries no thread identifier")
+            elif not att_thread:
+                problems.append("the attestation names no thread")
+            elif start_thread != att_thread:
+                problems.append(
                     f"its thread {att_thread!r} is not the archived session's "
-                    f"thread {start_thread!r}; the scanner requires them equal")
-            elif _dig(att, ("teardown",)) != "confirmed":
-                unusable["attestation.json"] = (
-                    f"teardown reads {_dig(att, ('teardown',))!r}, and the scanner "
-                    "accepts only 'confirmed'")
-            elif _dig(att, ("turn", "status")) != "completed":
-                unusable["attestation.json"] = (
-                    f"turn status reads {_dig(att, ('turn', 'status'))!r}, and the "
-                    "scanner accepts only 'completed' for an archived round")
+                    f"thread {start_thread!r}")
+
+            if _dig(att, ("teardown",)) != "confirmed":
+                problems.append(
+                    f"teardown reads {_dig(att, ('teardown',))!r}, and only "
+                    "'confirmed' is accepted")
+            if _dig(att, ("turn", "status")) != "completed":
+                problems.append(
+                    f"turn status reads {_dig(att, ('turn', 'status'))!r}, and only "
+                    "'completed' is accepted for an archived round")
+
+            if not review.is_file():
+                problems.append("the review it attests is absent or not a regular file")
+            elif not claimed:
+                problems.append("it records no artifact digest for that review")
             else:
-                review = source / "review.md"
-                claimed = _dig(att, ("artifact", "sha256"))
-                if review.is_file() and claimed:
-                    # GUARDED. Hashing is itself an operation that can fail — an
-                    # unreadable review is exactly the kind of input this check
-                    # exists to meet — and a check that raises on the input it is
-                    # checking is not a check. Raised here it would escape the
-                    # pre-flight entirely, which is the one place that must not.
-                    try:
-                        actual = sha256_of(review)
-                    except OSError as exc:
-                        unusable["review.md"] = f"cannot be read to verify its digest: {exc}"
-                    else:
-                        if actual != claimed:
-                            unusable["attestation.json"] = (
-                                "its artifact digest does not match the review it "
-                                "archives; the scanner compares them")
+                try:
+                    actual = sha256_of(review)
+                except OSError as exc:
+                    problems.append(f"the review cannot be read to verify its digest: {exc}")
+                else:
+                    if actual != claimed:
+                        problems.append(
+                            "its artifact digest does not match the review it archives")
+            if not claimed_path:
+                problems.append("it records no artifact path")
+            elif os.path.normpath(str(claimed_path)) != os.path.normpath(
+                    str(review)):
+                problems.append(
+                    f"its artifact path {claimed_path!r} names something other than "
+                    "this round's review")
+
+            if problems:
+                unusable["attestation.json"] = "; ".join(problems)
+
     if unusable:
         raise SystemExit(
             "refusing to archive a round whose sidecars cannot be used:\n"
