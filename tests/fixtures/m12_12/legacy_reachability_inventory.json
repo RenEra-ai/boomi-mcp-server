@@ -10,7 +10,7 @@
     {
       "census": "authoring_boundary",
       "count": 1,
-      "evidence_line": 2553,
+      "evidence_line": 2557,
       "form": "archetype-expanded config",
       "path": "server.py",
       "row_id": "PB-b10aa66f",
@@ -19,7 +19,7 @@
     {
       "census": "authoring_boundary",
       "count": 1,
-      "evidence_line": 2321,
+      "evidence_line": 2325,
       "form": "hand-authored IntegrationSpecV1 config",
       "path": "server.py",
       "row_id": "PB-ef49e662",
@@ -28,7 +28,7 @@
     {
       "census": "authoring_boundary",
       "count": 1,
-      "evidence_line": 2581,
+      "evidence_line": 2585,
       "form": "composed multi-archetype config",
       "path": "server.py",
       "row_id": "PB-d8132167",
@@ -37,7 +37,7 @@
     {
       "census": "authoring_boundary",
       "count": 1,
-      "evidence_line": 2817,
+      "evidence_line": 2821,
       "form": "imported draft config",
       "path": "server.py",
       "row_id": "PB-c4d70f90",
@@ -289,7 +289,7 @@
     {
       "census": "http_client_call",
       "count": 1,
-      "evidence_line": 5384,
+      "evidence_line": 5388,
       "form": "client.post -> POST https://oauth2.googleapis.com/token (hand-rolled HTTP)",
       "path": "server.py",
       "row_id": "HT-14f98c53",
@@ -883,7 +883,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 1892,
+      "evidence_line": 1896,
       "form": "analyze_component_action(...) [legacy-bearing, src/boomi_mcp/categories/components/analyze_component.py]",
       "path": "server.py",
       "row_id": "LT-b1eebec0",
@@ -892,7 +892,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 2050,
+      "evidence_line": 2054,
       "form": "apply_component_edit_action(...) [legacy-bearing, src/boomi_mcp/categories/components/safe_edit_component.py]",
       "path": "server.py",
       "row_id": "LT-234ce0d2",
@@ -901,7 +901,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 2481,
+      "evidence_line": 2485,
       "form": "build_integration_action(...) [legacy-bearing, src/boomi_mcp/categories/integration_builder.py]",
       "path": "server.py",
       "row_id": "LT-75a0e536",
@@ -910,7 +910,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 2604,
+      "evidence_line": 2608,
       "form": "compose_archetypes_action(...) [legacy-bearing, src/boomi_mcp/categories/integration_authoring.py]",
       "path": "server.py",
       "row_id": "LT-1966e9c4",
@@ -919,7 +919,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 3024,
+      "evidence_line": 3028,
       "form": "discover_odata_metadata_action(...) [legacy-bearing, src/boomi_mcp/categories/schema_discovery.py]",
       "path": "server.py",
       "row_id": "LT-68b2c077",
@@ -928,7 +928,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 2923,
+      "evidence_line": 2927,
       "form": "discover_openapi_spec_action(...) [legacy-bearing, src/boomi_mcp/categories/schema_discovery.py]",
       "path": "server.py",
       "row_id": "LT-5b3318ea",
@@ -937,7 +937,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 2975,
+      "evidence_line": 2979,
       "form": "discover_soap_wsdl_action(...) [legacy-bearing, src/boomi_mcp/categories/schema_discovery.py]",
       "path": "server.py",
       "row_id": "LT-8ea30708",
@@ -946,7 +946,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 3413,
+      "evidence_line": 3417,
       "form": "invoke_api(...) [legacy-bearing, src/boomi_mcp/categories/meta_tools.py]",
       "path": "server.py",
       "row_id": "LT-ca47b87b",
@@ -955,7 +955,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 1791,
+      "evidence_line": 1795,
       "form": "manage_component_action(...) [legacy-bearing, src/boomi_mcp/categories/components/manage_component.py]",
       "path": "server.py",
       "row_id": "LT-8321cbbd",
@@ -964,7 +964,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 2154,
+      "evidence_line": 2158,
       "form": "manage_connector_action(...) [legacy-bearing, src/boomi_mcp/categories/components/connectors.py]",
       "path": "server.py",
       "row_id": "LT-ad82ab53",
@@ -973,7 +973,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 3,
-      "evidence_line": 4314,
+      "evidence_line": 4318,
       "form": "orchestrate_deploy_action(...) [legacy-bearing, src/boomi_mcp/categories/deployment/orchestration.py]",
       "path": "server.py",
       "row_id": "LT-fd046414",
@@ -982,7 +982,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 1970,
+      "evidence_line": 1974,
       "form": "prepare_component_edit_action(...) [legacy-bearing, src/boomi_mcp/categories/components/safe_edit_component.py]",
       "path": "server.py",
       "row_id": "LT-287a6852",
@@ -991,7 +991,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 2292,
+      "evidence_line": 2296,
       "form": "search_marketplace_recipes_action(...) [legacy-bearing, src/boomi_mcp/categories/marketplace.py]",
       "path": "server.py",
       "row_id": "LT-78f4a4e6",
@@ -2071,7 +2071,7 @@
     {
       "census": "raw_api_invoker",
       "count": 1,
-      "evidence_line": 3413,
+      "evidence_line": 3417,
       "form": "invoke_api(...)",
       "path": "server.py",
       "row_id": "WR-27669e63",
@@ -3893,7 +3893,7 @@
     {
       "census": "authoring_boundary",
       "disposition": "migrate the boundary to canonical ProcessIR",
-      "evidence_line": 2553,
+      "evidence_line": 2557,
       "forms": [
         "archetype-expanded config"
       ],
@@ -3906,7 +3906,7 @@
     {
       "census": "authoring_boundary",
       "disposition": "migrate the boundary to canonical ProcessIR",
-      "evidence_line": 2321,
+      "evidence_line": 2325,
       "forms": [
         "hand-authored IntegrationSpecV1 config"
       ],
@@ -3919,7 +3919,7 @@
     {
       "census": "authoring_boundary",
       "disposition": "migrate the boundary to canonical ProcessIR",
-      "evidence_line": 2581,
+      "evidence_line": 2585,
       "forms": [
         "composed multi-archetype config"
       ],
@@ -3932,7 +3932,7 @@
     {
       "census": "authoring_boundary",
       "disposition": "migrate the boundary to canonical ProcessIR",
-      "evidence_line": 2817,
+      "evidence_line": 2821,
       "forms": [
         "imported draft config"
       ],
@@ -4272,7 +4272,7 @@
     {
       "census": "http_client_call",
       "disposition": "WRT-external-transport-oauth-callback: unchanged — assert the target host/path is the configured token endpoint, never /Component.",
-      "evidence_line": 5384,
+      "evidence_line": 5388,
       "forms": [
         "client.post -> POST https://oauth2.googleapis.com/token (hand-rolled HTTP)"
       ],
@@ -4518,7 +4518,7 @@
     {
       "census": "legacy_transitive_call",
       "disposition": "follow the callee's row; this is an edge, not a site",
-      "evidence_line": 1892,
+      "evidence_line": 1896,
       "forms": [
         "analyze_component_action(...) [legacy-bearing, src/boomi_mcp/categories/components/analyze_component.py]"
       ],
@@ -4531,7 +4531,7 @@
     {
       "census": "legacy_transitive_call",
       "disposition": "follow the callee's row; this is an edge, not a site",
-      "evidence_line": 2050,
+      "evidence_line": 2054,
       "forms": [
         "apply_component_edit_action(...) [legacy-bearing, src/boomi_mcp/categories/components/safe_edit_component.py]"
       ],
@@ -4544,7 +4544,7 @@
     {
       "census": "legacy_transitive_call",
       "disposition": "follow the callee's row; this is an edge, not a site",
-      "evidence_line": 2481,
+      "evidence_line": 2485,
       "forms": [
         "build_integration_action(...) [legacy-bearing, src/boomi_mcp/categories/integration_builder.py]"
       ],
@@ -4557,7 +4557,7 @@
     {
       "census": "legacy_transitive_call",
       "disposition": "follow the callee's row; this is an edge, not a site",
-      "evidence_line": 2604,
+      "evidence_line": 2608,
       "forms": [
         "compose_archetypes_action(...) [legacy-bearing, src/boomi_mcp/categories/integration_authoring.py]"
       ],
@@ -4570,7 +4570,7 @@
     {
       "census": "legacy_transitive_call",
       "disposition": "follow the callee's row; this is an edge, not a site",
-      "evidence_line": 3024,
+      "evidence_line": 3028,
       "forms": [
         "discover_odata_metadata_action(...) [legacy-bearing, src/boomi_mcp/categories/schema_discovery.py]"
       ],
@@ -4583,7 +4583,7 @@
     {
       "census": "legacy_transitive_call",
       "disposition": "follow the callee's row; this is an edge, not a site",
-      "evidence_line": 2923,
+      "evidence_line": 2927,
       "forms": [
         "discover_openapi_spec_action(...) [legacy-bearing, src/boomi_mcp/categories/schema_discovery.py]"
       ],
@@ -4596,7 +4596,7 @@
     {
       "census": "legacy_transitive_call",
       "disposition": "follow the callee's row; this is an edge, not a site",
-      "evidence_line": 2975,
+      "evidence_line": 2979,
       "forms": [
         "discover_soap_wsdl_action(...) [legacy-bearing, src/boomi_mcp/categories/schema_discovery.py]"
       ],
@@ -4609,7 +4609,7 @@
     {
       "census": "legacy_transitive_call",
       "disposition": "follow the callee's row; this is an edge, not a site",
-      "evidence_line": 3413,
+      "evidence_line": 3417,
       "forms": [
         "invoke_api(...) [legacy-bearing, src/boomi_mcp/categories/meta_tools.py]"
       ],
@@ -4622,7 +4622,7 @@
     {
       "census": "legacy_transitive_call",
       "disposition": "follow the callee's row; this is an edge, not a site",
-      "evidence_line": 1791,
+      "evidence_line": 1795,
       "forms": [
         "manage_component_action(...) [legacy-bearing, src/boomi_mcp/categories/components/manage_component.py]"
       ],
@@ -4635,7 +4635,7 @@
     {
       "census": "legacy_transitive_call",
       "disposition": "follow the callee's row; this is an edge, not a site",
-      "evidence_line": 2154,
+      "evidence_line": 2158,
       "forms": [
         "manage_connector_action(...) [legacy-bearing, src/boomi_mcp/categories/components/connectors.py]"
       ],
@@ -4648,7 +4648,7 @@
     {
       "census": "legacy_transitive_call",
       "disposition": "follow the callee's row; this is an edge, not a site",
-      "evidence_line": 4314,
+      "evidence_line": 4318,
       "forms": [
         "orchestrate_deploy_action(...) [legacy-bearing, src/boomi_mcp/categories/deployment/orchestration.py]"
       ],
@@ -4661,7 +4661,7 @@
     {
       "census": "legacy_transitive_call",
       "disposition": "follow the callee's row; this is an edge, not a site",
-      "evidence_line": 1970,
+      "evidence_line": 1974,
       "forms": [
         "prepare_component_edit_action(...) [legacy-bearing, src/boomi_mcp/categories/components/safe_edit_component.py]"
       ],
@@ -4674,7 +4674,7 @@
     {
       "census": "legacy_transitive_call",
       "disposition": "follow the callee's row; this is an edge, not a site",
-      "evidence_line": 2292,
+      "evidence_line": 2296,
       "forms": [
         "search_marketplace_recipes_action(...) [legacy-bearing, src/boomi_mcp/categories/marketplace.py]"
       ],
@@ -5682,7 +5682,7 @@
     {
       "census": "raw_api_invoker",
       "disposition": "WRT-raw-api-component: ONE canonical endpoint parser feeds classification, ID extraction AND transport; the reserved literal `bulk` is matched BEFORE the `<id>` arm and is never a componentId; every update-shaped call runs the two-sided process check.",
-      "evidence_line": 3413,
+      "evidence_line": 3417,
       "forms": [
         "invoke_api(...)"
       ],
@@ -8036,7 +8036,7 @@
     },
     {
       "artifact_id": "SS-CAPABILITY-CATALOG:tools",
-      "canonical_length": 62261,
+      "canonical_length": 62284,
       "legacy_excerpt": {
         "build_from_archetype.description": "Build an IntegrationSpecV1 from an archetype WITHOUT calling Boomi. Pass the returned spec to build_integration(action='plan') to preview steps. The database_to_api_sync archetype emits executable component specs (DB source, JSON transform, REST target, structured process), including a verified Try/Catch + DLQ catch path with platform-timed retry and an optional log-only Notify step (#51/#88/#89); deployment and scheduling remain M3.",
         "build_from_archetype.examples[1]": "build_from_archetype(name=\"database_to_api_sync\", parameters={...}) → executable spec for build_integration(action='plan')",
@@ -8052,7 +8052,7 @@
       },
       "producer": "meta_tools.list_capabilities_action()",
       "selector": "tools",
-      "sha256": "2cea759ed5edf153c38e54f830ca99640796d9455c35bf0c2c6f816b5c5cb16f",
+      "sha256": "153cdca9911c383bd7c70e3f51ffebd7b915a59f42b22d4ddfa329323d4c1abc",
       "surface_class": "SS-CAPABILITY-CATALOG",
       "value": {
         "analyze_component": {
@@ -9033,7 +9033,8 @@
             "api_usage_counts",
             "connection_licensing_report",
             "custom_tracked_fields",
-            "edi_connector_records"
+            "edi_connector_records",
+            "execution_connectors"
           ],
           "category": "Monitoring",
           "description": "Monitor executions, logs, artifacts, audit trail, events, certificates, throughput, metrics, connector documents, summaries, counts, API usage, licensing, and EDI records",
@@ -9940,7 +9941,7 @@
       "canonical_length": 4022,
       "producer": "server.mcp.list_tools() [all tools]",
       "selector": "registered_surface_digest",
-      "sha256": "a2f630afc0024b861a7799b8f5baf53a0884b44383e50c7e5246de0e3fee913d",
+      "sha256": "2cc5a89e22a09eb1591eda17b0a45fb69d546410d24c443e3b3517ab7bf55d83",
       "surface_class": "SS-MCP-DESCRIPTIONS",
       "value": {
         "analyze_component": "7564cd9e0efe545dcb5b0d95802bdfd2c561f01990051777ba602e901eb58d57",
@@ -9978,7 +9979,7 @@
         "manage_schedules": "ef09d081b6d0354e1935db313929e2e6db129ff3f7bb204f1f188030f5a43df0",
         "manage_shared_resources": "28a828916ff6c6a6c639ebc0e9e0869d8612bc625e5cd24c8d35ddd2970efaad",
         "manage_trading_partner": "4fd099fdf9a593c51cf797274d5ad0dacd613087a92b7ba73d0574c9c0773942",
-        "monitor_platform": "f79304ff491875f8a57b2cc953df36f9b488b812a2608aa0bd1e4c0773797620",
+        "monitor_platform": "1c7d8a2ed4fa8ca9c583b4bd88b5b94c12ea7b87be77a86bc18a47802dcc0d20",
         "orchestrate_deploy": "260b7d3c853c1aa547d45d15d36438a510b9e365ee6195965d39885aae502900",
         "plan_integration_design": "7f61610e0c719e7e2279011245032cc33094728996f84a544b19a3e33449edcb",
         "prepare_component_edit": "cb7dc1189dcc4568760fa97d543e7172c1431cad9a0005a88b7212ac77cf3e9e",
