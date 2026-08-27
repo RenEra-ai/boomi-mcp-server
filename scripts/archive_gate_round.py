@@ -123,7 +123,17 @@ def _remove_confirmed(path: Path) -> bool:
     site here claims a cleanliness it has not verified — this returns the fact and
     each caller reports it honestly.
     """
-    shutil.rmtree(path, ignore_errors=True)
+    # BOTH shapes. `rmtree` silently does nothing to a regular file, so a helper
+    # that only called it left every file-shaped target in place while reporting
+    # through the confirmation below — which is how the checksum staging file
+    # came to be probed but never deleted.
+    if path.is_dir() and not path.is_symlink():
+        shutil.rmtree(path, ignore_errors=True)
+    else:
+        try:
+            path.unlink()
+        except (FileNotFoundError, IsADirectoryError, PermissionError, OSError):
+            pass
     return _confirmed_removed(path)
 
 
@@ -514,7 +524,13 @@ def write_sums(root: Path) -> int:
         # `_discard(durable…)` — instead of the property "every removal". A
         # surviving partial manifest is refused as unaccounted by the next run,
         # while the rollback above reports the archive is as it was.
-        if not _confirmed_removed(staging):
+        # REMOVE, then confirm. The previous line called the confirmation helper
+        # alone, which only probes — so replacing an unchecked delete with it
+        # removed the deletion entirely and left the partial manifest behind on
+        # every failure. A verification is not a substitute for the action it
+        # verifies, and swapping one for the other made this strictly worse than
+        # the unchecked delete it replaced.
+        if not _remove_confirmed(staging):
             print(f"  warning: {staging} could not be confirmed removed and will "
                   "be refused as unaccounted by the next run.", file=sys.stderr)
     return len(on_disk)
@@ -752,6 +768,50 @@ def refuse_unusable_json(source: Path, kind: str) -> None:
                 unusable[name] = (
                     f"parses, but the archive scanner requires {missing} and this "
                     "does not carry them")
+
+    # ...and the CROSS-FILE constraints, which presence checks cannot express.
+    # The scanner does not merely require these facts to exist; it requires them
+    # to AGREE — the attestation's thread must be the archived session's thread,
+    # its artifact digest must be the archived review's digest, and its teardown
+    # and turn status must read exactly the words it checks for. An attestation
+    # can carry every required path and still be rejected, which is precisely
+    # what a presence-only check publishes.
+    if kind == "architect-review" and "attestation.json" not in unusable:
+        att = read_json(source, "attestation.json")
+        if isinstance(att, dict):
+            start = read_json(source, "start.json")
+            start_thread = _dig(start, ("threadId",)) if isinstance(start, dict) else None
+            att_thread = _dig(att, ("start", "threadId"))
+            if start_thread and att_thread and start_thread != att_thread:
+                unusable["attestation.json"] = (
+                    f"its thread {att_thread!r} is not the archived session's "
+                    f"thread {start_thread!r}; the scanner requires them equal")
+            elif _dig(att, ("teardown",)) != "confirmed":
+                unusable["attestation.json"] = (
+                    f"teardown reads {_dig(att, ('teardown',))!r}, and the scanner "
+                    "accepts only 'confirmed'")
+            elif _dig(att, ("turn", "status")) != "completed":
+                unusable["attestation.json"] = (
+                    f"turn status reads {_dig(att, ('turn', 'status'))!r}, and the "
+                    "scanner accepts only 'completed' for an archived round")
+            else:
+                review = source / "review.md"
+                claimed = _dig(att, ("artifact", "sha256"))
+                if review.is_file() and claimed:
+                    # GUARDED. Hashing is itself an operation that can fail — an
+                    # unreadable review is exactly the kind of input this check
+                    # exists to meet — and a check that raises on the input it is
+                    # checking is not a check. Raised here it would escape the
+                    # pre-flight entirely, which is the one place that must not.
+                    try:
+                        actual = sha256_of(review)
+                    except OSError as exc:
+                        unusable["review.md"] = f"cannot be read to verify its digest: {exc}"
+                    else:
+                        if actual != claimed:
+                            unusable["attestation.json"] = (
+                                "its artifact digest does not match the review it "
+                                "archives; the scanner compares them")
     if unusable:
         raise SystemExit(
             "refusing to archive a round whose sidecars cannot be used:\n"

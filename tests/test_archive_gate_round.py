@@ -133,7 +133,9 @@ def _gate_run(tmp_path, prompt_bytes=b"the attested prompt\n", attest=True):
 
     run = tmp_path / "cdx-gate-review.AAAAAA"
     run.mkdir()
-    (run / "start.json").write_text(json.dumps({"threadId": "t-9", "socket": "/s"}) + "\n")
+    thread_id = "01a0-thread-" + run.name
+    (run / "start.json").write_text(
+        json.dumps({"threadId": thread_id, "socket": "/s"}) + "\n")
     (run / "review.md").write_text("a review\n")
     digest = hashlib.sha256(prompt_bytes).hexdigest()
     # The REAL collector schema — nested under `prompt`, not a flat key. The
@@ -153,7 +155,11 @@ def _gate_run(tmp_path, prompt_bytes=b"the attested prompt\n", attest=True):
         "teardown": "confirmed",
         "turn": {"status": "completed", "kind": "turn", "turnToken": 1},
         "parsedVerdict": "NO ISSUES",
-        "start": {"threadId": "01a0-thread-" + run.name, "private": True},
+        # The SAME thread the session record carries. The scanner requires
+        # equality, not presence: an attestation naming a different thread is
+        # an attestation of a different session, which is the forgery this
+        # binding exists to refuse. The earlier fixture used two ids.
+        "start": {"threadId": thread_id, "private": True},
         "artifact": {
             "path": str(run / "review.md"),
             "sha256": hashlib.sha256(review_bytes).hexdigest(),
@@ -322,7 +328,8 @@ def test_the_guard_is_not_inert_against_a_REAL_attestation(tmp_path):
     run.mkdir()
     (run / "start.json").write_text(json.dumps({"threadId": "t-real", "socket": "/s"}) + "\n")
     (run / "review.md").write_text("a review\n")
-    (run / "attestation.json").write_text(real[0].read_text())
+    (run / "attestation.json").write_text(
+        json.dumps(_make_coherent(json.loads(real[0].read_text()), run)) + "\n")
 
     wrong = tmp_path / "wrong-prompts"
     wrong.mkdir()
@@ -332,6 +339,27 @@ def test_the_guard_is_not_inert_against_a_REAL_attestation(tmp_path):
     assert result.returncode == 1, result.stdout
     assert "not the attested" in result.stderr
     assert not (root / "architect-reviews" / run.name).exists()
+
+
+def _make_coherent(att, run):
+    """Bind a borrowed attestation to the run directory it is placed in.
+
+    A real attestation names its own session's thread and its own review's
+    digest. Copying it into a synthetic run directory leaves both pointing
+    elsewhere — which the pre-flight now refuses, correctly, because an
+    attestation of a different session is exactly the forgery those bindings
+    exist to catch. Tests that borrow one must therefore re-bind it, rather than
+    the archiver relaxing a check to accommodate a fixture.
+    """
+    import hashlib
+
+    att.setdefault("start", {})["threadId"] = json.loads(
+        (run / "start.json").read_text())["threadId"]
+    review = run / "review.md"
+    if review.is_file():
+        att.setdefault("artifact", {})["sha256"] = hashlib.sha256(
+            review.read_bytes()).hexdigest()
+    return att
 
 
 def _real_attestation():
@@ -446,7 +474,8 @@ def test_an_attestation_the_archiver_cannot_READ_is_refused(tmp_path, mutate, la
     run.mkdir()
     (run / "start.json").write_text(json.dumps({"threadId": "t-m", "socket": "/s"}) + "\n")
     (run / "review.md").write_text("a review\n")
-    (run / "attestation.json").write_text(json.dumps(attestation) + "\n")
+    (run / "attestation.json").write_text(
+        json.dumps(_make_coherent(attestation, run)) + "\n")
 
     prompts = tmp_path / "prompts-that-are-wrong"
     prompts.mkdir()
@@ -478,7 +507,8 @@ def test_an_UNMUTATED_real_attestation_still_archives(tmp_path):
     run.mkdir()
     (run / "start.json").write_text(json.dumps({"threadId": "t-c", "socket": "/s"}) + "\n")
     (run / "review.md").write_text("a review\n")
-    (run / "attestation.json").write_text((round_dir / "attestation.json").read_text())
+    (run / "attestation.json").write_text(json.dumps(_make_coherent(
+        json.loads((round_dir / "attestation.json").read_text()), run)) + "\n")
 
     prompts = tmp_path / "prompts-real"
     prompts.mkdir()
@@ -616,7 +646,8 @@ def test_a_non_STRING_attested_digest_refuses_instead_of_raising(tmp_path, junk,
     run.mkdir()
     (run / "start.json").write_text(json.dumps({"threadId": "t-j", "socket": "/s"}) + "\n")
     (run / "review.md").write_text("a review\n")
-    (run / "attestation.json").write_text(json.dumps(attestation) + "\n")
+    (run / "attestation.json").write_text(
+        json.dumps(_make_coherent(attestation, run)) + "\n")
 
     prompts = tmp_path / "prompts"
     prompts.mkdir()
@@ -832,7 +863,8 @@ def test_a_whitespace_only_attestation_fact_is_not_RESOLVED(tmp_path, blank):
     run.mkdir()
     (run / "start.json").write_text(json.dumps({"threadId": "t-b", "socket": "/s"}) + "\n")
     (run / "review.md").write_text("a review\n")
-    (run / "attestation.json").write_text(json.dumps(attestation) + "\n")
+    (run / "attestation.json").write_text(
+        json.dumps(_make_coherent(attestation, run)) + "\n")
 
     prompts = tmp_path / "prompts"
     prompts.mkdir()
@@ -1476,7 +1508,12 @@ def test_a_failure_while_COPYING_leaves_the_destination_untouched(tmp_path):
     try:
         out, _ = _archive_gate(tmp_path, second, prompts)
         assert out.returncode != 0, out.stdout
-        assert "while copying" in out.stderr
+        # Refused in the PRE-FLIGHT now, not mid-copy: verifying the attestation's
+        # artifact digest has to read the review, so an unreadable one is caught
+        # before anything is created rather than while it is being copied. Earlier
+        # is strictly better, and the substantive guarantees below are unchanged —
+        # no destination, no staging debris, and the repaired retry succeeds.
+        assert "cannot be read" in out.stderr
         assert not (root / "architect-reviews" / second.name).exists()
         # No staging debris either — a leftover `.partial-` directory would be
         # listed by the next manifest rewrite as archived evidence.
@@ -2236,3 +2273,93 @@ def test_a_DIRECTORY_at_a_sidecar_path_is_not_an_absent_sidecar(tmp_path):
     assert result.returncode == 1, result.stdout
     assert "is a directory" in result.stderr
     assert not (root / "architect-reviews" / run.name).exists()
+
+
+def test_the_checksum_staging_file_is_actually_REMOVED_not_merely_probed(tmp_path):
+    """A verification is not a substitute for the action it verifies.
+
+    Replacing the unchecked delete with the confirmation helper alone removed the
+    deletion entirely: that helper only probes. The partial manifest then survived
+    every failure and was refused as unaccounted by the next run — strictly worse
+    than the unchecked delete it replaced.
+    """
+    module = _archiver_module()
+    victim = tmp_path / ".SHA256SUMS.partial-test"
+    victim.write_text("partial\n")
+    assert victim.exists()
+
+    assert module._remove_confirmed(victim) is True
+    assert not victim.exists(), "the helper probed but did not delete"
+
+    # ...and it removes a DIRECTORY too, which is the shape it was written for.
+    d = tmp_path / ".partial-dir"
+    (d / "inner").mkdir(parents=True)
+    (d / "inner" / "f").write_text("x")
+    assert module._remove_confirmed(d) is True
+    assert not d.exists()
+
+
+def test_an_attestation_naming_a_DIFFERENT_session_is_refused(tmp_path):
+    """Presence is not agreement, and the scanner requires agreement.
+
+    An attestation can carry every field the consumer names and still be
+    rejected, because the consumer checks that they MATCH the round: the thread
+    must be the archived session's thread and the artifact digest must be the
+    archived review's digest. A presence-only pre-flight publishes exactly that
+    round — and this module's own fixture was carrying two different thread ids
+    when an architect review pointed it out.
+    """
+    run, prompts = _gate_run(tmp_path)
+    att = json.loads((run / "attestation.json").read_text())
+    att["start"]["threadId"] = "01a0-some-other-session"
+    (run / "attestation.json").write_text(json.dumps(att) + "\n")
+
+    result, root = _archive_gate(tmp_path, run, prompts)
+    assert result.returncode == 1, result.stdout
+    assert "not the archived session's thread" in result.stderr
+    assert not (root / "architect-reviews" / run.name).exists()
+
+
+def test_an_attestation_whose_artifact_digest_is_WRONG_is_refused(tmp_path):
+    """The other half of the same agreement, checked the same way."""
+    run, prompts = _gate_run(tmp_path)
+    att = json.loads((run / "attestation.json").read_text())
+    att["artifact"]["sha256"] = "0" * 64
+    (run / "attestation.json").write_text(json.dumps(att) + "\n")
+
+    result, root = _archive_gate(tmp_path, run, prompts)
+    assert result.returncode == 1, result.stdout
+    assert "does not match the review it archives" in result.stderr
+    assert not (root / "architect-reviews" / run.name).exists()
+
+
+def test_a_failed_manifest_REPLACE_leaves_no_partial_behind(tmp_path):
+    """Exercises the CALL SITE, not the helper.
+
+    The first witness for this checked that the removal helper deletes — which it
+    does — while the defect was that `write_sums` called the PROBE instead. A
+    mutant swapping them back passed that test untouched. So this drives the real
+    failure path: the staging manifest is written, the replace fails, and nothing
+    may be left behind for the next run to refuse as unaccounted.
+    """
+    run, prompts = _gate_run(tmp_path)
+    first, root = _archive_gate(tmp_path, run, prompts)
+    assert first.returncode == 0, first.stderr
+
+    module = _archiver_module()
+    real_replace = module.os.replace
+
+    def exploding_replace(src, dst):
+        raise OSError(5, "Input/output error")
+
+    module.os.replace = exploding_replace
+    try:
+        try:
+            module.write_sums(root)
+        except OSError:
+            pass                      # the failure itself is the point
+    finally:
+        module.os.replace = real_replace
+
+    leftovers = [p.name for p in root.iterdir() if p.name.startswith(".SHA256SUMS.partial")]
+    assert leftovers == [], leftovers
