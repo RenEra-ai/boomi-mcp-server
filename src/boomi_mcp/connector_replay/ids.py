@@ -39,6 +39,9 @@ from typing import Final
 __all__ = [
     "BOOMI_COMPONENT_ID_PATTERN",
     "BOOMI_COMPONENT_ID_RE",
+    "EVIDENCE_COMPONENT_ID_PATTERN",
+    "EVIDENCE_COMPONENT_ID_RE",
+    "is_evidence_component_id",
     "EXECUTION_ID_PATTERN",
     "EXECUTION_ID_RE",
     "is_boomi_component_id",
@@ -57,13 +60,31 @@ __all__ = [
 #: 8-4-4-4-12 form. Anchored at both ends — an id is the whole string, never a
 #: substring of one, so a value carrying trailing whitespace or an appended
 #: fragment is rejected rather than silently truncated to its leading match.
-#: LOWERCASE only, which is evidence-derived rather than stylistic: every component
-#: and execution id in the captured archive is lowercase, with zero exceptions. A
-#: grammar looser than the evidence accepts values the platform has never been seen
-#: to mint, and this is the grammar an evidence row is validated against.
+#: TWO grammars, because two consumers ask different questions of the same shape.
+#:
+#: This one — the general Boomi component-id language — is CASE-INSENSITIVE. It
+#: answers "is this a well-formed component reference?", which is what a caller
+#: supplying a certificate or profile reference needs, and UUIDs are case-insensitive
+#: by definition. A previous review round established that explicitly, with a test.
+#:
+#: A single lowercase-only pattern was tried here and was WRONG: the evidence behind
+#: it — every id in the captured archive is lowercase — comes from the replay
+#: archive, which is a different consumer with a different question. Tightening the
+#: shared pattern on one consumer's evidence broke the other, and the suite caught
+#: it. One consumer's evidence is not automatically another's contract.
 BOOMI_COMPONENT_ID_PATTERN: Final[str] = (
+    r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+)
+
+#: The STRICTER grammar, for what an evidence row may CITE. Not "is this a valid
+#: id?" but "is this an id the platform was OBSERVED to mint?" — a narrower question
+#: with a fail-closed answer, because a citation is a claim about something that
+#: happened. All 72 archived ids are lowercase, with zero exceptions.
+EVIDENCE_COMPONENT_ID_PATTERN: Final[str] = (
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
 )
+
+EVIDENCE_COMPONENT_ID_RE: Final[re.Pattern[str]] = re.compile(EVIDENCE_COMPONENT_ID_PATTERN)
 
 BOOMI_COMPONENT_ID_RE: Final[re.Pattern[str]] = re.compile(BOOMI_COMPONENT_ID_PATTERN)
 
@@ -104,6 +125,17 @@ def is_boomi_component_id(value: object) -> bool:
     number is a thing that happens and is simply not an id.
     """
     return isinstance(value, str) and BOOMI_COMPONENT_ID_RE.fullmatch(value) is not None
+
+
+def is_evidence_component_id(value: object) -> bool:
+    """Whether an EVIDENCE ROW may cite this component id.
+
+    Stricter than :func:`is_boomi_component_id` on purpose — see
+    :data:`EVIDENCE_COMPONENT_ID_PATTERN`. A reference a caller supplies is
+    validated for well-formedness; a citation in an evidence row is validated
+    against what the platform has been observed to produce.
+    """
+    return isinstance(value, str) and EVIDENCE_COMPONENT_ID_RE.fullmatch(value) is not None
 
 
 def is_execution_id(value: object) -> bool:

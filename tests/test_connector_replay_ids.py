@@ -112,17 +112,35 @@ def test_execution_id_negatives(value):
     assert not is_execution_id(value)
 
 
-def test_component_id_is_lowercase_only_and_stays_anchored():
-    """Lowercase is EVIDENCE-DERIVED, not stylistic.
+def test_the_two_component_id_grammars_answer_different_questions():
+    """A reference is validated for well-formedness; a citation, against observation.
 
-    Every component and execution id in the captured archive is lowercase, with
-    zero exceptions. A grammar looser than the evidence accepts values the platform
-    has never been seen to mint — and this grammar guards what an evidence row may
-    cite.
+    One lowercase-only pattern was tried for both and was wrong. The general
+    grammar serves callers supplying a certificate or profile reference, and UUIDs
+    are case-insensitive — a previous review round established that with a test,
+    which this broke and which caught it. The strict grammar serves evidence rows,
+    where the question is not "is this well-formed?" but "is this an id the
+    platform was observed to mint?"
     """
+    from boomi_mcp.connector_replay.ids import is_evidence_component_id
+
     lower = "c4016c66-1234-4abc-9def-0123456789ab"
+    upper = lower.upper()
+
+    # A reference may be either case.
     assert is_boomi_component_id(lower)
-    assert not is_boomi_component_id(lower.upper())
+    assert is_boomi_component_id(upper)
+
+    # A citation may not.
+    assert is_evidence_component_id(lower)
+    assert not is_evidence_component_id(upper)
+
+    # Both stay anchored.
+    for check in (is_boomi_component_id, is_evidence_component_id):
+        assert not check(lower + " ")
+        assert not check("x" + lower)
+        assert not check(lower[:-1])
+        assert not check(None)
     assert not is_boomi_component_id(lower + " ")
     assert not is_boomi_component_id("x" + lower)
     assert not is_boomi_component_id(lower[:-1])

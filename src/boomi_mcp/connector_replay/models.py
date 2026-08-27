@@ -27,7 +27,7 @@ from typing import Final
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from .ids import is_boomi_component_id, is_execution_id
+from .ids import is_evidence_component_id, is_execution_id
 
 __all__ = [
     "ReplayRegistryModel",
@@ -192,7 +192,7 @@ class CapabilityEvidenceRecordV1(ReplayRegistryModel):
     @field_validator("operation_component_id")
     @classmethod
     def _component_id_is_real(cls, value: str | None) -> str | None:
-        if value is not None and not is_boomi_component_id(value):
+        if value is not None and not is_evidence_component_id(value):
             raise ValueError(f"not a Boomi component id: {value!r}")
         return value
 
@@ -329,7 +329,7 @@ class LiveComponentIdentityV1(ReplayRegistryModel):
     @field_validator("component_id")
     @classmethod
     def _component_id_is_real(cls, value: str) -> str:
-        if not is_boomi_component_id(value):
+        if not is_evidence_component_id(value):
             raise ValueError(f"not a Boomi component id: {value!r}")
         return value
 
