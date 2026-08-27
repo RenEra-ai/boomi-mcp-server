@@ -1,0 +1,44 @@
+[
+  {
+    "gcr_id": "R0VOX0NPTk5fUkVDX2V4ZWN1dGlvbi0wYWE1NmU5ZC0yMzdlLTQ1ZDctOTA2Mi1hYTAxODExYWVmZjMtMjAyNi4wOC4yNzpjb25uZWN0b3ItNjhhZWVjZWUtYmEyYi00NTdjLThlYzgtNDRiYjc2ZjBjYzRl",
+    "resp": {
+      "_success": true,
+      "generic_connector_record_id": "R0VOX0NPTk5fUkVDX2V4ZWN1dGlvbi0wYWE1NmU5ZC0yMzdlLTQ1ZDctOTA2Mi1hYTAxODExYWVmZjMtMjAyNi4wOC4yNzpjb25uZWN0b3ItNjhhZWVjZWUtYmEyYi00NTdjLThlYzgtNDRiYjc2ZjBjYzRl",
+      "download_url": "https://platform.boomi.com/account/traininghlibbochkarov-JKIY2X/api/download/ConnectorDocument-6d6532a7-445e-4eb8-accf-b62d499632c6",
+      "status_code": 202,
+      "message": "Beginning download.",
+      "_downloaded": true,
+      "content": "",
+      "content_type": "text/*; charset=UTF-8",
+      "size_bytes": 0
+    }
+  },
+  {
+    "gcr_id": "R0VOX0NPTk5fUkVDX2V4ZWN1dGlvbi0wYWE1NmU5ZC0yMzdlLTQ1ZDctOTA2Mi1hYTAxODExYWVmZjMtMjAyNi4wOC4yNzpjb25uZWN0b3ItMzM0MzgwZTMtYzQ2MS00M2MyLThhNTEtMjdhNjgwMzJhNTU3",
+    "resp": {
+      "_success": true,
+      "generic_connector_record_id": "R0VOX0NPTk5fUkVDX2V4ZWN1dGlvbi0wYWE1NmU5ZC0yMzdlLTQ1ZDctOTA2Mi1hYTAxODExYWVmZjMtMjAyNi4wOC4yNzpjb25uZWN0b3ItMzM0MzgwZTMtYzQ2MS00M2MyLThhNTEtMjdhNjgwMzJhNTU3",
+      "download_url": "https://platform.boomi.com/account/traininghlibbochkarov-JKIY2X/api/download/ConnectorDocument-21b35f92-21c3-48a2-acd8-16e801cc816d",
+      "status_code": 202,
+      "message": "Beginning download.",
+      "_downloaded": true,
+      "content": "",
+      "content_type": "text/*; charset=UTF-8",
+      "size_bytes": 0
+    }
+  },
+  {
+    "gcr_id": "R0VOX0NPTk5fUkVDX2V4ZWN1dGlvbi0wYWE1NmU5ZC0yMzdlLTQ1ZDctOTA2Mi1hYTAxODExYWVmZjMtMjAyNi4wOC4yNzpjb25uZWN0b3ItN2E4ZTk1YWYtZGU1NC00Mzc5LThiNTktMjQ3ZDc3MTZlNzRk",
+    "resp": {
+      "_success": true,
+      "generic_connector_record_id": "R0VOX0NPTk5fUkVDX2V4ZWN1dGlvbi0wYWE1NmU5ZC0yMzdlLTQ1ZDctOTA2Mi1hYTAxODExYWVmZjMtMjAyNi4wOC4yNzpjb25uZWN0b3ItN2E4ZTk1YWYtZGU1NC00Mzc5LThiNTktMjQ3ZDc3MTZlNzRk",
+      "download_url": "https://platform.boomi.com/account/traininghlibbochkarov-JKIY2X/api/download/ConnectorDocument-5c0a311f-4b36-4a5e-b513-9d4abb2c345a",
+      "status_code": 202,
+      "message": "Beginning download.",
+      "_downloaded": true,
+      "content": "{\"clientId\":\"_E4_TPL_20260827132830\",\"name\":\"E4 tpl target\",\"status\":\"ACTIVE\",\"key\":\"5f3c1fd6-dbfc-434c-a7fb-93a50f50998b\",\"createdOn\":\"2026-08-27T13:28:30.321Z\",\"createdBy\":\"integration\",\"modifiedOn\":\"2026-08-27T13:28:30.321Z\",\"modifiedBy\":\"integration\"}",
+      "content_type": "text/*; charset=UTF-8",
+      "size_bytes": 255
+    }
+  }
+]

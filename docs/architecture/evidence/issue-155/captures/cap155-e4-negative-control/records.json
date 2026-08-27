@@ -1,0 +1,134 @@
+{
+  "record": {
+    "scenario_id": "cap155-e4-negative-control",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "boomi_env_id": "c8d9140d-6d34-4ca6-91ff-bfd263556d5b",
+    "boomi_atom_id": "89387bdf-b177-4631-9cc6-687bf4afefa7",
+    "rest_connection_id": "c4281346-83e9-4026-856d-ede718ec68a0",
+    "counterparty_sha": "e25849a27fa19ca6ac11bb049470fdf70219d53b",
+    "counterparty_container": "cds-mock",
+    "captured_utc": "2026-08-27T13:45:11.026975+00:00",
+    "repo_head": "a0463e6b5e64fc2246ec65169e1d94d0c11f2ed6",
+    "verb": "DELETE",
+    "route": "legacy integration_spec / sync_pipeline: fetch(REST GET) -> send(REST DELETE)",
+    "process_component_id": "da816a10-694f-488b-a097-0bc2c60ff9d9",
+    "operation_component_id": "b9701599-b09a-4ce8-a935-cb5303f1071b",
+    "source_operation_component_id": "615f52c8-0b38-4614-ae81-7e0ee484011e",
+    "provenance": {
+      "banked_source": "cap155-e2-delete/operation_component.xml",
+      "banked_source_sha256": "40633cb19b978923d1a0594b6f04ebc2b6c7394259b4434be7c5cdfada7228e4",
+      "apply_status": "reused"
+    },
+    "execution": {
+      "execution_id": "execution-a800fe72-6589-4ac9-8093-4a478af4925d-2026.08.27",
+      "utc": "2026-08-27T13:32:45.640296+00:00",
+      "status": "COMPLETE",
+      "inbound_document_count": 1,
+      "outbound_document_count": 2
+    },
+    "readback_path": "/admin/cdscm/api/v1/clients",
+    "verdict": "NEGATIVE CONTROL PASSED",
+    "observed_status": 405,
+    "access_log_line": "2026-08-27T13:32:47.672556131Z INFO:     192.168.65.1:64117 - \"DELETE /admin/cdscm/api/v1/clients HTTP/1.1\" 405 Method Not Allowed"
+  },
+  "artifacts": [
+    {
+      "scenario": "cap155-e4-negative-control",
+      "file": "CORRELATION.md",
+      "sha256": "a541bc8634ffbb6fa6799e76509d58142e7efb1cf540a2907672b113325a1a69",
+      "byte_length": 3845,
+      "execution_id": "execution-a800fe72-6589-4ac9-8093-4a478af4925d-2026.08.27"
+    },
+    {
+      "scenario": "cap155-e4-negative-control",
+      "file": "PROVENANCE.md",
+      "sha256": "db03095d73274725fedaab9d63ba14a04ed0c3d6268908ea338bf4ef8a6f9014",
+      "byte_length": 2420,
+      "execution_id": "execution-a800fe72-6589-4ac9-8093-4a478af4925d-2026.08.27"
+    },
+    {
+      "scenario": "cap155-e4-negative-control",
+      "file": "connector_documents.json",
+      "sha256": "caead237514e9e11c2b08c85b2441bc8c7b80ec040043a68d138bf2b0a0e1e7c",
+      "byte_length": 2736,
+      "execution_id": "execution-a800fe72-6589-4ac9-8093-4a478af4925d-2026.08.27"
+    },
+    {
+      "scenario": "cap155-e4-negative-control",
+      "file": "connector_fields.json",
+      "sha256": "154c19e6cb97267876af3bb71f018e66e260a0c089c1e9ebc284836e532d0c33",
+      "byte_length": 1007,
+      "execution_id": "execution-a800fe72-6589-4ac9-8093-4a478af4925d-2026.08.27"
+    },
+    {
+      "scenario": "cap155-e4-negative-control",
+      "file": "execute.json",
+      "sha256": "569d38e6918d005195fde054c0288f749494a11fc606cc4c7d5205485a8bf3e4",
+      "byte_length": 859,
+      "execution_id": "execution-a800fe72-6589-4ac9-8093-4a478af4925d-2026.08.27"
+    },
+    {
+      "scenario": "cap155-e4-negative-control",
+      "file": "execution_connector.json",
+      "sha256": "4559808c74a8007ea9bbe0ea6834e63fe9f1884ede95eaa8d087e14426e07ae9",
+      "byte_length": 3701,
+      "execution_id": "execution-a800fe72-6589-4ac9-8093-4a478af4925d-2026.08.27"
+    },
+    {
+      "scenario": "cap155-e4-negative-control",
+      "file": "execution_record.json",
+      "sha256": "bf8bed270ea3a3a36cf7595d23827e49a35900cdccf2977638bbcf5fa3a911d4",
+      "byte_length": 1229,
+      "execution_id": "execution-a800fe72-6589-4ac9-8093-4a478af4925d-2026.08.27"
+    },
+    {
+      "scenario": "cap155-e4-negative-control",
+      "file": "generic_connector_record.json",
+      "sha256": "76f5a25a0bff1f26bfc0a8ba446fd3348c75f5b069c868d3d443774b77561514",
+      "byte_length": 6800,
+      "execution_id": "execution-a800fe72-6589-4ac9-8093-4a478af4925d-2026.08.27"
+    },
+    {
+      "scenario": "cap155-e4-negative-control",
+      "file": "mock_access_log.txt",
+      "sha256": "3b8d9c753af5544eec43cda21a128e6c86e5737f457eaed22596222edebcdf11",
+      "byte_length": 1456,
+      "execution_id": "execution-a800fe72-6589-4ac9-8093-4a478af4925d-2026.08.27"
+    },
+    {
+      "scenario": "cap155-e4-negative-control",
+      "file": "mock_access_log_timestamped.txt",
+      "sha256": "4ac352498aa3d016b79a1c91959e74917848edc5c19eaa8c8f51a2cc711ae38f",
+      "byte_length": 1859,
+      "execution_id": "execution-a800fe72-6589-4ac9-8093-4a478af4925d-2026.08.27"
+    },
+    {
+      "scenario": "cap155-e4-negative-control",
+      "file": "operation_component.xml",
+      "sha256": "24ca5869ef1ff14fd394a4f361c4c196e84f2f0f5926da827df7d00fbf80eb64",
+      "byte_length": 1434,
+      "execution_id": "execution-a800fe72-6589-4ac9-8093-4a478af4925d-2026.08.27"
+    },
+    {
+      "scenario": "cap155-e4-negative-control",
+      "file": "readback_after.json",
+      "sha256": "bd73fad77ca0ffaf674d227034f89af94d752bedd7b59d71f3ce2be677c025cc",
+      "byte_length": 16055,
+      "execution_id": "execution-a800fe72-6589-4ac9-8093-4a478af4925d-2026.08.27"
+    },
+    {
+      "scenario": "cap155-e4-negative-control",
+      "file": "readback_before.json",
+      "sha256": "da2fbf332d3e6ab1624c642d803327a226de4267a64bc86d7530b4224d866a59",
+      "byte_length": 16055,
+      "execution_id": "execution-a800fe72-6589-4ac9-8093-4a478af4925d-2026.08.27"
+    },
+    {
+      "scenario": "cap155-e4-negative-control",
+      "file": "readback_delta.json",
+      "sha256": "c760fe15ecc7f36a06954e7f3e2e9fc401c9ef634fd30cd1603e83abb24e20c2",
+      "byte_length": 476,
+      "execution_id": "execution-a800fe72-6589-4ac9-8093-4a478af4925d-2026.08.27"
+    }
+  ]
+}

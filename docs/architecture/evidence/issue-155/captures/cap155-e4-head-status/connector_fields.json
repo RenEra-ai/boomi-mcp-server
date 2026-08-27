@@ -1,0 +1,23 @@
+[
+  {
+    "gcr_id": "R0VOX0NPTk5fUkVDX2V4ZWN1dGlvbi00ODdkNGNlYi0zMmU1LTRmMWUtOTVlYy05YTJkNjQ0NzU2MDctMjAyNi4wOC4yNzpjb25uZWN0b3ItZjgyZTBiNjgtZTc0Ni00ODIzLTlhNWEtMGFkZDRmZWI2NGVi",
+    "fields": {}
+  },
+  {
+    "gcr_id": "R0VOX0NPTk5fUkVDX2V4ZWN1dGlvbi00ODdkNGNlYi0zMmU1LTRmMWUtOTVlYy05YTJkNjQ0NzU2MDctMjAyNi4wOC4yNzpjb25uZWN0b3ItZjM3OGI2NGYtMTdjMy00OGNkLTg4MDEtOWE4MTAwMzZiMjFj",
+    "fields": {
+      "response_date": "Thu, 27 Aug 2026 13:31:59 GMT",
+      "response_server": "uvicorn",
+      "response_content-length": "0"
+    }
+  },
+  {
+    "gcr_id": "R0VOX0NPTk5fUkVDX2V4ZWN1dGlvbi00ODdkNGNlYi0zMmU1LTRmMWUtOTVlYy05YTJkNjQ0NzU2MDctMjAyNi4wOC4yNzpjb25uZWN0b3ItYjExODBmNGItNTFiNC00MmJlLWE4OGUtYzQ2Njk2OTAzZjcz",
+    "fields": {
+      "response_date": "Thu, 27 Aug 2026 13:31:59 GMT",
+      "response_content-type": "application/json",
+      "response_server": "uvicorn",
+      "response_content-length": "255"
+    }
+  }
+]

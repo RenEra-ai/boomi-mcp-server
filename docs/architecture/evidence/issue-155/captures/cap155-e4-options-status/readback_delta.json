@@ -1,0 +1,18 @@
+[
+  {
+    "label": "run1",
+    "execution_id": "execution-88a1330f-52a2-4a68-ba95-7d4698618bda-2026.08.27",
+    "utc": "2026-08-27T13:32:18.170547+00:00",
+    "status": "COMPLETE",
+    "inbound": 1,
+    "outbound": 2,
+    "readback_path": "/admin/cdscm/api/v1/clients/61ae0e89-bed1-466f-9cc0-5909c05204a8",
+    "http_before": 200,
+    "http_after": 200,
+    "sha_before": "34589e4c1a794eff",
+    "sha_after": "34589e4c1a794eff",
+    "raw_changed": false,
+    "substantive_diff": {},
+    "full_diff_keys": []
+  }
+]

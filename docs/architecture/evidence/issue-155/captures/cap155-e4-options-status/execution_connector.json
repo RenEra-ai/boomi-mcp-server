@@ -1,0 +1,90 @@
+{
+  "rows": [
+    {
+      "executionConnector": "Start",
+      "connectorType": "nodata",
+      "actionType": "nodata",
+      "isStartShape": true,
+      "recordType": "nodata",
+      "successCount": 1,
+      "errorCount": 0,
+      "size": 0,
+      "id": "RVhFQ19DT05OdHJ1ZTpub2RhdGE6c2hhcGUxOjpleGVjdXRpb24tODhhMTMzMGYtNTJhMi00YTY4LWJhOTUtN2Q0Njk4NjE4YmRhLTIwMjYuMDguMjc"
+    },
+    {
+      "executionConnector": "_TEST_155E4_src_GET_20260827132830",
+      "connectorType": "officialboomi-X3979C-rest-prod",
+      "actionType": "EXECUTE",
+      "isStartShape": false,
+      "recordType": "connector",
+      "successCount": 1,
+      "errorCount": 0,
+      "size": 255,
+      "id": "RVhFQ19DT05OZmFsc2U6RVhFQ1VURTpjNDI4MTM0Ni04M2U5LTQwMjYtODU2ZC1lZGU3MThlYzY4YTA6NjE1ZjUyYzgtMGIzOC00NjE0LWFlODEtN2UwZWU0ODQwMTFlOmV4ZWN1dGlvbi04OGExMzMwZi01MmEyLTRhNjgtYmE5NS03ZDQ2OTg2MThiZGEtMjAyNi4wOC4yNw"
+    },
+    {
+      "executionConnector": "_TEST_155E4_OPTIONS_options_20260827132830",
+      "connectorType": "officialboomi-X3979C-rest-prod",
+      "actionType": "EXECUTE",
+      "isStartShape": false,
+      "recordType": "connector",
+      "successCount": 1,
+      "errorCount": 0,
+      "size": 0,
+      "id": "RVhFQ19DT05OZmFsc2U6RVhFQ1VURTpjNDI4MTM0Ni04M2U5LTQwMjYtODU2ZC1lZGU3MThlYzY4YTA6NjVkMzEyOWItYzRmNy00NDFkLTkxNzItOTk5YzZhMjgyMTc3OmV4ZWN1dGlvbi04OGExMzMwZi01MmEyLTRhNjgtYmE5NS03ZDQ2OTg2MThiZGEtMjAyNi4wOC4yNw"
+    }
+  ],
+  "raw": {
+    "_success": true,
+    "status_code": 200,
+    "method": "POST",
+    "endpoint": "ExecutionConnector/query",
+    "url": "https://api.boomi.com/api/rest/v1/traininghlibbochkarov-JKIY2X/ExecutionConnector/query",
+    "profile": "renera",
+    "data": {
+      "@type": "QueryResult",
+      "result": [
+        {
+          "@type": "ExecutionConnector",
+          "id": "RVhFQ19DT05OdHJ1ZTpub2RhdGE6c2hhcGUxOjpleGVjdXRpb24tODhhMTMzMGYtNTJhMi00YTY4LWJhOTUtN2Q0Njk4NjE4YmRhLTIwMjYuMDguMjc",
+          "executionId": "execution-88a1330f-52a2-4a68-ba95-7d4698618bda-2026.08.27",
+          "executionConnector": "Start",
+          "connectorType": "nodata",
+          "actionType": "nodata",
+          "errorCount": 0,
+          "successCount": 1,
+          "size": 0,
+          "isStartShape": true,
+          "recordType": "nodata"
+        },
+        {
+          "@type": "ExecutionConnector",
+          "id": "RVhFQ19DT05OZmFsc2U6RVhFQ1VURTpjNDI4MTM0Ni04M2U5LTQwMjYtODU2ZC1lZGU3MThlYzY4YTA6NjE1ZjUyYzgtMGIzOC00NjE0LWFlODEtN2UwZWU0ODQwMTFlOmV4ZWN1dGlvbi04OGExMzMwZi01MmEyLTRhNjgtYmE5NS03ZDQ2OTg2MThiZGEtMjAyNi4wOC4yNw",
+          "executionId": "execution-88a1330f-52a2-4a68-ba95-7d4698618bda-2026.08.27",
+          "executionConnector": "_TEST_155E4_src_GET_20260827132830",
+          "connectorType": "officialboomi-X3979C-rest-prod",
+          "actionType": "EXECUTE",
+          "errorCount": 0,
+          "successCount": 1,
+          "size": 255,
+          "isStartShape": false,
+          "recordType": "connector"
+        },
+        {
+          "@type": "ExecutionConnector",
+          "id": "RVhFQ19DT05OZmFsc2U6RVhFQ1VURTpjNDI4MTM0Ni04M2U5LTQwMjYtODU2ZC1lZGU3MThlYzY4YTA6NjVkMzEyOWItYzRmNy00NDFkLTkxNzItOTk5YzZhMjgyMTc3OmV4ZWN1dGlvbi04OGExMzMwZi01MmEyLTRhNjgtYmE5NS03ZDQ2OTg2MThiZGEtMjAyNi4wOC4yNw",
+          "executionId": "execution-88a1330f-52a2-4a68-ba95-7d4698618bda-2026.08.27",
+          "executionConnector": "_TEST_155E4_OPTIONS_options_20260827132830",
+          "connectorType": "officialboomi-X3979C-rest-prod",
+          "actionType": "EXECUTE",
+          "errorCount": 0,
+          "successCount": 1,
+          "size": 0,
+          "isStartShape": false,
+          "recordType": "connector"
+        }
+      ],
+      "numberOfResults": 3
+    }
+  }
+}

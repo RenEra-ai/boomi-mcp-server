@@ -1,0 +1,134 @@
+{
+  "record": {
+    "scenario_id": "cap155-e4-trace-status",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "boomi_env_id": "c8d9140d-6d34-4ca6-91ff-bfd263556d5b",
+    "boomi_atom_id": "89387bdf-b177-4631-9cc6-687bf4afefa7",
+    "rest_connection_id": "c4281346-83e9-4026-856d-ede718ec68a0",
+    "counterparty_sha": "e25849a27fa19ca6ac11bb049470fdf70219d53b",
+    "counterparty_container": "cds-mock",
+    "captured_utc": "2026-08-27T13:45:11.022391+00:00",
+    "repo_head": "a0463e6b5e64fc2246ec65169e1d94d0c11f2ed6",
+    "verb": "TRACE",
+    "route": "legacy integration_spec / sync_pipeline: fetch(REST GET) -> send(REST TRACE)",
+    "process_component_id": "b233abbb-12a1-4408-9a9d-6bcbff2c2a56",
+    "operation_component_id": "0225ac9f-d288-412b-b76b-9761933b0139",
+    "source_operation_component_id": "615f52c8-0b38-4614-ae81-7e0ee484011e",
+    "provenance": {
+      "banked_source": "cap155-e2-trace/operation_component.xml",
+      "banked_source_sha256": "e474e525829390525414c318284a62bf9c3808acc57474b58dba05095dc0bd1a",
+      "apply_status": "reused"
+    },
+    "execution": {
+      "execution_id": "execution-0aa56e9d-237e-45d7-9062-aa01811aeff3-2026.08.27",
+      "utc": "2026-08-27T13:32:29.773482+00:00",
+      "status": "COMPLETE",
+      "inbound_document_count": 1,
+      "outbound_document_count": 2
+    },
+    "readback_path": "/admin/cdscm/api/v1/clients/6186425e-a59a-4a19-b616-b4e18a58e0ce",
+    "verdict": "ATTESTED",
+    "observed_status": 200,
+    "access_log_line": "2026-08-27T13:32:33.702291125Z INFO:     192.168.65.1:49297 - \"TRACE /admin/cdscm/api/v1/clients/6186425e-a59a-4a19-b616-b4e18a58e0ce HTTP/1.1\" 200 OK"
+  },
+  "artifacts": [
+    {
+      "scenario": "cap155-e4-trace-status",
+      "file": "CORRELATION.md",
+      "sha256": "60d897fd94cc48f99e290a6f4b37aaf24bdd40ab6ea6b32f96dda639de6d8d5e",
+      "byte_length": 3719,
+      "execution_id": "execution-0aa56e9d-237e-45d7-9062-aa01811aeff3-2026.08.27"
+    },
+    {
+      "scenario": "cap155-e4-trace-status",
+      "file": "PROVENANCE.md",
+      "sha256": "3d7312432e5288bb0d8a310cb9974dc1ac757ebe13186ac05d999323c427fe3c",
+      "byte_length": 2481,
+      "execution_id": "execution-0aa56e9d-237e-45d7-9062-aa01811aeff3-2026.08.27"
+    },
+    {
+      "scenario": "cap155-e4-trace-status",
+      "file": "connector_documents.json",
+      "sha256": "00a93e55171dd45f92916f645d071bb98c017dc453130118dc903da37cf3e4ee",
+      "byte_length": 2583,
+      "execution_id": "execution-0aa56e9d-237e-45d7-9062-aa01811aeff3-2026.08.27"
+    },
+    {
+      "scenario": "cap155-e4-trace-status",
+      "file": "connector_fields.json",
+      "sha256": "8f6981668363a60ffa9085a69401e05ea231e1f941e36b1c66ffc18007a85e68",
+      "byte_length": 970,
+      "execution_id": "execution-0aa56e9d-237e-45d7-9062-aa01811aeff3-2026.08.27"
+    },
+    {
+      "scenario": "cap155-e4-trace-status",
+      "file": "execute.json",
+      "sha256": "770cd8408ce45fd6767272d93c12fc07661bd02de6c45118f00da22154758efd",
+      "byte_length": 859,
+      "execution_id": "execution-0aa56e9d-237e-45d7-9062-aa01811aeff3-2026.08.27"
+    },
+    {
+      "scenario": "cap155-e4-trace-status",
+      "file": "execution_connector.json",
+      "sha256": "e7232e81cd66fbfa8b276a12f262896da9dbf77b731b32fafc7cea13f2fd738a",
+      "byte_length": 3693,
+      "execution_id": "execution-0aa56e9d-237e-45d7-9062-aa01811aeff3-2026.08.27"
+    },
+    {
+      "scenario": "cap155-e4-trace-status",
+      "file": "execution_record.json",
+      "sha256": "1c6b4d8575f40155519cc5728aaabd92abd14eb777183f71831e571b890f7677",
+      "byte_length": 1228,
+      "execution_id": "execution-0aa56e9d-237e-45d7-9062-aa01811aeff3-2026.08.27"
+    },
+    {
+      "scenario": "cap155-e4-trace-status",
+      "file": "generic_connector_record.json",
+      "sha256": "a9f63c5a3ce41b0f452a1511760070bccacc63844c7b382ae04260a851dac54e",
+      "byte_length": 6637,
+      "execution_id": "execution-0aa56e9d-237e-45d7-9062-aa01811aeff3-2026.08.27"
+    },
+    {
+      "scenario": "cap155-e4-trace-status",
+      "file": "mock_access_log.txt",
+      "sha256": "35f7c0a09bfb57d72a823c7b86caa09f243c9addfe090d1b6301377cc09aaa90",
+      "byte_length": 1313,
+      "execution_id": "execution-0aa56e9d-237e-45d7-9062-aa01811aeff3-2026.08.27"
+    },
+    {
+      "scenario": "cap155-e4-trace-status",
+      "file": "mock_access_log_timestamped.txt",
+      "sha256": "636bfb2e5b29c0f73f99e174766463bf32e5ef627c5f39c54761a923b9b99d39",
+      "byte_length": 1654,
+      "execution_id": "execution-0aa56e9d-237e-45d7-9062-aa01811aeff3-2026.08.27"
+    },
+    {
+      "scenario": "cap155-e4-trace-status",
+      "file": "operation_component.xml",
+      "sha256": "5daa0fbe80cbbb0f758c690c2f1d1846e8ecd48a7560d2b0fbc63bce8fb62e02",
+      "byte_length": 1412,
+      "execution_id": "execution-0aa56e9d-237e-45d7-9062-aa01811aeff3-2026.08.27"
+    },
+    {
+      "scenario": "cap155-e4-trace-status",
+      "file": "readback_after.json",
+      "sha256": "553048a825913253131417beab78acfe847733d9b937a0b3326e22d359686ae6",
+      "byte_length": 560,
+      "execution_id": "execution-0aa56e9d-237e-45d7-9062-aa01811aeff3-2026.08.27"
+    },
+    {
+      "scenario": "cap155-e4-trace-status",
+      "file": "readback_before.json",
+      "sha256": "47617a13978e594a153eaa42cf29928489e9c08c8b1398849c512ab6220f05e6",
+      "byte_length": 560,
+      "execution_id": "execution-0aa56e9d-237e-45d7-9062-aa01811aeff3-2026.08.27"
+    },
+    {
+      "scenario": "cap155-e4-trace-status",
+      "file": "readback_delta.json",
+      "sha256": "1893aba3f60ab0d04c3e9108b1882c4d169ee9fca0f80eb798b1a44fd2299e2a",
+      "byte_length": 513,
+      "execution_id": "execution-0aa56e9d-237e-45d7-9062-aa01811aeff3-2026.08.27"
+    }
+  ]
+}

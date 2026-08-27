@@ -1,0 +1,17 @@
+{
+  "utc": "2026-08-27T13:32:29.706483+00:00",
+  "path": "/admin/cdscm/api/v1/clients/61ae0e89-bed1-466f-9cc0-5909c05204a8",
+  "status": 200,
+  "sha256": "34589e4c1a794effdc303d47ec25cc6c1e51d8d6b872f2079d4fc2dfe15fae10",
+  "bytes": 263,
+  "body": {
+    "clientId": "_E4_OPTIONS_20260827132830",
+    "name": "E4 options target",
+    "status": "ACTIVE",
+    "key": "61ae0e89-bed1-466f-9cc0-5909c05204a8",
+    "createdOn": "2026-08-27T13:28:30.333Z",
+    "createdBy": "integration",
+    "modifiedOn": "2026-08-27T13:28:30.333Z",
+    "modifiedBy": "integration"
+  }
+}

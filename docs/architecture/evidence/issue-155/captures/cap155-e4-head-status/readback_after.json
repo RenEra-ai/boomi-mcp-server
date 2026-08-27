@@ -1,0 +1,17 @@
+{
+  "utc": "2026-08-27T13:32:18.100597+00:00",
+  "path": "/admin/cdscm/api/v1/clients/71cb4f7c-c1a7-482e-97a3-7d7a168b667b",
+  "status": 200,
+  "sha256": "1df22db328a984636c5bc3a7b316c30a3205fb549fa507251b7b6ae8ab96f375",
+  "bytes": 257,
+  "body": {
+    "clientId": "_E4_HEAD_20260827132830",
+    "name": "E4 head target",
+    "status": "ACTIVE",
+    "key": "71cb4f7c-c1a7-482e-97a3-7d7a168b667b",
+    "createdOn": "2026-08-27T13:28:30.328Z",
+    "createdBy": "integration",
+    "modifiedOn": "2026-08-27T13:28:30.328Z",
+    "modifiedBy": "integration"
+  }
+}

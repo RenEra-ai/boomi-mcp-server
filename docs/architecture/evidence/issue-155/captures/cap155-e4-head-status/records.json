@@ -1,0 +1,134 @@
+{
+  "record": {
+    "scenario_id": "cap155-e4-head-status",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "boomi_env_id": "c8d9140d-6d34-4ca6-91ff-bfd263556d5b",
+    "boomi_atom_id": "89387bdf-b177-4631-9cc6-687bf4afefa7",
+    "rest_connection_id": "c4281346-83e9-4026-856d-ede718ec68a0",
+    "counterparty_sha": "e25849a27fa19ca6ac11bb049470fdf70219d53b",
+    "counterparty_container": "cds-mock",
+    "captured_utc": "2026-08-27T13:45:11.014487+00:00",
+    "repo_head": "a0463e6b5e64fc2246ec65169e1d94d0c11f2ed6",
+    "verb": "HEAD",
+    "route": "legacy integration_spec / sync_pipeline: fetch(REST GET) -> send(REST HEAD)",
+    "process_component_id": "8bc581e8-66bc-40db-93ed-79d5abad22fb",
+    "operation_component_id": "d95ed2c3-720a-4f8d-a6c1-e01cce6aeae3",
+    "source_operation_component_id": "615f52c8-0b38-4614-ae81-7e0ee484011e",
+    "provenance": {
+      "banked_source": "cap155-e2-head/operation_component.xml",
+      "banked_source_sha256": "a1e8c0cfaf9e8a30f4916ca1a4ab7da71d854fab6e095c32da4c9977bae79849",
+      "apply_status": "reused"
+    },
+    "execution": {
+      "execution_id": "execution-487d4ceb-32e5-4f1e-95ec-9a2d64475607-2026.08.27",
+      "utc": "2026-08-27T13:31:55.463133+00:00",
+      "status": "COMPLETE",
+      "inbound_document_count": 1,
+      "outbound_document_count": 2
+    },
+    "readback_path": "/admin/cdscm/api/v1/clients/71cb4f7c-c1a7-482e-97a3-7d7a168b667b",
+    "verdict": "ATTESTED",
+    "observed_status": 200,
+    "access_log_line": "2026-08-27T13:32:00.272311262Z INFO:     192.168.65.1:41958 - \"HEAD /admin/cdscm/api/v1/clients/71cb4f7c-c1a7-482e-97a3-7d7a168b667b HTTP/1.1\" 200 OK"
+  },
+  "artifacts": [
+    {
+      "scenario": "cap155-e4-head-status",
+      "file": "CORRELATION.md",
+      "sha256": "64c87ccc4440c7ffe2af8e9e01e91d7c34fc73193f3f1e298bd2596799b3eb8a",
+      "byte_length": 3565,
+      "execution_id": "execution-487d4ceb-32e5-4f1e-95ec-9a2d64475607-2026.08.27"
+    },
+    {
+      "scenario": "cap155-e4-head-status",
+      "file": "PROVENANCE.md",
+      "sha256": "c896042287ac6261c052704ea16a51cba8d4fbb884da72fab9c02551d1b411ce",
+      "byte_length": 2471,
+      "execution_id": "execution-487d4ceb-32e5-4f1e-95ec-9a2d64475607-2026.08.27"
+    },
+    {
+      "scenario": "cap155-e4-head-status",
+      "file": "connector_documents.json",
+      "sha256": "5c04bfaa62235e6653c82c53ca61c835e064d0a8a1d7a111142452ce31f824bc",
+      "byte_length": 2583,
+      "execution_id": "execution-487d4ceb-32e5-4f1e-95ec-9a2d64475607-2026.08.27"
+    },
+    {
+      "scenario": "cap155-e4-head-status",
+      "file": "connector_fields.json",
+      "sha256": "14786dbab19543e9a61615633dd13192be1bd43e1b86c60d6c7cdc68fef1e50e",
+      "byte_length": 923,
+      "execution_id": "execution-487d4ceb-32e5-4f1e-95ec-9a2d64475607-2026.08.27"
+    },
+    {
+      "scenario": "cap155-e4-head-status",
+      "file": "execute.json",
+      "sha256": "f214edb2b7ed404e30e0f84e5bccdc5e2b0e3d3e800493c9c2e6c4335ccb3fc7",
+      "byte_length": 858,
+      "execution_id": "execution-487d4ceb-32e5-4f1e-95ec-9a2d64475607-2026.08.27"
+    },
+    {
+      "scenario": "cap155-e4-head-status",
+      "file": "execution_connector.json",
+      "sha256": "67451d3b635794c5a9302b4a129dfd5d3930d839ea70f4e00cc8d465825d1516",
+      "byte_length": 3689,
+      "execution_id": "execution-487d4ceb-32e5-4f1e-95ec-9a2d64475607-2026.08.27"
+    },
+    {
+      "scenario": "cap155-e4-head-status",
+      "file": "execution_record.json",
+      "sha256": "8095ea979690762ae2016ec02f633aa004ab1d158fbbf691a7955ca72310b32a",
+      "byte_length": 1227,
+      "execution_id": "execution-487d4ceb-32e5-4f1e-95ec-9a2d64475607-2026.08.27"
+    },
+    {
+      "scenario": "cap155-e4-head-status",
+      "file": "generic_connector_record.json",
+      "sha256": "a466f2a4ff0cba2d39165b64121d5923e2f4c6065daea09cd14c59ef31652eb3",
+      "byte_length": 6468,
+      "execution_id": "execution-487d4ceb-32e5-4f1e-95ec-9a2d64475607-2026.08.27"
+    },
+    {
+      "scenario": "cap155-e4-head-status",
+      "file": "mock_access_log.txt",
+      "sha256": "448431a9f8695f7c41b7ebc1eb5d79cb4a04b6e087bcef1f08dfaeebcb8fb207",
+      "byte_length": 473,
+      "execution_id": "execution-487d4ceb-32e5-4f1e-95ec-9a2d64475607-2026.08.27"
+    },
+    {
+      "scenario": "cap155-e4-head-status",
+      "file": "mock_access_log_timestamped.txt",
+      "sha256": "e4720541d0a42bf788ff55f5ffe42dfdeb08f31a189ebe11ba8966bc28b2ebf4",
+      "byte_length": 597,
+      "execution_id": "execution-487d4ceb-32e5-4f1e-95ec-9a2d64475607-2026.08.27"
+    },
+    {
+      "scenario": "cap155-e4-head-status",
+      "file": "operation_component.xml",
+      "sha256": "583c5a04c91356fc59a47eec9d20160feccaa7f6fe7719f2046fa27e0617f15c",
+      "byte_length": 1465,
+      "execution_id": "execution-487d4ceb-32e5-4f1e-95ec-9a2d64475607-2026.08.27"
+    },
+    {
+      "scenario": "cap155-e4-head-status",
+      "file": "readback_after.json",
+      "sha256": "eb3a4ca8b20cdde0a471555bcdb43a2e4ee3a8ecf40f335e224e96fabd8f1172",
+      "byte_length": 558,
+      "execution_id": "execution-487d4ceb-32e5-4f1e-95ec-9a2d64475607-2026.08.27"
+    },
+    {
+      "scenario": "cap155-e4-head-status",
+      "file": "readback_before.json",
+      "sha256": "053b6cb425ad4083084b1c8de8d7022bfd298b6133561f83544d377c38ff2a07",
+      "byte_length": 558,
+      "execution_id": "execution-487d4ceb-32e5-4f1e-95ec-9a2d64475607-2026.08.27"
+    },
+    {
+      "scenario": "cap155-e4-head-status",
+      "file": "readback_delta.json",
+      "sha256": "893a108c1955c0b30f2a2b32428691cd771dc9a7106d4a5fe2b31e75c4c0ac06",
+      "byte_length": 513,
+      "execution_id": "execution-487d4ceb-32e5-4f1e-95ec-9a2d64475607-2026.08.27"
+    }
+  ]
+}

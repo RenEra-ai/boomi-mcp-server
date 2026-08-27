@@ -1,0 +1,497 @@
+{
+  "utc": "2026-08-27T13:32:45.640266+00:00",
+  "path": "/admin/cdscm/api/v1/clients",
+  "status": 200,
+  "sha256": "8466f6cca13488989d26ad6478185fad5246eb1a75e685cd4989b865bcecd75a",
+  "bytes": 12215,
+  "body": [
+    {
+      "name": "QA Created",
+      "clientId": "QA_clients_925814E6D8",
+      "key": "1bdb1503-2807-4771-b1b7-8689be8f8e0a",
+      "createdOn": "2026-05-22T21:51:28.494Z",
+      "createdBy": "integration",
+      "modifiedOn": "2026-05-22T21:51:28.494Z",
+      "modifiedBy": "integration"
+    },
+    {
+      "name": "Lookup",
+      "clientId": "QA_clients_658C21E07C",
+      "key": "97ef6619-0f72-41bf-9b29-dba25de5f9da",
+      "createdOn": "2026-05-22T21:51:28.511Z",
+      "createdBy": "integration",
+      "modifiedOn": "2026-05-22T21:51:28.511Z",
+      "modifiedBy": "integration"
+    },
+    {
+      "name": "Acme Holdings LLC",
+      "status": "ACTIVE",
+      "clientId": "QA_clients_6BC38489B6",
+      "key": "9a8fcc5a-c6c0-4854-b6ae-f38ecbaf79bd",
+      "createdOn": "2026-05-22T21:51:28.654Z",
+      "createdBy": "integration",
+      "modifiedOn": "2026-06-25T16:59:19.428Z",
+      "modifiedBy": "integration",
+      "description": "Updated via Boomi PATCH",
+      "billingName": "Acme Holdings",
+      "industry": "Legal Services",
+      "currencyIsoCode": "USD",
+      "openedOn": "2026-01-15",
+      "offices": [
+        "NYC",
+        "LON"
+      ],
+      "externalIdentifiers": [
+        {
+          "type": "AderantId",
+          "value": "ADR-10567"
+        }
+      ],
+      "aliases": [
+        {
+          "name": "Acme"
+        }
+      ],
+      "rounding": {
+        "type": "UP",
+        "increment": 6
+      }
+    },
+    {
+      "name": "Y",
+      "clientId": "QA_clients_01096A98C2",
+      "key": "2a3fd492-60c3-472b-8163-5cb053a597c9",
+      "createdOn": "2026-05-22T21:51:28.808Z",
+      "createdBy": "integration",
+      "modifiedOn": "2026-05-22T21:51:28.811Z",
+      "modifiedBy": "integration"
+    },
+    {
+      "clientId": "QA_BULK_clients_DC2ED8A821_0",
+      "name": "Bulk 0",
+      "key": "450b96e0-5bae-4d8d-9cfa-eb40dd10f97a",
+      "createdOn": "2026-05-22T21:51:28.834Z",
+      "createdBy": "integration",
+      "modifiedOn": "2026-05-22T21:51:28.834Z",
+      "modifiedBy": "integration"
+    },
+    {
+      "clientId": "QA_BULK_clients_DC2ED8A821_1",
+      "name": "Bulk 1",
+      "key": "ef40691c-a042-4f84-b316-2cc0aaba9780",
+      "createdOn": "2026-05-22T21:51:28.835Z",
+      "createdBy": "integration",
+      "modifiedOn": "2026-05-22T21:51:28.835Z",
+      "modifiedBy": "integration"
+    },
+    {
+      "clientId": "QA_BULK_clients_DC2ED8A821_2",
+      "name": "Bulk 2",
+      "key": "19cf1cfd-3475-4de4-ae0f-576f5af5ecf2",
+      "createdOn": "2026-05-22T21:51:28.836Z",
+      "createdBy": "integration",
+      "modifiedOn": "2026-05-22T21:51:28.836Z",
+      "modifiedBy": "integration"
+    },
+    {
+      "clientId": "QAPAGE8E2E04A919_0",
+      "name": "QAPAGE8E2E04A919",
+      "key": "7fb1219d-71df-4fa4-a126-9a119993840d",
+      "createdOn": "2026-05-22T21:51:28.873Z",
+      "createdBy": "integration",
+      "modifiedOn": "2026-05-22T21:51:28.873Z",
+      "modifiedBy": "integration"
+    },
+    {
+      "clientId": "QAPAGE8E2E04A919_2",
+      "name": "QAPAGE8E2E04A919",
+      "key": "4c5ee0f1-7370-4c8c-a161-4f396a28754d",
+      "createdOn": "2026-05-22T21:51:28.874Z",
+      "createdBy": "integration",
+      "modifiedOn": "2026-05-22T21:51:28.874Z",
+      "modifiedBy": "integration"
+    },
+    {
+      "clientId": "QAPAGE8E2E04A919_1",
+      "name": "QAPAGE8E2E04A919",
+      "key": "b03c708c-7cf2-41e3-9070-46f9578dcdf3",
+      "createdOn": "2026-05-22T21:51:28.874Z",
+      "createdBy": "integration",
+      "modifiedOn": "2026-05-22T21:51:28.874Z",
+      "modifiedBy": "integration"
+    },
+    {
+      "clientId": "QAPAGE8E2E04A919_3",
+      "name": "QAPAGE8E2E04A919",
+      "key": "da87a643-7d05-4543-ad36-ef44a68f6962",
+      "createdOn": "2026-05-22T21:51:28.875Z",
+      "createdBy": "integration",
+      "modifiedOn": "2026-05-22T21:51:28.875Z",
+      "modifiedBy": "integration"
+    },
+    {
+      "clientId": "QAPAGE8E2E04A919_4",
+      "name": "QAPAGE8E2E04A919",
+      "key": "a0c517a2-1c7f-4d2f-bf4e-0888960ce47c",
+      "createdOn": "2026-05-22T21:51:28.876Z",
+      "createdBy": "integration",
+      "modifiedOn": "2026-05-22T21:51:28.876Z",
+      "modifiedBy": "integration"
+    },
+    {
+      "clientId": "QABULK1",
+      "name": "Bulk One",
+      "key": "ba0f01fd-32c9-4e26-abc7-f4d265e0c9b4",
+      "createdOn": "2026-05-22T21:51:47.509Z",
+      "createdBy": "integration",
+      "modifiedOn": "2026-05-22T21:51:47.509Z",
+      "modifiedBy": "integration"
+    },
+    {
+      "clientId": "QABULK2",
+      "name": "Bulk Two",
+      "key": "f1d4a2ef-3d73-48af-9ce7-b5ab73960366",
+      "createdOn": "2026-05-22T21:51:47.513Z",
+      "createdBy": "integration",
+      "modifiedOn": "2026-05-22T21:51:47.513Z",
+      "modifiedBy": "integration"
+    },
+    {
+      "clientId": "QABULK3",
+      "name": "Bulk Three",
+      "key": "ad230f9a-f1ed-4366-965b-890afbb3a4c4",
+      "createdOn": "2026-05-22T21:51:47.514Z",
+      "createdBy": "integration",
+      "modifiedOn": "2026-05-22T21:51:47.514Z",
+      "modifiedBy": "integration"
+    },
+    {
+      "name": "QA Probe Client",
+      "clientId": "QAPROBE1",
+      "key": "e0c5e261-ccc8-485a-99db-ff2ee9e6dcc2",
+      "createdOn": "2026-05-22T21:51:47.640Z",
+      "createdBy": "integration",
+      "modifiedOn": "2026-05-22T21:51:47.640Z",
+      "modifiedBy": "integration"
+    },
+    {
+      "name": "QA Created",
+      "clientId": "QA_clients_78D75B0748",
+      "key": "32e8260b-4eb0-4e12-b7ca-25dc96eb92a2",
+      "createdOn": "2026-05-22T21:51:53.492Z",
+      "createdBy": "integration",
+      "modifiedOn": "2026-05-22T21:51:53.492Z",
+      "modifiedBy": "integration"
+    },
+    {
+      "name": "Lookup",
+      "clientId": "QA_clients_635C49FF4A",
+      "key": "6ddd6fa0-95a5-47dc-84c3-ad88575ca1dd",
+      "createdOn": "2026-05-22T21:51:53.515Z",
+      "createdBy": "integration",
+      "modifiedOn": "2026-05-22T21:51:53.515Z",
+      "modifiedBy": "integration"
+    },
+    {
+      "name": "Original",
+      "status": "CLOSED",
+      "clientId": "QA_clients_787F7FE289",
+      "key": "2ff052cc-0d9e-42ab-9ce1-3b773c8136b6",
+      "createdOn": "2026-05-22T21:51:53.664Z",
+      "createdBy": "integration",
+      "modifiedOn": "2026-05-22T21:51:53.724Z",
+      "modifiedBy": "integration"
+    },
+    {
+      "name": "Y",
+      "clientId": "QA_clients_AACA44D633",
+      "key": "ba3c928e-b97f-455a-8391-ab10e3d8b6cb",
+      "createdOn": "2026-05-22T21:51:53.821Z",
+      "createdBy": "integration",
+      "modifiedOn": "2026-05-22T21:51:53.824Z",
+      "modifiedBy": "integration"
+    },
+    {
+      "clientId": "QA_BULK_clients_7B4178216F_0",
+      "name": "Bulk 0",
+      "key": "3d4b04bc-7806-42a4-8381-94a8e3c4dbb2",
+      "createdOn": "2026-05-22T21:51:53.850Z",
+      "createdBy": "integration",
+      "modifiedOn": "2026-05-22T21:51:53.850Z",
+      "modifiedBy": "integration"
+    },
+    {
+      "clientId": "QA_BULK_clients_7B4178216F_1",
+      "name": "Bulk 1",
+      "key": "7a4c0364-b698-4d89-902a-69e5b69a682a",
+      "createdOn": "2026-05-22T21:51:53.851Z",
+      "createdBy": "integration",
+      "modifiedOn": "2026-05-22T21:51:53.851Z",
+      "modifiedBy": "integration"
+    },
+    {
+      "clientId": "QA_BULK_clients_7B4178216F_2",
+      "name": "Bulk 2",
+      "key": "4aa3f182-f6a9-4d40-99b3-93ff323ea777",
+      "createdOn": "2026-05-22T21:51:53.853Z",
+      "createdBy": "integration",
+      "modifiedOn": "2026-05-22T21:51:53.853Z",
+      "modifiedBy": "integration"
+    },
+    {
+      "clientId": "QAPAGE4C9C0292D9_0",
+      "name": "QAPAGE4C9C0292D9",
+      "key": "35dbf9df-d570-450d-acdc-623d705f1085",
+      "createdOn": "2026-05-22T21:51:53.903Z",
+      "createdBy": "integration",
+      "modifiedOn": "2026-05-22T21:51:53.903Z",
+      "modifiedBy": "integration"
+    },
+    {
+      "clientId": "QAPAGE4C9C0292D9_1",
+      "name": "QAPAGE4C9C0292D9",
+      "key": "822ddd8a-fe79-4689-b7a1-6be95d7d0525",
+      "createdOn": "2026-05-22T21:51:53.904Z",
+      "createdBy": "integration",
+      "modifiedOn": "2026-05-22T21:51:53.904Z",
+      "modifiedBy": "integration"
+    },
+    {
+      "clientId": "QAPAGE4C9C0292D9_2",
+      "name": "QAPAGE4C9C0292D9",
+      "key": "2f2d39c9-497a-4b25-b747-2620f44fcdaf",
+      "createdOn": "2026-05-22T21:51:53.905Z",
+      "createdBy": "integration",
+      "modifiedOn": "2026-05-22T21:51:53.905Z",
+      "modifiedBy": "integration"
+    },
+    {
+      "clientId": "QAPAGE4C9C0292D9_3",
+      "name": "QAPAGE4C9C0292D9",
+      "key": "8181cb9a-e3e4-42fc-aeb4-3bfb6e5ebbd7",
+      "createdOn": "2026-05-22T21:51:53.907Z",
+      "createdBy": "integration",
+      "modifiedOn": "2026-05-22T21:51:53.907Z",
+      "modifiedBy": "integration"
+    },
+    {
+      "clientId": "QAPAGE4C9C0292D9_4",
+      "name": "QAPAGE4C9C0292D9",
+      "key": "9fea1843-20cb-4999-946a-51704fd3f15e",
+      "createdOn": "2026-05-22T21:51:53.908Z",
+      "createdBy": "integration",
+      "modifiedOn": "2026-05-22T21:51:53.908Z",
+      "modifiedBy": "integration"
+    },
+    {
+      "name": "QA Created",
+      "clientId": "QA_clients_4BF18E8CFB",
+      "key": "3ee290a5-06f3-4e6d-80df-939065de6f14",
+      "createdOn": "2026-05-22T21:52:00.348Z",
+      "createdBy": "integration",
+      "modifiedOn": "2026-05-22T21:52:00.348Z",
+      "modifiedBy": "integration"
+    },
+    {
+      "name": "Lookup",
+      "clientId": "QA_clients_A4BA008875",
+      "key": "05bdbc6c-ac98-4178-8101-a583a3173f64",
+      "createdOn": "2026-05-22T21:52:00.368Z",
+      "createdBy": "integration",
+      "modifiedOn": "2026-05-22T21:52:00.368Z",
+      "modifiedBy": "integration"
+    },
+    {
+      "name": "Original",
+      "status": "CLOSED",
+      "clientId": "QA_clients_D6CB6E2EC5",
+      "key": "b603797f-22d6-463a-8657-8af2b796f55f",
+      "createdOn": "2026-05-22T21:52:00.517Z",
+      "createdBy": "integration",
+      "modifiedOn": "2026-05-22T21:52:00.578Z",
+      "modifiedBy": "integration"
+    },
+    {
+      "name": "Y",
+      "clientId": "QA_clients_1D3788F76A",
+      "key": "fbaac507-7809-4960-b2e7-3f2b4dcc7e80",
+      "createdOn": "2026-05-22T21:52:00.673Z",
+      "createdBy": "integration",
+      "modifiedOn": "2026-05-22T21:52:00.677Z",
+      "modifiedBy": "integration"
+    },
+    {
+      "clientId": "QA_BULK_clients_026262CC80_0",
+      "name": "Bulk 0",
+      "key": "c8fd0e0f-4c99-418e-80fa-a2ededa4e2df",
+      "createdOn": "2026-05-22T21:52:00.709Z",
+      "createdBy": "integration",
+      "modifiedOn": "2026-05-22T21:52:00.709Z",
+      "modifiedBy": "integration"
+    },
+    {
+      "clientId": "QA_BULK_clients_026262CC80_1",
+      "name": "Bulk 1",
+      "key": "7b4efba4-bb2d-4298-9b2e-6258aa17d6ac",
+      "createdOn": "2026-05-22T21:52:00.710Z",
+      "createdBy": "integration",
+      "modifiedOn": "2026-05-22T21:52:00.710Z",
+      "modifiedBy": "integration"
+    },
+    {
+      "clientId": "QA_BULK_clients_026262CC80_2",
+      "name": "Bulk 2",
+      "key": "300119e7-277e-45bc-972d-3d0547092ad5",
+      "createdOn": "2026-05-22T21:52:00.712Z",
+      "createdBy": "integration",
+      "modifiedOn": "2026-05-22T21:52:00.712Z",
+      "modifiedBy": "integration"
+    },
+    {
+      "clientId": "QAPAGEAFB518D282_0",
+      "name": "QAPAGEAFB518D282",
+      "key": "ae6d1685-84a0-4fe4-9af4-bd9ffb9f04ce",
+      "createdOn": "2026-05-22T21:52:00.755Z",
+      "createdBy": "integration",
+      "modifiedOn": "2026-05-22T21:52:00.755Z",
+      "modifiedBy": "integration"
+    },
+    {
+      "clientId": "QAPAGEAFB518D282_1",
+      "name": "QAPAGEAFB518D282",
+      "key": "303930b0-a718-4e46-8cba-eef589c0d39a",
+      "createdOn": "2026-05-22T21:52:00.756Z",
+      "createdBy": "integration",
+      "modifiedOn": "2026-05-22T21:52:00.756Z",
+      "modifiedBy": "integration"
+    },
+    {
+      "clientId": "QAPAGEAFB518D282_2",
+      "name": "QAPAGEAFB518D282",
+      "key": "7a7977d4-0295-460a-81da-e86cc06ffda6",
+      "createdOn": "2026-05-22T21:52:00.758Z",
+      "createdBy": "integration",
+      "modifiedOn": "2026-05-22T21:52:00.758Z",
+      "modifiedBy": "integration"
+    },
+    {
+      "clientId": "QAPAGEAFB518D282_3",
+      "name": "QAPAGEAFB518D282",
+      "key": "7077b692-473a-43db-ae65-083ff434d924",
+      "createdOn": "2026-05-22T21:52:00.759Z",
+      "createdBy": "integration",
+      "modifiedOn": "2026-05-22T21:52:00.759Z",
+      "modifiedBy": "integration"
+    },
+    {
+      "clientId": "QAPAGEAFB518D282_4",
+      "name": "QAPAGEAFB518D282",
+      "key": "a7676f02-1035-4066-a617-88f2ec14839f",
+      "createdOn": "2026-05-22T21:52:00.760Z",
+      "createdBy": "integration",
+      "modifiedOn": "2026-05-22T21:52:00.760Z",
+      "modifiedBy": "integration"
+    },
+    {
+      "name": "Acme Corp",
+      "billingName": "Acme Corporation Inc.",
+      "status": "ACT",
+      "billableStatus": "BILL",
+      "currencyIsoCode": "USD",
+      "industry": "Manufacturing",
+      "offices": [
+        "NYC"
+      ],
+      "openedOn": "2026-01-15",
+      "clientId": "CLI001",
+      "key": "aed1217f-b109-4089-9f27-64b2cf3ed9ba",
+      "createdOn": "2026-05-23T02:49:04.858Z",
+      "createdBy": "integration",
+      "modifiedOn": "2026-05-23T02:49:04.858Z",
+      "modifiedBy": "integration"
+    },
+    {
+      "name": "no-auth created",
+      "clientId": "NOAUTH_CC396EFB72",
+      "key": "ff67aa07-1a9e-4c0e-b814-c846c9f3e365",
+      "createdOn": "2026-05-23T04:23:02.899Z",
+      "createdBy": "integration",
+      "modifiedOn": "2026-05-23T04:23:02.899Z",
+      "modifiedBy": "integration"
+    },
+    {
+      "name": "basic-created",
+      "clientId": "BASIC_0F73FAC313",
+      "key": "70286868-738d-4229-916a-0019a53de0b0",
+      "createdOn": "2026-05-23T04:23:02.913Z",
+      "createdBy": "integration",
+      "modifiedOn": "2026-05-23T04:23:02.913Z",
+      "modifiedBy": "integration"
+    },
+    {
+      "name": "cross-surface",
+      "status": "ACT",
+      "clientId": "SHARED_DEA8E64C66",
+      "key": "86058c48-116d-49a0-a5fd-a27d5f11b5e0",
+      "createdOn": "2026-05-23T04:23:02.943Z",
+      "createdBy": "integration",
+      "modifiedOn": "2026-05-23T04:23:02.943Z",
+      "modifiedBy": "integration"
+    },
+    {
+      "name": "QA Created",
+      "clientId": "QA_clients_E6D814CE31",
+      "key": "59238c15-55c9-4a7a-ab61-f0338c2f671d",
+      "createdOn": "2026-05-23T04:23:02.964Z",
+      "createdBy": "integration",
+      "modifiedOn": "2026-05-23T04:23:02.964Z",
+      "modifiedBy": "integration"
+    },
+    {
+      "name": "Lookup",
+      "clientId": "QA_clients_5ED56AF9F4",
+      "key": "144eea33-adcf-47cb-86b2-ef29c5032d57",
+      "createdOn": "2026-05-23T04:23:02.982Z",
+      "createdBy": "integration",
+      "modifiedOn": "2026-05-23T04:23:02.982Z",
+      "modifiedBy": "integration"
+    },
+    {
+      "name": "Original",
+      "status": "CLOSED",
+      "clientId": "QA_clients_62DFD0291C",
+      "key": "658fbae1-3b53-4365-8df5-6f9bbe3c7416",
+      "createdOn": "2026-05-23T04:23:03.126Z",
+      "createdBy": "integration",
+      "modifiedOn": "2026-05-23T04:23:03.190Z",
+      "modifiedBy": "integration"
+    },
+    {
+      "name": "Y",
+      "clientId": "QA_clients_0650A1C4E9",
+      "key": "0ca523f1-3316-4751-a3f3-6f5c128c2ae0",
+      "createdOn": "2026-05-23T04:23:03.303Z",
+      "createdBy": "integration",
+      "modifiedOn": "2026-05-23T04:23:03.308Z",
+      "modifiedBy": "integration"
+    },
+    {
+      "clientId": "QA_BULK_clients_C1D736C7DA_0",
+      "name": "Bulk 0",
+      "key": "01319655-a444-4e77-856e-cbf16c72de89",
+      "createdOn": "2026-05-23T04:23:03.342Z",
+      "createdBy": "integration",
+      "modifiedOn": "2026-05-23T04:23:03.342Z",
+      "modifiedBy": "integration"
+    },
+    {
+      "clientId": "QA_BULK_clients_C1D736C7DA_1",
+      "name": "Bulk 1",
+      "key": "71df5f7f-465b-4e8f-bafe-7c2bea281e25",
+      "createdOn": "2026-05-23T04:23:03.344Z",
+      "createdBy": "integration",
+      "modifiedOn": "2026-05-23T04:23:03.344Z",
+      "modifiedBy": "integration"
+    }
+  ]
+}

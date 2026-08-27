@@ -1,0 +1,18 @@
+[
+  {
+    "label": "run1",
+    "execution_id": "execution-a800fe72-6589-4ac9-8093-4a478af4925d-2026.08.27",
+    "utc": "2026-08-27T13:32:45.640296+00:00",
+    "status": "COMPLETE",
+    "inbound": 1,
+    "outbound": 2,
+    "readback_path": "/admin/cdscm/api/v1/clients",
+    "http_before": 200,
+    "http_after": 200,
+    "sha_before": "8466f6cca1348898",
+    "sha_after": "8466f6cca1348898",
+    "raw_changed": false,
+    "substantive_diff": {},
+    "full_diff_keys": []
+  }
+]

@@ -1,0 +1,24 @@
+[
+  {
+    "gcr_id": "R0VOX0NPTk5fUkVDX2V4ZWN1dGlvbi0wYWE1NmU5ZC0yMzdlLTQ1ZDctOTA2Mi1hYTAxODExYWVmZjMtMjAyNi4wOC4yNzpjb25uZWN0b3ItNjhhZWVjZWUtYmEyYi00NTdjLThlYzgtNDRiYjc2ZjBjYzRl",
+    "fields": {
+      "response_date": "Thu, 27 Aug 2026 13:32:33 GMT",
+      "response_content-type": "message/http",
+      "response_server": "uvicorn",
+      "response_content-length": "0"
+    }
+  },
+  {
+    "gcr_id": "R0VOX0NPTk5fUkVDX2V4ZWN1dGlvbi0wYWE1NmU5ZC0yMzdlLTQ1ZDctOTA2Mi1hYTAxODExYWVmZjMtMjAyNi4wOC4yNzpjb25uZWN0b3ItMzM0MzgwZTMtYzQ2MS00M2MyLThhNTEtMjdhNjgwMzJhNTU3",
+    "fields": {}
+  },
+  {
+    "gcr_id": "R0VOX0NPTk5fUkVDX2V4ZWN1dGlvbi0wYWE1NmU5ZC0yMzdlLTQ1ZDctOTA2Mi1hYTAxODExYWVmZjMtMjAyNi4wOC4yNzpjb25uZWN0b3ItN2E4ZTk1YWYtZGU1NC00Mzc5LThiNTktMjQ3ZDc3MTZlNzRk",
+    "fields": {
+      "response_date": "Thu, 27 Aug 2026 13:32:33 GMT",
+      "response_content-type": "application/json",
+      "response_server": "uvicorn",
+      "response_content-length": "255"
+    }
+  }
+]

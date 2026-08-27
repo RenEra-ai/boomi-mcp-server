@@ -1,0 +1,23 @@
+[
+  {
+    "gcr_id": "R0VOX0NPTk5fUkVDX2V4ZWN1dGlvbi04OGExMzMwZi01MmEyLTRhNjgtYmE5NS03ZDQ2OTg2MThiZGEtMjAyNi4wOC4yNzpjb25uZWN0b3ItZmI1YmM0NmUtYTNiMC00NWNhLThjMGQtY2RmYTc4NDFmZjY5",
+    "fields": {}
+  },
+  {
+    "gcr_id": "R0VOX0NPTk5fUkVDX2V4ZWN1dGlvbi04OGExMzMwZi01MmEyLTRhNjgtYmE5NS03ZDQ2OTg2MThiZGEtMjAyNi4wOC4yNzpjb25uZWN0b3ItZmJiMDg1NmYtYTRiMi00ZGEyLWJlMTMtZGNmZmFiMTg0NGVk",
+    "fields": {
+      "response_date": "Thu, 27 Aug 2026 13:32:19 GMT",
+      "response_server": "uvicorn",
+      "response_allow": "GET, HEAD, PUT, PATCH, DELETE, OPTIONS, TRACE"
+    }
+  },
+  {
+    "gcr_id": "R0VOX0NPTk5fUkVDX2V4ZWN1dGlvbi04OGExMzMwZi01MmEyLTRhNjgtYmE5NS03ZDQ2OTg2MThiZGEtMjAyNi4wOC4yNzpjb25uZWN0b3ItMjc1NDUzN2YtYmYwMy00MzkwLWE4OTQtMjcyMWUzZDJlMDc4",
+    "fields": {
+      "response_date": "Thu, 27 Aug 2026 13:32:19 GMT",
+      "response_content-type": "application/json",
+      "response_server": "uvicorn",
+      "response_content-length": "255"
+    }
+  }
+]

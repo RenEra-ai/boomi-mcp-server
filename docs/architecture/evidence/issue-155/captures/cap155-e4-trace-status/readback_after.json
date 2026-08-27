@@ -1,0 +1,17 @@
+{
+  "utc": "2026-08-27T13:32:45.569764+00:00",
+  "path": "/admin/cdscm/api/v1/clients/6186425e-a59a-4a19-b616-b4e18a58e0ce",
+  "status": 200,
+  "sha256": "c2881cebdbdcd571bf58ca0ec93e988e09a867917e46d9f708ee166759292e77",
+  "bytes": 259,
+  "body": {
+    "clientId": "_E4_TRACE_20260827132830",
+    "name": "E4 trace target",
+    "status": "ACTIVE",
+    "key": "6186425e-a59a-4a19-b616-b4e18a58e0ce",
+    "createdOn": "2026-08-27T13:28:30.337Z",
+    "createdBy": "integration",
+    "modifiedOn": "2026-08-27T13:28:30.337Z",
+    "modifiedBy": "integration"
+  }
+}
