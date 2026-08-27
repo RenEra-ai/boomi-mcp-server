@@ -461,6 +461,12 @@ def _project_tree(root: ET.Element, spec: dict, kind: str) -> ET.Element:
         node.text = next(iter(seen)) if seen else ""
 
     included = set(spec.get("value_fields", ())) | set(spec.get("property_fields", ()))
+    # A repeated id is a REFUSAL, not last-one-wins. Two fields claiming the same id
+    # means the caller's assumption about which one applies is already broken, and
+    # quietly picking one bakes that ambiguity into a published value. This check
+    # was lost when the projection changed shape and is restored here — replacing a
+    # mechanism must carry its invariants across, not just its output.
+    seen_ids: set[str] = set()
     for el in root.iter():
         uri, local = _qname(el)
         if local != "field":
@@ -468,6 +474,11 @@ def _project_tree(root: ET.Element, spec: dict, kind: str) -> ET.Element:
         fid = el.get("id")
         if fid not in included:
             continue
+        if fid in seen_ids:
+            raise ConfigDigestRefused(
+                f"field id {fid!r} appears more than once; which one applies is "
+                "ambiguous and will not be digested")
+        seen_ids.add(fid)
         node = ET.SubElement(out, "field", {"ns": uri, "id": fid})
         if fid in set(spec.get("value_fields", ())):
             node.text = el.get("value", "")
