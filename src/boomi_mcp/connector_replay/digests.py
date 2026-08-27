@@ -364,11 +364,19 @@ def _projection_spec(kind: str, registry=None) -> dict:
     if registry is None:
         from .registry import load_registry
 
-        try:
-            registry = load_registry()
-        except Exception:  # a registry that cannot load must not silently widen this
-            registry = None
+        # NO silent fallback. A registry that cannot load used to drop this to a
+        # hard-coded projection, which is the fail-open reading of a failure: the
+        # digest would still be produced, under a projection nobody published, and
+        # would silently disagree with every digest computed when the registry did
+        # load. A digest that cannot state its projection is not an identity.
+        registry = load_registry()
     typed = registry.projection_for(kind) if registry is not None else None
+    if typed is None:
+        raise ConfigDigestRefused(
+            f"the registry publishes no projection for a {kind!r} component, so "
+            "there is no defined set of facts to digest. A projection is registry "
+            "data; add one with a capture behind it"
+        )
     if typed is not None:
         return {
             "attributes": list(typed.included_attributes),

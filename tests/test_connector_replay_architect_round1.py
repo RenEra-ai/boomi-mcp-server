@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from boomi_mcp.connector_replay.capture import summarize
+from boomi_mcp.connector_replay.capture import CaptureRefused, summarize
 from boomi_mcp.connector_replay.ingest import IngestRefused, ingest
 from boomi_mcp.connector_replay.models import (
     CapabilityEvidenceRecordV1,
@@ -140,3 +140,45 @@ def test_the_banked_patch_captures_can_still_be_ingested():
     rows = ingest(_ROOT, [_C / "cap155-e3b-patch-canonical"], family="rest",
                   actions={"cap155-e3b-patch-canonical": "PATCH"})
     assert (rows[0].family, rows[0].action) == ("rest", "PATCH")
+
+
+def test_connector_rows_must_name_this_captures_executions():
+    """The execution id is the causal tie between an artifact and a capture.
+
+    Without it, any file in the directory carrying a `connectorType` lent its
+    authority to the capture — so an artifact from an unrelated execution could
+    name the connector a row was minted for.
+    """
+    import shutil
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        d = Path(tmp) / "cap"
+        shutil.copytree(_C / "cap155-e4-head-status", d)
+        f = d / "execution_connector.json"
+        f.write_text(f.read_text().replace(
+            "execution-487d4ceb-32e5-4f1e-95ec-9a2d64475607-2026.08.27",
+            "execution-00000000-0000-4000-8000-000000000000-2026.01.01"))
+        with pytest.raises(CaptureRefused) as err:
+            summarize(d, "HEAD")
+        assert "names none of this capture's executions" in str(err.value)
+
+    # The control: the untouched capture still summarises.
+    assert summarize(_C / "cap155-e4-head-status", "HEAD").observed_connector_types
+
+
+def test_a_component_kind_with_no_published_projection_is_refused():
+    """A digest that cannot state its projection is not an identity.
+
+    The projection used to fall back to hard-coded constants when the registry was
+    absent, so a digest was still produced — under a projection nobody published,
+    silently disagreeing with every digest computed when the registry did load.
+    """
+    from boomi_mcp.connector_replay.digests import (
+        ConfigDigestRefused,
+        component_config_digest_v1,
+    )
+    from boomi_mcp.connector_replay.registry import ReplayRegistry
+
+    empty = ReplayRegistry((), ())
+    assert empty.projection_for("operation") is None

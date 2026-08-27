@@ -265,14 +265,31 @@ def _convergence(files: list[Path]) -> tuple[ConvergenceV1, ...]:
     return tuple(results)
 
 
-def _observed_connector_types(files: list[Path]) -> tuple[str, ...]:
-    """Connector types the platform recorded, with the execution sentinels removed."""
+def _observed_connector_types(
+    files: list[Path], execution_ids: frozenset[str]
+) -> tuple[str, ...]:
+    """Connector types the platform recorded FOR THIS CAPTURE'S EXECUTIONS.
+
+    The execution id is the causal tie, and requiring it is the point: without it
+    any file in the directory carrying a `connectorType` lent its authority to the
+    capture, so an artifact from an unrelated execution — or a bare
+    ``{"connectorType": ...}`` object — could name the connector a row was minted
+    for. A record that does not mention this capture's executions is not evidence
+    about them.
+    """
     from .models import EXECUTION_SENTINELS
 
     seen: set[str] = set()
     for path in files:
         if not path.name.endswith(_EXECUTION_CONNECTOR):
             continue
+        text = path.read_text()
+        if not any(eid in text for eid in execution_ids):
+            raise CaptureRefused(
+                f"{path.name} names none of this capture's executions "
+                f"{sorted(execution_ids)!r}, so its connector rows describe some "
+                "other execution and cannot attribute this one"
+            )
         payload = _load_json(path)
 
         def walk(node):
@@ -387,6 +404,7 @@ def summarize(capture_dir: Path, method_hint: str | None = None) -> CaptureSumma
         capture_digest=digest.hexdigest(),
         file_count=len(files),
         convergence=_convergence(files),
-        observed_connector_types=_observed_connector_types(files),
+        observed_connector_types=_observed_connector_types(
+            files, frozenset(run.execution_id for run in runs)),
         observed_methods=_observed_methods(files),
     )
