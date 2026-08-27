@@ -135,3 +135,30 @@ def test_the_dockerfile_copies_the_source_tree():
         "the Dockerfile no longer copies the whole tree; the packaged registry "
         "needs an explicit COPY if the build became selective"
     )
+
+
+def test_operation_records_are_exposed_not_silently_dropped():
+    """The loader read two keys and ignored the rest — including one it ships.
+
+    A loader that silently drops a key its own data declares will one day drop the
+    rows that decide whether a write may be retried, and it will do so quietly.
+    """
+    reg = load_registry()
+    assert reg.operation_records == ()
+    payload = json.loads(_ASSET.read_text())
+    assert "operation_records" in payload, "the packaged file must declare the key"
+
+
+def test_a_key_this_build_does_not_understand_is_refused():
+    """Refusing beats ignoring: an unknown key is a disagreement, not a default."""
+    with pytest.raises(RegistryInvalid) as err:
+        _parse({"schema_version": 1, "vocabulary": [], "evidence_records": [],
+                "surprise_rows": [{"family": "rest"}]})
+    assert "surprise_rows" in str(err.value)
+
+
+def test_underscore_prefixed_keys_are_commentary_and_allowed():
+    """The packaged file carries prose under `_comment` and `_known_unmapped`."""
+    reg = _parse({"schema_version": 1, "vocabulary": [], "evidence_records": [],
+                  "_comment": ["prose"], "_known_unmapped": [{"x": 1}]})
+    assert reg.evidence_records == ()

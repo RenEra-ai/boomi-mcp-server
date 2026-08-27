@@ -38,6 +38,12 @@ __all__ = [
 ]
 
 
+#: The sentinels that appear in execution-connector rows and are not connectors.
+#: Exposed so callers filter with the same set the validator refuses on, rather
+#: than re-listing them.
+EXECUTION_SENTINELS: Final[frozenset[str]] = frozenset({"nodata", "return"})
+
+
 class ReplayRegistryModel(BaseModel):
     """Frozen, closed base for every registry row.
 
@@ -112,7 +118,7 @@ class ConnectorVocabularyMappingV1(ReplayRegistryModel):
         synthetic return leg. Mapping either to a family would mint evidence for a
         connector that was never called.
         """
-        if value in ("nodata", "return"):
+        if value in EXECUTION_SENTINELS:
             raise ValueError(
                 f"{value!r} is an execution sentinel, not a connector type; it "
                 "appears in real execution-connector rows and must never be mapped "
@@ -202,8 +208,3 @@ class CapabilityEvidenceRecordV1(ReplayRegistryModel):
             )
         return self
 
-
-#: The sentinels that appear in execution-connector rows and are not connectors.
-#: Exposed so callers filter with the same set the validator refuses on, rather
-#: than re-listing them.
-EXECUTION_SENTINELS: Final[frozenset[str]] = frozenset({"nodata", "return"})

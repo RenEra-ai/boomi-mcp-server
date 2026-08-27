@@ -49,9 +49,11 @@ class ReplayRegistry:
         self,
         vocabulary: tuple[ConnectorVocabularyMappingV1, ...],
         evidence: tuple[CapabilityEvidenceRecordV1, ...],
+        operation_records: tuple = (),
     ) -> None:
         self._vocabulary = vocabulary
         self._evidence = evidence
+        self._operation_records = operation_records
         by_type: dict[str, ConnectorVocabularyMappingV1] = {}
         for entry in vocabulary:
             if entry.platform_connector_type in by_type:
@@ -77,6 +79,15 @@ class ReplayRegistry:
     @property
     def evidence_records(self) -> tuple[CapabilityEvidenceRecordV1, ...]:
         return self._evidence
+
+    @property
+    def operation_records(self) -> tuple:
+        """Account-bound records. Empty here; a later slice mints them.
+
+        Exposed even while always empty, because the alternative is a key the file
+        declares and the reader cannot see — which is how the drop was missed.
+        """
+        return self._operation_records
 
     def family_for(self, platform_connector_type: str) -> str | None:
         """The family for a raw platform connector type, or None if unmapped.
@@ -126,7 +137,23 @@ def _parse(payload: Any) -> ReplayRegistry:
         )
     except Exception as exc:  # pydantic ValidationError, TypeError on a non-mapping
         raise RegistryInvalid(f"registry content is not valid: {exc}") from exc
-    return ReplayRegistry(vocabulary, evidence)
+    # Every top-level key the packaged file carries must be one this build knows.
+    # The loader previously read `vocabulary` and `evidence_records` and IGNORED the
+    # rest — including `operation_records`, which the shipped file advertises. A
+    # loader that silently drops a key its own data declares will one day drop the
+    # rows that decide whether a write may be retried, and it would do so quietly.
+    known = {"schema_version", "vocabulary", "evidence_records", "operation_records"}
+    unknown = sorted(k for k in payload if not k.startswith("_") and k not in known)
+    if unknown:
+        raise RegistryInvalid(
+            "registry carries keys this build does not understand: {0}. Refusing "
+            "rather than ignoring them — a key present in the data and absent from "
+            "the reader is a disagreement, not a default.".format(unknown)
+        )
+    operation_records = payload.get("operation_records", [])
+    if not isinstance(operation_records, list):
+        raise RegistryInvalid("operation_records must be a list")
+    return ReplayRegistry(vocabulary, evidence, tuple(operation_records))
 
 
 @lru_cache(maxsize=1)

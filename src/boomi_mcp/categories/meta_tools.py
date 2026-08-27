@@ -10176,6 +10176,18 @@ def plan_integration_design_action(
     }
 
 
+
+def _monitoring_actions():
+    """The monitoring router's action names, read from its dispatch table.
+
+    Imported lazily: this module is large and imported early, and the catalog only
+    needs the names when it is actually asked to enumerate. The dependency points
+    one way — the monitoring router knows nothing about this catalog.
+    """
+    from boomi_mcp.categories.monitoring import _MONITORING_ACTIONS
+
+    return list(_MONITORING_ACTIONS)
+
 def list_capabilities_action(
     available_tools: set = None,
     expected_capability_revision: str = None,
@@ -11038,13 +11050,13 @@ def list_capabilities_action(
         "monitor_platform": {
             "category": "Monitoring",
             "description": "Monitor executions, logs, artifacts, audit trail, events, certificates, throughput, metrics, connector documents, summaries, counts, API usage, licensing, and EDI records",
-            "actions": [
-                "execution_records", "execution_logs", "execution_artifacts",
-                "audit_logs", "events", "certificates", "throughput",
-                "execution_metrics", "connector_documents", "download_connector_document",
-                "execution_summary", "document_counts", "execution_counts",
-                "api_usage_counts", "connection_licensing_report", "custom_tracked_fields", "edi_connector_records",
-            ],
+            # DERIVED from the router's dispatch table. This was a hand-written
+            # copy, and it went stale the moment an action was added — which is
+            # exactly how it was found: a slice added `execution_connectors`,
+            # swept the copy in the router's own error envelope, and missed this
+            # one, so the discovery surface silently regressed from complete to
+            # incomplete while every test stayed green.
+            "actions": list(_monitoring_actions()),
             "read_only": False,
             "parameters": {
                 "profile": "str (required)",

@@ -1941,16 +1941,22 @@ def _convert_generic_results(entries) -> List[Dict[str, Any]]:
 def _unset_to_none(value: Any) -> Any:
     """Normalise the SDK's unset marker to None.
 
-    The generated SDK defaults optional fields to a SENTINEL object rather than to
-    None, so a plain `getattr(record, field, None)` returns the sentinel — which is
-    truthy and serialises as a bare object repr. Callers filtering on `is not None`
-    therefore keep it. Normalising here means an absent field reads as absent.
+    MEASURED, after a first version of this docstring asserted the opposite. The
+    generated SDK names SENTINEL as a parameter DEFAULT, but assigns nothing when a
+    caller omits the argument — a freshly built record's `__dict__` is empty, so
+    `getattr(record, field, None)` yields None and never the sentinel. Across every
+    live record captured for this work, zero attributes held a sentinel value.
 
-    Compared by IDENTITY. The sentinel is a plain `object()` instance, so it has no
-    distinguishing type name and no equality of its own — a type-name check silently
-    matches nothing, which was the first version of this and was caught only by
-    running it. Note also that the test is not truthiness: `error_count` is
-    legitimately 0, and 0 is a fact, not an absence.
+    So the sentinel branch below is DEFENSIVE, not load-bearing, and saying so is
+    the point: the earlier claim that it was load-bearing was tested with a fixture
+    that `setattr`s a sentinel by hand — a state the SDK cannot produce — which made
+    a passing test look like coverage of a path that does not exist.
+
+    Comparison is by IDENTITY. The sentinel is a plain `object()`, with no
+    distinguishing type name and no equality of its own; a type-name check matches
+    nothing, which was the version before this one and was caught only by running
+    it. And the test is not truthiness: `error_count` is legitimately 0, and 0 is a
+    fact, not an absence.
     """
     from boomi.models.utils.sentinel import SENTINEL
 
@@ -1972,6 +1978,7 @@ def handle_execution_connectors(boomi_client, config_data: Dict[str, Any]) -> Di
       They are execution sentinels, not connectors, and are flagged so a caller
       does not mistake one for a connector that ran.
     """
+    from boomi_mcp.connector_replay.models import EXECUTION_SENTINELS
     from boomi.models import (
         ExecutionConnectorQueryConfig,
         ExecutionConnectorQueryConfigQueryFilter,
@@ -2011,10 +2018,14 @@ def handle_execution_connectors(boomi_client, config_data: Dict[str, Any]) -> Di
         row = {
             "execution_connector_id": _unset_to_none(getattr(record, "id_", None)),
             "execution_id": _unset_to_none(getattr(record, "execution_id", None)),
+            # WHICH connector ran. Dropping this made the rows unattributable —
+            # they could say a REST connector ran and how much it moved, but not
+            # which one, which is the whole reason these rows are read.
+            "execution_connector": _unset_to_none(getattr(record, "execution_connector", None)),
             "connector_type": connector_type,
             # Named for what it IS, not for what a reader might hope it is.
             "platform_action_type": _unset_to_none(getattr(record, "action_type", None)),
-            "is_execution_sentinel": connector_type in ("nodata", "return"),
+            "is_execution_sentinel": connector_type in EXECUTION_SENTINELS,
             "is_start_shape": _unset_to_none(getattr(record, "is_start_shape", None)),
             "record_type": _unset_to_none(getattr(record, "record_type", None)),
             "success_count": _unset_to_none(getattr(record, "success_count", None)),
@@ -2023,7 +2034,7 @@ def handle_execution_connectors(boomi_client, config_data: Dict[str, Any]) -> Di
         }
         rows.append({k: v for k, v in row.items() if v is not None})
 
-    return {
+    result = {
         "_success": True,
         "execution_id": execution_id,
         "count": len(rows),
@@ -2033,6 +2044,18 @@ def handle_execution_connectors(boomi_client, config_data: Dict[str, Any]) -> Di
             "from the operation component, not from this field."
         ),
     }
+    if not rows:
+        # An empty result has two causes this query cannot tell apart, and reporting
+        # it as a bare success invites the reader to conclude the execution used no
+        # connectors. Say what is actually known instead.
+        result["empty_result_is_ambiguous"] = (
+            "No connector rows were returned. This does NOT mean the execution used "
+            "no connectors: the same empty result is returned for an execution that "
+            "does not exist, and for one whose rows have not yet materialised. "
+            "Confirm the execution with the execution_records action before drawing "
+            "a conclusion from this."
+        )
+    return result
 
 
 

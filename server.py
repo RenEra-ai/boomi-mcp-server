@@ -1478,7 +1478,11 @@ if monitor_platform_action:
 
         Args:
             profile: Boomi profile name (required)
-            action: One of: execution_records, execution_logs, execution_artifacts, audit_logs, events, certificates, throughput, execution_metrics, connector_documents, download_connector_document
+            action: One of: execution_records, execution_logs, execution_artifacts, audit_logs,
+                events, certificates, throughput, execution_metrics, connector_documents,
+                download_connector_document, execution_summary, document_counts,
+                execution_counts, api_usage_counts, connection_licensing_report,
+                custom_tracked_fields, edi_connector_records, execution_connectors
             config: JSON string with action-specific configuration (see examples below)
 
         Actions and config examples:
