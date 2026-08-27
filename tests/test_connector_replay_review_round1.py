@@ -207,3 +207,46 @@ def test_the_real_archive_still_verifies_and_classifies():
     verify_archive(_ROOT, _C / "cap155-e4-negative-control")
     control = summarize(_C / "cap155-e4-negative-control", "DELETE")
     assert classify(control) == (SideEffectV1.UNKNOWN, RetrySafetyV1.UNVERIFIED)
+
+
+def test_property_key_serialization_is_injective():
+    """Separator-joined values collide, and the builder accepts the colliding inputs.
+
+    `','.join(keys)` made `["a,b"]` and `["a", "b"]` identical, and an empty key
+    indistinguishable from no keys. Both are reachable: the builder accepts
+    arbitrary non-secret strings as keys, verified by emitting them here rather
+    than assuming.
+    """
+    from boomi_mcp.categories.components.builders.connector_builder import (
+        RestClientOperationBuilder,
+    )
+
+    emit = RestClientOperationBuilder._build_customproperties_field
+    wrap = lambda body: '<Operation><field id="path" value="/x"/>' + body + "</Operation>"
+    digest = lambda body: component_config_digest_v1(wrap(body), "operation")
+
+    comma_in_key = emit("requestHeaders", {"a,b": "1"})
+    two_keys = emit("requestHeaders", {"a": "1", "b": "2"})
+    assert "a,b" in comma_in_key, "the builder refused a comma key; this test is vacuous"
+    assert digest(comma_in_key) != digest(two_keys)
+
+    assert digest(emit("requestHeaders", {})) != digest(emit("requestHeaders", {"": "1"}))
+
+    # The controls: the fix must not have flattened the distinctions that matter.
+    assert digest(emit("requestHeaders", {"X": "1"})) != digest(emit("requestHeaders", {"Y": "1"}))
+    assert digest(emit("requestHeaders", {"X": "1"})) == digest(emit("requestHeaders", {"X": "2"}))
+
+
+def test_a_field_value_cannot_impersonate_an_adjacent_field():
+    """The same injectivity hazard one level up, which the report did not name.
+
+    The payload used to be newline-joined `key=value` lines, so a value containing
+    a newline could have been read as a separate field.
+    """
+    honest = '<Operation><field id="path" value="/x"/></Operation>'
+    smuggled = ('<Operation><field id="path" value="/x&#10;field:followRedirects=true"/>'
+                '</Operation>')
+    also = ('<Operation><field id="path" value="/x"/>'
+            '<field id="followRedirects" value="true"/></Operation>')
+    assert component_config_digest_v1(smuggled, "operation") != component_config_digest_v1(also, "operation")
+    assert component_config_digest_v1(smuggled, "operation") != component_config_digest_v1(honest, "operation")

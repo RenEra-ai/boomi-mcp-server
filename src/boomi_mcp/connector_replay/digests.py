@@ -30,6 +30,7 @@ connector type, before counting the ones other connectors introduce.
 from __future__ import annotations
 
 import hashlib
+import json
 import xml.etree.ElementTree as ET
 from typing import Final
 from urllib.parse import urlsplit
@@ -103,6 +104,25 @@ class ConfigDigestRefused(DigestRefused):
     """The component configuration could not be projected."""
 
     code = CONNECTOR_REPLAY_CONFIGURATION_DIGEST_REFUSED
+
+
+def _canonical(payload: object) -> bytes:
+    """Serialize a digest payload so distinct inputs cannot collide.
+
+    Concatenating values with separators is NOT injective, and the failure is
+    quiet: joining property keys with a comma made ``["a,b"]`` and ``["a", "b"]``
+    identical, and an empty key indistinguishable from no keys at all. The builder
+    accepts arbitrary non-secret strings as keys, so those are reachable inputs,
+    not pathological ones — and the same hazard sat one level up, where a field
+    value containing a newline could have impersonated an adjacent line.
+
+    JSON with sorted keys and no whitespace encodes structure rather than eliding
+    it: strings are quoted and escaped, so a separator inside a value can no longer
+    be read as a separator between values. It is also auditable — a reader can see
+    exactly what went into a published digest.
+    """
+    return json.dumps(payload, sort_keys=True, separators=(",", ":"),
+                      ensure_ascii=False).encode("utf-8")
 
 
 def _localname(tag: str) -> str:
@@ -216,12 +236,14 @@ def route_digest_v1(connection_xml: str, operation_xml: str) -> str:
             "for such an operation, not a route digest"
         )
     base = _normalized_path(urlsplit(conn_fields["url"].strip()).path)
-    payload = "\n".join(("base=" + base, "template=" + template)).encode("utf-8")
-    return hashlib.sha256(ROUTE_DIGEST_DOMAIN + payload).hexdigest()
+    return hashlib.sha256(ROUTE_DIGEST_DOMAIN + _canonical({
+        "base": base,
+        "template": template,
+    })).hexdigest()
 
 
 def _projected_operation(root: ET.Element) -> list[str]:
-    lines: list[str] = []
+    lines: list[tuple[str, object]] = []
     for attr in _OPERATION_ATTRS:
         # The attribute may sit on the root or on a nested config element; search
         # rather than assume a depth, but take it only once.
@@ -230,9 +252,9 @@ def _projected_operation(root: ET.Element) -> list[str]:
             raise ConfigDigestRefused(
                 f"attribute {attr!r} carries conflicting values {sorted(set(seen))!r}"
             )
-        lines.append(f"{attr}={seen[0] if seen else ''}")
+        lines.append((attr, seen[0] if seen else ""))
     for fid, value in sorted(_field_values(root, _OPERATION_FIELDS).items()):
-        lines.append(f"field:{fid}={value}")
+        lines.append(("field:" + fid, value))
     for el in root.iter():
         if _localname(el.tag) != "field":
             continue
@@ -254,13 +276,13 @@ def _projected_operation(root: ET.Element) -> list[str]:
             for child in el.iter()
             if _localname(child.tag) == "properties" and child.get("key") is not None
         )
-        lines.append(f"{fid}.names={','.join(names)}")
+        lines.append((fid + ".keys", names))
     return sorted(lines)
 
 
-def _projected_connection(root: ET.Element) -> list[str]:
+def _projected_connection(root: ET.Element) -> list[tuple[str, object]]:
     fields = _field_values(root, _CONNECTION_FIELDS)
-    return [f"field:{fid}={fields.get(fid, '')}" for fid in sorted(_CONNECTION_FIELDS)]
+    return [("field:" + fid, fields.get(fid, "")) for fid in sorted(_CONNECTION_FIELDS)]
 
 
 def component_config_digest_v1(component_xml: str, kind: str) -> str:
@@ -277,5 +299,6 @@ def component_config_digest_v1(component_xml: str, kind: str) -> str:
         )
     root = _parse(component_xml, ConfigDigestRefused, kind)
     lines = _projected_operation(root) if kind == "operation" else _projected_connection(root)
-    payload = ("kind=" + kind + "\n" + "\n".join(lines)).encode("utf-8")
-    return hashlib.sha256(CONFIG_DIGEST_DOMAIN + payload).hexdigest()
+    return hashlib.sha256(
+        CONFIG_DIGEST_DOMAIN + _canonical({"kind": kind, "fields": lines})
+    ).hexdigest()
