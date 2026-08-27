@@ -112,10 +112,17 @@ def test_execution_id_negatives(value):
     assert not is_execution_id(value)
 
 
-def test_component_id_accepts_both_cases_and_stays_anchored():
+def test_component_id_is_lowercase_only_and_stays_anchored():
+    """Lowercase is EVIDENCE-DERIVED, not stylistic.
+
+    Every component and execution id in the captured archive is lowercase, with
+    zero exceptions. A grammar looser than the evidence accepts values the platform
+    has never been seen to mint — and this grammar guards what an evidence row may
+    cite.
+    """
     lower = "c4016c66-1234-4abc-9def-0123456789ab"
     assert is_boomi_component_id(lower)
-    assert is_boomi_component_id(lower.upper())
+    assert not is_boomi_component_id(lower.upper())
     assert not is_boomi_component_id(lower + " ")
     assert not is_boomi_component_id("x" + lower)
     assert not is_boomi_component_id(lower[:-1])

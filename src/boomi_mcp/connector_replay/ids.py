@@ -33,6 +33,7 @@ Both are rejected here, and the test module pins both directions.
 from __future__ import annotations
 
 import re
+from datetime import date
 from typing import Final
 
 __all__ = [
@@ -56,8 +57,12 @@ __all__ = [
 #: 8-4-4-4-12 form. Anchored at both ends — an id is the whole string, never a
 #: substring of one, so a value carrying trailing whitespace or an appended
 #: fragment is rejected rather than silently truncated to its leading match.
+#: LOWERCASE only, which is evidence-derived rather than stylistic: every component
+#: and execution id in the captured archive is lowercase, with zero exceptions. A
+#: grammar looser than the evidence accepts values the platform has never been seen
+#: to mint, and this is the grammar an evidence row is validated against.
 BOOMI_COMPONENT_ID_PATTERN: Final[str] = (
-    r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
 )
 
 BOOMI_COMPONENT_ID_RE: Final[re.Pattern[str]] = re.compile(BOOMI_COMPONENT_ID_PATTERN)
@@ -70,14 +75,22 @@ BOOMI_COMPONENT_ID_RE: Final[re.Pattern[str]] = re.compile(BOOMI_COMPONENT_ID_PA
 #: digit, which is what separates it from ``executionrecord-``: that value's next
 #: character after the shared prefix is ``r``, not a hex digit.
 #:
-#: The date is validated as a SHAPE, not as a calendar. A registry that refused
-#: 2026.02.30 would be asserting an authority it does not have — the platform
-#: mints these strings and this module only recognises them, so a shape that the
-#: platform could emit is accepted even if no such day exists.
+#: The date is validated as a REAL CALENDAR DAY, and this reverses an earlier
+#: decision recorded here. That decision argued a recogniser should not assert an
+#: authority it lacks, and would accept 2026.02.30 on the grounds that the platform
+#: mints these strings and this module only reads them.
+#:
+#: The argument was wrong for this particular grammar, for two reasons. The plan of
+#: record requires the identifier formats to be CLOSED and evidence-derived, and the
+#: evidence is unanimous: all 72 archived execution ids carry a real calendar day.
+#: And the asymmetry runs the other way here — this grammar guards what an evidence
+#: row may CITE, so accepting a value the platform cannot mint admits a fabricated
+#: citation, which is worse than rejecting a real id that has never been observed to
+#: exist.
 EXECUTION_ID_PATTERN: Final[str] = (
     r"^execution-"
-    r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
-    r"-[0-9]{4}\.[0-9]{2}\.[0-9]{2}$"
+    r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+    r"-(?P<year>[0-9]{4})\.(?P<month>[0-9]{2})\.(?P<day>[0-9]{2})$"
 )
 
 EXECUTION_ID_RE: Final[re.Pattern[str]] = re.compile(EXECUTION_ID_PATTERN)
@@ -99,4 +112,13 @@ def is_execution_id(value: object) -> bool:
     See :data:`EXECUTION_ID_PATTERN` — the trailing date is required, so the
     platform's undated documentation example is rejected here on purpose.
     """
-    return isinstance(value, str) and EXECUTION_ID_RE.fullmatch(value) is not None
+    if not isinstance(value, str):
+        return False
+    match = EXECUTION_ID_RE.fullmatch(value)
+    if match is None:
+        return False
+    try:
+        date(int(match["year"]), int(match["month"]), int(match["day"]))
+    except ValueError:
+        return False
+    return True

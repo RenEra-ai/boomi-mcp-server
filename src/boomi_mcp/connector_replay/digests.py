@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import xml.etree.ElementTree as ET
 from typing import Final
 from urllib.parse import urlsplit
@@ -62,6 +63,11 @@ CONFIG_DIGEST_DOMAIN: Final[bytes] = b"ComponentConfigDigestV1\0"
 #: goes. Query-parameter and request-header NAMES are included because adding a
 #: parameter changes the request; their VALUES are excluded because a static header
 #: value is exactly where an API key gets parked.
+#: FALLBACK ONLY. The authoritative projection specs are registry DATA — see
+#: `_projection_spec` — so extending what a digest covers is a data change backed by
+#: a capture rather than a code edit. These constants remain as the shape the code
+#: expects and as the default when a registry is not supplied.
+#:
 #: MEASURED against every operation component in the archive, not assumed. The
 #: platform serves exactly four operation fields, and all four are `<field id=...>`
 #: entries — including the two property containers. An earlier version of this
@@ -171,27 +177,88 @@ def _field_values(
     return found
 
 
-def _normalized_path(raw: str) -> str:
-    """RFC 3986 syntax-based normalization, restricted to what a path needs.
+#: Characters RFC 3986 calls unreserved: percent-encoding them carries no meaning,
+#: so an encoded form and a literal form denote the same path and must digest the
+#: same. Everything else keeps its encoding, with the hex digits upper-cased.
+_UNRESERVED: Final[frozenset[str]] = frozenset(
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~"
+)
 
-    Deliberately NOT a general URL normalizer. Case-folding a host would be wrong
-    here because the host is not part of what this returns, and resolving dot
-    segments against a base we do not have would invent a path.
+_PCT = re.compile(r"%([0-9A-Fa-f]{2})")
+
+
+def _normalize_percent_encoding(path: str) -> str:
+    """Decode unreserved octets; upper-case the hex of everything else.
+
+    Both halves of RFC 3986's percent-encoding normalization. Doing only one would
+    leave two spellings of one path digesting differently, which for a digest that
+    identifies captured route coverage means evidence that cannot be matched to the
+    route it was captured for.
     """
-    path = raw.strip()
-    if "://" in path:
-        path = urlsplit(path).path
-    if not path.startswith("/"):
-        path = "/" + path if path else "/"
-    # Internal empty segments are PRESERVED. Collapsing them made `/a//b` and
-    # `/a/b` digest identically, and servers may route those differently — this
-    # digest identifies captured route coverage, so a collapse would let evidence
-    # captured for one path satisfy a claim about another. Only a trailing
-    # separator is dropped, which no server treats as a distinct resource, and the
-    # root survives as "/".
-    if len(path) > 1 and path.endswith("/"):
-        path = path[:-1]
-    return path or "/"
+
+    def replace(match: re.Match[str]) -> str:
+        octet = int(match.group(1), 16)
+        char = chr(octet)
+        return char if char in _UNRESERVED else "%" + match.group(1).upper()
+
+    return _PCT.sub(replace, path)
+
+
+def _remove_dot_segments(path: str) -> str:
+    """RFC 3986 §5.2.4, applied literally.
+
+    Written out rather than approximated with a library call: `posixpath.normpath`
+    collapses duplicate separators, and internal empty segments are significant
+    here — two paths that differ only by one may route differently.
+    """
+    output: list[str] = []
+    while path:
+        if path.startswith("../"):
+            path = path[3:]
+        elif path.startswith("./"):
+            path = path[2:]
+        elif path.startswith("/./"):
+            path = "/" + path[3:]
+        elif path == "/.":
+            path = "/"
+        elif path.startswith("/../"):
+            path = "/" + path[4:]
+            if output:
+                output.pop()
+        elif path == "/..":
+            path = "/"
+            if output:
+                output.pop()
+        elif path in (".", ".."):
+            path = ""
+        else:
+            end = path.find("/", 1)
+            if end == -1:
+                end = len(path)
+            output.append(path[:end])
+            path = path[end:]
+    return "".join(output)
+
+
+def _effective_path(base_url: str, template: str) -> str:
+    """The single path a call actually addresses.
+
+    ONE path, not two values hashed side by side: a connection base and an
+    operation template are joined by the runtime before the request is made, so a
+    digest over the pair identifies something the wire never sees — and two
+    different splits of the same effective path would digest differently.
+
+    Trailing slash and internal empty segments are PRESERVED; both are
+    route-significant, and a normalizer that removed them would let evidence
+    captured for one resource satisfy a claim about another.
+    """
+    base = urlsplit(base_url.strip()).path if "://" in base_url else base_url.strip()
+    tail = template.strip()
+    # Exactly one slash at the boundary — neither swallowed nor doubled.
+    joined = base.rstrip("/") + "/" + tail.lstrip("/") if tail else base
+    if not joined.startswith("/"):
+        joined = "/" + joined
+    return _remove_dot_segments(_normalize_percent_encoding(joined)) or "/"
 
 
 def route_digest_v1(connection_xml: str, operation_xml: str) -> str:
@@ -235,11 +302,72 @@ def route_digest_v1(connection_xml: str, operation_xml: str) -> str:
             "static route digest identifies it. Service-wide evidence is required "
             "for such an operation, not a route digest"
         )
-    base = _normalized_path(urlsplit(conn_fields["url"].strip()).path)
-    return hashlib.sha256(ROUTE_DIGEST_DOMAIN + _canonical({
-        "base": base,
-        "template": template,
-    })).hexdigest()
+    path = _effective_path(conn_fields["url"], template)
+    # Stored WITH its version prefix. A bare hex string cannot say which algorithm
+    # produced it, so two algorithms' outputs would be interchangeable in storage
+    # even though the domain separator kept them distinct in the hash.
+    return "RouteDigestV1:" + hashlib.sha256(
+        ROUTE_DIGEST_DOMAIN + path.encode("utf-8")
+    ).hexdigest()
+
+
+def _projection_spec(kind: str, registry=None) -> dict:
+    """The projection for ``kind``, taken from registry data.
+
+    The plan makes these specs registry data on purpose: the allowlist binds an
+    unbounded XML space, so what it covers must be extensible without a code change
+    and must be visible in the artifact the registry publishes.
+    """
+    if registry is None:
+        from .registry import load_registry
+
+        try:
+            registry = load_registry()
+        except Exception:  # a registry that cannot load must not silently widen this
+            registry = None
+    spec = registry.projection_allowlists.get(kind) if registry is not None else None
+    if spec:
+        return spec
+    return {
+        "attributes": list(_OPERATION_ATTRS) if kind == "operation" else [],
+        "value_fields": sorted(_OPERATION_FIELDS if kind == "operation" else _CONNECTION_FIELDS),
+        "property_fields": sorted(_OPERATION_PROPERTY_FIELDS) if kind == "operation" else [],
+        "excluded_fields": [],
+    }
+
+
+def _refuse_unknown_fields(root: ET.Element, spec: dict, kind: str) -> None:
+    """Unknown content BLOCKS; it does not get ignored.
+
+    The stopping rule this projection was designed under is explicit: the allowlist
+    binds an unbounded space by design, and unknown content refuses. Silently
+    skipping an unrecognised field is the fail-OPEN reading of the same allowlist —
+    a connector field added by the platform tomorrow, or a credential-bearing field
+    this module has never seen, would leave the digest unchanged and let two
+    behaviourally different components share one published identity.
+    """
+    # THREE categories, not two. A field is included in the digest, or explicitly
+    # excluded from it, or UNKNOWN — and only the third refuses. Conflating the
+    # second and third would have refused every real connection, because a
+    # connection deliberately contributes only its base URL and carries some thirty
+    # other fields that are secrets or irrelevant to routing. Naming them as
+    # excluded forces a decision per field instead of silent omission, which is the
+    # point: a field nobody has classified is exactly the one that might matter.
+    known = (set(spec["value_fields"]) | set(spec["property_fields"])
+             | set(spec.get("excluded_fields", ())))
+    seen = {
+        el.get("id") for el in root.iter()
+        if _localname(el.tag) == "field" and el.get("id") is not None
+    }
+    unknown = sorted(seen - known)
+    if unknown:
+        raise ConfigDigestRefused(
+            "{0} component carries field(s) this projection does not cover: {1}. "
+            "Refusing rather than ignoring them — an uncovered field may change what "
+            "the component does, and a digest that omits it would let two different "
+            "components share one identity. Extend the registry's projection "
+            "allowlist, with a capture behind it.".format(kind, unknown)
+        )
 
 
 def _projected_operation(root: ET.Element) -> list[str]:
@@ -298,7 +426,8 @@ def component_config_digest_v1(component_xml: str, kind: str) -> str:
             f"kind must be 'operation' or 'connection', not {kind!r}"
         )
     root = _parse(component_xml, ConfigDigestRefused, kind)
+    _refuse_unknown_fields(root, _projection_spec(kind), kind)
     lines = _projected_operation(root) if kind == "operation" else _projected_connection(root)
-    return hashlib.sha256(
+    return "ComponentConfigDigestV1:" + hashlib.sha256(
         CONFIG_DIGEST_DOMAIN + _canonical({"kind": kind, "fields": lines})
     ).hexdigest()

@@ -50,10 +50,12 @@ class ReplayRegistry:
         vocabulary: tuple[ConnectorVocabularyMappingV1, ...],
         evidence: tuple[CapabilityEvidenceRecordV1, ...],
         operation_records: tuple = (),
+        projection_allowlists: dict | None = None,
     ) -> None:
         self._vocabulary = vocabulary
         self._evidence = evidence
         self._operation_records = operation_records
+        self._projection_allowlists = projection_allowlists or {}
         by_type: dict[str, ConnectorVocabularyMappingV1] = {}
         for entry in vocabulary:
             if entry.platform_connector_type in by_type:
@@ -79,6 +81,11 @@ class ReplayRegistry:
     @property
     def evidence_records(self) -> tuple[CapabilityEvidenceRecordV1, ...]:
         return self._evidence
+
+    @property
+    def projection_allowlists(self) -> dict:
+        """Per-component-kind projection specs. Data, so extending them needs a capture."""
+        return self._projection_allowlists
 
     @property
     def operation_records(self) -> tuple:
@@ -161,7 +168,8 @@ def _parse(payload: Any) -> ReplayRegistry:
     # rest — including `operation_records`, which the shipped file advertises. A
     # loader that silently drops a key its own data declares will one day drop the
     # rows that decide whether a write may be retried, and it would do so quietly.
-    known = {"schema_version", "vocabulary", "evidence_records", "operation_records"}
+    known = {"schema_version", "vocabulary", "evidence_records", "operation_records",
+             "projection_allowlists"}
     unknown = sorted(k for k in payload if not k.startswith("_") and k not in known)
     if unknown:
         raise RegistryInvalid(
@@ -170,7 +178,8 @@ def _parse(payload: Any) -> ReplayRegistry:
             "the reader is a disagreement, not a default.".format(unknown)
         )
     operation_records = payload["operation_records"]
-    return ReplayRegistry(vocabulary, evidence, tuple(operation_records))
+    return ReplayRegistry(vocabulary, evidence, tuple(operation_records),
+                          payload.get("projection_allowlists", {}))
 
 
 @lru_cache(maxsize=1)

@@ -45,7 +45,10 @@ def test_every_captured_operation_digests(connection_xml):
     """Real components must not refuse. A refusal here is the algorithm being wrong."""
     for path in _operation_xmls():
         digest = route_digest_v1(connection_xml, path.read_text())
-        assert re.fullmatch(r"[0-9a-f]{64}", digest), (path, digest)
+        # Stored WITH its algorithm prefix: a bare hex string cannot say which
+        # algorithm produced it, so two algorithms' outputs would be
+        # interchangeable in storage.
+        assert re.fullmatch(r"RouteDigestV1:[0-9a-f]{64}", digest), (path, digest)
 
 
 def test_operations_on_different_paths_get_different_route_digests(connection_xml):

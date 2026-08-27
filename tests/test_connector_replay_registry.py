@@ -84,14 +84,47 @@ def test_a_connector_type_mapped_twice_is_refused():
 
 
 def test_no_credential_material_in_the_packaged_asset():
-    """The registry is published; a secret reaching it is published with it."""
-    text = _ASSET.read_text().lower()
-    for needle in ("password", "secret", "token", "credential://", "apikey", "api_key",
-                   "authorization", "private_key", "@"):
-        assert needle not in text, (
-            "the packaged registry contains {0!r}; nothing credential-shaped may "
-            "ship in it".format(needle)
-        )
+    """The registry is published; a secret reaching it is published with it.
+
+    A word-search is not the right test any more, and the reason is worth stating:
+    the registry now NAMES credential-bearing fields in its projection exclusion
+    list, which is the opposite of shipping their contents. A grep for 'password'
+    cannot tell "this field is excluded" from "here is a password", so it would
+    force the exclusion list to be nameless — and a nameless exclusion list cannot
+    be reviewed.
+
+    What must not ship is a credential VALUE. Every string in the document is
+    checked against the field names the exclusions themselves declare, plus the
+    shapes a secret takes.
+    """
+    payload = json.loads(_ASSET.read_text())
+    excluded = set(payload["projection_allowlists"]["connection"]["excluded_fields"])
+    assert {"password", "awsSecretKey", "privateCertificate"} <= excluded, (
+        "the exclusion list no longer names the credential-bearing fields, so this "
+        "test cannot tell exclusion from inclusion"
+    )
+
+    def strings(node, path="$"):
+        if isinstance(node, dict):
+            for k, v in node.items():
+                yield from strings(v, path + "." + k)
+        elif isinstance(node, list):
+            for n, v in enumerate(node):
+                yield from strings(v, path + "[%d]" % n)
+        elif isinstance(node, str):
+            yield path, node
+
+    for path, value in strings(payload):
+        # A field NAME is allowed only where the schema puts names.
+        if value in excluded:
+            assert "excluded_fields" in path, (
+                "{0} carries the credential-bearing field name {1!r} outside the "
+                "exclusion list".format(path, value))
+        low = value.lower()
+        for shape in ("credential://", "bearer ", "-----begin", "api_key=", "password="):
+            assert shape not in low, "{0} contains {1!r}".format(path, shape)
+        assert "@" not in value or path.endswith("family"), (
+            "{0} contains an address-shaped value: {1!r}".format(path, value))
 
 
 def test_the_asset_is_not_excluded_from_the_built_image():
