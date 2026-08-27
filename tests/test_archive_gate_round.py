@@ -482,6 +482,24 @@ def test_an_UNMUTATED_real_attestation_still_archives(tmp_path):
     assert row["reviewed_sha"] is None
 
 
+def _reseal(root):
+    """Recompute the index's digest into the manifest after a test edits it.
+
+    The archiver now refuses an archive that already differs from its own
+    manifest, which is correct — that is external damage, and the repo's archive
+    scanner rejects it too. But it means a test that simulates a stale row by
+    writing `index.jsonl` directly has to leave the archive CONSISTENT, or it is
+    exercising the damage check rather than the behaviour it means to pin.
+    """
+    import hashlib
+
+    index, sums = root / "index.jsonl", root / "SHA256SUMS"
+    digest = hashlib.sha256(index.read_bytes()).hexdigest()
+    sums.write_text("\n".join(
+        (digest + "  index.jsonl") if line.endswith("  index.jsonl") else line
+        for line in sums.read_text().splitlines() if line) + "\n")
+
+
 def _rederive(tmp_path):
     return subprocess.run(
         [sys.executable, str(_SCRIPT), "--issue", "999", "--rederive-index",
@@ -510,6 +528,7 @@ def test_a_stale_index_row_is_recomputed_from_the_archived_bytes(tmp_path):
 
     stale = dict(good, prompt_sha256=None, verdict="NO ISSUES AT ALL", status="completed")
     index.write_text(header + "\n" + json.dumps(stale, sort_keys=True) + "\n")
+    _reseal(root)
 
     assert _rederive(tmp_path).returncode == 0
     assert json.loads(index.read_text().splitlines()[1]) == good
@@ -535,6 +554,7 @@ def test_rederiving_never_promotes_a_failed_round_into_a_completion(tmp_path):
     header, line = index.read_text().splitlines()
     failed = dict(json.loads(line), status="failed")
     index.write_text(header + "\n" + json.dumps(failed, sort_keys=True) + "\n")
+    _reseal(root)
 
     assert _rederive(tmp_path).returncode == 0
     assert json.loads(index.read_text().splitlines()[1])["status"] == "failed"
@@ -613,6 +633,7 @@ def test_rederiving_an_index_this_script_did_not_write_is_REFUSED(tmp_path):
     foreign = dict(json.loads(line), ordinal=7, ledger_cited=True,
                    scope_provenance="collector", reconciled_disposition="fixed")
     index.write_text(header + "\n" + json.dumps(foreign, sort_keys=True) + "\n")
+    _reseal(root)
 
     result = _rederive(tmp_path)
     assert result.returncode != 0, result.stdout
@@ -638,6 +659,7 @@ def test_rederiving_never_blanks_a_value_it_cannot_source(tmp_path):
     header, line = index.read_text().splitlines()
     populated = dict(json.loads(line), reviewed_sha="a" * 40)
     index.write_text(header + "\n" + json.dumps(populated, sort_keys=True) + "\n")
+    _reseal(root)
 
     assert _rederive(tmp_path).returncode == 0
     after = json.loads(index.read_text().splitlines()[1])
@@ -687,6 +709,7 @@ def test_rederiving_does_not_resurrect_a_sha_the_bytes_derive_as_ABSENT(tmp_path
     # A stale row carrying a sha from before the round was known to have failed.
     index.write_text(header + "\n" + json.dumps(
         dict(row, reviewed_sha="d" * 40), sort_keys=True) + "\n")
+    _reseal(root)
 
     assert _rederive(tmp_path).returncode == 0
     after = json.loads(index.read_text().splitlines()[1])
@@ -712,6 +735,7 @@ def test_a_richer_value_under_a_SHARED_key_is_refused_not_narrowed(tmp_path):
     richer = dict(row, files={k: {"sha256": v, "bytes": 12, "mode": "100644"}
                               for k, v in row["files"].items()})
     index.write_text(header + "\n" + json.dumps(richer, sort_keys=True) + "\n")
+    _reseal(root)
 
     result = _rederive(tmp_path)
     assert result.returncode != 0, result.stdout
@@ -758,6 +782,7 @@ def test_an_index_whose_first_line_is_a_ROW_is_refused(tmp_path):
     index = root / "index.jsonl"
     _header, line = index.read_text().splitlines()
     index.write_text(line + "\n")
+    _reseal(root)
 
     out = _rederive(tmp_path)
     assert out.returncode != 0, out.stdout
@@ -881,6 +906,7 @@ def test_a_recorded_verdict_on_a_commit_review_row_survives_rederivation(tmp_pat
     header, line = index.read_text().splitlines()
     recorded = dict(json.loads(line), verdict="findings")
     index.write_text(header + "\n" + json.dumps(recorded, sort_keys=True) + "\n")
+    _reseal(root)
 
     assert _rederive(tmp_path).returncode == 0
     assert json.loads(index.read_text().splitlines()[1])["verdict"] == "findings"
@@ -970,7 +996,16 @@ def test_an_already_canonical_index_is_not_rewritten_at_all(tmp_path):
 
 
 def test_a_file_a_ROW_references_cannot_vanish_unreported(tmp_path):
-    """The inner layer: a deleted file a row names is caught by that row."""
+    """A deleted file, caught by the pre-flight before anything is written.
+
+    Two layers see this — the archive-level accounting and the row's own file
+    map — and which one reports it matters. The pre-flight runs FIRST, so the
+    index is still byte-untouched when the refusal happens, and restoring the
+    file makes the run simply retryable. When the row-level check reported it,
+    the index had already been rewritten, and the next run then saw an
+    already-canonical index, decided there was nothing to do, and exited 0 with
+    a stale manifest digest.
+    """
     run, prompts = _gate_run(tmp_path)
     result, root = _archive_gate(tmp_path, run, prompts)
     assert result.returncode == 0, result.stderr
@@ -980,11 +1015,22 @@ def test_a_file_a_ROW_references_cannot_vanish_unreported(tmp_path):
     victim.unlink()
 
     _noncanonical_but_consistent(root)
+    _reseal(root)
+    before = (root / "index.jsonl").read_bytes()
+
     out = _rederive(tmp_path)
     assert out.returncode != 0, out.stdout
-    assert "in the row but not on disk" in out.stderr
+    assert "no longer on disk" in out.stderr
     assert "review.md" in out.stderr
     assert "Traceback" not in out.stderr
+    assert (root / "index.jsonl").read_bytes() == before, \
+        "a refused run must leave the index untouched, or it is not retryable"
+
+    # ...and once the file is restored, the run really does succeed.
+    victim.write_text("a review\n")
+    _reseal(root)
+    retry = _rederive(tmp_path)
+    assert retry.returncode == 0, retry.stderr
 
 
 def test_a_file_NO_ROW_references_cannot_vanish_unreported_either(tmp_path):
@@ -1045,11 +1091,11 @@ def test_a_STRAY_file_is_reported_rather_than_recorded_as_evidence(tmp_path):
     out = _rederive(tmp_path)
     assert out.returncode != 0, out.stdout
     assert "unreviewed.md" in out.stderr
-    # It is refused as a FILE-SET disagreement, not as a narrowing. Both refuse,
-    # but only one of them sends the operator to the right place: nothing about
-    # a re-derivation adds a file, so a name on disk the row never recorded came
-    # from outside this tool.
-    assert "on disk but not in the row" in out.stderr
+    # Refused as an unaccounted ARCHIVE difference by the pre-flight, not as a
+    # narrowing and not by the row-level check. Nothing about a re-derivation
+    # adds a file, so a name on disk the manifest never listed came from outside
+    # this tool — and saying so is what sends the operator to the right place.
+    assert "never listed" in out.stderr
     assert "narrow" not in out.stderr
 
 
@@ -1103,3 +1149,77 @@ def test_a_CRLF_index_is_canonicalised_rather_than_compared_as_text(tmp_path):
             d, n = line.split("  ", 1)
             listed[n] = d
     assert listed["index.jsonl"] == hashlib.sha256(index.read_bytes()).hexdigest()
+
+
+def test_a_file_whose_BYTES_changed_under_the_same_path_is_refused(tmp_path):
+    """The dimension the name-set comparison could not see.
+
+    Comparing only which names are listed let an archived file be rewritten in
+    place and pass straight through — and the manifest rebuild then recorded its
+    NEW digest, converting a hash mismatch the archive scanner would have caught
+    into evidence that looks valid. For a capture no index row references, that
+    manifest entry is the only thing that would ever have disagreed.
+    """
+    run, prompts = _gate_run(tmp_path)
+    result, root = _archive_gate(tmp_path, run, prompts)
+    assert result.returncode == 0, result.stderr
+
+    tampered = root / "architect-reviews" / run.name / "review.md"
+    original = tampered.read_bytes()
+    tampered.write_text("a review that says something else entirely\n")
+
+    _noncanonical_but_consistent(root)
+    _reseal(root)
+    out = _rederive(tmp_path)
+    assert out.returncode != 0, out.stdout
+    assert "its bytes have changed" in out.stderr
+    assert "review.md" in out.stderr
+
+    # The manifest still records the ORIGINAL digest — the tamper was not
+    # certified — and restoring the bytes makes the run retryable.
+    import hashlib
+
+    listed = {}
+    for line in (root / "SHA256SUMS").read_text().splitlines():
+        if line:
+            digest, name = line.split("  ", 1)
+            listed[name] = digest
+    assert listed[f"architect-reviews/{run.name}/review.md"] == \
+        hashlib.sha256(original).hexdigest()
+
+    tampered.write_bytes(original)
+    _reseal(root)
+    assert _rederive(tmp_path).returncode == 0
+
+
+def test_ARCHIVING_refuses_before_the_destination_exists(tmp_path):
+    """Raising after the round directory exists makes the failure permanent.
+
+    The overwrite refusal then blocks the corrected run, so an operator who
+    repairs exactly what the check complained about still cannot proceed. The
+    check runs before anything is created, so the repair is enough.
+    """
+    run, prompts = _gate_run(tmp_path)
+    first, root = _archive_gate(tmp_path, run, prompts)
+    assert first.returncode == 0, first.stderr
+
+    victim = root / "architect-reviews" / run.name / "review.md"
+    original = victim.read_bytes()
+    victim.unlink()
+
+    second = tmp_path / "cdx-gate-review.AFTERDMG"
+    second.mkdir()
+    for name in ("start.json", "attestation.json", "review.md"):
+        (second / name).write_text((run / name).read_text())
+
+    out, _ = _archive_gate(tmp_path, second, prompts)
+    assert out.returncode != 0, out.stdout
+    assert "no longer on disk" in out.stderr
+    assert not (root / "architect-reviews" / second.name).exists(), \
+        "the destination was created before the check — the failure is now permanent"
+
+    # Repairing what the check named is sufficient: the same command succeeds.
+    victim.write_bytes(original)
+    retry, _ = _archive_gate(tmp_path, second, prompts)
+    assert retry.returncode == 0, retry.stderr
+    assert (root / "architect-reviews" / second.name / "review.md").is_file()

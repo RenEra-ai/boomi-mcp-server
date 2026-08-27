@@ -254,64 +254,92 @@ def derive_row(kind: str, run_dir: Path, durable: Path, rel_root: Path,
     return row
 
 
-def regenerate_sums(root: Path, expect: str) -> int:
-    """Rewrite SHA256SUMS over every archived file, ACCOUNTING for the change.
+def read_sums(root: Path):
+    """The manifest as a name -> digest mapping, or empty when there is none."""
+    listed = {}
+    if (root / "SHA256SUMS").is_file():
+        for line in (root / "SHA256SUMS").read_text().splitlines():
+            if line:
+                digest, name = line.split("  ", 1)
+                listed[name] = digest
+    return listed
 
-    Any file NAMED SHA256SUMS is excluded, not just the top-level one: a nested
-    checksum file copied in from a capture would otherwise be listed by the
-    parent while the archive test's own scan skips it, and the two disagree.
 
-    `expect` is not optional, and that is the point. This function rebuilds the
-    manifest from whatever is on disk, so it silently absorbs any difference
-    between the archive it finds and the archive the manifest described — and
-    the manifest is the ONLY record of most of what is here: in the issue-155
-    archive, 337 of 422 files are referenced by no index row at all. Absorbing a
-    difference therefore converts a LOUD failure into a silent success. Measured
-    on both directions: a file deleted out from under the archive went from the
-    scanner reporting listed-but-absent to the manifest simply no longer listing
-    it, and a stray file went from on-disk-but-unlisted to being recorded as
-    evidence. Both exited 0, and because the tool's own closing line says to run
-    `git add` over the directory — which stages deletions — the loss is durable.
+def scan_archive(root: Path):
+    """Every archived file's current digest. Any file NAMED SHA256SUMS is excluded.
 
-    So each caller declares what it is doing and an unaccounted difference
-    refuses:
-
-      "same"  a re-derivation. The set of NAMES cannot change; only the index's
-              own digest may move. Any name added or removed is external damage
-              this tool must report rather than launder.
-      "grow"  a round is being archived. Names may appear — that is the round —
-              but none may vanish.
+    Not just the top-level one: a nested checksum file copied in from a capture
+    would otherwise be listed by the parent while the archive test's own scan
+    skips it, and the two disagree.
     """
-    listed_before = {
-        line.split("  ", 1)[1]
-        for line in (root / "SHA256SUMS").read_text().splitlines() if line
-    } if (root / "SHA256SUMS").is_file() else set()
+    return {
+        str(path.relative_to(root)): sha256_of(path)
+        for path in sorted(root.rglob("*"))
+        if path.is_file() and path.name != "SHA256SUMS"
+    }
 
-    lines, names = [], set()
-    for path in sorted(root.rglob("*")):
-        if path.is_file() and path.name != "SHA256SUMS":
-            rel = str(path.relative_to(root))
-            lines.append(f"{sha256_of(path)}  {rel}")
-            names.add(rel)
 
-    vanished = sorted(listed_before - names)
-    appeared = sorted(names - listed_before)
+def refuse_unless_archive_is_accounted_for(root: Path, expect: str) -> None:
+    """Check BEFORE anything is written. Pure — this function never mutates.
+
+    Two separate lessons are encoded here, both learned from findings against
+    earlier versions of this file.
+
+    The first is WHAT to compare. Comparing only the set of NAMES let a file
+    whose bytes changed under an unchanged path pass straight through, and the
+    rewrite then recorded its new digest — turning a hash mismatch the archive
+    scanner would have caught into evidence that looks valid. Names, digests and
+    absences are all compared now.
+
+    The second is WHEN to compare. Every earlier version raised only after the
+    mutation it was guarding: the index was already rewritten, or the round
+    directory and its row already created. That left the archive in a state the
+    operator could not simply retry out of — the destination now exists, so the
+    overwrite refusal blocks the corrected run, and an index already
+    canonicalised makes the next run think there is nothing to do. So the check
+    is a separate function, and it runs first.
+
+      "same"  a re-derivation. No name may appear or vanish and no archived
+              file's bytes may differ from what the manifest recorded.
+      "grow"  a round is being archived. Names may appear afterwards — that is
+              the round — but nothing here may have vanished or changed.
+    """
+    listed, on_disk = read_sums(root), scan_archive(root)
+    if not listed:
+        return
+
     unaccounted = {}
+    vanished = sorted(set(listed) - set(on_disk))
+    appeared = sorted(set(on_disk) - set(listed))
+    rewritten = sorted(
+        name for name in set(listed) & set(on_disk)
+        if listed[name] != on_disk[name]
+    )
     if vanished:
         unaccounted["listed but no longer on disk"] = vanished
     if appeared and expect == "same":
         unaccounted["on disk but never listed"] = appeared
-    if unaccounted and listed_before:
-        raise SystemExit(
-            "refusing to rewrite SHA256SUMS: it would silently absorb a change "
-            "this run did not make, and for most files here the manifest is the "
-            "only record there is:\n" + "\n".join(
-                f"  {why}: {what}" for why, what in sorted(unaccounted.items())
-            ) + "\nRestore the archive, or record the change deliberately."
-        )
+    if rewritten:
+        unaccounted["listed but its bytes have changed"] = rewritten
+    if not unaccounted:
+        return
 
-    (root / "SHA256SUMS").write_text("\n".join(lines) + "\n")
-    return len(lines)
+    raise SystemExit(
+        "refusing to touch this archive: it already differs from what its own "
+        "manifest records, and rewriting would absorb a change this run did not "
+        "make. For most files here the manifest is the only record there is:\n"
+        + "\n".join(f"  {why}: {what}" for why, what in sorted(unaccounted.items()))
+        + "\nRestore the archive, or record the change deliberately."
+    )
+
+
+def write_sums(root: Path) -> int:
+    """Rewrite SHA256SUMS over every archived file. Call the check FIRST."""
+    on_disk = scan_archive(root)
+    (root / "SHA256SUMS").write_text(
+        "\n".join(f"{digest}  {name}" for name, digest in sorted(on_disk.items())) + "\n"
+    )
+    return len(on_disk)
 
 
 def rederive_index(root: Path) -> int:
@@ -551,6 +579,12 @@ def main() -> int:
         return 1
 
     if args.rederive_index:
+        # FIRST, before the index is touched. The previous order rewrote the
+        # index and only then discovered external damage, which left the
+        # operator unable to retry: having fixed the damage, the next run saw an
+        # already-canonical index, decided there was nothing to do, and exited 0
+        # with the manifest still holding the index's old digest.
+        refuse_unless_archive_is_accounted_for(root, expect="same")
         changed = rederive_index(root)
         # ONLY when a row actually moved. The checksum manifest covers archived
         # FILES, and re-deriving changes none of them — the sole reason to touch
@@ -559,7 +593,7 @@ def main() -> int:
         # ordering is not stable), so pointing this at an archive it has nothing
         # to fix would move real bytes for no reason. That is the one path here
         # that writes outside the index, so it gets the same restraint.
-        listed = regenerate_sums(root, expect="same") if changed else None
+        listed = write_sums(root) if changed else None
         rows = 0 if changed == _INDEX_BYTES_ONLY else changed
         print(f"re-derived {rows} index row(s) from the archived bytes"
               + ("; the index was rewritten in canonical form" if changed == _INDEX_BYTES_ONLY else "")
@@ -578,6 +612,12 @@ def main() -> int:
         return 1
 
     subdir, wanted, _collector, indexed = KINDS[args.kind]
+
+    # BEFORE the destination exists. Raising after it does is what makes a
+    # failure non-retryable: the partial round is then in the way, and the
+    # overwrite refusal blocks the corrected run even once the operator has
+    # repaired what the check complained about.
+    refuse_unless_archive_is_accounted_for(root, expect="grow")
 
     durable = root / subdir / (args.name or args.run_dir.name)
     if durable.exists():
@@ -703,7 +743,7 @@ def main() -> int:
         # the scanner would then look for and not find.
         (durable / "round.json").write_text(json.dumps(row, sort_keys=True, indent=1) + "\n")
 
-    listed = regenerate_sums(root, expect="grow")
+    listed = write_sums(root)
     print(f"archived {len(copied)} file(s) to {durable.relative_to(repo)}")
     print(f"  status={row['status']} reviewed_sha={row.get('reviewed_sha')}")
     print("  {0}; SHA256SUMS lists {1} files".format(
