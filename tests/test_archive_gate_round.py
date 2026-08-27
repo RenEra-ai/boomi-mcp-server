@@ -554,3 +554,333 @@ def test_rederive_does_not_need_the_flags_that_name_a_single_round(tmp_path):
     )
     assert bare.returncode == 2, bare.stdout
     assert "--rederive-index" in bare.stderr
+
+
+@pytest.mark.parametrize("junk,label", [
+    (["9c5d0467"], "a list — unhashable in the membership test"),
+    (12345, "an integer — not subscriptable in the refusal message"),
+    ({"sha": "9c5d0467"}, "an object — unhashable too"),
+    (True, "a bool, which is not a digest however it compares"),
+])
+def test_a_non_STRING_attested_digest_refuses_instead_of_raising(tmp_path, junk, label):
+    """Resolved is not the same fact as usable.
+
+    `_dig` answers "is there a value here", and every one of these has one — so
+    each passed the resolution check and then raised deeper in, AFTER the
+    destination directory existed. The exception skipped the discard, and the
+    leftover then tripped the overwrite refusal, so the operator's corrected
+    retry was blocked. That is the identical poisoned-destination failure this
+    same batch already fixed once for a malformed prompt block, which is why the
+    check is now a type check and not a presence check.
+    """
+    attestation = _real_attestation()
+    attestation["prompt"]["actualSha256"] = junk
+
+    run = tmp_path / "cdx-gate-review.JUNKDIG"
+    run.mkdir()
+    (run / "start.json").write_text(json.dumps({"threadId": "t-j", "socket": "/s"}) + "\n")
+    (run / "review.md").write_text("a review\n")
+    (run / "attestation.json").write_text(json.dumps(attestation) + "\n")
+
+    prompts = tmp_path / "prompts"
+    prompts.mkdir()
+    (prompts / "prompt").write_bytes(b"some prompt\n")
+
+    result, root = _archive_gate(tmp_path, run, prompts)
+    assert result.returncode == 1, (label, result.stdout)
+    assert "Traceback" not in result.stderr, (label, result.stderr)
+    assert not (root / "architect-reviews" / run.name).exists(), label
+
+    retry, _ = _archive_gate(tmp_path, run, prompts)
+    assert "refusing to overwrite" not in retry.stderr, (label, retry.stderr)
+
+
+def test_rederiving_an_index_this_script_did_not_write_is_REFUSED(tmp_path):
+    """The destructive case, built from a REAL foreign archive's field names.
+
+    Issues 152, 153, 171 and 175 carry row fields no derivation here produces.
+    Replacing those rows with this script's narrower shape would discard what
+    their original producer recorded, irreversibly, and `--issue` takes any
+    number — one typo away. So an unrecognised field declines the whole run
+    rather than silently narrowing the archive.
+    """
+    run, prompts = _gate_run(tmp_path)
+    result, root = _archive_gate(tmp_path, run, prompts)
+    assert result.returncode == 0, result.stderr
+
+    index = root / "index.jsonl"
+    header, line = index.read_text().splitlines()
+    foreign = dict(json.loads(line), ordinal=7, ledger_cited=True,
+                   scope_provenance="collector", reconciled_disposition="fixed")
+    index.write_text(header + "\n" + json.dumps(foreign, sort_keys=True) + "\n")
+
+    result = _rederive(tmp_path)
+    assert result.returncode != 0, result.stdout
+    for field in ("ordinal", "ledger_cited", "scope_provenance", "reconciled_disposition"):
+        assert field in result.stderr, field
+    # ...and the index is untouched, which is the whole point of refusing.
+    assert json.loads(index.read_text().splitlines()[1]) == foreign
+
+
+def test_rederiving_never_blanks_a_value_it_cannot_source(tmp_path):
+    """Twenty-four architect rows elsewhere carry a reviewed sha this cannot read.
+
+    The attestation carries no reviewed sha, so a row this script CREATES gets
+    null. That is a fact about the derivation, not about the field — other
+    producers populate it. A re-derivation that treated its own inability to
+    read a value as evidence the value is absent would erase all of them.
+    """
+    run, prompts = _gate_run(tmp_path)
+    result, root = _archive_gate(tmp_path, run, prompts)
+    assert result.returncode == 0, result.stderr
+
+    index = root / "index.jsonl"
+    header, line = index.read_text().splitlines()
+    populated = dict(json.loads(line), reviewed_sha="a" * 40)
+    index.write_text(header + "\n" + json.dumps(populated, sort_keys=True) + "\n")
+
+    assert _rederive(tmp_path).returncode == 0
+    after = json.loads(index.read_text().splitlines()[1])
+    assert after["reviewed_sha"] == "a" * 40
+    # ...while a field it CAN source is still corrected in the same pass.
+    assert after["prompt_sha256"] == populated["prompt_sha256"]
+
+
+def test_rederiving_does_not_resurrect_a_sha_the_bytes_derive_as_ABSENT(tmp_path):
+    """Null is a VERDICT on a commit-review row, not an absence.
+
+    The collector withholds the reviewed-sha marker for a round that failed, so
+    that a failed round can never silently shrink the next review's scope. A
+    blanket "never replace a value with null" — which is how the architect rows
+    were first protected — also protected THIS null, resurrecting a sha onto a
+    round the bytes say did not complete and restating a completion the
+    collector deliberately declined to record.
+
+    So the exemption is per KIND: an architect row's reviewed sha is unsourceable
+    here and is left alone; a commit-review row's is sourced, including its null.
+    """
+    run = tmp_path / "cdx-review.FAILED1"
+    run.mkdir()
+    (run / "start.json").write_text(json.dumps({"threadId": "t-f"}) + "\n")
+    (run / "baseline").write_text("b" * 40 + "\n")
+    (run / "start-head").write_text("c" * 40 + "\n")
+    (run / "dirty").write_text("false\n")
+    (run / "scope").write_text("auto\n")
+    (run / "phase").write_text("failed\n")
+    (run / "review.json").write_text(json.dumps({"scope": "auto"}) + "\n")
+
+    root = tmp_path / "repo" / "docs" / "architecture" / "evidence" / "issue-999"
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "index.jsonl").write_text(json.dumps(
+        {"generated_at": "x", "issue": 999, "schema_version": 1, "source_tip": "abc"}) + "\n")
+    result = subprocess.run(
+        [sys.executable, str(_SCRIPT), "--issue", "999", "--kind", "commit-review",
+         "--run-dir", str(run), "--logical-loop", "L2", "--repo", str(tmp_path / "repo")],
+        capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+
+    index = root / "index.jsonl"
+    header, line = index.read_text().splitlines()
+    row = json.loads(line)
+    assert row["status"] == "failed" and row["reviewed_sha"] is None
+
+    # A stale row carrying a sha from before the round was known to have failed.
+    index.write_text(header + "\n" + json.dumps(
+        dict(row, reviewed_sha="d" * 40), sort_keys=True) + "\n")
+
+    assert _rederive(tmp_path).returncode == 0
+    after = json.loads(index.read_text().splitlines()[1])
+    assert after["reviewed_sha"] is None, after
+    assert after["status"] == "failed"
+
+
+def test_a_richer_value_under_a_SHARED_key_is_refused_not_narrowed(tmp_path):
+    """Key-set equality is not shape equality.
+
+    The first version of this guard compared only top-level key names, so a
+    producer recording a richer value under a key this derivation also produces
+    passed straight through and was silently replaced by the narrower one. The
+    never-subtract rule cannot catch it either — a narrowed value is not null.
+    """
+    run, prompts = _gate_run(tmp_path)
+    result, root = _archive_gate(tmp_path, run, prompts)
+    assert result.returncode == 0, result.stderr
+
+    index = root / "index.jsonl"
+    header, line = index.read_text().splitlines()
+    row = json.loads(line)
+    richer = dict(row, files={k: {"sha256": v, "bytes": 12, "mode": "100644"}
+                              for k, v in row["files"].items()})
+    index.write_text(header + "\n" + json.dumps(richer, sort_keys=True) + "\n")
+
+    result = _rederive(tmp_path)
+    assert result.returncode != 0, result.stdout
+    assert "narrow" in result.stderr and "files" in result.stderr
+    assert json.loads(index.read_text().splitlines()[1]) == richer
+
+
+def test_rederiving_an_unchanged_archive_leaves_its_CHECKSUMS_alone(tmp_path):
+    """The one path here that writes outside the index.
+
+    The checksum manifest covers archived FILES, none of which a re-derivation
+    changes. Its ordering is not stable, so regenerating it on an archive with
+    nothing to fix moves real bytes for no reason — measured on three archives
+    this slice does not own.
+    """
+    run, prompts = _gate_run(tmp_path)
+    result, root = _archive_gate(tmp_path, run, prompts)
+    assert result.returncode == 0, result.stderr
+
+    sums = root / "SHA256SUMS"
+
+    # SCRAMBLE the order first. Comparing bytes alone was vacuous: this archive
+    # is small enough that a regeneration reproduces the same ordering, so the
+    # test passed even with the guard removed. A regeneration writes in sorted
+    # order, so a deliberately reversed file survives only if nothing wrote.
+    scrambled = b"".join(
+        l + b"\n" for l in reversed(sums.read_bytes().split(b"\n")) if l
+    )
+    sums.write_bytes(scrambled)
+
+    out = _rederive(tmp_path)
+    assert out.returncode == 0
+    assert "0 index row(s)" in out.stdout
+    assert "untouched" in out.stdout
+    assert sums.read_bytes() == scrambled, "the checksum manifest was rewritten"
+
+
+def test_an_index_whose_first_line_is_a_ROW_is_refused(tmp_path):
+    """A header-less index would otherwise lose its first round at exit 0."""
+    run, prompts = _gate_run(tmp_path)
+    result, root = _archive_gate(tmp_path, run, prompts)
+    assert result.returncode == 0, result.stderr
+
+    index = root / "index.jsonl"
+    _header, line = index.read_text().splitlines()
+    index.write_text(line + "\n")
+
+    out = _rederive(tmp_path)
+    assert out.returncode != 0, out.stdout
+    assert "no header line" in out.stderr
+    assert index.read_text().strip() == line
+
+
+def test_a_missing_or_empty_index_says_what_to_do(tmp_path):
+    """Actionable, not a raw traceback — no damage either way, but readable."""
+    (tmp_path / "repo" / "docs" / "architecture" / "evidence" / "issue-999").mkdir(parents=True)
+    missing = _rederive(tmp_path)
+    assert missing.returncode != 0
+    assert "no index to re-derive" in missing.stderr
+    assert "Traceback" not in missing.stderr
+
+    (tmp_path / "repo" / "docs" / "architecture" / "evidence" / "issue-999"
+     / "index.jsonl").write_text("")
+    empty = _rederive(tmp_path)
+    assert empty.returncode != 0
+    assert "is empty" in empty.stderr
+    assert "Traceback" not in empty.stderr
+
+
+@pytest.mark.parametrize("blank", ["   ", "\t", "\n", "   "])
+def test_a_whitespace_only_attestation_fact_is_not_RESOLVED(tmp_path, blank):
+    """`not "   "` is False, so a blank fact passed the non-empty test."""
+    attestation = _real_attestation()
+    attestation["parsedVerdict"] = blank
+
+    run = tmp_path / "cdx-gate-review.BLANKFACT"
+    run.mkdir()
+    (run / "start.json").write_text(json.dumps({"threadId": "t-b", "socket": "/s"}) + "\n")
+    (run / "review.md").write_text("a review\n")
+    (run / "attestation.json").write_text(json.dumps(attestation) + "\n")
+
+    prompts = tmp_path / "prompts"
+    prompts.mkdir()
+    (prompts / "prompt").write_bytes(b"some prompt\n")
+
+    result, root = _archive_gate(tmp_path, run, prompts)
+    assert result.returncode == 1, result.stdout
+    assert "parsedVerdict" in result.stderr or "verdict" in result.stderr
+    assert not (root / "architect-reviews" / run.name).exists()
+
+
+def test_every_field_derived_as_a_CONSTANT_null_is_listed_unsourceable():
+    """Derive the exemption list from the derivation, do not trust the list.
+
+    Writing a hardcoded null is not sourcing a value — it is having nothing to
+    say — so any such field must be exempt from re-derivation or it will erase
+    whatever a real producer recorded there. Hand-listing which fields those are
+    is the same hand-model this module has now been burned by three times, so
+    the list is checked against the code that produces the rows.
+
+    The check builds a round where every SOURCEABLE field has a value. Anything
+    still null afterwards is a constant, and must be listed.
+    """
+    module = _archiver_module()
+
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+        root = base / "evidence"
+        (root / "commit-reviews").mkdir(parents=True)
+        run = root / "commit-reviews" / "cdx-review.CONST1"
+        run.mkdir()
+        sha = "e" * 40
+        (run / "start.json").write_text(json.dumps({"threadId": "t", "startedAt": "now"}) + "\n")
+        (run / "baseline").write_text("b" * 40 + "\n")
+        (run / "start-head").write_text(sha + "\n")
+        (run / "last-reviewed-sha").write_text(sha + "\n")   # completed
+        (run / "dirty").write_text("false\n")
+        (run / "scope").write_text("auto\n")
+        (run / "teardown").write_text("confirmed stopped\n")
+        (run / "review.json").write_text(json.dumps({"scope": "auto"}) + "\n")
+
+        row = module.derive_row("commit-review", Path("/tmp/src"), run, root, "L2", None, None)
+
+    constant_nulls = sorted(k for k, v in row.items() if v is None)
+    listed = set(module.UNSOURCEABLE_BY_KIND.get("commit-review", ()))
+    assert set(constant_nulls) <= listed, {
+        "derived_as_null_but_not_exempt": sorted(set(constant_nulls) - listed),
+        "this_field_would_erase_a_real_producers_value": True,
+    }
+    # ...and the exemption is not vacuous — this row really does carry one.
+    assert constant_nulls, "no constant null found; the check proves nothing"
+
+
+def test_a_recorded_verdict_on_a_commit_review_row_survives_rederivation(tmp_path):
+    """The measured case: six rows in a closed issue's archive.
+
+    Sweeping the real archives to verify the refusal, the run modified two of
+    them, and issue 180's commit-review rows each lost a verdict of "clean" or
+    "findings". The key-set guard could not see it — `verdict` exists in both
+    shapes — and the sourced-null rule actively preferred the null, because a
+    hardcoded None is indistinguishable from a computed one at the call site.
+    """
+    run = tmp_path / "cdx-review.VERDICT1"
+    run.mkdir()
+    sha = "f" * 40
+    (run / "start.json").write_text(json.dumps({"threadId": "t-v"}) + "\n")
+    (run / "baseline").write_text("b" * 40 + "\n")
+    (run / "start-head").write_text(sha + "\n")
+    (run / "last-reviewed-sha").write_text(sha + "\n")
+    (run / "dirty").write_text("false\n")
+    (run / "scope").write_text("auto\n")
+    (run / "teardown").write_text("confirmed stopped\n")
+    (run / "review.json").write_text(json.dumps({"scope": "auto"}) + "\n")
+
+    root = tmp_path / "repo" / "docs" / "architecture" / "evidence" / "issue-999"
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "index.jsonl").write_text(json.dumps(
+        {"generated_at": "x", "issue": 999, "schema_version": 1, "source_tip": "abc"}) + "\n")
+    assert subprocess.run(
+        [sys.executable, str(_SCRIPT), "--issue", "999", "--kind", "commit-review",
+         "--run-dir", str(run), "--logical-loop", "L2", "--repo", str(tmp_path / "repo")],
+        capture_output=True, text=True).returncode == 0
+
+    index = root / "index.jsonl"
+    header, line = index.read_text().splitlines()
+    recorded = dict(json.loads(line), verdict="findings")
+    index.write_text(header + "\n" + json.dumps(recorded, sort_keys=True) + "\n")
+
+    assert _rederive(tmp_path).returncode == 0
+    assert json.loads(index.read_text().splitlines()[1])["verdict"] == "findings"

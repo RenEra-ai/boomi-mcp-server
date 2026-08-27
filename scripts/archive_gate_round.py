@@ -149,11 +149,18 @@ ARCHITECT_ROW_PATHS = {
     "verdict": ("parsedVerdict",),
 }
 
-#: `gate-attest` records no reviewed SHA under any spelling — checked against a
-#: real attestation, whose top-level keys are schema, gateProtocol, gate,
-#: collectedAt, start, prompt, turn, artifact, inputPlan, parsedVerdict and
-#: teardown. The row therefore carries null DELIBERATELY and says so, rather
-#: than probing invented keys and letting the miss read as an absent value.
+#: The attestation `gate-attest` writes carries no reviewed SHA under any
+#: spelling — checked against a real one, whose top-level keys are schema,
+#: gateProtocol, gate, collectedAt, start, prompt, turn, artifact, inputPlan,
+#: parsedVerdict and teardown. So THIS script cannot source one, and the rows it
+#: creates carry null deliberately rather than probing invented keys.
+#:
+#: That is a statement about this derivation, NOT about the field. Twenty-four
+#: architect rows across seven other archives in this repository DO carry a
+#: populated reviewed sha, put there by a different producer. A re-derivation
+#: must therefore never overwrite one with this null — which is exactly what
+#: `rederive_index` refuses to do, and why it refuses rather than merges when
+#: it meets a row shape it does not model.
 #: The commit-review branch has a real sidecar for this and uses it.
 #:
 #: No mutation can tell this constant apart from the key-probing it replaced —
@@ -278,10 +285,58 @@ def rederive_index(root: Path) -> int:
     the run directory it came from. Everything else is re-read.
     """
     index = root / "index.jsonl"
-    lines = index.read_text().splitlines()
-    header, rows = lines[0], [json.loads(l) for l in lines[1:] if l.strip()]
+    if not index.is_file():
+        raise SystemExit(f"no index to re-derive at {index} — check --issue and --repo")
+    lines = [l for l in index.read_text().splitlines() if l.strip()]
+    if not lines:
+        raise SystemExit(f"{index} is empty — there is nothing to re-derive")
+
+    # The first line is the archive HEADER, not a round. Verify that rather than
+    # assuming it: an index whose first line is a ROW would otherwise have that
+    # row silently demoted into the header slot and dropped from the rewrite —
+    # a byte of evidence lost at exit 0, which is the one outcome this whole
+    # guard exists to prevent.
+    header, rest = lines[0], lines[1:]
+    probe = json.loads(header)
+    if "durable_dir" in probe or "collector" in probe:
+        raise SystemExit(
+            f"{index} has no header line — its first line is a round row "
+            f"({probe.get('durable_dir')}). Refusing, because rewriting would "
+            "drop that row."
+        )
+    rows = [json.loads(l) for l in rest]
 
     by_collector = {c: k for k, (_s, _f, c, indexed) in KINDS.items() if indexed}
+
+    # FAIL CLOSED on an archive this script did not write. Measured across the
+    # thirteen archives in this repository: issues 152, 153, 171 and 175 carry
+    # row fields no derivation here produces — `ordinal`, `ledger_cited`,
+    # `scope_provenance`, `reconciled_disposition`, `verdict_source`,
+    # `collected_at`, `thread_id`, `turn_token` and more. Re-deriving those rows
+    # would replace each with this script's narrower shape and destroy the rest
+    # IRREVERSIBLY, and `--issue` accepts any number, so the hazard is one
+    # typo away. An unrecognised field means the row has a producer this script
+    # does not model, and the only safe answer is to decline the whole run.
+    foreign = {}
+    for row in rows:
+        kind = by_collector.get(row.get("collector"))
+        durable = root / row["durable_dir"]
+        if kind is None or not durable.is_dir():
+            continue
+        known = set(derive_row(kind, Path(row["source_run_dir"]), durable, root,
+                               row["logical_loop"], None, row.get("wave_sha")))
+        extra = sorted(set(row) - known - {"wave_sha"})
+        if extra:
+            foreign[row["durable_dir"]] = extra
+    if foreign:
+        raise SystemExit(
+            "refusing to re-derive an index carrying fields this script does not "
+            "produce — another producer wrote these rows and re-deriving them "
+            "would discard what it recorded:\n" + "\n".join(
+                f"  {d}: {fields}" for d, fields in sorted(foreign.items())
+            )
+        )
+
     changed, out = 0, []
     for row in rows:
         kind = by_collector.get(row.get("collector"))
@@ -296,9 +351,48 @@ def rederive_index(root: Path) -> int:
         # into a false completion.
         if row.get("status") != fresh.get("status") and row.get("status") in _NON_DERIVED_STATUSES:
             fresh["status"] = row["status"]
-        if fresh != row:
+
+        # START FROM THE EXISTING ROW and update only what this derivation both
+        # owns and can source. The previous shape — build a fresh row, then copy
+        # back anything it left null — was wrong in two measured ways. It
+        # resurrected a reviewed sha onto a commit-review round the bytes now
+        # derive as FAILED, because "null" there is a deliberate verdict rather
+        # than an absence. And it silently narrowed a richer value written under
+        # a key this derivation also produces, which no copy-back can catch
+        # because a narrowed value is not null.
+        merged, narrowed = dict(row), []
+        for name, value in fresh.items():
+            if name in UNSOURCEABLE_BY_KIND.get(kind, ()):
+                continue  # keep whatever the original producer recorded
+            existing = row.get(name)
+            if existing is None:
+                merged[name] = value
+                continue
+            if value is None:
+                # A null this derivation SOURCED is a verdict, not a gap — the
+                # failed-round case above is exactly it — so it wins. The fields
+                # where null means "nothing to say" are listed as unsourceable
+                # and were skipped before reaching here.
+                merged[name] = None
+                continue
+            if type(existing) is not type(value):
+                narrowed.append(name)
+                continue
+            if isinstance(value, dict) and not all(
+                    type(existing.get(k)) is type(v) for k, v in value.items()):
+                narrowed.append(name)
+                continue
+            merged[name] = value
+        if narrowed:
+            raise SystemExit(
+                f"refusing to re-derive {row['durable_dir']}: this script would "
+                f"narrow {sorted(narrowed)}, whose recorded shape it does not "
+                "model. Another producer wrote that value; re-deriving would "
+                "replace it with something smaller."
+            )
+        if merged != row:
             changed += 1
-        out.append(fresh)
+        out.append(merged)
 
     with index.open("w") as handle:
         handle.write(header + "\n")
@@ -310,6 +404,32 @@ def rederive_index(root: Path) -> int:
 #: Statuses a caller supplies for a round that did not complete. They cannot be
 #: re-derived from the archived bytes, so a re-derivation never overwrites one.
 _NON_DERIVED_STATUSES = ("failed", "timeout", "refused")
+
+#: Fields a derivation genuinely CANNOT source, per kind — the only ones a
+#: re-derivation leaves entirely alone. Everything else this script produces is
+#: authoritative for a row it owns, including a deliberate null.
+#:
+#: The distinction is load-bearing and was got wrong once. A blanket "never
+#: replace a value with null" also protected `reviewed_sha` on a COMMIT-REVIEW
+#: row, where null is not an absence but a verdict: the collector withholds the
+#: marker for a round that failed, and resurrecting the sha there would restate
+#: a completion the collector declined to record. An architect row is the
+#: opposite case — the attestation carries no such field at all, so this script
+#: has nothing to say and must not speak.
+#: A field whose derived value is a HARDCODED None belongs here by definition:
+#: writing a constant null is not sourcing a value, it is having nothing to say.
+#: `verdict` on a commit-review row is exactly that — the commit-review collector
+#: records no verdict, so this script writes None and always has. Found the
+#: expensive way: sweeping the thirteen real archives to check the refusal, the
+#: run modified two of them, and issue 180's six commit-review rows each lost a
+#: recorded verdict of "clean" or "findings". The key-set guard could not see it
+#: (the key exists in both shapes) and the sourced-null rule actively preferred
+#: the null. `test_every_field_derived_as_a_CONSTANT_null_is_listed_unsourceable`
+#: derives this table's contents from the derivation instead of trusting it.
+UNSOURCEABLE_BY_KIND = {
+    "architect-review": ("reviewed_sha",),
+    "commit-review": ("verdict",),
+}
 
 
 def main() -> int:
@@ -346,9 +466,17 @@ def main() -> int:
 
     if args.rederive_index:
         changed = rederive_index(root)
-        listed = regenerate_sums(root)
+        # ONLY when a row actually moved. The checksum manifest covers archived
+        # FILES, and re-deriving changes none of them — the sole reason to touch
+        # it is that `index.jsonl` is itself listed and its digest moved. A
+        # regeneration on an unchanged archive rewrites the manifest anyway (the
+        # ordering is not stable), so pointing this at an archive it has nothing
+        # to fix would move real bytes for no reason. That is the one path here
+        # that writes outside the index, so it gets the same restraint.
+        listed = regenerate_sums(root) if changed else None
         print(f"re-derived {changed} index row(s) from the archived bytes; "
-              f"SHA256SUMS lists {listed} files")
+              + (f"SHA256SUMS lists {listed} files" if changed
+                 else "SHA256SUMS left untouched — nothing changed"))
         print("\nNEXT: git add docs/architecture/evidence — the scanners compare "
               "SHA256SUMS against the GIT INDEX.")
         return 0
@@ -427,9 +555,20 @@ def main() -> int:
         # round; it is an attested round nobody can place, which is worse.
         if attestation is not None and not read_json(durable, "refusal.json") \
                 and args.status in (None, "completed"):
+            # A non-empty STRING, not merely "resolved". Every one of these
+            # facts is textual, and a corrupted or drifted attestation carrying
+            # a list or a number would otherwise pass this check and then raise
+            # deeper in. The two differ, and the first version of this comment
+            # got it wrong by lumping them: a list or dict is unhashable, so it
+            # raises IN the membership test, BEFORE `_discard` — leaving debris
+            # that blocks the operator's corrected retry. An integer is hashable,
+            # so the membership test succeeds and `_discard` does run; it then
+            # raises in the refusal message, where it is not subscriptable. Only
+            # the first leaves debris. Both are refused here instead.
             unresolved = sorted(
                 name for name, path in ARCHITECT_ROW_PATHS.items()
-                if _dig(attestation, path) in (None, "")
+                if not isinstance(_dig(attestation, path), str)
+                or not _dig(attestation, path).strip()
             )
             if unresolved:
                 _discard(durable)
@@ -458,8 +597,11 @@ def main() -> int:
             print("refusing to archive a gate round whose prompt is not the attested "
                   f"one (attestation's prompt.actualSha256 is {attested[:16]}…, "
                   f"archived prompts hash to "
-                  f"{sorted(d[:16] for d in digests)}) — this is the wrong prompt "
-                  "directory", file=sys.stderr)
+                  f"{sorted(d[:16] for d in digests)}) — usually the wrong "
+                  "--prompts directory, but check the digest's own spelling too: "
+                  "this compares raw text, so uppercase hex or surrounding "
+                  "whitespace fails here with the RIGHT directory",
+                  file=sys.stderr)
             return 1
 
     row = derive_row(args.kind, args.run_dir, durable, root,
