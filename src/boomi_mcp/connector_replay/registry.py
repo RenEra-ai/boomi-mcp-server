@@ -136,7 +136,15 @@ class ReplayRegistry:
         # from the row alone let an evidence row for an unmapped family return an
         # affirmative verdict, which is the one answer this registry exists to
         # withhold.
-        if family not in {entry.family for entry in self._vocabulary}:
+        recognised = {
+            action_name
+            for entry in self._vocabulary if entry.family == family
+            for action_name in entry.recognised_actions
+        }
+        if not recognised or action not in recognised:
+            # The family must be mapped AND the action recognised. Resolving only
+            # the family let an invented action inherit a mapped family's
+            # authority, which is the same fail-open one level down.
             return RetrySafetyV1.UNVERIFIED
         row = self._by_pair.get((family, action))
         return row.retry_safety if row else RetrySafetyV1.UNVERIFIED

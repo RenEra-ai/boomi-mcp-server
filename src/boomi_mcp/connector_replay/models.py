@@ -119,6 +119,23 @@ class ConnectorVocabularyMappingV1(ReplayRegistryModel):
     platform_connector_type: str = Field(min_length=1)
     family: str = Field(min_length=1, pattern=r"^[a-z][a-z0-9_]*$")
     action_source: ActionSourceV1
+    #: The actions this family is RECOGNISED to have. Closed, and evidence-derived
+    #: from the verbs the archive shows exercised.
+    #:
+    #: Resolving the family alone was not enough: an evidence row could name any
+    #: non-empty action string and still return an affirmative verdict, so an
+    #: invented action inherited a mapped family's authority. The plan asks for a
+    #: total, injective family-AND-action vocabulary; this is the action half.
+    recognised_actions: tuple[str, ...] = Field(min_length=1)
+
+    @field_validator("recognised_actions")
+    @classmethod
+    def _actions_are_sorted_and_unique(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        if len(set(value)) != len(value):
+            raise ValueError("duplicate recognised actions")
+        if list(value) != sorted(value):
+            raise ValueError("recognised actions must be sorted, so one set has one form")
+        return value
 
     @field_validator("platform_connector_type")
     @classmethod

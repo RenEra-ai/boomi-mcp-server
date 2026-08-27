@@ -120,9 +120,14 @@ class CaptureSummaryV1(ReplayRegistryModel):
     #: Connector types the PLATFORM recorded for these executions, sentinels excluded.
     #: This is what a capture observed, as distinct from what a caller says it is.
     observed_connector_types: tuple[str, ...] = ()
-    #: The HTTP method the operation component declares. The platform reports one
-    #: generic action for every verb, so this is the only place the verb exists.
-    observed_method: str | None = None
+    #: Every HTTP method the capture's components declare. A capture commonly holds
+    #: more than one — a source operation that fetches, and the operation under
+    #: test — so this is a SET, and which member is the subject is not determinable
+    #: from the components alone. Reconciliation therefore requires a declared
+    #: action to be a member, and requires exact agreement with the counterparty log
+    #: wherever one was taken. Evidence-proportional: strong where the evidence is,
+    #: still non-vacuous where it is not.
+    observed_methods: tuple[str, ...] = ()
     #: sha256 over every archived file's bytes, in sorted-name order.
     capture_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
     file_count: int = Field(ge=1)
@@ -285,8 +290,8 @@ def _observed_connector_types(files: list[Path]) -> tuple[str, ...]:
     return tuple(sorted(seen))
 
 
-def _observed_method(files: list[Path]) -> str | None:
-    """The verb the operation component declares.
+def _observed_methods(files: list[Path]) -> tuple[str, ...]:
+    """Every verb the capture's components declare.
 
     Read from the component rather than from the execution record, because the
     platform reports one generic action for all eight verbs — measured across 95
@@ -294,17 +299,18 @@ def _observed_method(files: list[Path]) -> str | None:
     """
     import re
 
+    # Selected by CONTENT, not by filename. The first version required "operation"
+    # in the name, which silently excluded the archived PATCH captures — they use
+    # `component_op_patch.xml` — so their method read as absent and the
+    # reconciliation this feeds REFUSED the very captures slice F depends on. A
+    # naming convention is not evidence; that sentence is already written a few
+    # lines below about the action, and it applies here too.
+    found: set[str] = set()
     for path in sorted(files):
-        if not path.name.endswith(".xml") or "operation" not in path.name:
+        if path.suffix != ".xml":
             continue
-        found = re.findall(r'customOperationType="([^"]+)"', path.read_text())
-        if len(set(found)) == 1:
-            return found[0]
-        if len(set(found)) > 1:
-            raise CaptureRefused(
-                f"{path.name}: conflicting operation types {sorted(set(found))!r}"
-            )
-    return None
+        found.update(re.findall(r'customOperationType="([^"]+)"', path.read_text()))
+    return tuple(sorted(found))
 
 
 def summarize(capture_dir: Path, method_hint: str | None = None) -> CaptureSummaryV1:
@@ -382,5 +388,5 @@ def summarize(capture_dir: Path, method_hint: str | None = None) -> CaptureSumma
         file_count=len(files),
         convergence=_convergence(files),
         observed_connector_types=_observed_connector_types(files),
-        observed_method=_observed_method(files),
+        observed_methods=_observed_methods(files),
     )

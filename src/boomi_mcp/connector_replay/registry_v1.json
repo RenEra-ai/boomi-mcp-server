@@ -69,7 +69,17 @@
     {
       "action_source": "operation_component",
       "family": "rest",
-      "platform_connector_type": "officialboomi-X3979C-rest-prod"
+      "platform_connector_type": "officialboomi-X3979C-rest-prod",
+      "recognised_actions": [
+        "DELETE",
+        "GET",
+        "HEAD",
+        "OPTIONS",
+        "PATCH",
+        "POST",
+        "PUT",
+        "TRACE"
+      ]
     }
   ]
 }

@@ -119,6 +119,7 @@ def test_the_execution_sentinels_are_present_in_real_data_and_are_refused():
             ConnectorVocabularyMappingV1(
                 platform_connector_type=sentinel, family="rest",
                 action_source=ActionSourceV1.OPERATION_COMPONENT,
+                recognised_actions=("GET",),
             )
 
 
@@ -128,8 +129,27 @@ def test_a_genuine_connector_type_maps():
     m = ConnectorVocabularyMappingV1(
         platform_connector_type=genuine[0], family="rest",
         action_source=ActionSourceV1.OPERATION_COMPONENT,
+        recognised_actions=("GET", "HEAD"),
     )
     assert m.family == "rest"
+
+
+def test_a_mapping_must_recognise_at_least_one_action():
+    """Resolving a family alone let an invented action inherit its authority."""
+    with pytest.raises(ValidationError):
+        ConnectorVocabularyMappingV1(
+            platform_connector_type="officialboomi-X3979C-rest-prod", family="rest",
+            action_source=ActionSourceV1.OPERATION_COMPONENT, recognised_actions=(),
+        )
+
+
+def test_recognised_actions_have_one_canonical_form():
+    for bad in (("HEAD", "GET"), ("GET", "GET")):
+        with pytest.raises(ValidationError):
+            ConnectorVocabularyMappingV1(
+                platform_connector_type="x", family="rest",
+                action_source=ActionSourceV1.OPERATION_COMPONENT, recognised_actions=bad,
+            )
 
 
 def test_the_action_may_not_be_sourced_from_the_execution_record():
@@ -137,6 +157,6 @@ def test_the_action_may_not_be_sourced_from_the_execution_record():
     with pytest.raises(ValidationError) as err:
         ConnectorVocabularyMappingV1(
             platform_connector_type="officialboomi-X3979C-rest-prod", family="rest",
-            action_source=ActionSourceV1.EXECUTION_RECORD,
+            action_source=ActionSourceV1.EXECUTION_RECORD, recognised_actions=("GET",),
         )
     assert "one generic action" in str(err.value)

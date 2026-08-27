@@ -29,7 +29,10 @@ _REAL = "execution-1957bb8f-9a89-4254-b169-9ddbf41fddf8-2026.08.26"
 def test_a_capture_reports_the_connector_it_actually_used():
     summary = summarize(_C / "cap155-e4-head-status", "HEAD")
     assert summary.observed_connector_types == ("officialboomi-X3979C-rest-prod",)
-    assert summary.observed_method == "HEAD"
+    # A SET: a capture commonly declares more than one method (a source operation
+    # that fetches, plus the operation under test), and which is the subject is not
+    # determinable from the components alone.
+    assert summary.observed_methods == ("HEAD",)
 
 
 def test_the_declared_family_is_reconciled_against_the_capture():
@@ -106,3 +109,34 @@ def test_no_served_surface_hand_lists_the_actions():
     assert offenders == [], (
         "a served surface hand-lists monitoring actions and is already stale: {0}"
         .format(offenders))
+
+
+def test_an_unrecognised_action_gets_no_verdict_even_in_a_mapped_family():
+    """Resolving the family alone was the same fail-open, one level down."""
+    from boomi_mcp.connector_replay.registry import load_registry
+
+    vocabulary = load_registry().vocabulary
+    invented = CapabilityEvidenceRecordV1(
+        family="rest", action="BREW_COFFEE", side_effect=SideEffectV1.READ,
+        retry_safety=RetrySafetyV1.IDEMPOTENT, capture_digest="a" * 64,
+        execution_ids=(_REAL,),
+    )
+    assert ReplayRegistry(vocabulary, (invented,)).retry_safety(
+        "rest", "BREW_COFFEE") is RetrySafetyV1.UNVERIFIED
+
+    # The control: a RECOGNISED action still resolves, or the fix is just a denial.
+    real = invented.model_copy(update={"action": "HEAD"})
+    assert ReplayRegistry(vocabulary, (real,)).retry_safety(
+        "rest", "HEAD") is RetrySafetyV1.IDEMPOTENT
+
+
+def test_the_banked_patch_captures_can_still_be_ingested():
+    """Slice F depends on these; a reconciliation that blocks them is a regression.
+
+    An earlier version selected the operation component by FILENAME, and the PATCH
+    captures are named `component_op_patch.xml` — so their method read as absent and
+    reconciliation refused the very evidence the next slice needs.
+    """
+    rows = ingest(_ROOT, [_C / "cap155-e3b-patch-canonical"], family="rest",
+                  actions={"cap155-e3b-patch-canonical": "PATCH"})
+    assert (rows[0].family, rows[0].action) == ("rest", "PATCH")

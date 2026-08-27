@@ -255,16 +255,26 @@ def ingest(
                 f"observed {sorted(observed_families)!r}. The declared family is a "
                 "claim about the evidence, not the evidence"
             )
-        if summary.observed_method is None:
+        if not summary.observed_methods:
             raise IngestRefused(
-                f"{directory.name}: the operation component declares no method, so "
-                "the action cannot be reconciled"
+                f"{directory.name}: no component declares a method, so the action "
+                "cannot be reconciled against anything"
             )
-        if summary.observed_method != action:
+        if action not in summary.observed_methods:
             raise IngestRefused(
-                f"{directory.name}: declared action {action!r} does not match the "
-                f"operation component's {summary.observed_method!r}. Classification "
-                "would otherwise describe a method the capture never exercised"
+                f"{directory.name}: declared action {action!r} is not among the "
+                f"methods this capture's components declare {list(summary.observed_methods)!r}. "
+                "Classification would otherwise describe a method the capture never "
+                "exercised"
+            )
+        # Where a counterparty log exists it is the STRONGER evidence, and it must
+        # agree exactly: membership says the capture COULD have exercised this
+        # method, the log says it DID.
+        logged = {r.counterparty_method for r in summary.runs if r.counterparty_method}
+        if logged and logged != {action}:
+            raise IngestRefused(
+                f"{directory.name}: declared action {action!r} disagrees with the "
+                f"counterparty log, which recorded {sorted(logged)!r}"
             )
 
         side_effect, retry_safety = classify(summary)
