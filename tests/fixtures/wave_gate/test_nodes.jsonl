@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 10680, "minimum_collected": 10680, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 10781, "minimum_collected": 10781, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -10576,146 +10576,247 @@
 {"kind": "test", "id": "pytest-010575", "node_id": "tests/test_wave_gate_goldens.py::test_golden_manifest_row[golden-000068]", "state": "active"}
 {"kind": "test", "id": "pytest-010576", "node_id": "tests/test_wave_gate_goldens.py::test_golden_manifest_row[golden-000069]", "state": "active"}
 {"kind": "test", "id": "pytest-010577", "node_id": "tests/test_wave_gate_goldens.py::test_golden_manifest_row[golden-000070]", "state": "active"}
-{"kind": "test", "id": "pytest-010578", "node_id": "tests/test_wave_gate_goldens.py::test_golden_manifest_row[golden-000071]", "state": "active"}
-{"kind": "test", "id": "pytest-010579", "node_id": "tests/test_wave_gate_goldens.py::test_golden_manifest_row[golden-000072]", "state": "active"}
-{"kind": "test", "id": "pytest-010580", "node_id": "tests/test_wave_gate_goldens.py::test_golden_manifest_row[golden-000073]", "state": "active"}
-{"kind": "test", "id": "pytest-010581", "node_id": "tests/test_wave_gate_goldens.py::test_golden_manifest_row[golden-000074]", "state": "active"}
-{"kind": "test", "id": "pytest-010582", "node_id": "tests/test_process_ir_semantic_lineage.py::test_a_document_replacement_between_the_writer_and_the_call_is_refused[cache_get]", "state": "active"}
-{"kind": "test", "id": "pytest-010583", "node_id": "tests/test_process_ir_semantic_lineage.py::test_a_document_replacement_between_the_writer_and_the_call_is_refused[data_process_script]", "state": "active"}
-{"kind": "test", "id": "pytest-010584", "node_id": "tests/test_process_ir_semantic_lineage.py::test_a_document_replacement_between_the_writer_and_the_call_is_refused[data_process_split]", "state": "active"}
-{"kind": "test", "id": "pytest-010585", "node_id": "tests/test_process_ir_semantic_lineage.py::test_the_replacement_rule_does_not_over_fire", "state": "active"}
-{"kind": "test", "id": "pytest-010586", "node_id": "tests/test_process_ir_semantic_lineage.py::test_the_stream_replacing_authority_matches_the_served_contract", "state": "active"}
-{"kind": "test", "id": "pytest-010587", "node_id": "tests/test_process_ir_semantic_lineage.py::test_a_bound_paths_profile_ref_is_enumerated_as_a_component_reference", "state": "active"}
-{"kind": "test", "id": "pytest-010588", "node_id": "tests/test_process_ir_semantic_lineage.py::test_an_optional_component_ref_field_is_recognised", "state": "active"}
-{"kind": "test", "id": "pytest-010589", "node_id": "tests/test_process_ir_models.py::test_the_derived_reference_table_covers_exactly_the_node_vocabulary", "state": "active"}
-{"kind": "test", "id": "pytest-010590", "node_id": "tests/test_process_ir_models.py::test_the_connector_path_binding_profile_is_served[connector_call]", "state": "active"}
-{"kind": "test", "id": "pytest-010591", "node_id": "tests/test_process_ir_models.py::test_the_connector_path_binding_profile_is_served[target]", "state": "active"}
-{"kind": "test", "id": "pytest-010592", "node_id": "tests/test_process_ir_models.py::test_a_directly_held_reference_keeps_its_bare_name_and_required_flag", "state": "active"}
-{"kind": "test", "id": "pytest-010593", "node_id": "tests/test_process_ir_models.py::test_a_reference_reached_through_a_list_is_served_once_and_not_required", "state": "active"}
-{"kind": "test", "id": "pytest-010594", "node_id": "tests/test_process_ir_models.py::test_adding_a_reference_to_a_model_grows_the_served_list[required-True]", "state": "active"}
-{"kind": "test", "id": "pytest-010595", "node_id": "tests/test_process_ir_models.py::test_adding_a_reference_to_a_model_grows_the_served_list[optional-False]", "state": "active"}
-{"kind": "test", "id": "pytest-010596", "node_id": "tests/test_process_ir_models.py::test_the_walk_stops_at_nested_nodes_and_that_rule_is_load_bearing", "state": "active"}
-{"kind": "test", "id": "pytest-010597", "node_id": "tests/test_process_ir_models.py::test_the_served_contract_agrees_with_the_derived_table", "state": "active"}
-{"kind": "test", "id": "pytest-010598", "node_id": "tests/test_integration_build_basics_guards.py::test_a_canonical_property_name_is_linted_in_every_body_slot[branch_leg-body0]", "state": "active"}
-{"kind": "test", "id": "pytest-010599", "node_id": "tests/test_integration_build_basics_guards.py::test_a_canonical_property_name_is_linted_in_every_body_slot[decision_true_arm-body1]", "state": "active"}
-{"kind": "test", "id": "pytest-010600", "node_id": "tests/test_integration_build_basics_guards.py::test_a_canonical_property_name_is_linted_in_every_body_slot[decision_false_arm-body2]", "state": "active"}
-{"kind": "test", "id": "pytest-010601", "node_id": "tests/test_integration_build_basics_guards.py::test_a_canonical_property_name_is_linted_in_every_body_slot[try_body-body3]", "state": "active"}
-{"kind": "test", "id": "pytest-010602", "node_id": "tests/test_integration_build_basics_guards.py::test_a_canonical_property_name_is_linted_in_every_body_slot[catch_body-body4]", "state": "active"}
-{"kind": "test", "id": "pytest-010603", "node_id": "tests/test_integration_build_basics_guards.py::test_two_badly_named_writers_produce_two_warnings", "state": "active"}
-{"kind": "test", "id": "pytest-010604", "node_id": "tests/test_integration_build_basics_guards.py::test_conformant_canonical_names_are_clean", "state": "active"}
-{"kind": "test", "id": "pytest-010605", "node_id": "tests/test_integration_build_basics_guards.py::test_the_canonical_warning_names_the_process_component_and_is_byte_identical", "state": "active"}
-{"kind": "test", "id": "pytest-010606", "node_id": "tests/test_process_ir_models.py::test_the_property_write_walk_derives_its_models_from_the_shared_validator", "state": "active"}
-{"kind": "test", "id": "pytest-010607", "node_id": "tests/test_process_ir_models.py::test_a_new_property_writing_kind_is_picked_up_with_no_edit", "state": "active"}
-{"kind": "test", "id": "pytest-010608", "node_id": "tests/test_process_ir_models.py::test_a_collection_of_references_is_recognised_and_walked", "state": "active"}
-{"kind": "test", "id": "pytest-010609", "node_id": "tests/test_process_ir_models.py::test_the_widening_did_not_admit_a_shape_that_is_not_a_reference", "state": "active"}
-{"kind": "test", "id": "pytest-010610", "node_id": "tests/test_process_ir_models.py::test_every_admitted_reference_shape_is_also_walkable[bare-ComponentRefV1-$ref:A]", "state": "active"}
-{"kind": "test", "id": "pytest-010611", "node_id": "tests/test_process_ir_models.py::test_every_admitted_reference_shape_is_also_walkable[optional-Optional[ComponentRefV1]-$ref:A]", "state": "active"}
-{"kind": "test", "id": "pytest-010612", "node_id": "tests/test_process_ir_models.py::test_every_admitted_reference_shape_is_also_walkable[tuple-Tuple[ComponentRefV1, ...]-value2]", "state": "active"}
-{"kind": "test", "id": "pytest-010613", "node_id": "tests/test_process_ir_models.py::test_every_admitted_reference_shape_is_also_walkable[list-List[ComponentRefV1]-value3]", "state": "active"}
-{"kind": "test", "id": "pytest-010614", "node_id": "tests/test_process_ir_models.py::test_a_shape_the_walk_cannot_resolve_is_not_admitted[Tuple[Tuple[ComponentRefV1, ...], ...]]", "state": "active"}
-{"kind": "test", "id": "pytest-010615", "node_id": "tests/test_process_ir_models.py::test_a_shape_the_walk_cannot_resolve_is_not_admitted[Dict[str, ComponentRefV1]]", "state": "active"}
-{"kind": "test", "id": "pytest-010616", "node_id": "tests/test_process_ir_models.py::test_a_shape_the_walk_cannot_resolve_is_not_admitted[Mapping[str, ComponentRefV1]]", "state": "active"}
-{"kind": "test", "id": "pytest-010617", "node_id": "tests/test_process_ir_models.py::test_a_named_tuple_that_is_not_all_references_is_refused", "state": "active"}
-{"kind": "test", "id": "pytest-010618", "node_id": "tests/test_process_ir_models.py::test_a_one_shot_value_is_refused_by_the_value_side_too", "state": "active"}
-{"kind": "test", "id": "pytest-010619", "node_id": "tests/test_process_ir_models.py::test_a_shape_the_walk_cannot_resolve_is_not_admitted[Iterable[ComponentRefV1]]", "state": "active"}
-{"kind": "test", "id": "pytest-010620", "node_id": "tests/test_process_ir_models.py::test_an_admitted_reference_field_survives_being_read[bare-ComponentRefV1-$ref:A]", "state": "active"}
-{"kind": "test", "id": "pytest-010621", "node_id": "tests/test_process_ir_models.py::test_an_admitted_reference_field_survives_being_read[list-List[ComponentRefV1]-value3]", "state": "active"}
-{"kind": "test", "id": "pytest-010622", "node_id": "tests/test_process_ir_models.py::test_an_admitted_reference_field_survives_being_read[optional-Optional[ComponentRefV1]-$ref:A]", "state": "active"}
-{"kind": "test", "id": "pytest-010623", "node_id": "tests/test_process_ir_models.py::test_an_admitted_reference_field_survives_being_read[tuple-Tuple[ComponentRefV1, ...]-value2]", "state": "active"}
-{"kind": "test", "id": "pytest-010624", "node_id": "tests/test_process_ir_models.py::test_a_shape_the_walk_cannot_resolve_is_not_admitted[FrozenSet[ComponentRefV1]]", "state": "active"}
-{"kind": "test", "id": "pytest-010625", "node_id": "tests/test_process_ir_models.py::test_a_shape_the_walk_cannot_resolve_is_not_admitted[Set[ComponentRefV1]]", "state": "active"}
-{"kind": "test", "id": "pytest-010626", "node_id": "tests/test_process_ir_models.py::test_an_admitted_reference_field_survives_being_read[deque-Deque[ComponentRefV1]-value5]", "state": "active"}
-{"kind": "test", "id": "pytest-010627", "node_id": "tests/test_process_ir_models.py::test_an_admitted_reference_field_survives_being_read[optional_sequence-Optional[Sequence[ComponentRefV1]]-value7]", "state": "active"}
-{"kind": "test", "id": "pytest-010628", "node_id": "tests/test_process_ir_models.py::test_an_admitted_reference_field_survives_being_read[optional_tuple-Optional[Tuple[ComponentRefV1, ...]]-value6]", "state": "active"}
-{"kind": "test", "id": "pytest-010629", "node_id": "tests/test_process_ir_models.py::test_an_admitted_reference_field_survives_being_read[sequence-Sequence[ComponentRefV1]-value4]", "state": "active"}
-{"kind": "test", "id": "pytest-010630", "node_id": "tests/test_process_ir_models.py::test_every_admitted_reference_shape_is_also_walkable[deque-Deque[ComponentRefV1]-value5]", "state": "active"}
-{"kind": "test", "id": "pytest-010631", "node_id": "tests/test_process_ir_models.py::test_every_admitted_reference_shape_is_also_walkable[optional_sequence-Optional[Sequence[ComponentRefV1]]-value7]", "state": "active"}
-{"kind": "test", "id": "pytest-010632", "node_id": "tests/test_process_ir_models.py::test_every_admitted_reference_shape_is_also_walkable[optional_tuple-Optional[Tuple[ComponentRefV1, ...]]-value6]", "state": "active"}
-{"kind": "test", "id": "pytest-010633", "node_id": "tests/test_process_ir_models.py::test_every_admitted_reference_shape_is_also_walkable[sequence-Sequence[ComponentRefV1]-value4]", "state": "active"}
-{"kind": "test", "id": "pytest-010634", "node_id": "tests/test_process_ir_models.py::test_no_model_declares_a_reference_in_an_unsupported_shape", "state": "active"}
-{"kind": "test", "id": "pytest-010635", "node_id": "tests/test_process_ir_models.py::test_the_guard_refuses_each_unsupported_shape[Dict[str, ComponentRefV1]]", "state": "active"}
-{"kind": "test", "id": "pytest-010636", "node_id": "tests/test_process_ir_models.py::test_the_guard_refuses_each_unsupported_shape[FrozenSet[ComponentRefV1]]", "state": "active"}
-{"kind": "test", "id": "pytest-010637", "node_id": "tests/test_process_ir_models.py::test_the_guard_refuses_each_unsupported_shape[Iterable[ComponentRefV1]]", "state": "active"}
-{"kind": "test", "id": "pytest-010638", "node_id": "tests/test_process_ir_models.py::test_the_guard_refuses_each_unsupported_shape[Set[ComponentRefV1]]", "state": "active"}
-{"kind": "test", "id": "pytest-010639", "node_id": "tests/test_process_ir_models.py::test_the_guard_refuses_each_unsupported_shape[Tuple[ComponentRefV1, str]]", "state": "active"}
-{"kind": "test", "id": "pytest-010640", "node_id": "tests/test_process_ir_models.py::test_the_guard_refuses_each_unsupported_shape[Tuple[Tuple[ComponentRefV1, ...], ...]]", "state": "active"}
-{"kind": "test", "id": "pytest-010641", "node_id": "tests/test_process_ir_models.py::test_the_guard_refuses_the_named_tuple_shapes_that_emit_WRONG_references", "state": "active"}
-{"kind": "test", "id": "pytest-010642", "node_id": "tests/test_process_ir_models.py::test_an_arbitrary_class_cannot_carry_a_reference_past_the_models", "state": "active"}
-{"kind": "test", "id": "pytest-010643", "node_id": "tests/test_process_ir_models.py::test_pydantic_resolves_field_annotations_under_postponed_evaluation", "state": "active"}
-{"kind": "test", "id": "pytest-010644", "node_id": "tests/test_process_ir_models.py::test_the_shape_guard_does_not_depend_on_resolving_annotations", "state": "active"}
-{"kind": "test", "id": "pytest-010645", "node_id": "tests/test_process_ir_models.py::test_the_shape_guard_does_not_refuse_an_ordinary_field[StopNodeV1]", "state": "active"}
-{"kind": "test", "id": "pytest-010646", "node_id": "tests/test_process_ir_models.py::test_the_shape_guard_does_not_refuse_an_ordinary_field[bool]", "state": "active"}
-{"kind": "test", "id": "pytest-010647", "node_id": "tests/test_process_ir_models.py::test_the_shape_guard_does_not_refuse_an_ordinary_field[int]", "state": "active"}
-{"kind": "test", "id": "pytest-010648", "node_id": "tests/test_process_ir_models.py::test_the_shape_guard_does_not_refuse_an_ordinary_field[str]", "state": "active"}
-{"kind": "test", "id": "pytest-010649", "node_id": "tests/test_process_ir_models.py::test_the_guard_refuses_an_annotation_it_cannot_reason_about[any]", "state": "active"}
-{"kind": "test", "id": "pytest-010650", "node_id": "tests/test_process_ir_models.py::test_the_guard_refuses_an_annotation_it_cannot_reason_about[forward_reference]", "state": "active"}
-{"kind": "test", "id": "pytest-010651", "node_id": "tests/test_process_ir_models.py::test_the_guard_refuses_an_annotation_it_cannot_reason_about[type_variable]", "state": "active"}
-{"kind": "test", "id": "pytest-010652", "node_id": "tests/test_process_ir_models.py::test_the_guard_universe_is_derived_from_reachability_not_a_snapshot", "state": "active"}
-{"kind": "test", "id": "pytest-010653", "node_id": "tests/test_process_ir_models.py::test_no_model_in_the_guard_universe_subclasses_another", "state": "active"}
-{"kind": "test", "id": "pytest-010654", "node_id": "tests/test_archive_gate_round.py::test_a_commit_review_round_IS_indexed", "state": "active"}
-{"kind": "test", "id": "pytest-010655", "node_id": "tests/test_archive_gate_round.py::test_a_round_whose_reviewed_sha_disagrees_is_not_recorded_as_completed", "state": "active"}
-{"kind": "test", "id": "pytest-010656", "node_id": "tests/test_archive_gate_round.py::test_a_wave_gate_round_is_archived_but_never_indexed", "state": "active"}
-{"kind": "test", "id": "pytest-010657", "node_id": "tests/test_archive_gate_round.py::test_the_machine_local_sidecars_are_never_archived[cache-dir]", "state": "active"}
-{"kind": "test", "id": "pytest-010658", "node_id": "tests/test_archive_gate_round.py::test_the_machine_local_sidecars_are_never_archived[missing-probes]", "state": "active"}
-{"kind": "test", "id": "pytest-010659", "node_id": "tests/test_process_ir_semantic_lineage.py::test_a_binding_naming_a_genuinely_different_property_still_refuses", "state": "active"}
-{"kind": "test", "id": "pytest-010660", "node_id": "tests/test_process_ir_semantic_lineage.py::test_a_bound_path_composed_from_an_unestablished_current_value_is_refused", "state": "active"}
-{"kind": "test", "id": "pytest-010661", "node_id": "tests/test_process_ir_semantic_lineage.py::test_a_bound_path_may_append_to_a_value_an_earlier_step_established", "state": "active"}
-{"kind": "test", "id": "pytest-010662", "node_id": "tests/test_process_ir_semantic_lineage.py::test_several_sources_aliased_to_one_profile_are_one_profile", "state": "active"}
-{"kind": "test", "id": "pytest-010663", "node_id": "tests/test_process_ir_semantic_lineage.py::test_surrounding_whitespace_does_not_change_which_property_is_named[ P - P ]", "state": "active"}
-{"kind": "test", "id": "pytest-010664", "node_id": "tests/test_process_ir_semantic_lineage.py::test_surrounding_whitespace_does_not_change_which_property_is_named[ P -P]", "state": "active"}
-{"kind": "test", "id": "pytest-010665", "node_id": "tests/test_process_ir_semantic_lineage.py::test_surrounding_whitespace_does_not_change_which_property_is_named[P- P ]", "state": "active"}
-{"kind": "test", "id": "pytest-010666", "node_id": "tests/test_process_ir_semantic_lineage.py::test_surrounding_whitespace_does_not_change_which_property_is_named[P-P]", "state": "active"}
-{"kind": "test", "id": "pytest-010667", "node_id": "tests/test_process_ir_semantic_lineage.py::test_the_current_read_is_recognised_only_for_a_BOUND_path", "state": "active"}
-{"kind": "test", "id": "pytest-010668", "node_id": "tests/test_process_ir_semantic_lineage.py::test_two_refs_naming_DIFFERENT_profile_components_still_mismatch[$ref:PROF-$ref:PROF_OTHER-binding names a different component]", "state": "active"}
-{"kind": "test", "id": "pytest-010669", "node_id": "tests/test_process_ir_semantic_lineage.py::test_two_refs_naming_DIFFERENT_profile_components_still_mismatch[$ref:PROF_OTHER-$ref:PROF-writer names a different component]", "state": "active"}
-{"kind": "test", "id": "pytest-010670", "node_id": "tests/test_process_ir_semantic_lineage.py::test_two_refs_naming_one_profile_component_agree[$ref:PROF-$ref:PROF_ALIAS]", "state": "active"}
-{"kind": "test", "id": "pytest-010671", "node_id": "tests/test_process_ir_semantic_lineage.py::test_two_refs_naming_one_profile_component_agree[$ref:PROF_ALIAS-$ref:PROF]", "state": "active"}
-{"kind": "test", "id": "pytest-010672", "node_id": "tests/test_process_ir_semantic_lineage.py::test_the_served_current_description_states_the_rule_at_the_scope_it_holds", "state": "active"}
-{"kind": "test", "id": "pytest-010673", "node_id": "tests/test_process_ir_semantic_lineage.py::test_a_current_value_does_not_survive_a_document_replacement[cache_get]", "state": "active"}
-{"kind": "test", "id": "pytest-010674", "node_id": "tests/test_process_ir_semantic_lineage.py::test_a_current_value_does_not_survive_a_document_replacement[data_process_script]", "state": "active"}
-{"kind": "test", "id": "pytest-010675", "node_id": "tests/test_process_ir_semantic_lineage.py::test_a_current_value_does_not_survive_a_document_replacement[data_process_split]", "state": "active"}
-{"kind": "test", "id": "pytest-010676", "node_id": "tests/test_process_ir_semantic_lineage.py::test_a_replacement_does_not_refuse_a_writer_that_needs_no_earlier_value[cache_get]", "state": "active"}
-{"kind": "test", "id": "pytest-010677", "node_id": "tests/test_process_ir_semantic_lineage.py::test_a_replacement_does_not_refuse_a_writer_that_needs_no_earlier_value[data_process_script]", "state": "active"}
-{"kind": "test", "id": "pytest-010678", "node_id": "tests/test_process_ir_semantic_lineage.py::test_a_replacement_does_not_refuse_a_writer_that_needs_no_earlier_value[data_process_split]", "state": "active"}
-{"kind": "test", "id": "pytest-010679", "node_id": "tests/test_process_ir_semantic_lineage.py::test_appending_to_a_value_with_no_replacement_between_still_compiles", "state": "active"}
-{"kind": "test", "id": "pytest-010680", "node_id": "tests/test_process_ir_semantic_lineage.py::test_a_caller_declared_entry_value_establishes_one_too", "state": "active"}
-{"kind": "test", "id": "pytest-010681", "node_id": "tests/test_process_ir_semantic_lineage.py::test_a_contract_declared_write_establishes_a_value_current_may_append_to", "state": "active"}
-{"kind": "test", "id": "pytest-010682", "node_id": "tests/test_process_ir_semantic_lineage.py::test_a_declaring_node_that_replaces_the_stream_keeps_its_own_write", "state": "active"}
-{"kind": "test", "id": "pytest-010683", "node_id": "tests/test_process_ir_authoring_contract_parity.py::test_an_action_family_with_no_capability_row_is_caught", "state": "active"}
-{"kind": "test", "id": "pytest-010684", "node_id": "tests/test_process_ir_authoring_contract_parity.py::test_an_unused_family_row_is_caught", "state": "active"}
-{"kind": "test", "id": "pytest-010685", "node_id": "tests/test_process_ir_authoring_contract_parity.py::test_every_action_family_has_a_capability_row_and_none_is_unused", "state": "active"}
-{"kind": "test", "id": "pytest-010686", "node_id": "tests/test_process_ir_authoring_contract_parity.py::test_every_published_action_row_carries_the_joined_family_fields", "state": "active"}
-{"kind": "test", "id": "pytest-010687", "node_id": "tests/test_process_ir_authoring_contract_parity.py::test_the_public_field_map_is_total_over_the_joined_fields", "state": "active"}
-{"kind": "test", "id": "pytest-010688", "node_id": "tests/test_process_ir_authoring_contract_parity.py::test_the_public_names_do_not_collide", "state": "active"}
-{"kind": "test", "id": "pytest-010689", "node_id": "tests/test_process_ir_authoring_contract_parity.py::test_the_rest_family_is_the_only_one_declaring_a_bindable_location", "state": "active"}
-{"kind": "test", "id": "pytest-010690", "node_id": "tests/test_process_ir_semantic_lineage.py::test_a_current_value_survives_a_replacement_that_keeps_properties[message]", "state": "active"}
-{"kind": "test", "id": "pytest-010691", "node_id": "tests/test_process_ir_semantic_lineage.py::test_a_replacement_that_KEEPS_the_properties_does_not_invalidate_the_path[message]", "state": "active"}
-{"kind": "test", "id": "pytest-010692", "node_id": "tests/test_process_ir_semantic_lineage.py::test_the_bound_path_diagnostic_message_covers_every_way_it_fires", "state": "active"}
-{"kind": "test", "id": "pytest-010693", "node_id": "tests/test_process_ir_semantic_lineage.py::test_the_bound_path_diagnostic_names_the_action_that_actually_clears_it", "state": "active"}
-{"kind": "test", "id": "pytest-010694", "node_id": "tests/test_process_ir_semantic_lineage.py::test_the_probe_behind_that_message_still_contradicts_the_old_wording", "state": "active"}
-{"kind": "test", "id": "pytest-010695", "node_id": "tests/test_process_ir_semantic_lineage.py::test_the_served_retry_description_states_the_escape_this_slice_added", "state": "active"}
-{"kind": "test", "id": "pytest-010696", "node_id": "tests/test_process_ir_semantic_lineage.py::test_the_survival_table_is_pinned_to_what_was_measured", "state": "active"}
-{"kind": "test", "id": "pytest-010697", "node_id": "tests/test_error_taxonomy.py::test_issue_155_owns_exactly_these_codes_and_they_are_fully_specified", "state": "active"}
-{"kind": "test", "id": "pytest-010698", "node_id": "tests/test_process_ir_error_handling.py::test_allow_duplicates_lifts_the_source_reexecution_refusal", "state": "active"}
-{"kind": "test", "id": "pytest-010699", "node_id": "tests/test_process_ir_error_handling.py::test_authored_forbid_behaves_exactly_as_the_default_does", "state": "active"}
-{"kind": "test", "id": "pytest-010700", "node_id": "tests/test_process_ir_error_handling.py::test_the_default_policy_still_refuses_at_every_positive_count[1]", "state": "active"}
-{"kind": "test", "id": "pytest-010701", "node_id": "tests/test_process_ir_error_handling.py::test_the_default_policy_still_refuses_at_every_positive_count[3]", "state": "active"}
-{"kind": "test", "id": "pytest-010702", "node_id": "tests/test_process_ir_error_handling.py::test_the_default_policy_still_refuses_at_every_positive_count[5]", "state": "active"}
-{"kind": "test", "id": "pytest-010703", "node_id": "tests/test_process_ir_error_handling.py::test_the_policy_does_not_lift_the_write_safety_refusal", "state": "active"}
-{"kind": "test", "id": "pytest-010704", "node_id": "tests/test_process_ir_error_handling.py::test_the_policy_is_refused_at_retry_zero", "state": "active"}
-{"kind": "test", "id": "pytest-010705", "node_id": "tests/test_process_ir_error_handling.py::test_the_policy_is_refused_on_a_connector_scope", "state": "active"}
-{"kind": "test", "id": "pytest-010706", "node_id": "tests/test_process_ir_error_handling.py::test_the_policy_survives_a_dump_and_reparse_in_both_states", "state": "active"}
-{"kind": "test", "id": "pytest-010707", "node_id": "tests/test_process_ir_semantic_lineage.py::test_a_bound_call_is_admitted_as_a_control_body_entry", "state": "active"}
-{"kind": "test", "id": "pytest-010708", "node_id": "tests/test_process_ir_semantic_lineage.py::test_a_bound_connector_call_inherits_the_existing_placement_rules", "state": "active"}
-{"kind": "test", "id": "pytest-010709", "node_id": "tests/test_process_ir_semantic_lineage.py::test_a_bound_target_inherits_the_existing_placement_rules", "state": "active"}
-{"kind": "test", "id": "pytest-010710", "node_id": "tests/test_process_ir_semantic_lineage.py::test_the_fan_out_witnesses_are_not_vacuous", "state": "active"}
-{"kind": "test", "id": "pytest-010711", "node_id": "tests/test_archive_gate_round.py::test_a_gate_round_whose_prompt_is_not_THE_attested_one_is_REFUSED", "state": "active"}
-{"kind": "test", "id": "pytest-010712", "node_id": "tests/test_archive_gate_round.py::test_a_gate_round_with_no_prompt_is_REFUSED_before_anything_is_recorded", "state": "active"}
-{"kind": "test", "id": "pytest-010713", "node_id": "tests/test_archive_gate_round.py::test_a_gate_round_with_the_attested_prompt_is_archived", "state": "active"}
-{"kind": "test", "id": "pytest-010714", "node_id": "tests/test_archive_gate_round.py::test_an_unattested_round_still_requires_a_prompt_to_be_present", "state": "active"}
-{"kind": "test", "id": "pytest-010715", "node_id": "tests/test_error_taxonomy.py::test_each_dynamic_path_code_is_produced_by_a_real_document[PROCESS_IR_CAPABILITY_DYNAMIC_PATH_UNSUPPORTED]", "state": "active"}
-{"kind": "test", "id": "pytest-010716", "node_id": "tests/test_error_taxonomy.py::test_each_dynamic_path_code_is_produced_by_a_real_document[PROCESS_IR_SEMANTIC_DYNAMIC_PATH_DDP_NOT_ESTABLISHED]", "state": "active"}
-{"kind": "test", "id": "pytest-010717", "node_id": "tests/test_error_taxonomy.py::test_each_dynamic_path_code_is_produced_by_a_real_document[PROCESS_IR_SEMANTIC_DYNAMIC_PATH_NO_DYNAMIC_SEGMENT]", "state": "active"}
-{"kind": "test", "id": "pytest-010718", "node_id": "tests/test_error_taxonomy.py::test_each_dynamic_path_code_is_produced_by_a_real_document[PROCESS_IR_SEMANTIC_DYNAMIC_PATH_PROFILE_BINDING_MISMATCH]", "state": "active"}
-{"kind": "test", "id": "pytest-010719", "node_id": "tests/test_error_taxonomy.py::test_each_replay_policy_code_is_produced_by_a_real_document[PROCESS_IR_SEMANTIC_RETRY_SOURCE_POLICY_REQUIRES_RETRY]", "state": "active"}
-{"kind": "test", "id": "pytest-010720", "node_id": "tests/test_error_taxonomy.py::test_each_replay_policy_code_is_produced_by_a_real_document[PROCESS_IR_SEMANTIC_RETRY_SOURCE_POLICY_SCOPE_INVALID]", "state": "active"}
+{"kind": "test", "id": "pytest-010578", "node_id": "tests/test_archive_gate_round.py::test_a_wave_gate_round_is_archived_but_never_indexed", "state": "active"}
+{"kind": "test", "id": "pytest-010579", "node_id": "tests/test_archive_gate_round.py::test_a_commit_review_round_IS_indexed", "state": "active"}
+{"kind": "test", "id": "pytest-010580", "node_id": "tests/test_archive_gate_round.py::test_the_machine_local_sidecars_are_never_archived[cache-dir]", "state": "active"}
+{"kind": "test", "id": "pytest-010581", "node_id": "tests/test_archive_gate_round.py::test_the_machine_local_sidecars_are_never_archived[missing-probes]", "state": "active"}
+{"kind": "test", "id": "pytest-010582", "node_id": "tests/test_archive_gate_round.py::test_a_round_whose_reviewed_sha_disagrees_is_not_recorded_as_completed", "state": "active"}
+{"kind": "test", "id": "pytest-010583", "node_id": "tests/test_archive_gate_round.py::test_a_gate_round_with_the_attested_prompt_is_archived", "state": "active"}
+{"kind": "test", "id": "pytest-010584", "node_id": "tests/test_archive_gate_round.py::test_a_gate_round_with_no_prompt_is_REFUSED_before_anything_is_recorded", "state": "active"}
+{"kind": "test", "id": "pytest-010585", "node_id": "tests/test_archive_gate_round.py::test_a_gate_round_whose_prompt_is_not_THE_attested_one_is_REFUSED", "state": "active"}
+{"kind": "test", "id": "pytest-010586", "node_id": "tests/test_archive_gate_round.py::test_an_unattested_round_still_requires_a_prompt_to_be_present", "state": "active"}
+{"kind": "test", "id": "pytest-010587", "node_id": "tests/test_archive_gate_round.py::test_the_fixture_matches_a_real_attestation_rather_than_an_invented_one", "state": "active"}
+{"kind": "test", "id": "pytest-010588", "node_id": "tests/test_archive_gate_round.py::test_a_prompts_path_holding_only_directories_is_REFUSED", "state": "active"}
+{"kind": "test", "id": "pytest-010589", "node_id": "tests/test_archive_gate_round.py::test_the_guard_is_not_inert_against_a_REAL_attestation", "state": "active"}
+{"kind": "test", "id": "pytest-010590", "node_id": "tests/test_archive_gate_round.py::test_every_architect_row_path_resolves_in_a_REAL_attestation", "state": "active"}
+{"kind": "test", "id": "pytest-010591", "node_id": "tests/test_archive_gate_round.py::test_the_mapping_covers_what_the_row_needs_and_nothing_it_invents", "state": "active"}
+{"kind": "test", "id": "pytest-010592", "node_id": "tests/test_archive_gate_round.py::test_an_attestation_the_archiver_cannot_READ_is_refused[<lambda>-prompt block renamed away]", "state": "active"}
+{"kind": "test", "id": "pytest-010593", "node_id": "tests/test_archive_gate_round.py::test_an_attestation_the_archiver_cannot_READ_is_refused[<lambda>-digest key dropped]", "state": "active"}
+{"kind": "test", "id": "pytest-010594", "node_id": "tests/test_archive_gate_round.py::test_an_attestation_the_archiver_cannot_READ_is_refused[<lambda>-digest present but null]", "state": "active"}
+{"kind": "test", "id": "pytest-010595", "node_id": "tests/test_archive_gate_round.py::test_an_attestation_the_archiver_cannot_READ_is_refused[<lambda>-prompt block is a string, not a dict]", "state": "active"}
+{"kind": "test", "id": "pytest-010596", "node_id": "tests/test_archive_gate_round.py::test_an_attestation_the_archiver_cannot_READ_is_refused[<lambda>-turn status dropped]", "state": "active"}
+{"kind": "test", "id": "pytest-010597", "node_id": "tests/test_archive_gate_round.py::test_an_UNMUTATED_real_attestation_still_archives", "state": "active"}
+{"kind": "test", "id": "pytest-010598", "node_id": "tests/test_archive_gate_round.py::test_a_stale_index_row_is_recomputed_from_the_archived_bytes", "state": "active"}
+{"kind": "test", "id": "pytest-010599", "node_id": "tests/test_archive_gate_round.py::test_rederiving_never_promotes_a_failed_round_into_a_completion", "state": "active"}
+{"kind": "test", "id": "pytest-010600", "node_id": "tests/test_archive_gate_round.py::test_rederive_does_not_need_the_flags_that_name_a_single_round", "state": "active"}
+{"kind": "test", "id": "pytest-010601", "node_id": "tests/test_archive_gate_round.py::test_a_non_STRING_attested_digest_refuses_instead_of_raising[junk0-a list \\u2014 unhashable in the membership test]", "state": "active"}
+{"kind": "test", "id": "pytest-010602", "node_id": "tests/test_archive_gate_round.py::test_a_non_STRING_attested_digest_refuses_instead_of_raising[12345-an integer \\u2014 not subscriptable in the refusal message]", "state": "active"}
+{"kind": "test", "id": "pytest-010603", "node_id": "tests/test_archive_gate_round.py::test_a_non_STRING_attested_digest_refuses_instead_of_raising[junk2-an object \\u2014 unhashable too]", "state": "active"}
+{"kind": "test", "id": "pytest-010604", "node_id": "tests/test_archive_gate_round.py::test_a_non_STRING_attested_digest_refuses_instead_of_raising[True-a bool, which is not a digest however it compares]", "state": "active"}
+{"kind": "test", "id": "pytest-010605", "node_id": "tests/test_archive_gate_round.py::test_rederiving_an_index_this_script_did_not_write_is_REFUSED", "state": "active"}
+{"kind": "test", "id": "pytest-010606", "node_id": "tests/test_archive_gate_round.py::test_rederiving_never_blanks_a_value_it_cannot_source", "state": "active"}
+{"kind": "test", "id": "pytest-010607", "node_id": "tests/test_archive_gate_round.py::test_rederiving_does_not_resurrect_a_sha_the_bytes_derive_as_ABSENT", "state": "active"}
+{"kind": "test", "id": "pytest-010608", "node_id": "tests/test_archive_gate_round.py::test_a_richer_value_under_a_SHARED_key_is_refused_not_narrowed", "state": "active"}
+{"kind": "test", "id": "pytest-010609", "node_id": "tests/test_archive_gate_round.py::test_rederiving_an_unchanged_archive_leaves_its_CHECKSUMS_alone", "state": "active"}
+{"kind": "test", "id": "pytest-010610", "node_id": "tests/test_archive_gate_round.py::test_an_index_whose_first_line_is_a_ROW_is_refused", "state": "active"}
+{"kind": "test", "id": "pytest-010611", "node_id": "tests/test_archive_gate_round.py::test_a_missing_or_empty_index_says_what_to_do", "state": "active"}
+{"kind": "test", "id": "pytest-010612", "node_id": "tests/test_archive_gate_round.py::test_a_whitespace_only_attestation_fact_is_not_RESOLVED[   ]", "state": "active"}
+{"kind": "test", "id": "pytest-010613", "node_id": "tests/test_archive_gate_round.py::test_a_whitespace_only_attestation_fact_is_not_RESOLVED[\\t]", "state": "active"}
+{"kind": "test", "id": "pytest-010614", "node_id": "tests/test_archive_gate_round.py::test_a_whitespace_only_attestation_fact_is_not_RESOLVED[\\n]", "state": "active"}
+{"kind": "test", "id": "pytest-010615", "node_id": "tests/test_archive_gate_round.py::test_a_whitespace_only_attestation_fact_is_not_RESOLVED[ \\xa0 ]", "state": "active"}
+{"kind": "test", "id": "pytest-010616", "node_id": "tests/test_archive_gate_round.py::test_every_field_derived_as_a_CONSTANT_null_is_listed_unsourceable", "state": "active"}
+{"kind": "test", "id": "pytest-010617", "node_id": "tests/test_archive_gate_round.py::test_a_recorded_verdict_on_a_commit_review_row_survives_rederivation", "state": "active"}
+{"kind": "test", "id": "pytest-010618", "node_id": "tests/test_archive_gate_round.py::test_canonicalising_the_index_also_refreshes_the_CHECKSUMS", "state": "active"}
+{"kind": "test", "id": "pytest-010619", "node_id": "tests/test_archive_gate_round.py::test_an_already_canonical_index_is_not_rewritten_at_all", "state": "active"}
+{"kind": "test", "id": "pytest-010620", "node_id": "tests/test_archive_gate_round.py::test_a_file_a_ROW_references_cannot_vanish_unreported", "state": "active"}
+{"kind": "test", "id": "pytest-010621", "node_id": "tests/test_archive_gate_round.py::test_a_file_NO_ROW_references_cannot_vanish_unreported_either", "state": "active"}
+{"kind": "test", "id": "pytest-010622", "node_id": "tests/test_archive_gate_round.py::test_a_STRAY_file_is_reported_rather_than_recorded_as_evidence", "state": "active"}
+{"kind": "test", "id": "pytest-010623", "node_id": "tests/test_archive_gate_round.py::test_ARCHIVING_a_round_may_add_names_but_still_never_loses_one", "state": "active"}
+{"kind": "test", "id": "pytest-010624", "node_id": "tests/test_archive_gate_round.py::test_a_CRLF_index_is_canonicalised_rather_than_compared_as_text", "state": "active"}
+{"kind": "test", "id": "pytest-010625", "node_id": "tests/test_archive_gate_round.py::test_a_file_whose_BYTES_changed_under_the_same_path_is_refused", "state": "active"}
+{"kind": "test", "id": "pytest-010626", "node_id": "tests/test_archive_gate_round.py::test_ARCHIVING_refuses_before_the_destination_exists", "state": "active"}
+{"kind": "test", "id": "pytest-010627", "node_id": "tests/test_archive_gate_round.py::test_a_PRE_EXISTING_unlisted_file_is_not_laundered_by_archiving_a_round", "state": "active"}
+{"kind": "test", "id": "pytest-010628", "node_id": "tests/test_archive_gate_round.py::test_accepting_a_foreign_file_is_RECORDED_not_silent", "state": "active"}
+{"kind": "test", "id": "pytest-010629", "node_id": "tests/test_archive_gate_round.py::test_a_NAME_that_is_a_PATH_is_refused[../ESCAPED-escapes the kind directory]", "state": "active"}
+{"kind": "test", "id": "pytest-010630", "node_id": "tests/test_archive_gate_round.py::test_a_NAME_that_is_a_PATH_is_refused[../../ESCAPED2-escapes the issue archive entirely]", "state": "active"}
+{"kind": "test", "id": "pytest-010631", "node_id": "tests/test_archive_gate_round.py::test_a_NAME_that_is_a_PATH_is_refused[a/b-a nested path, not a name]", "state": "active"}
+{"kind": "test", "id": "pytest-010632", "node_id": "tests/test_archive_gate_round.py::test_a_NAME_that_is_a_PATH_is_refused[..-the parent itself]", "state": "active"}
+{"kind": "test", "id": "pytest-010633", "node_id": "tests/test_archive_gate_round.py::test_a_NAME_that_is_a_PATH_is_refused[-empty]", "state": "active"}
+{"kind": "test", "id": "pytest-010634", "node_id": "tests/test_archive_gate_round.py::test_a_name_that_IS_a_single_component_still_works", "state": "active"}
+{"kind": "test", "id": "pytest-010635", "node_id": "tests/test_archive_gate_round.py::test_a_failed_archive_is_ROLLED_BACK_and_the_retry_succeeds", "state": "active"}
+{"kind": "test", "id": "pytest-010636", "node_id": "tests/test_archive_gate_round.py::test_a_file_inside_an_ARCHIVED_round_is_not_absorbable", "state": "active"}
+{"kind": "test", "id": "pytest-010637", "node_id": "tests/test_archive_gate_round.py::test_a_failure_while_COPYING_leaves_the_destination_untouched", "state": "active"}
+{"kind": "test", "id": "pytest-010638", "node_id": "tests/test_archive_gate_round.py::test_the_manifest_is_written_ATOMICALLY", "state": "active"}
+{"kind": "test", "id": "pytest-010639", "node_id": "tests/test_archive_gate_round.py::test_accept_new_with_rederive_is_REJECTED", "state": "active"}
+{"kind": "test", "id": "pytest-010640", "node_id": "tests/test_archive_gate_round.py::test_a_rollback_that_cannot_COMPLETE_says_so_instead_of_claiming_success", "state": "active"}
+{"kind": "test", "id": "pytest-010641", "node_id": "tests/test_archive_gate_round.py::test_an_archive_with_NO_INDEX_is_refused_rather_than_bootstrapped", "state": "active"}
+{"kind": "test", "id": "pytest-010642", "node_id": "tests/test_archive_gate_round.py::test_the_ISSUE_is_a_number_not_a_path[999/../issue-888]", "state": "active"}
+{"kind": "test", "id": "pytest-010643", "node_id": "tests/test_archive_gate_round.py::test_the_ISSUE_is_a_number_not_a_path[999/../../../../..]", "state": "active"}
+{"kind": "test", "id": "pytest-010644", "node_id": "tests/test_archive_gate_round.py::test_the_ISSUE_is_a_number_not_a_path[abc]", "state": "active"}
+{"kind": "test", "id": "pytest-010645", "node_id": "tests/test_archive_gate_round.py::test_the_ISSUE_is_a_number_not_a_path[9 9]", "state": "active"}
+{"kind": "test", "id": "pytest-010646", "node_id": "tests/test_archive_gate_round.py::test_a_name_the_MANIFEST_cannot_record_is_refused", "state": "active"}
+{"kind": "test", "id": "pytest-010647", "node_id": "tests/test_archive_gate_round.py::test_an_archive_with_NO_manifest_still_accounts_for_what_is_in_it", "state": "active"}
+{"kind": "test", "id": "pytest-010648", "node_id": "tests/test_archive_gate_round.py::test_a_refusal_does_not_remove_a_directory_it_did_not_create", "state": "active"}
+{"kind": "test", "id": "pytest-010649", "node_id": "tests/test_archive_gate_round.py::test_EVERY_separator_splitlines_breaks_on_is_refused[\\x0b-vertical tab]", "state": "active"}
+{"kind": "test", "id": "pytest-010650", "node_id": "tests/test_archive_gate_round.py::test_EVERY_separator_splitlines_breaks_on_is_refused[\\x0c-form feed]", "state": "active"}
+{"kind": "test", "id": "pytest-010651", "node_id": "tests/test_archive_gate_round.py::test_EVERY_separator_splitlines_breaks_on_is_refused[\\x1c-file separator]", "state": "active"}
+{"kind": "test", "id": "pytest-010652", "node_id": "tests/test_archive_gate_round.py::test_EVERY_separator_splitlines_breaks_on_is_refused[\\x1d-group separator]", "state": "active"}
+{"kind": "test", "id": "pytest-010653", "node_id": "tests/test_archive_gate_round.py::test_EVERY_separator_splitlines_breaks_on_is_refused[\\x1e-record separator]", "state": "active"}
+{"kind": "test", "id": "pytest-010654", "node_id": "tests/test_archive_gate_round.py::test_EVERY_separator_splitlines_breaks_on_is_refused[\\x85-NEL]", "state": "active"}
+{"kind": "test", "id": "pytest-010655", "node_id": "tests/test_archive_gate_round.py::test_EVERY_separator_splitlines_breaks_on_is_refused[\\u2028-line separator]", "state": "active"}
+{"kind": "test", "id": "pytest-010656", "node_id": "tests/test_archive_gate_round.py::test_EVERY_separator_splitlines_breaks_on_is_refused[\\u2029-paragraph separator]", "state": "active"}
+{"kind": "test", "id": "pytest-010657", "node_id": "tests/test_archive_gate_round.py::test_a_failed_PUBLICATION_leaves_no_staging_behind", "state": "active"}
+{"kind": "test", "id": "pytest-010658", "node_id": "tests/test_archive_gate_round.py::test_a_publication_failure_whose_CLEANUP_also_fails_reports_unknown", "state": "active"}
+{"kind": "test", "id": "pytest-010659", "node_id": "tests/test_archive_gate_round.py::test_only_a_PROVEN_absence_counts_as_a_completed_cleanup", "state": "active"}
+{"kind": "test", "id": "pytest-010660", "node_id": "tests/test_archive_gate_round.py::test_a_dangling_staging_symlink_is_reported_not_claimed_clean", "state": "active"}
+{"kind": "test", "id": "pytest-010661", "node_id": "tests/test_archive_gate_round.py::test_the_ROLLBACK_also_confirms_its_removal_rather_than_assuming_it", "state": "active"}
+{"kind": "test", "id": "pytest-010662", "node_id": "tests/test_archive_gate_round.py::test_a_copy_failure_whose_cleanup_also_fails_reports_unknown", "state": "active"}
+{"kind": "test", "id": "pytest-010663", "node_id": "tests/test_archive_gate_round.py::test_an_UNPARSEABLE_attestation_is_not_an_absent_one", "state": "active"}
+{"kind": "test", "id": "pytest-010664", "node_id": "tests/test_archive_gate_round.py::test_a_sidecar_that_parses_to_NOTHING_USABLE_is_refused[null-syntactically valid JSON that parses to nothing usable]", "state": "active"}
+{"kind": "test", "id": "pytest-010665", "node_id": "tests/test_archive_gate_round.py::test_a_sidecar_that_parses_to_NOTHING_USABLE_is_refused[[]-a list where an object is required]", "state": "active"}
+{"kind": "test", "id": "pytest-010666", "node_id": "tests/test_archive_gate_round.py::test_a_sidecar_that_parses_to_NOTHING_USABLE_is_refused[\"a string\"-a bare string]", "state": "active"}
+{"kind": "test", "id": "pytest-010667", "node_id": "tests/test_archive_gate_round.py::test_a_sidecar_that_parses_to_NOTHING_USABLE_is_refused[123-a bare number]", "state": "active"}
+{"kind": "test", "id": "pytest-010668", "node_id": "tests/test_archive_gate_round.py::test_a_sidecar_that_parses_to_NOTHING_USABLE_is_refused[{oops-invalid JSON]", "state": "active"}
+{"kind": "test", "id": "pytest-010669", "node_id": "tests/test_archive_gate_round.py::test_an_unreadable_START_json_is_refused_before_publication", "state": "active"}
+{"kind": "test", "id": "pytest-010670", "node_id": "tests/test_archive_gate_round.py::test_the_FIXTURE_satisfies_the_same_contract_the_archive_scanner_enforces", "state": "active"}
+{"kind": "test", "id": "pytest-010671", "node_id": "tests/test_archive_gate_round.py::test_an_attestation_MISSING_a_consumer_required_fact_is_refused[drop0]", "state": "active"}
+{"kind": "test", "id": "pytest-010672", "node_id": "tests/test_archive_gate_round.py::test_an_attestation_MISSING_a_consumer_required_fact_is_refused[drop1]", "state": "active"}
+{"kind": "test", "id": "pytest-010673", "node_id": "tests/test_archive_gate_round.py::test_an_attestation_MISSING_a_consumer_required_fact_is_refused[drop2]", "state": "active"}
+{"kind": "test", "id": "pytest-010674", "node_id": "tests/test_archive_gate_round.py::test_an_attestation_MISSING_a_consumer_required_fact_is_refused[drop3]", "state": "active"}
+{"kind": "test", "id": "pytest-010675", "node_id": "tests/test_archive_gate_round.py::test_an_attestation_MISSING_a_consumer_required_fact_is_refused[drop4]", "state": "active"}
+{"kind": "test", "id": "pytest-010676", "node_id": "tests/test_archive_gate_round.py::test_a_DIRECTORY_at_a_sidecar_path_is_not_an_absent_sidecar", "state": "active"}
+{"kind": "test", "id": "pytest-010677", "node_id": "tests/test_archive_gate_round.py::test_the_checksum_staging_file_is_actually_REMOVED_not_merely_probed", "state": "active"}
+{"kind": "test", "id": "pytest-010678", "node_id": "tests/test_archive_gate_round.py::test_an_attestation_naming_a_DIFFERENT_session_is_refused", "state": "active"}
+{"kind": "test", "id": "pytest-010679", "node_id": "tests/test_archive_gate_round.py::test_an_attestation_whose_artifact_digest_is_WRONG_is_refused", "state": "active"}
+{"kind": "test", "id": "pytest-010680", "node_id": "tests/test_archive_gate_round.py::test_a_failed_manifest_REPLACE_leaves_no_partial_behind", "state": "active"}
+{"kind": "test", "id": "pytest-010681", "node_id": "tests/test_archive_gate_round.py::test_a_MISSING_binding_side_is_refused_not_skipped[<lambda>-the session record carries no thread identifier0]", "state": "active"}
+{"kind": "test", "id": "pytest-010682", "node_id": "tests/test_archive_gate_round.py::test_a_MISSING_binding_side_is_refused_not_skipped[<lambda>-the session record carries no thread identifier1]", "state": "active"}
+{"kind": "test", "id": "pytest-010683", "node_id": "tests/test_archive_gate_round.py::test_a_MISSING_binding_side_is_refused_not_skipped[<lambda>-the archive scanner requires0]", "state": "active"}
+{"kind": "test", "id": "pytest-010684", "node_id": "tests/test_archive_gate_round.py::test_a_MISSING_binding_side_is_refused_not_skipped[<lambda>-absent or not a regular file]", "state": "active"}
+{"kind": "test", "id": "pytest-010685", "node_id": "tests/test_archive_gate_round.py::test_a_MISSING_binding_side_is_refused_not_skipped[<lambda>-the archive scanner requires1]", "state": "active"}
+{"kind": "test", "id": "pytest-010686", "node_id": "tests/test_archive_gate_round.py::test_a_MISSING_binding_side_is_refused_not_skipped[<lambda>-the archive scanner requires2]", "state": "active"}
+{"kind": "test", "id": "pytest-010687", "node_id": "tests/test_archive_gate_round.py::test_a_MISSING_binding_side_is_refused_not_skipped[<lambda>-names something other than this round's review]", "state": "active"}
+{"kind": "test", "id": "pytest-010688", "node_id": "tests/test_error_taxonomy.py::test_issue_155_owns_exactly_these_codes_and_they_are_fully_specified", "state": "active"}
+{"kind": "test", "id": "pytest-010689", "node_id": "tests/test_error_taxonomy.py::test_each_dynamic_path_code_is_produced_by_a_real_document[PROCESS_IR_CAPABILITY_DYNAMIC_PATH_UNSUPPORTED]", "state": "active"}
+{"kind": "test", "id": "pytest-010690", "node_id": "tests/test_error_taxonomy.py::test_each_dynamic_path_code_is_produced_by_a_real_document[PROCESS_IR_SEMANTIC_DYNAMIC_PATH_DDP_NOT_ESTABLISHED]", "state": "active"}
+{"kind": "test", "id": "pytest-010691", "node_id": "tests/test_error_taxonomy.py::test_each_dynamic_path_code_is_produced_by_a_real_document[PROCESS_IR_SEMANTIC_DYNAMIC_PATH_NO_DYNAMIC_SEGMENT]", "state": "active"}
+{"kind": "test", "id": "pytest-010692", "node_id": "tests/test_error_taxonomy.py::test_each_dynamic_path_code_is_produced_by_a_real_document[PROCESS_IR_SEMANTIC_DYNAMIC_PATH_PROFILE_BINDING_MISMATCH]", "state": "active"}
+{"kind": "test", "id": "pytest-010693", "node_id": "tests/test_error_taxonomy.py::test_each_replay_policy_code_is_produced_by_a_real_document[PROCESS_IR_SEMANTIC_RETRY_SOURCE_POLICY_REQUIRES_RETRY]", "state": "active"}
+{"kind": "test", "id": "pytest-010694", "node_id": "tests/test_error_taxonomy.py::test_each_replay_policy_code_is_produced_by_a_real_document[PROCESS_IR_SEMANTIC_RETRY_SOURCE_POLICY_SCOPE_INVALID]", "state": "active"}
+{"kind": "test", "id": "pytest-010695", "node_id": "tests/test_integration_build_basics_guards.py::test_a_canonical_property_name_is_linted_in_every_body_slot[branch_leg-body0]", "state": "active"}
+{"kind": "test", "id": "pytest-010696", "node_id": "tests/test_integration_build_basics_guards.py::test_a_canonical_property_name_is_linted_in_every_body_slot[decision_true_arm-body1]", "state": "active"}
+{"kind": "test", "id": "pytest-010697", "node_id": "tests/test_integration_build_basics_guards.py::test_a_canonical_property_name_is_linted_in_every_body_slot[decision_false_arm-body2]", "state": "active"}
+{"kind": "test", "id": "pytest-010698", "node_id": "tests/test_integration_build_basics_guards.py::test_a_canonical_property_name_is_linted_in_every_body_slot[try_body-body3]", "state": "active"}
+{"kind": "test", "id": "pytest-010699", "node_id": "tests/test_integration_build_basics_guards.py::test_a_canonical_property_name_is_linted_in_every_body_slot[catch_body-body4]", "state": "active"}
+{"kind": "test", "id": "pytest-010700", "node_id": "tests/test_integration_build_basics_guards.py::test_two_badly_named_writers_produce_two_warnings", "state": "active"}
+{"kind": "test", "id": "pytest-010701", "node_id": "tests/test_integration_build_basics_guards.py::test_conformant_canonical_names_are_clean", "state": "active"}
+{"kind": "test", "id": "pytest-010702", "node_id": "tests/test_integration_build_basics_guards.py::test_the_canonical_warning_names_the_process_component_and_is_byte_identical", "state": "active"}
+{"kind": "test", "id": "pytest-010703", "node_id": "tests/test_process_ir_authoring_contract_parity.py::test_every_action_family_has_a_capability_row_and_none_is_unused", "state": "active"}
+{"kind": "test", "id": "pytest-010704", "node_id": "tests/test_process_ir_authoring_contract_parity.py::test_an_unused_family_row_is_caught", "state": "active"}
+{"kind": "test", "id": "pytest-010705", "node_id": "tests/test_process_ir_authoring_contract_parity.py::test_an_action_family_with_no_capability_row_is_caught", "state": "active"}
+{"kind": "test", "id": "pytest-010706", "node_id": "tests/test_process_ir_authoring_contract_parity.py::test_the_public_field_map_is_total_over_the_joined_fields", "state": "active"}
+{"kind": "test", "id": "pytest-010707", "node_id": "tests/test_process_ir_authoring_contract_parity.py::test_the_public_names_do_not_collide", "state": "active"}
+{"kind": "test", "id": "pytest-010708", "node_id": "tests/test_process_ir_authoring_contract_parity.py::test_every_published_action_row_carries_the_joined_family_fields", "state": "active"}
+{"kind": "test", "id": "pytest-010709", "node_id": "tests/test_process_ir_authoring_contract_parity.py::test_the_rest_family_is_the_only_one_declaring_a_bindable_location", "state": "active"}
+{"kind": "test", "id": "pytest-010710", "node_id": "tests/test_process_ir_error_handling.py::test_allow_duplicates_lifts_the_source_reexecution_refusal", "state": "active"}
+{"kind": "test", "id": "pytest-010711", "node_id": "tests/test_process_ir_error_handling.py::test_the_default_policy_still_refuses_at_every_positive_count[1]", "state": "active"}
+{"kind": "test", "id": "pytest-010712", "node_id": "tests/test_process_ir_error_handling.py::test_the_default_policy_still_refuses_at_every_positive_count[3]", "state": "active"}
+{"kind": "test", "id": "pytest-010713", "node_id": "tests/test_process_ir_error_handling.py::test_the_default_policy_still_refuses_at_every_positive_count[5]", "state": "active"}
+{"kind": "test", "id": "pytest-010714", "node_id": "tests/test_process_ir_error_handling.py::test_authored_forbid_behaves_exactly_as_the_default_does", "state": "active"}
+{"kind": "test", "id": "pytest-010715", "node_id": "tests/test_process_ir_error_handling.py::test_the_policy_is_refused_on_a_connector_scope", "state": "active"}
+{"kind": "test", "id": "pytest-010716", "node_id": "tests/test_process_ir_error_handling.py::test_the_policy_is_refused_at_retry_zero", "state": "active"}
+{"kind": "test", "id": "pytest-010717", "node_id": "tests/test_process_ir_error_handling.py::test_the_policy_survives_a_dump_and_reparse_in_both_states", "state": "active"}
+{"kind": "test", "id": "pytest-010718", "node_id": "tests/test_process_ir_error_handling.py::test_the_policy_does_not_lift_the_write_safety_refusal", "state": "active"}
+{"kind": "test", "id": "pytest-010719", "node_id": "tests/test_process_ir_models.py::test_the_derived_reference_table_covers_exactly_the_node_vocabulary", "state": "active"}
+{"kind": "test", "id": "pytest-010720", "node_id": "tests/test_process_ir_models.py::test_the_connector_path_binding_profile_is_served[connector_call]", "state": "active"}
+{"kind": "test", "id": "pytest-010721", "node_id": "tests/test_process_ir_models.py::test_the_connector_path_binding_profile_is_served[target]", "state": "active"}
+{"kind": "test", "id": "pytest-010722", "node_id": "tests/test_process_ir_models.py::test_a_directly_held_reference_keeps_its_bare_name_and_required_flag", "state": "active"}
+{"kind": "test", "id": "pytest-010723", "node_id": "tests/test_process_ir_models.py::test_a_reference_reached_through_a_list_is_served_once_and_not_required", "state": "active"}
+{"kind": "test", "id": "pytest-010724", "node_id": "tests/test_process_ir_models.py::test_adding_a_reference_to_a_model_grows_the_served_list[required-True]", "state": "active"}
+{"kind": "test", "id": "pytest-010725", "node_id": "tests/test_process_ir_models.py::test_adding_a_reference_to_a_model_grows_the_served_list[optional-False]", "state": "active"}
+{"kind": "test", "id": "pytest-010726", "node_id": "tests/test_process_ir_models.py::test_the_walk_stops_at_nested_nodes_and_that_rule_is_load_bearing", "state": "active"}
+{"kind": "test", "id": "pytest-010727", "node_id": "tests/test_process_ir_models.py::test_the_served_contract_agrees_with_the_derived_table", "state": "active"}
+{"kind": "test", "id": "pytest-010728", "node_id": "tests/test_process_ir_models.py::test_the_property_write_walk_derives_its_models_from_the_shared_validator", "state": "active"}
+{"kind": "test", "id": "pytest-010729", "node_id": "tests/test_process_ir_models.py::test_a_new_property_writing_kind_is_picked_up_with_no_edit", "state": "active"}
+{"kind": "test", "id": "pytest-010730", "node_id": "tests/test_process_ir_models.py::test_a_collection_of_references_is_recognised_and_walked", "state": "active"}
+{"kind": "test", "id": "pytest-010731", "node_id": "tests/test_process_ir_models.py::test_every_admitted_reference_shape_is_also_walkable[bare-ComponentRefV1-$ref:A]", "state": "active"}
+{"kind": "test", "id": "pytest-010732", "node_id": "tests/test_process_ir_models.py::test_every_admitted_reference_shape_is_also_walkable[optional-Optional[ComponentRefV1]-$ref:A]", "state": "active"}
+{"kind": "test", "id": "pytest-010733", "node_id": "tests/test_process_ir_models.py::test_every_admitted_reference_shape_is_also_walkable[tuple-Tuple[ComponentRefV1, ...]-value2]", "state": "active"}
+{"kind": "test", "id": "pytest-010734", "node_id": "tests/test_process_ir_models.py::test_every_admitted_reference_shape_is_also_walkable[list-List[ComponentRefV1]-value3]", "state": "active"}
+{"kind": "test", "id": "pytest-010735", "node_id": "tests/test_process_ir_models.py::test_every_admitted_reference_shape_is_also_walkable[sequence-Sequence[ComponentRefV1]-value4]", "state": "active"}
+{"kind": "test", "id": "pytest-010736", "node_id": "tests/test_process_ir_models.py::test_every_admitted_reference_shape_is_also_walkable[deque-Deque[ComponentRefV1]-value5]", "state": "active"}
+{"kind": "test", "id": "pytest-010737", "node_id": "tests/test_process_ir_models.py::test_every_admitted_reference_shape_is_also_walkable[optional_tuple-Optional[Tuple[ComponentRefV1, ...]]-value6]", "state": "active"}
+{"kind": "test", "id": "pytest-010738", "node_id": "tests/test_process_ir_models.py::test_every_admitted_reference_shape_is_also_walkable[optional_sequence-Optional[Sequence[ComponentRefV1]]-value7]", "state": "active"}
+{"kind": "test", "id": "pytest-010739", "node_id": "tests/test_process_ir_models.py::test_a_shape_the_walk_cannot_resolve_is_not_admitted[Tuple[Tuple[ComponentRefV1, ...], ...]]", "state": "active"}
+{"kind": "test", "id": "pytest-010740", "node_id": "tests/test_process_ir_models.py::test_a_shape_the_walk_cannot_resolve_is_not_admitted[Dict[str, ComponentRefV1]]", "state": "active"}
+{"kind": "test", "id": "pytest-010741", "node_id": "tests/test_process_ir_models.py::test_a_shape_the_walk_cannot_resolve_is_not_admitted[Mapping[str, ComponentRefV1]]", "state": "active"}
+{"kind": "test", "id": "pytest-010742", "node_id": "tests/test_process_ir_models.py::test_a_shape_the_walk_cannot_resolve_is_not_admitted[Iterable[ComponentRefV1]]", "state": "active"}
+{"kind": "test", "id": "pytest-010743", "node_id": "tests/test_process_ir_models.py::test_a_shape_the_walk_cannot_resolve_is_not_admitted[Set[ComponentRefV1]]", "state": "active"}
+{"kind": "test", "id": "pytest-010744", "node_id": "tests/test_process_ir_models.py::test_a_shape_the_walk_cannot_resolve_is_not_admitted[FrozenSet[ComponentRefV1]]", "state": "active"}
+{"kind": "test", "id": "pytest-010745", "node_id": "tests/test_process_ir_models.py::test_the_widening_did_not_admit_a_shape_that_is_not_a_reference", "state": "active"}
+{"kind": "test", "id": "pytest-010746", "node_id": "tests/test_process_ir_models.py::test_an_admitted_reference_field_survives_being_read[bare-ComponentRefV1-$ref:A]", "state": "active"}
+{"kind": "test", "id": "pytest-010747", "node_id": "tests/test_process_ir_models.py::test_an_admitted_reference_field_survives_being_read[optional-Optional[ComponentRefV1]-$ref:A]", "state": "active"}
+{"kind": "test", "id": "pytest-010748", "node_id": "tests/test_process_ir_models.py::test_an_admitted_reference_field_survives_being_read[tuple-Tuple[ComponentRefV1, ...]-value2]", "state": "active"}
+{"kind": "test", "id": "pytest-010749", "node_id": "tests/test_process_ir_models.py::test_an_admitted_reference_field_survives_being_read[list-List[ComponentRefV1]-value3]", "state": "active"}
+{"kind": "test", "id": "pytest-010750", "node_id": "tests/test_process_ir_models.py::test_an_admitted_reference_field_survives_being_read[sequence-Sequence[ComponentRefV1]-value4]", "state": "active"}
+{"kind": "test", "id": "pytest-010751", "node_id": "tests/test_process_ir_models.py::test_an_admitted_reference_field_survives_being_read[deque-Deque[ComponentRefV1]-value5]", "state": "active"}
+{"kind": "test", "id": "pytest-010752", "node_id": "tests/test_process_ir_models.py::test_an_admitted_reference_field_survives_being_read[optional_tuple-Optional[Tuple[ComponentRefV1, ...]]-value6]", "state": "active"}
+{"kind": "test", "id": "pytest-010753", "node_id": "tests/test_process_ir_models.py::test_an_admitted_reference_field_survives_being_read[optional_sequence-Optional[Sequence[ComponentRefV1]]-value7]", "state": "active"}
+{"kind": "test", "id": "pytest-010754", "node_id": "tests/test_process_ir_models.py::test_a_one_shot_value_is_refused_by_the_value_side_too", "state": "active"}
+{"kind": "test", "id": "pytest-010755", "node_id": "tests/test_process_ir_models.py::test_a_named_tuple_that_is_not_all_references_is_refused", "state": "active"}
+{"kind": "test", "id": "pytest-010756", "node_id": "tests/test_process_ir_models.py::test_no_model_declares_a_reference_in_an_unsupported_shape", "state": "active"}
+{"kind": "test", "id": "pytest-010757", "node_id": "tests/test_process_ir_models.py::test_the_guard_refuses_each_unsupported_shape[Set[ComponentRefV1]]", "state": "active"}
+{"kind": "test", "id": "pytest-010758", "node_id": "tests/test_process_ir_models.py::test_the_guard_refuses_each_unsupported_shape[FrozenSet[ComponentRefV1]]", "state": "active"}
+{"kind": "test", "id": "pytest-010759", "node_id": "tests/test_process_ir_models.py::test_the_guard_refuses_each_unsupported_shape[Iterable[ComponentRefV1]]", "state": "active"}
+{"kind": "test", "id": "pytest-010760", "node_id": "tests/test_process_ir_models.py::test_the_guard_refuses_each_unsupported_shape[Dict[str, ComponentRefV1]]", "state": "active"}
+{"kind": "test", "id": "pytest-010761", "node_id": "tests/test_process_ir_models.py::test_the_guard_refuses_each_unsupported_shape[Tuple[Tuple[ComponentRefV1, ...], ...]]", "state": "active"}
+{"kind": "test", "id": "pytest-010762", "node_id": "tests/test_process_ir_models.py::test_the_guard_refuses_each_unsupported_shape[Tuple[ComponentRefV1, str]]", "state": "active"}
+{"kind": "test", "id": "pytest-010763", "node_id": "tests/test_process_ir_models.py::test_the_guard_refuses_the_named_tuple_shapes_that_emit_WRONG_references", "state": "active"}
+{"kind": "test", "id": "pytest-010764", "node_id": "tests/test_process_ir_models.py::test_the_shape_guard_does_not_depend_on_resolving_annotations", "state": "active"}
+{"kind": "test", "id": "pytest-010765", "node_id": "tests/test_process_ir_models.py::test_the_shape_guard_does_not_refuse_an_ordinary_field[str]", "state": "active"}
+{"kind": "test", "id": "pytest-010766", "node_id": "tests/test_process_ir_models.py::test_the_shape_guard_does_not_refuse_an_ordinary_field[int]", "state": "active"}
+{"kind": "test", "id": "pytest-010767", "node_id": "tests/test_process_ir_models.py::test_the_shape_guard_does_not_refuse_an_ordinary_field[bool]", "state": "active"}
+{"kind": "test", "id": "pytest-010768", "node_id": "tests/test_process_ir_models.py::test_the_shape_guard_does_not_refuse_an_ordinary_field[StopNodeV1]", "state": "active"}
+{"kind": "test", "id": "pytest-010769", "node_id": "tests/test_process_ir_models.py::test_pydantic_resolves_field_annotations_under_postponed_evaluation", "state": "active"}
+{"kind": "test", "id": "pytest-010770", "node_id": "tests/test_process_ir_models.py::test_an_arbitrary_class_cannot_carry_a_reference_past_the_models", "state": "active"}
+{"kind": "test", "id": "pytest-010771", "node_id": "tests/test_process_ir_models.py::test_the_guard_refuses_an_annotation_it_cannot_reason_about[type_variable]", "state": "active"}
+{"kind": "test", "id": "pytest-010772", "node_id": "tests/test_process_ir_models.py::test_the_guard_refuses_an_annotation_it_cannot_reason_about[forward_reference]", "state": "active"}
+{"kind": "test", "id": "pytest-010773", "node_id": "tests/test_process_ir_models.py::test_the_guard_refuses_an_annotation_it_cannot_reason_about[any]", "state": "active"}
+{"kind": "test", "id": "pytest-010774", "node_id": "tests/test_process_ir_models.py::test_the_guard_universe_is_derived_from_reachability_not_a_snapshot", "state": "active"}
+{"kind": "test", "id": "pytest-010775", "node_id": "tests/test_process_ir_models.py::test_no_model_in_the_guard_universe_subclasses_another", "state": "active"}
+{"kind": "test", "id": "pytest-010776", "node_id": "tests/test_process_ir_semantic_lineage.py::test_the_stream_replacing_authority_matches_the_served_contract", "state": "active"}
+{"kind": "test", "id": "pytest-010777", "node_id": "tests/test_process_ir_semantic_lineage.py::test_a_document_replacement_between_the_writer_and_the_call_is_refused[data_process_split]", "state": "active"}
+{"kind": "test", "id": "pytest-010778", "node_id": "tests/test_process_ir_semantic_lineage.py::test_a_document_replacement_between_the_writer_and_the_call_is_refused[data_process_script]", "state": "active"}
+{"kind": "test", "id": "pytest-010779", "node_id": "tests/test_process_ir_semantic_lineage.py::test_a_document_replacement_between_the_writer_and_the_call_is_refused[cache_get]", "state": "active"}
+{"kind": "test", "id": "pytest-010780", "node_id": "tests/test_process_ir_semantic_lineage.py::test_the_replacement_rule_does_not_over_fire", "state": "active"}
+{"kind": "test", "id": "pytest-010781", "node_id": "tests/test_process_ir_semantic_lineage.py::test_an_optional_component_ref_field_is_recognised", "state": "active"}
+{"kind": "test", "id": "pytest-010782", "node_id": "tests/test_process_ir_semantic_lineage.py::test_a_bound_paths_profile_ref_is_enumerated_as_a_component_reference", "state": "active"}
+{"kind": "test", "id": "pytest-010783", "node_id": "tests/test_process_ir_semantic_lineage.py::test_a_bound_path_composed_from_an_unestablished_current_value_is_refused", "state": "active"}
+{"kind": "test", "id": "pytest-010784", "node_id": "tests/test_process_ir_semantic_lineage.py::test_a_bound_path_may_append_to_a_value_an_earlier_step_established", "state": "active"}
+{"kind": "test", "id": "pytest-010785", "node_id": "tests/test_process_ir_semantic_lineage.py::test_the_current_read_is_recognised_only_for_a_BOUND_path", "state": "active"}
+{"kind": "test", "id": "pytest-010786", "node_id": "tests/test_process_ir_semantic_lineage.py::test_surrounding_whitespace_does_not_change_which_property_is_named[ P -P]", "state": "active"}
+{"kind": "test", "id": "pytest-010787", "node_id": "tests/test_process_ir_semantic_lineage.py::test_surrounding_whitespace_does_not_change_which_property_is_named[P- P ]", "state": "active"}
+{"kind": "test", "id": "pytest-010788", "node_id": "tests/test_process_ir_semantic_lineage.py::test_surrounding_whitespace_does_not_change_which_property_is_named[ P - P ]", "state": "active"}
+{"kind": "test", "id": "pytest-010789", "node_id": "tests/test_process_ir_semantic_lineage.py::test_surrounding_whitespace_does_not_change_which_property_is_named[P-P]", "state": "active"}
+{"kind": "test", "id": "pytest-010790", "node_id": "tests/test_process_ir_semantic_lineage.py::test_a_binding_naming_a_genuinely_different_property_still_refuses", "state": "active"}
+{"kind": "test", "id": "pytest-010791", "node_id": "tests/test_process_ir_semantic_lineage.py::test_two_refs_naming_one_profile_component_agree[$ref:PROF-$ref:PROF_ALIAS]", "state": "active"}
+{"kind": "test", "id": "pytest-010792", "node_id": "tests/test_process_ir_semantic_lineage.py::test_two_refs_naming_one_profile_component_agree[$ref:PROF_ALIAS-$ref:PROF]", "state": "active"}
+{"kind": "test", "id": "pytest-010793", "node_id": "tests/test_process_ir_semantic_lineage.py::test_several_sources_aliased_to_one_profile_are_one_profile", "state": "active"}
+{"kind": "test", "id": "pytest-010794", "node_id": "tests/test_process_ir_semantic_lineage.py::test_two_refs_naming_DIFFERENT_profile_components_still_mismatch[$ref:PROF-$ref:PROF_OTHER-binding names a different component]", "state": "active"}
+{"kind": "test", "id": "pytest-010795", "node_id": "tests/test_process_ir_semantic_lineage.py::test_two_refs_naming_DIFFERENT_profile_components_still_mismatch[$ref:PROF_OTHER-$ref:PROF-writer names a different component]", "state": "active"}
+{"kind": "test", "id": "pytest-010796", "node_id": "tests/test_process_ir_semantic_lineage.py::test_the_served_current_description_states_the_rule_at_the_scope_it_holds", "state": "active"}
+{"kind": "test", "id": "pytest-010797", "node_id": "tests/test_process_ir_semantic_lineage.py::test_a_current_value_does_not_survive_a_document_replacement[data_process_split]", "state": "active"}
+{"kind": "test", "id": "pytest-010798", "node_id": "tests/test_process_ir_semantic_lineage.py::test_a_current_value_does_not_survive_a_document_replacement[data_process_script]", "state": "active"}
+{"kind": "test", "id": "pytest-010799", "node_id": "tests/test_process_ir_semantic_lineage.py::test_a_current_value_does_not_survive_a_document_replacement[cache_get]", "state": "active"}
+{"kind": "test", "id": "pytest-010800", "node_id": "tests/test_process_ir_semantic_lineage.py::test_a_replacement_does_not_refuse_a_writer_that_needs_no_earlier_value[data_process_split]", "state": "active"}
+{"kind": "test", "id": "pytest-010801", "node_id": "tests/test_process_ir_semantic_lineage.py::test_a_replacement_does_not_refuse_a_writer_that_needs_no_earlier_value[data_process_script]", "state": "active"}
+{"kind": "test", "id": "pytest-010802", "node_id": "tests/test_process_ir_semantic_lineage.py::test_a_replacement_does_not_refuse_a_writer_that_needs_no_earlier_value[cache_get]", "state": "active"}
+{"kind": "test", "id": "pytest-010803", "node_id": "tests/test_process_ir_semantic_lineage.py::test_appending_to_a_value_with_no_replacement_between_still_compiles", "state": "active"}
+{"kind": "test", "id": "pytest-010804", "node_id": "tests/test_process_ir_semantic_lineage.py::test_a_contract_declared_write_establishes_a_value_current_may_append_to", "state": "active"}
+{"kind": "test", "id": "pytest-010805", "node_id": "tests/test_process_ir_semantic_lineage.py::test_a_declaring_node_that_replaces_the_stream_keeps_its_own_write", "state": "active"}
+{"kind": "test", "id": "pytest-010806", "node_id": "tests/test_process_ir_semantic_lineage.py::test_a_caller_declared_entry_value_establishes_one_too", "state": "active"}
+{"kind": "test", "id": "pytest-010807", "node_id": "tests/test_process_ir_semantic_lineage.py::test_a_replacement_that_KEEPS_the_properties_does_not_invalidate_the_path[message]", "state": "active"}
+{"kind": "test", "id": "pytest-010808", "node_id": "tests/test_process_ir_semantic_lineage.py::test_a_current_value_survives_a_replacement_that_keeps_properties[message]", "state": "active"}
+{"kind": "test", "id": "pytest-010809", "node_id": "tests/test_process_ir_semantic_lineage.py::test_the_survival_table_is_pinned_to_what_was_measured", "state": "active"}
+{"kind": "test", "id": "pytest-010810", "node_id": "tests/test_process_ir_semantic_lineage.py::test_the_bound_path_diagnostic_names_the_action_that_actually_clears_it", "state": "active"}
+{"kind": "test", "id": "pytest-010811", "node_id": "tests/test_process_ir_semantic_lineage.py::test_the_bound_path_diagnostic_message_covers_every_way_it_fires", "state": "active"}
+{"kind": "test", "id": "pytest-010812", "node_id": "tests/test_process_ir_semantic_lineage.py::test_the_probe_behind_that_message_still_contradicts_the_old_wording", "state": "active"}
+{"kind": "test", "id": "pytest-010813", "node_id": "tests/test_process_ir_semantic_lineage.py::test_the_served_retry_description_states_the_escape_this_slice_added", "state": "active"}
+{"kind": "test", "id": "pytest-010814", "node_id": "tests/test_process_ir_semantic_lineage.py::test_a_bound_target_inherits_the_existing_placement_rules", "state": "active"}
+{"kind": "test", "id": "pytest-010815", "node_id": "tests/test_process_ir_semantic_lineage.py::test_a_bound_connector_call_inherits_the_existing_placement_rules", "state": "active"}
+{"kind": "test", "id": "pytest-010816", "node_id": "tests/test_process_ir_semantic_lineage.py::test_a_bound_call_is_admitted_as_a_control_body_entry", "state": "active"}
+{"kind": "test", "id": "pytest-010817", "node_id": "tests/test_process_ir_semantic_lineage.py::test_the_fan_out_witnesses_are_not_vacuous", "state": "active"}
+{"kind": "test", "id": "pytest-010818", "node_id": "tests/test_wave_gate_goldens.py::test_golden_manifest_row[golden-000071]", "state": "active"}
+{"kind": "test", "id": "pytest-010819", "node_id": "tests/test_wave_gate_goldens.py::test_golden_manifest_row[golden-000072]", "state": "active"}
+{"kind": "test", "id": "pytest-010820", "node_id": "tests/test_wave_gate_goldens.py::test_golden_manifest_row[golden-000073]", "state": "active"}
+{"kind": "test", "id": "pytest-010821", "node_id": "tests/test_wave_gate_goldens.py::test_golden_manifest_row[golden-000074]", "state": "active"}
