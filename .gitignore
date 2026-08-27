@@ -113,6 +113,11 @@ OAUTH_DISCONNECT_ANALYSIS.md
 # docs/* children individually and carve out the architecture subdirectory.
 docs/*
 !docs/architecture/
+# ...and the derived replay-evidence report, which is a TRACKED artifact: it is
+# generated from the packaged registry and its whole purpose is to be reviewable
+# in the repository. A report that existed only in a working tree would let the
+# registry and its published summary drift with nobody able to see it.
+!docs/evidence/
 
 # Test files (local only, except anywhere under tests/)
 test_*.py
