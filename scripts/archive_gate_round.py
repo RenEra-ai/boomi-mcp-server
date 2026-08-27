@@ -254,17 +254,62 @@ def derive_row(kind: str, run_dir: Path, durable: Path, rel_root: Path,
     return row
 
 
-def regenerate_sums(root: Path) -> int:
-    """Rewrite SHA256SUMS over every archived file.
+def regenerate_sums(root: Path, expect: str) -> int:
+    """Rewrite SHA256SUMS over every archived file, ACCOUNTING for the change.
 
     Any file NAMED SHA256SUMS is excluded, not just the top-level one: a nested
     checksum file copied in from a capture would otherwise be listed by the
     parent while the archive test's own scan skips it, and the two disagree.
+
+    `expect` is not optional, and that is the point. This function rebuilds the
+    manifest from whatever is on disk, so it silently absorbs any difference
+    between the archive it finds and the archive the manifest described — and
+    the manifest is the ONLY record of most of what is here: in the issue-155
+    archive, 337 of 422 files are referenced by no index row at all. Absorbing a
+    difference therefore converts a LOUD failure into a silent success. Measured
+    on both directions: a file deleted out from under the archive went from the
+    scanner reporting listed-but-absent to the manifest simply no longer listing
+    it, and a stray file went from on-disk-but-unlisted to being recorded as
+    evidence. Both exited 0, and because the tool's own closing line says to run
+    `git add` over the directory — which stages deletions — the loss is durable.
+
+    So each caller declares what it is doing and an unaccounted difference
+    refuses:
+
+      "same"  a re-derivation. The set of NAMES cannot change; only the index's
+              own digest may move. Any name added or removed is external damage
+              this tool must report rather than launder.
+      "grow"  a round is being archived. Names may appear — that is the round —
+              but none may vanish.
     """
-    lines = []
+    listed_before = {
+        line.split("  ", 1)[1]
+        for line in (root / "SHA256SUMS").read_text().splitlines() if line
+    } if (root / "SHA256SUMS").is_file() else set()
+
+    lines, names = [], set()
     for path in sorted(root.rglob("*")):
         if path.is_file() and path.name != "SHA256SUMS":
-            lines.append(f"{sha256_of(path)}  {path.relative_to(root)}")
+            rel = str(path.relative_to(root))
+            lines.append(f"{sha256_of(path)}  {rel}")
+            names.add(rel)
+
+    vanished = sorted(listed_before - names)
+    appeared = sorted(names - listed_before)
+    unaccounted = {}
+    if vanished:
+        unaccounted["listed but no longer on disk"] = vanished
+    if appeared and expect == "same":
+        unaccounted["on disk but never listed"] = appeared
+    if unaccounted and listed_before:
+        raise SystemExit(
+            "refusing to rewrite SHA256SUMS: it would silently absorb a change "
+            "this run did not make, and for most files here the manifest is the "
+            "only record there is:\n" + "\n".join(
+                f"  {why}: {what}" for why, what in sorted(unaccounted.items())
+            ) + "\nRestore the archive, or record the change deliberately."
+        )
+
     (root / "SHA256SUMS").write_text("\n".join(lines) + "\n")
     return len(lines)
 
@@ -360,7 +405,7 @@ def rederive_index(root: Path) -> int:
         # than an absence. And it silently narrowed a richer value written under
         # a key this derivation also produces, which no copy-back can catch
         # because a narrowed value is not null.
-        merged, narrowed = dict(row), []
+        merged, narrowed, disagreed = dict(row), [], {}
         for name, value in fresh.items():
             if name in UNSOURCEABLE_BY_KIND.get(kind, ()):
                 continue  # keep whatever the original producer recorded
@@ -378,11 +423,30 @@ def rederive_index(root: Path) -> int:
             if type(existing) is not type(value):
                 narrowed.append(name)
                 continue
-            if isinstance(value, dict) and not all(
-                    type(existing.get(k)) is type(v) for k, v in value.items()):
-                narrowed.append(name)
-                continue
+            if isinstance(value, dict):
+                # Two different disagreements, and calling both "narrowing" sent
+                # an operator looking for the wrong thing: a KEY SET difference
+                # means the archive on disk is not the archive the row records —
+                # a file appeared or vanished — while a VALUE TYPE difference
+                # means another producer recorded something richer here.
+                if set(existing) != set(value):
+                    disagreed[name] = {
+                        "on disk but not in the row": sorted(set(value) - set(existing)),
+                        "in the row but not on disk": sorted(set(existing) - set(value)),
+                    }
+                    continue
+                if not all(type(existing.get(k)) is type(v) for k, v in value.items()):
+                    narrowed.append(name)
+                    continue
             merged[name] = value
+        if disagreed:
+            raise SystemExit(
+                f"refusing to re-derive {row['durable_dir']}: what is on disk is "
+                "not what this row records, and a re-derivation neither adds nor "
+                "removes files — so the difference came from outside:\n" + "\n".join(
+                    f"  {field}: {detail}" for field, detail in sorted(disagreed.items())
+                )
+            )
         if narrowed:
             raise SystemExit(
                 f"refusing to re-derive {row['durable_dir']}: this script would "
@@ -394,11 +458,28 @@ def rederive_index(root: Path) -> int:
             changed += 1
         out.append(merged)
 
-    with index.open("w") as handle:
-        handle.write(header + "\n")
-        for row in out:
-            handle.write(json.dumps(row, sort_keys=True) + "\n")
-    return changed
+    # Write only if the BYTES move, and report that rather than the row count.
+    # The two are not the same question, and answering the wrong one produced an
+    # archive that exited 0 internally inconsistent: an index that is
+    # semantically identical but bytewise noncanonical — unsorted keys from a
+    # hand edit, a blank line, a missing trailing newline — is still rewritten
+    # here in canonical form, while a row count of zero skipped the checksum
+    # regeneration and left the manifest describing the bytes that used to be
+    # there. Reproduced before fixing: the manifest and the index disagreed and
+    # the archive scanner rejects exactly that.
+    rendered = header + "\n" + "".join(
+        json.dumps(row, sort_keys=True) + "\n" for row in out)
+    # BYTES, not decoded text. `read_text()` applies universal-newline
+    # translation, so a CRLF index compared equal to its LF rendering and was
+    # left un-canonicalised while this comment claimed to be comparing bytes —
+    # the claim outrunning the code, again.
+    if rendered.encode() == index.read_bytes():
+        return 0
+    index.write_bytes(rendered.encode())
+    # At least one byte moved, so the manifest must be refreshed even when no
+    # ROW changed. Reported as one so the caller regenerates; the printed row
+    # count is separate and stays honest about what was re-derived.
+    return changed or _INDEX_BYTES_ONLY
 
 
 #: Statuses a caller supplies for a round that did not complete. They cannot be
@@ -426,6 +507,11 @@ _NON_DERIVED_STATUSES = ("failed", "timeout", "refused")
 #: (the key exists in both shapes) and the sourced-null rule actively preferred
 #: the null. `test_every_field_derived_as_a_CONSTANT_null_is_listed_unsourceable`
 #: derives this table's contents from the derivation instead of trusting it.
+#: Returned when the index bytes moved but no ROW did — a canonicalisation. It
+#: is truthy so the checksum manifest is refreshed, and distinguishable so the
+#: message does not claim a row was re-derived when none was.
+_INDEX_BYTES_ONLY = -1
+
 UNSOURCEABLE_BY_KIND = {
     "architect-review": ("reviewed_sha",),
     "commit-review": ("verdict",),
@@ -473,10 +559,12 @@ def main() -> int:
         # ordering is not stable), so pointing this at an archive it has nothing
         # to fix would move real bytes for no reason. That is the one path here
         # that writes outside the index, so it gets the same restraint.
-        listed = regenerate_sums(root) if changed else None
-        print(f"re-derived {changed} index row(s) from the archived bytes; "
-              + (f"SHA256SUMS lists {listed} files" if changed
-                 else "SHA256SUMS left untouched — nothing changed"))
+        listed = regenerate_sums(root, expect="same") if changed else None
+        rows = 0 if changed == _INDEX_BYTES_ONLY else changed
+        print(f"re-derived {rows} index row(s) from the archived bytes"
+              + ("; the index was rewritten in canonical form" if changed == _INDEX_BYTES_ONLY else "")
+              + ("; " + f"SHA256SUMS lists {listed} files" if changed
+                 else "; SHA256SUMS left untouched — nothing changed"))
         print("\nNEXT: git add docs/architecture/evidence — the scanners compare "
               "SHA256SUMS against the GIT INDEX.")
         return 0
@@ -615,7 +703,7 @@ def main() -> int:
         # the scanner would then look for and not find.
         (durable / "round.json").write_text(json.dumps(row, sort_keys=True, indent=1) + "\n")
 
-    listed = regenerate_sums(root)
+    listed = regenerate_sums(root, expect="grow")
     print(f"archived {len(copied)} file(s) to {durable.relative_to(repo)}")
     print(f"  status={row['status']} reviewed_sha={row.get('reviewed_sha')}")
     print("  {0}; SHA256SUMS lists {1} files".format(

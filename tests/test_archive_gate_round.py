@@ -884,3 +884,222 @@ def test_a_recorded_verdict_on_a_commit_review_row_survives_rederivation(tmp_pat
 
     assert _rederive(tmp_path).returncode == 0
     assert json.loads(index.read_text().splitlines()[1])["verdict"] == "findings"
+
+
+def _noncanonical_but_consistent(root):
+    """Rewrite the index in a bytewise-noncanonical form and make sums agree.
+
+    This is the realistic state after someone hand-edits a row and regenerates
+    the manifest: the archive is internally CONSISTENT, just not in the form
+    this script would emit.
+    """
+    index, sums = root / "index.jsonl", root / "SHA256SUMS"
+    lines = [l for l in index.read_text().splitlines() if l.strip()]
+    scrambled = [lines[0]] + [
+        json.dumps({k: json.loads(l)[k] for k in reversed(list(json.loads(l)))})
+        for l in lines[1:]
+    ]
+    index.write_text("\n\n".join(scrambled))          # blank lines, no trailing newline
+
+    import hashlib
+
+    digest = hashlib.sha256(index.read_bytes()).hexdigest()
+    rows = [l for l in sums.read_text().splitlines() if l]
+    sums.write_text("\n".join(
+        (digest + "  index.jsonl") if l.endswith("  index.jsonl") else l for l in rows) + "\n")
+    return index.read_bytes(), sums.read_bytes()
+
+
+def test_canonicalising_the_index_also_refreshes_the_CHECKSUMS(tmp_path):
+    """Bytes moved and rows did not — two different questions.
+
+    A semantically identical but bytewise-noncanonical index is still rewritten
+    in canonical form, so gating the checksum refresh on the ROW count left the
+    manifest describing bytes that were no longer there. Reproduced before
+    fixing: exit 0, and the archive scanner rejects the result.
+    """
+    run, prompts = _gate_run(tmp_path)
+    result, root = _archive_gate(tmp_path, run, prompts)
+    assert result.returncode == 0, result.stderr
+
+    before_index, before_sums = _noncanonical_but_consistent(root)
+
+    out = _rederive(tmp_path)
+    assert out.returncode == 0, out.stderr
+    assert (root / "index.jsonl").read_bytes() != before_index, "the index was not canonicalised"
+    assert (root / "SHA256SUMS").read_bytes() != before_sums, "the manifest was left stale"
+
+    import hashlib
+
+    listed = {}
+    for line in (root / "SHA256SUMS").read_text().splitlines():
+        if line:
+            digest, name = line.split("  ", 1)
+            listed[name] = digest
+    assert listed["index.jsonl"] == hashlib.sha256(
+        (root / "index.jsonl").read_bytes()).hexdigest(), "manifest disagrees with the index"
+
+    # ...and it does not claim to have re-derived a row, because none moved.
+    assert "0 index row(s)" in out.stdout
+    assert "canonical form" in out.stdout
+
+
+def test_an_already_canonical_index_is_not_rewritten_at_all(tmp_path):
+    """The other half: no bytes move, so neither file is touched.
+
+    Without this the fix above could be satisfied by simply always regenerating,
+    which is the behaviour a previous round removed for moving real bytes in
+    archives this slice does not own.
+    """
+    run, prompts = _gate_run(tmp_path)
+    result, root = _archive_gate(tmp_path, run, prompts)
+    assert result.returncode == 0, result.stderr
+
+    index, sums = root / "index.jsonl", root / "SHA256SUMS"
+    scrambled_sums = b"".join(
+        l + b"\n" for l in reversed(sums.read_bytes().split(b"\n")) if l
+    )
+    sums.write_bytes(scrambled_sums)
+    before_index = index.read_bytes()
+
+    out = _rederive(tmp_path)
+    assert out.returncode == 0, out.stderr
+    assert index.read_bytes() == before_index
+    assert sums.read_bytes() == scrambled_sums, "the manifest was rewritten for nothing"
+    assert "untouched" in out.stdout
+
+
+def test_a_file_a_ROW_references_cannot_vanish_unreported(tmp_path):
+    """The inner layer: a deleted file a row names is caught by that row."""
+    run, prompts = _gate_run(tmp_path)
+    result, root = _archive_gate(tmp_path, run, prompts)
+    assert result.returncode == 0, result.stderr
+
+    victim = root / "architect-reviews" / run.name / "review.md"
+    assert victim.is_file()
+    victim.unlink()
+
+    _noncanonical_but_consistent(root)
+    out = _rederive(tmp_path)
+    assert out.returncode != 0, out.stdout
+    assert "in the row but not on disk" in out.stderr
+    assert "review.md" in out.stderr
+    assert "Traceback" not in out.stderr
+
+
+def test_a_file_NO_ROW_references_cannot_vanish_unreported_either(tmp_path):
+    """The outer layer, and the one that actually needed building.
+
+    Most of what an archive holds is referenced by no index row at all — in the
+    issue-155 archive, most files — so for those the checksum manifest is the
+    ONLY record that they were ever here. Rebuilding it from disk absorbed their
+    disappearance silently: a scanner rejection of listed-but-absent became a
+    manifest that simply no longer listed them, at exit 0. And because this
+    tool's own closing line says to `git add` the directory, which stages
+    deletions, the erasure would be durable rather than recoverable.
+
+    The row-level check above cannot see these files. This one can.
+    """
+    run, prompts = _gate_run(tmp_path)
+    result, root = _archive_gate(tmp_path, run, prompts)
+    assert result.returncode == 0, result.stderr
+
+    # A capture: archived evidence that no index row references.
+    unreferenced = root / "captures" / "cap-155-x" / "readback.xml"
+    unreferenced.parent.mkdir(parents=True)
+    unreferenced.write_text("<component/>\n")
+
+    second = tmp_path / "cdx-gate-review.LISTIT"
+    second.mkdir()
+    for name in ("start.json", "attestation.json", "review.md"):
+        (second / name).write_text((run / name).read_text())
+    relist, _ = _archive_gate(tmp_path, second, prompts)
+    assert relist.returncode == 0, relist.stderr
+    assert "captures/cap-155-x/readback.xml" in (root / "SHA256SUMS").read_text()
+
+    unreferenced.unlink()
+
+    _noncanonical_but_consistent(root)
+    out = _rederive(tmp_path)
+    assert out.returncode != 0, out.stdout
+    assert "no longer on disk" in out.stderr
+    assert "readback.xml" in out.stderr
+    assert "only record" in out.stderr
+    assert "Traceback" not in out.stderr
+
+
+def test_a_STRAY_file_is_reported_rather_than_recorded_as_evidence(tmp_path):
+    """The other direction: an unlisted file must not be quietly promoted.
+
+    A re-derivation adds no file, so a name on disk that the manifest never
+    listed arrived from somewhere else. Listing it would record it as archived
+    evidence on this tool's authority, which it does not have.
+    """
+    run, prompts = _gate_run(tmp_path)
+    result, root = _archive_gate(tmp_path, run, prompts)
+    assert result.returncode == 0, result.stderr
+
+    (root / "architect-reviews" / run.name / "unreviewed.md").write_text("not evidence\n")
+
+    _noncanonical_but_consistent(root)
+    out = _rederive(tmp_path)
+    assert out.returncode != 0, out.stdout
+    assert "unreviewed.md" in out.stderr
+    # It is refused as a FILE-SET disagreement, not as a narrowing. Both refuse,
+    # but only one of them sends the operator to the right place: nothing about
+    # a re-derivation adds a file, so a name on disk the row never recorded came
+    # from outside this tool.
+    assert "on disk but not in the row" in out.stderr
+    assert "narrow" not in out.stderr
+
+
+def test_ARCHIVING_a_round_may_add_names_but_still_never_loses_one(tmp_path):
+    """`grow` is not `anything goes` — the two callers differ in one direction.
+
+    Archiving legitimately adds the round's own files. It must still refuse if a
+    name vanishes, because nothing about copying a new round removes an old one.
+    """
+    run, prompts = _gate_run(tmp_path)
+    first, root = _archive_gate(tmp_path, run, prompts)
+    assert first.returncode == 0, first.stderr
+
+    (root / "architect-reviews" / run.name / "review.md").unlink()
+
+    second_run = tmp_path / "cdx-gate-review.SECOND"
+    second_run.mkdir()
+    for name in ("start.json", "attestation.json", "review.md"):
+        (second_run / name).write_text((run / name).read_text())
+    out, _ = _archive_gate(tmp_path, second_run, prompts)
+    assert out.returncode != 0, out.stdout
+    assert "no longer on disk" in out.stderr
+
+
+def test_a_CRLF_index_is_canonicalised_rather_than_compared_as_text(tmp_path):
+    """`read_text()` translates newlines, so CRLF compared equal to LF.
+
+    The gate claimed to compare bytes and did not, leaving a CRLF index
+    un-canonicalised at exit 0 while reporting nothing to do.
+    """
+    run, prompts = _gate_run(tmp_path)
+    result, root = _archive_gate(tmp_path, run, prompts)
+    assert result.returncode == 0, result.stderr
+
+    index = root / "index.jsonl"
+    index.write_bytes(index.read_bytes().replace(b"\n", b"\r\n"))
+    import hashlib
+
+    sums = root / "SHA256SUMS"
+    digest = hashlib.sha256(index.read_bytes()).hexdigest()
+    sums.write_text("\n".join(
+        (digest + "  index.jsonl") if l.endswith("  index.jsonl") else l
+        for l in sums.read_text().splitlines() if l) + "\n")
+
+    out = _rederive(tmp_path)
+    assert out.returncode == 0, out.stderr
+    assert b"\r\n" not in index.read_bytes(), "the CRLF index was left un-canonicalised"
+    listed = {}
+    for line in sums.read_text().splitlines():
+        if line:
+            d, n = line.split("  ", 1)
+            listed[n] = d
+    assert listed["index.jsonl"] == hashlib.sha256(index.read_bytes()).hexdigest()
