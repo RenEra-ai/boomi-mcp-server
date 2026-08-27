@@ -509,8 +509,14 @@ def write_sums(root: Path) -> int:
         staging.write_text(body)
         os.replace(staging, root / "SHA256SUMS")
     finally:
-        if staging.exists():
-            staging.unlink()
+        # CONFIRMED, like every other removal here. This one was missed by a
+        # sweep that enumerated two call SHAPES — `rmtree(staging…)` and
+        # `_discard(durable…)` — instead of the property "every removal". A
+        # surviving partial manifest is refused as unaccounted by the next run,
+        # while the rollback above reports the archive is as it was.
+        if not _confirmed_removed(staging):
+            print(f"  warning: {staging} could not be confirmed removed and will "
+                  "be refused as unaccounted by the next run.", file=sys.stderr)
     return len(on_disk)
 
 
@@ -699,17 +705,53 @@ READ_JSON_BY_KIND = {
 }
 
 
+#: What the CONSUMER requires of a completed round, per kind — the archive
+#: scanner in `tests/test_wave_gate.py`, which is the only thing that decides
+#: whether an archived round is usable. Validating merely that a sidecar parses
+#: to an object is a weaker contract than the one it must satisfy, and the gap
+#: is not academic: an attestation missing its teardown, artifact or thread
+#: binding parses perfectly and is then rejected downstream, so the producer
+#: reports success for evidence its consumer refuses.
+CONSUMER_REQUIRES = {
+    "architect-review": {
+        "attestation.json": (
+            ("teardown",), ("turn", "status"), ("parsedVerdict",),
+            ("artifact", "path"), ("artifact", "sha256"),
+            ("start", "threadId"), ("prompt", "actualSha256"),
+        ),
+    },
+    "commit-review": {"start.json": (("threadId",),)},
+}
+
+
 def refuse_unusable_json(source: Path, kind: str) -> None:
-    """Every present JSON sidecar this kind reads must parse to an object."""
+    """Every present sidecar must be readable AND satisfy the consumer's contract."""
     unusable = {}
     for name in READ_JSON_BY_KIND.get(kind, ()):
-        if not (source / name).is_file():
+        path = source / name
+        if not path.exists():
             continue                       # absent is a fact, not a corruption
+        if not path.is_file():
+            # A DIRECTORY at a sidecar's path is not an absent sidecar. The
+            # presence test used to ask `is_file()`, which answers no for a
+            # directory and sent it down the absent branch — archiving the round
+            # at exit 0 with every derived field null.
+            unusable[name] = f"is a {'directory' if path.is_dir() else 'special file'}"
+            continue
         parsed = read_json(source, name)
         if isinstance(parsed, Unreadable):
             unusable[name] = parsed.reason
         elif not isinstance(parsed, dict):
             unusable[name] = f"parsed to {type(parsed).__name__}, not an object"
+        else:
+            missing = [
+                "/".join(fp) for fp in CONSUMER_REQUIRES.get(kind, {}).get(name, ())
+                if _dig(parsed, fp) in (None, "")
+            ]
+            if missing:
+                unusable[name] = (
+                    f"parses, but the archive scanner requires {missing} and this "
+                    "does not carry them")
     if unusable:
         raise SystemExit(
             "refusing to archive a round whose sidecars cannot be used:\n"

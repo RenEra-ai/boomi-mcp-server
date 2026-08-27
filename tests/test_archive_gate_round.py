@@ -141,10 +141,23 @@ def _gate_run(tmp_path, prompt_bytes=b"the attested prompt\n", attest=True):
     # `collect` prints to stdout, and that invention hid a guard that was inert
     # on every real round. `test_the_fixture_matches_a_real_attestation` below
     # pins this shape against an attestation the repository actually archived.
+    # The COMPLETE contract the archive scanner requires of a completed round —
+    # teardown, turn status, verdict, artifact path and digest, thread binding,
+    # and the prompt digest. The earlier version of this fixture carried only
+    # three of those, so the positive test proved the archiver ACCEPTS something
+    # the consumer refuses. An architect review caught it. A fixture is only
+    # evidence to the extent it matches what the real producer emits.
+    review_bytes = (run / "review.md").read_bytes() if (run / "review.md").is_file() else b""
     (run / "attestation.json").write_text(json.dumps({
-        "schema": 1, "gate": "review",
-        "turn": {"status": "completed", "kind": "turn"},
+        "schema": 1, "gateProtocol": 2, "gate": "review",
+        "teardown": "confirmed",
+        "turn": {"status": "completed", "kind": "turn", "turnToken": 1},
         "parsedVerdict": "NO ISSUES",
+        "start": {"threadId": "01a0-thread-" + run.name, "private": True},
+        "artifact": {
+            "path": str(run / "review.md"),
+            "sha256": hashlib.sha256(review_bytes).hexdigest(),
+        },
         **({"prompt": {"actualSha256": digest, "allowedSha256": [digest],
                        "verified": True}} if attest else {}),
     }) + "\n")
@@ -2157,3 +2170,69 @@ def test_an_unreadable_START_json_is_refused_before_publication(tmp_path):
     assert "Traceback" not in result.stderr
     assert not (root / "commit-reviews" / run.name).exists(), \
         "the round was published before the failure — the retry is now blocked"
+
+
+def test_the_FIXTURE_satisfies_the_same_contract_the_archive_scanner_enforces():
+    """The positive test is only meaningful if its fixture is consumer-valid.
+
+    An architect review found this module's fixture carried three of the seven
+    facts the archive scanner requires of a completed round — so the positive
+    test proved the archiver accepts something the consumer refuses, which is
+    the opposite of what a positive test is for. This pins the fixture against
+    the contract directly, and against a REAL archived attestation, so the two
+    cannot drift apart again in either direction.
+    """
+    module = _archiver_module()
+    required = module.CONSUMER_REQUIRES["architect-review"]["attestation.json"]
+
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        run, _prompts = _gate_run(Path(tmp))
+        fixture = json.loads((run / "attestation.json").read_text())
+    missing = ["/".join(fp) for fp in required if module._dig(fixture, fp) in (None, "")]
+    assert missing == [], missing
+
+    # ...and the same contract holds against an attestation actually archived.
+    real = json.loads(sorted(_ARCHITECT_ROUNDS.glob("*/attestation.json"))[0].read_text())
+    absent = ["/".join(fp) for fp in required if module._dig(real, fp) in (None, "")]
+    assert absent == [], absent
+
+
+@pytest.mark.parametrize("drop", [
+    ("teardown",), ("turn", "status"), ("parsedVerdict",),
+    ("artifact", "sha256"), ("start", "threadId"),
+])
+def test_an_attestation_MISSING_a_consumer_required_fact_is_refused(tmp_path, drop):
+    """Parsing to an object is a weaker contract than the consumer's.
+
+    Each of these attestations is perfectly valid JSON and would have archived at
+    exit 0, then been rejected downstream — the producer reporting success for
+    evidence its consumer refuses, which is the defect this whole file exists to
+    prevent.
+    """
+    run, prompts = _gate_run(tmp_path)
+    att = json.loads((run / "attestation.json").read_text())
+    node = att
+    for key in drop[:-1]:
+        node = node[key]
+    node.pop(drop[-1])
+    (run / "attestation.json").write_text(json.dumps(att) + "\n")
+
+    result, root = _archive_gate(tmp_path, run, prompts)
+    assert result.returncode == 1, (drop, result.stdout)
+    assert "the archive scanner requires" in result.stderr, drop
+    assert "/".join(drop) in result.stderr, drop
+    assert not (root / "architect-reviews" / run.name).exists(), drop
+
+
+def test_a_DIRECTORY_at_a_sidecar_path_is_not_an_absent_sidecar(tmp_path):
+    """`is_file()` answers no for a directory, which sent it down the absent branch."""
+    run, prompts = _gate_run(tmp_path)
+    (run / "attestation.json").unlink()
+    (run / "attestation.json").mkdir()
+
+    result, root = _archive_gate(tmp_path, run, prompts)
+    assert result.returncode == 1, result.stdout
+    assert "is a directory" in result.stderr
+    assert not (root / "architect-reviews" / run.name).exists()

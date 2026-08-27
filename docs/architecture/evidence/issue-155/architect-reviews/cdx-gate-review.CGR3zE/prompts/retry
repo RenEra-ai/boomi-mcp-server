@@ -1,0 +1,17 @@
+Approvals and tool calls are unavailable in this read-only review session, and no further input is
+coming. Do not ask a clarifying question and do not request permission — neither can be answered.
+
+Produce the review NOW, as plain text, from what you have already read.
+
+This is evaluation 3 of 3 — the LAST architect evaluation for issue #155 slice A. Report, with
+file:line and the plan clause for each:
+
+1. Whether the corrections made since evaluation 2 discharge its six findings, or only appear to.
+2. Any requirement the plan makes of SLICE A that remains unmet.
+3. Anything built in slice A that the plan does not authorize.
+4. Whether, in your judgement, the slice should land in its current state — and if not, exactly what
+   would have to change.
+
+Absences belonging to slices B through F are NOT findings. Do not report them.
+
+END with a verdict on its OWN FINAL line: exactly 'VERDICT: NO ISSUES' or 'VERDICT: ISSUES FOUND'.
