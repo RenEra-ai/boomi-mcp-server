@@ -465,17 +465,27 @@ ancestor of W, so its corrections sit inside the wave gate's tree rather than af
 and N touch `docs/architecture/**` only; the darkness proof of that claim is
 `git diff --stat W..HEAD -- src tests scripts` being EMPTY, recorded at N.
 
-**Closure status — the slice does NOT close on this record alone.** Two blockers are open, neither
-mine to clear, and both are recorded as findings rather than as notes:
+**Closure status — the slice does NOT close, and ONE blocker remains.**
 
-1. `ARCH-155-r3-04` — the deferral enumerations for `ARCH-155-r1-03` and `ARCH-155-r1-05` are not
-   yet in #160's description. A deferral's enumeration must live in the target issue's body, and
-   this loop is barred from editing an issue it was not invoked against. The text is prepared in
-   full, with acceptance criteria, reason class and placement for each. **Until it is pasted, slice
-   A's code is complete and every gate current while its CLOSURE remains invalid.**
-2. `ARCH-155-r3-05` — the maintained evidence archiver is scope the plan does not authorise; the
-   strategy of record specifies a scratchpad derivation. Both remedies — removal, or an owner
-   amendment adopting it — are outside this loop's authority.
+1. `ARCH-155-r3-04` — **RESOLVED**, see `ARCH-155-r3-04a`. The deferral enumerations are now in
+   #160's description: five findings, each with acceptance criteria, reason class and placement, the
+   original body preserved verbatim as a prefix, and every cited identifier verified to resolve
+   against a row in this ledger — two of them rewritten from the superseded identifier form, since
+   the text was drafted before those rows were renamed to be scanner-visible. I had recorded this as
+   impossible for the loop to clear, on the strength of a remembered constraint I never tested.
+   Tested, the edit succeeds. The deferrals are closure-valid and NO CRITICAL RESIDUE REMAINS.
+
+2. `ARCH-155-r3-05` — **the sole remaining blocker.** The maintained evidence archiver is scope the
+   plan does not authorise; the strategy of record specifies a scratchpad derivation. It is standard
+   residue and fully enumerated, but it cannot be validly DEFERRED, because a deferral requires an
+   already-filed follow-up issue and this loop is barred BY POLICY from filing one — a constraint
+   genuinely different in kind from the capability wrongly assumed above. So neither close outcome
+   is available: `CLOSE-CLEAN` is false while residue exists, and `DEFER-STANDARD-AND-CLOSE` needs a
+   filed home this loop may not create. Two owner remedies: remove the tool, or amend the plan to
+   adopt it. **Recommendation: ADOPT** — removal leaves the completion workflow's requirement that
+   every round be archived with no maintained producer, which is how a previous issue came to
+   fabricate six attestations. Authorising a follow-up issue to carry it would equally unblock a
+   `DEFER-STANDARD-AND-CLOSE`.
 
 #155 itself stays OPEN regardless of either: it closes only on slice F, which is unstarted and needs
 both an active account when it lands and a counterparty that accepts six REST verbs.
