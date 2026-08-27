@@ -32,6 +32,7 @@ listed-but-untracked and fails the gate.
 import argparse
 import hashlib
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -279,7 +280,7 @@ def scan_archive(root: Path):
     }
 
 
-def refuse_unless_archive_is_accounted_for(root: Path, expect: str) -> None:
+def refuse_unless_archive_is_accounted_for(root: Path, accept_new: bool = False) -> None:
     """Check BEFORE anything is written. Pure — this function never mutates.
 
     Two separate lessons are encoded here, both learned from findings against
@@ -299,10 +300,20 @@ def refuse_unless_archive_is_accounted_for(root: Path, expect: str) -> None:
     canonicalised makes the next run think there is nothing to do. So the check
     is a separate function, and it runs first.
 
-      "same"  a re-derivation. No name may appear or vanish and no archived
-              file's bytes may differ from what the manifest recorded.
-      "grow"  a round is being archived. Names may appear afterwards — that is
-              the round — but nothing here may have vanished or changed.
+    There is no per-caller variation, and removing it is the third lesson. The
+    check once exempted "appeared" names while archiving, on the reasoning that
+    a new round brings new files — but it runs BEFORE the round's directory is
+    created, so nothing it can see was ever created by this invocation. The
+    exemption could not admit what it was written for and admitted only files
+    that predated the run: precisely the on-disk-but-unlisted state this exists
+    to catch, which the rewrite then recorded as valid evidence.
+
+    `accept_new` is the deliberate way to list a file that arrived outside this
+    script — a live capture, most often. It exists because that flow is real:
+    most files in this archive are captures, listed in the manifest and
+    referenced by no index row, and until now they were absorbed silently by
+    whichever round happened to be archived next. Accepting them is now an act
+    the operator asks for and the output records.
     """
     listed, on_disk = read_sums(root), scan_archive(root)
     if not listed:
@@ -317,8 +328,9 @@ def refuse_unless_archive_is_accounted_for(root: Path, expect: str) -> None:
     )
     if vanished:
         unaccounted["listed but no longer on disk"] = vanished
-    if appeared and expect == "same":
-        unaccounted["on disk but never listed"] = appeared
+    if appeared and not accept_new:
+        unaccounted["on disk but never listed (pass --accept-new to record them "
+                    "deliberately)"] = appeared
     if rewritten:
         unaccounted["listed but its bytes have changed"] = rewritten
     if not unaccounted:
@@ -327,7 +339,11 @@ def refuse_unless_archive_is_accounted_for(root: Path, expect: str) -> None:
     raise SystemExit(
         "refusing to touch this archive: it already differs from what its own "
         "manifest records, and rewriting would absorb a change this run did not "
-        "make. For most files here the manifest is the only record there is:\n"
+        "make. For most files here the manifest is the only record there is. "
+        "The difference is usually external, but not always — a previous run of "
+        "this script that failed before it was made rollback-safe could have "
+        "left it, so check the round directories named below before assuming "
+        "someone else touched the archive:\n"
         + "\n".join(f"  {why}: {what}" for why, what in sorted(unaccounted.items()))
         + "\nRestore the archive, or record the change deliberately."
     )
@@ -564,6 +580,11 @@ def main() -> int:
                              "not the run directory (the dispatcher-owned seam keeps "
                              "them apart on purpose)")
     parser.add_argument("--repo", type=Path, default=None)
+    parser.add_argument("--accept-new", action="store_true",
+                        help="record files that arrived in the archive outside this "
+                             "script (a live capture, typically). Without it an "
+                             "unlisted file refuses, because absorbing one silently "
+                             "is how unaccounted evidence becomes accounted evidence")
     parser.add_argument("--rederive-index", action="store_true",
                         help="recompute every index row from the archived bytes and "
                              "exit; use after changing how a row is derived, or the "
@@ -584,7 +605,7 @@ def main() -> int:
         # operator unable to retry: having fixed the damage, the next run saw an
         # already-canonical index, decided there was nothing to do, and exited 0
         # with the manifest still holding the index's old digest.
-        refuse_unless_archive_is_accounted_for(root, expect="same")
+        refuse_unless_archive_is_accounted_for(root, accept_new=args.accept_new)
         changed = rederive_index(root)
         # ONLY when a row actually moved. The checksum manifest covers archived
         # FILES, and re-deriving changes none of them — the sole reason to touch
@@ -613,11 +634,51 @@ def main() -> int:
 
     subdir, wanted, _collector, indexed = KINDS[args.kind]
 
+    # A SINGLE path component. Joined unchecked, `--name ../ESCAPED` wrote the
+    # round outside its kind directory and `--name ../../ESCAPED2` outside the
+    # issue archive altogether — both at exit 0, the second covered by no
+    # manifest line at all while an index row still claimed it. A completion
+    # claim citing that round would never be captured by a `git add` of the
+    # issue's evidence directory, which is the one thing the archive exists to
+    # make checkable. An absolute name wrote nine files outside the repository
+    # before failing on an unrelated path computation.
+    if args.name is not None and (
+            args.name in ("", ".", "..")
+            or os.sep in args.name
+            or (os.altsep and os.altsep in args.name)
+            or Path(args.name).is_absolute()):
+        print(f"--name must be a single directory name, not a path: {args.name!r}",
+              file=sys.stderr)
+        return 2
+
     # BEFORE the destination exists. Raising after it does is what makes a
     # failure non-retryable: the partial round is then in the way, and the
     # overwrite refusal blocks the corrected run even once the operator has
     # repaired what the check complained about.
-    refuse_unless_archive_is_accounted_for(root, expect="grow")
+    accepted = []
+    if args.accept_new:
+        _listed, _disk = read_sums(root), scan_archive(root)
+        accepted = sorted(set(_disk) - set(_listed))
+        # A file that appeared INSIDE an already-archived round is not a capture
+        # and must not be absorbed. The manifest is rewritten over every file
+        # while the index only appends the new row, so absorbing one would list
+        # it as evidence while the round's own row still denies it — and a later
+        # re-derivation then refuses on that disagreement, with no path forward
+        # that this flag can offer. Captures live outside round directories;
+        # anything inside one belongs to its round.
+        round_subdirs = {subdir for subdir, _f, _c, _i in KINDS.values()}
+        inside_a_round = sorted(
+            name for name in accepted
+            if len(Path(name).parts) > 2 and Path(name).parts[0] in round_subdirs
+        )
+        if inside_a_round:
+            print("refusing to accept files that appeared inside an already "
+                  "archived round — these belong to a round, not to the archive, "
+                  "and listing them would leave the round's own row denying "
+                  f"them:\n  {inside_a_round}\nRemove them, or delete the round "
+                  "directory and archive it again.", file=sys.stderr)
+            return 1
+    refuse_unless_archive_is_accounted_for(root, accept_new=args.accept_new)
 
     durable = root / subdir / (args.name or args.run_dir.name)
     if durable.exists():
@@ -734,17 +795,37 @@ def main() -> int:
 
     row = derive_row(args.kind, args.run_dir, durable, root,
                      args.logical_loop, args.status, args.wave_sha)
-    if indexed:
-        with (root / "index.jsonl").open("a") as handle:
-            handle.write(json.dumps(row, sort_keys=True) + "\n")
-    else:
-        # Recorded BESIDE the round instead of in the shared index, so the
-        # evidence exists and is checksummed without claiming an attestation
-        # the scanner would then look for and not find.
-        (durable / "round.json").write_text(json.dumps(row, sort_keys=True, indent=1) + "\n")
+    # From here every write is ROLLED BACK on failure. Without this the sequence
+    # — create the directory, copy into it, append the row, rewrite the manifest
+    # — left an archive that was both inconsistent AND unretryable when any step
+    # failed: a read-only manifest, a full disk, an unreadable source file each
+    # produced a half-archived round, and because the destination then existed,
+    # the overwrite refusal blocked the identical command after the operator had
+    # fixed exactly what the error named. Restoring the previous state is what
+    # makes "fix what it says and run it again" true rather than aspirational.
+    index_before = (root / "index.jsonl").read_bytes()
+    try:
+        if indexed:
+            with (root / "index.jsonl").open("a") as handle:
+                handle.write(json.dumps(row, sort_keys=True) + "\n")
+        else:
+            # Recorded BESIDE the round instead of in the shared index, so the
+            # evidence exists and is checksummed without claiming an attestation
+            # the scanner would then look for and not find.
+            (durable / "round.json").write_text(
+                json.dumps(row, sort_keys=True, indent=1) + "\n")
 
-    listed = write_sums(root)
+        listed = write_sums(root)
+    except BaseException as failure:
+        (root / "index.jsonl").write_bytes(index_before)
+        _discard(durable)
+        print(f"archiving failed and was rolled back ({type(failure).__name__}: "
+              f"{failure}). The archive is as it was; fix the cause and run the "
+              "same command again.", file=sys.stderr)
+        return 1
     print(f"archived {len(copied)} file(s) to {durable.relative_to(repo)}")
+    for name in accepted:
+        print(f"  ACCEPTED into the manifest, not produced by this round: {name}")
     print(f"  status={row['status']} reviewed_sha={row.get('reviewed_sha')}")
     print("  {0}; SHA256SUMS lists {1} files".format(
         "index row appended" if indexed else "recorded in round.json, NOT indexed "

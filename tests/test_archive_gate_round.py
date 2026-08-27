@@ -154,7 +154,7 @@ def _gate_run(tmp_path, prompt_bytes=b"the attested prompt\n", attest=True):
     return run, prompts
 
 
-def _archive_gate(tmp_path, run, prompts):
+def _archive_gate(tmp_path, run, prompts, accept_new=False):
     root = tmp_path / "repo" / "docs" / "architecture" / "evidence" / "issue-999"
     root.mkdir(parents=True, exist_ok=True)
     index = root / "index.jsonl"
@@ -167,6 +167,8 @@ def _archive_gate(tmp_path, run, prompts):
             "--repo", str(tmp_path / "repo")]
     if prompts is not None:
         args += ["--prompts", str(prompts)]
+    if accept_new:
+        args += ["--accept-new"]
     return subprocess.run(args, capture_output=True, text=True), root
 
 
@@ -1059,8 +1061,18 @@ def test_a_file_NO_ROW_references_cannot_vanish_unreported_either(tmp_path):
     second.mkdir()
     for name in ("start.json", "attestation.json", "review.md"):
         (second / name).write_text((run / name).read_text())
-    relist, _ = _archive_gate(tmp_path, second, prompts)
+    # A capture arrived outside this script, so listing it is now something the
+    # operator ASKS for. Without the flag this refuses — checked here, because
+    # the silent absorption it replaces is exactly how an unlisted file used to
+    # become listed evidence.
+    refused, _ = _archive_gate(tmp_path, second, prompts)
+    assert refused.returncode != 0, refused.stdout
+    assert "never listed" in refused.stderr and "readback.xml" in refused.stderr
+
+    relist, _ = _archive_gate(tmp_path, second, prompts, accept_new=True)
     assert relist.returncode == 0, relist.stderr
+    assert "ACCEPTED into the manifest" in relist.stdout
+    assert "readback.xml" in relist.stdout
     assert "captures/cap-155-x/readback.xml" in (root / "SHA256SUMS").read_text()
 
     unreferenced.unlink()
@@ -1223,3 +1235,198 @@ def test_ARCHIVING_refuses_before_the_destination_exists(tmp_path):
     retry, _ = _archive_gate(tmp_path, second, prompts)
     assert retry.returncode == 0, retry.stderr
     assert (root / "architect-reviews" / second.name / "review.md").is_file()
+
+
+def test_a_PRE_EXISTING_unlisted_file_is_not_laundered_by_archiving_a_round(tmp_path):
+    """The exemption that could not admit what it was written for.
+
+    The pre-flight ran before the new round's directory existed, so nothing it
+    could see had been created by that invocation — yet it exempted `appeared`
+    names while archiving, on the reasoning that a new round brings new files.
+    The only names the exemption could actually admit were ones that predated
+    the run, and the manifest rewrite then recorded them as valid evidence:
+    exactly the on-disk-but-unlisted state the accounting exists to catch.
+    """
+    run, prompts = _gate_run(tmp_path)
+    first, root = _archive_gate(tmp_path, run, prompts)
+    assert first.returncode == 0, first.stderr
+
+    # Arrived from somewhere else, before this next round is archived.
+    intruder = root / "commit-reviews" / "cdx-review.NOTMINE" / "review.json"
+    intruder.parent.mkdir(parents=True)
+    intruder.write_text(json.dumps({"scope": "auto"}) + "\n")
+
+    second = tmp_path / "cdx-gate-review.NEXTONE"
+    second.mkdir()
+    for name in ("start.json", "attestation.json", "review.md"):
+        (second / name).write_text((run / name).read_text())
+
+    out, _ = _archive_gate(tmp_path, second, prompts)
+    assert out.returncode != 0, out.stdout
+    assert "never listed" in out.stderr
+    assert "cdx-review.NOTMINE/review.json" in out.stderr
+    assert "cdx-review.NOTMINE/review.json" not in (root / "SHA256SUMS").read_text()
+    assert not (root / "architect-reviews" / second.name).exists()
+
+
+def test_accepting_a_foreign_file_is_RECORDED_not_silent(tmp_path):
+    """Absorbing one silently is how unaccounted evidence becomes accounted.
+
+    The flow is real — most files in a live archive are captures that arrived
+    outside this script — so the flag exists. What it must not be is quiet: the
+    accepted names are printed, so the act lands in whatever record the operator
+    is keeping rather than only in the manifest it changes.
+    """
+    run, prompts = _gate_run(tmp_path)
+    first, root = _archive_gate(tmp_path, run, prompts)
+    assert first.returncode == 0, first.stderr
+
+    capture = root / "captures" / "cap-x" / "readback.xml"
+    capture.parent.mkdir(parents=True)
+    capture.write_text("<component/>\n")
+
+    second = tmp_path / "cdx-gate-review.WITHFLAG"
+    second.mkdir()
+    for name in ("start.json", "attestation.json", "review.md"):
+        (second / name).write_text((run / name).read_text())
+
+    out, _ = _archive_gate(tmp_path, second, prompts, accept_new=True)
+    assert out.returncode == 0, out.stderr
+    assert "ACCEPTED into the manifest, not produced by this round" in out.stdout
+    assert "captures/cap-x/readback.xml" in out.stdout
+    assert "captures/cap-x/readback.xml" in (root / "SHA256SUMS").read_text()
+
+    # The flag admits an ARRIVAL. It must not also excuse a disappearance.
+    (root / "architect-reviews" / run.name / "review.md").unlink()
+    third = tmp_path / "cdx-gate-review.THIRD"
+    third.mkdir()
+    for name in ("start.json", "attestation.json", "review.md"):
+        (third / name).write_text((run / name).read_text())
+    lost, _ = _archive_gate(tmp_path, third, prompts, accept_new=True)
+    assert lost.returncode != 0, lost.stdout
+    assert "no longer on disk" in lost.stderr
+
+
+@pytest.mark.parametrize("bad,why", [
+    ("../ESCAPED", "escapes the kind directory"),
+    ("../../ESCAPED2", "escapes the issue archive entirely"),
+    ("a/b", "a nested path, not a name"),
+    ("..", "the parent itself"),
+    ("", "empty"),
+])
+def test_a_NAME_that_is_a_PATH_is_refused(tmp_path, bad, why):
+    """Joined unchecked, this wrote rounds outside the archive at exit 0.
+
+    `../ESCAPED` landed outside its kind directory; `../../ESCAPED2` landed
+    outside the issue archive altogether, covered by NO manifest line while an
+    index row still claimed it. A completion claim citing that round would never
+    be captured by a `git add` of the issue's evidence directory — which is the
+    single thing this archive exists to make checkable. An absolute name wrote
+    nine files outside the repository before failing on something unrelated.
+    """
+    run, prompts = _gate_run(tmp_path)
+    root = tmp_path / "repo" / "docs" / "architecture" / "evidence" / "issue-999"
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "index.jsonl").write_text(json.dumps({
+        "generated_at": "x", "issue": 999, "schema_version": 1, "source_tip": "abc",
+    }) + "\n")
+
+    result = subprocess.run(
+        [sys.executable, str(_SCRIPT), "--issue", "999", "--kind", "architect-review",
+         "--run-dir", str(run), "--logical-loop", "L3", "--repo", str(tmp_path / "repo"),
+         "--prompts", str(prompts), "--name", bad],
+        capture_output=True, text=True)
+
+    assert result.returncode == 2, (why, result.stdout)
+    assert "single directory name" in result.stderr
+    escaped = [p for p in (tmp_path / "repo").rglob("ESCAPED*")]
+    assert escaped == [], (why, escaped)
+    assert (root / "index.jsonl").read_text().count("\n") == 1, "a row was written"
+
+
+def test_a_name_that_IS_a_single_component_still_works(tmp_path):
+    """The control: the wave-gate rounds in this repo are archived under one."""
+    run, prompts = _gate_run(tmp_path)
+    root = tmp_path / "repo" / "docs" / "architecture" / "evidence" / "issue-999"
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "index.jsonl").write_text(json.dumps({
+        "generated_at": "x", "issue": 999, "schema_version": 1, "source_tip": "abc",
+    }) + "\n")
+
+    result = subprocess.run(
+        [sys.executable, str(_SCRIPT), "--issue", "999", "--kind", "architect-review",
+         "--run-dir", str(run), "--logical-loop", "L3", "--repo", str(tmp_path / "repo"),
+         "--prompts", str(prompts), "--name", "renamed-round"],
+        capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+    assert (root / "architect-reviews" / "renamed-round" / "review.md").is_file()
+
+
+def test_a_failed_archive_is_ROLLED_BACK_and_the_retry_succeeds(tmp_path):
+    """Inconsistent AND unretryable was the measured outcome of any failed write.
+
+    The destination existed afterwards, so the overwrite refusal blocked the
+    identical command even once the operator had fixed exactly what the error
+    named. A read-only manifest is the cheapest way to produce that failure.
+    """
+    run, prompts = _gate_run(tmp_path)
+    first, root = _archive_gate(tmp_path, run, prompts)
+    assert first.returncode == 0, first.stderr
+
+    index_before = (root / "index.jsonl").read_bytes()
+    sums = root / "SHA256SUMS"
+    sums.chmod(0o444)
+
+    second = tmp_path / "cdx-gate-review.WILLFAIL"
+    second.mkdir()
+    for name in ("start.json", "attestation.json", "review.md"):
+        (second / name).write_text((run / name).read_text())
+
+    out, _ = _archive_gate(tmp_path, second, prompts)
+    try:
+        assert out.returncode != 0, out.stdout
+        assert "rolled back" in out.stderr
+        assert (root / "index.jsonl").read_bytes() == index_before, "the row survived"
+        assert not (root / "architect-reviews" / second.name).exists(), \
+            "the partial round survived and now blocks the retry"
+    finally:
+        sums.chmod(0o644)
+
+    # Fix exactly what the message named; the identical command now succeeds.
+    retry, _ = _archive_gate(tmp_path, second, prompts)
+    assert retry.returncode == 0, retry.stderr
+    assert (root / "architect-reviews" / second.name / "review.md").is_file()
+
+
+def test_a_file_inside_an_ARCHIVED_round_is_not_absorbable(tmp_path):
+    """The two derived artifacts have different refresh scopes.
+
+    The manifest is rewritten over every file; the index only appends the new
+    row. So a file that appears inside an already-archived round could be listed
+    as evidence while that round's own row still denies it — and a later
+    re-derivation then refuses on the disagreement with nothing the accept flag
+    can do about it. Captures live outside round directories; anything inside
+    one belongs to its round.
+    """
+    run, prompts = _gate_run(tmp_path)
+    first, root = _archive_gate(tmp_path, run, prompts)
+    assert first.returncode == 0, first.stderr
+
+    late = root / "architect-reviews" / run.name / "late-sidecar.json"
+    late.write_text(json.dumps({"arrived": "after the round was archived"}) + "\n")
+
+    second = tmp_path / "cdx-gate-review.NEXT2"
+    second.mkdir()
+    for name in ("start.json", "attestation.json", "review.md"):
+        (second / name).write_text((run / name).read_text())
+
+    out, _ = _archive_gate(tmp_path, second, prompts, accept_new=True)
+    assert out.returncode != 0, out.stdout
+    assert "inside an already archived round" in out.stderr
+    assert "late-sidecar.json" in out.stderr
+    assert "late-sidecar.json" not in (root / "SHA256SUMS").read_text()
+
+    # And the way out that the message names actually works.
+    late.unlink()
+    retry, _ = _archive_gate(tmp_path, second, prompts)
+    assert retry.returncode == 0, retry.stderr
