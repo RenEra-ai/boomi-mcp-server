@@ -152,6 +152,8 @@ def test_connector_rows_must_name_this_captures_executions():
     import shutil
     import tempfile
 
+    import json
+
     with tempfile.TemporaryDirectory() as tmp:
         d = Path(tmp) / "cap"
         shutil.copytree(_C / "cap155-e4-head-status", d)
@@ -161,7 +163,26 @@ def test_connector_rows_must_name_this_captures_executions():
             "execution-00000000-0000-4000-8000-000000000000-2026.01.01"))
         with pytest.raises(CaptureRefused) as err:
             summarize(d, "HEAD")
-        assert "names none of this capture's executions" in str(err.value)
+        assert "not one of this capture's" in str(err.value)
+
+    # The MIXED case, which per-FILE correlation could not see: a file holding a
+    # record for this capture's execution BESIDE one for a foreign execution passed
+    # wholesale, and every connector type in it was then trusted.
+    with tempfile.TemporaryDirectory() as tmp:
+        d = Path(tmp) / "cap"
+        shutil.copytree(_C / "cap155-e4-head-status", d)
+        f = d / "execution_connector.json"
+        doc = json.loads(f.read_text())
+        records = doc["raw"]["data"]["result"]
+        records.append({
+            **records[0],
+            "executionId": "execution-00000000-0000-4000-8000-000000000000-2026.01.01",
+            "connectorType": "officialboomi-X3979C-dbv2da-prod",
+        })
+        f.write_text(json.dumps(doc))
+        with pytest.raises(CaptureRefused) as err:
+            summarize(d, "HEAD")
+        assert "not one of this capture's" in str(err.value)
 
     # The control: the untouched capture still summarises.
     assert summarize(_C / "cap155-e4-head-status", "HEAD").observed_connector_types
@@ -182,3 +203,41 @@ def test_a_component_kind_with_no_published_projection_is_refused():
 
     empty = ReplayRegistry((), ())
     assert empty.projection_for("operation") is None
+
+
+def test_one_logged_request_cannot_attest_two_executions():
+    """A replay verdict must not rest on a request nobody observed.
+
+    The single counterparty outcome was copied onto every run, so a capture with
+    two executions and one logged request looked fully attested — and a replay
+    verdict drawn from the second execution rested on nothing.
+    """
+    import shutil
+    import tempfile
+
+    from boomi_mcp.connector_replay.ingest import classify
+
+    with tempfile.TemporaryDirectory() as tmp:
+        d = Path(tmp) / "cap"
+        shutil.copytree(_C / "cap155-e2-post", d)
+        (d / "mock_access_log.txt").write_text(
+            'INFO: 1.2.3.4 - "POST /x HTTP/1.1" 200 OK\n')
+        summary = summarize(d, "POST")
+        assert len(summary.runs) == 2
+        assert {r.counterparty_status for r in summary.runs} == {None}, (
+            "one logged request was spread across both executions")
+        assert classify(summary, "POST", frozenset()) == (
+            SideEffectV1.UNKNOWN, RetrySafetyV1.UNVERIFIED)
+
+
+def test_absence_is_not_a_present_null():
+    """A replay that ADDED a null-valued field reported no difference at all.
+
+    `dict.get` returns None for both "not there" and "there and null", and that
+    result fed the convergence verdict.
+    """
+    from boomi_mcp.connector_replay.capture import _differing_keys
+
+    assert _differing_keys({}, {"f": None}) == ("f",)
+    assert _differing_keys({"f": None}, {}) == ("f",)
+    assert _differing_keys({"f": None}, {"f": None}) == ()

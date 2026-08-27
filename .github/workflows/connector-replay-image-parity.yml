@@ -72,7 +72,8 @@ jobs:
             -e PYTHONPATH=/app/src connector-replay-parity:ci \
             /app/scripts/connector_replay_digest_parity.py
 
-          docker run --rm --entrypoint python connector-replay-parity:ci -c '
+          docker run --rm --entrypoint python \
+            -e PYTHONPATH=/app/src connector-replay-parity:ci -c '
           import json, sys
           from importlib import resources
 

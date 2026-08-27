@@ -297,6 +297,15 @@ def _effective_path(base_url: str, template: str) -> str:
     tail = template.strip()
     _reject_malformed_percent(base)
     _reject_malformed_percent(tail)
+    # The operation resource is a PATH. Query and fragment are refused on the
+    # connection url already; leaving them accepted here meant `/x?query=1` and
+    # `/x#fragment` still received versioned digests through the other door.
+    for marker, what in (("?", "query"), ("#", "fragment")):
+        if marker in tail:
+            raise RouteDigestRefused(
+                f"operation path {tail!r} carries a {what}; neither is part of a "
+                "route, and including one would digest the same route differently"
+            )
     # Exactly one slash at the boundary — neither swallowed nor doubled.
     joined = base.rstrip("/") + "/" + tail.lstrip("/") if tail else base
     if not joined.startswith("/"):

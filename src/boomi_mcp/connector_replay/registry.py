@@ -236,7 +236,17 @@ def _refuse_unresolvable_records(vocabulary, evidence, operation_records, semant
     whether a write may be retried, "well-formed" is not the bar.
     """
     families = {entry.family: set(entry.recognised_actions) for entry in vocabulary}
-    published = {(d.semantics_id, d.revision) for d in semantics}
+    # A SET would silently accept two CONTRADICTORY definitions for one id and
+    # revision — they differ, so both survive, and which one interprets a record
+    # then depends on iteration order.
+    published: dict[tuple[str, int], object] = {}
+    for definition in semantics:
+        key = (definition.semantics_id, definition.revision)
+        if key in published and published[key] != definition:
+            raise RegistryInvalid(
+                f"two different semantics definitions for {key!r}; a record citing "
+                "it would be interpreted differently depending on which is read")
+        published[key] = definition
 
     for row in evidence:
         if row.family not in families:
@@ -248,7 +258,7 @@ def _refuse_unresolvable_records(vocabulary, evidence, operation_records, semant
                 f"evidence row {row.family}/{row.action} names an action the "
                 f"{row.family!r} vocabulary does not recognise")
 
-    seen: set[tuple[str, str, str]] = set()
+    seen: set[str] = set()
     for record in operation_records:
         if record.family not in families:
             raise RegistryInvalid(
@@ -271,12 +281,16 @@ def _refuse_unresolvable_records(vocabulary, evidence, operation_records, semant
             raise RegistryInvalid(
                 f"operation record {record.contract_ref} is bound to one account "
                 "while its capture was taken in another")
-        key = (record.family, record.action, record.contract_ref)
-        if key in seen:
+        # Keyed on the CONTRACT REFERENCE alone. Including family and action let
+        # one reference occur under several actions, so a single contract could
+        # carry conflicting verdicts and the reference would no longer identify
+        # anything.
+        if record.contract_ref in seen:
             raise RegistryInvalid(
-                f"duplicate operation record for {key!r}; two records for one "
-                "contract would make the verdict depend on iteration order")
-        seen.add(key)
+                f"contract reference {record.contract_ref!r} appears on more than "
+                "one operation record; a reference that identifies several records "
+                "identifies none of them")
+        seen.add(record.contract_ref)
 
 
 @lru_cache(maxsize=1)

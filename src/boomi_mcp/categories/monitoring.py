@@ -1183,6 +1183,14 @@ def _convert_connector_records(entries) -> List[Dict[str, Any]]:
             "error_message": getattr(entry, 'error_message', None),
             "retryable": getattr(entry, 'retryable', None),
             "document_index": getattr(entry, 'document_index', None),
+            # Provenance. The SDK carries these and they were being dropped, so a
+            # per-document record could say a REST connector moved a document but
+            # not WHICH operation, connection or connector row produced it — which
+            # is exactly the attribution the evidence registry is built on.
+            "operation_id": _unset_to_none(getattr(entry, 'operation_id', None)),
+            "connection_id": _unset_to_none(getattr(entry, 'connection_id', None)),
+            "execution_connector_id": _unset_to_none(
+                getattr(entry, 'execution_connector_id', None)),
         }
         records.append({k: v for k, v in record.items() if v is not None})
     return records

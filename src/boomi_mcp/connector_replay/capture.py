@@ -228,8 +228,19 @@ def _body_of(payload: Any) -> dict[str, Any] | None:
     return body if isinstance(body, dict) else None
 
 
+_ABSENT = object()
+
+
 def _differing_keys(a: dict[str, Any], b: dict[str, Any]) -> tuple[str, ...]:
-    return tuple(sorted(k for k in set(a) | set(b) if a.get(k) != b.get(k)))
+    """Keys whose value differs, counting ABSENCE as different from a present null.
+
+    `a.get(k)` returns None for both "not there" and "there and null", so a replay
+    that ADDED a null-valued field reported no difference at all — and that result
+    feeds the convergence verdict. A sentinel keeps the two apart.
+    """
+    return tuple(sorted(
+        k for k in set(a) | set(b) if a.get(k, _ABSENT) != b.get(k, _ABSENT)
+    ))
 
 
 def _convergence(files: list[Path]) -> tuple[ConvergenceV1, ...]:
@@ -265,6 +276,30 @@ def _convergence(files: list[Path]) -> tuple[ConvergenceV1, ...]:
     return tuple(results)
 
 
+def _platform_connector_records(payload: Any) -> list[dict]:
+    """The platform's own connector records inside a captured query response.
+
+    Found by SHAPE — an object carrying both `executionId` and `connectorType` —
+    rather than by a fixed path, because the capture generations wrap the platform
+    response differently. The shape is the platform's; the wrapper is ours.
+    """
+    found: list[dict] = []
+
+    def walk(node: Any) -> None:
+        if isinstance(node, dict):
+            if "connectorType" in node and "executionId" in node:
+                found.append(node)
+                return
+            for child in node.values():
+                walk(child)
+        elif isinstance(node, list):
+            for child in node:
+                walk(child)
+
+    walk(payload)
+    return found
+
+
 def _observed_connector_types(
     files: list[Path], execution_ids: frozenset[str]
 ) -> tuple[str, ...]:
@@ -283,27 +318,38 @@ def _observed_connector_types(
     for path in files:
         if not path.name.endswith(_EXECUTION_CONNECTOR):
             continue
-        text = path.read_text()
-        if not any(eid in text for eid in execution_ids):
-            raise CaptureRefused(
-                f"{path.name} names none of this capture's executions "
-                f"{sorted(execution_ids)!r}, so its connector rows describe some "
-                "other execution and cannot attribute this one"
-            )
         payload = _load_json(path)
 
-        def walk(node):
-            if isinstance(node, dict):
-                value = node.get("connectorType")
-                if isinstance(value, str) and value not in EXECUTION_SENTINELS:
-                    seen.add(value)
-                for child in node.values():
-                    walk(child)
-            elif isinstance(node, list):
-                for child in node:
-                    walk(child)
-
-        walk(payload)
+        # PER RECORD, from the PLATFORM's own records. The capture tooling also
+        # writes a flattened `rows` array, and that array DROPS `executionId` —
+        # the very field that ties a row to an execution. Reading it would have
+        # made per-record correlation impossible and per-file correlation the only
+        # option, which is what allowed a file holding an own-execution row beside
+        # a foreign-execution row to pass wholesale.
+        #
+        # A record is evidence about the execution it names, and about no other.
+        records = _platform_connector_records(payload)
+        if not records:
+            raise CaptureRefused(
+                f"{path.name} carries no platform connector records, so there is "
+                "nothing whose execution can be checked"
+            )
+        for record in records:
+            execution = record.get("executionId")
+            if not isinstance(execution, str):
+                raise CaptureRefused(
+                    f"{path.name}: a connector record names no execution, so "
+                    "nothing ties it to this capture"
+                )
+            if execution not in execution_ids:
+                raise CaptureRefused(
+                    f"{path.name}: a connector record belongs to execution "
+                    f"{execution!r}, which is not one of this capture's "
+                    f"{sorted(execution_ids)!r}"
+                )
+            value = record.get("connectorType")
+            if isinstance(value, str) and value not in EXECUTION_SENTINELS:
+                seen.add(value)
     return tuple(sorted(seen))
 
 
@@ -328,6 +374,14 @@ def _observed_methods(files: list[Path]) -> tuple[str, ...]:
             continue
         found.update(re.findall(r'customOperationType="([^"]+)"', path.read_text()))
     return tuple(sorted(found))
+
+
+def _counterparty_request_count(log: Path, method_hint: str | None) -> int:
+    """How many requests the counterparty actually logged for the method under test."""
+    hits = [m for line in log.read_text().splitlines() if (m := _ACCESS_LINE.search(line))]
+    if method_hint:
+        return sum(1 for m in hits if m.group("method") == method_hint)
+    return len(hits)
 
 
 def summarize(capture_dir: Path, method_hint: str | None = None) -> CaptureSummaryV1:
@@ -362,9 +416,16 @@ def summarize(capture_dir: Path, method_hint: str | None = None) -> CaptureSumma
         if p.name.endswith(_READBACK_DELTA)
     }
     logs = [p for p in files if p.name.endswith(_ACCESS_LOG)]
+    if len(logs) > 1:
+        raise CaptureRefused(
+            "the capture carries more than one counterparty log and there is no "
+            "rule for which execution each belongs to"
+        )
     counterparty_status, counterparty_method = (None, None)
+    logged_request_count = 0
     if logs:
         counterparty_status, counterparty_method = _counterparty_outcome(logs[0], method_hint)
+        logged_request_count = _counterparty_request_count(logs[0], method_hint)
 
     runs: list[CaptureRunV1] = []
     for path in execution_files:
@@ -397,6 +458,17 @@ def summarize(capture_dir: Path, method_hint: str | None = None) -> CaptureSumma
                 counterparty_method=counterparty_method,
             )
         )
+
+    # ONE observed request cannot attest TWO executions. The outcome above is
+    # copied onto every run, which is correct only when the counterparty logged as
+    # many requests as there were executions. Otherwise the second execution is
+    # unattested, and a replay verdict drawn from it would rest on a request nobody
+    # observed. Drop the attribution rather than spread it.
+    if logs and logged_request_count < len(runs):
+        runs = [
+            run.model_copy(update={"counterparty_status": None, "counterparty_method": None})
+            for run in runs
+        ]
 
     return CaptureSummaryV1(
         scenario=capture_dir.name,
