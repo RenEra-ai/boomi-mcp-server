@@ -285,6 +285,13 @@ def refuse_unrecordable_names(root: Path) -> None:
     """Refuse any archived path the manifest cannot represent faithfully."""
     import unicodedata
 
+    # The test below asks `str.splitlines()` itself rather than comparing against
+    # a list of separators. Hand-listing them is how this check shipped seeing
+    # only carriage return and newline while `splitlines()` also breaks on the
+    # vertical tab, the form feed, three file/group/record separators, NEL and
+    # both Unicode line and paragraph separators — eight it did not know about.
+    # The manifest is read back with `splitlines()`, so `splitlines()` is the
+    # authority on what breaks it, and asking the authority cannot drift.
     offenders = {}
     for path in sorted(root.rglob("*")):
         if path.is_symlink():
@@ -297,9 +304,9 @@ def refuse_unrecordable_names(root: Path) -> None:
         if not path.is_file():
             continue
         rel = str(path.relative_to(root))
-        if "\n" in rel or "\r" in rel:
-            offenders.setdefault("a line break, which ends the manifest record "
-                                 "mid-name", []).append(repr(rel))
+        if len(rel.splitlines()) > 1 or rel.splitlines() != [rel]:
+            offenders.setdefault("a line separator, which ends the manifest "
+                                 "record mid-name", []).append(repr(rel))
         elif rel != unicodedata.normalize("NFC", rel):
             offenders.setdefault("a decomposed form that git stores differently, "
                                  "so the manifest and the git index disagree",
@@ -783,15 +790,39 @@ def main() -> int:
     # Widening a rollback to cover more of the copy loop is the patch I already
     # tried; making the destination appear only when the round is COMPLETE is
     # the property, and it holds for failures nobody enumerated.
+    # BEFORE anything is created. Appending a round row into a missing index
+    # makes that ROW the archive header, where the repository's scanner requires
+    # a schema version and a source tip and where this script's own
+    # re-derivation explicitly refuses a row — so the command reported success
+    # and produced an archive nothing could read. An archive skeleton is created
+    # deliberately; inventing a source tip here would fabricate provenance.
+    #
+    # Placed here, not at the point of use: the first version of this check sat
+    # beside the index read and therefore refused only after the round had
+    # already been published, which is the same check-after-mutate shape two
+    # earlier rounds were about. Writing it a third time is what moved it here.
+    index_path = root / "index.jsonl"
+    if indexed and not index_path.is_file():
+        print(f"no index at {index_path} — an archive is opened with its skeleton "
+              "(index header plus manifest), not bootstrapped by its first round. "
+              "Create the skeleton, then archive into it.", file=sys.stderr)
+        return 1
+
     kind_dir_existed = durable.parent.is_dir()
     durable.parent.mkdir(parents=True, exist_ok=True)
     staging = durable.parent / f".partial-{durable.name}-{os.getpid()}"
-    if staging.exists():
-        shutil.rmtree(staging)
-    staging.mkdir()
 
     copied = []
     try:
+        # Inside the guard from the FIRST mutation, not from the first copy.
+        # Creating the staging directory is itself a write and can itself fail —
+        # a read-only kind directory is the case that proved it — and sitting one
+        # line above the guard it escaped as a traceback. Every attempt to fence
+        # this operation has drawn the fence one step too late; this draws it at
+        # the first thing that touches the disk.
+        if staging.exists():
+            shutil.rmtree(staging)
+        staging.mkdir()
         for name in wanted:
             source = args.run_dir / name
             if source.is_file():
@@ -830,8 +861,20 @@ def main() -> int:
               file=sys.stderr)
         return 1
 
-    # The destination comes into existence here, complete, in one step.
-    os.rename(staging, durable)
+    # The destination comes into existence here, complete, in one step — and the
+    # publication itself is guarded, because a rename can fail too (an I/O error,
+    # or the destination appearing between the check and the move). Left
+    # unguarded it stranded a populated staging directory inside the archive,
+    # which the next run then refuses as unaccounted: exactly the retry-blocked
+    # state building beside the destination was meant to remove.
+    try:
+        os.rename(staging, durable)
+    except BaseException as failure:
+        shutil.rmtree(staging, ignore_errors=True)
+        print(f"archiving failed while publishing the round ({type(failure).__name__}: "
+              f"{failure}). Nothing was left in the archive; fix the cause and run "
+              "the same command again.", file=sys.stderr)
+        return 1
 
     # A gate round's PROMPT is required evidence, and it must be the prompt the
     # collector attested — not merely some file in a directory named prompts.
@@ -925,7 +968,6 @@ def main() -> int:
     # and the retry blocked. Measured against the previous commit: it exited 0
     # there and 1 here. A fix that breaks the first use of the thing it protects
     # is not a fix, and this one was mine.
-    index_path = root / "index.jsonl"
     try:
         index_before = index_path.read_bytes() if index_path.is_file() else None
         if indexed:

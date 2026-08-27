@@ -1577,28 +1577,54 @@ def test_a_rollback_that_cannot_COMPLETE_says_so_instead_of_claiming_success(tmp
     assert retry.returncode == 0, retry.stderr
 
 
-def test_bootstrapping_a_NEW_issue_archive_works(tmp_path):
-    """A regression I introduced, caught by QA and A/B-proven against the parent.
+def test_an_archive_with_NO_INDEX_is_refused_rather_than_bootstrapped(tmp_path):
+    """Three behaviours in three rounds, and only the third is right.
 
-    Reading the index unconditionally, outside the protected region and after the
-    round had been moved into place, turned the first use of a new archive into a
-    crash that orphaned the round and blocked the retry. The previous commit
-    exited 0 on the identical input. A fix that breaks the first use of the thing
-    it protects is not a fix.
+    Originally this crashed with a file-not-found, orphaning the round and
+    blocking the retry — a regression I introduced. I then "fixed" it by letting
+    the append create the index, and asserted only that the command exited 0.
+    It did, and produced an archive nothing can read: the first line of an index
+    is its HEADER, carrying a schema version and a source tip, and a round row
+    sitting there fails the repository's scanner and is explicitly refused by
+    this script's own re-derivation. My witness had checked for success instead
+    of for a usable result, which is why it passed.
+
+    An archive skeleton is created deliberately. Inventing a source tip here
+    would be fabricating provenance, so a missing index is refused.
     """
     run, prompts = _gate_run(tmp_path)
     root = tmp_path / "repo" / "docs" / "architecture" / "evidence" / "issue-888"
-    root.mkdir(parents=True)          # no index.jsonl, no SHA256SUMS: brand new
+    root.mkdir(parents=True)          # no index.jsonl: not a skeleton
 
-    result = subprocess.run(
-        [sys.executable, str(_SCRIPT), "--issue", "888", "--kind", "architect-review",
-         "--run-dir", str(run), "--logical-loop", "L3", "--repo", str(tmp_path / "repo"),
-         "--prompts", str(prompts)],
-        capture_output=True, text=True)
-    assert result.returncode == 0, result.stderr
+    def archive():
+        return subprocess.run(
+            [sys.executable, str(_SCRIPT), "--issue", "888", "--kind",
+             "architect-review", "--run-dir", str(run), "--logical-loop", "L3",
+             "--repo", str(tmp_path / "repo"), "--prompts", str(prompts)],
+            capture_output=True, text=True)
+
+    result = archive()
+    assert result.returncode == 1, result.stdout
+    assert "not bootstrapped by its first round" in result.stderr
     assert "Traceback" not in result.stderr
-    assert (root / "architect-reviews" / run.name / "review.md").is_file()
-    assert (root / "SHA256SUMS").is_file()
+    assert not (root / "architect-reviews").exists(), "a round was written anyway"
+
+    # With a real skeleton it archives, AND the result is usable — which is the
+    # assertion the earlier version of this test was missing.
+    (root / "index.jsonl").write_text(json.dumps({
+        "generated_at": "x", "issue": 888, "schema_version": 1, "source_tip": "abc",
+    }) + "\n")
+    ok = archive()
+    assert ok.returncode == 0, ok.stderr
+    header = json.loads((root / "index.jsonl").read_text().splitlines()[0])
+    assert "schema_version" in header and "source_tip" in header
+    assert "durable_dir" not in header, "the round row became the header"
+
+    rederived = subprocess.run(
+        [sys.executable, str(_SCRIPT), "--issue", "888", "--rederive-index",
+         "--repo", str(tmp_path / "repo")],
+        capture_output=True, text=True)
+    assert rederived.returncode == 0, rederived.stderr
 
 
 @pytest.mark.parametrize("bad", ["999/../issue-888", "999/../../../../..", "abc", "9 9"])
@@ -1639,7 +1665,7 @@ def test_a_name_the_MANIFEST_cannot_record_is_refused(tmp_path):
 
     out = _rederive(tmp_path)
     assert out.returncode != 0, out.stdout
-    assert "line break" in out.stderr
+    assert "line separator" in out.stderr
     newline_named.unlink()
 
     # NFD: the same characters git would store in composed form.
@@ -1720,3 +1746,84 @@ def test_a_refusal_does_not_remove_a_directory_it_did_not_create(tmp_path):
         assert not (root / "architect-reviews" / second.name).exists()
     finally:
         index.chmod(0o644)
+
+
+@pytest.mark.parametrize("sep,name", [
+    ("\v", "vertical tab"), ("\f", "form feed"), ("\x1c", "file separator"),
+    ("\x1d", "group separator"), ("\x1e", "record separator"),
+    ("\x85", "NEL"), (" ", "line separator"), (" ", "paragraph separator"),
+])
+def test_EVERY_separator_splitlines_breaks_on_is_refused(tmp_path, sep, name):
+    """Eight the hand-written check did not know about.
+
+    It tested carriage return and newline. The manifest is read back with
+    `str.splitlines()`, which also breaks on all of these — so each produced a
+    manifest that parsed into more records than it had files, at exit 0. The
+    check now asks `splitlines()` itself rather than comparing against a list,
+    because the reader IS the authority on what breaks the reader, and a list
+    beside it is a copy that drifts. This test exists to prove the derivation
+    covers the cases the list missed.
+    """
+    run, prompts = _gate_run(tmp_path)
+    result, root = _archive_gate(tmp_path, run, prompts)
+    assert result.returncode == 0, result.stderr
+
+    offender = root / "captures" / f"bad{sep}name.txt"
+    offender.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        offender.write_text("x\n")
+    except (OSError, ValueError):
+        pytest.skip(f"the filesystem rejects {name} in a name")
+
+    out = _rederive(tmp_path)
+    assert out.returncode != 0, (name, out.stdout)
+    assert "line separator" in out.stderr, name
+
+
+def test_a_failed_PUBLICATION_leaves_no_staging_behind(tmp_path):
+    """A rename can fail too, and it sat outside the guarded cleanup.
+
+    Left there, a failed publication stranded a populated staging directory
+    inside the archive, which the next run then refuses as unaccounted —
+    recreating exactly the retry-blocked state that building beside the
+    destination was introduced to remove.
+    """
+    run, prompts = _gate_run(tmp_path)
+    first, root = _archive_gate(tmp_path, run, prompts)
+    assert first.returncode == 0, first.stderr
+
+    second = tmp_path / "cdx-gate-review.PUBFAIL"
+    second.mkdir()
+    for name in ("start.json", "attestation.json", "review.md"):
+        (second / name).write_text((run / name).read_text())
+
+    # The publication specifically — not an earlier step. A read-only kind
+    # directory fails at staging creation and never reaches the rename, so it
+    # cannot control this guard; the failure has to be injected AT the rename.
+    # That is also the shape the review named: the destination appearing between
+    # the existence check and the move.
+    module = _archiver_module()
+    kind = root / "architect-reviews"
+
+    def exploding_rename(src, dst):
+        raise OSError(5, "Input/output error")
+
+    real_rename, module.os.rename = module.os.rename, exploding_rename
+    argv = sys.argv
+    sys.argv = ["archive_gate_round.py", "--issue", "999", "--kind",
+                "architect-review", "--run-dir", str(second), "--logical-loop",
+                "L3", "--repo", str(tmp_path / "repo"), "--prompts", str(prompts)]
+    try:
+        rc = module.main()
+    finally:
+        module.os.rename = real_rename
+        sys.argv = argv
+
+    assert rc == 1, rc
+    leftovers = [p.name for p in kind.iterdir() if p.name.startswith(".partial-")]
+    assert leftovers == [], leftovers
+    assert not (kind / second.name).exists()
+
+    # ...and the ordinary command still succeeds afterwards.
+    retry, _ = _archive_gate(tmp_path, second, prompts)
+    assert retry.returncode == 0, retry.stderr
