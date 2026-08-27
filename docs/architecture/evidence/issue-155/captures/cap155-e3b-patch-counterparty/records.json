@@ -1,0 +1,26 @@
+[
+  {
+    "scenario": "cap155-e3-patch-counterparty",
+    "file": "PROVENANCE.md",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "sha256": "527b7935b8fe67edc36b3133c0cd39d8442e7b6f6c892db52573597547a43da0",
+    "byte_length": 2634,
+    "proves": "what this capture proves and where every fact came from"
+  },
+  {
+    "scenario": "cap155-e3-patch-counterparty",
+    "file": "account_liveness.json",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "sha256": "a9771f1c112e7d297f54621d7ce134489be5db320d6842dc4be1ae82a5bb24a8",
+    "byte_length": 887,
+    "proves": "C1 account/runtime liveness (redacted)"
+  },
+  {
+    "scenario": "cap155-e3-patch-counterparty",
+    "file": "counterparty_patch_replay.json",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "sha256": "ddffdd4b5b8b848aa749482ba9b983345439c2b36bf316207c90b23a8c11cf95",
+    "byte_length": 9802,
+    "proves": "identical-PATCH replay + the no-write drift control + the different-payload control, measured directly over HTTP with no Boomi involvement"
+  }
+]

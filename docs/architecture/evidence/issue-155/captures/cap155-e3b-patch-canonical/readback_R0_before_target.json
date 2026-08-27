@@ -1,0 +1,19 @@
+{
+  "utc": "2026-08-27T07:09:00.227842+00:00",
+  "path": "/admin/cdscm/api/v1/clients/41172938-b9bd-4495-b411-9851f5ac7b00",
+  "status": 200,
+  "sha256": "083e2156b0dfde8a5493294f319bbc86d23e508e1734171a273b704bcb5721d7",
+  "bytes": 270,
+  "body": {
+    "clientId": "_E3C_TGT_20260827070621",
+    "name": "E3 Canonical Target Before",
+    "status": "PENDING",
+    "key": "41172938-b9bd-4495-b411-9851f5ac7b00",
+    "createdOn": "2026-08-27T07:06:21.921Z",
+    "createdBy": "integration",
+    "modifiedOn": "2026-08-27T07:06:21.921Z",
+    "modifiedBy": "integration"
+  },
+  "label": "target R0",
+  "business_sha256": "55ec3458fd8c5b2a6e5215a7e8fcb12653f1dabe7c555ea6a298b619c9b698ff"
+}

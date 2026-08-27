@@ -1,0 +1,40 @@
+{
+  "_redaction_note": "identity fields removed at capture time; only liveness-bearing fields kept",
+  "account": {
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "expiration_date": "2026-08-28T05:00:00Z",
+    "over_deployed": false,
+    "status": "active"
+  },
+  "licensing": {
+    "standard": {
+      "purchased": 3,
+      "used": 0
+    },
+    "standard_test": {
+      "purchased": 3,
+      "used": 1
+    }
+  },
+  "runtimes": [
+    {
+      "id": "34bfd8e5-3fa9-4c60-b20a-d5eabd935c4f",
+      "name": "renera-cloud-atom",
+      "status": "ONLINE",
+      "type": "CLOUD",
+      "version": null
+    },
+    {
+      "id": "89387bdf-b177-4631-9cc6-687bf4afefa7",
+      "name": "renera-local-atom",
+      "status": "ONLINE",
+      "type": "ATOM",
+      "version": "26.07.0"
+    }
+  ],
+  "tools_called": [
+    "list_boomi_profiles",
+    "boomi_account_info",
+    "manage_runtimes"
+  ]
+}

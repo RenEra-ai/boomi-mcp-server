@@ -1,0 +1,20 @@
+{
+  "utc": "2026-08-27T07:04:38.408464+00:00",
+  "path": "/admin/cdscm/api/v1/clients/d992cb87-a0b0-4061-abab-97f218a23bb6",
+  "status": 200,
+  "sha256": "13d94fbdc041024ace25d6ef0c06ad04c6ed18ec228ca70fbabbb678454323f6",
+  "bytes": 299,
+  "body": {
+    "clientId": "_E3L_TPL_20260827070337",
+    "name": "E3 Legacy Template",
+    "status": "ACTIVE",
+    "key": "d992cb87-a0b0-4061-abab-97f218a23bb6",
+    "createdOn": "2026-08-27T07:03:37.893Z",
+    "createdBy": "integration",
+    "modifiedOn": "2026-08-27T07:04:24.962Z",
+    "modifiedBy": "integration",
+    "e3Marker": "legacy-identical-payload"
+  },
+  "label": "target R1",
+  "business_sha256": "26e4ad8e467289855e7a52e327a4a479fa7732dae7196f7182b6929882e4162f"
+}

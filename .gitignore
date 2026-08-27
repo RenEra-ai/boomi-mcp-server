@@ -149,11 +149,18 @@ incident-*/
 scripts/provision_qa_noop_fixture.py
 scripts/.qa_noop_fixture_pins.json*
 
-# Stray live-account inventory dumps written by QA capture runs at the repository
-# ROOT. Anchored with a leading slash on purpose: gitignore matches a bare pattern
-# at every depth, and unanchored this also ignored
-# docs/architecture/evidence/**/account_liveness.json — a file the capture's own
-# SHA256SUMS requires. That would stage a manifest without its payload, which is
-# the listed-but-untracked archive failure this repository already knows about.
-# Captures belong in the checksummed archive and must stay committable.
-/*_liveness.json
+# Live-account inventory dumps written by QA capture runs. Ignored at EVERY depth,
+# then re-included under the checksummed evidence tree only.
+#
+# Both halves are load-bearing and each was got wrong once. Unanchored alone also
+# swallowed docs/architecture/evidence/**/account_liveness.json, which a capture's
+# own SHA256SUMS requires — staging a manifest without its payload, the
+# listed-but-untracked archive failure this repository already knows about.
+# Root-anchoring alone fixed that and reopened the other side: a dump written to
+# any nested NON-evidence directory became committable again by a stage-all.
+# The recursive ignore plus a targeted re-inclusion is what covers both.
+#
+# The re-inclusion works because `!docs/architecture/` above already re-includes
+# that directory; git cannot re-include a file whose parent directory is excluded.
+*_liveness.json
+!docs/architecture/evidence/**/*_liveness.json
