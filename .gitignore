@@ -149,6 +149,11 @@ incident-*/
 scripts/provision_qa_noop_fixture.py
 scripts/.qa_noop_fixture_pins.json*
 
-# Stray live-account inventory dumps written by QA capture runs (never evidence:
-# the checksummed archive under docs/architecture/evidence/ is where captures go).
-*_liveness.json
+# Stray live-account inventory dumps written by QA capture runs at the repository
+# ROOT. Anchored with a leading slash on purpose: gitignore matches a bare pattern
+# at every depth, and unanchored this also ignored
+# docs/architecture/evidence/**/account_liveness.json — a file the capture's own
+# SHA256SUMS requires. That would stage a manifest without its payload, which is
+# the listed-but-untracked archive failure this repository already knows about.
+# Captures belong in the checksummed archive and must stay committable.
+/*_liveness.json

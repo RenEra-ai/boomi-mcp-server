@@ -1,0 +1,19 @@
+{
+  "utc": "2026-08-27T06:01:25.929128+00:00",
+  "path": "/admin/cdscm/api/v1/clients/e5fab103-9d0e-42e9-8755-299eda600452",
+  "status": 200,
+  "sha256": "f8ffd41d757085ede0495a5f617c740ea45a6db3e6f7de43f193c309013a5404",
+  "bytes": 267,
+  "body": {
+    "clientId": "_E3L_TGT_20260827060040",
+    "name": "E3 Legacy Target Before",
+    "status": "PENDING",
+    "key": "e5fab103-9d0e-42e9-8755-299eda600452",
+    "createdOn": "2026-08-27T06:00:40.517Z",
+    "createdBy": "integration",
+    "modifiedOn": "2026-08-27T06:00:40.517Z",
+    "modifiedBy": "integration"
+  },
+  "label": "target R0",
+  "business_sha256": "03a0c548ed0b9cac1180e1412d21a65584bf48b4f0d8abe4e2f59e373eb73cba"
+}

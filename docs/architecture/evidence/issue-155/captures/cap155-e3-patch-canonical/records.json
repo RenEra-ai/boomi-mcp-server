@@ -1,0 +1,252 @@
+[
+  {
+    "scenario": "cap155-e3-patch-canonical",
+    "file": "run1_execution_record.json",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "utc": "20260827060615",
+    "sha256": "b27aeed4860a46d038f2ac58785b4ca621a1c1e03170270c1f92f79922dde97c",
+    "byte_length": 1230,
+    "proves": "platform execution status/document counts for this run"
+  },
+  {
+    "scenario": "cap155-e3-patch-canonical",
+    "file": "run1_execution_connector.json",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "utc": "20260827060615",
+    "sha256": "217d5d4c62500fd6b2e684c9a68106785c7f244a0e17b53f70faa242825d2fd0",
+    "byte_length": 2680,
+    "proves": "per-connector-step success/error counts for this run"
+  },
+  {
+    "scenario": "cap155-e3-patch-canonical",
+    "file": "run1_generic_connector_record.json",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "utc": "20260827060615",
+    "sha256": "38be3f212eb0b9d0bda67997eb632b3f477f642e7566a881a6300c545dab4344",
+    "byte_length": 6827,
+    "proves": "per-document connector rows incl. operation + connection names"
+  },
+  {
+    "scenario": "cap155-e3-patch-canonical",
+    "file": "run1_document_start.json",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "utc": "20260827060615",
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "byte_length": 0,
+    "gcr_id": "R0VOX0NPTk5fUkVDX2V4ZWN1dGlvbi0zYmRhMjFhZS1lNmQ5LTRkZDgtYjEwZC1hNjk3YTYxNDYwNDAtMjAyNi4wOC4yNzpjb25uZWN0b3ItZWQwMDAxMmQtNjdjYi00NDg3LWExMTEtYWM5YzY3Mjg2ZmNh",
+    "operation_name": "shape1",
+    "connection_name": "Start",
+    "execution_connector_id": null,
+    "proves": "the start connector document served for this run"
+  },
+  {
+    "scenario": "cap155-e3-patch-canonical",
+    "file": "run1_document_GET.json",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "utc": "20260827060615",
+    "sha256": "33a0008568dfc7efdf7fb9cbfde73455ed277b5b421f16a07ab772b4ac16da98",
+    "byte_length": 305,
+    "gcr_id": "R0VOX0NPTk5fUkVDX2V4ZWN1dGlvbi0zYmRhMjFhZS1lNmQ5LTRkZDgtYjEwZC1hNjk3YTYxNDYwNDAtMjAyNi4wOC4yNzpjb25uZWN0b3ItMjJhMzIyZjMtOTJkNS00MjA5LWE0Y2EtZGY0MTZhZWY0ZTYy",
+    "operation_name": "_TEST_155E3C_src_GET_20260827060615",
+    "connection_name": "Sandbox CDS Mock REST (no-auth)",
+    "execution_connector_id": "RVhFQ19DT05OZmFsc2U6RVhFQ1VURTpjNDI4MTM0Ni04M2U5LTQwMjYtODU2ZC1lZGU3MThlYzY4YTA6YWQ5N2ExZDAtM2NiOC00M2UyLWIwMDQtNmZiN2QzZTc2YmRiOmV4ZWN1dGlvbi0zYmRhMjFhZS1lNmQ5LTRkZDgtYjEwZC1hNjk3YTYxNDYwNDAtMjAyNi4wOC4yNw",
+    "proves": "the GET connector document served for this run"
+  },
+  {
+    "scenario": "cap155-e3-patch-canonical",
+    "file": "run1_document_PATCH.json",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "utc": "20260827060615",
+    "sha256": "018c56d287753a94717cc0798f8b1a606d90810ea91830a6ffb47d6e782e8ddf",
+    "byte_length": 305,
+    "gcr_id": "R0VOX0NPTk5fUkVDX2V4ZWN1dGlvbi0zYmRhMjFhZS1lNmQ5LTRkZDgtYjEwZC1hNjk3YTYxNDYwNDAtMjAyNi4wOC4yNzpjb25uZWN0b3ItZTcxZDRkMWMtMDVmZS00NDM5LTllNjMtMDk2Njk5M2IxZTBm",
+    "operation_name": "_TEST_155E3C_PATCH_20260827060615",
+    "connection_name": "Sandbox CDS Mock REST (no-auth)",
+    "execution_connector_id": "RVhFQ19DT05OZmFsc2U6RVhFQ1VURTpjNDI4MTM0Ni04M2U5LTQwMjYtODU2ZC1lZGU3MThlYzY4YTA6MjdhZWVlZDQtMWYzMi00NzRlLThmZDEtZDMwN2IwZDE2MGMyOmV4ZWN1dGlvbi0zYmRhMjFhZS1lNmQ5LTRkZDgtYjEwZC1hNjk3YTYxNDYwNDAtMjAyNi4wOC4yNw",
+    "proves": "the PATCH connector document served for this run"
+  },
+  {
+    "scenario": "cap155-e3-patch-canonical",
+    "file": "run1_document_start.json",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "utc": "20260827060615",
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "byte_length": 0,
+    "gcr_id": "R0VOX0NPTk5fUkVDX2V4ZWN1dGlvbi0zYmRhMjFhZS1lNmQ5LTRkZDgtYjEwZC1hNjk3YTYxNDYwNDAtMjAyNi4wOC4yNzpjb25uZWN0b3ItZGEzODQ0ZTItY2IxZC00NjE5LWI4ZGUtYjhmYWJmYTVmYTMw",
+    "operation_name": "shape4",
+    "connection_name": "Return Documents",
+    "execution_connector_id": "RVhFQ19DT05OZmFsc2U6cmV0dXJuOnJldHVybjpzaGFwZTQ6ZXhlY3V0aW9uLTNiZGEyMWFlLWU2ZDktNGRkOC1iMTBkLWE2OTdhNjE0NjA0MC0yMDI2LjA4LjI3",
+    "proves": "the start connector document served for this run"
+  },
+  {
+    "scenario": "cap155-e3-patch-canonical",
+    "file": "replay_execution_record.json",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "utc": "20260827060615",
+    "sha256": "c0ca2d39752982947421268822fd180bd3f4010bf5397035d20cb09b8f703e9a",
+    "byte_length": 1229,
+    "proves": "platform execution status/document counts for this run"
+  },
+  {
+    "scenario": "cap155-e3-patch-canonical",
+    "file": "replay_execution_connector.json",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "utc": "20260827060615",
+    "sha256": "835cdf31bcb30668f43f1ad6f113444198add435bad5316b92ab3f11a9dd8d0d",
+    "byte_length": 2680,
+    "proves": "per-connector-step success/error counts for this run"
+  },
+  {
+    "scenario": "cap155-e3-patch-canonical",
+    "file": "replay_generic_connector_record.json",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "utc": "20260827060615",
+    "sha256": "0e1edd951a1bcb7d22e6dbab34edfb4d4a32ac224b4212db701146c76e0e6d5c",
+    "byte_length": 6827,
+    "proves": "per-document connector rows incl. operation + connection names"
+  },
+  {
+    "scenario": "cap155-e3-patch-canonical",
+    "file": "replay_document_start.json",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "utc": "20260827060615",
+    "sha256": "97a13f1d44f473a6b99ea07a3871761a2513de82563ca1beea8e3572d3e301c4",
+    "byte_length": 305,
+    "gcr_id": "R0VOX0NPTk5fUkVDX2V4ZWN1dGlvbi04YzQ3Nzk5Ni03Y2U4LTQxMzMtYTdiZC1kYTU0OGQwNmY1MTgtMjAyNi4wOC4yNzpjb25uZWN0b3ItYzk5NDA0ODgtMGViZi00NGYwLThhODgtYWQ1YTNkNzc2NGJj",
+    "operation_name": "shape4",
+    "connection_name": "Return Documents",
+    "execution_connector_id": "RVhFQ19DT05OZmFsc2U6cmV0dXJuOnJldHVybjpzaGFwZTQ6ZXhlY3V0aW9uLThjNDc3OTk2LTdjZTgtNDEzMy1hN2JkLWRhNTQ4ZDA2ZjUxOC0yMDI2LjA4LjI3",
+    "proves": "the start connector document served for this run"
+  },
+  {
+    "scenario": "cap155-e3-patch-canonical",
+    "file": "replay_document_PATCH.json",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "utc": "20260827060615",
+    "sha256": "97a13f1d44f473a6b99ea07a3871761a2513de82563ca1beea8e3572d3e301c4",
+    "byte_length": 305,
+    "gcr_id": "R0VOX0NPTk5fUkVDX2V4ZWN1dGlvbi04YzQ3Nzk5Ni03Y2U4LTQxMzMtYTdiZC1kYTU0OGQwNmY1MTgtMjAyNi4wOC4yNzpjb25uZWN0b3ItNjM2ZGEwN2YtZDc4ZS00ZmJhLTlkMWEtNDQ4MTk2YmY4ZjNk",
+    "operation_name": "_TEST_155E3C_PATCH_20260827060615",
+    "connection_name": "Sandbox CDS Mock REST (no-auth)",
+    "execution_connector_id": "RVhFQ19DT05OZmFsc2U6RVhFQ1VURTpjNDI4MTM0Ni04M2U5LTQwMjYtODU2ZC1lZGU3MThlYzY4YTA6MjdhZWVlZDQtMWYzMi00NzRlLThmZDEtZDMwN2IwZDE2MGMyOmV4ZWN1dGlvbi04YzQ3Nzk5Ni03Y2U4LTQxMzMtYTdiZC1kYTU0OGQwNmY1MTgtMjAyNi4wOC4yNw",
+    "proves": "the PATCH connector document served for this run"
+  },
+  {
+    "scenario": "cap155-e3-patch-canonical",
+    "file": "replay_document_start.json",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "utc": "20260827060615",
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "byte_length": 0,
+    "gcr_id": "R0VOX0NPTk5fUkVDX2V4ZWN1dGlvbi04YzQ3Nzk5Ni03Y2U4LTQxMzMtYTdiZC1kYTU0OGQwNmY1MTgtMjAyNi4wOC4yNzpjb25uZWN0b3ItZjc1NzU1NTUtNzIwYy00NzI2LTk4ZjEtOGFjYjJlZjMwOGY3",
+    "operation_name": "shape1",
+    "connection_name": "Start",
+    "execution_connector_id": null,
+    "proves": "the start connector document served for this run"
+  },
+  {
+    "scenario": "cap155-e3-patch-canonical",
+    "file": "replay_document_GET.json",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "utc": "20260827060615",
+    "sha256": "33a0008568dfc7efdf7fb9cbfde73455ed277b5b421f16a07ab772b4ac16da98",
+    "byte_length": 305,
+    "gcr_id": "R0VOX0NPTk5fUkVDX2V4ZWN1dGlvbi04YzQ3Nzk5Ni03Y2U4LTQxMzMtYTdiZC1kYTU0OGQwNmY1MTgtMjAyNi4wOC4yNzpjb25uZWN0b3ItZmNiMDg3ZDAtOTM4MC00NDZmLWEwMmYtMDM2MWYzMTA2N2Rj",
+    "operation_name": "_TEST_155E3C_src_GET_20260827060615",
+    "connection_name": "Sandbox CDS Mock REST (no-auth)",
+    "execution_connector_id": "RVhFQ19DT05OZmFsc2U6RVhFQ1VURTpjNDI4MTM0Ni04M2U5LTQwMjYtODU2ZC1lZGU3MThlYzY4YTA6YWQ5N2ExZDAtM2NiOC00M2UyLWIwMDQtNmZiN2QzZTc2YmRiOmV4ZWN1dGlvbi04YzQ3Nzk5Ni03Y2U4LTQxMzMtYTdiZC1kYTU0OGQwNmY1MTgtMjAyNi4wOC4yNw",
+    "proves": "the GET connector document served for this run"
+  },
+  {
+    "scenario": "cap155-e3-patch-canonical",
+    "file": "readback_R0_before_target.json",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "utc": "20260827060615",
+    "sha256": "9d9f6b89a32fa03e0a576cae73d188614dec35eb9805ecc1c672748e0b0b5112",
+    "byte_length": 684,
+    "proves": "counterparty state of the PATCHed resource at this point"
+  },
+  {
+    "scenario": "cap155-e3-patch-canonical",
+    "file": "readback_R0_before_template.json",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "utc": "20260827060615",
+    "sha256": "c6faa272431678c50aeb77ba4f125300fc2151b52dc32ef50e112756ae4f5196",
+    "byte_length": 727,
+    "proves": "counterparty state of the PATCH-body SOURCE document at this point"
+  },
+  {
+    "scenario": "cap155-e3-patch-canonical",
+    "file": "readback_R1_between_target.json",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "utc": "20260827060615",
+    "sha256": "5d047b8b7ce2ef990f0283898d6f29a25c36836a0c8408608947126797ba1841",
+    "byte_length": 725,
+    "proves": "counterparty state of the PATCHed resource at this point"
+  },
+  {
+    "scenario": "cap155-e3-patch-canonical",
+    "file": "readback_R1_between_template.json",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "utc": "20260827060615",
+    "sha256": "8d7feec60f0c455bfd0bccb8a6f78348f132561bc447b79687e666bd3f629ff9",
+    "byte_length": 727,
+    "proves": "counterparty state of the PATCH-body SOURCE document at this point"
+  },
+  {
+    "scenario": "cap155-e3-patch-canonical",
+    "file": "readback_R2_after_target.json",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "utc": "20260827060615",
+    "sha256": "ff725de9acf80f4595bd0c632e830b2a4fb4859890ceb8d27801184a6e11f738",
+    "byte_length": 725,
+    "proves": "counterparty state of the PATCHed resource at this point"
+  },
+  {
+    "scenario": "cap155-e3-patch-canonical",
+    "file": "readback_R2_after_template.json",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "utc": "20260827060615",
+    "sha256": "a6760ba878eafec4e8acdf87c9f056ec486a13e26e60bf557ea3441c04d6a3b5",
+    "byte_length": 727,
+    "proves": "counterparty state of the PATCH-body SOURCE document at this point"
+  },
+  {
+    "scenario": "cap155-e3-patch-canonical",
+    "file": "execute_calls.json",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "utc": "20260827060615",
+    "sha256": "e596666308b7369acb58ebd20d4094681a8bfccf21f73f3d007c241847e6e8cf",
+    "byte_length": 2426,
+    "proves": "the two execute_process tool responses"
+  },
+  {
+    "scenario": "cap155-e3-patch-canonical",
+    "file": "component_op_patch.xml",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "utc": "20260827060615",
+    "sha256": "dca4a9005b33c5d3c111169e9df4de7708d0e029cecab84b44de308008dd10a9",
+    "byte_length": 1387,
+    "component_id": "27aeeed4-1f32-474e-8fd1-d307b0d160c2",
+    "proves": "the stored Boomi component XML for this REST operation"
+  },
+  {
+    "scenario": "cap155-e3-patch-canonical",
+    "file": "component_op_src.xml",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "utc": "20260827060615",
+    "sha256": "232c04d4295530f00a124eea8cf26bf48af70cb068cc19e27c422f4324010d06",
+    "byte_length": 1443,
+    "component_id": "ad97a1d0-3cb8-43e2-b004-6fb7d3e76bdb",
+    "proves": "the stored Boomi component XML for this REST operation"
+  },
+  {
+    "scenario": "cap155-e3-patch-canonical",
+    "file": "analysis.json",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "utc": "20260827060615",
+    "sha256": "bbf5c532657565f6f900389f05e5524a26bcd23d005846945c72e35f378113e0",
+    "byte_length": 3537,
+    "proves": "the derived verdict, from the artifacts above"
+  }
+]

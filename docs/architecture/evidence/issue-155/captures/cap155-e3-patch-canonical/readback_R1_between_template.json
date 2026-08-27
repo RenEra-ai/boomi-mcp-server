@@ -1,0 +1,20 @@
+{
+  "utc": "2026-08-27T06:10:52.855993+00:00",
+  "path": "/admin/cdscm/api/v1/clients/de94098b-6be4-414c-9d71-adbfa13e91d1",
+  "status": 200,
+  "sha256": "33a0008568dfc7efdf7fb9cbfde73455ed277b5b421f16a07ab772b4ac16da98",
+  "bytes": 305,
+  "body": {
+    "clientId": "_E3C_TPL_20260827060615",
+    "name": "E3 Canonical Template",
+    "status": "ACTIVE",
+    "e3Marker": "canonical-identical-payload",
+    "key": "de94098b-6be4-414c-9d71-adbfa13e91d1",
+    "createdOn": "2026-08-27T06:06:15.967Z",
+    "createdBy": "integration",
+    "modifiedOn": "2026-08-27T06:06:15.967Z",
+    "modifiedBy": "integration"
+  },
+  "label": "template R1",
+  "business_sha256": "1636be34b13a89dcb60a39ab89ce2f0619118c0f8df82e214e2d56e854177218"
+}

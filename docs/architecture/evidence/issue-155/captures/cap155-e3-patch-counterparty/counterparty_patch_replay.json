@@ -1,0 +1,249 @@
+{
+  "utc": "2026-08-27T05:57:36.531838+00:00",
+  "counterparty": "sandbox-services @e25849a",
+  "base": "http://localhost:8081",
+  "probes": {
+    "P1_identical_patch_replay": {
+      "target_key": "5202aff2-ef63-4e40-abad-95bb1dcdfe80",
+      "path": "/admin/cdscm/api/v1/clients/5202aff2-ef63-4e40-abad-95bb1dcdfe80",
+      "reads": [
+        {
+          "utc": "2026-08-27T05:57:36.559586+00:00",
+          "path": "/admin/cdscm/api/v1/clients/5202aff2-ef63-4e40-abad-95bb1dcdfe80",
+          "status": 200,
+          "sha256": "eda694a9b42d298b14102d3a03c3a08ba0ff8b47be0da8332c13ad01efdc4fe1",
+          "bytes": 259,
+          "body": {
+            "clientId": "_E3_TGT_20260827055736",
+            "name": "E3 Target Before",
+            "status": "PENDING",
+            "key": "5202aff2-ef63-4e40-abad-95bb1dcdfe80",
+            "createdOn": "2026-08-27T05:57:36.550Z",
+            "createdBy": "integration",
+            "modifiedOn": "2026-08-27T05:57:36.550Z",
+            "modifiedBy": "integration"
+          },
+          "label": "R0 before",
+          "business_sha256": "30d9d7918a511651d4495bed58e11fd62428b5212f3dd503970808bc775918d0"
+        },
+        {
+          "utc": "2026-08-27T05:57:37.775317+00:00",
+          "path": "/admin/cdscm/api/v1/clients/5202aff2-ef63-4e40-abad-95bb1dcdfe80",
+          "status": 200,
+          "sha256": "2102b0790d2983f760d8041cdda6305a3f83fe80c8f4b34fb983823db35fae11",
+          "bytes": 288,
+          "body": {
+            "clientId": "_E3_TGT_20260827055736",
+            "name": "E3 Patched Name",
+            "status": "ACTIVE",
+            "key": "5202aff2-ef63-4e40-abad-95bb1dcdfe80",
+            "createdOn": "2026-08-27T05:57:36.550Z",
+            "createdBy": "integration",
+            "modifiedOn": "2026-08-27T05:57:37.766Z",
+            "modifiedBy": "integration",
+            "e3Marker": "identical-payload"
+          },
+          "label": "R1 between",
+          "business_sha256": "913e7a81c235d78e3f947ffe128d1b617f499869f44b2d31f812836d58fc5e74"
+        },
+        {
+          "utc": "2026-08-27T05:57:38.989864+00:00",
+          "path": "/admin/cdscm/api/v1/clients/5202aff2-ef63-4e40-abad-95bb1dcdfe80",
+          "status": 200,
+          "sha256": "e8ca5e6041bb908ec16e3ee370708219645e2c035813313b326b3a97fb6c85d2",
+          "bytes": 288,
+          "body": {
+            "clientId": "_E3_TGT_20260827055736",
+            "name": "E3 Patched Name",
+            "status": "ACTIVE",
+            "key": "5202aff2-ef63-4e40-abad-95bb1dcdfe80",
+            "createdOn": "2026-08-27T05:57:36.550Z",
+            "createdBy": "integration",
+            "modifiedOn": "2026-08-27T05:57:38.983Z",
+            "modifiedBy": "integration",
+            "e3Marker": "identical-payload"
+          },
+          "label": "R2 after",
+          "business_sha256": "913e7a81c235d78e3f947ffe128d1b617f499869f44b2d31f812836d58fc5e74"
+        }
+      ],
+      "writes": [
+        {
+          "label": "PATCH#1",
+          "status": 200,
+          "utc": "2026-08-27T05:57:37.773392+00:00",
+          "response_sha256": "2102b0790d2983f760d8041cdda6305a3f83fe80c8f4b34fb983823db35fae11",
+          "response": {
+            "clientId": "_E3_TGT_20260827055736",
+            "name": "E3 Patched Name",
+            "status": "ACTIVE",
+            "key": "5202aff2-ef63-4e40-abad-95bb1dcdfe80",
+            "createdOn": "2026-08-27T05:57:36.550Z",
+            "createdBy": "integration",
+            "modifiedOn": "2026-08-27T05:57:37.766Z",
+            "modifiedBy": "integration",
+            "e3Marker": "identical-payload"
+          }
+        },
+        {
+          "label": "PATCH#2",
+          "status": 200,
+          "utc": "2026-08-27T05:57:38.987538+00:00",
+          "response_sha256": "e8ca5e6041bb908ec16e3ee370708219645e2c035813313b326b3a97fb6c85d2",
+          "response": {
+            "clientId": "_E3_TGT_20260827055736",
+            "name": "E3 Patched Name",
+            "status": "ACTIVE",
+            "key": "5202aff2-ef63-4e40-abad-95bb1dcdfe80",
+            "createdOn": "2026-08-27T05:57:36.550Z",
+            "createdBy": "integration",
+            "modifiedOn": "2026-08-27T05:57:38.983Z",
+            "modifiedBy": "integration",
+            "e3Marker": "identical-payload"
+          }
+        }
+      ],
+      "verdict": {
+        "both_writes_succeeded": true,
+        "write_status_1": 200,
+        "write_status_2": 200,
+        "write_responses_byte_identical": false,
+        "business_state_converged_R1_R2": true,
+        "full_state_identical_R1_R2": false,
+        "modifiedOn_R0": "2026-08-27T05:57:36.550Z",
+        "modifiedOn_R1": "2026-08-27T05:57:37.766Z",
+        "modifiedOn_R2": "2026-08-27T05:57:38.983Z",
+        "modifiedOn_moved_R1_to_R2": true,
+        "createdOn_stable": true
+      }
+    },
+    "CA_no_write_drift_control": {
+      "path": "/admin/cdscm/api/v1/clients/5202aff2-ef63-4e40-abad-95bb1dcdfe80",
+      "reads": [
+        {
+          "utc": "2026-08-27T05:57:38.991785+00:00",
+          "path": "/admin/cdscm/api/v1/clients/5202aff2-ef63-4e40-abad-95bb1dcdfe80",
+          "status": 200,
+          "sha256": "e8ca5e6041bb908ec16e3ee370708219645e2c035813313b326b3a97fb6c85d2",
+          "bytes": 288,
+          "body": {
+            "clientId": "_E3_TGT_20260827055736",
+            "name": "E3 Patched Name",
+            "status": "ACTIVE",
+            "key": "5202aff2-ef63-4e40-abad-95bb1dcdfe80",
+            "createdOn": "2026-08-27T05:57:36.550Z",
+            "createdBy": "integration",
+            "modifiedOn": "2026-08-27T05:57:38.983Z",
+            "modifiedBy": "integration",
+            "e3Marker": "identical-payload"
+          },
+          "label": "CA read1",
+          "business_sha256": "913e7a81c235d78e3f947ffe128d1b617f499869f44b2d31f812836d58fc5e74"
+        },
+        {
+          "utc": "2026-08-27T05:57:41.501987+00:00",
+          "path": "/admin/cdscm/api/v1/clients/5202aff2-ef63-4e40-abad-95bb1dcdfe80",
+          "status": 200,
+          "sha256": "e8ca5e6041bb908ec16e3ee370708219645e2c035813313b326b3a97fb6c85d2",
+          "bytes": 288,
+          "body": {
+            "clientId": "_E3_TGT_20260827055736",
+            "name": "E3 Patched Name",
+            "status": "ACTIVE",
+            "key": "5202aff2-ef63-4e40-abad-95bb1dcdfe80",
+            "createdOn": "2026-08-27T05:57:36.550Z",
+            "createdBy": "integration",
+            "modifiedOn": "2026-08-27T05:57:38.983Z",
+            "modifiedBy": "integration",
+            "e3Marker": "identical-payload"
+          },
+          "label": "CA read2 (+2.5s)",
+          "business_sha256": "913e7a81c235d78e3f947ffe128d1b617f499869f44b2d31f812836d58fc5e74"
+        }
+      ],
+      "verdict": {
+        "modifiedOn_stable_without_a_write": true,
+        "full_state_identical": true
+      }
+    },
+    "CB_different_payload_control": {
+      "path": "/admin/cdscm/api/v1/clients/5202aff2-ef63-4e40-abad-95bb1dcdfe80",
+      "reads": [
+        {
+          "utc": "2026-08-27T05:57:41.504380+00:00",
+          "path": "/admin/cdscm/api/v1/clients/5202aff2-ef63-4e40-abad-95bb1dcdfe80",
+          "status": 200,
+          "sha256": "e8ca5e6041bb908ec16e3ee370708219645e2c035813313b326b3a97fb6c85d2",
+          "bytes": 288,
+          "body": {
+            "clientId": "_E3_TGT_20260827055736",
+            "name": "E3 Patched Name",
+            "status": "ACTIVE",
+            "key": "5202aff2-ef63-4e40-abad-95bb1dcdfe80",
+            "createdOn": "2026-08-27T05:57:36.550Z",
+            "createdBy": "integration",
+            "modifiedOn": "2026-08-27T05:57:38.983Z",
+            "modifiedBy": "integration",
+            "e3Marker": "identical-payload"
+          },
+          "label": "CB before",
+          "business_sha256": "913e7a81c235d78e3f947ffe128d1b617f499869f44b2d31f812836d58fc5e74"
+        },
+        {
+          "utc": "2026-08-27T05:57:42.720680+00:00",
+          "path": "/admin/cdscm/api/v1/clients/5202aff2-ef63-4e40-abad-95bb1dcdfe80",
+          "status": 200,
+          "sha256": "5709ead949e0d11e59c7643bf4c8a1814b142a112f04102031237c01e309f6b8",
+          "bytes": 288,
+          "body": {
+            "clientId": "_E3_TGT_20260827055736",
+            "name": "E3 DIFFERENT Name",
+            "status": "CLOSED",
+            "key": "5202aff2-ef63-4e40-abad-95bb1dcdfe80",
+            "createdOn": "2026-08-27T05:57:36.550Z",
+            "createdBy": "integration",
+            "modifiedOn": "2026-08-27T05:57:42.712Z",
+            "modifiedBy": "integration",
+            "e3Marker": "changed-payload"
+          },
+          "label": "CB after",
+          "business_sha256": "093bd41a7603aa4d3b10d3d0c572999f67a9daeb09a838c60b70016c3e6edf11"
+        }
+      ],
+      "writes": [
+        {
+          "label": "PATCH-diff",
+          "status": 200,
+          "utc": "2026-08-27T05:57:42.718847+00:00",
+          "response": {
+            "clientId": "_E3_TGT_20260827055736",
+            "name": "E3 DIFFERENT Name",
+            "status": "CLOSED",
+            "key": "5202aff2-ef63-4e40-abad-95bb1dcdfe80",
+            "createdOn": "2026-08-27T05:57:36.550Z",
+            "createdBy": "integration",
+            "modifiedOn": "2026-08-27T05:57:42.712Z",
+            "modifiedBy": "integration",
+            "e3Marker": "changed-payload"
+          }
+        }
+      ],
+      "payload": {
+        "name": "E3 DIFFERENT Name",
+        "status": "CLOSED",
+        "e3Marker": "changed-payload"
+      },
+      "verdict": {
+        "business_state_changed": true,
+        "name_before": "E3 Patched Name",
+        "name_after": "E3 DIFFERENT Name"
+      }
+    }
+  },
+  "patch_payload": {
+    "name": "E3 Patched Name",
+    "status": "ACTIVE",
+    "e3Marker": "identical-payload"
+  },
+  "patch_payload_sha256": "058575afabd34c2790746a826d0e22f0a010a677d3beb58bcd5f08b0f0dd2e80"
+}

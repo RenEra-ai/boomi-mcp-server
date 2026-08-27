@@ -100,5 +100,8 @@ scripts/diagnose_*
 # empty-arg path; both guards exist because the failure is silent.
 **/BUILD_REVISION
 
-# Never bake a live-account inventory into an image.
-*_liveness.json
+# Never bake a live-account inventory into an image, at ANY depth. `**/` is
+# load-bearing for exactly the reason the note above this section gives:
+# .dockerignore matches the full context-relative path, so the bare pattern
+# covered only the context root and left every nested capture inventory in.
+**/*_liveness.json

@@ -1,0 +1,81 @@
+{
+  "scenario": "cap155-e3-patch-canonical",
+  "question": "does the SECOND identical PATCH leave the resource in the same state as the first, and does it report success?",
+  "route": "canonical authoring_request / process_ir (source GET -> connector_call PATCH)",
+  "account_id": "traininghlibbochkarov-JKIY2X",
+  "process_component_id": "7740736c-1477-4d0f-8c07-eeeb8ff0d397",
+  "executions": [
+    {
+      "label": "run1",
+      "execution_id": "execution-3bda21ae-e6d9-4dd8-b10d-a697a6146040-2026.08.27",
+      "status": "COMPLETE",
+      "inbound": 1,
+      "outbound": 2
+    },
+    {
+      "label": "run2_identical_replay",
+      "execution_id": "execution-8c477996-7ce8-4133-a7bd-da548d06f518-2026.08.27",
+      "status": "COMPLETE",
+      "inbound": 1,
+      "outbound": 2
+    }
+  ],
+  "A_identical_payload_is_established_by": {
+    "claim": "the PATCH request body is the GET stage's output document; that document is byte-identical across the two runs, and the source resource never moved.",
+    "run1_GET_document_sha256": "33a0008568dfc7efdf7fb9cbfde73455ed277b5b421f16a07ab772b4ac16da98",
+    "replay_GET_document_sha256": "33a0008568dfc7efdf7fb9cbfde73455ed277b5b421f16a07ab772b4ac16da98",
+    "GET_documents_byte_identical": true,
+    "template_readback_sha_R0": "33a0008568dfc7efdf7fb9cbfde73455ed277b5b421f16a07ab772b4ac16da98",
+    "template_readback_sha_R1": "33a0008568dfc7efdf7fb9cbfde73455ed277b5b421f16a07ab772b4ac16da98",
+    "template_readback_sha_R2": "33a0008568dfc7efdf7fb9cbfde73455ed277b5b421f16a07ab772b4ac16da98",
+    "template_never_moved": true
+  },
+  "B_both_executions_reported_success": {
+    "run1_status": "COMPLETE",
+    "replay_status": "COMPLETE",
+    "run1_connector_errorCount": 0,
+    "replay_connector_errorCount": 0,
+    "run1_PATCH_gcr_status": "SUCCESS",
+    "replay_PATCH_gcr_status": "SUCCESS"
+  },
+  "C_resource_state_at_the_three_read_points": {
+    "R0_before": {
+      "http": 200,
+      "full_sha256": "1e7f39b5c7efb7d02e401e8945e9ae872a190e854698161637b37a33c24e9aa4",
+      "business_sha256": "aa6cec6e8566329bf1557465b4a54beed64a507b65d04e866bd6037e14599d67",
+      "modifiedOn": "2026-08-27T06:06:15.972Z"
+    },
+    "R1_between": {
+      "http": 200,
+      "full_sha256": "018c56d287753a94717cc0798f8b1a606d90810ea91830a6ffb47d6e782e8ddf",
+      "business_sha256": "5203d544802e53d268b17b787ccca6aee1aa4edb59c6b92798dbaef0563a4267",
+      "modifiedOn": "2026-08-27T06:10:41.821Z"
+    },
+    "R2_after": {
+      "http": 200,
+      "full_sha256": "97a13f1d44f473a6b99ea07a3871761a2513de82563ca1beea8e3572d3e301c4",
+      "business_sha256": "5203d544802e53d268b17b787ccca6aee1aa4edb59c6b92798dbaef0563a4267",
+      "modifiedOn": "2026-08-27T06:10:53.636Z"
+    }
+  },
+  "D_the_verdict": {
+    "first_PATCH_changed_state_R0_to_R1_POSITIVE_CONTROL": true,
+    "second_identical_PATCH_converged_business_state_R1_eq_R2": true,
+    "second_identical_PATCH_left_FULL_state_identical": false,
+    "observable_difference_between_the_two_executions": {
+      "PATCH_response_documents_byte_identical": false,
+      "run1_PATCH_response_sha256": "018c56d287753a94717cc0798f8b1a606d90810ea91830a6ffb47d6e782e8ddf",
+      "replay_PATCH_response_sha256": "97a13f1d44f473a6b99ea07a3871761a2513de82563ca1beea8e3572d3e301c4",
+      "fields_that_differ": [
+        "modifiedOn"
+      ],
+      "field_values": {
+        "modifiedOn": {
+          "run1": "2026-08-27T06:10:41.821Z",
+          "replay": "2026-08-27T06:10:53.636Z"
+        }
+      }
+    },
+    "createdOn_stable_R0_to_R2": true
+  }
+}

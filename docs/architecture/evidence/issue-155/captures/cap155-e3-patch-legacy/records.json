@@ -1,0 +1,226 @@
+[
+  {
+    "scenario": "cap155-e3-patch-legacy",
+    "file": "run1_execution_record.json",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "utc": "20260827060040",
+    "sha256": "22322a4241b374b0d8b0f762bc547c12971bbb6c45869834d482c4987ef6f7cb",
+    "byte_length": 1229,
+    "proves": "platform execution status/document counts for this run"
+  },
+  {
+    "scenario": "cap155-e3-patch-legacy",
+    "file": "run1_execution_connector.json",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "utc": "20260827060040",
+    "sha256": "f4b49ab275c7cfc8fff798598d8d3e2452ff63ff6fa55f2c2b65c495ab871edf",
+    "byte_length": 2154,
+    "proves": "per-connector-step success/error counts for this run"
+  },
+  {
+    "scenario": "cap155-e3-patch-legacy",
+    "file": "run1_generic_connector_record.json",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "utc": "20260827060040",
+    "sha256": "d156fb541a1bf51c6025648e7216f743f3191337550e7249d604525642130250",
+    "byte_length": 5118,
+    "proves": "per-document connector rows incl. operation + connection names"
+  },
+  {
+    "scenario": "cap155-e3-patch-legacy",
+    "file": "run1_document_start.json",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "utc": "20260827060040",
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "byte_length": 0,
+    "gcr_id": "R0VOX0NPTk5fUkVDX2V4ZWN1dGlvbi02NWY0NWYxMy02MmI2LTQ3MjAtOTcwZS0yMTY4M2I4OTg3NDktMjAyNi4wOC4yNzpjb25uZWN0b3ItNzMxYTg3ZTctNjMyMi00MTJhLWE4MzctNThmZTZmZDA3MWI3",
+    "operation_name": "shape1",
+    "connection_name": "Start",
+    "execution_connector_id": null,
+    "proves": "the start connector document served for this run"
+  },
+  {
+    "scenario": "cap155-e3-patch-legacy",
+    "file": "run1_document_GET.json",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "utc": "20260827060040",
+    "sha256": "f2d267f9b570e56211dd917cd2aa13dcb4271e3fc2fa836ed355a9c926190e3b",
+    "byte_length": 299,
+    "gcr_id": "R0VOX0NPTk5fUkVDX2V4ZWN1dGlvbi02NWY0NWYxMy02MmI2LTQ3MjAtOTcwZS0yMTY4M2I4OTg3NDktMjAyNi4wOC4yNzpjb25uZWN0b3ItZGM3M2RkNjctZTI1OS00ZDljLWE5ZjYtYjkxYTNhYTU4OGE4",
+    "operation_name": "_TEST_155E3_src_GET_20260827060040",
+    "connection_name": "Sandbox CDS Mock REST (no-auth)",
+    "execution_connector_id": "RVhFQ19DT05OZmFsc2U6RVhFQ1VURTpjNDI4MTM0Ni04M2U5LTQwMjYtODU2ZC1lZGU3MThlYzY4YTA6NTk2YWZiODItYTg3NS00MjNmLWI4ZmMtNTFlN2NiNzE0ZGRjOmV4ZWN1dGlvbi02NWY0NWYxMy02MmI2LTQ3MjAtOTcwZS0yMTY4M2I4OTg3NDktMjAyNi4wOC4yNw",
+    "proves": "the GET connector document served for this run"
+  },
+  {
+    "scenario": "cap155-e3-patch-legacy",
+    "file": "run1_document_PATCH.json",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "utc": "20260827060040",
+    "sha256": "9d6a811405edbafe47c162892cbdd7c2b92840f7bd8d3bbd276000653952d27a",
+    "byte_length": 299,
+    "gcr_id": "R0VOX0NPTk5fUkVDX2V4ZWN1dGlvbi02NWY0NWYxMy02MmI2LTQ3MjAtOTcwZS0yMTY4M2I4OTg3NDktMjAyNi4wOC4yNzpjb25uZWN0b3ItY2RjNzNkMjAtNzExMS00N2IwLTgzYjUtMDdmMTdiZDExMjRk",
+    "operation_name": "_TEST_155E3_PATCH_20260827060040",
+    "connection_name": "Sandbox CDS Mock REST (no-auth)",
+    "execution_connector_id": "RVhFQ19DT05OZmFsc2U6RVhFQ1VURTpjNDI4MTM0Ni04M2U5LTQwMjYtODU2ZC1lZGU3MThlYzY4YTA6MTc2MzUyNGItZWM2NS00NzY0LWJkYzctOGE4MWIyYTkzZDc2OmV4ZWN1dGlvbi02NWY0NWYxMy02MmI2LTQ3MjAtOTcwZS0yMTY4M2I4OTg3NDktMjAyNi4wOC4yNw",
+    "proves": "the PATCH connector document served for this run"
+  },
+  {
+    "scenario": "cap155-e3-patch-legacy",
+    "file": "replay_execution_record.json",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "utc": "20260827060040",
+    "sha256": "a46fde5d38594c8fb192d77f40cf2d4a8fb40306de0a501ba7c3e78fb06a7362",
+    "byte_length": 1228,
+    "proves": "platform execution status/document counts for this run"
+  },
+  {
+    "scenario": "cap155-e3-patch-legacy",
+    "file": "replay_execution_connector.json",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "utc": "20260827060040",
+    "sha256": "883703a14f0d13e58ee9f95a3c425c246d064c7484a34b1cd83c97bfa7390c04",
+    "byte_length": 2154,
+    "proves": "per-connector-step success/error counts for this run"
+  },
+  {
+    "scenario": "cap155-e3-patch-legacy",
+    "file": "replay_generic_connector_record.json",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "utc": "20260827060040",
+    "sha256": "dcd3a55671b3174747f2964a1cac4123b385fcd4084d7cb7f51779e7f6602800",
+    "byte_length": 5118,
+    "proves": "per-document connector rows incl. operation + connection names"
+  },
+  {
+    "scenario": "cap155-e3-patch-legacy",
+    "file": "replay_document_GET.json",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "utc": "20260827060040",
+    "sha256": "f2d267f9b570e56211dd917cd2aa13dcb4271e3fc2fa836ed355a9c926190e3b",
+    "byte_length": 299,
+    "gcr_id": "R0VOX0NPTk5fUkVDX2V4ZWN1dGlvbi0zOTc5OTY3Ni0zMzY4LTRjOTYtODgyOC0xNzk0YjliZGZhZDctMjAyNi4wOC4yNzpjb25uZWN0b3ItODgzNDEzNTMtZDYwMy00NTgwLTg5OTktMmI0YTYwY2NkYzAz",
+    "operation_name": "_TEST_155E3_src_GET_20260827060040",
+    "connection_name": "Sandbox CDS Mock REST (no-auth)",
+    "execution_connector_id": "RVhFQ19DT05OZmFsc2U6RVhFQ1VURTpjNDI4MTM0Ni04M2U5LTQwMjYtODU2ZC1lZGU3MThlYzY4YTA6NTk2YWZiODItYTg3NS00MjNmLWI4ZmMtNTFlN2NiNzE0ZGRjOmV4ZWN1dGlvbi0zOTc5OTY3Ni0zMzY4LTRjOTYtODgyOC0xNzk0YjliZGZhZDctMjAyNi4wOC4yNw",
+    "proves": "the GET connector document served for this run"
+  },
+  {
+    "scenario": "cap155-e3-patch-legacy",
+    "file": "replay_document_start.json",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "utc": "20260827060040",
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "byte_length": 0,
+    "gcr_id": "R0VOX0NPTk5fUkVDX2V4ZWN1dGlvbi0zOTc5OTY3Ni0zMzY4LTRjOTYtODgyOC0xNzk0YjliZGZhZDctMjAyNi4wOC4yNzpjb25uZWN0b3ItNDFlNTlkMmQtOTgyYS00MGQyLWI0NDYtZTI1ZTI2NzNiNTBi",
+    "operation_name": "shape1",
+    "connection_name": "Start",
+    "execution_connector_id": null,
+    "proves": "the start connector document served for this run"
+  },
+  {
+    "scenario": "cap155-e3-patch-legacy",
+    "file": "replay_document_PATCH.json",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "utc": "20260827060040",
+    "sha256": "d66493098d9f53151708e41c4d2577e142f98938f890084d674af7eed1653b6a",
+    "byte_length": 299,
+    "gcr_id": "R0VOX0NPTk5fUkVDX2V4ZWN1dGlvbi0zOTc5OTY3Ni0zMzY4LTRjOTYtODgyOC0xNzk0YjliZGZhZDctMjAyNi4wOC4yNzpjb25uZWN0b3ItOTI3ZTA5Y2QtOTBhNi00NzJhLWFjZjgtNWExMGQ2MDgzMTM0",
+    "operation_name": "_TEST_155E3_PATCH_20260827060040",
+    "connection_name": "Sandbox CDS Mock REST (no-auth)",
+    "execution_connector_id": "RVhFQ19DT05OZmFsc2U6RVhFQ1VURTpjNDI4MTM0Ni04M2U5LTQwMjYtODU2ZC1lZGU3MThlYzY4YTA6MTc2MzUyNGItZWM2NS00NzY0LWJkYzctOGE4MWIyYTkzZDc2OmV4ZWN1dGlvbi0zOTc5OTY3Ni0zMzY4LTRjOTYtODgyOC0xNzk0YjliZGZhZDctMjAyNi4wOC4yNw",
+    "proves": "the PATCH connector document served for this run"
+  },
+  {
+    "scenario": "cap155-e3-patch-legacy",
+    "file": "readback_R0_before_target.json",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "utc": "20260827060040",
+    "sha256": "60098ef24bc4d4f4a5b80c7ed62252fe72726621bc0cd893943f3d439a65410b",
+    "byte_length": 681,
+    "proves": "counterparty state of the PATCHed resource at this point"
+  },
+  {
+    "scenario": "cap155-e3-patch-legacy",
+    "file": "readback_R0_before_template.json",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "utc": "20260827060040",
+    "sha256": "671edef64a0171b12f65afc7c312ce89a9a24a8d651143ba5175e53579d57a7b",
+    "byte_length": 721,
+    "proves": "counterparty state of the PATCH-body SOURCE document at this point"
+  },
+  {
+    "scenario": "cap155-e3-patch-legacy",
+    "file": "readback_R1_between_target.json",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "utc": "20260827060040",
+    "sha256": "31cc53a63949c433cddd58b14ced1a53ed9c380a361c34ee44236e61006ce32c",
+    "byte_length": 719,
+    "proves": "counterparty state of the PATCHed resource at this point"
+  },
+  {
+    "scenario": "cap155-e3-patch-legacy",
+    "file": "readback_R1_between_template.json",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "utc": "20260827060040",
+    "sha256": "37297d04129eba80a655e9932dd5356401756147ee0cea825d999f550ce4d2b0",
+    "byte_length": 721,
+    "proves": "counterparty state of the PATCH-body SOURCE document at this point"
+  },
+  {
+    "scenario": "cap155-e3-patch-legacy",
+    "file": "readback_R2_after_target.json",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "utc": "20260827060040",
+    "sha256": "23473981faf7307fea9febec8ec14f32b6c02f1e6e59e95660b70b02fe7cad8e",
+    "byte_length": 719,
+    "proves": "counterparty state of the PATCHed resource at this point"
+  },
+  {
+    "scenario": "cap155-e3-patch-legacy",
+    "file": "readback_R2_after_template.json",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "utc": "20260827060040",
+    "sha256": "ec7781888f13f66d3c569c6be3d6adfc392f987221f7fa290e4e4212759e9594",
+    "byte_length": 721,
+    "proves": "counterparty state of the PATCH-body SOURCE document at this point"
+  },
+  {
+    "scenario": "cap155-e3-patch-legacy",
+    "file": "execute_calls.json",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "utc": "20260827060040",
+    "sha256": "aed31232f3532a8e4c643d267a3b7616b59512625d51a69f69f9df7dc823eb26",
+    "byte_length": 2425,
+    "proves": "the two execute_process tool responses"
+  },
+  {
+    "scenario": "cap155-e3-patch-legacy",
+    "file": "component_op_PATCH.xml",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "utc": "20260827060040",
+    "sha256": "a315afd41229d0900faaeee9d9e2bb4c343eec066f3388fa54ab246b823bdcd6",
+    "byte_length": 1386,
+    "component_id": "1763524b-ec65-4764-bdc7-8a81b2a93d76",
+    "proves": "the stored Boomi component XML for this REST operation"
+  },
+  {
+    "scenario": "cap155-e3-patch-legacy",
+    "file": "component_op_src.xml",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "utc": "20260827060040",
+    "sha256": "4b0c2049e237e4c3c7a04d048239931b3086a639712e1335c5c02c457f7f502e",
+    "byte_length": 1442,
+    "component_id": "596afb82-a875-423f-b8fc-51e7cb714ddc",
+    "proves": "the stored Boomi component XML for this REST operation"
+  },
+  {
+    "scenario": "cap155-e3-patch-legacy",
+    "file": "analysis.json",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "utc": "20260827060040",
+    "sha256": "445e92c71968b5309b87a158572b1185d31e14e2b2b9eaf68c94c919a62268e8",
+    "byte_length": 3522,
+    "proves": "the derived verdict, from the artifacts above"
+  }
+]
