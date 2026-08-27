@@ -523,6 +523,14 @@ I committed by an indiscriminate stage-all, and the ledger scanner caught twelve
 had been invisible to it since evaluation 1 under an identifier shape the strategy of record had
 warned about before any work began.
 
+**Landing preflight.** The closing commit N (`12b474b`) was pushed to `scratch/issue-155a` and
+earned the required status: `Python tests` completed SUCCESS on that exact SHA
+(https://github.com/RenEra-ai/boomi-mcp-server/actions/runs/33067160730), on the interpreter the
+`dev` ruleset requires and independently of the local runs. The fast-forward to `dev` is therefore
+mechanically ready and is DELIBERATELY NOT TAKEN: the slice terminates ESCALATE-OPEN, pushing is
+outward-facing and hard to reverse, and landing a slice whose closure record is knowingly incomplete
+is the owner's decision rather than this loop's. Everything needed for it is in place.
+
 **#155 stays open regardless.** It closes only on slice F, which is unstarted and needs an active
 account when it lands plus a counterparty accepting six REST verbs. The class-level PATCH evidence F
 depends on is banked and archived at `captures/cap155-e3b-patch-*`, so that dependency is discharged.
