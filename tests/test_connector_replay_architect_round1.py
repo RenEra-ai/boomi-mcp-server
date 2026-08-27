@@ -130,16 +130,33 @@ def test_an_unrecognised_action_gets_no_verdict_even_in_a_mapped_family():
         "rest", "HEAD") is RetrySafetyV1.UNVERIFIED
 
 
-def test_the_banked_patch_captures_can_still_be_ingested():
-    """Slice F depends on these; a reconciliation that blocks them is a regression.
+def test_the_attested_patch_capture_ingests_with_a_replay_verdict():
+    """The capture slice F actually needs: a double execution WITH attestation.
 
-    An earlier version selected the operation component by FILENAME, and the PATCH
-    captures are named `component_op_patch.xml` — so their method read as absent and
-    reconciliation refused the very evidence the next slice needs.
+    An earlier version selected the operation component by FILENAME, which blocked
+    the archived PATCH captures entirely. Selecting by content fixed that — but the
+    older PATCH captures carry no counterparty log, so under the verdict binding
+    they establish a side effect nobody observed and are now REFUSED. That is
+    correct and is why the attested capture was taken.
     """
-    rows = ingest(_ROOT, [_C / "cap155-e3b-patch-canonical"], family="rest",
-                  actions={"cap155-e3b-patch-canonical": "PATCH"})
-    assert (rows[0].family, rows[0].action) == ("rest", "PATCH")
+    rows = ingest(_ROOT, [_C / "cap155-e5-patch-attested"], family="rest",
+                  actions={"cap155-e5-patch-attested": "PATCH"})
+    row = rows[0]
+    assert (row.family, row.action) == ("rest", "PATCH")
+    assert row.retry_safety is RetrySafetyV1.CONDITIONALLY_IDEMPOTENT
+    assert row.capture.summary.replay.value == "same_effect"
+    assert row.operation_component_id, "a conditional verdict must name its operation"
+
+
+def test_the_unattested_patch_captures_are_now_refused():
+    """The control: an unattested capture must not yield a verdict.
+
+    These have two executions and staged readbacks but no counterparty log, so
+    nothing observed what the endpoint returned.
+    """
+    with pytest.raises(IngestRefused):
+        ingest(_ROOT, [_C / "cap155-e3b-patch-canonical"], family="rest",
+               actions={"cap155-e3b-patch-canonical": "PATCH"})
 
 
 def test_connector_rows_must_name_this_captures_executions():

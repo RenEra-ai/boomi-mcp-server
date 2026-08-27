@@ -117,7 +117,9 @@ def test_an_undeclared_action_is_refused():
     assert "not inferred" in str(err.value)
 
 
-def test_ingest_of_the_whole_read_set_is_deterministic():
-    a = ingest(_ROOT, [_C / n for n in _ACTIONS], family="rest", actions=_ACTIONS)
-    b = ingest(_ROOT, [_C / n for n in reversed(list(_ACTIONS))], family="rest", actions=_ACTIONS)
+def test_ingest_is_deterministic_regardless_of_input_order():
+    """The read verbs only — the refusal control establishes nothing and is refused."""
+    readable = {k: v for k, v in _ACTIONS.items() if k != "cap155-e4-negative-control"}
+    a = ingest(_ROOT, [_C / n for n in readable], family="rest", actions=readable)
+    b = ingest(_ROOT, [_C / n for n in reversed(list(readable))], family="rest", actions=readable)
     assert a == b, "row order or content depends on input order"

@@ -100,6 +100,12 @@ class CaptureRunV1(ReplayRegistryModel):
     execution_id: str
     status: str = Field(min_length=1)
     inbound_error_documents: int | None = None
+    #: Documents CONSUMED — distinct from the error count, which is what an earlier
+    #: version read and which is zero for a healthy input-consuming run.
+    inbound_documents: int | None = None
+    #: Documents the connector produced. A counterparty log proves a request
+    #: reached the endpoint; only this proves anything came back.
+    outbound_documents: int | None = None
     #: True when the readback showed the counterparty's state actually moved.
     state_changed: bool | None = None
     #: The status the COUNTERPARTY logged, when a log was captured.
@@ -128,6 +134,12 @@ class CaptureSummaryV1(ReplayRegistryModel):
     #: wherever one was taken. Evidence-proportional: strong where the evidence is,
     #: still non-vacuous where it is not.
     observed_methods: tuple[str, ...] = ()
+    #: Provenance READ FROM THE CAPTURE rather than from its directory name.
+    captured_at: str | None = None
+    account_id: str | None = None
+    #: Whether the connector ran as the process entry. Observed, not assumed: the
+    #: archived double-execution target runs downstream of a fetch.
+    is_start_shape: bool | None = None
     #: sha256 over every archived file's bytes, in sorted-name order.
     capture_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
     file_count: int = Field(ge=1)
@@ -178,6 +190,28 @@ def _first(node: Any, key: str) -> Any:
     return None
 
 
+def _first_across(files: list[Path], key: str, want: type | tuple = object) -> Any:
+    """The first value for ``key`` across the capture's JSON artifacts.
+
+    Used for provenance the capture RECORDS — the execution's time, its account,
+    whether the connector was the entry shape — rather than values inferred from a
+    directory name or assumed by the reader.
+    """
+    for path in sorted(files):
+        if path.suffix != ".json":
+            continue
+        try:
+            found = _first(_load_json(path), key)
+        except CaptureRefused:
+            continue
+        # TYPE-CHECKED. The platform reuses key names at different shapes — an
+        # `account` appears both as an id string and as a nested object — so taking
+        # the first match of any shape picked up the wrong one.
+        if found is not None and isinstance(found, want):
+            return found
+    return None
+
+
 def _run_label(name: str, suffix: str) -> str:
     """``run1_execution_record.json`` -> ``run1``; ``execution_record.json`` -> ``run``."""
     stem = name[: -len(suffix)].rstrip("_")
@@ -204,10 +238,12 @@ def _counterparty_outcome(log: Path, method_hint: str | None) -> tuple[int | Non
         if len(for_method) == 1:
             return int(for_method[0].group("status")), for_method[0].group("method")
         if len(for_method) > 1:
-            raise CaptureRefused(
-                f"{log.name}: {method_hint} appears {len(for_method)} times; the "
-                "request this capture is about cannot be attributed unambiguously"
-            )
+            # NOT an error. A double-execution capture NECESSARILY logs the method
+            # once per execution, and refusing on multiplicity made the very
+            # evidence a replay verdict requires unusable. The count is reconciled
+            # against the number of executions by the caller; here we report the
+            # FIRST outcome and let per-run attribution place the rest.
+            return int(for_method[0].group("status")), for_method[0].group("method")
         # ZERO matches. Previously this fell through, and a log holding a single
         # UNRELATED request returned that request's status — which the ingest then
         # paired with the DECLARED action. A successful read could therefore mint an
@@ -221,6 +257,12 @@ def _counterparty_outcome(log: Path, method_hint: str | None) -> tuple[int | Non
     if len(hits) == 1:
         return int(hits[0].group("status")), hits[0].group("method")
     return None, None
+
+
+def _status_of(payload: Any) -> int | None:
+    """The readback's HTTP status, when it recorded one."""
+    value = payload.get("status") if isinstance(payload, dict) else None
+    return value if isinstance(value, int) else None
 
 
 def _body_of(payload: Any) -> dict[str, Any] | None:
@@ -264,13 +306,38 @@ def _convergence(files: list[Path]) -> tuple[ConvergenceV1, ...]:
                 "replay did cannot be derived"
             )
         before, between, after = bodies[0][1], bodies[-2][1], bodies[-1][1]
+        statuses = [_status_of(_load_json(path)) for _, path in staged]
+
+        # ABSENCE is a state, and two absences are the same state. When a readback
+        # is non-2xx the resource is not there, and comparing the two error BODIES
+        # then reports a difference that is not about the resource at all — the
+        # archived delete capture returns 404 at both stages with only the error's
+        # own `timestamp` differing, which read as a second effect and turned an
+        # effect-idempotent delete into a non-idempotent one.
+        #
+        # Deliberately narrower than widening the volatile-field list: that list
+        # governs fields on a resource that EXISTS, and widening it is how a real
+        # side effect gets reclassified as noise.
+        def moved(a_status, a_body, b_status, b_body):
+            if a_status is not None and b_status is not None:
+                a_present = 200 <= a_status < 300
+                b_present = 200 <= b_status < 300
+                if a_present != b_present:
+                    return True, ("<resource presence>",)
+                if not a_present and not b_present:
+                    return False, ()
+            keys = _differing_keys(a_body, b_body)
+            return bool(keys), keys
+
+        first_moved, _ = moved(statuses[0], before, statuses[-2], between)
+        replay_moved, replay_keys = moved(statuses[-2], between, statuses[-1], after)
         results.append(
             ConvergenceV1(
                 subject=subject,
                 stages=tuple(stage for stage, _ in staged),
-                first_call_changed_state=bool(_differing_keys(before, between)),
-                replay_changed_state=bool(_differing_keys(between, after)),
-                fields_differing_on_replay=_differing_keys(between, after),
+                first_call_changed_state=first_moved,
+                replay_changed_state=replay_moved,
+                fields_differing_on_replay=replay_keys,
             )
         )
     return tuple(results)
@@ -316,9 +383,20 @@ def _observed_connector_types(
 
     seen: set[str] = set()
     for path in files:
-        if not path.name.endswith(_EXECUTION_CONNECTOR):
+        # By CONTENT, not by filename. A suffix check missed
+        # `run1_execution_connector_raw.json` — the shape the double-execution
+        # captures use — so the records this correlation depends on were skipped
+        # entirely and the capture refused. Third time filename coupling has broken
+        # a reader in this slice; the file's NAME is our tooling's, its CONTENT is
+        # the platform's.
+        if path.suffix != ".json":
             continue
-        payload = _load_json(path)
+        try:
+            payload = _load_json(path)
+        except CaptureRefused:
+            continue
+        if not _platform_connector_records(payload):
+            continue
 
         # PER RECORD, from the PLATFORM's own records. The capture tooling also
         # writes a flattened `rows` array, and that array DROPS `executionId` —
@@ -374,6 +452,14 @@ def _observed_methods(files: list[Path]) -> tuple[str, ...]:
             continue
         found.update(re.findall(r'customOperationType="([^"]+)"', path.read_text()))
     return tuple(sorted(found))
+
+
+def _counterparty_outcomes(log: Path, method_hint: str | None) -> list[tuple[int, str]]:
+    """Every logged outcome for the method under test, in chronological order."""
+    hits = [m for line in log.read_text().splitlines() if (m := _ACCESS_LINE.search(line))]
+    if method_hint:
+        hits = [m for m in hits if m.group("method") == method_hint]
+    return [(int(m.group("status")), m.group("method")) for m in hits]
 
 
 def _counterparty_request_count(log: Path, method_hint: str | None) -> int:
@@ -453,6 +539,8 @@ def summarize(capture_dir: Path, method_hint: str | None = None) -> CaptureSumma
                 execution_id=execution_id,
                 status=status,
                 inbound_error_documents=_first(payload, "inboundErrorDocumentCount"),
+                inbound_documents=_first(payload, "inboundDocumentCount"),
+                outbound_documents=_first(payload, "outboundDocumentCount"),
                 state_changed=state_changed,
                 counterparty_status=counterparty_status,
                 counterparty_method=counterparty_method,
@@ -469,6 +557,19 @@ def summarize(capture_dir: Path, method_hint: str | None = None) -> CaptureSumma
             run.model_copy(update={"counterparty_status": None, "counterparty_method": None})
             for run in runs
         ]
+    elif logs and logged_request_count == len(runs) and len(runs) > 1:
+        # The counts agree, so each execution has its own observed request. Attribute
+        # them IN ORDER — the log is chronological and the runs are label-sorted,
+        # which is the same order the executions ran in. Copying one outcome onto
+        # every run would have claimed the second execution returned what the first
+        # did, and for the archived DELETE capture that is false: 204 then 404.
+        outcomes = _counterparty_outcomes(logs[0], method_hint)
+        if len(outcomes) == len(runs):
+            runs = [
+                run.model_copy(update={"counterparty_status": status,
+                                       "counterparty_method": method})
+                for run, (status, method) in zip(runs, outcomes)
+            ]
 
     return CaptureSummaryV1(
         scenario=capture_dir.name,
@@ -479,4 +580,7 @@ def summarize(capture_dir: Path, method_hint: str | None = None) -> CaptureSumma
         observed_connector_types=_observed_connector_types(
             files, frozenset(run.execution_id for run in runs)),
         observed_methods=_observed_methods(files),
+        captured_at=_first_across(files, "executionTime", str),
+        account_id=_first_across(files, "account", str),
+        is_start_shape=_first_across(files, "isStartShape", bool),
     )

@@ -360,3 +360,45 @@ def test_every_real_component_still_digests():
     for path in sorted(_C.rglob("operation_component.xml")):
         assert component_config_digest_v1(path.read_text(), "operation")
     assert component_config_digest_v1(_CONN, "connection")
+
+
+def test_service_wide_coverage_needs_a_service_wide_capture():
+    """One operation's evidence cannot establish coverage of a whole service."""
+    from pydantic import ValidationError
+
+    from _connector_replay_factories import capture_reference
+    from boomi_mcp.connector_replay.models import (
+        EvidenceScopeV1, ServiceWideRouteCoverageV1)
+
+    with pytest.raises(ValidationError) as err:
+        ServiceWideRouteCoverageV1(
+            service_wide_capture=capture_reference(scope=EvidenceScopeV1.SINGLE_OPERATION))
+    assert "service-wide" in str(err.value)
+
+    # The control: a genuinely service-wide capture is accepted.
+    assert ServiceWideRouteCoverageV1(
+        service_wide_capture=capture_reference(scope=EvidenceScopeV1.SERVICE_WIDE_ROUTE))
+
+
+def test_recognised_actions_union_across_mappings():
+    """Several connector types map to one family; order must not decide acceptance."""
+    from boomi_mcp.connector_replay.registry import _parse
+
+    payload = {
+        "schema_version": 1, "projection_allowlists": [], "semantics_definitions": [],
+        "operation_records": [], "evidence_records": [],
+        "vocabulary": [
+            {"platform_connector_type": "acct-a-rest", "family": "rest",
+             "action_source": "operation_component",
+             "recognised_actions": ["GET"], "safe_actions": ["GET"]},
+            {"platform_connector_type": "acct-b-rest", "family": "rest",
+             "action_source": "operation_component",
+             "recognised_actions": ["PATCH"], "safe_actions": []},
+        ],
+    }
+    registry = _parse(payload)
+    from boomi_mcp.connector_replay.models import RetrySafetyV1
+    # Both actions resolve regardless of which mapping came last.
+    for action in ("GET", "PATCH"):
+        assert registry.retry_safety("rest", action) is RetrySafetyV1.UNVERIFIED
+    assert registry.retry_safety("rest", "BREW") is RetrySafetyV1.UNVERIFIED

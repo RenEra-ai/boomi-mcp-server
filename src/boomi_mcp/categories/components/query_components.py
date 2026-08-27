@@ -79,7 +79,15 @@ def _extract_api_error_msg(e) -> str:
 
 #: Filter keys `list` actually honours. Anything else is refused — see the
 #: docstring below for why silence was the wrong default.
-_LIST_FILTER_KEYS = frozenset({"show_all", "type", "component_type", "limit"})
+#:
+#: HAND-WRITTEN and therefore guarded: the first version of this set omitted
+#: `folder_name`, which the function has always honoured, so a refusal built to
+#: prevent a silent widening instead broke a working filter. A test derives the
+#: real set by parsing what the function reads and compares it to this constant, so
+#: the two cannot drift again in either direction.
+_LIST_FILTER_KEYS = frozenset({
+    "show_all", "type", "component_type", "limit", "folder_name",
+})
 
 
 def list_components(

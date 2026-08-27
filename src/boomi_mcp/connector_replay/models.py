@@ -576,6 +576,22 @@ class ServiceWideRouteCoverageV1(ReplayRegistryModel):
     kind: str = Field(default="service_wide", pattern=r"^service_wide$")
     service_wide_capture: CaptureReferenceV1
 
+    @model_validator(mode="after")
+    def _the_capture_must_actually_be_service_wide(self) -> "ServiceWideRouteCoverageV1":
+        """A single-endpoint capture cannot establish service-wide coverage.
+
+        Accepting any capture here let a row claim coverage of a whole service from
+        one operation's evidence — which is precisely the overreach the scope field
+        exists to record.
+        """
+        if self.service_wide_capture.summary.scope is not EvidenceScopeV1.SERVICE_WIDE_ROUTE:
+            raise ValueError(
+                "service-wide route coverage needs a capture whose scope is "
+                f"service-wide; this one is "
+                f"{self.service_wide_capture.summary.scope.value!r}"
+            )
+        return self
+
 
 class OperationContractRecordV1(ReplayRegistryModel):
     """An account-bound record that a specific operation's replay was observed."""

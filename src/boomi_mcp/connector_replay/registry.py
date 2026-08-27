@@ -105,10 +105,20 @@ class ReplayRegistry:
         a lookup that ignored family would digest a database component under a REST
         projection and let the two collide.
         """
-        for spec in self._projection_allowlists:
-            if spec.component_kind == component_kind and spec.family == family:
-                return spec
-        return None
+        matches = [s for s in self._projection_allowlists
+                   if s.component_kind == component_kind and s.family == family]
+        if not matches:
+            return None
+        if len(matches) > 1:
+            # Digests from different projection revisions are not comparable, so
+            # returning "the first match" would make component identity depend on
+            # registry ORDER and carry no indication of which revision produced it.
+            raise RegistryInvalid(
+                f"the registry publishes {len(matches)} projection revisions for "
+                f"({family!r}, {component_kind!r}); a component identity must name "
+                "one revision, and digests across revisions are not comparable"
+            )
+        return matches[0]
 
     @property
     def operation_records(self) -> tuple:
@@ -145,7 +155,7 @@ class ReplayRegistry:
             action_name
             for entry in self._vocabulary if entry.family == family
             for action_name in entry.recognised_actions
-        }
+        }  # already a union across mappings
         if not recognised or action not in recognised:
             # The family must be mapped AND the action recognised. Resolving only
             # the family let an invented action inherit a mapped family's
@@ -240,7 +250,12 @@ def _refuse_unresolvable_records(vocabulary, evidence, operation_records, semant
     outright, and still be perfectly typed. In a registry whose records decide
     whether a write may be retried, "well-formed" is not the bar.
     """
-    families = {entry.family: set(entry.recognised_actions) for entry in vocabulary}
+    # UNION across mappings. Several account-specific connector types can map to one
+    # portable family, and a dict comprehension kept only the last mapping's
+    # actions — so whether a row was accepted depended on vocabulary ORDER.
+    families: dict[str, set] = {}
+    for entry in vocabulary:
+        families.setdefault(entry.family, set()).update(entry.recognised_actions)
     # A SET would silently accept two CONTRADICTORY definitions for one id and
     # revision — they differ, so both survive, and which one interprets a record
     # then depends on iteration order.

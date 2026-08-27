@@ -55,3 +55,43 @@ def test_supported_keys_are_not_refused():
                        ("component_type", "process"), ("limit", 5)):
         result = list_components(_Client(), "renera", {key: value})
         assert "does not support these filter key" not in str(result.get("error", "")), key
+
+
+def test_the_allowlist_matches_what_the_function_actually_reads():
+    """DERIVED from the source, because the hand-written set was already wrong once.
+
+    The first version omitted `folder_name`, which `list_components` has always
+    honoured — so a refusal added to stop a silent WIDENING instead broke a working
+    filter, failing in the opposite direction. Parsing what the function reads
+    catches drift both ways: a key honoured but not allowed is a regression, and a
+    key allowed but not honoured is the original silent-ignore defect returning.
+    """
+    import ast
+    from pathlib import Path
+
+    source = (Path(__file__).resolve().parents[1]
+              / "src/boomi_mcp/categories/components/query_components.py").read_text()
+    fn = next(n for n in ast.walk(ast.parse(source))
+              if isinstance(n, ast.FunctionDef) and n.name == "list_components")
+
+    read: set[str] = set()
+    for node in ast.walk(fn):
+        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "get" and isinstance(node.func.value, ast.Name)
+                and node.func.value.id == "filters" and node.args
+                and isinstance(node.args[0], ast.Constant)):
+            read.add(node.args[0].value)
+        if (isinstance(node, ast.Subscript) and isinstance(node.value, ast.Name)
+                and node.value.id == "filters" and isinstance(node.slice, ast.Constant)):
+            read.add(node.slice.value)
+
+    assert read == set(_LIST_FILTER_KEYS), {
+        "honoured but refused (a regression)": sorted(read - set(_LIST_FILTER_KEYS)),
+        "allowed but ignored (silently widens)": sorted(set(_LIST_FILTER_KEYS) - read),
+    }
+
+
+def test_folder_name_is_not_refused():
+    """The specific regression: an existing, working filter must keep working."""
+    result = list_components(_Client(), "renera", {"folder_name": "X"})
+    assert "does not support these filter key" not in str(result.get("error", ""))

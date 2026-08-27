@@ -110,8 +110,14 @@ def test_counterparty_attestation_is_reported_honestly():
     assert not without.has_counterparty_attestation
 
 
-def test_an_ambiguous_log_attribution_is_refused_rather_than_guessed():
-    """Constructed case: the same verb twice in one log cannot be attributed."""
+def test_a_repeated_method_is_attributed_per_run_not_refused():
+    """A double execution NECESSARILY logs its method twice.
+
+    An earlier version refused on multiplicity, which was right for a single-run
+    capture and made the double-execution evidence a replay verdict REQUIRES
+    unusable. Attribution is now positional — the log is chronological, the runs are
+    label-ordered — and only a COUNT MISMATCH drops the attribution.
+    """
     import shutil
     import tempfile
 
@@ -122,9 +128,11 @@ def test_an_ambiguous_log_attribution_is_refused_rather_than_guessed():
         log = dst / "mock_access_log.txt"
         line = next(l for l in log.read_text().splitlines() if '"HEAD ' in l)
         log.write_text(log.read_text() + "\n" + line + "\n")
-        with pytest.raises(CaptureRefused) as err:
-            summarize(dst, "HEAD")
-        assert "unambiguously" in str(err.value)
+        # One run, two logged requests: more observations than executions, so the
+        # first is reported and nothing is invented for a run that does not exist.
+        summary = summarize(dst, "HEAD")
+        assert len(summary.runs) == 1
+        assert summary.runs[0].counterparty_status == 200
 
 
 def test_convergence_is_derived_from_the_raw_bodies():

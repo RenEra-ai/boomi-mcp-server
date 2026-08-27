@@ -160,8 +160,28 @@ def classify(summary: CaptureSummaryV1, action: str | None = None,
     statuses = [r.counterparty_status for r in summary.runs if r.counterparty_status is not None]
     if not statuses:
         return SideEffectV1.UNKNOWN, RetrySafetyV1.UNVERIFIED
-    if any(s not in _SUCCESS_RANGE for s in statuses):
+    # The FIRST execution must have succeeded — otherwise the action never
+    # happened and nothing about it was observed.
+    if statuses[0] not in _SUCCESS_RANGE:
         return SideEffectV1.UNKNOWN, RetrySafetyV1.UNVERIFIED
+    replay_statuses = statuses[1:]
+    if replay_statuses and any(s not in _SUCCESS_RANGE for s in replay_statuses):
+        # A REPLAY that is refused is not an absence of evidence — it is evidence,
+        # and often the most useful kind. A delete that returns 204 then 404 while
+        # the resource stays deleted has an idempotent EFFECT and a
+        # non-idempotent RESPONSE, which is exactly the conflict-without-second-
+        # effect outcome the model defines. Refusing every non-2xx made that
+        # outcome unreachable from any capture.
+        #
+        # The condition is narrow: the state must not have moved on the replay. A
+        # refused replay that ALSO changed something is not a conflict, it is a
+        # second effect.
+        moved = [c for c in summary.convergence
+                 if c.replay_changed_state
+                 and not set(c.fields_differing_on_replay) <= _VOLATILE_FIELDS]
+        if moved:
+            return SideEffectV1.WRITE, RetrySafetyV1.NON_IDEMPOTENT
+        return SideEffectV1.WRITE, RetrySafetyV1.CONDITIONALLY_IDEMPOTENT
 
     changed = [r.state_changed for r in summary.runs if r.state_changed is not None]
     # The positive control: at least one subject the FIRST call actually moved.
@@ -337,9 +357,10 @@ def ingest(
 
 def _input_observation(summary: CaptureSummaryV1) -> InputObservationV1:
     """Whether the connector consumed documents, from the execution's own counts."""
-    consumed = any(
-        (run.inbound_error_documents or 0) > 0 for run in summary.runs
-    )
+    # `inboundDocumentCount`, not `inboundErrorDocumentCount` — the latter counts
+    # ERRONEOUS inbound documents, so a successful input-consuming run has zero of
+    # them and was being published as consuming nothing.
+    consumed = any((run.inbound_documents or 0) > 0 for run in summary.runs)
     return (InputObservationV1.DOCUMENTS_CONSUMED if consumed
             else InputObservationV1.NO_INBOUND_DOCUMENTS)
 
@@ -350,9 +371,13 @@ def _output_observation(summary: CaptureSummaryV1) -> OutputObservationV1:
     Conservative: without a counterparty attestation nothing is claimed about
     output, because the platform reports a complete execution either way.
     """
-    if not summary.has_counterparty_attestation:
-        return OutputObservationV1.NO_OUTPUT_OBSERVED
-    return OutputObservationV1.RETURN_DOCUMENTS_RECEIVED
+    # A counterparty log proves a REQUEST reached the endpoint. It says nothing
+    # about a response document reaching the process, and a 204 carries no body at
+    # all — so claiming documents were returned from the log alone was asserting
+    # something never observed.
+    if any((run.outbound_documents or 0) > 0 for run in summary.runs):
+        return OutputObservationV1.RETURN_DOCUMENTS_RECEIVED
+    return OutputObservationV1.NO_OUTPUT_OBSERVED
 
 
 def _replay_observation(summary: CaptureSummaryV1) -> ReplayObservationV1:
@@ -371,6 +396,13 @@ def _replay_observation(summary: CaptureSummaryV1) -> ReplayObservationV1:
              and not set(c.fields_differing_on_replay) <= _VOLATILE_FIELDS]
     if moved:
         return ReplayObservationV1.DUPLICATE_EFFECT
+    # A replay REFUSED by the counterparty, with the state unmoved, is the conflict
+    # outcome rather than a plain repeat — and the distinction matters to a caller
+    # deciding whether a retry is safe to attempt at all.
+    replay_statuses = [r.counterparty_status for r in summary.runs[1:]
+                       if r.counterparty_status is not None]
+    if replay_statuses and any(s not in _SUCCESS_RANGE for s in replay_statuses):
+        return ReplayObservationV1.CONFLICT_WITHOUT_SECOND_EFFECT
     return ReplayObservationV1.SAME_EFFECT
 
 
@@ -382,10 +414,20 @@ def _capture_reference(summary: CaptureSummaryV1, side_effect: SideEffectV1) -> 
     claim needs evidence gathered across operations, and asserting it from one would
     be the overreach the scope field exists to prevent.
     """
-    effect = {
-        SideEffectV1.READ: EffectObservationV1.READ_ONLY,
-        SideEffectV1.WRITE: EffectObservationV1.STATE_CHANGED,
-    }.get(side_effect, EffectObservationV1.READ_ONLY)
+    if side_effect is SideEffectV1.READ:
+        effect = EffectObservationV1.READ_ONLY
+    elif side_effect is SideEffectV1.WRITE:
+        effect = (EffectObservationV1.STATE_UNCHANGED_AFTER_REPLAY
+                  if summary.convergence else EffectObservationV1.STATE_CHANGED)
+    else:
+        # UNKNOWN has no honest observation. Defaulting to `read_only` fabricated a
+        # POSITIVE finding out of missing or failed evidence, and let the outer side
+        # effect contradict the summary it is supposed to rest on.
+        raise IngestRefused(
+            f"{summary.scenario}: the side effect could not be determined, so there "
+            "is no observation to record. A capture that establishes nothing must "
+            "not be given a reference that claims something"
+        )
     sources = [EvidenceSourceV1.EXECUTION_RECORD, EvidenceSourceV1.EXECUTION_CONNECTOR]
     if any(r.state_changed is not None for r in summary.runs) or summary.convergence:
         sources.append(EvidenceSourceV1.ENDPOINT_READBACK)
@@ -397,11 +439,17 @@ def _capture_reference(summary: CaptureSummaryV1, side_effect: SideEffectV1) -> 
         )
     return CaptureReferenceV1(
         execution_id=summary.execution_ids[0],
-        captured_at=summary.scenario,
+        # From the capture, not from its DIRECTORY NAME. A scenario label is neither
+        # a timestamp nor an account: hashing it made two captures from one account
+        # look unrelated and two identically-named scenarios from different accounts
+        # collide — which silently defeats the account-consistency check that
+        # consumes this hash.
+        captured_at=summary.captured_at or summary.execution_ids[0].rsplit("-", 1)[1],
         account_scope_hash=hashlib.sha256(
-            summary.scenario.encode("utf-8")).hexdigest(),
+            (summary.account_id or "").encode("utf-8")).hexdigest(),
         summary=ClosedCaptureObservationsV1(
-            placement=PlacementObservationV1.ENTRY,
+            placement=(PlacementObservationV1.ENTRY if summary.is_start_shape
+                       else PlacementObservationV1.DOWNSTREAM),
             input_observation=_input_observation(summary),
             output_observation=_output_observation(summary),
             effect=effect,
@@ -419,7 +467,12 @@ def _operation_component_id(directory: Path) -> str | None:
 
     from .ids import is_boomi_component_id
 
-    for path in sorted(directory.glob("*operation*.xml")):
+    # By CONTENT. The double-execution captures name their components
+    # `component_op_src.xml` and `component_op_tgt.xml`, which a `*operation*` glob
+    # misses — so the operation a conditional verdict must name was unfindable.
+    for path in sorted(directory.glob("*.xml")):
+        if "customOperationType" not in path.read_text():
+            continue
         for match in re.finditer(r'componentId="([^"]+)"|\bid="([0-9a-fA-F-]{36})"', path.read_text()):
             value = match.group(1) or match.group(2)
             if is_boomi_component_id(value):
