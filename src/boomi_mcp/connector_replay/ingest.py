@@ -387,7 +387,12 @@ def _input_observation(summary: CaptureSummaryV1) -> InputObservationV1:
     """
     if summary.is_start_shape:
         return InputObservationV1.NO_INBOUND_DOCUMENTS
-    consumed = (summary.connector_documents or 0) > 0
+    if summary.connector_documents is None:
+        raise IngestRefused(
+            f"{summary.scenario}: the connector under test reported no document "
+            "count, so what it consumed is unknown rather than absent"
+        )
+    consumed = summary.connector_documents > 0
     return (InputObservationV1.DOCUMENTS_CONSUMED if consumed
             else InputObservationV1.NO_INBOUND_DOCUMENTS)
 
@@ -402,13 +407,19 @@ def _output_observation(summary: CaptureSummaryV1) -> OutputObservationV1:
     # about a response document reaching the process, and a 204 carries no body at
     # all — so claiming documents were returned from the log alone was asserting
     # something never observed.
-    # The CONNECTOR'S OWN bytes, not the execution's document sum. Measured on the
+    # The CONNECTOR'S OWN documents, not the execution's document sum. Measured on the
     # archive, the two disagree in the direction that matters: every capture reports
     # `outboundDocumentCount` 2 — one document from the source read, one from the
-    # connector under test — so a HEAD and a TRACE, which return no body at all,
-    # were both published as having received return documents. The connector's own
-    # `size` is 0 for exactly those, and non-zero for the verbs that carried a body.
-    if (summary.connector_response_bytes or 0) > 0:
+    # connector under test — so the claim was about the wrong subject. Counted in
+    # DOCUMENTS and not in bytes: the archived HEAD capture records a successful
+    # connector document of zero bytes, download and all, so a byte test would call
+    # a call that DID return a document one that returned nothing.
+    if summary.connector_successful_documents is None:
+        raise IngestRefused(
+            f"{summary.scenario}: the connector under test reported no document "
+            "count, so what it returned is unknown rather than absent"
+        )
+    if summary.connector_successful_documents > 0:
         return OutputObservationV1.RETURN_DOCUMENTS_RECEIVED
     return OutputObservationV1.NO_OUTPUT_OBSERVED
 

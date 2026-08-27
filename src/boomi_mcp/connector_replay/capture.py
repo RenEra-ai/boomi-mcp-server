@@ -147,9 +147,10 @@ class CaptureSummaryV1(ReplayRegistryModel):
     #: captures report `outboundDocumentCount` 2 for an execution in which the
     #: connector under test reports `successCount` 1, the other document being the
     #: source read's. A connector-level claim derived from the process-level sum is
-    #: a claim about the wrong subject.
-    connector_documents: int | None = None
-    connector_response_bytes: int | None = None
+    #: a claim about the wrong subject. Counted in DOCUMENTS, because the vocabulary
+    #: these feed is document-based and a successful call can return zero bytes.
+    connector_documents: int | None = Field(default=None, ge=0)
+    connector_successful_documents: int | None = Field(default=None, ge=0)
     #: sha256 over every archived file's bytes, in sorted-name order.
     capture_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
     file_count: int = Field(ge=1)
@@ -200,6 +201,19 @@ def _first(node: Any, key: str) -> Any:
     return None
 
 
+#: The fields every correlated row is READ for. Two archived copies of one platform
+#: row must agree on exactly these: reconciling fields nobody reads would refuse
+#: captures over differences that change no observation, and reconciling fewer would
+#: let a read field vary by filename.
+_CORRELATED_ROW_FIELDS: Final = (
+    "executionConnector",
+    "executionId",
+    "isStartShape",
+    "successCount",
+    "errorCount",
+)
+
+
 def _component_name_under_test(files: list[Path], method_hint: str | None) -> str | None:
     """The NAME of the operation component whose verb is the one under test.
 
@@ -225,6 +239,7 @@ def _component_name_under_test(files: list[Path], method_hint: str | None) -> st
     # report "uniquely resolved" for a genuinely ambiguous capture, which is the
     # fail-open direction. Counting components refuses it.
     by_component: dict[str, str] = {}
+    owners: dict[str, set[str]] = {}
     for path in sorted(files):
         if path.suffix != ".xml":
             continue
@@ -236,11 +251,22 @@ def _component_name_under_test(files: list[Path], method_hint: str | None) -> st
         component_id = root.get("componentId")
         if not name or not component_id:
             continue
+        owners.setdefault(name, set()).add(component_id)
         if any(el.get("customOperationType") == method_hint for el in root.iter()):
             by_component[component_id] = name
-    if len(by_component) == 1:
-        return next(iter(by_component.values()))
-    return None
+    if len(by_component) != 1:
+        return None
+    name = next(iter(by_component.values()))
+    # The name must be owned by exactly ONE component across the WHOLE capture, not
+    # merely one among those declaring this verb. Guarding only the verb's own
+    # components protects the RESOLUTION and leaves the JOIN wide: the rows below
+    # match on the name alone, so a source component sharing the target's name — the
+    # platform's UPDATE path permits it — would lend its documents to the target's
+    # observations, and placement would not refuse because both normally run
+    # downstream. That is the same uncorrelated read one level out.
+    if len(owners.get(name, ())) != 1:
+        return None
+    return name
 
 
 def _connector_rows_under_test(
@@ -285,34 +311,69 @@ def _connector_rows_under_test(
                 # No platform id to dedupe on: keep it, but keyed so two such rows
                 # from one file cannot collapse into one.
                 key = f"{path.name}#{len(by_row)}"
-            by_row.setdefault(key, record)
+            seen = by_row.get(key)
+            if seen is None:
+                by_row[key] = record
+                continue
+            # RECONCILED, not first-wins. Captures archive the same query twice — a
+            # raw copy beside a requery — and the manifest validates each file on its
+            # own, so nothing else would notice the two disagreeing. Keeping whichever
+            # file sorted first would make a served observation depend on a filename.
+            differing = sorted(
+                field for field in _CORRELATED_ROW_FIELDS
+                if seen.get(field) != record.get(field)
+            )
+            if differing:
+                raise CaptureRefused(
+                    f"{path.name}: two archived copies of platform row {key!r} "
+                    f"disagree on {differing!r}; which one describes the execution "
+                    "is not decidable from the archive"
+                )
     return tuple(by_row.values()) or None
 
 
-def _connector_documents(
+def _connector_document_counts(
     files: list[Path], execution_ids: frozenset[str], method_hint: str | None
-) -> int | None:
-    """Documents the connector under test processed, from ITS OWN rows."""
+) -> tuple[int, int] | None:
+    """(documents handled, documents handled successfully) for the connector under test.
+
+    DOCUMENTS, not bytes. An earlier form of this read `size`, which misreads exactly
+    the read verbs this slice exists to evidence: the archived HEAD capture records a
+    successful connector document of zero bytes — the platform even archives its
+    download — so a byte test published "no output observed" for a call that did
+    return a document. The A9 vocabulary the value feeds is document-based.
+
+    Every correlated row must carry both counts as non-negative integers. A missing
+    field is REFUSED rather than skipped: dropping it left the sum None, which the
+    observations then read as zero and published as an affirmative absence — an
+    incomplete capture asserting that nothing was consumed. A negative is refused for
+    the same reason, since these feed `> 0` decisions and a corrupt row could sum
+    back under the threshold.
+    """
     rows = _connector_rows_under_test(files, execution_ids, method_hint)
     if rows is None:
         return None
-    counts = [
-        (r.get("successCount") or 0) + (r.get("errorCount") or 0)
-        for r in rows
-        if isinstance(r.get("successCount"), int) or isinstance(r.get("errorCount"), int)
-    ]
-    return sum(counts) if counts else None
-
-
-def _connector_response_bytes(
-    files: list[Path], execution_ids: frozenset[str], method_hint: str | None
-) -> int | None:
-    """Bytes the connector under test moved, from ITS OWN rows."""
-    rows = _connector_rows_under_test(files, execution_ids, method_hint)
-    if rows is None:
-        return None
-    sizes = [r["size"] for r in rows if isinstance(r.get("size"), int)]
-    return sum(sizes) if sizes else None
+    handled = succeeded = 0
+    for row in rows:
+        counts = {}
+        for field in ("successCount", "errorCount"):
+            value = row.get(field)
+            if not isinstance(value, int) or isinstance(value, bool):
+                raise CaptureRefused(
+                    f"connector row {row.get('id')!r} carries no usable {field!r} "
+                    "({0!r}); a connector-level observation cannot be derived from "
+                    "a row that does not report it".format(value)
+                )
+            if value < 0:
+                raise CaptureRefused(
+                    f"connector row {row.get('id')!r} reports a negative {field!r} "
+                    f"({value}); the count feeds an absence decision and a negative "
+                    "would sum back under it"
+                )
+            counts[field] = value
+        handled += counts["successCount"] + counts["errorCount"]
+        succeeded += counts["successCount"]
+    return handled, succeeded
 
 
 def _start_shape_of_the_exercised_connector(
@@ -756,6 +817,7 @@ def summarize(capture_dir: Path, method_hint: str | None = None) -> CaptureSumma
             ]
 
     execution_ids = frozenset(run.execution_id for run in runs)
+    counts = _connector_document_counts(files, execution_ids, method_hint)
     return CaptureSummaryV1(
         scenario=capture_dir.name,
         runs=tuple(sorted(runs, key=lambda r: r.label)),
@@ -769,8 +831,6 @@ def summarize(capture_dir: Path, method_hint: str | None = None) -> CaptureSumma
         is_start_shape=_start_shape_of_the_exercised_connector(
             files, execution_ids, method_hint
         ),
-        connector_documents=_connector_documents(files, execution_ids, method_hint),
-        connector_response_bytes=_connector_response_bytes(
-            files, execution_ids, method_hint
-        ),
+        connector_documents=None if counts is None else counts[0],
+        connector_successful_documents=None if counts is None else counts[1],
     )

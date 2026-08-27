@@ -177,7 +177,6 @@ def test_connector_counts_come_from_the_connector_not_the_execution(tmp_path):
         touched = False
         for record in _platform_connector_records(payload):
             if record.get("executionConnector") == patch_step:
-                record["size"] = 0
                 record["successCount"] = 0
                 record["errorCount"] = 0
                 touched = True
@@ -185,8 +184,8 @@ def test_connector_counts_come_from_the_connector_not_the_execution(tmp_path):
             path.write_text(json.dumps(payload))
 
     zeroed = summarize(dst, "PATCH")
-    assert zeroed.connector_response_bytes == 0
     assert zeroed.connector_documents == 0
+    assert zeroed.connector_successful_documents == 0
     assert _output_observation(zeroed) is OutputObservationV1.NO_OUTPUT_OBSERVED
 
     # CONTROL: the execution's own counts are untouched and still non-zero, which
@@ -247,3 +246,170 @@ def test_two_components_sharing_a_name_are_ambiguous_not_unique(tmp_path):
     # CONTROL: the untouched capture still resolves, so the refusal is about the
     # collision and not about the extra file.
     assert _component_name_under_test(sorted((_CAPTURES / _SOURCE).iterdir()), "PATCH")
+
+
+# --------------------------------------------------------------------------
+# Round 9. Four of these five are the SAME class again, one level in: a guard
+# that protects the resolution and leaves the join open, a predicate that reads
+# bytes where the vocabulary counts documents, a missing value read as an
+# absence, and a duplicate resolved by filename order.
+# --------------------------------------------------------------------------
+
+
+def _rename_source_onto_target(tmp_path: Path) -> Path:
+    """A capture where the SOURCE component carries the TARGET's name.
+
+    The platform permits it: component CREATE uniquifies a duplicate name, component
+    UPDATE does not. The two components keep different verbs and different ids.
+    """
+    dst = tmp_path / "name-shared-across-verbs"
+    shutil.copytree(_CAPTURES / _SOURCE, dst)
+    target = next(p for p in dst.glob("*.xml") if 'customOperationType="PATCH"' in p.read_text())
+    source = next(p for p in dst.glob("*.xml") if 'customOperationType="GET"' in p.read_text())
+    target_name = target.read_text().split('name="', 1)[1].split('"', 1)[0]
+    source_text = source.read_text()
+    source_name = source_text.split('name="', 1)[1].split('"', 1)[0]
+    source.write_text(source_text.replace(f'name="{source_name}"', f'name="{target_name}"', 1))
+    return dst
+
+
+def test_a_name_shared_across_verbs_is_refused_not_joined(tmp_path):
+    """The JOIN must be as narrow as the resolution claims to be.
+
+    Guarding only the components that declare the requested verb left this open:
+    exactly one component declares PATCH, so resolution succeeded, and the row filter
+    then admitted the source's rows too — publishing the source's documents as the
+    target's observations. Placement would not have caught it, because both run
+    downstream.
+    """
+    from boomi_mcp.connector_replay.capture import _component_name_under_test
+
+    dst = _rename_source_onto_target(tmp_path)
+    files = sorted(dst.iterdir())
+    assert _component_name_under_test(files, "PATCH") is None
+    assert summarize(dst, "PATCH").connector_documents is None
+
+    # CONTROL: one component still declares PATCH, so the refusal is about the
+    # shared name and not about the capture having become malformed.
+    patch_components = [
+        p for p in dst.glob("*.xml") if 'customOperationType="PATCH"' in p.read_text()
+    ]
+    assert len(patch_components) == 1
+
+
+def test_output_counts_documents_not_bytes(tmp_path):
+    """A successful call that returns an empty body still returned a document."""
+    from boomi_mcp.connector_replay.ingest import _output_observation
+    from boomi_mcp.connector_replay.models import OutputObservationV1
+
+    # The archived HEAD capture is the real case: the platform records a successful
+    # connector document, downloadable, of zero bytes.
+    head = summarize(_CAPTURES / "cap155-e4-head-status", "HEAD")
+    assert head.connector_successful_documents == 1
+    assert _output_observation(head) is OutputObservationV1.RETURN_DOCUMENTS_RECEIVED
+
+    documents = json.loads(
+        (_CAPTURES / "cap155-e4-head-status" / "connector_documents.json").read_text()
+    )
+    assert any(d["resp"]["size_bytes"] == 0 and d["resp"]["_success"] for d in documents), (
+        "the fixture must actually contain a successful zero-byte document, or this "
+        "test would pass for the wrong reason"
+    )
+
+
+def test_a_missing_count_is_unknown_and_refused_not_zero(tmp_path):
+    """An incomplete capture must not assert that nothing was consumed."""
+    from boomi_mcp.connector_replay.capture import CaptureRefused
+
+    dst = tmp_path / "missing-counts"
+    shutil.copytree(_CAPTURES / _SOURCE, dst)
+    patch_step = None
+    for xml in dst.glob("*.xml"):
+        text = xml.read_text()
+        if 'customOperationType="PATCH"' in text:
+            patch_step = text.split('name="', 1)[1].split('"', 1)[0]
+    for path in dst.glob("*.json"):
+        payload = json.loads(path.read_text())
+        touched = False
+        for record in _platform_connector_records(payload):
+            if record.get("executionConnector") == patch_step:
+                record.pop("successCount", None)
+                touched = True
+        if touched:
+            path.write_text(json.dumps(payload))
+
+    with pytest.raises(CaptureRefused, match="successCount"):
+        summarize(dst, "PATCH")
+
+
+def test_a_negative_count_is_refused(tmp_path):
+    """These feed `> 0` absence decisions, so a negative must not sum back under."""
+    from boomi_mcp.connector_replay.capture import CaptureRefused
+
+    dst = tmp_path / "negative-count"
+    shutil.copytree(_CAPTURES / _SOURCE, dst)
+    patch_step = None
+    for xml in dst.glob("*.xml"):
+        text = xml.read_text()
+        if 'customOperationType="PATCH"' in text:
+            patch_step = text.split('name="', 1)[1].split('"', 1)[0]
+    for path in dst.glob("*.json"):
+        payload = json.loads(path.read_text())
+        touched = False
+        for record in _platform_connector_records(payload):
+            if record.get("executionConnector") == patch_step:
+                record["successCount"] = -1
+                touched = True
+        if touched:
+            path.write_text(json.dumps(payload))
+
+    with pytest.raises(CaptureRefused, match="negative"):
+        summarize(dst, "PATCH")
+
+
+def test_two_copies_of_one_row_that_disagree_are_refused(tmp_path):
+    """A served observation must not depend on which file sorted first."""
+    from boomi_mcp.connector_replay.capture import CaptureRefused
+
+    dst = tmp_path / "disagreeing-copies"
+    shutil.copytree(_CAPTURES / _SOURCE, dst)
+    patch_step = None
+    for xml in dst.glob("*.xml"):
+        text = xml.read_text()
+        if 'customOperationType="PATCH"' in text:
+            patch_step = text.split('name="', 1)[1].split('"', 1)[0]
+
+    edited = 0
+    for path in sorted(dst.glob("*.json"), reverse=True):
+        payload = json.loads(path.read_text())
+        touched = False
+        for record in _platform_connector_records(payload):
+            if record.get("executionConnector") == patch_step:
+                record["successCount"] = (record.get("successCount") or 0) + 5
+                touched = True
+        if touched:
+            path.write_text(json.dumps(payload))
+            edited += 1
+            break
+    assert edited == 1, "the source capture must archive its rows in more than one file"
+
+    with pytest.raises(CaptureRefused, match="disagree"):
+        summarize(dst, "PATCH")
+
+
+def test_the_archive_itself_has_no_disagreeing_copies():
+    """CONTROL for the refusal above: it must not fire on the real archive.
+
+    Measured: 34 duplicate row copies across the archive, none disagreeing.
+    """
+    from boomi_mcp.connector_replay.capture import CaptureRefused
+
+    for scenario, action in [
+        ("cap155-e5-patch-attested", "PATCH"),
+        ("cap155-e5-delete-attested", "DELETE"),
+        ("cap155-e3b-patch-canonical", "PATCH"),
+    ]:
+        try:
+            assert summarize(_CAPTURES / scenario, action).connector_documents is not None
+        except CaptureRefused as exc:  # pragma: no cover - a real regression
+            pytest.fail(f"{scenario}: the reconciliation refused live evidence: {exc}")
