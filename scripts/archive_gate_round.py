@@ -870,10 +870,24 @@ def main() -> int:
     try:
         os.rename(staging, durable)
     except BaseException as failure:
+        # VERIFY the cleanup rather than assert it. Suppressing the removal's own
+        # errors and then reporting that nothing was left is the same shape as
+        # the rollback that once claimed the archive was restored when it could
+        # not restore it — and its sibling below already knows better. A
+        # surviving staging directory blocks the next pre-flight as unaccounted,
+        # so an operator told "nothing was left" would be looking anywhere but
+        # at the thing in their way.
         shutil.rmtree(staging, ignore_errors=True)
         print(f"archiving failed while publishing the round ({type(failure).__name__}: "
-              f"{failure}). Nothing was left in the archive; fix the cause and run "
-              "the same command again.", file=sys.stderr)
+              f"{failure}).", file=sys.stderr)
+        if staging.exists():
+            print(f"  THE ARCHIVE IS IN AN UNKNOWN STATE — {staging} could not be "
+                  "removed and will be refused as unaccounted by the next run. "
+                  "Remove it before running anything else against this archive.",
+                  file=sys.stderr)
+        else:
+            print("  Nothing was left in the archive; fix the cause and run the "
+                  "same command again.", file=sys.stderr)
         return 1
 
     # A gate round's PROMPT is required evidence, and it must be the prompt the

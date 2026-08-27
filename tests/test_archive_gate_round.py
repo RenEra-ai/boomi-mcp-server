@@ -1827,3 +1827,61 @@ def test_a_failed_PUBLICATION_leaves_no_staging_behind(tmp_path):
     # ...and the ordinary command still succeeds afterwards.
     retry, _ = _archive_gate(tmp_path, second, prompts)
     assert retry.returncode == 0, retry.stderr
+
+
+def test_a_publication_failure_whose_CLEANUP_also_fails_reports_unknown(tmp_path):
+    """Two adjacent failure paths, one of which asserted what the other verified.
+
+    Suppressing the removal's own errors and then reporting that nothing was
+    left is the shape the rollback below was already corrected for: a surviving
+    staging directory is refused as unaccounted by the next run, so an operator
+    told "nothing was left" would be looking anywhere but at the thing blocking
+    them. Both failures have to be injected — no filesystem-level manipulation
+    reaches the rename at all — which is precisely why this needs a control
+    rather than a reading.
+    """
+    run, prompts = _gate_run(tmp_path)
+    first, root = _archive_gate(tmp_path, run, prompts)
+    assert first.returncode == 0, first.stderr
+
+    second = tmp_path / "cdx-gate-review.BOTHFAIL"
+    second.mkdir()
+    for name in ("start.json", "attestation.json", "review.md"):
+        (second / name).write_text((run / name).read_text())
+
+    module = _archiver_module()
+
+    def exploding_rename(src, dst):
+        raise OSError(5, "Input/output error")
+
+    def useless_rmtree(path, ignore_errors=False, **kw):
+        return None                      # the cleanup silently accomplishes nothing
+
+    real_rename, module.os.rename = module.os.rename, exploding_rename
+    real_rmtree, module.shutil.rmtree = module.shutil.rmtree, useless_rmtree
+    argv = sys.argv
+    sys.argv = ["archive_gate_round.py", "--issue", "999", "--kind",
+                "architect-review", "--run-dir", str(second), "--logical-loop",
+                "L3", "--repo", str(tmp_path / "repo"), "--prompts", str(prompts)]
+    import io
+    import contextlib
+
+    err = io.StringIO()
+    try:
+        with contextlib.redirect_stderr(err):
+            rc = module.main()
+    finally:
+        module.os.rename = real_rename
+        module.shutil.rmtree = real_rmtree
+        sys.argv = argv
+
+    assert rc == 1, rc
+    message = err.getvalue()
+    assert "UNKNOWN STATE" in message, message
+    assert "Nothing was left" not in message, "it claimed a cleanup it did not achieve"
+
+    leftover = [p for p in (root / "architect-reviews").iterdir()
+                if p.name.startswith(".partial-")]
+    assert leftover, "the fixture failed to leave the debris this test is about"
+    for path in leftover:
+        real_rmtree(path, ignore_errors=True)
