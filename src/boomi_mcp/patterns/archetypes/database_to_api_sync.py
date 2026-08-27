@@ -1380,7 +1380,7 @@ def _build_dynamic_path(
         segments.append(
             {
                 "type": "profile",
-                "element_id": entry["key"],
+                "element_id": str(entry["key"]),
                 "element_name": f"{leaf} ({name_path})",
             }
         )

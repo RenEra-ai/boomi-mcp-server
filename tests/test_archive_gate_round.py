@@ -2018,3 +2018,79 @@ def test_the_ROLLBACK_also_confirms_its_removal_rather_than_assuming_it(tmp_path
     assert "rolled back ['the round directory']" not in message, \
         "it listed a removal it did not achieve"
     real_rmtree(root / "architect-reviews" / second.name, ignore_errors=True)
+
+
+def test_a_copy_failure_whose_cleanup_also_fails_reports_unknown(tmp_path):
+    """The sibling I missed when the publication path was corrected.
+
+    Round 13's finding was exactly this shape — a cleanup asserted rather than
+    verified — and the fix swept the publication path and the rollback while
+    leaving the copy path, which is the one an architect review then reproduced
+    by fault injection. A surviving staging directory blocks the next preflight,
+    so telling the operator nothing was written sends them the wrong way.
+    """
+    run, prompts = _gate_run(tmp_path)
+    first, root = _archive_gate(tmp_path, run, prompts)
+    assert first.returncode == 0, first.stderr
+
+    second = tmp_path / "cdx-gate-review.COPYFAIL"
+    second.mkdir()
+    for name in ("start.json", "attestation.json", "review.md"):
+        (second / name).write_text((run / name).read_text())
+
+    module = _archiver_module()
+    kind = root / "architect-reviews"
+
+    def exploding_copy(src, dst, *a, **kw):
+        raise OSError(5, "Input/output error")
+
+    real_copy, module.shutil.copy2 = module.shutil.copy2, exploding_copy
+    real_rmtree = shutil.rmtree
+    module.shutil.rmtree = lambda p, ignore_errors=False, **kw: None   # cleanup accomplishes nothing
+
+    argv = sys.argv
+    sys.argv = ["archive_gate_round.py", "--issue", "999", "--kind",
+                "architect-review", "--run-dir", str(second), "--logical-loop",
+                "L3", "--repo", str(tmp_path / "repo"), "--prompts", str(prompts)]
+    import io
+    import contextlib
+
+    err = io.StringIO()
+    try:
+        with contextlib.redirect_stderr(err):
+            rc = module.main()
+    finally:
+        module.shutil.copy2 = real_copy
+        module.shutil.rmtree = real_rmtree
+        sys.argv = argv
+
+    assert rc == 1, rc
+    message = err.getvalue()
+    assert "UNKNOWN STATE" in message, message
+    assert "Nothing was written" not in message, "it claimed a cleanup it did not achieve"
+    for leftover in [p for p in kind.iterdir() if p.name.startswith(".partial-")]:
+        real_rmtree(leftover, ignore_errors=True)
+
+
+def test_an_UNPARSEABLE_attestation_is_not_an_absent_one(tmp_path):
+    """Collapsing the two archived a malformed round at exit 0.
+
+    The presence guard saw None for invalid JSON, concluded the round was simply
+    unattested, and let it through with a null gate and status — output the
+    downstream scanner refuses, reported as success by the producer, with the
+    source run possibly discarded on the strength of it.
+    """
+    run, prompts = _gate_run(tmp_path)
+    (run / "attestation.json").write_text('{"gate": "review", "turn": {trunc')
+
+    result, root = _archive_gate(tmp_path, run, prompts)
+    assert result.returncode == 1, result.stdout
+    assert "cannot be read" in result.stderr
+    assert "not an absent one" in result.stderr
+    assert not (root / "architect-reviews" / run.name).exists()
+
+    # ...and a genuinely ABSENT attestation still archives, so the refusal is
+    # about unreadability rather than about attestation being required.
+    (run / "attestation.json").unlink()
+    ok, _ = _archive_gate(tmp_path, run, prompts)
+    assert ok.returncode == 0, ok.stderr

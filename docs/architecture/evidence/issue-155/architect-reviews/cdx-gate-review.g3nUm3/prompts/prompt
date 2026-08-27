@@ -1,0 +1,1385 @@
+You are performing the §6 ARCHITECT IMPLEMENTATION REVIEW for issue #155, slice A, of the
+boomi-mcp-server repository — **evaluation 2 of a maximum of 3**. This is not a general code review.
+Your single question is:
+
+    Do the corrections made since your last evaluation faithfully realize the architect design plan
+    reproduced verbatim below, and did they resolve the findings your first evaluation raised?
+
+## What you already reviewed, and what happened to it
+
+Evaluation 1 read the tree at `2c1c9c7` and returned ISSUES FOUND. Its findings were reconciled one
+by one. Two were REFUTED on measurement rather than fixed, and you should judge those refutations —
+they are the part of this round I most want your eyes on:
+
+1. **"The database archetype coerces the path-binding property to a string"** — refuted. Measured:
+   the profile-property source model your finding depends on is referenced nowhere outside the model
+   module itself. The plan's instruction presupposes a re-lowering of the primitive path-binding
+   helper that has deliberately NOT happened (see departure 3 below), so there is no route on which
+   the coercion you describe can occur. If you think that measurement is wrong, name the route.
+
+2. **"The diagnostic contract mismatches the plan"** — refuted. The plan lumps two conditions under
+   one code; the implementation splits them: a property that was never established anywhere yields
+   the not-established code, and a writer composing only static text yields the no-dynamic-segment
+   code. I judged the split strictly more informative than the plan's lumping and kept it. Say
+   plainly whether you accept that, and if not, what it costs a caller.
+
+The remaining findings were FIXED: the diagnostic path for a bound call now carries its binding
+sub-path, the path-binding model is frozen, the capability is published with an executable witness,
+and the golden matrix gained the coverage you named.
+
+## What changed since `2c1c9c7`, and how to read it
+
+Read the delta yourself: `git diff 2c1c9c7..HEAD -- src tests scripts`. It is large, and almost all
+of the size is one file that has nothing to do with the plan. Please do not spend your review there.
+
+  - THREE files under `src/` changed. That is the slice-A surface, and it is what I want judged.
+  - The rest is `scripts/archive_gate_round.py` and its tests — the evidence archiver this slice had
+    to write because the completion workflow requires every gate round archived as it is collected
+    and no producer for the archive index existed. It grew by roughly 1700 test lines across NINE
+    consecutive commit-review rounds, none of which touched a served surface.
+
+I have frozen that artifact and recorded why: eight consecutive rounds on it, seventeen findings,
+several of them regressions I introduced while fixing earlier ones, and one defect class that
+recurred three times despite two structural fixes. From here it takes a code change only for a
+finding that is both critical and reachable through the invocation this loop actually makes.
+
+If you think that judgement is wrong — that the archiver was never in scope for this slice, or that
+freezing it leaves something unsafe — say so. It is the decision I am least certain of.
+
+## Scope discipline — read this before reporting an absence
+
+The plan below covers ALL SIX slices A–F. Only slice A is implemented. §5.B through §5.F describe
+units that are deliberately absent: the packaged replay-evidence registry, the trusted connector
+resolution snapshot, per-call idempotency grants, apply-boundary rechecks, and evidence ingestion.
+An absence belonging to slices B–F is NOT a finding — it is the plan working as written.
+
+## Where the implementation KNOWINGLY departs from the plan
+
+You judged these in evaluation 1; they are unchanged and restated so this round is self-contained.
+State plainly whether each remains acceptable.
+
+1. The plan's dynamic-path rule was NARROWED — strict for a bound path only, not in the general
+   lineage model, because the legacy chain accepts a composition the general rule would refuse and a
+   shipped parity golden freezes it.
+2. The rule keys on a MEASURED platform table, not on the served stream-replacing set. Live
+   measurement found the two facts differ: a Message replaces the document stream and KEEPS document
+   properties; a split and a cache read lose them.
+3. Re-lowering the primitive path-binding helper was NOT done, recorded out-of-scope-by-design
+   against the cutover issue: it has no non-empty caller.
+4. The profile-identity comparison is inert on the canonical route, deferred to slice C: validation
+   is account-independent by specification and runs before any id lookup.
+
+## What I most want from you
+
+- Whether the corrections actually discharge your evaluation-1 findings, or only appear to.
+- Your judgement on the two refutations above — a silent agreement is not useful to me.
+- Any plan requirement for SLICE A still genuinely unmet, quoting the plan clause.
+- Anything built since `2c1c9c7` that the plan does not authorize.
+
+Be concrete: cite file:line and the plan clause.
+
+END with a verdict on its OWN FINAL line: exactly 'VERDICT: NO ISSUES' or 'VERDICT: ISSUES FOUND'.
+
+
+=== ARCHITECT DESIGN PLAN (verbatim) ===
+# GitHub issue #155 implementation plan
+
+## Summary
+
+Ship #155 as nine ordered units: canonical dynamic-path authoring and legacy-identical emission; dynamic-path lowering, validation, publication, and safety nets; explicit process-scope replay policy; a packaged fail-closed replay-evidence registry with shared ID grammar and two versioned digest algorithms; a trusted connector-resolution snapshot; typed per-call replay grants; discovery and fingerprint integration; apply-boundary identity rechecks and evidence attestations; and finally live-evidence-backed production rows. Units 1–8 can land and be fully tested while every production write remains `unverified`. Unit 9 is required to close #155 but cannot be completed unless qualifying captures from the renera account exist. No unevidenced row, synthetic fixture, caller assertion, or documentation claim may authorize retry.
+
+## Anchor verification
+
+The issue’s line numbers have drifted. These are the current locations checked in the working tree:
+
+- `ConnectorActionInputV1` is now `src/boomi_mcp/compiler/process_ir/contracts.py:793-799`, still six fields with no dynamic path. `_emit_connector` remains at `emitter_registry.py:314-322`; `_req_connector` is at `:446-450`; source and target registrations still share the emitter at `:594-595`.
+- The renderer is actually under `src/boomi_mcp/categories/components/builders/process_emitters/rendering.py`, not `src/boomi_mcp/process_emitters/`. `render_connector_action` now spans `:364-425`; the absent-binding branch remains `:387-389` and the existing dynamic-path bytes are emitted at `:391-408`. `legacy.py:96-120` remains the adapter. Both files are reused unchanged.
+- Legacy source emission moved to `process_flow_builder.py:931-961`; target emission spans `:1118-1167`. The cited segment validator moved from `:1987-2067` to `:1702-1782`; integer `element_id` coercion is at `:1751-1755` and profile pairing at `:1767-1781`.
+- `_validate_contract_ref` moved from `models/process_ir.py:235` to `:300-330`. `ProfilePropertySourceV1.element_id: str` is now at `:489`. `ConnectorCallNodeV1` is at `:764-804`, `SetDdpNodeV1` at `:983-1007`, and `RetryPolicyV1` moved to `:1771-1786`.
+- The generalized grammar already treats the first `connector_call` after its legal prefix as the source-side call (`models/process_ir.py:2086-2102`; `lowering.py:630-640`). The legacy `SourceEndpointV1` must still be first (`models/process_ir.py:2048-2050,2211-2215`). Therefore source dynamic path should use a generalized `ConnectorCallNodeV1`, not widen the legacy `SourceEndpointV1` grammar.
+- `rest_runtime.py` validation is now `:152-284` and lowering `:291-394`. The database archetype is under `patterns/archetypes/database_to_api_sync.py`; its DDP-name helper is now `:1287-1306`, dynamic-path builder `:1309-1396`, and the old watermark anchors have moved to approximately `:1641-1660` and `:1868-1879`.
+- The REST blank-path guard remains at `connector_builder.py:3203-3214`, with blank-path construction at `:3293-3306`. The DDP naming lint moved to `integration_builder.py:5012-5045`.
+- The legacy rejection layers remain in `legacy_adapters/sync_pipeline.py:214-225`, `legacy_adapters/authority.py:136-163`, and `models/_process_ir_compat.py:470-476,824-829`; these stay untouched for #160.
+- `tests/test_connector_call_mixed_flow.py:326-333` still checks that one unbound canonical call emits empty parameters. It is not evidence that all canonical calls must remain unbound and must be narrowed accordingly.
+- The two cited goldens are not source-versus-target goldens. Both `dynamic_path_source_ddp.xml` and `dynamic_path_target_profile.xml` represent target-side REST PATCH calls; “source” identifies the DDP segment source. `tests/test_process_flow_builder_dynamic_path.py:434-451` confirms this. The literal acceptance wording asking a source connector to equal `dynamic_path_source_ddp.xml` is therefore unsatisfiable. Preserve both as target-form parity oracles and add a separately frozen true source-role golden.
+- `connector_capabilities.py:121-203` still contains exactly five rows. REST POST is absent; REST PATCH and database Send remain `unverified`; SOAP EXECUTE is also `unverified`. `_NEVER_RETRYABLE` and evidence kinds remain at `error_handling.py:72-82`, the retry-zero short circuit at `:283`, source replay refusal at `:288-298`, write classification at `:303-320`, and the current ref/operation-only evidence check at `:334-340`.
+- `IdempotencyContractSymbolV1` remains operation-wide at `contracts.py:224-253`; `CatchErrorsInputV1` still carries only `retry_count` at `:879-896`.
+- `materialization.py:107` is still the placeholder resolver, but the issue’s “two `build_symbol_table` call sites” is stale. Current calls are `authoring/workflow.py:1346`, `recipes/engine.py:1741`, and `integration_builder.py:7578,7862`. Rebinding helpers at `authoring/process_materialization.py:536-556` and `canonical_process_apply.py:90-111` must also preserve new grant fields.
+- Recipe/workflow compilation currently occurs before collision/live resolution in several paths; the relevant workflow and integration-builder regions have moved substantially. Typed apply recompilation is now around `authoring/workflow.py:2540-2545`.
+- `account_scope_fingerprint` is now `authoring/revisions.py:189-216` and still permits profile-name fallback. Keep that behavior for unrelated authoring, but prohibit the fallback in evidence matching.
+- `.dockerignore:78` still excludes Markdown. `.gitignore` ignores `.codex/` around line 50 and now ignores `docs/*` around `:114-115`, not line 105. Both `!docs/evidence/` and `!docs/evidence/**` are needed.
+- The repository has no wheel/package-data configuration. Deployment imports `/app/src/boomi_mcp` from the Docker image. The required packaging proof must therefore exercise `importlib.resources` from the copied package inside the built image; describing it as a wheel-install test would be inaccurate.
+
+## Work units
+
+### 1. Canonical dynamic-path contract and byte-identical emission — required
+
+Scope:
+
+- Before implementation changes, freeze a true source-role legacy fixture with provenance from the current legacy builder. Do not generate it from the new compiler.
+- Add `ConnectorPathBindingV1` to authored ProcessIR and one compiler-side connector-action input shared by source and target roles.
+- Pass the binding through `_emit_connector` into the existing renderer without altering renderer templates.
+- Preserve byte identity when the binding is absent.
+
+Contract:
+
+- `ConnectorPathBindingV1`:
+  - `property_name: str`
+  - `request_profile_ref: ComponentRefV1 | None = None`
+  - frozen/extra-forbidden, using the existing DDP-name and component-ref validators.
+- Add `path_binding: ConnectorPathBindingV1 | None = None` to `ConnectorCallNodeV1` and `TargetEndpointV1`.
+- Do not add it to `SourceEndpointV1`; source-role use is the first generalized `ConnectorCallNodeV1`.
+- Change `ProfilePropertySourceV1.element_id` validation to accept `str` or non-boolean `int`, storing and serializing the canonical decimal string. Floats, booleans, empty strings, and other values remain invalid.
+- Add compiler mirrors:
+  - `ConnectorPathBindingSemanticV1(property_name, request_profile_ref)`
+  - `ConnectorDynamicPathInputV1(property_name, request_profile_id="", has_profile_segment=False)`
+  - `ConnectorActionInputV1.dynamic_path: ConnectorDynamicPathInputV1 | None = None`
+- `_req_connector` conditionally requires the request-profile symbol only when `request_profile_ref` is present.
+- `_emit_connector` converts this input to the existing `RenderConnectorDynamicPath`; no new emitter kind or registry key.
+
+Acceptance:
+
+- Existing unbound canonical goldens remain byte-identical.
+- Canonical target DDP/profile cases equal the two existing legacy goldens.
+- A new generalized source-role case equals the separately frozen legacy source fixture.
+- `registry_keys()` remains exactly unchanged.
+
+### 2. Dynamic-path lowering, semantics, publication, and adjacent guards — required
+
+Scope:
+
+- Make the upstream `set_ddp` node the single authority for ordered path segments.
+- Port legacy segment/profile rules into the canonical semantic pass.
+- Re-lower REST helpers and the database archetype without removing legacy spellings.
+- Make blank-path operations deployable only when a path binding is present.
+- Publish the bindable-location claim from capability data and extend the canonical DDP naming lint.
+
+Rules:
+
+- `path_binding` does not duplicate segments. The matching upstream `SetDdpNodeV1.source_values` owns segment order and source types.
+- For every incoming CFG path to a bound connector call:
+  - a reaching `set_ddp` for `property_name` must exist;
+  - that writer must contain at least one dynamic profile/DDP/DPP source;
+  - all profile sources must use one `(profile_ref, profile_type)` pair;
+  - `request_profile_ref` must be present and equal that pair iff profile sources exist;
+  - a DDP read by that writer must itself be established on every path.
+- Extend the existing must-state/property-lineage analysis to expose reaching writers; do not add an independent graph traversal. Emit the dynamic-path-specific diagnostic instead of a duplicate generic read-before-write diagnostic for the same defect.
+- `lower_path_bindings` returns a canonical `(SetDdpNodeV1, ConnectorPathBindingV1)` pair. Keep its existing legacy facade until #160.
+- The database archetype keeps `_path_ddp_name` as the authoring-side name derivation and emits the same canonical pair. The compiler never synthesizes a DDP name.
+- Add `requires_path_binding: bool = False` to trusted operation metadata/symbols. Derive it from normalized or parsed operation XML; a REST operation with an intentionally blank resource path sets it true.
+- Extend `ConnectorCapabilityV1` with `bindable_locations: tuple[Literal["Path"], ...] = ()`. Existing REST rows publish `("Path",)` and SOAP/database rows publish `()`. Expose it through `PUBLIC_CAPABILITY_FIELDS` as `per_document_bindable_locations`.
+- The schema-template text “Path is the only bindable REST location” must be generated from that field.
+- Extend the existing integration-builder lint to recursively inspect canonical `SetDdpNodeV1.name`; retain warning code `[PROPERTY_NAMING]`, warning-only behavior, and deduplication.
+
+Acceptance:
+
+- Missing/non-dominating DDP, static-only segments, profile mismatches, and nested DDP reads fail correctly.
+- Valid generalized source, generalized target, and legacy-target canonical forms compile.
+- Blank-path REST operations fail without a binding and compile with one.
+- Public schema/capability projections are total and registry-derived.
+- Legacy adapters, builder spellings, renderer code, and legacy goldens remain untouched.
+
+### 3. Explicit process-source replay policy — required
+
+Scope:
+
+- Add the authored policy and validate it before the existing retry-zero early return.
+- Change only source-isolation semantics; keep write/idempotency validation independent.
+- Keep emitter inputs and XML unchanged.
+
+Contract:
+
+- `SourceReplayPolicyV1 = Literal["forbid", "allow_duplicates"]`.
+- `RetryPolicyV1.source_replay_policy: SourceReplayPolicyV1 = "forbid"`.
+- Carry the value through `TryCatchSemanticV1` and the error-region model.
+- Legality:
+  - `"forbid"` is legal for every scope and retry count.
+  - `"allow_duplicates"` is legal only for `scope="process"` and `count > 0`.
+  - Connector scope and retry zero are named refusals at the exact canonical field path `/<existing try_catch node path>/retry/source_replay_policy`.
+- `"allow_duplicates"` bypasses only `PROCESS_IR_SEMANTIC_RETRY_SOURCE_REEXECUTION`; capability and idempotency checks still run.
+- Add the field to the existing machine-served ProcessIR capability/schema projection with status `"supported"`.
+- Do not change `CatchErrorsInputV1`; emitted XML stays identical.
+
+Acceptance:
+
+- All four requested arms plus dump/reparse of defaulted `"forbid"` pass.
+- Because canonical serialization includes defaults, existing retry-policy JSON and fingerprints will rotate even when the field was not explicitly authored. Record this as an intentional schema/compiler revision change; do not claim only explicitly authored values affect the fingerprint.
+
+### 4. Packaged evidence registry, ID grammar, digests, and audit report — required mechanism
+
+Add `src/boomi_mcp/connector_replay/` containing:
+
+- `ids.py`: canonical/authored ID types and the shared validator.
+- `models.py`: strict frozen registry record models.
+- `digests.py`: Route Digest V1 and Component Config Digest V1.
+- `registry.py`: `importlib.resources` loader, cross-record checks, semantic-revision projection, and injected-registry test seam.
+- `report.py`: deterministic renderer/parser for the tracked audit report.
+- `registry_v1.json`: authoritative packaged data.
+- `__init__.py`: narrow exports only.
+
+Contract ID:
+
+- Bare canonical ID regex: `^icv1:[a-z0-9_]+:[a-z0-9_]+:[a-z0-9_]+:[1-9][0-9]*$`.
+- Authored form regex: `^\$ref:icv1:[a-z0-9_]+:[a-z0-9_]+:[a-z0-9_]+:[1-9][0-9]*$`.
+- No leading-zero revision.
+- An explicit registry mapping assigns each raw family to one `family_id` and each action within that family to one `action_id`; mappings are total and injective. No runtime case/hyphen folding.
+- `semantics_id` must resolve to exactly one `ContractKeySemanticsDefinitionV1` with the same positive revision.
+- The same dependency-light validator is called by authoring, compiler symbols, registry load/mint, grant matching, and discovery.
+
+Strict registry records:
+
+- `ConnectorVocabularyMappingV1(raw_family, raw_action, family_id, action_id)`.
+- `ContractKeySemanticsDefinitionV1(semantics_id, revision, mechanism, key_scope, duplicate_guarantee)`, with closed enums only.
+- `ComponentProjectionAllowlistV1(family, component_kind, projection_version, included_elements, included_attributes, qname_aware_attrs, qname_aware_tags, contract_relevant_extension_fields)`.
+- `CaptureSummaryV1` with only closed observations for input, output, effect, replay result, and evidence scope.
+- `CaptureReferenceV1(execution_id, captured_at, account_scope_hash, summary, capture_digest)`.
+- `CapabilityEvidenceRecordV1(family, action, accepts_input, produces_output, side_effect, retry_safety, capture)`.
+- `LiveComponentIdentityV1(component_id, version, config_digest)`.
+- Discriminated route coverage:
+  - `StaticRouteCoverageV1(kind="static_path", route_digests: nonempty sorted unique tuple)`.
+  - `ServiceWideRouteCoverageV1(kind="service_wide", service_wide_capture: CaptureReferenceV1)`.
+- `OperationContractRecordV1(contract_ref, family, action, semantics_id, semantics_revision, account_scope_hash, operation_identity, connection_identity, route_coverage, capture, record_digest)`.
+- `ConnectorReplayRegistryV1(schema_version, vocabulary_mappings, semantics_definitions, projection_allowlists, capability_records, operation_records)`.
+- Every model is `extra="forbid"`. There are no narrative, header, body, URL, raw-path, credential, or arbitrary-description fields.
+- Component/execution ID formats must be closed and evidence-derived before any production record is accepted. Until the live syntax is pinned, production operation/capture lists stay empty; test fixtures use the strict fixture grammar rather than weakening the production validator.
+
+Route Digest V1:
+
+- Join connection base path and operation resource path with exactly one slash at that boundary.
+- Exclude scheme, authority, query, and fragment.
+- Uppercase percent-encoding hex, decode unreserved characters, and apply RFC 3986 dot-segment removal.
+- Preserve path case, trailing slash, and internal empty segments.
+- Hash `b"RouteDigestV1\0" + normalized_path.encode("utf-8")`.
+- Store as `RouteDigestV1:<64 lowercase hex>`.
+- A dynamic per-document route is never converted to a static digest; it requires separate service-wide evidence.
+
+Component Config Digest V1:
+
+- Projection specs are registry data, separately defined for operation and connection components.
+- Build a new tree containing only the enumerated `<object>` configuration fields and family/action-bearing type fields. Unknown elements or attributes within a projection scope refuse the digest.
+- Match XML names by `(namespace URI, local name)`, preserve child order, remove comments/PIs structurally, and drop only whitespace-only element content.
+- Track source namespace context during parsing. For declared QName-aware values, resolve source prefixes and redeclare the needed bindings on the projection tree; unresolved prefixes refuse.
+- Canonicalize with `xml.etree.ElementTree.canonicalize(with_comments=False, rewrite_prefixes=True, strip_text=False, qname_aware_attrs=..., qname_aware_tags=...)`.
+- Hash `b"ComponentConfigDigestV1\0" + canonical_xml.encode("utf-8")`.
+- Store as `ComponentConfigDigestV1:<64 lowercase hex>`.
+- Version, config digest, and externally supplied `sha256:<hex>` capture digest remain distinct.
+
+Registry/report invariants:
+
+- Every positive retry-safety row and every connector row absent from the frozen five-row baseline has one exact class-level evidence record.
+- Evidence claims must equal the capability row; class records never mint operation contracts.
+- Operation records must resolve their ID mapping/semantics exactly and must not collide.
+- The derived report groups fixed prose and typed tables by `(family, action)`; checked-in bytes must equal deterministic rendering from `registry_v1.json`.
+- Add `.gitignore` carve-outs for both the evidence directory and its contents.
+- Test `git ls-files`, strict report parsing, registry/report equality, package-resource loading, and Docker-image loading/digest parity.
+- `registry_v1.json` initially contains schemas, explicit mappings, semantic definitions, and projection allowlists as appropriate, but no fabricated production evidence records.
+
+### 5. Trusted connector-resolution snapshot and compile ordering — required
+
+Add `src/boomi_mcp/authoring/connector_resolution_snapshot.py`.
+
+Contract:
+
+- `ResolvedConnectorModeV1 = Literal["reuse", "create", "update"]`.
+- `ConnectorIdentityAuthorityV1 = Literal["normalized_builder_xml", "submitted_xml", "live_readback_xml"]`.
+- `ResolvedConnectorComponentIdentityV1` records logical ref, component kind, mode, authority, actual component ID/version when live, derived family/action, configuration digest, resource/base-path facts, `requires_path_binding`, and closed extension-binding state.
+- `TrustedConnectorResolutionSnapshotV1` records strict actual-account scope and sorted operation/connection identities.
+- Caller `connector_metadata` becomes an assertion only:
+  - structured create/update derives from normalized builder XML;
+  - raw-XML create/update derives from parsed submitted XML;
+  - direct and collision reuse derive from live XML readback;
+  - all reuse identities require actual ID, parseable XML, and explicit version.
+- Compare declared versus derived family/action for every compiled connector action before capability classification, including read-only actions.
+- Keep the existing profile-name account fallback for unrelated functionality, but add a strict evidence helper that requires the actual platform account ID. Missing actual account ID means no grant.
+- Refactor all four current `build_symbol_table` paths to consume the same post-composition/post-collision snapshot. Remove early recipe compilation before resolution; compose, resolve collisions/live reuse, build one snapshot, then compile.
+- Preserve the snapshot and root-specific symbol tables privately through typed apply. Do not put them into served plan JSON or relocatable fingerprints.
+- New/create/update components may still compile for ordinary authoring but cannot mint replay evidence.
+
+Acceptance:
+
+- Raw create, raw update, direct reuse, and collision reuse each reject declared GET/actual POST.
+- Profile alias fallback cannot satisfy evidence scope.
+- Every compile path uses the snapshot, and an AST/call-spy invariant proves no alternative family/action derivation reaches capability validation.
+
+### 6. Per-call contract symbols and grant enforcement — required
+
+Compiler contracts:
+
+- Extend `IdempotencyContractSymbolV1` with validated `ref`, `operation_ref`, `record_digest`, and existing kind. Permit uniqueness by `(ref, operation_ref)`, not `ref` alone, so multiple authored aliases of one live operation remain representable.
+- Add `IdempotencyGrantSymbolV1`:
+  - `contract_ref`
+  - `process_root_ref`
+  - `call_identity`
+  - `operation_ref`
+  - `connection_ref`
+  - `account_scope_hash`
+  - operation and connection component IDs, versions, and config digests
+  - route coverage/digest
+  - operation-record and capture digests
+  - `kind: Literal["per_call_idempotency_grant"]`
+- Add `SymbolTableV1.idempotency_grants: tuple[IdempotencyGrantSymbolV1, ...] = ()`, sorted and unique by `(process_root_ref, call_identity, contract_ref)`.
+- Define stable call identity as `CallIdentityV1:<sha256>` over `b"CallIdentityV1\0"` plus canonical JSON `[process_root_ref, canonical connector-call JSON pointer]`. Reordering a call intentionally changes its identity.
+- Add root/call/route facts to connector-call semantic bindings.
+
+Minting:
+
+- `build_symbol_table` remains the sole minting point and receives ProcessIR roots, trusted snapshot, packaged registry, and caller assertions.
+- It may mint a contract symbol and grant only for a reused, unchanged live operation and reused, unchanged live connection whose ID, explicit version, configuration digest, account scope, family/action, and route coverage exactly match one operation record.
+- It mints nothing for new/update, placeholders, lookup failure, missing account ID, versionless or unparsable readback, identity/version/digest mismatch, foreign account, extension-bound relevant fields, static-route mismatch, dynamic route without separately captured service-wide evidence, or ambiguous records.
+- A class-level capability record and a ProcessIR declaration can never mint.
+- Keep private typed mint-decision reasons for tests, but externally these arms reach the existing evidence-missing diagnostic rather than inventing an override.
+- Both conditionally-idempotent and idempotent-write retries require a matching per-call grant:
+  - conditional writes require `key_reference` equal to the grant’s authored contract ref;
+  - idempotent writes retain `verified_action` acknowledgement but additionally require an `action_replay` grant for that call.
+- This is a necessary correction to the issue’s “only two decision changes” claim: leaving current `verified_action` operation-wide would violate the stronger stated rule that the typed per-call grant is the sole retry authority.
+- Read-only actions still require no evidence, but their family/action must come from the trusted snapshot.
+- A wrong root, call, operation, connection, account, or route never satisfies the grant.
+- Update both symbol-table reconstruction helpers to preserve grants.
+
+Acceptance:
+
+- All missing/mismatched mint arms fail closed.
+- Same operation/different route calls mint independently.
+- Cross-root and wrong-call substitution fail.
+- An operation-wide symbol without the per-call grant fails.
+- Production rows remaining `unverified` are rejected before grant matching.
+
+### 7. Discovery and account-independent fingerprint integration — required
+
+Discovery:
+
+- Add `idempotency_contract_candidates` to the existing `query_components` surface and route it through `server.py` and `meta_tools.py`.
+- Input is profile plus resolved operation component ID.
+- Read the live operation and connection, obtain the actual account ID, and derive identity with the same snapshot/digest code.
+- Return only typed records:
+  - `authority="non_authoritative_candidate"`
+  - `candidate_only=true`
+  - authored `$ref:` token
+  - semantics ID/revision
+  - required account scope
+  - operation and connection IDs/versions/digests
+  - route-coverage requirement
+- Never return key material, credentials, auth data, headers, bodies, raw captured paths, raw capture content, or narratives.
+- Discovery never calls the grant minter and never authorizes compilation.
+
+Fingerprint:
+
+- Add a deterministic account-independent registry semantic projection to the existing compiler/materialization revision input.
+- Include only connector capability semantics, explicit raw-to-ID mappings, and abstract key-semantics definitions.
+- Exclude operation records, accounts, component/connection identities, projection allowlists, captures, mint outcomes, and grants.
+- Test the relocatable per-process materialization fingerprint, not the outer workflow `plan_hash`, which is intentionally account-bound by #146.
+- Registry semantic changes rotate the current global compiler revision and therefore all process plan fingerprints. Do not claim selective “affected plans only” behavior without a separate future revision architecture.
+
+### 8. Apply-boundary rechecks and mutation attestation — required
+
+Attestation contract:
+
+- Add `ConnectorReplayEvidenceBindingAttestationV1` with contract ref, process root, call identity, account scope, operation and connection identities/versions/digests, route coverage, and record/capture digests.
+- Add `ProcessMutationAttestationV1.replay_evidence_bindings: tuple[...] = ()`.
+- Sort/deduplicate by `(process_root_ref, call_identity, contract_ref, operation_ref, connection_ref)`.
+- Attest every consumed grant for every process root; enforce nested account scope equals the parent attestation scope.
+
+Apply sequencing:
+
+- Perform a global read-only recheck of all evidence-bound operation/connection identities immediately before the first mutation.
+- Recheck again after late binding immediately before each evidence-bound submission.
+- For structured update, add a pre-submit callback after merge/materialization and before the platform update call.
+- Compare ID, explicit version, and config digest independently. A credential-only version advance fails even when the credential-excluding digest is unchanged.
+- Pre-submit drift/unavailability refuses that pending submission.
+- After a successful or mutation-uncertain submission, read back both operation and connection and compare against the pinned identity:
+  - match: normal success;
+  - drift: named reconciliation failure;
+  - unavailable: named reconciliation failure.
+- A post-submit failure retains component ID, platform result, readback/uncertainty state, mutation accounting, and evidence attestation. It never implies rollback.
+- Ensure outer multi-component flows append retained mutation/readback evidence before returning failure.
+
+Acceptance correction:
+
+- The issue’s absolute statement that a pre-submission mismatch always means “no mutation has occurred” cannot hold in a multi-step plan if an earlier component has already been submitted. The global pre-first-write check provides the no-mutation refusal in the ordinary case; a later just-in-time mismatch after earlier writes must be returned as a retained partial/reconciliation failure, never mislabeled as globally mutation-free.
+
+### 9. Live-evidence data and final validation — required for closure, evidence-gated
+
+Only after qualifying renera captures:
+
+- Add REST POST/PUT/DELETE/HEAD/OPTIONS/TRACE rows atomically with exact class-level evidence records proving `accepts_input`, `produces_output`, and `side_effect`.
+- Leave each new write `retry_safety="unverified"` unless the capture proves action-wide replay semantics.
+- For endpoint/key-specific evidence, use `conditionally_idempotent` plus an operation-specific record; never infer `idempotent_write`.
+- Add a service-wide route record only from its own service-wide capture.
+- Keep `verified_write_replay_safety="gated"` until at least one real positive write row plus matching operation record can authorize a production grant; then change it to `"supported"` in the same evidence-bearing commit.
+- Run the positive safe-retry live QA scenario only after that production record exists.
+- If evidence is unavailable or inconclusive, stop with rows unverified/absent and report #155 incomplete; do not add an override.
+
+## File-by-file plan
+
+### Existing source
+
+- `src/boomi_mcp/models/process_ir.py`
+  - Add `ConnectorPathBindingV1`, `path_binding` fields, `element_id` coercion, `SourceReplayPolicyV1`, and `RetryPolicyV1.source_replay_policy`.
+  - Replace the permissive idempotency-ref check with the shared authored-ref validator.
+  - Update canonical schemas/docstrings and the published ProcessIR capability entry.
+
+- `src/boomi_mcp/compiler/process_ir/contracts.py`
+  - Add dynamic-path semantic/emitter inputs, replay-policy semantic value, richer contract symbols, per-call grant symbols, call identity/root facts, and symbol-table grant indexes.
+  - Validate contract refs through the shared registry-owned validator.
+
+- `src/boomi_mcp/compiler/process_ir/lowering.py`
+  - Lower path bindings and replay policy without altering `CatchErrorsInputV1`.
+  - Derive source/target role from the existing generalized-call position.
+  - Carry stable call JSON pointers and process-root identity.
+
+- `src/boomi_mcp/compiler/process_ir/emitter_registry.py`
+  - Pass optional dynamic-path input to the existing renderer and conditionally resolve its request profile.
+  - Add no emitter kinds; keep registry keys fixed.
+
+- Existing semantic-lineage owner under `src/boomi_mcp/compiler/process_ir/`
+  - Expose reaching DDP writers from the current must-state pass and apply dynamic-path domination, segment, nested-DDP, and profile-pairing rules.
+  - Avoid a second graph traversal.
+
+- `src/boomi_mcp/compiler/process_ir/error_handling.py`
+  - Validate `source_replay_policy` before retry-zero short-circuit.
+  - Bypass only source reexecution for allowed process replay.
+  - Replace operation-wide ref matching with exact per-call grant matching for every positive write class.
+  - Preserve the unverified/non-idempotent check before grant lookup.
+
+- `src/boomi_mcp/compiler/process_ir/connector_capabilities.py`
+  - Add registry-derived bindable locations and public projection mapping.
+  - Add new REST rows only with live evidence in work unit 9.
+  - Import only the account-independent semantic revision projection, never operation records.
+
+- `src/boomi_mcp/patterns/primitives/rest_runtime.py`
+  - Return the canonical `SetDdpNodeV1` plus binding while preserving the legacy-facing facade and existing slot/token/secret checks.
+
+- `src/boomi_mcp/patterns/archetypes/database_to_api_sync.py`
+  - Reuse `_path_ddp_name`, emit the canonical pair, and leave watermark query binding deferred.
+
+- `src/boomi_mcp/categories/components/builders/connector_builder.py`
+  - Derive `requires_path_binding` and normalized trusted identity from structured and raw XML.
+  - Do not synthesize a default static resource path.
+
+- `src/boomi_mcp/categories/integration_builder.py`
+  - Extend canonical DDP naming lint.
+  - Reorder raw/collision paths so trusted resolution precedes compilation.
+  - Consume snapshot-built symbols in both current call sites.
+  - Add global/JIT identity rechecks and retained reconciliation handling.
+
+- `src/boomi_mcp/recipes/materialization.py`
+  - Accept the trusted snapshot/process roots/registry.
+  - Remain the sole contract/grant minting implementation.
+  - Preserve placeholder behavior as non-minting.
+
+- `src/boomi_mcp/recipes/engine.py`
+  - Resolve composition/collisions before compilation and pass the shared snapshot into materialization.
+
+- `src/boomi_mcp/authoring/workflow.py`
+  - Replace caller-authoritative connector metadata with assertions.
+  - Build/retain the trusted snapshot, use it for compilation and apply recompilation, and add evidence tuples to mutation attestations.
+  - Implement pre/post drift semantics without discarding mutation results.
+
+- `src/boomi_mcp/authoring/revisions.py`
+  - Add strict actual-account scope derivation for evidence use without changing the existing general fallback.
+  - Feed the abstract registry semantic projection into compiler revisioning.
+
+- `src/boomi_mcp/authoring/process_materialization.py`
+  - Preserve grants through symbol rebinding.
+  - Keep concrete evidence out of the relocatable plan fingerprint.
+
+- `src/boomi_mcp/categories/components/canonical_process_apply.py`
+  - Preserve per-call grants/root identity in reconstructed symbol tables.
+
+- `src/boomi_mcp/categories/components/query_components.py`
+  - Implement the non-authoritative candidate query using live-derived identity and the packaged registry.
+
+- `src/boomi_mcp/categories/meta_tools.py` and `src/boomi_mcp/server.py`
+  - Publish/route the candidate action and derive contract/schema descriptions from registry data.
+
+- `src/boomi_mcp/categories/components/builders/process_emitters/rendering.py`
+  - No changes.
+
+- `src/boomi_mcp/categories/components/builders/process_emitters/legacy.py`, `process_flow_builder.py`, legacy adapters, and `_process_ir_compat.py`
+  - No behavior changes; retain as #160 differential oracles/rejection layers.
+
+### New packaged registry
+
+- `src/boomi_mcp/connector_replay/{ids,models,digests,registry,report}.py`
+  - Implement the contracts from work unit 4 with dependency direction that avoids importing ProcessIR models from the ID layer.
+
+- `src/boomi_mcp/connector_replay/registry_v1.json`
+  - Authoritative sanitized registry. Initially no invented capability or operation evidence.
+
+- `src/boomi_mcp/authoring/connector_resolution_snapshot.py`
+  - Trusted-resolution types, parsers, authority selection, assertion comparison, and strict account scoping.
+
+### Tracked artifacts
+
+- `.gitignore`
+  - Add `!docs/evidence/` and `!docs/evidence/**`.
+
+- `docs/evidence/connector-replay-captures.md`
+  - Deterministically generated fixed prose and typed tables only.
+
+- `tests/fixtures/golden_xml/dynamic_path_connector_source_ddp.xml`
+  - New true source-role oracle captured from the pre-change legacy chain with baseline/provenance recorded.
+
+## Diagnostics
+
+New diagnostics:
+
+| Diagnostic | Raised where | Condition |
+|---|---|---|
+| `PROCESS_IR_CAPABILITY_DYNAMIC_PATH_UNSUPPORTED` | Connector capability validation | Binding used for a family/action whose registry row does not publish `Path`. |
+| `PROCESS_IR_SEMANTIC_DYNAMIC_PATH_REQUIRED` | Connector semantic validation | Trusted operation requires a dynamic path but the call has no binding. |
+| `PROCESS_IR_SEMANTIC_DYNAMIC_PATH_DDP_NOT_ESTABLISHED` | Semantic lineage pass | Bound property, or a DDP source feeding its reaching writer, is not established on every incoming path. |
+| `PROCESS_IR_SEMANTIC_DYNAMIC_PATH_NO_DYNAMIC_SEGMENT` | Semantic lineage pass | Reaching writer is absent or contains only static sources. |
+| `PROCESS_IR_SEMANTIC_DYNAMIC_PATH_PROFILE_BINDING_MISMATCH` | Semantic lineage pass | Profile sources disagree, the binding omits the required profile, or it names a different profile. |
+| `PROCESS_IR_SEMANTIC_RETRY_SOURCE_POLICY_SCOPE_INVALID` | Error-region validation | `allow_duplicates` on non-process scope; path points to `retry/source_replay_policy`. |
+| `PROCESS_IR_SEMANTIC_RETRY_SOURCE_POLICY_REQUIRES_RETRY` | Error-region validation | `allow_duplicates` with retry count zero; same exact path. |
+| `PROCESS_IR_REFERENCE_IDEMPOTENCY_CONTRACT_INVALID_FORMAT` | Shared validator at all five surfaces | Contract token violates the anchored authored/bare grammar. |
+| `PROCESS_IR_REFERENCE_CONNECTOR_ACTION_IDENTITY_MISMATCH` | Snapshot/assertion validation | Declared family/action or settings family differs from trusted derived XML/live identity. Detail identifies `action` or `connection`, not raw XML. |
+| `PROCESS_IR_REFERENCE_CONNECTOR_ACTION_IDENTITY_UNAVAILABLE` | Snapshot construction | A compiled action’s authoritative XML/readback cannot supply family/action identity. |
+| `CONNECTOR_REPLAY_REGISTRY_INVALID` | Packaged registry/report loader | Closed reason: `unknown_field`, `invalid_value`, `mapping_incomplete`, `mapping_collision`, `semantics_unresolved`, `contract_ref_collision`, `evidence_row_missing`, `evidence_row_mismatch`, or `report_mismatch`. |
+| `CONNECTOR_REPLAY_CONFIGURATION_DIGEST_REFUSED` | Config digest projection | Closed reason: `invalid_xml`, `unknown_content`, `unresolved_qname`, `missing_configuration`, or `projection_unavailable`. |
+| `CONNECTOR_REPLAY_ROUTE_DIGEST_REFUSED` | Route digest derivation | Effective path is malformed or cannot be represented under Route Digest V1. |
+| `CONNECTOR_REPLAY_PRE_SUBMISSION_IDENTITY_DRIFT` | Global/JIT apply recheck | Operation or connection ID/version/digest differs before the pending submission. |
+| `CONNECTOR_REPLAY_PRE_SUBMISSION_IDENTITY_UNAVAILABLE` | Global/JIT apply recheck | Operation or connection cannot be read before submission. |
+| `CONNECTOR_REPLAY_POST_SUBMISSION_RECONCILIATION_DRIFT` | Post-submit readback | Submission occurred and operation/connection identity no longer matches the pin. Result and attestation are retained. |
+| `CONNECTOR_REPLAY_POST_SUBMISSION_RECONCILIATION_UNAVAILABLE` | Post-submit readback | Submission occurred and operation/connection readback is unavailable. Result and attestation are retained. |
+
+Existing diagnostics retained:
+
+- `PROCESS_IR_SEMANTIC_RETRY_SOURCE_REEXECUTION` for process replay without explicit allowance.
+- `PROCESS_IR_SEMANTIC_RETRY_NON_IDEMPOTENT_WRITE` for every `unverified`/non-idempotent write, before evidence lookup.
+- `PROCESS_IR_SEMANTIC_IDEMPOTENCY_EVIDENCE_MISSING` for absent/dangling or wrong-root/call/operation/connection/route grants.
+- `PROCESS_IR_CAPABILITY_CONNECTOR_ACTION_UNSUPPORTED` while an action has no evidence-backed capability row.
+- Existing schema-validation envelopes for malformed fields and existing component/profile reference diagnostics.
+
+## Test plan
+
+### Dynamic path
+
+- `tests/test_process_ir_models.py`
+  - Binding parse/dump/default behavior.
+  - `element_id` string and integer coercion; boolean/float/empty rejection.
+  - SourceEndpoint remains first-only and gains no path field.
+
+- New `tests/test_process_ir_dynamic_path.py`
+  - Generalized source-role and target-role bindings.
+  - Existing target DDP/profile golden equality plus true source-role golden.
+  - Absent-binding XML byte identity.
+  - Source and target use the same emitter input.
+
+- `tests/test_process_ir_semantic_lineage.py`
+  - Missing writer, branch-only writer, static-only writer, nested DDP missing, valid domination, profile mismatch, valid paired profile, and no duplicate lineage diagnostic.
+
+- `tests/test_process_emitter_registry.py`
+  - Exact existing registry key set/count unchanged.
+
+- `tests/patterns/test_rest_fetch_primitive.py`, `tests/patterns/test_primitives_target_operations.py`, and `tests/patterns/test_database_to_api_sync_path_replacement.py`
+  - Canonical re-lowering, stable DDP name derivation, token/slot/secret/profile constraints, and retained legacy facade.
+
+- `tests/test_rest_client_operation_builder.py`
+  - Blank-path operation marks `requires_path_binding`; static paths do not.
+
+- `tests/test_integration_build_basics_guards.py`
+  - Blank-path refusal/success and warning-only canonical DDP naming lint.
+
+- `tests/test_process_ir_authoring_contract_parity.py`
+  - Registry-derived bindable-location schema/template equality and no evidence field leakage.
+
+- Golden corpus/graph tests
+  - All survivor goldens unchanged; two existing dynamic-path goldens plus new source-role golden; connector graph/shape verification.
+
+### Replay policy
+
+- `tests/test_process_ir_error_handling.py`
+  - Process scope + retry > 0 + allow succeeds.
+  - Default/authored forbid remains serialized and valid on every scope.
+  - Connector-scope allow and retry-zero allow produce the exact named code/path.
+  - Dump/reparse of defaulted forbid is valid.
+  - Allowing source replay does not bypass write evidence.
+
+- Compiler/schema pin tests
+  - Manifest projection contains the field.
+  - `CatchErrorsInputV1` and emitted XML remain unchanged.
+  - Expected canonical JSON/compiler fingerprint revision rotates.
+
+### Registry, IDs, digests, and report
+
+- New `tests/test_connector_replay_registry.py`
+  - Strict field allowlist, closed typed values, unknown-field refusal.
+  - Frozen five-row baseline link rule; new/positive row without exact evidence fails.
+  - Capability/evidence mismatch, ref collision, unresolved semantics, mapping incompleteness/collision.
+  - Total/injective mapping includes uppercase/hyphenated REST family and case-distinct action vocabulary.
+  - Production registry contains no fabricated positive row/operation record.
+  - Planted high-entropy token substitution into every accepted string field fails by grammar/enum/resolution, not a deny-list.
+
+- New `tests/test_connector_replay_digests.py`
+  - Route equality: percent-hex case, encoded unreserved character, dot segments, boundary double slash.
+  - Route difference: trailing slash, path case, one-character change.
+  - Config equality: attribute reorder, prefix rename in names and declared QName-aware values, binding-only namespace for both attribute and text positions, formatting whitespace, empty-element form, comment, and PI.
+  - Config difference: meaningful text and attribute changes.
+  - Unknown element/attribute and unresolved QName prefix refuse.
+  - Version/domain separators and digest formats pinned.
+
+- New `tests/test_connector_replay_packaging.py`
+  - Load through `importlib.resources` with no working-tree/docs lookup.
+  - Report is tracked via `git ls-files`, strict-loadable, and byte-for-byte synchronized.
+  - Docker image imports the packaged registry and computes identical fixture digests under Python 3.11.
+
+### Trusted snapshot and grants
+
+- New `tests/test_connector_trusted_resolution.py`
+  - Declared GET/actual POST rejection for raw create, raw update, direct reuse, and collision reuse.
+  - Structured builder output, submitted XML, and live readback each exercise their sole authority mode.
+  - Profile alias fallback rejected for evidence.
+  - Missing/unparseable readback and absent version.
+  - AST/call-spy proof covering all four current symbol-table call paths.
+
+- New `tests/test_connector_replay_grants.py`
+  - Reused existing operation/connection exact match mints.
+  - New, update, changed, placeholder, lookup-failed, versionless, foreign-account, absent-account-ID, connection-changed, and ambiguous-record arms mint nothing.
+  - Contract-relevant extension binding refuses; unrelated/non-contract extension state cannot silently expand the allowlist.
+  - Credential-only version change fails despite equal config digest.
+  - Static route match/mismatch and dynamic route requiring separate service-wide capture.
+  - Same operation/different route; same operation aliases; wrong call; wrong root; cross-root isolation.
+  - Spec declaration and class-level row never mint.
+  - Operation symbol without matching per-call grant fails.
+  - Synthetic injected positive capability records prove conditional and idempotent grant mechanics; packaged production unverified rows still refuse.
+  - Shared contract validator gates authoring, compiler symbol, registry mint, grant check, and discovery.
+
+### Discovery, fingerprint, and apply
+
+- New `tests/test_connector_contract_discovery.py`
+  - Operation-scoped candidate lookup, candidate labels, and full typed requirements.
+  - Empty result when production registry has no matching record.
+  - No credentials, capture content, bodies, headers, raw paths, or key material.
+  - Candidate output never creates a grant.
+
+- New `tests/test_connector_replay_fingerprint.py`
+  - Two fixture accounts share canonical contract ID, authored ref, semantic revision, and relocatable process fingerprint.
+  - Their concrete attestations differ in expected account-bound fields and sorted binding tuples.
+  - Cross-account record substitution refuses while the relocatable fingerprint remains unchanged.
+  - Operation-record/capture changes do not alter the semantic revision; class/semantics changes do.
+  - Correct the issue’s literal “attestations differ exactly in the tuple” assertion: existing top-level `account_scope_hash` also necessarily differs.
+
+- Extend `tests/test_issue_153_canonical_apply_e2e.py`, `tests/test_m12_11_authoring_plan.py`, and `tests/test_m12_11_authoring_compile.py`
+  - Global pre-first-write and JIT operation/connection drift/unavailable arms.
+  - Post-submit operation/connection drift/unavailable arms retain result, mutation, readback, and attestation.
+  - Credential-only version advance at mint, pre-submit, and post-submit.
+  - Partial multi-step mutation is never mislabeled as no mutation.
+  - Deterministic sorted tuple of all grants across multiple roots.
+
+- Extend `tests/test_process_materialization_plan.py`, `tests/test_recipe_validation_gate.py`, and `tests/test_issue_180_compile_entry_context.py`
+  - Plan → compile → materialize dry run through workflow and recipe entry points.
+  - Root/call identities and grants survive rebinding but stay out of relocatable fingerprints.
+
+- `tests/test_error_taxonomy.py`
+  - Pin every new diagnostic and closed reason vocabulary.
+
+### Final gates
+
+- Run the full non-KB Python 3.11 suite with `PYTHONPATH=src .venv/bin/python -m pytest`.
+- Run all XML golden and graph verification.
+- Run one scoped public-MCP QA pass:
+  - REST dynamic-path replacement.
+  - Safe connector retry with explicit whole-process replay acknowledgement, only if real evidence enables a production grant.
+- After QA-clean, commit the validated boundary and perform the required Codex review/fix-only re-review under the repository’s three-evaluation architect cap and blocking-class bar.
+
+## Evidence-gated items
+
+The following cannot truthfully land without qualifying renera live captures:
+
+- Production REST POST/PUT/DELETE/HEAD/OPTIONS/TRACE capability rows, because even their input/output/side-effect claims require live evidence under the issue’s rule.
+- Any production write row changing from `unverified` to `idempotent_write` or `conditionally_idempotent`.
+- Any operation-specific record capable of minting a production grant.
+- Any service-wide dynamic-route record.
+- A positive production `retry_count > 0` write compilation.
+- The safe-write live QA scenario, the `verified_write_replay_safety` flip, and the final definition of done.
+
+The following land and are fully tested regardless:
+
+- Dynamic path, process replay policy, registry format, strict sanitization, ID grammar, explicit mappings, both digest algorithms, deterministic report, snapshot authority, per-call grants, discovery, fingerprint split, apply rechecks, and attestation tuples.
+- Production capability rows remain absent or `unverified`; production operation records remain empty.
+- Positive grant flows use dependency-injected synthetic registries only. Tests clearly label those records non-production and separately assert the packaged registry cannot authorize them.
+- Every unevidenced write continues to fail with `PROCESS_IR_SEMANTIC_RETRY_NON_IDEMPOTENT_WRITE`; an authored contract ref alone fails with the existing evidence-missing diagnostic.
+
+If captures are unavailable or establish only one endpoint’s behavior, close work units 1–8 as fail-closed infrastructure but leave #155 open and report unit 9 as evidence-blocked. Do not reinterpret documentation, current fixtures, or a self-authored capture as replay evidence.
+
+## Risks
+
+- The named source golden is actually a target-call golden. Reusing it literally for a source connector would encode a false acceptance criterion; add the independent source-role oracle.
+- Source-role dynamic path must use generalized `ConnectorCallNodeV1`. Adding a prefix before legacy `SourceEndpointV1` would widen a settled grammar and conflict with #154/#160.
+- Binding-present XML affects `<parameters>`, `<dynamicProperties>`, and potentially graph shape ordinals. Binding-absent bytes must remain exact; the existing renderer should not be edited.
+- `source_replay_policy` changes canonical JSON/fingerprints because defaults are serialized, although emitted XML stays unchanged.
+- Capability fields, diagnostics, retry policy, discovery output, and schema-template projections are served contracts; update all frozen snapshots/parity tests atomically.
+- New capability rows and replay-safety flips change the abstract compiler revision. With the current global revision model this rotates all process fingerprints, not only plans using the changed connector.
+- Concrete evidence identities must never enter relocatable fingerprints. Conversely, excluding them from mutation attestations would break auditability.
+- The outer workflow hash is account-bound; only the per-process relocatable fingerprint can satisfy the two-account equality test.
+- Existing mutation attestations already contain top-level account scope, so two accounts cannot yield attestations differing solely in the new tuple.
+- A pre-submit race can occur after earlier plan mutations. Preserve partial mutation accounting and use reconciliation semantics rather than promising transactionality or rollback.
+- Live readbacks must be performed once into a trusted snapshot and reused; re-deriving identity from caller config or at independent call sites reopens the GET/POST bypass.
+- Connection version remains authoritative even though credential material is excluded from the configuration digest.
+- The exact live grammar for Boomi execution/component identifiers is not established in the issue. Do not weaken validators to accept arbitrary strings; pin a versioned closed grammar from the first admissible capture before adding production records.
+- Projection allowlists may initially reject legitimate new platform XML. That false-negative is intentional; unknown content must block minting until reviewed and versioned.
+- QName-aware canonicalization requires namespace-context-aware parsing. A plain `ElementTree.fromstring` projection will lose binding-only namespace declarations and is not acceptable.
+- The repo has no wheel packaging. The deployment-relevant proof is an actual Docker-image package-resource import; adding unrelated wheel infrastructure is not part of #155.
+- `verified_action` alone currently authorizes an idempotent-write row. Keeping that behavior would contradict the issue’s per-call sole-authority requirement; require a typed grant for all positive write classes.
+- The four actual symbol-table call sites and both reconstruction helpers must migrate together. Missing any one recreates caller-authoritative or grant-dropping behavior.
+- `.gitignore` needs both directory and recursive-content negations; otherwise the derived report can remain silently ignored.
+- Apply-path changes touch mutation accounting and update preservation. All pre/post failure tests must assert retained IDs, results, readbacks, and attestations—not merely diagnostic codes.
+
+---
+
+# Addendum (2026-08-25) — corrections, answers, and the landing strategy
+
+This section is part of the plan of record. It was produced by the same architect thread
+(`01a03703-e1a5-7b81-9b37-6f8e80d58c9e`) after adversarial verification of the plan above against the
+working tree at `9860842e5932c2e091a115e4697722bd8429953c`, and then itself verified. Where it and
+the plan above disagree, THIS section governs. Where this section and "Corrections after
+verification of the addendum" (below it) disagree, the CORRECTIONS govern.
+
+### 1. Dispositions
+
+1. **P1 — ACCEPT.** Replace Unit 6 text with: “Per-call grants are consumed only by the existing `key_reference` branch. `idempotent_write` continues to require the trusted-snapshot family/action classification, an evidence-backed class row, and authored `verified_action`; no `action_replay` grant or third retry-table branch is added.”
+
+2. **P2 — ACCEPT.** Discovery input becomes `(profile, operation_component_id, connection_component_id)`. Operation-only discovery is removed because operation XML contains no connection edge.
+
+3. **P3 — ACCEPT.** Build a trusted base-component snapshot in `plan_authoring_request_v1` before `_normalize_intent`, thread it into `run_recipes` as data alongside `effect_declarations`, and retain the #145 engine compile. Direct no-client recipe-bridge execution uses the strict local mode defined under A8.
+
+4. **P4 — ACCEPT.** Keep `ProfilePropertySourceV1.element_id: str`. Change only `database_to_api_sync._build_dynamic_path` to emit `"element_id": str(entry["key"])`; no model validator or union widening.
+
+5. **P5 — ACCEPT.** Add exactly one `.gitignore` line, `!docs/evidence/`, immediately after `!docs/architecture/`. Do not add `!docs/evidence/**`.
+
+6. **P6 — ACCEPT.** Route discovery through root `server.py` and `src/boomi_mcp/categories/meta_tools.py`. Add the abstract replay-registry revision as a `(key, loader)` entry in `authoring/contract.py::_compiler_revision`; `revisions.py` supplies only hashing/account-scope primitives.
+
+7. **P7 — ACCEPT.** Canonical DDP naming lint emits one warning per offending `SetDdpNodeV1` occurrence, in traversal order. It does not deduplicate; two equal bad names produce two warnings.
+
+8. **P8 — ACCEPT.** Re-key contract uniqueness, sorting, `build_idempotency_index`, and `_require_resolvable` consistently by `(ref, operation_ref)`. Add an alias-order invariance test.
+
+9. **P9 — ACCEPT.** Use per-root `SymbolTableV1` projection at all four root-iteration sites. The compiler signature stays unchanged; no root parameter is added to lowering or `compile_process_ir_v1`.
+
+10. **P10 — ACCEPT.** Add the literal-baseline audit ledger/roster, Python 3.11 non-KB dev preflight, same-commit golden manifest transition, final-tree test-node regeneration, M12.12 inventory regeneration, all schema/JSON/authoring snapshots, and `scripts/wave_gate.py wave --base <literal-baseline>` to the completion contract.
+
+11. **P11 — ACCEPT.** Slice-A live QA covers source-role dynamic path and process-scope `allow_duplicates` over a read-only GET, including both named refusal arms. Only the positive write-retry live scenario is Unit-9/evidence-gated.
+
+12. **P12 — ACCEPT.** Raw evidence capture begins on day 0, independently of registry ingestion. Each operator-side record contains execution ID, UTC ISO timestamp, actual account ID, closed scenario identifier, and SHA-256 of the raw capture bytes.
+
+13. **P13 — ACCEPT.** Unit 1 explicitly rotates `process_ir_v1.json`, `process_ir_v1.schema.json` and its definition-count pin, and both CFG and emission-plan halves of `process_ir_compiler_v1.json`.
+
+14. **P14 — ACCEPT.** Keep the existing mixed-flow test node and assertions unchanged. Correct only its stale docstring in the one non-blocking prose batch.
+
+15. **P15 — ACCEPT.** Dynamic bindability becomes one per-family authority, joined into per-action public rows at projection time. It is not copied into each `ConnectorCapabilityV1`.
+
+16. **P16 — ACCEPT.** Define execution IDs now as lowercase generic UUID plus date, with the exact `execution-` prefix. Pin `executionrecord-` as a negative. Registry records contain `account_scope_hash`, not an account-ID grammar.
+
+17. **P17 — ACCEPT.** Dynamic semantic diagnostics are owned by `semantic_validation/findings.py`; compiler refusals by `diagnostics.py`. Snapshot identity failures are renamed to `AUTHORING_CONNECTOR_IDENTITY_*`, so no `PROCESS_IR_*` code is emitted outside the #177 roots. Contract-ref format errors enter ProcessIR only through model/compiler-root adapters.
+
+18. **P18 — ACCEPT.** Golden parity compares the bare `<process>` body. Add three canonical `process-xml-v1` corpus rows—source DDP, target DDP, target profile—whose expected bytes are frozen from the legacy body and whose provenance follows #154.
+
+### 2. Answers A1–A20
+
+1. **A1 — Withdrawn.** There is no `action_replay` record, token, or grant. `idempotent_write` keeps the existing `verified_action` branch. The evidence-backed class row and trusted family/action are authoritative; only `key_reference` changes to per-call grant matching. Consequently `retry_rule_specs`, the try-catch ordering fact, and `semantic_rule.retry.replay_safety` retain their idempotent-write meaning. The `typed_idempotency_evidence` witness and evidence-missing remediation rotate only to demonstrate the stricter `key_reference` arm.
+
+2. **A2 — Triple input.** Add `query_components(action="idempotency_contract_candidates", profile, operation_component_id, connection_component_id)`. Both component IDs are required UUIDs. The query reads both live components and returns only records matching both identities.
+
+3. **A3 — Confirmed.**
+   - `has_profile_segment = binding.request_profile_ref is not None`.
+   - `ConnectorPathBindingSemanticV1 | None` is added to both `ConnectorSemanticV1` and `ConnectorCallSemanticV1`.
+   - The CFG and emission-plan halves of `process_ir_compiler_v1.json` rotate.
+   - The binding carries `request_profile_ref` because production operation symbols do not populate `input_profile_ref`; the semantic rule makes the duplicate field a bidirectionally pinned closed contract: profile segments exist iff the binding carries the one matching profile ref.
+
+4. **A4 — Family gate, not a new legacy action lookup.** Add `lookup_connector_family_capability(family)` and check dynamic-path support against that authority for both semantic connector kinds. A legacy target using REST POST plus a binding passes the Path-family gate even while POST has no action row. A generalized `connector_call` using POST still fails its existing action lookup until Unit 9 adds the row. Trusted declared-versus-derived identity comparison covers legacy `source`, legacy `target`, and generalized `connector_call`.
+
+5. **A5 — Canonical body goldens.**
+   - Compare the extracted bare `<process>` element, not component envelopes.
+   - Add three `process-xml-v1` wave rows rendered through canonical `emit_process`: `issue155_source_dynamic_path_ddp`, `issue155_target_dynamic_path_ddp`, and `issue155_target_dynamic_path_profile`.
+   - Freeze their expected bare-process bytes from pre-change legacy renders and add `tests/fixtures/process_ir/issue155/PROVENANCE.md`.
+   - Move the active golden floor 70→73 in the same commit.
+   - Mark source placement as legacy-oracle parity but platform-unattested, then close or explicitly carry that limitation from the source-form live QA.
+
+6. **A6 — Empty defaults plus a stricter path rule.** `lower_path_bindings` and the database archetype author `default_value=""` for DDP/DPP segment sources to preserve bytes. The dynamic-path pass nevertheless treats DDP segment reads as strict regardless of that default. General lineage retains its current default semantics; only a DDP feeding a bound Path writer receives the stronger issue-mandated rule.
+
+7. **A7 — Per-root projection.** `build_symbol_table` accepts `process_root_ref` and that root’s `ProcessIRV1`, returning a table containing only grants for that root. Every existing root loop passes its key. Lowering remains root-blind.
+
+8. **A8 — Snapshot lifecycle.**
+   - `plan_authoring_request_v1` builds a base-component snapshot before `_normalize_intent` and threads it through `run_recipes(connector_resolution_snapshot=...)`; engine compilation remains in `_compile_processes`.
+   - Structured create/update uses a new builder-owned `normalized_identity_projection(config, live_projection=None)` and never calls `builder.build()` pre-apply. It returns family/action, route fields, extension state, and no credentials. Partial structured updates merge only these closed identity fields with a sanitized live projection.
+   - Raw create/update parses submitted XML. Reuse and collision reuse use live readback XML/version.
+   - With `boomi_client is None`, structured creates compile from normalized projections but mint no grant. Reuse, reference-only, collision-dependent, and update identities that require live state refuse with `AUTHORING_CONNECTOR_IDENTITY_UNAVAILABLE`. This is `STRICT_BY_DESIGN` in `recipe_bridge`.
+   - Raw apply builds the snapshot after `_build_plan`/`existing_ids` and before the pre-write loop at `integration_builder.py:8624`. `_build_canonical_symbols` at its plan and dry-emit callers and the `:7862` execution construction all receive `snapshot.for_root(root_key)`.
+
+9. **A9 — Closed vocabularies and sources.**
+   - `mechanism`: `request_key_deduplication | resource_identity_upsert`.
+   - `key_scope`: `operation | static_route | service`.
+   - `duplicate_guarantee`: `same_effect | same_result | conflict_without_second_effect`.
+   - `placement_observation`: `entry | downstream`.
+   - `input_observation`: `no_inbound_documents | documents_consumed`.
+   - `output_observation`: `successor_received_documents | return_documents_received | no_output_observed`.
+   - `effect_observation`: `read_only | state_created | state_changed | state_deleted | state_unchanged_after_replay`.
+   - `replay_observation`: `not_exercised | same_effect | same_result | conflict_without_second_effect | duplicate_effect`.
+   - `evidence_scope`: `action_semantics | single_operation | service_wide_route`.
+   - `evidence_sources`: sorted subset of `execution_record | execution_connector | generic_connector_record | endpoint_readback`.
+   - `ExecutionRecord` backs execution ID/date/status and aggregate document counts; `ExecutionConnector` backs family/action, entry placement, success/error counts, and size; `GenericConnectorRecord` backs per-document action/status; endpoint readback backs side-effect/replay observations.
+   - Add `monitor_platform(action="execution_connectors")` using the typed SDK service, with execution ID required and optional family/action filters.
+
+10. **A10 — Base-path derivation.** REST connection XML stores the complete URL in `GenericConnectionConfig/field[@id="url"]/@value` (`connector_builder.py:2733,2781-2784`). Parse it with `urllib.parse.urlsplit`; require an absolute HTTP(S) URL, use `split.path` as the base path, and exclude scheme/authority/query/fragment from Route Digest V1. The complete URL field remains in the connection config projection/digest, so authority, query, or base-path edits move the config digest. Operation path comes from `GenericOperationConfig/field[@id="path"]/@value` (`:3387-3399`).
+
+11. **A11 — Per-family authority.** Add `CONNECTOR_FAMILY_CAPABILITIES_V1: Mapping[str, ConnectorFamilyCapabilityV1]`. REST has `per_document_bindable_locations=("Path",)`; SOAP/database have `()`. `connector_capability_rows()` joins the family value into each public row. Tests require the family table to be total over row families and to contain no unused family.
+
+12. **A12 — Unit 2 owns the manifest key.** Add `"dynamic_path": "supported"` to `PROCESS_IR_V1_CAPABILITIES`, its §8 documentation row, and an `admits` witness with `PROVENANCE_INLINE_ADMISSION`. The witness compiles a canonical profile-bound call and asserts both `propertyName="Path"` and `<parameter-profile>` in emitted bytes. `_connector_entries` composes “Path is the only per-document bindable REST location” only from the REST family tuple. Compiler/capability revisions and the authoring snapshot rotate in Unit 2.
+
+13. **A13 — Structural derivation.** Remove model-reference lists from `_NODE_FACTS[_REFS]`. Add a recursive Pydantic-annotation walker that descends through non-node helper models, stops at nested process-body/node boundaries, recognizes `ComponentRefV1`, and derives dotted paths plus requiredness. It therefore publishes optional `path_binding.request_profile_ref` for target and connector-call nodes without a hand-copy. A parity test compares the projection to `iter_component_refs` over witness documents.
+
+14. **A14 — Deduplicated component rechecks.** The global platform-answered pass, beside placement/live-resolution and before the first write, rereads each distinct reused operation and connection consumed by any compiled root once. JIT recheck immediately before a process submission rereads only the distinct reused identities consumed by that root; it is not one GET per grant or call. Roots using only new components perform no live reread. This pass is not placed in the request-decidable compiler gate.
+
+15. **A15 — Consistent pair key.**
+   - Contract sort/uniqueness key: `(ref, operation_ref)`.
+   - `build_idempotency_index()` returns `dict[(ref, operation_ref), symbol]`.
+   - `_require_resolvable` and the conditional retry branch query that pair.
+   - Add reversed-order aliases to `test_shuffled_symbol_and_contract_order_does_not_change_output`.
+
+16. **A16 — ID grammar.**
+   - Execution ID regex: `^execution-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}-[0-9]{4}\.[0-9]{2}\.[0-9]{2}$`, plus calendar-date validation.
+   - Explicit negative: any `executionrecord-` prefix.
+   - Record that the platform template example is neither dated nor UUID-version-specific and therefore is not admissible evidence for broadening this captured-ID grammar.
+   - Component IDs use the existing generic Boomi UUID validator.
+   - No account ID is stored or grammared; only `account_scope_hash`.
+
+17. **A17 — Out of scope by design.** #155 tests both bindings in one no-map document, such as `[writer, GET(bound), writer, PATCH(bound), stop]`. It does not widen map adjacency. File a grammar follow-up for `map_ref → property-prefix → connector_call`, and make #160 depend on it before legacy deletion. Consequence: source-bound + map + target-profile-path remains unavailable canonically until that follow-up and must be listed as a #160 cutover blocker.
+
+18. **A18 — Diagnostic ownership.**
+   - `PROCESS_IR_SEMANTIC_DYNAMIC_PATH_DDP_NOT_ESTABLISHED`, `...NO_DYNAMIC_SEGMENT`, and `...PROFILE_BINDING_MISMATCH` live in `semantic_validation/findings.py` `_MESSAGES/_REMEDIATION` and are emitted via `_report`.
+   - `PROCESS_IR_CAPABILITY_DYNAMIC_PATH_UNSUPPORTED`, `PROCESS_IR_SEMANTIC_DYNAMIC_PATH_REQUIRED`, source-replay diagnostics, and `PROCESS_IR_REFERENCE_IDEMPOTENCY_CONTRACT_INVALID_FORMAT` live in compiler `diagnostics.py`.
+   - Snapshot errors are `AUTHORING_CONNECTOR_IDENTITY_MISMATCH` and `AUTHORING_CONNECTOR_IDENTITY_UNAVAILABLE`, not ProcessIR codes.
+   - Registry/discovery use `CONNECTOR_REPLAY_CONTRACT_REF_INVALID`.
+   - The shared parser is reused, but each surface wraps it in its own accounted diagnostic family. `EMISSION_ROOTS` is not widened.
+
+19. **A19 — Final gates.**
+   - Record literal baseline `9860842e5932c2e091a115e4697722bd8429953c`, ledger, loop roster, fixture provenance, and evidence archive before mutation.
+   - Earn the Python 3.11 non-KB ruleset on `scratch/**` from `dev` before feature work.
+   - Append all three golden rows and change the floor 70→73 in the same commit as their files.
+   - Regenerate `test_nodes.jsonl` once from the final mechanism tree; Unit 9 uses existing parameterized nodes.
+   - Regenerate M12.12 inventory and §11, ProcessIR schema/JSON/compiler JSON, and both authoring contract fixtures.
+   - Run `scripts/wave_gate.py wave --base <slice-literal-baseline>`.
+   - Slice-A live QA: source dynamic path; read-only process replay allow; scope refusal; retry-zero refusal.
+   - Slice-B live QA: evidence-backed write retry.
+   - Run the final composite wave gate against the final Unit-9 tree.
+
+20. **A20 — Schema-visible pattern.** Use `StringConstraints(pattern=AUTHORED_CONTRACT_REF_PATTERN)` for authored refs and the corresponding bare-ID type. Prepend a surface-local `BeforeValidator` that invokes the shared parser and emits the named ProcessIR diagnostic from `models/process_ir.py`. The compiler uses an equivalent root-owned adapter. This intentionally rotates `process_ir_v1.schema.json`, schema templates, and authoring snapshots.
+
+### 3. Gap resolutions M1–M16
+
+1. **M1:** Require operation and connection component IDs in discovery. No unresolved connection placeholder is served.
+
+2. **M2:** Dynamic Path is a per-family capability. Legacy REST POST plus a binding passes that family gate without creating a general legacy action lookup. Trusted snapshot comparison still covers source/target endpoints.
+
+3. **M3:** Put the binding mirror on both connector semantic models and derive emitter fields solely from it and symbols. The CFG fixture rotates.
+
+4. **M4:** Add three canonical `process-xml-v1` rows and compare bare process bytes frozen from legacy output. The wave gate therefore executes canonical emission.
+
+5. **M5:** The required dynamic-path live scenario is the generalized source-role GET form. Its ledger row explicitly closes or carries forward the #154 prefix limitation.
+
+6. **M6:** Map-plus-both-sides composition is out of scope for #155. #160 is blocked on a named grammar follow-up before deleting the legacy representation.
+
+7. **M7:** Production operation/connection projection allowlists remain empty until day-0 executed-green/UI-authored live readbacks establish their XML vocabulary. Unit 4 tests the mechanism with injected synthetic allowlists; no record can mint against an empty production allowlist.
+
+8. **M8:** Derive `required_references` recursively from annotations, stopping at child-node boundaries; remove the reference hand-copy from `_NODE_FACTS`.
+
+9. **M9:** Lowerers write `default_value=""`, while dynamic-path DDP sources remain strict regardless of default.
+
+10. **M10:** Do not call `builder.build()` pre-apply. Add credential-free `normalized_identity_projection`; structured updates merge its closed identity fields with sanitized live facts.
+
+11. **M11:** Use the exact enums and evidence-source mapping in A9. Add the typed `execution_connectors` monitor action.
+
+12. **M12:** Unit 2 owns the supported `dynamic_path` manifest row, executable witness, documentation, projection, and revision rotations.
+
+13. **M13:** Sandbox verb provisioning is an external environment prerequisite, not a repo mutation in #155. Follow the repository order—MCP provisioning, direct Boomi API, Chrome UI, then owner escalation. Without an authorized PUT/DELETE/HEAD/OPTIONS/TRACE endpoint before account expiry, those rows stay absent and #155 ends `ESCALATE-OPEN`; a missing fixture is not recorded as successful evidence.
+
+14. **M14:** Use:
+    - `PROVENANCE_INLINE_ADMISSION` for new compiler/schema-only surfaces (`source_replay_policy`, dynamic-path manifest witness, discovery candidate schema);
+    - legacy-oracle provenance for dynamic-path wire bytes;
+    - registry-derived provenance for bindable-location publication;
+    - live-capture provenance only for capability/operation evidence records.
+    These are contract-test provenance classes, not substitutes for live replay evidence.
+
+15. **M15:** Extract base path from the REST connection’s `url` field with `urlsplit`; include the full URL field in Config Digest V1 and only its path component in Route Digest V1.
+
+16. **M16:** Do not emit ProcessIR-prefixed identity diagnostics outside the guarded roots. Use authoring/connector-replay codes outside, and root-owned adapters for the ProcessIR contract-ref code.
+
+### 4. Revised unit contracts
+
+#### Unit 1 — Canonical dynamic-path model, semantics, and emission
+
+Files:
+
+- `models/process_ir.py`
+- `compiler/process_ir/contracts.py`
+- `compiler/process_ir/lowering.py`
+- `compiler/process_ir/emitter_registry.py`
+- `patterns/archetypes/database_to_api_sync.py`
+- canonical issue-155 fixtures/manifests
+
+Contract:
+
+- Add frozen, extra-forbidden `ConnectorPathBindingV1`:
+  - `property_name: str`
+  - `request_profile_ref: ComponentRefV1 | None = None`
+- Add `path_binding: ConnectorPathBindingV1 | None = None` to `ConnectorCallNodeV1` and `TargetEndpointV1`; do not add it to `SourceEndpointV1`.
+- Keep `ProfilePropertySourceV1.element_id: str`. Coerce the sole integer producer with `str(entry["key"])`.
+- Add `ConnectorPathBindingSemanticV1 | None` to both `ConnectorSemanticV1` and `ConnectorCallSemanticV1`.
+- Add `ConnectorDynamicPathInputV1(property_name, request_profile_id="", has_profile_segment=False)` and `ConnectorActionInputV1.dynamic_path`.
+- Define `has_profile_segment` solely as `request_profile_ref is not None`; resolve `request_profile_id` from that ref’s symbol.
+- Pass the input to the existing `RenderConnectorDynamicPath`; do not change renderer templates or add an emitter kind.
+- Preserve the absent branch exactly.
+
+Validation and acceptance:
+
+- Canonical target DDP/profile and source DDP outputs equal the corresponding legacy `<process>` bodies.
+- Add three canonical wave rows with #154-style provenance and floor 70→73.
+- Existing mixed-flow absent-binding assertions remain unchanged.
+- `registry_keys()` remains unchanged.
+- Rotate `process_ir_v1.json`, schema and definition pin 39→40, and both compiler-fixture halves.
+
+#### Unit 2 — Dynamic-path lowering, lineage, family capability, publication, and guards
+
+Files:
+
+- `patterns/primitives/rest_runtime.py`
+- `patterns/archetypes/database_to_api_sync.py`
+- `semantic_validation/lineage.py` and `findings.py`
+- `connector_capabilities.py`
+- `authoring/process_ir_projection.py`
+- `integration_builder.py`
+- `models/process_ir.py` capability manifest
+- `docs/architecture/PROCESS_IR_V1.md`
+
+Contract:
+
+- `lower_path_bindings` returns `(SetDdpNodeV1, ConnectorPathBindingV1)` and keeps the legacy facade until #160.
+- DDP/DPP segment sources receive `default_value=""`.
+- Extend the lineage `_visit` recursion with a per-path “last DDP writer by key” argument, copied into Branch/Decision/try-catch child visits like `leg`; do not alter `_State.merged_with`, Decision meet, or Branch reassembly.
+- At a bound connector:
+  - a last writer for `property_name` must exist on that path;
+  - it must have at least one dynamic source;
+  - all profile sources share one profile ref/type;
+  - profile sources exist iff the binding carries that exact ref;
+  - every DDP segment source must already be established before the writer, regardless of default.
+- The most recent writer on each path wins.
+- Add `ConnectorFamilyCapabilityV1` and `CONNECTOR_FAMILY_CAPABILITIES_V1`; REST publishes `("Path",)`, SOAP/database `()`.
+- Dynamic-path support uses the family table. It introduces no legacy action-row lookup.
+- `connector_capability_rows()` joins `per_document_bindable_locations` from the family row; Unit 9 rows inherit automatically.
+- Add `"dynamic_path": "supported"`, §8 documentation, and a `PROVENANCE_INLINE_ADMISSION` witness that observes Path and `parameter-profile`.
+- `_connector_entries` generates the “Path is the only…” sentence from the family tuple.
+- Derive served `required_references` recursively from `ComponentRefV1` annotations instead of `_NODE_FACTS` copies.
+- Bound connector nodes inherit all existing Branch/Decision placement rules; no new placement refusal is introduced. Add bound target, bound connector-call, and bound entry-call fan-out witnesses.
+- Canonical naming lint emits one warning per bad `SetDdpNodeV1` occurrence without deduplication.
+- `PROCESS_IR_SEMANTIC_DYNAMIC_PATH_*` findings use the semantic findings registry; capability/required-binding refusals use compiler diagnostics.
+- The blank-path compiler rule consumes `requires_path_binding` from symbols. Unit 5 is responsible for making that fact trusted in reference-only, collision reuse, raw create, and raw update modes.
+
+Acceptance:
+
+- Source/target/profile/DDP parity, domination, branch/decision/catch non-domination, multiple-writer last-wins, strict nested DDP, and profile mismatch arms.
+- REST POST legacy target plus binding passes the family gate; SOAP/database binding refuses.
+- Same-document no-map source and target bindings compile.
+- Mapped source-plus-target limitation is recorded as a #160 blocker.
+- Public family/action rows, manifest, references, and ordering facts are derived and bidirectionally pinned.
+
+#### Unit 4 — Packaged registry, identifiers, evidence models, digests, report, and capture query
+
+New package:
+
+- `src/boomi_mcp/connector_replay/{__init__,ids,models,digests,registry,report}.py`
+- `src/boomi_mcp/connector_replay/registry_v1.json`
+- `docs/evidence/connector-replay-captures.md`
+- one `.gitignore` carve-out
+
+Identifiers:
+
+- Bare contract ID: `^icv1:[a-z0-9_]+:[a-z0-9_]+:[a-z0-9_]+:[1-9][0-9]*$`.
+- Authored token: `^\$ref:icv1:[a-z0-9_]+:[a-z0-9_]+:[a-z0-9_]+:[1-9][0-9]*$`.
+- Execution ID uses the exact A16 grammar and valid calendar date.
+- Component IDs use the existing generic lowercase UUID rule.
+- Account scope and all digests use fixed version/prefix plus lowercase SHA-256.
+- Explicit raw-family/action mappings are total/injective; no folding derives an ID.
+
+Models:
+
+- `ConnectorVocabularyMappingV1`.
+- `ContractKeySemanticsDefinitionV1` using A9’s three closed enum sets.
+- `ComponentProjectionAllowlistV1`.
+- `CaptureSummaryV1` using A9’s observation/source enums plus non-negative execution/connector counts.
+- `CaptureReferenceV1(execution_id, captured_at, account_scope_hash, summary, capture_digest)`.
+- `CapabilityEvidenceRecordV1(..., captures: nonempty sorted tuple)`.
+- `LiveComponentIdentityV1(component_id, version: PositiveInt, config_digest)`.
+- `StaticRouteCoverageV1` and `ServiceWideRouteCoverageV1`; service-wide requires its own capture.
+- `OperationContractRecordV1`.
+- `ConnectorReplayRegistryV1`.
+- All are frozen, `extra="forbid"`, and contain no narrative, raw URL/path, header, body, credential, or account-ID field.
+
+Digest algorithms:
+
+- Route Digest V1 extracts the connection URL path, joins it to the operation path with one boundary slash, applies the issue’s RFC 3986 syntax normalization, and hashes `b"RouteDigestV1\0" + utf8_path`.
+- Component Config Digest V1 performs namespace-context-aware closed projection, refuses unknown scoped content/unresolved QName values, canonicalizes with the pinned `ElementTree.canonicalize` options, and hashes `b"ComponentConfigDigestV1\0" + canonical_xml`.
+- The connection projection includes the complete `field id="url"`; the operation projection includes family/action fields and `field id="path"`.
+- Production projection allowlists remain empty until admissible live readbacks arrive. Synthetic allowlists are dependency-injected only in tests.
+
+Evidence capture support:
+
+- Add `monitor_platform(action="execution_connectors")`, backed by `boomi_client.execution_connector`, returning typed counts/action/family/placement facts.
+- Class evidence aggregates the required ExecutionRecord, ExecutionConnector, GenericConnectorRecord, and endpoint-readback observations.
+- Raw artifacts remain operator-side; only typed summaries and digests enter the package/report.
+
+Registry/report:
+
+- `registry_v1.json` is loaded through `importlib.resources`.
+- The report is deterministic fixed prose/tables grouped by family/action.
+- Add exactly `!docs/evidence/` to `.gitignore`.
+- Assert report tracked, strict-loadable, synchronized, and sanitization-safe.
+- Add a separate `connector-replay-image-parity` CI job with a 60-minute timeout. Skip only when Docker is absent or its daemon is unreachable; a started build/import/digest mismatch fails.
+
+Acceptance:
+
+- ID mapping totality/injectivity, all shared-validator surfaces, canonicalization/route fixtures, planted-secret rejection, report synchronization, Docker parity, and class-row evidence-link invariants.
+- Packaged production evidence/allowlists may be empty; all writes remain `unverified`.
+
+#### Unit 5 — Trusted resolution snapshot and compile-path authority
+
+New module:
+
+- `authoring/connector_resolution_snapshot.py`
+
+Types:
+
+- `ResolvedConnectorModeV1 = Literal["reuse","create","update"]`.
+- `ConnectorIdentityAuthorityV1 = Literal["normalized_structured_fields","submitted_xml","live_readback_xml"]`.
+- `ResolvedConnectorComponentIdentityV1`:
+  - logical ref/component type/mode/authority;
+  - actual component ID/version when live;
+  - family/action;
+  - connection URL-path or operation resource-path fact;
+  - `requires_path_binding`;
+  - config digest when admissible;
+  - closed extension-binding flags.
+- `TrustedConnectorResolutionSnapshotV1`:
+  - strict actual-account scope or `None`;
+  - sorted operation/connection facts;
+  - resolution decisions for direct/collision reuse.
+
+Authority:
+
+- Structured create/update calls `normalized_identity_projection`, never `builder.build`.
+- Structured partial updates merge identity fields with sanitized live identity, never credential values.
+- Raw create/update parses submitted XML.
+- Reuse/collision reuse parses live readback XML and requires actual ID, version, and family/action.
+- Caller metadata is assertion-only for every connector semantic kind.
+- `requires_path_binding` derives from usable structured `path_replacements` or a blank parsed operation path.
+
+Flow:
+
+- Workflow builds the base snapshot before `_normalize_intent` and threads it to `run_recipes`.
+- Recipe engine keeps its compile. Recipe-produced structured creates derive local projections; undeclared live reuse cannot be inferred.
+- Direct no-client recipe-bridge mode accepts structured creates and refuses live-dependent reuse/update.
+- Raw integration builds the snapshot after `_build_plan`/`existing_ids` and before the pre-write pass.
+- All four symbol-table sinks and two reconstruction helpers consume snapshot-derived facts.
+- Every legacy source/target and generalized call undergoes declared-versus-derived comparison.
+
+Diagnostics:
+
+- `AUTHORING_CONNECTOR_IDENTITY_MISMATCH`.
+- `AUTHORING_CONNECTOR_IDENTITY_UNAVAILABLE`.
+- Neither enters the ProcessIR diagnostic set.
+
+Acceptance:
+
+- Declared GET/actual POST refuses in raw create, raw update, direct reuse, and collision reuse.
+- Profile fallback cannot mint evidence.
+- Blank-path fact is correct in all four formerly fail-open modes.
+- No credential-bearing builder XML reaches plan, response, diagnostic, or snapshot serialization.
+
+#### Unit 6 — Operation contracts and root/call-scoped key-reference grants
+
+Contracts:
+
+- `IdempotencyContractSymbolV1` gains `record_digest`; uniqueness/sort/index key is `(ref, operation_ref)`.
+- Add `SymbolTableV1.process_root_ref: str | None = None`.
+- Add `IdempotencyGrantSymbolV1`:
+  - `kind: Literal["per_call_key_reference_grant"]`;
+  - `contract_ref`, `operation_ref`, `connection_ref`;
+  - `process_root_ref`, `call_source_path`;
+  - account scope;
+  - operation/connection IDs, versions, config digests;
+  - route coverage;
+  - record/capture digests.
+- Add sorted `SymbolTableV1.idempotency_grants`.
+- Grant lookup key is `(contract_ref, operation_ref, call_source_path)` within the root-projected table.
+
+Minting:
+
+- `build_symbol_table(process_root_ref, process_ir, snapshot, registry, ...)` remains the sole minter.
+- First build a symbol-only table, then run the compiler’s own `lower_process_ir_to_cfg` and `resolve_connector_call_bindings` to obtain canonical RFC 6901 call paths. Do not implement another IR walk.
+- Mint only for exact reused operation and connection record matches, strict account scope, explicit versions, matching config digests, allowed extension state, and matching static/service-wide route coverage.
+- New/update, placeholder, lookup failure, versionless, foreign-account, changed, extension-bound, route-mismatched, or ambiguous records mint nothing.
+- A class row or spec declaration never mints.
+- Root isolation is enforced by table projection; a table with `process_root_ref=None` may contain no grants.
+
+Retry behavior:
+
+- `conditionally_idempotent` + `key_reference` requires a matching contract pair and per-call grant.
+- `read_only` attached key references also resolve by `(ref, operation_ref)`; a dangling reference still fails.
+- `idempotent_write` remains class-row plus `verified_action`; no grant and no third decision branch.
+- `unverified`/non-idempotent checks remain first.
+
+Acceptance:
+
+- All negative mint arms, static/service-wide routes, same operation/different route, wrong call, wrong root, cross-root substitution, aliases, and order invariance.
+- Synthetic injected conditional rows prove positive grants.
+- Packaged production rows remain unverified and refuse before grant lookup.
+
+#### Unit 7 — Candidate discovery, shared grammar, and semantic fingerprint
+
+Discovery:
+
+- Add `query_components(action="idempotency_contract_candidates")` to `query_components.py`, root `server.py`, and `meta_tools.py`.
+- Require `profile`, `operation_component_id`, and `connection_component_id`.
+- Read both live components, derive actual account scope, versions/digests, and return candidates matching both.
+- Candidate fields:
+  - `authority="non_authoritative_candidate"`;
+  - `candidate_only=true`;
+  - authored contract ref;
+  - semantics ID/revision;
+  - required account scope;
+  - operation/connection IDs, versions, digests;
+  - route coverage.
+- No candidate grants or authorizes; no capture content, credentials, headers, bodies, raw routes, or key material.
+- Missing/malformed live components use `CONNECTOR_REPLAY_DISCOVERY_IDENTITY_UNAVAILABLE`; no matching record is a successful empty list.
+
+Shared grammar:
+
+- `ids.py` owns parsing/regex constants.
+- ProcessIR authored refs use schema-visible `StringConstraints` plus a root-owned `BeforeValidator`.
+- Compiler symbols use a compiler-root adapter.
+- Registry/discovery wrap the same parser with `CONNECTOR_REPLAY_CONTRACT_REF_INVALID`.
+
+Fingerprint:
+
+- Add `("connector_replay_semantics", abstract_semantic_revision_payload)` to `authoring/contract.py::_compiler_revision`.
+- Include only class capability semantics, explicit mappings, and abstract key semantics.
+- Exclude account/component/connection/capture/operation records, allowlists, grants, and mint decisions.
+- Two-account equality targets the relocatable materialization fingerprint, not the outer account-bound plan hash.
+
+Acceptance:
+
+- Discovery safety/empty/match arms.
+- Shared validator on all five surfaces.
+- Two-account equal contract ref/semantic revision/relocatable fingerprint; different concrete account-bound attestations; cross-account mint refusal without fingerprint movement.
+
+#### Unit 8 — Apply identity rechecks and concrete evidence attestation
+
+Types:
+
+- `ConnectorReplayEvidenceBindingAttestationV1` records conditional grant identity: contract ref, root, call source path, account scope, operation/connection identities, route coverage, and record/capture digests.
+- `ProcessMutationAttestationV1.replay_evidence_bindings: tuple[...] = ()`, deterministically sorted.
+- Parent/nested account scope derives from the same actual client account when bindings exist.
+
+Rechecks:
+
+- Global platform-answered pass before the first write rereads every distinct reused operation/connection consumed by compiled roots.
+- JIT pass before each process submission rereads only identities consumed by that root.
+- Structured update receives a pre-submit callback after merge/materialization and before the platform update.
+- ID, version, and config digest are independent; a credential-only version advance fails.
+- Pre-first-write drift/unavailability returns the named refusal with no mutation.
+- A later JIT mismatch after earlier writes returns retained partial/reconciliation failure.
+- Post-submit readback compares the same operation and connection pins.
+
+Diagnostics:
+
+- `CONNECTOR_REPLAY_PRE_SUBMISSION_IDENTITY_DRIFT`.
+- `CONNECTOR_REPLAY_PRE_SUBMISSION_IDENTITY_UNAVAILABLE`.
+- `CONNECTOR_REPLAY_POST_SUBMISSION_RECONCILIATION_DRIFT`.
+- `CONNECTOR_REPLAY_POST_SUBMISSION_RECONCILIATION_UNAVAILABLE`.
+
+Retention:
+
+- Post-submit failure retains platform result, component ID, mutation record, readback/unavailability fact, and evidence attestation.
+- No rollback or “nothing mutated” wording after any earlier/submitted mutation.
+
+Acceptance:
+
+- Operation and connection drift/unavailable at both boundaries.
+- Credential-only version movement.
+- Multiple roots/contracts sorted deterministically.
+- Partial mutation retained and accurately classified.
+- Roots with no reused connector identities perform no unnecessary live reads.
+
+### 5. Revised landing order and slicing
+
+The smallest honest landing set is **two governed slices**. A literal requirement that Unit 9 also remain `unverified` is internally impossible: Unit 9 must flip at least one write row to close #155. The “valid with all writes unverified” constraint therefore applies to the mechanism slice; the second slice is the explicitly evidence-gated ingestion exception.
+
+#### Slice 155A — Fail-closed mechanism and canonical dynamic path
+
+Contains Units 1–8 and Unit 3 unchanged.
+
+Internal implementation order, optimized for the expiring account:
+
+1. Start raw evidence capture immediately.
+2. Unit 4 registry/digests plus `execution_connectors`.
+3. Unit 5 trusted snapshot.
+4. Unit 6 grants.
+5. Unit 8 apply pin/recheck path.
+6. Units 1–2 dynamic path.
+7. Unit 3 source replay policy.
+8. Unit 7 discovery/fingerprint.
+9. Final integrated validation.
+
+This remains one completion-workflow slice; intermediate commits are implementation checkpoints, not separately closed slices.
+
+Acceptance discharged:
+
+- Canonical source/target dynamic path and three canonical body goldens.
+- DDP/profile/path/fan-out semantics and blank-path guard.
+- `dynamic_path` and source-replay published contracts.
+- All source-replay arms.
+- Registry grammar/models/digests/report/package/image mechanisms.
+- Trusted identity across all modes/call sites.
+- Conditional per-call grant and all refusal arms using injected fixtures.
+- Candidate discovery, two-account fingerprint split, apply drift/reconciliation, and attestation.
+- Every packaged production write remains `unverified`; production compilation still refuses it.
+
+Day-0 capture running alongside this slice:
+
+- Account: `traininghlibbochkarov-JKIY2X`.
+- Deadline: `2026-08-28T05:00Z`.
+- Capture reusable operation/connection XML plus versions before execution.
+- Capture source-role GET dynamic path against `/clients/{key}`.
+- Capture static-path PATCH twice with identical key/document and GET readback after each.
+- Capture POST where admissible.
+- Attempt fixture provisioning for PUT/DELETE/HEAD/OPTIONS/TRACE through the repository-mandated escalation order.
+- Store raw artifacts operator-side with execution ID, UTC date, account ID, scenario enum, and raw-byte SHA-256.
+- Capture `ExecutionRecord`, `ExecutionConnector`, `GenericConnectorRecord`, and endpoint readback together.
+- If Slice 155A cannot reach a final-tree public-MCP write-retry QA before account expiry, the stored operation record cannot satisfy later active-account minting. A replacement active account is then mandatory for closure.
+
+Slice-155A rebaseline:
+
+- `tests/fixtures/process_ir/process_ir_v1.schema.json`; definition pin 39→40.
+- `tests/fixtures/process_ir/process_ir_v1.json`.
+- Both halves of `tests/fixtures/process_ir/process_ir_compiler_v1.json`.
+- `tests/fixtures/authoring_contract/process_ir_authoring_v1.contract.json`.
+- `tests/fixtures/authoring_contract/process_ir_authoring_v1.schema.json`.
+- Three issue-155 canonical XML fixtures and provenance.
+- `tests/fixtures/wave_gate/goldens.jsonl`, floor 70→73, same commit.
+- `tests/fixtures/wave_gate/test_nodes.jsonl`, regenerated once after all Unit-9-generic parameterized tests already exist.
+- `tests/_m12_12_legacy_inventory.py --write`.
+- `tests/_m12_12_legacy_inventory.py --emit-markdown` into `docs/architecture/M12_COMPATIBILITY_INVENTORY.md` §11.
+- Expected inventory transition: Python sources 216→223 and unscanned packaged assets 0→1.
+- Capability/compiler revision pins, capability witnesses, `PROCESS_IR_V1.md`, meta-tool/frozen inventory digests.
+- All existing survivor goldens rechecked unchanged.
+
+Slice-155A gates:
+
+- Literal baseline/ledger/roster before mutation.
+- Python 3.11 non-KB suite.
+- Docker image parity job.
+- Source-form dynamic-path live QA.
+- Read-only process-replay allow plus both named refusal probes.
+- Stage-1 QA, committed review boundary, Codex review/fix-only rounds, architect cap.
+- `scripts/wave_gate.py wave --base 9860842e5932c2e091a115e4697722bd8429953c`.
+
+#### Slice 155B — Evidence ingestion and production enablement
+
+Contains Unit 9 only. It lands only when admissible captures exist.
+
+Acceptance discharged:
+
+- REST POST/PUT/DELETE/HEAD/OPTIONS/TRACE rows whose three behavioral columns are capture-backed.
+- At least one write row flips from `unverified`.
+- Preferred cheapest positive: static-path REST PATCH as `conditionally_idempotent`, backed by two identical executions and GET readbacks plus one exact operation/connection record.
+- `verified_write_replay_safety` changes from `gated` to `supported` and remains supported after the JKIY2X account expires; expiration affects operation-record minting, not the class-level served promise.
+- Positive production write retry compiles only while the active account/operation/connection matches the record.
+- Evidence-backed write live QA passes through the public MCP boundary.
+- If any required verb lacks an admissible endpoint/capture, its row remains absent and #155 remains open.
+
+Slice-155B rebaseline:
+
+- `registry_v1.json` and derived Markdown report.
+- Connector capability rows and evidence-link snapshot.
+- `process_ir_authoring_v1.contract.json` and schema if row enumeration changes it.
+- Capability/compiler revision pins and plan-fingerprint fixtures affected by the abstract semantic revision.
+- Flip the existing `verified_write_replay_safety` witness from refusal to admission; add no test node.
+- Re-run M12.12 inventory and §11 generation; no path/count change is expected, but commit any measured generated delta.
+- No golden or ProcessIR schema fixture rotation.
+- No `test_nodes.jsonl` regeneration because Slice 155A already landed all parameterized evidence-ingestion tests.
+
+Slice-155B gates:
+
+- Fresh literal baseline and ledger/roster.
+- Full Python 3.11 non-KB suite.
+- Public safe-write live QA before account expiry or against a replacement matching account.
+- QA/review workflow and final composite wave gate against the Unit-9 tree.
+
+### 6. Anything you now consider wrong in the verification
+
+No P1–P18 conclusion is overturned.
+
+One supporting claim should be corrected: `ExecutionConnector` is not reachable only through `invoke_boomi_api`. The installed SDK exposes `boomi_client.execution_connector` at `.venv/lib/python3.12/site-packages/boomi/sdk.py:286`, with typed query/query-more methods in `.venv/lib/python3.12/site-packages/boomi/services/execution_connector.py:11-75`. The repository lacks a served wrapper, which is why Unit 4 adds `monitor_platform(action="execution_connectors")`; it should not use the raw escape hatch.
+
+---
+
+# Corrections after verification of the addendum (2026-08-25)
+
+Three addendum claims were REFUTED and one PARTIAL when re-measured at `9860842`. These override the
+addendum text above.
+
+1. **A8-3 REFUTED — the no-client rule is SCOPED, never blanket.** With `boomi_client is None`,
+   reused identities are recorded `unavailable`; a refusal fires ONLY when a compile decision depends
+   on that identity (grant minting — which mints nothing in no-client mode, no error; or capability
+   classification of a REUSED OPERATION whose call sits in a `retry_count>0` region). A blanket
+   refusal for reuse/reference-only/collision/update is a capability-reachability regression:
+   `build_from_archetype` and `compose_archetypes` compile through `run_recipes` with no client and
+   emit `reference_only` reuse bindings (measured: 34 probe records, 31 through
+   `build_from_archetype_action`, all carrying `reuse_reference`; `compose_archetypes_action(parts,
+   options)` has no client parameter either, `integration_authoring.py:453`, unmeasured). Reuse
+   CONNECTIONS with created operations compile exactly as today. `STRICT_BY_DESIGN`
+   (`test_issue_180_compile_entry_context.py:51-110`) is keyed on the defaulted `capabilities`
+   parameter and does NOT cover this one — add a derived sweep over `src/` for compile entries
+   lacking a client parameter instead of citing it.
+
+2. **A12 REFUTED — the `dynamic_path` admits witness must observe the REAL emitted strings.**
+   `rendering.py:395-408` emits `<propertyvalue childKey="" key="path" name="Path"
+   valueType="track">` with `propertyName="Dynamic Document Property - {ddp}"`, and
+   `parameter-profile` is an ATTRIBUTE on `<connectoraction>`. Assert `key="path" name="Path"` and
+   ` parameter-profile="<id>"` in `emit_process(...).process_xml`; hand-run the drop-the-binding
+   mutant before recording the claim. The addendum's `propertyName="Path"` / `<parameter-profile>`
+   strings never appear, so a witness written to them can never pass and the manifest flip fails
+   `test_every_supported_capability_is_reachable`.
+
+3. **A18-1 REFUTED — no `AUTHORING_CONNECTOR_IDENTITY_*` family.** `errors.py:342-347` documents
+   #146 as the SOLE owner of `AUTHORING_*`. The snapshot identity refusals are
+   `CONNECTOR_REPLAY_IDENTITY_MISMATCH` and `CONNECTOR_REPLAY_IDENTITY_UNAVAILABLE` in the one
+   #155-owned family, with a #153-style biconditional ownership test and a "does not extend a family
+   it does not own" test.
+
+4. **A5 PARTIAL — the legacy golden freeze needs a recorded transform.** A verbatim `<process>`
+   freeze is impossible: the legacy open tag carries seven option attributes `emit_process` never
+   emits (`emitter_registry.py:821`). Comparison scope is the `<shapes>…</shapes>` element on both
+   sides; expected `process-xml-v1` bytes are `"<process xmlns=\"\">" + legacy_shapes + "</process>"`.
+   Record the transform, the legacy render command and the pre-change SHA in
+   `tests/fixtures/process_ir/issue155/PROVENANCE.md`.
+
+**Anchor corrections (the plan above and the addendum both carry these wrong).** The capability
+manifest is `models/process_ir.py:~2370` (not :2307), and `dynamic_path` / `source_replay_policy` are
+NEW keys (27→29), not flips of existing gated ones. The §8 parser parity lives in
+`test_process_ir_authoring_contract_parity.py:1018+` (not in the 292-line
+`test_process_ir_capability_enforcement.py`). `connector_capability_rows` and
+`PUBLIC_CAPABILITY_FIELDS` are `compiler/process_ir/connector_capabilities.py:300` / `:288`; the
+projection parity pin is `test_process_ir_authoring_contract_parity.py:166-167`. `_connector_entries`
+is `authoring/process_ir_projection.py:1255` and carries no "bindable" sentence today. The
+`verified_write_replay_safety` witness is `tests/_process_ir_capability_witnesses.py:976`.
+`compiler_diagnostic_specs` is `diagnostics.py:482`. `component_get_xml` is
+`categories/components/_shared.py:191`. `validate_connector_calls` is defined at
+`connector_resolution.py:640`. There is no `src/boomi_mcp/server.py` — the server module is the
+repo-root `server.py` (`:276` import, `:1591` tool).
+
+**Landing shape.** The addendum's two-slice proposal (155A = units 1–8, 155B = unit 9) is replaced by
+SIX separately-landed slices under one open issue — A (U1+U2−S11+U3), B (U4), C (U5+S11), D (U6+U7),
+E (U8), F (U9, evidence-gated) — each with its own step-0 baseline, roster window, wave gate and
+closing protocol. Rationale, per-slice contracts, rebaseline order, ledger rules, QA probe matrices
+and owner decisions: `docs/plans/issue-155-strategy.md` (gitignored; §-numbered).

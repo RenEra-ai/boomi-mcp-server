@@ -115,7 +115,13 @@ def test_path_replacement_lowered_to_dynamic_path():
         {"type": "static", "value": "/admin/cdscm/api/v1/clients/"},
         {
             "type": "profile",
-            "element_id": 3,
+            # A STRING, matching the served ProcessIR schema, which types this field
+            # as a string. The profile field index keys it with an integer, and the
+            # archetype used to pass that through — harmless for the legacy chain,
+            # which renders it into XML where everything is text, but wrong the
+            # moment the canonical route consumes it. Measured when this changed:
+            # every golden is byte-identical, so the coercion costs nothing.
+            "element_id": "3",
             "element_name": "clientId (Root/Object/clientId)",
         },
     ]

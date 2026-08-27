@@ -113,6 +113,20 @@ def _confirmed_removed(path: Path) -> bool:
     return False
 
 
+def _remove_confirmed(path: Path) -> bool:
+    """Remove a path and report whether it is PROVABLY gone.
+
+    Every cleanup in this file exists so an operator can fix what the error names
+    and run the same command again. A removal that silently failed defeats that:
+    the leftover is refused as unaccounted by the next run, and an operator told
+    the archive is clean looks anywhere except at the thing blocking them. So no
+    site here claims a cleanliness it has not verified — this returns the fact and
+    each caller reports it honestly.
+    """
+    shutil.rmtree(path, ignore_errors=True)
+    return _confirmed_removed(path)
+
+
 def _discard(durable: Path, parent_existed: bool = True) -> None:
     """Remove a refused round, and the parent only if THIS run created it.
 
@@ -145,14 +159,37 @@ def read_text(directory: Path, name: str):
     return text or None
 
 
+class Unreadable:
+    """A sidecar that EXISTS but cannot be parsed. Not the same as absent.
+
+    Collapsing the two is how a malformed attestation was archived at exit 0: the
+    presence guard saw None, concluded the round was simply unattested, and let it
+    through with a null gate and status. The downstream scanner then rejects the
+    result — so the producer had already reported success for output its consumer
+    refuses, and may have stranded the source run on the strength of it.
+    """
+
+    def __init__(self, path, reason):
+        self.path, self.reason = path, reason
+
+    def __repr__(self):
+        return f"<unreadable {self.path}: {self.reason}>"
+
+
 def read_json(directory: Path, name: str):
+    """Parsed content, None when the file is ABSENT, or `Unreadable` when it is not.
+
+    Callers that only care whether a fact is available may treat `Unreadable` as
+    falsey-ish by testing `isinstance`; callers that must not proceed on a
+    corrupt record check for it explicitly. The distinction is the point.
+    """
     path = directory / name
     if not path.is_file():
         return None
     try:
         return json.loads(path.read_text())
-    except (ValueError, OSError):
-        return None
+    except (ValueError, OSError) as exc:
+        return Unreadable(path, f"{type(exc).__name__}: {exc}")
 
 
 #: Where each architect-round index field lives INSIDE a `gate-attest`
@@ -257,6 +294,8 @@ def derive_row(kind: str, run_dir: Path, durable: Path, rel_root: Path,
         })
     elif kind == "architect-review":
         attestation = read_json(durable, "attestation.json")
+        if isinstance(attestation, Unreadable):
+            attestation = None      # the archive path refuses these before we get here
         refusal = read_json(durable, "refusal.json")
         row.update({name: _dig(attestation, path)
                     for name, path in ARCHITECT_ROW_PATHS.items()})
@@ -871,16 +910,31 @@ def main() -> int:
                         shutil.copy2(candidate, staging / "prompts" / name)
                         copied.append("prompts/" + name)
     except BaseException as failure:
-        shutil.rmtree(staging, ignore_errors=True)
-        print(f"archiving failed while copying ({type(failure).__name__}: {failure}). "
-              "Nothing was written to the archive; fix the cause and run the same "
-              "command again.", file=sys.stderr)
+        # VERIFIED, not asserted — the sibling of the publication handler below,
+        # and missed when that one was corrected. A copy failure whose cleanup
+        # also fails leaves a staging directory that blocks the next preflight,
+        # so claiming nothing was written sends the operator the wrong way.
+        gone = _remove_confirmed(staging)
+        print(f"archiving failed while copying ({type(failure).__name__}: {failure}).",
+              file=sys.stderr)
+        if gone:
+            print("  Nothing was written to the archive; fix the cause and run the "
+                  "same command again.", file=sys.stderr)
+        else:
+            print(f"  THE ARCHIVE IS IN AN UNKNOWN STATE — {staging} could not be "
+                  "confirmed removed and will be refused as unaccounted by the next "
+                  "run. Remove it before running anything else against this archive.",
+                  file=sys.stderr)
         return 1
 
     if not copied:
-        shutil.rmtree(staging, ignore_errors=True)
+        gone = _remove_confirmed(staging)
         print(f"nothing to archive in {args.run_dir} — is it the right run directory?",
               file=sys.stderr)
+        if not gone:
+            print(f"  and {staging} could not be confirmed removed — remove it "
+                  "before the next run, which will refuse it as unaccounted.",
+                  file=sys.stderr)
         return 1
 
     # The destination comes into existence here, complete, in one step — and the
@@ -929,6 +983,20 @@ def main() -> int:
         # the tests green. A fixture is not evidence; the shape is now asserted
         # against a real archived attestation by a test, so it cannot drift back.
         attestation = read_json(durable, "attestation.json")
+        # An attestation that exists but cannot be PARSED is not an unattested
+        # round — it is an attested round nobody can read. Treating the two
+        # alike archived a malformed one at exit 0 with a null gate and status,
+        # which the downstream scanner then refuses: success reported for output
+        # its consumer rejects, with the source run possibly already discarded.
+        if isinstance(attestation, Unreadable):
+            if not _remove_confirmed(durable):
+                print(f"  warning: {durable} could not be confirmed removed.",
+                      file=sys.stderr)
+            print("refusing to archive a gate round whose attestation cannot be "
+                  f"read ({attestation.reason}). An unparseable attestation is "
+                  "not an absent one; repair or remove it, then archive again.",
+                  file=sys.stderr)
+            return 1
         # An attestation that is PRESENT must be fully readable, or this round is
         # not archived. The previous version treated an unreadable digest exactly
         # like an absent attestation, so renaming the prompt block, dropping
@@ -954,7 +1022,8 @@ def main() -> int:
                 or not _dig(attestation, path).strip()
             )
             if unresolved:
-                _discard(durable)
+                if not _remove_confirmed(durable):
+                    print(f"  warning: {durable} could not be confirmed removed; the next run will refuse it.", file=sys.stderr)
                 print("refusing to archive a gate round whose attestation does not "
                       f"resolve {unresolved} — the collector's schema and this "
                       "script disagree, so the archive would record nulls for facts "
@@ -971,12 +1040,14 @@ def main() -> int:
         ) if (durable / "prompts").is_dir() else []
         digests = {sha256_of(f) for f in archived}
         if not archived:
-            _discard(durable)
+            if not _remove_confirmed(durable):
+                print(f"  warning: {durable} could not be confirmed removed; the next run will refuse it.", file=sys.stderr)
             print("refusing to archive a gate round with no prompt: pass --prompts "
                   "<dir> naming the directory that holds it", file=sys.stderr)
             return 1
         if attested and attested not in digests:
-            _discard(durable)
+            if not _remove_confirmed(durable):
+                print(f"  warning: {durable} could not be confirmed removed; the next run will refuse it.", file=sys.stderr)
             print("refusing to archive a gate round whose prompt is not the attested "
                   f"one (attestation's prompt.actualSha256 is {attested[:16]}…, "
                   f"archived prompts hash to "

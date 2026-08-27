@@ -1,0 +1,81 @@
+You are performing the §6 ARCHITECT IMPLEMENTATION REVIEW for issue #155, slice A, of the
+boomi-mcp-server repository — **evaluation 2 of a maximum of 3**. This is not a general code review.
+Your single question is:
+
+    Do the corrections made since your last evaluation faithfully realize the architect design plan
+    reproduced verbatim below, and did they resolve the findings your first evaluation raised?
+
+## What you already reviewed, and what happened to it
+
+Evaluation 1 read the tree at `2c1c9c7` and returned ISSUES FOUND. Its findings were reconciled one
+by one. Two were REFUTED on measurement rather than fixed, and you should judge those refutations —
+they are the part of this round I most want your eyes on:
+
+1. **"The database archetype coerces the path-binding property to a string"** — refuted. Measured:
+   the profile-property source model your finding depends on is referenced nowhere outside the model
+   module itself. The plan's instruction presupposes a re-lowering of the primitive path-binding
+   helper that has deliberately NOT happened (see departure 3 below), so there is no route on which
+   the coercion you describe can occur. If you think that measurement is wrong, name the route.
+
+2. **"The diagnostic contract mismatches the plan"** — refuted. The plan lumps two conditions under
+   one code; the implementation splits them: a property that was never established anywhere yields
+   the not-established code, and a writer composing only static text yields the no-dynamic-segment
+   code. I judged the split strictly more informative than the plan's lumping and kept it. Say
+   plainly whether you accept that, and if not, what it costs a caller.
+
+The remaining findings were FIXED: the diagnostic path for a bound call now carries its binding
+sub-path, the path-binding model is frozen, the capability is published with an executable witness,
+and the golden matrix gained the coverage you named.
+
+## What changed since `2c1c9c7`, and how to read it
+
+Read the delta yourself: `git diff 2c1c9c7..HEAD -- src tests scripts`. It is large, and almost all
+of the size is one file that has nothing to do with the plan. Please do not spend your review there.
+
+  - THREE files under `src/` changed. That is the slice-A surface, and it is what I want judged.
+  - The rest is `scripts/archive_gate_round.py` and its tests — the evidence archiver this slice had
+    to write because the completion workflow requires every gate round archived as it is collected
+    and no producer for the archive index existed. It grew by roughly 1700 test lines across NINE
+    consecutive commit-review rounds, none of which touched a served surface.
+
+I have frozen that artifact and recorded why: eight consecutive rounds on it, seventeen findings,
+several of them regressions I introduced while fixing earlier ones, and one defect class that
+recurred three times despite two structural fixes. From here it takes a code change only for a
+finding that is both critical and reachable through the invocation this loop actually makes.
+
+If you think that judgement is wrong — that the archiver was never in scope for this slice, or that
+freezing it leaves something unsafe — say so. It is the decision I am least certain of.
+
+## Scope discipline — read this before reporting an absence
+
+The plan below covers ALL SIX slices A–F. Only slice A is implemented. §5.B through §5.F describe
+units that are deliberately absent: the packaged replay-evidence registry, the trusted connector
+resolution snapshot, per-call idempotency grants, apply-boundary rechecks, and evidence ingestion.
+An absence belonging to slices B–F is NOT a finding — it is the plan working as written.
+
+## Where the implementation KNOWINGLY departs from the plan
+
+You judged these in evaluation 1; they are unchanged and restated so this round is self-contained.
+State plainly whether each remains acceptable.
+
+1. The plan's dynamic-path rule was NARROWED — strict for a bound path only, not in the general
+   lineage model, because the legacy chain accepts a composition the general rule would refuse and a
+   shipped parity golden freezes it.
+2. The rule keys on a MEASURED platform table, not on the served stream-replacing set. Live
+   measurement found the two facts differ: a Message replaces the document stream and KEEPS document
+   properties; a split and a cache read lose them.
+3. Re-lowering the primitive path-binding helper was NOT done, recorded out-of-scope-by-design
+   against the cutover issue: it has no non-empty caller.
+4. The profile-identity comparison is inert on the canonical route, deferred to slice C: validation
+   is account-independent by specification and runs before any id lookup.
+
+## What I most want from you
+
+- Whether the corrections actually discharge your evaluation-1 findings, or only appear to.
+- Your judgement on the two refutations above — a silent agreement is not useful to me.
+- Any plan requirement for SLICE A still genuinely unmet, quoting the plan clause.
+- Anything built since `2c1c9c7` that the plan does not authorize.
+
+Be concrete: cite file:line and the plan clause.
+
+END with a verdict on its OWN FINAL line: exactly 'VERDICT: NO ISSUES' or 'VERDICT: ISSUES FOUND'.

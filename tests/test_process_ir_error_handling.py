@@ -1419,12 +1419,18 @@ def test_the_policy_is_refused_on_a_connector_scope():
     """
     diag = _compile_error(_connector_scope(retry={"count": 2, **ALLOW}))
     assert diag.code == PROCESS_IR_SEMANTIC_RETRY_SOURCE_POLICY_SCOPE_INVALID
+    # The PATH as well as the code. The plan's acceptance clause requires both,
+    # and a code alone does not tell an author WHICH field to correct — the
+    # pointer is the actionable half of a refusal, and pinning only the code
+    # leaves it free to drift onto the wrong node without any test noticing.
+    assert diag.path.endswith("/retry/source_replay_policy"), diag.path
 
 
 def test_the_policy_is_refused_at_retry_zero():
     """Retry arm: with no retry there is no re-execution to permit."""
     diag = _compile_error(_process_scope(retry={"count": 0, **ALLOW}))
     assert diag.code == PROCESS_IR_SEMANTIC_RETRY_SOURCE_POLICY_REQUIRES_RETRY
+    assert diag.path.endswith("/retry/source_replay_policy"), diag.path
 
 
 def test_the_policy_survives_a_dump_and_reparse_in_both_states():
