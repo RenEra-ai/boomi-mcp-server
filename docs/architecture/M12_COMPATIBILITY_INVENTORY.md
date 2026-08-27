@@ -2182,7 +2182,7 @@ rather than aspirational.
 | LG-a6339083 | unclassified_reference | src/boomi_mcp/categories/integration_builder.py | _synthesize_wrapper_subprocess_edges | 3 | 567 | #160 | residue: a watched name mentioned in a shape the census does not classify |
 | LG-df05d9d2 | unclassified_reference | src/boomi_mcp/categories/integration_builder.py | _synthesize_wrapper_subprocess_extensions | 3 | 731 | #160 | residue: a watched name mentioned in a shape the census does not classify |
 | LG-2ae43575 | unclassified_reference | src/boomi_mcp/categories/integration_builder.py | build_structured_update_xml | 7 | 3349 | #160 | residue: a watched name mentioned in a shape the census does not classify |
-| LG-1ffb629c | unclassified_reference | src/boomi_mcp/categories/integration_import.py | _derive_preset_parameters | 1 | 1058 | #160 | residue: a watched name mentioned in a shape the census does not classify |
+| LG-1ffb629c | unclassified_reference | src/boomi_mcp/categories/integration_import.py | _derive_preset_parameters | 1 | 1061 | #160 | residue: a watched name mentioned in a shape the census does not classify |
 | LG-feb448d7 | unclassified_reference | src/boomi_mcp/categories/meta_tools.py | <module> | 5 | 8017 | #160 | retract the served legacy guidance / guard the raw route |
 | LG-de5e36cb | unclassified_reference | src/boomi_mcp/compiler/process_ir/emitter_registry.py | <module> | 15 | 621 | #160 | residue: a watched name mentioned in a shape the census does not classify |
 | LG-ea29df03 | unclassified_reference | src/boomi_mcp/compiler/process_ir/legacy_adapters/authority.py | <module> | 2 | 114 | #151 | re-home onto the neutral extraction |
@@ -2883,6 +2883,33 @@ No row was added, removed or re-dispositioned, and no symbol, path or owning iss
 field by field rather than inferred from the row counts being equal, which they were. Twenty-two of
 those rows are printed in the section-11 tables, so those tables were regenerated here; the earlier
 units in this slice moved no evidence line and correctly needed none.
+
+### Slice B of #155 — the replay registry enters the scanned surface
+
+`python_source_count` moved 217 → 225 and `unscanned_asset_count` moved 0 → 1. Both are real
+additions, both were predicted before the work started, and they are recorded separately because
+they are different kinds of thing.
+
+The eight sources are the `connector_replay` package: its namespace module plus the identifier
+grammars, the registry row models, the two digests, the registry loader, the capture summariser,
+the ingest path and the derived report. None of them touches a legacy caller, so the census gained
+no row for any of them — they are new surface, not newly-discovered legacy.
+
+The one unscanned asset is the packaged registry data file. It is the FIRST data asset this
+repository ships from `src/`, which is why the count moved off zero for the first time. The scanner
+does not read it because it is not Python; that it ships at all is checked separately, both by a
+docker-free simulation of the ignore rules and by an advisory image-parity workflow that reads it
+from inside a built image.
+
+The rebaseline changed exactly two leaves across the whole inventory — verified leaf by leaf against
+the previous committed copy rather than inferred from the summary line, which reported the same two.
+
+One §11.2 row also moved, in one field, and it is recorded here rather than left to be noticed: the
+`evidence_line` for `_derive_preset_parameters` in the migration importer went 1058 → 1061. That is
+the three lines the component-id sweep added above it — an import and its explanation — shifting
+everything beneath. No row was added, removed or re-dispositioned and no symbol, path or owning
+issue moved. The table below is the regenerated one, pasted verbatim: the check that caught this
+exists precisely so a derived table cannot be hand-reconciled into agreement with prose.
 
 Neither served digest moved for unit 5. That is worth stating because it looks surprising next to
 four consecutive units that did move them: those revisions are content-addressed, not
