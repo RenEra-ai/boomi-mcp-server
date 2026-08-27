@@ -1,0 +1,47 @@
+{
+  "schema_version": 1,
+  "_comment": [
+    "The packaged connector-replay evidence registry.",
+    "",
+    "It ships with NO evidence rows and NO operation records, and that is not an",
+    "oversight: this slice lands the MECHANISM, and the rows are ingested from",
+    "executed captures in a later slice. A registry that shipped pre-filled rows",
+    "would be asserting replay safety that no execution in this account observed.",
+    "",
+    "Empty is also the safe state. Every consumer treats an absent row as",
+    "'unverified', which refuses a write retry. A registry that failed to load, or",
+    "loaded as empty, therefore denies rather than permits."
+  ],
+  "vocabulary": [
+    {
+      "platform_connector_type": "officialboomi-X3979C-rest-prod",
+      "family": "rest",
+      "action_source": "operation_component",
+      "_provenance": [
+        "Observed in 60 execution-connector rows across the archived captures for",
+        "this issue, every one from an execution that completed. The middle segment",
+        "is Boomi's official-connector publisher namespace, not the customer",
+        "account: the same segment appears on a different family",
+        "(officialboomi-X3979C-dbv2da-prod) in this repository's own goldens, and it",
+        "does not match this account's id. That is what makes the mapping portable",
+        "across accounts, which is the whole point of mapping to a family at all.",
+        "",
+        "action_source is operation_component because the platform reports one",
+        "generic action for every HTTP verb; see the models module."
+      ]
+    }
+  ],
+  "evidence_records": [],
+  "operation_records": [],
+  "_known_unmapped": [
+    {
+      "platform_connector_type": "officialboomi-X3979C-dbv2da-prod",
+      "why": [
+        "Present in this repository's goldens but NOT in any executed capture under",
+        "this issue. The allowlist admits only types observed in a green execution,",
+        "so this one is recorded here rather than mapped. Adding it needs a capture,",
+        "not an edit."
+      ]
+    }
+  ]
+}
