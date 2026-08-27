@@ -1,0 +1,92 @@
+# ADVISORY CI. Not a required status, and deliberately not part of the gate.
+#
+# What it proves: that the packaged replay-evidence registry is readable INSIDE a
+# built image, by the same `importlib.resources` call the runtime uses. That is a
+# property the ordinary test suite structurally cannot check — on a developer
+# machine and in the test runner the file is simply present on disk, so
+# `importlib.resources` finds it whether or not the packaging would ship it. This
+# repository has no wheel build; it packages by copying the tree into an image, so
+# a `.dockerignore` pattern is the whole of "packaging", and one added later would
+# break the registry in production while every unit test stayed green.
+#
+# Why its own workflow rather than a job in `tests.yml`: that file is the required
+# status on `dev`, and its own pins forbid any `if:` or other softener on it. A
+# best-effort docker step does not belong inside a gate that must fail closed.
+#
+# Why NOT in the dev ruleset: only `Python 3.11 non-KB` is required, and adding a
+# docker-dependent check to the required set would block every landing whenever the
+# runner image changes its docker availability. The registry already fails closed at
+# runtime — an unreadable registry denies every retry — so a packaging regression is
+# a degradation to notice, not a reason to stop the line.
+name: connector replay image parity
+
+on:
+  push:
+    branches:
+      - dev
+      - 'scratch/**'
+
+# Its own budget. A docker build is slower than the unit suite and must not inherit
+# a timeout tuned for it.
+permissions:
+  contents: read
+
+jobs:
+  image-parity:
+    name: registry readable in the built image
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      # The docker-availability skip is SHELL, never a job-level `if:`.
+      #
+      # A skipped job reports as SUCCESS to anything reading the check, so an `if:`
+      # that silently stopped evaluating would make an environment change look like
+      # a pass forever. Doing it in the shell means the step RUNS, says out loud why
+      # it stopped, and leaves that sentence in the log where a reader can find it.
+      - name: Build the image and read the registry from inside it
+        run: |
+          set -euo pipefail
+
+          if ! command -v docker >/dev/null 2>&1 || ! docker info >/dev/null 2>&1; then
+            echo "skipped: docker unavailable on this runner"
+            exit 0
+          fi
+
+          docker build -t connector-replay-parity:ci .
+
+          # Read the registry the way the runtime does. Everything below FAILS the
+          # job: a build that succeeds while the registry is unreadable is exactly
+          # the regression this workflow exists to catch.
+          docker run --rm --entrypoint python connector-replay-parity:ci -c '
+          import json, sys
+          from importlib import resources
+
+          from boomi_mcp.connector_replay.registry import load_registry
+
+          # 1. The packaged asset must be reachable through importlib.resources.
+          raw = resources.files("boomi_mcp.connector_replay").joinpath(
+              "registry_v1.json").read_text("utf-8")
+          payload = json.loads(raw)
+
+          # 2. It must parse through the real loader, not just as JSON. A file that
+          #    shipped but no longer matches the models is equally unusable.
+          registry = load_registry()
+
+          # 3. The vocabulary must be non-empty. An empty registry is the safe
+          #    runtime state, but shipping one means every capture is unattributable
+          #    — which would fail closed silently rather than loudly.
+          if not registry.vocabulary:
+              print("FAIL: the packaged registry maps no connector types", file=sys.stderr)
+              sys.exit(1)
+
+          # 4. What the loader read must equal what is on disk in the image.
+          if len(registry.vocabulary) != len(payload["vocabulary"]):
+              print("FAIL: loader and packaged bytes disagree on vocabulary size",
+                    file=sys.stderr)
+              sys.exit(1)
+
+          print("registry readable in image: {0} vocabulary entries, {1} evidence rows".format(
+              len(registry.vocabulary), len(registry.evidence_records)))
+          '
