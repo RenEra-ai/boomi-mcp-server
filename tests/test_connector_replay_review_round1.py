@@ -237,16 +237,57 @@ def test_property_key_serialization_is_injective():
     assert digest(emit("requestHeaders", {"X": "1"})) == digest(emit("requestHeaders", {"X": "2"}))
 
 
-def test_a_field_value_cannot_impersonate_an_adjacent_field():
-    """The same injectivity hazard one level up, which the report did not name.
+def _pre_fix_payload_digest(xml: str, kind: str = "operation") -> str:
+    """The serializer as it stood BEFORE the injectivity fix: sorted lines, newline-joined.
 
-    The payload used to be newline-joined `key=value` lines, so a value containing
-    a newline could have been read as a separate field.
+    Carried here on purpose. A regression test for a collision is only meaningful if
+    its case actually collided under the old code, and that is not obvious by
+    inspection — the first version of this test used a case that did NOT collide,
+    because the old serializer sorted whole lines and the injected text sorted after
+    the field it was impersonating. The test passed, looked like coverage, and would
+    have stayed green through a full revert.
+
+    Keeping the old implementation next to the case makes that checkable instead of
+    assumed.
     """
-    honest = '<Operation><field id="path" value="/x"/></Operation>'
-    smuggled = ('<Operation><field id="path" value="/x&#10;field:followRedirects=true"/>'
-                '</Operation>')
-    also = ('<Operation><field id="path" value="/x"/>'
-            '<field id="followRedirects" value="true"/></Operation>')
-    assert component_config_digest_v1(smuggled, "operation") != component_config_digest_v1(also, "operation")
+    import hashlib
+    import xml.etree.ElementTree as ET
+
+    from boomi_mcp.connector_replay import digests as _d
+
+    root = ET.fromstring(xml)
+    projected = _d._projected_operation(root) if kind == "operation" else _d._projected_connection(root)
+    lines = sorted(
+        f"{k}={','.join(v)}" if isinstance(v, list) else f"{k}={v}"
+        for k, v in projected
+    )
+    payload = ("kind=" + kind + "\n" + "\n".join(lines)).encode("utf-8")
+    return hashlib.sha256(_d.CONFIG_DIGEST_DOMAIN + payload).hexdigest()
+
+
+def test_a_field_value_cannot_impersonate_an_adjacent_field():
+    """The injectivity hazard one level up, which the collision report did not name.
+
+    The payload was newline-joined `key=value` lines, so a value containing a
+    newline could be read as a separate field. The case below uses the operation's
+    TYPE attribute rather than its path, because the old serializer sorted whole
+    lines: the type sorts before every `field:` line, so text smuggled into it lands
+    exactly where the impersonated line would have gone. A newline in the path
+    sorts after, and therefore never collided.
+
+    A character reference is required — a literal newline in an attribute is
+    normalised to a space by the XML parser, while `&#10;` is not.
+    """
+    smuggled = ('<Operation customOperationType="GET&#10;field:followRedirects=true">'
+                '<field id="path" value="/x"/></Operation>')
+    honest = ('<Operation customOperationType="GET">'
+              '<field id="path" value="/x"/>'
+              '<field id="followRedirects" value="true"/></Operation>')
+
+    # The case must be a REAL regression case: it collided before the fix.
+    assert _pre_fix_payload_digest(smuggled) == _pre_fix_payload_digest(honest), (
+        "this case does not collide under the pre-fix serializer, so it cannot "
+        "detect the defect being reintroduced — pick a case that does"
+    )
+    # ...and does not collide now.
     assert component_config_digest_v1(smuggled, "operation") != component_config_digest_v1(honest, "operation")
