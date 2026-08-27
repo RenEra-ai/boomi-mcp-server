@@ -125,3 +125,52 @@ def test_the_registry_layer_loads_without_the_authoring_stack():
         "importing the replay registry pulled in the authoring stack: {0}. Move the "
         "offending import inside the function that needs it.".format(leaked)
     )
+
+
+def test_every_registered_replay_code_has_a_raiser():
+    """A published code nothing can produce is a promise the system cannot keep.
+
+    This repository already enforces the property for compiler diagnostics. The
+    reasoning does not depend on the code being a compiler diagnostic: a caller
+    that branches on a code which is never raised has written dead error handling,
+    and one reading the taxonomy as documentation is told about a condition that
+    cannot occur.
+
+    The universe is derived from the taxonomy itself, so a code added to the family
+    later is covered without editing this test.
+    """
+    import pytest
+
+    from boomi_mcp.connector_replay.digests import (
+        ConfigDigestRefused,
+        RouteDigestRefused,
+        component_config_digest_v1,
+        route_digest_v1,
+    )
+    from boomi_mcp.connector_replay.registry import RegistryInvalid, _parse
+    from boomi_mcp.errors import ERROR_TAXONOMY
+
+    registered = {
+        code for code, spec in ERROR_TAXONOMY.items()
+        if code.startswith("CONNECTOR_REPLAY_")
+    }
+    assert registered, "the family is empty; this check would be vacuous"
+
+    produced: set[str] = set()
+
+    with pytest.raises(RouteDigestRefused) as route_err:
+        route_digest_v1("<C/>", "<O/>")
+    produced.add(route_err.value.code)
+
+    with pytest.raises(ConfigDigestRefused) as cfg_err:
+        component_config_digest_v1("<C/>", "not-a-kind")
+    produced.add(cfg_err.value.code)
+
+    with pytest.raises(RegistryInvalid) as reg_err:
+        _parse({"schema_version": 999})
+    produced.add(reg_err.value.code)
+
+    assert registered == produced, {
+        "registered but never raised": sorted(registered - produced),
+        "raised but not registered": sorted(produced - registered),
+    }

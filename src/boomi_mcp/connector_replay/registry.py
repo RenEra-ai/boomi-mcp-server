@@ -18,6 +18,8 @@ from functools import lru_cache
 from importlib import resources
 from typing import Any
 
+from boomi_mcp.errors import CONNECTOR_REPLAY_REGISTRY_INVALID
+
 from .models import (
     CapabilityEvidenceRecordV1,
     ConnectorVocabularyMappingV1,
@@ -36,6 +38,8 @@ _SUPPORTED_SCHEMA = 1
 
 class RegistryInvalid(Exception):
     """The packaged registry could not be read as this module understands it."""
+
+    code = CONNECTOR_REPLAY_REGISTRY_INVALID
 
 
 class ReplayRegistry:

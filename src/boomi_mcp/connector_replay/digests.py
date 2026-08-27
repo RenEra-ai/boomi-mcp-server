@@ -34,6 +34,11 @@ import xml.etree.ElementTree as ET
 from typing import Final
 from urllib.parse import urlsplit
 
+from boomi_mcp.errors import (
+    CONNECTOR_REPLAY_CONFIGURATION_DIGEST_REFUSED,
+    CONNECTOR_REPLAY_ROUTE_DIGEST_REFUSED,
+)
+
 __all__ = [
     "DigestRefused",
     "RouteDigestRefused",
@@ -69,15 +74,26 @@ _CONNECTION_FIELDS: Final[frozenset[str]] = frozenset({"url"})
 
 
 class DigestRefused(Exception):
-    """A digest could not be computed from the supplied bytes."""
+    """A digest could not be computed from the supplied bytes.
+
+    Each subclass carries the stable taxonomy code a caller reports. The code is
+    an attribute rather than something the raiser passes, so every raise site
+    reports the same code and none can invent one.
+    """
+
+    code: str = ""
 
 
 class RouteDigestRefused(DigestRefused):
     """The route could not be determined."""
 
+    code = CONNECTOR_REPLAY_ROUTE_DIGEST_REFUSED
+
 
 class ConfigDigestRefused(DigestRefused):
     """The component configuration could not be projected."""
+
+    code = CONNECTOR_REPLAY_CONFIGURATION_DIGEST_REFUSED
 
 
 def _localname(tag: str) -> str:

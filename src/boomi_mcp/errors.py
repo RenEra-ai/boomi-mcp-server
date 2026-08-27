@@ -503,6 +503,21 @@ UPDATE_PRESERVATION_FETCH_FAILED = "UPDATE_PRESERVATION_FETCH_FAILED"
 #: HIGH-stakes one (a write may have landed) was not.
 UPDATE_PRESERVATION_PUSH_FAILED = "UPDATE_PRESERVATION_PUSH_FAILED"
 
+#: #155: the connector-replay evidence registry. Every code in this family reports
+#: a REFUSAL to draw a conclusion, never a failure to perform work — which is why
+#: none of them is retryable. Retrying a refused digest yields the same refusal, and
+#: a caller that retried past one would be treating "I cannot tell" as "not yet".
+CONNECTOR_REPLAY_REGISTRY_INVALID = "CONNECTOR_REPLAY_REGISTRY_INVALID"
+CONNECTOR_REPLAY_ROUTE_DIGEST_REFUSED = "CONNECTOR_REPLAY_ROUTE_DIGEST_REFUSED"
+CONNECTOR_REPLAY_CONFIGURATION_DIGEST_REFUSED = (
+    "CONNECTOR_REPLAY_CONFIGURATION_DIGEST_REFUSED"
+)
+#: The contract-reference code is deliberately NOT registered here. Its grammar and
+#: its only raiser belong to the slice that introduces authored contract references;
+#: registering it now would leave a published code that nothing can produce, which
+#: this repository already treats as a defect for compiler diagnostics and which is
+#: no better outside them. It lands with its raiser.
+
 
 @dataclass(frozen=True)
 class ErrorCodeSpec:
@@ -518,6 +533,36 @@ class ErrorCodeSpec:
 ERROR_TAXONOMY: Dict[str, ErrorCodeSpec] = {
     spec.code: spec
     for spec in (
+        ErrorCodeSpec(
+            code=CONNECTOR_REPLAY_REGISTRY_INVALID,
+            category="connector_replay",
+            retryable=False,
+            summary=(
+                "The packaged replay-evidence registry could not be read as this "
+                "build understands it; no replay decision may be made from it."
+            ),
+            owner="#155",
+        ),
+        ErrorCodeSpec(
+            code=CONNECTOR_REPLAY_ROUTE_DIGEST_REFUSED,
+            category="connector_replay",
+            retryable=False,
+            summary=(
+                "The route a connector call takes could not be derived from the "
+                "supplied connection and operation."
+            ),
+            owner="#155",
+        ),
+        ErrorCodeSpec(
+            code=CONNECTOR_REPLAY_CONFIGURATION_DIGEST_REFUSED,
+            category="connector_replay",
+            retryable=False,
+            summary=(
+                "A component's routing configuration could not be projected into a "
+                "stable digest."
+            ),
+            owner="#155",
+        ),
         ErrorCodeSpec(
             code=ENVIRONMENT_ACCOUNT_ATOM_ATTACHMENT_UNSUPPORTED,
             category="deployment",
