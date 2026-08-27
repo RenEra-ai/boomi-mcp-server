@@ -329,3 +329,37 @@ def test_a_field_value_cannot_impersonate_an_adjacent_field():
     )
     # ...and does not collide now.
     assert component_config_digest_v1(smuggled, "operation") != component_config_digest_v1(honest, "operation")
+
+
+def test_child_order_and_namespace_reach_the_config_digest():
+    """Sorted JSON over local names discarded both, and both are significant.
+
+    Flattening a component into `key=value` pairs and hashing sorted JSON threw
+    away child ORDER and every NAMESPACE — so a reordered component, or one whose
+    fields came from a namespace this projection has never seen, digested
+    identically to the original. Matching on local name alone treats two elements
+    from different namespaces as the same element.
+    """
+    ordered = ('<Operation><field id="path" value="/x"/>'
+               '<field id="followRedirects" value="true"/></Operation>')
+    reordered = ('<Operation><field id="followRedirects" value="true"/>'
+                 '<field id="path" value="/x"/></Operation>')
+    assert component_config_digest_v1(ordered, "operation") != \
+        component_config_digest_v1(reordered, "operation")
+
+    namespaced = '<Operation xmlns:o="urn:other"><o:field id="path" value="/x"/></Operation>'
+    plain = '<Operation><field id="path" value="/x"/></Operation>'
+    assert component_config_digest_v1(namespaced, "operation") != \
+        component_config_digest_v1(plain, "operation")
+
+
+def test_canonicalisation_ignores_what_is_insignificant():
+    """The control: not every textual difference is a different component.
+
+    A digest that changed on insignificant whitespace would make every capture
+    unmatchable, which fails in the opposite direction to the one above.
+    """
+    compact = '<Operation><field id="path" value="/x"/></Operation>'
+    spaced = '<Operation>\n  <field id="path" value="/x"/>\n</Operation>'
+    assert component_config_digest_v1(compact, "operation") == \
+        component_config_digest_v1(spaced, "operation")

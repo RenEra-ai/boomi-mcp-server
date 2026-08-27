@@ -1,54 +1,54 @@
 {
   "_purpose": "Host-computed digests, compared against the same computation inside a built image. Equality is the parity claim: importlib.resources finding the registry is necessary but not sufficient \u2014 the digests must also agree, or the image computes different identities from the same bytes.",
-  "connection_config_digest": "ComponentConfigDigestV1:6ca4cb87d880c96668876041e63bfbb0d8004e55f79b93c8222ff2da783af926",
+  "connection_config_digest": "ComponentConfigDigestV1:2ec6d62049f144df14a7b50227478e1081a0befcfab89126be45f545f73c5f21",
   "operations": [
     {
-      "config_digest": "ComponentConfigDigestV1:72ef001293effaa00fc3911ef7ac8dc5ef5105c8145c627447477b641eb8547e",
+      "config_digest": "ComponentConfigDigestV1:1fb64458e298dbfbd86907ff93c2b436cd7a5a22f5a6886c34100b0ad5d7787d",
       "route_digest": "RouteDigestV1:b637e10a39c167bbe3e98c15b1007ac5e8958eccbc17bbd8ba0d9f84b1789855",
       "scenario": "cap155-e2-delete"
     },
     {
-      "config_digest": "ComponentConfigDigestV1:2b8052df1d3e0df39f3427a0cc68d524979d8af2af7afcc19c6fc71934466774",
+      "config_digest": "ComponentConfigDigestV1:25a1cc0be7b6ef1237282b9101a675a1d7cb723da43f6540eebe57dfc22d0bdf",
       "route_digest": "RouteDigestV1:cbcf2b9ea03deb8375c74b5f12f17c2b2b01cd04e23d297ad94db5029b4b951b",
       "scenario": "cap155-e2-head"
     },
     {
-      "config_digest": "ComponentConfigDigestV1:dccf710c7b825f04245d8f2272d036daa14da9ff08657af2c5ed4e348aaeb1c5",
+      "config_digest": "ComponentConfigDigestV1:ee7be8928b449993e1e1e13b39faf4467dd176231483475f362d83ff43409232",
       "route_digest": "RouteDigestV1:cbcf2b9ea03deb8375c74b5f12f17c2b2b01cd04e23d297ad94db5029b4b951b",
       "scenario": "cap155-e2-options"
     },
     {
-      "config_digest": "ComponentConfigDigestV1:092df63027657966d148e9fc397d75d08dcd66b60d4d0e6ed760e3b74b2a338a",
+      "config_digest": "ComponentConfigDigestV1:94c62673ee961eca67e64d08e3d061a17405d9f06aae2b228a5a1f0bbf7d8179",
       "route_digest": "RouteDigestV1:8ea339abf8f6001dbd1b7dff170ce01b85ae7226af02b7c022ec81f89d0bf17e",
       "scenario": "cap155-e2-post"
     },
     {
-      "config_digest": "ComponentConfigDigestV1:574c6624f0b72024651c64635e1fc8e0a7d482790c42add94d995e900d4e41b4",
+      "config_digest": "ComponentConfigDigestV1:4ba9ad5982303b705444703e607da94777e63337a7f826d3335ace24fecbc74e",
       "route_digest": "RouteDigestV1:96c51df034972c2faa18e3f91b4d472e22d3503077df0755729b81710de8e8a6",
       "scenario": "cap155-e2-put"
     },
     {
-      "config_digest": "ComponentConfigDigestV1:48464741314edcfc500a3a3b2ae91314a17a036f9a029bc2be9a4e71a597d147",
+      "config_digest": "ComponentConfigDigestV1:d8ad7be2112ff341592fb2dd3640a287e0f5836e27083090660c481e43c2e60f",
       "route_digest": "RouteDigestV1:cbcf2b9ea03deb8375c74b5f12f17c2b2b01cd04e23d297ad94db5029b4b951b",
       "scenario": "cap155-e2-trace"
     },
     {
-      "config_digest": "ComponentConfigDigestV1:e6140eccb6afe2793ed49a6874ba70b3681cfb8850d1f9fc34ca7c44fab7457a",
+      "config_digest": "ComponentConfigDigestV1:dc1f3717984e03398fe7635bb6a5f0154ae0a8b3afa471314d0aef1f9f38db58",
       "route_digest": "RouteDigestV1:4173d72a2593e98516a320441927f9cb5e4bdc11225f884b15df660e185b7c19",
       "scenario": "cap155-e4-head-status"
     },
     {
-      "config_digest": "ComponentConfigDigestV1:837c02fd7e3685439d9517d8c8d3a62068715dcdd0d85b5cfcab9ed2900b8afa",
+      "config_digest": "ComponentConfigDigestV1:8dca0035e045dd772afe7656a94a2c9aade61c8230c879cb32fed99e52819cb6",
       "route_digest": "RouteDigestV1:88168073af2f0cf6db5ed3b28d3dd114d57173d22141cd9d06a93ec2c25455de",
       "scenario": "cap155-e4-negative-control"
     },
     {
-      "config_digest": "ComponentConfigDigestV1:d9443d9285025695318ad1cbf9b98d6a9937c8ddf217f915cfb93788b634f512",
+      "config_digest": "ComponentConfigDigestV1:eeedcab780fe129fcc6de61d00148c72d44ac3a59321e255121431e0018741c9",
       "route_digest": "RouteDigestV1:836824339bc735375dd79f3cffb92811542e3320071e3e906554e74d42b17221",
       "scenario": "cap155-e4-options-status"
     },
     {
-      "config_digest": "ComponentConfigDigestV1:5a64707f083b091dd1484583d12155b8bd9b85b38ef1469fe61f2171cda1cbfe",
+      "config_digest": "ComponentConfigDigestV1:8e1f825bb1bff600dfce818c82f3b05ae891a233bb85002cf80f722f6329b2d4",
       "route_digest": "RouteDigestV1:de645712420baaca85632a37b403dec1219a2abfa157111a1b90ff0ecea4a25f",
       "scenario": "cap155-e4-trace-status"
     }

@@ -426,47 +426,58 @@ def _refuse_unknown_fields(root: ET.Element, spec: dict, kind: str) -> None:
         )
 
 
-def _projected_operation(root: ET.Element) -> list[str]:
-    lines: list[tuple[str, object]] = []
-    for attr in _OPERATION_ATTRS:
-        # The attribute may sit on the root or on a nested config element; search
-        # rather than assume a depth, but take it only once.
-        seen = [el.get(attr) for el in root.iter() if el.get(attr) is not None]
-        if len(set(seen)) > 1:
+def _qname(el: ET.Element) -> tuple[str, str]:
+    """(namespace URI, local name) — the identity XML actually assigns a name.
+
+    Matching on local name alone treats two elements from different namespaces as
+    the same element, which is how an unknown element from a namespace this
+    projection has never seen would be read as a known one.
+    """
+    tag = el.tag
+    if tag.startswith("{"):
+        uri, _, local = tag[1:].partition("}")
+        return uri, local
+    return "", tag
+
+
+def _project_tree(root: ET.Element, spec: dict, kind: str) -> ET.Element:
+    """Build a NEW tree holding only what the projection names.
+
+    Structural rather than value-scraping. The previous form flattened the
+    component into `key=value` pairs and hashed sorted JSON, which discarded child
+    ORDER and every namespace — so a reordered component, or one whose fields came
+    from a different namespace, digested identically to the original.
+
+    Comments and processing instructions are dropped structurally rather than
+    stripped textually; whitespace-only text is dropped, real text preserved.
+    """
+    out = ET.Element("projection", {"kind": kind})
+    for attr in spec.get("attributes", ()):
+        seen = {el.get(attr) for el in root.iter() if el.get(attr) is not None}
+        if len(seen) > 1:
             raise ConfigDigestRefused(
-                f"attribute {attr!r} carries conflicting values {sorted(set(seen))!r}"
-            )
-        lines.append((attr, seen[0] if seen else ""))
-    for fid, value in sorted(_field_values(root, _OPERATION_FIELDS).items()):
-        lines.append(("field:" + fid, value))
+                f"attribute {attr!r} carries conflicting values {sorted(seen)!r}")
+        node = ET.SubElement(out, "attribute", {"name": attr})
+        node.text = next(iter(seen)) if seen else ""
+
+    included = set(spec.get("value_fields", ())) | set(spec.get("property_fields", ()))
     for el in root.iter():
-        if _localname(el.tag) != "field":
+        uri, local = _qname(el)
+        if local != "field":
             continue
         fid = el.get("id")
-        if fid not in _OPERATION_PROPERTY_FIELDS:
+        if fid not in included:
             continue
-        # KEYS only. A static header's value is a classic place for an API key,
-        # and this digest is published.
-        #
-        # The attribute is `key` on a `<properties>` element — the shape the
-        # component builder emits, which its own docstring records as verified
-        # against two live components. Two earlier versions of this read the wrong
-        # thing: first an element tag no component carries, then a `name`
-        # attribute that does not exist on this element. Both produced an empty
-        # list for every real component, so populated parameters and headers
-        # contributed nothing to the digest while the code looked correct.
-        names = sorted(
-            child.get("key", "")
-            for child in el.iter()
-            if _localname(child.tag) == "properties" and child.get("key") is not None
-        )
-        lines.append((fid + ".keys", names))
-    return sorted(lines)
-
-
-def _projected_connection(root: ET.Element) -> list[tuple[str, object]]:
-    fields = _field_values(root, _CONNECTION_FIELDS)
-    return [("field:" + fid, fields.get(fid, "")) for fid in sorted(_CONNECTION_FIELDS)]
+        node = ET.SubElement(out, "field", {"ns": uri, "id": fid})
+        if fid in set(spec.get("value_fields", ())):
+            node.text = el.get("value", "")
+        else:
+            # A property container: KEYS only, in document order. A static header's
+            # value is a classic place for an API key, and this digest is published.
+            for child in el.iter():
+                if _qname(child)[1] == "properties" and child.get("key") is not None:
+                    ET.SubElement(node, "key", {"name": child.get("key")})
+    return out
 
 
 def component_config_digest_v1(component_xml: str, kind: str) -> str:
@@ -482,8 +493,18 @@ def component_config_digest_v1(component_xml: str, kind: str) -> str:
             f"kind must be 'operation' or 'connection', not {kind!r}"
         )
     root = _parse(component_xml, ConfigDigestRefused, kind)
-    _refuse_unknown_fields(root, _projection_spec(kind), kind)
-    lines = _projected_operation(root) if kind == "operation" else _projected_connection(root)
+    spec = _projection_spec(kind)
+    _refuse_unknown_fields(root, spec, kind)
+    projected = _project_tree(root, spec, kind)
+    # The SPECIFIED canonicalization, with its options pinned. Two components that
+    # differ only in prefix spelling or in insignificant whitespace must digest the
+    # same; two that differ in child order or namespace must not.
+    canonical = ET.canonicalize(
+        ET.tostring(projected, encoding="unicode"),
+        with_comments=False,
+        rewrite_prefixes=True,
+        strip_text=False,
+    )
     return "ComponentConfigDigestV1:" + hashlib.sha256(
-        CONFIG_DIGEST_DOMAIN + _canonical({"kind": kind, "fields": lines})
+        CONFIG_DIGEST_DOMAIN + canonical.encode("utf-8")
     ).hexdigest()
