@@ -43,6 +43,8 @@ from __future__ import annotations
 
 import json
 import re
+
+from boomi_mcp.connector_replay.ids import BOOMI_COMPONENT_ID_RE
 from typing import Any, Dict, List, Optional, Tuple
 
 from pydantic import ValidationError
@@ -185,9 +187,10 @@ _SUPPORTED_TRANSFORM_KINDS = {"field_mapping", "mapping", "direct"}
 # arbitrary caller content and are never echoed in messages.
 _KNOWN_AUTH_MODES = {"basic", "bearer_token", "oauth2_client_credentials"}
 
-_UUID_RE = re.compile(
-    r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
-)
+# The Boomi component-id language, owned by `connector_replay.ids`. Previously
+# spelled out here AND in the connector builder — same language, two spellings,
+# each free to drift.
+_UUID_RE = BOOMI_COMPONENT_ID_RE
 
 _NON_PREFIX_RE = re.compile(r"[^A-Za-z0-9]+")
 

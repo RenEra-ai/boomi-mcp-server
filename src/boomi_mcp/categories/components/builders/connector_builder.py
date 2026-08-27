@@ -16,6 +16,7 @@ so creation uses raw Serializer POST (see connectors.py _create_component_raw).
 import re
 from typing import Any, Dict, Optional
 
+from boomi_mcp.connector_replay.ids import BOOMI_COMPONENT_ID_RE
 from boomi_mcp.categories.components.builders._preservation_policy import (
     OwnedPath,
     PreservationPolicy,
@@ -1961,10 +1962,12 @@ class RestClientConnectionBuilder:
     # form, case-insensitive). Codex round-3 P2 #2: enforce this shape so
     # a caller accidentally pasting PEM/SSH-key content can't sneak the
     # raw key material into emitted XML.
-    _BOOMI_COMPONENT_ID_RE = re.compile(
-        r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
-        re.IGNORECASE,
-    )
+    # Imported, never re-spelled. This language was written out by hand here and
+    # again in the migration importer, in two different spellings of the same
+    # thing; `connector_replay.ids` now owns it and both sites read it from
+    # there. The import points INTO this stack and never back out — that module
+    # deliberately depends on nothing in `boomi_mcp`.
+    _BOOMI_COMPONENT_ID_RE = BOOMI_COMPONENT_ID_RE
     FORBIDDEN_SECRET_FIELDS = DatabaseConnectorBuilder.FORBIDDEN_SECRET_FIELDS
 
     @classmethod
