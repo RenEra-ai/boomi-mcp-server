@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
+from _connector_replay_factories import capture_reference, evidence_row
 from boomi_mcp.connector_replay.models import (
     ActionSourceV1,
     CapabilityEvidenceRecordV1,
@@ -42,57 +43,39 @@ def _real_connector_types() -> set[str]:
 
 
 def test_rows_are_frozen_and_closed():
-    row = CapabilityEvidenceRecordV1(
-        family="rest", action="GET", side_effect=SideEffectV1.READ,
-        retry_safety=RetrySafetyV1.IDEMPOTENT, capture_digest="a" * 64,
-        execution_ids=(_a_real_execution_id(),),
-    )
+    row = evidence_row(execution_ids=(_a_real_execution_id(),))
     with pytest.raises(ValidationError):
         row.family = "other"
     with pytest.raises(ValidationError):
-        CapabilityEvidenceRecordV1(
-            family="rest", action="GET", side_effect=SideEffectV1.READ,
-            retry_safety=RetrySafetyV1.IDEMPOTENT, capture_digest="a" * 64,
-            execution_ids=(_a_real_execution_id(),), surprise="x",
-        )
+        evidence_row(execution_ids=(_a_real_execution_id(),), surprise="x")
 
 
 def test_the_platforms_published_example_cannot_be_cited_as_evidence():
     """The undated documentation example is exactly what a fixture author pastes."""
     with pytest.raises(ValidationError) as err:
-        CapabilityEvidenceRecordV1(
-            family="rest", action="GET", side_effect=SideEffectV1.READ,
-            retry_safety=RetrySafetyV1.IDEMPOTENT, capture_digest="a" * 64,
-            execution_ids=("execution-110b23f4-567a-8d90-1234-56789e0b123d",),
-        )
+        evidence_row(execution_ids=("execution-110b23f4-567a-8d90-1234-56789e0b123d",))
     assert "execution ids" in str(err.value)
 
 
 def test_a_row_cannot_cite_the_same_execution_twice():
     eid = _a_real_execution_id()
     with pytest.raises(ValidationError):
-        CapabilityEvidenceRecordV1(
-            family="rest", action="GET", side_effect=SideEffectV1.READ,
-            retry_safety=RetrySafetyV1.IDEMPOTENT, capture_digest="a" * 64,
-            execution_ids=(eid, eid),
-        )
+        evidence_row(execution_ids=(eid, eid))
 
 
 def test_conditionally_idempotent_must_name_its_operation():
     with pytest.raises(ValidationError) as err:
-        CapabilityEvidenceRecordV1(
-            family="rest", action="PATCH", side_effect=SideEffectV1.WRITE,
-            retry_safety=RetrySafetyV1.CONDITIONALLY_IDEMPOTENT,
-            capture_digest="a" * 64, execution_ids=(_a_real_execution_id(),),
-        )
+        evidence_row(action="PATCH", side_effect=SideEffectV1.WRITE,
+                     retry_safety=RetrySafetyV1.CONDITIONALLY_IDEMPOTENT,
+                     capture=_converged(), execution_ids=(_a_real_execution_id(),))
     assert "not transferable" in str(err.value)
 
 
 def test_conditionally_idempotent_is_accepted_when_it_names_one():
-    row = CapabilityEvidenceRecordV1(
-        family="rest", action="PATCH", side_effect=SideEffectV1.WRITE,
-        retry_safety=RetrySafetyV1.CONDITIONALLY_IDEMPOTENT,
-        capture_digest="a" * 64, execution_ids=(_a_real_execution_id(),),
+    row = evidence_row(
+        action="PATCH", side_effect=SideEffectV1.WRITE,
+        retry_safety=RetrySafetyV1.CONDITIONALLY_IDEMPOTENT, capture=_converged(),
+        execution_ids=(_a_real_execution_id(),),
         operation_component_id="c4016c66-1234-4abc-9def-0123456789ab",
     )
     assert row.retry_safety is RetrySafetyV1.CONDITIONALLY_IDEMPOTENT
@@ -100,11 +83,8 @@ def test_conditionally_idempotent_is_accepted_when_it_names_one():
 
 def test_unknown_side_effect_cannot_carry_a_verdict():
     with pytest.raises(ValidationError):
-        CapabilityEvidenceRecordV1(
-            family="rest", action="TRACE", side_effect=SideEffectV1.UNKNOWN,
-            retry_safety=RetrySafetyV1.IDEMPOTENT, capture_digest="a" * 64,
-            execution_ids=(_a_real_execution_id(),),
-        )
+        evidence_row(action="TRACE", side_effect=SideEffectV1.UNKNOWN,
+                     retry_safety=RetrySafetyV1.IDEMPOTENT)
 
 
 def test_the_execution_sentinels_are_present_in_real_data_and_are_refused():
@@ -234,3 +214,20 @@ def test_a_state_claim_requires_an_endpoint_readback():
     assert ClosedCaptureObservationsV1(
         effect=EffectObservationV1.READ_ONLY,
         sources=(EvidenceSourceV1.EXECUTION_RECORD,), **kw)
+
+
+def _converged():
+    """A capture whose replay WAS exercised and converged.
+
+    A conditional verdict needs one: the model now requires the verdict to be
+    supported by the capture's replay observation, and `not_exercised` supports
+    nothing affirmative.
+    """
+    from boomi_mcp.connector_replay.models import (
+        EffectObservationV1, EvidenceSourceV1, ReplayObservationV1)
+
+    return capture_reference(
+        replay=ReplayObservationV1.SAME_EFFECT,
+        effect=EffectObservationV1.STATE_CHANGED,
+        sources=(EvidenceSourceV1.ENDPOINT_READBACK, EvidenceSourceV1.EXECUTION_RECORD),
+    )

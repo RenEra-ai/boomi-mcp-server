@@ -204,7 +204,8 @@ def test_the_real_archive_still_verifies_and_classifies():
                          ("cap155-e4-trace-status", "TRACE")]:
         verify_archive(_ROOT, _C / name)
         summary = summarize(_C / name, action)
-        assert classify(summary, action, safe) == (SideEffectV1.READ, RetrySafetyV1.IDEMPOTENT)
+        # READ is observed; replay safety is not, because no replay was exercised.
+        assert classify(summary, action, safe) == (SideEffectV1.READ, RetrySafetyV1.UNVERIFIED)
     verify_archive(_ROOT, _C / "cap155-e4-negative-control")
     control = summarize(_C / "cap155-e4-negative-control", "DELETE")
     assert classify(control, "DELETE", safe) == (SideEffectV1.UNKNOWN, RetrySafetyV1.UNVERIFIED)
@@ -225,8 +226,9 @@ def test_a_no_op_write_is_not_an_idempotent_read():
         for r in summary.runs)})
 
     assert classify(unchanged, "PATCH", safe) == (SideEffectV1.UNKNOWN, RetrySafetyV1.UNVERIFIED)
-    # The control: a genuinely safe verb must still resolve, or this is a denial.
-    assert classify(unchanged, "HEAD", safe) == (SideEffectV1.READ, RetrySafetyV1.IDEMPOTENT)
+    # The control: a genuinely safe verb must still be recognised AS A READ, or the
+    # fix is a blanket denial rather than a distinction.
+    assert classify(unchanged, "HEAD", safe) == (SideEffectV1.READ, RetrySafetyV1.UNVERIFIED)
     # And with no verb at all, nothing may be concluded.
     assert classify(unchanged) == (SideEffectV1.UNKNOWN, RetrySafetyV1.UNVERIFIED)
 

@@ -193,6 +193,18 @@ class CapabilityEvidenceRecordV1(ReplayRegistryModel):
     action: str = Field(min_length=1)
     side_effect: SideEffectV1
     retry_safety: RetrySafetyV1
+    #: What the capture OBSERVED about consuming and producing documents (A9).
+    accepts_input: "InputObservationV1"
+    produces_output: "OutputObservationV1"
+    #: The capture this row rests on, with its closed observations. REQUIRED.
+    #:
+    #: Without it the row carried a declared `retry_safety` beside a digest and
+    #: some execution ids, and nothing connected the verdict to anything observed —
+    #: a fabricated row with a plausible digest and one grammar-valid execution id
+    #: loaded and returned `idempotent`. A verdict that does not have to agree with
+    #: an observation is not evidence; it is an assertion with provenance-shaped
+    #: decoration.
+    capture: "CaptureReferenceV1"
     #: sha256 over the raw captured record bytes, in manifest order.
     capture_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
     #: The executions this row rests on. At least one, and each a real execution id
@@ -225,6 +237,50 @@ class CapabilityEvidenceRecordV1(ReplayRegistryModel):
         if value is not None and not is_evidence_component_id(value):
             raise ValueError(f"not a Boomi component id: {value!r}")
         return value
+
+    @model_validator(mode="after")
+    def _the_verdict_must_follow_the_observation(self) -> "CapabilityEvidenceRecordV1":
+        """The declared verdict must be one the capture's replay observation supports.
+
+        This is the binding that makes a row evidence. The mapping is deliberately
+        narrow — each verdict names the observations that can produce it, and
+        anything else refuses:
+
+        * a replay never exercised supports no affirmative verdict at all;
+        * a replay that produced the same effect or the same result supports a
+          conditional verdict, never an unconditional one;
+        * a replay that duplicated the effect supports only `non_idempotent`.
+        """
+        replay = self.capture.summary.replay
+        allowed: dict[ReplayObservationV1, set[RetrySafetyV1]] = {
+            ReplayObservationV1.NOT_EXERCISED: {RetrySafetyV1.UNVERIFIED},
+            ReplayObservationV1.SAME_EFFECT: {
+                RetrySafetyV1.UNVERIFIED, RetrySafetyV1.CONDITIONALLY_IDEMPOTENT,
+                RetrySafetyV1.IDEMPOTENT},
+            ReplayObservationV1.SAME_RESULT: {
+                RetrySafetyV1.UNVERIFIED, RetrySafetyV1.CONDITIONALLY_IDEMPOTENT,
+                RetrySafetyV1.IDEMPOTENT},
+            ReplayObservationV1.CONFLICT_WITHOUT_SECOND_EFFECT: {
+                RetrySafetyV1.UNVERIFIED, RetrySafetyV1.CONDITIONALLY_IDEMPOTENT},
+            ReplayObservationV1.DUPLICATE_EFFECT: {
+                RetrySafetyV1.UNVERIFIED, RetrySafetyV1.NON_IDEMPOTENT},
+        }
+        if self.retry_safety not in allowed[replay]:
+            raise ValueError(
+                f"retry_safety {self.retry_safety.value!r} is not supported by the "
+                f"capture's replay observation {replay.value!r}; a verdict must "
+                "follow what was observed, not accompany it"
+            )
+        # An unconditional verdict additionally requires the observation to be
+        # action-wide. Convergence seen on ONE operation says nothing about the
+        # next one.
+        if (self.retry_safety is RetrySafetyV1.IDEMPOTENT
+                and self.capture.summary.scope is not EvidenceScopeV1.ACTION_SEMANTICS):
+            raise ValueError(
+                "an unconditional idempotent verdict needs action-wide evidence; "
+                f"this capture's scope is {self.capture.summary.scope.value!r}"
+            )
+        return self
 
     @model_validator(mode="after")
     def _a_verified_write_needs_a_condition(self) -> "CapabilityEvidenceRecordV1":

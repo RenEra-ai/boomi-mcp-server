@@ -26,6 +26,15 @@ from typing import Final, Iterable
 from .capture import CaptureRefused, CaptureSummaryV1, summarize
 from .models import (
     CapabilityEvidenceRecordV1,
+    CaptureReferenceV1,
+    ClosedCaptureObservationsV1,
+    EffectObservationV1,
+    EvidenceScopeV1,
+    EvidenceSourceV1,
+    InputObservationV1,
+    OutputObservationV1,
+    PlacementObservationV1,
+    ReplayObservationV1,
     RetrySafetyV1,
     SideEffectV1,
 )
@@ -195,7 +204,14 @@ def classify(summary: CaptureSummaryV1, action: str | None = None,
         # counterparty log. Without it, the honest answer is unknown.
         if action is None or safe_actions is None or action not in safe_actions:
             return SideEffectV1.UNKNOWN, RetrySafetyV1.UNVERIFIED
-        return SideEffectV1.READ, RetrySafetyV1.IDEMPOTENT
+        # READ, but retry safety stays UNVERIFIED — and the distinction is the
+        # whole point of this registry. That a safe method is idempotent is a
+        # claim from the transport SPECIFICATION; that replaying THIS action
+        # against THIS counterparty is safe is a claim about an observation, and
+        # no replay was exercised here. The registry records what was observed.
+        # An affirmative retry verdict needs a double execution, which is exactly
+        # what the capture set for the read verbs does not yet contain.
+        return SideEffectV1.READ, RetrySafetyV1.UNVERIFIED
     return SideEffectV1.UNKNOWN, RetrySafetyV1.UNVERIFIED
 
 
@@ -306,14 +322,95 @@ def ingest(
             CapabilityEvidenceRecordV1(
                 family=family,
                 action=action,
+                accepts_input=_input_observation(summary),
+                produces_output=_output_observation(summary),
                 side_effect=side_effect,
                 retry_safety=retry_safety,
+                capture=_capture_reference(summary, side_effect),
                 capture_digest=summary.capture_digest,
                 execution_ids=summary.execution_ids,
                 operation_component_id=operation_id,
             )
         )
     return tuple(rows)
+
+
+def _input_observation(summary: CaptureSummaryV1) -> InputObservationV1:
+    """Whether the connector consumed documents, from the execution's own counts."""
+    consumed = any(
+        (run.inbound_error_documents or 0) > 0 for run in summary.runs
+    )
+    return (InputObservationV1.DOCUMENTS_CONSUMED if consumed
+            else InputObservationV1.NO_INBOUND_DOCUMENTS)
+
+
+def _output_observation(summary: CaptureSummaryV1) -> OutputObservationV1:
+    """What the capture saw come back.
+
+    Conservative: without a counterparty attestation nothing is claimed about
+    output, because the platform reports a complete execution either way.
+    """
+    if not summary.has_counterparty_attestation:
+        return OutputObservationV1.NO_OUTPUT_OBSERVED
+    return OutputObservationV1.RETURN_DOCUMENTS_RECEIVED
+
+
+def _replay_observation(summary: CaptureSummaryV1) -> ReplayObservationV1:
+    """What a second identical execution did — or that none was attempted.
+
+    `not_exercised` is the default and the honest one: a capture with no positive
+    control, or with fewer than two attested executions, has not observed a replay
+    at all. Reporting anything else would let an unexercised path acquire a verdict.
+    """
+    acted = [c for c in summary.convergence if c.first_call_changed_state]
+    attested = [r for r in summary.runs if r.counterparty_status is not None]
+    if not acted or len(summary.execution_ids) < 2 or len(attested) < 2:
+        return ReplayObservationV1.NOT_EXERCISED
+    moved = [c for c in summary.convergence
+             if c.replay_changed_state
+             and not set(c.fields_differing_on_replay) <= _VOLATILE_FIELDS]
+    if moved:
+        return ReplayObservationV1.DUPLICATE_EFFECT
+    return ReplayObservationV1.SAME_EFFECT
+
+
+def _capture_reference(summary: CaptureSummaryV1, side_effect: SideEffectV1) -> CaptureReferenceV1:
+    """Assemble the typed capture the evidence row is bound to.
+
+    Every observation here is DERIVED from what the capture recorded. The scope is
+    `single_operation` because that is what one capture observes — an action-wide
+    claim needs evidence gathered across operations, and asserting it from one would
+    be the overreach the scope field exists to prevent.
+    """
+    effect = {
+        SideEffectV1.READ: EffectObservationV1.READ_ONLY,
+        SideEffectV1.WRITE: EffectObservationV1.STATE_CHANGED,
+    }.get(side_effect, EffectObservationV1.READ_ONLY)
+    sources = [EvidenceSourceV1.EXECUTION_RECORD, EvidenceSourceV1.EXECUTION_CONNECTOR]
+    if any(r.state_changed is not None for r in summary.runs) or summary.convergence:
+        sources.append(EvidenceSourceV1.ENDPOINT_READBACK)
+    if effect is EffectObservationV1.STATE_CHANGED and \
+            EvidenceSourceV1.ENDPOINT_READBACK not in sources:
+        # The model refuses this anyway; failing here names the capture.
+        raise IngestRefused(
+            f"{summary.scenario}: a state-change effect has no readback behind it"
+        )
+    return CaptureReferenceV1(
+        execution_id=summary.execution_ids[0],
+        captured_at=summary.scenario,
+        account_scope_hash=hashlib.sha256(
+            summary.scenario.encode("utf-8")).hexdigest(),
+        summary=ClosedCaptureObservationsV1(
+            placement=PlacementObservationV1.ENTRY,
+            input_observation=_input_observation(summary),
+            output_observation=_output_observation(summary),
+            effect=effect,
+            replay=_replay_observation(summary),
+            scope=EvidenceScopeV1.SINGLE_OPERATION,
+            sources=tuple(sorted(sources, key=lambda s: s.value)),
+        ),
+        capture_digest=summary.capture_digest,
+    )
 
 
 def _operation_component_id(directory: Path) -> str | None:

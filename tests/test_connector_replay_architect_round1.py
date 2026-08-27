@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pytest
 
+from _connector_replay_factories import capture_reference, evidence_row
 from boomi_mcp.connector_replay.capture import CaptureRefused, summarize
 from boomi_mcp.connector_replay.ingest import IngestRefused, ingest
 from boomi_mcp.connector_replay.models import (
@@ -58,7 +59,13 @@ def test_truthful_labels_still_ingest():
     rows = ingest(_ROOT, [_C / "cap155-e4-head-status"], family="rest",
                   actions={"cap155-e4-head-status": "HEAD"})
     assert (rows[0].family, rows[0].action) == ("rest", "HEAD")
-    assert rows[0].retry_safety is RetrySafetyV1.IDEMPOTENT
+    assert rows[0].side_effect is SideEffectV1.READ
+    # UNVERIFIED, and that is correct: this capture never exercised a replay, so
+    # nothing observed supports an affirmative retry verdict. That a safe method is
+    # idempotent is a claim from the transport specification; this registry records
+    # what was observed.
+    assert rows[0].retry_safety is RetrySafetyV1.UNVERIFIED
+    assert rows[0].capture.summary.replay.value == "not_exercised"
 
 
 def test_an_unmapped_family_gets_no_affirmative_verdict():
@@ -68,11 +75,7 @@ def test_an_unmapped_family_gets_no_affirmative_verdict():
     connector still returned an affirmative verdict — the one answer this registry
     exists to withhold.
     """
-    row = CapabilityEvidenceRecordV1(
-        family="unmapped", action="DELETE", side_effect=SideEffectV1.READ,
-        retry_safety=RetrySafetyV1.IDEMPOTENT, capture_digest="a" * 64,
-        execution_ids=(_REAL,),
-    )
+    row = evidence_row(family="unmapped", action="DELETE")
     empty_vocabulary = ReplayRegistry((), (row,))
     assert empty_vocabulary.retry_safety("unmapped", "DELETE") is RetrySafetyV1.UNVERIFIED
 
@@ -116,18 +119,15 @@ def test_an_unrecognised_action_gets_no_verdict_even_in_a_mapped_family():
     from boomi_mcp.connector_replay.registry import load_registry
 
     vocabulary = load_registry().vocabulary
-    invented = CapabilityEvidenceRecordV1(
-        family="rest", action="BREW_COFFEE", side_effect=SideEffectV1.READ,
-        retry_safety=RetrySafetyV1.IDEMPOTENT, capture_digest="a" * 64,
-        execution_ids=(_REAL,),
-    )
+    invented = evidence_row(action="BREW_COFFEE")
     assert ReplayRegistry(vocabulary, (invented,)).retry_safety(
         "rest", "BREW_COFFEE") is RetrySafetyV1.UNVERIFIED
 
     # The control: a RECOGNISED action still resolves, or the fix is just a denial.
-    real = invented.model_copy(update={"action": "HEAD"})
+    real = invented.model_copy(update={"action": "HEAD",
+                                       "retry_safety": RetrySafetyV1.UNVERIFIED})
     assert ReplayRegistry(vocabulary, (real,)).retry_safety(
-        "rest", "HEAD") is RetrySafetyV1.IDEMPOTENT
+        "rest", "HEAD") is RetrySafetyV1.UNVERIFIED
 
 
 def test_the_banked_patch_captures_can_still_be_ingested():

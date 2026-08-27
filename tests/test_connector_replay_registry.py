@@ -261,9 +261,14 @@ def _vocab_only():
                             "recognised_actions": ["GET"], "safe_actions": ["GET"]}]}
 
 
-_A_ROW = {"family": "rest", "action": "GET", "side_effect": "read",
-          "retry_safety": "idempotent", "capture_digest": "a" * 64,
-          "execution_ids": ["execution-1957bb8f-9a89-4254-b169-9ddbf41fddf8-2026.08.26"]}
+def _a_row(**over):
+    """A row built through the shared factory, so it satisfies the verdict binding."""
+    from _connector_replay_factories import evidence_row
+
+    return evidence_row(**over).model_dump(mode="json")
+
+
+_A_ROW = _a_row()
 
 
 def test_a_typed_row_that_resolves_to_nothing_is_refused():
@@ -274,11 +279,11 @@ def test_a_typed_row_that_resolves_to_nothing_is_refused():
     the bar.
     """
     with pytest.raises(RegistryInvalid) as err:
-        _parse({**_vocab_only(), "evidence_records": [{**_A_ROW, "family": "database"}]})
+        _parse({**_vocab_only(), "evidence_records": [_a_row(family="database")]})
     assert "no vocabulary maps" in str(err.value)
 
     with pytest.raises(RegistryInvalid):
-        _parse({**_vocab_only(), "evidence_records": [{**_A_ROW, "action": "BREW"}]})
+        _parse({**_vocab_only(), "evidence_records": [_a_row(action="BREW")]})
 
 
 def test_a_resolvable_row_still_loads():

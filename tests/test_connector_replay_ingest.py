@@ -65,7 +65,13 @@ def test_a_missing_manifest_is_refused():
             verify_archive(root, root / "captures" / "x")
 
 
-def test_the_read_verbs_ingest_as_idempotent_reads():
+def test_the_read_verbs_ingest_as_reads_with_no_replay_verdict():
+    """READ is observed; replay safety is NOT, because no replay was exercised.
+
+    These captures each hold one execution. That a safe method is idempotent is a
+    claim from the transport specification, not from anything this capture saw —
+    and the registry records observations.
+    """
     rows = {r.action: r for r in ingest(
         _ROOT, [_C / n for n in _ACTIONS if n != "cap155-e4-negative-control"],
         family="rest", actions=_ACTIONS,
@@ -73,7 +79,8 @@ def test_the_read_verbs_ingest_as_idempotent_reads():
     assert set(rows) == {"HEAD", "OPTIONS", "TRACE"}
     for row in rows.values():
         assert row.side_effect is SideEffectV1.READ
-        assert row.retry_safety is RetrySafetyV1.IDEMPOTENT
+        assert row.retry_safety is RetrySafetyV1.UNVERIFIED
+        assert row.capture.summary.replay.value == "not_exercised"
         assert row.execution_ids
 
 
