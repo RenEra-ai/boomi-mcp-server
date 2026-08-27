@@ -190,6 +190,39 @@ def _first(node: Any, key: str) -> Any:
     return None
 
 
+def _start_shape_of_the_exercised_connector(
+    files: list[Path], execution_ids: frozenset[str]
+) -> bool | None:
+    """Whether the CONNECTOR UNDER TEST ran as the process entry.
+
+    Correlated, not first-match. The archived captures put a `nodata` sentinel
+    first, and that sentinel IS the start shape — so reading whichever flag came
+    first reported entry placement for a connector that runs downstream, and the
+    order differs between executions, so the answer was not even stable.
+    """
+    from .models import EXECUTION_SENTINELS
+
+    flags = set()
+    for path in files:
+        if path.suffix != ".json":
+            continue
+        try:
+            payload = _load_json(path)
+        except CaptureRefused:
+            continue
+        for record in _platform_connector_records(payload):
+            if record.get("executionId") not in execution_ids:
+                continue
+            if record.get("connectorType") in EXECUTION_SENTINELS:
+                continue
+            value = record.get("isStartShape")
+            if isinstance(value, bool):
+                flags.add(value)
+    if len(flags) == 1:
+        return next(iter(flags))
+    return None
+
+
 def _first_across(files: list[Path], key: str, want: type | tuple = object) -> Any:
     """The first value for ``key`` across the capture's JSON artifacts.
 
@@ -238,11 +271,12 @@ def _counterparty_outcome(log: Path, method_hint: str | None) -> tuple[int | Non
         if len(for_method) == 1:
             return int(for_method[0].group("status")), for_method[0].group("method")
         if len(for_method) > 1:
-            # NOT an error. A double-execution capture NECESSARILY logs the method
-            # once per execution, and refusing on multiplicity made the very
-            # evidence a replay verdict requires unusable. The count is reconciled
-            # against the number of executions by the caller; here we report the
-            # FIRST outcome and let per-run attribution place the rest.
+            # NOT an error here. A double-execution capture NECESSARILY logs the
+            # method once per execution. The COUNT is reconciled against the number
+            # of executions by the caller, and ANY mismatch — surplus as well as
+            # shortfall — drops attribution entirely: a third unrelated request of
+            # the same method would otherwise leave the first status copied onto
+            # both runs, which can turn a refused replay into an attested success.
             return int(for_method[0].group("status")), for_method[0].group("method")
         # ZERO matches. Previously this fell through, and a log holding a single
         # UNRELATED request returned that request's status — which the ingest then
@@ -269,6 +303,11 @@ def _body_of(payload: Any) -> dict[str, Any] | None:
     body = payload.get("body") if isinstance(payload, dict) else None
     return body if isinstance(body, dict) else None
 
+
+#: Statuses that VERIFY a resource is absent. Deliberately tiny: everything else
+#: non-2xx means the readback failed, which is not the same as the resource being
+#: gone, and conflating them manufactures evidence from failure.
+_ABSENCE_STATUSES: Final[frozenset[int]] = frozenset({404, 410})
 
 _ABSENT = object()
 
@@ -325,7 +364,19 @@ def _convergence(files: list[Path]) -> tuple[ConvergenceV1, ...]:
                 if a_present != b_present:
                     return True, ("<resource presence>",)
                 if not a_present and not b_present:
-                    return False, ()
+                    # ONLY a verified absence. A 404 says the resource is not
+                    # there; a 401, 429 or 500 says the readback FAILED and the
+                    # state is unknown. Treating those as "absent" made a 200
+                    # followed by two 500s read as a clean first effect and no
+                    # replay effect — an affirmative verdict built on two failed
+                    # observations.
+                    if a_status in _ABSENCE_STATUSES and b_status in _ABSENCE_STATUSES:
+                        return False, ()
+                    raise CaptureRefused(
+                        f"readbacks returned {a_status} and {b_status}; neither "
+                        "observes the resource's state, so whether the call "
+                        "changed anything is unknown"
+                    )
             keys = _differing_keys(a_body, b_body)
             return bool(keys), keys
 
@@ -513,6 +564,7 @@ def summarize(capture_dir: Path, method_hint: str | None = None) -> CaptureSumma
         counterparty_status, counterparty_method = _counterparty_outcome(logs[0], method_hint)
         logged_request_count = _counterparty_request_count(logs[0], method_hint)
 
+    execution_ids_seen: set[str] = set()
     runs: list[CaptureRunV1] = []
     for path in execution_files:
         label = _run_label(path.name, _EXECUTION_RECORD)
@@ -552,12 +604,12 @@ def summarize(capture_dir: Path, method_hint: str | None = None) -> CaptureSumma
     # many requests as there were executions. Otherwise the second execution is
     # unattested, and a replay verdict drawn from it would rest on a request nobody
     # observed. Drop the attribution rather than spread it.
-    if logs and logged_request_count < len(runs):
+    if logs and logged_request_count != len(runs):
         runs = [
             run.model_copy(update={"counterparty_status": None, "counterparty_method": None})
             for run in runs
         ]
-    elif logs and logged_request_count == len(runs) and len(runs) > 1:
+    elif logs and len(runs) > 1:
         # The counts agree, so each execution has its own observed request. Attribute
         # them IN ORDER — the log is chronological and the runs are label-sorted,
         # which is the same order the executions ran in. Copying one outcome onto
@@ -571,16 +623,16 @@ def summarize(capture_dir: Path, method_hint: str | None = None) -> CaptureSumma
                 for run, (status, method) in zip(runs, outcomes)
             ]
 
+    execution_ids = frozenset(run.execution_id for run in runs)
     return CaptureSummaryV1(
         scenario=capture_dir.name,
         runs=tuple(sorted(runs, key=lambda r: r.label)),
         capture_digest=digest.hexdigest(),
         file_count=len(files),
         convergence=_convergence(files),
-        observed_connector_types=_observed_connector_types(
-            files, frozenset(run.execution_id for run in runs)),
+        observed_connector_types=_observed_connector_types(files, execution_ids),
         observed_methods=_observed_methods(files),
         captured_at=_first_across(files, "executionTime", str),
         account_id=_first_across(files, "account", str),
-        is_start_shape=_first_across(files, "isStartShape", bool),
+        is_start_shape=_start_shape_of_the_exercised_connector(files, execution_ids),
     )

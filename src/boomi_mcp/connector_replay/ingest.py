@@ -20,6 +20,7 @@ exactly the direction that matters.
 from __future__ import annotations
 
 import hashlib
+import re
 from pathlib import Path
 from typing import Final, Iterable
 
@@ -332,7 +333,7 @@ def ingest(
         if retry_safety is RetrySafetyV1.CONDITIONALLY_IDEMPOTENT:
             # The model requires it, and rightly: convergence was observed against
             # one operation and does not transfer to another.
-            operation_id = _operation_component_id(directory)
+            operation_id = _operation_component_id(directory, action)
             if operation_id is None:
                 raise IngestRefused(
                     f"{directory.name}: convergence was observed but the operation "
@@ -353,6 +354,23 @@ def ingest(
             )
         )
     return tuple(rows)
+
+
+def _account_scope_hash(summary: CaptureSummaryV1) -> str:
+    """The account this capture was taken in, hashed. REFUSES when unknown.
+
+    Hashing the empty string produced the well-known digest of nothing, and every
+    accountless capture then carried the SAME scope — so evidence from two
+    different unknown accounts satisfied the account-consistency check that this
+    hash exists to enforce. A scope nobody established is not a scope.
+    """
+    if not summary.account_id:
+        raise IngestRefused(
+            f"{summary.scenario}: no account is recorded in the capture's "
+            "execution artifacts, so the scope its evidence belongs to is unknown "
+            "and an account-bound record cannot rest on it"
+        )
+    return hashlib.sha256(summary.account_id.encode("utf-8")).hexdigest()
 
 
 def _input_observation(summary: CaptureSummaryV1) -> InputObservationV1:
@@ -417,8 +435,17 @@ def _capture_reference(summary: CaptureSummaryV1, side_effect: SideEffectV1) -> 
     if side_effect is SideEffectV1.READ:
         effect = EffectObservationV1.READ_ONLY
     elif side_effect is SideEffectV1.WRITE:
-        effect = (EffectObservationV1.STATE_UNCHANGED_AFTER_REPLAY
-                  if summary.convergence else EffectObservationV1.STATE_CHANGED)
+        # Derived from what the replay DID, not from convergence merely existing.
+        # Labelling any write with a convergence tuple as unchanged-after-replay
+        # emitted the contradictory pair `state_unchanged_after_replay` beside
+        # `duplicate_effect` for a non-idempotent double execution.
+        replay_moved = any(
+            c.replay_changed_state
+            and not set(c.fields_differing_on_replay) <= _VOLATILE_FIELDS
+            for c in summary.convergence
+        )
+        effect = (EffectObservationV1.STATE_CHANGED if replay_moved or not summary.convergence
+                  else EffectObservationV1.STATE_UNCHANGED_AFTER_REPLAY)
     else:
         # UNKNOWN has no honest observation. Defaulting to `read_only` fabricated a
         # POSITIVE finding out of missing or failed evidence, and let the outer side
@@ -445,8 +472,7 @@ def _capture_reference(summary: CaptureSummaryV1, side_effect: SideEffectV1) -> 
         # collide — which silently defeats the account-consistency check that
         # consumes this hash.
         captured_at=summary.captured_at or summary.execution_ids[0].rsplit("-", 1)[1],
-        account_scope_hash=hashlib.sha256(
-            (summary.account_id or "").encode("utf-8")).hexdigest(),
+        account_scope_hash=_account_scope_hash(summary),
         summary=ClosedCaptureObservationsV1(
             placement=(PlacementObservationV1.ENTRY if summary.is_start_shape
                        else PlacementObservationV1.DOWNSTREAM),
@@ -461,20 +487,28 @@ def _capture_reference(summary: CaptureSummaryV1, side_effect: SideEffectV1) -> 
     )
 
 
-def _operation_component_id(directory: Path) -> str | None:
+def _operation_component_id(directory: Path, action: str | None = None) -> str | None:
     """The component id of the operation a capture exercised, from its XML."""
     import re
 
-    from .ids import is_boomi_component_id
+    from .ids import is_evidence_component_id
 
-    # By CONTENT. The double-execution captures name their components
-    # `component_op_src.xml` and `component_op_tgt.xml`, which a `*operation*` glob
-    # misses — so the operation a conditional verdict must name was unfindable.
+    # By CONTENT, and MATCHED TO THE ACTION. The double-execution captures hold two
+    # operations — a source that fetches and the target under test — and
+    # `component_op_src.xml` sorts first, so returning the first match attached the
+    # conditional verdict to the GET source rather than the PATCH target. A verdict
+    # naming the wrong operation is worse than no verdict: it authorises replaying
+    # something that was never replayed.
     for path in sorted(directory.glob("*.xml")):
-        if "customOperationType" not in path.read_text():
+        text = path.read_text()
+        if "customOperationType" not in text:
             continue
+        if action is not None:
+            found = re.findall(r'customOperationType="([^"]+)"', text)
+            if action not in found:
+                continue
         for match in re.finditer(r'componentId="([^"]+)"|\bid="([0-9a-fA-F-]{36})"', path.read_text()):
             value = match.group(1) or match.group(2)
-            if is_boomi_component_id(value):
+            if is_evidence_component_id(value):
                 return value
     return None

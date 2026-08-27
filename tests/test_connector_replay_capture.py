@@ -128,11 +128,12 @@ def test_a_repeated_method_is_attributed_per_run_not_refused():
         log = dst / "mock_access_log.txt"
         line = next(l for l in log.read_text().splitlines() if '"HEAD ' in l)
         log.write_text(log.read_text() + "\n" + line + "\n")
-        # One run, two logged requests: more observations than executions, so the
-        # first is reported and nothing is invented for a run that does not exist.
+        # One run, two logged requests. ANY count mismatch — surplus as well as
+        # shortfall — drops attribution: a surplus request of the same method could
+        # otherwise have its status copied onto a run it never belonged to.
         summary = summarize(dst, "HEAD")
         assert len(summary.runs) == 1
-        assert summary.runs[0].counterparty_status == 200
+        assert summary.runs[0].counterparty_status is None
 
 
 def test_convergence_is_derived_from_the_raw_bodies():
