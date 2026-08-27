@@ -91,6 +91,28 @@ KINDS = {
 }
 
 
+def _confirmed_removed(path: Path) -> bool:
+    """True only when the path is provably GONE — nothing weaker counts.
+
+    `Path.exists()` is not a verification under the faults this is used to check
+    for. Measured on the interpreters this repository runs: it re-raises for
+    EACCES and EIO — the very errors a failed cleanup reports — so using it
+    inside a failure handler escapes that handler without its diagnostic. And it
+    follows symlinks, so a DANGLING symlink answers False while the directory
+    entry is still there for the next run's scan to trip over.
+
+    `lstat` raising ENOENT is the only answer that means removed. A successful
+    lstat means something is still there; any other error means nobody knows.
+    """
+    try:
+        os.lstat(path)
+    except FileNotFoundError:
+        return True
+    except OSError:
+        return False
+    return False
+
+
 def _discard(durable: Path, parent_existed: bool = True) -> None:
     """Remove a refused round, and the parent only if THIS run created it.
 
@@ -880,14 +902,14 @@ def main() -> int:
         shutil.rmtree(staging, ignore_errors=True)
         print(f"archiving failed while publishing the round ({type(failure).__name__}: "
               f"{failure}).", file=sys.stderr)
-        if staging.exists():
-            print(f"  THE ARCHIVE IS IN AN UNKNOWN STATE — {staging} could not be "
-                  "removed and will be refused as unaccounted by the next run. "
-                  "Remove it before running anything else against this archive.",
-                  file=sys.stderr)
-        else:
+        if _confirmed_removed(staging):
             print("  Nothing was left in the archive; fix the cause and run the "
                   "same command again.", file=sys.stderr)
+        else:
+            print(f"  THE ARCHIVE IS IN AN UNKNOWN STATE — {staging} could not be "
+                  "confirmed removed and will be refused as unaccounted by the "
+                  "next run. Remove it before running anything else against this "
+                  "archive.", file=sys.stderr)
         return 1
 
     # A gate round's PROMPT is required evidence, and it must be the prompt the
@@ -1014,8 +1036,14 @@ def main() -> int:
         except BaseException as restore_failure:
             unresolved.append(f"index.jsonl ({restore_failure})")
         try:
-            if durable.exists():
+            if not _confirmed_removed(durable):
                 _discard(durable, parent_existed=kind_dir_existed)
+                # ...and CONFIRM it, rather than assuming the removal worked.
+                # Sibling of the publication path above, swept for the same
+                # reason: an existence test is not a verification under the
+                # faults a failure handler exists to report.
+                if not _confirmed_removed(durable):
+                    raise OSError(f"{durable} could not be confirmed removed")
                 undone.append("the round directory")
         except BaseException as restore_failure:
             unresolved.append(f"{durable} ({restore_failure})")

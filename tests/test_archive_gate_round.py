@@ -1885,3 +1885,136 @@ def test_a_publication_failure_whose_CLEANUP_also_fails_reports_unknown(tmp_path
     assert leftover, "the fixture failed to leave the debris this test is about"
     for path in leftover:
         real_rmtree(path, ignore_errors=True)
+
+
+def test_only_a_PROVEN_absence_counts_as_a_completed_cleanup(tmp_path):
+    """An existence test is not a verification under the faults it checks for.
+
+    Measured on the interpreters this repository runs: `Path.exists()` re-raises
+    for EACCES and EIO — exactly what a failed cleanup reports — so calling it
+    inside the failure handler escapes that handler without its diagnostic. And
+    it follows symlinks, so a DANGLING symlink answers False while the directory
+    entry remains for the next run's scan to trip over. Only `lstat` raising
+    ENOENT means gone.
+    """
+    module = _archiver_module()
+
+    # A dangling symlink: the case `exists()` gets backwards.
+    dangling = tmp_path / ".partial-dangling"
+    dangling.symlink_to(tmp_path / "nowhere-at-all")
+    assert dangling.exists() is False, "premise: exists() reports it absent"
+    assert module._confirmed_removed(dangling) is False, \
+        "a directory entry that is still there is not a completed cleanup"
+
+    # A path that genuinely is not there.
+    assert module._confirmed_removed(tmp_path / "never-existed") is True
+
+    # An error that is not ENOENT must not read as removed. A path under a
+    # non-searchable directory produces EACCES rather than ENOENT.
+    locked = tmp_path / "locked"
+    locked.mkdir()
+    (locked / "inside").write_text("x\n")
+    locked.chmod(0o000)
+    try:
+        verdict = module._confirmed_removed(locked / "inside")
+    finally:
+        locked.chmod(0o755)
+    assert verdict is False, "an unreadable path is unknown, not removed"
+
+
+def test_a_dangling_staging_symlink_is_reported_not_claimed_clean(tmp_path):
+    """End to end: the publication handler must not claim a cleanup it cannot prove."""
+    run, prompts = _gate_run(tmp_path)
+    first, root = _archive_gate(tmp_path, run, prompts)
+    assert first.returncode == 0, first.stderr
+
+    second = tmp_path / "cdx-gate-review.DANGLE"
+    second.mkdir()
+    for name in ("start.json", "attestation.json", "review.md"):
+        (second / name).write_text((run / name).read_text())
+
+    module = _archiver_module()
+    kind = root / "architect-reviews"
+
+    def exploding_rename(src, dst):
+        raise OSError(5, "Input/output error")
+
+    def symlink_leaving_rmtree(path, ignore_errors=False, **kw):
+        # Removes the directory but leaves a dangling entry in its place —
+        # the shape `exists()` reports as absent.
+        real_rmtree(path, ignore_errors=True)
+        Path(path).symlink_to(Path(path).parent / "gone")
+
+    real_rename, module.os.rename = module.os.rename, exploding_rename
+    real_rmtree = shutil.rmtree
+    module.shutil.rmtree = symlink_leaving_rmtree
+    argv = sys.argv
+    sys.argv = ["archive_gate_round.py", "--issue", "999", "--kind",
+                "architect-review", "--run-dir", str(second), "--logical-loop",
+                "L3", "--repo", str(tmp_path / "repo"), "--prompts", str(prompts)]
+    import io
+    import contextlib
+
+    err = io.StringIO()
+    try:
+        with contextlib.redirect_stderr(err):
+            rc = module.main()
+    finally:
+        module.os.rename = real_rename
+        module.shutil.rmtree = real_rmtree
+        sys.argv = argv
+
+    assert rc == 1, rc
+    assert "UNKNOWN STATE" in err.getvalue(), err.getvalue()
+    assert "Nothing was left" not in err.getvalue()
+    for leftover in [p for p in kind.iterdir() if p.name.startswith(".partial-")]:
+        leftover.unlink()
+
+
+def test_the_ROLLBACK_also_confirms_its_removal_rather_than_assuming_it(tmp_path):
+    """The sibling of the publication check, swept for the same reason.
+
+    Here the round IS published and the index append then fails, so the rollback
+    proper runs. If its removal silently accomplishes nothing, the command must
+    report an unknown archive state — not list the round directory among the
+    things it rolled back. Assuming a removal worked is how the earlier version
+    of the publication handler came to claim a cleanup it had not achieved.
+    """
+    run, prompts = _gate_run(tmp_path)
+    first, root = _archive_gate(tmp_path, run, prompts)
+    assert first.returncode == 0, first.stderr
+
+    second = tmp_path / "cdx-gate-review.ROLLNOOP"
+    second.mkdir()
+    for name in ("start.json", "attestation.json", "review.md"):
+        (second / name).write_text((run / name).read_text())
+
+    module = _archiver_module()
+    index = root / "index.jsonl"
+    index.chmod(0o444)                       # the append fails, after publication
+
+    real_rmtree = shutil.rmtree
+    module.shutil.rmtree = lambda path, ignore_errors=False, **kw: None
+
+    argv = sys.argv
+    sys.argv = ["archive_gate_round.py", "--issue", "999", "--kind",
+                "architect-review", "--run-dir", str(second), "--logical-loop",
+                "L3", "--repo", str(tmp_path / "repo"), "--prompts", str(prompts)]
+    import io
+    import contextlib
+
+    err = io.StringIO()
+    try:
+        with contextlib.redirect_stderr(err):
+            rc = module.main()
+    finally:
+        module.shutil.rmtree = real_rmtree
+        sys.argv = argv
+        index.chmod(0o644)
+
+    assert rc == 1, rc
+    message = err.getvalue()
+    assert "UNKNOWN STATE" in message, message
+    assert "rolled back ['the round directory']" not in message, \
+        "it listed a removal it did not achieve"
+    real_rmtree(root / "architect-reviews" / second.name, ignore_errors=True)

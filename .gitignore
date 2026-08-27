@@ -148,3 +148,7 @@ incident-*/
 # Zero-license no-op QA fixture provisioner + its account-specific state (local)
 scripts/provision_qa_noop_fixture.py
 scripts/.qa_noop_fixture_pins.json*
+
+# Stray live-account inventory dumps written by QA capture runs (never evidence:
+# the checksummed archive under docs/architecture/evidence/ is where captures go).
+*_liveness.json

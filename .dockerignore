@@ -99,3 +99,6 @@ scripts/diagnose_*
 # read back as this image's commit id. The Dockerfile also deletes it on the
 # empty-arg path; both guards exist because the failure is silent.
 **/BUILD_REVISION
+
+# Never bake a live-account inventory into an image.
+*_liveness.json
