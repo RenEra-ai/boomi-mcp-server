@@ -122,3 +122,92 @@ def test_a_round_whose_reviewed_sha_disagrees_is_not_recorded_as_completed(tmp_p
     row = [json.loads(l) for l in (root / "index.jsonl").read_text().splitlines()][1]
     assert row["status"] != "completed"
     assert row["reviewed_sha"] is None
+
+
+def _gate_run(tmp_path, prompt_bytes=b"the attested prompt\n", attest=True):
+    """A gate run directory plus the prompt directory the seam keeps separate."""
+    import hashlib
+
+    run = tmp_path / "cdx-gate-review.AAAAAA"
+    run.mkdir()
+    (run / "start.json").write_text(json.dumps({"threadId": "t-9", "socket": "/s"}) + "\n")
+    (run / "review.md").write_text("a review\n")
+    digest = hashlib.sha256(prompt_bytes).hexdigest()
+    (run / "attestation.json").write_text(json.dumps({
+        "gate": "review", "status": "completed",
+        **({"promptSha256": digest} if attest else {}),
+    }) + "\n")
+
+    prompts = tmp_path / "cdx-gate-prompts.BBBBBB"
+    prompts.mkdir()
+    (prompts / "prompt").write_bytes(prompt_bytes)
+    return run, prompts
+
+
+def _archive_gate(tmp_path, run, prompts):
+    root = tmp_path / "repo" / "docs" / "architecture" / "evidence" / "issue-999"
+    root.mkdir(parents=True, exist_ok=True)
+    index = root / "index.jsonl"
+    if not index.exists():
+        index.write_text(json.dumps({
+            "generated_at": "x", "issue": 999, "schema_version": 1, "source_tip": "abc",
+        }) + "\n")
+    args = [sys.executable, str(_SCRIPT), "--issue", "999", "--kind", "architect-review",
+            "--run-dir", str(run), "--logical-loop", "L3",
+            "--repo", str(tmp_path / "repo")]
+    if prompts is not None:
+        args += ["--prompts", str(prompts)]
+    return subprocess.run(args, capture_output=True, text=True), root
+
+
+def test_a_gate_round_with_the_attested_prompt_is_archived(tmp_path):
+    """The positive control — without it the refusals below could be vacuous."""
+    run, prompts = _gate_run(tmp_path)
+    result, root = _archive_gate(tmp_path, run, prompts)
+    assert result.returncode == 0, result.stderr
+    assert (root / "architect-reviews" / run.name / "prompts" / "prompt").is_file()
+    assert len((root / "index.jsonl").read_text().splitlines()) == 2
+
+
+def test_a_gate_round_with_no_prompt_is_REFUSED_before_anything_is_recorded(tmp_path):
+    """The prompt is required evidence, and the refusal must come FIRST.
+
+    The collector sidecars alone make the copy non-empty, so a missing or
+    mistyped prompt directory previously exited 0 and recorded an archive the
+    repository's own scanner then rejected — by which time the source run may be
+    gone and the prompt unrecoverable. The archive and the index row must not
+    exist after a refusal.
+    """
+    run, _ = _gate_run(tmp_path)
+    result, root = _archive_gate(tmp_path, run, tmp_path / "nowhere")
+    assert result.returncode == 1, result.stdout
+    assert "no prompt" in result.stderr
+    assert not (root / "architect-reviews" / run.name).exists()
+    assert len((root / "index.jsonl").read_text().splitlines()) == 1
+
+
+def test_a_gate_round_whose_prompt_is_not_THE_attested_one_is_REFUSED(tmp_path):
+    """Present-but-wrong is the more dangerous case than absent.
+
+    An archive holding some other prompt still satisfies "a prompts directory
+    exists", and would stand as evidence that the gate judged something it never
+    saw. The attested digest is the only thing that distinguishes them.
+    """
+    run, _ = _gate_run(tmp_path, prompt_bytes=b"the attested prompt\n")
+    other = tmp_path / "other-prompts"
+    other.mkdir()
+    (other / "prompt").write_bytes(b"a completely different prompt\n")
+
+    result, root = _archive_gate(tmp_path, run, other)
+    assert result.returncode == 1, result.stdout
+    assert "not the attested" in result.stderr
+    assert not (root / "architect-reviews" / run.name).exists()
+
+
+def test_an_unattested_round_still_requires_a_prompt_to_be_present(tmp_path):
+    """With no attested digest the archiver cannot compare — but absence is still
+    a refusal, so a round with no attestation cannot smuggle in an empty one."""
+    run, _ = _gate_run(tmp_path, attest=False)
+    result, root = _archive_gate(tmp_path, run, tmp_path / "nowhere")
+    assert result.returncode == 1, result.stdout
+    assert not (root / "architect-reviews" / run.name).exists()

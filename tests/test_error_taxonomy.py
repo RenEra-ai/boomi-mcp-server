@@ -806,19 +806,103 @@ def test_issue_155_owns_exactly_these_codes_and_they_are_fully_specified():
         assert "docs/" not in spec.summary, code
 
 
-@pytest.mark.parametrize("code", ISSUE_155_CODES)
-def test_each_issue_155_code_is_raised_somewhere_in_the_source(code):
-    """Registered-but-unraised is a code that can never reach a caller.
+def _issue_155_witnesses():
+    """One document per #155 code that the compiler ACTUALLY refuses with it.
 
-    The complement — raised but unregistered — is covered by the emission-roots
-    sweep already in this repo. This is the direction that sweep cannot see.
+    A grep for the constant is not a reachability proof, and the first version of
+    this test was exactly that: it counted any mention outside the taxonomy as a
+    raiser. The codes also appear in the message and remediation tables, so the
+    construction site could be deleted and the test stayed green — verified by
+    neutering it, which is how the defect was confirmed rather than argued.
+
+    A witness cannot be fooled that way: if nothing constructs the code, no
+    document produces it.
     """
-    import subprocess
+    import sys
 
-    hits = subprocess.run(
-        ["grep", "-rl", code, "src/boomi_mcp"],
-        capture_output=True, text=True,
-    ).stdout.split()
-    # errors.py itself declares it; a raiser is any OTHER module.
-    raisers = [h for h in hits if not h.endswith("errors.py")]
-    assert raisers, code
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from test_process_ir_semantic_lineage import (  # noqa: E402
+        _BOUND, _DPPSEG, _STATIC, _dynpath_symbols,
+    )
+    from boomi_mcp.compiler.process_ir.contracts import (  # noqa: E402
+        ComponentSymbolV1, SymbolTableV1,
+    )
+
+    base = _dynpath_symbols()
+    soap_symbols = SymbolTableV1(
+        symbols=list(base.symbols) + [
+            ComponentSymbolV1(ref="$ref:SCONN", component_id="SC",
+                              component_type="connector-settings",
+                              connector_type="wssoapclientsdk"),
+            ComponentSymbolV1(ref="$ref:SOP", component_id="SO",
+                              component_type="connector-action",
+                              connector_type="wssoapclientsdk", action_type="EXECUTE",
+                              connection_ref="$ref:SCONN"),
+        ],
+        idempotency_contracts=base.idempotency_contracts,
+    )
+    writer = {"kind": "set_ddp", "name": "P", "source_values": [_STATIC, _DPPSEG]}
+    static_only = {"kind": "set_ddp", "name": "P", "source_values": [_STATIC]}
+    profile_src = {"value_type": "profile", "profile_ref": "$ref:PROF",
+                   "profile_type": "profile.json", "element_id": "3",
+                   "element_name": "clientId (Root/Object/clientId)"}
+    stop = {"kind": "stop"}
+
+    return {
+        "PROCESS_IR_SEMANTIC_DYNAMIC_PATH_DDP_NOT_ESTABLISHED": ([_BOUND, stop], None),
+        "PROCESS_IR_SEMANTIC_DYNAMIC_PATH_NO_DYNAMIC_SEGMENT": ([static_only, _BOUND, stop], None),
+        "PROCESS_IR_SEMANTIC_DYNAMIC_PATH_PROFILE_BINDING_MISMATCH": (
+            [{"kind": "set_ddp", "name": "P", "source_values": [_STATIC, profile_src]},
+             _BOUND, stop], None),
+        "PROCESS_IR_CAPABILITY_DYNAMIC_PATH_UNSUPPORTED": (
+            [writer,
+             {"kind": "connector_call", "operation_ref": "$ref:SOP",
+              "path_binding": {"property_name": "P"}}, stop],
+            soap_symbols),
+    }
+
+
+@pytest.mark.parametrize("code", sorted(_issue_155_witnesses() if False else [
+    "PROCESS_IR_CAPABILITY_DYNAMIC_PATH_UNSUPPORTED",
+    "PROCESS_IR_SEMANTIC_DYNAMIC_PATH_DDP_NOT_ESTABLISHED",
+    "PROCESS_IR_SEMANTIC_DYNAMIC_PATH_NO_DYNAMIC_SEGMENT",
+    "PROCESS_IR_SEMANTIC_DYNAMIC_PATH_PROFILE_BINDING_MISMATCH",
+]))
+def test_each_dynamic_path_code_is_produced_by_a_real_document(code):
+    """Reachability proved by EXERCISING each code, not by finding its name."""
+    from boomi_mcp.compiler.process_ir.diagnostics import ProcessIRCompileError
+    from boomi_mcp.compiler.process_ir.pipeline import compile_process_ir_v1
+    from boomi_mcp.models.process_ir import parse_process_ir_v1
+
+    steps, symbols = _issue_155_witnesses()[code]
+    if symbols is None:
+        import sys
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        from test_process_ir_semantic_lineage import _dynpath_symbols
+        symbols = _dynpath_symbols()
+
+    doc = {"version": "1", "body": {"kind": "sequence", "steps": steps}}
+    with pytest.raises(ProcessIRCompileError) as excinfo:
+        compile_process_ir_v1(parse_process_ir_v1(doc), symbols)
+    assert code in [d.code for d in excinfo.value.diagnostics], [
+        d.code for d in excinfo.value.diagnostics]
+
+
+@pytest.mark.parametrize("code", [
+    "PROCESS_IR_SEMANTIC_RETRY_SOURCE_POLICY_REQUIRES_RETRY",
+    "PROCESS_IR_SEMANTIC_RETRY_SOURCE_POLICY_SCOPE_INVALID",
+])
+def test_each_replay_policy_code_is_produced_by_a_real_document(code):
+    """The other two #155 codes, exercised through the error-handling builders."""
+    import sys
+
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from test_process_ir_error_handling import (  # noqa: E402
+        _compile_error, _connector_scope, _process_scope,
+    )
+
+    allow = {"source_replay_policy": "allow_duplicates"}
+    doc = (_process_scope(retry={"count": 0, **allow})
+           if code.endswith("REQUIRES_RETRY")
+           else _connector_scope(retry={"count": 2, **allow}))
+    assert _compile_error(doc).code == code

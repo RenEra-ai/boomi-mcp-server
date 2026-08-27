@@ -90,6 +90,18 @@ KINDS = {
 }
 
 
+def _discard(durable: Path) -> None:
+    """Remove a refused round, and its parent if that leaves it empty.
+
+    An empty `architect-reviews/` left behind reads as "a round was archived
+    here" to anyone looking, which is the impression a refusal exists to avoid.
+    """
+    shutil.rmtree(durable, ignore_errors=True)
+    parent = durable.parent
+    if parent.is_dir() and not any(parent.iterdir()):
+        parent.rmdir()
+
+
 def sha256_of(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as handle:
@@ -262,6 +274,32 @@ def main() -> int:
         print(f"nothing to archive in {args.run_dir} — is it the right run directory?",
               file=sys.stderr)
         return 1
+
+    # A gate round's PROMPT is required evidence, and it must be the prompt the
+    # collector attested — not merely some file in a directory named prompts.
+    #
+    # Without this the command exited 0 for a missing, mistyped or simply wrong
+    # `--prompts`: the collector sidecars alone make the copy non-empty, so an
+    # unusable archive was recorded as a success. The repository's scanner does
+    # catch it, but only later, by which time the source run directory may be
+    # gone and the prompt unrecoverable. Refusing here, before anything is
+    # recorded, is the difference between a fixable mistake and a lost round.
+    if args.kind == "architect-review":
+        attested = (read_json(durable, "attestation.json") or {}).get("promptSha256")
+        archived = sorted((durable / "prompts").glob("*")) if (durable / "prompts").is_dir() else []
+        digests = {sha256_of(f) for f in archived if f.is_file()}
+        if not archived:
+            _discard(durable)
+            print("refusing to archive a gate round with no prompt: pass --prompts "
+                  "<dir> naming the directory that holds it", file=sys.stderr)
+            return 1
+        if attested and attested not in digests:
+            _discard(durable)
+            print("refusing to archive a gate round whose prompt is not the attested "
+                  f"one (attestation says {attested[:16]}…, archived prompts hash to "
+                  f"{sorted(d[:16] for d in digests)}) — this is the wrong prompt "
+                  "directory", file=sys.stderr)
+            return 1
 
     row = derive_row(args.kind, args.run_dir, durable, root,
                      args.logical_loop, args.status, args.wave_sha)
