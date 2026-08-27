@@ -239,15 +239,20 @@ def _projected_operation(root: ET.Element) -> list[str]:
         fid = el.get("id")
         if fid not in _OPERATION_PROPERTY_FIELDS:
             continue
-        # NAMES only. A static header's value is a classic place for an API key,
-        # and this digest is published. The names are read from the field's own
-        # customProperties child — these containers are FIELDS, not element tags,
-        # which is what an earlier version got wrong and why this contributed
-        # nothing at all.
+        # KEYS only. A static header's value is a classic place for an API key,
+        # and this digest is published.
+        #
+        # The attribute is `key` on a `<properties>` element — the shape the
+        # component builder emits, which its own docstring records as verified
+        # against two live components. Two earlier versions of this read the wrong
+        # thing: first an element tag no component carries, then a `name`
+        # attribute that does not exist on this element. Both produced an empty
+        # list for every real component, so populated parameters and headers
+        # contributed nothing to the digest while the code looked correct.
         names = sorted(
-            child.get("name", "")
+            child.get("key", "")
             for child in el.iter()
-            if child.get("name") is not None
+            if _localname(child.tag) == "properties" and child.get("key") is not None
         )
         lines.append(f"{fid}.names={','.join(names)}")
     return sorted(lines)
