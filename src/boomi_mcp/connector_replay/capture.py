@@ -34,6 +34,7 @@ from .models import ReplayRegistryModel
 
 __all__ = [
     "CaptureRefused",
+    "ConvergenceV1",
     "CaptureRunV1",
     "CaptureSummaryV1",
     "summarize",
@@ -45,6 +46,14 @@ _EXECUTION_RECORD: Final[str] = "execution_record.json"
 _READBACK_DELTA: Final[str] = "readback_delta.json"
 _ACCESS_LOG: Final[str] = "mock_access_log.txt"
 
+#: Staged readbacks from a double-execution capture: the state BEFORE the first
+#: call, BETWEEN the two, and AFTER the second. Discovered by this shape rather
+#: than by a list of stage names, so a capture adding a fourth stage is ordered
+#: correctly instead of ignored.
+_STAGE_READBACK: Final[re.Pattern[str]] = re.compile(
+    r"^readback_(?P<stage>R\d+)_(?P<moment>[a-z]+)_(?P<subject>[a-z]+)\.json$"
+)
+
 _RUN_PREFIX: Final[re.Pattern[str]] = re.compile(r"^(?P<label>[a-z0-9]+)_(?P<rest>.+)$")
 
 #: A uvicorn-style access line: method, target, protocol, then the status.
@@ -55,6 +64,32 @@ _ACCESS_LINE: Final[re.Pattern[str]] = re.compile(
 
 class CaptureRefused(Exception):
     """A capture directory could not be summarised into usable facts."""
+
+
+class ConvergenceV1(ReplayRegistryModel):
+    """What two identical calls did to the counterparty's state.
+
+    Derived from the platform's own returned bodies at each staged readback, NOT
+    from the capture tooling's precomputed digest beside them. The tooling's digest
+    already embeds a judgement about which fields are volatile; recomputing from the
+    body keeps that judgement out here, where it would be invisible.
+
+    This reports FACTS and deliberately stops short of a verdict. Whether a replay
+    that changed only a timestamp counts as idempotent is a policy question the
+    registry answers with the differing field names in hand — not one this
+    summariser should settle by hard-coding which fields are allowed to move.
+    """
+
+    subject: str = Field(min_length=1)
+    stages: tuple[str, ...] = Field(min_length=2)
+    #: The positive control: the FIRST call must actually have done something.
+    #: Without this a broken call that changed nothing would look perfectly
+    #: idempotent, which is the failure mode this field exists to expose.
+    first_call_changed_state: bool
+    #: Whether the second, identical call moved the state again.
+    replay_changed_state: bool
+    #: Exactly which top-level fields differed across the replay.
+    fields_differing_on_replay: tuple[str, ...] = ()
 
 
 class CaptureRunV1(ReplayRegistryModel):
@@ -84,6 +119,8 @@ class CaptureSummaryV1(ReplayRegistryModel):
     #: sha256 over every archived file's bytes, in sorted-name order.
     capture_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
     file_count: int = Field(ge=1)
+    #: Present only when the capture staged readbacks around a double execution.
+    convergence: tuple[ConvergenceV1, ...] = ()
 
     @property
     def execution_ids(self) -> tuple[str, ...]:
@@ -164,6 +201,48 @@ def _counterparty_outcome(log: Path, method_hint: str | None) -> tuple[int | Non
     return None, None
 
 
+def _body_of(payload: Any) -> dict[str, Any] | None:
+    body = payload.get("body") if isinstance(payload, dict) else None
+    return body if isinstance(body, dict) else None
+
+
+def _differing_keys(a: dict[str, Any], b: dict[str, Any]) -> tuple[str, ...]:
+    return tuple(sorted(k for k in set(a) | set(b) if a.get(k) != b.get(k)))
+
+
+def _convergence(files: list[Path]) -> tuple[ConvergenceV1, ...]:
+    """Derive what a replay did, per subject, from the staged readbacks."""
+    by_subject: dict[str, list[tuple[str, Path]]] = {}
+    for path in files:
+        m = _STAGE_READBACK.match(path.name)
+        if m:
+            by_subject.setdefault(m.group("subject"), []).append((m.group("stage"), path))
+
+    results: list[ConvergenceV1] = []
+    for subject, staged in sorted(by_subject.items()):
+        # Order by the stage NUMBER, not lexically: R10 must not sort before R2.
+        staged.sort(key=lambda pair: int(pair[0][1:]))
+        if len(staged) < 3:
+            continue
+        bodies = [(stage, _body_of(_load_json(path))) for stage, path in staged]
+        if any(body is None for _, body in bodies):
+            raise CaptureRefused(
+                f"{subject}: a staged readback carries no body object, so what the "
+                "replay did cannot be derived"
+            )
+        before, between, after = bodies[0][1], bodies[-2][1], bodies[-1][1]
+        results.append(
+            ConvergenceV1(
+                subject=subject,
+                stages=tuple(stage for stage, _ in staged),
+                first_call_changed_state=bool(_differing_keys(before, between)),
+                replay_changed_state=bool(_differing_keys(between, after)),
+                fields_differing_on_replay=_differing_keys(between, after),
+            )
+        )
+    return tuple(results)
+
+
 def summarize(capture_dir: Path, method_hint: str | None = None) -> CaptureSummaryV1:
     """Derive registry-usable facts from one archived capture directory."""
     capture_dir = Path(capture_dir)
@@ -237,4 +316,5 @@ def summarize(capture_dir: Path, method_hint: str | None = None) -> CaptureSumma
         runs=tuple(sorted(runs, key=lambda r: r.label)),
         capture_digest=digest.hexdigest(),
         file_count=len(files),
+        convergence=_convergence(files),
     )

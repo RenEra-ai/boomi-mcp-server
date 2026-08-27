@@ -125,3 +125,52 @@ def test_an_ambiguous_log_attribution_is_refused_rather_than_guessed():
         with pytest.raises(CaptureRefused) as err:
             summarize(dst, "HEAD")
         assert "unambiguously" in str(err.value)
+
+
+def test_convergence_is_derived_from_the_raw_bodies():
+    """The PATCH double-execution, recomputed rather than trusted.
+
+    The capture tooling writes its own analysis beside these files. This derives
+    the same facts from the platform's returned bodies, so the two agree
+    independently — and if the tooling's judgement about volatile fields were ever
+    wrong, this would disagree with it rather than inherit it.
+    """
+    summary = summarize(_CAPTURES / "cap155-e3b-patch-canonical")
+    by_subject = {c.subject: c for c in summary.convergence}
+    assert set(by_subject) == {"target", "template"}
+
+    target = by_subject["target"]
+    # The positive control: the first call must actually have done something,
+    # otherwise "the replay changed nothing" is meaningless.
+    assert target.first_call_changed_state is True
+    # The replay moved ONLY the server-maintained timestamp — which is what
+    # conditionally-idempotent means for this endpoint.
+    assert target.fields_differing_on_replay == ("modifiedOn",)
+
+
+def test_the_untouched_subject_is_a_negative_control():
+    """A resource the calls never targeted must move at neither step.
+
+    If this one had changed, the target's convergence would be evidence of
+    nothing — it would mean something other than the call under test was moving
+    state during the capture window.
+    """
+    summary = summarize(_CAPTURES / "cap155-e3b-patch-canonical")
+    template = {c.subject: c for c in summary.convergence}["template"]
+    assert template.first_call_changed_state is False
+    assert template.replay_changed_state is False
+    assert template.fields_differing_on_replay == ()
+
+
+def test_both_patch_capture_generations_agree():
+    """The superseded and corrected capture sets must tell the same story."""
+    stories = {}
+    for name in ("cap155-e3-patch-canonical", "cap155-e3b-patch-canonical"):
+        target = {c.subject: c for c in summarize(_CAPTURES / name).convergence}["target"]
+        stories[name] = (target.first_call_changed_state, target.fields_differing_on_replay)
+    assert len(set(stories.values())) == 1, stories
+
+
+def test_captures_without_staged_readbacks_report_no_convergence():
+    """Absence is reported as absence, never as 'converged'."""
+    assert summarize(_CAPTURES / "cap155-e4-head-status", "HEAD").convergence == ()
