@@ -1,0 +1,118 @@
+{
+  "verb": "DELETE",
+  "scenario": "cap155-e5-delete-attested",
+  "account_id": "traininghlibbochkarov-JKIY2X",
+  "route": "banked cap155-e3b component XML, re-created verbatim (identity attrs stripped, root name= substituted, path bytes UNEDITED)",
+  "executions": [
+    {
+      "label": "run1",
+      "execution_id": "execution-d999b19c-8f5f-4d46-9d93-11de5846c7a4-2026.08.27",
+      "status": "COMPLETE",
+      "inbound": 1,
+      "outbound": 2
+    },
+    {
+      "label": "run2_identical_replay",
+      "execution_id": "execution-18b59781-67b7-4f31-afc6-89a619efd15b-2026.08.27",
+      "status": "COMPLETE",
+      "inbound": 1,
+      "outbound": 2
+    }
+  ],
+  "counterparty_requests": [
+    {
+      "execution_label": "run1",
+      "execution_id": "execution-d999b19c-8f5f-4d46-9d93-11de5846c7a4-2026.08.27",
+      "stamp": "2026-08-27T20:33:34.743823678Z",
+      "request": "INFO:     192.168.65.1:55445 - \"DELETE /admin/cdscm/api/v1/clients/df0c8de9-3a8b-4e13-b9a6-e08819540b24 HTTP/1.1\" 204 No Content",
+      "http_status": "204",
+      "reason": "No Content"
+    },
+    {
+      "execution_label": "run2_identical_replay",
+      "execution_id": "execution-18b59781-67b7-4f31-afc6-89a619efd15b-2026.08.27",
+      "stamp": "2026-08-27T20:33:47.419563295Z",
+      "request": "INFO:     192.168.65.1:58648 - \"DELETE /admin/cdscm/api/v1/clients/df0c8de9-3a8b-4e13-b9a6-e08819540b24 HTTP/1.1\" 404 Not Found",
+      "http_status": "404",
+      "reason": "Not Found"
+    }
+  ],
+  "attribution_is_unambiguous": true,
+  "log_covers_both_executions": true,
+  "window_overlaps": [],
+  "state": {
+    "run1_status": "COMPLETE",
+    "run2_status": "COMPLETE",
+    "both_executions_reported_success": true,
+    "first_write_changed_business_state": true,
+    "full_state_identical_R1_R2": false,
+    "modifiedOn_R0": "2026-08-27T20:33:27.023Z",
+    "modifiedOn_R1": null,
+    "modifiedOn_R2": null,
+    "modifiedOn_moved_R1_to_R2": false,
+    "createdOn_stable_R0_to_R2": false,
+    "CONTROL_untouched_R0_R1_R2": true,
+    "control_sha256": "590a57ffa569ff058082a10faeff073d1ae9b95eed73f38dd75fd23b6b445d11",
+    "patch_body_source_stable_across_runs": true,
+    "state_key": "readback HTTP status + sha256 of body with ['modifiedOn', 'modifiedBy', 'timestamp'] stripped",
+    "target_status_R0_R1_R2": [
+      200,
+      404,
+      404
+    ],
+    "target_business_R0_R1_R2": [
+      "b3d9eb119701",
+      "2759dbcaac9f",
+      "2759dbcaac9f"
+    ],
+    "resource_state_converged_R1_R2": true,
+    "body_source_stable_across_runs": true
+  },
+  "platform_discrimination": {
+    "counterparty_statuses": [
+      "204",
+      "404"
+    ],
+    "discriminating_diffs": {
+      "gcr": {
+        "_TEST_155E5_DELETE_20260827202715": {
+          "size": [
+            0,
+            225
+          ]
+        },
+        "shape4": {
+          "size": [
+            0,
+            225
+          ]
+        }
+      },
+      "connector_rows": {
+        "_TEST_155E5_DELETE_20260827202715": {
+          "size": [
+            0,
+            225
+          ]
+        },
+        "shape4": {
+          "size": [
+            0,
+            225
+          ]
+        }
+      }
+    }
+  },
+  "clock_skew_control": {
+    "host_before": "2026-08-27T20:33:31.895081+00:00",
+    "host_after": "2026-08-27T20:33:31.908388+00:00",
+    "container_stamps": [
+      "2026-08-27T20:33:27.033201883Z",
+      "2026-08-27T20:33:31.907551885Z"
+    ],
+    "round_trip_ms": 13.306999999999999,
+    "last_stamp": "2026-08-27T20:33:31.907551885Z",
+    "stamp_within_host_bracket": true
+  }
+}

@@ -1,0 +1,72 @@
+{
+  "note": "every component was created by POSTing BANKED, proven-operable component XML; the builder under test authored nothing here",
+  "ops": {
+    "op_src": {
+      "component_id": "75d080a8-006b-457d-8ee5-a0d5c9b5dd99",
+      "name": "_TEST_155E5_src_GET_20260827202715",
+      "banked_source": "cap155-e2-delete/source_operation_component.xml",
+      "banked_sha256": "279806a7551e99079c1879fac6b8ca36ce5c64d2c408b16a01ce8a2957205add",
+      "created_xml_sha256": "99377e1d95c7d0d425e705965b5ec1105c1070e32185f683d938752e0c7f69a0",
+      "readback_sha256": "6009171aa51370ea6875b7a6f3a7415408e4918ed3731502de60f005077e5cc7",
+      "substitutions": {
+        "old_name": "_TEST_155E2_src_GET_20260826070453",
+        "new_name": "_TEST_155E5_src_GET_20260827202715",
+        "operation_id_remap": {}
+      },
+      "banked_path": "/admin/cdscm/api/v1/clients/c4016c66-fb7c-4fab-bb2e-edda725d6b89",
+      "persisted_path": "/admin/cdscm/api/v1/clients/c4016c66-fb7c-4fab-bb2e-edda725d6b89",
+      "path_bytes_unedited": true,
+      "persisted_verb": "GET"
+    },
+    "op_tgt": {
+      "component_id": "ef18e7f1-1d34-4245-b715-1bc4713dc992",
+      "name": "_TEST_155E5_DELETE_20260827202715",
+      "banked_source": "cap155-e2-delete/operation_component.xml",
+      "banked_sha256": "40633cb19b978923d1a0594b6f04ebc2b6c7394259b4434be7c5cdfada7228e4",
+      "created_xml_sha256": "389b4d7c7bfc1e832ba73580ca561e2450aecb4ee50f79d67c198390b680c3d9",
+      "readback_sha256": "bc45bd5463ab3e0d80345fc6af6f67b3cc28dc4cb59f94a754bf2f9f04855d2c",
+      "substitutions": {
+        "old_name": "_TEST_155E2_DELETE_20260826070453",
+        "new_name": "_TEST_155E5_DELETE_20260827202715",
+        "operation_id_remap": {}
+      },
+      "banked_path": "/admin/cdscm/api/v1/clients/df0c8de9-3a8b-4e13-b9a6-e08819540b24",
+      "persisted_path": "/admin/cdscm/api/v1/clients/df0c8de9-3a8b-4e13-b9a6-e08819540b24",
+      "path_bytes_unedited": true,
+      "persisted_verb": "DELETE"
+    }
+  },
+  "process": {
+    "component_id": "de6367ca-6f15-427f-8d17-f51cf10d8ce5",
+    "name": "_TEST_155E5_proc_DELETE_20260827202715",
+    "banked_source": "cap155-e3b-patch-canonical/component_process.xml",
+    "banked_sha256": "e2bb0683eb13f412c5040d8506243ff7fcd72d14ec9b54dedfc4c1d18f33c0e5",
+    "created_xml_sha256": "82b91d8f5b7a254b631f1853e03a1463ceffadea404deade19802294eaa46065",
+    "readback_sha256": "4d873c7ce4cb49b887e1805b6bd388034f90e2e29703244560956e737631f1f0",
+    "substitutions": {
+      "old_name": "_TEST_155E3C_proc_PATCH_20260827070621",
+      "new_name": "_TEST_155E5_proc_DELETE_20260827202715",
+      "operation_id_remap": {
+        "03ff92d3-46db-4b45-9a52-ccf6de6613ca": "75d080a8-006b-457d-8ee5-a0d5c9b5dd99",
+        "9f2e2ad7-518b-4485-9ab9-e0bbbde75ae2": "ef18e7f1-1d34-4245-b715-1bc4713dc992"
+      },
+      "send_action_type": {
+        "from": "PATCH",
+        "to": "DELETE"
+      }
+    },
+    "operation_ids_in_readback": [
+      "75d080a8-006b-457d-8ee5-a0d5c9b5dd99",
+      "ef18e7f1-1d34-4245-b715-1bc4713dc992"
+    ],
+    "connection_ids_in_readback": [
+      "c4281346-83e9-4026-856d-ede718ec68a0"
+    ]
+  },
+  "counterparty_seed": {
+    "note": "the counterparty accepts a caller-supplied `key`, so the resources were re-seeded at the EXACT keys the banked operation XML already points at; no path byte was edited",
+    "target_path": "/admin/cdscm/api/v1/clients/df0c8de9-3a8b-4e13-b9a6-e08819540b24",
+    "template_path": "/admin/cdscm/api/v1/clients/c4016c66-fb7c-4fab-bb2e-edda725d6b89",
+    "control_path": "/admin/cdscm/api/v1/clients/759217e5-fd5a-409d-afbb-dea03fc223e4"
+  }
+}

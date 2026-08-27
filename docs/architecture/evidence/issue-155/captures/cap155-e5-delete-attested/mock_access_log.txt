@@ -1,0 +1,14 @@
+INFO:     192.168.65.1:64212 - "GET /admin/cdscm/api/v1/clients/759217e5-fd5a-409d-afbb-dea03fc223e4 HTTP/1.1" 200 OK
+INFO:     192.168.65.1:36248 - "GET /admin/cdscm/api/v1/clients/df0c8de9-3a8b-4e13-b9a6-e08819540b24 HTTP/1.1" 200 OK
+INFO:     192.168.65.1:45354 - "GET /admin/cdscm/api/v1/clients/759217e5-fd5a-409d-afbb-dea03fc223e4 HTTP/1.1" 200 OK
+INFO:     192.168.65.1:18545 - "GET /admin/cdscm/api/v1/clients/c4016c66-fb7c-4fab-bb2e-edda725d6b89 HTTP/1.1" 200 OK
+INFO:     192.168.65.1:65279 - "GET /admin/cdscm/api/v1/clients/c4016c66-fb7c-4fab-bb2e-edda725d6b89 HTTP/1.1" 200 OK
+INFO:     192.168.65.1:55445 - "DELETE /admin/cdscm/api/v1/clients/df0c8de9-3a8b-4e13-b9a6-e08819540b24 HTTP/1.1" 204 No Content
+INFO:     192.168.65.1:25559 - "GET /admin/cdscm/api/v1/clients/df0c8de9-3a8b-4e13-b9a6-e08819540b24 HTTP/1.1" 404 Not Found
+INFO:     192.168.65.1:28753 - "GET /admin/cdscm/api/v1/clients/759217e5-fd5a-409d-afbb-dea03fc223e4 HTTP/1.1" 200 OK
+INFO:     192.168.65.1:45883 - "GET /admin/cdscm/api/v1/clients/c4016c66-fb7c-4fab-bb2e-edda725d6b89 HTTP/1.1" 200 OK
+INFO:     192.168.65.1:56799 - "GET /admin/cdscm/api/v1/clients/c4016c66-fb7c-4fab-bb2e-edda725d6b89 HTTP/1.1" 200 OK
+INFO:     192.168.65.1:58648 - "DELETE /admin/cdscm/api/v1/clients/df0c8de9-3a8b-4e13-b9a6-e08819540b24 HTTP/1.1" 404 Not Found
+INFO:     192.168.65.1:60932 - "GET /admin/cdscm/api/v1/clients/df0c8de9-3a8b-4e13-b9a6-e08819540b24 HTTP/1.1" 404 Not Found
+INFO:     192.168.65.1:50123 - "GET /admin/cdscm/api/v1/clients/759217e5-fd5a-409d-afbb-dea03fc223e4 HTTP/1.1" 200 OK
+INFO:     192.168.65.1:18711 - "GET /admin/cdscm/api/v1/clients/c4016c66-fb7c-4fab-bb2e-edda725d6b89 HTTP/1.1" 200 OK

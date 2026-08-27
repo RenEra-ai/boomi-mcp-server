@@ -1,0 +1,19 @@
+{
+  "utc": "2026-08-27T20:22:55.628831+00:00",
+  "path": "/admin/cdscm/api/v1/clients/41172938-b9bd-4495-b411-9851f5ac7b00",
+  "status": 200,
+  "sha256": "a92e4acec8c52fbd7450b7d633bdcce2267ca6969908017bc8a3843388d6c464",
+  "bytes": 259,
+  "body": {
+    "clientId": "_E5_TGT_20260827202224",
+    "name": "E5 Target Before",
+    "status": "PENDING",
+    "key": "41172938-b9bd-4495-b411-9851f5ac7b00",
+    "createdOn": "2026-08-27T20:22:24.065Z",
+    "createdBy": "integration",
+    "modifiedOn": "2026-08-27T20:22:24.065Z",
+    "modifiedBy": "integration"
+  },
+  "label": "target R0_before",
+  "business_sha256": "529fb5fe84e1364f73a095982c9c3ebb196a4f0a6b91b56b30b3a4cd61dac888"
+}

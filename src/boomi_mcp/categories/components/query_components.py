@@ -77,13 +77,47 @@ def _extract_api_error_msg(e) -> str:
 # Actions
 # ============================================================================
 
+#: Filter keys `list` actually honours. Anything else is refused — see the
+#: docstring below for why silence was the wrong default.
+_LIST_FILTER_KEYS = frozenset({"show_all", "type", "component_type", "limit"})
+
+
 def list_components(
     boomi_client: Boomi,
     profile: str,
     filters: Optional[Dict[str, Any]] = None
 ) -> Dict[str, Any]:
-    """List all components, optionally filtered by type."""
+    """List all components, optionally filtered by type.
+
+    A key this action does not support is REFUSED, not ignored. It used to be
+    dropped silently while the call still returned `_success: true`, so a caller
+    who believed they had scoped the list received the WHOLE account instead — and
+    the failure widened the result set, which is the dangerous direction. A
+    name-scoped cleanup built on that answer soft-deleted twenty-one components it
+    was never meant to touch.
+
+    Note the asymmetry that made it plausible: `search` DOES support `name`, so the
+    same key on the sibling action does what a caller expects.
+    """
     try:
+        if filters:
+            unsupported = sorted(k for k in filters if k not in _LIST_FILTER_KEYS)
+            if unsupported:
+                return {
+                    "_success": False,
+                    "error": (
+                        "list does not support these filter key(s): "
+                        f"{unsupported}"
+                    ),
+                    "supported_filters": sorted(_LIST_FILTER_KEYS),
+                    "hint": (
+                        "Refusing rather than ignoring them: an ignored filter "
+                        "returns MORE than the caller asked for, and a caller who "
+                        "believes the result is scoped may act destructively on it. "
+                        "For name filtering use action='search'."
+                    ),
+                }
+
         show_all = False
         if filters:
             show_all = filters.get('show_all', False)

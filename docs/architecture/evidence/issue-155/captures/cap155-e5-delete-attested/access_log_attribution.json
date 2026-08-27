@@ -1,0 +1,40 @@
+{
+  "method": "parsed-datetime window attribution",
+  "verb": "DELETE",
+  "target_path": "/admin/cdscm/api/v1/clients/df0c8de9-3a8b-4e13-b9a6-e08819540b24",
+  "executions": 2,
+  "logged_requests_of_verb_on_target": 2,
+  "window_overlaps": [],
+  "attributed": [
+    {
+      "execution_label": "run1",
+      "ts": "2026-08-27T20:33:34.743823678Z",
+      "method": "DELETE",
+      "path": "/admin/cdscm/api/v1/clients/df0c8de9-3a8b-4e13-b9a6-e08819540b24",
+      "status": "204",
+      "reason": "No Content",
+      "line": "2026-08-27T20:33:34.743823678Z INFO:     192.168.65.1:55445 - \"DELETE /admin/cdscm/api/v1/clients/df0c8de9-3a8b-4e13-b9a6-e08819540b24 HTTP/1.1\" 204 No Content",
+      "plain": "INFO:     192.168.65.1:55445 - \"DELETE /admin/cdscm/api/v1/clients/df0c8de9-3a8b-4e13-b9a6-e08819540b24 HTTP/1.1\" 204 No Content",
+      "execution_id": "execution-d999b19c-8f5f-4d46-9d93-11de5846c7a4-2026.08.27"
+    },
+    {
+      "execution_label": "run2_identical_replay",
+      "ts": "2026-08-27T20:33:47.419563295Z",
+      "method": "DELETE",
+      "path": "/admin/cdscm/api/v1/clients/df0c8de9-3a8b-4e13-b9a6-e08819540b24",
+      "status": "404",
+      "reason": "Not Found",
+      "line": "2026-08-27T20:33:47.419563295Z INFO:     192.168.65.1:58648 - \"DELETE /admin/cdscm/api/v1/clients/df0c8de9-3a8b-4e13-b9a6-e08819540b24 HTTP/1.1\" 404 Not Found",
+      "plain": "INFO:     192.168.65.1:58648 - \"DELETE /admin/cdscm/api/v1/clients/df0c8de9-3a8b-4e13-b9a6-e08819540b24 HTTP/1.1\" 404 Not Found",
+      "execution_id": "execution-18b59781-67b7-4f31-afc6-89a619efd15b-2026.08.27"
+    }
+  ],
+  "unattributed": [],
+  "per_execution_counts": {
+    "run1": 1,
+    "run2_identical_replay": 1
+  },
+  "exactly_one_request_per_execution": true,
+  "log_covers_both_executions": true,
+  "agrees_with_string_comparison_pass": true
+}

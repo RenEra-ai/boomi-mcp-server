@@ -1,0 +1,24 @@
+{
+  "_redaction_note": "identity fields removed at capture time; only liveness-bearing fields kept",
+  "account": {},
+  "licensing": {
+    "standard": {
+      "purchased": 3,
+      "used": 0
+    },
+    "standard_test": {
+      "purchased": 3,
+      "used": 1
+    }
+  },
+  "runtimes": [],
+  "tools_called": [
+    "boomi_account_info",
+    "manage_runtimes",
+    "execute_process",
+    "invoke_boomi_api",
+    "monitor_platform",
+    "manage_component",
+    "manage_deployment"
+  ]
+}

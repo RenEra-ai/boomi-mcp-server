@@ -1,0 +1,20 @@
+{
+  "gcr_id": "R0VOX0NPTk5fUkVDX2V4ZWN1dGlvbi0xOGI1OTc4MS02N2I3LTRmMzEtYWZjNi04OWE2MTllZmQxNWItMjAyNi4wOC4yNzpjb25uZWN0b3ItN2E5ZjEzMjAtMDM3MC00ZDA1LWE0ZGMtYWFjMmU4N2U5NGM2",
+  "operationName": "_TEST_155E5_DELETE_20260827202715",
+  "actionType": "EXECUTE",
+  "status": "SUCCESS",
+  "size": 225,
+  "documentIndex": 0,
+  "download_response": {
+    "_success": true,
+    "generic_connector_record_id": "R0VOX0NPTk5fUkVDX2V4ZWN1dGlvbi0xOGI1OTc4MS02N2I3LTRmMzEtYWZjNi04OWE2MTllZmQxNWItMjAyNi4wOC4yNzpjb25uZWN0b3ItN2E5ZjEzMjAtMDM3MC00ZDA1LWE0ZGMtYWFjMmU4N2U5NGM2",
+    "download_url": "https://platform.boomi.com/account/traininghlibbochkarov-JKIY2X/api/download/ConnectorDocument-31edb53d-9acb-44a5-b510-587c2d0d9571",
+    "status_code": 202,
+    "message": "Beginning download.",
+    "_downloaded": true,
+    "content": "{\"message\":\"Clients record 'df0c8de9-3a8b-4e13-b9a6-e08819540b24' not found\",\"developerMessage\":\"Clients record 'df0c8de9-3a8b-4e13-b9a6-e08819540b24' not found\",\"errors\":[],\"data\":null,\"timestamp\":\"2026-08-27T20:33:47.419Z\"}",
+    "content_type": "text/*; charset=UTF-8",
+    "size_bytes": 225
+  },
+  "content": null
+}

@@ -1,0 +1,335 @@
+[
+  {
+    "file": "mock_access_log.txt",
+    "proves": "counterparty access log covering BOTH executions (DELETE x2), same format as cap155-e1-405-delete/mock_access_log.txt",
+    "scenario": "cap155-e5-delete-attested",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "sha256": "f1bda7fd9e395ee573b8e6be59d92f703c5a1666d5b6f4d436d01f8aad26de52",
+    "byte_length": 1687,
+    "redacted": false
+  },
+  {
+    "file": "mock_access_log_timestamped.txt",
+    "proves": "the same log with dockerd's per-line RFC3339 stamps \u2014 the bytes attribution is computed from",
+    "scenario": "cap155-e5-delete-attested",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "sha256": "70d6c0b55eb6ad9f1696ed23ace31648682d532c970c824b4d5fdf880ae60982",
+    "byte_length": 2121,
+    "redacted": false
+  },
+  {
+    "file": "access_log_attribution.json",
+    "proves": "per-execution attribution of each logged request of the verb under test",
+    "scenario": "cap155-e5-delete-attested",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "sha256": "320c7a5f1903702c5d73fdd414689db761aced2d51fd0539384b45085ee2327f",
+    "byte_length": 1835,
+    "redacted": false
+  },
+  {
+    "file": "execute_calls.json",
+    "proves": "the two execute_process calls with their host-clock attribution windows",
+    "scenario": "cap155-e5-delete-attested",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "sha256": "c2863f0c15b3336b365d093b36eec94e20caa688db6c6150ddf5b58ea8b574e3",
+    "byte_length": 2650,
+    "redacted": false
+  },
+  {
+    "file": "run1_execution_record.json",
+    "proves": "RAW ExecutionRecord envelope for run1",
+    "scenario": "cap155-e5-delete-attested",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "sha256": "bc0e7770e2137877a561c9e7153d87d796ba47ec1375bd6ac4155ae266aa0aae",
+    "byte_length": 1231,
+    "redacted": false
+  },
+  {
+    "file": "run1_execution_connector_raw.json",
+    "proves": "RAW ExecutionConnector envelope for run1 \u2014 the raw platform response, preserved because the flattened rows drop executionId and the ingest correlates per record on that field",
+    "scenario": "cap155-e5-delete-attested",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "sha256": "1956660ed5e3aab3ab7c8825ad42b52ca966cbebf381c03482a37c9fa1525a6c",
+    "byte_length": 2675,
+    "redacted": false
+  },
+  {
+    "file": "run1_generic_connector_record_raw.json",
+    "proves": "RAW GenericConnectorRecord envelope for run1 (keeps executionId)",
+    "scenario": "cap155-e5-delete-attested",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "sha256": "37af30427bfd215ae4faf50432243a62ce09f7ea8c26179de05a260977e4b66e",
+    "byte_length": 6208,
+    "redacted": false
+  },
+  {
+    "file": "run1_connector_rows.json",
+    "proves": "execution-connector rows for run1, executionId RETAINED",
+    "scenario": "cap155-e5-delete-attested",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "sha256": "fc83e77a0707a7d5ce5f6801859612d36c3078c9bd2941453acf9af01ffc0b43",
+    "byte_length": 2008,
+    "redacted": false
+  },
+  {
+    "file": "run1_gcr_rows.json",
+    "proves": "generic-connector rows for run1, executionId RETAINED",
+    "scenario": "cap155-e5-delete-attested",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "sha256": "0031f39b05b37e63832795c9786c3134d37e98dcdc600ae105cbc8225a55d903",
+    "byte_length": 2048,
+    "redacted": false
+  },
+  {
+    "file": "run1_doc00.json",
+    "proves": "connector document ordinal 0 for run1 (op=_TEST_155E5_src_GET_20260827202715, present=True)",
+    "scenario": "cap155-e5-delete-attested",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "sha256": "ff46aa1bf8970583686b8e74d488429ac5a0f36446cd48c38d304310d6530797",
+    "byte_length": 1250,
+    "redacted": false
+  },
+  {
+    "file": "run1_doc01.json",
+    "proves": "connector document ordinal 1 for run1 (op=shape1, present=True)",
+    "scenario": "cap155-e5-delete-attested",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "sha256": "d884c75f4ef4b491d369af826ae6fdea70fd9bf0fac7a8d84d0b5cd48b3ae6a8",
+    "byte_length": 879,
+    "redacted": false
+  },
+  {
+    "file": "run1_doc02.json",
+    "proves": "connector document ordinal 2 for run1 (op=shape4, present=True)",
+    "scenario": "cap155-e5-delete-attested",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "sha256": "983f3b24bbff7b9f85ad57ad01d0cfd4c1f0eb068db73a1c401f4eb22daaa3ca",
+    "byte_length": 879,
+    "redacted": false
+  },
+  {
+    "file": "run1_doc03.json",
+    "proves": "connector document ordinal 3 for run1 (op=_TEST_155E5_DELETE_20260827202715, present=True)",
+    "scenario": "cap155-e5-delete-attested",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "sha256": "e4dbc66c2d887ff7d0f1ac04b3505849b558b6a30794d83039195f5ab7e2c862",
+    "byte_length": 907,
+    "redacted": false
+  },
+  {
+    "file": "run2_execution_record.json",
+    "proves": "RAW ExecutionRecord envelope for run2_identical_replay",
+    "scenario": "cap155-e5-delete-attested",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "sha256": "87d5be3f057101704519cc695f7b457fe1b4f30fa305b07f4caa525a29f5df87",
+    "byte_length": 1231,
+    "redacted": false
+  },
+  {
+    "file": "run2_execution_connector_raw.json",
+    "proves": "RAW ExecutionConnector envelope for run2_identical_replay \u2014 the raw platform response, preserved because the flattened rows drop executionId and the ingest correlates per record on that field",
+    "scenario": "cap155-e5-delete-attested",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "sha256": "cd9646f2eb17dab64ebde988568a7acad6840b2539c7fcf338338f92296d7c92",
+    "byte_length": 2679,
+    "redacted": false
+  },
+  {
+    "file": "run2_generic_connector_record_raw.json",
+    "proves": "RAW GenericConnectorRecord envelope for run2_identical_replay (keeps executionId)",
+    "scenario": "cap155-e5-delete-attested",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "sha256": "5351d500d4eeeaae66df940dac74d6c686739b1c2b34d93c2c39430567515b70",
+    "byte_length": 6826,
+    "redacted": false
+  },
+  {
+    "file": "run2_connector_rows.json",
+    "proves": "execution-connector rows for run2_identical_replay, executionId RETAINED",
+    "scenario": "cap155-e5-delete-attested",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "sha256": "027aabd367fa57420ec712aecc2a50674168a4a057f1339623ebd3ef2281e8bf",
+    "byte_length": 2012,
+    "redacted": false
+  },
+  {
+    "file": "run2_gcr_rows.json",
+    "proves": "generic-connector rows for run2_identical_replay, executionId RETAINED",
+    "scenario": "cap155-e5-delete-attested",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "sha256": "3d44e4cdb85851d0e695806507ff323ad9d799a80804c1a83b75bf6a5404a028",
+    "byte_length": 2052,
+    "redacted": false
+  },
+  {
+    "file": "run2_doc00.json",
+    "proves": "connector document ordinal 0 for run2_identical_replay (op=_TEST_155E5_src_GET_20260827202715, present=True)",
+    "scenario": "cap155-e5-delete-attested",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "sha256": "d2cf283d4e35686b76645158b93bd641e0c17686891d1380b204d4f857dbcdb4",
+    "byte_length": 1250,
+    "redacted": false
+  },
+  {
+    "file": "run2_doc01.json",
+    "proves": "connector document ordinal 1 for run2_identical_replay (op=shape1, present=True)",
+    "scenario": "cap155-e5-delete-attested",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "sha256": "23ec0898cd6b5b39114c33d6bd8545bc9cef62a561e382757e5b917b9e7708ca",
+    "byte_length": 879,
+    "redacted": false
+  },
+  {
+    "file": "run2_doc02.json",
+    "proves": "connector document ordinal 2 for run2_identical_replay (op=shape4, present=True)",
+    "scenario": "cap155-e5-delete-attested",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "sha256": "7e06a34d6dd3c9402279290f04472e2f42e7b9fe2b122953d50bd0cc089c9e47",
+    "byte_length": 1124,
+    "redacted": false
+  },
+  {
+    "file": "run2_doc03.json",
+    "proves": "connector document ordinal 3 for run2_identical_replay (op=_TEST_155E5_DELETE_20260827202715, present=True)",
+    "scenario": "cap155-e5-delete-attested",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "sha256": "31b9bcc2b0f9d155aaa404e3de6cde8090e3c68da1de5460160ea27908a8eabb",
+    "byte_length": 1152,
+    "redacted": false
+  },
+  {
+    "file": "readback_R0_before_target.json",
+    "proves": "target resource at R0_before",
+    "scenario": "cap155-e5-delete-attested",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "sha256": "e719b8ced2307a32865d8b318b5dfe2eb70b20990b8a6dedfed846243a4b9ec0",
+    "byte_length": 689,
+    "redacted": false
+  },
+  {
+    "file": "readback_R0_before_template.json",
+    "proves": "template resource at R0_before",
+    "scenario": "cap155-e5-delete-attested",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "sha256": "9140929fd5b6262607539fd95302d12877e43b4627fe193a34bd2d0ded5b110c",
+    "byte_length": 731,
+    "redacted": false
+  },
+  {
+    "file": "readback_R0_before_control.json",
+    "proves": "control resource at R0_before  \u2014 NEGATIVE CONTROL: never referenced by any operation component",
+    "scenario": "cap155-e5-delete-attested",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "sha256": "abf8dfeb66454bbd00f024dc34190f0802c5de4e143a97ee74b39628f34a9994",
+    "byte_length": 685,
+    "redacted": false
+  },
+  {
+    "file": "readback_R1_between_target.json",
+    "proves": "target resource at R1_between",
+    "scenario": "cap155-e5-delete-attested",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "sha256": "69768ec2bddf2e8da81cecc71e312b389f51182b96a9425cf04c0521997e79fc",
+    "byte_length": 629,
+    "redacted": false
+  },
+  {
+    "file": "readback_R1_between_template.json",
+    "proves": "template resource at R1_between",
+    "scenario": "cap155-e5-delete-attested",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "sha256": "867b82f3075edf6eac313750f9a0032137b76b2918701870521ad6ff6fb96077",
+    "byte_length": 732,
+    "redacted": false
+  },
+  {
+    "file": "readback_R1_between_control.json",
+    "proves": "control resource at R1_between  \u2014 NEGATIVE CONTROL: never referenced by any operation component",
+    "scenario": "cap155-e5-delete-attested",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "sha256": "a58e10f4231ccca19de8b92e91a44773ca60f934b3d6fb061bb8f3d7ff5cbf9e",
+    "byte_length": 686,
+    "redacted": false
+  },
+  {
+    "file": "readback_R2_after_target.json",
+    "proves": "target resource at R2_after",
+    "scenario": "cap155-e5-delete-attested",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "sha256": "8528bcb5ce33a708955ead7b3b000a8ae99f670755e28c21f0879085cd1fa6e4",
+    "byte_length": 627,
+    "redacted": false
+  },
+  {
+    "file": "readback_R2_after_template.json",
+    "proves": "template resource at R2_after",
+    "scenario": "cap155-e5-delete-attested",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "sha256": "1a44c9e5aa34dc50eca82fefa1a892476d83420b1012b3f13e21da2553af29e6",
+    "byte_length": 730,
+    "redacted": false
+  },
+  {
+    "file": "readback_R2_after_control.json",
+    "proves": "control resource at R2_after  \u2014 NEGATIVE CONTROL: never referenced by any operation component",
+    "scenario": "cap155-e5-delete-attested",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "sha256": "9d92824b6d50941163676197d36ec3b59d7bd997aca58dae3cca6d1ae9f88d6e",
+    "byte_length": 684,
+    "redacted": false
+  },
+  {
+    "file": "component_op_src.xml",
+    "proves": "stored Boomi component XML for op_src (re-created from cap155-e2-delete/source_operation_component.xml, path bytes unedited)",
+    "scenario": "cap155-e5-delete-attested",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "sha256": "25d180bf26f82c42906ed62e8f8801b686bcc7794c4ca30e2d5014d41a3bb880",
+    "byte_length": 1462,
+    "redacted": true
+  },
+  {
+    "file": "component_op_tgt.xml",
+    "proves": "stored Boomi component XML for op_tgt (re-created from cap155-e2-delete/operation_component.xml, path bytes unedited)",
+    "scenario": "cap155-e5-delete-attested",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "sha256": "749a43b26f12dac2705729682da055a495f0496aeaebfb6211c2ae6b832e699f",
+    "byte_length": 1464,
+    "redacted": true
+  },
+  {
+    "file": "component_process.xml",
+    "proves": "stored process XML (re-created from cap155-e3b-patch-canonical/component_process.xml)",
+    "scenario": "cap155-e5-delete-attested",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "sha256": "e80a8cb36ba8261a402696c5e8e2652c6adea05f73a3dfaa6d0f2b7f58b4fcd6",
+    "byte_length": 2500,
+    "redacted": true
+  },
+  {
+    "file": "fixture_derivation.json",
+    "proves": "provenance of every fixture byte: banked source, digests, substitutions",
+    "scenario": "cap155-e5-delete-attested",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "sha256": "015b5f47b397729108276bd1fdd55b1e32da86c8d2eb8ae449364d6e82c18c14",
+    "byte_length": 3611,
+    "redacted": false
+  },
+  {
+    "file": "analysis.json",
+    "proves": "the derived verdict for this verb",
+    "scenario": "cap155-e5-delete-attested",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "sha256": "ce17e394aac87877b2daae6a5eee6756c393085b58e87460c7792531639c1386",
+    "byte_length": 3545,
+    "redacted": false
+  },
+  {
+    "file": "account_liveness.json",
+    "proves": "C1 account liveness, redacted",
+    "scenario": "cap155-e5-delete-attested",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "sha256": "61c52ce59a4e23d1d6fa6833b7a321d428e3af97d2d000142edaf080d496c4ea",
+    "byte_length": 481,
+    "redacted": false
+  }
+]

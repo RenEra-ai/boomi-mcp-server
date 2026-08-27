@@ -1,0 +1,50 @@
+[
+  {
+    "executionId": "execution-18b59781-67b7-4f31-afc6-89a619efd15b-2026.08.27",
+    "executionConnector": "_TEST_155E5_src_GET_20260827202715",
+    "connectorType": "officialboomi-X3979C-rest-prod",
+    "actionType": "EXECUTE",
+    "isStartShape": false,
+    "recordType": "connector",
+    "successCount": 1,
+    "errorCount": 0,
+    "size": 302,
+    "id": "RVhFQ19DT05OZmFsc2U6RVhFQ1VURTpjNDI4MTM0Ni04M2U5LTQwMjYtODU2ZC1lZGU3MThlYzY4YTA6NzVkMDgwYTgtMDA2Yi00NTdkLThlZTUtYTBkNWM5YjVkZDk5OmV4ZWN1dGlvbi0xOGI1OTc4MS02N2I3LTRmMzEtYWZjNi04OWE2MTllZmQxNWItMjAyNi4wOC4yNw"
+  },
+  {
+    "executionId": "execution-18b59781-67b7-4f31-afc6-89a619efd15b-2026.08.27",
+    "executionConnector": "Start",
+    "connectorType": "nodata",
+    "actionType": "nodata",
+    "isStartShape": true,
+    "recordType": "nodata",
+    "successCount": 1,
+    "errorCount": 0,
+    "size": 0,
+    "id": "RVhFQ19DT05OdHJ1ZTpub2RhdGE6c2hhcGUxOjpleGVjdXRpb24tMThiNTk3ODEtNjdiNy00ZjMxLWFmYzYtODlhNjE5ZWZkMTViLTIwMjYuMDguMjc"
+  },
+  {
+    "executionId": "execution-18b59781-67b7-4f31-afc6-89a619efd15b-2026.08.27",
+    "executionConnector": "shape4",
+    "connectorType": "return",
+    "actionType": "return",
+    "isStartShape": false,
+    "recordType": "return",
+    "successCount": 1,
+    "errorCount": 0,
+    "size": 225,
+    "id": "RVhFQ19DT05OZmFsc2U6cmV0dXJuOnJldHVybjpzaGFwZTQ6ZXhlY3V0aW9uLTE4YjU5NzgxLTY3YjctNGYzMS1hZmM2LTg5YTYxOWVmZDE1Yi0yMDI2LjA4LjI3"
+  },
+  {
+    "executionId": "execution-18b59781-67b7-4f31-afc6-89a619efd15b-2026.08.27",
+    "executionConnector": "_TEST_155E5_DELETE_20260827202715",
+    "connectorType": "officialboomi-X3979C-rest-prod",
+    "actionType": "EXECUTE",
+    "isStartShape": false,
+    "recordType": "connector",
+    "successCount": 1,
+    "errorCount": 0,
+    "size": 225,
+    "id": "RVhFQ19DT05OZmFsc2U6RVhFQ1VURTpjNDI4MTM0Ni04M2U5LTQwMjYtODU2ZC1lZGU3MThlYzY4YTA6ZWYxOGU3ZjEtMWQzNC00MjQ1LWI3MTUtMWJjNDcxM2RjOTkyOmV4ZWN1dGlvbi0xOGI1OTc4MS02N2I3LTRmMzEtYWZjNi04OWE2MTllZmQxNWItMjAyNi4wOC4yNw"
+  }
+]

@@ -1,0 +1,20 @@
+{
+  "utc": "2026-08-27T20:23:34.424937+00:00",
+  "path": "/admin/cdscm/api/v1/clients/1ccd7554-7f2e-4e05-83ac-194d20b16b2d",
+  "status": 200,
+  "sha256": "87e213902dc80f9942f5a70e38bceed532345c7d0ac6b8e25a3ce41d3f931bff",
+  "bytes": 302,
+  "body": {
+    "clientId": "_E5_TPL_20260827202224",
+    "name": "E5 Template (PATCH body source)",
+    "status": "ACTIVE",
+    "e5Marker": "double-attested",
+    "key": "1ccd7554-7f2e-4e05-83ac-194d20b16b2d",
+    "createdOn": "2026-08-27T20:22:24.057Z",
+    "createdBy": "integration",
+    "modifiedOn": "2026-08-27T20:22:24.057Z",
+    "modifiedBy": "integration"
+  },
+  "label": "template R2_after",
+  "business_sha256": "6a268c53947a34b11bfd12445b755172cfc872983f47f5cc4c1b09f78bdb8c88"
+}

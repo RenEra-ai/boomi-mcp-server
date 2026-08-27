@@ -1,0 +1,19 @@
+{
+  "utc": "2026-08-27T20:33:32.959383+00:00",
+  "path": "/admin/cdscm/api/v1/clients/df0c8de9-3a8b-4e13-b9a6-e08819540b24",
+  "status": 200,
+  "sha256": "d113f53b71a1457a6d52d6d16d5f0e135784d59fe23e4b7fc0e289971fe29541",
+  "bytes": 268,
+  "body": {
+    "clientId": "_E5_TGT_20260827203327",
+    "name": "E5 Target Before (reseed)",
+    "status": "PENDING",
+    "key": "df0c8de9-3a8b-4e13-b9a6-e08819540b24",
+    "createdOn": "2026-08-27T20:33:27.023Z",
+    "createdBy": "integration",
+    "modifiedOn": "2026-08-27T20:33:27.023Z",
+    "modifiedBy": "integration"
+  },
+  "label": "target R0_before",
+  "business_sha256": "b3d9eb1197017bdc4d88fc7372331fbcae3e558790c0d130ccc823a272267f58"
+}

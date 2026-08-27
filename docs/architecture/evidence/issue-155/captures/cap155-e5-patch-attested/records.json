@@ -1,0 +1,335 @@
+[
+  {
+    "file": "mock_access_log.txt",
+    "proves": "counterparty access log covering BOTH executions (PATCH x2), same format as cap155-e1-405-delete/mock_access_log.txt",
+    "scenario": "cap155-e5-patch-attested",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "sha256": "7c91ab3329548a63141c61abb948620783353339dd2ee92a797683445f20b2dc",
+    "byte_length": 1538,
+    "redacted": false
+  },
+  {
+    "file": "mock_access_log_timestamped.txt",
+    "proves": "the same log with dockerd's per-line RFC3339 stamps \u2014 the bytes attribution is computed from",
+    "scenario": "cap155-e5-patch-attested",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "sha256": "2a2a03a9ffd4eb18f49b77db49020937c7eb0af39b55b092d2cb2c4b5375bf9b",
+    "byte_length": 1941,
+    "redacted": false
+  },
+  {
+    "file": "access_log_attribution.json",
+    "proves": "per-execution attribution of each logged request of the verb under test",
+    "scenario": "cap155-e5-patch-attested",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "sha256": "f63b3762fa6c14aff234186fda28612aae41b4e9cd2c21e32298058223692801",
+    "byte_length": 1950,
+    "redacted": false
+  },
+  {
+    "file": "execute_calls.json",
+    "proves": "the two execute_process calls with their host-clock attribution windows",
+    "scenario": "cap155-e5-patch-attested",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "sha256": "94e7c0bbaf3ca3741bd10f299ab1d781298accc7b7273aab75513f7cf16438e9",
+    "byte_length": 2645,
+    "redacted": false
+  },
+  {
+    "file": "run1_execution_record.json",
+    "proves": "RAW ExecutionRecord envelope for run1",
+    "scenario": "cap155-e5-patch-attested",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "sha256": "80a8afb4ce54803f0d8a261ba7f12ffbc434d1921c2060edeb0dd39488abc73f",
+    "byte_length": 1228,
+    "redacted": false
+  },
+  {
+    "file": "run1_execution_connector_raw.json",
+    "proves": "RAW ExecutionConnector envelope for run1 \u2014 the raw platform response, preserved because the flattened rows drop executionId and the ingest correlates per record on that field",
+    "scenario": "cap155-e5-patch-attested",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "sha256": "00c63c15849b823998d42e163dd24d61adba82ecfc2950a28b5ffc5aec6fda21",
+    "byte_length": 2678,
+    "redacted": false
+  },
+  {
+    "file": "run1_generic_connector_record_raw.json",
+    "proves": "RAW GenericConnectorRecord envelope for run1 (keeps executionId)",
+    "scenario": "cap155-e5-patch-attested",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "sha256": "a5768f6987029df3ab86482b37a91f74252131862b92bce3f7e8bedb9deafb2c",
+    "byte_length": 6825,
+    "redacted": false
+  },
+  {
+    "file": "run1_connector_rows.json",
+    "proves": "execution-connector rows for run1, executionId RETAINED",
+    "scenario": "cap155-e5-patch-attested",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "sha256": "af71c07fb58e06c928adec9ef35dc0fcfdf115ffcdcb7507f1ada678cd4ba3a9",
+    "byte_length": 2011,
+    "redacted": false
+  },
+  {
+    "file": "run1_gcr_rows.json",
+    "proves": "generic-connector rows for run1, executionId RETAINED",
+    "scenario": "cap155-e5-patch-attested",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "sha256": "59e199e6c2406ea46debad33d63aed5ef7d1cc4dd1079d3305039099d89741f3",
+    "byte_length": 2051,
+    "redacted": false
+  },
+  {
+    "file": "run1_doc00.json",
+    "proves": "connector document ordinal 0 for run1 (op=shape4, present=True)",
+    "scenario": "cap155-e5-patch-attested",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "sha256": "8173cf00422c2020687140e84bc7b434a146bf448daa8ca271fed01072219ef4",
+    "byte_length": 1221,
+    "redacted": false
+  },
+  {
+    "file": "run1_doc01.json",
+    "proves": "connector document ordinal 1 for run1 (op=_TEST_155E5_PATCH_20260827202224, present=True)",
+    "scenario": "cap155-e5-patch-attested",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "sha256": "1bf22e959123294252ff51f32705291bcf288b67ef34ba290a7ef1cddd49cd2d",
+    "byte_length": 1248,
+    "redacted": false
+  },
+  {
+    "file": "run1_doc02.json",
+    "proves": "connector document ordinal 2 for run1 (op=shape1, present=True)",
+    "scenario": "cap155-e5-patch-attested",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "sha256": "78365f141ca92602c4fc2a6c61620778303625896127f2931dad9c99c3ebb5af",
+    "byte_length": 879,
+    "redacted": false
+  },
+  {
+    "file": "run1_doc03.json",
+    "proves": "connector document ordinal 3 for run1 (op=_TEST_155E5_src_GET_20260827202224, present=True)",
+    "scenario": "cap155-e5-patch-attested",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "sha256": "901b1c01175d371ad6fb69e1e91941235c6628b157ad39e9ca389a10d4a0ca46",
+    "byte_length": 1250,
+    "redacted": false
+  },
+  {
+    "file": "run2_execution_record.json",
+    "proves": "RAW ExecutionRecord envelope for run2_identical_replay",
+    "scenario": "cap155-e5-patch-attested",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "sha256": "fe9854477497ac3466f6745711fa86f2f3b50a0a93ad4c514cabe7e5ec65f045",
+    "byte_length": 1228,
+    "redacted": false
+  },
+  {
+    "file": "run2_execution_connector_raw.json",
+    "proves": "RAW ExecutionConnector envelope for run2_identical_replay \u2014 the raw platform response, preserved because the flattened rows drop executionId and the ingest correlates per record on that field",
+    "scenario": "cap155-e5-patch-attested",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "sha256": "79eb41c6105baf80ccee8378708e0d893efd58862e4d3ebcea15247425876023",
+    "byte_length": 2678,
+    "redacted": false
+  },
+  {
+    "file": "run2_generic_connector_record_raw.json",
+    "proves": "RAW GenericConnectorRecord envelope for run2_identical_replay (keeps executionId)",
+    "scenario": "cap155-e5-patch-attested",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "sha256": "a25e91e444effc4d30d6ef279496e8663464196382b32d0f8588f21304b184a6",
+    "byte_length": 6825,
+    "redacted": false
+  },
+  {
+    "file": "run2_connector_rows.json",
+    "proves": "execution-connector rows for run2_identical_replay, executionId RETAINED",
+    "scenario": "cap155-e5-patch-attested",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "sha256": "0b023da2c05a80ac99b1f68160d4c1b435b58e8c3531b95b95017bc8abff28f9",
+    "byte_length": 2011,
+    "redacted": false
+  },
+  {
+    "file": "run2_gcr_rows.json",
+    "proves": "generic-connector rows for run2_identical_replay, executionId RETAINED",
+    "scenario": "cap155-e5-patch-attested",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "sha256": "3d1076b741ed5ef46feeef7abf29f3eed229ab9a30d698714680ce5ff80666a1",
+    "byte_length": 2051,
+    "redacted": false
+  },
+  {
+    "file": "run2_doc00.json",
+    "proves": "connector document ordinal 0 for run2_identical_replay (op=_TEST_155E5_PATCH_20260827202224, present=True)",
+    "scenario": "cap155-e5-patch-attested",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "sha256": "77014c08056a1e0159647be6bed51c7a4b7d1f738409b7cede3a4a2eab7afea2",
+    "byte_length": 1248,
+    "redacted": false
+  },
+  {
+    "file": "run2_doc01.json",
+    "proves": "connector document ordinal 1 for run2_identical_replay (op=shape4, present=True)",
+    "scenario": "cap155-e5-patch-attested",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "sha256": "d14ff1656ffa8eeb19ee08add42b280a6909b082229c3d7c106c46aa77673f64",
+    "byte_length": 1221,
+    "redacted": false
+  },
+  {
+    "file": "run2_doc02.json",
+    "proves": "connector document ordinal 2 for run2_identical_replay (op=_TEST_155E5_src_GET_20260827202224, present=True)",
+    "scenario": "cap155-e5-patch-attested",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "sha256": "cc13a6289495bad8ff7249f0cb1989203bd9a71b108d76450887509e1311c105",
+    "byte_length": 1250,
+    "redacted": false
+  },
+  {
+    "file": "run2_doc03.json",
+    "proves": "connector document ordinal 3 for run2_identical_replay (op=shape1, present=True)",
+    "scenario": "cap155-e5-patch-attested",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "sha256": "a6020f705480b7056c65de1c660df40d23904cbca1d82f90784ec7c4d620a3b8",
+    "byte_length": 879,
+    "redacted": false
+  },
+  {
+    "file": "readback_R0_before_target.json",
+    "proves": "target resource at R0_before",
+    "scenario": "cap155-e5-patch-attested",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "sha256": "656b865c64f0a02d64a62b1b88b33297ccbb235c4ca44c6a5f04a11ae92672ca",
+    "byte_length": 680,
+    "redacted": false
+  },
+  {
+    "file": "readback_R0_before_template.json",
+    "proves": "template resource at R0_before",
+    "scenario": "cap155-e5-patch-attested",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "sha256": "83305003df67f7749beb02ed2349ed8683cf84bfc05a4032d79b07d2b98b9488",
+    "byte_length": 731,
+    "redacted": false
+  },
+  {
+    "file": "readback_R0_before_control.json",
+    "proves": "control resource at R0_before  \u2014 NEGATIVE CONTROL: never referenced by any operation component",
+    "scenario": "cap155-e5-patch-attested",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "sha256": "2bf69660ed396e3cecbdc373b2399f2afe158a2588b9a78a69b136fce7253794",
+    "byte_length": 685,
+    "redacted": false
+  },
+  {
+    "file": "readback_R1_between_target.json",
+    "proves": "target resource at R1_between",
+    "scenario": "cap155-e5-patch-attested",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "sha256": "6555d98e2a684ba3a69a63d1574ab2066d0696eb445babfd572ad2f459f6081f",
+    "byte_length": 730,
+    "redacted": false
+  },
+  {
+    "file": "readback_R1_between_template.json",
+    "proves": "template resource at R1_between",
+    "scenario": "cap155-e5-patch-attested",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "sha256": "42f201dedc1b06e14ec4a32106726715047bb1623eaab2b6bc9a88f30592b939",
+    "byte_length": 732,
+    "redacted": false
+  },
+  {
+    "file": "readback_R1_between_control.json",
+    "proves": "control resource at R1_between  \u2014 NEGATIVE CONTROL: never referenced by any operation component",
+    "scenario": "cap155-e5-patch-attested",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "sha256": "8cbd37d37e1d3384b8126067020144877cade2084cc25c148160666813e10ddd",
+    "byte_length": 686,
+    "redacted": false
+  },
+  {
+    "file": "readback_R2_after_target.json",
+    "proves": "target resource at R2_after",
+    "scenario": "cap155-e5-patch-attested",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "sha256": "e79b17633d07bce13ffde50edbcdbe19855600f25dc62a4b9753ab47de9f8fe2",
+    "byte_length": 728,
+    "redacted": false
+  },
+  {
+    "file": "readback_R2_after_template.json",
+    "proves": "template resource at R2_after",
+    "scenario": "cap155-e5-patch-attested",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "sha256": "6aa889122126e84ea69146fb1f5aa6d6b46106515c4b53a7d98accbcbd60ec7e",
+    "byte_length": 730,
+    "redacted": false
+  },
+  {
+    "file": "readback_R2_after_control.json",
+    "proves": "control resource at R2_after  \u2014 NEGATIVE CONTROL: never referenced by any operation component",
+    "scenario": "cap155-e5-patch-attested",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "sha256": "a5f7b8a733be5414c1fe78cb3e954194bb403613e803d79e37860cde335c430e",
+    "byte_length": 684,
+    "redacted": false
+  },
+  {
+    "file": "component_op_src.xml",
+    "proves": "stored Boomi component XML for op_src (re-created from cap155-e3b-patch-canonical/component_op_src.xml, path bytes unedited)",
+    "scenario": "cap155-e5-patch-attested",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "sha256": "539286b99fb24f8e6d6e421b0a08b2d3e8c9559a5ca16a9d243fc3ac4dc1da7d",
+    "byte_length": 1462,
+    "redacted": true
+  },
+  {
+    "file": "component_op_tgt.xml",
+    "proves": "stored Boomi component XML for op_tgt (re-created from cap155-e3b-patch-canonical/component_op_patch.xml, path bytes unedited)",
+    "scenario": "cap155-e5-patch-attested",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "sha256": "dab74c75a11f1cebc694f0c26808038095891366fc8c79c04c5260e73b3f2276",
+    "byte_length": 1406,
+    "redacted": true
+  },
+  {
+    "file": "component_process.xml",
+    "proves": "stored process XML (re-created from cap155-e3b-patch-canonical/component_process.xml)",
+    "scenario": "cap155-e5-patch-attested",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "sha256": "6f111b6a0cb25f5f1884223a54c0a3afd160cd98fcfc18d637a683533daffca2",
+    "byte_length": 2496,
+    "redacted": true
+  },
+  {
+    "file": "fixture_derivation.json",
+    "proves": "provenance of every fixture byte: banked source, digests, substitutions",
+    "scenario": "cap155-e5-patch-attested",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "sha256": "d27fce73fd691470f82491966e7056f6681c288b49111fc45c90049ea4c3ea7b",
+    "byte_length": 3531,
+    "redacted": false
+  },
+  {
+    "file": "analysis.json",
+    "proves": "the derived verdict for this verb",
+    "scenario": "cap155-e5-patch-attested",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "sha256": "1e27136510f940195f64e28c3ff0280353f69a5fb70493d7283df29f29114280",
+    "byte_length": 2925,
+    "redacted": false
+  },
+  {
+    "file": "account_liveness.json",
+    "proves": "C1 account liveness, redacted",
+    "scenario": "cap155-e5-patch-attested",
+    "account_id": "traininghlibbochkarov-JKIY2X",
+    "sha256": "61c52ce59a4e23d1d6fa6833b7a321d428e3af97d2d000142edaf080d496c4ea",
+    "byte_length": 481,
+    "redacted": false
+  }
+]

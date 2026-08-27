@@ -1,0 +1,50 @@
+[
+  {
+    "id": "R0VOX0NPTk5fUkVDX2V4ZWN1dGlvbi1kOTk5YjE5Yy04ZjVmLTRkNDYtOWQ5My0xMWRlNTg0NmM3YTQtMjAyNi4wOC4yNzpjb25uZWN0b3ItMjFjMmEyOTEtNmQzZi00NTQ2LTkzMzMtMjdkZTZlNzdkZjU4",
+    "executionId": "execution-d999b19c-8f5f-4d46-9d93-11de5846c7a4-2026.08.27",
+    "connectorType": "officialboomi-X3979C-rest-prod",
+    "actionType": "EXECUTE",
+    "operationName": "_TEST_155E5_src_GET_20260827202715",
+    "connectionName": "Sandbox CDS Mock REST (no-auth)",
+    "status": "SUCCESS",
+    "size": 302,
+    "errorMessage": null,
+    "documentIndex": 0
+  },
+  {
+    "id": "R0VOX0NPTk5fUkVDX2V4ZWN1dGlvbi1kOTk5YjE5Yy04ZjVmLTRkNDYtOWQ5My0xMWRlNTg0NmM3YTQtMjAyNi4wOC4yNzpjb25uZWN0b3ItYzlhNWFlMDItMzk1Mi00ZGY3LTgwN2QtMDYwZjM5NDY3ZjU0",
+    "executionId": "execution-d999b19c-8f5f-4d46-9d93-11de5846c7a4-2026.08.27",
+    "connectorType": "officialboomi-X3979C-rest-prod",
+    "actionType": "EXECUTE",
+    "operationName": "_TEST_155E5_DELETE_20260827202715",
+    "connectionName": "Sandbox CDS Mock REST (no-auth)",
+    "status": "SUCCESS",
+    "size": 0,
+    "errorMessage": null,
+    "documentIndex": 0
+  },
+  {
+    "id": "R0VOX0NPTk5fUkVDX2V4ZWN1dGlvbi1kOTk5YjE5Yy04ZjVmLTRkNDYtOWQ5My0xMWRlNTg0NmM3YTQtMjAyNi4wOC4yNzpjb25uZWN0b3ItYzEzZTZlNjktZTA2Yy00OGJkLWIwNTYtN2E0YWEwMDkwZTk4",
+    "executionId": "execution-d999b19c-8f5f-4d46-9d93-11de5846c7a4-2026.08.27",
+    "connectorType": "return",
+    "actionType": "return",
+    "operationName": "shape4",
+    "connectionName": "Return Documents",
+    "status": "SUCCESS",
+    "size": 0,
+    "errorMessage": null,
+    "documentIndex": 0
+  },
+  {
+    "id": "R0VOX0NPTk5fUkVDX2V4ZWN1dGlvbi1kOTk5YjE5Yy04ZjVmLTRkNDYtOWQ5My0xMWRlNTg0NmM3YTQtMjAyNi4wOC4yNzpjb25uZWN0b3ItNTFkNGViMjUtODYzMi00M2UzLThmZDMtZDBjYTBmZGE5Zjlh",
+    "executionId": "execution-d999b19c-8f5f-4d46-9d93-11de5846c7a4-2026.08.27",
+    "connectorType": "nodata",
+    "actionType": "nodata",
+    "operationName": "shape1",
+    "connectionName": "Start",
+    "status": "SUCCESS",
+    "size": 0,
+    "errorMessage": null,
+    "documentIndex": 0
+  }
+]

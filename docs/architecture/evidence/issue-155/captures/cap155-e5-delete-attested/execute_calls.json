@@ -1,0 +1,70 @@
+[
+  {
+    "label": "run1",
+    "utc": "2026-08-27T20:33:46.880710+00:00",
+    "execute": {
+      "_success": true,
+      "request_id": "executionrecord-69f3d34c-de01-4cf8-848a-633746c37e0f",
+      "process_id": "de6367ca-6f15-427f-8d17-f51cf10d8ce5",
+      "environment_id": "c8d9140d-6d34-4ca6-91ff-bfd263556d5b",
+      "atom_id": "89387bdf-b177-4631-9cc6-687bf4afefa7",
+      "execution_result": {
+        "poll_status": "COMPLETED",
+        "elapsed_seconds": 9.2,
+        "poll_count": 5,
+        "execution_id": "execution-d999b19c-8f5f-4d46-9d93-11de5846c7a4-2026.08.27",
+        "status": "COMPLETE",
+        "process_name": "_TEST_155E5_proc_DELETE_20260827202715 2",
+        "atom_name": "renera-local-atom",
+        "execution_time": "2026-08-27T20:33:34Z",
+        "execution_duration": 59,
+        "inbound_document_count": 1,
+        "outbound_document_count": 2,
+        "inbound_error_document_count": 0,
+        "error": null
+      },
+      "execution_id": "execution-d999b19c-8f5f-4d46-9d93-11de5846c7a4-2026.08.27"
+    },
+    "execution_id": "execution-d999b19c-8f5f-4d46-9d93-11de5846c7a4-2026.08.27",
+    "window_start": "2026-08-27T20:33:33.447193+00:00",
+    "window_end": "2026-08-27T20:33:42.870669+00:00",
+    "status": "COMPLETE",
+    "inbound": 1,
+    "outbound": 2,
+    "error": null
+  },
+  {
+    "label": "run2_identical_replay",
+    "utc": "2026-08-27T20:34:02.665523+00:00",
+    "execute": {
+      "_success": true,
+      "request_id": "executionrecord-b175a336-e363-4e1d-a693-b7e5cb2b0a4e",
+      "process_id": "de6367ca-6f15-427f-8d17-f51cf10d8ce5",
+      "environment_id": "c8d9140d-6d34-4ca6-91ff-bfd263556d5b",
+      "atom_id": "89387bdf-b177-4631-9cc6-687bf4afefa7",
+      "execution_result": {
+        "poll_status": "COMPLETED",
+        "elapsed_seconds": 11.5,
+        "poll_count": 6,
+        "execution_id": "execution-18b59781-67b7-4f31-afc6-89a619efd15b-2026.08.27",
+        "status": "COMPLETE",
+        "process_name": "_TEST_155E5_proc_DELETE_20260827202715 2",
+        "atom_name": "renera-local-atom",
+        "execution_time": "2026-08-27T20:33:47Z",
+        "execution_duration": 49,
+        "inbound_document_count": 1,
+        "outbound_document_count": 2,
+        "inbound_error_document_count": 0,
+        "error": null
+      },
+      "execution_id": "execution-18b59781-67b7-4f31-afc6-89a619efd15b-2026.08.27"
+    },
+    "execution_id": "execution-18b59781-67b7-4f31-afc6-89a619efd15b-2026.08.27",
+    "window_start": "2026-08-27T20:33:46.891915+00:00",
+    "window_end": "2026-08-27T20:33:58.655969+00:00",
+    "status": "COMPLETE",
+    "inbound": 1,
+    "outbound": 2,
+    "error": null
+  }
+]
