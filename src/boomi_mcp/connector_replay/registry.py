@@ -122,6 +122,18 @@ def _parse(payload: Any) -> ReplayRegistry:
         version == _SUPPORTED_SCHEMA,
         f"registry schema_version {version!r} is not the supported {_SUPPORTED_SCHEMA}",
     )
+    # REQUIRED, not defaulted. `payload.get(key, [])` turned a truncated or
+    # corrupted packaged file into an apparently valid deny-all registry: the
+    # safe-looking outcome silently replaced the real one, and nothing said so.
+    for section in ("vocabulary", "evidence_records", "operation_records"):
+        if section not in payload:
+            raise RegistryInvalid(
+                f"registry is missing the required {section!r} section. An absent "
+                "section is corruption, not an intentionally empty registry — the "
+                "packaged file declares all three"
+            )
+        if not isinstance(payload[section], list):
+            raise RegistryInvalid(f"registry section {section!r} must be a list")
     try:
         vocabulary = tuple(
             ConnectorVocabularyMappingV1(
@@ -150,9 +162,7 @@ def _parse(payload: Any) -> ReplayRegistry:
             "rather than ignoring them — a key present in the data and absent from "
             "the reader is a disagreement, not a default.".format(unknown)
         )
-    operation_records = payload.get("operation_records", [])
-    if not isinstance(operation_records, list):
-        raise RegistryInvalid("operation_records must be a list")
+    operation_records = payload["operation_records"]
     return ReplayRegistry(vocabulary, evidence, tuple(operation_records))
 
 

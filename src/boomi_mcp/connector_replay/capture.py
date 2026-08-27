@@ -196,6 +196,16 @@ def _counterparty_outcome(log: Path, method_hint: str | None) -> tuple[int | Non
                 f"{log.name}: {method_hint} appears {len(for_method)} times; the "
                 "request this capture is about cannot be attributed unambiguously"
             )
+        # ZERO matches. Previously this fell through, and a log holding a single
+        # UNRELATED request returned that request's status — which the ingest then
+        # paired with the DECLARED action. A successful read could therefore mint an
+        # idempotent row for a delete that never ran. A declared method with no
+        # matching request is not weak evidence; it is evidence of the wrong thing.
+        raise CaptureRefused(
+            f"{log.name}: no {method_hint} request appears in the counterparty log, "
+            "so this capture attests nothing about that method. Another request's "
+            "status must never be borrowed for it"
+        )
     if len(hits) == 1:
         return int(hits[0].group("status")), hits[0].group("method")
     return None, None

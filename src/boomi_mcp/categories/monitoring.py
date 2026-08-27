@@ -1938,6 +1938,12 @@ def _convert_generic_results(entries) -> List[Dict[str, Any]]:
 # ============================================================================
 
 
+#: A bound on paging, so a pathological execution cannot spin this call forever.
+#: Reaching it is REPORTED rather than hidden — a silent cap is how a truncated
+#: answer comes to look like a complete one.
+_MAX_QUERY_PAGES = 50
+
+
 def _unset_to_none(value: Any) -> Any:
     """Normalise the SDK's unset marker to None.
 
@@ -2012,8 +2018,26 @@ def handle_execution_connectors(boomi_client, config_data: Dict[str, Any]) -> Di
     )
     response = boomi_client.execution_connector.query_execution_connector(request_body=query)
 
+    # Follow the query token to exhaustion, the same way this module's other
+    # queries do. Reading only the first page returned a truncated `connectors`
+    # list beside a `count` that described the truncation rather than the
+    # execution — which is worse than an obvious error, because the caller has no
+    # way to tell a short list from a complete one. An execution with many
+    # connector rows is exactly the case these rows exist to describe.
+    records = list(getattr(response, "result", None) or [])
+    query_token = getattr(response, "query_token", None)
+    pages = 1
+    while query_token and pages < _MAX_QUERY_PAGES:
+        response = boomi_client.execution_connector.query_more_execution_connector(
+            request_body=query_token
+        )
+        records.extend(getattr(response, "result", None) or [])
+        query_token = getattr(response, "query_token", None)
+        pages += 1
+    truncated = bool(query_token)
+
     rows = []
-    for record in (getattr(response, "result", None) or []):
+    for record in records:
         connector_type = _unset_to_none(getattr(record, "connector_type", None))
         row = {
             "execution_connector_id": _unset_to_none(getattr(record, "id_", None)),
@@ -2038,12 +2062,21 @@ def handle_execution_connectors(boomi_client, config_data: Dict[str, Any]) -> Di
         "_success": True,
         "execution_id": execution_id,
         "count": len(rows),
+        "pages_read": pages,
         "connectors": rows,
         "note": (
             "platform_action_type is identical for every HTTP verb; read the verb "
             "from the operation component, not from this field."
         ),
     }
+    if truncated:
+        # Say so rather than serving a short list as if it were the whole set.
+        result["truncated"] = (
+            "More connector rows exist than were read: the page limit of {0} was "
+            "reached and the platform still offered a continuation token. The "
+            "`connectors` list and `count` describe what was read, not the "
+            "execution.".format(_MAX_QUERY_PAGES)
+        )
     if not rows:
         # An empty result has two causes this query cannot tell apart, and reporting
         # it as a bare success invites the reader to conclude the execution used no

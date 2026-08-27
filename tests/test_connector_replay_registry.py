@@ -63,12 +63,15 @@ def test_a_registry_that_cannot_be_parsed_is_refused_not_skipped():
     with pytest.raises(RegistryInvalid):
         _parse(["not", "an", "object"])
     with pytest.raises(RegistryInvalid):
-        _parse({"schema_version": 1, "vocabulary": [{"platform_connector_type": "x"}]})
+        _parse({"schema_version": 1, "vocabulary": [{"platform_connector_type": "x"}],
+                "evidence_records": [], "operation_records": []})
 
 
 def test_a_connector_type_mapped_twice_is_refused():
     dup = {
         "schema_version": 1,
+        "evidence_records": [],
+        "operation_records": [],
         "vocabulary": [
             {"platform_connector_type": "t", "family": "rest",
              "action_source": "operation_component"},
@@ -153,12 +156,36 @@ def test_a_key_this_build_does_not_understand_is_refused():
     """Refusing beats ignoring: an unknown key is a disagreement, not a default."""
     with pytest.raises(RegistryInvalid) as err:
         _parse({"schema_version": 1, "vocabulary": [], "evidence_records": [],
-                "surprise_rows": [{"family": "rest"}]})
+                "operation_records": [], "surprise_rows": [{"family": "rest"}]})
     assert "surprise_rows" in str(err.value)
 
 
 def test_underscore_prefixed_keys_are_commentary_and_allowed():
     """The packaged file carries prose under `_comment` and `_known_unmapped`."""
     reg = _parse({"schema_version": 1, "vocabulary": [], "evidence_records": [],
+                  "operation_records": [],
                   "_comment": ["prose"], "_known_unmapped": [{"x": 1}]})
     assert reg.evidence_records == ()
+
+
+def test_a_truncated_registry_is_not_mistaken_for_an_empty_one():
+    """The dangerous shape: corruption that reads as a valid deny-all state.
+
+    Defaulting an absent section to `[]` turned a truncated packaged file into a
+    registry that looked intentionally empty. Empty IS the safe runtime state, so
+    the corruption would have been invisible — it produces exactly the behaviour a
+    healthy empty registry produces.
+    """
+    for missing in ("vocabulary", "evidence_records", "operation_records"):
+        payload = {"schema_version": 1, "vocabulary": [], "evidence_records": [],
+                   "operation_records": []}
+        del payload[missing]
+        with pytest.raises(RegistryInvalid) as err:
+            _parse(payload)
+        assert missing in str(err.value)
+
+
+def test_a_section_of_the_wrong_type_is_refused():
+    with pytest.raises(RegistryInvalid):
+        _parse({"schema_version": 1, "vocabulary": {}, "evidence_records": [],
+                "operation_records": []})

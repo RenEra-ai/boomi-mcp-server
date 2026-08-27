@@ -61,9 +61,18 @@ CONFIG_DIGEST_DOMAIN: Final[bytes] = b"ComponentConfigDigestV1\0"
 #: goes. Query-parameter and request-header NAMES are included because adding a
 #: parameter changes the request; their VALUES are excluded because a static header
 #: value is exactly where an API key gets parked.
-_OPERATION_FIELDS: Final[frozenset[str]] = frozenset({"path"})
+#: MEASURED against every operation component in the archive, not assumed. The
+#: platform serves exactly four operation fields, and all four are `<field id=...>`
+#: entries — including the two property containers. An earlier version of this
+#: module looked for `queryParameters` and `requestHeaders` as ELEMENT TAGS, which
+#: no component carries, so that branch was dead: parameter and header names never
+#: reached a digest at all, and `followRedirects` was not in the allowlist either.
+#: Two operations differing only in redirect behaviour digested identically.
+_OPERATION_FIELDS: Final[frozenset[str]] = frozenset({"path", "followRedirects"})
 _OPERATION_ATTRS: Final[tuple[str, ...]] = ("customOperationType",)
-_OPERATION_PROPERTY_CONTAINERS: Final[frozenset[str]] = frozenset(
+#: Field ids whose value is a customProperties block. Their NAMES are digested;
+#: their VALUES are not — a static header value is where an API key gets parked.
+_OPERATION_PROPERTY_FIELDS: Final[frozenset[str]] = frozenset(
     {"queryParameters", "requestHeaders"}
 )
 
@@ -110,8 +119,16 @@ def _parse(xml: str, refusal: type[DigestRefused], what: str) -> ET.Element:
         raise refusal(f"{what}: not well-formed XML ({exc})") from exc
 
 
-def _field_values(root: ET.Element, wanted: frozenset[str]) -> dict[str, str]:
+def _field_values(
+    root: ET.Element,
+    wanted: frozenset[str],
+    refusal: type[DigestRefused] = ConfigDigestRefused,
+) -> dict[str, str]:
     """Collect ``<field id=... value=...>`` for ids in ``wanted``.
+
+    ``refusal`` is the caller's own exception type. This helper is shared by both
+    digests, and raising the config refusal from a route derivation would report a
+    registered code the caller never advertises.
 
     A repeated id is a refusal rather than a last-one-wins: two fields claiming the
     same id means the caller's assumption about which one decides the route is
@@ -126,7 +143,7 @@ def _field_values(root: ET.Element, wanted: frozenset[str]) -> dict[str, str]:
         if fid not in wanted:
             continue
         if fid in found:
-            raise ConfigDigestRefused(
+            raise refusal(
                 f"field id {fid!r} appears more than once; the route it implies is "
                 "ambiguous and will not be digested"
             )
@@ -146,10 +163,15 @@ def _normalized_path(raw: str) -> str:
         path = urlsplit(path).path
     if not path.startswith("/"):
         path = "/" + path if path else "/"
-    # Collapse duplicate separators; a trailing separator is not significant for a
-    # route, but the root itself must survive as "/".
-    parts = [p for p in path.split("/") if p]
-    return "/" + "/".join(parts) if parts else "/"
+    # Internal empty segments are PRESERVED. Collapsing them made `/a//b` and
+    # `/a/b` digest identically, and servers may route those differently — this
+    # digest identifies captured route coverage, so a collapse would let evidence
+    # captured for one path satisfy a claim about another. Only a trailing
+    # separator is dropped, which no server treats as a distinct resource, and the
+    # root survives as "/".
+    if len(path) > 1 and path.endswith("/"):
+        path = path[:-1]
+    return path or "/"
 
 
 def route_digest_v1(connection_xml: str, operation_xml: str) -> str:
@@ -163,13 +185,13 @@ def route_digest_v1(connection_xml: str, operation_xml: str) -> str:
     conn = _parse(connection_xml, RouteDigestRefused, "connection")
     oper = _parse(operation_xml, RouteDigestRefused, "operation")
 
-    conn_fields = _field_values(conn, _CONNECTION_FIELDS)
+    conn_fields = _field_values(conn, _CONNECTION_FIELDS, RouteDigestRefused)
     if "url" not in conn_fields:
         raise RouteDigestRefused(
             "the connection declares no url field; a route cannot be derived from a "
             "connection whose base is unknown"
         )
-    oper_fields = _field_values(oper, _OPERATION_FIELDS)
+    oper_fields = _field_values(oper, frozenset({"path"}), RouteDigestRefused)
     # A BLANK operation path is meaningful and must not be confused with a missing
     # one: blank is how a dynamically-bound path is authored, and it is exactly the
     # case this issue exists to support.
@@ -180,8 +202,20 @@ def route_digest_v1(connection_xml: str, operation_xml: str) -> str:
             "shape this digest reads"
         )
 
-    base = _normalized_path(urlsplit(conn_fields["url"].strip()).path)
     template = oper_fields["path"].strip()
+    if not template:
+        # A blank path is how a DYNAMICALLY BOUND route is authored — the actual
+        # path is composed per document at runtime. Every such operation would
+        # otherwise digest to the same base-only value, so one captured document's
+        # route could satisfy coverage for every other. There is no static route
+        # here to identify, and inventing one is worse than refusing.
+        raise RouteDigestRefused(
+            "the operation's path is blank, which is how a dynamically bound route "
+            "is authored: the path is composed per document at runtime, so no "
+            "static route digest identifies it. Service-wide evidence is required "
+            "for such an operation, not a route digest"
+        )
+    base = _normalized_path(urlsplit(conn_fields["url"].strip()).path)
     payload = "\n".join(("base=" + base, "template=" + template)).encode("utf-8")
     return hashlib.sha256(ROUTE_DIGEST_DOMAIN + payload).hexdigest()
 
@@ -200,18 +234,23 @@ def _projected_operation(root: ET.Element) -> list[str]:
     for fid, value in sorted(_field_values(root, _OPERATION_FIELDS).items()):
         lines.append(f"field:{fid}={value}")
     for el in root.iter():
-        if _localname(el.tag) not in _OPERATION_PROPERTY_CONTAINERS:
+        if _localname(el.tag) != "field":
             continue
-        container = _localname(el.tag)
+        fid = el.get("id")
+        if fid not in _OPERATION_PROPERTY_FIELDS:
+            continue
         # NAMES only. A static header's value is a classic place for an API key,
-        # and this digest is published.
+        # and this digest is published. The names are read from the field's own
+        # customProperties child — these containers are FIELDS, not element tags,
+        # which is what an earlier version got wrong and why this contributed
+        # nothing at all.
         names = sorted(
             child.get("name", "")
             for child in el.iter()
             if child.get("name") is not None
         )
-        lines.append(f"{container}.names={','.join(names)}")
-    return lines
+        lines.append(f"{fid}.names={','.join(names)}")
+    return sorted(lines)
 
 
 def _projected_connection(root: ET.Element) -> list[str]:

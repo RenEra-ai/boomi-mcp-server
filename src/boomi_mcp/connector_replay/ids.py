@@ -45,6 +45,13 @@ __all__ = [
 ]
 
 
+#: Matched with ``fullmatch``, not ``match``. A trailing ``$`` is NOT a whole-string
+#: anchor in Python: it also matches immediately before a final newline, so
+#: ``match`` accepted an otherwise-valid id with a newline glued to it — a value
+#: that is not the grammar this module documents, and one an evidence row could
+#: then cite. The anchors are kept as well, so the pattern remains correct for a
+#: caller that uses it directly.
+#:
 #: The Boomi component-id language: a lowercase-or-uppercase hex UUID in canonical
 #: 8-4-4-4-12 form. Anchored at both ends — an id is the whole string, never a
 #: substring of one, so a value carrying trailing whitespace or an appended
@@ -83,7 +90,7 @@ def is_boomi_component_id(value: object) -> bool:
     classify values arriving from JSON and from the platform, where a null or a
     number is a thing that happens and is simply not an id.
     """
-    return isinstance(value, str) and BOOMI_COMPONENT_ID_RE.match(value) is not None
+    return isinstance(value, str) and BOOMI_COMPONENT_ID_RE.fullmatch(value) is not None
 
 
 def is_execution_id(value: object) -> bool:
@@ -92,4 +99,4 @@ def is_execution_id(value: object) -> bool:
     See :data:`EXECUTION_ID_PATTERN` — the trailing date is required, so the
     platform's undated documentation example is rejected here on purpose.
     """
-    return isinstance(value, str) and EXECUTION_ID_RE.match(value) is not None
+    return isinstance(value, str) and EXECUTION_ID_RE.fullmatch(value) is not None

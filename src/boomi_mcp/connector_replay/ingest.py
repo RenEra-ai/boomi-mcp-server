@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import hashlib
 from pathlib import Path
-from typing import Iterable
+from typing import Final, Iterable
 
 from .capture import CaptureRefused, CaptureSummaryV1, summarize
 from .models import (
@@ -44,6 +44,12 @@ _MANIFEST = "SHA256SUMS"
 #: acted on". A 4xx or 5xx means the action was NOT observed, whatever the platform
 #: reported about the execution.
 _SUCCESS_RANGE = range(200, 300)
+
+#: Fields the counterparty maintains itself, which moving does not make a replay
+#: unsafe. Deliberately tiny and named here rather than inline: widening it is how
+#: a genuine side effect gets reclassified as noise, so it should be an obvious
+#: edit with a reviewer's eyes on it.
+_VOLATILE_FIELDS: Final[frozenset[str]] = frozenset({"modifiedOn"})
 
 
 class IngestRefused(Exception):
@@ -91,9 +97,10 @@ def verify_archive(archive_root: Path, capture_dir: Path) -> None:
     capture_dir = Path(capture_dir)
     digests = _manifest_digests(archive_root)
 
+    on_disk = sorted(p for p in capture_dir.rglob("*") if p.is_file())
     unlisted: list[str] = []
     mismatched: list[str] = []
-    for path in sorted(p for p in capture_dir.rglob("*") if p.is_file()):
+    for path in on_disk:
         rel = str(path.relative_to(archive_root))
         expected = digests.get(rel)
         if expected is None:
@@ -103,11 +110,23 @@ def verify_archive(archive_root: Path, capture_dir: Path) -> None:
         if actual != expected:
             mismatched.append(rel)
 
-    if unlisted or mismatched:
+    # MISSING is the third direction, and the one the first version could not see.
+    # Walking only what exists finds a changed byte and an extra file, but a
+    # DELETED artifact produces neither — it is not on disk to mismatch and not
+    # unlisted because it is not there at all. A capture that quietly lost its
+    # replay execution record or a readback would then verify clean and be
+    # classified on the evidence that remained.
+    prefix = str(capture_dir.relative_to(archive_root)) + "/"
+    present = {str(p.relative_to(archive_root)) for p in on_disk}
+    missing = sorted(rel for rel in digests if rel.startswith(prefix) and rel not in present)
+
+    if unlisted or mismatched or missing:
         raise IngestRefused(
             "capture {0} does not match the archive manifest — unlisted: {1}; "
-            "digest mismatch: {2}. A capture is evidence only while its bytes are "
-            "the bytes that were archived.".format(capture_dir.name, unlisted, mismatched)
+            "digest mismatch: {2}; MISSING (listed but absent): {3}. A capture is "
+            "evidence only while its bytes are the bytes that were archived, and "
+            "only while all of them are still there.".format(
+                capture_dir.name, unlisted, mismatched, missing)
         )
 
 
@@ -135,13 +154,30 @@ def classify(summary: CaptureSummaryV1) -> tuple[SideEffectV1, RetrySafetyV1]:
         return SideEffectV1.UNKNOWN, RetrySafetyV1.UNVERIFIED
 
     changed = [r.state_changed for r in summary.runs if r.state_changed is not None]
-    convergence = [c for c in summary.convergence if c.first_call_changed_state]
+    # The positive control: at least one subject the FIRST call actually moved.
+    # Without it, "the replay changed nothing" is unfalsifiable — a call that did
+    # nothing at all looks perfectly idempotent.
+    acted = [c for c in summary.convergence if c.first_call_changed_state]
 
-    if convergence:
-        # A double execution with a positive control: the first call moved state,
-        # so the second one's behaviour is meaningful.
-        only_volatile = all(not c.replay_changed_state or set(c.fields_differing_on_replay) <= {"modifiedOn"}
-                            for c in convergence)
+    if acted:
+        # A replay verdict requires two DISTINCT executions. Staged readbacks alone
+        # do not make a double execution: a malformed or truncated capture could
+        # carry them beside a single run and be handed a replay verdict it never
+        # earned.
+        if len(summary.execution_ids) < 2:
+            return SideEffectV1.WRITE, RetrySafetyV1.UNVERIFIED
+
+        # Evaluate the replay across EVERY captured subject, not only the ones the
+        # first call touched. Filtering to those discarded the negative controls —
+        # so a second call that unexpectedly moved a previously untouched resource
+        # was invisible, and the action was still called conditionally idempotent.
+        # A side effect on a subject nobody targeted is the strongest possible
+        # evidence AGAINST replay safety.
+        only_volatile = all(
+            not c.replay_changed_state
+            or set(c.fields_differing_on_replay) <= _VOLATILE_FIELDS
+            for c in summary.convergence
+        )
         return (
             SideEffectV1.WRITE,
             RetrySafetyV1.CONDITIONALLY_IDEMPOTENT if only_volatile else RetrySafetyV1.NON_IDEMPOTENT,
