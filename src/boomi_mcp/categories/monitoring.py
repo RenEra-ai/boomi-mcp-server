@@ -1937,6 +1937,132 @@ def _convert_generic_results(entries) -> List[Dict[str, Any]]:
 # Consolidated Action Router
 # ============================================================================
 
+
+def _unset_to_none(value: Any) -> Any:
+    """Normalise the SDK's unset marker to None.
+
+    The generated SDK defaults optional fields to a SENTINEL object rather than to
+    None, so a plain `getattr(record, field, None)` returns the sentinel — which is
+    truthy and serialises as a bare object repr. Callers filtering on `is not None`
+    therefore keep it. Normalising here means an absent field reads as absent.
+
+    Compared by IDENTITY. The sentinel is a plain `object()` instance, so it has no
+    distinguishing type name and no equality of its own — a type-name check silently
+    matches nothing, which was the first version of this and was caught only by
+    running it. Note also that the test is not truthiness: `error_count` is
+    legitimately 0, and 0 is a fact, not an absence.
+    """
+    from boomi.models.utils.sentinel import SENTINEL
+
+    return None if value is None or value is SENTINEL else value
+
+
+def handle_execution_connectors(boomi_client, config_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Query the per-connector rows the platform records for one execution.
+
+    These rows are what make a capture attributable: they say WHICH connector ran
+    inside an execution and how many documents it moved. Two cautions are baked
+    into the shape of the result rather than left to the caller:
+
+    * ``action_type`` is the platform's own value and is the SAME for every HTTP
+      verb — measured across 95 rows spanning eight verbs. It is returned because
+      it is what the platform said, but it cannot distinguish a read from a
+      delete, and the field name here says so.
+    * ``nodata`` and ``return`` appear as connector types beside genuine ones.
+      They are execution sentinels, not connectors, and are flagged so a caller
+      does not mistake one for a connector that ran.
+    """
+    from boomi.models import (
+        ExecutionConnectorQueryConfig,
+        ExecutionConnectorQueryConfigQueryFilter,
+        ExecutionConnectorSimpleExpression,
+        ExecutionConnectorSimpleExpressionOperator,
+        ExecutionConnectorSimpleExpressionProperty,
+    )
+
+    execution_id = config_data.get("execution_id")
+    if not execution_id:
+        return {
+            "_success": False,
+            "error": "execution_id is required",
+            "hint": (
+                "ExecutionConnector queries require an execution_id. Use the "
+                "execution_records action to find one."
+            ),
+        }
+
+    rejection = _reject_request_id_as_execution_id(execution_id)
+    if rejection:
+        return rejection
+
+    expression = ExecutionConnectorSimpleExpression(
+        operator=ExecutionConnectorSimpleExpressionOperator.EQUALS,
+        property=ExecutionConnectorSimpleExpressionProperty.EXECUTIONID,
+        argument=[execution_id],
+    )
+    query = ExecutionConnectorQueryConfig(
+        query_filter=ExecutionConnectorQueryConfigQueryFilter(expression=expression)
+    )
+    response = boomi_client.execution_connector.query_execution_connector(request_body=query)
+
+    rows = []
+    for record in (getattr(response, "result", None) or []):
+        connector_type = _unset_to_none(getattr(record, "connector_type", None))
+        row = {
+            "execution_connector_id": _unset_to_none(getattr(record, "id_", None)),
+            "execution_id": _unset_to_none(getattr(record, "execution_id", None)),
+            "connector_type": connector_type,
+            # Named for what it IS, not for what a reader might hope it is.
+            "platform_action_type": _unset_to_none(getattr(record, "action_type", None)),
+            "is_execution_sentinel": connector_type in ("nodata", "return"),
+            "is_start_shape": _unset_to_none(getattr(record, "is_start_shape", None)),
+            "record_type": _unset_to_none(getattr(record, "record_type", None)),
+            "success_count": _unset_to_none(getattr(record, "success_count", None)),
+            "error_count": _unset_to_none(getattr(record, "error_count", None)),
+            "size": _unset_to_none(getattr(record, "size", None)),
+        }
+        rows.append({k: v for k, v in row.items() if v is not None})
+
+    return {
+        "_success": True,
+        "execution_id": execution_id,
+        "count": len(rows),
+        "connectors": rows,
+        "note": (
+            "platform_action_type is identical for every HTTP verb; read the verb "
+            "from the operation component, not from this field."
+        ),
+    }
+
+
+
+#: Action name -> (handler, whether the handler needs credentials).
+#:
+#: This table is the AUTHORITY for which monitoring actions exist. Dispatch reads
+#: it and so does the message that lists valid actions, so the two cannot drift.
+#: Declaration order is the served order.
+_MONITORING_ACTIONS = {
+    "execution_records": (handle_execution_records, False),
+    "execution_logs": (handle_execution_logs, True),
+    "execution_artifacts": (handle_execution_artifacts, True),
+    "audit_logs": (handle_audit_logs, False),
+    "events": (handle_events, False),
+    "certificates": (handle_certificates, False),
+    "throughput": (handle_throughput, False),
+    "execution_metrics": (handle_execution_metrics, False),
+    "connector_documents": (handle_connector_documents, False),
+    "download_connector_document": (handle_download_connector_document, True),
+    "execution_summary": (handle_execution_summary, False),
+    "document_counts": (handle_document_counts, False),
+    "execution_counts": (handle_execution_counts, False),
+    "api_usage_counts": (handle_api_usage_counts, False),
+    "connection_licensing_report": (handle_connection_licensing_report, False),
+    "custom_tracked_fields": (handle_custom_tracked_fields, False),
+    "edi_connector_records": (handle_edi_connector_records, False),
+    "execution_connectors": (handle_execution_connectors, False),
+}
+
+
 def monitor_platform_action(
     boomi_client,
     profile: str,
@@ -1961,53 +2087,23 @@ def monitor_platform_action(
         config_data = {}
 
     try:
-        if action == "execution_records":
-            return handle_execution_records(boomi_client, config_data)
-        elif action == "execution_logs":
-            return handle_execution_logs(boomi_client, config_data, creds=creds)
-        elif action == "execution_artifacts":
-            return handle_execution_artifacts(boomi_client, config_data, creds=creds)
-        elif action == "audit_logs":
-            return handle_audit_logs(boomi_client, config_data)
-        elif action == "events":
-            return handle_events(boomi_client, config_data)
-        elif action == "certificates":
-            return handle_certificates(boomi_client, config_data)
-        elif action == "throughput":
-            return handle_throughput(boomi_client, config_data)
-        elif action == "execution_metrics":
-            return handle_execution_metrics(boomi_client, config_data)
-        elif action == "connector_documents":
-            return handle_connector_documents(boomi_client, config_data)
-        elif action == "download_connector_document":
-            return handle_download_connector_document(boomi_client, config_data, creds=creds)
-        elif action == "execution_summary":
-            return handle_execution_summary(boomi_client, config_data)
-        elif action == "document_counts":
-            return handle_document_counts(boomi_client, config_data)
-        elif action == "execution_counts":
-            return handle_execution_counts(boomi_client, config_data)
-        elif action == "api_usage_counts":
-            return handle_api_usage_counts(boomi_client, config_data)
-        elif action == "connection_licensing_report":
-            return handle_connection_licensing_report(boomi_client, config_data)
-        elif action == "custom_tracked_fields":
-            return handle_custom_tracked_fields(boomi_client, config_data)
-        elif action == "edi_connector_records":
-            return handle_edi_connector_records(boomi_client, config_data)
-        else:
+        entry = _MONITORING_ACTIONS.get(action)
+        if entry is None:
             return {
                 "_success": False,
                 "error": f"Unknown action: {action}",
-                "valid_actions": [
-                    "execution_records", "execution_logs", "execution_artifacts",
-                    "audit_logs", "events", "certificates", "throughput",
-                    "execution_metrics", "connector_documents", "download_connector_document",
-                    "execution_summary", "document_counts", "execution_counts",
-                    "api_usage_counts", "connection_licensing_report",
-                    "custom_tracked_fields", "edi_connector_records",
-                ]
+                # DERIVED from the dispatch table, never re-listed. This message
+                # used to carry a hand-written copy of the action names — a second
+                # model of a fact the table already held. The two could disagree,
+                # and both directions hurt: an action that dispatches but is not
+                # advertised is invisible, and one advertised but not dispatched is
+                # a promise that fails on use.
+                "valid_actions": list(_MONITORING_ACTIONS),
             }
+        handler, wants_creds = entry
+        if wants_creds:
+            return handler(boomi_client, config_data, creds=creds)
+        return handler(boomi_client, config_data)
 
     except ApiError as e:
         return {
