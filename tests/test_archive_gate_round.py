@@ -10,6 +10,7 @@ Run with PYTHONPATH=src (the editable-install .pth is stale):
 """
 
 import json
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -1374,8 +1375,13 @@ def test_a_failed_archive_is_ROLLED_BACK_and_the_retry_succeeds(tmp_path):
     assert first.returncode == 0, first.stderr
 
     index_before = (root / "index.jsonl").read_bytes()
-    sums = root / "SHA256SUMS"
-    sums.chmod(0o444)
+    # The failure is injected at the index append, which happens AFTER the round
+    # has been moved into place — so this exercises the rollback proper. A
+    # read-only manifest no longer works as an injection point: the manifest is
+    # written beside itself and moved in, and a rename succeeds onto a read-only
+    # file, so that whole failure mode stopped existing.
+    index = root / "index.jsonl"
+    index.chmod(0o444)
 
     second = tmp_path / "cdx-gate-review.WILLFAIL"
     second.mkdir()
@@ -1386,11 +1392,11 @@ def test_a_failed_archive_is_ROLLED_BACK_and_the_retry_succeeds(tmp_path):
     try:
         assert out.returncode != 0, out.stdout
         assert "rolled back" in out.stderr
-        assert (root / "index.jsonl").read_bytes() == index_before, "the row survived"
+        assert index.read_bytes() == index_before, "the row survived"
         assert not (root / "architect-reviews" / second.name).exists(), \
             "the partial round survived and now blocks the retry"
     finally:
-        sums.chmod(0o644)
+        index.chmod(0o644)
 
     # Fix exactly what the message named; the identical command now succeeds.
     retry, _ = _archive_gate(tmp_path, second, prompts)
@@ -1430,3 +1436,287 @@ def test_a_file_inside_an_ARCHIVED_round_is_not_absorbable(tmp_path):
     late.unlink()
     retry, _ = _archive_gate(tmp_path, second, prompts)
     assert retry.returncode == 0, retry.stderr
+
+
+def test_a_failure_while_COPYING_leaves_the_destination_untouched(tmp_path):
+    """The window the rollback could not cover, closed by construction instead.
+
+    Copying straight into the destination meant an unreadable source or a full
+    disk left a partial round exactly where the next attempt wants to go, and
+    the overwrite refusal then blocked the retry permanently. The round is now
+    built beside its destination and moved in as one step, so the destination
+    appears only when the round is complete — which holds for failure modes
+    nobody enumerated, unlike widening a rollback to cover more of the loop.
+    """
+    run, prompts = _gate_run(tmp_path)
+    first, root = _archive_gate(tmp_path, run, prompts)
+    assert first.returncode == 0, first.stderr
+
+    second = tmp_path / "cdx-gate-review.UNREADABLE"
+    second.mkdir()
+    for name in ("start.json", "attestation.json", "review.md"):
+        (second / name).write_text((run / name).read_text())
+    (second / "review.md").chmod(0o000)
+
+    index_before = (root / "index.jsonl").read_bytes()
+    sums_before = (root / "SHA256SUMS").read_bytes()
+    try:
+        out, _ = _archive_gate(tmp_path, second, prompts)
+        assert out.returncode != 0, out.stdout
+        assert "while copying" in out.stderr
+        assert not (root / "architect-reviews" / second.name).exists()
+        # No staging debris either — a leftover `.partial-` directory would be
+        # listed by the next manifest rewrite as archived evidence.
+        leftovers = [p.name for p in (root / "architect-reviews").iterdir()
+                     if p.name.startswith(".partial-")]
+        assert leftovers == [], leftovers
+        assert (root / "index.jsonl").read_bytes() == index_before
+        assert (root / "SHA256SUMS").read_bytes() == sums_before
+    finally:
+        (second / "review.md").chmod(0o644)
+
+    retry, _ = _archive_gate(tmp_path, second, prompts)
+    assert retry.returncode == 0, retry.stderr
+
+
+def test_the_manifest_is_written_ATOMICALLY(tmp_path):
+    """Either wholly the old manifest or wholly the new one — never a stub.
+
+    A truncated manifest is worse than a wrong one: an empty manifest reads as a
+    brand-new archive to the accounting check, which then has nothing to compare
+    against and lets every difference through. So it is written beside itself
+    and moved into place.
+    """
+    run, prompts = _gate_run(tmp_path)
+    result, root = _archive_gate(tmp_path, run, prompts)
+    assert result.returncode == 0, result.stderr
+
+    sums = root / "SHA256SUMS"
+    # A rename replaces a read-only target, so the write survives what a plain
+    # truncate-and-fill would have failed on half way through.
+    sums.chmod(0o444)
+    before = sums.read_bytes()
+    try:
+        second = tmp_path / "cdx-gate-review.ATOMIC"
+        second.mkdir()
+        for name in ("start.json", "attestation.json", "review.md"):
+            (second / name).write_text((run / name).read_text())
+        out, _ = _archive_gate(tmp_path, second, prompts)
+        assert out.returncode == 0, out.stderr
+        assert sums.read_bytes() != before
+        assert sums.read_text().strip(), "the manifest is not empty"
+    finally:
+        (root / "SHA256SUMS").chmod(0o644)
+
+    # No staging file survives beside it.
+    assert [p.name for p in root.iterdir() if p.name.startswith(".SHA256SUMS")] == []
+
+
+def test_accept_new_with_rederive_is_REJECTED(tmp_path):
+    """A re-derivation adds no file, so there is nothing for the flag to accept.
+
+    Combined, the re-derivation branch returned before the acceptance accounting
+    ran at all — so the files it was asked to accept went unrecorded at exit 0,
+    or worse were certified into the manifest by the rewrite without the
+    round-internal refusal ever being consulted.
+    """
+    run, prompts = _gate_run(tmp_path)
+    result, root = _archive_gate(tmp_path, run, prompts)
+    assert result.returncode == 0, result.stderr
+
+    out = subprocess.run(
+        [sys.executable, str(_SCRIPT), "--issue", "999", "--rederive-index",
+         "--accept-new", "--repo", str(tmp_path / "repo")],
+        capture_output=True, text=True)
+    assert out.returncode == 2, out.stdout
+    assert "no meaning with --rederive-index" in out.stderr
+
+    # ...and each flag alone still works.
+    assert _rederive(tmp_path).returncode == 0
+
+
+def test_a_rollback_that_cannot_COMPLETE_says_so_instead_of_claiming_success(tmp_path):
+    """The rollback is itself a mutation, and can itself fail.
+
+    A read-only index is the case that proved it: restoring needed exactly the
+    permission that was missing, so the restore raised out of the handler and
+    the process died with a traceback after reporting nothing. Now it restores
+    only what actually changed — nothing had been written in that case — and if
+    a restore genuinely cannot be done it reports an UNKNOWN state rather than
+    the reassuring lie that the archive is as it was.
+    """
+    run, prompts = _gate_run(tmp_path)
+    first, root = _archive_gate(tmp_path, run, prompts)
+    assert first.returncode == 0, first.stderr
+
+    index = root / "index.jsonl"
+    index_before = index.read_bytes()
+    index.chmod(0o444)
+
+    second = tmp_path / "cdx-gate-review.ROLLFAIL"
+    second.mkdir()
+    for name in ("start.json", "attestation.json", "review.md"):
+        (second / name).write_text((run / name).read_text())
+
+    try:
+        out, _ = _archive_gate(tmp_path, second, prompts)
+        assert out.returncode != 0, out.stdout
+        assert "Traceback" not in out.stderr, "the rollback raised out of its handler"
+        # The round HAD been moved into place before the append failed, so the
+        # rollback had exactly one thing to undo and undoes it. The index needed
+        # no restore — the append never wrote — and attempting one anyway is
+        # what used to raise, because it needed the permission that was missing.
+        assert "rolled back ['the round directory']" in out.stderr
+        assert "UNKNOWN" not in out.stderr, "it should not claim an unknown state here"
+        assert index.read_bytes() == index_before
+        assert not (root / "architect-reviews" / second.name).exists()
+    finally:
+        index.chmod(0o644)
+
+    retry, _ = _archive_gate(tmp_path, second, prompts)
+    assert retry.returncode == 0, retry.stderr
+
+
+def test_bootstrapping_a_NEW_issue_archive_works(tmp_path):
+    """A regression I introduced, caught by QA and A/B-proven against the parent.
+
+    Reading the index unconditionally, outside the protected region and after the
+    round had been moved into place, turned the first use of a new archive into a
+    crash that orphaned the round and blocked the retry. The previous commit
+    exited 0 on the identical input. A fix that breaks the first use of the thing
+    it protects is not a fix.
+    """
+    run, prompts = _gate_run(tmp_path)
+    root = tmp_path / "repo" / "docs" / "architecture" / "evidence" / "issue-888"
+    root.mkdir(parents=True)          # no index.jsonl, no SHA256SUMS: brand new
+
+    result = subprocess.run(
+        [sys.executable, str(_SCRIPT), "--issue", "888", "--kind", "architect-review",
+         "--run-dir", str(run), "--logical-loop", "L3", "--repo", str(tmp_path / "repo"),
+         "--prompts", str(prompts)],
+        capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+    assert "Traceback" not in result.stderr
+    assert (root / "architect-reviews" / run.name / "review.md").is_file()
+    assert (root / "SHA256SUMS").is_file()
+
+
+@pytest.mark.parametrize("bad", ["999/../issue-888", "999/../../../../..", "abc", "9 9"])
+def test_the_ISSUE_is_a_number_not_a_path(tmp_path, bad):
+    """The twin of the name check, joined by the same operator.
+
+    This script's own comment already warned the issue number is accepted as
+    given and the hazard is one typo away. It was: a traversing issue wrote
+    eleven paths outside the repository at exit 0.
+    """
+    run, prompts = _gate_run(tmp_path)
+    result = subprocess.run(
+        [sys.executable, str(_SCRIPT), "--issue", bad, "--kind", "architect-review",
+         "--run-dir", str(run), "--logical-loop", "L3", "--repo", str(tmp_path / "repo"),
+         "--prompts", str(prompts)],
+        capture_output=True, text=True)
+    assert result.returncode == 2, result.stdout
+    assert "must be a number" in result.stderr
+    assert list((tmp_path / "repo").rglob("issue-888")) == []
+
+
+def test_a_name_the_MANIFEST_cannot_record_is_refused(tmp_path):
+    """One refusal replacing three separate encoding problems.
+
+    A newline ends a manifest record mid-name, so the manifest could never be
+    parsed again; a decomposed-unicode name is stored differently by git, so the
+    manifest and the git index disagree; a symlink is hashed through but recorded
+    by its own path. Encoding around each in turn is sanitising an unbounded
+    space. The input is bounded instead, and the limit is stated.
+    """
+    run, prompts = _gate_run(tmp_path)
+    result, root = _archive_gate(tmp_path, run, prompts)
+    assert result.returncode == 0, result.stderr
+
+    newline_named = root / "captures" / "with\nnewline.txt"
+    newline_named.parent.mkdir(parents=True, exist_ok=True)
+    newline_named.write_text("x\n")
+
+    out = _rederive(tmp_path)
+    assert out.returncode != 0, out.stdout
+    assert "line break" in out.stderr
+    newline_named.unlink()
+
+    # NFD: the same characters git would store in composed form.
+    import unicodedata
+
+    nfd = root / "captures" / unicodedata.normalize("NFD", "café.txt")
+    nfd.write_text("x\n")
+    out = _rederive(tmp_path)
+    assert out.returncode != 0, out.stdout
+    assert "decomposed" in out.stderr
+    nfd.unlink()
+
+    # A symlink, which the manifest describes by the link rather than the target.
+    link = root / "captures" / "link.txt"
+    link.symlink_to(root / "index.jsonl")
+    out = _rederive(tmp_path)
+    assert out.returncode != 0, out.stdout
+    assert "symlink" in out.stderr
+    link.unlink()
+
+    # ...and with all three gone it works again.
+    _reseal(root)
+    assert _rederive(tmp_path).returncode == 0
+
+
+def test_an_archive_with_NO_manifest_still_accounts_for_what_is_in_it(tmp_path):
+    """`if not listed: return` treated every manifest-less archive as a bootstrap.
+
+    A real bootstrap has nothing in it but its own index, so anything else
+    present arrived from somewhere this script cannot vouch for — and skipping
+    the check meant the very next write recorded it as evidence.
+    """
+    run, prompts = _gate_run(tmp_path)
+    result, root = _archive_gate(tmp_path, run, prompts)
+    assert result.returncode == 0, result.stderr
+    (root / "SHA256SUMS").unlink()
+
+    out = _rederive(tmp_path)
+    assert out.returncode != 0, out.stdout
+    assert "no manifest yet" in out.stderr
+
+
+def test_a_refusal_does_not_remove_a_directory_it_did_not_create(tmp_path):
+    """Removing an empty directory because a refusal happened to find it empty."""
+    run, prompts = _gate_run(tmp_path)
+    first, root = _archive_gate(tmp_path, run, prompts)
+    assert first.returncode == 0, first.stderr
+
+    # Empty the kind directory but KEEP it, so it is a directory that existed
+    # before the refusing run and holds nothing. That is the exact shape whose
+    # removal is indistinguishable from tidying up after oneself.
+    shutil.rmtree(root / "architect-reviews" / run.name)
+    assert (root / "architect-reviews").is_dir()
+    assert not any((root / "architect-reviews").iterdir())
+
+    # ...and leave the archive CONSISTENT with that, or the pre-flight refuses
+    # before the rollback is ever reached and the test proves nothing about it.
+    header = (root / "index.jsonl").read_text().splitlines()[0]
+    (root / "index.jsonl").write_text(header + "\n")
+    import hashlib
+
+    (root / "SHA256SUMS").write_text(
+        hashlib.sha256((root / "index.jsonl").read_bytes()).hexdigest()
+        + "  index.jsonl\n")
+
+    index = root / "index.jsonl"
+    index.chmod(0o444)                     # force a failure after the rename
+    second = tmp_path / "cdx-gate-review.WILLREFUSE"
+    second.mkdir()
+    for name in ("start.json", "attestation.json", "review.md"):
+        (second / name).write_text((run / name).read_text())
+
+    try:
+        out, _ = _archive_gate(tmp_path, second, prompts)
+        assert out.returncode != 0, out.stdout
+        assert (root / "architect-reviews").is_dir(), \
+            "a directory this run never created was removed by its rollback"
+        assert not (root / "architect-reviews" / second.name).exists()
+    finally:
+        index.chmod(0o644)

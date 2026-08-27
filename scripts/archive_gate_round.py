@@ -91,15 +91,18 @@ KINDS = {
 }
 
 
-def _discard(durable: Path) -> None:
-    """Remove a refused round, and its parent if that leaves it empty.
+def _discard(durable: Path, parent_existed: bool = True) -> None:
+    """Remove a refused round, and the parent only if THIS run created it.
 
-    An empty `architect-reviews/` left behind reads as "a round was archived
-    here" to anyone looking, which is the impression a refusal exists to avoid.
+    An empty `architect-reviews/` left behind by a refusal reads as "a round was
+    archived here", which is the impression a refusal exists to avoid — but
+    removing one that was already there is a different act entirely: it deletes
+    something the run did not create, on the strength of it happening to be
+    empty. `parent_existed` says which case this is; the default is the safe one.
     """
     shutil.rmtree(durable, ignore_errors=True)
     parent = durable.parent
-    if parent.is_dir() and not any(parent.iterdir()):
+    if not parent_existed and parent.is_dir() and not any(parent.iterdir()):
         parent.rmdir()
 
 
@@ -266,6 +269,51 @@ def read_sums(root: Path):
     return listed
 
 
+#: The checksum manifest is a line-oriented `<digest>  <name>` text format that
+#: this repository's archive scanner reads, and it is NOT this script's to
+#: change. That means some names simply cannot be recorded in it, and three
+#: separate findings were all that one fact wearing different clothes: a newline
+#: in a name produced a manifest nobody could parse again; a decomposed-unicode
+#: name produced a manifest that disagreed with the git index; a symlinked
+#: directory made the scan silently erase lines.
+#:
+#: Encoding around each of those in turn is sanitising the output of an
+#: unbounded space, which this repository has already learned does not converge.
+#: The input is bounded instead: a name that cannot be recorded faithfully is
+#: REFUSED, and the limit is stated rather than worked around.
+def refuse_unrecordable_names(root: Path) -> None:
+    """Refuse any archived path the manifest cannot represent faithfully."""
+    import unicodedata
+
+    offenders = {}
+    for path in sorted(root.rglob("*")):
+        if path.is_symlink():
+            # `rglob` follows these when hashing but records the link's own
+            # path, so the manifest ends up describing something other than what
+            # was hashed — and a symlinked directory drops its real entries.
+            offenders.setdefault("a symlink, which the manifest cannot describe",
+                                 []).append(str(path.relative_to(root)))
+            continue
+        if not path.is_file():
+            continue
+        rel = str(path.relative_to(root))
+        if "\n" in rel or "\r" in rel:
+            offenders.setdefault("a line break, which ends the manifest record "
+                                 "mid-name", []).append(repr(rel))
+        elif rel != unicodedata.normalize("NFC", rel):
+            offenders.setdefault("a decomposed form that git stores differently, "
+                                 "so the manifest and the git index disagree",
+                                 []).append(repr(rel))
+    if offenders:
+        raise SystemExit(
+            "refusing: these archived paths cannot be recorded faithfully in a "
+            "line-oriented checksum manifest, and a manifest that cannot be read "
+            "back is worse than none:\n" + "\n".join(
+                f"  {why}: {what}" for why, what in sorted(offenders.items())
+            ) + "\nRename them before archiving."
+        )
+
+
 def scan_archive(root: Path):
     """Every archived file's current digest. Any file NAMED SHA256SUMS is excluded.
 
@@ -315,8 +363,23 @@ def refuse_unless_archive_is_accounted_for(root: Path, accept_new: bool = False)
     whichever round happened to be archived next. Accepting them is now an act
     the operator asks for and the output records.
     """
+    refuse_unrecordable_names(root)
     listed, on_disk = read_sums(root), scan_archive(root)
     if not listed:
+        # A brand-new archive has no manifest, but that is not licence to accept
+        # whatever is already lying in it: a bootstrap has nothing on disk yet,
+        # so anything present arrived from somewhere this script cannot vouch
+        # for. Only an empty archive bootstraps silently.
+        # `index.jsonl` is the archive's OWN skeleton, created when the archive
+        # is opened and re-derivable from the rounds themselves — it is not
+        # evidence that arrived from elsewhere, so it does not make a bootstrap
+        # suspicious. Anything else present before the first round did.
+        strangers = sorted(set(on_disk) - {"index.jsonl"})
+        if strangers and not accept_new:
+            raise SystemExit(
+                "refusing: this archive has no manifest yet, but already holds "
+                f"files this run did not create: {strangers[:5]}. Pass "
+                "--accept-new to record them deliberately.")
         return
 
     unaccounted = {}
@@ -350,11 +413,26 @@ def refuse_unless_archive_is_accounted_for(root: Path, accept_new: bool = False)
 
 
 def write_sums(root: Path) -> int:
-    """Rewrite SHA256SUMS over every archived file. Call the check FIRST."""
+    """Rewrite SHA256SUMS over every archived file. Call the check FIRST.
+
+    ATOMICALLY. A plain write truncates first and then fills, so a failure part
+    way — a full disk, an I/O error — left a truncated manifest behind while the
+    caller's rollback restored only the index and reported the archive intact.
+    A truncated manifest is worse than a wrong one: an empty one reads as a
+    brand-new archive to the check above, which then has nothing to compare and
+    lets everything through. Writing beside it and moving it into place means
+    the manifest is either wholly the old one or wholly the new one.
+    """
+    refuse_unrecordable_names(root)
     on_disk = scan_archive(root)
-    (root / "SHA256SUMS").write_text(
-        "\n".join(f"{digest}  {name}" for name, digest in sorted(on_disk.items())) + "\n"
-    )
+    body = "\n".join(f"{digest}  {name}" for name, digest in sorted(on_disk.items())) + "\n"
+    staging = root / f".SHA256SUMS.partial-{os.getpid()}"
+    try:
+        staging.write_text(body)
+        os.replace(staging, root / "SHA256SUMS")
+    finally:
+        if staging.exists():
+            staging.unlink()
     return len(on_disk)
 
 
@@ -591,6 +669,14 @@ def main() -> int:
                              "archive keeps serving the old derivation")
     args = parser.parse_args()
 
+    # The twin of the name check. This script's own comment already warned that
+    # the issue number is accepted as given and the hazard is one typo away; it
+    # is joined into the archive path by the same operator, so `--issue
+    # '999/../../../..'` wrote eleven paths outside the repository at exit 0.
+    if not str(args.issue).isdigit():
+        print(f"--issue must be a number, not a path: {args.issue!r}", file=sys.stderr)
+        return 2
+
     repo = args.repo or Path(
         subprocess.check_output(["git", "rev-parse", "--show-toplevel"], text=True).strip()
     )
@@ -598,6 +684,12 @@ def main() -> int:
     if not root.is_dir():
         print(f"no evidence archive for issue {args.issue} at {root}", file=sys.stderr)
         return 1
+
+    if args.rederive_index and args.accept_new:
+        print("--accept-new has no meaning with --rederive-index: a re-derivation "
+              "adds no file, so there is nothing to accept. Archive the round that "
+              "brings the file, or remove it.", file=sys.stderr)
+        return 2
 
     if args.rederive_index:
         # FIRST, before the index is touched. The previous order rewrote the
@@ -684,39 +776,62 @@ def main() -> int:
     if durable.exists():
         print(f"refusing to overwrite an archived round: {durable}", file=sys.stderr)
         return 1
-    durable.mkdir(parents=True)
+    # BUILT BESIDE the destination and moved in as one step. Copying straight
+    # into the destination meant any failure part way — an unreadable source, a
+    # full disk — left a partial round sitting exactly where the next attempt
+    # wants to go, and the overwrite refusal then blocked the retry forever.
+    # Widening a rollback to cover more of the copy loop is the patch I already
+    # tried; making the destination appear only when the round is COMPLETE is
+    # the property, and it holds for failures nobody enumerated.
+    kind_dir_existed = durable.parent.is_dir()
+    durable.parent.mkdir(parents=True, exist_ok=True)
+    staging = durable.parent / f".partial-{durable.name}-{os.getpid()}"
+    if staging.exists():
+        shutil.rmtree(staging)
+    staging.mkdir()
 
     copied = []
-    for name in wanted:
-        source = args.run_dir / name
-        if source.is_file():
-            shutil.copy2(source, durable / name)
-            copied.append(name)
-    if args.kind == "architect-review":
-        # The prompts are REQUIRED evidence for a gate round — the archive
-        # scanner hashes every file under `prompts/` and refuses a round without
-        # it. They may not live in the run directory: the dispatcher-owned seam
-        # deliberately keeps them in a separate share directory, because the run
-        # directory holds `start.json`, the collector's root of trust, and the
-        # helper that drives the turn is a process that can write files. So the
-        # location is a parameter, defaulting to the run directory.
-        source = args.prompts or (args.run_dir / "prompts")
-        if source.is_dir():
-            shutil.copytree(source, durable / "prompts")
-            copied.append("prompts/")
-        else:
-            for name in ("prompt", "retry"):
-                candidate = (args.prompts or args.run_dir) / name
-                if candidate.is_file():
-                    (durable / "prompts").mkdir(exist_ok=True)
-                    shutil.copy2(candidate, durable / "prompts" / name)
-                    copied.append("prompts/" + name)
+    try:
+        for name in wanted:
+            source = args.run_dir / name
+            if source.is_file():
+                shutil.copy2(source, staging / name)
+                copied.append(name)
+        if args.kind == "architect-review":
+            # The prompts are REQUIRED evidence for a gate round — the archive
+            # scanner hashes every file under `prompts/` and refuses a round
+            # without it. They may not live in the run directory: the
+            # dispatcher-owned seam deliberately keeps them in a separate share
+            # directory, because the run directory holds `start.json`, the
+            # collector's root of trust, and the helper that drives the turn is
+            # a process that can write files. So the location is a parameter,
+            # defaulting to the run directory.
+            source = args.prompts or (args.run_dir / "prompts")
+            if source.is_dir():
+                shutil.copytree(source, staging / "prompts")
+                copied.append("prompts/")
+            else:
+                for name in ("prompt", "retry"):
+                    candidate = (args.prompts or args.run_dir) / name
+                    if candidate.is_file():
+                        (staging / "prompts").mkdir(exist_ok=True)
+                        shutil.copy2(candidate, staging / "prompts" / name)
+                        copied.append("prompts/" + name)
+    except BaseException as failure:
+        shutil.rmtree(staging, ignore_errors=True)
+        print(f"archiving failed while copying ({type(failure).__name__}: {failure}). "
+              "Nothing was written to the archive; fix the cause and run the same "
+              "command again.", file=sys.stderr)
+        return 1
 
     if not copied:
-        shutil.rmtree(durable)
+        shutil.rmtree(staging, ignore_errors=True)
         print(f"nothing to archive in {args.run_dir} — is it the right run directory?",
               file=sys.stderr)
         return 1
+
+    # The destination comes into existence here, complete, in one step.
+    os.rename(staging, durable)
 
     # A gate round's PROMPT is required evidence, and it must be the prompt the
     # collector attested — not merely some file in a directory named prompts.
@@ -803,8 +918,16 @@ def main() -> int:
     # the overwrite refusal blocked the identical command after the operator had
     # fixed exactly what the error named. Restoring the previous state is what
     # makes "fix what it says and run it again" true rather than aspirational.
-    index_before = (root / "index.jsonl").read_bytes()
+    # DEFENSIVE, and inside the protected region. A brand-new issue archive has
+    # no index yet, and reading it unconditionally — outside the try, after the
+    # round had already been moved into place — turned bootstrapping a new
+    # archive from a working operation into a crash that left the round orphaned
+    # and the retry blocked. Measured against the previous commit: it exited 0
+    # there and 1 here. A fix that breaks the first use of the thing it protects
+    # is not a fix, and this one was mine.
+    index_path = root / "index.jsonl"
     try:
+        index_before = index_path.read_bytes() if index_path.is_file() else None
         if indexed:
             with (root / "index.jsonl").open("a") as handle:
                 handle.write(json.dumps(row, sort_keys=True) + "\n")
@@ -817,11 +940,40 @@ def main() -> int:
 
         listed = write_sums(root)
     except BaseException as failure:
-        (root / "index.jsonl").write_bytes(index_before)
-        _discard(durable)
-        print(f"archiving failed and was rolled back ({type(failure).__name__}: "
-              f"{failure}). The archive is as it was; fix the cause and run the "
-              "same command again.", file=sys.stderr)
+        # The rollback is itself a mutation and can itself fail — a read-only
+        # index is the case that proved it, where restoring needed exactly the
+        # permission that was missing and the restore raised out of the handler.
+        # So restore only what actually changed, and if even that cannot be done,
+        # say the archive is in an UNKNOWN state rather than claiming it is as it
+        # was. A rollback that lies is worse than no rollback.
+        undone, unresolved = [], []
+        try:
+            if index_before is None:
+                if index_path.is_file():
+                    index_path.unlink()   # it did not exist before this run
+                    undone.append("the index file this run created")
+            elif index_path.read_bytes() != index_before:
+                index_path.write_bytes(index_before)
+                undone.append("the index row")
+        except BaseException as restore_failure:
+            unresolved.append(f"index.jsonl ({restore_failure})")
+        try:
+            if durable.exists():
+                _discard(durable, parent_existed=kind_dir_existed)
+                undone.append("the round directory")
+        except BaseException as restore_failure:
+            unresolved.append(f"{durable} ({restore_failure})")
+
+        print(f"archiving failed ({type(failure).__name__}: {failure}).",
+              file=sys.stderr)
+        if unresolved:
+            print("  THE ARCHIVE IS IN AN UNKNOWN STATE — rollback could not "
+                  f"complete: {unresolved}. Inspect it before running anything "
+                  "else against it.", file=sys.stderr)
+            return 1
+        print(f"  rolled back {undone or ['nothing — no write had happened yet']}. "
+              "The archive is as it was; fix the cause and run the same command "
+              "again.", file=sys.stderr)
         return 1
     print(f"archived {len(copied)} file(s) to {durable.relative_to(repo)}")
     for name in accepted:
