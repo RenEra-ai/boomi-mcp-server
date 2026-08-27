@@ -83,3 +83,40 @@ def test_the_owner_module_really_is_where_the_shape_lives():
     """Anchors the expectation above to a file that exists and spells it."""
     assert _OWNER.is_file()
     assert any(_HEX_UUID_SHAPE.search(s) for s in _string_literals(ast.parse(_OWNER.read_text())))
+
+
+def test_the_registry_layer_loads_without_the_authoring_stack():
+    """`connector_replay` must be importable on its own.
+
+    The registry is meant to be packaged and read by tooling — including from
+    inside a built image — without dragging the compiler or the MCP category
+    modules in behind it. This is a load-time property, so it is checked by
+    importing into a cleaned module table rather than by reading the source for
+    import statements: a lazily-imported name inside a function is fine, and a
+    grep-based check would flag it while missing a transitive pull-in.
+    """
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    repo = Path(__file__).resolve().parents[1]
+    code = (
+        "import sys\n"
+        "import boomi_mcp.connector_replay.ids\n"
+        "import boomi_mcp.connector_replay.digests\n"
+        "leaked = sorted(k for k in sys.modules if k.startswith('boomi_mcp.categories')"
+        " or k.startswith('boomi_mcp.compiler'))\n"
+        "print(';'.join(leaked))\n"
+    )
+    out = subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=repo, capture_output=True, text=True,
+        env={"PYTHONPATH": str(repo / "src"), "PATH": "/usr/bin:/bin",
+             "PYTHONDONTWRITEBYTECODE": "1"},
+    )
+    assert out.returncode == 0, out.stderr
+    leaked = [x for x in out.stdout.strip().split(";") if x]
+    assert leaked == [], (
+        "importing the replay registry pulled in the authoring stack: {0}. Move the "
+        "offending import inside the function that needs it.".format(leaked)
+    )
