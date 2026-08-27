@@ -374,11 +374,20 @@ def _account_scope_hash(summary: CaptureSummaryV1) -> str:
 
 
 def _input_observation(summary: CaptureSummaryV1) -> InputObservationV1:
-    """Whether the connector consumed documents, from the execution's own counts."""
-    # `inboundDocumentCount`, not `inboundErrorDocumentCount` — the latter counts
-    # ERRONEOUS inbound documents, so a successful input-consuming run has zero of
-    # them and was being published as consuming nothing.
-    consumed = any((run.inbound_documents or 0) > 0 for run in summary.runs)
+    """Whether the CONNECTOR UNDER TEST consumed documents, from its own rows.
+
+    Correlated, for the same reason placement is. This previously read the
+    execution's `inboundDocumentCount`, which is a process-level figure covering
+    every connector that ran — so the claim was published about the wrong subject,
+    and forcing the connector's own rows to zero did not change it.
+
+    A connector that ran as the process ENTRY consumes nothing by construction: it
+    has no predecessor to consume from. That is a structural fact about the graph,
+    not an inference from a count, which is why it is asserted separately.
+    """
+    if summary.is_start_shape:
+        return InputObservationV1.NO_INBOUND_DOCUMENTS
+    consumed = (summary.connector_documents or 0) > 0
     return (InputObservationV1.DOCUMENTS_CONSUMED if consumed
             else InputObservationV1.NO_INBOUND_DOCUMENTS)
 
@@ -393,7 +402,13 @@ def _output_observation(summary: CaptureSummaryV1) -> OutputObservationV1:
     # about a response document reaching the process, and a 204 carries no body at
     # all — so claiming documents were returned from the log alone was asserting
     # something never observed.
-    if any((run.outbound_documents or 0) > 0 for run in summary.runs):
+    # The CONNECTOR'S OWN bytes, not the execution's document sum. Measured on the
+    # archive, the two disagree in the direction that matters: every capture reports
+    # `outboundDocumentCount` 2 — one document from the source read, one from the
+    # connector under test — so a HEAD and a TRACE, which return no body at all,
+    # were both published as having received return documents. The connector's own
+    # `size` is 0 for exactly those, and non-zero for the verbs that carried a body.
+    if (summary.connector_response_bytes or 0) > 0:
         return OutputObservationV1.RETURN_DOCUMENTS_RECEIVED
     return OutputObservationV1.NO_OUTPUT_OBSERVED
 
@@ -464,6 +479,17 @@ def _capture_reference(summary: CaptureSummaryV1, side_effect: SideEffectV1) -> 
         raise IngestRefused(
             f"{summary.scenario}: a state-change effect has no readback behind it"
         )
+    # REFUSED, never defaulted. `is_start_shape` is None exactly when the capture
+    # did not let the connector under test be correlated to a platform row, and a
+    # ternary on it published DOWNSTREAM for that unresolved case — a machine-served
+    # placement claim about a connector nobody observed, indistinguishable in the
+    # served row from one that was measured.
+    if summary.is_start_shape is None:
+        raise IngestRefused(
+            f"{summary.scenario}: placement is unresolved — no platform connector row "
+            "could be correlated to the operation under test, and a placement is an "
+            "observation, not a default"
+        )
     return CaptureReferenceV1(
         execution_id=summary.execution_ids[0],
         # From the capture, not from its DIRECTORY NAME. A scenario label is neither
@@ -475,7 +501,7 @@ def _capture_reference(summary: CaptureSummaryV1, side_effect: SideEffectV1) -> 
         account_scope_hash=_account_scope_hash(summary),
         summary=ClosedCaptureObservationsV1(
             placement=(PlacementObservationV1.ENTRY if summary.is_start_shape
-                       else PlacementObservationV1.DOWNSTREAM),
+                       else PlacementObservationV1.DOWNSTREAM),  # None refused above
             input_observation=_input_observation(summary),
             output_observation=_output_observation(summary),
             effect=effect,

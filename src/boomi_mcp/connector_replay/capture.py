@@ -24,6 +24,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any, Final
 
@@ -140,6 +141,15 @@ class CaptureSummaryV1(ReplayRegistryModel):
     #: Whether the connector ran as the process entry. Observed, not assumed: the
     #: archived double-execution target runs downstream of a fetch.
     is_start_shape: bool | None = None
+    #: Documents the CONNECTOR UNDER TEST processed, and the bytes it moved, summed
+    #: over its own correlated platform rows. Distinct from the execution's counts,
+    #: which are process-level sums over every connector that ran: the archived
+    #: captures report `outboundDocumentCount` 2 for an execution in which the
+    #: connector under test reports `successCount` 1, the other document being the
+    #: source read's. A connector-level claim derived from the process-level sum is
+    #: a claim about the wrong subject.
+    connector_documents: int | None = None
+    connector_response_bytes: int | None = None
     #: sha256 over every archived file's bytes, in sorted-name order.
     capture_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
     file_count: int = Field(ge=1)
@@ -190,20 +200,75 @@ def _first(node: Any, key: str) -> Any:
     return None
 
 
-def _start_shape_of_the_exercised_connector(
-    files: list[Path], execution_ids: frozenset[str]
-) -> bool | None:
-    """Whether the CONNECTOR UNDER TEST ran as the process entry.
+def _component_name_under_test(files: list[Path], method_hint: str | None) -> str | None:
+    """The NAME of the operation component whose verb is the one under test.
 
-    Correlated, not first-match. The archived captures put a `nodata` sentinel
-    first, and that sentinel IS the start shape — so reading whichever flag came
-    first reported entry placement for a connector that runs downstream, and the
-    order differs between executions, so the answer was not even stable.
+    THE JOIN KEY, and the reason this function exists at all. A capture holds more
+    than one connector component — every archived one pairs a source read with the
+    verb being tested — and the platform's own connector rows are printed per step,
+    so any observation taken by scanning rows describes whichever component the scan
+    happened to reach. That is not an observation of the connector under test.
+
+    The component is resolved by its DECLARED VERB, the same authority
+    ``_observed_methods`` reads, never by filename and never by a naming convention:
+    the step names in the archive happen to spell their verb, and reading that would
+    be a hand-model of a test harness's habit rather than a fact the platform
+    published. Zero or several components declaring the verb is an unresolved
+    correlation and returns None — the callers refuse rather than pick.
     """
-    from .models import EXECUTION_SENTINELS
+    if not method_hint:
+        return None
+    # Keyed on the COMPONENT ID, not on the name. Deduping by name would collapse
+    # two distinct components that happen to share one — and they can: measured live
+    # on the account, component CREATE uniquifies a duplicate name but component
+    # UPDATE does not, so two ids can carry the same name. Counting names would then
+    # report "uniquely resolved" for a genuinely ambiguous capture, which is the
+    # fail-open direction. Counting components refuses it.
+    by_component: dict[str, str] = {}
+    for path in sorted(files):
+        if path.suffix != ".xml":
+            continue
+        try:
+            root = ET.parse(path).getroot()
+        except (OSError, ET.ParseError):
+            continue
+        name = root.get("name")
+        component_id = root.get("componentId")
+        if not name or not component_id:
+            continue
+        if any(el.get("customOperationType") == method_hint for el in root.iter()):
+            by_component[component_id] = name
+    if len(by_component) == 1:
+        return next(iter(by_component.values()))
+    return None
 
-    flags = set()
-    for path in files:
+
+def _connector_rows_under_test(
+    files: list[Path], execution_ids: frozenset[str], method_hint: str | None
+) -> tuple[dict, ...] | None:
+    """The platform's connector rows FOR THE CONNECTOR UNDER TEST, or None.
+
+    The single correlated selector every per-connector observation reads from.
+    Rows are matched on the platform's own ``executionConnector`` field against the
+    name of the component resolved above, so the selection is a join between two
+    artifacts the platform authored rather than a filter that admits whatever else
+    ran in the same execution.
+
+    None means the correlation could not be made — no method hint, no uniquely
+    resolvable component, or no row bearing its name. Callers must refuse on None;
+    none of them may substitute a default, because a default here is a machine-served
+    claim about a connector nobody observed.
+    """
+    step_name = _component_name_under_test(files, method_hint)
+    if not step_name:
+        return None
+    # DEDUPED BY THE PLATFORM'S OWN ROW ID. A capture commonly archives the same
+    # query twice — `execution_connector.json` beside `execution_connector_requery.json`
+    # — so a row-per-file scan returned each connector twice. Harmless to a set of
+    # flags, and silently doubling to anything that COUNTS; the counts below are
+    # exactly such a consumer, so the duplicate has to die before they read it.
+    by_row: dict[str, dict] = {}
+    for path in sorted(files):
         if path.suffix != ".json":
             continue
         try:
@@ -213,11 +278,64 @@ def _start_shape_of_the_exercised_connector(
         for record in _platform_connector_records(payload):
             if record.get("executionId") not in execution_ids:
                 continue
-            if record.get("connectorType") in EXECUTION_SENTINELS:
+            if record.get("executionConnector") != step_name:
                 continue
-            value = record.get("isStartShape")
-            if isinstance(value, bool):
-                flags.add(value)
+            key = record.get("id")
+            if not isinstance(key, str):
+                # No platform id to dedupe on: keep it, but keyed so two such rows
+                # from one file cannot collapse into one.
+                key = f"{path.name}#{len(by_row)}"
+            by_row.setdefault(key, record)
+    return tuple(by_row.values()) or None
+
+
+def _connector_documents(
+    files: list[Path], execution_ids: frozenset[str], method_hint: str | None
+) -> int | None:
+    """Documents the connector under test processed, from ITS OWN rows."""
+    rows = _connector_rows_under_test(files, execution_ids, method_hint)
+    if rows is None:
+        return None
+    counts = [
+        (r.get("successCount") or 0) + (r.get("errorCount") or 0)
+        for r in rows
+        if isinstance(r.get("successCount"), int) or isinstance(r.get("errorCount"), int)
+    ]
+    return sum(counts) if counts else None
+
+
+def _connector_response_bytes(
+    files: list[Path], execution_ids: frozenset[str], method_hint: str | None
+) -> int | None:
+    """Bytes the connector under test moved, from ITS OWN rows."""
+    rows = _connector_rows_under_test(files, execution_ids, method_hint)
+    if rows is None:
+        return None
+    sizes = [r["size"] for r in rows if isinstance(r.get("size"), int)]
+    return sum(sizes) if sizes else None
+
+
+def _start_shape_of_the_exercised_connector(
+    files: list[Path], execution_ids: frozenset[str], method_hint: str | None = None
+) -> bool | None:
+    """Whether the CONNECTOR UNDER TEST ran as the process entry.
+
+    Reads the flag off the correlated rows only. Two earlier shapes of this
+    function were wrong in the same way and are worth naming, because the second
+    looked like a fix for the first: reading whichever flag came first reported the
+    `nodata` sentinel's placement, and aggregating every non-sentinel row in the
+    execution reported a set spanning the source read AND the verb under test. Both
+    happened to agree with the archive, which is why both passed — every archived
+    capture runs its connector downstream of a start shape. Neither had correlated
+    anything.
+
+    Disagreement among the correlated rows, or no correlation at all, returns None
+    and the placement is refused downstream.
+    """
+    rows = _connector_rows_under_test(files, execution_ids, method_hint)
+    if rows is None:
+        return None
+    flags = {r["isStartShape"] for r in rows if isinstance(r.get("isStartShape"), bool)}
     if len(flags) == 1:
         return next(iter(flags))
     return None
@@ -423,6 +541,13 @@ def _observed_connector_types(
 ) -> tuple[str, ...]:
     """Connector types the platform recorded FOR THIS CAPTURE'S EXECUTIONS.
 
+    SWEPT, and deliberately left uncorrelated. This is the one observation where
+    reading every row is the STRONGER check: its consumer requires the whole
+    observed set to equal the declared family, so a capture whose source and target
+    are different families is refused outright rather than attributed to whichever
+    one was correlated. Narrowing this to the connector under test would turn a
+    refusal into an attribution.
+
     The execution id is the causal tie, and requiring it is the point: without it
     any file in the directory carrying a `connectorType` lent its authority to the
     capture, so an artifact from an unrelated execution — or a bare
@@ -488,6 +613,13 @@ def _observed_methods(files: list[Path]) -> tuple[str, ...]:
     Read from the component rather than from the execution record, because the
     platform reports one generic action for all eight verbs — measured across 95
     rows. A capture's method is therefore only knowable from the component.
+
+    SWEPT, and left as a MEMBERSHIP test on purpose: it answers "could this capture
+    have exercised the declared verb", which is the weaker question, and it is
+    backstopped by two correlated checks that answer the stronger one — the
+    counterparty log must agree exactly where one exists, and the placement
+    correlation refuses any declared action that does not resolve to a unique
+    component carrying a platform row.
     """
     import re
 
@@ -634,5 +766,11 @@ def summarize(capture_dir: Path, method_hint: str | None = None) -> CaptureSumma
         observed_methods=_observed_methods(files),
         captured_at=_first_across(files, "executionTime", str),
         account_id=_first_across(files, "account", str),
-        is_start_shape=_start_shape_of_the_exercised_connector(files, execution_ids),
+        is_start_shape=_start_shape_of_the_exercised_connector(
+            files, execution_ids, method_hint
+        ),
+        connector_documents=_connector_documents(files, execution_ids, method_hint),
+        connector_response_bytes=_connector_response_bytes(
+            files, execution_ids, method_hint
+        ),
     )
