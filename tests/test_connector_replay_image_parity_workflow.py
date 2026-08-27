@@ -95,3 +95,62 @@ def test_the_check_actually_fails_on_a_bad_registry():
     )
     assert "load_registry()" in body, "it must exercise the real loader, not just json.loads"
     assert "importlib" in body or "resources.files" in body
+
+
+def test_the_workflow_compares_digests_not_only_readability():
+    """Loading the registry is necessary and NOT sufficient.
+
+    An image that shipped the registry but normalised a path differently would pass
+    a readability check and still compute identities that never match the host's —
+    which defeats the registry's entire purpose, since matching captured evidence to
+    a live route IS the mechanism.
+    """
+    body = _WORKFLOW.read_text()
+    assert "connector_replay_digest_parity.py" in body
+    assert (_REPO / "scripts" / "connector_replay_digest_parity.py").is_file()
+
+
+def test_the_parity_script_passes_on_this_host():
+    """It must agree with the committed fixture here, or it cannot judge an image."""
+    import os
+    import subprocess
+    import sys
+
+    out = subprocess.run(
+        [sys.executable, "scripts/connector_replay_digest_parity.py"],
+        cwd=_REPO, capture_output=True, text=True,
+        env={**os.environ, "PYTHONPATH": str(_REPO / "src")},
+    )
+    assert out.returncode == 0, out.stderr
+
+
+def test_the_parity_script_fails_when_a_digest_moves():
+    """Non-vacuity: a comparison that cannot fail is not a comparison.
+
+    Runs against a COPY with one digest altered, so the committed fixture is never
+    touched by the control.
+    """
+    import json
+    import os
+    import shutil
+    import subprocess
+    import sys
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        clone = Path(tmp) / "repo"
+        for rel in ("scripts", "src", "tests/fixtures/connector_replay",
+                    "docs/architecture/evidence/issue-155/captures"):
+            shutil.copytree(_REPO / rel, clone / rel)
+        fixture = clone / "tests/fixtures/connector_replay/digest_parity.json"
+        payload = json.loads(fixture.read_text())
+        payload["operations"][0]["config_digest"] = "ComponentConfigDigestV1:" + "0" * 64
+        fixture.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+
+        out = subprocess.run(
+            [sys.executable, "scripts/connector_replay_digest_parity.py"],
+            cwd=clone, capture_output=True, text=True,
+            env={**os.environ, "PYTHONPATH": str(clone / "src")},
+        )
+        assert out.returncode == 1, "an altered digest did not fail the comparison"
+        assert "config_digest" in out.stderr

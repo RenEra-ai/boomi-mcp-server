@@ -47,6 +47,40 @@ registers them lands; the ledger names a code only once the taxonomy carries it.
 The collected count 10537 equals the recorded floor from #180, so the floor is current on the
 branch point.
 
+## Slice B — Stage-1 step 0 — baseline
+
+| Field | Value |
+| --- | --- |
+| Issue | #155 — M12.17 connector dynamic path and connector/replay contracts |
+| Step-0 baseline (`$BASELINE`) | `6d2205ad836846517f522f8a0ac3e6baf64c2626` |
+| Branch | `codex/issue-155b` |
+| Branch point | `origin/dev` @ `6d2205a` (slice A's landing) |
+| Baseline suite | 10781 passed, 17 skipped — full non-KB, local `.venv` 3.12, `PYTHONPATH=src`, before any edit |
+| Baseline manifests | 10781 required nodes, 74 active goldens |
+| Slice kind | src-changing, one public action; the registry package lands dark |
+| Rebaseline set | the reachability inventory (source count and unscanned-asset count), the served capability catalog and description digests, and `test_nodes.jsonl` LAST from the final tree |
+
+This block is recorded LATE, and that is worth stating rather than hiding: the slice map
+carried a one-line entry for slice B from its first commit, but the per-slice step-0 table
+the ledger rules require was not written until the architect review pointed at its absence.
+Nothing in it is reconstructed — the baseline SHA was printed and pasted at step 0 in the
+usual way, and the suite and manifest figures are the ones recorded in the slice's opening
+commits. What was missing was the table, not the measurements.
+
+The baseline collected count 10781 equals the floor slice A landed, so the floor was current
+at this branch point.
+
+**Artifact trust boundary for this slice.** Slice B CREATES AND OWNS the `connector_replay`
+package and its packaged registry, both digest algorithms, the derived report, the
+digest-parity fixture and its checker, the advisory image-parity workflow, and the
+`execution_connectors` monitor action. It CONSUMES the platform's execution and connector
+records, the archived captures from slice A and the E-series rounds, the component builder's
+emitted XML shapes, and the monitoring router's existing seventeen actions. A finding that
+only hardens a self-owned artifact gets a boundary verdict at reconciliation rather than a
+fix batch by default — but note that this slice's two most serious findings, the ingest
+label reconciliation and the vocabulary resolution, were about CONSUMED facts being taken on
+trust, not about self-owned artifacts.
+
 ## Artifact trust boundary
 
 The slice CREATES AND OWNS: the canonical path binding and its semantic mirrors, the family

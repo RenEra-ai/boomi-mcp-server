@@ -1,7 +1,10 @@
 # ADVISORY CI. Not a required status, and deliberately not part of the gate.
 #
 # What it proves: that the packaged replay-evidence registry is readable INSIDE a
-# built image, by the same `importlib.resources` call the runtime uses. That is a
+# built image by the same `importlib.resources` call the runtime uses, AND that the
+# image computes byte-identical digests from byte-identical inputs. Readability alone
+# would let an image that loads the registry but normalises a path differently pass —
+# and evidence captured on the host would then never match in production. That is a
 # property the ordinary test suite structurally cannot check — on a developer
 # machine and in the test runner the file is simply present on disk, so
 # `importlib.resources` finds it whether or not the packaging would ship it. This
@@ -59,6 +62,16 @@ jobs:
           # Read the registry the way the runtime does. Everything below FAILS the
           # job: a build that succeeds while the registry is unreadable is exactly
           # the regression this workflow exists to catch.
+          #
+          # Loading the registry is NECESSARY BUT NOT SUFFICIENT. The image must
+          # also compute the SAME digests from the same bytes — a digest that
+          # differs between host and image means evidence captured on one cannot be
+          # matched on the other, which is the registry's entire purpose. That
+          # comparison runs first.
+          docker run --rm --entrypoint python \
+            -e PYTHONPATH=/app/src connector-replay-parity:ci \
+            /app/scripts/connector_replay_digest_parity.py
+
           docker run --rm --entrypoint python connector-replay-parity:ci -c '
           import json, sys
           from importlib import resources
