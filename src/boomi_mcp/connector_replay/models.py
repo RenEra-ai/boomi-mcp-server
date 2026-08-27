@@ -39,6 +39,14 @@ __all__ = [
     "KeyMechanismV1",
     "KeyScopeV1",
     "DuplicateGuaranteeV1",
+    "PlacementObservationV1",
+    "InputObservationV1",
+    "OutputObservationV1",
+    "EffectObservationV1",
+    "ReplayObservationV1",
+    "EvidenceScopeV1",
+    "EvidenceSourceV1",
+    "ClosedCaptureObservationsV1",
     "ContractKeySemanticsDefinitionV1",
     "ComponentProjectionAllowlistV1",
     "CaptureReferenceV1",
@@ -254,12 +262,18 @@ class CapabilityEvidenceRecordV1(ReplayRegistryModel):
 # ---------------------------------------------------------------------------
 
 
-class KeyMechanismV1(str, Enum):
-    """How a contract's idempotency key is supplied. Closed, per the design."""
+# The vocabularies below are the DESIGN'S, verbatim. An earlier version invented
+# plausible-looking alternatives — `client_supplied_key`, `rejects_duplicate`,
+# `connection` scope — which read sensibly and were not the published contract. A
+# closed vocabulary is a contract with the slices that consume it, so inventing a
+# near-synonym means the consuming slice cannot express what it was designed to.
 
-    CLIENT_SUPPLIED_KEY = "client_supplied_key"
-    NATURAL_KEY = "natural_key"
-    SERVER_ASSIGNED = "server_assigned"
+
+class KeyMechanismV1(str, Enum):
+    """How a contract's idempotency key works."""
+
+    REQUEST_KEY_DEDUPLICATION = "request_key_deduplication"
+    RESOURCE_IDENTITY_UPSERT = "resource_identity_upsert"
 
 
 class KeyScopeV1(str, Enum):
@@ -270,17 +284,81 @@ class KeyScopeV1(str, Enum):
     """
 
     OPERATION = "operation"
-    CONNECTION = "connection"
-    ACCOUNT = "account"
+    STATIC_ROUTE = "static_route"
     SERVICE = "service"
 
 
 class DuplicateGuaranteeV1(str, Enum):
-    """What the counterparty promises about a repeated key."""
+    """What the counterparty does with a repeated key."""
 
-    REJECTS_DUPLICATE = "rejects_duplicate"
-    CONVERGES = "converges"
-    CREATES_DUPLICATE = "creates_duplicate"
+    SAME_EFFECT = "same_effect"
+    SAME_RESULT = "same_result"
+    CONFLICT_WITHOUT_SECOND_EFFECT = "conflict_without_second_effect"
+
+
+class PlacementObservationV1(str, Enum):
+    """Where in the process the connector ran."""
+
+    ENTRY = "entry"
+    DOWNSTREAM = "downstream"
+
+
+class InputObservationV1(str, Enum):
+    """What the connector consumed."""
+
+    NO_INBOUND_DOCUMENTS = "no_inbound_documents"
+    DOCUMENTS_CONSUMED = "documents_consumed"
+
+
+class OutputObservationV1(str, Enum):
+    """What the connector produced."""
+
+    SUCCESSOR_RECEIVED_DOCUMENTS = "successor_received_documents"
+    RETURN_DOCUMENTS_RECEIVED = "return_documents_received"
+    NO_OUTPUT_OBSERVED = "no_output_observed"
+
+
+class EffectObservationV1(str, Enum):
+    """What the counterparty's state did."""
+
+    READ_ONLY = "read_only"
+    STATE_CREATED = "state_created"
+    STATE_CHANGED = "state_changed"
+    STATE_DELETED = "state_deleted"
+    STATE_UNCHANGED_AFTER_REPLAY = "state_unchanged_after_replay"
+
+
+class ReplayObservationV1(str, Enum):
+    """What a second identical execution did."""
+
+    NOT_EXERCISED = "not_exercised"
+    SAME_EFFECT = "same_effect"
+    SAME_RESULT = "same_result"
+    CONFLICT_WITHOUT_SECOND_EFFECT = "conflict_without_second_effect"
+    DUPLICATE_EFFECT = "duplicate_effect"
+
+
+class EvidenceScopeV1(str, Enum):
+    """How far an observation generalises."""
+
+    ACTION_SEMANTICS = "action_semantics"
+    SINGLE_OPERATION = "single_operation"
+    SERVICE_WIDE_ROUTE = "service_wide_route"
+
+
+class EvidenceSourceV1(str, Enum):
+    """Which platform artifact backs an observation.
+
+    Named because the artifacts back DIFFERENT facts and are not interchangeable:
+    the execution record backs status and aggregate counts, the execution connector
+    backs family/action and placement, the per-document record backs per-document
+    status, and only an endpoint readback backs a side-effect or replay claim.
+    """
+
+    EXECUTION_RECORD = "execution_record"
+    EXECUTION_CONNECTOR = "execution_connector"
+    GENERIC_CONNECTOR_RECORD = "generic_connector_record"
+    ENDPOINT_READBACK = "endpoint_readback"
 
 
 class ContractKeySemanticsDefinitionV1(ReplayRegistryModel):
@@ -319,12 +397,59 @@ class ComponentProjectionAllowlistV1(ReplayRegistryModel):
     excluded_fields: tuple[str, ...] = ()
 
 
+class ClosedCaptureObservationsV1(ReplayRegistryModel):
+    """A capture's findings, in closed vocabularies only.
+
+    No free text and no booleans: a boolean cannot say "not exercised", and this
+    record must distinguish "the replay produced the same effect" from "no replay
+    was attempted". Collapsing those is how an unexercised path acquires a verdict.
+    """
+
+    placement: PlacementObservationV1
+    input_observation: InputObservationV1
+    output_observation: OutputObservationV1
+    effect: EffectObservationV1
+    replay: ReplayObservationV1
+    scope: EvidenceScopeV1
+    #: Which artifacts back this, sorted and unique — the claim is only as strong as
+    #: the artifact behind it, and a side-effect claim without an endpoint readback
+    #: rests on nothing that observed the counterparty.
+    sources: tuple[EvidenceSourceV1, ...] = Field(min_length=1)
+
+    @field_validator("sources")
+    @classmethod
+    def _sorted_unique(cls, value: tuple) -> tuple:
+        raw = [v.value for v in value]
+        if len(set(raw)) != len(raw):
+            raise ValueError("duplicate evidence sources claim more backing than held")
+        if raw != sorted(raw):
+            raise ValueError("evidence sources must be sorted, so one set has one form")
+        return value
+
+    @model_validator(mode="after")
+    def _a_state_claim_needs_a_readback(self) -> "ClosedCaptureObservationsV1":
+        state_claims = {
+            EffectObservationV1.STATE_CREATED, EffectObservationV1.STATE_CHANGED,
+            EffectObservationV1.STATE_DELETED,
+            EffectObservationV1.STATE_UNCHANGED_AFTER_REPLAY,
+        }
+        if self.effect in state_claims and EvidenceSourceV1.ENDPOINT_READBACK not in self.sources:
+            raise ValueError(
+                f"effect {self.effect.value!r} claims something about the "
+                "counterparty's state, and only an endpoint readback observes that. "
+                "The platform reports an execution complete even when the "
+                "counterparty refused the request"
+            )
+        return self
+
+
 class CaptureReferenceV1(ReplayRegistryModel):
     """A pointer to the executed capture a record rests on."""
 
     execution_id: str
     captured_at: str = Field(min_length=1)
     account_scope_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    summary: ClosedCaptureObservationsV1
     capture_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
 
     @field_validator("execution_id")

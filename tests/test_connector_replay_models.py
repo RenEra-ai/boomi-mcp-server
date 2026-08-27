@@ -160,3 +160,77 @@ def test_the_action_may_not_be_sourced_from_the_execution_record():
             action_source=ActionSourceV1.EXECUTION_RECORD, recognised_actions=("GET",),
         )
     assert "one generic action" in str(err.value)
+
+
+def test_the_closed_vocabularies_are_the_designs_not_invented_ones():
+    """A closed vocabulary is a contract with the slices that consume it.
+
+    An earlier version invented plausible near-synonyms — `client_supplied_key`,
+    `rejects_duplicate`, a `connection` key scope. They read sensibly and were not
+    the published contract, which means the consuming slice could not express what
+    it was designed to express.
+    """
+    from boomi_mcp.connector_replay.models import (
+        DuplicateGuaranteeV1,
+        EffectObservationV1,
+        KeyMechanismV1,
+        KeyScopeV1,
+        ReplayObservationV1,
+    )
+
+    assert {e.value for e in KeyMechanismV1} == {
+        "request_key_deduplication", "resource_identity_upsert"}
+    assert {e.value for e in KeyScopeV1} == {"operation", "static_route", "service"}
+    assert {e.value for e in DuplicateGuaranteeV1} == {
+        "same_effect", "same_result", "conflict_without_second_effect"}
+    assert {e.value for e in EffectObservationV1} == {
+        "read_only", "state_created", "state_changed", "state_deleted",
+        "state_unchanged_after_replay"}
+    assert {e.value for e in ReplayObservationV1} == {
+        "not_exercised", "same_effect", "same_result",
+        "conflict_without_second_effect", "duplicate_effect"}
+
+
+def test_a_state_claim_requires_an_endpoint_readback():
+    """The platform reports an execution complete even when the counterparty refused.
+
+    So an effect claim about the counterparty's state rests on nothing unless a
+    readback observed it. `not_exercised` exists for the same reason: a boolean
+    cannot distinguish "the replay produced the same effect" from "no replay was
+    attempted", and collapsing those is how an unexercised path acquires a verdict.
+    """
+    from boomi_mcp.connector_replay.models import (
+        ClosedCaptureObservationsV1,
+        EffectObservationV1,
+        EvidenceScopeV1,
+        EvidenceSourceV1,
+        InputObservationV1,
+        OutputObservationV1,
+        PlacementObservationV1,
+        ReplayObservationV1,
+    )
+
+    kw = dict(
+        placement=PlacementObservationV1.ENTRY,
+        input_observation=InputObservationV1.NO_INBOUND_DOCUMENTS,
+        output_observation=OutputObservationV1.RETURN_DOCUMENTS_RECEIVED,
+        replay=ReplayObservationV1.NOT_EXERCISED,
+        scope=EvidenceScopeV1.SINGLE_OPERATION,
+    )
+    with pytest.raises(ValidationError) as err:
+        ClosedCaptureObservationsV1(
+            effect=EffectObservationV1.STATE_CHANGED,
+            sources=(EvidenceSourceV1.EXECUTION_RECORD,), **kw)
+    assert "endpoint readback" in str(err.value)
+
+    # With the readback, the same claim stands.
+    ok = ClosedCaptureObservationsV1(
+        effect=EffectObservationV1.STATE_CHANGED,
+        sources=(EvidenceSourceV1.ENDPOINT_READBACK, EvidenceSourceV1.EXECUTION_RECORD),
+        **kw)
+    assert ok.effect is EffectObservationV1.STATE_CHANGED
+
+    # And a read-only claim needs no readback.
+    assert ClosedCaptureObservationsV1(
+        effect=EffectObservationV1.READ_ONLY,
+        sources=(EvidenceSourceV1.EXECUTION_RECORD,), **kw)

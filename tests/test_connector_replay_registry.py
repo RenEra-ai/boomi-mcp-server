@@ -251,3 +251,37 @@ def test_a_section_of_the_wrong_type_is_refused():
         _parse({"schema_version": 1, "vocabulary": {}, "evidence_records": [],
                 "operation_records": [], "projection_allowlists": [],
                 "semantics_definitions": []})
+
+
+def _vocab_only():
+    return {"schema_version": 1, "projection_allowlists": [], "semantics_definitions": [],
+            "operation_records": [], "evidence_records": [],
+            "vocabulary": [{"platform_connector_type": "t", "family": "rest",
+                            "action_source": "operation_component",
+                            "recognised_actions": ["GET"], "safe_actions": ["GET"]}]}
+
+
+_A_ROW = {"family": "rest", "action": "GET", "side_effect": "read",
+          "retry_safety": "idempotent", "capture_digest": "a" * 64,
+          "execution_ids": ["execution-1957bb8f-9a89-4254-b169-9ddbf41fddf8-2026.08.26"]}
+
+
+def test_a_typed_row_that_resolves_to_nothing_is_refused():
+    """Field types make a record well-formed; they do not make it authoritative.
+
+    A record can name a family no vocabulary maps and still be perfectly typed. In a
+    registry whose records decide whether a write may be retried, well-formed is not
+    the bar.
+    """
+    with pytest.raises(RegistryInvalid) as err:
+        _parse({**_vocab_only(), "evidence_records": [{**_A_ROW, "family": "database"}]})
+    assert "no vocabulary maps" in str(err.value)
+
+    with pytest.raises(RegistryInvalid):
+        _parse({**_vocab_only(), "evidence_records": [{**_A_ROW, "action": "BREW"}]})
+
+
+def test_a_resolvable_row_still_loads():
+    """The control: cross-record validation must not be a blanket denial."""
+    reg = _parse({**_vocab_only(), "evidence_records": [_A_ROW]})
+    assert len(reg.evidence_records) == 1

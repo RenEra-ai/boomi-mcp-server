@@ -222,7 +222,61 @@ def _parse(payload: Any) -> ReplayRegistry:
         )
     except Exception as exc:
         raise RegistryInvalid(f"registry content is not valid: {exc}") from exc
+    _refuse_unresolvable_records(vocabulary, evidence, operation_records, semantics)
     return ReplayRegistry(vocabulary, evidence, operation_records, allowlists, semantics)
+
+
+def _refuse_unresolvable_records(vocabulary, evidence, operation_records, semantics) -> None:
+    """CROSS-RECORD validation: a typed record is not yet an authoritative one.
+
+    Field-level types make a record well-formed. They say nothing about whether it
+    refers to anything — a record could name a family no vocabulary maps, a
+    semantics revision that was never published, or duplicate another record
+    outright, and still be perfectly typed. In a registry whose records decide
+    whether a write may be retried, "well-formed" is not the bar.
+    """
+    families = {entry.family: set(entry.recognised_actions) for entry in vocabulary}
+    published = {(d.semantics_id, d.revision) for d in semantics}
+
+    for row in evidence:
+        if row.family not in families:
+            raise RegistryInvalid(
+                f"evidence row {row.family}/{row.action} names a family no "
+                "vocabulary maps, so no live connector can ever resolve to it")
+        if row.action not in families[row.family]:
+            raise RegistryInvalid(
+                f"evidence row {row.family}/{row.action} names an action the "
+                f"{row.family!r} vocabulary does not recognise")
+
+    seen: set[tuple[str, str, str]] = set()
+    for record in operation_records:
+        if record.family not in families:
+            raise RegistryInvalid(
+                f"operation record {record.contract_ref} names an unmapped family "
+                f"{record.family!r}")
+        if record.action not in families[record.family]:
+            raise RegistryInvalid(
+                f"operation record {record.contract_ref} names an unrecognised "
+                f"action {record.action!r}")
+        if (record.semantics_id, record.semantics_revision) not in published:
+            raise RegistryInvalid(
+                f"operation record {record.contract_ref} cites semantics "
+                f"{record.semantics_id!r} revision {record.semantics_revision}, which "
+                "this registry does not publish — a record whose meaning is not "
+                "defined here cannot be interpreted here")
+        # The record and the capture it rests on must belong to the SAME account.
+        # A record bound to one account, resting on evidence gathered in another, is
+        # a claim about an environment nobody observed.
+        if record.capture.account_scope_hash != record.account_scope_hash:
+            raise RegistryInvalid(
+                f"operation record {record.contract_ref} is bound to one account "
+                "while its capture was taken in another")
+        key = (record.family, record.action, record.contract_ref)
+        if key in seen:
+            raise RegistryInvalid(
+                f"duplicate operation record for {key!r}; two records for one "
+                "contract would make the verdict depend on iteration order")
+        seen.add(key)
 
 
 @lru_cache(maxsize=1)
