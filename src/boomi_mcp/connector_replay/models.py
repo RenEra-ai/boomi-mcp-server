@@ -451,6 +451,15 @@ class ComponentProjectionAllowlistV1(ReplayRegistryModel):
     #: refuse: naming an exclusion forces a decision per field instead of silent
     #: omission, and a field nobody has classified is the one that might matter.
     excluded_fields: tuple[str, ...] = ()
+    #: Elements the projection scope may contain. An element outside this set is
+    #: unknown content and refuses — the allowlist binds an unbounded XML space by
+    #: design, and silently skipping an unrecognised element is the fail-OPEN
+    #: reading of the same allowlist.
+    included_elements: tuple[str, ...] = ()
+    #: Names whose VALUES are qualified names, so canonicalisation must resolve
+    #: their prefixes rather than compare them textually.
+    qname_aware_tags: tuple[str, ...] = ()
+    qname_aware_attrs: tuple[str, ...] = ()
 
 
 class ClosedCaptureObservationsV1(ReplayRegistryModel):

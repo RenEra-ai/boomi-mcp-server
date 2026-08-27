@@ -98,10 +98,15 @@ class ReplayRegistry:
         """Versioned key-semantics definitions. Empty here; a later slice mints them."""
         return self._semantics_definitions
 
-    def projection_for(self, component_kind: str):
-        """The projection spec for a component kind, or None."""
+    def projection_for(self, component_kind: str, family: str = "rest"):
+        """The projection for a (family, kind) pair, or None.
+
+        Scoped by FAMILY as well as kind: two families project different facts, so
+        a lookup that ignored family would digest a database component under a REST
+        projection and let the two collide.
+        """
         for spec in self._projection_allowlists:
-            if spec.component_kind == component_kind:
+            if spec.component_kind == component_kind and spec.family == family:
                 return spec
         return None
 

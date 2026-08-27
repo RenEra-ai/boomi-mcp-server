@@ -39,11 +39,32 @@
       ],
       "family": "rest",
       "included_attributes": [],
+      "included_elements": [
+        "GenericConnectionConfig",
+        "field",
+        "OAuth2Config",
+        "credentials",
+        "accessTokenEndpoint",
+        "authorizationTokenEndpoint",
+        "accessTokenParameters",
+        "authorizationParameters",
+        "jwtParameters",
+        "scope",
+        "expiration",
+        "sslOptions",
+        "bns:Component",
+        "bns:object",
+        "bns:description",
+        "bns:encryptedValues",
+        "bns:GlobalVariableReferences"
+      ],
       "included_property_fields": [],
       "included_value_fields": [
         "url"
       ],
-      "projection_version": 1
+      "projection_version": 1,
+      "qname_aware_attrs": [],
+      "qname_aware_tags": []
     },
     {
       "component_kind": "operation",
@@ -51,6 +72,24 @@
       "family": "rest",
       "included_attributes": [
         "customOperationType"
+      ],
+      "included_elements": [
+        "Operation",
+        "Configuration",
+        "GenericOperationConfig",
+        "field",
+        "customProperties",
+        "properties",
+        "Options",
+        "Tracking",
+        "TrackedFields",
+        "Caching",
+        "Archiving",
+        "bns:Component",
+        "bns:object",
+        "bns:description",
+        "bns:encryptedValues",
+        "bns:GlobalVariableReferences"
       ],
       "included_property_fields": [
         "queryParameters",
@@ -60,7 +99,9 @@
         "path",
         "followRedirects"
       ],
-      "projection_version": 1
+      "projection_version": 1,
+      "qname_aware_attrs": [],
+      "qname_aware_tags": []
     }
   ],
   "schema_version": 1,

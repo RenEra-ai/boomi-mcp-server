@@ -363,7 +363,7 @@ def route_digest_v1(connection_xml: str, operation_xml: str) -> str:
     ).hexdigest()
 
 
-def _projection_spec(kind: str, registry=None) -> dict:
+def _projection_spec(kind: str, registry=None, family: str = "rest") -> dict:
     """The projection for ``kind``, taken from registry data.
 
     The plan makes these specs registry data on purpose: the allowlist binds an
@@ -379,7 +379,7 @@ def _projection_spec(kind: str, registry=None) -> dict:
         # would silently disagree with every digest computed when the registry did
         # load. A digest that cannot state its projection is not an identity.
         registry = load_registry()
-    typed = registry.projection_for(kind) if registry is not None else None
+    typed = registry.projection_for(kind, family) if registry is not None else None
     if typed is None:
         raise ConfigDigestRefused(
             f"the registry publishes no projection for a {kind!r} component, so "
@@ -392,6 +392,9 @@ def _projection_spec(kind: str, registry=None) -> dict:
             "value_fields": list(typed.included_value_fields),
             "property_fields": list(typed.included_property_fields),
             "excluded_fields": list(typed.excluded_fields),
+            "elements": list(typed.included_elements),
+            "qname_aware_tags": list(typed.qname_aware_tags),
+            "qname_aware_attrs": list(typed.qname_aware_attrs),
         }
     return {
         "attributes": list(_OPERATION_ATTRS) if kind == "operation" else [],
@@ -424,6 +427,26 @@ def _refuse_unknown_fields(root: ET.Element, spec: dict, kind: str) -> None:
         el.get("id") for el in root.iter()
         if _localname(el.tag) == "field" and el.get("id") is not None
     }
+    # ELEMENTS as well as fields. Checking only field ids left every unknown
+    # element and wrapper outside the closed set: a behaviour-bearing element added
+    # by the platform would leave the digest unchanged, so a changed live component
+    # could still match captured configuration evidence.
+    allowed_elements = set(spec.get("elements", ()))
+    if allowed_elements:
+        elements = {_qname(el)[1] for el in root.iter()}
+        # A prefixed name is compared on its local part; the namespace URI is
+        # carried into the projection tree separately.
+        stray = sorted(e for e in elements
+                       if e not in allowed_elements
+                       and not any(a.endswith(":" + e) or a == e for a in allowed_elements))
+        if stray:
+            raise ConfigDigestRefused(
+                "{0} component carries element(s) this projection does not cover: "
+                "{1}. Refusing rather than ignoring them — an uncovered element may "
+                "change what the component does, and a digest that omits it would "
+                "let a changed component match captured evidence.".format(kind, stray)
+            )
+
     unknown = sorted(seen - known)
     if unknown:
         raise ConfigDigestRefused(
@@ -500,7 +523,7 @@ def _project_tree(root: ET.Element, spec: dict, kind: str) -> ET.Element:
     return out
 
 
-def component_config_digest_v1(component_xml: str, kind: str) -> str:
+def component_config_digest_v1(component_xml: str, kind: str, family: str = "rest") -> str:
     """Digest a component's routing-relevant configuration.
 
     ``kind`` is ``"operation"`` or ``"connection"``. It is required rather than
@@ -513,7 +536,7 @@ def component_config_digest_v1(component_xml: str, kind: str) -> str:
             f"kind must be 'operation' or 'connection', not {kind!r}"
         )
     root = _parse(component_xml, ConfigDigestRefused, kind)
-    spec = _projection_spec(kind)
+    spec = _projection_spec(kind, family=family)
     _refuse_unknown_fields(root, spec, kind)
     projected = _project_tree(root, spec, kind)
     # The SPECIFIED canonicalization, with its options pinned. Two components that
@@ -524,6 +547,8 @@ def component_config_digest_v1(component_xml: str, kind: str) -> str:
         with_comments=False,
         rewrite_prefixes=True,
         strip_text=False,
+        qname_aware_tags=tuple(spec.get("qname_aware_tags", ())) or None,
+        qname_aware_attrs=tuple(spec.get("qname_aware_attrs", ())) or None,
     )
     return "ComponentConfigDigestV1:" + hashlib.sha256(
         CONFIG_DIGEST_DOMAIN + canonical.encode("utf-8")

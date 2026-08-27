@@ -327,3 +327,36 @@ def test_canonicalisation_ignores_what_is_insignificant():
     spaced = '<Operation>\n  <field id="path" value="/x"/>\n</Operation>'
     assert component_config_digest_v1(compact, "operation") == \
         component_config_digest_v1(spaced, "operation")
+
+
+def test_an_unknown_element_refuses_like_an_unknown_field():
+    """Checking field ids only left every unknown ELEMENT outside the closed set.
+
+    A behaviour-bearing element added by the platform would have left the digest
+    unchanged, so a changed live component could still match captured evidence —
+    which is the collision the digest exists to prevent.
+    """
+    with pytest.raises(ConfigDigestRefused) as err:
+        component_config_digest_v1(
+            '<Operation><field id="path" value="/x"/>'
+            '<BrandNewElement behaviour="yes"/></Operation>', "operation")
+    assert "element(s) this projection does not cover" in str(err.value)
+
+
+def test_the_projection_is_scoped_by_family():
+    """Two families project different facts; one lookup for both would collide them."""
+    with pytest.raises(ConfigDigestRefused):
+        component_config_digest_v1(
+            '<Operation><field id="path" value="/x"/></Operation>',
+            "operation", family="database")
+    # The control: the family that IS published still digests.
+    assert component_config_digest_v1(
+        '<Operation><field id="path" value="/x"/></Operation>',
+        "operation", family="rest").startswith("ComponentConfigDigestV1:")
+
+
+def test_every_real_component_still_digests():
+    """The control for the whole projection tightening."""
+    for path in sorted(_C.rglob("operation_component.xml")):
+        assert component_config_digest_v1(path.read_text(), "operation")
+    assert component_config_digest_v1(_CONN, "connection")
