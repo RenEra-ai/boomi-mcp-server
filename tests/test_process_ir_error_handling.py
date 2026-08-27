@@ -1419,18 +1419,20 @@ def test_the_policy_is_refused_on_a_connector_scope():
     """
     diag = _compile_error(_connector_scope(retry={"count": 2, **ALLOW}))
     assert diag.code == PROCESS_IR_SEMANTIC_RETRY_SOURCE_POLICY_SCOPE_INVALID
-    # The PATH as well as the code. The plan's acceptance clause requires both,
-    # and a code alone does not tell an author WHICH field to correct — the
-    # pointer is the actionable half of a refusal, and pinning only the code
-    # leaves it free to drift onto the wrong node without any test noticing.
-    assert diag.path.endswith("/retry/source_replay_policy"), diag.path
+    # The COMPLETE pointer, not a suffix. The pointer is the actionable half of a
+    # refusal — a code alone does not tell an author which field to correct — and
+    # a suffix match accepts the right field on the WRONG NODE, which is exactly
+    # the drift worth catching. This fixture puts the offending region at step 1.
+    assert diag.path == "/body/steps/1/retry/source_replay_policy", diag.path
 
 
 def test_the_policy_is_refused_at_retry_zero():
     """Retry arm: with no retry there is no re-execution to permit."""
     diag = _compile_error(_process_scope(retry={"count": 0, **ALLOW}))
     assert diag.code == PROCESS_IR_SEMANTIC_RETRY_SOURCE_POLICY_REQUIRES_RETRY
-    assert diag.path.endswith("/retry/source_replay_policy"), diag.path
+    # ...and this fixture puts it at step 0, so the two pins together also prove
+    # the pointer TRACKS the authored node rather than being a constant.
+    assert diag.path == "/body/steps/0/retry/source_replay_policy", diag.path
 
 
 def test_the_policy_survives_a_dump_and_reparse_in_both_states():

@@ -2085,8 +2085,8 @@ def test_an_UNPARSEABLE_attestation_is_not_an_absent_one(tmp_path):
 
     result, root = _archive_gate(tmp_path, run, prompts)
     assert result.returncode == 1, result.stdout
-    assert "cannot be read" in result.stderr
-    assert "not an absent one" in result.stderr
+    assert "cannot be used" in result.stderr
+    assert "not an absent file" in result.stderr
     assert not (root / "architect-reviews" / run.name).exists()
 
     # ...and a genuinely ABSENT attestation still archives, so the refusal is
@@ -2094,3 +2094,66 @@ def test_an_UNPARSEABLE_attestation_is_not_an_absent_one(tmp_path):
     (run / "attestation.json").unlink()
     ok, _ = _archive_gate(tmp_path, run, prompts)
     assert ok.returncode == 0, ok.stderr
+
+
+@pytest.mark.parametrize("body,why", [
+    ("null", "syntactically valid JSON that parses to nothing usable"),
+    ("[]", "a list where an object is required"),
+    ('"a string"', "a bare string"),
+    ("123", "a bare number"),
+    ("{oops", "invalid JSON"),
+])
+def test_a_sidecar_that_parses_to_NOTHING_USABLE_is_refused(tmp_path, body, why):
+    """Absent, unreadable, and readable-but-useless are three different states.
+
+    The first fix here collapsed the first two and missed the third: `null` is
+    valid JSON, so it parsed cleanly to nothing and slipped a guard that only
+    tested for a parse FAILURE. All of these are equally unusable and all are
+    refused before anything is created.
+    """
+    run, prompts = _gate_run(tmp_path)
+    (run / "attestation.json").write_text(body)
+
+    result, root = _archive_gate(tmp_path, run, prompts)
+    assert result.returncode == 1, (why, result.stdout)
+    assert "cannot be used" in result.stderr, why
+    assert not (root / "architect-reviews" / run.name).exists(), why
+    assert "Traceback" not in result.stderr, why
+
+
+def test_an_unreadable_START_json_is_refused_before_publication(tmp_path):
+    """The sentinel leaked past the attestation guard into the row builder.
+
+    It is truthy on purpose — a falsey sentinel would let `or {}` swap it for an
+    empty mapping and archive a corrupt round as an empty one — so the row
+    builder's `start.get(...)` kept it and raised. That builder runs AFTER the
+    round is published, which is exactly where a failure is hardest to retry out
+    of. The refusal is now in the pre-flight, before anything is created.
+    """
+    run = tmp_path / "cdx-review.BADSTART"
+    run.mkdir()
+    (run / "start.json").write_text("{not json at all")
+    (run / "baseline").write_text("b" * 40 + "\n")
+    (run / "start-head").write_text("c" * 40 + "\n")
+    (run / "last-reviewed-sha").write_text("c" * 40 + "\n")
+    (run / "dirty").write_text("false\n")
+    (run / "scope").write_text("auto\n")
+    (run / "teardown").write_text("confirmed stopped\n")
+    (run / "review.json").write_text(json.dumps({"scope": "auto"}) + "\n")
+
+    root = tmp_path / "repo" / "docs" / "architecture" / "evidence" / "issue-999"
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "index.jsonl").write_text(json.dumps({
+        "generated_at": "x", "issue": 999, "schema_version": 1, "source_tip": "abc",
+    }) + "\n")
+
+    result = subprocess.run(
+        [sys.executable, str(_SCRIPT), "--issue", "999", "--kind", "commit-review",
+         "--run-dir", str(run), "--logical-loop", "L2", "--repo", str(tmp_path / "repo")],
+        capture_output=True, text=True)
+    assert result.returncode == 1, result.stdout
+    assert "cannot be used" in result.stderr
+    assert "start.json" in result.stderr
+    assert "Traceback" not in result.stderr
+    assert not (root / "commit-reviews" / run.name).exists(), \
+        "the round was published before the failure — the retry is now blocked"

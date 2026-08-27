@@ -175,6 +175,16 @@ class Unreadable:
     def __repr__(self):
         return f"<unreadable {self.path}: {self.reason}>"
 
+    def __getattr__(self, name):
+        # Deliberately LOUD. This sentinel is truthy on purpose — making it
+        # falsey would let `x or {}` swap it for an empty mapping and archive a
+        # corrupt round as an empty one — so a leak must announce itself rather
+        # than surface as a bare attribute error three frames away.
+        raise AssertionError(
+            f"unreadable sidecar {self.path} reached {name!r}: {self.reason}. "
+            "This should have been refused in the pre-flight; the round must not "
+            "have been published.")
+
 
 def read_json(directory: Path, name: str):
     """Parsed content, None when the file is ABSENT, or `Unreadable` when it is not.
@@ -672,6 +682,42 @@ def rederive_index(root: Path) -> int:
     return changed or _INDEX_BYTES_ONLY
 
 
+#: The JSON sidecars each kind reads. A PRESENT one must parse to an object, or
+#: the round is refused before anything is created.
+#:
+#: Checked in one place rather than at each call site, because the per-site
+#: version is what failed: the unreadable sentinel introduced for the attestation
+#: is truthy, so `start.get(...)` and `summary.get(...)` in the row builder kept
+#: it through their `or {}` fallbacks and raised — and the row builder runs AFTER
+#: the round has been published, so the failure landed exactly where a retry is
+#: hardest. A syntactically valid `null` slipped the same guard for the opposite
+#: reason: it parses fine, to nothing usable.
+READ_JSON_BY_KIND = {
+    "commit-review": ("start.json", "review.json"),
+    "architect-review": ("start.json", "attestation.json", "refusal.json"),
+    "wave-gate": ("summary.json",),
+}
+
+
+def refuse_unusable_json(source: Path, kind: str) -> None:
+    """Every present JSON sidecar this kind reads must parse to an object."""
+    unusable = {}
+    for name in READ_JSON_BY_KIND.get(kind, ()):
+        if not (source / name).is_file():
+            continue                       # absent is a fact, not a corruption
+        parsed = read_json(source, name)
+        if isinstance(parsed, Unreadable):
+            unusable[name] = parsed.reason
+        elif not isinstance(parsed, dict):
+            unusable[name] = f"parsed to {type(parsed).__name__}, not an object"
+    if unusable:
+        raise SystemExit(
+            "refusing to archive a round whose sidecars cannot be used:\n"
+            + "\n".join(f"  {n}: {why}" for n, why in sorted(unusable.items()))
+            + "\nA file that exists but holds nothing usable is not an absent file. "
+              "Repair or remove it, then archive again.")
+
+
 #: Statuses a caller supplies for a round that did not complete. They cannot be
 #: re-derived from the archived bytes, so a re-derivation never overwrites one.
 _NON_DERIVED_STATUSES = ("failed", "timeout", "refused")
@@ -868,6 +914,8 @@ def main() -> int:
               "(index header plus manifest), not bootstrapped by its first round. "
               "Create the skeleton, then archive into it.", file=sys.stderr)
         return 1
+
+    refuse_unusable_json(args.run_dir, args.kind)
 
     kind_dir_existed = durable.parent.is_dir()
     durable.parent.mkdir(parents=True, exist_ok=True)
