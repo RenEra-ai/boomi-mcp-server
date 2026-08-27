@@ -45,6 +45,7 @@ __all__ = [
 _EXECUTION_RECORD: Final[str] = "execution_record.json"
 _READBACK_DELTA: Final[str] = "readback_delta.json"
 _ACCESS_LOG: Final[str] = "mock_access_log.txt"
+_EXECUTION_CONNECTOR: Final[str] = "execution_connector.json"
 
 #: Staged readbacks from a double-execution capture: the state BEFORE the first
 #: call, BETWEEN the two, and AFTER the second. Discovered by this shape rather
@@ -116,6 +117,12 @@ class CaptureSummaryV1(ReplayRegistryModel):
 
     scenario: str = Field(min_length=1)
     runs: tuple[CaptureRunV1, ...] = Field(min_length=1)
+    #: Connector types the PLATFORM recorded for these executions, sentinels excluded.
+    #: This is what a capture observed, as distinct from what a caller says it is.
+    observed_connector_types: tuple[str, ...] = ()
+    #: The HTTP method the operation component declares. The platform reports one
+    #: generic action for every verb, so this is the only place the verb exists.
+    observed_method: str | None = None
     #: sha256 over every archived file's bytes, in sorted-name order.
     capture_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
     file_count: int = Field(ge=1)
@@ -253,6 +260,53 @@ def _convergence(files: list[Path]) -> tuple[ConvergenceV1, ...]:
     return tuple(results)
 
 
+def _observed_connector_types(files: list[Path]) -> tuple[str, ...]:
+    """Connector types the platform recorded, with the execution sentinels removed."""
+    from .models import EXECUTION_SENTINELS
+
+    seen: set[str] = set()
+    for path in files:
+        if not path.name.endswith(_EXECUTION_CONNECTOR):
+            continue
+        payload = _load_json(path)
+
+        def walk(node):
+            if isinstance(node, dict):
+                value = node.get("connectorType")
+                if isinstance(value, str) and value not in EXECUTION_SENTINELS:
+                    seen.add(value)
+                for child in node.values():
+                    walk(child)
+            elif isinstance(node, list):
+                for child in node:
+                    walk(child)
+
+        walk(payload)
+    return tuple(sorted(seen))
+
+
+def _observed_method(files: list[Path]) -> str | None:
+    """The verb the operation component declares.
+
+    Read from the component rather than from the execution record, because the
+    platform reports one generic action for all eight verbs — measured across 95
+    rows. A capture's method is therefore only knowable from the component.
+    """
+    import re
+
+    for path in sorted(files):
+        if not path.name.endswith(".xml") or "operation" not in path.name:
+            continue
+        found = re.findall(r'customOperationType="([^"]+)"', path.read_text())
+        if len(set(found)) == 1:
+            return found[0]
+        if len(set(found)) > 1:
+            raise CaptureRefused(
+                f"{path.name}: conflicting operation types {sorted(set(found))!r}"
+            )
+    return None
+
+
 def summarize(capture_dir: Path, method_hint: str | None = None) -> CaptureSummaryV1:
     """Derive registry-usable facts from one archived capture directory."""
     capture_dir = Path(capture_dir)
@@ -327,4 +381,6 @@ def summarize(capture_dir: Path, method_hint: str | None = None) -> CaptureSumma
         capture_digest=digest.hexdigest(),
         file_count=len(files),
         convergence=_convergence(files),
+        observed_connector_types=_observed_connector_types(files),
+        observed_method=_observed_method(files),
     )

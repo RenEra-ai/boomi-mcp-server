@@ -5324,10 +5324,14 @@ _ORGANIZATION_CREATE = {
 # Monitoring Templates
 # ============================================================================
 
+# `available_actions` is filled in at access time from the router's dispatch table —
+# see `_monitoring_overview()`. It was a hand-written list of ten while the router
+# dispatched eighteen, and it stayed stale through the slice that added an action AND
+# through the sweep that was supposed to have caught it. Deriving it here is the third
+# attempt at that sweep; the first two each fixed one copy and declared completeness.
 _MONITORING_OVERVIEW = {
     "resource_type": "monitoring",
     "tool": "monitor_platform",
-    "available_actions": ["execution_records", "execution_logs", "execution_artifacts", "audit_logs", "events", "certificates", "throughput", "execution_metrics", "connector_documents", "download_connector_document"],
     "hint": "Use operation='execution_records' or 'audit_logs' etc. for action-specific templates",
 }
 
@@ -9117,11 +9121,14 @@ def _get_folder_template(operation=None, **_):
     }
 
 
-def _get_monitoring_template(operation=None, **_):
-    if not operation:
-        return {"_success": True, **_MONITORING_OVERVIEW}
+def _monitoring_templates():
+    """Action name -> its request template. The ONLY definition of this map.
 
-    templates = {
+    The overview derives its `actions_with_templates` from this rather than
+    carrying a second list, which is how the served overview came to advertise ten
+    actions while the router dispatched eighteen.
+    """
+    return {
         "execution_records": _MONITORING_EXECUTION_RECORDS,
         "execution_logs": _MONITORING_EXECUTION_LOGS,
         "execution_artifacts": _MONITORING_EXECUTION_ARTIFACTS,
@@ -9133,6 +9140,32 @@ def _get_monitoring_template(operation=None, **_):
         "connector_documents": _MONITORING_CONNECTOR_DOCUMENTS,
         "download_connector_document": _MONITORING_DOWNLOAD_CONNECTOR_DOCUMENT,
     }
+
+
+def _monitoring_overview():
+    """The overview, with its action list DERIVED from the router.
+
+    Two lists are served, and they are different facts: every action the tool
+    dispatches, and the subset that has a request template. Collapsing them — which
+    the hand-written version did by listing only the templated ones — told a caller
+    that eight real actions did not exist.
+    """
+    templated = sorted(_monitoring_templates())
+    return {
+        **_MONITORING_OVERVIEW,
+        "available_actions": _monitoring_actions(),
+        "actions_with_templates": templated,
+        "actions_without_templates": [
+            a for a in _monitoring_actions() if a not in set(templated)
+        ],
+    }
+
+
+def _get_monitoring_template(operation=None, **_):
+    if not operation:
+        return {"_success": True, **_monitoring_overview()}
+
+    templates = _monitoring_templates()
 
     tpl = templates.get(operation)
     if not tpl:

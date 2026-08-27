@@ -195,14 +195,28 @@ def ingest(
     *,
     family: str,
     actions: dict[str, str],
+    registry=None,
 ) -> tuple[CapabilityEvidenceRecordV1, ...]:
     """Verify, summarise and classify captures into evidence rows.
 
-    ``actions`` maps a capture directory name to the action it exercised. It is
-    required rather than inferred from the directory name: a naming convention is
-    not evidence, and a row that named the wrong action would authorise retrying
-    something never observed.
+    ``actions`` maps a capture directory name to the action it exercised, and
+    ``family`` names the connector family. BOTH are RECONCILED against what the
+    capture observed — they are the caller's claim about the evidence, not the
+    evidence.
+
+    Without that reconciliation the caller's word became the row: a checksummed
+    REST HEAD capture ingested as ``family="database"`` produced a
+    ``database/HEAD/idempotent`` row, minting a verdict for a connector no
+    execution touched. Verifying the bytes proves the capture was not altered; it
+    says nothing about whether the labels attached to it are true.
+
+    ``registry`` supplies the vocabulary that maps an observed platform connector
+    type to a family. It defaults to the packaged one.
     """
+    if registry is None:
+        from .registry import load_registry
+
+        registry = load_registry()
     archive_root = Path(archive_root)
     rows: list[CapabilityEvidenceRecordV1] = []
     for directory in sorted(Path(d) for d in capture_dirs):
@@ -217,6 +231,41 @@ def ingest(
             summary = summarize(directory, method_hint=action)
         except CaptureRefused as exc:
             raise IngestRefused(f"{directory.name}: {exc}") from exc
+
+        # RECONCILE the caller's labels against the capture's own observations.
+        if not summary.observed_connector_types:
+            raise IngestRefused(
+                f"{directory.name}: no connector type was observed, so the family "
+                "cannot be reconciled and the caller's claim would stand unchecked"
+            )
+        observed_families = {
+            registry.family_for(t) for t in summary.observed_connector_types
+        }
+        if None in observed_families:
+            unmapped = [t for t in summary.observed_connector_types
+                        if registry.family_for(t) is None]
+            raise IngestRefused(
+                f"{directory.name}: observed connector type(s) {unmapped!r} are not "
+                "in the registry vocabulary. A capture whose connector cannot be "
+                "resolved cannot be attributed to a family"
+            )
+        if observed_families != {family}:
+            raise IngestRefused(
+                f"{directory.name}: declared family {family!r} does not match the "
+                f"observed {sorted(observed_families)!r}. The declared family is a "
+                "claim about the evidence, not the evidence"
+            )
+        if summary.observed_method is None:
+            raise IngestRefused(
+                f"{directory.name}: the operation component declares no method, so "
+                "the action cannot be reconciled"
+            )
+        if summary.observed_method != action:
+            raise IngestRefused(
+                f"{directory.name}: declared action {action!r} does not match the "
+                f"operation component's {summary.observed_method!r}. Classification "
+                "would otherwise describe a method the capture never exercised"
+            )
 
         side_effect, retry_safety = classify(summary)
         operation_id = None

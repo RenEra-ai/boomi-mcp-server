@@ -106,6 +106,13 @@ class ReplayRegistry:
         affirmative verdict, so every absence — unmapped connector, unobserved
         action, empty registry — arrives here as ``unverified``.
         """
+        # RESOLVE THROUGH THE VOCABULARY FIRST. A row is only meaningful for a
+        # family the registry can actually map a live connector onto; answering
+        # from the row alone let an evidence row for an unmapped family return an
+        # affirmative verdict, which is the one answer this registry exists to
+        # withhold.
+        if family not in {entry.family for entry in self._vocabulary}:
+            return RetrySafetyV1.UNVERIFIED
         row = self._by_pair.get((family, action))
         return row.retry_safety if row else RetrySafetyV1.UNVERIFIED
 
