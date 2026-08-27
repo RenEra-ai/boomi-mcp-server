@@ -198,15 +198,53 @@ def test_a_route_duplicate_field_reports_the_route_code():
 
 def test_the_real_archive_still_verifies_and_classifies():
     """The control for the whole batch: none of it broke the real evidence."""
+    safe = frozenset({"GET", "HEAD", "OPTIONS", "TRACE"})
     for name, action in [("cap155-e4-head-status", "HEAD"),
                          ("cap155-e4-options-status", "OPTIONS"),
                          ("cap155-e4-trace-status", "TRACE")]:
         verify_archive(_ROOT, _C / name)
         summary = summarize(_C / name, action)
-        assert classify(summary) == (SideEffectV1.READ, RetrySafetyV1.IDEMPOTENT)
+        assert classify(summary, action, safe) == (SideEffectV1.READ, RetrySafetyV1.IDEMPOTENT)
     verify_archive(_ROOT, _C / "cap155-e4-negative-control")
     control = summarize(_C / "cap155-e4-negative-control", "DELETE")
-    assert classify(control) == (SideEffectV1.UNKNOWN, RetrySafetyV1.UNVERIFIED)
+    assert classify(control, "DELETE", safe) == (SideEffectV1.UNKNOWN, RetrySafetyV1.UNVERIFIED)
+
+
+def test_a_no_op_write_is_not_an_idempotent_read():
+    """"Nothing changed" is consistent with a read AND with a write that no-opped.
+
+    A PATCH setting a field to the value it already held changes nothing, and is
+    not therefore safe to replay. Only the verb's declared semantics separate the
+    two, and the verb is verified evidence — reconciled against the components and
+    against the counterparty log.
+    """
+    safe = frozenset({"GET", "HEAD", "OPTIONS", "TRACE"})
+    summary = summarize(_C / "cap155-e4-head-status", "HEAD")
+    unchanged = summary.model_copy(update={"runs": tuple(
+        r.model_copy(update={"state_changed": False, "counterparty_status": 200})
+        for r in summary.runs)})
+
+    assert classify(unchanged, "PATCH", safe) == (SideEffectV1.UNKNOWN, RetrySafetyV1.UNVERIFIED)
+    # The control: a genuinely safe verb must still resolve, or this is a denial.
+    assert classify(unchanged, "HEAD", safe) == (SideEffectV1.READ, RetrySafetyV1.IDEMPOTENT)
+    # And with no verb at all, nothing may be concluded.
+    assert classify(unchanged) == (SideEffectV1.UNKNOWN, RetrySafetyV1.UNVERIFIED)
+
+
+def test_a_route_digest_needs_an_absolute_http_base():
+    """Malformed bases used to get identities, and two of them COLLIDED.
+
+    `ftp://h/base` and `http:///base` both reduced to the same path and therefore
+    the same digest — a digest that maps two unrelated malformed inputs onto one
+    value is worse than a refusal.
+    """
+    op = '<Operation><field id="path" value="/z"/></Operation>'
+    for url in ("not-a-url/base", "ftp://h/b", "http:///b", "http://h/%2G", "http://h/b?x=1"):
+        with pytest.raises(RouteDigestRefused):
+            route_digest_v1('<C><field id="url" value="%s"/></C>' % url, op)
+    # The control.
+    assert route_digest_v1('<C><field id="url" value="http://h/b"/></C>', op).startswith(
+        "RouteDigestV1:")
 
 
 def test_property_key_serialization_is_injective():

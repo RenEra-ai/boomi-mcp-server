@@ -240,6 +240,47 @@ def _remove_dot_segments(path: str) -> str:
     return "".join(output)
 
 
+def _require_absolute_http_url(raw: str) -> str:
+    """Refuse a connection base that is not an absolute HTTP(S) URL with authority.
+
+    Anything looser silently produced a route identity for a base that addresses
+    nothing — and worse, DIFFERENT malformed bases collided: `ftp://h/base` and
+    `http:///base` both reduced to the same path and therefore the same digest.
+    A digest exists to distinguish routes; one that maps two unrelated malformed
+    inputs onto one value is worse than a refusal.
+    """
+    parsed = urlsplit(raw.strip())
+    if parsed.scheme.lower() not in ("http", "https"):
+        raise RouteDigestRefused(
+            f"connection url {raw!r} is not http(s); a route digest identifies an "
+            "HTTP route and cannot describe another scheme"
+        )
+    if not parsed.netloc:
+        raise RouteDigestRefused(
+            f"connection url {raw!r} has no authority, so it addresses no host and "
+            "the route it implies does not exist"
+        )
+    if parsed.query or parsed.fragment:
+        raise RouteDigestRefused(
+            f"connection url {raw!r} carries a query or fragment; neither is part of "
+            "a route and including one would make the same route digest differently"
+        )
+    return parsed.path
+
+
+def _reject_malformed_percent(path: str) -> None:
+    """A stray `%` that is not a valid escape makes the path undecodable."""
+    for index, char in enumerate(path):
+        if char != "%":
+            continue
+        escape = path[index + 1:index + 3]
+        if len(escape) != 2 or any(c not in "0123456789abcdefABCDEF" for c in escape):
+            raise RouteDigestRefused(
+                f"path {path!r} contains a malformed percent-escape at offset "
+                f"{index}; it decodes to nothing and cannot identify a route"
+            )
+
+
 def _effective_path(base_url: str, template: str) -> str:
     """The single path a call actually addresses.
 
@@ -252,8 +293,10 @@ def _effective_path(base_url: str, template: str) -> str:
     route-significant, and a normalizer that removed them would let evidence
     captured for one resource satisfy a claim about another.
     """
-    base = urlsplit(base_url.strip()).path if "://" in base_url else base_url.strip()
+    base = _require_absolute_http_url(base_url)
     tail = template.strip()
+    _reject_malformed_percent(base)
+    _reject_malformed_percent(tail)
     # Exactly one slash at the boundary — neither swallowed nor doubled.
     joined = base.rstrip("/") + "/" + tail.lstrip("/") if tail else base
     if not joined.startswith("/"):

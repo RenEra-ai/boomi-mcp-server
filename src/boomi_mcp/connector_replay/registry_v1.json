@@ -79,6 +79,12 @@
         "POST",
         "PUT",
         "TRACE"
+      ],
+      "safe_actions": [
+        "GET",
+        "HEAD",
+        "OPTIONS",
+        "TRACE"
       ]
     }
   ]

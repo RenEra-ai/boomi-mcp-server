@@ -130,7 +130,8 @@ def verify_archive(archive_root: Path, capture_dir: Path) -> None:
         )
 
 
-def classify(summary: CaptureSummaryV1) -> tuple[SideEffectV1, RetrySafetyV1]:
+def classify(summary: CaptureSummaryV1, action: str | None = None,
+             safe_actions: frozenset[str] | None = None) -> tuple[SideEffectV1, RetrySafetyV1]:
     """Decide what a capture proves, from its derived facts alone.
 
     The rules, and why each is conservative:
@@ -185,6 +186,15 @@ def classify(summary: CaptureSummaryV1) -> tuple[SideEffectV1, RetrySafetyV1]:
     if any(changed):
         return SideEffectV1.WRITE, RetrySafetyV1.UNVERIFIED
     if changed:
+        # No observable state change. That is consistent with a READ *and* with a
+        # write that happened to be a no-op — a PATCH setting a field to the value
+        # it already held changes nothing and is not therefore idempotent.
+        #
+        # The verb is what separates them, and the verb is now VERIFIED evidence:
+        # it was reconciled against the capture's components and against the
+        # counterparty log. Without it, the honest answer is unknown.
+        if action is None or safe_actions is None or action not in safe_actions:
+            return SideEffectV1.UNKNOWN, RetrySafetyV1.UNVERIFIED
         return SideEffectV1.READ, RetrySafetyV1.IDEMPOTENT
     return SideEffectV1.UNKNOWN, RetrySafetyV1.UNVERIFIED
 
@@ -277,7 +287,11 @@ def ingest(
                 f"counterparty log, which recorded {sorted(logged)!r}"
             )
 
-        side_effect, retry_safety = classify(summary)
+        safe = frozenset(
+            a for entry in registry.vocabulary if entry.family == family
+            for a in entry.safe_actions
+        )
+        side_effect, retry_safety = classify(summary, action, safe)
         operation_id = None
         if retry_safety is RetrySafetyV1.CONDITIONALLY_IDEMPOTENT:
             # The model requires it, and rightly: convergence was observed against

@@ -127,6 +127,11 @@ class ConnectorVocabularyMappingV1(ReplayRegistryModel):
     #: invented action inherited a mapped family's authority. The plan asks for a
     #: total, injective family-AND-action vocabulary; this is the action half.
     recognised_actions: tuple[str, ...] = Field(min_length=1)
+    #: The subset that is SAFE — no request-side effect — by the transport's own
+    #: specification, not by this project's judgement. Needed because "nothing
+    #: changed" is consistent with a read AND with a write that no-opped, and only
+    #: the verb's declared semantics separate them.
+    safe_actions: tuple[str, ...] = ()
 
     @field_validator("recognised_actions")
     @classmethod
