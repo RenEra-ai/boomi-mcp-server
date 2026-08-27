@@ -1,0 +1,19 @@
+{
+ "gate": "composite wave gate",
+ "command": "scripts/wave_gate.py wave --base 9860842e5932c2e091a115e4697722bd8429953c",
+ "status": "completed",
+ "verdict": "pass",
+ "wave_sha": "706b2f72c4db1f842bf57e1e9aee480db55d776b",
+ "suite": {
+  "passed": 10764,
+  "skipped": 17,
+  "skip_cap": 30
+ },
+ "goldens": {
+  "active": 74,
+  "deterministic": true,
+  "byte_exact": true
+ },
+ "plan_fingerprint_cases": 2,
+ "exit_code": 0
+}
