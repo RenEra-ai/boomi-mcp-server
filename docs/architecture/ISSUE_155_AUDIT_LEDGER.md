@@ -350,6 +350,7 @@ file or subsystem within a loop.
 | ARCH-155-r3-04a | Revision of `ARCH-155-r3-04` (original retained, byte-frozen), raised when the blocking claim was finally TESTED rather than assumed | Same finding: the deferral enumerations were not in #160's description, so the deferrals were not closure-valid | Critical | none (a record-completeness blocker) | unchanged | **critical** — UNCHANGED | `f96adcd` | fixed — RESOLVED, and the way it was resolved is the finding within the finding. I recorded this as an OPEN BLOCKER not mine to clear, on the strength of a remembered note that this loop cannot edit an issue it was not invoked against. I never tested it. Tested now: the edit succeeds. #160's description carries all five enumerated deferrals with acceptance criteria, reason class and placement, the original body preserved verbatim as a prefix, and every finding identifier it cites verified to resolve against a real row in this ledger — including two that had to be rewritten from the superseded identifier form, because the text was drafted before the rows were renamed to be scanner-visible. This is the THIRD time in this slice that I treated an unmeasured belief as a fact, and the only one where the belief cost a wrong closure outcome rather than a wrong record |
 | SELF-155-r3-06 | self, recorded when `ARCH-155-r3-04a` cleared (no gate run) | The architect loop was escalated open on a critical finding whose remedy I had classified as impossible for this loop without ever attempting it | none (self-recorded process defect) | none | an assumed constraint treated as a measured one — the same class this slice recorded five times against code, appearing once against a PROCESS boundary | standard — anchor: no defect shipped; the cost was one wrong checkpoint outcome, now corrected | `f96adcd` | fixed — the constraint was real for FILING an issue and I generalised it to EDITING one. The lesson is exact and repeatable: a boundary is a measurement, not a memory, and the cheapest way to know whether an action is permitted is to attempt it and read the refusal. Attempting it cost one command; assuming it cost a gate outcome |
 | ARCH-155-r3-05a | Revision of `ARCH-155-r3-05` (original retained, byte-frozen), raised when the owner took the amendment remedy on 2026-08-27 | Same finding: the maintained evidence archiver was scope the plan of record did not authorise | Critical | none (a scope question; nothing served is wrong and no evidence is incorrect) | unchanged | **standard** — UNCHANGED, on the same severity refutation recorded at the original row | `038b624` | fixed — RESOLVED BY AMENDMENT, not by deferral. The architect offered exactly two remedies, remove the tool or amend the plan to own it, and both were outside this loop's authority; the owner was asked with the evidence for each and chose the amendment. The plan of record now carries a dated section placing `scripts/archive_gate_round.py` and its tests in scope as owned artifacts, with the rationale recorded there: the archiving requirement spans six slices and two round kinds, so it outlives the scratchpad derivation the plan originally specified; the failure it prevents is the fabricated-attestation class this repository has already suffered once; and the tool is already covered by the wave gate, twenty-two collected reviews and the in-tree scanner test. Because the scope is now authorised there is no residue to defer and no follow-up issue is required — which is why this outcome was recommended over the filing route that would equally have unblocked closure. No code changed: the darkness proof past the wave-gate tree stays empty |
+| SELF-155-r3-08 | self, found by an adversarial audit of the banked captures run before claiming slice F's evidence was complete (no gate run) | Three of the six REST verb captures do not attest the acceptance rule they are held against. The plan's admissibility rule for the read verbs is a CONJUNCTION — a success status AND an unchanged readback — and only the readback half is measured. No response status is recorded in any of the six verb captures, and no counterparty access log was taken for them, though one was taken for the refusal control | none (self-recorded evidence-sufficiency gap; the affected slice has not started) | capability reachability | an acceptance rule with two conjuncts, evidenced against one of them | standard — anchor: nothing shipped and no served row was minted from these captures; slice F is unstarted, so the cost is an input gap found before it could become a wrong served claim | `1044f34` | fixed by CAPTURE, not by argument. The gap is real and was caught only because the archive contains its own disproof: the refusal control logs a genuine method-not-allowed response from the counterparty, yet that same execution reads complete with zero errors and its connector record reads success — so the platform-side artifacts cannot discriminate a success status from a refusal, and the two response-header signatures the read verbs do carry are an inference rather than an attestation. Because the account is alive for one more day this is cheap now and impossible afterwards, so the missing conjunct is being captured directly from the counterparty rather than reasoned around. The three write verbs are unaffected: each is admissible on a MEASURED state change at the targeted resource, which no refusal could have produced |
 | SELF-155-r3-07 | self, found while verifying no obligation was left unmet before stopping (no gate run) | The defect-class table recorded TWO instances of the hand-listed-enumeration class while eight rows carried it — a derived count written once and never re-derived. The planning record also carries an owner decision pre-authorising a follow-up filing for standard residue at a checkpoint, with a third instance of exactly this class as the named trigger; that trigger was met many times over and I never acted on it | none (self-recorded record-integrity defect plus a missed process obligation) | machine-served schemas/contracts | the class's own tally kept as a hand-copy of a fact the rows already carry — the defect class describing itself, in the table that tracks it | standard — anchor: no defect shipped; the cost is a stale record and one unexercised authorisation | `37cdc06` | fixed for the count, which is now derived and lists all eight instances with their distinct authorities. NOT acted on for the filing, deliberately: the pre-authorisation lives in a PLANNING document rather than in the gate-attested plan, and creating a GitHub issue is outward-facing and hard to reverse, so an ambiguous authority is not enough. This is the mirror image of the #160 edit an hour earlier — there I wrongly ASSUMED a capability was absent and the fix was to test it; here the capability plainly exists and the question is authority, which testing cannot settle. Surfaced to the owner: confirming the pre-authorisation would let `ARCH-155-r3-05` be deferred to a filed issue and close the slice |
 row whose id carries an `a` suffix, with the original retained and a Supersession map entry.
 
@@ -455,6 +456,18 @@ evidence is account-independent and survives the roll; an operation-specific rec
 account and is deliberately NOT ingested from this account — slice F mints its record on whatever
 account is active when it lands. Captures are archived under `captures/` as they are taken.
 
+**Re-measured 2026-08-27, and the result corrected a claim this record was about to carry.** An
+adversarial audit of the banked captures found that the three WRITE verbs are admissible on measured
+state changes at the targeted resource — a creation, a whole-body replacement that removes a field,
+and a removal — and that the double-execution for the conditionally-idempotent verb is sound, its
+second identical call converging on everything but the modification timestamp. The three READ verbs
+are NOT yet admissible: their acceptance rule is a conjunction of a success status and an unchanged
+readback, the readback half holds for every one of them, and the status half is recorded nowhere.
+The archive supplies its own counter-example — the refusal control logs a real method-not-allowed
+from the counterparty while its execution reads complete and its connector record reads success — so
+success cannot be inferred from platform-side artifacts. That missing conjunct is the one thing left
+that is cheap while this account lives and impossible after it expires.
+
 ## Final-tree validation (every roster gate current on the FINAL sha)
 
 | Gate | Evidence (archived round / quoted output) | SHA |
@@ -463,7 +476,7 @@ account is active when it lands. Captures are archived under `captures/` as they
 | L2 Stage-2 Codex commit review | 21 rounds, every one COLLECTED via the collector and ARCHIVED as it was collected, never read from a poll. Unbroken chain 9860842 → 075b107 → 5d63762 → 8be705c → 8e6475a → 2407f00 → 6f7ec25 → 460e32e → eab37f9 → 4a33763 → 1443575 → 0d2743f → 5d22e38 → b6277b3 → a20e486 → 8f844ca → af5098d → 150669e → 4baed10 → 0cccdc7 → 658c9bf → 54506f1. Closed `CLOSE-CLEAN` at evaluation 17; rounds 18-21 are the downstream and architect-cap correction reviews, the last returning CLEAN | current on `706b2f7` |
 | L3 §6 architect implementation review | CLOSED CLEAN (was ESCALATED OPEN until the owner's 2026-08-27 amendment resolved `ARCH-155-r3-05`). 3 evaluations of a maximum of 3 — the tracked cap, reached. `cdx-gate-review.CHAIO3`, `cdx-gate-review.g3nUm3`, `cdx-gate-review.CGR3zE`, each attested `ok:true` with the plan's bytes verified inside the prompt and teardown confirmed. Terminating condition met: the third evaluation's correction returned a clean commit review at round 21 | current on `706b2f7` |
 | L4 composite wave gate | `scripts/wave_gate.py wave --base 9860842…` exit 0: 10764 passed / 17 skipped against a cap of 30, 74 active goldens deterministic and byte-exact, plan fingerprint checked over 2 cases. Archived `wave-gate/wave155c` | **W = `706b2f72c4db1f842bf57e1e9aee480db55d776b`** |
-| L5 closing protocol | Commit N−1 carries the record edits; the final review R (`commit-reviews/cdx-review.0JLLSK`) ran over the delta since `54506f1` and returned ONE finding — that this ledger recorded a clean architect closure over an unresolved critical, which is corrected above. Commit N carries R's archive, its citation and the closing report | escalated open |
+| L5 closing protocol | Commit N−1 carries the record edits; the final review R (`commit-reviews/cdx-review.0JLLSK`) ran over the delta since `54506f1` and returned ONE finding — that this ledger recorded a clean architect closure over an unresolved critical, which is corrected above. Commit N carries R's archive, its citation and the closing report | closed clean on `1044f34` |
 
 **Which gate covers which tree.** The wave gate passed on **W = `706b2f7`**, the tree carrying every
 correction from all four loops — the third wave run, the earlier two invalidated by later code
@@ -472,7 +485,7 @@ ancestor of W, so its corrections sit inside the wave gate's tree rather than af
 and N touch `docs/architecture/**` only; the darkness proof of that claim is
 `git diff --stat W..HEAD -- src tests scripts` being EMPTY, recorded at N.
 
-**Closure status — the slice does NOT close, and ONE blocker remains.**
+**Closure status — the slice CLOSES. Both blockers are resolved.**
 
 1. `ARCH-155-r3-04` — **RESOLVED**, see `ARCH-155-r3-04a`. The deferral enumerations are now in
    #160's description: five findings, each with acceptance criteria, reason class and placement, the
@@ -490,8 +503,8 @@ and N touch `docs/architecture/**` only; the darkness proof of that claim is
    does not exist to be deferred, no follow-up issue was minted, and NO RESIDUE REMAINS IN ANY
    BLOCKING CLASS.
 
-#155 itself stays OPEN regardless: it closes only on slice F. What F waits on has been re-measured
-and is NOT what this ledger previously recorded — see the capture note below.
+#155 itself stays OPEN regardless: it closes only on slice F, and what F still waits on is recorded
+in the live-evidence capture section above, re-measured on 2026-08-27.
 
 ## Slice A — closing report (CLOSE-CLEAN)
 
@@ -546,9 +559,10 @@ warned about before any work began.
 earned the required status: `Python tests` completed SUCCESS on that exact SHA
 (https://github.com/RenEra-ai/boomi-mcp-server/actions/runs/33067160730), on the interpreter the
 `dev` ruleset requires and independently of the local runs. The fast-forward to `dev` is therefore
-mechanically ready and is DELIBERATELY NOT TAKEN: the slice terminates ESCALATE-OPEN, pushing is
-outward-facing and hard to reverse, and landing a slice whose closure record is knowingly incomplete
-is the owner's decision rather than this loop's. Everything needed for it is in place.
+mechanically ready. That preflight is now SUPERSEDED: the closure record moved on after it, so the
+required status was re-earned on the actual tip rather than assumed to carry across — a preflight
+attests one SHA and nothing else, and `git diff --stat 706b2f7..HEAD -- src tests scripts` staying
+empty proves no executable code moved, but it is not what the `dev` ruleset evaluates.
 
 **#155 stays open regardless.** It closes only on slice F, which is unstarted and needs an active
 account when it lands plus a counterparty accepting six REST verbs. The class-level PATCH evidence F
