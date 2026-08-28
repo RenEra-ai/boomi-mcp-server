@@ -235,7 +235,7 @@
     {
       "census": "component_xml_write",
       "count": 1,
-      "evidence_line": 5873,
+      "evidence_line": 5877,
       "form": "svc.send_request(...)",
       "path": "src/boomi_mcp/categories/meta_tools.py",
       "row_id": "WR-ff78566d",
@@ -1900,7 +1900,7 @@
     {
       "census": "process_kind_producer",
       "count": 2,
-      "evidence_line": 7701,
+      "evidence_line": 7705,
       "form": "dict-literal process_kind='database_to_api_sync'",
       "path": "src/boomi_mcp/categories/meta_tools.py",
       "row_id": "PP-afb1406e",
@@ -1909,7 +1909,7 @@
     {
       "census": "process_kind_producer",
       "count": 2,
-      "evidence_line": 8563,
+      "evidence_line": 8567,
       "form": "dict-literal process_kind='sync_pipeline'",
       "path": "src/boomi_mcp/categories/meta_tools.py",
       "row_id": "PP-9797a75e",
@@ -1918,7 +1918,7 @@
     {
       "census": "process_kind_producer",
       "count": 2,
-      "evidence_line": 8432,
+      "evidence_line": 8436,
       "form": "dict-literal process_kind='wrapper_subprocess'",
       "path": "src/boomi_mcp/categories/meta_tools.py",
       "row_id": "PP-67bfa71b",
@@ -2944,7 +2944,7 @@
     {
       "census": "unclassified_reference",
       "count": 5,
-      "evidence_line": 8017,
+      "evidence_line": 8021,
       "form": "'process_kind' (unclassified selector literal)",
       "path": "src/boomi_mcp/categories/meta_tools.py",
       "row_id": "UR-10de511e",
@@ -4194,7 +4194,7 @@
     {
       "census": "component_xml_write",
       "disposition": "WRT-raw-api-component: ONE canonical endpoint parser feeds classification, ID extraction AND transport; the reserved literal `bulk` is matched BEFORE the `<id>` arm and is never a componentId; every update-shaped call runs the two-sided process check.",
-      "evidence_line": 5873,
+      "evidence_line": 5877,
       "forms": [
         "svc.send_request(...)"
       ],
@@ -5507,7 +5507,7 @@
     {
       "census": "process_kind_producer",
       "disposition": "retract the served legacy guidance / guard the raw route",
-      "evidence_line": 7701,
+      "evidence_line": 7705,
       "forms": [
         "dict-literal process_kind='database_to_api_sync'",
         "dict-literal process_kind='sync_pipeline'",
@@ -6295,7 +6295,7 @@
     {
       "census": "unclassified_reference",
       "disposition": "retract the served legacy guidance / guard the raw route",
-      "evidence_line": 8017,
+      "evidence_line": 8021,
       "forms": [
         "'process_kind' (unclassified selector literal)"
       ],
@@ -6920,7 +6920,7 @@
       "symbol",
       "form"
     ],
-    "python_source_count": 225,
+    "python_source_count": 226,
     "roots": [
       "*.py (repo root)",
       "src/boomi_mcp",
@@ -37739,7 +37739,7 @@
       "legacy_excerpt": {},
       "producer": "meta_tools.get_schema_template_action(...) [all axes]",
       "selector": "walked_surface_digest",
-      "sha256": "3614d37e3899baca71b543406371beb18aece166eefa7c4622a3b54d8f42ffad",
+      "sha256": "a0483320b8763c49159ddf1e01c54504392236ef57f33fe55abadd117034bed0",
       "surface_class": "SS-SCHEMA-TEMPLATES",
       "value": {
         "resource_type=component": "8327243ec482fa1641f49265c87694e33616f12db015b3f234dc73db9ed8057c",
@@ -37948,7 +37948,7 @@
         "resource_type=integration|operation=apply": "b55a1c201b265ea5e13fc21b45a547c5781491bd1e37fc1937700de39f94e137",
         "resource_type=integration|operation=plan": "3941f8a81188b16ad65a673fdf14e4600fe21700b0d35c912781287543677564",
         "resource_type=integration|operation=verify": "ce8ff56835a8fc612281204d0c7a43bc80307fc468b48d8425fdcbfba93ef94e",
-        "resource_type=monitoring": "a550384f4f34d6b2932142e963eb58f322e368eca41937e81a7440bf36fa58b2",
+        "resource_type=monitoring": "0a845926237d37a0050617e9b7637ab333f4f37c30ce370bc4fee8492a11fa21",
         "resource_type=monitoring|operation=audit_logs": "11ea4b05332d918018fe3227f87ec371e86c3fce3c1e95fa7f603ae6c497bf97",
         "resource_type=monitoring|operation=certificates": "d85efc070f3b8193e0f11336c07de77d17b18ec333ef9592ce9b2846fe824b1f",
         "resource_type=monitoring|operation=connector_documents": "bdab1f0f5a793c3bd9dca70fa0663daebb04f9deb2548fe1828e3c2d8bfa39e5",
