@@ -455,15 +455,33 @@ def _reachable_receivers(
         return None
     component_id, _ = resolved
 
+    # RECONCILED, like the connector rows are. Two archived copies of ONE process
+    # component that disagree would otherwise let filename sort order decide a served
+    # answer — the same defect the row reader closed, in the artifact beside it, which
+    # is where the sweep for that fix should have reached.
+    graphs: dict[str, tuple[Path, str]] = {}
     for path in sorted(files):
         if path.suffix != ".xml":
             continue
         try:
+            body = path.read_bytes()
             root = ET.parse(path).getroot()
         except (OSError, ET.ParseError):
             continue
         if root.get("type") != "process" or root.get("componentId") != process_id:
             continue
+        canonical = ET.canonicalize(body.decode("utf-8", "replace"), strip_text=True)
+        seen = graphs.get(process_id)
+        if seen is not None and seen[1] != canonical:
+            raise CaptureRefused(
+                f"{path.name}: two archived copies of process {process_id!r} differ, "
+                f"and {seen[0].name} sorts first; which graph ran is not decidable "
+                "from the archive"
+            )
+        graphs[process_id] = (path, canonical)
+
+    for path, _canonical in graphs.values():
+        root = ET.parse(path).getroot()
 
         shapes: dict[str, dict] = {}
         for element in root.iter():
@@ -925,7 +943,11 @@ def summarize(capture_dir: Path, method_hint: str | None = None) -> CaptureSumma
         counterparty_status, counterparty_method = _counterparty_outcome(logs[0], method_hint)
         logged_request_count = _counterparty_request_count(logs[0], method_hint)
 
+    _run_started_at: dict[str, str] = {}
     execution_ids_seen: set[str] = set()
+    process_ids: set[str] = set()
+    execution_times: list[str] = []
+    accounts: set[str] = set()
     runs: list[CaptureRunV1] = []
     for path in execution_files:
         label = _run_label(path.name, _EXECUTION_RECORD)
@@ -939,6 +961,26 @@ def summarize(capture_dir: Path, method_hint: str | None = None) -> CaptureSumma
         if not isinstance(status, str) or not status:
             raise CaptureRefused(f"{path.name}: no execution status")
 
+        # Read HERE, from the record of an execution this capture owns, rather than
+        # by searching the directory for the key. A directory-wide search takes the
+        # first file that happens to carry one — and the archive holds a capture whose
+        # earliest such file is a by-atom listing of OTHER executions entirely.
+        process_id = _first(payload, "processId")
+        if isinstance(process_id, str) and process_id:
+            process_ids.add(process_id)
+        # THE SAME SWEEP, and it was owed when the process id moved here. These two
+        # feed served values — the recorded capture time and the account the scope
+        # hash is built from — and both were still taking whatever the directory's
+        # first matching artifact said. Measured on the archive: dropping in its own
+        # by-atom execution listing moved a capture's served timestamp to an execution
+        # a month earlier from a different capture, and ingest still succeeded.
+        executed_at = _first(payload, "executionTime")
+        if isinstance(executed_at, str) and executed_at:
+            execution_times.append(executed_at)
+        account = _first(payload, "account")
+        if isinstance(account, str) and account:
+            accounts.add(account)
+
         state_changed: bool | None = None
         delta_path = deltas.get(label) or (next(iter(deltas.values())) if len(deltas) == 1 else None)
         if delta_path is not None:
@@ -946,6 +988,8 @@ def summarize(capture_dir: Path, method_hint: str | None = None) -> CaptureSumma
             if isinstance(changed, bool):
                 state_changed = changed
 
+        if isinstance(executed_at, str) and executed_at:
+            _run_started_at[label] = executed_at
         runs.append(
             CaptureRunV1(
                 label=label,
@@ -959,6 +1003,14 @@ def summarize(capture_dir: Path, method_hint: str | None = None) -> CaptureSumma
                 counterparty_method=counterparty_method,
             )
         )
+
+    # ORDERED BY WHEN THEY RAN. The attribution below pairs the counterparty's
+    # chronological log against this sequence, and it used to be sorted by the run's
+    # filename LABEL on the stated grounds that the two orders agree — measured, they
+    # disagree in eleven of the thirteen multi-run captures. With exactly two runs the
+    # two inversions cancel and no served value moved, which is precisely why this was
+    # invisible: the key was never established, it merely happened not to matter yet.
+    runs.sort(key=lambda r: (_run_started_at.get(r.label) or "", r.label))
 
     # ONE observed request cannot attest TWO executions. The outcome above is
     # copied onto every run, which is correct only when the counterparty logged as
@@ -986,19 +1038,25 @@ def summarize(capture_dir: Path, method_hint: str | None = None) -> CaptureSumma
 
     execution_ids = frozenset(run.execution_id for run in runs)
     counts = _connector_document_counts(files, execution_ids, method_hint)
+    # Exactly one, or none. Executions naming DIFFERENT processes do not share a
+    # topology, and the archive holds such a capture — picking either graph would
+    # attribute one execution's shape to the other's documents. Unresolved here means
+    # the attribution refuses rather than guesses.
     receivers = _reachable_receivers(
-        files, method_hint, _first_across(files, "processId", str)
+        files, method_hint, process_ids.pop() if len(process_ids) == 1 else None
     )
     return CaptureSummaryV1(
         scenario=capture_dir.name,
-        runs=tuple(sorted(runs, key=lambda r: r.label)),
+        runs=tuple(runs),
         capture_digest=digest.hexdigest(),
         file_count=len(files),
         convergence=_convergence(files),
         observed_connector_types=_observed_connector_types(files, execution_ids),
         observed_methods=_observed_methods(files),
-        captured_at=_first_across(files, "executionTime", str),
-        account_id=_first_across(files, "account", str),
+        captured_at=min(execution_times) if execution_times else None,
+        # One account or none: executions from two accounts share no scope, and a
+        # scope hash built from either would place the capture in the wrong one.
+        account_id=accounts.pop() if len(accounts) == 1 else None,
         is_start_shape=_start_shape_of_the_exercised_connector(
             files, execution_ids, method_hint
         ),

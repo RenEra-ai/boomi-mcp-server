@@ -788,40 +788,101 @@ def test_the_archive_corroborates_which_operation_produced_the_delivery():
     assert receiver != sizes(source), "and not the source's"
 
 
-def test_the_graph_is_taken_from_the_process_that_actually_RAN():
-    """A capture may archive a graph that never executed, and one already does.
+def test_the_graph_is_taken_from_the_process_that_actually_RAN(tmp_path):
+    """The graph is selected by the executed process id, not by sort order.
 
-    `cap155-e1-source-dynamic-path` holds an emitted process beside the stored one.
-    The emitted copy carries no component id and sorts FIRST, so reading whichever
-    process mentioned the operation read a graph the platform never ran.
+    The first version of this test proved nothing: it used a capture with no operation
+    component at all, so resolution returned None before the process id was ever read
+    and the assertion held even if selection were ignored entirely. This one uses a
+    capture that DOES resolve, and plants a decoy graph that sorts first and carries
+    the same operation — so sort order and the execution record disagree, and only one
+    of them gives the right answer.
     """
-    import xml.etree.ElementTree as ET
+    from boomi_mcp.connector_replay.capture import _first, _load_json, _reachable_receivers
 
-    from boomi_mcp.connector_replay.capture import _first_across, _reachable_receivers
+    dst = tmp_path / "decoy-graph"
+    shutil.copytree(_CAPTURES / _SOURCE, dst)
+    real = (dst / "component_process.xml").read_text()
+    process_id = real.split('componentId="', 1)[1].split('"', 1)[0]
 
-    directory = _CAPTURES / "cap155-e1-source-dynamic-path"
-    files = sorted(directory.iterdir())
-    process_id = _first_across(files, "processId", str)
-    assert process_id, "the execution record must name the process it ran"
+    executed = {
+        _first(_load_json(p), "processId")
+        for p in dst.glob("*execution_record*.json")
+    }
+    assert executed == {process_id}, "the execution records must name the archived graph"
 
-    archived = {}
-    for path in files:
-        if path.suffix != ".xml":
-            continue
-        root = ET.parse(path).getroot()
-        if root.get("type") == "process":
-            archived[path.name] = root.get("componentId")
-    assert len(archived) > 1, "the fixture must archive more than one process graph"
-    assert archived.get("emitted_process.xml") is None
-    assert archived.get("stored_process.xml") == process_id
-    assert sorted(archived)[0] == "emitted_process.xml", (
-        "the unexecuted graph must sort first, or this test proves nothing"
+    # A decoy that sorts BEFORE `component_process.xml`, carries the same operation,
+    # and reaches no receiver. Under sort-order selection this is what gets read.
+    decoy_id = "00000000-0000-4000-8000-000000000002"
+    decoy = real.replace(process_id, decoy_id, 1)
+    for shape in ("shape4",):
+        decoy = decoy.replace(f'toShape="{shape}"', 'toShape="shape3"')
+    (dst / "aaa_decoy_process.xml").write_text(decoy)
+    assert sorted(p.name for p in dst.glob("*.xml"))[0] == "aaa_decoy_process.xml", (
+        "the decoy must sort first, or this test cannot tell the two rules apart"
     )
 
-    # A capture whose executed graph cannot be identified yields no attribution
-    # rather than an attribution from the wrong graph.
-    dst_files = files
-    assert _reachable_receivers(dst_files, "GET", "no-such-process-id") is None
+    files = sorted(dst.iterdir())
+    # Selected by the executed id: the real graph, which reaches the receiver.
+    assert _reachable_receivers(files, "PATCH", process_id) == frozenset({"shape4"})
+    # Selected by the decoy's id: the decoy graph, which reaches none. Different
+    # answers from the same directory prove the id is what chooses.
+    assert _reachable_receivers(files, "PATCH", decoy_id) == frozenset()
+    # And the whole pipeline picks the executed one.
+    assert summarize(dst, "PATCH").receiver_is_downstream is True
+
+
+def test_executions_naming_different_processes_yield_no_attribution(tmp_path):
+    """Two executions, two processes: no single topology to attribute through."""
+    dst = tmp_path / "two-processes"
+    shutil.copytree(_CAPTURES / _SOURCE, dst)
+    records = sorted(dst.glob("*execution_record*.json"))
+    assert len(records) > 1, "the fixture must carry more than one execution"
+
+    payload = json.loads(records[0].read_text())
+
+    def repoint(node):
+        if isinstance(node, dict):
+            if "processId" in node:
+                node["processId"] = "00000000-0000-4000-8000-000000000003"
+            for value in node.values():
+                repoint(value)
+        elif isinstance(node, list):
+            for value in node:
+                repoint(value)
+
+    repoint(payload)
+    records[0].write_text(json.dumps(payload))
+
+    summary = summarize(dst, "PATCH")
+    assert summary.receiver_is_downstream is None, (
+        "disagreeing executions must leave the attribution unestablished"
+    )
+    assert summary.return_documents is None, "and the count unknown, not zero"
+
+
+def test_a_process_id_from_an_unrelated_artifact_is_not_used(tmp_path):
+    """The id comes from this capture's execution records, not from the directory.
+
+    The archive holds a capture whose earliest `processId`-bearing file is a by-atom
+    listing of other executions entirely, which a directory-wide search would read.
+    """
+    from boomi_mcp.connector_replay.capture import _first_across
+
+    dst = tmp_path / "foreign-process-id"
+    shutil.copytree(_CAPTURES / _SOURCE, dst)
+    real = (dst / "component_process.xml").read_text()
+    process_id = real.split('componentId="', 1)[1].split('"', 1)[0]
+
+    (dst / "aaa_other_executions.json").write_text(
+        json.dumps({"result": [{"processId": "00000000-0000-4000-8000-000000000004"}]})
+    )
+    files = sorted(dst.iterdir())
+    assert _first_across(files, "processId", str) != process_id, (
+        "a directory-wide search must actually pick the foreign id, or this is vacuous"
+    )
+    # The pipeline still attributes correctly, because it reads the execution records.
+    assert summarize(dst, "PATCH").receiver_is_downstream is True
 
 
 def test_a_receiver_on_an_unrelated_branch_does_not_supply_the_count(tmp_path):
@@ -844,14 +905,54 @@ def test_a_receiver_on_an_unrelated_branch_does_not_supply_the_count(tmp_path):
     )
     process.write_text(text)
 
+    # A SHAPE ALONE PROVES NOTHING. Without a platform row for it, a sum-over-every-
+    # receiver implementation returns the same number and this test stays green under
+    # the exact defect it exists to catch — which is what the previous version did.
+    added = 0
+    for path in sorted(dst.glob("*.json")):
+        payload = json.loads(path.read_text())
+        rows = _platform_connector_records(payload)
+        unrelated = [
+            {**row, "id": f"{row['id']}-shape9", "executionConnector": "shape9",
+             "successCount": 7}
+            for row in rows
+            if row.get("connectorType") == "return"
+            and isinstance(row.get("successCount"), int)
+        ]
+        if not unrelated:
+            continue
+        container = payload
+        for key in ("raw", "data", "result"):
+            if isinstance(container, dict) and key in container:
+                container = container[key]
+        if isinstance(container, list):
+            container.extend(unrelated)
+            path.write_text(json.dumps(payload))
+            added += len(unrelated)
+    assert added, "the unrelated receiver must actually report documents"
+
     files = sorted(dst.iterdir())
-    receivers = _reachable_receivers(files, "PATCH", _first_across(files, "processId", str))
+    process_id = _first_across(files, "processId", str)
+    receivers = _reachable_receivers(files, "PATCH", process_id)
     assert receivers == frozenset({"shape4"}), (
         "the unrelated receiver must not be attributed to this operation"
     )
 
-    # And the count is still the reachable receiver's own, not a sum over both.
-    assert summarize(dst, "PATCH").return_documents == 2
+    summary = summarize(dst, "PATCH")
+    # Bound to the attributed receiver. A sum over every receiver would be 2 + 7 per
+    # execution, so the two rules give different numbers and the test discriminates.
+    assert summary.return_documents == 2
+    every_receiver = sum(
+        row["successCount"]
+        for path in dst.glob("*.json")
+        for row in _platform_connector_records(json.loads(path.read_text()))
+        if row.get("connectorType") == "return"
+        and isinstance(row.get("successCount"), int)
+    )
+    assert every_receiver > summary.return_documents, (
+        "summing every receiver must give a DIFFERENT answer, or the assertion above "
+        "passes under the defect"
+    )
 
 
 def test_a_positive_receiver_count_always_comes_from_an_attributed_receiver():
@@ -864,7 +965,7 @@ def test_a_positive_receiver_count_always_comes_from_an_attributed_receiver():
     """
     import xml.etree.ElementTree as ET
 
-    checked = 0
+    checked = positive = 0
     for directory in sorted(_CAPTURES.iterdir()):
         if not directory.is_dir():
             continue
@@ -886,8 +987,126 @@ def test_a_positive_receiver_count_always_comes_from_an_attributed_receiver():
                 continue
             checked += 1
             if (summary.return_documents or 0) > 0:
+                positive += 1
                 assert summary.receiver_is_downstream is True, (
                     f"{directory.name}::{verb} counts documents from a receiver the "
                     "graph does not attribute to the operation under test"
                 )
     assert checked > 20, "the sweep must actually cover the archive"
+    # THE FLOOR THAT MATTERS. Counting cells that merely summarize let a mutant
+    # returning zero documents keep this green — the implication held vacuously over
+    # a set with no positive member. Only cells that actually count a delivery
+    # exercise it, and the archive has four.
+    assert positive >= 4, (
+        f"only {positive} cells counted a delivery, so the implication was not "
+        "exercised; a reader that always returns zero would satisfy it"
+    )
+
+
+def test_served_provenance_comes_from_this_captures_executions(tmp_path):
+    """The recorded time and account are read from the executions, not the directory.
+
+    The same sweep the process id got, owed at the same moment and not paid then.
+    Witness uses the archive's OWN by-atom listing, which names executions from other
+    captures a month earlier — a directory-wide search reads it.
+    """
+    from boomi_mcp.connector_replay.capture import _first_across
+
+    intact = summarize(_CAPTURES / _SOURCE, "PATCH")
+    assert intact.captured_at and intact.account_id
+
+    dst = tmp_path / "foreign-provenance"
+    shutil.copytree(_CAPTURES / _SOURCE, dst)
+    foreign = _CAPTURES / "cap155-e1-id-grammar" / "execution_records_by_atom.json"
+    assert foreign.exists(), "the archive must still carry the foreign listing"
+    shutil.copy(foreign, dst / "aa_execution_records_by_atom.json")
+
+    files = sorted(dst.iterdir())
+    borrowed = _first_across(files, "executionTime", str)
+    assert borrowed != intact.captured_at, (
+        "a directory-wide search must actually read the foreign time, or this is vacuous"
+    )
+
+    moved = summarize(dst, "PATCH")
+    assert moved.captured_at == intact.captured_at, "the served time must not move"
+    assert moved.account_id == intact.account_id, "nor the account the scope hash uses"
+
+
+def test_runs_are_ordered_by_when_they_ran(tmp_path):
+    """Counterparty outcomes are paired against the log in chronological order.
+
+    The pairing used the filename LABEL on the stated grounds that label order and
+    execution order agree. They disagree in most multi-run captures; with exactly two
+    runs the inversions cancel, which is why no served value ever moved.
+    """
+    dst = tmp_path / "reversed-labels"
+    shutil.copytree(_CAPTURES / _SOURCE, dst)
+
+    records = sorted(dst.glob("*execution_record*.json"))
+    assert len(records) == 2
+
+    times = []
+    for record in records:
+        payload = json.loads(record.read_text())
+        times.append(_first_time(payload))
+    assert times[0] and times[1] and times[0] != times[1]
+
+    # Swap the two records' times so label order and run order now disagree.
+    for record, other in zip(records, reversed(times)):
+        text = record.read_text()
+        payload = json.loads(text)
+        _set_time(payload, other)
+        record.write_text(json.dumps(payload))
+
+    summary = summarize(dst, "PATCH")
+    ordered = [r.label for r in summary.runs]
+    assert ordered == ["run2", "run1"], (
+        f"runs must follow execution time, got {ordered}"
+    )
+
+
+def _first_time(node):
+    if isinstance(node, dict):
+        if "executionTime" in node:
+            return node["executionTime"]
+        for value in node.values():
+            found = _first_time(value)
+            if found:
+                return found
+    elif isinstance(node, list):
+        for value in node:
+            found = _first_time(value)
+            if found:
+                return found
+    return None
+
+
+def _set_time(node, value):
+    if isinstance(node, dict):
+        if "executionTime" in node:
+            node["executionTime"] = value
+        for inner in node.values():
+            _set_time(inner, value)
+    elif isinstance(node, list):
+        for inner in node:
+            _set_time(inner, value)
+
+
+def test_two_disagreeing_copies_of_the_executed_process_are_refused(tmp_path):
+    """The graph reader reconciles, like the row reader beside it."""
+    from boomi_mcp.connector_replay.capture import CaptureRefused
+
+    dst = tmp_path / "disagreeing-graphs"
+    shutil.copytree(_CAPTURES / _SOURCE, dst)
+    real = (dst / "component_process.xml").read_text()
+    # Same component id, different graph, sorting FIRST.
+    (dst / "aaa_same_process.xml").write_text(real.replace('toShape="shape4"', 'toShape="shape3"'))
+
+    with pytest.raises(CaptureRefused, match="two archived copies of process"):
+        summarize(dst, "PATCH")
+
+    # CONTROL: a byte-identical second copy is not a disagreement.
+    other = tmp_path / "identical-graphs"
+    shutil.copytree(_CAPTURES / _SOURCE, other)
+    (other / "aaa_same_process.xml").write_text((other / "component_process.xml").read_text())
+    assert summarize(other, "PATCH").receiver_is_downstream is True
