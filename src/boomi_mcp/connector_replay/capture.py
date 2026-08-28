@@ -646,12 +646,21 @@ def _state_change_for_run(
         # turning a served row into a refusal on the strength of an unrelated
         # neighbour. An entry that names an execution is judged on that name; an entry
         # that names none is judged on its label.
+        # A keyed entry claiming the same label PROVES that label is not unique here,
+        # so the unkeyed entry beside it identifies nothing. Unrelated keyed
+        # neighbours still leave the fallback alone — it is the collision that
+        # disqualifies it, not the presence of keys.
+        reused = {
+            entry.get("label") for entry in entries
+            if isinstance(entry, dict) and entry.get("execution_id")
+            and entry.get("execution_id") != execution_id
+        }
         matching = [
             entry for entry in entries
             if isinstance(entry, dict)
             and (entry["execution_id"] == execution_id
                  if entry.get("execution_id")
-                 else entry.get("label") == label)
+                 else (entry.get("label") == label and label not in reused))
         ]
         if len(matching) == 1:
             changed = matching[0].get("raw_changed")
@@ -745,6 +754,16 @@ def _differing_keys(a: dict[str, Any], b: dict[str, Any]) -> tuple[str, ...]:
     ))
 
 
+def _body_label(path: Path) -> str | None:
+    """The place a staged readback claims for itself, if it claims one."""
+    try:
+        payload = _load_json(path)
+    except CaptureRefused:
+        return None
+    label = payload.get("label") if isinstance(payload, dict) else None
+    return label if isinstance(label, str) and label else None
+
+
 def _convergence(files: list[Path]) -> tuple[ConvergenceV1, ...]:
     """Derive what a replay did, per subject, from the staged readbacks."""
     # KEYED ON THE MOMENT EACH READBACK STATES, not on where it falls in a sorted
@@ -782,6 +801,44 @@ def _convergence(files: list[Path]) -> tuple[ConvergenceV1, ...]:
                 "which one bounds the comparison is not decidable from the archive"
             )
         staged = [moments[m][0] for m in _CONVERGENCE_ORDER]
+
+        # THE TWO RECORDED ORDERS MUST AGREE. A moment set can be complete while every
+        # moment contradicts its own stage number — an archive naming R0 the `between`
+        # and R1 the `before` has a complete set and a reversed sequence, so the two
+        # comparison windows get placed on a replay that ran the other way round. The
+        # stage number is a sequence and the moment is a position in it; if sorting by
+        # one disagrees with the other, the capture states two different orders and
+        # neither is authoritative.
+        by_stage = sorted(staged, key=lambda pair: int(pair[0][1:]))
+        if [stage for stage, _ in by_stage] != [stage for stage, _ in staged]:
+            raise CaptureRefused(
+                f"{subject}: stage order {[s for s, _ in by_stage]!r} disagrees with "
+                f"moment order {[s for s, _ in staged]!r}; the capture records two "
+                "different sequences for one replay"
+            )
+
+        # And where a readback's own payload names its place, that name must agree
+        # with the filename. Two capture generations write this label differently —
+        # one states subject, stage and moment, the other only subject and stage — so
+        # the moment half is checked only where it is actually stated. A fact recorded
+        # twice with no pin between the copies is a class this ledger already carries.
+        for stage, path in staged:
+            label = _body_label(path)
+            if label is None:
+                continue
+            expected_stage = f"{subject} {stage}"
+            if not label.startswith(expected_stage):
+                raise CaptureRefused(
+                    f"{path.name}: its own label {label!r} does not agree with the "
+                    f"subject and stage its filename states ({expected_stage!r})"
+                )
+            stated_moment = label[len(expected_stage):].lstrip("_").strip()
+            moment = next(m for m in _CONVERGENCE_ORDER if moments[m][0][0] == stage)
+            if stated_moment and stated_moment != moment:
+                raise CaptureRefused(
+                    f"{path.name}: its own label states the {stated_moment!r} moment "
+                    f"while its filename states {moment!r}"
+                )
         bodies = [(stage, _body_of(_load_json(path))) for stage, path in staged]
         if any(body is None for _, body in bodies):
             raise CaptureRefused(

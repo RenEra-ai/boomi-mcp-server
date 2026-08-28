@@ -1290,6 +1290,7 @@ def test_every_defect_class_tally_equals_its_own_enumeration():
     assert known_rows, "no finding rows parsed — the existence check would be vacuous"
 
     checked = 0
+    owners: dict[str, str] = {}
     for line in ledger.splitlines():
         if not line.startswith("| DC-155-"):
             continue
@@ -1321,7 +1322,17 @@ def test_every_defect_class_tally_equals_its_own_enumeration():
         missing = [i for i in enumerated if i not in known_rows]
         assert not missing, f"{name}: names instances with no finding row: {missing}"
 
+        for instance in enumerated:
+            other = owners.get(instance)
+            assert other is None, (
+                f"{instance} is claimed by both {other} and {name}; the "
+                "second-instance trigger requires one defect class per finding, and "
+                "two owners double-count it in both tallies"
+            )
+            owners[instance] = name
+
     assert checked >= 12, f"only {checked} class rows were checked"
+    assert len(owners) >= 40, f"only {len(owners)} instances were attributed"
 
 
 def test_a_conflicting_execution_id_is_not_overridden_by_a_matching_label(tmp_path):
@@ -1422,4 +1433,66 @@ def test_an_unkeyed_delta_entry_still_binds_beside_a_keyed_stranger(tmp_path):
     assert by_label["run1"] is True, (
         f"an unkeyed entry must bind by its label regardless of a keyed stranger, "
         f"got {by_label}"
+    )
+
+
+def test_a_capture_stating_two_different_replay_orders_is_refused(tmp_path):
+    """A complete moment set can still contradict its own stage numbers.
+
+    Renaming one readback's moment leaves the set complete and reverses the sequence,
+    so the two comparison windows get placed on a replay that ran the other way round.
+    Whether that lands on a safe or unsafe verdict depends on the data — measured on
+    the archived delete capture it flipped to `non_idempotent`, the fail-closed side —
+    which is exactly why the refusal is on the CONTRADICTION and not on the outcome.
+    """
+    from boomi_mcp.connector_replay.capture import CaptureRefused
+
+    dst = tmp_path / "two-orders"
+    shutil.copytree(_CAPTURES / "cap155-e5-delete-attested", dst)
+    (dst / "readback_R0_before_target.json").rename(dst / "readback_R0_between_target.json")
+    (dst / "readback_R1_between_target.json").rename(dst / "readback_R1_before_target.json")
+
+    with pytest.raises(CaptureRefused, match="disagrees with moment order"):
+        summarize(dst, "DELETE")
+
+
+def test_a_readback_whose_own_label_contradicts_its_filename_is_refused(tmp_path):
+    """The place a readback claims for itself must match the place it is filed under."""
+    from boomi_mcp.connector_replay.capture import CaptureRefused
+
+    dst = tmp_path / "label-contradiction"
+    shutil.copytree(_CAPTURES / "cap155-e5-delete-attested", dst)
+    path = dst / "readback_R1_between_target.json"
+    payload = json.loads(path.read_text())
+    assert payload["label"] == "target R1_between", "the fixture must state its moment"
+    payload["label"] = "target R1_after"
+    path.write_text(json.dumps(payload))
+
+    with pytest.raises(CaptureRefused, match="its own label states"):
+        summarize(dst, "DELETE")
+
+    # CONTROL: the older label generation states subject and stage only, and must
+    # still be accepted — four archived captures write it that way.
+    older = summarize(_CAPTURES / "cap155-e3b-patch-canonical", "PATCH")
+    assert {c.subject for c in older.convergence} == {"target", "template"}
+
+
+def test_a_label_a_keyed_entry_also_claims_is_not_a_fallback(tmp_path):
+    """A keyed row proves the label is non-unique, so it identifies nothing."""
+    dst = tmp_path / "reused-label"
+    shutil.copytree(_CAPTURES / "cap155-e2-post", dst)
+    path = dst / "readback_delta.json"
+    entries = json.loads(path.read_text())
+    entries[0].pop("execution_id", None)
+    entries[0]["raw_changed"] = True
+    entries.append({
+        "label": "run1",
+        "execution_id": "execution-00000000-0000-4000-8000-00000000000b-2026.01.01",
+        "raw_changed": False,
+    })
+    path.write_text(json.dumps(entries))
+
+    by_label = {r.label: r.state_changed for r in summarize(dst, "POST").runs}
+    assert by_label["run1"] is None, (
+        f"a label another keyed entry claims must not bind, got {by_label}"
     )
