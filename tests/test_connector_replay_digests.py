@@ -314,34 +314,68 @@ def test_a_carried_attribute_is_bound_to_the_field_id_not_only_its_position():
            component_config_digest_v1(document("boolean", "string", False), "connection")
 
 
-#: The canonical payload, pinned per projection revision. A payload change without a
-#: revision bump is the defect this pins, and it happened TWICE in consecutive review
-#: rounds while the rule was written down and relied on memory. Adding a revision adds
-#: a row; changing a payload under an existing revision fails here.
-_PAYLOAD_BY_REVISION = {
-    4: "e4d06ac9ebe8a1db",
+#: The whole projection CONTRACT, pinned per revision: every published projection
+#: specification plus the canonical payload each component kind produces. Pinning one
+#: document's payload was not the contract — an edit to the operation allowlist, or an
+#: excluded connection field, left that pin untouched and let incompatible semantics
+#: share a revision. A revision bump adds a row; changing anything under an existing
+#: revision fails here.
+_CONTRACT_BY_REVISION = {
+    4: "1733718c76ff2128",
 }
 
 
-def test_a_payload_change_requires_a_new_projection_revision():
+def _projection_contract() -> str:
+    """A digest over every projection spec AND the payload each kind produces.
+
+    Derived from the registry and the digest function, so it moves for a change to
+    either the projection DATA or the payload FORMAT — the two things a revision is
+    supposed to distinguish, and the two that were each forgotten once.
+    """
+    import hashlib
+    import json
+
+    from boomi_mcp.connector_replay.registry import load_registry
+
+    registry = load_registry()
+    material = []
+    for entry in sorted(registry.projection_allowlists,
+                        key=lambda e: (e.family, e.component_kind)):
+        material.append(json.loads(entry.model_dump_json()))
+    fixtures = {
+        "connection": ('<GenericConnectionConfig><field id="url" type="string" '
+                       'value="http://host:8081"/></GenericConnectionConfig>'),
+        "operation": ('<Operation customOperationType="GET"><GenericOperationConfig>'
+                      '<field id="path" type="string" value="/x"/>'
+                      '</GenericOperationConfig></Operation>'),
+    }
+    for kind, xml in sorted(fixtures.items()):
+        material.append({kind: component_config_digest_v1(xml, kind)})
+    payload = json.dumps(material, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(payload.encode()).hexdigest()[:16]
+
+
+def test_a_projection_change_requires_a_new_revision():
     """Mechanized, because the written rule was forgotten twice running.
 
-    The digest of a fixed component under the CURRENT projection is pinned against the
-    revision that projection declares. Change the payload and the pin fails until a new
-    revision — and a new row — is recorded.
+    The first version of this guard pinned a single URL-only connection payload, which
+    is not the contract: an operation allowlist edit passed it untouched. Measured —
+    the planted edit was green under the same revision.
     """
     from boomi_mcp.connector_replay.registry import load_registry
 
-    revision = load_registry().projection_for("connection", "rest").projection_version
-    assert revision in _PAYLOAD_BY_REVISION, (
-        f"projection revision {revision} has no pinned payload; a revision bump adds a "
-        "row here, so the payload it produces is recorded rather than assumed"
+    revisions = {e.projection_version for e in load_registry().projection_allowlists}
+    assert len(revisions) == 1, (
+        f"the published projections disagree on their revision ({sorted(revisions)}); "
+        "a digest cannot say which projection produced it"
     )
-    fixed = ('<GenericConnectionConfig><field id="url" type="string" '
-             'value="http://host:8081"/></GenericConnectionConfig>')
-    actual = component_config_digest_v1(fixed, "connection").split(":")[-1][:16]
-    assert actual == _PAYLOAD_BY_REVISION[revision], (
-        f"the canonical payload changed under revision {revision} (pinned "
-        f"{_PAYLOAD_BY_REVISION[revision]}, got {actual}). Advance the projection "
-        "revision with the payload, and add its row above"
+    revision = revisions.pop()
+    assert revision in _CONTRACT_BY_REVISION, (
+        f"projection revision {revision} has no pinned contract; a revision bump adds "
+        "a row here, so what it publishes is recorded rather than assumed"
+    )
+    assert _projection_contract() == _CONTRACT_BY_REVISION[revision], (
+        f"the projection contract changed under revision {revision} (pinned "
+        f"{_CONTRACT_BY_REVISION[revision]}, got {_projection_contract()}). Advance the "
+        "revision with the contract, and add its row above"
     )
