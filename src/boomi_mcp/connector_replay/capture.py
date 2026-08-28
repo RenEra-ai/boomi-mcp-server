@@ -821,12 +821,16 @@ def _convergence(files: list[Path]) -> tuple[ConvergenceV1, ...]:
         # stage number is a sequence and the moment is a position in it; if sorting by
         # one disagrees with the other, the capture states two different orders and
         # neither is authoritative.
-        by_stage = sorted(staged, key=lambda pair: int(pair[0][1:]))
-        if [stage for stage, _ in by_stage] != [stage for stage, _ in staged]:
+        numbers = [int(stage[1:]) for stage, _ in staged]
+        # STRICTLY INCREASING, not merely "sorts the same". Comparing a stable sort
+        # against the original is vacuous under ties: three readbacks all filed as R0
+        # leave the list unchanged and pass, and the older label form states no moment
+        # to contradict it — so a capture with no sequence at all drove the comparison.
+        if sorted(set(numbers)) != numbers:
             raise CaptureRefused(
-                f"{subject}: stage order {[s for s, _ in by_stage]!r} disagrees with "
-                f"moment order {[s for s, _ in staged]!r}; the capture records two "
-                "different sequences for one replay"
+                f"{subject}: stage numbers {[s for s, _ in staged]!r} do not increase "
+                "across before, between and after; the capture records no sequence for "
+                "this replay, or records two different ones"
             )
 
         # And where a readback's own payload names its place, that name must agree

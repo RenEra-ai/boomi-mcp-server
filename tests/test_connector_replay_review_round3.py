@@ -1282,8 +1282,8 @@ _EXPECTED_CLASS_COUNTS = {
     "DC-155-I": 2,
     "DC-155-J": 2,
     "DC-155-J2": 3,
-    "DC-155-K": 33,
-    "DC-155-L": 12,
+    "DC-155-K": 34,
+    "DC-155-L": 13,
 }
 
 #: Instances counted before finding ids were enumerated. A CLOSED set: a
@@ -1336,6 +1336,17 @@ def test_every_defect_class_tally_equals_its_own_enumeration():
         declared = int(declared.group(1))
         seen_counts[name] = declared
         if declared == 0:
+            # VALIDATED, not skipped. Returning early here let a zero-count row carry
+            # a finding id and an unrowed remainder while bypassing every check below
+            # it, and its own floor of zero accepted the contradiction.
+            empty = re.search(r"\(([^)]*)\)", count_cell)
+            if empty:
+                assert not re.findall(r"`([A-Z]+-155-[A-Za-z0-9-]+)`", empty.group(1)), (
+                    f"{name}: declares zero instances and names some"
+                )
+                assert "unrowed" not in empty.group(1), (
+                    f"{name}: declares zero instances and carries a remainder"
+                )
             continue
 
         listed = re.search(r"\(([^)]*)\)", count_cell)
@@ -1510,7 +1521,7 @@ def test_a_capture_stating_two_different_replay_orders_is_refused(tmp_path):
     (dst / "readback_R0_before_target.json").rename(dst / "readback_R0_between_target.json")
     (dst / "readback_R1_between_target.json").rename(dst / "readback_R1_before_target.json")
 
-    with pytest.raises(CaptureRefused, match="disagrees with moment order"):
+    with pytest.raises(CaptureRefused, match="do not increase"):
         summarize(dst, "DELETE")
 
 
@@ -1599,3 +1610,54 @@ def test_two_subjects_observing_one_resource_are_refused(tmp_path):
 
     with pytest.raises(CaptureRefused, match="observed the same resource"):
         summarize(dst, "DELETE")
+
+
+def test_repeated_stage_numbers_are_not_a_sequence(tmp_path):
+    """Three readbacks all filed as one stage record no order at all.
+
+    The first version of this pin compared a stable sort against the original, which
+    is vacuous under ties — and the older payload-label form states subject and stage
+    only, so it had no moment to contradict. A capture with no sequence drove the
+    comparison that decides retry safety.
+    """
+    from boomi_mcp.connector_replay.capture import CaptureRefused
+
+    dst = tmp_path / "one-stage"
+    shutil.copytree(_CAPTURES / "cap155-e3b-patch-canonical", dst)
+    for subject in ("target", "template"):
+        for moment, stage in (("before", "R0"), ("between", "R1"), ("after", "R2")):
+            path = dst / f"readback_{stage}_{moment}_{subject}.json"
+            body = json.loads(path.read_text())
+            assert body["label"] == f"{subject} {stage}", "this generation states no moment"
+            body["label"] = f"{subject} R0"
+            path.write_text(json.dumps(body))
+            path.rename(dst / f"readback_R0_{moment}_{subject}.json")
+
+    with pytest.raises(CaptureRefused, match="do not increase"):
+        summarize(dst, "PATCH")
+
+
+def test_a_zero_count_class_row_may_not_name_instances():
+    """The early return bypassed every check below it."""
+    import re
+
+    ledger = (
+        Path(__file__).resolve().parents[1]
+        / "docs/architecture/ISSUE_155_AUDIT_LEDGER.md"
+    ).read_text()
+
+    zero_rows = 0
+    for line in ledger.splitlines():
+        if not line.startswith("| DC-155-"):
+            continue
+        cell = line.split("|")[4]
+        if not re.match(r"\s*0\s", cell):
+            continue
+        zero_rows += 1
+        assert not re.findall(r"`([A-Z]+-155-[A-Za-z0-9-]+)`", cell), (
+            f"{line.split('|')[1].strip()}: zero instances, yet names one"
+        )
+    assert zero_rows == 4, (
+        f"the ledger has {zero_rows} zero-count class rows, not the 4 measured when this "
+        "check was written; a class opening or closing changes what it covers"
+    )
