@@ -1004,13 +1004,32 @@ def summarize(capture_dir: Path, method_hint: str | None = None) -> CaptureSumma
             )
         )
 
-    # ORDERED BY WHEN THEY RAN. The attribution below pairs the counterparty's
-    # chronological log against this sequence, and it used to be sorted by the run's
-    # filename LABEL on the stated grounds that the two orders agree — measured, they
-    # disagree in eleven of the thirteen multi-run captures. With exactly two runs the
-    # two inversions cancel and no served value moved, which is precisely why this was
-    # invisible: the key was never established, it merely happened not to matter yet.
-    runs.sort(key=lambda r: (_run_started_at.get(r.label) or "", r.label))
+    # ORDERED BY WHEN THEY RAN, or NOT ORDERED AT ALL. The attribution below pairs the
+    # counterparty's chronological log against this sequence, and it used to sort by
+    # the run's filename LABEL on the stated grounds that the two orders agree —
+    # measured, they disagree in eleven of the thirteen multi-run captures.
+    #
+    # Sorting by timestamp with a fallback for missing ones was the first correction
+    # and was itself wrong: an untimed run sorted ahead of every timed one, so removing
+    # one timestamp from the archived delete capture moved the first call's 204 onto
+    # the second execution and served that execution's id as the capture's. A partial
+    # chronology is not a chronology.
+    #
+    # So the order is established or it is not. Established means every run carries a
+    # timestamp and no two share one; then the runs are ordered by it. Otherwise they
+    # keep a deterministic label order that asserts nothing about sequence, and the
+    # per-run attribution below is dropped rather than paired against an order the
+    # archive did not establish. Falling back to label ORDER for the pairing would
+    # reinstate exactly the unestablished key this replaced.
+    _times = [_run_started_at.get(run.label) for run in runs]
+    chronology_established = (
+        len(runs) == 1
+        or (all(_times) and len(set(_times)) == len(_times))
+    )
+    if chronology_established and len(runs) > 1:
+        runs.sort(key=lambda r: _run_started_at[r.label])
+    else:
+        runs.sort(key=lambda r: r.label)
 
     # ONE observed request cannot attest TWO executions. The outcome above is
     # copied onto every run, which is correct only when the counterparty logged as
@@ -1018,6 +1037,16 @@ def summarize(capture_dir: Path, method_hint: str | None = None) -> CaptureSumma
     # unattested, and a replay verdict drawn from it would rest on a request nobody
     # observed. Drop the attribution rather than spread it.
     if logs and logged_request_count != len(runs):
+        runs = [
+            run.model_copy(update={"counterparty_status": None, "counterparty_method": None})
+            for run in runs
+        ]
+    elif logs and len(runs) > 1 and not chronology_established:
+        # The counts agree, so each execution has its own observed request — but which
+        # request belongs to which execution is exactly what an unestablished order
+        # cannot say. Dropping the attribution costs the replay verdict, which then
+        # falls back to unverified; keeping it would mint a per-execution outcome from
+        # an order nobody recorded.
         runs = [
             run.model_copy(update={"counterparty_status": None, "counterparty_method": None})
             for run in runs

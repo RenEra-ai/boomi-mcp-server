@@ -1110,3 +1110,75 @@ def test_two_disagreeing_copies_of_the_executed_process_are_refused(tmp_path):
     shutil.copytree(_CAPTURES / _SOURCE, other)
     (other / "aaa_same_process.xml").write_text((other / "component_process.xml").read_text())
     assert summarize(other, "PATCH").receiver_is_downstream is True
+
+
+def test_a_partial_chronology_drops_attribution_rather_than_guessing(tmp_path):
+    """One missing timestamp is not a chronology, and must not become one.
+
+    The first version of the ordering fix sorted by timestamp with a fallback for
+    missing ones, which put an untimed run AHEAD of every timed one: removing a single
+    timestamp from the archived delete capture moved the first call's 204 onto the
+    second execution and served that execution's id as the capture's.
+
+    Falling back to LABEL order for the pairing is equally wrong — that is the
+    unestablished key the ordering fix replaced. So an incomplete chronology drops the
+    per-run attribution, and the replay verdict falls back to unverified.
+    """
+    from boomi_mcp.connector_replay.ingest import classify
+    from boomi_mcp.connector_replay.models import RetrySafetyV1
+
+    source = _CAPTURES / "cap155-e5-delete-attested"
+    intact = summarize(source, "DELETE")
+    assert [(r.label, r.counterparty_status) for r in intact.runs] == [
+        ("run1", 204), ("run2", 404)
+    ]
+    assert classify(intact, "DELETE")[1] is RetrySafetyV1.CONDITIONALLY_IDEMPOTENT
+
+    dst = tmp_path / "partial-chronology"
+    shutil.copytree(source, dst)
+
+    def strip_times(node):
+        if isinstance(node, dict):
+            node.pop("executionTime", None)
+            for value in node.values():
+                strip_times(value)
+        elif isinstance(node, list):
+            for value in node:
+                strip_times(value)
+
+    record = dst / "run2_execution_record.json"
+    payload = json.loads(record.read_text())
+    strip_times(payload)
+    record.write_text(json.dumps(payload))
+
+    partial = summarize(dst, "DELETE")
+    # The counterparty log is untouched and still carries both outcomes...
+    assert all(run.counterparty_status is None for run in partial.runs), (
+        "an unestablished order must not pair outcomes to executions"
+    )
+    # ...so the verdict degrades rather than being minted from a guessed order.
+    assert classify(partial, "DELETE")[1] is RetrySafetyV1.UNVERIFIED
+    # And the untimed run must not have been promoted to first, which is what the
+    # superseded ordering did and what made the served execution id wrong.
+    assert [r.label for r in partial.runs] == ["run1", "run2"]
+
+
+def test_two_runs_sharing_one_timestamp_are_not_an_order(tmp_path):
+    """A tie establishes no sequence either."""
+    from boomi_mcp.connector_replay.ingest import classify
+    from boomi_mcp.connector_replay.models import RetrySafetyV1
+
+    dst = tmp_path / "tied-chronology"
+    shutil.copytree(_CAPTURES / "cap155-e5-delete-attested", dst)
+    records = sorted(dst.glob("*execution_record*.json"))
+    shared = _first_time(json.loads(records[0].read_text()))
+    assert shared
+
+    for record in records:
+        payload = json.loads(record.read_text())
+        _set_time(payload, shared)
+        record.write_text(json.dumps(payload))
+
+    tied = summarize(dst, "DELETE")
+    assert all(run.counterparty_status is None for run in tied.runs)
+    assert classify(tied, "DELETE")[1] is RetrySafetyV1.UNVERIFIED
