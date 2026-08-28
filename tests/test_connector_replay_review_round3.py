@@ -1277,7 +1277,7 @@ _EXPECTED_CLASS_COUNTS = {
     "DC-155-D": 3,
     "DC-155-E": 1,
     "DC-155-F": 0,
-    "DC-155-G": 6,
+    "DC-155-G": 7,
     "DC-155-H": 1,
     "DC-155-I": 2,
     "DC-155-J": 4,
@@ -1309,6 +1309,8 @@ _NOT_AN_INSTANCE = {
     "SELF-155-r44-03a": "likewise a revision of a counted row",
     "CDX-155-r45-01a": "likewise a revision of a counted row",
     "CDX-155-r45-02a": "likewise a revision of a counted row",
+    "SELF-155-r55-02": "the structural fix its class owed, not a new instance",
+    "CDX-155-r54-01a": "a revision of a row already counted",
     "SELF-155-r51-04": "the structural fix its class owed, not a new instance of it",
     "SELF-155-r47-01a": "a revision of a row that is itself a non-instance",
     "SELF-155-r47-01": "the class being DISCHARGED — the regeneration done correctly from the final tree — not a new instance of regenerating from a non-final one",
@@ -1869,6 +1871,37 @@ def test_a_closing_report_names_the_current_wave_sha_and_proves_darkness():
     assert len(boundary) == 1, f"the report must name exactly one N−1, found {boundary}"
     reported_n1 = boundary[0]
 
+    # THE PROTOCOL'S CHAIN, asserted as a chain. Four consecutive reviews found this
+    # guard checking one more true-but-insufficient clause — the wave SHA alone, then
+    # the boundary's existence, then its order, then its strictness — because ancestry
+    # conditions were being accumulated from findings rather than derived from what
+    # the protocol specifies. It specifies POSITIONS: the wave gate passes on one
+    # tree, the record edits land in the next, and the closing commit holds only an
+    # archive and prose. An identity leaves no room for the reflexive-reachability
+    # loophole that `--is-ancestor` allows, where a fifth clause would only move it.
+    def _rev(ref):
+        out = subprocess.run(["git", "rev-parse", ref], capture_output=True, text=True,
+                             cwd=ledger_path.parents[2])
+        assert out.returncode == 0, f"cannot resolve {ref}: {out.stderr.strip()}"
+        return out.stdout.strip()
+
+    assert _rev(reported_n1) == _rev("HEAD~1"), (
+        f"the report names N−1={reported_n1}, but the closing commit must be the tip "
+        f"and N−1 the commit before it ({_rev('HEAD~1')[:7]})"
+    )
+    assert _rev(reported_w) != _rev(reported_n1), (
+        f"the report names N−1 equal to W ({reported_w}); the wave gate runs first "
+        "and the reviewed record commit follows it, so they are never the same tree"
+    )
+    strict = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", reported_w, reported_n1],
+        capture_output=True, text=True, cwd=ledger_path.parents[2],
+    )
+    assert strict.returncode == 0, (
+        f"the closing review must run AFTER the wave gate: {reported_w} does not "
+        f"precede {reported_n1}"
+    )
+
     runs = re.findall(r"`(cdx-review\.[A-Za-z0-9]+)`", report)
     assert runs, "the report must name the closing review run that covers N−1"
     archive = ledger_path.parents[0] / "evidence" / "issue-155" / "commit-reviews"
@@ -1887,18 +1920,6 @@ def test_a_closing_report_names_the_current_wave_sha_and_proves_darkness():
     # satisfied it — which is the current-W-with-a-stale-boundary case this guard was
     # extended to refuse the round before. Both directions are needed: N−1 must
     # descend from W, and must still be reachable from the tip.
-    for earlier, later, why in (
-        (reported_w, reported_n1, "the closing review must run AFTER the wave gate"),
-        (reported_n1, "HEAD", "the reviewed boundary must be reachable from the tip"),
-    ):
-        ordered = subprocess.run(
-            ["git", "merge-base", "--is-ancestor", earlier, later],
-            capture_output=True, text=True, cwd=ledger_path.parents[2],
-        )
-        assert ordered.returncode == 0, (
-            f"{why}: {earlier} is not an ancestor of {later}"
-        )
-
     diff = subprocess.run(
         ["git", "diff", "--name-only", reported_w, "HEAD", "--", "src", "tests", "scripts"],
         capture_output=True, text=True, cwd=ledger_path.parents[2],
@@ -1908,3 +1929,73 @@ def test_a_closing_report_names_the_current_wave_sha_and_proves_darkness():
     assert not changed, (
         f"the closing report claims darkness from {reported_w}, but these differ: {changed}"
     )
+
+
+def _closing_chain_violation(report, rev, archived):
+    """The closing chain's rule, evaluated against supplied facts.
+
+    Extracted so the RULE is exercised on every run. The guard that applies it to the
+    real ledger skips while no closing report exists, so its logic was untested for as
+    long as it mattered least — and a correction to it was silently lost to a
+    `git reset --hard` during a simulation, recorded as fixed, and caught only by a
+    reviewer reading the committed file. Facts are passed in; nothing here touches git
+    or the ledger, so the cases below are cheap and always run.
+    """
+    import re
+
+    named = re.findall(r"`([0-9a-f]{7,40})`\s*\(\*\*W\*\*\)", report)
+    if len(named) != 1:
+        return "W"
+    boundary = re.findall(r"`([0-9a-f]{7,40})`\s*\(\*\*N−1\*\*\)", report)
+    if len(boundary) != 1:
+        return "N-1"
+    w, n1 = named[0], boundary[0]
+    if rev(n1) != rev("HEAD~1"):
+        return "not-head-1"
+    if rev(w) == rev(n1):
+        return "equal"
+    if not rev.precedes(w, n1):
+        return "out-of-order"
+    if not any(archived.get(r) == rev(n1) for r in re.findall(r"`(cdx-review\.[A-Za-z0-9]+)`", report)):
+        return "unattested"
+    return None
+
+
+class _FakeRev:
+    """A tiny linear history: A -> B -> C, with C as HEAD."""
+
+    _order = ["aaaaaaa", "bbbbbbb", "ccccccc"]
+
+    def __call__(self, ref):
+        return {"HEAD": "ccccccc", "HEAD~1": "bbbbbbb"}.get(ref, ref)
+
+    def precedes(self, earlier, later):
+        return self._order.index(earlier) < self._order.index(later)
+
+
+def _report(w, n1, run="cdx-review.aaaaaa"):
+    return (
+        "## Slice B — closing report\n\n"
+        f"| `{w}` (**W**) | wave |\n| `{n1}` (**N−1**) | review `{run}` |\n"
+    )
+
+
+@pytest.mark.parametrize(
+    "w,n1,archived,expected",
+    [
+        # the one correct shape: W strictly precedes N−1, N−1 is the commit before the
+        # tip, and an archived review carries N−1 as the SHA it reviewed
+        ("aaaaaaa", "bbbbbbb", {"cdx-review.aaaaaa": "bbbbbbb"}, None),
+        # the reflexive hole four reviews took to close
+        ("bbbbbbb", "bbbbbbb", {"cdx-review.aaaaaa": "bbbbbbb"}, "equal"),
+        # a boundary that is not the commit before the tip
+        ("aaaaaaa", "aaaaaaa", {"cdx-review.aaaaaa": "aaaaaaa"}, "not-head-1"),
+        # a review that attests a different tree
+        ("aaaaaaa", "bbbbbbb", {"cdx-review.aaaaaa": "aaaaaaa"}, "unattested"),
+        # no archived review at all
+        ("aaaaaaa", "bbbbbbb", {}, "unattested"),
+    ],
+)
+def test_the_closing_chain_rule_admits_exactly_one_shape(w, n1, archived, expected):
+    """The rule itself, always exercised — not only once a report exists."""
+    assert _closing_chain_violation(_report(w, n1), _FakeRev(), archived) == expected
