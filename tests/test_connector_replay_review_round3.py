@@ -1285,7 +1285,7 @@ _EXPECTED_CLASS_COUNTS = {
     "DC-155-J": 4,
     "DC-155-J2": 3,
     "DC-155-K": 38,
-    "DC-155-L": 31,
+    "DC-155-L": 33,
     "DC-155-M": 1,
 }
 
@@ -1861,10 +1861,25 @@ def test_a_closing_report_names_the_current_wave_sha_and_proves_darkness():
     # HEAD~1 held only until the next commit: the ledger schedules slices C through F
     # after this one, so the first documentation commit that followed would have made
     # this fail on a certified tree that had not changed at all.
-    owning = _git("log", "--format=%H", "-1", "-S", "## Slice B — closing report",
-                  "--", str(ledger_path.relative_to(root)))
-    closing = owning or "HEAD"        # uncommitted while N is being written
-    parent = _git("rev-parse", f"{closing}~1") if owning else _git("rev-parse", "HEAD")
+    rel = str(ledger_path.relative_to(root))
+    marker = "## Slice B — closing report"
+    committed = subprocess.run(["git", "show", f"HEAD:{rel}"], capture_output=True,
+                               text=True, cwd=root).stdout
+    if marker in committed:
+        # `-S` counts occurrences CHANGING, so it matches a removal as readily as an
+        # addition — and this report was removed once as premature. Walk the matches
+        # newest-first and take the one that ADDS the marker.
+        owning = _commit_that_added(
+            marker,
+            _git("log", "--format=%H", "-S", marker, "--", rel).split(),
+            lambda sha: subprocess.run(["git", "show", sha, "--", rel],
+                                       capture_output=True, text=True, cwd=root).stdout,
+        )
+        assert owning, "HEAD carries the report but no commit introduces it"
+        parent = _git("rev-parse", f"{owning}~1")
+    else:
+        # Still uncommitted: N is the commit about to be made, so N−1 is the tip.
+        parent = _git("rev-parse", "HEAD")
 
     class _RepoRev:
         def __call__(self, ref):
@@ -1882,7 +1897,11 @@ def test_a_closing_report_names_the_current_wave_sha_and_proves_darkness():
         if d.is_dir() and (d / "last-reviewed-sha").exists()
     }
 
-    violation = _closing_chain_violation(report, _RepoRev(), archived)
+    waves = re.findall(
+        r"\| L4 composite wave gate, slice B \|[^|]*\|\s*`([0-9a-f]{7,40})`", ledger
+    )
+    assert waves, "no wave checkpoint row found in the ledger"
+    violation = _closing_chain_violation(report, _RepoRev(), archived, waves[-1])
     assert violation is None, (
         f"the closing report violates the closing chain: {violation}. W and N−1 must "
         f"be named, N−1 must be the commit before the one carrying this report "
@@ -1898,7 +1917,26 @@ def test_a_closing_report_names_the_current_wave_sha_and_proves_darkness():
     )
 
 
-def _closing_chain_violation(report, rev, archived):
+def _commit_that_added(marker, candidates, show):
+    """The newest commit whose diff ADDS ``marker``.
+
+    `git log -S` matches an occurrence-count change in EITHER direction, so a commit
+    that REMOVED the marker matches as readily as one that added it — and this report
+    was removed once, as premature. Taking the newest match anchored the guard to that
+    removal's parent and rejected a correct boundary.
+
+    Extracted so the direction is exercised on every run: applied to the repository it
+    only runs once a report exists, which is the window in which a lost correction
+    survived before.
+    """
+    for sha in candidates:
+        if any(line.startswith("+") and marker in line
+               for line in show(sha).splitlines()):
+            return sha
+    return ""
+
+
+def _closing_chain_violation(report, rev, archived, latest_wave=None):
     """The closing chain's rule, evaluated against supplied facts.
 
     Extracted so the RULE is exercised on every run. The guard that applies it to the
@@ -1917,6 +1955,13 @@ def _closing_chain_violation(report, rev, archived):
     if len(boundary) != 1:
         return "N-1"
     w, n1 = named[0], boundary[0]
+    if latest_wave is not None and not (
+        rev(w) == rev(latest_wave) or latest_wave.startswith(w) or w.startswith(latest_wave)
+    ):
+        # A superseded gate still precedes the boundary and still shows no executable
+        # difference, so every other clause accepts it. Dropped in a refactor that was
+        # meant only to remove a duplicate implementation.
+        return "stale-wave"
     if rev(n1) != rev("HEAD~1"):
         return "not-head-1"
     if rev(w) == rev(n1):
@@ -1972,6 +2017,24 @@ def test_the_closing_chain_rule_admits_exactly_one_shape(w, n1, archived, expect
     assert _closing_chain_violation(_report(w, n1), _FakeRev(), archived) == expected
 
 
+@pytest.mark.parametrize(
+    "cited,latest,expected",
+    [
+        ("aaaaaaa", "aaaaaaa", None),        # the report cites the current gate
+        ("aaaaaaa", "ccccccc", "stale-wave"),  # a superseded gate, still ordered and dark
+    ],
+)
+def test_the_rule_refuses_a_superseded_wave_sha(cited, latest, expected):
+    """A stale gate still precedes the boundary and still shows no executable diff.
+
+    Every other clause accepts it, which is why this comparison exists — and why its
+    silent loss in a refactor was a regression rather than a simplification.
+    """
+    assert _closing_chain_violation(
+        _report(cited, "bbbbbbb"), _FakeRev(), {"cdx-review.aaaaaa": "bbbbbbb"}, latest
+    ) == expected
+
+
 def test_every_collected_node_is_pinned_by_the_manifest():
     """The floor is a MINIMUM, so an unpinned test never fails anything.
 
@@ -2014,3 +2077,24 @@ def test_every_collected_node_is_pinned_by_the_manifest():
         "these tests collect but are not required by the manifest, so deleting them "
         f"would leave every gate green: {unpinned}"
     )
+
+
+@pytest.mark.parametrize(
+    "history,expected",
+    [
+        # newest first: a removal, then the addition — the addition must win
+        ([("r1", "-MARK"), ("a1", "+MARK")], "a1"),
+        # a straightforward single addition
+        ([("a1", "+MARK")], "a1"),
+        # removed and never re-added: nothing owns it
+        ([("r1", "-MARK")], ""),
+        # re-added after a removal, newest addition wins
+        ([("a2", "+MARK"), ("r1", "-MARK"), ("a1", "+MARK")], "a2"),
+    ],
+)
+def test_the_owning_commit_is_the_one_that_added_the_report(history, expected):
+    """`-S` matches removals too; the anchor must be the commit that ADDED."""
+    shown = dict(history)
+    assert _commit_that_added(
+        "MARK", [sha for sha, _ in history], lambda sha: shown[sha]
+    ) == expected
