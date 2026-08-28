@@ -1283,7 +1283,7 @@ _EXPECTED_CLASS_COUNTS = {
     "DC-155-J": 4,
     "DC-155-J2": 3,
     "DC-155-K": 38,
-    "DC-155-L": 19,
+    "DC-155-L": 21,
 }
 
 #: Instances counted before finding ids were enumerated. A CLOSED set: a
@@ -1305,6 +1305,7 @@ _NOT_AN_INSTANCE = {
     "QA-155-r35-05": "not-validated — a recorded limitation rather than a defect",
     "QA-155-r35-06": "the class's own positive controls",
     "CDX-155-r38-02a": "a revision of a row already counted; counting both double-counts",
+    "SELF-155-r44-03a": "likewise a revision of a counted row",
 }
 
 _CLASS_NAMED_IN_PROSE = [
@@ -1402,13 +1403,21 @@ def test_every_defect_class_tally_equals_its_own_enumeration():
         # the backticks let an unbackticked identifier sit inside it, counted by
         # nobody and read by a person as declared.
         parts = [segment.strip() for segment in body.split(",")]
+        remainders = 0
         for segment in parts:
-            assert re.fullmatch(r"`[A-Z]+-155-[A-Za-z0-9-]+`", segment) or re.match(
-                r"\+\d+ unrowed\b", segment
-            ), (
+            # FULL match on both forms. A prefix match let `+2 unrowed <id>` through on
+            # the strength of its opening, carrying an uncounted identifier in the one
+            # segment allowed to be something other than an identifier.
+            if re.fullmatch(r"`[A-Z]+-155-[A-Za-z0-9-]+`", segment):
+                continue
+            assert re.fullmatch(r"\+\d+ unrowed", segment), (
                 f"{name}: {segment[:48]!r} in its instance list is neither a "
-                "backticked finding id nor the unrowed remainder"
+                "backticked finding id nor exactly one unrowed remainder"
             )
+            remainders += 1
+        assert remainders <= 1, (
+            f"{name}: carries {remainders} remainders, and only the first is read"
+        )
         enumerated = re.findall(r"`([A-Z]+-155-[A-Za-z0-9-]+)`", body)
         unrowed = re.search(r"\+(\d+) unrowed", body)
         unrowed = int(unrowed.group(1)) if unrowed else 0
