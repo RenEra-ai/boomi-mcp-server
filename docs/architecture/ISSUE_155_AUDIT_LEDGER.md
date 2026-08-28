@@ -877,3 +877,66 @@ empty proves no executable code moved, but it is not what the `dev` ruleset eval
 **#155 stays open regardless.** It closes only on slice F, which is unstarted and needs an active
 account when it lands plus a counterparty accepting six REST verbs. The class-level PATCH evidence F
 depends on is banked and archived at `captures/cap155-e3b-patch-*`, so that dependency is discharged.
+
+## Slice B — escalation report (ESCALATE-OPEN)
+
+**The slice does not close, and #155 does not close.** Both statements are decisions
+recorded against evidence, not a shortage of effort, and they have different causes.
+
+**Which gate covers which tree.** The composite wave gate passed on
+**W = `a2293b0`**, archived at `wave-gate/wave155h`, with the non-KB suite green at
+11,047 passed and 18 skipped, 74 active goldens rendered twice and byte-exact, the
+plan-fingerprint seam across two cases, and the required-node manifest matching
+collection exactly. Every commit after W touches `docs/architecture/**` only; the
+proof of that is `git diff --stat a2293b0..HEAD -- src tests scripts` being EMPTY.
+The last Stage-2 review, `commit-reviews/cdx-review.9WwP87`, covered `7e1e38a`.
+
+**What landed.** The packaged connector-replay evidence registry, dark: no production
+evidence rows, no operation records, every write `unverified`, and the capability
+manifest key still `gated`. The registry, its identifier grammar, the Route and
+Component Config digests, the derived report, the capture summariser, the ingest
+writer and the `execution_connectors` monitor action are all in the tree and green.
+
+**What the record holds.** 215 finding rows for this slice, of which 63 derive
+critical. 197 fixed, 1 refuted on evidence, 5 not-validated with their reproduction
+attempts recorded, 4 carrying an escalated or superseded disposition. 66 commit-review
+rounds and 8 wave rounds archived with checksums; 26 wave evaluations recorded, of
+which the last four carry durable reverifiable evidence and the earlier ones do not —
+recorded as a limitation at `CDX-155-r69-02`, not smoothed over.
+
+**Open, enumerated, with a concrete next action for each.**
+
+1. `SELF-155-r65-01` — the finding-id grammar the ledger scanners share does not match
+   the architect-review row shape, so 36 rows here and 19 in #154's ledger have never
+   been covered by the append-only, disposition, supersession or tally checks. That
+   blindness is why a CRITICAL finding sat marked OPEN through an entire closing
+   protocol and was found by reading the ledger by hand. Widening the grammar was
+   tried and measured: it surfaces 33 rows in this ledger alone that were deleted
+   under their original ids and re-added under scanner-visible ones, spanning #153,
+   #154 and #175. Reconciling those is a cross-issue decision about whether each
+   rename was legitimate — not this slice's to make, and the same-slice
+   cross-subsystem refactor the structural-fix rule forbids.
+
+2. `CDX-155-r73-01` and `CDX-155-r73-02` — the wave-evidence guard accepts a summary
+   that omits its metrics entirely, accepts string-valued counts, and cannot compare a
+   count the ledger row spells in words. Both verified by construction; both have a
+   concrete fix. They are NOT applied because the Stage-2 checkpoint at 3/37 decided
+   this loop, and applying one more correction to this same guard is exactly what that
+   decision refuses.
+
+**The honest accounting.** `DC-155-D` — a guard whose model is narrower than the space
+it binds — reached fourteen instances across five axes. The FIRST of them was a real
+defect in served behaviour: the configuration digest ignored unknown attributes, so a
+component whose routing configuration had changed still matched captured evidence.
+That one is fixed, witnessed by construction, and covered by W. Every instance after it
+was in a guard this slice wrote about its own audit record. The artifact trust boundary
+declared at step 0 says a finding that only hardens a self-owned artifact gets a
+boundary verdict at reconciliation rather than a fix batch by default; I applied fix
+batches anyway, seven rounds running, and each fix produced the next finding. The
+escalation is the rule catching that, one round later than the rule would have.
+
+**#155 stays open regardless of any of the above.** It closes only on slice F, which is
+unstarted and needs an active Boomi account when it lands plus a counterparty that
+accepts six REST verbs. The class-level PATCH evidence F depends on is banked and
+archived under `captures/cap155-e3b-patch-*`.
+
