@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 11012, "minimum_collected": 11012, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 11017, "minimum_collected": 11017, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -11051,3 +11051,8 @@
 {"kind": "test", "id": "pytest-011050", "node_id": "tests/test_connector_replay_review_round3.py::test_the_owning_commit_is_the_one_that_added_the_report[history3-a2]", "state": "active"}
 {"kind": "test", "id": "pytest-011051", "node_id": "tests/test_connector_replay_review_round3.py::test_the_rule_refuses_a_superseded_wave_sha[aaaaaaa-aaaaaaa-None]", "state": "active"}
 {"kind": "test", "id": "pytest-011052", "node_id": "tests/test_connector_replay_review_round3.py::test_the_rule_refuses_a_superseded_wave_sha[aaaaaaa-ccccccc-stale-wave]", "state": "active"}
+{"kind": "test", "id": "pytest-011053", "node_id": "tests/test_connector_replay_review_round3.py::test_the_boundary_is_the_adding_commits_parent_once_the_report_lands", "state": "active"}
+{"kind": "test", "id": "pytest-011054", "node_id": "tests/test_connector_replay_review_round3.py::test_the_boundary_is_the_tip_while_the_report_is_uncommitted", "state": "active"}
+{"kind": "test", "id": "pytest-011055", "node_id": "tests/test_connector_replay_review_round3.py::test_the_repository_guard_accepts_the_one_correct_closing_shape", "state": "active"}
+{"kind": "test", "id": "pytest-011056", "node_id": "tests/test_connector_replay_review_round3.py::test_the_repository_guard_refuses_a_report_citing_a_superseded_wave", "state": "active"}
+{"kind": "test", "id": "pytest-011057", "node_id": "tests/test_connector_replay_review_round3.py::test_the_repository_guard_refuses_a_report_whose_tree_moved_after_the_gate", "state": "active"}

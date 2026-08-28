@@ -1285,7 +1285,7 @@ _EXPECTED_CLASS_COUNTS = {
     "DC-155-J": 4,
     "DC-155-J2": 3,
     "DC-155-K": 38,
-    "DC-155-L": 33,
+    "DC-155-L": 36,
     "DC-155-M": 1,
 }
 
@@ -1827,17 +1827,70 @@ def test_each_enumerated_instance_is_classed_to_the_row_that_claims_it():
     )
 
 
+def _closing_report_violation(ledger_text, rel, archive_dir, git):
+    """The whole closing-chain check, over supplied facts — one implementation.
+
+    Extracted because pieces of it were tested while its COMPOSITION was not: the
+    caller that supplies the latest wave row could be reverted and every test stayed
+    green, since the repository guard skips while no report exists. Making the
+    parameter required did not fix that — a call that never runs raises nothing. So
+    the composition itself is now driven, by a synthetic repository, on every run.
+    """
+    import re
+
+    marker = "## Slice B — closing report"
+    if marker not in ledger_text:
+        return "absent"
+    report = ledger_text[ledger_text.index(marker):]
+    report = report[: report.index("\n## ")] if "\n## " in report else report
+
+    # ANCHORED TO THE REPORT'S OWN COMMIT, not to the moving tip. Comparing against
+    # HEAD~1 held only until the next commit: the ledger schedules slices C through F
+    # after this one, so the first documentation commit that followed would have made
+    # this fail on a certified tree that had not changed at all.
+    parent = _closing_boundary_sha(rel, marker, git)
+
+    class _Rev:
+        def __call__(self, ref):
+            return parent if ref == "HEAD~1" else git("rev-parse", ref).strip()
+
+        def precedes(self, earlier, later):
+            base = git("merge-base", earlier, later, check=False).strip()
+            e, l = git("rev-parse", earlier).strip(), git("rev-parse", later).strip()
+            return bool(base) and base == e and e != l
+
+    archived = {
+        d.name: (d / "last-reviewed-sha").read_text().strip()
+        for d in (sorted(archive_dir.iterdir()) if archive_dir.exists() else [])
+        if d.is_dir() and (d / "last-reviewed-sha").exists()
+    }
+
+    waves = re.findall(
+        r"\| L4 composite wave gate, slice B \|[^|]*\|\s*`([0-9a-f]{7,40})`", ledger_text
+    )
+    if not waves:
+        return "no-wave-row"
+    violation = _closing_chain_violation(report, _Rev(), archived, waves[-1])
+    if violation:
+        return violation
+
+    named_w = re.findall(r"`([0-9a-f]{7,40})`\s*\(\*\*W\*\*\)", report)[0]
+    changed = [
+        c for c in git("diff", "--name-only", named_w, "HEAD",
+                       "--", "src", "tests", "scripts").splitlines() if c.strip()
+    ]
+    return f"not-dark: {changed}" if changed else None
+
+
 def test_a_closing_report_names_the_current_wave_sha_and_proves_darkness():
     """STRUCTURAL: the closing report cannot outlive the tree it certifies.
 
-    Recorded repeatedly as `DC-155-G`. This applies the rule below to the real
-    repository; the rule itself is exercised on every run by the table further down.
-    There is ONE implementation — an earlier version kept a second copy here, so the
+    Recorded repeatedly as `DC-155-G`. This applies the rule to the real repository;
+    the rule AND its composition are exercised on every run by the cases below. There
+    is ONE implementation — an earlier version kept a second copy here, so the
     always-on cases could stay green while the real checks were deleted, which is the
     lost-fix failure the extraction was supposed to end.
     """
-    import json
-    import re
     import subprocess
 
     ledger_path = (
@@ -1847,73 +1900,26 @@ def test_a_closing_report_names_the_current_wave_sha_and_proves_darkness():
     ledger = ledger_path.read_text()
     if "## Slice B — closing report" not in ledger:
         pytest.skip("no closing report yet; the check applies once one is written")
-
-    report = ledger[ledger.index("## Slice B — closing report"):]
-    report = report[: report.index("\n## ")] if "\n## " in report else report
     root = ledger_path.parents[2]
 
-    def _git(*args):
+    def git(*args, check=True):
         out = subprocess.run(["git", *args], capture_output=True, text=True, cwd=root)
-        assert out.returncode == 0, f"git {' '.join(args)} failed: {out.stderr.strip()}"
-        return out.stdout.strip()
+        if check:
+            assert out.returncode == 0, f"git {' '.join(args)} failed: {out.stderr.strip()}"
+        return out.stdout
 
-    # ANCHORED TO THE REPORT'S OWN COMMIT, not to the moving tip. Comparing against
-    # HEAD~1 held only until the next commit: the ledger schedules slices C through F
-    # after this one, so the first documentation commit that followed would have made
-    # this fail on a certified tree that had not changed at all.
-    rel = str(ledger_path.relative_to(root))
-    marker = "## Slice B — closing report"
-    committed = subprocess.run(["git", "show", f"HEAD:{rel}"], capture_output=True,
-                               text=True, cwd=root).stdout
-    if marker in committed:
-        # `-S` counts occurrences CHANGING, so it matches a removal as readily as an
-        # addition — and this report was removed once as premature. Walk the matches
-        # newest-first and take the one that ADDS the marker.
-        owning = _commit_that_added(
-            marker,
-            _git("log", "--format=%H", "-S", marker, "--", rel).split(),
-            lambda sha: subprocess.run(["git", "show", sha, "--", rel],
-                                       capture_output=True, text=True, cwd=root).stdout,
-        )
-        assert owning, "HEAD carries the report but no commit introduces it"
-        parent = _git("rev-parse", f"{owning}~1")
-    else:
-        # Still uncommitted: N is the commit about to be made, so N−1 is the tip.
-        parent = _git("rev-parse", "HEAD")
-
-    class _RepoRev:
-        def __call__(self, ref):
-            return parent if ref == "HEAD~1" else _git("rev-parse", ref)
-
-        def precedes(self, earlier, later):
-            return subprocess.run(
-                ["git", "merge-base", "--is-ancestor", earlier, later],
-                capture_output=True, cwd=root).returncode == 0
-
-    archive = ledger_path.parents[0] / "evidence" / "issue-155" / "commit-reviews"
-    archived = {
-        d.name: (d / "last-reviewed-sha").read_text().strip()
-        for d in archive.iterdir()
-        if d.is_dir() and (d / "last-reviewed-sha").exists()
-    }
-
-    waves = re.findall(
-        r"\| L4 composite wave gate, slice B \|[^|]*\|\s*`([0-9a-f]{7,40})`", ledger
+    violation = _closing_report_violation(
+        ledger,
+        str(ledger_path.relative_to(root)),
+        ledger_path.parents[0] / "evidence" / "issue-155" / "commit-reviews",
+        git,
     )
-    assert waves, "no wave checkpoint row found in the ledger"
-    violation = _closing_chain_violation(report, _RepoRev(), archived, waves[-1])
     assert violation is None, (
         f"the closing report violates the closing chain: {violation}. W and N−1 must "
-        f"be named, N−1 must be the commit before the one carrying this report "
-        f"({parent[:7]}), W must strictly precede it, and an archived review must "
-        "attest N−1"
-    )
-
-    changed = _git("diff", "--name-only",
-                   re.findall(r"`([0-9a-f]{7,40})`\s*\(\*\*W\*\*\)", report)[0],
-                   "HEAD", "--", "src", "tests", "scripts").splitlines()
-    assert not [c for c in changed if c.strip()], (
-        f"the closing report claims darkness from its wave SHA, but these differ: {changed}"
+        "be named, W must be the wave gate the latest checkpoint row names, N−1 must "
+        "be the commit before the one carrying this report, W must strictly precede "
+        "it, an archived review must attest N−1, and no source, test or script may "
+        "differ between W and the tip"
     )
 
 
@@ -1936,7 +1942,30 @@ def _commit_that_added(marker, candidates, show):
     return ""
 
 
-def _closing_chain_violation(report, rev, archived, latest_wave=None):
+def _closing_boundary_sha(rel, marker, git):
+    """Resolve N−1 — the commit the closing report will sit on top of.
+
+    Extracted for the same reason as the rule below: the guard that calls it skips
+    while no report exists, so both of its branches went untested exactly when a
+    regression in them was cheapest to introduce. A reviewer proved that by reverting
+    this to the bare history search and watching the suite stay green.
+    """
+    if marker not in git("show", f"HEAD:{rel}", check=False):
+        # Still uncommitted: N is the commit about to be made, so N−1 is the tip.
+        return git("rev-parse", "HEAD").strip()
+    # `-S` counts occurrences CHANGING, so it matches a removal as readily as an
+    # addition — and this report was removed once as premature. Walk the matches
+    # newest-first and take the one that ADDS the marker.
+    owning = _commit_that_added(
+        marker,
+        git("log", "--format=%H", "-S", marker, "--", rel).split(),
+        lambda sha: git("show", sha, "--", rel),
+    )
+    assert owning, "HEAD carries the report but no commit introduces it"
+    return git("rev-parse", f"{owning}~1").strip()
+
+
+def _closing_chain_violation(report, rev, archived, latest_wave):
     """The closing chain's rule, evaluated against supplied facts.
 
     Extracted so the RULE is exercised on every run. The guard that applies it to the
@@ -1955,9 +1984,8 @@ def _closing_chain_violation(report, rev, archived, latest_wave=None):
     if len(boundary) != 1:
         return "N-1"
     w, n1 = named[0], boundary[0]
-    if latest_wave is not None and not (
-        rev(w) == rev(latest_wave) or latest_wave.startswith(w) or w.startswith(latest_wave)
-    ):
+    if not (rev(w) == rev(latest_wave)
+            or latest_wave.startswith(w) or w.startswith(latest_wave)):
         # A superseded gate still precedes the boundary and still shows no executable
         # difference, so every other clause accepts it. Dropped in a refactor that was
         # meant only to remove a duplicate implementation.
@@ -2014,7 +2042,7 @@ def _report(w, n1, run="cdx-review.aaaaaa"):
 )
 def test_the_closing_chain_rule_admits_exactly_one_shape(w, n1, archived, expected):
     """The rule itself, always exercised — not only once a report exists."""
-    assert _closing_chain_violation(_report(w, n1), _FakeRev(), archived) == expected
+    assert _closing_chain_violation(_report(w, n1), _FakeRev(), archived, w) == expected
 
 
 @pytest.mark.parametrize(
@@ -2033,6 +2061,164 @@ def test_the_rule_refuses_a_superseded_wave_sha(cited, latest, expected):
     assert _closing_chain_violation(
         _report(cited, "bbbbbbb"), _FakeRev(), {"cdx-review.aaaaaa": "bbbbbbb"}, latest
     ) == expected
+
+
+def _synthetic_history(tmp_path, marker):
+    """A real repository shaped like this one: report written, removed, rewritten.
+
+    Built with git rather than mocked, because the defect being pinned is a property
+    of `git log -S` — that it matches an occurrence count changing in EITHER
+    direction — and a fake would have to reproduce the very behaviour under test.
+    """
+    import subprocess
+
+    root = tmp_path / "repo"
+    root.mkdir()
+
+    def git(*args, check=True):
+        out = subprocess.run(["git", *args], capture_output=True, text=True, cwd=root)
+        if check:
+            assert out.returncode == 0, f"git {' '.join(args)} failed: {out.stderr.strip()}"
+        return out.stdout
+
+    git("init", "-q", "-b", "main")
+    git("config", "user.email", "qa@example.invalid")
+    git("config", "user.name", "qa")
+    ledger = root / "ledger.md"
+    for text, message in (
+        ("base\n", "baseline"),
+        (f"base\n{marker}\npremature\n", "a closing report written too early"),
+        ("base\n", "remove the premature report"),
+    ):
+        ledger.write_text(text)
+        git("add", "-A")
+        git("commit", "-qm", message)
+    return git, ledger
+
+
+def test_the_boundary_is_the_tip_while_the_report_is_uncommitted(tmp_path):
+    """The pre-N state: HEAD lacks the report, the worktree carries it.
+
+    This is the exact shape the anchor got wrong — the history search found the
+    REMOVAL and resolved N−1 to its parent, rejecting a correct boundary. Driven end
+    to end, so reverting the branch fails here rather than passing quietly.
+    """
+    marker = "## Slice B — closing report"
+    git, ledger = _synthetic_history(tmp_path, marker)
+    ledger.write_text(f"base\n{marker}\nfinal\n")  # uncommitted, as before commit N
+
+    assert _closing_boundary_sha("ledger.md", marker, git) == git("rev-parse", "HEAD").strip()
+
+
+def test_the_boundary_is_the_adding_commits_parent_once_the_report_lands(tmp_path):
+    """And after N is made, the anchor is the commit that ADDED the report.
+
+    Not the one that removed an earlier copy — which is the parent one commit further
+    back, and is what the search returned before.
+    """
+    marker = "## Slice B — closing report"
+    git, ledger = _synthetic_history(tmp_path, marker)
+    removal = git("rev-parse", "HEAD").strip()
+    ledger.write_text(f"base\n{marker}\nfinal\n")
+    git("add", "-A")
+    git("commit", "-qm", "the closing report")
+
+    assert _closing_boundary_sha("ledger.md", marker, git) == removal
+
+
+def _synthetic_closing_repo(tmp_path, wave_shas_from, cited, executable_drift=False):
+    """A real repository carrying a closing report, built to be driven end to end.
+
+    Two commits: the first is the wave gate's tree, the second is N−1. The report is
+    left UNCOMMITTED, which is the state commit N is made from. ``wave_shas_from`` and
+    ``cited`` are indices into those two commits, so a case can name the current gate
+    or a superseded one.
+    """
+    import subprocess
+
+    root = tmp_path / "repo"
+    root.mkdir()
+
+    def git(*args, check=True):
+        out = subprocess.run(["git", *args], capture_output=True, text=True, cwd=root)
+        if check:
+            assert out.returncode == 0, f"git {' '.join(args)} failed: {out.stderr.strip()}"
+        return out.stdout
+
+    git("init", "-q", "-b", "main")
+    git("config", "user.email", "qa@example.invalid")
+    git("config", "user.name", "qa")
+    ledger = root / "ledger.md"
+    shas = []
+    for n, message in enumerate(("the wave gate's tree", "the record edits")):
+        ledger.write_text(f"{message}\n")
+        if executable_drift and n == 1:
+            # code moving after the gate that certified it — the thing the darkness
+            # proof exists to catch, and the reason N is confined to prose.
+            (root / "src").mkdir(exist_ok=True)
+            (root / "src" / "drift.py").write_text("x = 1\n")
+        git("add", "-A")
+        git("commit", "-qm", message)
+        shas.append(git("rev-parse", "HEAD").strip()[:7])
+
+    archive = root / "archive"
+    (archive / "cdx-review.aaaaaa").mkdir(parents=True)
+    (archive / "cdx-review.aaaaaa" / "last-reviewed-sha").write_text(
+        git("rev-parse", "HEAD").strip()
+    )
+
+    rows = "\n".join(
+        f"| L4 composite wave gate, slice B | {i + 1} / {i + 1} | `{shas[j]}`, clean | ok |"
+        for i, j in enumerate(wave_shas_from)
+    )
+    ledger.write_text(
+        f"{rows}\n\n## Slice B — closing report\n\n"
+        f"| `{shas[cited]}` (**W**) | wave |\n"
+        f"| `{shas[1]}` (**N−1**) | review `cdx-review.aaaaaa` |\n"
+    )
+    return git, archive
+
+
+def test_the_repository_guard_accepts_the_one_correct_closing_shape(tmp_path):
+    """The whole composition, driven — not the rule in isolation.
+
+    The real guard stands down while no report is written, so everything it wires
+    together went unexercised in the window where breaking it was cheapest.
+    """
+    git, archive = _synthetic_closing_repo(tmp_path, wave_shas_from=[0], cited=0)
+    assert _closing_report_violation(
+        (tmp_path / "repo" / "ledger.md").read_text(), "ledger.md", archive, git
+    ) is None
+
+
+def test_the_repository_guard_refuses_a_report_citing_a_superseded_wave(tmp_path):
+    """And it refuses a stale gate through the REAL caller.
+
+    This is the case that dropping `waves[-1]` from the production call had to fail
+    and did not: the parameter was required, but a call the guard never reaches
+    raises nothing. Here the caller runs on every test run.
+    """
+    git, archive = _synthetic_closing_repo(tmp_path, wave_shas_from=[0, 1], cited=0)
+    assert _closing_report_violation(
+        (tmp_path / "repo" / "ledger.md").read_text(), "ledger.md", archive, git
+    ) == "stale-wave"
+
+
+def test_the_repository_guard_refuses_a_report_whose_tree_moved_after_the_gate(tmp_path):
+    """The darkness clause, with a case that can actually fail it.
+
+    Found while grading the fix above rather than reported: neutering this clause left
+    every test green, which is the same defect the two reviewed findings describe —
+    a check with no witness — one level further down.
+    """
+    git, archive = _synthetic_closing_repo(
+        tmp_path, wave_shas_from=[0], cited=0, executable_drift=True
+    )
+    violation = _closing_report_violation(
+        (tmp_path / "repo" / "ledger.md").read_text(), "ledger.md", archive, git
+    )
+    assert violation is not None and violation.startswith("not-dark"), violation
+    assert "src/drift.py" in violation
 
 
 def test_every_collected_node_is_pinned_by_the_manifest():
