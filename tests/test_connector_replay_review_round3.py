@@ -1277,13 +1277,13 @@ _EXPECTED_CLASS_COUNTS = {
     "DC-155-D": 3,
     "DC-155-E": 1,
     "DC-155-F": 0,
-    "DC-155-G": 3,
+    "DC-155-G": 4,
     "DC-155-H": 1,
     "DC-155-I": 2,
     "DC-155-J": 4,
     "DC-155-J2": 3,
     "DC-155-K": 38,
-    "DC-155-L": 27,
+    "DC-155-L": 28,
     "DC-155-M": 1,
 }
 
@@ -1859,6 +1859,35 @@ def test_a_closing_report_names_the_current_wave_sha_and_proves_darkness():
     assert reported_w.startswith(current_w) or current_w.startswith(reported_w), (
         f"the closing report names W={reported_w} while the latest wave checkpoint "
         f"names {current_w}; a report may not outlive the gate it cites"
+    )
+
+    # THE REVIEWED BOUNDARY, not only the wave SHA. Validating W alone left the other
+    # half of the same defect open: a report naming the current W beside a stale
+    # closing-review boundary — or none at all — would pass, which is the drift this
+    # guard exists to refuse, one field over.
+    boundary = re.findall(r"`([0-9a-f]{7,40})`\s*\(\*\*N−1\*\*\)", report)
+    assert len(boundary) == 1, f"the report must name exactly one N−1, found {boundary}"
+    reported_n1 = boundary[0]
+
+    runs = re.findall(r"`(cdx-review\.[A-Za-z0-9]+)`", report)
+    assert runs, "the report must name the closing review run that covers N−1"
+    archive = ledger_path.parents[0] / "evidence" / "issue-155" / "commit-reviews"
+    covering = [
+        r for r in runs
+        if (archive / r / "last-reviewed-sha").exists()
+        and (archive / r / "last-reviewed-sha").read_text().strip().startswith(reported_n1)
+    ]
+    assert covering, (
+        f"no archived closing review has last-reviewed-sha {reported_n1}; the report "
+        f"names {runs} and the boundary it claims is therefore unattested"
+    )
+
+    ancestry = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", reported_n1, "HEAD"],
+        capture_output=True, text=True, cwd=ledger_path.parents[2],
+    )
+    assert ancestry.returncode == 0, (
+        f"the report names N−1={reported_n1}, which is not an ancestor of the tip"
     )
 
     diff = subprocess.run(

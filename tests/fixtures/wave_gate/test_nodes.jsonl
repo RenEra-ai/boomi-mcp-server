@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 10998, "minimum_collected": 10998, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 10999, "minimum_collected": 10999, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -11037,3 +11037,4 @@
 {"kind": "test", "id": "pytest-011036", "node_id": "tests/test_query_components_list_filters.py::test_the_allowlist_matches_what_the_function_actually_reads", "state": "active"}
 {"kind": "test", "id": "pytest-011037", "node_id": "tests/test_query_components_list_filters.py::test_the_refusal_happens_before_the_platform_is_touched", "state": "active"}
 {"kind": "test", "id": "pytest-011038", "node_id": "tests/test_query_components_list_filters.py::test_the_refusal_names_what_is_supported", "state": "active"}
+{"kind": "test", "id": "pytest-011039", "node_id": "tests/test_connector_replay_review_round3.py::test_a_closing_report_names_the_current_wave_sha_and_proves_darkness", "state": "active"}
