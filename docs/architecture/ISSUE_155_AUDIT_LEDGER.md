@@ -940,3 +940,18 @@ unstarted and needs an active Boomi account when it lands plus a counterparty th
 accepts six REST verbs. The class-level PATCH evidence F depends on is banked and
 archived under `captures/cap155-e3b-patch-*`.
 
+**Landing preflight.** The escalation tip `784866a` was pushed to `scratch/issue-155b`
+and earned the required status: `Python 3.11 non-KB` completed SUCCESS on that exact
+SHA (run 33201203166), on the interpreter the `dev` ruleset evaluates and independently
+of every local run. The advisory image-parity workflow passed on the same SHA (run
+33201203144). Recording that preflight moves the tip, so the status is re-earned on the
+pushed SHA rather than assumed to carry across — a preflight attests one SHA and
+nothing else, which is the correction slice A's own record already carries.
+
+**What lands, and what does not.** Slice B lands on `dev`; that is the outcome the plan
+of record names for every end state, and the reason is recorded rather than assumed:
+work whose gates have passed is not left on a branch, which is how #149 and #139E
+became branches that never landed. **#155 is NOT closed and no follow-up issue is
+filed.** The issue closes only on slice F, and the residue enumerated above is the
+owner's to slot.
+
