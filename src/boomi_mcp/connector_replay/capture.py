@@ -423,38 +423,35 @@ def _connector_document_counts(
     return handled, succeeded
 
 
-def _receiver_is_downstream_of_the_operation(
-    files: list[Path], method_hint: str | None
-) -> bool | None:
-    """Whether the operation under test REACHES a Return Documents shape.
+def _reachable_receivers(
+    files: list[Path], method_hint: str | None, process_id: str | None
+) -> frozenset[str] | None:
+    """The Return Documents shapes the operation under test PRODUCES for.
 
-    The causal link, taken from the process component the capture archives — the
-    platform's own graph — rather than assumed from a receiver merely having run in
-    the same execution. An execution can reach a receiver down a path the operation
-    under test never took, and a delivery claim attached to the wrong branch is a
-    machine-served observation of something that did not happen.
+    Three corrections live in this one function and each was a different wrong
+    question, so they are worth keeping named.
 
-    PRODUCED, not merely REACHED. Asking whether the operation reaches a receiver
-    admits every operation upstream of it, and the archived graphs are linear, so on
-    the real archive a source read "reaches" the receiver exactly as the operation
-    under test does — measured: with the source verb selected, the delete capture
-    attributed the target's delivery to the source, while the same archive's own
-    document sizes (the receiver's 0 and 225 against the target's 0 and 225, versus
-    the source's 302) show whose documents the receiver actually counted.
+    THE EXECUTED GRAPH, not the first one on disk. A capture may archive more than one
+    process — the archive already holds a directory carrying an emitted graph beside
+    the stored one, and the emitted copy has no component id and sorts first, so
+    taking the first match read a graph that never ran. The execution record names the
+    process it ran, and the process component carries that id.
 
-    The traversal therefore STOPS at any other connector action. Documents entering a
-    Return Documents shape were produced by the last connector on the path into it,
-    so an operation with another connector between it and the receiver did not
-    produce what the receiver counted. This is topological rather than quantitative
-    on purpose: matching document sizes would work on today's archive and would be a
-    coincidence-shaped rule the moment two steps moved equal-sized payloads.
+    PRODUCED, not merely REACHED. The traversal stops at any other connector action:
+    documents entering a receiver were produced by the last connector on the path in,
+    and in a linear process every upstream operation reaches the receiver otherwise.
 
-    None means the archive cannot say: no process component, or none whose graph
-    contains this operation. The caller refuses rather than guessing, because
-    "unestablished" and "not downstream" are different facts.
+    WHICH receivers, not whether any. Returning a bare yes let the caller count rows
+    from every receiver in the execution, so a reachable receiver reporting nothing
+    plus an unrelated branch reporting documents read as a delivery. The shape names
+    are carried out so the counting binds to the same receivers this walk found.
+
+    None means the archive cannot say: no execution names a process, no archived
+    process component is the one that ran, or its graph does not contain this
+    operation. Empty means it ran and produces for no receiver.
     """
     resolved = _component_under_test(files, method_hint)
-    if resolved is None:
+    if resolved is None or not process_id:
         return None
     component_id, _ = resolved
 
@@ -465,7 +462,7 @@ def _receiver_is_downstream_of_the_operation(
             root = ET.parse(path).getroot()
         except (OSError, ET.ParseError):
             continue
-        if root.get("type") != "process":
+        if root.get("type") != "process" or root.get("componentId") != process_id:
             continue
 
         shapes: dict[str, dict] = {}
@@ -488,13 +485,13 @@ def _receiver_is_downstream_of_the_operation(
                 "operations": operations,
             }
 
-        origins = [n for n, s in shapes.items() if component_id in s["operations"]]
+        origins = [n for n, sh in shapes.items() if component_id in sh["operations"]]
         if not origins:
-            continue
-        # Forward reachability, cycle-guarded: a process graph is authored, so it is
-        # not guaranteed acyclic just because the archived ones are.
+            return None
+
+        receivers: set[str] = set()
         seen, frontier = set(origins), list(origins)
-        while frontier:
+        while frontier:  # cycle-guarded: an authored graph need not be acyclic
             current = frontier.pop()
             for successor in shapes.get(current, {}).get("successors", ()):
                 if successor in seen:
@@ -502,32 +499,38 @@ def _receiver_is_downstream_of_the_operation(
                 seen.add(successor)
                 successor_type = shapes.get(successor, {}).get("type")
                 if successor_type == "returndocuments":
-                    return True
+                    receivers.add(successor)
+                    continue
                 if successor_type == "connectoraction":
-                    # Another connector produces the documents from here on, so
-                    # anything past it is that connector's delivery, not this one's.
                     continue
                 frontier.append(successor)
-        return False
+        return frozenset(receivers)
     return None
 
 
 def _return_documents(
-    files: list[Path], execution_ids: frozenset[str]
+    files: list[Path],
+    execution_ids: frozenset[str],
+    receivers: frozenset[str] | None,
 ) -> int | None:
-    """Documents the receiver reported, or None when the archive cannot say.
+    """Documents THIS operation's receivers reported, or None when unknowable.
 
-    THREE outcomes, not two. Summing whatever carried a number collapsed the middle
-    one: half the receiver rows in the archive are document records that never carry
-    counts, so a capture holding only those would have summed to zero and published a
-    measured absence of output. An absent authority and an observed zero are different
-    facts and the served value must not be reachable from both.
+    Bound to the receivers the graph walk actually found. Summing every receiver in
+    the execution let another branch's delivery stand in for this operation's, which
+    is the same substitution the walk above was corrected for, one step later.
     """
-    rows = [row for row in _reconciled_platform_rows(files, execution_ids)
-            if row.get("connectorType") == "return"]
-    if not rows:
+    present = [row for row in _reconciled_platform_rows(files, execution_ids)
+               if row.get("connectorType") == "return"]
+    if not present:
         return 0
-    counted = [row for row in rows
+    if receivers is None:
+        # Receivers ran, and the archive cannot say which are this operation's. An
+        # unknown, not a zero — the caller refuses.
+        return None
+    ours = [row for row in present if row.get("executionConnector") in receivers]
+    if not ours:
+        return 0
+    counted = [row for row in ours
                if isinstance(row.get("successCount"), int)
                and not isinstance(row.get("successCount"), bool)]
     if not counted:
@@ -983,6 +986,9 @@ def summarize(capture_dir: Path, method_hint: str | None = None) -> CaptureSumma
 
     execution_ids = frozenset(run.execution_id for run in runs)
     counts = _connector_document_counts(files, execution_ids, method_hint)
+    receivers = _reachable_receivers(
+        files, method_hint, _first_across(files, "processId", str)
+    )
     return CaptureSummaryV1(
         scenario=capture_dir.name,
         runs=tuple(sorted(runs, key=lambda r: r.label)),
@@ -996,10 +1002,8 @@ def summarize(capture_dir: Path, method_hint: str | None = None) -> CaptureSumma
         is_start_shape=_start_shape_of_the_exercised_connector(
             files, execution_ids, method_hint
         ),
-        return_documents=_return_documents(files, execution_ids),
-        receiver_is_downstream=_receiver_is_downstream_of_the_operation(
-            files, method_hint
-        ),
+        return_documents=_return_documents(files, execution_ids, receivers),
+        receiver_is_downstream=None if receivers is None else bool(receivers),
         connector_documents=None if counts is None else counts[0],
         connector_successful_documents=None if counts is None else counts[1],
     )

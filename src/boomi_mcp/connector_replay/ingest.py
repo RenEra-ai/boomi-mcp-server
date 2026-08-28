@@ -432,16 +432,13 @@ def _output_observation(summary: CaptureSummaryV1) -> OutputObservationV1:
             f"{summary.scenario}: a receiver ran but the archive carries no count "
             "for it, so what it received is unknown rather than nothing"
         )
+    # ATTRIBUTION happened upstream: the count is bound to the receivers the process
+    # graph placed downstream of this operation, so a positive count cannot come from
+    # a receiver this operation does not produce for. No second check is written here
+    # BECAUSE it would be unreachable, and this module has already shipped one guard
+    # that could not fire. The implication is pinned by a test over the archive
+    # instead, which is where an invariant with no reachable failure belongs.
     if summary.return_documents > 0:
-        # ATTRIBUTED, not merely co-occurring. A receiver reached down another branch
-        # of the same execution delivered nothing on this operation's behalf, so the
-        # archived process graph has to place it downstream before the claim is made.
-        if summary.receiver_is_downstream is not True:
-            raise IngestRefused(
-                f"{summary.scenario}: a receiver reported documents but the archive "
-                "does not establish that the operation under test reaches it, so the "
-                "delivery cannot be attributed to this operation"
-            )
         return OutputObservationV1.RETURN_DOCUMENTS_RECEIVED
     # `successor_received_documents` is deliberately NOT minted here, and the reason
     # is a scope decision rather than an absence of evidence — an earlier version of

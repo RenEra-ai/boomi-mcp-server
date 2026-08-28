@@ -436,6 +436,13 @@ def test_the_reconciled_field_set_equals_what_the_module_actually_reads():
     This records the reads as they HAPPEN instead. A proxy stands in for every
     platform row and notes each key asked of it, so no read form can hide: whatever
     syntax reaches a row, the row itself sees the key.
+
+    But observing every read includes the RECONCILER'S OWN, and the reconciler asks
+    each row for every member of the set under test — so a stale member recorded
+    itself and the equality assertion passed for it. Measured: a planted
+    `totallyUnusedField` survived. The sweep therefore runs twice, once with the set
+    emptied so the reconciler reads nothing, and the CONSUMER reads are what the
+    second run saw.
     """
     from boomi_mcp.connector_replay import capture as module
 
@@ -451,11 +458,15 @@ def test_the_reconciled_field_set_equals_what_the_module_actually_reads():
             return super().get(key, default)
 
     real_records = module._platform_connector_records
+    real_fields = module._CORRELATED_ROW_FIELDS
 
     def recording_records(payload):
         return [_RecordingRow(row) for row in real_records(payload)]
 
     module._platform_connector_records = recording_records
+    # Emptied for the duration: with nothing to reconcile, every recorded read is a
+    # read some observation actually wanted.
+    module._CORRELATED_ROW_FIELDS = ()
     try:
         for directory in sorted(_CAPTURES.iterdir()):
             if not directory.is_dir():
@@ -480,12 +491,16 @@ def test_the_reconciled_field_set_equals_what_the_module_actually_reads():
                     pass
     finally:
         module._platform_connector_records = real_records
+        module._CORRELATED_ROW_FIELDS = real_fields
 
     # `id` is the reconciliation KEY, not a reconciled value: two copies that
     # disagree on it are two different rows, which is not a conflict.
     observed.discard("id")
 
     assert observed, "no reads were recorded, so the comparison would be vacuous"
+    assert "connectorType" in observed and "successCount" in observed, (
+        "the isolation removed too much: these are consumer reads and must survive it"
+    )
     assert set(module._CORRELATED_ROW_FIELDS) == observed, (
         "the reconciled field set and the module's observed reads have drifted: "
         f"only reconciled {sorted(set(module._CORRELATED_ROW_FIELDS) - observed)}, "
@@ -637,10 +652,9 @@ def test_a_receiver_on_another_branch_is_not_this_operations_delivery(tmp_path):
     case it lacks: the operation under test runs on a branch that never reaches the
     Return Documents shape, while a receiver runs on the other one.
     """
-    from boomi_mcp.connector_replay.capture import (
-        _receiver_is_downstream_of_the_operation,
-    )
-    from boomi_mcp.connector_replay.ingest import IngestRefused, _output_observation
+    from boomi_mcp.connector_replay.capture import _first_across, _reachable_receivers
+    from boomi_mcp.connector_replay.ingest import _output_observation
+    from boomi_mcp.connector_replay.models import OutputObservationV1
 
     dst = tmp_path / "receiver-on-another-branch"
     shutil.copytree(_CAPTURES / _SOURCE, dst)
@@ -653,17 +667,28 @@ def test_a_receiver_on_another_branch_is_not_this_operations_delivery(tmp_path):
     process.write_text(text.replace('toShape="shape4"', 'toShape="shape3"', 1))
 
     files = sorted(dst.iterdir())
-    assert _receiver_is_downstream_of_the_operation(files, "PATCH") is False
+    assert _reachable_receivers(files, "PATCH", _first_across(files, "processId", str)) == frozenset()
 
+    # The receiver still RAN and still reported — the platform rows are untouched —
+    # but the graph now says this operation produces for no receiver, so the count is
+    # not borrowed from it. A measured zero, not an unknown and not a delivery.
     summary = summarize(dst, "PATCH")
-    assert summary.return_documents > 0, "the receiver still ran and still reported"
-    with pytest.raises(IngestRefused, match="does not establish"):
-        _output_observation(summary)
+    assert summary.receiver_is_downstream is False
+    assert summary.return_documents == 0
+    assert _output_observation(summary) is OutputObservationV1.NO_OUTPUT_OBSERVED
+
+    untouched = [
+        row for path in dst.glob("*.json")
+        for row in _platform_connector_records(json.loads(path.read_text()))
+        if row.get("connectorType") == "return"
+        and isinstance(row.get("successCount"), int)
+        and row["successCount"] > 0
+    ]
+    assert untouched, "the receiver rows must still report documents, or this is vacuous"
 
     # CONTROL: unmodified, the same capture attributes the delivery.
-    assert _receiver_is_downstream_of_the_operation(
-        sorted((_CAPTURES / _SOURCE).iterdir()), "PATCH"
-    ) is True
+    intact = sorted((_CAPTURES / _SOURCE).iterdir())
+    assert _reachable_receivers(intact, "PATCH", _first_across(intact, "processId", str))
 
 
 def test_a_receiver_with_no_countable_row_is_unknown_not_zero(tmp_path):
@@ -711,9 +736,7 @@ def test_delivery_is_attributed_to_the_producer_not_every_ancestor():
     selected, a linear process makes the source reach the receiver exactly as the
     operation under test does.
     """
-    from boomi_mcp.connector_replay.capture import (
-        _receiver_is_downstream_of_the_operation,
-    )
+    from boomi_mcp.connector_replay.capture import _first_across, _reachable_receivers
 
     for scenario, produced, merely_reaches in [
         ("cap155-e5-delete-attested", "DELETE", "GET"),
@@ -721,8 +744,11 @@ def test_delivery_is_attributed_to_the_producer_not_every_ancestor():
         ("cap155-e3b-patch-canonical", "PATCH", "GET"),
     ]:
         files = sorted((_CAPTURES / scenario).iterdir())
-        assert _receiver_is_downstream_of_the_operation(files, produced) is True
-        assert _receiver_is_downstream_of_the_operation(files, merely_reaches) is False
+        process_id = _first_across(files, "processId", str)
+        assert _reachable_receivers(files, produced, process_id), "the producer delivers"
+        assert _reachable_receivers(files, merely_reaches, process_id) == frozenset(), (
+            "an ancestor that merely reaches the receiver produces nothing for it"
+        )
 
 
 def test_the_archive_corroborates_which_operation_produced_the_delivery():
@@ -760,3 +786,108 @@ def test_the_archive_corroborates_which_operation_produced_the_delivery():
     assert receiver, "the receiver rows must carry sizes for this control to mean anything"
     assert receiver == sizes(target), "the receiver counted the target's documents"
     assert receiver != sizes(source), "and not the source's"
+
+
+def test_the_graph_is_taken_from_the_process_that_actually_RAN():
+    """A capture may archive a graph that never executed, and one already does.
+
+    `cap155-e1-source-dynamic-path` holds an emitted process beside the stored one.
+    The emitted copy carries no component id and sorts FIRST, so reading whichever
+    process mentioned the operation read a graph the platform never ran.
+    """
+    import xml.etree.ElementTree as ET
+
+    from boomi_mcp.connector_replay.capture import _first_across, _reachable_receivers
+
+    directory = _CAPTURES / "cap155-e1-source-dynamic-path"
+    files = sorted(directory.iterdir())
+    process_id = _first_across(files, "processId", str)
+    assert process_id, "the execution record must name the process it ran"
+
+    archived = {}
+    for path in files:
+        if path.suffix != ".xml":
+            continue
+        root = ET.parse(path).getroot()
+        if root.get("type") == "process":
+            archived[path.name] = root.get("componentId")
+    assert len(archived) > 1, "the fixture must archive more than one process graph"
+    assert archived.get("emitted_process.xml") is None
+    assert archived.get("stored_process.xml") == process_id
+    assert sorted(archived)[0] == "emitted_process.xml", (
+        "the unexecuted graph must sort first, or this test proves nothing"
+    )
+
+    # A capture whose executed graph cannot be identified yields no attribution
+    # rather than an attribution from the wrong graph.
+    dst_files = files
+    assert _reachable_receivers(dst_files, "GET", "no-such-process-id") is None
+
+
+def test_a_receiver_on_an_unrelated_branch_does_not_supply_the_count(tmp_path):
+    """Counting must bind to the receivers the walk found, not to every receiver."""
+    from boomi_mcp.connector_replay.capture import _first_across, _reachable_receivers
+
+    dst = tmp_path / "two-receivers"
+    shutil.copytree(_CAPTURES / _SOURCE, dst)
+    process = dst / "component_process.xml"
+    text = process.read_text()
+
+    # Give the process a SECOND Return Documents shape that the operation under test
+    # does not produce for: hang it off the start shape, ahead of every connector.
+    text = text.replace(
+        '<shape name="shape4"',
+        '<shape name="shape9" shapetype="returndocuments" userlabel="">'
+        '<configuration><returndocuments/></configuration></shape>'
+        '<shape name="shape4"',
+        1,
+    )
+    process.write_text(text)
+
+    files = sorted(dst.iterdir())
+    receivers = _reachable_receivers(files, "PATCH", _first_across(files, "processId", str))
+    assert receivers == frozenset({"shape4"}), (
+        "the unrelated receiver must not be attributed to this operation"
+    )
+
+    # And the count is still the reachable receiver's own, not a sum over both.
+    assert summarize(dst, "PATCH").return_documents == 2
+
+
+def test_a_positive_receiver_count_always_comes_from_an_attributed_receiver():
+    """The implication the ingest layer relies on, pinned where it is decidable.
+
+    `_output_observation` deliberately writes no guard for this: the count is bound to
+    the graph-attributed receivers upstream, so the failing case is unconstructible
+    there and a guard would be one more clause that cannot fire. It is checkable here,
+    across every capture and verb, which is where an unreachable invariant belongs.
+    """
+    import xml.etree.ElementTree as ET
+
+    checked = 0
+    for directory in sorted(_CAPTURES.iterdir()):
+        if not directory.is_dir():
+            continue
+        verbs = set()
+        for xml in directory.glob("*.xml"):
+            try:
+                root = ET.parse(xml).getroot()
+            except ET.ParseError:
+                continue
+            verbs |= {
+                e.get("customOperationType")
+                for e in root.iter()
+                if e.get("customOperationType")
+            }
+        for verb in sorted(verbs) or [None]:
+            try:
+                summary = summarize(directory, verb)
+            except Exception:
+                continue
+            checked += 1
+            if (summary.return_documents or 0) > 0:
+                assert summary.receiver_is_downstream is True, (
+                    f"{directory.name}::{verb} counts documents from a receiver the "
+                    "graph does not attribute to the operation under test"
+                )
+    assert checked > 20, "the sweep must actually cover the archive"
