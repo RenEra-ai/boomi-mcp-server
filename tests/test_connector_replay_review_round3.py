@@ -1283,7 +1283,7 @@ _EXPECTED_CLASS_COUNTS = {
     "DC-155-J": 4,
     "DC-155-J2": 3,
     "DC-155-K": 38,
-    "DC-155-L": 21,
+    "DC-155-L": 22,
 }
 
 #: Instances counted before finding ids were enumerated. A CLOSED set: a
@@ -1306,6 +1306,8 @@ _NOT_AN_INSTANCE = {
     "QA-155-r35-06": "the class's own positive controls",
     "CDX-155-r38-02a": "a revision of a row already counted; counting both double-counts",
     "SELF-155-r44-03a": "likewise a revision of a counted row",
+    "CDX-155-r45-01a": "likewise a revision of a counted row",
+    "CDX-155-r45-02a": "likewise a revision of a counted row",
 }
 
 _CLASS_NAMED_IN_PROSE = [
