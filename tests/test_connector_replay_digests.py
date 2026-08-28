@@ -130,3 +130,52 @@ def test_a_duplicated_field_id_is_refused_rather_than_last_one_wins():
     dup = '<C><field id="url" value="http://a/x"/><field id="url" value="http://b/y"/></C>'
     with pytest.raises(ConfigDigestRefused):
         component_config_digest_v1(dup, "connection")
+
+
+def test_an_unknown_attribute_on_a_projected_field_refuses(connection_xml):
+    """The third of three: fields closed, elements closed, attributes did not.
+
+    Measured before the fix: a stray attribute on a projected field left the digest
+    byte-identical, so a component whose configuration had changed still matched
+    captured evidence — the one property this digest exists to provide.
+    """
+    planted = re.sub(r'(<field id="url"[^>]*?)\s*/>', r'\1 strayAttr="surprise"/>',
+                     connection_xml, count=1)
+    assert planted != connection_xml, "the attribute plant matched nothing"
+    with pytest.raises(ConfigDigestRefused) as caught:
+        component_config_digest_v1(planted, "connection")
+    assert "strayAttr" in str(caught.value)
+
+
+def test_an_attribute_outside_the_projection_scope_does_not_refuse(connection_xml):
+    """The CONTROL for the refusal above, and the reason it is scoped.
+
+    A component wrapper carries a couple of dozen metadata attributes — author,
+    dates, folder, version. Refusing those would refuse every real component while
+    proving nothing, so the scope is what the projection digests, not the document.
+    """
+    planted = connection_xml.replace("<Component ", '<Component strayMeta="x" ', 1)
+    if planted == connection_xml:
+        planted = re.sub(r"(<[A-Za-z][\w.:-]*\s)", r'\1strayMeta="x" ', connection_xml, count=1)
+    assert planted != connection_xml, "the metadata plant matched nothing"
+    assert component_config_digest_v1(planted, "connection") == \
+           component_config_digest_v1(connection_xml, "connection")
+
+
+def test_changing_a_projected_fields_type_moves_the_digest(connection_xml):
+    """`type` is carried, so a retyped routing field is a different configuration.
+
+    It was previously dropped: the projection read `id` and `value` and ignored
+    everything else on the element.
+    """
+    retyped = connection_xml.replace('id="url" type="string"', 'id="url" type="password"', 1)
+    assert retyped != connection_xml, "the retype matched nothing"
+    assert component_config_digest_v1(retyped, "connection") != \
+           component_config_digest_v1(connection_xml, "connection")
+
+
+def test_every_captured_component_still_digests_under_the_closed_attributes(connection_xml):
+    """The whole corpus must pass. A refusal here is the allowlist being wrong."""
+    component_config_digest_v1(connection_xml, "connection")
+    for path in _operation_xmls():
+        component_config_digest_v1(path.read_text(), "operation")

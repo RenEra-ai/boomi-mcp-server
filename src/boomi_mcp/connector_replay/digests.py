@@ -393,6 +393,9 @@ def _projection_spec(kind: str, registry=None, family: str = "rest") -> dict:
             "property_fields": list(typed.included_property_fields),
             "excluded_fields": list(typed.excluded_fields),
             "elements": list(typed.included_elements),
+            "field_attributes": list(typed.included_field_attributes),
+            "excluded_field_attributes": list(typed.excluded_field_attributes),
+            "excluded_property_attributes": list(typed.excluded_property_attributes),
             "qname_aware_tags": list(typed.qname_aware_tags),
             "qname_aware_attrs": list(typed.qname_aware_attrs),
         }
@@ -458,6 +461,59 @@ def _refuse_unknown_fields(root: ET.Element, spec: dict, kind: str) -> None:
         )
 
 
+#: Attributes the projection carries STRUCTURALLY rather than by allowlist: ``id``
+#: becomes the projected node's identity, ``value`` its text, and ``key`` names a
+#: projected property. They are known by construction, not by configuration.
+_STRUCTURAL_FIELD_ATTRS = ("id", "value")
+_STRUCTURAL_PROPERTY_ATTRS = ("key",)
+
+
+def _refuse_unknown_attributes(root: ET.Element, spec: dict, kind: str) -> None:
+    """Unknown ATTRIBUTES on a projected element block, as unknown fields do.
+
+    The element and field allowlists closed two thirds of this projection. An
+    attribute was the remaining third: a projected field could carry any attribute
+    at all and the digest would not move, so a component whose behaviour changed
+    could still match captured configuration evidence — which is the whole property
+    this digest exists to provide.
+
+    Scope is the PROJECTION, not the document. A component wrapper carries a couple
+    of dozen metadata attributes — who created it, when, which folder — that never
+    reach the digest because the projection builds a new tree. Refusing those would
+    refuse every real component while proving nothing.
+    """
+    included = set(spec.get("value_fields", ())) | set(spec.get("property_fields", ()))
+    known_field = (set(_STRUCTURAL_FIELD_ATTRS)
+                   | set(spec.get("field_attributes", ()))
+                   | set(spec.get("excluded_field_attributes", ())))
+    # A property's `value` is KNOWN and deliberately excluded, not unknown: keys
+    # reach the digest and values never do, because a static header's value is a
+    # classic place for an API key. Classifying it is the point — the corpus this
+    # allowlist was first checked against carries no property children at all, so
+    # the captured components could not have shown this and the suite did.
+    known_property = set(_STRUCTURAL_PROPERTY_ATTRS) | set(
+        spec.get("excluded_property_attributes", ()))
+    for el in root.iter():
+        if _qname(el)[1] != "field" or el.get("id") not in included:
+            continue
+        for scope, known, node in (
+            ("field", known_field, el),
+            *(("property", known_property, ch) for ch in el.iter()
+              if _qname(ch)[1] == "properties" and ch.get("key") is not None),
+        ):
+            stray = sorted(a.split("}")[-1] for a in node.attrib
+                           if a.split("}")[-1] not in known)
+            if stray:
+                raise ConfigDigestRefused(
+                    "{0} component carries attribute(s) {1} on a projected {2} "
+                    "({3!r}) that this projection does not cover. Refusing rather "
+                    "than ignoring them — an uncovered attribute may change what "
+                    "the component does, and a digest that omits it would let a "
+                    "changed component match captured evidence. Classify it in the "
+                    "registry projection, with a capture behind it.".format(
+                        kind, stray, scope, el.get("id")))
+
+
 def _qname(el: ET.Element) -> tuple[str, str]:
     """(namespace URI, local name) — the identity XML actually assigns a name.
 
@@ -511,7 +567,14 @@ def _project_tree(root: ET.Element, spec: dict, kind: str) -> ET.Element:
                 f"field id {fid!r} appears more than once; which one applies is "
                 "ambiguous and will not be digested")
         seen_ids.add(fid)
-        node = ET.SubElement(out, "field", {"ns": uri, "id": fid})
+        carried = {"ns": uri, "id": fid}
+        # Allowlisted attributes travel WITH the field, so a change to one moves the
+        # digest. Sorted so the projected node's attribute order is a property of
+        # the projection rather than of the source document's spelling.
+        for attr in sorted(spec.get("field_attributes", ())):
+            if el.get(attr) is not None:
+                carried[attr] = el.get(attr)
+        node = ET.SubElement(out, "field", carried)
         if fid in set(spec.get("value_fields", ())):
             node.text = el.get("value", "")
         else:
@@ -538,6 +601,7 @@ def component_config_digest_v1(component_xml: str, kind: str, family: str = "res
     root = _parse(component_xml, ConfigDigestRefused, kind)
     spec = _projection_spec(kind, family=family)
     _refuse_unknown_fields(root, spec, kind)
+    _refuse_unknown_attributes(root, spec, kind)
     projected = _project_tree(root, spec, kind)
     # The SPECIFIED canonicalization, with its options pinned. Two components that
     # differ only in prefix spelling or in insignificant whitespace must digest the

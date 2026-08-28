@@ -62,9 +62,16 @@
       "included_value_fields": [
         "url"
       ],
-      "projection_version": 1,
+      "projection_version": 2,
       "qname_aware_attrs": [],
-      "qname_aware_tags": []
+      "qname_aware_tags": [],
+      "included_field_attributes": [
+        "type"
+      ],
+      "excluded_field_attributes": [],
+      "excluded_property_attributes": [
+        "value"
+      ]
     },
     {
       "component_kind": "operation",
@@ -99,9 +106,16 @@
         "path",
         "followRedirects"
       ],
-      "projection_version": 1,
+      "projection_version": 2,
       "qname_aware_attrs": [],
-      "qname_aware_tags": []
+      "qname_aware_tags": [],
+      "included_field_attributes": [
+        "type"
+      ],
+      "excluded_field_attributes": [],
+      "excluded_property_attributes": [
+        "value"
+      ]
     }
   ],
   "schema_version": 1,

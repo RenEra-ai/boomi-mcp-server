@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 11034, "minimum_collected": 11034, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 11038, "minimum_collected": 11038, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -11073,3 +11073,7 @@
 {"kind": "test", "id": "pytest-011072", "node_id": "tests/test_query_components_list_filters.py::test_the_allowlist_matches_what_the_function_actually_reads", "state": "active"}
 {"kind": "test", "id": "pytest-011073", "node_id": "tests/test_query_components_list_filters.py::test_the_refusal_happens_before_the_platform_is_touched", "state": "active"}
 {"kind": "test", "id": "pytest-011074", "node_id": "tests/test_query_components_list_filters.py::test_the_refusal_names_what_is_supported", "state": "active"}
+{"kind": "test", "id": "pytest-011075", "node_id": "tests/test_connector_replay_digests.py::test_an_attribute_outside_the_projection_scope_does_not_refuse", "state": "active"}
+{"kind": "test", "id": "pytest-011076", "node_id": "tests/test_connector_replay_digests.py::test_an_unknown_attribute_on_a_projected_field_refuses", "state": "active"}
+{"kind": "test", "id": "pytest-011077", "node_id": "tests/test_connector_replay_digests.py::test_changing_a_projected_fields_type_moves_the_digest", "state": "active"}
+{"kind": "test", "id": "pytest-011078", "node_id": "tests/test_connector_replay_digests.py::test_every_captured_component_still_digests_under_the_closed_attributes", "state": "active"}
