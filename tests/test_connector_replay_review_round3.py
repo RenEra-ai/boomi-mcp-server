@@ -1285,7 +1285,7 @@ _EXPECTED_CLASS_COUNTS = {
     "DC-155-J": 4,
     "DC-155-J2": 3,
     "DC-155-K": 38,
-    "DC-155-L": 36,
+    "DC-155-L": 37,
     "DC-155-M": 1,
 }
 
@@ -2126,13 +2126,18 @@ def test_the_boundary_is_the_adding_commits_parent_once_the_report_lands(tmp_pat
     assert _closing_boundary_sha("ledger.md", marker, git) == removal
 
 
-def _synthetic_closing_repo(tmp_path, wave_shas_from, cited, executable_drift=False):
+def _synthetic_closing_repo(tmp_path, wave_shas_from, cited, executable_drift=False,
+                            commit_report=False):
     """A real repository carrying a closing report, built to be driven end to end.
 
-    Two commits: the first is the wave gate's tree, the second is N−1. The report is
-    left UNCOMMITTED, which is the state commit N is made from. ``wave_shas_from`` and
-    ``cited`` are indices into those two commits, so a case can name the current gate
-    or a superseded one.
+    One commit is the wave gate's tree (W), a later one is N−1, and the report either
+    sits UNCOMMITTED — the state commit N is made from — or is committed on top, which
+    is the state the guard runs in for every commit AFTER N. Both are production
+    states and both go through the whole guard: testing only the first left the
+    boundary call replaceable by a bare `rev-parse HEAD` with the suite still green,
+    and that regression would surface as the guard rejecting a valid report the moment
+    N landed. ``commit_report`` also plants the historical premature report and its
+    removal, so the committed path exercises the direction rule as it really is.
     """
     import subprocess
 
@@ -2149,17 +2154,24 @@ def _synthetic_closing_repo(tmp_path, wave_shas_from, cited, executable_drift=Fa
     git("config", "user.email", "qa@example.invalid")
     git("config", "user.name", "qa")
     ledger = root / "ledger.md"
-    shas = []
-    for n, message in enumerate(("the wave gate's tree", "the record edits")):
-        ledger.write_text(f"{message}\n")
-        if executable_drift and n == 1:
-            # code moving after the gate that certified it — the thing the darkness
-            # proof exists to catch, and the reason N is confined to prose.
-            (root / "src").mkdir(exist_ok=True)
-            (root / "src" / "drift.py").write_text("x = 1\n")
+    marker = "## Slice B — closing report"
+
+    def commit(text, message):
+        ledger.write_text(text)
         git("add", "-A")
         git("commit", "-qm", message)
-        shas.append(git("rev-parse", "HEAD").strip()[:7])
+        return git("rev-parse", "HEAD").strip()[:7]
+
+    wave = commit("the wave gate's tree\n", "the wave gate's tree")
+    if commit_report:
+        commit(f"x\n{marker}\npremature\n", "a closing report written too early")
+        commit("x\n", "remove the premature report")
+    if executable_drift:
+        # code moving after the gate that certified it — the thing the darkness proof
+        # exists to catch, and the reason N is confined to prose.
+        (root / "src").mkdir(exist_ok=True)
+        (root / "src" / "drift.py").write_text("x = 1\n")
+    boundary = commit("the record edits\n", "the record edits")
 
     archive = root / "archive"
     (archive / "cdx-review.aaaaaa").mkdir(parents=True)
@@ -2167,16 +2179,37 @@ def _synthetic_closing_repo(tmp_path, wave_shas_from, cited, executable_drift=Fa
         git("rev-parse", "HEAD").strip()
     )
 
+    shas = [wave, boundary]
     rows = "\n".join(
         f"| L4 composite wave gate, slice B | {i + 1} / {i + 1} | `{shas[j]}`, clean | ok |"
         for i, j in enumerate(wave_shas_from)
     )
     ledger.write_text(
-        f"{rows}\n\n## Slice B — closing report\n\n"
+        f"{rows}\n\n{marker}\n\n"
         f"| `{shas[cited]}` (**W**) | wave |\n"
-        f"| `{shas[1]}` (**N−1**) | review `cdx-review.aaaaaa` |\n"
+        f"| `{boundary}` (**N−1**) | review `cdx-review.aaaaaa` |\n"
     )
+    if commit_report:
+        git("add", "-A")
+        git("commit", "-qm", "the closing report")
     return git, archive
+
+
+def test_the_repository_guard_accepts_a_report_already_committed(tmp_path):
+    """The state the guard is in for every run AFTER commit N lands.
+
+    Until this existed the production boundary call could be replaced by a bare
+    `rev-parse HEAD` with every test still green — and the failure it hides only
+    appears once N is made, when the guard would compare the named N−1 against N and
+    reject a correct report. The history here also carries the premature report and
+    its removal, so this drives the direction rule through the real caller too.
+    """
+    git, archive = _synthetic_closing_repo(
+        tmp_path, wave_shas_from=[0], cited=0, commit_report=True
+    )
+    assert _closing_report_violation(
+        (tmp_path / "repo" / "ledger.md").read_text(), "ledger.md", archive, git
+    ) is None
 
 
 def test_the_repository_guard_accepts_the_one_correct_closing_shape(tmp_path):
