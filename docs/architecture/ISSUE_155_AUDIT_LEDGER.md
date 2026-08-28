@@ -654,6 +654,55 @@ edit succeeds. Verified against the live issue on 2026-08-27: #160's description
 identifiers, each with acceptance criteria, reason class and placement, and every one resolves to a
 row above. The #155 description carries its own half. Nothing here is now waiting on a paste.
 
+
+## Slice B — closing report
+
+**Which gate covers which tree.** Three SHAs, three different guarantees, named separately because
+conflating them is the failure the closing protocol exists to prevent.
+
+| tree | covered by |
+|---|---|
+| `f53748b` (**W**) | the composite wave gate, fourth evaluation: 10,998 required nodes, the full non-KB suite green at 10,981 passed and 17 skipped, 74 active goldens rendered twice and byte-exact, the plan-fingerprint seam across two cases |
+| `d8ccdaa` (**N−1**) | the closing review, run `cdx-review.dzC9du`, which returned NO findings over the manifest transition, the collected-node set, the ledger guards and the durable archive |
+| this commit (**N**) | not reviewed, and does not need to be: it adds only this report and the closing review's own archive. Its darkness is proven by there being no difference in source, tests or scripts between **W** and it |
+
+**Gate roster, all five loops closed.** Stage-1 QA across eight dispatches; the Stage-2 commit review
+closing `CLOSE-CLEAN` at its nineteenth evaluation on a clean read of its own last mutation; the
+architect review ending at its three-evaluation cap under the tracked rule; the composite wave gate
+above; and this closing protocol.
+
+**What the slice ships.** The packaged connector-replay evidence registry, landing DARK: the
+registry ships empty, no path mints or serves a replay verdict, and every write stays `unverified`
+until slice F ingests evidence. Alongside it, an identifier grammar owned in one place, two versioned
+digests, a capture summariser, an ingest writer, a monitoring action for execution connectors, and an
+advisory image-parity workflow.
+
+**What the gates actually found, and why it mattered.** Sixty-six findings across nineteen Stage-2
+evaluations, every one reconciled and dispositioned, none deferred. Fourteen of those evaluations
+found defects in what the slice ships — ten distinct KINDS in the capture reader, each able to mint a
+replay-safety verdict the evidence did not support: an uncorrelated record, an unknown read as an
+absence, bytes counted where the vocabulary counts documents, the connector answering for the
+receiver, a proxy standing in for a recorded key, an unexecuted process graph, a partial chronology
+treated as an order, a weaker key overriding a stronger one, two ends of a comparison observing
+different resources, and a subject set fixed by ordinal position. Five structural fixes closed them.
+The remaining five evaluations found defects only in the audit record and the tests that check it.
+
+**The two attested verdicts held byte-identical throughout**, which is what makes them safe for slice
+F to ingest: PATCH `conditionally_idempotent` with replay `same_effect`, DELETE
+`conditionally_idempotent` with replay `conflict_without_second_effect`.
+
+**Carried open, deliberately.** `SELF-155-r48-01a` — a recipe-security test that failed once inside
+the full suite and passed in later runs. Random ordering and hash-seed sensitivity were both ruled
+out by measurement; cross-test state remains, matching the test's own subject. It is not attributed
+to this slice, not claimed fixed, and not deferred to a follow-up, because filing one is not the
+loop's to authorise.
+
+**#155 does not close on this slice.** It closes on slice F, which needs slices C, D and E first, and
+each of those requires live QA on a Boomi account as a required gate. That account is an owner action
+and is not granted, so C through F are deliberately not started: shipping code that cannot obtain its
+mandatory validation is how earlier issues in this epic became branches that never landed. The issue
+stays OPEN.
+
 ## Evidence index
 
 Collected run directories and live captures are archived, byte-verified, under
