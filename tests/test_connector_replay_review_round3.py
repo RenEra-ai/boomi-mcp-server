@@ -1277,7 +1277,7 @@ _EXPECTED_CLASS_COUNTS = {
     "DC-155-D": 3,
     "DC-155-E": 1,
     "DC-155-F": 0,
-    "DC-155-G": 4,
+    "DC-155-G": 5,
     "DC-155-H": 1,
     "DC-155-I": 2,
     "DC-155-J": 4,
@@ -1882,13 +1882,22 @@ def test_a_closing_report_names_the_current_wave_sha_and_proves_darkness():
         f"names {runs} and the boundary it claims is therefore unattested"
     )
 
-    ancestry = subprocess.run(
-        ["git", "merge-base", "--is-ancestor", reported_n1, "HEAD"],
-        capture_output=True, text=True, cwd=ledger_path.parents[2],
-    )
-    assert ancestry.returncode == 0, (
-        f"the report names N−1={reported_n1}, which is not an ancestor of the tip"
-    )
+    # ORDERED, not merely present. "N−1 is an ancestor of the tip" says nothing about
+    # WHERE it sits relative to the wave SHA, so a review taken BEFORE the wave ran
+    # satisfied it — which is the current-W-with-a-stale-boundary case this guard was
+    # extended to refuse the round before. Both directions are needed: N−1 must
+    # descend from W, and must still be reachable from the tip.
+    for earlier, later, why in (
+        (reported_w, reported_n1, "the closing review must run AFTER the wave gate"),
+        (reported_n1, "HEAD", "the reviewed boundary must be reachable from the tip"),
+    ):
+        ordered = subprocess.run(
+            ["git", "merge-base", "--is-ancestor", earlier, later],
+            capture_output=True, text=True, cwd=ledger_path.parents[2],
+        )
+        assert ordered.returncode == 0, (
+            f"{why}: {earlier} is not an ancestor of {later}"
+        )
 
     diff = subprocess.run(
         ["git", "diff", "--name-only", reported_w, "HEAD", "--", "src", "tests", "scripts"],
