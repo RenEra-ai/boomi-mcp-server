@@ -1267,11 +1267,17 @@ def test_a_shared_readback_delta_is_read_per_run(tmp_path):
 
 
 def test_every_defect_class_tally_equals_its_own_enumeration():
-    """Counts are DERIVED here, because a hand-typed one was wrong.
+    """Counts are DERIVED for EVERY class row, because a hand-typed one was wrong.
 
-    The class table's instance count feeds the second-instance trigger and the
-    checkpoint trend accounting, so a tally that disagrees with its own list makes
-    both unverifiable. One was typed as twenty-eight over a list of twenty-seven.
+    The first version of this guard covered only the rows that happened to carry a
+    parenthesised list — five of thirteen — so a count written in words, a row with no
+    list at all, a duplicated id and a fabricated one all passed it, and the largest
+    tally in the table disagreed with its own names unchecked. That is the same
+    incomplete-sweep failure the guard was written to end, inside the guard.
+
+    Every row with a non-zero count must now name its instances, the names must exist
+    as finding rows, and instances counted before ids were enumerated must say so
+    explicitly rather than sit in the gap between a number and a list.
     """
     import re
 
@@ -1280,24 +1286,42 @@ def test_every_defect_class_tally_equals_its_own_enumeration():
         / "docs/architecture/ISSUE_155_AUDIT_LEDGER.md"
     ).read_text()
 
+    known_rows = set(re.findall(r"^\| ([A-Z]+-155-[A-Za-z0-9-]+) \|", ledger, re.M))
+    assert known_rows, "no finding rows parsed — the existence check would be vacuous"
+
     checked = 0
     for line in ledger.splitlines():
         if not line.startswith("| DC-155-"):
             continue
-        match = re.search(r"\|\s*(\d+)\s*\(([^)]*)\)\s*\|", line)
-        if not match:
+        checked += 1
+        name = line.split("|")[1].strip()
+        count_cell = line.split("|")[4]
+
+        declared = re.match(r"\s*(\d+)", count_cell)
+        assert declared, (
+            f"{name}: the instance count must be a numeral, not {count_cell.strip()[:40]!r}"
+        )
+        declared = int(declared.group(1))
+        if declared == 0:
             continue
-        declared = int(match.group(1))
-        enumerated = re.findall(r"`([A-Z]+-155-[A-Za-z0-9-]+)`", match.group(2))
-        assert declared == len(enumerated), (
-            f"{line.split('|')[1].strip()}: declares {declared} instances but "
-            f"enumerates {len(enumerated)}: {enumerated}"
+
+        listed = re.search(r"\(([^)]*)\)", count_cell)
+        assert listed, f"{name}: declares {declared} instances and names none"
+        enumerated = re.findall(r"`([A-Z]+-155-[A-Za-z0-9-]+)`", listed.group(1))
+        unrowed = re.search(r"\+(\d+) unrowed", listed.group(1))
+        unrowed = int(unrowed.group(1)) if unrowed else 0
+
+        assert declared == len(enumerated) + unrowed, (
+            f"{name}: declares {declared} but names {len(enumerated)}"
+            + (f" plus {unrowed} unrowed" if unrowed else "")
         )
         assert len(set(enumerated)) == len(enumerated), (
-            f"{line.split('|')[1].strip()}: an instance is listed twice"
+            f"{name}: an instance is listed twice"
         )
-        checked += 1
-    assert checked >= 4, f"only {checked} class rows carried an enumeration"
+        missing = [i for i in enumerated if i not in known_rows]
+        assert not missing, f"{name}: names instances with no finding row: {missing}"
+
+    assert checked >= 12, f"only {checked} class rows were checked"
 
 
 def test_a_conflicting_execution_id_is_not_overridden_by_a_matching_label(tmp_path):
@@ -1342,4 +1366,60 @@ def test_two_delta_entries_naming_one_execution_are_ambiguous(tmp_path):
     by_label = {r.label: r.state_changed for r in summarize(dst, "POST").runs}
     assert all(v is None for v in by_label.values()), (
         f"an id claimed by two entries must bind to neither, got {by_label}"
+    )
+
+
+def test_a_convergence_subject_with_a_missing_stage_is_refused(tmp_path):
+    """Dropping the subject silently narrowed the set the verdict quantifies over.
+
+    The archive records each readback's moment in its filename AND in its own payload
+    label, and the reader used neither: it admitted any subject with three or more
+    files and compared by ordinal position. A capture archived with one readback fewer
+    lost that subject entirely — and with one MORE, both comparison windows slid past
+    the effect. Either way an archive that recorded a second effect served the clean
+    verdict, and the served row carries no stage count to notice with.
+    """
+    from boomi_mcp.connector_replay.capture import CaptureRefused
+
+    source = _CAPTURES / "cap155-e5-delete-attested"
+    intact = summarize(source, "DELETE")
+    assert {c.subject for c in intact.convergence} == {"control", "target", "template"}
+
+    dropped = tmp_path / "missing-stage"
+    shutil.copytree(source, dropped)
+    (dropped / "readback_R1_between_target.json").unlink()
+    with pytest.raises(CaptureRefused, match="staged readbacks cover"):
+        summarize(dropped, "DELETE")
+
+    extra = tmp_path / "extra-stage"
+    shutil.copytree(source, extra)
+    shutil.copy(
+        extra / "readback_R2_after_target.json",
+        extra / "readback_R3_after_target.json",
+    )
+    with pytest.raises(CaptureRefused, match="more than one staged readback claims"):
+        summarize(extra, "DELETE")
+
+
+def test_an_unkeyed_delta_entry_still_binds_beside_a_keyed_stranger(tmp_path):
+    """Precedence is per ENTRY: a keyed neighbour must not deny an unkeyed one."""
+    dst = tmp_path / "mixed-keys"
+    shutil.copytree(_CAPTURES / "cap155-e2-post", dst)
+    path = dst / "readback_delta.json"
+    entries = json.loads(path.read_text())
+
+    # run1's entry keeps its label and loses its id; a stranger keeps an id.
+    entries[0].pop("execution_id", None)
+    entries[0]["raw_changed"] = True
+    entries.append({
+        "label": "someone-else",
+        "execution_id": "execution-00000000-0000-4000-8000-00000000000a-2026.01.01",
+        "raw_changed": False,
+    })
+    path.write_text(json.dumps(entries))
+
+    by_label = {r.label: r.state_changed for r in summarize(dst, "POST").runs}
+    assert by_label["run1"] is True, (
+        f"an unkeyed entry must bind by its label regardless of a keyed stranger, "
+        f"got {by_label}"
     )

@@ -56,6 +56,12 @@ _STAGE_READBACK: Final[re.Pattern[str]] = re.compile(
     r"^readback_(?P<stage>R\d+)_(?P<moment>[a-z]+)_(?P<subject>[a-z]+)\.json$"
 )
 
+#: The moments a convergence comparison is placed on, and the order they run in. A
+#: closed set on purpose: these are the boundaries of the two comparison windows, so
+#: a capture that records a different set has not recorded THIS measurement.
+_CONVERGENCE_ORDER: Final[tuple[str, ...]] = ("before", "between", "after")
+_CONVERGENCE_MOMENTS: Final[frozenset[str]] = frozenset(_CONVERGENCE_ORDER)
+
 _RUN_PREFIX: Final[re.Pattern[str]] = re.compile(r"^(?P<label>[a-z0-9]+)_(?P<rest>.+)$")
 
 #: A uvicorn-style access line: method, target, protocol, then the status.
@@ -635,17 +641,23 @@ def _state_change_for_run(
         # coincidental label override a CONFLICTING id and bind another execution's
         # verdict to this run — the weaker key overruling the stronger one, which is
         # the same substitution this whole correlation exists to prevent.
-        keyed = [entry for entry in entries
-                 if isinstance(entry, dict) and entry.get("execution_id")]
-        if keyed:
-            matching = [e for e in keyed if e.get("execution_id") == execution_id]
-        else:
-            matching = [entry for entry in entries
-                        if isinstance(entry, dict) and entry.get("label") == label]
+        # PER ENTRY, not per file. Scoping the precedence to the file let one keyed
+        # STRANGER deny label matching to an entry carrying no identifier at all,
+        # turning a served row into a refusal on the strength of an unrelated
+        # neighbour. An entry that names an execution is judged on that name; an entry
+        # that names none is judged on its label.
+        matching = [
+            entry for entry in entries
+            if isinstance(entry, dict)
+            and (entry["execution_id"] == execution_id
+                 if entry.get("execution_id")
+                 else entry.get("label") == label)
+        ]
         if len(matching) == 1:
             changed = matching[0].get("raw_changed")
             return changed if isinstance(changed, bool) else None
-        if not matching and own is not None and len(entries) == 1 and not keyed:
+        if (not matching and own is not None and len(entries) == 1
+                and not any(isinstance(e, dict) and e.get("execution_id") for e in entries)):
             # A per-run file whose single entry names NEITHER key: the filename is the
             # only correlation that generation offers. An entry carrying an id that
             # does not match is a disagreement, not a fallback.
@@ -735,25 +747,48 @@ def _differing_keys(a: dict[str, Any], b: dict[str, Any]) -> tuple[str, ...]:
 
 def _convergence(files: list[Path]) -> tuple[ConvergenceV1, ...]:
     """Derive what a replay did, per subject, from the staged readbacks."""
-    by_subject: dict[str, list[tuple[str, Path]]] = {}
+    # KEYED ON THE MOMENT EACH READBACK STATES, not on where it falls in a sorted
+    # list. Every staged file names its moment twice — in its filename and again in
+    # its own payload label — and the reader discarded both, admitting any subject
+    # with three or more files and then taking the first, second-to-last and last.
+    # Two archived-capture shapes defeat that: one file fewer and the subject leaves
+    # the tuple entirely, silently narrowing the set the verdict quantifies over; one
+    # file MORE and both comparison windows slide past the effect. Either way an
+    # archive that recorded a second effect serves the clean verdict, and the served
+    # row carries no stage count for a consumer to notice with.
+    by_subject: dict[str, dict[str, list[tuple[str, Path]]]] = {}
     for path in files:
         m = _STAGE_READBACK.match(path.name)
         if m:
-            by_subject.setdefault(m.group("subject"), []).append((m.group("stage"), path))
+            by_subject.setdefault(m.group("subject"), {}).setdefault(
+                m.group("moment"), []
+            ).append((m.group("stage"), path))
 
     results: list[ConvergenceV1] = []
-    for subject, staged in sorted(by_subject.items()):
-        # Order by the stage NUMBER, not lexically: R10 must not sort before R2.
-        staged.sort(key=lambda pair: int(pair[0][1:]))
-        if len(staged) < 3:
-            continue
+    for subject, moments in sorted(by_subject.items()):
+        # Incomplete or duplicated moments REFUSE. Dropping the subject was the
+        # fail-open half: the neighbouring check already refuses a readback with no
+        # body, so missing evidence one line over was failing the opposite way.
+        if set(moments) != _CONVERGENCE_MOMENTS:
+            raise CaptureRefused(
+                f"{subject}: staged readbacks cover {sorted(moments)!r} rather than "
+                f"{sorted(_CONVERGENCE_MOMENTS)!r}; a comparison window cannot be "
+                "placed on a moment the capture did not record"
+            )
+        duplicated = sorted(m for m, entries in moments.items() if len(entries) != 1)
+        if duplicated:
+            raise CaptureRefused(
+                f"{subject}: more than one staged readback claims {duplicated!r}, so "
+                "which one bounds the comparison is not decidable from the archive"
+            )
+        staged = [moments[m][0] for m in _CONVERGENCE_ORDER]
         bodies = [(stage, _body_of(_load_json(path))) for stage, path in staged]
         if any(body is None for _, body in bodies):
             raise CaptureRefused(
                 f"{subject}: a staged readback carries no body object, so what the "
                 "replay did cannot be derived"
             )
-        before, between, after = bodies[0][1], bodies[-2][1], bodies[-1][1]
+        before, between, after = bodies[0][1], bodies[1][1], bodies[2][1]
         statuses = [_status_of(_load_json(path)) for _, path in staged]
 
         # ABSENCE is a state, and two absences are the same state. When a readback
@@ -789,8 +824,8 @@ def _convergence(files: list[Path]) -> tuple[ConvergenceV1, ...]:
             keys = _differing_keys(a_body, b_body)
             return bool(keys), keys
 
-        first_moved, _ = moved(statuses[0], before, statuses[-2], between)
-        replay_moved, replay_keys = moved(statuses[-2], between, statuses[-1], after)
+        first_moved, _ = moved(statuses[0], before, statuses[1], between)
+        replay_moved, replay_keys = moved(statuses[1], between, statuses[2], after)
         results.append(
             ConvergenceV1(
                 subject=subject,
