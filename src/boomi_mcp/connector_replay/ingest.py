@@ -421,8 +421,18 @@ def _output_observation(summary: CaptureSummaryV1) -> OutputObservationV1:
             "the operation under test, so what it returned is unknown rather than "
             "absent"
         )
-    if summary.connector_successful_documents > 0:
+    # The RECEIVER, not the connector. `return_documents_received` names a Return
+    # Documents shape receiving output; the connector's own success count only says
+    # the connector finished its documents. Reading the latter published the value
+    # for the archived read-verb captures, none of which carries a receiver row,
+    # while the two attested write captures do — so the distinction is in the
+    # evidence and was being flattened.
+    if summary.return_documents > 0:
         return OutputObservationV1.RETURN_DOCUMENTS_RECEIVED
+    # `successor_received_documents` is deliberately NOT minted here. It is a claim
+    # about a downstream step receiving the output, and no archived capture carries
+    # an authority for it — inventing one from the connector's own count is the
+    # defect this correction removes, one value over. Recorded as a limitation.
     return OutputObservationV1.NO_OUTPUT_OBSERVED
 
 

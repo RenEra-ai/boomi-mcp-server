@@ -161,8 +161,8 @@ def test_connector_counts_come_from_the_connector_not_the_execution(tmp_path):
     the process-level read it did not: the execution's counts are sums over every
     connector that ran, so the source read's document kept the claim alive.
     """
-    from boomi_mcp.connector_replay.ingest import _output_observation
-    from boomi_mcp.connector_replay.models import OutputObservationV1
+    from boomi_mcp.connector_replay.ingest import _input_observation
+    from boomi_mcp.connector_replay.models import InputObservationV1
 
     dst = tmp_path / "zeroed"
     shutil.copytree(_CAPTURES / _SOURCE, dst)
@@ -186,15 +186,15 @@ def test_connector_counts_come_from_the_connector_not_the_execution(tmp_path):
     zeroed = summarize(dst, "PATCH")
     assert zeroed.connector_documents == 0
     assert zeroed.connector_successful_documents == 0
-    assert _output_observation(zeroed) is OutputObservationV1.NO_OUTPUT_OBSERVED
+    assert _input_observation(zeroed) is InputObservationV1.NO_INBOUND_DOCUMENTS
 
     # CONTROL: the execution's own counts are untouched and still non-zero, which
     # is exactly why the process-level read could not see this.
-    assert any((r.outbound_documents or 0) > 0 for r in zeroed.runs)
+    assert any((r.inbound_documents or 0) > 0 for r in zeroed.runs)
 
-    # CONTROL, the other way: unmodified, the same capture still reports output.
+    # CONTROL, the other way: unmodified, the same capture still reports consumption.
     intact = summarize(_CAPTURES / _SOURCE, "PATCH")
-    assert _output_observation(intact) is OutputObservationV1.RETURN_DOCUMENTS_RECEIVED
+    assert _input_observation(intact) is InputObservationV1.DOCUMENTS_CONSUMED
 
 
 def test_an_entry_connector_consumes_nothing_by_construction(tmp_path):
@@ -297,16 +297,16 @@ def test_a_name_shared_across_verbs_is_refused_not_joined(tmp_path):
     assert len(patch_components) == 1
 
 
-def test_output_counts_documents_not_bytes(tmp_path):
-    """A successful call that returns an empty body still returned a document."""
-    from boomi_mcp.connector_replay.ingest import _output_observation
-    from boomi_mcp.connector_replay.models import OutputObservationV1
+def test_counts_are_documents_not_bytes(tmp_path):
+    """A successful call that returns an empty body still handled a document.
 
-    # The archived HEAD capture is the real case: the platform records a successful
-    # connector document, downloadable, of zero bytes.
+    The counts must not be byte figures: the archived HEAD capture records a
+    successful connector document of zero bytes, so a byte test would report that the
+    connector handled nothing. What that document then went on to reach is a
+    different question, answered by the receiver — see the return-delivery test.
+    """
     head = summarize(_CAPTURES / "cap155-e4-head-status", "HEAD")
     assert head.connector_successful_documents == 1
-    assert _output_observation(head) is OutputObservationV1.RETURN_DOCUMENTS_RECEIVED
 
     documents = json.loads(
         (_CAPTURES / "cap155-e4-head-status" / "connector_documents.json").read_text()
@@ -576,3 +576,54 @@ def test_the_missing_count_refusal_survives_a_brace_bearing_row_id(tmp_path):
         summarize(dst, "PATCH")
     # The id reaches the operator intact, and no KeyError is raised in its place.
     assert "row-{0}-{name}" in str(raised.value)
+
+
+def test_return_delivery_is_read_from_the_receiver_not_the_connector():
+    """WITNESS: the two subjects disagree on the real archive.
+
+    `return_documents_received` names a Return Documents shape receiving output. The
+    connector's own success count says only that the connector finished — and for
+    every archived read-verb capture those two answers differ, because the platform
+    records a receiver row for the write captures and none for the read ones.
+    """
+    from boomi_mcp.connector_replay.ingest import _output_observation
+    from boomi_mcp.connector_replay.models import OutputObservationV1
+
+    delivered = summarize(_CAPTURES / _SOURCE, "PATCH")
+    assert delivered.return_documents > 0
+    assert _output_observation(delivered) is OutputObservationV1.RETURN_DOCUMENTS_RECEIVED
+
+    for scenario, action in [
+        ("cap155-e4-head-status", "HEAD"),
+        ("cap155-e4-options-status", "OPTIONS"),
+        ("cap155-e4-trace-status", "TRACE"),
+    ]:
+        summary = summarize(_CAPTURES / scenario, action)
+        # The connector DID finish documents successfully — which is exactly why
+        # reading its count published a receiver claim for a capture with no receiver.
+        assert summary.connector_successful_documents > 0
+        assert summary.return_documents == 0
+        assert _output_observation(summary) is OutputObservationV1.NO_OUTPUT_OBSERVED
+
+
+def test_a_receiver_row_that_received_nothing_is_not_a_delivery(tmp_path):
+    """Presence of the receiver is not delivery; its own count decides."""
+    from boomi_mcp.connector_replay.ingest import _output_observation
+    from boomi_mcp.connector_replay.models import OutputObservationV1
+
+    dst = tmp_path / "empty-receiver"
+    shutil.copytree(_CAPTURES / _SOURCE, dst)
+    for path in dst.glob("*.json"):
+        payload = json.loads(path.read_text())
+        touched = False
+        for record in _platform_connector_records(payload):
+            if record.get("connectorType") == "return":
+                record["successCount"] = 0
+                touched = True
+        if touched:
+            path.write_text(json.dumps(payload))
+
+    summary = summarize(dst, "PATCH")
+    assert summary.return_documents == 0
+    assert summary.connector_successful_documents > 0
+    assert _output_observation(summary) is OutputObservationV1.NO_OUTPUT_OBSERVED

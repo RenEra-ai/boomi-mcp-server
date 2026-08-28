@@ -151,6 +151,11 @@ class CaptureSummaryV1(ReplayRegistryModel):
     #: these feed is document-based and a successful call can return zero bytes.
     connector_documents: int | None = Field(default=None, ge=0)
     connector_successful_documents: int | None = Field(default=None, ge=0)
+    #: Documents a Return Documents shape received. A DIFFERENT SUBJECT again: the
+    #: connector completing successfully does not mean a receiver got its output, and
+    #: the vocabulary has a separate value for each. The archived read-verb captures
+    #: carry no receiver row, and the two attested write captures do.
+    return_documents: int = Field(default=0, ge=0)
     #: sha256 over every archived file's bytes, in sorted-name order.
     capture_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
     file_count: int = Field(ge=1)
@@ -403,6 +408,30 @@ def _connector_document_counts(
         handled += counts["successCount"] + counts["errorCount"]
         succeeded += counts["successCount"]
     return handled, succeeded
+
+
+def _return_documents(
+    files: list[Path], execution_ids: frozenset[str]
+) -> int:
+    """Documents a Return Documents shape received, from ITS OWN rows.
+
+    A DIFFERENT SUBJECT from the connector's counts, and the vocabulary distinguishes
+    them: `return_documents_received` is a claim about a receiver, not about the
+    connector completing. Deriving it from the connector's success count published it
+    for the archived read-verb captures, which carry no receiver row at all.
+
+    The platform names the receiver itself — a row whose connector type is the return
+    sentinel — so the authority is in the capture rather than in an inference from the
+    connector's own numbers.
+    """
+    total = 0
+    for row in _reconciled_platform_rows(files, execution_ids):
+        if row.get("connectorType") != "return":
+            continue
+        value = row.get("successCount")
+        if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+            total += value
+    return total
 
 
 def _start_shape_of_the_exercised_connector(
@@ -860,6 +889,7 @@ def summarize(capture_dir: Path, method_hint: str | None = None) -> CaptureSumma
         is_start_shape=_start_shape_of_the_exercised_connector(
             files, execution_ids, method_hint
         ),
+        return_documents=_return_documents(files, execution_ids),
         connector_documents=None if counts is None else counts[0],
         connector_successful_documents=None if counts is None else counts[1],
     )
