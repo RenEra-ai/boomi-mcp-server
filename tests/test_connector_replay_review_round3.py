@@ -1497,28 +1497,47 @@ def _declared_class_floors(source):
     return ast.literal_eval(found.group(1)) if found else None
 
 
-def _floor_regression(previous_source, current_source):
-    """What a revision did to the recorded floors, if anything wrong."""
-    previous = _declared_class_floors(previous_source)
+def _floor_regression(previous_sources, current_source):
+    """What the current table did to the HIGHEST floor each class ever carried.
+
+    Compared against every recorded revision, not against one neighbour. A single
+    neighbour is HEAD, and on a committed tree HEAD is the current bytes — so a floor
+    lowered and committed in one step compared equal to itself and passed, which is
+    the state CI and the wave gate always run in. Measured: the lowering passed once
+    committed. The ceiling over all revisions has no such blind spot, and it also
+    refuses a floor raised and then quietly walked back down.
+    """
+    ceiling: dict[str, int] = {}
+    for source in previous_sources:
+        for cls, floor in (_declared_class_floors(source) or {}).items():
+            ceiling[cls] = max(ceiling.get(cls, 0), floor)
+    if not ceiling:
+        return None  # the table has never been recorded
     current = _declared_class_floors(current_source)
-    if previous is None:
-        return None  # the table did not exist in that revision
     if current is None:
         return "removed"
-    lowered = sorted(c for c, floor in previous.items() if current.get(c, -1) < floor)
+    lowered = sorted(c for c, floor in ceiling.items() if current.get(c, -1) < floor)
     return f"lowered: {lowered}" if lowered else None
 
 
 @pytest.mark.parametrize(
     "previous,current,expected",
     [
-        ("_EXPECTED_CLASS_COUNTS = {'A': 3}", "_EXPECTED_CLASS_COUNTS = {'A': 3}", None),
-        ("_EXPECTED_CLASS_COUNTS = {'A': 3}", "_EXPECTED_CLASS_COUNTS = {'A': 4}", None),
-        ("_EXPECTED_CLASS_COUNTS = {'A': 3}", "_EXPECTED_CLASS_COUNTS = {'A': 3, 'B': 1}", None),
-        ("_EXPECTED_CLASS_COUNTS = {'A': 3}", "_EXPECTED_CLASS_COUNTS = {'A': 2}", "lowered: ['A']"),
-        ("_EXPECTED_CLASS_COUNTS = {'A': 3}", "_EXPECTED_CLASS_COUNTS = {'B': 3}", "lowered: ['A']"),
-        ("_EXPECTED_CLASS_COUNTS = {'A': 3}", "nothing here", "removed"),
-        ("nothing here", "_EXPECTED_CLASS_COUNTS = {'A': 3}", None),
+        (["_EXPECTED_CLASS_COUNTS = {'A': 3}"], "_EXPECTED_CLASS_COUNTS = {'A': 3}", None),
+        (["_EXPECTED_CLASS_COUNTS = {'A': 3}"], "_EXPECTED_CLASS_COUNTS = {'A': 4}", None),
+        (["_EXPECTED_CLASS_COUNTS = {'A': 3}"], "_EXPECTED_CLASS_COUNTS = {'A': 3, 'B': 1}", None),
+        (["_EXPECTED_CLASS_COUNTS = {'A': 3}"], "_EXPECTED_CLASS_COUNTS = {'A': 2}", "lowered: ['A']"),
+        (["_EXPECTED_CLASS_COUNTS = {'A': 3}"], "_EXPECTED_CLASS_COUNTS = {'B': 3}", "lowered: ['A']"),
+        (["_EXPECTED_CLASS_COUNTS = {'A': 3}"], "nothing here", "removed"),
+        (["nothing here"], "_EXPECTED_CLASS_COUNTS = {'A': 3}", None),
+        # the committed-lowering hole: the newest revision already carries the lowered
+        # value, so a neighbour comparison sees no change and the ceiling still does
+        (["_EXPECTED_CLASS_COUNTS = {'A': 5}", "_EXPECTED_CLASS_COUNTS = {'A': 2}"],
+         "_EXPECTED_CLASS_COUNTS = {'A': 2}", "lowered: ['A']"),
+        # raised, then walked back to where it started
+        (["_EXPECTED_CLASS_COUNTS = {'A': 3}", "_EXPECTED_CLASS_COUNTS = {'A': 9}"],
+         "_EXPECTED_CLASS_COUNTS = {'A': 3}", "lowered: ['A']"),
+        ([], "_EXPECTED_CLASS_COUNTS = {'A': 3}", None),
     ],
 )
 def test_the_floor_rule_admits_only_growth(previous, current, expected):
@@ -1527,18 +1546,23 @@ def test_the_floor_rule_admits_only_growth(previous, current, expected):
 
 
 def _floor_regression_in_repo(rel, current_source, git):
-    """The comparison as the repository performs it — committed against working.
+    """The comparison as the repository performs it — ALL recorded revisions.
 
     Extracted for the reason this whole file keeps rediscovering: a rule tested alone
     leaves its CALLER free to regress, and here the caller's regression is the exact
     defect the rule exists to catch — comparing the file against itself reports no
-    lowering, forever.
+    lowering, forever. It read `HEAD` alone until a reviewer pointed out that on a
+    committed tree those are the same bytes, which made the guard inert in CI and in
+    every wave-gate run: the one environment it had to work in.
     """
-    return _floor_regression(git("show", f"HEAD:{rel}", check=False), current_source)
+    revisions = git("log", "--format=%H", "--", rel).split()
+    return _floor_regression(
+        [git("show", f"{sha}:{rel}", check=False) for sha in revisions], current_source
+    )
 
 
-def _repo_with_committed_floors(tmp_path, committed_floor):
-    """A real repository whose committed revision declares one floor."""
+def _repo_with_committed_floors(tmp_path, committed_floors):
+    """A real repository whose recorded revisions declare these floors, in order."""
     import subprocess
 
     root = tmp_path / "floors"
@@ -1553,27 +1577,35 @@ def _repo_with_committed_floors(tmp_path, committed_floor):
     git("init", "-q", "-b", "main")
     git("config", "user.email", "qa@example.invalid")
     git("config", "user.name", "qa")
-    (root / "guard.py").write_text(f"_EXPECTED_CLASS_COUNTS = {{'A': {committed_floor}}}\n")
-    git("add", "-A")
-    git("commit", "-qm", "the recorded floors")
+    for floor in committed_floors:
+        (root / "guard.py").write_text(f"_EXPECTED_CLASS_COUNTS = {{'A': {floor}}}\n")
+        git("add", "-A")
+        git("commit", "-qm", f"floor {floor}")
     return git
 
 
 @pytest.mark.parametrize(
     "committed,working,expected",
     [
-        (3, 4, None),                 # a class recurred; the floor may follow upwards
-        (3, 3, None),                 # untouched
-        (3, 2, "lowered: ['A']"),     # regenerated from the present, which is the defect
+        ([3], 4, None),                 # a class recurred; the floor may follow upwards
+        ([3], 3, None),                 # untouched
+        ([3], 2, "lowered: ['A']"),     # lowered in the working tree
+        # ALREADY COMMITTED, which is the state CI and every wave-gate run are in.
+        # Reading only the newest revision compares these bytes with themselves and
+        # reports nothing — measured on this repository before the ceiling replaced it.
+        ([5, 2], 2, "lowered: ['A']"),
+        # raised and then walked back down over two commits
+        ([3, 9, 3], 3, "lowered: ['A']"),
     ],
 )
-def test_the_repository_comparison_reads_the_committed_revision(
+def test_the_repository_comparison_reads_every_recorded_revision(
     tmp_path, committed, working, expected
 ):
-    """The caller, driven — not the rule alone.
+    """The caller, driven — not the rule alone, and not one revision of it.
 
     Pointing the comparison at the working file on BOTH sides passes every test that
-    exercises only the rule, and reports no lowering for the rest of time.
+    exercises only the rule. Pointing it at HEAD alone passes every test where the
+    lowering is uncommitted — and is inert everywhere the gate actually runs.
     """
     git = _repo_with_committed_floors(tmp_path, committed)
     source = f"_EXPECTED_CLASS_COUNTS = {{'A': {working}}}\n"
