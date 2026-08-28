@@ -13,7 +13,9 @@ These tests supply the case the archive lacks.
 from __future__ import annotations
 
 import json
+import os
 import shutil
+import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
@@ -1283,7 +1285,7 @@ _EXPECTED_CLASS_COUNTS = {
     "DC-155-J": 4,
     "DC-155-J2": 3,
     "DC-155-K": 38,
-    "DC-155-L": 28,
+    "DC-155-L": 29,
     "DC-155-M": 1,
 }
 
@@ -1999,3 +2001,47 @@ def _report(w, n1, run="cdx-review.aaaaaa"):
 def test_the_closing_chain_rule_admits_exactly_one_shape(w, n1, archived, expected):
     """The rule itself, always exercised — not only once a report exists."""
     assert _closing_chain_violation(_report(w, n1), _FakeRev(), archived) == expected
+
+
+def test_every_collected_node_is_pinned_by_the_manifest():
+    """The floor is a MINIMUM, so an unpinned test never fails anything.
+
+    The required-node manifest is checked in one direction — every required node must
+    still collect — which catches a deletion and misses an addition. Three times in
+    this slice a batch added tests and left them unpinned: 217 of them once, the
+    closure guard once, and its five rule cases once. Each time the gate stayed green
+    while the new work was protected by nothing, because collection merely exceeded
+    the floor.
+
+    This asserts the other direction for this slice's own file: everything collected
+    from it is named in the manifest. Scoped there deliberately — the manifest is
+    another issue's artifact and widening the assertion to the whole suite would make
+    this test fail for reasons that are not this slice's to fix.
+    """
+    import json
+    import subprocess
+
+    root = Path(__file__).resolve().parents[1]
+    manifest = root / "tests/fixtures/wave_gate/test_nodes.jsonl"
+    rows = [json.loads(l) for l in manifest.read_text().splitlines() if l.strip()]
+    pinned = {r["node_id"] for r in rows[1:]}
+
+    mine = Path(__file__).name
+    collected = subprocess.run(
+        [sys.executable, "-m", "pytest", f"tests/{mine}", "--collect-only", "-q",
+         "-p", "no:cacheprovider"],
+        capture_output=True, text=True, cwd=root,
+        env={**os.environ, "PYTHONPATH": "src", "PYTHONDONTWRITEBYTECODE": "1"},
+    )
+    assert collected.returncode == 0, f"collection failed: {collected.stderr[-400:]}"
+    nodes = [
+        ln.strip() for ln in collected.stdout.splitlines()
+        if ln.startswith(f"tests/{mine}::")
+    ]
+    assert len(nodes) > 40, f"only {len(nodes)} nodes collected; the check would be thin"
+
+    unpinned = sorted(n for n in nodes if n not in pinned)
+    assert not unpinned, (
+        "these tests collect but are not required by the manifest, so deleting them "
+        f"would leave every gate green: {unpinned}"
+    )
