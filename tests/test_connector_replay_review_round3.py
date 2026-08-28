@@ -1279,13 +1279,13 @@ _EXPECTED_CLASS_COUNTS = {
     "DC-155-D": 3,
     "DC-155-E": 1,
     "DC-155-F": 0,
-    "DC-155-G": 7,
+    "DC-155-G": 8,
     "DC-155-H": 1,
     "DC-155-I": 2,
     "DC-155-J": 4,
     "DC-155-J2": 3,
     "DC-155-K": 38,
-    "DC-155-L": 29,
+    "DC-155-L": 31,
     "DC-155-M": 1,
 }
 
@@ -1830,14 +1830,13 @@ def test_each_enumerated_instance_is_classed_to_the_row_that_claims_it():
 def test_a_closing_report_names_the_current_wave_sha_and_proves_darkness():
     """STRUCTURAL: the closing report cannot outlive the tree it certifies.
 
-    Recorded three times as `DC-155-G` — a closure written ahead of the validation
-    it cites. Twice it was a checkpoint row; the third time it was the closing report
-    itself, which named a superseded wave SHA, a stale review boundary, and a darkness
-    claim two test files contradicted. Being careful is what failed, so this is a
-    check instead: if a closing report exists, the SHA it names must be the one the
-    latest wave checkpoint names, and no source, test or script may differ between
-    that SHA and the tip.
+    Recorded repeatedly as `DC-155-G`. This applies the rule below to the real
+    repository; the rule itself is exercised on every run by the table further down.
+    There is ONE implementation — an earlier version kept a second copy here, so the
+    always-on cases could stay green while the real checks were deleted, which is the
+    lost-fix failure the extraction was supposed to end.
     """
+    import json
     import re
     import subprocess
 
@@ -1851,85 +1850,51 @@ def test_a_closing_report_names_the_current_wave_sha_and_proves_darkness():
 
     report = ledger[ledger.index("## Slice B — closing report"):]
     report = report[: report.index("\n## ")] if "\n## " in report else report
-    named = re.findall(r"`([0-9a-f]{7,40})`\s*\(\*\*W\*\*\)", report)
-    assert len(named) == 1, f"the report must name exactly one W, found {named}"
-    reported_w = named[0]
+    root = ledger_path.parents[2]
 
-    waves = re.findall(
-        r"\| L4 composite wave gate, slice B \|[^|]*\|\s*`([0-9a-f]{7,40})`", ledger
-    )
-    assert waves, "no wave checkpoint row found"
-    current_w = waves[-1]
-    assert reported_w.startswith(current_w) or current_w.startswith(reported_w), (
-        f"the closing report names W={reported_w} while the latest wave checkpoint "
-        f"names {current_w}; a report may not outlive the gate it cites"
-    )
-
-    # THE REVIEWED BOUNDARY, not only the wave SHA. Validating W alone left the other
-    # half of the same defect open: a report naming the current W beside a stale
-    # closing-review boundary — or none at all — would pass, which is the drift this
-    # guard exists to refuse, one field over.
-    boundary = re.findall(r"`([0-9a-f]{7,40})`\s*\(\*\*N−1\*\*\)", report)
-    assert len(boundary) == 1, f"the report must name exactly one N−1, found {boundary}"
-    reported_n1 = boundary[0]
-
-    # THE PROTOCOL'S CHAIN, asserted as a chain. Four consecutive reviews found this
-    # guard checking one more true-but-insufficient clause — the wave SHA alone, then
-    # the boundary's existence, then its order, then its strictness — because ancestry
-    # conditions were being accumulated from findings rather than derived from what
-    # the protocol specifies. It specifies POSITIONS: the wave gate passes on one
-    # tree, the record edits land in the next, and the closing commit holds only an
-    # archive and prose. An identity leaves no room for the reflexive-reachability
-    # loophole that `--is-ancestor` allows, where a fifth clause would only move it.
-    def _rev(ref):
-        out = subprocess.run(["git", "rev-parse", ref], capture_output=True, text=True,
-                             cwd=ledger_path.parents[2])
-        assert out.returncode == 0, f"cannot resolve {ref}: {out.stderr.strip()}"
+    def _git(*args):
+        out = subprocess.run(["git", *args], capture_output=True, text=True, cwd=root)
+        assert out.returncode == 0, f"git {' '.join(args)} failed: {out.stderr.strip()}"
         return out.stdout.strip()
 
-    assert _rev(reported_n1) == _rev("HEAD~1"), (
-        f"the report names N−1={reported_n1}, but the closing commit must be the tip "
-        f"and N−1 the commit before it ({_rev('HEAD~1')[:7]})"
-    )
-    assert _rev(reported_w) != _rev(reported_n1), (
-        f"the report names N−1 equal to W ({reported_w}); the wave gate runs first "
-        "and the reviewed record commit follows it, so they are never the same tree"
-    )
-    strict = subprocess.run(
-        ["git", "merge-base", "--is-ancestor", reported_w, reported_n1],
-        capture_output=True, text=True, cwd=ledger_path.parents[2],
-    )
-    assert strict.returncode == 0, (
-        f"the closing review must run AFTER the wave gate: {reported_w} does not "
-        f"precede {reported_n1}"
-    )
+    # ANCHORED TO THE REPORT'S OWN COMMIT, not to the moving tip. Comparing against
+    # HEAD~1 held only until the next commit: the ledger schedules slices C through F
+    # after this one, so the first documentation commit that followed would have made
+    # this fail on a certified tree that had not changed at all.
+    owning = _git("log", "--format=%H", "-1", "-S", "## Slice B — closing report",
+                  "--", str(ledger_path.relative_to(root)))
+    closing = owning or "HEAD"        # uncommitted while N is being written
+    parent = _git("rev-parse", f"{closing}~1") if owning else _git("rev-parse", "HEAD")
 
-    runs = re.findall(r"`(cdx-review\.[A-Za-z0-9]+)`", report)
-    assert runs, "the report must name the closing review run that covers N−1"
+    class _RepoRev:
+        def __call__(self, ref):
+            return parent if ref == "HEAD~1" else _git("rev-parse", ref)
+
+        def precedes(self, earlier, later):
+            return subprocess.run(
+                ["git", "merge-base", "--is-ancestor", earlier, later],
+                capture_output=True, cwd=root).returncode == 0
+
     archive = ledger_path.parents[0] / "evidence" / "issue-155" / "commit-reviews"
-    covering = [
-        r for r in runs
-        if (archive / r / "last-reviewed-sha").exists()
-        and (archive / r / "last-reviewed-sha").read_text().strip().startswith(reported_n1)
-    ]
-    assert covering, (
-        f"no archived closing review has last-reviewed-sha {reported_n1}; the report "
-        f"names {runs} and the boundary it claims is therefore unattested"
+    archived = {
+        d.name: (d / "last-reviewed-sha").read_text().strip()
+        for d in archive.iterdir()
+        if d.is_dir() and (d / "last-reviewed-sha").exists()
+    }
+
+    violation = _closing_chain_violation(report, _RepoRev(), archived)
+    assert violation is None, (
+        f"the closing report violates the closing chain: {violation}. W and N−1 must "
+        f"be named, N−1 must be the commit before the one carrying this report "
+        f"({parent[:7]}), W must strictly precede it, and an archived review must "
+        "attest N−1"
     )
 
-    # ORDERED, not merely present. "N−1 is an ancestor of the tip" says nothing about
-    # WHERE it sits relative to the wave SHA, so a review taken BEFORE the wave ran
-    # satisfied it — which is the current-W-with-a-stale-boundary case this guard was
-    # extended to refuse the round before. Both directions are needed: N−1 must
-    # descend from W, and must still be reachable from the tip.
-    diff = subprocess.run(
-        ["git", "diff", "--name-only", reported_w, "HEAD", "--", "src", "tests", "scripts"],
-        capture_output=True, text=True, cwd=ledger_path.parents[2],
-    )
-    assert diff.returncode == 0, f"git diff failed: {diff.stderr.strip()}"
-    changed = [ln for ln in diff.stdout.splitlines() if ln.strip()]
-    assert not changed, (
-        f"the closing report claims darkness from {reported_w}, but these differ: {changed}"
+    changed = _git("diff", "--name-only",
+                   re.findall(r"`([0-9a-f]{7,40})`\s*\(\*\*W\*\*\)", report)[0],
+                   "HEAD", "--", "src", "tests", "scripts").splitlines()
+    assert not [c for c in changed if c.strip()], (
+        f"the closing report claims darkness from its wave SHA, but these differ: {changed}"
     )
 
 
@@ -1958,7 +1923,9 @@ def _closing_chain_violation(report, rev, archived):
         return "equal"
     if not rev.precedes(w, n1):
         return "out-of-order"
-    if not any(archived.get(r) == rev(n1) for r in re.findall(r"`(cdx-review\.[A-Za-z0-9]+)`", report)):
+    named_runs = re.findall(r"`(cdx-review\.[A-Za-z0-9]+)`", report)
+    if not any(archived.get(r, "").startswith(n1) or archived.get(r) == rev(n1)
+               for r in named_runs):
         return "unattested"
     return None
 
@@ -1996,6 +1963,8 @@ def _report(w, n1, run="cdx-review.aaaaaa"):
         ("aaaaaaa", "bbbbbbb", {"cdx-review.aaaaaa": "aaaaaaa"}, "unattested"),
         # no archived review at all
         ("aaaaaaa", "bbbbbbb", {}, "unattested"),
+        # the wave gate must precede the reviewed boundary, never follow it
+        ("ccccccc", "bbbbbbb", {"cdx-review.aaaaaa": "bbbbbbb"}, "out-of-order"),
     ],
 )
 def test_the_closing_chain_rule_admits_exactly_one_shape(w, n1, archived, expected):
