@@ -155,7 +155,11 @@ class CaptureSummaryV1(ReplayRegistryModel):
     #: connector completing successfully does not mean a receiver got its output, and
     #: the vocabulary has a separate value for each. The archived read-verb captures
     #: carry no receiver row, and the two attested write captures do.
-    return_documents: int = Field(default=0, ge=0)
+    return_documents: int | None = Field(default=None, ge=0)
+    #: Whether the operation under test REACHES that receiver in the archived process
+    #: graph. A receiver that ran in the same execution down another branch delivers
+    #: nothing on this operation's behalf. None means the archive cannot establish it.
+    receiver_is_downstream: bool | None = None
     #: sha256 over every archived file's bytes, in sorted-name order.
     capture_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
     file_count: int = Field(ge=1)
@@ -223,6 +227,14 @@ _CORRELATED_ROW_FIELDS: Final = (
 
 
 def _component_name_under_test(files: list[Path], method_hint: str | None) -> str | None:
+    """The name half of the resolution below, for the row join."""
+    resolved = _component_under_test(files, method_hint)
+    return None if resolved is None else resolved[1]
+
+
+def _component_under_test(
+    files: list[Path], method_hint: str | None
+) -> tuple[str, str] | None:
     """The NAME of the operation component whose verb is the one under test.
 
     THE JOIN KEY, and the reason this function exists at all. A capture holds more
@@ -272,7 +284,7 @@ def _component_name_under_test(files: list[Path], method_hint: str | None) -> st
             by_component[component_id] = name
     if len(by_component) != 1:
         return None
-    name = next(iter(by_component.values()))
+    component_id, name = next(iter(by_component.items()))
     # The name must be owned by exactly ONE component across the WHOLE capture, not
     # merely one among those declaring this verb. Guarding only the verb's own
     # components protects the RESOLUTION and leaves the JOIN wide: the rows below
@@ -282,7 +294,7 @@ def _component_name_under_test(files: list[Path], method_hint: str | None) -> st
     # downstream. That is the same uncorrelated read one level out.
     if len(owners.get(name, ())) != 1:
         return None
-    return name
+    return component_id, name
 
 
 def _connector_rows_under_test(
@@ -410,28 +422,102 @@ def _connector_document_counts(
     return handled, succeeded
 
 
+def _receiver_is_downstream_of_the_operation(
+    files: list[Path], method_hint: str | None
+) -> bool | None:
+    """Whether the operation under test REACHES a Return Documents shape.
+
+    The causal link, taken from the process component the capture archives — the
+    platform's own graph — rather than assumed from a receiver merely having run in
+    the same execution. An execution can reach a receiver down a path the operation
+    under test never took, and a delivery claim attached to the wrong branch is a
+    machine-served observation of something that did not happen.
+
+    None means the archive cannot say: no process component, or none whose graph
+    contains this operation. The caller refuses rather than guessing, because
+    "unestablished" and "not downstream" are different facts.
+    """
+    resolved = _component_under_test(files, method_hint)
+    if resolved is None:
+        return None
+    component_id, _ = resolved
+
+    for path in sorted(files):
+        if path.suffix != ".xml":
+            continue
+        try:
+            root = ET.parse(path).getroot()
+        except (OSError, ET.ParseError):
+            continue
+        if root.get("type") != "process":
+            continue
+
+        shapes: dict[str, dict] = {}
+        for element in root.iter():
+            if element.tag.split("}")[-1] != "shape":
+                continue
+            name = element.get("name")
+            if not name:
+                continue
+            successors, operations = [], []
+            for child in element.iter():
+                local = child.tag.split("}")[-1]
+                if local == "dragpoint" and child.get("toShape"):
+                    successors.append(child.get("toShape"))
+                elif local == "connectoraction" and child.get("operationId"):
+                    operations.append(child.get("operationId"))
+            shapes[name] = {
+                "type": element.get("shapetype"),
+                "successors": successors,
+                "operations": operations,
+            }
+
+        origins = [n for n, s in shapes.items() if component_id in s["operations"]]
+        if not origins:
+            continue
+        # Forward reachability, cycle-guarded: a process graph is authored, so it is
+        # not guaranteed acyclic just because the archived ones are.
+        seen, frontier = set(origins), list(origins)
+        while frontier:
+            current = frontier.pop()
+            for successor in shapes.get(current, {}).get("successors", ()):
+                if successor in seen:
+                    continue
+                seen.add(successor)
+                if shapes.get(successor, {}).get("type") == "returndocuments":
+                    return True
+                frontier.append(successor)
+        return False
+    return None
+
+
 def _return_documents(
     files: list[Path], execution_ids: frozenset[str]
-) -> int:
-    """Documents a Return Documents shape received, from ITS OWN rows.
+) -> int | None:
+    """Documents the receiver reported, or None when the archive cannot say.
 
-    A DIFFERENT SUBJECT from the connector's counts, and the vocabulary distinguishes
-    them: `return_documents_received` is a claim about a receiver, not about the
-    connector completing. Deriving it from the connector's success count published it
-    for the archived read-verb captures, which carry no receiver row at all.
-
-    The platform names the receiver itself — a row whose connector type is the return
-    sentinel — so the authority is in the capture rather than in an inference from the
-    connector's own numbers.
+    THREE outcomes, not two. Summing whatever carried a number collapsed the middle
+    one: half the receiver rows in the archive are document records that never carry
+    counts, so a capture holding only those would have summed to zero and published a
+    measured absence of output. An absent authority and an observed zero are different
+    facts and the served value must not be reachable from both.
     """
-    total = 0
-    for row in _reconciled_platform_rows(files, execution_ids):
-        if row.get("connectorType") != "return":
-            continue
-        value = row.get("successCount")
-        if isinstance(value, int) and not isinstance(value, bool) and value > 0:
-            total += value
-    return total
+    rows = [row for row in _reconciled_platform_rows(files, execution_ids)
+            if row.get("connectorType") == "return"]
+    if not rows:
+        return 0
+    counted = [row for row in rows
+               if isinstance(row.get("successCount"), int)
+               and not isinstance(row.get("successCount"), bool)]
+    if not counted:
+        return None
+    for row in counted:
+        if row["successCount"] < 0:
+            raise CaptureRefused(
+                f"receiver row {row.get('id')!r} reports a negative document count "
+                f"({row['successCount']}); the value feeds a delivery decision"
+            )
+    return sum(row["successCount"] for row in counted)
 
 
 def _start_shape_of_the_exercised_connector(
@@ -890,6 +976,9 @@ def summarize(capture_dir: Path, method_hint: str | None = None) -> CaptureSumma
             files, execution_ids, method_hint
         ),
         return_documents=_return_documents(files, execution_ids),
+        receiver_is_downstream=_receiver_is_downstream_of_the_operation(
+            files, method_hint
+        ),
         connector_documents=None if counts is None else counts[0],
         connector_successful_documents=None if counts is None else counts[1],
     )

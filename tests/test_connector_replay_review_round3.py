@@ -627,3 +627,77 @@ def test_a_receiver_row_that_received_nothing_is_not_a_delivery(tmp_path):
     assert summary.return_documents == 0
     assert summary.connector_successful_documents > 0
     assert _output_observation(summary) is OutputObservationV1.NO_OUTPUT_OBSERVED
+
+
+def test_a_receiver_on_another_branch_is_not_this_operations_delivery(tmp_path):
+    """Co-occurrence in one execution is not attribution.
+
+    The archived processes are linear, so the receiver is always downstream and the
+    archive cannot tell an attributed claim from an unattributed one. This builds the
+    case it lacks: the operation under test runs on a branch that never reaches the
+    Return Documents shape, while a receiver runs on the other one.
+    """
+    from boomi_mcp.connector_replay.capture import (
+        _receiver_is_downstream_of_the_operation,
+    )
+    from boomi_mcp.connector_replay.ingest import IngestRefused, _output_observation
+
+    dst = tmp_path / "receiver-on-another-branch"
+    shutil.copytree(_CAPTURES / _SOURCE, dst)
+    process = dst / "component_process.xml"
+    text = process.read_text()
+
+    # shape3 is the PATCH; cut its edge to the receiver so nothing downstream of it
+    # reaches shape4, while shape4 itself still exists and still ran.
+    assert '<dragpoint name="shape3.dragpoint1" toShape="shape4"' in text or 'toShape="shape4"' in text
+    process.write_text(text.replace('toShape="shape4"', 'toShape="shape3"', 1))
+
+    files = sorted(dst.iterdir())
+    assert _receiver_is_downstream_of_the_operation(files, "PATCH") is False
+
+    summary = summarize(dst, "PATCH")
+    assert summary.return_documents > 0, "the receiver still ran and still reported"
+    with pytest.raises(IngestRefused, match="does not establish"):
+        _output_observation(summary)
+
+    # CONTROL: unmodified, the same capture attributes the delivery.
+    assert _receiver_is_downstream_of_the_operation(
+        sorted((_CAPTURES / _SOURCE).iterdir()), "PATCH"
+    ) is True
+
+
+def test_a_receiver_with_no_countable_row_is_unknown_not_zero(tmp_path):
+    """Half the archive's receiver rows never carry counts; absence must not read as zero."""
+    from boomi_mcp.connector_replay.ingest import IngestRefused, _output_observation
+
+    # The premise, measured rather than assumed: document-record receiver rows exist
+    # in the real archive with no count on them at all.
+    uncounted = 0
+    for path in sorted((_CAPTURES / _SOURCE).glob("*.json")):
+        for record in _platform_connector_records(json.loads(path.read_text())):
+            if record.get("connectorType") == "return" and not isinstance(
+                record.get("successCount"), int
+            ):
+                uncounted += 1
+    assert uncounted, "the fixture must contain a countless receiver row"
+
+    dst = tmp_path / "receiver-without-counts"
+    shutil.copytree(_CAPTURES / _SOURCE, dst)
+    for path in dst.glob("*.json"):
+        payload = json.loads(path.read_text())
+        touched = False
+        for record in _platform_connector_records(payload):
+            if record.get("connectorType") == "return":
+                record.pop("successCount", None)
+                touched = True
+        if touched:
+            path.write_text(json.dumps(payload))
+
+    summary = summarize(dst, "PATCH")
+    assert summary.return_documents is None, "an absent count must not become zero"
+    with pytest.raises(IngestRefused, match="unknown rather than nothing"):
+        _output_observation(summary)
+
+    # CONTROL: a capture with NO receiver at all is a measured absence, not unknown.
+    absent = summarize(_CAPTURES / "cap155-e4-head-status", "HEAD")
+    assert absent.return_documents == 0

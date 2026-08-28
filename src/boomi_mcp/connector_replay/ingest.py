@@ -427,7 +427,21 @@ def _output_observation(summary: CaptureSummaryV1) -> OutputObservationV1:
     # for the archived read-verb captures, none of which carries a receiver row,
     # while the two attested write captures do — so the distinction is in the
     # evidence and was being flattened.
+    if summary.return_documents is None:
+        raise IngestRefused(
+            f"{summary.scenario}: a receiver ran but the archive carries no count "
+            "for it, so what it received is unknown rather than nothing"
+        )
     if summary.return_documents > 0:
+        # ATTRIBUTED, not merely co-occurring. A receiver reached down another branch
+        # of the same execution delivered nothing on this operation's behalf, so the
+        # archived process graph has to place it downstream before the claim is made.
+        if summary.receiver_is_downstream is not True:
+            raise IngestRefused(
+                f"{summary.scenario}: a receiver reported documents but the archive "
+                "does not establish that the operation under test reaches it, so the "
+                "delivery cannot be attributed to this operation"
+            )
         return OutputObservationV1.RETURN_DOCUMENTS_RECEIVED
     # `successor_received_documents` is deliberately NOT minted here. It is a claim
     # about a downstream step receiving the output, and no archived capture carries
