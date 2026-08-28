@@ -610,6 +610,43 @@ def _first_across(files: list[Path], key: str, want: type | tuple = object) -> A
     return None
 
 
+def _state_change_for_run(
+    own: Path | None,
+    deltas: dict[str, Path],
+    label: str,
+    execution_id: str,
+) -> bool | None:
+    """Whether THIS run changed state, from the delta entry that names it.
+
+    Two capture generations, one rule. Some write a delta file per run, whose label
+    matches the run's; others write one file holding a list of entries, each carrying
+    its own ``label`` and ``execution_id``. Matching on those is the same correlation
+    the connector rows get, and it is what the previous reader skipped: it took entry
+    zero from the shared file for every run.
+    """
+    candidates = [own] if own is not None else list(deltas.values())
+    for path in candidates:
+        try:
+            payload = _load_json(path)
+        except CaptureRefused:
+            continue
+        entries = payload if isinstance(payload, list) else [payload]
+        matching = [
+            entry for entry in entries
+            if isinstance(entry, dict)
+            and (entry.get("execution_id") == execution_id or entry.get("label") == label)
+        ]
+        if len(matching) == 1:
+            changed = matching[0].get("raw_changed")
+            return changed if isinstance(changed, bool) else None
+        if not matching and own is not None and len(entries) == 1:
+            # A per-run file whose single entry names nothing: the filename IS the
+            # correlation for that generation.
+            changed = _first(entries[0], "raw_changed")
+            return changed if isinstance(changed, bool) else None
+    return None
+
+
 def _run_label(name: str, suffix: str) -> str:
     """``run1_execution_record.json`` -> ``run1``; ``execution_record.json`` -> ``run``."""
     stem = name[: -len(suffix)].rstrip("_")
@@ -975,6 +1012,13 @@ def summarize(capture_dir: Path, method_hint: str | None = None) -> CaptureSumma
         # by-atom execution listing moved a capture's served timestamp to an execution
         # a month earlier from a different capture, and ingest still succeeded.
         executed_at = _first(payload, "executionTime")
+        if not (isinstance(executed_at, str) and executed_at):
+            # The platform stamps the record twice, and the second stamp is present
+            # and distinct in every archived multi-run capture. Refusing to order runs
+            # because ONE of two recorded times is missing discards an order the
+            # artifact does record — the defect being avoided is inventing an order,
+            # not reading a second one the platform wrote.
+            executed_at = _first(payload, "recordedDate")
         if isinstance(executed_at, str) and executed_at:
             execution_times.append(executed_at)
         account = _first(payload, "account")
@@ -982,11 +1026,16 @@ def summarize(capture_dir: Path, method_hint: str | None = None) -> CaptureSumma
             accounts.add(account)
 
         state_changed: bool | None = None
-        delta_path = deltas.get(label) or (next(iter(deltas.values())) if len(deltas) == 1 else None)
-        if delta_path is not None:
-            changed = _first(_load_json(delta_path), "raw_changed")
-            if isinstance(changed, bool):
-                state_changed = changed
+        # CORRELATED TO THIS RUN. A single delta file covering several runs is a LIST
+        # whose entries each name the run and the execution they describe, and the
+        # reader used to take the first entry's verdict and hand it to every run — the
+        # archived post capture serves a replay `state_changed` of true from its first
+        # call's entry while its own second entry says false. The filename label is a
+        # fallback for the one-entry-per-file generation, never a way to spread one
+        # entry over several runs.
+        state_changed = _state_change_for_run(
+            deltas.get(label), deltas, label, execution_id
+        )
 
         if isinstance(executed_at, str) and executed_at:
             _run_started_at[label] = executed_at
@@ -1007,7 +1056,8 @@ def summarize(capture_dir: Path, method_hint: str | None = None) -> CaptureSumma
     # ORDERED BY WHEN THEY RAN, or NOT ORDERED AT ALL. The attribution below pairs the
     # counterparty's chronological log against this sequence, and it used to sort by
     # the run's filename LABEL on the stated grounds that the two orders agree —
-    # measured, they disagree in eleven of the thirteen multi-run captures.
+    # measured, they disagree in ten of the thirteen multi-run captures by LABEL order, which is
+    # what that fallback would use; eleven is the count by filename order.
     #
     # Sorting by timestamp with a fallback for missing ones was the first correction
     # and was itself wrong: an untimed run sorted ahead of every timed one, so removing
@@ -1022,10 +1072,10 @@ def summarize(capture_dir: Path, method_hint: str | None = None) -> CaptureSumma
     # archive did not establish. Falling back to label ORDER for the pairing would
     # reinstate exactly the unestablished key this replaced.
     _times = [_run_started_at.get(run.label) for run in runs]
-    chronology_established = (
-        len(runs) == 1
-        or (all(_times) and len(set(_times)) == len(_times))
-    )
+    # No `len(runs) == 1` special case: one run trivially satisfies both conditions,
+    # and a disjunct that cannot change an outcome is a clause this module has already
+    # been told twice not to write.
+    chronology_established = all(_times) and len(set(_times)) == len(_times)
     if chronology_established and len(runs) > 1:
         runs.sort(key=lambda r: _run_started_at[r.label])
     else:

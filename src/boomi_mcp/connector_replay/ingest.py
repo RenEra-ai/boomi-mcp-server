@@ -529,6 +529,12 @@ def _capture_reference(summary: CaptureSummaryV1, side_effect: SideEffectV1) -> 
             "could be correlated to the operation under test, and a placement is an "
             "observation, not a default"
         )
+    if not summary.captured_at:
+        raise IngestRefused(
+            f"{summary.scenario}: no execution records a time, and the identifier's "
+            "trailing date is a DIFFERENT shape from the one this field carries — "
+            "serving it would put a dotted date where every other row has a timestamp"
+        )
     return CaptureReferenceV1(
         execution_id=summary.execution_ids[0],
         # From the capture, not from its DIRECTORY NAME. A scenario label is neither
@@ -536,7 +542,7 @@ def _capture_reference(summary: CaptureSummaryV1, side_effect: SideEffectV1) -> 
         # look unrelated and two identically-named scenarios from different accounts
         # collide — which silently defeats the account-consistency check that
         # consumes this hash.
-        captured_at=summary.captured_at or summary.execution_ids[0].rsplit("-", 1)[1],
+        captured_at=summary.captured_at,
         account_scope_hash=_account_scope_hash(summary),
         summary=ClosedCaptureObservationsV1(
             placement=(PlacementObservationV1.ENTRY if summary.is_start_shape

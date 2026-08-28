@@ -1122,9 +1122,18 @@ def test_a_partial_chronology_drops_attribution_rather_than_guessing(tmp_path):
 
     Falling back to LABEL order for the pairing is equally wrong — that is the
     unestablished key the ordering fix replaced. So an incomplete chronology drops the
-    per-run attribution, and the replay verdict falls back to unverified.
+    per-run attribution.
+
+    What happens NEXT was stated wrongly here twice: the evidence row is REFUSED
+    outright, not "degraded to unverified" — and `unverified` is a retry-safety value,
+    not a replay observation at all. This test now asserts the consumer it gates
+    rather than stopping at the classifier, which is the whole point of the finding
+    that produced it.
+
+    Both timestamps are stripped, because the platform records two and the
+    establishment key reads either.
     """
-    from boomi_mcp.connector_replay.ingest import classify
+    from boomi_mcp.connector_replay.ingest import IngestRefused, _capture_reference, classify
     from boomi_mcp.connector_replay.models import RetrySafetyV1
 
     source = _CAPTURES / "cap155-e5-delete-attested"
@@ -1140,6 +1149,7 @@ def test_a_partial_chronology_drops_attribution_rather_than_guessing(tmp_path):
     def strip_times(node):
         if isinstance(node, dict):
             node.pop("executionTime", None)
+            node.pop("recordedDate", None)
             for value in node.values():
                 strip_times(value)
         elif isinstance(node, list):
@@ -1156,8 +1166,12 @@ def test_a_partial_chronology_drops_attribution_rather_than_guessing(tmp_path):
     assert all(run.counterparty_status is None for run in partial.runs), (
         "an unestablished order must not pair outcomes to executions"
     )
-    # ...so the verdict degrades rather than being minted from a guessed order.
-    assert classify(partial, "DELETE")[1] is RetrySafetyV1.UNVERIFIED
+    # ...so the verdict is not minted from a guessed order, and the CONSUMER refuses
+    # rather than serving a row built on it.
+    side_effect, safety = classify(partial, "DELETE")
+    assert safety is RetrySafetyV1.UNVERIFIED
+    with pytest.raises(IngestRefused):
+        _capture_reference(partial, side_effect)
     # And the untimed run must not have been promoted to first, which is what the
     # superseded ordering did and what made the served execution id wrong.
     assert [r.label for r in partial.runs] == ["run1", "run2"]
@@ -1165,7 +1179,7 @@ def test_a_partial_chronology_drops_attribution_rather_than_guessing(tmp_path):
 
 def test_two_runs_sharing_one_timestamp_are_not_an_order(tmp_path):
     """A tie establishes no sequence either."""
-    from boomi_mcp.connector_replay.ingest import classify
+    from boomi_mcp.connector_replay.ingest import IngestRefused, _capture_reference, classify
     from boomi_mcp.connector_replay.models import RetrySafetyV1
 
     dst = tmp_path / "tied-chronology"
@@ -1177,8 +1191,76 @@ def test_two_runs_sharing_one_timestamp_are_not_an_order(tmp_path):
     for record in records:
         payload = json.loads(record.read_text())
         _set_time(payload, shared)
+        _set_recorded(payload, shared)
         record.write_text(json.dumps(payload))
 
     tied = summarize(dst, "DELETE")
     assert all(run.counterparty_status is None for run in tied.runs)
-    assert classify(tied, "DELETE")[1] is RetrySafetyV1.UNVERIFIED
+    side_effect, safety = classify(tied, "DELETE")
+    assert safety is RetrySafetyV1.UNVERIFIED
+    with pytest.raises(IngestRefused):
+        _capture_reference(tied, side_effect)
+
+
+def _set_recorded(node, value):
+    if isinstance(node, dict):
+        if "recordedDate" in node:
+            node["recordedDate"] = value
+        for inner in node.values():
+            _set_recorded(inner, value)
+    elif isinstance(node, list):
+        for inner in node:
+            _set_recorded(inner, value)
+
+
+def test_the_second_platform_timestamp_establishes_the_order(tmp_path):
+    """The platform stamps each record twice, and both are recorded evidence.
+
+    Refusing to order runs because ONE of two recorded times is absent discards an
+    order the artifact does record. Measured: the second stamp is present and
+    distinct in all thirteen archived multi-run captures.
+    """
+    dst = tmp_path / "second-stamp-only"
+    shutil.copytree(_CAPTURES / "cap155-e5-delete-attested", dst)
+    for record in dst.glob("*execution_record*.json"):
+        payload = json.loads(record.read_text())
+
+        def drop(node):
+            if isinstance(node, dict):
+                node.pop("executionTime", None)
+                for value in node.values():
+                    drop(value)
+            elif isinstance(node, list):
+                for value in node:
+                    drop(value)
+
+        drop(payload)
+        record.write_text(json.dumps(payload))
+
+    summary = summarize(dst, "DELETE")
+    assert [(r.label, r.counterparty_status) for r in summary.runs] == [
+        ("run1", 204), ("run2", 404)
+    ], "the second stamp must still establish the order"
+
+
+def test_a_shared_readback_delta_is_read_per_run(tmp_path):
+    """Each entry names the run it describes; entry zero is not everyone's verdict.
+
+    Not hypothetical — the archived POST capture served its replay a state change
+    taken from the first call's entry while its own second entry says otherwise.
+    """
+    summary = summarize(_CAPTURES / "cap155-e2-post", "POST")
+    by_label = {r.label: r.state_changed for r in summary.runs}
+    assert by_label == {"run1": True, "replay": False}, (
+        f"each run must take its own entry, got {by_label}"
+    )
+
+    entries = json.loads(
+        (_CAPTURES / "cap155-e2-post" / "readback_delta.json").read_text()
+    )
+    assert isinstance(entries, list) and len(entries) > 1
+    recorded = {e["label"]: e["raw_changed"] for e in entries}
+    assert recorded != {k: entries[0]["raw_changed"] for k in recorded}, (
+        "the fixture's entries must actually disagree, or this proves nothing"
+    )
+    assert by_label == recorded
