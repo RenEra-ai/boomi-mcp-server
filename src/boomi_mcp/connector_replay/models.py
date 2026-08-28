@@ -462,20 +462,23 @@ class ComponentProjectionAllowlistV1(ReplayRegistryModel):
     #: design, and silently skipping an unrecognised element is the fail-OPEN
     #: reading of the same allowlist.
     included_elements: tuple[str, ...] = ()
-    #: Attributes carried into the digest from a PROJECTED field element, beyond
-    #: the two the projection carries structurally (``id`` becomes the projected
-    #: node's identity, ``value`` its text). An attribute on a projected element
-    #: that is in neither this tuple nor ``excluded_field_attributes`` is unknown
-    #: content and refuses, exactly as an unknown field or element does.
-    included_field_attributes: tuple[str, ...] = ()
-    #: Attributes on a projected field KNOWN and deliberately left out. Naming an
-    #: exclusion forces a decision per attribute instead of silent omission.
-    excluded_field_attributes: tuple[str, ...] = ()
-    #: The same three categories for a projected property element. ``value`` belongs
-    #: here rather than in the digest: a static header's or query parameter's value
-    #: is a classic place for an API key and this digest is published, so keys reach
-    #: it and values never do. That is a decision, recorded as one — not an omission.
-    excluded_property_attributes: tuple[str, ...] = ()
+    #: Attributes carried into the digest from ANY element the projection admits.
+    #: Scope is derived, not enumerated per shape: every element whose name is in
+    #: ``included_elements`` must have every one of its attributes classified — here,
+    #: in ``excluded_scope_attributes``, or as one of the structural names the
+    #: projection carries by construction. Anything else is unknown content and
+    #: refuses, exactly as an unknown field or element does. Enumerating the
+    #: SHAPES instead (attributes on fields, then on properties, then on config
+    #: elements) found a new uncovered shape every review round; the admitted-element
+    #: set is finite and the projection already owns it.
+    included_scope_attributes: tuple[str, ...] = ()
+    #: Attributes on an admitted element KNOWN and deliberately left out. Naming an
+    #: exclusion forces a decision per attribute instead of silent omission. The
+    #: OAuth endpoint and client attributes live here for the same reason the
+    #: credentials element does: this digest is published and they are credential
+    #: material, not routing identity. A static header's or query parameter's value
+    #: is here too — keys reach the digest and values never do.
+    excluded_scope_attributes: tuple[str, ...] = ()
     #: Names whose VALUES are qualified names, so canonicalisation must resolve
     #: their prefixes rather than compare them textually.
     qname_aware_tags: tuple[str, ...] = ()

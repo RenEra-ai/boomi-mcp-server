@@ -132,6 +132,72 @@ def test_a_duplicated_field_id_is_refused_rather_than_last_one_wins():
         component_config_digest_v1(dup, "connection")
 
 
+def _operation_xml() -> str:
+    return _operation_xmls()[0].read_text()
+
+
+def test_an_unknown_attribute_on_a_non_field_element_refuses():
+    """Scope is every element the projection ADMITS, not the shapes named so far.
+
+    Three consecutive reviews each found one more uncovered shape — a field, then a
+    property, then a configuration element — because each fix named a place instead
+    of the space. Measured before this rule: a stray attribute on
+    `GenericOperationConfig` left the digest byte-identical.
+    """
+    op = _operation_xml()
+    planted = op.replace("<GenericOperationConfig", '<GenericOperationConfig strayAttr="x"', 1)
+    assert planted != op, "the plant matched nothing"
+    with pytest.raises(ConfigDigestRefused):
+        component_config_digest_v1(planted, "operation")
+
+
+@pytest.mark.parametrize("attribute", ["operationType", "trackResponse",
+                                       "returnApplicationErrors"])
+def test_a_classified_configuration_attribute_reaches_the_digest(attribute):
+    """A carried attribute must MOVE the digest, or classifying it changed nothing."""
+    op = _operation_xml()
+    found = re.search(rf'{attribute}="([^"]*)"', op)
+    assert found, f"{attribute} is absent from the captured operation; this test is vacuous"
+    planted = op.replace(found.group(0), f'{attribute}="MUTATED"', 1)
+    assert component_config_digest_v1(planted, "operation") != \
+           component_config_digest_v1(op, "operation")
+
+
+def test_a_namespaced_attribute_is_not_the_unqualified_one(connection_xml):
+    """`x:type` is a different attribute from `type` and must not pass as it.
+
+    Measured before the QName comparison: the local-name allowlist admitted it while
+    the projection read the unqualified name and found nothing, so a field carrying a
+    namespaced type digested identically to a field carrying none.
+    """
+    planted = re.sub(r'(<field id="url"[^>]*?)\s*/>',
+                     r'\1 xmlns:x="urn:x" x:type="password"/>', connection_xml, count=1)
+    assert planted != connection_xml, "the plant matched nothing"
+    with pytest.raises(ConfigDigestRefused):
+        component_config_digest_v1(planted, "connection")
+
+
+def test_the_projection_revision_is_inside_the_digested_payload(connection_xml):
+    """Two projections are declared incomparable, so the revision must be digested.
+
+    Recorded beside the digest it is a label; inside it, a component whose projected
+    facts happen not to differ still cannot collide across revisions.
+    """
+    import xml.etree.ElementTree as ET
+
+    from boomi_mcp.connector_replay.digests import (
+        _parse, _project_tree, _projection_spec,
+    )
+    spec = _projection_spec("connection")
+    root = _parse(connection_xml, ConfigDigestRefused, "connection")
+    payloads = set()
+    for revision in (1, 2):
+        variant = dict(spec, projection_version=revision)
+        payloads.add(ET.canonicalize(
+            ET.tostring(_project_tree(root, variant, "connection"), encoding="unicode")))
+    assert len(payloads) == 2, "the projection revision does not reach the payload"
+
+
 def test_an_unknown_attribute_on_a_projected_field_refuses(connection_xml):
     """The third of three: fields closed, elements closed, attributes did not.
 
@@ -154,9 +220,11 @@ def test_an_attribute_outside_the_projection_scope_does_not_refuse(connection_xm
     dates, folder, version. Refusing those would refuse every real component while
     proving nothing, so the scope is what the projection digests, not the document.
     """
-    planted = connection_xml.replace("<Component ", '<Component strayMeta="x" ', 1)
-    if planted == connection_xml:
-        planted = re.sub(r"(<[A-Za-z][\w.:-]*\s)", r'\1strayMeta="x" ', connection_xml, count=1)
+    # The root element, NOT the XML declaration — an earlier form of this plant hit
+    # `<?xml` and produced a parse refusal that read like an over-broad guard.
+    root = re.search(r"<(?!\?)[A-Za-z][\w.:-]*", connection_xml)
+    assert root, "no root element found"
+    planted = connection_xml[:root.end()] + ' strayMeta="x"' + connection_xml[root.end():]
     assert planted != connection_xml, "the metadata plant matched nothing"
     assert component_config_digest_v1(planted, "connection") == \
            component_config_digest_v1(connection_xml, "connection")

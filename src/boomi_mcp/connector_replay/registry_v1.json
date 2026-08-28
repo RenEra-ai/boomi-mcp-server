@@ -65,12 +65,13 @@
       "projection_version": 2,
       "qname_aware_attrs": [],
       "qname_aware_tags": [],
-      "included_field_attributes": [
+      "included_scope_attributes": [
         "type"
       ],
-      "excluded_field_attributes": [],
-      "excluded_property_attributes": [
-        "value"
+      "excluded_scope_attributes": [
+        "clientId",
+        "grantType",
+        "url"
       ]
     },
     {
@@ -109,13 +110,16 @@
       "projection_version": 2,
       "qname_aware_attrs": [],
       "qname_aware_tags": [],
-      "included_field_attributes": [
-        "type"
+      "included_scope_attributes": [
+        "customOperationType",
+        "type",
+        "operationType",
+        "returnApplicationErrors",
+        "trackResponse",
+        "enabled",
+        "directory"
       ],
-      "excluded_field_attributes": [],
-      "excluded_property_attributes": [
-        "value"
-      ]
+      "excluded_scope_attributes": []
     }
   ],
   "schema_version": 1,
