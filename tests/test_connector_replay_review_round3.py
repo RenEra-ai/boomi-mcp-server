@@ -1275,20 +1275,36 @@ _EXPECTED_CLASS_COUNTS = {
     "DC-155-B": 1,
     "DC-155-C": 13,
     "DC-155-D": 3,
-    "DC-155-E": 0,
+    "DC-155-E": 1,
     "DC-155-F": 0,
     "DC-155-G": 1,
-    "DC-155-H": 0,
+    "DC-155-H": 1,
     "DC-155-I": 2,
     "DC-155-J": 2,
     "DC-155-J2": 3,
     "DC-155-K": 34,
-    "DC-155-L": 13,
+    "DC-155-L": 16,
 }
 
 #: Instances counted before finding ids were enumerated. A CLOSED set: a
 #: remainder that only has to add up can absorb a real instance.
 _UNROWED = {"DC-155-C": 2, "DC-155-I": 1}
+
+#: Finding rows that name their defect class in PROSE rather than by its id, because
+#: they were written before that class had one and are byte-frozen from their first
+#: commit. Frozen by name so the gap cannot grow or be swapped into; a row written now
+#: has an id available and must use it.
+_CLASS_NAMED_IN_PROSE = [
+    "CDX-155-r22-06",
+    "CDX-155-r23-01",
+    "CDX-155-r27-01",
+    "CDX-155-r27-05",
+    "CDX-155-r6-01",
+    "QA-155-r21-02",
+    "QA-155-r23-01",
+    "QA-155-r27-01",
+    "QA-155-r27-05",
+]
 
 
 def test_every_defect_class_tally_equals_its_own_enumeration():
@@ -1329,30 +1345,48 @@ def test_every_defect_class_tally_equals_its_own_enumeration():
         name = line.split("|")[1].strip()
         count_cell = line.split("|")[4]
 
-        declared = re.match(r"\s*(\d+)", count_cell)
-        assert declared, (
-            f"{name}: the instance count must be a numeral, not {count_cell.strip()[:40]!r}"
+        # A CANONICAL GRAMMAR for the whole cell, not a check per escape. Four rounds
+        # of this guard closed one shape each — a count in words, a row with no list,
+        # a duplicate, a zero row naming instances — and the fifth arrived as a
+        # remainder written OUTSIDE the parentheses, where every one of those checks
+        # looked past it. The cell now has exactly two legal forms and anything else
+        # is refused, so the space is closed rather than sampled.
+        canonical = re.fullmatch(
+            r"\s*(?P<count>\d+)\s*(?:\((?P<body>[^()]*)\)(?P<tail>\s*—[^()]*)?)?\s*",
+            count_cell,
         )
-        declared = int(declared.group(1))
+        assert canonical, (
+            f"{name}: the instance cell {count_cell.strip()[:60]!r} is not a count, "
+            "optionally one parenthesised instance list, optionally a dash-introduced "
+            "note — and nothing else"
+        )
+        declared = int(canonical.group("count"))
+        body = canonical.group("body")
+        tail = canonical.group("tail") or ""
+        # The note may explain; it may not COUNT. An instance or a remainder written
+        # after the list would read as declared while sitting outside everything that
+        # checks the list — which is exactly how the previous shape of this guard was
+        # walked past.
+        assert not re.findall(r"`([A-Z]+-155-[A-Za-z0-9-]+)`", tail), (
+            f"{name}: the note after its instance list names findings; instances "
+            "belong in the list, where they are counted"
+        )
+        assert "unrowed" not in tail, (
+            f"{name}: the note after its instance list carries a remainder"
+        )
         seen_counts[name] = declared
+
         if declared == 0:
-            # VALIDATED, not skipped. Returning early here let a zero-count row carry
-            # a finding id and an unrowed remainder while bypassing every check below
-            # it, and its own floor of zero accepted the contradiction.
-            empty = re.search(r"\(([^)]*)\)", count_cell)
-            if empty:
-                assert not re.findall(r"`([A-Z]+-155-[A-Za-z0-9-]+)`", empty.group(1)), (
-                    f"{name}: declares zero instances and names some"
-                )
-                assert "unrowed" not in empty.group(1), (
-                    f"{name}: declares zero instances and carries a remainder"
-                )
+            # A zero row carries NO body at all. Validating the body's CONTENTS was
+            # the previous shape of this, and it looked past a remainder written
+            # outside the parentheses; the grammar above makes that unwritable, and
+            # this asserts the remaining freedom is unused.
+            assert not body, f"{name}: declares zero instances and carries {body!r}"
             continue
 
-        listed = re.search(r"\(([^)]*)\)", count_cell)
-        assert listed, f"{name}: declares {declared} instances and names none"
-        enumerated = re.findall(r"`([A-Z]+-155-[A-Za-z0-9-]+)`", listed.group(1))
-        unrowed = re.search(r"\+(\d+) unrowed", listed.group(1))
+        assert body, f"{name}: declares {declared} instances and names none"
+        enumerated = re.findall(r"`([A-Z]+-155-[A-Za-z0-9-]+)`", body)
+        unrowed = re.search(r"\+(\d+) unrowed", body)
         unrowed = int(unrowed.group(1)) if unrowed else 0
 
         # FROZEN, not merely arithmetic. A remainder that only has to add up verifies
@@ -1657,7 +1691,68 @@ def test_a_zero_count_class_row_may_not_name_instances():
         assert not re.findall(r"`([A-Z]+-155-[A-Za-z0-9-]+)`", cell), (
             f"{line.split('|')[1].strip()}: zero instances, yet names one"
         )
-    assert zero_rows == 4, (
-        f"the ledger has {zero_rows} zero-count class rows, not the 4 measured when this "
+    assert zero_rows == 2, (
+        f"the ledger has {zero_rows} zero-count class rows, not the 2 measured when this "
         "check was written; a class opening or closing changes what it covers"
+    )
+
+
+def test_each_enumerated_instance_is_classed_to_the_row_that_claims_it():
+    """The class table and the finding rows must agree, in BOTH directions.
+
+    Deriving the table from the rows' own class assignments is the fix that would end
+    this guard's recurrence outright — the count would not be authored at all. It is
+    not available here: finding rows are byte-frozen from their first commit, and the
+    earliest ones name their class in prose, written before that class had an id, so
+    they cannot be retro-labelled. What IS derivable is the other direction — every id
+    a class row claims must, where its own row names a class id, name THIS one.
+
+    The exempt set is frozen rather than open-ended, so the gap cannot grow: a row
+    written today has an id available and must use it.
+    """
+    import re
+
+    ledger = (
+        Path(__file__).resolve().parents[1]
+        / "docs/architecture/ISSUE_155_AUDIT_LEDGER.md"
+    ).read_text()
+
+    row_class: dict[str, str | None] = {}
+    for line in ledger.splitlines():
+        match = re.match(r"^\| ([A-Z]+-155-[A-Za-z0-9-]+) \|", line)
+        if not match:
+            continue
+        cells = line.split("|")
+        if len(cells) < 10:
+            continue
+        named = re.search(r"(DC-155-[A-Z0-9]+)", cells[6])
+        row_class[match.group(1)] = named.group(1) if named else None
+
+    exempt, mismatched, checked = [], [], 0
+    for line in ledger.splitlines():
+        if not line.startswith("| DC-155-"):
+            continue
+        name = line.split("|")[1].strip()
+        listed = re.search(r"\(([^)]*)\)", line.split("|")[4])
+        if not listed:
+            continue
+        for instance in re.findall(r"`([A-Z]+-155-[A-Za-z0-9-]+)`", listed.group(1)):
+            declared_by_row = row_class.get(instance)
+            if declared_by_row is None:
+                exempt.append(instance)
+                continue
+            checked += 1
+            if declared_by_row != name:
+                mismatched.append((instance, name, declared_by_row))
+
+    assert not mismatched, (
+        "a class row claims an instance whose own row names a different class: "
+        + ", ".join(f"{i} claimed by {c} but classed {d}" for i, c, d in mismatched)
+    )
+    assert checked >= 30, f"only {checked} instances were cross-checked"
+    assert sorted(set(exempt)) == _CLASS_NAMED_IN_PROSE, (
+        "the set of instances naming their class in prose rather than by id has "
+        f"changed: only expected {sorted(set(_CLASS_NAMED_IN_PROSE) - set(exempt))}, "
+        f"only present {sorted(set(exempt) - set(_CLASS_NAMED_IN_PROSE))}. It is frozen "
+        "by NAME, not by count, so one row cannot be swapped for another"
     )
