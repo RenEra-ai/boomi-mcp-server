@@ -289,3 +289,59 @@ def test_a_carried_attribute_is_bound_to_the_element_that_owns_it():
     assert only_first != only_second, "the two variants are identical; this test is vacuous"
     assert component_config_digest_v1(only_first, "operation") != \
            component_config_digest_v1(only_second, "operation")
+
+
+def test_a_carried_attribute_is_bound_to_the_field_id_not_only_its_position():
+    """Position among admitted elements is not an identity.
+
+    Constructed collision, measured before the fix: a PROJECTED field and an EXCLUDED
+    one both carrying `type`, with ownership swapped, produced the same ordered
+    sequence of records — so the routing field's type changed from `string` to
+    `boolean` and the digest did not move.
+    """
+    from boomi_mcp.connector_replay.registry import load_registry
+
+    projection = load_registry().projection_for("connection", "rest")
+    excluded = projection.excluded_fields[0]
+
+    def document(url_type, other_type, url_first):
+        url = f'<field id="url" type="{url_type}" value="http://host:8081"/>'
+        other = f'<field id="{excluded}" type="{other_type}" value="x"/>'
+        ordered = [url, other] if url_first else [other, url]
+        return "<GenericConnectionConfig>" + "".join(ordered) + "</GenericConnectionConfig>"
+
+    assert component_config_digest_v1(document("string", "boolean", True), "connection") != \
+           component_config_digest_v1(document("boolean", "string", False), "connection")
+
+
+#: The canonical payload, pinned per projection revision. A payload change without a
+#: revision bump is the defect this pins, and it happened TWICE in consecutive review
+#: rounds while the rule was written down and relied on memory. Adding a revision adds
+#: a row; changing a payload under an existing revision fails here.
+_PAYLOAD_BY_REVISION = {
+    4: "e4d06ac9ebe8a1db",
+}
+
+
+def test_a_payload_change_requires_a_new_projection_revision():
+    """Mechanized, because the written rule was forgotten twice running.
+
+    The digest of a fixed component under the CURRENT projection is pinned against the
+    revision that projection declares. Change the payload and the pin fails until a new
+    revision — and a new row — is recorded.
+    """
+    from boomi_mcp.connector_replay.registry import load_registry
+
+    revision = load_registry().projection_for("connection", "rest").projection_version
+    assert revision in _PAYLOAD_BY_REVISION, (
+        f"projection revision {revision} has no pinned payload; a revision bump adds a "
+        "row here, so the payload it produces is recorded rather than assumed"
+    )
+    fixed = ('<GenericConnectionConfig><field id="url" type="string" '
+             'value="http://host:8081"/></GenericConnectionConfig>')
+    actual = component_config_digest_v1(fixed, "connection").split(":")[-1][:16]
+    assert actual == _PAYLOAD_BY_REVISION[revision], (
+        f"the canonical payload changed under revision {revision} (pinned "
+        f"{_PAYLOAD_BY_REVISION[revision]}, got {actual}). Advance the projection "
+        "revision with the payload, and add its row above"
+    )

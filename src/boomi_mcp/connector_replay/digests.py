@@ -591,13 +591,21 @@ def _project_tree(root: ET.Element, spec: dict, kind: str) -> ET.Element:
     # two fields were indistinguishable, so moving the sole `type` from one to the
     # other left the payload identical. Emitting every admitted element also makes the
     # presence of an extra admitted element a change in its own right.
-    for el in _admitted(root, spec):
+    for index, el in enumerate(_admitted(root, spec)):
         uri, local = _qname(el)
+        # Bound to the element's STRUCTURAL identity, not only to its position among
+        # admitted elements. Position alone collided: with a projected field and an
+        # excluded one both carrying `type`, swapping which owned which produced the
+        # same ordered sequence of records, so a routing field's type could change
+        # and still match captured evidence.
+        identity = {"ns": uri, "el": local, "at": str(index)}
+        if el.get("id") is not None:
+            identity["of"] = el.get("id")
         carried = {
             name.split("}")[-1]: value for name, value in sorted(el.attrib.items())
             if _attr_class(spec, local, *_attr_qname(name)) == "carried"
         }
-        ET.SubElement(out, "on", {"ns": uri, "el": local, **carried})
+        ET.SubElement(out, "on", {**identity, **carried})
 
     included = set(spec.get("value_fields", ())) | set(spec.get("property_fields", ()))
     # A repeated id is a REFUSAL, not last-one-wins. Two fields claiming the same id

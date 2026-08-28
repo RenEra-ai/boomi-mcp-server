@@ -62,7 +62,7 @@
       "included_value_fields": [
         "url"
       ],
-      "projection_version": 3,
+      "projection_version": 4,
       "qname_aware_attrs": [],
       "qname_aware_tags": [],
       "included_scope_attributes": [
@@ -109,7 +109,7 @@
         "path",
         "followRedirects"
       ],
-      "projection_version": 3,
+      "projection_version": 4,
       "qname_aware_attrs": [],
       "qname_aware_tags": [],
       "included_scope_attributes": [
