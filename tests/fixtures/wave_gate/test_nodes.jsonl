@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 11049, "minimum_collected": 11049, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 11055, "minimum_collected": 11055, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -11088,3 +11088,9 @@
 {"kind": "test", "id": "pytest-011087", "node_id": "tests/test_query_components_list_filters.py::test_the_allowlist_matches_what_the_function_actually_reads", "state": "active"}
 {"kind": "test", "id": "pytest-011088", "node_id": "tests/test_query_components_list_filters.py::test_the_refusal_happens_before_the_platform_is_touched", "state": "active"}
 {"kind": "test", "id": "pytest-011089", "node_id": "tests/test_query_components_list_filters.py::test_the_refusal_names_what_is_supported", "state": "active"}
+{"kind": "test", "id": "pytest-011090", "node_id": "tests/test_connector_replay_digests.py::test_the_contract_fixture_reaches_every_projected_field", "state": "active"}
+{"kind": "test", "id": "pytest-011091", "node_id": "tests/test_connector_replay_review_round3.py::test_the_latest_wave_checkpoint_is_reverifiable_from_the_archive", "state": "active"}
+{"kind": "test", "id": "pytest-011092", "node_id": "tests/test_connector_replay_review_round3.py::test_the_wave_evidence_rule_admits_only_a_reverifiable_row[| L4 composite wave gate, slice B | 1 / 1 | x | y | W = `abc1234`, archived `wave-gate/gone`. |-cited archive gone is absent from the checkout]", "state": "active"}
+{"kind": "test", "id": "pytest-011093", "node_id": "tests/test_connector_replay_review_round3.py::test_the_wave_evidence_rule_admits_only_a_reverifiable_row[| L4 composite wave gate, slice B | 1 / 1 | x | y | W = `abc1234`, archived `wave-gate/ok`. |-None]", "state": "active"}
+{"kind": "test", "id": "pytest-011094", "node_id": "tests/test_connector_replay_review_round3.py::test_the_wave_evidence_rule_admits_only_a_reverifiable_row[| L4 composite wave gate, slice B | 1 / 1 | x | y | W = `abc1234`. |-the latest wave row (abc1234) cites no archived evidence]", "state": "active"}
+{"kind": "test", "id": "pytest-011095", "node_id": "tests/test_connector_replay_review_round3.py::test_the_wave_evidence_rule_admits_only_a_reverifiable_row[| L4 composite wave gate, slice B | 1 / 1 | x | y | W = `dddffff`, archived `wave-gate/ok`. |-cited archive ok attests abc1234, not the dddffff the row names]", "state": "active"}

@@ -2416,6 +2416,76 @@ def test_the_repository_guard_refuses_a_report_whose_tree_moved_after_the_gate(t
     assert "src/drift.py" in violation
 
 
+def _wave_evidence_violation(ledger_text, archive_dir):
+    """Whether the LATEST wave checkpoint can be reverified from the repository.
+
+    The procedural fix for decisions-ahead-of-evidence was to write the checkpoint
+    after the validation. It held for ordering and then failed on a different axis: a
+    wave row named a passing SHA whose run output was never archived at all, so its
+    quoted counts existed only in the row that quoted them. Ordering was a rule about
+    WHEN; this is a rule about WHETHER, and it is executable rather than remembered.
+    """
+    import json
+    import re
+
+    rows = re.findall(r"^\| L4 composite wave gate, slice B \|.*$", ledger_text, re.M)
+    if not rows:
+        return "no wave row"
+    latest = rows[-1]
+    sha = re.search(r"W = `([0-9a-f]{7,40})`", latest)
+    if not sha:
+        return "the latest wave row names no SHA"
+    named = re.search(r"`wave-gate/([A-Za-z0-9._-]+)`", latest)
+    if not named:
+        return f"the latest wave row ({sha.group(1)}) cites no archived evidence"
+    summary = archive_dir / named.group(1) / "summary.json"
+    if not summary.is_file():
+        return f"cited archive {named.group(1)} is absent from the checkout"
+    recorded = json.loads(summary.read_text()).get("wave_sha", "")
+    if not recorded.startswith(sha.group(1)):
+        return (f"cited archive {named.group(1)} attests {recorded[:7]}, "
+                f"not the {sha.group(1)} the row names")
+    return None
+
+
+@pytest.mark.parametrize(
+    "row,expected",
+    [
+        ("| L4 composite wave gate, slice B | 1 / 1 | x | y | W = `abc1234`, archived `wave-gate/ok`. |", None),
+        ("| L4 composite wave gate, slice B | 1 / 1 | x | y | W = `abc1234`. |",
+         "the latest wave row (abc1234) cites no archived evidence"),
+        ("| L4 composite wave gate, slice B | 1 / 1 | x | y | W = `abc1234`, archived `wave-gate/gone`. |",
+         "cited archive gone is absent from the checkout"),
+        ("| L4 composite wave gate, slice B | 1 / 1 | x | y | W = `dddffff`, archived `wave-gate/ok`. |",
+         "cited archive ok attests abc1234, not the dddffff the row names"),
+    ],
+)
+def test_the_wave_evidence_rule_admits_only_a_reverifiable_row(tmp_path, row, expected):
+    """The rule itself, always exercised — not only against this repository."""
+    import json
+
+    archive = tmp_path / "wave-gate"
+    (archive / "ok").mkdir(parents=True)
+    (archive / "ok" / "summary.json").write_text(json.dumps({"wave_sha": "abc1234def"}))
+    assert _wave_evidence_violation(row, archive) == expected
+
+
+def test_the_latest_wave_checkpoint_is_reverifiable_from_the_archive():
+    """Applied to this ledger. Scoped to the LATEST row deliberately.
+
+    Twenty-two earlier wave rounds were never archived and their run output no longer
+    exists, so requiring evidence for all of them would fail on history nobody can
+    supply. Closure depends on the CURRENT gate, and that one must be reverifiable.
+    """
+    root = Path(__file__).resolve().parents[1]
+    ledger = (root / "docs/architecture/ISSUE_155_AUDIT_LEDGER.md").read_text()
+    archive = root / "docs/architecture/evidence/issue-155/wave-gate"
+    violation = _wave_evidence_violation(ledger, archive)
+    assert violation is None, (
+        f"the latest wave checkpoint cannot be reverified: {violation}"
+    )
+
+
 def test_every_collected_node_is_pinned_by_the_manifest():
     """The floor is a MINIMUM, so an unpinned test never fails anything.
 

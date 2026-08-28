@@ -321,8 +321,38 @@ def test_a_carried_attribute_is_bound_to_the_field_id_not_only_its_position():
 #: share a revision. A revision bump adds a row; changing anything under an existing
 #: revision fails here.
 _CONTRACT_BY_REVISION = {
-    4: "1733718c76ff2128",
+    4: "f86c4bc66b60fb2a",
 }
+
+
+def _exhaustive_component(projection) -> str:
+    """A component exercising EVERY branch the projection can take, derived from it.
+
+    Hand-written fixtures covered the branches I thought of: two minimal documents
+    reached the value-field path and neither reached the property-key path, so a
+    formatter change to properties alone left the contract digest untouched. The
+    document is therefore built FROM the projection — one field per included value
+    field, one per included property field with a keyed child, and every admitted
+    element that carries a classified attribute — so a new branch cannot be omitted
+    by forgetting it.
+    """
+    parts = []
+    for index, field in enumerate(sorted(projection.included_value_fields)):
+        parts.append(f'<field id="{field}" type="string" value="v{index}"/>')
+    for field in sorted(projection.included_property_fields):
+        parts.append(f'<field id="{field}" type="customproperties">'
+                     f'<properties key="K-{field}" value="secret"/></field>')
+    carried = {}
+    for entry in sorted(projection.included_scope_attributes):
+        element, _, attribute = entry.partition("/")
+        if element != "field":
+            carried.setdefault(element, []).append(attribute)
+    body = "".join(parts)
+    for element in sorted(carried, reverse=True):
+        attrs = " ".join(f'{a}="a-{a}"' for a in sorted(carried[element]))
+        body = f"<{element} {attrs}>{body}</{element}>"
+    root = "GenericConnectionConfig" if projection.component_kind == "connection" else "Operation"
+    return body if root in carried else f"<{root}>{body}</{root}>"
 
 
 def _projection_contract() -> str:
@@ -330,7 +360,9 @@ def _projection_contract() -> str:
 
     Derived from the registry and the digest function, so it moves for a change to
     either the projection DATA or the payload FORMAT — the two things a revision is
-    supposed to distinguish, and the two that were each forgotten once.
+    supposed to distinguish, and the two that were each forgotten once. The payload
+    half is exercised over a DERIVED component per kind rather than a hand-written
+    one, because a hand-written pair missed a whole branch.
     """
     import hashlib
     import json
@@ -342,17 +374,30 @@ def _projection_contract() -> str:
     for entry in sorted(registry.projection_allowlists,
                         key=lambda e: (e.family, e.component_kind)):
         material.append(json.loads(entry.model_dump_json()))
-    fixtures = {
-        "connection": ('<GenericConnectionConfig><field id="url" type="string" '
-                       'value="http://host:8081"/></GenericConnectionConfig>'),
-        "operation": ('<Operation customOperationType="GET"><GenericOperationConfig>'
-                      '<field id="path" type="string" value="/x"/>'
-                      '</GenericOperationConfig></Operation>'),
-    }
-    for kind, xml in sorted(fixtures.items()):
-        material.append({kind: component_config_digest_v1(xml, kind)})
+        material.append({
+            f"{e_family}/{entry.component_kind}": component_config_digest_v1(
+                _exhaustive_component(entry), entry.component_kind, entry.family)
+            for e_family in (entry.family,)
+        })
     payload = json.dumps(material, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(payload.encode()).hexdigest()[:16]
+
+
+def test_the_contract_fixture_reaches_every_projected_field():
+    """The derived document must actually exercise what the projection publishes.
+
+    A coverage claim nobody checks is the defect this whole guard exists to prevent,
+    so it is asserted rather than assumed.
+    """
+    from boomi_mcp.connector_replay.registry import load_registry
+
+    for entry in load_registry().projection_allowlists:
+        document = _exhaustive_component(entry)
+        for field in entry.included_value_fields:
+            assert f'id="{field}"' in document, f"{entry.component_kind}: {field} unreached"
+        for field in entry.included_property_fields:
+            assert f'id="{field}"' in document and "<properties " in document, (
+                f"{entry.component_kind}: the property branch is unreached")
 
 
 def test_a_projection_change_requires_a_new_revision():
