@@ -2453,33 +2453,62 @@ def _wave_evidence_violation(ledger_text, archive_dir):
     if attested.get("status") != "completed" or attested.get("verdict") != "pass":
         return (f"cited archive {named.group(1)} records "
                 f"{attested.get('status')}/{attested.get('verdict')}, not a passing run")
-    if attested.get("exit_code") != 0:
-        return f"cited archive {named.group(1)} exited {attested.get('exit_code')}"
-    # Every arm the row QUOTES must agree with what the archive attests. A row may
-    # quote fewer arms than the archive holds; it may not quote a different number.
-    arms = (
-        (r"(\d[\d,]*) passed", ("suite", "passed")),
-        (r"(\d[\d,]*) skipped", ("suite", "skipped")),
-        (r"(\d[\d,]*) active goldens", ("goldens", "active")),
-    )
-    for pattern, (section, key) in arms:
-        quoted = re.search(pattern, latest)
-        if not quoted:
+    exit_code = attested.get("exit_code")
+    # `False == 0` in Python, so a JSON boolean passed an integer comparison. A process
+    # exit code is an integer; a boolean in that field is malformed evidence, not a zero.
+    if isinstance(exit_code, bool) or exit_code != 0:
+        return f"cited archive {named.group(1)} records exit_code {exit_code!r}"
+
+    # DERIVED from what the archive attests, not from a list of arm names. Enumerating
+    # the arms checked pass/skip/goldens and silently ignored `deterministic`,
+    # `byte_exact` and the fingerprint count — the same hand-listed-enumeration defect
+    # this guard exists to catch, inside the guard, for the fourth time in this
+    # artifact. Every boolean a passing run attests must be true, and every number the
+    # row quotes beside a key the archive records must equal it.
+    leaves = {}
+
+    def _walk(node, path):
+        if isinstance(node, dict):
+            for key, value in node.items():
+                _walk(value, path + [key])
+        else:
+            leaves[".".join(path)] = node
+
+    _walk(attested, [])
+    #: Counts a PASSING wave may legitimately record as zero. Everything else it
+    #: counts is work it claims to have done, and zero of that verifies nothing —
+    #: including an arm the row quotes in WORDS, which no digit comparison can see.
+    may_be_zero = ("exit_code", "skipped", "skip_cap")
+    for path, value in sorted(leaves.items()):
+        if isinstance(value, bool) and not value:
+            return f"cited archive {named.group(1)} attests {path} is false"
+        if (isinstance(value, int) and not isinstance(value, bool)
+                and value == 0 and path.rsplit(".", 1)[-1] not in may_be_zero):
+            return f"cited archive {named.group(1)} attests {path} is zero"
+    for path, value in sorted(leaves.items()):
+        if isinstance(value, bool) or not isinstance(value, int):
             continue
-        claimed = int(quoted.group(1).replace(",", ""))
-        actual = attested.get(section, {}).get(key)
-        if actual != claimed:
-            return (f"the row quotes {claimed} {section}.{key} but "
-                    f"{named.group(1)} attests {actual}")
+        word = path.rsplit(".", 1)[-1]
+        if word in ("exit_code", "skip_cap"):
+            continue
+        quoted = re.search(r"(\d[\d,]*)\s+(?:active\s+)?" + re.escape(word), latest)
+        if quoted is None:
+            quoted = re.search(re.escape(word.replace("_", " ")) + r"\D{0,40}?(\d[\d,]*)", latest)
+        if quoted and int(quoted.group(1).replace(",", "")) != value:
+            return (f"the row quotes {quoted.group(1)} for {path} but "
+                    f"{named.group(1)} attests {value}")
     return None
 
 
 _PASSING_WAVE = {
     "wave_sha": "abc1234def", "status": "completed", "verdict": "pass", "exit_code": 0,
-    "suite": {"passed": 11037, "skipped": 18}, "goldens": {"active": 74},
+    "suite": {"passed": 11037, "skipped": 18, "skip_cap": 30},
+    "goldens": {"active": 74, "deterministic": True, "byte_exact": True},
+    "plan_fingerprint_cases": 2,
 }
 _ROW = ("| L4 composite wave gate, slice B | 1 / 1 | x | `CLOSE-CLEAN` | W = `{sha}`{cite}. Arms: the non-KB "
-        "suite green at 11,037 passed and 18 skipped; 74 active goldens |")
+        "suite green at 11,037 passed and 18 skipped; 74 active goldens rendered twice and byte-exact; the "
+        "plan-fingerprint seam across two cases |")
 
 
 @pytest.mark.parametrize(
@@ -2497,11 +2526,29 @@ _ROW = ("| L4 composite wave gate, slice B | 1 / 1 | x | `CLOSE-CLEAN` | W = `{s
         ("abc1234", ", archived `wave-gate/ok`", {"status": "timeout"},
          "cited archive ok records timeout/pass, not a passing run"),
         ("abc1234", ", archived `wave-gate/ok`", {"exit_code": 1},
-         "cited archive ok exited 1"),
-        ("abc1234", ", archived `wave-gate/ok`", {"suite": {"passed": 1, "skipped": 18}},
-         "the row quotes 11037 suite.passed but ok attests 1"),
-        ("abc1234", ", archived `wave-gate/ok`", {"goldens": {"active": 9}},
-         "the row quotes 74 goldens.active but ok attests 9"),
+         "cited archive ok records exit_code 1"),
+        ("abc1234", ", archived `wave-gate/ok`",
+         {"suite": {"passed": 1, "skipped": 18, "skip_cap": 30}},
+         "the row quotes 11,037 for suite.passed but ok attests 1"),
+        ("abc1234", ", archived `wave-gate/ok`",
+         {"goldens": {"active": 9, "deterministic": True, "byte_exact": True}},
+         "the row quotes 74 for goldens.active but ok attests 9"),
+        # Never named by the hand-written arms tuple, which is why it was enumerated
+        # away: the derived rule reaches them without being told they exist.
+        ("abc1234", ", archived `wave-gate/ok`",
+         {"goldens": {"active": 74, "deterministic": False, "byte_exact": True}},
+         "cited archive ok attests goldens.deterministic is false"),
+        ("abc1234", ", archived `wave-gate/ok`",
+         {"goldens": {"active": 74, "deterministic": True, "byte_exact": False}},
+         "cited archive ok attests goldens.byte_exact is false"),
+        # An arm the row quotes in WORDS, which no digit comparison can see.
+        ("abc1234", ", archived `wave-gate/ok`", {"plan_fingerprint_cases": 0},
+         "cited archive ok attests plan_fingerprint_cases is zero"),
+        # `False == 0` in Python, so a JSON boolean passed as a process exit code.
+        ("abc1234", ", archived `wave-gate/ok`", {"exit_code": False},
+         "cited archive ok records exit_code False"),
+        ("abc1234", ", archived `wave-gate/ok`", {"status": "failed"},
+         "cited archive ok records failed/pass, not a passing run"),
     ],
 )
 def test_the_wave_evidence_rule_admits_only_a_supported_row(tmp_path, sha, cite, attested, expected):

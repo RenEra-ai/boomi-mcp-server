@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 11060, "minimum_collected": 11060, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 11065, "minimum_collected": 11065, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -11067,35 +11067,40 @@
 {"kind": "test", "id": "pytest-011066", "node_id": "tests/test_connector_replay_review_round3.py::test_the_selector_returns_each_platform_row_once", "state": "active"}
 {"kind": "test", "id": "pytest-011067", "node_id": "tests/test_connector_replay_review_round3.py::test_the_wave_evidence_rule_admits_only_a_supported_row[abc1234-, archived `wave-gate/gone`-attested2-cited archive gone is absent from the checkout]", "state": "active"}
 {"kind": "test", "id": "pytest-011068", "node_id": "tests/test_connector_replay_review_round3.py::test_the_wave_evidence_rule_admits_only_a_supported_row[abc1234-, archived `wave-gate/ok`-attested0-None]", "state": "active"}
-{"kind": "test", "id": "pytest-011069", "node_id": "tests/test_connector_replay_review_round3.py::test_the_wave_evidence_rule_admits_only_a_supported_row[abc1234-, archived `wave-gate/ok`-attested4-cited archive ok records completed/fail, not a passing run]", "state": "active"}
-{"kind": "test", "id": "pytest-011070", "node_id": "tests/test_connector_replay_review_round3.py::test_the_wave_evidence_rule_admits_only_a_supported_row[abc1234-, archived `wave-gate/ok`-attested5-cited archive ok records timeout/pass, not a passing run]", "state": "active"}
-{"kind": "test", "id": "pytest-011071", "node_id": "tests/test_connector_replay_review_round3.py::test_the_wave_evidence_rule_admits_only_a_supported_row[abc1234-, archived `wave-gate/ok`-attested6-cited archive ok exited 1]", "state": "active"}
-{"kind": "test", "id": "pytest-011072", "node_id": "tests/test_connector_replay_review_round3.py::test_the_wave_evidence_rule_admits_only_a_supported_row[abc1234-, archived `wave-gate/ok`-attested7-the row quotes 11037 suite.passed but ok attests 1]", "state": "active"}
-{"kind": "test", "id": "pytest-011073", "node_id": "tests/test_connector_replay_review_round3.py::test_the_wave_evidence_rule_admits_only_a_supported_row[abc1234-, archived `wave-gate/ok`-attested8-the row quotes 74 goldens.active but ok attests 9]", "state": "active"}
-{"kind": "test", "id": "pytest-011074", "node_id": "tests/test_connector_replay_review_round3.py::test_the_wave_evidence_rule_admits_only_a_supported_row[abc1234--attested1-the latest wave row (abc1234) cites no archived evidence]", "state": "active"}
-{"kind": "test", "id": "pytest-011075", "node_id": "tests/test_connector_replay_review_round3.py::test_the_wave_evidence_rule_admits_only_a_supported_row[dddffff-, archived `wave-gate/ok`-attested3-cited archive ok attests abc1234, not the dddffff the row names]", "state": "active"}
-{"kind": "test", "id": "pytest-011076", "node_id": "tests/test_connector_replay_review_round3.py::test_the_witness_is_not_vacuous_the_uncorrelated_read_cannot_answer_it", "state": "active"}
-{"kind": "test", "id": "pytest-011077", "node_id": "tests/test_connector_replay_review_round3.py::test_two_components_sharing_a_name_are_ambiguous_not_unique", "state": "active"}
-{"kind": "test", "id": "pytest-011078", "node_id": "tests/test_connector_replay_review_round3.py::test_two_copies_of_one_row_that_disagree_are_refused", "state": "active"}
-{"kind": "test", "id": "pytest-011079", "node_id": "tests/test_connector_replay_review_round3.py::test_two_delta_entries_naming_one_execution_are_ambiguous", "state": "active"}
-{"kind": "test", "id": "pytest-011080", "node_id": "tests/test_connector_replay_review_round3.py::test_two_disagreeing_copies_of_the_executed_process_are_refused", "state": "active"}
-{"kind": "test", "id": "pytest-011081", "node_id": "tests/test_connector_replay_review_round3.py::test_two_runs_sharing_one_timestamp_are_not_an_order", "state": "active"}
-{"kind": "test", "id": "pytest-011082", "node_id": "tests/test_connector_replay_review_round3.py::test_two_subjects_observing_one_resource_are_refused", "state": "active"}
-{"kind": "test", "id": "pytest-011083", "node_id": "tests/test_connector_replay_review_round3.py::test_unresolved_placement_never_reaches_a_served_row", "state": "active"}
-{"kind": "test", "id": "pytest-011084", "node_id": "tests/test_monitoring_execution_connectors.py::test_a_zero_count_survives_and_an_unset_field_is_absent", "state": "active"}
-{"kind": "test", "id": "pytest-011085", "node_id": "tests/test_monitoring_execution_connectors.py::test_an_empty_result_says_it_cannot_distinguish_its_two_causes", "state": "active"}
-{"kind": "test", "id": "pytest-011086", "node_id": "tests/test_monitoring_execution_connectors.py::test_execution_connectors_is_dispatchable", "state": "active"}
-{"kind": "test", "id": "pytest-011087", "node_id": "tests/test_monitoring_execution_connectors.py::test_sentinels_are_flagged_not_silently_returned_as_connectors", "state": "active"}
-{"kind": "test", "id": "pytest-011088", "node_id": "tests/test_monitoring_execution_connectors.py::test_the_capability_catalog_is_derived_from_the_dispatch_table", "state": "active"}
-{"kind": "test", "id": "pytest-011089", "node_id": "tests/test_monitoring_execution_connectors.py::test_the_connector_identity_is_served", "state": "active"}
-{"kind": "test", "id": "pytest-011090", "node_id": "tests/test_monitoring_execution_connectors.py::test_the_dispatch_table_is_the_only_list_of_actions", "state": "active"}
-{"kind": "test", "id": "pytest-011091", "node_id": "tests/test_monitoring_execution_connectors.py::test_the_execution_id_is_required", "state": "active"}
-{"kind": "test", "id": "pytest-011092", "node_id": "tests/test_monitoring_execution_connectors.py::test_the_platform_action_field_is_named_for_what_it_is", "state": "active"}
-{"kind": "test", "id": "pytest-011093", "node_id": "tests/test_monitoring_execution_connectors.py::test_the_sdk_never_actually_yields_the_sentinel", "state": "active"}
-{"kind": "test", "id": "pytest-011094", "node_id": "tests/test_monitoring_execution_connectors.py::test_the_tool_docstring_names_every_action", "state": "active"}
-{"kind": "test", "id": "pytest-011095", "node_id": "tests/test_query_components_list_filters.py::test_an_unsupported_filter_key_is_refused", "state": "active"}
-{"kind": "test", "id": "pytest-011096", "node_id": "tests/test_query_components_list_filters.py::test_folder_name_is_not_refused", "state": "active"}
-{"kind": "test", "id": "pytest-011097", "node_id": "tests/test_query_components_list_filters.py::test_supported_keys_are_not_refused", "state": "active"}
-{"kind": "test", "id": "pytest-011098", "node_id": "tests/test_query_components_list_filters.py::test_the_allowlist_matches_what_the_function_actually_reads", "state": "active"}
-{"kind": "test", "id": "pytest-011099", "node_id": "tests/test_query_components_list_filters.py::test_the_refusal_happens_before_the_platform_is_touched", "state": "active"}
-{"kind": "test", "id": "pytest-011100", "node_id": "tests/test_query_components_list_filters.py::test_the_refusal_names_what_is_supported", "state": "active"}
+{"kind": "test", "id": "pytest-011069", "node_id": "tests/test_connector_replay_review_round3.py::test_the_wave_evidence_rule_admits_only_a_supported_row[abc1234-, archived `wave-gate/ok`-attested10-cited archive ok attests goldens.byte_exact is false]", "state": "active"}
+{"kind": "test", "id": "pytest-011070", "node_id": "tests/test_connector_replay_review_round3.py::test_the_wave_evidence_rule_admits_only_a_supported_row[abc1234-, archived `wave-gate/ok`-attested11-cited archive ok attests plan_fingerprint_cases is zero]", "state": "active"}
+{"kind": "test", "id": "pytest-011071", "node_id": "tests/test_connector_replay_review_round3.py::test_the_wave_evidence_rule_admits_only_a_supported_row[abc1234-, archived `wave-gate/ok`-attested12-cited archive ok records exit_code False]", "state": "active"}
+{"kind": "test", "id": "pytest-011072", "node_id": "tests/test_connector_replay_review_round3.py::test_the_wave_evidence_rule_admits_only_a_supported_row[abc1234-, archived `wave-gate/ok`-attested13-cited archive ok records failed/pass, not a passing run]", "state": "active"}
+{"kind": "test", "id": "pytest-011073", "node_id": "tests/test_connector_replay_review_round3.py::test_the_wave_evidence_rule_admits_only_a_supported_row[abc1234-, archived `wave-gate/ok`-attested4-cited archive ok records completed/fail, not a passing run]", "state": "active"}
+{"kind": "test", "id": "pytest-011074", "node_id": "tests/test_connector_replay_review_round3.py::test_the_wave_evidence_rule_admits_only_a_supported_row[abc1234-, archived `wave-gate/ok`-attested5-cited archive ok records timeout/pass, not a passing run]", "state": "active"}
+{"kind": "test", "id": "pytest-011075", "node_id": "tests/test_connector_replay_review_round3.py::test_the_wave_evidence_rule_admits_only_a_supported_row[abc1234-, archived `wave-gate/ok`-attested6-cited archive ok records exit_code 1]", "state": "active"}
+{"kind": "test", "id": "pytest-011076", "node_id": "tests/test_connector_replay_review_round3.py::test_the_wave_evidence_rule_admits_only_a_supported_row[abc1234-, archived `wave-gate/ok`-attested7-the row quotes 11,037 for suite.passed but ok attests 1]", "state": "active"}
+{"kind": "test", "id": "pytest-011077", "node_id": "tests/test_connector_replay_review_round3.py::test_the_wave_evidence_rule_admits_only_a_supported_row[abc1234-, archived `wave-gate/ok`-attested8-the row quotes 74 for goldens.active but ok attests 9]", "state": "active"}
+{"kind": "test", "id": "pytest-011078", "node_id": "tests/test_connector_replay_review_round3.py::test_the_wave_evidence_rule_admits_only_a_supported_row[abc1234-, archived `wave-gate/ok`-attested9-cited archive ok attests goldens.deterministic is false]", "state": "active"}
+{"kind": "test", "id": "pytest-011079", "node_id": "tests/test_connector_replay_review_round3.py::test_the_wave_evidence_rule_admits_only_a_supported_row[abc1234--attested1-the latest wave row (abc1234) cites no archived evidence]", "state": "active"}
+{"kind": "test", "id": "pytest-011080", "node_id": "tests/test_connector_replay_review_round3.py::test_the_wave_evidence_rule_admits_only_a_supported_row[dddffff-, archived `wave-gate/ok`-attested3-cited archive ok attests abc1234, not the dddffff the row names]", "state": "active"}
+{"kind": "test", "id": "pytest-011081", "node_id": "tests/test_connector_replay_review_round3.py::test_the_witness_is_not_vacuous_the_uncorrelated_read_cannot_answer_it", "state": "active"}
+{"kind": "test", "id": "pytest-011082", "node_id": "tests/test_connector_replay_review_round3.py::test_two_components_sharing_a_name_are_ambiguous_not_unique", "state": "active"}
+{"kind": "test", "id": "pytest-011083", "node_id": "tests/test_connector_replay_review_round3.py::test_two_copies_of_one_row_that_disagree_are_refused", "state": "active"}
+{"kind": "test", "id": "pytest-011084", "node_id": "tests/test_connector_replay_review_round3.py::test_two_delta_entries_naming_one_execution_are_ambiguous", "state": "active"}
+{"kind": "test", "id": "pytest-011085", "node_id": "tests/test_connector_replay_review_round3.py::test_two_disagreeing_copies_of_the_executed_process_are_refused", "state": "active"}
+{"kind": "test", "id": "pytest-011086", "node_id": "tests/test_connector_replay_review_round3.py::test_two_runs_sharing_one_timestamp_are_not_an_order", "state": "active"}
+{"kind": "test", "id": "pytest-011087", "node_id": "tests/test_connector_replay_review_round3.py::test_two_subjects_observing_one_resource_are_refused", "state": "active"}
+{"kind": "test", "id": "pytest-011088", "node_id": "tests/test_connector_replay_review_round3.py::test_unresolved_placement_never_reaches_a_served_row", "state": "active"}
+{"kind": "test", "id": "pytest-011089", "node_id": "tests/test_monitoring_execution_connectors.py::test_a_zero_count_survives_and_an_unset_field_is_absent", "state": "active"}
+{"kind": "test", "id": "pytest-011090", "node_id": "tests/test_monitoring_execution_connectors.py::test_an_empty_result_says_it_cannot_distinguish_its_two_causes", "state": "active"}
+{"kind": "test", "id": "pytest-011091", "node_id": "tests/test_monitoring_execution_connectors.py::test_execution_connectors_is_dispatchable", "state": "active"}
+{"kind": "test", "id": "pytest-011092", "node_id": "tests/test_monitoring_execution_connectors.py::test_sentinels_are_flagged_not_silently_returned_as_connectors", "state": "active"}
+{"kind": "test", "id": "pytest-011093", "node_id": "tests/test_monitoring_execution_connectors.py::test_the_capability_catalog_is_derived_from_the_dispatch_table", "state": "active"}
+{"kind": "test", "id": "pytest-011094", "node_id": "tests/test_monitoring_execution_connectors.py::test_the_connector_identity_is_served", "state": "active"}
+{"kind": "test", "id": "pytest-011095", "node_id": "tests/test_monitoring_execution_connectors.py::test_the_dispatch_table_is_the_only_list_of_actions", "state": "active"}
+{"kind": "test", "id": "pytest-011096", "node_id": "tests/test_monitoring_execution_connectors.py::test_the_execution_id_is_required", "state": "active"}
+{"kind": "test", "id": "pytest-011097", "node_id": "tests/test_monitoring_execution_connectors.py::test_the_platform_action_field_is_named_for_what_it_is", "state": "active"}
+{"kind": "test", "id": "pytest-011098", "node_id": "tests/test_monitoring_execution_connectors.py::test_the_sdk_never_actually_yields_the_sentinel", "state": "active"}
+{"kind": "test", "id": "pytest-011099", "node_id": "tests/test_monitoring_execution_connectors.py::test_the_tool_docstring_names_every_action", "state": "active"}
+{"kind": "test", "id": "pytest-011100", "node_id": "tests/test_query_components_list_filters.py::test_an_unsupported_filter_key_is_refused", "state": "active"}
+{"kind": "test", "id": "pytest-011101", "node_id": "tests/test_query_components_list_filters.py::test_folder_name_is_not_refused", "state": "active"}
+{"kind": "test", "id": "pytest-011102", "node_id": "tests/test_query_components_list_filters.py::test_supported_keys_are_not_refused", "state": "active"}
+{"kind": "test", "id": "pytest-011103", "node_id": "tests/test_query_components_list_filters.py::test_the_allowlist_matches_what_the_function_actually_reads", "state": "active"}
+{"kind": "test", "id": "pytest-011104", "node_id": "tests/test_query_components_list_filters.py::test_the_refusal_happens_before_the_platform_is_touched", "state": "active"}
+{"kind": "test", "id": "pytest-011105", "node_id": "tests/test_query_components_list_filters.py::test_the_refusal_names_what_is_supported", "state": "active"}
