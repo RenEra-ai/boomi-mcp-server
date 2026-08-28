@@ -1308,6 +1308,7 @@ _NOT_AN_INSTANCE = {
     "SELF-155-r44-03a": "likewise a revision of a counted row",
     "CDX-155-r45-01a": "likewise a revision of a counted row",
     "CDX-155-r45-02a": "likewise a revision of a counted row",
+    "SELF-155-r47-01": "the class being DISCHARGED — the regeneration done correctly from the final tree — not a new instance of regenerating from a non-final one",
 }
 
 _CLASS_NAMED_IN_PROSE = [
