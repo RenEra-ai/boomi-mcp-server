@@ -1283,7 +1283,7 @@ _EXPECTED_CLASS_COUNTS = {
     "DC-155-J": 4,
     "DC-155-J2": 3,
     "DC-155-K": 38,
-    "DC-155-L": 22,
+    "DC-155-L": 26,
 }
 
 #: Instances counted before finding ids were enumerated. A CLOSED set: a
@@ -1308,6 +1308,7 @@ _NOT_AN_INSTANCE = {
     "SELF-155-r44-03a": "likewise a revision of a counted row",
     "CDX-155-r45-01a": "likewise a revision of a counted row",
     "CDX-155-r45-02a": "likewise a revision of a counted row",
+    "SELF-155-r47-01a": "a revision of a row that is itself a non-instance",
     "SELF-155-r47-01": "the class being DISCHARGED — the regeneration done correctly from the final tree — not a new instance of regenerating from a non-final one",
 }
 
