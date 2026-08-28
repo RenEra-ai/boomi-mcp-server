@@ -1266,6 +1266,31 @@ def test_a_shared_readback_delta_is_read_per_run(tmp_path):
     assert by_label == recorded
 
 
+#: The class roster and each row's instance count at the moment this guard was
+#: written. A tally may GROW as a class recurs; it may never shrink, and the
+#: roster may not lose a row — a floor on the total missed the removal of a
+#: small class while catching the removal of a large one.
+_EXPECTED_CLASS_COUNTS = {
+    "DC-155-A": 0,
+    "DC-155-B": 1,
+    "DC-155-C": 13,
+    "DC-155-D": 3,
+    "DC-155-E": 0,
+    "DC-155-F": 0,
+    "DC-155-G": 1,
+    "DC-155-H": 0,
+    "DC-155-I": 2,
+    "DC-155-J": 2,
+    "DC-155-J2": 3,
+    "DC-155-K": 33,
+    "DC-155-L": 12,
+}
+
+#: Instances counted before finding ids were enumerated. A CLOSED set: a
+#: remainder that only has to add up can absorb a real instance.
+_UNROWED = {"DC-155-C": 2, "DC-155-I": 1}
+
+
 def test_every_defect_class_tally_equals_its_own_enumeration():
     """Counts are DERIVED for EVERY class row, because a hand-typed one was wrong.
 
@@ -1291,6 +1316,12 @@ def test_every_defect_class_tally_equals_its_own_enumeration():
 
     checked = 0
     owners: dict[str, str] = {}
+    seen_counts: dict[str, int] = {}
+    class_names = {
+        line.split("|")[1].strip()
+        for line in ledger.splitlines()
+        if line.startswith("| DC-155-")
+    }
     for line in ledger.splitlines():
         if not line.startswith("| DC-155-"):
             continue
@@ -1303,6 +1334,7 @@ def test_every_defect_class_tally_equals_its_own_enumeration():
             f"{name}: the instance count must be a numeral, not {count_cell.strip()[:40]!r}"
         )
         declared = int(declared.group(1))
+        seen_counts[name] = declared
         if declared == 0:
             continue
 
@@ -1311,6 +1343,16 @@ def test_every_defect_class_tally_equals_its_own_enumeration():
         enumerated = re.findall(r"`([A-Z]+-155-[A-Za-z0-9-]+)`", listed.group(1))
         unrowed = re.search(r"\+(\d+) unrowed", listed.group(1))
         unrowed = int(unrowed.group(1)) if unrowed else 0
+
+        # FROZEN, not merely arithmetic. A remainder that only has to add up verifies
+        # nothing about membership: it can absorb a real instance, and a row naming
+        # nobody at all passes on the strength of its own remainder. These two are the
+        # complete historical set — instances counted before ids were enumerated — and
+        # no row may invent another or grow one.
+        assert unrowed == _UNROWED.get(name, 0), (
+            f"{name}: an unrowed remainder of {unrowed} is not the frozen "
+            f"{_UNROWED.get(name, 0)}; historical instances are a closed set"
+        )
 
         assert declared == len(enumerated) + unrowed, (
             f"{name}: declares {declared} but names {len(enumerated)}"
@@ -1321,6 +1363,8 @@ def test_every_defect_class_tally_equals_its_own_enumeration():
         )
         missing = [i for i in enumerated if i not in known_rows]
         assert not missing, f"{name}: names instances with no finding row: {missing}"
+        collides = [i for i in enumerated if i in class_names]
+        assert not collides, f"{name}: names a CLASS as an instance: {collides}"
 
         for instance in enumerated:
             other = owners.get(instance)
@@ -1331,8 +1375,22 @@ def test_every_defect_class_tally_equals_its_own_enumeration():
             )
             owners[instance] = name
 
-    assert checked >= 12, f"only {checked} class rows were checked"
-    assert len(owners) >= 40, f"only {len(owners)} instances were attributed"
+    # Every declared class must have been seen. A count floor missed the removal of a
+    # SMALL row while catching the removal of a large one, so the roster is pinned by
+    # NAME and the per-row counts are pinned individually.
+    assert set(_EXPECTED_CLASS_COUNTS) == class_names, (
+        "the class roster changed: only expected "
+        f"{sorted(set(_EXPECTED_CLASS_COUNTS) - class_names)}, only present "
+        f"{sorted(class_names - set(_EXPECTED_CLASS_COUNTS))}"
+    )
+    assert checked == len(_EXPECTED_CLASS_COUNTS), (
+        f"{checked} class rows parsed against {len(_EXPECTED_CLASS_COUNTS)} declared"
+    )
+    for cls, floor in _EXPECTED_CLASS_COUNTS.items():
+        assert seen_counts[cls] >= floor, (
+            f"{cls}: declares {seen_counts[cls]} instances, below its recorded floor "
+            f"of {floor} — a class tally may grow, never shrink"
+        )
 
 
 def test_a_conflicting_execution_id_is_not_overridden_by_a_matching_label(tmp_path):
@@ -1496,3 +1554,48 @@ def test_a_label_a_keyed_entry_also_claims_is_not_a_fallback(tmp_path):
     assert by_label["run1"] is None, (
         f"a label another keyed entry claims must not bind, got {by_label}"
     )
+
+
+def test_a_comparison_across_two_resources_is_refused(tmp_path):
+    """The reader established WHEN each observation was taken, never WHAT of.
+
+    The subject token comes from a filename our own capture harness chose, while every
+    readback records the counterparty's own name for the resource it read. Substituting
+    one staged readback with an observation of a DIFFERENT resource — filename, stage,
+    moment and payload label all untouched — manufactured the positive control the
+    verdict calls essential.
+    """
+    from boomi_mcp.connector_replay.capture import CaptureRefused
+
+    source = _CAPTURES / "cap155-e5-delete-attested"
+    target_before = json.loads((source / "readback_R0_before_target.json").read_text())
+    control_before = json.loads((source / "readback_R0_before_control.json").read_text())
+    assert target_before["path"] != control_before["path"], (
+        "the fixture's subjects must observe different resources"
+    )
+
+    dst = tmp_path / "swapped-subject"
+    shutil.copytree(source, dst)
+    swapped = dict(control_before)
+    swapped["label"] = target_before["label"]  # every stated key left truthful-looking
+    (dst / "readback_R0_before_target.json").write_text(json.dumps(swapped))
+
+    with pytest.raises(CaptureRefused, match="rather than one resource"):
+        summarize(dst, "DELETE")
+
+
+def test_two_subjects_observing_one_resource_are_refused(tmp_path):
+    """A negative control only controls for something if it is somewhere else."""
+    from boomi_mcp.connector_replay.capture import CaptureRefused
+
+    dst = tmp_path / "same-resource"
+    shutil.copytree(_CAPTURES / "cap155-e5-delete-attested", dst)
+    for moment, stage in (("before", "R0"), ("between", "R1"), ("after", "R2")):
+        control = dst / f"readback_{stage}_{moment}_control.json"
+        target = dst / f"readback_{stage}_{moment}_target.json"
+        body = json.loads(control.read_text())
+        body["path"] = json.loads(target.read_text())["path"]
+        control.write_text(json.dumps(body))
+
+    with pytest.raises(CaptureRefused, match="observed the same resource"):
+        summarize(dst, "DELETE")

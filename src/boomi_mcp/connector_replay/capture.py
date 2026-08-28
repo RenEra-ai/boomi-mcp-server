@@ -49,9 +49,10 @@ _ACCESS_LOG: Final[str] = "mock_access_log.txt"
 _EXECUTION_CONNECTOR: Final[str] = "execution_connector.json"
 
 #: Staged readbacks from a double-execution capture: the state BEFORE the first
-#: call, BETWEEN the two, and AFTER the second. Discovered by this shape rather
-#: than by a list of stage names, so a capture adding a fourth stage is ordered
-#: correctly instead of ignored.
+#: call, BETWEEN the two, and AFTER the second. Discovered by this shape rather than
+#: by a list of stage names — but a capture adding a FOURTH stage is now refused, not
+#: "ordered correctly": the moments below are a closed set, and this comment promised
+#: the opposite of what the reader does for two rounds after that changed.
 _STAGE_READBACK: Final[re.Pattern[str]] = re.compile(
     r"^readback_(?P<stage>R\d+)_(?P<moment>[a-z]+)_(?P<subject>[a-z]+)\.json$"
 )
@@ -754,6 +755,16 @@ def _differing_keys(a: dict[str, Any], b: dict[str, Any]) -> tuple[str, ...]:
     ))
 
 
+def _observed_resource(path: Path) -> str | None:
+    """The counterparty's OWN name for what a staged readback observed."""
+    try:
+        payload = _load_json(path)
+    except CaptureRefused:
+        return None
+    resource = payload.get("path") if isinstance(payload, dict) else None
+    return resource if isinstance(resource, str) and resource else None
+
+
 def _body_label(path: Path) -> str | None:
     """The place a staged readback claims for itself, if it claims one."""
     try:
@@ -784,6 +795,7 @@ def _convergence(files: list[Path]) -> tuple[ConvergenceV1, ...]:
             ).append((m.group("stage"), path))
 
     results: list[ConvergenceV1] = []
+    resources: dict[str, str] = {}
     for subject, moments in sorted(by_subject.items()):
         # Incomplete or duplicated moments REFUSE. Dropping the subject was the
         # fail-open half: the neighbouring check already refuses a readback with no
@@ -839,6 +851,30 @@ def _convergence(files: list[Path]) -> tuple[ConvergenceV1, ...]:
                     f"{path.name}: its own label states the {stated_moment!r} moment "
                     f"while its filename states {moment!r}"
                 )
+        # WHAT was observed, not only WHEN. Every readback records the counterparty's
+        # own name for the resource it read, and the reader took the subject from a
+        # token in a filename OUR capture harness chose — so substituting one staged
+        # readback with an observation of a DIFFERENT resource, leaving filename,
+        # stage, moment and payload label untouched, manufactured the positive control
+        # the verdict calls essential and turned a capture that correctly refuses into
+        # a served duplicate-effect row.
+        observed = {}
+        for stage, path in staged:
+            resource = _observed_resource(path)
+            if resource is None:
+                raise CaptureRefused(
+                    f"{path.name}: records no resource, so what it observed is not "
+                    "established and it cannot bound a comparison"
+                )
+            observed[stage] = resource
+        if len(set(observed.values())) != 1:
+            raise CaptureRefused(
+                f"{subject}: its staged readbacks observed {sorted(set(observed.values()))!r} "
+                "rather than one resource; a before-and-after comparison across two "
+                "resources measures nothing about either"
+            )
+        resources[subject] = next(iter(observed.values()))
+
         bodies = [(stage, _body_of(_load_json(path))) for stage, path in staged]
         if any(body is None for _, body in bodies):
             raise CaptureRefused(
@@ -891,6 +927,15 @@ def _convergence(files: list[Path]) -> tuple[ConvergenceV1, ...]:
                 replay_changed_state=replay_moved,
                 fields_differing_on_replay=replay_keys,
             )
+        )
+
+    # And two subjects must not be the same resource under two names: the negative
+    # control only controls for something if it is somewhere else.
+    duplicated = {r for r in resources.values() if list(resources.values()).count(r) > 1}
+    if duplicated:
+        raise CaptureRefused(
+            f"subjects {sorted(k for k, v in resources.items() if v in duplicated)!r} "
+            "observed the same resource, so one is not a control on the other"
         )
     return tuple(results)
 
@@ -1201,18 +1246,24 @@ def summarize(capture_dir: Path, method_hint: str | None = None) -> CaptureSumma
             for run in runs
         ]
     elif logs and len(runs) > 1:
-        # The counts agree, so each execution has its own observed request. Attribute
-        # them IN ORDER — the log is chronological and the runs are label-sorted,
-        # which is the same order the executions ran in. Copying one outcome onto
-        # every run would have claimed the second execution returned what the first
-        # did, and for the archived DELETE capture that is false: 204 then 404.
+        # The counts agree and the chronology is established, so each execution has
+        # its own observed request and the two sequences can be paired. The runs are
+        # ordered by when they RAN — this comment said "label-sorted" for two rounds
+        # after that stopped being true, in the one branch where the distinction
+        # decides the pairing. Copying one outcome onto every run would have claimed
+        # the second execution returned what the first did, and for the archived
+        # DELETE capture that is false: 204 then 404.
+        #
+        # No `len(outcomes) == len(runs)` guard: both were filtered from the same log
+        # by the same predicate that produced the count above, so the branch could not
+        # be false, and an unreachable clause here is a shape this module has been
+        # told about three times.
         outcomes = _counterparty_outcomes(logs[0], method_hint)
-        if len(outcomes) == len(runs):
-            runs = [
-                run.model_copy(update={"counterparty_status": status,
-                                       "counterparty_method": method})
-                for run, (status, method) in zip(runs, outcomes)
-            ]
+        runs = [
+            run.model_copy(update={"counterparty_status": status,
+                                   "counterparty_method": method})
+            for run, (status, method) in zip(runs, outcomes)
+        ]
 
     execution_ids = frozenset(run.execution_id for run in runs)
     counts = _connector_document_counts(files, execution_ids, method_hint)
