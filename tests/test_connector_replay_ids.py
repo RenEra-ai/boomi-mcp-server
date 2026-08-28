@@ -55,7 +55,11 @@ def _spec_text() -> str | None:
     """
     try:
         return _SPEC.read_text()
-    except OSError:
+    except FileNotFoundError:
+        # ABSENCE only. Catching every OS error would read a permissions failure,
+        # an I/O error, or the path having become a directory as "not here" and
+        # silently skip the provenance assertions — turning a broken input into a
+        # passing test, which is the shape this slice has been correcting all along.
         return None
 
 

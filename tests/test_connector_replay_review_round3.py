@@ -1277,13 +1277,13 @@ _EXPECTED_CLASS_COUNTS = {
     "DC-155-D": 3,
     "DC-155-E": 1,
     "DC-155-F": 0,
-    "DC-155-G": 1,
+    "DC-155-G": 3,
     "DC-155-H": 1,
     "DC-155-I": 2,
     "DC-155-J": 4,
     "DC-155-J2": 3,
     "DC-155-K": 38,
-    "DC-155-L": 26,
+    "DC-155-L": 27,
     "DC-155-M": 1,
 }
 
@@ -1309,6 +1309,7 @@ _NOT_AN_INSTANCE = {
     "SELF-155-r44-03a": "likewise a revision of a counted row",
     "CDX-155-r45-01a": "likewise a revision of a counted row",
     "CDX-155-r45-02a": "likewise a revision of a counted row",
+    "SELF-155-r51-04": "the structural fix its class owed, not a new instance of it",
     "SELF-155-r47-01a": "a revision of a row that is itself a non-instance",
     "SELF-155-r47-01": "the class being DISCHARGED — the regeneration done correctly from the final tree — not a new instance of regenerating from a non-final one",
 }
@@ -1819,4 +1820,53 @@ def test_each_enumerated_instance_is_classed_to_the_row_that_claims_it():
         f"changed: only expected {sorted(set(_CLASS_NAMED_IN_PROSE) - set(exempt))}, "
         f"only present {sorted(set(exempt) - set(_CLASS_NAMED_IN_PROSE))}. It is frozen "
         "by NAME, not by count, so one row cannot be swapped for another"
+    )
+
+
+def test_a_closing_report_names_the_current_wave_sha_and_proves_darkness():
+    """STRUCTURAL: the closing report cannot outlive the tree it certifies.
+
+    Recorded three times as `DC-155-G` — a closure written ahead of the validation
+    it cites. Twice it was a checkpoint row; the third time it was the closing report
+    itself, which named a superseded wave SHA, a stale review boundary, and a darkness
+    claim two test files contradicted. Being careful is what failed, so this is a
+    check instead: if a closing report exists, the SHA it names must be the one the
+    latest wave checkpoint names, and no source, test or script may differ between
+    that SHA and the tip.
+    """
+    import re
+    import subprocess
+
+    ledger_path = (
+        Path(__file__).resolve().parents[1]
+        / "docs/architecture/ISSUE_155_AUDIT_LEDGER.md"
+    )
+    ledger = ledger_path.read_text()
+    if "## Slice B — closing report" not in ledger:
+        pytest.skip("no closing report yet; the check applies once one is written")
+
+    report = ledger[ledger.index("## Slice B — closing report"):]
+    report = report[: report.index("\n## ")] if "\n## " in report else report
+    named = re.findall(r"`([0-9a-f]{7,40})`\s*\(\*\*W\*\*\)", report)
+    assert len(named) == 1, f"the report must name exactly one W, found {named}"
+    reported_w = named[0]
+
+    waves = re.findall(
+        r"\| L4 composite wave gate, slice B \|[^|]*\|\s*`([0-9a-f]{7,40})`", ledger
+    )
+    assert waves, "no wave checkpoint row found"
+    current_w = waves[-1]
+    assert reported_w.startswith(current_w) or current_w.startswith(reported_w), (
+        f"the closing report names W={reported_w} while the latest wave checkpoint "
+        f"names {current_w}; a report may not outlive the gate it cites"
+    )
+
+    diff = subprocess.run(
+        ["git", "diff", "--name-only", reported_w, "HEAD", "--", "src", "tests", "scripts"],
+        capture_output=True, text=True, cwd=ledger_path.parents[2],
+    )
+    assert diff.returncode == 0, f"git diff failed: {diff.stderr.strip()}"
+    changed = [ln for ln in diff.stdout.splitlines() if ln.strip()]
+    assert not changed, (
+        f"the closing report claims darkness from {reported_w}, but these differ: {changed}"
     )
