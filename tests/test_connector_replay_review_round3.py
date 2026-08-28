@@ -413,3 +413,166 @@ def test_the_archive_itself_has_no_disagreeing_copies():
             assert summarize(_CAPTURES / scenario, action).connector_documents is not None
         except CaptureRefused as exc:  # pragma: no cover - a real regression
             pytest.fail(f"{scenario}: the reconciliation refused live evidence: {exc}")
+
+
+# --------------------------------------------------------------------------
+# Round 31 QA. The reconciliation field set was a hand-model of what the readers
+# consume, and it had already drifted twice — one member unreachable, one reader
+# omitted. The guard below derives the truth from the module instead.
+# --------------------------------------------------------------------------
+
+
+def test_the_reconciled_field_set_equals_what_the_module_actually_reads():
+    """STRUCTURAL: the set is pinned to the module's own reads, not hand-kept.
+
+    Every key this module pulls off a platform connector record must be reconciled
+    between two archived copies of that record, or a served observation can vary by
+    filename. Hand-listing the set let `connectorType` fall out — the family
+    reconciliation reads it — so the list is derived here and compared.
+    """
+    import ast
+
+    from boomi_mcp.connector_replay import capture as module
+
+    source = Path(module.__file__).read_text()
+    tree = ast.parse(source)
+
+    # The readers: every function that takes a platform record and asks it for a
+    # named key. Found by shape — `<name>.get("literal")` where the receiver is a
+    # record or a row — rather than by a list of function names.
+    receivers = {"record", "row", "seen", "r", "a", "b"}
+    read_keys = {
+        node.args[0].value
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "get"
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id in receivers
+        and node.args
+        and isinstance(node.args[0], ast.Constant)
+        and isinstance(node.args[0].value, str)
+    }
+    # Keys read through a loop over a literal tuple — `for field in ("a", "b"):
+    # row.get(field)` — are reads too, and missing them is how this derivation
+    # would have passed while the set was still wrong.
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.For) or not isinstance(node.target, ast.Name):
+            continue
+        if not isinstance(node.iter, (ast.Tuple, ast.List)):
+            continue
+        literals = [
+            e.value for e in node.iter.elts
+            if isinstance(e, ast.Constant) and isinstance(e.value, str)
+        ]
+        if not literals or len(literals) != len(node.iter.elts):
+            continue
+        reads_the_variable = any(
+            isinstance(inner, ast.Call)
+            and isinstance(inner.func, ast.Attribute)
+            and inner.func.attr == "get"
+            and isinstance(inner.func.value, ast.Name)
+            and inner.func.value.id in receivers
+            and inner.args
+            and isinstance(inner.args[0], ast.Name)
+            and inner.args[0].id == node.target.id
+            for inner in ast.walk(node)
+        )
+        if reads_the_variable:
+            read_keys.update(literals)
+
+    # `id` is the reconciliation KEY, not a reconciled value: two copies that
+    # disagree on it are two different rows, which is not a conflict.
+    read_keys.discard("id")
+
+    assert read_keys, "the derivation found no reads, so it would pass vacuously"
+    assert set(module._CORRELATED_ROW_FIELDS) == read_keys, (
+        "the reconciled field set and the module's reads have drifted: "
+        f"only reconciled {sorted(set(module._CORRELATED_ROW_FIELDS) - read_keys)}, "
+        f"only read {sorted(read_keys - set(module._CORRELATED_ROW_FIELDS))}"
+    )
+
+
+def test_copies_disagreeing_on_the_join_field_are_refused(tmp_path):
+    """The clause that could not fire before the reconciler moved ahead of the join.
+
+    Two copies of one row disagreeing about WHICH step it belongs to never met while
+    reconciliation ran after filtering — they were filtered apart first — so the
+    disagreement resolved silently toward the connector under test.
+    """
+    from boomi_mcp.connector_replay.capture import CaptureRefused
+
+    dst = tmp_path / "join-field-disagreement"
+    shutil.copytree(_CAPTURES / _SOURCE, dst)
+    patch_step = None
+    for xml in dst.glob("*.xml"):
+        text = xml.read_text()
+        if 'customOperationType="PATCH"' in text:
+            patch_step = text.split('name="', 1)[1].split('"', 1)[0]
+
+    for path in sorted(dst.glob("*.json"), reverse=True):
+        payload = json.loads(path.read_text())
+        touched = False
+        for record in _platform_connector_records(payload):
+            if record.get("executionConnector") == patch_step:
+                record["executionConnector"] = "_SOME_OTHER_STEP"
+                touched = True
+        if touched:
+            path.write_text(json.dumps(payload))
+            break
+
+    with pytest.raises(CaptureRefused, match="executionConnector"):
+        summarize(dst, "PATCH")
+
+
+def test_a_non_operation_component_does_not_contest_the_name(tmp_path):
+    """The ownership gate is scoped to components that can produce a connector row."""
+    from boomi_mcp.connector_replay.capture import _component_name_under_test
+
+    dst = tmp_path / "process-shares-the-name"
+    shutil.copytree(_CAPTURES / _SOURCE, dst)
+    target = next(p for p in dst.glob("*.xml") if 'customOperationType="PATCH"' in p.read_text())
+    name = target.read_text().split('name="', 1)[1].split('"', 1)[0]
+    (dst / "component_process.xml").write_text(
+        '<Component xmlns="http://api.platform.boomi.com/" '
+        f'componentId="00000000-0000-4000-8000-000000000001" name="{name}" '
+        'type="process"><object/></Component>'
+    )
+
+    assert _component_name_under_test(sorted(dst.iterdir()), "PATCH") == name
+
+    # CONTROL: a second OPERATION sharing the name still refuses, so the narrowing
+    # did not reopen the collision it was added to close.
+    twin = target.read_text()
+    component_id = twin.split('componentId="', 1)[1].split('"', 1)[0]
+    other = component_id[:-1] + ("0" if component_id[-1] != "0" else "1")
+    (dst / "component_op_twin.xml").write_text(twin.replace(component_id, other, 1))
+    assert _component_name_under_test(sorted(dst.iterdir()), "PATCH") is None
+
+
+def test_the_missing_count_refusal_survives_a_brace_bearing_row_id(tmp_path):
+    """The message must not be re-formatted after interpolation."""
+    from boomi_mcp.connector_replay.capture import CaptureRefused, _connector_document_counts
+
+    dst = tmp_path / "brace-id"
+    shutil.copytree(_CAPTURES / _SOURCE, dst)
+    patch_step = None
+    for xml in dst.glob("*.xml"):
+        text = xml.read_text()
+        if 'customOperationType="PATCH"' in text:
+            patch_step = text.split('name="', 1)[1].split('"', 1)[0]
+    for path in dst.glob("*.json"):
+        payload = json.loads(path.read_text())
+        touched = False
+        for record in _platform_connector_records(payload):
+            if record.get("executionConnector") == patch_step:
+                record["id"] = "row-{0}-{name}"
+                record.pop("successCount", None)
+                touched = True
+        if touched:
+            path.write_text(json.dumps(payload))
+
+    with pytest.raises(CaptureRefused) as raised:
+        summarize(dst, "PATCH")
+    # The id reaches the operator intact, and no KeyError is raised in its place.
+    assert "row-{0}-{name}" in str(raised.value)

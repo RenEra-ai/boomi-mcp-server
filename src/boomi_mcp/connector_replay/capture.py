@@ -201,16 +201,19 @@ def _first(node: Any, key: str) -> Any:
     return None
 
 
-#: The fields every correlated row is READ for. Two archived copies of one platform
-#: row must agree on exactly these: reconciling fields nobody reads would refuse
-#: captures over differences that change no observation, and reconciling fewer would
-#: let a read field vary by filename.
+#: The fields every archived connector row is READ for. Two copies of one platform row
+#: must agree on exactly these: reconciling fields nobody reads would refuse captures
+#: over differences that change no observation, and reconciling fewer would let a read
+#: field vary by filename. Hand-listing it is what let `connectorType` fall out — the
+#: family reconciliation consumes it — so the set is PINNED to the module's own reads
+#: by a guard that derives them from this file, rather than trusted to stay in step.
 _CORRELATED_ROW_FIELDS: Final = (
+    "connectorType",
+    "errorCount",
     "executionConnector",
     "executionId",
     "isStartShape",
     "successCount",
-    "errorCount",
 )
 
 
@@ -251,8 +254,16 @@ def _component_name_under_test(files: list[Path], method_hint: str | None) -> st
         component_id = root.get("componentId")
         if not name or not component_id:
             continue
+        # Ownership is contested only among components that can PRODUCE a connector
+        # row — those declaring an operation type. A process or profile archived
+        # beside them cannot appear in the platform's connector rows, so counting it
+        # as a rival owner refused captures it could never have corrupted.
+        declared = [el.get("customOperationType") for el in root.iter()
+                    if el.get("customOperationType")]
+        if not declared:
+            continue
         owners.setdefault(name, set()).add(component_id)
-        if any(el.get("customOperationType") == method_hint for el in root.iter()):
+        if method_hint in declared:
             by_component[component_id] = name
     if len(by_component) != 1:
         return None
@@ -288,11 +299,35 @@ def _connector_rows_under_test(
     step_name = _component_name_under_test(files, method_hint)
     if not step_name:
         return None
-    # DEDUPED BY THE PLATFORM'S OWN ROW ID. A capture commonly archives the same
-    # query twice — `execution_connector.json` beside `execution_connector_requery.json`
-    # — so a row-per-file scan returned each connector twice. Harmless to a set of
-    # flags, and silently doubling to anything that COUNTS; the counts below are
-    # exactly such a consumer, so the duplicate has to die before they read it.
+    rows = _reconciled_platform_rows(files, execution_ids)
+    selected = [row for row in rows if row.get("executionConnector") == step_name]
+    return tuple(selected) or None
+
+
+def _reconciled_platform_rows(
+    files: list[Path], execution_ids: frozenset[str]
+) -> tuple[dict, ...]:
+    """Every archived platform connector row, deduped by id and reconciled.
+
+    RECONCILED BEFORE THE JOIN, and the order is the whole point. Doing this after
+    filtering made two of the reconciled fields structurally unreachable — a row is
+    only compared against another row that already matched the same execution and the
+    same step, so two copies disagreeing about WHICH step a row belongs to could never
+    meet, and the disagreement resolved silently toward the connector under test. That
+    is the reconciler failing at exactly the case it was added for.
+
+    Captures archive the same query twice — a raw copy beside a requery — and the
+    manifest validates each file on its own, so nothing else would notice the two
+    disagreeing; keeping whichever file sorted first would make a served observation
+    depend on a filename.
+
+    Rows naming a FOREIGN execution are skipped rather than reconciled. A record that
+    does not mention this capture's executions is not evidence about them, so it is
+    not a rival copy of anything here — and the rule that refuses it belongs to the
+    connector-type reconciliation, which reports it in those terms. Reconciling it
+    here would answer a question about causal ties with a message about disagreeing
+    copies.
+    """
     by_row: dict[str, dict] = {}
     for path in sorted(files):
         if path.suffix != ".json":
@@ -304,21 +339,15 @@ def _connector_rows_under_test(
         for record in _platform_connector_records(payload):
             if record.get("executionId") not in execution_ids:
                 continue
-            if record.get("executionConnector") != step_name:
-                continue
             key = record.get("id")
             if not isinstance(key, str):
-                # No platform id to dedupe on: keep it, but keyed so two such rows
-                # from one file cannot collapse into one.
+                # No platform id to reconcile on: keep it, but keyed so two such
+                # rows from one file cannot collapse into one.
                 key = f"{path.name}#{len(by_row)}"
             seen = by_row.get(key)
             if seen is None:
                 by_row[key] = record
                 continue
-            # RECONCILED, not first-wins. Captures archive the same query twice — a
-            # raw copy beside a requery — and the manifest validates each file on its
-            # own, so nothing else would notice the two disagreeing. Keeping whichever
-            # file sorted first would make a served observation depend on a filename.
             differing = sorted(
                 field for field in _CORRELATED_ROW_FIELDS
                 if seen.get(field) != record.get(field)
@@ -329,7 +358,7 @@ def _connector_rows_under_test(
                     f"disagree on {differing!r}; which one describes the execution "
                     "is not decidable from the archive"
                 )
-    return tuple(by_row.values()) or None
+    return tuple(by_row.values())
 
 
 def _connector_document_counts(
@@ -361,8 +390,8 @@ def _connector_document_counts(
             if not isinstance(value, int) or isinstance(value, bool):
                 raise CaptureRefused(
                     f"connector row {row.get('id')!r} carries no usable {field!r} "
-                    "({0!r}); a connector-level observation cannot be derived from "
-                    "a row that does not report it".format(value)
+                    f"({value!r}); a connector-level observation cannot be derived "
+                    "from a row that does not report it"
                 )
             if value < 0:
                 raise CaptureRefused(

@@ -389,8 +389,9 @@ def _input_observation(summary: CaptureSummaryV1) -> InputObservationV1:
         return InputObservationV1.NO_INBOUND_DOCUMENTS
     if summary.connector_documents is None:
         raise IngestRefused(
-            f"{summary.scenario}: the connector under test reported no document "
-            "count, so what it consumed is unknown rather than absent"
+            f"{summary.scenario}: no platform connector row could be correlated to "
+            "the operation under test, so what it consumed is unknown rather than "
+            "absent"
         )
     consumed = summary.connector_documents > 0
     return (InputObservationV1.DOCUMENTS_CONSUMED if consumed
@@ -416,8 +417,9 @@ def _output_observation(summary: CaptureSummaryV1) -> OutputObservationV1:
     # a call that DID return a document one that returned nothing.
     if summary.connector_successful_documents is None:
         raise IngestRefused(
-            f"{summary.scenario}: the connector under test reported no document "
-            "count, so what it returned is unknown rather than absent"
+            f"{summary.scenario}: no platform connector row could be correlated to "
+            "the operation under test, so what it returned is unknown rather than "
+            "absent"
         )
     if summary.connector_successful_documents > 0:
         return OutputObservationV1.RETURN_DOCUMENTS_RECEIVED
