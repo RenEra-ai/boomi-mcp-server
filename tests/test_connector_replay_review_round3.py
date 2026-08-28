@@ -2441,33 +2441,82 @@ def _wave_evidence_violation(ledger_text, archive_dir):
     summary = archive_dir / named.group(1) / "summary.json"
     if not summary.is_file():
         return f"cited archive {named.group(1)} is absent from the checkout"
-    recorded = json.loads(summary.read_text()).get("wave_sha", "")
+    attested = json.loads(summary.read_text())
+    recorded = attested.get("wave_sha", "")
     if not recorded.startswith(sha.group(1)):
         return (f"cited archive {named.group(1)} attests {recorded[:7]}, "
                 f"not the {sha.group(1)} the row names")
+    # The archive must SUPPORT the row, not merely share its SHA. Checking identity
+    # alone accepted an archive recording a failed verdict, a nonzero exit code, or
+    # counts contradicting the arms the row quotes — so the guard proved that evidence
+    # existed and nothing about what it said.
+    if attested.get("status") != "completed" or attested.get("verdict") != "pass":
+        return (f"cited archive {named.group(1)} records "
+                f"{attested.get('status')}/{attested.get('verdict')}, not a passing run")
+    if attested.get("exit_code") != 0:
+        return f"cited archive {named.group(1)} exited {attested.get('exit_code')}"
+    # Every arm the row QUOTES must agree with what the archive attests. A row may
+    # quote fewer arms than the archive holds; it may not quote a different number.
+    arms = (
+        (r"(\d[\d,]*) passed", ("suite", "passed")),
+        (r"(\d[\d,]*) skipped", ("suite", "skipped")),
+        (r"(\d[\d,]*) active goldens", ("goldens", "active")),
+    )
+    for pattern, (section, key) in arms:
+        quoted = re.search(pattern, latest)
+        if not quoted:
+            continue
+        claimed = int(quoted.group(1).replace(",", ""))
+        actual = attested.get(section, {}).get(key)
+        if actual != claimed:
+            return (f"the row quotes {claimed} {section}.{key} but "
+                    f"{named.group(1)} attests {actual}")
     return None
 
 
+_PASSING_WAVE = {
+    "wave_sha": "abc1234def", "status": "completed", "verdict": "pass", "exit_code": 0,
+    "suite": {"passed": 11037, "skipped": 18}, "goldens": {"active": 74},
+}
+_ROW = ("| L4 composite wave gate, slice B | 1 / 1 | x | `CLOSE-CLEAN` | W = `{sha}`{cite}. Arms: the non-KB "
+        "suite green at 11,037 passed and 18 skipped; 74 active goldens |")
+
+
 @pytest.mark.parametrize(
-    "row,expected",
+    "sha,cite,attested,expected",
     [
-        ("| L4 composite wave gate, slice B | 1 / 1 | x | y | W = `abc1234`, archived `wave-gate/ok`. |", None),
-        ("| L4 composite wave gate, slice B | 1 / 1 | x | y | W = `abc1234`. |",
-         "the latest wave row (abc1234) cites no archived evidence"),
-        ("| L4 composite wave gate, slice B | 1 / 1 | x | y | W = `abc1234`, archived `wave-gate/gone`. |",
+        ("abc1234", ", archived `wave-gate/ok`", {}, None),
+        ("abc1234", "", {}, "the latest wave row (abc1234) cites no archived evidence"),
+        ("abc1234", ", archived `wave-gate/gone`", {},
          "cited archive gone is absent from the checkout"),
-        ("| L4 composite wave gate, slice B | 1 / 1 | x | y | W = `dddffff`, archived `wave-gate/ok`. |",
+        ("dddffff", ", archived `wave-gate/ok`", {},
          "cited archive ok attests abc1234, not the dddffff the row names"),
+        # Identity alone was the whole check, and it accepted every one of these.
+        ("abc1234", ", archived `wave-gate/ok`", {"verdict": "fail"},
+         "cited archive ok records completed/fail, not a passing run"),
+        ("abc1234", ", archived `wave-gate/ok`", {"status": "timeout"},
+         "cited archive ok records timeout/pass, not a passing run"),
+        ("abc1234", ", archived `wave-gate/ok`", {"exit_code": 1},
+         "cited archive ok exited 1"),
+        ("abc1234", ", archived `wave-gate/ok`", {"suite": {"passed": 1, "skipped": 18}},
+         "the row quotes 11037 suite.passed but ok attests 1"),
+        ("abc1234", ", archived `wave-gate/ok`", {"goldens": {"active": 9}},
+         "the row quotes 74 goldens.active but ok attests 9"),
     ],
 )
-def test_the_wave_evidence_rule_admits_only_a_reverifiable_row(tmp_path, row, expected):
-    """The rule itself, always exercised — not only against this repository."""
+def test_the_wave_evidence_rule_admits_only_a_supported_row(tmp_path, sha, cite, attested, expected):
+    """The rule itself, always exercised — not only against this repository.
+
+    An archive must SUPPORT the row, not merely share its SHA: checking identity alone
+    accepted a failed verdict, a timed-out run, a nonzero exit and counts contradicting
+    the arms the row quotes.
+    """
     import json
 
     archive = tmp_path / "wave-gate"
     (archive / "ok").mkdir(parents=True)
-    (archive / "ok" / "summary.json").write_text(json.dumps({"wave_sha": "abc1234def"}))
-    assert _wave_evidence_violation(row, archive) == expected
+    (archive / "ok" / "summary.json").write_text(json.dumps({**_PASSING_WAVE, **attested}))
+    assert _wave_evidence_violation(_ROW.format(sha=sha, cite=cite), archive) == expected
 
 
 def test_the_latest_wave_checkpoint_is_reverifiable_from_the_archive():
