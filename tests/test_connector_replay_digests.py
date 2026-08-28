@@ -247,3 +247,45 @@ def test_every_captured_component_still_digests_under_the_closed_attributes(conn
     component_config_digest_v1(connection_xml, "connection")
     for path in _operation_xmls():
         component_config_digest_v1(path.read_text(), "operation")
+
+
+def test_a_property_attribute_is_not_accepted_on_a_field():
+    """Classification is element-QUALIFIED, not a flat set of attribute names.
+
+    Generalising the per-shape allowlists to one flat set restored the fail-open one
+    level up: `key` is structural on a property and reaches nothing on a field, and a
+    connection's excluded `url` reaches nothing on a field either. Both were accepted.
+    """
+    op = _operation_xml()
+    planted = re.sub(r'(<field id="path"[^>]*?)\s*/>', r'\1 key="behavior"/>', op, count=1)
+    assert planted != op, "the plant matched nothing"
+    with pytest.raises(ConfigDigestRefused):
+        component_config_digest_v1(planted, "operation")
+
+
+def test_an_excluded_attribute_is_not_accepted_on_a_foreign_element(connection_xml):
+    """An exclusion is a decision about one element, not a licence everywhere."""
+    planted = re.sub(r'(<field id="url"[^>]*?)\s*/>', r'\1 url="http://evil"/>',
+                     connection_xml, count=1)
+    assert planted != connection_xml, "the plant matched nothing"
+    with pytest.raises(ConfigDigestRefused):
+        component_config_digest_v1(planted, "connection")
+
+
+def test_a_carried_attribute_is_bound_to_the_element_that_owns_it():
+    """Which element carries an attribute is part of the configuration.
+
+    Keyed only by element NAME, two fields were indistinguishable: moving the sole
+    `type` from one to the other left the payload byte-identical. The two documents
+    here hold the same attributes and differ only in ownership.
+    """
+    op = _operation_xml()
+    fields = re.findall(r'<field id="(?:path|followRedirects)"[^>]*?/>', op)
+    assert len(fields) == 2 and all('type="string"' in f for f in fields), \
+        "the captured operation no longer supplies two typed fields; this test is vacuous"
+    first, second = fields
+    only_first = op.replace(second, second.replace(' type="string"', ''), 1)
+    only_second = op.replace(first, first.replace(' type="string"', ''), 1)
+    assert only_first != only_second, "the two variants are identical; this test is vacuous"
+    assert component_config_digest_v1(only_first, "operation") != \
+           component_config_digest_v1(only_second, "operation")

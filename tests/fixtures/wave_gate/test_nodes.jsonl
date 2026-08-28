@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 11044, "minimum_collected": 11044, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 11047, "minimum_collected": 11047, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -11083,3 +11083,6 @@
 {"kind": "test", "id": "pytest-011082", "node_id": "tests/test_connector_replay_digests.py::test_a_namespaced_attribute_is_not_the_unqualified_one", "state": "active"}
 {"kind": "test", "id": "pytest-011083", "node_id": "tests/test_connector_replay_digests.py::test_an_unknown_attribute_on_a_non_field_element_refuses", "state": "active"}
 {"kind": "test", "id": "pytest-011084", "node_id": "tests/test_connector_replay_digests.py::test_the_projection_revision_is_inside_the_digested_payload", "state": "active"}
+{"kind": "test", "id": "pytest-011085", "node_id": "tests/test_connector_replay_digests.py::test_a_carried_attribute_is_bound_to_the_element_that_owns_it", "state": "active"}
+{"kind": "test", "id": "pytest-011086", "node_id": "tests/test_connector_replay_digests.py::test_a_property_attribute_is_not_accepted_on_a_field", "state": "active"}
+{"kind": "test", "id": "pytest-011087", "node_id": "tests/test_connector_replay_digests.py::test_an_excluded_attribute_is_not_accepted_on_a_foreign_element", "state": "active"}

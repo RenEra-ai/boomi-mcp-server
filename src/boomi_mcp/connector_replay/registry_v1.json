@@ -62,16 +62,18 @@
       "included_value_fields": [
         "url"
       ],
-      "projection_version": 2,
+      "projection_version": 3,
       "qname_aware_attrs": [],
       "qname_aware_tags": [],
       "included_scope_attributes": [
-        "type"
+        "field/type"
       ],
       "excluded_scope_attributes": [
-        "clientId",
-        "grantType",
-        "url"
+        "OAuth2Config/grantType",
+        "accessTokenEndpoint/url",
+        "authorizationTokenEndpoint/url",
+        "credentials/clientId",
+        "properties/value"
       ]
     },
     {
@@ -107,19 +109,23 @@
         "path",
         "followRedirects"
       ],
-      "projection_version": 2,
+      "projection_version": 3,
       "qname_aware_attrs": [],
       "qname_aware_tags": [],
       "included_scope_attributes": [
-        "customOperationType",
-        "type",
-        "operationType",
-        "returnApplicationErrors",
-        "trackResponse",
-        "enabled",
-        "directory"
+        "Archiving/directory",
+        "Archiving/enabled",
+        "GenericOperationConfig/customOperationType",
+        "GenericOperationConfig/operationType",
+        "Operation/customOperationType",
+        "Operation/operationType",
+        "Operation/returnApplicationErrors",
+        "Operation/trackResponse",
+        "field/type"
       ],
-      "excluded_scope_attributes": []
+      "excluded_scope_attributes": [
+        "properties/value"
+      ]
     }
   ],
   "schema_version": 1,

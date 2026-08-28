@@ -461,10 +461,34 @@ def _refuse_unknown_fields(root: ET.Element, spec: dict, kind: str) -> None:
         )
 
 
-#: Attributes the projection carries STRUCTURALLY rather than by allowlist: ``id``
-#: becomes a projected field's identity, ``value`` its text, and ``key`` names a
-#: projected property. They are known by construction, not by configuration.
-_STRUCTURAL_ATTRS = ("id", "value", "key")
+#: Attributes the projection carries STRUCTURALLY rather than by allowlist, keyed
+#: by the element that may carry them: a field's ``id`` becomes the projected node's
+#: identity, its ``value`` the node text, and a property's ``key`` its name. Known by
+#: construction, not by configuration — and element-QUALIFIED, because a flat set of
+#: bare names accepted ``key`` on a field, where nothing reads it.
+_STRUCTURAL_PAIRS = ("field/id", "field/value", "properties/key")
+
+
+def _attr_class(spec, element: str, uri: str, attribute: str):
+    """How this projection classifies one attribute ON ONE element.
+
+    Element-qualified on purpose. A flat set of attribute names is not a
+    classification: it accepted a property's ``key`` on a field and a connection's
+    excluded ``url`` on a field, in both cases passing an attribute that reaches
+    nothing — the fail-open the per-element allowlists existed to prevent, restored
+    one level up while generalising them.
+    """
+    if uri:
+        # A namespaced attribute is never the unqualified one of the same name.
+        return None
+    key = "{0}/{1}".format(element, attribute)
+    if key in _STRUCTURAL_PAIRS:
+        return "structural"
+    if key in set(spec.get("scope_attributes", ())):
+        return "carried"
+    if key in set(spec.get("excluded_scope_attributes", ())):
+        return "excluded"
+    return None
 
 
 def _admitted(root: ET.Element, spec: dict):
@@ -501,13 +525,11 @@ def _refuse_unknown_attributes(root: ET.Element, spec: dict, kind: str) -> None:
     projection reads the unqualified name and finds nothing, so a field carrying a
     namespaced type digested identically to a field carrying none.
     """
-    known = (set(_STRUCTURAL_ATTRS)
-             | set(spec.get("scope_attributes", ()))
-             | set(spec.get("excluded_scope_attributes", ())))
     for el in _admitted(root, spec):
+        element = _qname(el)[1]
         stray = sorted(
             name for name in el.attrib
-            if not (_attr_qname(name)[0] == "" and _attr_qname(name)[1] in known)
+            if _attr_class(spec, element, *_attr_qname(name)) is None
         )
         if stray:
             raise ConfigDigestRefused(
@@ -564,12 +586,18 @@ def _project_tree(root: ET.Element, spec: dict, kind: str) -> ET.Element:
     # qualified by the element that carries it. A change to any of them moves the
     # digest; previously only a document-unique scan reached them, which could not
     # represent the same attribute appearing on two different elements.
+    # ONE record per admitted element, in document order, emitted whether or not it
+    # carries anything. Position is the record's identity: keyed only by element NAME,
+    # two fields were indistinguishable, so moving the sole `type` from one to the
+    # other left the payload identical. Emitting every admitted element also makes the
+    # presence of an extra admitted element a change in its own right.
     for el in _admitted(root, spec):
-        carried = {a: el.get(a) for a in sorted(spec.get("scope_attributes", ()))
-                   if el.get(a) is not None}
-        if carried:
-            uri, local = _qname(el)
-            ET.SubElement(out, "on", {"ns": uri, "el": local, **carried})
+        uri, local = _qname(el)
+        carried = {
+            name.split("}")[-1]: value for name, value in sorted(el.attrib.items())
+            if _attr_class(spec, local, *_attr_qname(name)) == "carried"
+        }
+        ET.SubElement(out, "on", {"ns": uri, "el": local, **carried})
 
     included = set(spec.get("value_fields", ())) | set(spec.get("property_fields", ()))
     # A repeated id is a REFUSAL, not last-one-wins. Two fields claiming the same id
