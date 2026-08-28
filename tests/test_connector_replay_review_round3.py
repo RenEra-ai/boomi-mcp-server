@@ -1272,6 +1272,13 @@ def test_a_shared_readback_delta_is_read_per_run(tmp_path):
 #: written. A tally may GROW as a class recurs; it may never shrink, and the
 #: roster may not lose a row — a floor on the total missed the removal of a
 #: small class while catching the removal of a large one.
+#:
+#: NEVER REGENERATE THIS FROM THE LEDGER. The assertion below is `>=`, so a growing
+#: tally needs no edit here, and re-deriving the numbers makes the floor a mirror of
+#: the present instead of a record of the past. Measured: shrinking a tally fails the
+#: guard, and re-deriving the table in the same batch makes it pass. Only a NEW class
+#: is added, with the count it has at that moment; existing entries stay as written.
+#: `test_the_recorded_floors_never_move_down` now enforces exactly that.
 _EXPECTED_CLASS_COUNTS = {
     "DC-155-A": 0,
     "DC-155-B": 1,
@@ -1479,6 +1486,128 @@ def test_every_defect_class_tally_equals_its_own_enumeration():
             f"{cls}: declares {seen_counts[cls]} instances, below its recorded floor "
             f"of {floor} — a class tally may grow, never shrink"
         )
+
+
+def _declared_class_floors(source):
+    """The floor table as written in one revision of this file."""
+    import ast
+    import re
+
+    found = re.search(r"_EXPECTED_CLASS_COUNTS = (\{[^}]*\})", source)
+    return ast.literal_eval(found.group(1)) if found else None
+
+
+def _floor_regression(previous_source, current_source):
+    """What a revision did to the recorded floors, if anything wrong."""
+    previous = _declared_class_floors(previous_source)
+    current = _declared_class_floors(current_source)
+    if previous is None:
+        return None  # the table did not exist in that revision
+    if current is None:
+        return "removed"
+    lowered = sorted(c for c, floor in previous.items() if current.get(c, -1) < floor)
+    return f"lowered: {lowered}" if lowered else None
+
+
+@pytest.mark.parametrize(
+    "previous,current,expected",
+    [
+        ("_EXPECTED_CLASS_COUNTS = {'A': 3}", "_EXPECTED_CLASS_COUNTS = {'A': 3}", None),
+        ("_EXPECTED_CLASS_COUNTS = {'A': 3}", "_EXPECTED_CLASS_COUNTS = {'A': 4}", None),
+        ("_EXPECTED_CLASS_COUNTS = {'A': 3}", "_EXPECTED_CLASS_COUNTS = {'A': 3, 'B': 1}", None),
+        ("_EXPECTED_CLASS_COUNTS = {'A': 3}", "_EXPECTED_CLASS_COUNTS = {'A': 2}", "lowered: ['A']"),
+        ("_EXPECTED_CLASS_COUNTS = {'A': 3}", "_EXPECTED_CLASS_COUNTS = {'B': 3}", "lowered: ['A']"),
+        ("_EXPECTED_CLASS_COUNTS = {'A': 3}", "nothing here", "removed"),
+        ("nothing here", "_EXPECTED_CLASS_COUNTS = {'A': 3}", None),
+    ],
+)
+def test_the_floor_rule_admits_only_growth(previous, current, expected):
+    """The rule itself, always exercised — the repository check needs a prior commit."""
+    assert _floor_regression(previous, current) == expected
+
+
+def _floor_regression_in_repo(rel, current_source, git):
+    """The comparison as the repository performs it — committed against working.
+
+    Extracted for the reason this whole file keeps rediscovering: a rule tested alone
+    leaves its CALLER free to regress, and here the caller's regression is the exact
+    defect the rule exists to catch — comparing the file against itself reports no
+    lowering, forever.
+    """
+    return _floor_regression(git("show", f"HEAD:{rel}", check=False), current_source)
+
+
+def _repo_with_committed_floors(tmp_path, committed_floor):
+    """A real repository whose committed revision declares one floor."""
+    import subprocess
+
+    root = tmp_path / "floors"
+    root.mkdir()
+
+    def git(*args, check=True):
+        out = subprocess.run(["git", *args], capture_output=True, text=True, cwd=root)
+        if check:
+            assert out.returncode == 0, f"git {' '.join(args)} failed: {out.stderr.strip()}"
+        return out.stdout
+
+    git("init", "-q", "-b", "main")
+    git("config", "user.email", "qa@example.invalid")
+    git("config", "user.name", "qa")
+    (root / "guard.py").write_text(f"_EXPECTED_CLASS_COUNTS = {{'A': {committed_floor}}}\n")
+    git("add", "-A")
+    git("commit", "-qm", "the recorded floors")
+    return git
+
+
+@pytest.mark.parametrize(
+    "committed,working,expected",
+    [
+        (3, 4, None),                 # a class recurred; the floor may follow upwards
+        (3, 3, None),                 # untouched
+        (3, 2, "lowered: ['A']"),     # regenerated from the present, which is the defect
+    ],
+)
+def test_the_repository_comparison_reads_the_committed_revision(
+    tmp_path, committed, working, expected
+):
+    """The caller, driven — not the rule alone.
+
+    Pointing the comparison at the working file on BOTH sides passes every test that
+    exercises only the rule, and reports no lowering for the rest of time.
+    """
+    git = _repo_with_committed_floors(tmp_path, committed)
+    source = f"_EXPECTED_CLASS_COUNTS = {{'A': {working}}}\n"
+    assert _floor_regression_in_repo("guard.py", source, git) == expected
+
+
+def test_the_recorded_floors_never_move_down():
+    """A floor re-derived from what it guards is not a floor.
+
+    The table above is a ratchet: a class tally may grow, never shrink. Measured, it
+    does catch a shrink — and then the habit of regenerating it from the ledger in the
+    same batch as the ledger edit makes the very same shrink pass, because the floor
+    is rewritten to whatever the present says. Every ledger edit in this slice ran that
+    regeneration, so the ratchet was armed only against shrinks made in some other
+    batch. This compares the working table against the COMMITTED one and refuses any
+    entry that moved down or vanished, which is the thing a comment could only ask for.
+    """
+    import subprocess
+
+    here = Path(__file__).resolve()
+    root = here.parents[1]
+    rel = str(here.relative_to(root))
+    def git(*args, check=True):
+        out = subprocess.run(["git", *args], capture_output=True, text=True, cwd=root)
+        if check:
+            assert out.returncode == 0, f"git {' '.join(args)} failed: {out.stderr.strip()}"
+        return out.stdout
+
+    regression = _floor_regression_in_repo(rel, here.read_text(), git)
+    assert regression is None, (
+        f"the recorded class floors moved down ({regression}). A tally may grow as a "
+        "class recurs; a floor may not follow it downwards, and it is never "
+        "regenerated from the ledger it exists to check"
+    )
 
 
 def test_a_conflicting_execution_id_is_not_overridden_by_a_matching_label(tmp_path):

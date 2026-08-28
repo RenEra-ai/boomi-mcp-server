@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 11018, "minimum_collected": 11018, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 11029, "minimum_collected": 11029, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -11057,3 +11057,14 @@
 {"kind": "test", "id": "pytest-011056", "node_id": "tests/test_connector_replay_review_round3.py::test_the_repository_guard_refuses_a_report_citing_a_superseded_wave", "state": "active"}
 {"kind": "test", "id": "pytest-011057", "node_id": "tests/test_connector_replay_review_round3.py::test_the_repository_guard_refuses_a_report_whose_tree_moved_after_the_gate", "state": "active"}
 {"kind": "test", "id": "pytest-011058", "node_id": "tests/test_connector_replay_review_round3.py::test_the_repository_guard_accepts_a_report_already_committed", "state": "active"}
+{"kind": "test", "id": "pytest-011059", "node_id": "tests/test_connector_replay_review_round3.py::test_the_floor_rule_admits_only_growth[_EXPECTED_CLASS_COUNTS = {'A': 3}-_EXPECTED_CLASS_COUNTS = {'A': 2}-lowered: ['A']]", "state": "active"}
+{"kind": "test", "id": "pytest-011060", "node_id": "tests/test_connector_replay_review_round3.py::test_the_floor_rule_admits_only_growth[_EXPECTED_CLASS_COUNTS = {'A': 3}-_EXPECTED_CLASS_COUNTS = {'A': 3, 'B': 1}-None]", "state": "active"}
+{"kind": "test", "id": "pytest-011061", "node_id": "tests/test_connector_replay_review_round3.py::test_the_floor_rule_admits_only_growth[_EXPECTED_CLASS_COUNTS = {'A': 3}-_EXPECTED_CLASS_COUNTS = {'A': 3}-None]", "state": "active"}
+{"kind": "test", "id": "pytest-011062", "node_id": "tests/test_connector_replay_review_round3.py::test_the_floor_rule_admits_only_growth[_EXPECTED_CLASS_COUNTS = {'A': 3}-_EXPECTED_CLASS_COUNTS = {'A': 4}-None]", "state": "active"}
+{"kind": "test", "id": "pytest-011063", "node_id": "tests/test_connector_replay_review_round3.py::test_the_floor_rule_admits_only_growth[_EXPECTED_CLASS_COUNTS = {'A': 3}-_EXPECTED_CLASS_COUNTS = {'B': 3}-lowered: ['A']]", "state": "active"}
+{"kind": "test", "id": "pytest-011064", "node_id": "tests/test_connector_replay_review_round3.py::test_the_floor_rule_admits_only_growth[_EXPECTED_CLASS_COUNTS = {'A': 3}-nothing here-removed]", "state": "active"}
+{"kind": "test", "id": "pytest-011065", "node_id": "tests/test_connector_replay_review_round3.py::test_the_floor_rule_admits_only_growth[nothing here-_EXPECTED_CLASS_COUNTS = {'A': 3}-None]", "state": "active"}
+{"kind": "test", "id": "pytest-011066", "node_id": "tests/test_connector_replay_review_round3.py::test_the_recorded_floors_never_move_down", "state": "active"}
+{"kind": "test", "id": "pytest-011067", "node_id": "tests/test_connector_replay_review_round3.py::test_the_repository_comparison_reads_the_committed_revision[3-2-lowered: ['A']]", "state": "active"}
+{"kind": "test", "id": "pytest-011068", "node_id": "tests/test_connector_replay_review_round3.py::test_the_repository_comparison_reads_the_committed_revision[3-3-None]", "state": "active"}
+{"kind": "test", "id": "pytest-011069", "node_id": "tests/test_connector_replay_review_round3.py::test_the_repository_comparison_reads_the_committed_revision[3-4-None]", "state": "active"}
