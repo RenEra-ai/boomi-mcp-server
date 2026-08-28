@@ -1280,10 +1280,10 @@ _EXPECTED_CLASS_COUNTS = {
     "DC-155-G": 1,
     "DC-155-H": 1,
     "DC-155-I": 2,
-    "DC-155-J": 2,
+    "DC-155-J": 4,
     "DC-155-J2": 3,
-    "DC-155-K": 34,
-    "DC-155-L": 16,
+    "DC-155-K": 38,
+    "DC-155-L": 19,
 }
 
 #: Instances counted before finding ids were enumerated. A CLOSED set: a
@@ -1294,6 +1294,19 @@ _UNROWED = {"DC-155-C": 2, "DC-155-I": 1}
 #: they were written before that class had one and are byte-frozen from their first
 #: commit. Frozen by name so the gap cannot grow or be swapped into; a row written now
 #: has an id available and must use it.
+#: Finding rows that NAME a defect class without being an instance of it, each with
+#: the reason. Frozen so the set cannot grow silently: a row that names a class is an
+#: instance of it unless it appears here.
+_NOT_AN_INSTANCE = {
+    "SELF-155-r5-02": "the sibling sweep the structural fix owed, not a new instance",
+    "SELF-155-r28-02": "likewise a sweep",
+    "EVAL-155-08": "names the adjacent process class, not this one",
+    "QA-155-r30-04": "finding-refuted, and a refuted row never counts",
+    "QA-155-r35-05": "not-validated — a recorded limitation rather than a defect",
+    "QA-155-r35-06": "the class's own positive controls",
+    "CDX-155-r38-02a": "a revision of a row already counted; counting both double-counts",
+}
+
 _CLASS_NAMED_IN_PROSE = [
     "CDX-155-r22-06",
     "CDX-155-r23-01",
@@ -1385,6 +1398,17 @@ def test_every_defect_class_tally_equals_its_own_enumeration():
             continue
 
         assert body, f"{name}: declares {declared} instances and names none"
+        # The LIST is a list, not free text. Accepting arbitrary characters between
+        # the backticks let an unbackticked identifier sit inside it, counted by
+        # nobody and read by a person as declared.
+        parts = [segment.strip() for segment in body.split(",")]
+        for segment in parts:
+            assert re.fullmatch(r"`[A-Z]+-155-[A-Za-z0-9-]+`", segment) or re.match(
+                r"\+\d+ unrowed\b", segment
+            ), (
+                f"{name}: {segment[:48]!r} in its instance list is neither a "
+                "backticked finding id nor the unrowed remainder"
+            )
         enumerated = re.findall(r"`([A-Z]+-155-[A-Za-z0-9-]+)`", body)
         unrowed = re.search(r"\+(\d+) unrowed", body)
         unrowed = int(unrowed.group(1)) if unrowed else 0
@@ -1729,6 +1753,7 @@ def test_each_enumerated_instance_is_classed_to_the_row_that_claims_it():
         row_class[match.group(1)] = named.group(1) if named else None
 
     exempt, mismatched, checked = [], [], 0
+    owners_by_instance: dict[str, str] = {}
     for line in ledger.splitlines():
         if not line.startswith("| DC-155-"):
             continue
@@ -1740,8 +1765,10 @@ def test_each_enumerated_instance_is_classed_to_the_row_that_claims_it():
             declared_by_row = row_class.get(instance)
             if declared_by_row is None:
                 exempt.append(instance)
+                owners_by_instance[instance] = name
                 continue
             checked += 1
+            owners_by_instance[instance] = name
             if declared_by_row != name:
                 mismatched.append((instance, name, declared_by_row))
 
@@ -1750,6 +1777,29 @@ def test_each_enumerated_instance_is_classed_to_the_row_that_claims_it():
         + ", ".join(f"{i} claimed by {c} but classed {d}" for i, c, d in mismatched)
     )
     assert checked >= 30, f"only {checked} instances were cross-checked"
+    # THE REVERSE DIRECTION. Iterating only the ids the class rows already name can
+    # never see a finding row the table forgot — which is the stale-count
+    # inconsistency this check exists to prevent, walking in through the door the
+    # check does not watch. Measured when this was added: six classed rows were
+    # genuinely uncounted and are now listed; seven are non-instances and are frozen
+    # below with the reason each is one.
+    unowned = []
+    for instance, declared_class in sorted(row_class.items()):
+        if declared_class is None:
+            continue
+        if owners_by_instance.get(instance) == declared_class:
+            continue
+        unowned.append((instance, declared_class))
+    unexpected = [i for i, _ in unowned if i not in _NOT_AN_INSTANCE]
+    assert not unexpected, (
+        "these finding rows name a defect class that does not count them, and are "
+        f"not recorded as non-instances: {unexpected}"
+    )
+    stale = [i for i in _NOT_AN_INSTANCE if i not in {x for x, _ in unowned}]
+    assert not stale, (
+        f"these are recorded as non-instances but their class now counts them: {stale}"
+    )
+
     assert sorted(set(exempt)) == _CLASS_NAMED_IN_PROSE, (
         "the set of instances naming their class in prose rather than by id has "
         f"changed: only expected {sorted(set(_CLASS_NAMED_IN_PROSE) - set(exempt))}, "
