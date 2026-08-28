@@ -1284,6 +1284,7 @@ _EXPECTED_CLASS_COUNTS = {
     "DC-155-J2": 3,
     "DC-155-K": 38,
     "DC-155-L": 26,
+    "DC-155-M": 1,
 }
 
 #: Instances counted before finding ids were enumerated. A CLOSED set: a

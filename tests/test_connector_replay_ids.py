@@ -43,8 +43,20 @@ def _platform_minted_execution_ids() -> set[str]:
     return found
 
 
-def _spec_text() -> str:
-    return _SPEC.read_text()
+def _spec_text() -> str | None:
+    """The platform spec, or None where it is not present.
+
+    It is GITIGNORED, so it exists on a development machine and on no clone —
+    including CI. A provenance guard that hard-fails without it converts "the
+    provenance cannot be re-verified here" into "the behaviour is untested here",
+    which is backwards: the behavioural assertion is the one that must always run.
+    So provenance is re-checked wherever the spec exists, and the behaviour is
+    checked everywhere.
+    """
+    try:
+        return _SPEC.read_text()
+    except OSError:
+        return None
 
 
 def test_the_capture_corpus_is_large_enough_to_be_evidence():
@@ -78,17 +90,21 @@ def test_the_platforms_own_undated_example_is_rejected():
     positive above and still admits this.
     """
     undated = "execution-110b23f4-567a-8d90-1234-56789e0b123d"
-    assert undated in _spec_text(), (
-        "this test's negative is supposed to be the platform's OWN documented "
-        "example; it is no longer present in the spec, so the pin has lost its "
-        "provenance and must be re-derived rather than hard-coded"
-    )
+    spec = _spec_text()
+    if spec is not None:
+        assert undated in spec, (
+            "this test's negative is supposed to be the platform's OWN documented "
+            "example; it is no longer present in the spec, so the pin has lost its "
+            "provenance and must be re-derived rather than hard-coded"
+        )
     assert not is_execution_id(undated)
 
 
 def test_a_different_object_sharing_the_prefix_is_rejected():
     other = "executionrecord-110b23f4-567a-8d90-1234-56789e0b123d"
-    assert other in _spec_text()
+    spec = _spec_text()
+    if spec is not None:
+        assert other in spec
     assert not is_execution_id(other)
 
 
