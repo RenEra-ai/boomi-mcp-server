@@ -631,17 +631,24 @@ def _state_change_for_run(
         except CaptureRefused:
             continue
         entries = payload if isinstance(payload, list) else [payload]
-        matching = [
-            entry for entry in entries
-            if isinstance(entry, dict)
-            and (entry.get("execution_id") == execution_id or entry.get("label") == label)
-        ]
+        # THE EXECUTION ID WINS WHEREVER IT IS PRESENT. Matching on either key let a
+        # coincidental label override a CONFLICTING id and bind another execution's
+        # verdict to this run — the weaker key overruling the stronger one, which is
+        # the same substitution this whole correlation exists to prevent.
+        keyed = [entry for entry in entries
+                 if isinstance(entry, dict) and entry.get("execution_id")]
+        if keyed:
+            matching = [e for e in keyed if e.get("execution_id") == execution_id]
+        else:
+            matching = [entry for entry in entries
+                        if isinstance(entry, dict) and entry.get("label") == label]
         if len(matching) == 1:
             changed = matching[0].get("raw_changed")
             return changed if isinstance(changed, bool) else None
-        if not matching and own is not None and len(entries) == 1:
-            # A per-run file whose single entry names nothing: the filename IS the
-            # correlation for that generation.
+        if not matching and own is not None and len(entries) == 1 and not keyed:
+            # A per-run file whose single entry names NEITHER key: the filename is the
+            # only correlation that generation offers. An entry carrying an id that
+            # does not match is a disagreement, not a fallback.
             changed = _first(entries[0], "raw_changed")
             return changed if isinstance(changed, bool) else None
     return None

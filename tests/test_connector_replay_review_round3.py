@@ -1264,3 +1264,82 @@ def test_a_shared_readback_delta_is_read_per_run(tmp_path):
         "the fixture's entries must actually disagree, or this proves nothing"
     )
     assert by_label == recorded
+
+
+def test_every_defect_class_tally_equals_its_own_enumeration():
+    """Counts are DERIVED here, because a hand-typed one was wrong.
+
+    The class table's instance count feeds the second-instance trigger and the
+    checkpoint trend accounting, so a tally that disagrees with its own list makes
+    both unverifiable. One was typed as twenty-eight over a list of twenty-seven.
+    """
+    import re
+
+    ledger = (
+        Path(__file__).resolve().parents[1]
+        / "docs/architecture/ISSUE_155_AUDIT_LEDGER.md"
+    ).read_text()
+
+    checked = 0
+    for line in ledger.splitlines():
+        if not line.startswith("| DC-155-"):
+            continue
+        match = re.search(r"\|\s*(\d+)\s*\(([^)]*)\)\s*\|", line)
+        if not match:
+            continue
+        declared = int(match.group(1))
+        enumerated = re.findall(r"`([A-Z]+-155-[A-Za-z0-9-]+)`", match.group(2))
+        assert declared == len(enumerated), (
+            f"{line.split('|')[1].strip()}: declares {declared} instances but "
+            f"enumerates {len(enumerated)}: {enumerated}"
+        )
+        assert len(set(enumerated)) == len(enumerated), (
+            f"{line.split('|')[1].strip()}: an instance is listed twice"
+        )
+        checked += 1
+    assert checked >= 4, f"only {checked} class rows carried an enumeration"
+
+
+def test_a_conflicting_execution_id_is_not_overridden_by_a_matching_label(tmp_path):
+    """The stronger key decides. A label that agrees cannot rescue an id that does not."""
+    dst = tmp_path / "conflicting-keys"
+    shutil.copytree(_CAPTURES / "cap155-e2-post", dst)
+    path = dst / "readback_delta.json"
+    entries = json.loads(path.read_text())
+    assert len(entries) > 1
+
+    # run1's entry keeps its LABEL but points its id at an execution in neither run,
+    # and the verdicts are made to disagree so binding the wrong one would show.
+    entries[0]["execution_id"] = "execution-00000000-0000-4000-8000-000000000009-2026.01.01"
+    entries[0]["raw_changed"] = False
+    entries[1]["raw_changed"] = True
+    path.write_text(json.dumps(entries))
+
+    summary = summarize(dst, "POST")
+    by_label = {r.label: r.state_changed for r in summary.runs}
+    # run1's own id matches no entry, so it gets no verdict rather than the one a
+    # coincidental label offered — which is what the superseded rule handed it.
+    assert by_label["run1"] is None, (
+        f"run1 must not take an entry whose id names another execution, got {by_label}"
+    )
+    # The other run is still named by exactly one entry, so it binds cleanly: the
+    # narrowing refuses the conflict without refusing the evidence beside it.
+    assert by_label["replay"] is True, (
+        f"the unambiguously keyed run must still bind, got {by_label}"
+    )
+
+
+def test_two_delta_entries_naming_one_execution_are_ambiguous(tmp_path):
+    """Two entries for one id is a conflict, not a choice."""
+    dst = tmp_path / "duplicate-keys"
+    shutil.copytree(_CAPTURES / "cap155-e2-post", dst)
+    path = dst / "readback_delta.json"
+    entries = json.loads(path.read_text())
+    ids = [e["execution_id"] for e in entries]
+    entries[0]["execution_id"] = ids[1]
+    path.write_text(json.dumps(entries))
+
+    by_label = {r.label: r.state_changed for r in summarize(dst, "POST").runs}
+    assert all(v is None for v in by_label.values()), (
+        f"an id claimed by two entries must bind to neither, got {by_label}"
+    )
