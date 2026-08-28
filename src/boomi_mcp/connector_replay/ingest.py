@@ -443,10 +443,15 @@ def _output_observation(summary: CaptureSummaryV1) -> OutputObservationV1:
                 "delivery cannot be attributed to this operation"
             )
         return OutputObservationV1.RETURN_DOCUMENTS_RECEIVED
-    # `successor_received_documents` is deliberately NOT minted here. It is a claim
-    # about a downstream step receiving the output, and no archived capture carries
-    # an authority for it — inventing one from the connector's own count is the
-    # defect this correction removes, one value over. Recorded as a limitation.
+    # `successor_received_documents` is deliberately NOT minted here, and the reason
+    # is a scope decision rather than an absence of evidence — an earlier version of
+    # this comment claimed no archived capture carried an authority for it, which is
+    # false: a capture whose operation feeds another connector action has that
+    # successor's own row, and the graph reader above can now find it. What the module
+    # does not model is document FLOW between connectors, so it cannot say the
+    # successor received THIS operation's documents rather than its own inputs — and
+    # that is the distinction the neighbouring value was just corrected for. Minting
+    # it belongs with the slice that models flow. Recorded as a limitation.
     return OutputObservationV1.NO_OUTPUT_OBSERVED
 
 

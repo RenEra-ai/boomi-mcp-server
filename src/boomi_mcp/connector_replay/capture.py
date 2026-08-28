@@ -156,9 +156,10 @@ class CaptureSummaryV1(ReplayRegistryModel):
     #: the vocabulary has a separate value for each. The archived read-verb captures
     #: carry no receiver row, and the two attested write captures do.
     return_documents: int | None = Field(default=None, ge=0)
-    #: Whether the operation under test REACHES that receiver in the archived process
-    #: graph. A receiver that ran in the same execution down another branch delivers
-    #: nothing on this operation's behalf. None means the archive cannot establish it.
+    #: Whether the operation under test PRODUCED what that receiver counted, per the
+    #: archived process graph: it reaches the receiver with no other connector action
+    #: in between. Merely reaching it is not enough — in a linear process every
+    #: upstream operation reaches the receiver. None means the archive cannot say.
     receiver_is_downstream: bool | None = None
     #: sha256 over every archived file's bytes, in sorted-name order.
     capture_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
@@ -433,6 +434,21 @@ def _receiver_is_downstream_of_the_operation(
     under test never took, and a delivery claim attached to the wrong branch is a
     machine-served observation of something that did not happen.
 
+    PRODUCED, not merely REACHED. Asking whether the operation reaches a receiver
+    admits every operation upstream of it, and the archived graphs are linear, so on
+    the real archive a source read "reaches" the receiver exactly as the operation
+    under test does — measured: with the source verb selected, the delete capture
+    attributed the target's delivery to the source, while the same archive's own
+    document sizes (the receiver's 0 and 225 against the target's 0 and 225, versus
+    the source's 302) show whose documents the receiver actually counted.
+
+    The traversal therefore STOPS at any other connector action. Documents entering a
+    Return Documents shape were produced by the last connector on the path into it,
+    so an operation with another connector between it and the receiver did not
+    produce what the receiver counted. This is topological rather than quantitative
+    on purpose: matching document sizes would work on today's archive and would be a
+    coincidence-shaped rule the moment two steps moved equal-sized payloads.
+
     None means the archive cannot say: no process component, or none whose graph
     contains this operation. The caller refuses rather than guessing, because
     "unestablished" and "not downstream" are different facts.
@@ -484,8 +500,13 @@ def _receiver_is_downstream_of_the_operation(
                 if successor in seen:
                     continue
                 seen.add(successor)
-                if shapes.get(successor, {}).get("type") == "returndocuments":
+                successor_type = shapes.get(successor, {}).get("type")
+                if successor_type == "returndocuments":
                     return True
+                if successor_type == "connectoraction":
+                    # Another connector produces the documents from here on, so
+                    # anything past it is that connector's delivery, not this one's.
+                    continue
                 frontier.append(successor)
         return False
     return None

@@ -367,7 +367,13 @@ class InputObservationV1(str, Enum):
 
 
 class OutputObservationV1(str, Enum):
-    """What the connector produced."""
+    """What was observed RECEIVING the connector's output.
+
+    The subject is the receiver, not the connector: these values distinguish who got
+    the documents, and a connector completing successfully is not one of them. The
+    earlier wording said "what the connector produced", which is a different question
+    and is the one whose answer was published here by mistake.
+    """
 
     SUCCESSOR_RECEIVED_DOCUMENTS = "successor_received_documents"
     RETURN_DOCUMENTS_RECEIVED = "return_documents_received"

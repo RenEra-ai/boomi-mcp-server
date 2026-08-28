@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import shutil
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 import pytest
@@ -423,73 +424,72 @@ def test_the_archive_itself_has_no_disagreeing_copies():
 
 
 def test_the_reconciled_field_set_equals_what_the_module_actually_reads():
-    """STRUCTURAL: the set is pinned to the module's own reads, not hand-kept.
+    """STRUCTURAL: the set is pinned to OBSERVED reads, not to a parse of read forms.
 
-    Every key this module pulls off a platform connector record must be reconciled
-    between two archived copies of that record, or a served observation can vary by
-    filename. Hand-listing the set let `connectorType` fall out — the family
-    reconciliation reads it — so the list is derived here and compared.
+    The first version of this guard parsed the module for `<name>.get("literal")` over
+    a hand-listed set of receiver names — which is the very class it was written to
+    close, one level up. It was blind to a subscript, to a receiver name not on the
+    list, to a comprehension variable and to a module-level key constant; and the
+    module already reads rows by subscript, so two fields were reconciled only by the
+    accident of also being spelled `.get()` somewhere else.
+
+    This records the reads as they HAPPEN instead. A proxy stands in for every
+    platform row and notes each key asked of it, so no read form can hide: whatever
+    syntax reaches a row, the row itself sees the key.
     """
-    import ast
-
     from boomi_mcp.connector_replay import capture as module
 
-    source = Path(module.__file__).read_text()
-    tree = ast.parse(source)
+    observed: set[str] = set()
 
-    # The readers: every function that takes a platform record and asks it for a
-    # named key. Found by shape — `<name>.get("literal")` where the receiver is a
-    # record or a row — rather than by a list of function names.
-    receivers = {"record", "row", "seen", "r", "a", "b"}
-    read_keys = {
-        node.args[0].value
-        for node in ast.walk(tree)
-        if isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Attribute)
-        and node.func.attr == "get"
-        and isinstance(node.func.value, ast.Name)
-        and node.func.value.id in receivers
-        and node.args
-        and isinstance(node.args[0], ast.Constant)
-        and isinstance(node.args[0].value, str)
-    }
-    # Keys read through a loop over a literal tuple — `for field in ("a", "b"):
-    # row.get(field)` — are reads too, and missing them is how this derivation
-    # would have passed while the set was still wrong.
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.For) or not isinstance(node.target, ast.Name):
-            continue
-        if not isinstance(node.iter, (ast.Tuple, ast.List)):
-            continue
-        literals = [
-            e.value for e in node.iter.elts
-            if isinstance(e, ast.Constant) and isinstance(e.value, str)
-        ]
-        if not literals or len(literals) != len(node.iter.elts):
-            continue
-        reads_the_variable = any(
-            isinstance(inner, ast.Call)
-            and isinstance(inner.func, ast.Attribute)
-            and inner.func.attr == "get"
-            and isinstance(inner.func.value, ast.Name)
-            and inner.func.value.id in receivers
-            and inner.args
-            and isinstance(inner.args[0], ast.Name)
-            and inner.args[0].id == node.target.id
-            for inner in ast.walk(node)
-        )
-        if reads_the_variable:
-            read_keys.update(literals)
+    class _RecordingRow(dict):
+        def __getitem__(self, key):
+            observed.add(key)
+            return super().__getitem__(key)
+
+        def get(self, key, default=None):
+            observed.add(key)
+            return super().get(key, default)
+
+    real_records = module._platform_connector_records
+
+    def recording_records(payload):
+        return [_RecordingRow(row) for row in real_records(payload)]
+
+    module._platform_connector_records = recording_records
+    try:
+        for directory in sorted(_CAPTURES.iterdir()):
+            if not directory.is_dir():
+                continue
+            verbs = set()
+            for xml in directory.glob("*.xml"):
+                try:
+                    root = ET.parse(xml).getroot()
+                except ET.ParseError:
+                    continue
+                verbs |= {
+                    e.get("customOperationType")
+                    for e in root.iter()
+                    if e.get("customOperationType")
+                }
+            for verb in sorted(verbs) or [None]:
+                try:
+                    summarize(directory, verb)
+                except Exception:
+                    # A refused capture still exercised its reads on the way to the
+                    # refusal, which is exactly what is being collected here.
+                    pass
+    finally:
+        module._platform_connector_records = real_records
 
     # `id` is the reconciliation KEY, not a reconciled value: two copies that
     # disagree on it are two different rows, which is not a conflict.
-    read_keys.discard("id")
+    observed.discard("id")
 
-    assert read_keys, "the derivation found no reads, so it would pass vacuously"
-    assert set(module._CORRELATED_ROW_FIELDS) == read_keys, (
-        "the reconciled field set and the module's reads have drifted: "
-        f"only reconciled {sorted(set(module._CORRELATED_ROW_FIELDS) - read_keys)}, "
-        f"only read {sorted(read_keys - set(module._CORRELATED_ROW_FIELDS))}"
+    assert observed, "no reads were recorded, so the comparison would be vacuous"
+    assert set(module._CORRELATED_ROW_FIELDS) == observed, (
+        "the reconciled field set and the module's observed reads have drifted: "
+        f"only reconciled {sorted(set(module._CORRELATED_ROW_FIELDS) - observed)}, "
+        f"only read {sorted(observed - set(module._CORRELATED_ROW_FIELDS))}"
     )
 
 
@@ -701,3 +701,62 @@ def test_a_receiver_with_no_countable_row_is_unknown_not_zero(tmp_path):
     # CONTROL: a capture with NO receiver at all is a measured absence, not unknown.
     absent = summarize(_CAPTURES / "cap155-e4-head-status", "HEAD")
     assert absent.return_documents == 0
+
+
+def test_delivery_is_attributed_to_the_producer_not_every_ancestor():
+    """WITNESS from the real archive: reaching the receiver is not producing for it.
+
+    No mutation needed — the archived captures already contain the discriminating
+    case, and the previous rule got it wrong on live evidence: with the SOURCE verb
+    selected, a linear process makes the source reach the receiver exactly as the
+    operation under test does.
+    """
+    from boomi_mcp.connector_replay.capture import (
+        _receiver_is_downstream_of_the_operation,
+    )
+
+    for scenario, produced, merely_reaches in [
+        ("cap155-e5-delete-attested", "DELETE", "GET"),
+        ("cap155-e5-patch-attested", "PATCH", "GET"),
+        ("cap155-e3b-patch-canonical", "PATCH", "GET"),
+    ]:
+        files = sorted((_CAPTURES / scenario).iterdir())
+        assert _receiver_is_downstream_of_the_operation(files, produced) is True
+        assert _receiver_is_downstream_of_the_operation(files, merely_reaches) is False
+
+
+def test_the_archive_corroborates_which_operation_produced_the_delivery():
+    """CONTROL for the rule above, from an independent field the rule never reads.
+
+    The topological rule is deliberately not built on document sizes — equal payloads
+    would break that the moment two steps moved the same bytes. But the sizes are in
+    the archive, and they agree with the topology, which is what makes the topological
+    answer checkable rather than merely self-consistent.
+    """
+    from boomi_mcp.connector_replay.capture import (
+        _component_name_under_test,
+        _reconciled_platform_rows,
+    )
+
+    directory = _CAPTURES / "cap155-e5-delete-attested"
+    files = sorted(directory.iterdir())
+    summary = summarize(directory, "DELETE")
+    execution_ids = frozenset(summary.execution_ids)
+    rows = _reconciled_platform_rows(files, execution_ids)
+
+    target = _component_name_under_test(files, "DELETE")
+    source = _component_name_under_test(files, "GET")
+
+    def sizes(step):
+        return sorted(
+            r.get("size") for r in rows
+            if r.get("executionConnector") == step and isinstance(r.get("size"), int)
+        )
+
+    receiver = sizes("shape4") or sorted(
+        r.get("size") for r in rows
+        if r.get("connectorType") == "return" and isinstance(r.get("size"), int)
+    )
+    assert receiver, "the receiver rows must carry sizes for this control to mean anything"
+    assert receiver == sizes(target), "the receiver counted the target's documents"
+    assert receiver != sizes(source), "and not the source's"
