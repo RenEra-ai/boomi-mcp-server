@@ -8465,7 +8465,18 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
         return planned
     if dry_run:
         planned["dry_run"] = True
-        planned["message"] = "Dry run only. Set dry_run=false to execute."
+        # SAY what a dry run does not check. Everything a request can decide for
+        # itself is already decided above, but the checks that compare the request
+        # against components the ACCOUNT holds run in the pre-write pass, which a
+        # dry run does not reach — so a dry success that will refuse on apply used
+        # to read exactly like one that will not. Moving those reads onto the dry
+        # path would change what `dry_run` means; saying so costs nothing and
+        # leaves the caller able to tell the two apart.
+        planned["message"] = (
+            "Dry run only. Set dry_run=false to execute. Checks that compare this "
+            "request against components already in the account are not performed "
+            "on a dry run, so an apply may still refuse."
+        )
         return planned
 
     # Fail-fast: reject plans with unresolvable steps before executing anything.

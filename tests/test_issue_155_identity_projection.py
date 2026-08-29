@@ -878,3 +878,35 @@ def test_no_registered_replay_code_is_without_a_production_raiser():
             if code in path.read_text()
         ]
         assert hits, f"{code} is registered but named in no source file"
+
+
+def test_a_dry_run_says_which_checks_it_does_not_perform():
+    """QA-155-r44-01: the accepted limitation was invisible to callers.
+
+    Everything a request can decide for itself is decided on the dry path. The
+    checks that compare the request against components the ACCOUNT holds run in
+    the pre-write pass, which a dry run does not reach — so a dry success that
+    will refuse on apply read exactly like one that will not.
+
+    Moving those reads onto the dry path would change what `dry_run` means, which
+    is not this slice's call; saying so costs nothing. Pinned because a served
+    sentence is machine-facing text a caller may rely on.
+    """
+    import re
+    from pathlib import Path
+
+    module = (
+        Path(__file__).resolve().parents[1]
+        / "src/boomi_mcp/categories/integration_builder.py"
+    )
+    source = module.read_text()
+    dry_block = source[source.index('planned["dry_run"] = True'):]
+    dry_block = dry_block[: dry_block.index("return planned")]
+
+    assert "dry_run=false" in dry_block, "the dry run no longer says how to execute"
+    assert "account" in dry_block, (
+        "the dry-run message no longer discloses that account-dependent checks "
+        "are skipped — a dry success then reads identically to one that will "
+        "refuse on apply"
+    )
+    assert "may still refuse" in dry_block
