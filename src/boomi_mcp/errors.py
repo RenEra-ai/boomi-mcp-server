@@ -512,6 +512,12 @@ CONNECTOR_REPLAY_ROUTE_DIGEST_REFUSED = "CONNECTOR_REPLAY_ROUTE_DIGEST_REFUSED"
 CONNECTOR_REPLAY_CONFIGURATION_DIGEST_REFUSED = (
     "CONNECTOR_REPLAY_CONFIGURATION_DIGEST_REFUSED"
 )
+#: The two identity codes land with their raiser, in the AUTHORING layer. They are
+#: deliberately never named under ``compiler/process_ir/``: a code imported there
+#: joins the compiler's published surface, and connector identity is an account
+#: fact the compiler is not allowed to depend on.
+CONNECTOR_REPLAY_IDENTITY_MISMATCH = "CONNECTOR_REPLAY_IDENTITY_MISMATCH"
+CONNECTOR_REPLAY_IDENTITY_UNAVAILABLE = "CONNECTOR_REPLAY_IDENTITY_UNAVAILABLE"
 #: The contract-reference code is deliberately NOT registered here. Its grammar and
 #: its only raiser belong to the slice that introduces authored contract references;
 #: registering it now would leave a published code that nothing can produce, which
@@ -560,6 +566,27 @@ ERROR_TAXONOMY: Dict[str, ErrorCodeSpec] = {
             summary=(
                 "A component's routing configuration could not be projected into a "
                 "stable digest."
+            ),
+            owner="#155",
+        ),
+        ErrorCodeSpec(
+            code=CONNECTOR_REPLAY_IDENTITY_MISMATCH,
+            category="connector_replay",
+            retryable=False,
+            summary=(
+                "A connector component's declared family or action disagrees with "
+                "what its own configuration resolves to; the declaration is an "
+                "assertion and is not allowed to override the resolution."
+            ),
+            owner="#155",
+        ),
+        ErrorCodeSpec(
+            code=CONNECTOR_REPLAY_IDENTITY_UNAVAILABLE,
+            category="connector_replay",
+            retryable=False,
+            summary=(
+                "A connector component's identity could not be resolved before "
+                "apply, so no identity was minted for it."
             ),
             owner="#155",
         ),

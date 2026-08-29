@@ -242,3 +242,119 @@ def test_the_canonical_symbol_table_is_built_in_exactly_one_place():
         "the shared construction lost a caller; its docstring claims three "
         f"(plan, apply, pre-write dry emit), found {len(helper)}"
     )
+
+
+# --- slice C: the identity comparison, and the REACH it does not yet have --------
+
+
+def _identity(key, **kw):
+    from boomi_mcp.authoring.connector_resolution_snapshot import (
+        ResolvedConnectorComponentIdentityV1,
+    )
+
+    return ResolvedConnectorComponentIdentityV1(component_key=key, **kw)
+
+
+def _snapshot(*identities):
+    from boomi_mcp.authoring.connector_resolution_snapshot import (
+        TrustedConnectorResolutionSnapshotV1,
+    )
+
+    return TrustedConnectorResolutionSnapshotV1(identities=tuple(identities))
+
+
+def test_a_declaration_that_contradicts_the_resolution_is_refused():
+    from boomi_mcp.authoring.connector_resolution_snapshot import (
+        ConnectorIdentityError,
+        assert_declared_matches_resolved,
+    )
+
+    snapshot = _snapshot(
+        _identity("op", family="rest", action="POST", endpoint="http://h:8081",
+                  route_state="static")
+    )
+    with pytest.raises(ConnectorIdentityError) as caught:
+        assert_declared_matches_resolved(snapshot, {"op": ("rest_client", "GET")})
+    assert caught.value.code == "CONNECTOR_REPLAY_IDENTITY_MISMATCH"
+    assert caught.value.component_key == "op"
+
+
+def test_the_raw_connector_type_is_canonicalised_before_comparison():
+    """Both halves go through one derivation.
+
+    They did not at first: the declared half carries the RAW type
+    (``rest_client``) and the resolved half a canonical family (``rest``), so
+    every REST component compared unequal to ITSELF and refused — including the
+    control. Caught by probing the wiring, which is the only reason a
+    fail-closed bug did not reach the suite as a mass refusal.
+    """
+    from boomi_mcp.authoring.connector_resolution_snapshot import (
+        assert_declared_matches_resolved,
+    )
+
+    snapshot = _snapshot(
+        _identity("op", family="rest", action="GET", endpoint="http://h:8081",
+                  route_state="static")
+    )
+    assert assert_declared_matches_resolved(snapshot, {"op": ("rest_client", "GET")})
+
+
+@pytest.mark.parametrize(
+    "route_state", ["dynamic", "unavailable"]
+)
+def test_an_unresolved_identity_is_never_treated_as_a_contradiction(route_state):
+    """'I could not tell' is not evidence the declaration is wrong.
+
+    Refusing here would break every config whose endpoint is bound to an
+    environment extension — a legal, common shape.
+    """
+    from boomi_mcp.authoring.connector_resolution_snapshot import (
+        assert_declared_matches_resolved,
+    )
+
+    snapshot = _snapshot(_identity("op", family="rest", route_state=route_state))
+    assert assert_declared_matches_resolved(snapshot, {"op": ("rest_client", "POST")})
+
+
+def test_the_canonical_sink_comparison_is_currently_TAUTOLOGICAL():
+    """RECORDED LIMITATION, pinned so it cannot be mistaken for a working gate.
+
+    At `_build_canonical_symbols` BOTH halves are computed from the same
+    `spec.components`: the declared half by `_connector_metadata_from_components`
+    and the resolved half by the projection, and for every family both read the
+    same config keys. Measured across the shapes that ought to disagree —
+    ``method`` versus ``action_type``, both directions, and the database
+    equivalent — the guard fires on NONE of them.
+
+    So the comparison is real machinery wired at a place that cannot yet trigger
+    it. The declaration only becomes independent evidence when it comes from a
+    DIFFERENT source than the config: a live component read back for reuse, or
+    the requirements-derived producer on the recipe route. Supplying that is the
+    next unit; this test exists so the gap is a recorded fact rather than an
+    assumption, and it FAILS the moment the sink gains a real disagreement.
+    """
+    from boomi_mcp.authoring.workflow import _connector_metadata_from_components
+    from boomi_mcp.categories.components.builders.connector_builder import (
+        connector_family_of,
+        normalized_identity_projection,
+    )
+    from boomi_mcp.models.integration_models import IntegrationComponentSpec
+
+    contradictions = [
+        {"connector_type": "rest_client", "method": "POST", "action_type": "GET",
+         "base_url": "http://h:8081"},
+        {"connector_type": "rest_client", "method": "GET", "action_type": "POST",
+         "base_url": "http://h:8081"},
+        {"connector_type": "database", "operation_mode": "send", "action_type": "Get",
+         "host": "h", "dbname": "d"},
+    ]
+    for config in contradictions:
+        component = IntegrationComponentSpec(key="k", type="connector-action", config=config)
+        declared = _connector_metadata_from_components([component])["k"]
+        resolved = normalized_identity_projection(config)
+        assert connector_family_of(declared[0]) == resolved.family
+        assert (declared[1] or "").lower() == (resolved.action or "").lower(), (
+            "the declared and resolved halves now disagree at this sink — the "
+            "comparison is no longer tautological, so this recorded limitation is "
+            "stale and the ledger entry must be updated"
+        )

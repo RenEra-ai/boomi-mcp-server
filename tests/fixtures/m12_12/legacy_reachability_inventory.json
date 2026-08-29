@@ -208,7 +208,7 @@
     {
       "census": "component_xml_write",
       "count": 1,
-      "evidence_line": 8032,
+      "evidence_line": 8048,
       "form": "create_component(...)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "WR-c52b7626",
@@ -1297,7 +1297,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 8383,
+      "evidence_line": 8399,
       "form": "_build_plan(...) [legacy-bearing, src/boomi_mcp/categories/integration_builder.py]",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LT-d2d552f0",
@@ -1306,7 +1306,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 8930,
+      "evidence_line": 8946,
       "form": "_execute_canonical_process(...) [legacy-bearing, src/boomi_mcp/categories/integration_builder.py]",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LT-21fe473d",
@@ -1315,7 +1315,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 9156,
+      "evidence_line": 9172,
       "form": "_execute_component(...) [legacy-bearing, src/boomi_mcp/categories/integration_builder.py]",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LT-aabdab32",
@@ -1324,7 +1324,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 8345,
+      "evidence_line": 8361,
       "form": "preflight_typed_apply_v1(...) [legacy-bearing, src/boomi_mcp/authoring/workflow.py]",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LT-e0b988c1",
@@ -1378,7 +1378,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 10017,
+      "evidence_line": 10033,
       "form": "compile_authoring_request_v1(...) [legacy-bearing, src/boomi_mcp/authoring/workflow.py]",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LT-b741b93b",
@@ -1387,7 +1387,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 8017,
+      "evidence_line": 8033,
       "form": "_apply_structured_update(...) [legacy-bearing, src/boomi_mcp/categories/integration_builder.py]",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LT-35437114",
@@ -1396,7 +1396,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 8032,
+      "evidence_line": 8048,
       "form": "create_component(...) [legacy-bearing, src/boomi_mcp/categories/components/manage_component.py]",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LT-3999ba54",
@@ -1459,7 +1459,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 9955,
+      "evidence_line": 9971,
       "form": "plan_authoring_request_v1(...) [legacy-bearing, src/boomi_mcp/authoring/workflow.py]",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LT-e950b4e0",
@@ -1495,7 +1495,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 10322,
+      "evidence_line": 10338,
       "form": "_apply_plan(...) [legacy-bearing, src/boomi_mcp/categories/integration_builder.py]",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LT-e5bb8b19",
@@ -1504,7 +1504,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 10314,
+      "evidence_line": 10330,
       "form": "_build_plan(...) [legacy-bearing, src/boomi_mcp/categories/integration_builder.py]",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LT-dcb7048c",
@@ -1513,7 +1513,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 10318,
+      "evidence_line": 10334,
       "form": "_compile_authoring(...) [legacy-bearing, src/boomi_mcp/categories/integration_builder.py]",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LT-5ad6792c",
@@ -1522,7 +1522,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 10312,
+      "evidence_line": 10328,
       "form": "_plan_authoring(...) [legacy-bearing, src/boomi_mcp/categories/integration_builder.py]",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LT-b68fe63e",
@@ -4167,7 +4167,7 @@
     {
       "census": "component_xml_write",
       "disposition": "WRT-canonical-process-materialization: unchanged, and it is what the retraction leaves behind: a process root reaches the platform only through a compiled artifact whose plan fingerprint and apply-time mutation attestation are both recorded.",
-      "evidence_line": 8032,
+      "evidence_line": 8048,
       "forms": [
         "create_component(...)"
       ],
@@ -5008,7 +5008,7 @@
     {
       "census": "legacy_transitive_call",
       "disposition": "follow the callee's row; this is an edge, not a site",
-      "evidence_line": 8345,
+      "evidence_line": 8361,
       "forms": [
         "_build_plan(...) [legacy-bearing, src/boomi_mcp/categories/integration_builder.py]",
         "_execute_canonical_process(...) [legacy-bearing, src/boomi_mcp/categories/integration_builder.py]",
@@ -5053,7 +5053,7 @@
     {
       "census": "legacy_transitive_call",
       "disposition": "follow the callee's row; this is an edge, not a site",
-      "evidence_line": 10017,
+      "evidence_line": 10033,
       "forms": [
         "compile_authoring_request_v1(...) [legacy-bearing, src/boomi_mcp/authoring/workflow.py]"
       ],
@@ -5066,7 +5066,7 @@
     {
       "census": "legacy_transitive_call",
       "disposition": "follow the callee's row; this is an edge, not a site",
-      "evidence_line": 8017,
+      "evidence_line": 8033,
       "forms": [
         "_apply_structured_update(...) [legacy-bearing, src/boomi_mcp/categories/integration_builder.py]",
         "create_component(...) [legacy-bearing, src/boomi_mcp/categories/components/manage_component.py]"
@@ -5098,7 +5098,7 @@
     {
       "census": "legacy_transitive_call",
       "disposition": "follow the callee's row; this is an edge, not a site",
-      "evidence_line": 9955,
+      "evidence_line": 9971,
       "forms": [
         "plan_authoring_request_v1(...) [legacy-bearing, src/boomi_mcp/authoring/workflow.py]"
       ],
@@ -5138,7 +5138,7 @@
     {
       "census": "legacy_transitive_call",
       "disposition": "follow the callee's row; this is an edge, not a site",
-      "evidence_line": 10312,
+      "evidence_line": 10328,
       "forms": [
         "_apply_plan(...) [legacy-bearing, src/boomi_mcp/categories/integration_builder.py]",
         "_build_plan(...) [legacy-bearing, src/boomi_mcp/categories/integration_builder.py]",
@@ -6920,7 +6920,7 @@
       "symbol",
       "form"
     ],
-    "python_source_count": 226,
+    "python_source_count": 227,
     "roots": [
       "*.py (repo root)",
       "src/boomi_mcp",

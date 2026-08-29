@@ -153,6 +153,42 @@ but inside that helper. Graded BOTH directions, which the first version was not:
 direct call including the helper's own and therefore failed on a clean tree — a guard that cannot
 pass is not a guard.
 
+**Unit 4 — the trusted resolution snapshot, and the reach it does NOT yet have.**
+`authoring/connector_resolution_snapshot.py` resolves each connector component from its own
+config and compares the caller's declaration against it, so the declaration becomes an assertion
+rather than an override. Both `CONNECTOR_REPLAY_IDENTITY_MISMATCH` and
+`CONNECTOR_REPLAY_IDENTITY_UNAVAILABLE` are registered and RAISED — the taxonomy's own guard
+refuses a published code nothing can produce, which is the rule this repository already applies
+to compiler diagnostics, and it fired on the first attempt to register them without a raiser.
+Neither code is named under `compiler/process_ir/`: a code imported there joins the compiler's
+published surface, and connector identity is an account fact.
+
+**A fail-CLOSED bug, caught by probing the wiring rather than by the suite.** The declared half
+carries the RAW connector type (`rest_client`) and the resolved half a canonical family (`rest`),
+so the first version compared every REST component unequal to ITSELF and refused — including the
+control. Both sides now go through one derivation, `connector_family_of`.
+
+**RECORDED LIMITATION, measured and pinned: at this sink the comparison is TAUTOLOGICAL.** At
+`_build_canonical_symbols` both halves are computed from the same `spec.components` — the
+declared half by `_connector_metadata_from_components`, the resolved half by the projection — and
+for every family they read the same config keys. Probed across the shapes that ought to disagree
+(`method` versus `action_type` in both directions, and the database equivalent): the guard fires
+on NONE of them, 0 of 4. So this is real machinery wired where it cannot yet trigger.
+
+That is stated plainly rather than left to be discovered, because a guard that cannot fire is the
+defect class this slice has spent its whole review history on. The declaration only becomes
+independent evidence when it comes from a source OTHER than the config — a live component read
+back for reuse, or the requirements-derived producer on the recipe route — and supplying that is
+the next unit. A test pins the tautology and FAILS the moment the sink gains a real
+disagreement, so the limitation cannot go stale silently.
+
+**Rebaseline performed:** the new module moves the M12.12 census 226 -> 227 sources; the
+inventory fixture and the two §11 tables that carry it were regenerated from the same run. The
+first attempt spliced the emit's `[INFO]` log lines into the tracked document and destroyed a
+section heading (39 -> 38) — the same log-contamination that produced two bogus manifest rows
+earlier in this issue, repeated. Reverted and redone by replacing only the two drifted TABLES:
+6 insertions, 6 deletions, headings intact.
+
 **Not yet wired.** Units 1 and 2 are consumed by nothing outside their tests. That is the
 `#180` inertness shape and it is named here rather than left implicit: the next unit is the
 snapshot module plus its first real consumer, and neither of these lands on `dev` before that

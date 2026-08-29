@@ -257,6 +257,30 @@ class NormalizedConnectorIdentity:
         )
 
 
+def connector_family_of(connector_type) -> Optional[str]:
+    """The canonical FAMILY a connector type belongs to, or None.
+
+    One authority, because both halves of the identity comparison need it and
+    they were derived differently at first: the declared half carries the raw
+    ``connector_type`` (``"rest_client"``) while the resolved half carried a
+    family name (``"rest"``), so every REST component compared unequal to itself
+    and refused. Caught by probing the wiring, not by the type checker.
+
+    Matched by the sanctioned RESOLVERS rather than by substring, for the reason
+    ``authoring.workflow._action_type_from_config`` records: ``soap_client``
+    contains neither "rest" nor "database", so substring matching silently
+    excluded SOAP once already.
+    """
+    raw = connector_type if isinstance(connector_type, str) else ""
+    if _resolve_rest_connector_type(raw) is not None:
+        return "rest"
+    if _resolve_soap_client_connector_type(raw) is not None:
+        return "soap_client"
+    if raw.strip().lower() == "database":
+        return "database"
+    return None
+
+
 def _normalized_action(config: "Mapping[str, Any]", family: Optional[str]) -> Optional[str]:
     """The connector ACTION this config declares, family-conditionally.
 
@@ -305,17 +329,7 @@ def normalized_identity_projection(config, live_projection=None):
             family=None, action=None, route_state="unavailable"
         )
 
-    raw_type = config.get("connector_type")
-    connector_type = raw_type if isinstance(raw_type, str) else ""
-    if _resolve_rest_connector_type(connector_type) is not None:
-        family = "rest"
-    elif _resolve_soap_client_connector_type(connector_type) is not None:
-        family = "soap_client"
-    elif connector_type.strip().lower() == "database":
-        family = "database"
-    else:
-        family = None
-
+    family = connector_family_of(config.get("connector_type"))
     action = _normalized_action(config, family)
 
     endpoint_raw = config.get("base_url")

@@ -7631,13 +7631,29 @@ def _build_canonical_symbols(*, spec):
     need it, and three copies of the same three arguments is how the two halves
     of a pair drift apart.
     """
+    from ..authoring.connector_resolution_snapshot import (
+        assert_declared_matches_resolved,
+        build_connector_resolution_snapshot,
+    )
     from ..authoring.workflow import _connector_metadata_from_components
     from ..recipes.materialization import build_symbol_table
+
+    # The caller's connector metadata is an ASSERTION, compared against what the
+    # components' own configs resolve to — not an override. Without this, a
+    # component whose config resolves to a POST could be declared a GET and the
+    # declaration would win all the way to a capability decision. The comparison
+    # is silent when a config settles nothing (an extension-bound endpoint, a
+    # per-document path): "I could not tell" is not evidence the declaration is
+    # wrong. It runs HERE because this is the one construction the plan path and
+    # the apply path share, so a mismatch refuses before the first write.
+    declared = _connector_metadata_from_components(spec.components)
+    snapshot = build_connector_resolution_snapshot(spec.components)
+    assert_declared_matches_resolved(snapshot, declared)
 
     return build_symbol_table(
         list(spec.components),
         process_keys=[u.envelope.component_key for u in (spec.processes or ())],
-        connector_metadata=_connector_metadata_from_components(spec.components),
+        connector_metadata=declared,
     )
 
 

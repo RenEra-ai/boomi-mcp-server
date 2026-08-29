@@ -170,6 +170,37 @@ def test_every_registered_replay_code_has_a_raiser():
         _parse({"schema_version": 999})
     produced.add(reg_err.value.code)
 
+    # Slice C's two identity codes are raised in the AUTHORING layer, never under
+    # compiler/process_ir — a code named there joins the compiler's published
+    # surface, and connector identity is an account fact. Both are produced from
+    # real inputs rather than constructed, so this stays a raiser check.
+    from boomi_mcp.authoring.connector_resolution_snapshot import (
+        ConnectorIdentityError,
+        TrustedConnectorResolutionSnapshotV1,
+        ResolvedConnectorComponentIdentityV1,
+        assert_declared_matches_resolved,
+        require_resolved_identity,
+    )
+
+    snapshot = TrustedConnectorResolutionSnapshotV1(
+        identities=(
+            ResolvedConnectorComponentIdentityV1(
+                component_key="rest_conn",
+                family="rest",
+                action="POST",
+                endpoint="http://host:8081",
+                route_state="static",
+            ),
+        )
+    )
+    with pytest.raises(ConnectorIdentityError) as mismatch:
+        assert_declared_matches_resolved(snapshot, {"rest_conn": ("rest", "GET")})
+    produced.add(mismatch.value.code)
+
+    with pytest.raises(ConnectorIdentityError) as unavailable:
+        require_resolved_identity(snapshot, "no_such_component")
+    produced.add(unavailable.value.code)
+
     assert registered == produced, {
         "registered but never raised": sorted(registered - produced),
         "raised but not registered": sorted(produced - registered),

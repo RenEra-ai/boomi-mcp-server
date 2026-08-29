@@ -781,6 +781,10 @@ ISSUE_155_CODES = (
     "CONNECTOR_REPLAY_CONFIGURATION_DIGEST_REFUSED",
     "CONNECTOR_REPLAY_REGISTRY_INVALID",
     "CONNECTOR_REPLAY_ROUTE_DIGEST_REFUSED",
+    # slice C — the trusted connector-resolution snapshot. Raised in the AUTHORING
+    # layer, never under compiler/process_ir: connector identity is an account fact.
+    "CONNECTOR_REPLAY_IDENTITY_MISMATCH",
+    "CONNECTOR_REPLAY_IDENTITY_UNAVAILABLE",
 )
 
 
