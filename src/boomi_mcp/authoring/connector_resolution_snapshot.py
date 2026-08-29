@@ -37,6 +37,8 @@ from pydantic import BaseModel, ConfigDict
 from ..errors import (
     CONNECTOR_REPLAY_IDENTITY_MISMATCH,
     CONNECTOR_REPLAY_SUBMITTED_XML_UNREADABLE,
+    SUBMITTED_XML_UNSETTLED_REASONS,
+    submitted_xml_unsettled_summary,
 )
 
 
@@ -68,24 +70,6 @@ class ConnectorIdentityError(Exception):
         #: The identities that DID resolve. Discarding them suppressed
         #: snapshot-dependent diagnostics for components that were perfectly fine.
         self.partial = partial
-
-
-#: EVERY way submitted component XML can fail to settle what it installs, in one
-#: place. Three copies of this list existed — the served taxonomy summary, this
-#: module's refusal messages, and the planning surface's remediation text — and
-#: adding a third reason to the rule left all three describing two. A list that
-#: must be edited in n places to stay true will be true in fewer than n.
-SUBMITTED_XML_UNSETTLED_REASONS: Tuple[str, ...] = (
-    "it cannot be parsed",
-    "it names more than one operation type",
-    "it describes a REST connector action and names no operation type",
-)
-
-
-def submitted_xml_unsettled_summary() -> str:
-    """The reasons as one served sentence, derived from the tuple above."""
-    reasons = list(SUBMITTED_XML_UNSETTLED_REASONS)
-    return "{0}, or {1}".format(", ".join(reasons[:-1]), reasons[-1])
 
 
 class _SnapshotModel(BaseModel):

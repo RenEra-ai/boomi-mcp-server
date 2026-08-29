@@ -2236,11 +2236,15 @@ def test_the_unsettled_reasons_have_exactly_one_authority():
     planning remediation — and adding a third reason left all three describing
     two. The structural fix is one list that every consumer reads.
     """
-    from boomi_mcp.authoring.connector_resolution_snapshot import (
+    # The authority lives in `errors`, the LOWEST layer, not beside the raiser.
+    # It sat beside the raiser for one commit and the served taxonomy reached up
+    # for it during its own import, which is a cycle every test in this suite is
+    # blind to because they all import `errors` first.
+    from boomi_mcp.errors import (
+        ERROR_TAXONOMY,
         SUBMITTED_XML_UNSETTLED_REASONS,
         submitted_xml_unsettled_summary,
     )
-    from boomi_mcp.errors import ERROR_TAXONOMY
 
     assert len(SUBMITTED_XML_UNSETTLED_REASONS) >= 3
     summary = submitted_xml_unsettled_summary()
@@ -2256,9 +2260,12 @@ def test_the_unsettled_reasons_have_exactly_one_authority():
 
     original = SUBMITTED_XML_UNSETTLED_REASONS
     try:
-        import boomi_mcp.authoring.connector_resolution_snapshot as module
-
-        module.SUBMITTED_XML_UNSETTLED_REASONS = original + ("a planted reason",)
+        errors_module.SUBMITTED_XML_UNSETTLED_REASONS = original + ("a planted reason",)
         assert "a planted reason" in errors_module._submitted_xml_unreadable_summary()
     finally:
-        module.SUBMITTED_XML_UNSETTLED_REASONS = original
+        errors_module.SUBMITTED_XML_UNSETTLED_REASONS = original
+
+    # And the snapshot module must READ it rather than keep a copy.
+    from boomi_mcp.authoring import connector_resolution_snapshot as snapshot
+
+    assert snapshot.SUBMITTED_XML_UNSETTLED_REASONS is SUBMITTED_XML_UNSETTLED_REASONS

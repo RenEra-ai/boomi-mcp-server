@@ -1353,10 +1353,10 @@ def _validate_processes(
     # This half needs NO account: it resolves from the request's own components,
     # which is exactly what a pre-apply surface is allowed to know. The live
     # reading stays at apply, where there is an account to read.
+    from ..errors import submitted_xml_unsettled_summary
     from .connector_resolution_snapshot import (
         ConnectorIdentityError,
         build_connector_resolution_snapshot,
-        submitted_xml_unsettled_summary,
     )
 
     # THIS SURFACE REPORTS; it does not refuse. That is not a preference, it is

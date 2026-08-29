@@ -545,18 +545,34 @@ CONNECTOR_REPLAY_SUBMITTED_XML_UNREADABLE = (
 #: no better outside them. It lands with its raiser.
 
 
+#: EVERY way submitted component XML can fail to settle what it installs, in one
+#: place. Three copies of this list existed — the served taxonomy summary, the
+#: snapshot module's refusal messages, and the planning surface's remediation
+#: text — and adding a third reason left all three describing two. A list that
+#: must be edited in n places to stay true will be true in fewer than n.
+#:
+#: It lives HERE, in the lowest layer, and not beside the code that raises it.
+#: The first attempt put it beside the raiser and had this module reach back for
+#: it through a deferred import, which reads as safe and is not: the taxonomy is
+#: built at import time, so importing the authoring module FIRST re-entered it
+#: while it was still initialising. Every test in this repository imports this
+#: module before that one, so all of them passed. The authority belongs in the
+#: layer both consumers already depend on.
+SUBMITTED_XML_UNSETTLED_REASONS: Tuple[str, ...] = (
+    "it cannot be parsed",
+    "it names more than one operation type",
+    "it describes a REST connector action and names no operation type",
+)
+
+
+def submitted_xml_unsettled_summary() -> str:
+    """The reasons as one served sentence, derived from the tuple above."""
+    reasons = list(SUBMITTED_XML_UNSETTLED_REASONS)
+    return "{0}, or {1}".format(", ".join(reasons[:-1]), reasons[-1])
+
+
 def _submitted_xml_unreadable_summary() -> str:
-    """Served text DERIVED from the refusal's own reason list.
-
-    Hand-maintained here, this sentence went stale the first time the rule grew a
-    reason and was corrected; it went stale again on the next one. The reasons
-    live with the code that raises them, and this reads that — the import is
-    deferred because the authoring layer imports this module.
-    """
-    from .authoring.connector_resolution_snapshot import (
-        submitted_xml_unsettled_summary,
-    )
-
+    """Served text DERIVED from the reason list above, with no cross-layer call."""
     return (
         "A connector component supplies raw component XML that does not settle "
         "what it would install — {0}; submitted bytes are refused rather than "
