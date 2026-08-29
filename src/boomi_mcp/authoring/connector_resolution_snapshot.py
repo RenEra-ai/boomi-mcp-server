@@ -73,6 +73,12 @@ class ResolvedConnectorComponentIdentityV1(_SnapshotModel):
     path: Optional[str] = None
     #: ``"static"`` | ``"dynamic"`` | ``"unavailable"`` — see the projection.
     route_state: str = "unavailable"
+    #: ``"config"`` when the request's own configuration settled this, ``"live"``
+    #: when it was read back from the component as it exists in the account. The
+    #: distinction is the whole point: a declaration compared against the config
+    #: it was derived FROM cannot disagree, so only a ``"live"`` identity makes
+    #: the comparison downstream independent evidence.
+    source: str = "config"
 
     @property
     def resolved(self) -> bool:
@@ -96,10 +102,53 @@ class TrustedConnectorResolutionSnapshotV1(_SnapshotModel):
         return None
 
 
+def live_identity_from_component_xml(
+    component_key: str, component_xml: str
+) -> ResolvedConnectorComponentIdentityV1:
+    """The identity a component ALREADY APPLIED in the account carries.
+
+    Read from the platform's own XML, so it is the account's answer rather than
+    the request's. This is what makes the declared-vs-resolved comparison mean
+    something: a request that declares a GET while REUSING a component the
+    account stores as a POST is exactly the case the comparison exists to catch,
+    and it is invisible while both halves come from the same config.
+
+    Credential-free by construction — only the component's type, its connector
+    subtype and its operation verb are read, and none of those can hold a
+    secret. Deliberately NOT the config digest: that reads the full projection
+    and refuses on unknown content, which is right for an evidence digest and
+    wrong for a pre-write comparison that must tolerate a component it only
+    partly understands.
+    """
+    import re
+
+    from ..categories.components.builders.connector_builder import connector_family_of
+
+    text = component_xml if isinstance(component_xml, str) else ""
+    root_match = re.search(r"<[A-Za-z:]*Component[^>]*>", text)
+    root = root_match.group(0) if root_match else ""
+
+    def attribute(name, scope):
+        found = re.search(name + r'="([^"]*)"', scope)
+        return found.group(1) if found else None
+
+    family = connector_family_of(attribute("subType", root))
+    action = attribute("customOperationType", text)
+    resolved_enough = family is not None and action is not None
+    return ResolvedConnectorComponentIdentityV1(
+        component_key=component_key,
+        family=family,
+        action=action.strip().upper() if isinstance(action, str) else None,
+        route_state="static" if resolved_enough else "unavailable",
+        source="live",
+    )
+
+
 def build_connector_resolution_snapshot(
     components: Sequence[Any],
     *,
     live_projections: Optional[Mapping[str, Mapping[str, Any]]] = None,
+    live_component_xml: Optional[Mapping[str, str]] = None,
 ) -> TrustedConnectorResolutionSnapshotV1:
     """Resolve every connector component in ``components`` from its own config.
 
@@ -114,6 +163,7 @@ def build_connector_resolution_snapshot(
     )
 
     live = live_projections or {}
+    live_xml = live_component_xml or {}
     resolved = []
     for component in components:
         component_type = getattr(component, "type", None)
@@ -121,6 +171,12 @@ def build_connector_resolution_snapshot(
             continue
         key = getattr(component, "key", None)
         if not isinstance(key, str) or not key:
+            continue
+        # The ACCOUNT's answer wins where we have it. Not because the config is
+        # untrusted, but because comparing a declaration against the config it
+        # was derived from is a tautology — only the live reading is independent.
+        if key in live_xml:
+            resolved.append(live_identity_from_component_xml(key, live_xml[key]))
             continue
         projection = normalized_identity_projection(
             getattr(component, "config", None) or {},
@@ -181,10 +237,21 @@ def assert_declared_matches_resolved(
                 raise ConnectorIdentityError(
                     CONNECTOR_REPLAY_IDENTITY_MISMATCH,
                     (
-                        "component {0!r} is declared with {1} {2!r}, but its own "
-                        "configuration resolves to {3!r}. The declaration is an "
-                        "assertion, not an override."
-                    ).format(key, label, theirs, mine),
+                        "component {0!r} is declared with {1} {2!r}, but {3} "
+                        "resolves to {4!r}. The declaration is an assertion, not "
+                        "an override."
+                    ).format(
+                        key,
+                        label,
+                        theirs,
+                        # Naming the SOURCE is the difference between a real
+                        # finding and a tautology: "the account stores" is
+                        # independent evidence, "its own configuration" is not.
+                        "the component stored in the account"
+                        if identity.source == "live"
+                        else "its own configuration",
+                        mine,
+                    ),
                     component_key=key,
                 )
     return dict(declared)

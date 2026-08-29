@@ -189,6 +189,29 @@ section heading (39 -> 38) — the same log-contamination that produced two bogu
 earlier in this issue, repeated. Reverted and redone by replacing only the two drifted TABLES:
 6 insertions, 6 deletions, headings intact.
 
+**Unit 5 — the tautology is CLOSED.** `live_identity_from_component_xml` derives family and
+action from the component as the ACCOUNT stores it, and the snapshot prefers that reading over
+the request's config wherever it is supplied. That is what makes the comparison independent
+evidence: a declaration checked against the config it was derived from cannot disagree, and the
+0-of-4 measurement recorded above is what that looks like. The refusal now names its source, so
+"the component stored in the account" and "its own configuration" are distinguishable in the
+message rather than only in the code.
+
+Verified against the SIX archived verb captures — `cap155-e2-post`, `-put`, `-delete`, `-head`,
+`-options`, `-trace`. Those are readbacks of components the platform actually served, not
+fixtures written to match the reader, which is the only direction that proves the reader right;
+the fixture-provenance rule this workflow adds at 2026-08-14 asks for exactly that. The
+declared-GET-over-an-account-POST case now REFUSES with
+`CONNECTOR_REPLAY_IDENTITY_MISMATCH`, and two controls keep it honest: the same live reading
+ACCEPTS a declaration that agrees with it, and with the live XML withheld the config's own GET
+resolves and the declaration agrees — so the refusal is caused by the live reading and nothing
+else.
+
+**Still owed for U5:** the apply path does not yet READ that XML. The comparison is capable and
+proven, and the sink that will feed it (`_execute_canonical_process`, which holds the Boomi
+client) is identified; supplying it is the next unit, and until then the live half is exercised
+by tests rather than by a running apply. Named here rather than implied.
+
 **Not yet wired.** Units 1 and 2 are consumed by nothing outside their tests. That is the
 `#180` inertness shape and it is named here rather than left implicit: the next unit is the
 snapshot module plus its first real consumer, and neither of these lands on `dev` before that

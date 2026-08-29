@@ -358,3 +358,112 @@ def test_the_canonical_sink_comparison_is_currently_TAUTOLOGICAL():
             "comparison is no longer tautological, so this recorded limitation is "
             "stale and the ledger entry must be updated"
         )
+
+
+# --- slice C: the comparison against the LIVE component (the non-tautological half)
+
+
+_CAPTURES = "docs/architecture/evidence/issue-155/captures"
+
+
+def _live_xml(scenario):
+    from pathlib import Path
+
+    path = (
+        Path(__file__).resolve().parents[1]
+        / _CAPTURES
+        / scenario
+        / "operation_component.xml"
+    )
+    assert path.is_file(), f"the archived capture {scenario} is missing"
+    return path.read_text()
+
+
+@pytest.mark.parametrize(
+    "scenario,verb",
+    [
+        ("cap155-e2-post", "POST"),
+        ("cap155-e2-put", "PUT"),
+        ("cap155-e2-delete", "DELETE"),
+        ("cap155-e2-head", "HEAD"),
+        ("cap155-e2-options", "OPTIONS"),
+        ("cap155-e2-trace", "TRACE"),
+    ],
+)
+def test_the_live_identity_is_read_from_real_platform_xml(scenario, verb):
+    """Provenance: these are captures of components the platform actually served.
+
+    Not fixtures written to match the reader — the reader is checked against
+    what Boomi stored, which is the only direction that proves anything.
+    """
+    from boomi_mcp.authoring.connector_resolution_snapshot import (
+        live_identity_from_component_xml,
+    )
+
+    identity = live_identity_from_component_xml("op", _live_xml(scenario))
+    assert identity.family == "rest"
+    assert identity.action == verb
+    assert identity.source == "live"
+    assert identity.resolved
+
+
+def test_a_request_declaring_GET_over_an_account_POST_is_refused():
+    """The case slice C exists for, and the one the tautology could not see.
+
+    A request reusing a component the ACCOUNT stores as a POST, while declaring
+    a GET. Both halves now come from different sources, so the disagreement is
+    real evidence rather than a config compared with itself.
+    """
+    from boomi_mcp.authoring.connector_resolution_snapshot import (
+        ConnectorIdentityError,
+        assert_declared_matches_resolved,
+        build_connector_resolution_snapshot,
+    )
+    from boomi_mcp.models.integration_models import IntegrationComponentSpec
+
+    component = IntegrationComponentSpec(
+        key="op",
+        type="connector-action",
+        component_id="deadbeef-0000-0000-0000-000000000000",
+        config={"connector_type": "rest_client", "method": "GET",
+                "base_url": "http://host.docker.internal:8081"},
+    )
+    snapshot = build_connector_resolution_snapshot(
+        [component], live_component_xml={"op": _live_xml("cap155-e2-post")}
+    )
+
+    with pytest.raises(ConnectorIdentityError) as caught:
+        assert_declared_matches_resolved(snapshot, {"op": ("rest_client", "GET")})
+    assert caught.value.code == "CONNECTOR_REPLAY_IDENTITY_MISMATCH"
+    assert "the component stored in the account" in str(caught.value), (
+        "the refusal must name its evidence source — 'its own configuration' "
+        "would describe the tautological comparison, not this one"
+    )
+
+    # CONTROL: the same live reading accepts a declaration that agrees with it.
+    assert assert_declared_matches_resolved(snapshot, {"op": ("rest_client", "POST")})
+
+
+def test_the_live_reading_overrides_a_config_that_would_have_agreed():
+    """Non-vacuity for the override itself.
+
+    With the live XML absent the config's own GET is what resolves, and the
+    declaration agrees — so the refusal above is caused by the live reading and
+    by nothing else.
+    """
+    from boomi_mcp.authoring.connector_resolution_snapshot import (
+        assert_declared_matches_resolved,
+        build_connector_resolution_snapshot,
+    )
+    from boomi_mcp.models.integration_models import IntegrationComponentSpec
+
+    component = IntegrationComponentSpec(
+        key="op",
+        type="connector-action",
+        config={"connector_type": "rest_client", "method": "GET",
+                "base_url": "http://host.docker.internal:8081"},
+    )
+    without_live = build_connector_resolution_snapshot([component])
+    assert without_live.lookup("op").source == "config"
+    assert without_live.lookup("op").action == "GET"
+    assert assert_declared_matches_resolved(without_live, {"op": ("rest_client", "GET")})
