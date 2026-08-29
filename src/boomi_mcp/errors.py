@@ -515,12 +515,16 @@ CONNECTOR_REPLAY_ROUTE_DIGEST_REFUSED = "CONNECTOR_REPLAY_ROUTE_DIGEST_REFUSED"
 CONNECTOR_REPLAY_CONFIGURATION_DIGEST_REFUSED = (
     "CONNECTOR_REPLAY_CONFIGURATION_DIGEST_REFUSED"
 )
-#: The two identity codes land with their raiser, in the AUTHORING layer. They are
+#: The identity MISMATCH code lands with its raiser, in the AUTHORING layer. It is
 #: deliberately never named under ``compiler/process_ir/``: a code imported there
 #: joins the compiler's published surface, and connector identity is an account
 #: fact the compiler is not allowed to depend on.
 CONNECTOR_REPLAY_IDENTITY_MISMATCH = "CONNECTOR_REPLAY_IDENTITY_MISMATCH"
-CONNECTOR_REPLAY_IDENTITY_UNAVAILABLE = "CONNECTOR_REPLAY_IDENTITY_UNAVAILABLE"
+#: An IDENTITY_UNAVAILABLE companion is deliberately NOT registered yet, for the
+#: same reason the contract-reference code above is not: its only consumer is the
+#: no-client reuse path, which this slice has not implemented, and a published
+#: code nothing can produce is a promise the system cannot keep. Live QA found it
+#: registered-but-unproducible here once already. It lands with its raiser.
 #: The contract-reference code is deliberately NOT registered here. Its grammar and
 #: its only raiser belong to the slice that introduces authored contract references;
 #: registering it now would leave a published code that nothing can produce, which
@@ -590,16 +594,6 @@ ERROR_TAXONOMY: Dict[str, ErrorCodeSpec] = {
                 "A connector component's declared family or action disagrees with "
                 "what its own configuration resolves to; the declaration is an "
                 "assertion and is not allowed to override the resolution."
-            ),
-            owner="#155",
-        ),
-        ErrorCodeSpec(
-            code=CONNECTOR_REPLAY_IDENTITY_UNAVAILABLE,
-            category="connector_replay",
-            retryable=False,
-            summary=(
-                "A connector component's identity could not be resolved before "
-                "apply, so no identity was minted for it."
             ),
             owner="#155",
         ),

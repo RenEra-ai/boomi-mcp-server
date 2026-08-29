@@ -781,7 +781,9 @@ def test_a_carried_registered_code_reaches_the_served_surface():
         ConnectorIdentityError(CONNECTOR_REPLAY_IDENTITY_MISMATCH, "x", component_key="op")
     )
     assert code == CONNECTOR_REPLAY_IDENTITY_MISMATCH
-    assert path == "op"
+    # The served path field is a JSON POINTER everywhere else; a component key
+    # there made one field mean two things with no discriminator (QA-155-r43-03).
+    assert path is None
 
     # ...and an UNREGISTERED code on an exception must not be published.
     class _Bogus(Exception):
@@ -815,3 +817,64 @@ def test_the_live_comparison_runs_before_the_first_write():
         f"the account is read from {len(calls)} places (lines {[c.lineno for c in calls]}); "
         "one is the pre-write pass and any other is a second authority"
     )
+
+
+def test_route_readability_does_not_gate_verb_verification():
+    """QA-155-r43-01, High — a hole OPENED by the blank-path fix.
+
+    Adding an `unavailable` route state gave `resolved` a new way to be false,
+    and the comparison gated on `resolved` — so an operation whose path could
+    not be read stopped having its VERB checked. A component the account stores
+    as a PATCH could be declared a GET and applied.
+
+    The two facts are independent: the route answers the path question, the
+    family and verb answer the identity question. The per-field checks already
+    skip whatever is genuinely unknown, which is the precise version of what the
+    gate was doing bluntly.
+    """
+    from boomi_mcp.authoring.connector_resolution_snapshot import (
+        ConnectorIdentityError,
+        assert_declared_matches_resolved,
+        live_identity_from_component_xml,
+    )
+
+    unreadable_route = live_identity_from_component_xml("op", _live_rest_op("", verb="PATCH"))
+    assert unreadable_route.route_state == "unavailable"
+    assert unreadable_route.action == "PATCH", "the verb IS known; only the route is not"
+
+    from boomi_mcp.authoring.connector_resolution_snapshot import (
+        TrustedConnectorResolutionSnapshotV1,
+    )
+
+    snapshot = TrustedConnectorResolutionSnapshotV1(identities=(unreadable_route,))
+    with pytest.raises(ConnectorIdentityError):
+        assert_declared_matches_resolved(snapshot, {"op": ("rest_client", "GET")})
+
+    # CONTROL: an agreeing declaration still passes, so the refusal is the
+    # mismatch and not the unreadable route.
+    assert assert_declared_matches_resolved(snapshot, {"op": ("rest_client", "PATCH")})
+
+
+def test_no_registered_replay_code_is_without_a_production_raiser():
+    """QA-155-r43-04, and the rule `errors.py` states for itself.
+
+    `CONNECTOR_REPLAY_IDENTITY_UNAVAILABLE` was registered while its only caller
+    was a test, which is exactly the published-code-nothing-can-produce that
+    this module refuses for the contract-reference code. It was removed rather
+    than given an invented consumer; its real one is the no-client reuse path.
+    """
+    from pathlib import Path
+
+    from boomi_mcp.errors import ERROR_TAXONOMY
+
+    assert "CONNECTOR_REPLAY_IDENTITY_UNAVAILABLE" not in ERROR_TAXONOMY
+
+    src = Path(__file__).resolve().parents[1] / "src"
+    registered = {c for c in ERROR_TAXONOMY if c.startswith("CONNECTOR_REPLAY_")}
+    for code in sorted(registered):
+        hits = [
+            path
+            for path in src.rglob("*.py")
+            if code in path.read_text()
+        ]
+        assert hits, f"{code} is registered but named in no source file"

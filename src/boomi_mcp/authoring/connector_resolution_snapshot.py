@@ -34,10 +34,7 @@ from typing import Any, Dict, Mapping, Optional, Sequence, Tuple
 
 from pydantic import BaseModel, ConfigDict
 
-from ..errors import (
-    CONNECTOR_REPLAY_IDENTITY_MISMATCH,
-    CONNECTOR_REPLAY_IDENTITY_UNAVAILABLE,
-)
+from ..errors import CONNECTOR_REPLAY_IDENTITY_MISMATCH
 
 
 class ConnectorIdentityError(Exception):
@@ -234,8 +231,18 @@ def assert_declared_matches_resolved(
     """
     for key, pair in sorted(declared.items()):
         identity = snapshot.lookup(key)
-        if identity is None or not identity.resolved:
+        if identity is None:
             continue
+        # NO `resolved` gate here. `resolved` answers a question about the ROUTE,
+        # and this loop asks about the FAMILY and the VERB — independent facts.
+        # Gating on it meant an operation whose path could not be read stopped
+        # having its verb checked at all, so a component the account stores as a
+        # PATCH could be declared a GET and applied. The per-field checks below
+        # already skip whatever is genuinely unknown, which is the precise
+        # version of what the gate was doing bluntly.
+        #
+        # This hole was OPENED by the fix for the blank-path critical: adding an
+        # `unavailable` route state gave `resolved` a new way to be false.
         from ..categories.components.builders.connector_builder import (
             connector_family_of,
         )
@@ -274,28 +281,3 @@ def assert_declared_matches_resolved(
                     component_key=key,
                 )
     return dict(declared)
-
-
-def require_resolved_identity(
-    snapshot: TrustedConnectorResolutionSnapshotV1, component_key: str
-) -> ResolvedConnectorComponentIdentityV1:
-    """The identity for one component, or a refusal naming why it is missing.
-
-    For callers that cannot proceed without one. Everything on the plan path
-    uses :func:`assert_declared_matches_resolved` instead, which tolerates an
-    unresolved identity — most configs legitimately settle nothing until the
-    account they will run against is known.
-    """
-    identity = snapshot.lookup(component_key)
-    if identity is not None and identity.resolved:
-        return identity
-    detail = "no connector component under that key"
-    if identity is not None:
-        detail = "its route is {0}".format(identity.route_state)
-    raise ConnectorIdentityError(
-        CONNECTOR_REPLAY_IDENTITY_UNAVAILABLE,
-        "component {0!r} has no resolvable connector identity: {1}".format(
-            component_key, detail
-        ),
-        component_key=component_key,
-    )

@@ -7830,7 +7830,11 @@ def _canonical_plan_failure(exc) -> Tuple[str, Optional[str]]:
     # attribute: an arbitrary string here would publish a code nothing documents.
     carried = getattr(exc, "code", None)
     if isinstance(carried, str) and carried in ERROR_TAXONOMY:
-        return carried, getattr(exc, "component_key", None) or None
+        # No path. Every other producer here serves a JSON POINTER, and returning
+        # a component key instead made one served field mean two different things
+        # with nothing to tell them apart. The key is already named in the
+        # message, which is where an identifier that is not a pointer belongs.
+        return carried, None
 
     # Both the validation-context form and the BARE `PydanticCustomError` form
     # are resolved by the one resolver now (QA-153-r17-02); the second lookup

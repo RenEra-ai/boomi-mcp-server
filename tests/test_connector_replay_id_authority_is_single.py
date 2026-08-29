@@ -179,7 +179,6 @@ def test_every_registered_replay_code_has_a_raiser():
         TrustedConnectorResolutionSnapshotV1,
         ResolvedConnectorComponentIdentityV1,
         assert_declared_matches_resolved,
-        require_resolved_identity,
     )
 
     snapshot = TrustedConnectorResolutionSnapshotV1(
@@ -196,10 +195,6 @@ def test_every_registered_replay_code_has_a_raiser():
     with pytest.raises(ConnectorIdentityError) as mismatch:
         assert_declared_matches_resolved(snapshot, {"rest_conn": ("rest", "GET")})
     produced.add(mismatch.value.code)
-
-    with pytest.raises(ConnectorIdentityError) as unavailable:
-        require_resolved_identity(snapshot, "no_such_component")
-    produced.add(unavailable.value.code)
 
     assert registered == produced, {
         "registered but never raised": sorted(registered - produced),

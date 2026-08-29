@@ -786,7 +786,6 @@ ISSUE_155_CODES = (
     # slice C — the trusted connector-resolution snapshot. Raised in the AUTHORING
     # layer, never under compiler/process_ir: connector identity is an account fact.
     "CONNECTOR_REPLAY_IDENTITY_MISMATCH",
-    "CONNECTOR_REPLAY_IDENTITY_UNAVAILABLE",
 )
 
 
