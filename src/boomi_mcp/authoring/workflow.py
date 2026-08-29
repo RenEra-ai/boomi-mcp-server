@@ -1371,20 +1371,27 @@ def _validate_processes(
             normalized.integration_spec.components
         )
     except ConnectorIdentityError as snapshot_error:
-        snapshot = build_connector_resolution_snapshot(())
-        snapshot_diagnostics.append(
-            _diag(
-                snapshot_error.code,
-                "error",
-                message=str(snapshot_error),
-                subject_kind="component",
-                subject_id=snapshot_error.component_key,
-                remediation=(
-                    "Supply component XML this server can parse, or omit it and "
-                    "declare the component's configuration instead."
-                ),
+        # EVERY failure, and the identities that DID resolve. Reporting only the
+        # first contradicts this surface's report-all contract as squarely as
+        # raising did; discarding the siblings suppressed diagnostics for
+        # components that were never in question — including the blank-path
+        # refusal, which is snapshot-derived.
+        snapshot = snapshot_error.partial or build_connector_resolution_snapshot(())
+        for failure in snapshot_error.failures:
+            snapshot_diagnostics.append(
+                _diag(
+                    failure.code,
+                    "error",
+                    message=str(failure),
+                    subject_kind="component",
+                    subject_id=failure.component_key,
+                    remediation=(
+                        "Supply component XML this server can parse and that names "
+                        "one operation type, or omit it and declare the "
+                        "component's configuration instead."
+                    ),
+                )
             )
-        )
     symbols = build_symbol_table(
         list(normalized.integration_spec.components),
         # #153: the roots are participants too. Without them a `$ref` naming
@@ -1398,10 +1405,14 @@ def _validate_processes(
         connector_resolution_snapshot=snapshot,
     )
 
-    errors = 0
+    # SEEDED, not merely appended. A diagnostic that contributes no code and no
+    # error leaves the served summary saying `is_valid: false` with an empty code
+    # list, so a caller classifying by the summary cannot tell WHY — which is the
+    # one thing a summary exists to say.
+    errors = len(snapshot_diagnostics)
     warnings = 0
     advisories = 0
-    codes: List[str] = []
+    codes: List[str] = [d.code for d in snapshot_diagnostics]
     diagnostics: List[AuthoringDiagnosticV1] = list(snapshot_diagnostics)
 
     # #154. Effect declarations are resolved ONCE, here, before any root is

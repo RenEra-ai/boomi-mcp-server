@@ -47,10 +47,27 @@ class ConnectorIdentityError(Exception):
     into responses do not have to re-derive it from the message.
     """
 
-    def __init__(self, code: str, message: str, *, component_key: str) -> None:
+    def __init__(
+        self,
+        code: str,
+        message: str,
+        *,
+        component_key: str,
+        failures: "Tuple[ConnectorIdentityError, ...]" = (),
+        partial: "Optional[TrustedConnectorResolutionSnapshotV1]" = None,
+    ) -> None:
         super().__init__(message)
         self.code = code
         self.component_key = component_key
+        #: EVERY component that failed, not just the first. A surface whose
+        #: contract is to report everything wrong at once cannot honour it if the
+        #: builder stops at the first bad component — and the surface that
+        #: REFUSES does not care how many there were, so carrying them all costs
+        #: it nothing.
+        self.failures = failures or (self,)
+        #: The identities that DID resolve. Discarding them suppressed
+        #: snapshot-dependent diagnostics for components that were perfectly fine.
+        self.partial = partial
 
 
 class _SnapshotModel(BaseModel):
@@ -262,6 +279,7 @@ def build_connector_resolution_snapshot(
     # identity, however emphatically they are declared.
     reused = set(reused_keys or ())
     resolved = []
+    failures: list = []
     for component in components:
         component_type = getattr(component, "type", None)
         if not isinstance(component_type, str) or "connector" not in component_type:
@@ -312,18 +330,45 @@ def build_connector_resolution_snapshot(
             # and the platform DISCARDS that prefix on write, so what landed was
             # exactly the refused bytes. Two guards this slice ships, defeated by
             # a prologue neither of them was about.
+            # THE CALLER'S OWN BYTES MUST SETTLE WHAT THEY INSTALL. Two ways
+            # they can fail to: the document does not parse, or it parses and
+            # says two contradictory things. Both leave nothing to check against
+            # the declaration, and both are the caller's choice — which is the
+            # whole reason this branch refuses where the account branch is
+            # silent. The first version refused only unparseability, so a
+            # document naming two different verbs was accepted with an empty
+            # action and the comparison skipped it: a component declared with a
+            # read verb could install XML that executes a write one.
             if not identity.readable:
-                raise ConnectorIdentityError(
-                    CONNECTOR_REPLAY_SUBMITTED_XML_UNREADABLE,
-                    (
-                        "component {0!r} supplies raw component XML that cannot be "
-                        "read, so nothing can be checked about what it would "
-                        "install. Remove any document-type or entity declaration: "
-                        "the platform discards them on write, so they change "
-                        "nothing about the component and hide everything about it."
-                    ).format(key),
-                    component_key=key,
+                failures.append(
+                    ConnectorIdentityError(
+                        CONNECTOR_REPLAY_SUBMITTED_XML_UNREADABLE,
+                        (
+                            "component {0!r} supplies raw component XML that "
+                            "cannot be read, so nothing can be checked about what "
+                            "it would install. Remove any document-type or entity "
+                            "declaration: the platform discards them on write, so "
+                            "they change nothing about the component and hide "
+                            "everything about it."
+                        ).format(key),
+                        component_key=key,
+                    )
                 )
+                continue
+            if identity.family is not None and identity.action is None:
+                failures.append(
+                    ConnectorIdentityError(
+                        CONNECTOR_REPLAY_SUBMITTED_XML_UNREADABLE,
+                        (
+                            "component {0!r} supplies raw component XML naming "
+                            "more than one operation type, so what it would "
+                            "install is not settled by its own bytes. Supply one "
+                            "operation type."
+                        ).format(key),
+                        component_key=key,
+                    )
+                )
+                continue
             resolved.append(identity.model_copy(update={"source": "config"}))
             continue
         if key in live_xml and action != "update":
@@ -356,9 +401,19 @@ def build_connector_resolution_snapshot(
                 route_state=projection.route_state,
             )
         )
-    return TrustedConnectorResolutionSnapshotV1(
+    snapshot = TrustedConnectorResolutionSnapshotV1(
         identities=tuple(sorted(resolved, key=lambda item: item.component_key))
     )
+    if failures:
+        first = failures[0]
+        raise ConnectorIdentityError(
+            first.code,
+            str(first),
+            component_key=first.component_key,
+            failures=tuple(failures),
+            partial=snapshot,
+        )
+    return snapshot
 
 
 def assert_declared_matches_resolved(

@@ -1890,3 +1890,149 @@ def test_two_contradictory_verbs_resolve_to_neither(spliced, expected):
     assert identity.readable is True, "a contradiction is not an unparseable document"
     if expected is None:
         assert identity.route_state == "unavailable"
+
+
+def test_caller_xml_naming_two_verbs_is_refused_not_merely_unsettled():
+    """CDX round 4 P1: a defect in the previous round's own fix.
+
+    Resolving a contradiction to nothing is right for the ACCOUNT's bytes and
+    fail-open for the CALLER's: the comparison skips an unknown action, so a
+    component declared with a read verb could install XML that executes a write
+    one. The rule was already stated one branch above — unknown from the account
+    is silence, unknown from the caller is a refusal — and applied to
+    unparseable documents only.
+    """
+    from boomi_mcp.authoring.connector_resolution_snapshot import (
+        ConnectorIdentityError,
+        build_connector_resolution_snapshot,
+    )
+    from boomi_mcp.models.integration_models import IntegrationComponentSpec
+
+    def _component(spliced):
+        return IntegrationComponentSpec(
+            key="raw", type="connector-action", action="create",
+            config={"connector_type": "rest_client", "method": "GET",
+                    "xml": _live_rest_op('<field id="path" value="/x"/>').replace(
+                        "<bns:object>", f"<bns:object>{spliced}")},
+        )
+
+    contradiction = '<GenericOperationConfig customOperationType="DELETE"/>'
+    with pytest.raises(ConnectorIdentityError) as raised:
+        build_connector_resolution_snapshot([_component(contradiction)])
+    assert raised.value.code == "CONNECTOR_REPLAY_SUBMITTED_XML_UNREADABLE"
+
+    # CONTROL: a document that settles ONE verb is still accepted.
+    settled = build_connector_resolution_snapshot([_component("")]).lookup("raw")
+    assert settled.action == "GET"
+
+
+def test_the_account_branch_keeps_its_silence_on_a_contradiction():
+    """The other half of the asymmetry, asserted so the fix cannot over-reach.
+
+    A contradiction in bytes the ACCOUNT served is still silence: refusing there
+    would turn a platform-side oddity into an authoring refusal, which is the
+    thing this module has declined to do since its first line.
+    """
+    from boomi_mcp.authoring.connector_resolution_snapshot import (
+        build_connector_resolution_snapshot,
+    )
+    from boomi_mcp.models.integration_models import IntegrationComponentSpec
+
+    contradictory = _live_rest_op('<field id="path" value="/x"/>').replace(
+        "<bns:object>",
+        '<bns:object><GenericOperationConfig customOperationType="DELETE"/>')
+    component = IntegrationComponentSpec(
+        key="op", type="connector-action", action="create", component_id="id-1",
+        config={"connector_type": "rest_client", "method": "GET"},
+    )
+    identity = build_connector_resolution_snapshot(
+        [component], live_component_xml={"op": contradictory}, reused_keys={"op"}
+    ).lookup("op")
+    assert identity.action is None and identity.source == "live"
+
+
+def test_every_unresolvable_component_is_reported_and_the_rest_survive():
+    """CDX round 4 P2: raising on the first contradicts the report-all contract.
+
+    And replacing the whole snapshot with an empty one discarded identities that
+    were never in question — including the ones the blank-path refusal is derived
+    from, so a second component's defect could silence a first component's
+    diagnostic.
+    """
+    from boomi_mcp.authoring.connector_resolution_snapshot import (
+        ConnectorIdentityError,
+        build_connector_resolution_snapshot,
+    )
+    from boomi_mcp.models.integration_models import IntegrationComponentSpec
+
+    def _raw(key, xml):
+        return IntegrationComponentSpec(
+            key=key, type="connector-action", action="create",
+            config={"connector_type": "rest_client", "method": "GET", "xml": xml},
+        )
+
+    unparseable = '<!DOCTYPE C [<!ENTITY x "y">]><Component/>'
+    contradictory = _live_rest_op('<field id="path" value="/x"/>').replace(
+        "<bns:object>",
+        '<bns:object><GenericOperationConfig customOperationType="DELETE"/>')
+    fine = IntegrationComponentSpec(
+        key="fine", type="connector-action", action="create",
+        config={"connector_type": "rest_client", "method": "GET",
+                "base_url": "http://h:8081", "path": "/x"},
+    )
+
+    with pytest.raises(ConnectorIdentityError) as raised:
+        build_connector_resolution_snapshot(
+            [_raw("a", unparseable), _raw("b", contradictory), fine]
+        )
+    error = raised.value
+    assert [f.component_key for f in error.failures] == ["a", "b"]
+    assert error.partial is not None
+    assert [i.component_key for i in error.partial.identities] == ["fine"], (
+        "identities that resolved were discarded with the ones that did not"
+    )
+
+
+def test_the_planning_summary_can_classify_a_snapshot_refusal():
+    """CDX round 4 P2: `is_valid: false`, `error_count: 1`, `codes: []`.
+
+    A summary whose whole purpose is to say what is wrong, saying nothing. The
+    counts and codes are seeded from the snapshot diagnostics rather than left
+    for a later loop that never sees them.
+    """
+    import ast
+    from pathlib import Path
+
+    module = Path(__file__).resolve().parents[1] / "src/boomi_mcp/authoring/workflow.py"
+    tree = ast.parse(module.read_text())
+    validate = next(
+        n for n in ast.walk(tree)
+        if isinstance(n, ast.FunctionDef) and n.name == "_validate_processes"
+    )
+    seeded = {"errors": False, "codes": False}
+    for node in ast.walk(validate):
+        if not isinstance(node, ast.Assign) or not node.targets:
+            continue
+        target = node.targets[0]
+        name = getattr(target, "id", None) or getattr(
+            getattr(target, "target", None), "id", None
+        )
+        if name is None and hasattr(target, "id"):
+            name = target.id
+        if name not in seeded:
+            continue
+        if any(
+            isinstance(sub, ast.Name) and sub.id == "snapshot_diagnostics"
+            for sub in ast.walk(node.value)
+        ):
+            seeded[name] = True
+    # AnnAssign carries the target differently.
+    for node in ast.walk(validate):
+        if isinstance(node, ast.AnnAssign) and getattr(node.target, "id", None) == "codes":
+            if node.value is not None and any(
+                isinstance(sub, ast.Name) and sub.id == "snapshot_diagnostics"
+                for sub in ast.walk(node.value)
+            ):
+                seeded["codes"] = True
+    assert seeded["errors"], "the error count ignores snapshot failures"
+    assert seeded["codes"], "the served code list ignores snapshot failures"
