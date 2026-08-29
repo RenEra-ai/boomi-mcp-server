@@ -2054,15 +2054,22 @@ _REST_SUBTYPE = "officialboomi-X3979C-rest-prod"
         ("database connection", "connector-settings", "database", "database",
          "<DatabaseConnectionSettings/>", False),
         ("unmodelled family", "connector-settings", "zzz", "zzz", "<Settings/>", False),
-        # A CONNECTOR ACTION MUST NAME ITS VERB — for a family we model, where we
-        # know the verb lives in `customOperationType`. Previously accepted, which
-        # let a plan classified as a read verb install an operation whose verb was
-        # unsettled, because the comparison skips an unknown action.
-        ("operation with its verb removed", "connector-action", "rest_client",
+        # A REST CONNECTOR ACTION MUST NAME ITS VERB. Scoped to REST because REST
+        # is the family whose verb location has been MEASURED — this repository's
+        # own builders put the database verb in the element name and SOAP's in
+        # `operationType`, so a wider scope refused raw-XML replay of the
+        # platform's own bytes for both.
+        ("rest action with its verb removed", "connector-action", "rest_client",
          _REST_SUBTYPE, '<operation/>', True),
-        # ...but NOT for a family we do not model: we do not know where its verb
-        # lives, and refusing would block the raw-XML escape hatch that exists to
-        # create exactly those components.
+        ("rest action with an empty verb", "connector-action", "rest_client",
+         _REST_SUBTYPE, '<operation customOperationType=""/>', True),
+        ("rest action with a whitespace verb", "connector-action", "rest_client",
+         _REST_SUBTYPE, '<operation customOperationType="   "/>', True),
+        ("database action, verb in the element name", "connector-action",
+         "database", "database", "<Configuration><DatabaseGetAction/></Configuration>",
+         False),
+        ("soap action, verb in operationType", "connector-action", "soap_client",
+         "wssoapclientsdk", '<operation operationType="EXECUTE"/>', False),
         ("unmodelled-family action, no verb", "connector-action", "zzz", "zzz",
          "<operation/>", False),
         # NAMES ONE — settled.
@@ -2154,3 +2161,104 @@ def test_the_served_summary_describes_both_ways_a_document_fails_to_settle():
     summary = ERROR_TAXONOMY["CONNECTOR_REPLAY_SUBMITTED_XML_UNREADABLE"].summary
     assert "settle" in summary
     assert "more than one operation type" in summary
+
+
+def test_the_verb_rule_reads_the_PAYLOAD_type_not_the_declaration():
+    """QA: the platform installs the bytes, so the bytes decide what they are.
+
+    Declaring a connection while submitting a connector-action payload installs
+    an ACTION — the platform reads the document. Selecting the rule by the
+    request's declaration therefore let one mis-declared field skip it, and the
+    verb-less operation it left behind was reusable by a later process.
+    """
+    from boomi_mcp.authoring.connector_resolution_snapshot import (
+        ConnectorIdentityError,
+        build_connector_resolution_snapshot,
+    )
+    from boomi_mcp.models.integration_models import IntegrationComponentSpec
+
+    action_payload = _raw_component(_REST_SUBTYPE, "<operation/>", "connector-action")
+
+    for declared in ("connector-settings", "connector-action"):
+        component = IntegrationComponentSpec(
+            key="k", type=declared, action="create",
+            config={"connector_type": "rest_client", "xml": action_payload},
+        )
+        with pytest.raises(ConnectorIdentityError):
+            build_connector_resolution_snapshot([component])
+
+    # CONTROL: a genuine connection payload is unaffected by either declaration.
+    connection_payload = _raw_component(
+        _REST_SUBTYPE, '<RestConnectionSettings url="http://h:8081"/>', "connector-settings"
+    )
+    for declared in ("connector-settings", "connector-action"):
+        build_connector_resolution_snapshot([
+            IntegrationComponentSpec(
+                key="k", type=declared, action="create",
+                config={"connector_type": "rest_client", "xml": connection_payload},
+            )
+        ])
+
+
+def test_the_verb_scope_names_only_the_family_whose_verb_location_is_measured():
+    """Non-vacuity for the scope, asserted against this repo's own builders.
+
+    The previous scope was "families this module models", which was asserted in
+    a comment and false for two of the three. The builders are the authority:
+    REST emits `customOperationType`, the database family emits the verb AS the
+    element name, SOAP carries `operationType`.
+    """
+    from pathlib import Path
+
+    builder = Path(__file__).resolve().parents[1] / (
+        "src/boomi_mcp/categories/components/builders/connector_builder.py"
+    )
+    source = builder.read_text()
+    assert 'GenericOperationConfig customOperationType="{method}"' in source, (
+        "the REST builder no longer emits the attribute this rule reads"
+    )
+    assert "<DatabaseGetAction" in source and "<DatabaseSendAction" in source, (
+        "the database verb is no longer the element name; re-measure the scope"
+    )
+
+    snapshot = Path(__file__).resolve().parents[1] / (
+        "src/boomi_mcp/authoring/connector_resolution_snapshot.py"
+    )
+    assert 'identity.family == "rest"' in snapshot.read_text(), (
+        "the verb rule's family scope is not pinned to the measured family"
+    )
+
+
+def test_the_unsettled_reasons_have_exactly_one_authority():
+    """QA: the served enumeration reached its second instance.
+
+    Three copies existed — the taxonomy summary, this module's messages, and the
+    planning remediation — and adding a third reason left all three describing
+    two. The structural fix is one list that every consumer reads.
+    """
+    from boomi_mcp.authoring.connector_resolution_snapshot import (
+        SUBMITTED_XML_UNSETTLED_REASONS,
+        submitted_xml_unsettled_summary,
+    )
+    from boomi_mcp.errors import ERROR_TAXONOMY
+
+    assert len(SUBMITTED_XML_UNSETTLED_REASONS) >= 3
+    summary = submitted_xml_unsettled_summary()
+    for reason in SUBMITTED_XML_UNSETTLED_REASONS:
+        assert reason in summary, reason
+
+    served = ERROR_TAXONOMY["CONNECTOR_REPLAY_SUBMITTED_XML_UNREADABLE"].summary
+    assert summary in served, "the served summary is not derived from the reasons"
+
+    # NON-VACUITY: a reason added to the tuple must reach the served text without
+    # anyone editing the served text.
+    from boomi_mcp import errors as errors_module
+
+    original = SUBMITTED_XML_UNSETTLED_REASONS
+    try:
+        import boomi_mcp.authoring.connector_resolution_snapshot as module
+
+        module.SUBMITTED_XML_UNSETTLED_REASONS = original + ("a planted reason",)
+        assert "a planted reason" in errors_module._submitted_xml_unreadable_summary()
+    finally:
+        module.SUBMITTED_XML_UNSETTLED_REASONS = original

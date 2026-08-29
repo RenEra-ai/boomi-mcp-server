@@ -1356,6 +1356,7 @@ def _validate_processes(
     from .connector_resolution_snapshot import (
         ConnectorIdentityError,
         build_connector_resolution_snapshot,
+        submitted_xml_unsettled_summary,
     )
 
     # THIS SURFACE REPORTS; it does not refuse. That is not a preference, it is
@@ -1386,10 +1387,10 @@ def _validate_processes(
                     subject_kind="component",
                     subject_id=failure.component_key,
                     remediation=(
-                        "Supply component XML this server can parse and that names "
-                        "one operation type, or omit it and declare the "
-                        "component's configuration instead."
-                    ),
+                        "Submitted component XML is refused when {0}. Supply XML "
+                        "that settles what it installs, or omit it and declare "
+                        "the component's configuration instead."
+                    ).format(submitted_xml_unsettled_summary()),
                 )
             )
     symbols = build_symbol_table(

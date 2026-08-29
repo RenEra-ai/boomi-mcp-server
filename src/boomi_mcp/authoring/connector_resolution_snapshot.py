@@ -70,6 +70,24 @@ class ConnectorIdentityError(Exception):
         self.partial = partial
 
 
+#: EVERY way submitted component XML can fail to settle what it installs, in one
+#: place. Three copies of this list existed — the served taxonomy summary, this
+#: module's refusal messages, and the planning surface's remediation text — and
+#: adding a third reason to the rule left all three describing two. A list that
+#: must be edited in n places to stay true will be true in fewer than n.
+SUBMITTED_XML_UNSETTLED_REASONS: Tuple[str, ...] = (
+    "it cannot be parsed",
+    "it names more than one operation type",
+    "it describes a REST connector action and names no operation type",
+)
+
+
+def submitted_xml_unsettled_summary() -> str:
+    """The reasons as one served sentence, derived from the tuple above."""
+    reasons = list(SUBMITTED_XML_UNSETTLED_REASONS)
+    return "{0}, or {1}".format(", ".join(reasons[:-1]), reasons[-1])
+
+
 class _SnapshotModel(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -90,6 +108,12 @@ class ResolvedConnectorComponentIdentityV1(_SnapshotModel):
     path: Optional[str] = None
     #: ``"static"`` | ``"dynamic"`` | ``"unavailable"`` — see the projection.
     route_state: str = "unavailable"
+    #: The component type the DOCUMENT declares, which is what the platform
+    #: installs. Distinct from the type declared beside it in the request: a
+    #: request declaring a connection while submitting an action payload installs
+    #: an action, so any rule selected by the request's declaration is skipped by
+    #: mis-declaring one field.
+    document_component_type: Optional[str] = None
     #: Whether the document named MORE THAN ONE operation type. ``None`` when no
     #: document was read. Carried rather than inferred from ``action is None``,
     #: which is true for two different reasons — a contradiction, and a document
@@ -187,14 +211,22 @@ def live_identity_from_component_xml(
         pass
 
     subtype = None
+    component_type = None
     actions = []
     path_fields = []
 
     def _start(name, attributes):
-        nonlocal subtype
+        nonlocal subtype, component_type
         local = name.rsplit("}", 1)[-1].rsplit(":", 1)[-1]
         if subtype is None and "subType" in attributes:
             subtype = attributes["subType"]
+        # WHAT THE PAYLOAD SAYS IT IS. The caller's declaration beside the XML is
+        # not this: a request declaring a connection while submitting an action
+        # payload installs an ACTION, because the platform reads the bytes and
+        # not the request. Reading the declaration let that request skip the very
+        # rule the declaration was used to select.
+        if component_type is None and "type" in attributes:
+            component_type = attributes["type"]
         if "customOperationType" in attributes:
             actions.append(attributes["customOperationType"])
         if local == "field" and attributes.get("id") == "path":
@@ -230,8 +262,13 @@ def live_identity_from_component_xml(
     # the same rule this module applies to every other fact it cannot settle.
     #
     # Identical repeats are not a conflict: a document may state one verb twice.
+    # A BLANK VERB IS AN ABSENT VERB. Keeping it made a one-character payload
+    # defeat the rule outright: `customOperationType=""` produced a single
+    # distinct value, so the action was "settled" as the empty string and every
+    # check downstream treated it as known.
     distinct_actions = {
-        value.strip().upper() for value in actions if isinstance(value, str)
+        value.strip().upper() for value in actions
+        if isinstance(value, str) and value.strip()
     }
     action = next(iter(distinct_actions)) if len(distinct_actions) == 1 else None
     contradicted = len(distinct_actions) > 1
@@ -260,6 +297,7 @@ def live_identity_from_component_xml(
         source="live",
         document_parsed=True,
         action_contradicted=contradicted,
+        document_component_type=component_type,
     )
 
 
@@ -373,24 +411,31 @@ def build_connector_resolution_snapshot(
             # written. A document that says nothing about a fact leaves that fact
             # to the configuration beside it; a document that says two
             # contradictory things settles nothing and is the caller's to fix.
-            # A CONNECTOR ACTION MUST NAME ITS VERB. The previous rule permitted
-            # any absence, because a connection legitimately names none — but an
-            # ACTION does not: the submitted bytes replace the component whole,
-            # so a document omitting the operation type installs an operation
-            # whose verb is unsettled while the comparison, which skips unknown
-            # actions, lets a plan classified as a read verb through.
+            # A REST CONNECTOR ACTION MUST NAME ITS VERB. Everything about this
+            # rule's scope is now MEASURED rather than asserted, because the
+            # previous version asserted its scope in a comment and was wrong
+            # about two thirds of it.
             #
-            # Scoped to families this module MODELS. For those we know the verb
-            # lives in `customOperationType`, so its absence is a real absence.
-            # For a family we do not model we do not know where its verb lives,
-            # and refusing would block the raw-XML escape hatch that exists to
-            # create exactly those components — which is a mistake this slice has
-            # already made once and does not need to make again.
-            component_type = getattr(component, "type", "") or ""
-            names_an_action = "connector-action" in component_type
+            # WHERE THE VERB LIVES IS PER FAMILY, and only REST puts it in
+            # `customOperationType` — this repository's own builders emit
+            # `<DatabaseGetAction>`/`<DatabaseSendAction>` for the database
+            # family, where the verb IS the element name, and SOAP carries
+            # `operationType`. Scoping this to "families we model" therefore
+            # refused raw-XML replay of the platform's own bytes for two of the
+            # three, which is the block-a-documented-feature mistake this slice
+            # has now made twice. The scope is one family because one family is
+            # what has been measured; extending it needs the same measurement
+            # for the family being added, not a wider adjective.
+            #
+            # WHAT KIND OF COMPONENT THIS IS comes from the PAYLOAD, not from the
+            # request's declaration beside it. The platform installs the bytes,
+            # so a request declaring a connection while submitting an action
+            # payload installs an action — and reading the declaration let
+            # exactly that request skip this rule.
+            document_type = identity.document_component_type or ""
             if (
-                names_an_action
-                and identity.family is not None
+                "connector-action" in document_type
+                and identity.family == "rest"
                 and identity.action is None
                 and not identity.action_contradicted
             ):

@@ -545,6 +545,25 @@ CONNECTOR_REPLAY_SUBMITTED_XML_UNREADABLE = (
 #: no better outside them. It lands with its raiser.
 
 
+def _submitted_xml_unreadable_summary() -> str:
+    """Served text DERIVED from the refusal's own reason list.
+
+    Hand-maintained here, this sentence went stale the first time the rule grew a
+    reason and was corrected; it went stale again on the next one. The reasons
+    live with the code that raises them, and this reads that — the import is
+    deferred because the authoring layer imports this module.
+    """
+    from .authoring.connector_resolution_snapshot import (
+        submitted_xml_unsettled_summary,
+    )
+
+    return (
+        "A connector component supplies raw component XML that does not settle "
+        "what it would install — {0}; submitted bytes are refused rather than "
+        "trusted unexamined."
+    ).format(submitted_xml_unsettled_summary())
+
+
 @dataclass(frozen=True)
 class ErrorCodeSpec:
     """Catalog entry for one stable error code."""
@@ -603,12 +622,7 @@ ERROR_TAXONOMY: Dict[str, ErrorCodeSpec] = {
             code=CONNECTOR_REPLAY_SUBMITTED_XML_UNREADABLE,
             category="connector_replay",
             retryable=False,
-            summary=(
-                "A connector component supplies raw component XML that does not "
-                "settle what it would install — it cannot be parsed, or it names "
-                "more than one operation type; submitted bytes are refused "
-                "rather than trusted unexamined."
-            ),
+            summary=_submitted_xml_unreadable_summary(),
             owner="#155",
         ),
         ErrorCodeSpec(
