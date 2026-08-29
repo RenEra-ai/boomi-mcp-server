@@ -212,6 +212,30 @@ proven, and the sink that will feed it (`_execute_canonical_process`, which hold
 client) is identified; supplying it is the next unit, and until then the live half is exercised
 by tests rather than by a running apply. Named here rather than implied.
 
+**Unit 6 — apply reads the account, so U5's comparison is now live.** `_live_connector_xml`
+fetches stored XML for every connector component the request REUSES, and the apply-time symbol
+table is built with it. Apply is the first point that HAS an account to read, and the read still
+happens before this root's first write, so a mismatch refuses rather than being discovered after
+a mutation.
+
+Three properties, each with its own test rather than asserted together:
+
+* **Only reused components are read.** A component being CREATED has no account-side truth to
+  disagree with, so reading nothing for it is correct rather than merely cheap — and it means a
+  create-only apply adds ZERO platform calls, which is what the `Q10` call-count probe will
+  measure.
+* **An unreadable component skips the comparison.** A transient platform error must not become
+  an authoring refusal; that is the same "I could not tell is not evidence" rule already applied
+  to an extension-bound endpoint.
+* **The refusal is caused by the account and nothing else.** The end-to-end test refuses a
+  declared GET over a stored POST through `_build_canonical_symbols`, and its control builds the
+  IDENTICAL spec cleanly with the live reading withheld.
+
+With this, U5's declared-vs-derived comparison is no longer a tautology in the tree, only in the
+one sink where both halves still come from the config. The `0 of 4` measurement recorded above
+remains true of the PLAN path and is now a statement about where the evidence comes from rather
+than an unqualified limitation.
+
 **Not yet wired.** Units 1 and 2 are consumed by nothing outside their tests. That is the
 `#180` inertness shape and it is named here rather than left implicit: the next unit is the
 snapshot module plus its first real consumer, and neither of these lands on `dev` before that

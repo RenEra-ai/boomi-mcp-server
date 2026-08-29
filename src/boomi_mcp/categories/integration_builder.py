@@ -7624,7 +7624,45 @@ def _resolve_canonical_placement(boomi_client, envelope):
     return matches[0].get("id") or None
 
 
-def _build_canonical_symbols(*, spec):
+def _live_connector_xml(*, boomi_client, spec):
+    """Live XML for every connector component this request REUSES.
+
+    Only components carrying a ``component_id`` are read: those name something
+    the account already holds, and they are the only ones whose stored identity
+    can disagree with what the request declares. A component being CREATED has
+    no account-side truth to compare against, so reading nothing for it is
+    correct rather than merely cheap — though it is also why this adds no
+    platform calls to a create-only apply.
+
+    A component that cannot be read contributes NOTHING, and the comparison then
+    skips it. That is the same "I could not tell is not evidence" rule the
+    comparison already applies to an extension-bound endpoint: refusing on a
+    failed read would turn a transient platform error into an authoring refusal.
+    """
+    from .components._shared import component_get_xml
+
+    live = {}
+    for component in (getattr(spec, "components", None) or ()):
+        component_type = getattr(component, "type", None)
+        component_id = getattr(component, "component_id", None)
+        key = getattr(component, "key", None)
+        if not isinstance(component_type, str) or "connector" not in component_type:
+            continue
+        if not (isinstance(component_id, str) and component_id):
+            continue
+        if not (isinstance(key, str) and key):
+            continue
+        try:
+            fetched = component_get_xml(boomi_client, component_id)
+        except Exception:
+            continue
+        xml = fetched.get("xml") if isinstance(fetched, dict) else None
+        if isinstance(xml, str) and xml:
+            live[key] = xml
+    return live
+
+
+def _build_canonical_symbols(*, spec, live_component_xml=None):
     """The compile symbol table for one spec. ONE construction, three callers.
 
     The step function, the pre-write plan build and the pre-write dry emit all
@@ -7647,7 +7685,9 @@ def _build_canonical_symbols(*, spec):
     # wrong. It runs HERE because this is the one construction the plan path and
     # the apply path share, so a mismatch refuses before the first write.
     declared = _connector_metadata_from_components(spec.components)
-    snapshot = build_connector_resolution_snapshot(spec.components)
+    snapshot = build_connector_resolution_snapshot(
+        spec.components, live_component_xml=live_component_xml
+    )
     assert_declared_matches_resolved(snapshot, declared)
 
     return build_symbol_table(
@@ -7938,7 +7978,15 @@ def _execute_canonical_process(
         # reason that helper's docstring claimed three callers while only two used
         # it. Threading anything new into the symbol table had two places to reach
         # here and would have reached one.
-        symbols = _build_canonical_symbols(spec=spec)
+        # Apply is the first point that HAS an account to read, so it is the first
+        # point the declared-vs-resolved comparison is more than a config compared
+        # with itself. It still runs before this root's first write.
+        symbols = _build_canonical_symbols(
+            spec=spec,
+            live_component_xml=_live_connector_xml(
+                boomi_client=boomi_client, spec=spec
+            ),
+        )
         if stored_plan is not None:
             # THE COMPILED PLAN IS EXECUTED, never a rebuild (§6 AR1-01).
             #

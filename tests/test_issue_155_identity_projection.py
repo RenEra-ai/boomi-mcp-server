@@ -467,3 +467,115 @@ def test_the_live_reading_overrides_a_config_that_would_have_agreed():
     assert without_live.lookup("op").source == "config"
     assert without_live.lookup("op").action == "GET"
     assert assert_declared_matches_resolved(without_live, {"op": ("rest_client", "GET")})
+
+
+# --- slice C: the apply path reads the account -----------------------------------
+
+
+class _ClientServing:
+    """A Boomi client that serves one component's stored XML, and counts reads."""
+
+    def __init__(self, xml_by_id):
+        self._xml = xml_by_id
+        self.reads = []
+
+
+def test_apply_reads_the_account_for_reused_connectors(monkeypatch):
+    """The wiring, driven — not the comparison in isolation.
+
+    Everything above proves the comparison CAN refuse. This proves the apply
+    path actually hands it the account's answer, which is the step whose absence
+    made the whole thing a tautology.
+    """
+    from boomi_mcp.categories import integration_builder as ib
+    from boomi_mcp.models.integration_models import IntegrationComponentSpec
+
+    class _Spec:
+        components = [
+            IntegrationComponentSpec(
+                key="reused_op",
+                type="connector-action",
+                component_id="deadbeef-0000-0000-0000-000000000000",
+                config={"connector_type": "rest_client", "method": "GET",
+                        "base_url": "http://host.docker.internal:8081"},
+            ),
+            IntegrationComponentSpec(
+                key="created_op",
+                type="connector-action",
+                config={"connector_type": "rest_client", "method": "GET",
+                        "base_url": "http://host.docker.internal:8081"},
+            ),
+        ]
+        processes = ()
+
+    reads = []
+
+    def _fake_get_xml(client, component_id, *a, **kw):
+        reads.append(component_id)
+        return {"xml": _live_xml("cap155-e2-post")}
+
+    monkeypatch.setattr(
+        "boomi_mcp.categories.components._shared.component_get_xml", _fake_get_xml
+    )
+    live = ib._live_connector_xml(boomi_client=object(), spec=_Spec())
+
+    # ONLY the reused component is read — a created one has no account-side truth,
+    # so a create-only apply adds no platform calls at all.
+    assert reads == ["deadbeef-0000-0000-0000-000000000000"]
+    assert set(live) == {"reused_op"}
+
+
+def test_an_unreadable_component_skips_the_comparison_rather_than_refusing(monkeypatch):
+    """A transient platform error must not become an authoring refusal."""
+    from boomi_mcp.categories import integration_builder as ib
+    from boomi_mcp.models.integration_models import IntegrationComponentSpec
+
+    class _Spec:
+        components = [
+            IntegrationComponentSpec(
+                key="reused_op",
+                type="connector-action",
+                component_id="deadbeef-0000-0000-0000-000000000000",
+                config={"connector_type": "rest_client", "method": "GET",
+                        "base_url": "http://h:8081"},
+            )
+        ]
+        processes = ()
+
+    def _boom(client, component_id, *a, **kw):
+        raise RuntimeError("platform unavailable")
+
+    monkeypatch.setattr(
+        "boomi_mcp.categories.components._shared.component_get_xml", _boom
+    )
+    assert ib._live_connector_xml(boomi_client=object(), spec=_Spec()) == {}
+    # and the symbol table still builds, because nothing was contradicted
+    assert ib._build_canonical_symbols(spec=_Spec(), live_component_xml={}) is not None
+
+
+def test_the_wired_apply_comparison_refuses_a_declared_GET_over_an_account_POST():
+    """End to end through `_build_canonical_symbols`, the shared construction."""
+    from boomi_mcp.authoring.connector_resolution_snapshot import ConnectorIdentityError
+    from boomi_mcp.categories import integration_builder as ib
+    from boomi_mcp.models.integration_models import IntegrationComponentSpec
+
+    class _Spec:
+        components = [
+            IntegrationComponentSpec(
+                key="reused_op",
+                type="connector-action",
+                component_id="deadbeef-0000-0000-0000-000000000000",
+                config={"connector_type": "rest_client", "method": "GET",
+                        "base_url": "http://host.docker.internal:8081"},
+            )
+        ]
+        processes = ()
+
+    live = {"reused_op": _live_xml("cap155-e2-post")}
+    with pytest.raises(ConnectorIdentityError) as caught:
+        ib._build_canonical_symbols(spec=_Spec(), live_component_xml=live)
+    assert caught.value.code == "CONNECTOR_REPLAY_IDENTITY_MISMATCH"
+
+    # CONTROL: without the account reading, the same spec builds cleanly — so the
+    # refusal comes from the account and not from anything in the request.
+    assert ib._build_canonical_symbols(spec=_Spec(), live_component_xml={}) is not None
