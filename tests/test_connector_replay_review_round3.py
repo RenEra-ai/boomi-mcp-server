@@ -1296,6 +1296,7 @@ _EXPECTED_CLASS_COUNTS = {
     "DC-155-M": 1,
     "DC-155-N": 1,
     "DC-155-O": 1,
+    "DC-155-P": 1,
 }
 
 #: Instances counted before finding ids were enumerated. A CLOSED set: a
@@ -1325,6 +1326,7 @@ _NOT_AN_INSTANCE = {
     "SELF-155-r51-04": "the structural fix its class owed, not a new instance of it",
     "SELF-155-r47-01a": "a revision of a row that is itself a non-instance",
     "QA-155-r2-01a": "a revision of a row already counted; counting both double-counts",
+    "QA-155-r2-01b": "a revision of a revision; the original is the counted row",
     "SELF-155-r47-01": "the class being DISCHARGED — the regeneration done correctly from the final tree — not a new instance of regenerating from a non-final one",
 }
 

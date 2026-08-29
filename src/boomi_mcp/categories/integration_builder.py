@@ -7625,15 +7625,25 @@ def _resolve_canonical_placement(boomi_client, envelope):
     return matches[0].get("id") or None
 
 
-def _live_connector_xml(*, boomi_client, spec, resolved_ids=None):
+def _live_connector_xml(*, boomi_client, spec, planned_actions, existing_ids):
     """Live XML for every connector component this request REUSES.
 
-    Only components that NAME something already in the account are read: those
+    Only components the request will USE AS THEY ALREADY EXIST are read: they
     are the only ones whose stored identity can disagree with what the request
-    declares. A component being CREATED has
-    no account-side truth to compare against, so reading nothing for it is
-    correct rather than merely cheap — though it is also why this adds no
-    platform calls to a create-only apply.
+    declares. A component being CREATED has no account-side truth to compare
+    against, so reading nothing for it is correct rather than merely cheap —
+    though it is also why this adds no platform calls to a create-only apply.
+
+    "Reuse" is THE PLANNER'S WORD, not a judgement assembled here. An earlier
+    version searched three places for an id and treated a hit anywhere as a
+    reuse, which re-derives a decision the plan had already made and recorded —
+    and it got that decision wrong twice. A plain create carrying a stray
+    ``component_id`` in its config was read, though that key binds nothing
+    unless ``reference_only`` is set; and every ``conflict_policy="clone"``
+    collision was read, though the planner sets that id DELIBERATELY to name the
+    component being cloned FROM. Both then refused the request against a
+    component it never touches. The plan already distinguishes all of this, so
+    this asks it instead of reconstructing it.
 
     A component that cannot be read contributes NOTHING, and the comparison then
     skips it. That is the same "I could not tell is not evidence" rule the
@@ -7648,22 +7658,15 @@ def _live_connector_xml(*, boomi_client, spec, resolved_ids=None):
         key = getattr(component, "key", None)
         if not isinstance(component_type, str) or "connector" not in component_type:
             continue
-        # THREE places an existing component can be named, not one. The top-level
-        # field is only the most obvious: a documented reference-only reuse puts
-        # the id in the config, and a COLLISION reuse resolves by name, so its id
-        # exists only in the plan. Reading the top-level field alone skipped both
-        # — and a skipped component is one the account never gets to contradict,
-        # which is precisely the case this comparison exists for.
-        config = getattr(component, "config", None) or {}
-        component_id = getattr(component, "component_id", None)
-        if not (isinstance(component_id, str) and component_id):
-            candidate = config.get("component_id") if isinstance(config, dict) else None
-            component_id = candidate if isinstance(candidate, str) else None
-        if not (isinstance(component_id, str) and component_id):
-            component_id = (resolved_ids or {}).get(key)
-        if not (isinstance(component_id, str) and component_id):
-            continue
         if not (isinstance(key, str) and key):
+            continue
+        # An UPDATE's live component is the state being CHANGED, so the snapshot
+        # keeps the request's desired identity for it — reading it would spend a
+        # platform call on bytes nothing consumes.
+        if (planned_actions or {}).get(key) != "reuse":
+            continue
+        component_id = (existing_ids or {}).get(key)
+        if not (isinstance(component_id, str) and component_id):
             continue
         try:
             fetched = component_get_xml(boomi_client, component_id)
@@ -8787,8 +8790,19 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
     # N roots x M reused connectors of platform GETs, each with its own
     # deadline — and worse, two roots could observe DIFFERENT snapshots of the
     # same account and disagree about what it holds.
-    _pre_write_live_xml = _live_connector_xml(
-        boomi_client=boomi_client, spec=spec, resolved_ids=existing_ids
+    #
+    # Nothing consumes it when there is no process root: the reading feeds the
+    # canonical symbol table, which is built per root. Hoisting it made the call
+    # unconditional, so a components-only apply paid for bytes no check reads.
+    _pre_write_live_xml = (
+        _live_connector_xml(
+            boomi_client=boomi_client,
+            spec=spec,
+            planned_actions=_planned_actions,
+            existing_ids=existing_ids,
+        )
+        if process_units_by_key
+        else {}
     )
     for _pkey, _unit in process_units_by_key.items():
         # A NON-WRITING PLANNED ACTION IS SKIPPED FOR THE WHOLE PASS, once, at

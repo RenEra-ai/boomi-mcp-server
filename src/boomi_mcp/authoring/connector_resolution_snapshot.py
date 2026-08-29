@@ -111,41 +111,66 @@ def live_identity_from_component_xml(
     and it is invisible while both halves come from the same config.
 
     Credential-free by construction — only the component's type, its connector
-    subtype and its operation verb are read, and none of those can hold a
-    secret. Deliberately NOT the config digest: that reads the full projection
-    and refuses on unknown content, which is right for an evidence digest and
-    wrong for a pre-write comparison that must tolerate a component it only
-    partly understands.
+    subtype, its operation verb and its stored path are read, and none of those
+    can hold a secret. Deliberately NOT the config digest: that reads the full
+    projection and refuses on unknown content, which is right for an evidence
+    digest and wrong for a pre-write comparison that must tolerate a component
+    it only partly understands.
+
+    STREAMED, not tree-built, and ENTITY DECLARATIONS ARE REFUSED. The bytes
+    reaching this function are not always the account's: a raw create hands its
+    own ``config["xml"]`` here, so a caller controls them, and a few hundred
+    bytes of internal entity declarations measured a 2,300-fold expansion on a
+    plan path. External entities do not resolve — the standard library does not
+    fetch them — so this is amplification rather than disclosure, and the
+    refusal lands on the DECLARATION, before any expansion is performed.
+
+    The repository already carries three copies of a regex that screens for
+    ``<!DOCTYPE``/``<!ENTITY`` before parsing. A fourth copy would be the
+    hand-model this slice keeps finding, so this asks the PARSER instead: expat
+    reports every entity declaration it reads, and a reader that never builds a
+    tree cannot hold an expanded one. A document carrying a DOCTYPE is simply
+    unreadable here, which is the answer this function already gives for
+    anything else it cannot read.
     """
-    import xml.etree.ElementTree as ET
+    import xml.parsers.expat
 
     from ..categories.components.builders.connector_builder import connector_family_of
 
-    def _localname(tag):
-        return tag.rsplit("}", 1)[-1] if isinstance(tag, str) else ""
+    class _EntityDeclared(Exception):
+        pass
 
-    # PARSED, not pattern-matched. The first version read attributes with a regex
-    # that assumed `id` preceded `value`, so a perfectly valid
-    # `<field value="" type="string" id="path"/>` reported no blank path and the
-    # net went quiet. Attribute order carries no meaning in XML and this reads raw
-    # platform bytes, so an order-sensitive reader is a reader that is sometimes
-    # wrong for no reason a caller could predict.
-    try:
-        root = ET.fromstring(component_xml if isinstance(component_xml, str) else "")
-    except ET.ParseError:
-        return ResolvedConnectorComponentIdentityV1(
-            component_key=component_key, source="live"
-        )
-
-    family = connector_family_of(root.get("subType"))
+    subtype = None
     action = None
     path_fields = []
-    for element in root.iter():
-        if action is None and element.get("customOperationType") is not None:
-            action = element.get("customOperationType")
-        if _localname(element.tag) == "field" and element.get("id") == "path":
-            path_fields.append(element.get("value"))
 
+    def _start(name, attributes):
+        nonlocal subtype, action
+        local = name.rsplit("}", 1)[-1].rsplit(":", 1)[-1]
+        if subtype is None and "subType" in attributes:
+            subtype = attributes["subType"]
+        if action is None and "customOperationType" in attributes:
+            action = attributes["customOperationType"]
+        if local == "field" and attributes.get("id") == "path":
+            path_fields.append(attributes.get("value"))
+
+    def _entity_declared(*_args, **_kwargs):
+        raise _EntityDeclared
+
+    unreadable = ResolvedConnectorComponentIdentityV1(
+        component_key=component_key, source="live"
+    )
+    if not isinstance(component_xml, str):
+        return unreadable
+    parser = xml.parsers.expat.ParserCreate()
+    parser.EntityDeclHandler = _entity_declared
+    parser.StartElementHandler = _start
+    try:
+        parser.Parse(component_xml, True)
+    except (_EntityDeclared, xml.parsers.expat.ExpatError):
+        return unreadable
+
+    family = connector_family_of(subtype)
     resolved_enough = family is not None and action is not None
 
     # THE STORED PATH, and it is the whole point for a reused component. Reading

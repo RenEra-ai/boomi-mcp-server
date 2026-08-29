@@ -517,7 +517,12 @@ def test_apply_reads_the_account_for_reused_connectors(monkeypatch):
     monkeypatch.setattr(
         "boomi_mcp.categories.components._shared.component_get_xml", _fake_get_xml
     )
-    live = ib._live_connector_xml(boomi_client=object(), spec=_Spec())
+    live = ib._live_connector_xml(
+        boomi_client=object(),
+        spec=_Spec(),
+        planned_actions={"reused_op": "reuse", "created_op": "create"},
+        existing_ids={"reused_op": "deadbeef-0000-0000-0000-000000000000"},
+    )
 
     # ONLY the reused component is read — a created one has no account-side truth,
     # so a create-only apply adds no platform calls at all.
@@ -548,7 +553,12 @@ def test_an_unreadable_component_skips_the_comparison_rather_than_refusing(monke
     monkeypatch.setattr(
         "boomi_mcp.categories.components._shared.component_get_xml", _boom
     )
-    assert ib._live_connector_xml(boomi_client=object(), spec=_Spec()) == {}
+    assert ib._live_connector_xml(
+        boomi_client=object(),
+        spec=_Spec(),
+        planned_actions={"reused_op": "reuse"},
+        existing_ids={"reused_op": "deadbeef-0000-0000-0000-000000000000"},
+    ) == {}
     # and the symbol table still builds, because nothing was contradicted
     assert ib._build_canonical_symbols(spec=_Spec(), live_component_xml={}) is not None
 
@@ -1024,13 +1034,16 @@ def test_only_a_BUILDABLE_replacement_set_projects_as_a_route(replacements, expe
     assert identity.route_state == expected
 
 
-def test_every_shape_of_reuse_is_read_from_the_account(monkeypatch):
-    """CDX P1: an existing component can be named in THREE places.
+def test_only_a_planned_REUSE_is_read_from_the_account(monkeypatch):
+    """CDX P1, then QA: the question is not "is there an id" but "is this a reuse".
 
-    The top-level field is only the most obvious: a reference-only reuse puts the
-    id in the config, and a collision reuse resolves by NAME so its id exists
-    only in the plan. A skipped component is one the account never gets to
-    contradict.
+    An id exists in several places and means several things. A plain create can
+    carry a stray `component_id` in its config, where the key binds nothing
+    unless `reference_only` is set; and a clone collision has an `existing_id`
+    the planner sets DELIBERATELY, to name the component being cloned FROM.
+    Reading either one refuses the request against a component it never touches
+    — which live QA measured as a refusal of every `conflict_policy="clone"`
+    apply. The plan already made this decision; this asks it.
     """
     from boomi_mcp.categories import integration_builder as ib
     from boomi_mcp.models.integration_models import IntegrationComponentSpec
@@ -1038,23 +1051,122 @@ def test_every_shape_of_reuse_is_read_from_the_account(monkeypatch):
     def _config(**extra):
         return {"connector_type": "rest_client", "method": "GET", **extra}
 
+    reads = []
+
+    def _fake_get_xml(client, component_id, *a, **k):
+        reads.append(component_id)
+        return {"xml": _live_rest_op('<field id="path" value="/x"/>')}
+
+    monkeypatch.setattr(
+        "boomi_mcp.categories.components._shared.component_get_xml", _fake_get_xml
+    )
+
     spec = type("S", (), {"components": [
-        IntegrationComponentSpec(key="top", type="connector-action",
-                                 component_id="id-top", config=_config()),
-        IntegrationComponentSpec(key="incfg", type="connector-action",
-                                 config=_config(component_id="id-cfg")),
-        IntegrationComponentSpec(key="byname", type="connector-action", config=_config()),
+        IntegrationComponentSpec(key="reused", type="connector-action", config=_config()),
+        IntegrationComponentSpec(key="updated", type="connector-action",
+                                 action="update", component_id="id-upd", config=_config()),
+        IntegrationComponentSpec(key="cloned", type="connector-action", config=_config()),
+        IntegrationComponentSpec(key="stray", type="connector-action",
+                                 config=_config(component_id="id-stray")),
         IntegrationComponentSpec(key="created", type="connector-action", config=_config()),
     ]})()
 
-    monkeypatch.setattr(
-        "boomi_mcp.categories.components._shared.component_get_xml",
-        lambda client, cid, *a, **k: {"xml": _live_rest_op('<field id="path" value="/x"/>')},
-    )
     live = ib._live_connector_xml(
-        boomi_client=object(), spec=spec, resolved_ids={"byname": "id-plan"}
+        boomi_client=object(),
+        spec=spec,
+        planned_actions={
+            "reused": "reuse",
+            "updated": "update",
+            "cloned": "create_clone",
+            "stray": "create",
+            "created": "create",
+        },
+        existing_ids={
+            "reused": "id-reused",
+            "updated": "id-upd",
+            "cloned": "id-cloned-from",
+            "stray": None,
+            "created": None,
+        },
     )
-    assert set(live) == {"top", "incfg", "byname"}, "a reuse shape is being skipped"
+    assert set(live) == {"reused"}, "something other than a planned reuse was read"
+    assert reads == ["id-reused"], f"platform reads beyond the reuse: {reads}"
+
+
+def test_the_reuse_rule_asks_the_planner_rather_than_searching_for_an_id():
+    """Non-vacuity: the guard above passes for a function that reads nothing.
+
+    So this constructs the case the OLD rule got wrong and the new one must get
+    right — the same component key, the same id in the same place, differing
+    only in what the plan decided about it.
+    """
+    from boomi_mcp.categories import integration_builder as ib
+    from boomi_mcp.models.integration_models import IntegrationComponentSpec
+
+    component = IntegrationComponentSpec(
+        key="c", type="connector-action", component_id="id-1",
+        config={"connector_type": "rest_client", "method": "GET"},
+    )
+    spec = type("S", (), {"components": [component]})()
+
+    def _run(planned_action):
+        seen = []
+
+        class _Shared:
+            @staticmethod
+            def component_get_xml(client, component_id, *a, **k):
+                seen.append(component_id)
+                return {"xml": _live_rest_op('<field id="path" value="/x"/>')}
+
+        import sys
+        real = sys.modules["boomi_mcp.categories.components._shared"].component_get_xml
+        sys.modules["boomi_mcp.categories.components._shared"].component_get_xml = (
+            _Shared.component_get_xml
+        )
+        try:
+            ib._live_connector_xml(
+                boomi_client=object(), spec=spec,
+                planned_actions={"c": planned_action},
+                existing_ids={"c": "id-1"},
+            )
+        finally:
+            sys.modules["boomi_mcp.categories.components._shared"].component_get_xml = real
+        return seen
+
+    assert _run("reuse") == ["id-1"], "a planned reuse must be read"
+    assert _run("create_clone") == [], "a clone names what it copies, not what it uses"
+    assert _run("create") == [], "a create has no account-side truth"
+
+
+def test_the_pre_write_read_is_skipped_when_nothing_consumes_it():
+    """QA: the hoist made the call unconditional.
+
+    The reading feeds the canonical symbol table, which is built per process
+    root, so a components-only apply paid platform calls for bytes no check
+    reads. The saving the hoist earns is unaffected — that is a separate guard.
+    """
+    import ast
+    from pathlib import Path
+
+    module = Path(__file__).resolve().parents[1] / "src/boomi_mcp/categories/integration_builder.py"
+    tree = ast.parse(module.read_text())
+    apply_plan = next(
+        n for n in ast.walk(tree)
+        if isinstance(n, ast.FunctionDef) and n.name == "_apply_plan"
+    )
+    guarded = [
+        node for node in ast.walk(apply_plan)
+        if isinstance(node, ast.IfExp)
+        and any(
+            isinstance(sub, ast.Call) and isinstance(sub.func, ast.Name)
+            and sub.func.id == "_live_connector_xml"
+            for sub in ast.walk(node)
+        )
+        and isinstance(node.test, ast.Name)
+        and node.test.id == "process_units_by_key"
+    ]
+    assert len(guarded) == 1, "the account read is not gated on there being a consumer"
+
 
 
 def test_the_account_is_read_once_per_apply_not_once_per_root():
@@ -1165,3 +1277,118 @@ def test_the_slice_a_deferral_is_discharged_by_the_live_reading():
     with pytest.raises(ConnectorIdentityError) as raised:
         assert_declared_matches_resolved(snapshot, {"op": ("rest_client", "GET")})
     assert raised.value.code == "CONNECTOR_REPLAY_IDENTITY_MISMATCH"
+
+
+def _entity_bomb(depth=6):
+    """A self-contained internal-entity expansion, declared and never fetched."""
+    declarations = "".join(
+        '<!ENTITY l{0} "{1}">'.format(i, ("&l%d;" % (i - 1)) * 10)
+        for i in range(1, depth + 1)
+    )
+    return (
+        '<?xml version="1.0"?><!DOCTYPE d [<!ENTITY l0 "aaaaaaaaaa">'
+        + declarations
+        + ']><Component subType="officialboomi-X3979C-rest-prod"><object>'
+        '<operation customOperationType="&l{0};"/></object></Component>'.format(depth)
+    )
+
+
+def test_an_entity_declaration_is_refused_before_anything_expands():
+    """QA: a raw create hands its OWN bytes to this reader.
+
+    So the input is caller-controlled, and a few hundred bytes of internal
+    entity declarations measured a 2,300-fold expansion on a plan path. The
+    refusal happens at the DECLARATION — the expansion is never performed, which
+    is why this is not a size limit.
+    """
+    from boomi_mcp.authoring.connector_resolution_snapshot import (
+        live_identity_from_component_xml,
+    )
+
+    for depth in (4, 5, 6, 7):
+        identity = live_identity_from_component_xml("op", _entity_bomb(depth))
+        assert identity.route_state == "unavailable", depth
+        assert identity.action is None, "an expanded value reached the identity"
+        assert identity.family is None
+
+
+def test_the_refusal_is_at_the_DECLARATION_not_at_the_expansion():
+    """Non-vacuity, and it discriminates the two implementations.
+
+    A post-parse size check would also refuse a bomb — and would accept this
+    document, which declares one tiny entity and never references it. Nothing
+    expands here, so anything that refuses it is refusing the declaration
+    itself, which is the property that makes the expansion unreachable rather
+    than merely bounded.
+    """
+    from boomi_mcp.authoring.connector_resolution_snapshot import (
+        live_identity_from_component_xml,
+    )
+
+    unused = (
+        '<?xml version="1.0"?><!DOCTYPE d [<!ENTITY unused "x">]>'
+        '<Component subType="officialboomi-X3979C-rest-prod"><object>'
+        '<operation customOperationType="GET"/>'
+        '<field id="path" value="/x"/></object></Component>'
+    )
+    identity = live_identity_from_component_xml("op", unused)
+    assert identity.route_state == "unavailable", (
+        "an unreferenced entity declaration was accepted, so the refusal is "
+        "keyed on expansion size rather than on the declaration"
+    )
+
+    # The CONTROL: the same document without the declaration reads normally, so
+    # the refusal above is about the entity and not about the shape.
+    without = (
+        '<Component subType="officialboomi-X3979C-rest-prod"><object>'
+        '<operation customOperationType="GET"/>'
+        '<field id="path" value="/x"/></object></Component>'
+    )
+    control = live_identity_from_component_xml("op", without)
+    assert (control.family, control.action, control.route_state) == (
+        "rest", "GET", "static",
+    )
+
+
+def test_every_archived_platform_capture_still_reads():
+    """The corpus control for a reader that changed twice in one slice.
+
+    These are real platform bytes, captured from executed-green components, and
+    they are the only documents in this repository the reader did not author.
+    A verb capture must read its verb; the blank-path fixture must read dynamic.
+    """
+    import json
+    from pathlib import Path
+
+    captures = Path(__file__).resolve().parents[1] / (
+        "docs/architecture/evidence/issue-155/captures"
+    )
+    if not captures.is_dir():  # pragma: no cover - the archive is tracked
+        pytest.skip("evidence archive absent")
+
+    from boomi_mcp.authoring.connector_resolution_snapshot import (
+        live_identity_from_component_xml,
+    )
+
+    read = {}
+    for path in sorted(captures.glob("*/*.xml")):
+        identity = live_identity_from_component_xml("cap", path.read_text())
+        read[f"{path.parent.name}/{path.name}"] = (identity.action, identity.route_state)
+
+    assert read, "the corpus control read nothing"
+    expected = {
+        "cap155-e1-p0-blankpath-op/op_p0_readback.xml": (None, "dynamic"),
+        "cap155-e2-post/operation_component.xml": ("POST", "static"),
+        "cap155-e2-put/operation_component.xml": ("PUT", "static"),
+        "cap155-e2-delete/operation_component.xml": ("DELETE", "static"),
+        "cap155-e2-head/operation_component.xml": ("HEAD", "static"),
+        "cap155-e2-options/operation_component.xml": ("OPTIONS", "static"),
+        "cap155-e2-trace/operation_component.xml": ("TRACE", "static"),
+    }
+    for name, (_, route_state) in expected.items():
+        if name not in read:  # a capture set may be re-taken under a new name
+            continue
+        assert read[name][1] == route_state, f"{name} now reads {read[name]}"
+        if name in read and expected[name][0] is not None:
+            assert read[name][0] == expected[name][0], f"{name} now reads {read[name]}"
+    assert json.dumps(read), "unserializable"
