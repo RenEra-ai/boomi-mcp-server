@@ -7717,7 +7717,21 @@ def _live_connector_xml(*, boomi_client, spec, existing_ids, conflict_policy):
     return live
 
 
-def _build_canonical_symbols(*, spec, live_component_xml=None, reused_keys=None):
+def _request_only_resolution(spec):
+    """A resolution built from the REQUEST alone, for a caller with no account.
+
+    Exists so that "I have no account context" is something a call site SAYS
+    rather than something it omits. The pre-apply surfaces are entitled to this;
+    an apply is not, and the difference is now visible in the diff.
+    """
+    from ..authoring.connector_resolution_snapshot import (
+        build_connector_resolution_snapshot,
+    )
+
+    return build_connector_resolution_snapshot(spec.components)
+
+
+def _build_canonical_symbols(*, spec, resolution):
     """The compile symbol table for one spec. ONE construction, three callers.
 
     The step function, the pre-write plan build and the pre-write dry emit all
@@ -7740,11 +7754,13 @@ def _build_canonical_symbols(*, spec, live_component_xml=None, reused_keys=None)
     # wrong. It runs HERE because this is the one construction the plan path and
     # the apply path share, so a mismatch refuses before the first write.
     declared = _connector_metadata_from_components(spec.components)
-    snapshot = build_connector_resolution_snapshot(
-        spec.components,
-        live_component_xml=live_component_xml,
-        reused_keys=reused_keys,
-    )
+    # The snapshot is BUILT ONCE PER APPLY and handed in. Three functions
+    # construct symbols and only one of them used to carry the account context,
+    # so the first construction on a raw apply resolved identities from the
+    # request alone — and could refuse on submitted XML the account was about to
+    # make irrelevant. `resolution` is REQUIRED rather than defaulted for exactly
+    # that reason: a caller cannot forget what it has no default for.
+    snapshot = resolution
     assert_declared_matches_resolved(snapshot, declared)
 
     return build_symbol_table(
@@ -7755,7 +7771,7 @@ def _build_canonical_symbols(*, spec, live_component_xml=None, reused_keys=None)
     )
 
 
-def _build_canonical_plan(*, spec, unit, conflict_policy: str):
+def _build_canonical_plan(*, spec, unit, conflict_policy: str, resolution):
     """Build ONE canonical root's materialization plan from the request alone.
 
     The single place the RAW route's plan is constructed (§6 AR3-02). It is
@@ -7769,7 +7785,7 @@ def _build_canonical_plan(*, spec, unit, conflict_policy: str):
     from ..authoring.process_materialization import build_materialization_plan
     from ..compiler.process_ir.emitter_registry import emitter_revision
 
-    symbols = _build_canonical_symbols(spec=spec)
+    symbols = _build_canonical_symbols(spec=spec, resolution=resolution)
     return build_materialization_plan(
         envelope=unit.envelope,
         process_ir=unit.process_ir,
@@ -7916,6 +7932,10 @@ def _execute_canonical_process(
     resolved_folder_id: Optional[str] = None,
     on_write_confirmed=None,
     precompiled_plan=None,
+    #: NO DEFAULT, deliberately. This is the argument three constructions used to
+    #: do without, and a default is exactly how a caller forgets it silently. A
+    #: caller with no account context asks for one explicitly.
+    resolution,
 ) -> Dict[str, Any]:
     """Materialize and apply ONE canonical ProcessIR root, and attest it.
 
@@ -8058,7 +8078,7 @@ def _execute_canonical_process(
         # against the account, before anything was written. Reading again inside
         # the mutation loop would be a second authority for one fact and would
         # reintroduce the refusal-after-a-write this slice just removed.
-        symbols = _build_canonical_symbols(spec=spec)
+        symbols = _build_canonical_symbols(spec=spec, resolution=resolution)
         if stored_plan is not None:
             # THE COMPILED PLAN IS EXECUTED, never a rebuild (§6 AR1-01).
             #
@@ -8086,7 +8106,8 @@ def _execute_canonical_process(
             # No stored plan and no pre-built one: the caller reached this
             # function directly. Building here is the only option.
             plan = _build_canonical_plan(
-                spec=spec, unit=unit, conflict_policy=conflict_policy
+                spec=spec, unit=unit, conflict_policy=conflict_policy,
+                resolution=resolution,
             )
         xml = materialize_canonical_process_xml(
             plan=plan,
@@ -8856,6 +8877,22 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
     _reused_component_keys = _keys_reused_at_apply(
         spec=spec, existing_ids=existing_ids, conflict_policy=conflict_policy
     )
+    # ONE resolution for the whole apply, and UNCONDITIONAL. The live READ above
+    # is gated on there being a root to compile, because nothing reads those
+    # bytes otherwise; the RESOLUTION is not, because it also decides whether the
+    # caller's own submitted XML can be read at all — and a components-only apply
+    # writes raw connector XML without ever compiling a root. Gating this on a
+    # process root left that shape unchecked, which is the bypass reopening one
+    # layer out from where it was closed.
+    from ..authoring.connector_resolution_snapshot import (
+        build_connector_resolution_snapshot as _build_resolution,
+    )
+
+    _resolution = _build_resolution(
+        spec.components,
+        live_component_xml=_pre_write_live_xml,
+        reused_keys=_reused_component_keys,
+    )
     for _pkey, _unit in process_units_by_key.items():
         # A NON-WRITING PLANNED ACTION IS SKIPPED FOR THE WHOLE PASS, once, at
         # the top (Codex round 22). Every check below decides whether a WRITE
@@ -8917,6 +8954,7 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
                     spec=spec,
                     unit=_unit,
                     conflict_policy=conflict_policy,
+                    resolution=_resolution,
                 )
             # ...and EMIT it dry (QA-153-r15-02): several request-decidable
             # refusals live in the emitter, not the compiler, so compiling
@@ -8930,11 +8968,7 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
                 # from one slice with opposite guarantees. Live QA measured that;
                 # the ordering invariant this file already states is that a refusal
                 # the request can decide must fire before the first write.
-                _build_canonical_symbols(
-                    spec=spec,
-                    live_component_xml=_pre_write_live_xml,
-                    reused_keys=_reused_component_keys,
-                ),
+                _build_canonical_symbols(spec=spec, resolution=_resolution),
                 _depends_on_by_key,
             )
         except Exception as _plan_exc:  # noqa: BLE001 — classified below
@@ -9133,6 +9167,7 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
                     resolved_folder_id=resolved_placements.get(key),
                     on_write_confirmed=_note_write,
                     precompiled_plan=precompiled_plans.get(key),
+                    resolution=_resolution,
                 )
                 results[key] = outcome["result"]
                 if outcome.get("applied_name") and outcome.get("requested_name") and (

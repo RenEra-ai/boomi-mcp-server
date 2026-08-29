@@ -73,6 +73,13 @@ class ResolvedConnectorComponentIdentityV1(_SnapshotModel):
     path: Optional[str] = None
     #: ``"static"`` | ``"dynamic"`` | ``"unavailable"`` — see the projection.
     route_state: str = "unavailable"
+    #: Whether the DOCUMENT this came from parsed. ``None`` when no document was
+    #: read at all (a config projection). Tracked rather than inferred: the first
+    #: version derived it from "did we find a family or an action", which labels a
+    #: perfectly well-formed component for a family this module does not classify
+    #: as unreadable — and that is exactly the unsupported connector the raw-XML
+    #: escape hatch exists to create. A proxy for a fact is not the fact.
+    document_parsed: Optional[bool] = None
     #: ``"config"`` when the request's own configuration settled this, ``"live"``
     #: when it was read back from the component as it exists in the account. The
     #: distinction is the whole point: a declaration compared against the config
@@ -87,14 +94,13 @@ class ResolvedConnectorComponentIdentityV1(_SnapshotModel):
 
     @property
     def readable(self) -> bool:
-        """Whether the document this came from could be read at all.
+        """Whether the document this came from parsed.
 
-        A document that parses but says nothing useful still yields a family or
-        an action; one that cannot be parsed yields neither. The distinction
-        matters only where the bytes are the CALLER's, and the caller of this
-        property is the one place that is true.
+        Says nothing about whether it CLASSIFIED. A well-formed component for a
+        family this module does not recognise is readable and unclassified, and
+        those are the components the raw-XML escape hatch exists to create.
         """
-        return self.family is not None or self.action is not None
+        return self.document_parsed is not False
 
 
 class TrustedConnectorResolutionSnapshotV1(_SnapshotModel):
@@ -172,7 +178,7 @@ def live_identity_from_component_xml(
         raise _EntityDeclared
 
     unreadable = ResolvedConnectorComponentIdentityV1(
-        component_key=component_key, source="live"
+        component_key=component_key, source="live", document_parsed=False
     )
     if not isinstance(component_xml, str):
         return unreadable
@@ -212,6 +218,7 @@ def live_identity_from_component_xml(
         action=action.strip().upper() if isinstance(action, str) else None,
         route_state=route_state,
         source="live",
+        document_parsed=True,
     )
 
 
@@ -308,6 +315,20 @@ def build_connector_resolution_snapshot(
             continue
         if key in live_xml and action != "update":
             resolved.append(live_identity_from_component_xml(key, live_xml[key]))
+            continue
+        if key in reused:
+            # A REUSE whose account bytes could not be read resolves to NOTHING.
+            # Falling through to the config would make the request's own values
+            # authoritative for a component apply is about to DISCARD — measured:
+            # a reused operation whose read failed reported a dynamic route from
+            # config and demanded a path binding the account's component may not
+            # need. "I could not tell" has to stay uncertain here; it is the one
+            # answer that cannot be wrong.
+            resolved.append(
+                ResolvedConnectorComponentIdentityV1(
+                    component_key=key, source="live"
+                )
+            )
             continue
         projection = normalized_identity_projection(
             config, live_projection=live.get(key)

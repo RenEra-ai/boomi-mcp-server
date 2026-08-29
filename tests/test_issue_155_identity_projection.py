@@ -560,7 +560,9 @@ def test_an_unreadable_component_skips_the_comparison_rather_than_refusing(monke
         conflict_policy="reuse",
     ) == {}
     # and the symbol table still builds, because nothing was contradicted
-    assert ib._build_canonical_symbols(spec=_Spec(), live_component_xml={}) is not None
+    assert ib._build_canonical_symbols(
+        spec=_Spec(), resolution=ib._request_only_resolution(_Spec())
+    ) is not None
 
 
 def test_the_wired_apply_comparison_refuses_a_declared_GET_over_an_account_POST():
@@ -583,12 +585,23 @@ def test_the_wired_apply_comparison_refuses_a_declared_GET_over_an_account_POST(
 
     live = {"reused_op": _live_xml("cap155-e2-post")}
     with pytest.raises(ConnectorIdentityError) as caught:
-        ib._build_canonical_symbols(spec=_Spec(), live_component_xml=live)
+        from boomi_mcp.authoring.connector_resolution_snapshot import (
+            build_connector_resolution_snapshot as _snapshot,
+        )
+
+        ib._build_canonical_symbols(
+            spec=_Spec(),
+            resolution=_snapshot(
+                _Spec.components, live_component_xml=live, reused_keys={'reused_op'}
+            ),
+        )
     assert caught.value.code == "CONNECTOR_REPLAY_IDENTITY_MISMATCH"
 
     # CONTROL: without the account reading, the same spec builds cleanly — so the
     # refusal comes from the account and not from anything in the request.
-    assert ib._build_canonical_symbols(spec=_Spec(), live_component_xml={}) is not None
+    assert ib._build_canonical_symbols(
+        spec=_Spec(), resolution=ib._request_only_resolution(_Spec())
+    ) is not None
 
 
 # --- slice C: the blank-path refusal ---------------------------------------------
@@ -1586,6 +1599,157 @@ def test_the_unreadable_refusal_reaches_a_caller_under_its_own_code():
         processes = ()
 
     with pytest.raises(ConnectorIdentityError) as raised:
-        ib._build_canonical_symbols(spec=_Spec())
+        ib._build_canonical_symbols(
+            spec=_Spec(), resolution=ib._request_only_resolution(_Spec())
+        )
     served, _path = ib._canonical_plan_failure(raised.value)
     assert served == "CONNECTOR_REPLAY_SUBMITTED_XML_UNREADABLE"
+
+
+def test_no_construction_of_canonical_symbols_can_omit_the_resolution():
+    """CDX round 3 P1: three functions build symbols, one carried the context.
+
+    So the FIRST construction on a raw apply resolved identities from the request
+    alone and could refuse on submitted XML the account was about to make
+    irrelevant. The argument is now required — a caller cannot forget what it has
+    no default for — and this asserts that, rather than asserting that today's
+    call sites happen to pass it.
+    """
+    import ast
+    import inspect
+    from pathlib import Path
+
+    from boomi_mcp.categories import integration_builder as ib
+
+    for name in ("_build_canonical_symbols", "_build_canonical_plan"):
+        signature = inspect.signature(getattr(ib, name))
+        parameter = signature.parameters["resolution"]
+        assert parameter.default is inspect.Parameter.empty, (
+            f"{name} defaults `resolution`, so a caller can omit it silently"
+        )
+
+    module = Path(__file__).resolve().parents[1] / "src/boomi_mcp/categories/integration_builder.py"
+    tree = ast.parse(module.read_text())
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Name):
+            continue
+        if node.func.id not in {"_build_canonical_symbols", "_build_canonical_plan"}:
+            continue
+        assert any(k.arg == "resolution" for k in node.keywords), (
+            f"{node.func.id} at line {node.lineno} builds without a resolution"
+        )
+
+
+def test_the_submitted_xml_check_survives_a_components_only_apply():
+    """CDX round 3 P1: the bypass reopened one layer out from where it closed.
+
+    The refusal lived in the canonical symbol construction, which only runs when
+    a process root will be compiled — so a components-only apply wrote raw
+    connector XML without the check ever executing. The RESOLUTION is therefore
+    built unconditionally, while the account READ stays gated on there being a
+    root to compile, because those are two different questions and only one of
+    them is about process roots.
+    """
+    import ast
+    from pathlib import Path
+
+    module = Path(__file__).resolve().parents[1] / "src/boomi_mcp/categories/integration_builder.py"
+    tree = ast.parse(module.read_text())
+    apply_plan = next(
+        n for n in ast.walk(tree)
+        if isinstance(n, ast.FunctionDef) and n.name == "_apply_plan"
+    )
+
+    def _inside_a_loop_or_conditional(target):
+        for node in ast.walk(apply_plan):
+            if isinstance(node, (ast.For, ast.While, ast.If, ast.IfExp)):
+                if any(sub is target for sub in ast.walk(node)):
+                    return True
+        return False
+
+    builds = [
+        node for node in ast.walk(apply_plan)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+        and node.func.id == "_build_resolution"
+    ]
+    assert len(builds) == 1, "the apply-wide resolution is not built exactly once"
+    assert not _inside_a_loop_or_conditional(builds[0]), (
+        "the resolution is conditional, so an apply shape exists that never "
+        "checks the caller's own submitted XML"
+    )
+
+    reads = [
+        node for node in ast.walk(apply_plan)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+        and node.func.id == "_live_connector_xml"
+    ]
+    assert len(reads) == 1 and _inside_a_loop_or_conditional(reads[0]), (
+        "the account read must stay gated — nothing consumes it with no root"
+    )
+
+
+def test_a_reuse_whose_account_read_failed_resolves_to_nothing():
+    """CDX round 3 P2: falling through to the config makes discarded bytes win.
+
+    Measured before the fix: a reused operation whose read failed reported a
+    dynamic route from its request config and demanded a path binding — from
+    values apply is about to throw away.
+    """
+    from boomi_mcp.authoring.connector_resolution_snapshot import (
+        build_connector_resolution_snapshot,
+    )
+    from boomi_mcp.models.integration_models import IntegrationComponentSpec
+    from boomi_mcp.recipes.materialization import _requires_path_binding
+
+    component = IntegrationComponentSpec(
+        key="op", type="connector-action", action="create", component_id="id-1",
+        config={"connector_type": "rest_client", "method": "GET",
+                "base_url": "http://h:8081", "path": "/x/{k}",
+                "path_replacements": [{"name": "k", "target_path": "a"}]},
+    )
+    snapshot = build_connector_resolution_snapshot(
+        [component], live_component_xml={}, reused_keys={"op"}
+    )
+    identity = snapshot.lookup("op")
+    assert (identity.family, identity.route_state, identity.source) == (
+        None, "unavailable", "live",
+    )
+    assert _requires_path_binding(snapshot, "op") is None, (
+        "a requirement was derived from config apply will discard"
+    )
+
+    # CONTROL: the same component NOT reused still resolves from its config.
+    projected = build_connector_resolution_snapshot([component]).lookup("op")
+    assert projected.route_state == "dynamic" and projected.source == "config"
+
+
+def test_a_wellformed_document_is_readable_even_when_it_classifies_as_nothing():
+    """CDX round 3 P2: readability was inferred from what was FOUND.
+
+    A well-formed component for a family this module does not classify has
+    neither family nor action — and those are exactly the unsupported connectors
+    the raw-XML escape hatch exists to create. Deriving a fact from a proxy for
+    it blocked the documented feature.
+    """
+    from boomi_mcp.authoring.connector_resolution_snapshot import (
+        build_connector_resolution_snapshot,
+        live_identity_from_component_xml,
+    )
+    from boomi_mcp.models.integration_models import IntegrationComponentSpec
+
+    unsupported = (
+        '<Component type="connector-settings" subType="a-family-we-do-not-model">'
+        '<object><Settings url="https://x"/></object></Component>'
+    )
+    identity = live_identity_from_component_xml("x", unsupported)
+    assert identity.family is None and identity.action is None
+    assert identity.readable is True, "well-formed is not the same as classified"
+    assert live_identity_from_component_xml("x", "<not-xml").readable is False
+
+    # And the escape hatch it protects: this must NOT refuse.
+    build_connector_resolution_snapshot([
+        IntegrationComponentSpec(
+            key="x", type="connector-settings", action="create",
+            config={"connector_type": "a-family-we-do-not-model", "xml": unsupported},
+        )
+    ])
