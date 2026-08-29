@@ -263,6 +263,9 @@ PROCESS_IR_SEMANTIC_DYNAMIC_PATH_DDP_NOT_ESTABLISHED = (
 PROCESS_IR_SEMANTIC_DYNAMIC_PATH_NO_DYNAMIC_SEGMENT = (
     "PROCESS_IR_SEMANTIC_DYNAMIC_PATH_NO_DYNAMIC_SEGMENT"
 )
+PROCESS_IR_SEMANTIC_DYNAMIC_PATH_REQUIRED = (
+    "PROCESS_IR_SEMANTIC_DYNAMIC_PATH_REQUIRED"
+)
 PROCESS_IR_SEMANTIC_DYNAMIC_PATH_PROFILE_BINDING_MISMATCH = (
     "PROCESS_IR_SEMANTIC_DYNAMIC_PATH_PROFILE_BINDING_MISMATCH"
 )
@@ -566,6 +569,16 @@ ERROR_TAXONOMY: Dict[str, ErrorCodeSpec] = {
             summary=(
                 "A component's routing configuration could not be projected into a "
                 "stable digest."
+            ),
+            owner="#155",
+        ),
+        ErrorCodeSpec(
+            code=PROCESS_IR_SEMANTIC_DYNAMIC_PATH_REQUIRED,
+            category="process_ir_semantic",
+            retryable=False,
+            summary=(
+                "A connector operation stores a blank request path, so the calling "
+                "step must bind one per document; the document binds none."
             ),
             owner="#155",
         ),

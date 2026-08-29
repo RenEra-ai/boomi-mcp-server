@@ -35,6 +35,7 @@ from pydantic import Field
 from ...errors import (
     PROCESS_IR_CAPABILITY_CONNECTOR_ACTION_UNSUPPORTED,
     PROCESS_IR_CAPABILITY_DYNAMIC_PATH_UNSUPPORTED,
+    PROCESS_IR_SEMANTIC_DYNAMIC_PATH_REQUIRED,
     PROCESS_IR_REFERENCE_CONNECTION_MISMATCH,
     PROCESS_IR_REFERENCE_CONNECTION_NOT_FOUND,
     PROCESS_IR_REFERENCE_OPERATION_NOT_FOUND,
@@ -677,6 +678,45 @@ def validate_dynamic_path_capability(
             )
 
 
+def validate_dynamic_path_required(
+    cfg: SemanticCfgV1, symbols: SymbolTableV1
+) -> None:
+    """Refuse a call on an operation that stores a BLANK path and binds none.
+
+    The mirror of :func:`validate_dynamic_path_capability`. That one refuses a
+    binding the family cannot honour; this one refuses the ABSENCE of a binding
+    the operation requires. Together they are the two ways a dynamic path can be
+    wrong, and neither can be derived from the other.
+
+    ``requires_path_binding`` is tri-state and only ``True`` refuses. ``None``
+    means nobody told the compiler — every caller that does not build a
+    resolution snapshot, which is most of them — and treating "not told" as
+    "does not require one" would be the fail-open reading. Treating it as "does
+    require one" would refuse every document that never mentioned a path, so
+    silence is silence and only an explicit ``True`` speaks.
+
+    Runs over BOTH dialects for the same reason its sibling does: a legacy
+    ``target`` naming a blank-path operation is as broken as a first-class call.
+    """
+    index = symbols.build_index()
+    for node in cfg.nodes:
+        semantic = node.semantic
+        operation_ref = getattr(semantic, "operation_ref", None)
+        if operation_ref is None:
+            continue
+        if getattr(semantic, "path_binding", None) is not None:
+            continue
+        operation = index.get(operation_ref)
+        if operation is None or operation.requires_path_binding is not True:
+            continue
+        raise raise_compile_error(
+            PROCESS_IR_SEMANTIC_DYNAMIC_PATH_REQUIRED,
+            "reference_resolution",
+            node.source_path,
+            internal_node_id=node.node_id,
+        )
+
+
 def validate_connector_calls(cfg: SemanticCfgV1, symbols: SymbolTableV1) -> None:
     """Every pass, in order. The single entry point the pipeline calls.
 
@@ -695,6 +735,7 @@ def validate_connector_calls(cfg: SemanticCfgV1, symbols: SymbolTableV1) -> None
     whichever cardinality/profile complaint the same payload happens to trip.
     """
     validate_dynamic_path_capability(cfg, symbols)
+    validate_dynamic_path_required(cfg, symbols)
     bindings = resolve_connector_call_bindings(cfg, symbols)
     validate_error_handling(cfg, bindings, symbols)
     validate_connector_call_semantics(cfg, bindings, symbols)

@@ -39,6 +39,7 @@ from ...errors import (
     PROCESS_IR_SEMANTIC_UNTERMINATED_PATH,
     PROCESS_IR_CAPABILITY_CONNECTOR_ACTION_UNSUPPORTED,
     PROCESS_IR_CAPABILITY_DYNAMIC_PATH_UNSUPPORTED,
+    PROCESS_IR_SEMANTIC_DYNAMIC_PATH_REQUIRED,
     PROCESS_IR_SEMANTIC_RETRY_SOURCE_POLICY_REQUIRES_RETRY,
     PROCESS_IR_SEMANTIC_RETRY_SOURCE_POLICY_SCOPE_INVALID,
     PROCESS_IR_CAPABILITY_UNSUPPORTED,
@@ -208,6 +209,11 @@ _REMEDIATION = {
         "locations it binds at get_schema_template("
         "schema_name='process_ir_authoring', category='connector_action')."
     ),
+    PROCESS_IR_SEMANTIC_DYNAMIC_PATH_REQUIRED: (
+        "Bind the request path at the calling step: give the connector call a "
+        "path_binding naming the dynamic document property the operation reads, "
+        "or point the step at an operation that stores a path of its own."
+    ),
     PROCESS_IR_SEMANTIC_RETRY_SOURCE_POLICY_SCOPE_INVALID: (
         "Set the region's scope to 'process' so it contains the producer whose "
         "replay is being accepted, or drop the acknowledgement and leave the "
@@ -342,6 +348,9 @@ _MESSAGES = {
     ),
     PROCESS_IR_CAPABILITY_DYNAMIC_PATH_UNSUPPORTED: (
         "the connector family exposes no per-document bindable request location"
+    ),
+    PROCESS_IR_SEMANTIC_DYNAMIC_PATH_REQUIRED: (
+        "the operation stores a blank request path and the calling step binds none"
     ),
     PROCESS_IR_SEMANTIC_RETRY_SOURCE_POLICY_SCOPE_INVALID: (
         "accepting a replayed producer is only meaningful on a process-scope region"

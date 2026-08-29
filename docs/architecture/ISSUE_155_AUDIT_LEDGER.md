@@ -236,6 +236,35 @@ one sink where both halves still come from the config. The `0 of 4` measurement 
 remains true of the PLAN path and is now a statement about where the evidence comes from rather
 than an unqualified limitation.
 
+**Unit 7 — `requires_path_binding` and the blank-path refusal (S11).** The symbol table gains a
+FOURTH optional field, and the tracked architecture note that says it "gained exactly three" is
+amended rather than left to contradict the code. That note already reasons about two proposed
+fields and rejects both, so it sets the test this one had to pass, and it was checked rather than
+argued:
+
+* Not a second encoding — the capability allowlist carries `(family, action)` pairs and says
+  nothing about a stored path; `binding_variant` was rejected because it WAS such an encoding.
+* Not inert — the snapshot populates it and the refusal consumes it; `dependency_refs` was
+  rejected because nothing populated it.
+* Not derivable here — the operation's stored path lives in the component, and reading that
+  would break the purity this layer promises, so the fact must arrive from outside.
+
+Tri-state on purpose. `None` means nobody told the compiler, which is the common case, and only
+an explicit `True` refuses: reading silence as "does not require one" is fail-open, reading it as
+"does" would refuse every document that never mentioned a path.
+
+`validate_dynamic_path_required` sits INSIDE `validate_connector_calls` — the module's own rule
+is that a gate only one of two entry points enforces is not a gate, and an AST test pins that it
+is reached from there. Both halves graded by mutation: neutering the refusal fails the witness,
+and stopping the population makes the field read `None`, which is exactly the inert state the
+architecture note rejects.
+
+**Rebaselines, each reviewed rather than accepted:** the taxonomy test's pinned per-issue code set gains the new code; the
+served authoring contract was regenerated and its diff INSPECTED — exactly one diagnostic code
+added, none removed, which is what a new refusal should do to text an LLM caller reads; the
+M12.12 census and five served digests moved and were re-emitted, replacing only the two drifted
+tables so the document's 39 headings survived.
+
 **Not yet wired.** Units 1 and 2 are consumed by nothing outside their tests. That is the
 `#180` inertness shape and it is named here rather than left implicit: the next unit is the
 snapshot module plus its first real consumer, and neither of these lands on `dev` before that

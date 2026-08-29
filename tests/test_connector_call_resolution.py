@@ -131,6 +131,12 @@ def test_component_symbol_optional_field_set_is_pinned():
         "connection_ref",
         "input_profile_ref",
         "output_profile_ref",
+        # #155 slice C. Ships where `binding_variant` and `dependency_refs` did
+        # not: the capability allowlist carries (family, action) and says nothing
+        # about a stored path, the snapshot populates this, the blank-path refusal
+        # consumes it, and the compiler cannot derive it without reading the
+        # component — which its purity promise forbids.
+        "requires_path_binding",
     }
     # Every optional field must actually default, or a pre-#140 caller's symbol
     # construction would break.

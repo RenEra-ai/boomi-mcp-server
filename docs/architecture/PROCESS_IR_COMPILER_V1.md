@@ -399,6 +399,16 @@ production.
 `input_profile_ref`, `output_profile_ref` — all defaulted, so every symbol every pre-#140 caller
 builds is byte-identical.
 
+**#155 slice C adds a fourth, `requires_path_binding`**, and it is worth saying why it passes the
+two tests that rejected `binding_variant` and `dependency_refs` below. It is not a second
+encoding: the capability allowlist carries `(family, action)` pairs and says nothing about what
+path an operation stores. It is not inert: the trusted connector-resolution snapshot populates it
+— from the request's config, or from the component the account actually holds — and the
+blank-path refusal consumes it. And it cannot be derived here: the operation's stored path lives
+in the component, and reading that would break the purity this layer promises, so the fact must
+arrive from outside. It is tri-state (`None` = nobody said), because "not told" and "does not
+require one" are different answers and only the second may refuse.
+
 There is deliberately **no** companion `*_profile_type`: the *profile* symbol's own `component_type`
 already is the profile kind (`connector_resolution._profile_identity` reads it from there), and a
 second caller-supplied copy would be exactly the duplicate authority ADR-001 §6 exists to remove —

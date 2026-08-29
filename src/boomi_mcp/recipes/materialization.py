@@ -117,12 +117,35 @@ def placeholder_component_id(selector: str) -> str:
     return f"id-{key}"
 
 
+def _requires_path_binding(snapshot, component_key):
+    """Whether the snapshot says this operation stores a BLANK request path.
+
+    ``None`` when there is no snapshot, no identity, or an identity that settled
+    nothing — three different ways of not knowing, all of which must stay silent
+    rather than resolve to ``False``. Only a ``"dynamic"`` route is a positive
+    answer: that state means usable path replacements were declared, which is
+    exactly the condition under which the emitted operation carries a blank path
+    and the calling step must supply the real one.
+    """
+    if snapshot is None:
+        return None
+    identity = snapshot.lookup(component_key)
+    if identity is None:
+        return None
+    if identity.route_state == "dynamic":
+        return True
+    if identity.route_state == "static":
+        return False
+    return None
+
+
 def build_symbol_table(
     components: Sequence[IntegrationComponentSpec],
     *,
     process_keys: Sequence[str] = (),
     connector_metadata: Optional[Mapping[str, Tuple[Optional[str], Optional[str]]]] = None,
     resolver: Callable[[str], str] = placeholder_component_id,
+    connector_resolution_snapshot=None,
 ):
     """Project components into the compiler's ``SymbolTableV1``.
 
@@ -201,6 +224,14 @@ def build_symbol_table(
                 action_type=action_type,
                 connection_ref=(
                     f"{_REF_PREFIX}{connection_ref_key}" if connection_ref_key else None
+                ),
+                # Tri-state, and absent unless a snapshot actually resolved it: a
+                # caller that builds no snapshot says nothing, and the blank-path
+                # refusal only speaks on an explicit True. Populating this is what
+                # keeps the field from being the inert addition the architecture
+                # note rejects `dependency_refs` for.
+                requires_path_binding=_requires_path_binding(
+                    connector_resolution_snapshot, component.key
                 ),
             )
         )

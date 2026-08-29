@@ -7694,6 +7694,7 @@ def _build_canonical_symbols(*, spec, live_component_xml=None):
         list(spec.components),
         process_keys=[u.envelope.component_key for u in (spec.processes or ())],
         connector_metadata=declared,
+        connector_resolution_snapshot=snapshot,
     )
 
 

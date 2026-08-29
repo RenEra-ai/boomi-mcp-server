@@ -579,3 +579,98 @@ def test_the_wired_apply_comparison_refuses_a_declared_GET_over_an_account_POST(
     # CONTROL: without the account reading, the same spec builds cleanly — so the
     # refusal comes from the account and not from anything in the request.
     assert ib._build_canonical_symbols(spec=_Spec(), live_component_xml={}) is not None
+
+
+# --- slice C: the blank-path refusal ---------------------------------------------
+#
+# The field is only worth adding if it both arrives and is acted on. These cover
+# both halves and the silence in between.
+
+
+def _rest_symbols(requires_path_binding):
+    """Refs are BARE here, matching the compiler's own test convention."""
+    from boomi_mcp.compiler.process_ir.contracts import (
+        ComponentSymbolV1,
+        SymbolTableV1,
+    )
+
+    def symbol(ref, component_type, **extra):
+        return ComponentSymbolV1(
+            ref=ref, component_id="id_" + ref, component_type=component_type, **extra
+        )
+
+    return SymbolTableV1(
+        symbols=(
+            symbol("conn_rest", "connector-settings", connector_type="rest"),
+            symbol(
+                "op_rest_get",
+                "connector-action",
+                connector_type="rest",
+                action_type="GET",
+                connection_ref="conn_rest",
+                requires_path_binding=requires_path_binding,
+            ),
+        )
+    )
+
+
+_BARE_CALL = {
+    "version": "1",
+    "body": {
+        "kind": "sequence",
+        "steps": [
+            {"kind": "connector_call", "operation_ref": "op_rest_get", "action": "GET"},
+            {"kind": "stop"},
+        ],
+    },
+}
+
+
+def _compile(symbols):
+    from boomi_mcp.compiler.process_ir.pipeline import compile_process_ir_v1
+    from boomi_mcp.models.process_ir import parse_process_ir_v1
+
+    return compile_process_ir_v1(parse_process_ir_v1(_BARE_CALL), symbols)
+
+
+def test_a_blank_path_operation_called_without_a_binding_is_refused():
+    """The refusal exists and fires. Without this the field would be inert."""
+    from boomi_mcp.compiler.process_ir.diagnostics import ProcessIRCompileError
+
+    with pytest.raises(ProcessIRCompileError) as caught:
+        _compile(_rest_symbols(True))
+    codes = [d.code for d in caught.value.diagnostics]
+    assert "PROCESS_IR_SEMANTIC_DYNAMIC_PATH_REQUIRED" in codes, codes
+
+
+@pytest.mark.parametrize("requires", [False, None])
+def test_only_an_explicit_requirement_refuses(requires):
+    """`None` is silence, not consent — and not refusal either.
+
+    Most callers build no snapshot at all, so `None` is the common case. Reading
+    it as "does not require one" would be fail-open; reading it as "does" would
+    refuse every document that never mentioned a path. It must say nothing.
+    """
+    _compile(_rest_symbols(requires))  # compiles; no refusal
+
+
+def test_the_refusal_is_reached_through_the_single_entry_point():
+    """A gate only one of two entry points enforces is not a gate.
+
+    The module documents that rule for its own passes; this pins that the new
+    one lives inside `validate_connector_calls` rather than beside it.
+    """
+    import ast
+    import inspect
+
+    from boomi_mcp.compiler.process_ir import connector_resolution
+
+    tree = ast.parse(
+        inspect.getsource(connector_resolution.validate_connector_calls)
+    )
+    called = {
+        node.func.id
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+    }
+    assert "validate_dynamic_path_required" in called, sorted(called)

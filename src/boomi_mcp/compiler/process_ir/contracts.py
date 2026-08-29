@@ -192,6 +192,19 @@ class ComponentSymbolV1(_CompilerModel):
     connector_type: Optional[str] = None
     action_type: Optional[str] = None
     connection_ref: Optional[str] = None
+    #: Whether the OPERATION this symbol names stores a blank request path and
+    #: therefore requires a per-document path binding. Tri-state on purpose:
+    #: ``None`` means nobody told the compiler, which is not the same as ``False``
+    #: and must not refuse.
+    #:
+    #: This ships where ``binding_variant`` and ``dependency_refs`` did not, and
+    #: for the reasons the architecture note gives for rejecting those two. It is
+    #: not a second encoding of the capability allowlist — that carries
+    #: ``(family, action)`` pairs and says nothing about a stored path — and it is
+    #: not inert, because the resolution snapshot populates it and the blank-path
+    #: refusal consumes it. The compiler cannot derive it: reading the component
+    #: would break the purity this layer promises, so the fact has to arrive.
+    requires_path_binding: Optional[bool] = None
     input_profile_ref: Optional[str] = None
     output_profile_ref: Optional[str] = None
 
