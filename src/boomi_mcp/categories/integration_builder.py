@@ -234,6 +234,7 @@ from ..errors import (
     INVALID_INPUT,
     LEGACY_ADAPTER_AUTHORITY_CONFLICT,
     PROCESS_MATERIALIZATION_FINGERPRINT_MISMATCH,
+    ERROR_TAXONOMY,
     PROCESS_MATERIALIZATION_INTERNAL_ERROR,
     PROCESS_MATERIALIZATION_PLAN_INVALID,
     PROCESS_MATERIALIZATION_REFERENCE_NOT_RELOCATABLE,
@@ -7817,6 +7818,20 @@ def _canonical_plan_failure(exc) -> Tuple[str, Optional[str]]:
         code = getattr(diagnostic, "code", None)
         if code:
             return str(code), getattr(diagnostic, "path", None) or None
+    # An exception that CARRIES a stable code serves it. Without this an error
+    # whose whole purpose is to name a condition was served as
+    # `PROCESS_MATERIALIZATION_INTERNAL_ERROR` — a caller branching on the real
+    # code found dead handling, and the code was registered-but-unproducible on
+    # every served surface even though a raiser existed. Live QA found that; the
+    # taxonomy's raiser guard did not, because the guard's own test raises it
+    # directly and never asks whether a SURFACE can emit it.
+    #
+    # Membership in the taxonomy is required, not just the presence of a `.code`
+    # attribute: an arbitrary string here would publish a code nothing documents.
+    carried = getattr(exc, "code", None)
+    if isinstance(carried, str) and carried in ERROR_TAXONOMY:
+        return carried, getattr(exc, "component_key", None) or None
+
     # Both the validation-context form and the BARE `PydanticCustomError` form
     # are resolved by the one resolver now (QA-153-r17-02); the second lookup
     # that used to sit here was this route's private copy of that rule.
@@ -7979,15 +7994,11 @@ def _execute_canonical_process(
         # reason that helper's docstring claimed three callers while only two used
         # it. Threading anything new into the symbol table had two places to reach
         # here and would have reached one.
-        # Apply is the first point that HAS an account to read, so it is the first
-        # point the declared-vs-resolved comparison is more than a config compared
-        # with itself. It still runs before this root's first write.
-        symbols = _build_canonical_symbols(
-            spec=spec,
-            live_component_xml=_live_connector_xml(
-                boomi_client=boomi_client, spec=spec
-            ),
-        )
+        # No live reading here: the PRE-WRITE pass already compared the request
+        # against the account, before anything was written. Reading again inside
+        # the mutation loop would be a second authority for one fact and would
+        # reintroduce the refusal-after-a-write this slice just removed.
+        symbols = _build_canonical_symbols(spec=spec)
         if stored_plan is not None:
             # THE COMPILED PLAN IS EXECUTED, never a rebuild (§6 AR1-01).
             #
@@ -8812,7 +8823,19 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
             # alone left them to fire at apply — after the dependencies.
             _dry_emit_canonical_plan(
                 _pre_plan,
-                _build_canonical_symbols(spec=spec),
+                # The LIVE reading happens HERE, in the pre-write pass, not in the
+                # mutation loop below. Inside the loop a root ordered after a created
+                # dependency refused with `mutation_performed: true`, while this
+                # slice's other refusal promises nothing was created — two refusals
+                # from one slice with opposite guarantees. Live QA measured that;
+                # the ordering invariant this file already states is that a refusal
+                # the request can decide must fire before the first write.
+                _build_canonical_symbols(
+                    spec=spec,
+                    live_component_xml=_live_connector_xml(
+                        boomi_client=boomi_client, spec=spec
+                    ),
+                ),
                 _depends_on_by_key,
             )
         except Exception as _plan_exc:  # noqa: BLE001 — classified below

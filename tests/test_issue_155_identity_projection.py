@@ -674,3 +674,144 @@ def test_the_refusal_is_reached_through_the_single_entry_point():
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
     }
     assert "validate_dynamic_path_required" in called, sorted(called)
+
+
+# --- slice C: what live QA round 1 found, pinned so it cannot come back ----------
+
+
+def _live_rest_op(path_field, verb="GET"):
+    return (
+        '<bns:Component xmlns:bns="http://api.platform.boomi.com/" '
+        'type="connector-action" subType="officialboomi-X3979C-rest-prod">'
+        f'<bns:object><Operation customOperationType="{verb}">'
+        f"<GenericOperationConfig>{path_field}</GenericOperationConfig>"
+        "</Operation></bns:object></bns:Component>"
+    )
+
+
+@pytest.mark.parametrize(
+    "path_field,expected",
+    [
+        ('<field id="path" type="string" value=""/>', "dynamic"),
+        ('<field id="path" type="string" value="/admin/v1/clients"/>', "static"),
+        ("", "unavailable"),
+    ],
+)
+def test_the_live_reading_reads_the_STORED_path(path_field, expected):
+    """QA-155-r1-02, Critical: the live reading DISARMED the blank-path net.
+
+    It read only the subtype and the verb, so every live identity came back
+    "static" — and because the snapshot prefers the live reading, a REUSED
+    operation the account stores with a blank path reported that no binding was
+    required. A process was applied whose connector action carried no Path
+    property at all.
+
+    Neither unit was wrong on its own; their COMPOSITION was. That is the second
+    time in this slice a composition defect survived tests of both halves.
+    """
+    from boomi_mcp.authoring.connector_resolution_snapshot import (
+        live_identity_from_component_xml,
+    )
+
+    assert live_identity_from_component_xml("op", _live_rest_op(path_field)).route_state == expected
+
+
+def test_a_reused_blank_path_operation_still_requires_a_binding():
+    """The end-to-end shape of QA-155-r1-02, through the symbol table."""
+    from boomi_mcp.authoring.connector_resolution_snapshot import (
+        build_connector_resolution_snapshot,
+    )
+    from boomi_mcp.models.integration_models import IntegrationComponentSpec
+    from boomi_mcp.recipes.materialization import build_symbol_table
+
+    # The config LIES: it claims a static path. The account is the authority.
+    component = IntegrationComponentSpec(
+        key="op",
+        type="connector-action",
+        component_id="deadbeef-0000-0000-0000-000000000000",
+        config={"connector_type": "rest_client", "method": "GET",
+                "base_url": "http://h:8081", "path": "/looks-static"},
+    )
+    snapshot = build_connector_resolution_snapshot(
+        [component],
+        live_component_xml={"op": _live_rest_op('<field id="path" type="string" value=""/>')},
+    )
+    table = build_symbol_table([component], connector_resolution_snapshot=snapshot)
+    assert [s.requires_path_binding for s in table.symbols] == [True]
+
+
+def test_the_typed_route_carries_the_snapshot():
+    """QA-155-r1-01, High: the refusal fired on NO pre-apply surface.
+
+    Plan, compile and `dry_run` all returned success for a document the wet
+    apply then refused, because the typed route's symbol table was built without
+    a snapshot — one sink of four was wired. Pinned structurally: the unit tests
+    build the table directly and so could never have seen this.
+    """
+    import ast
+    import inspect
+
+    from boomi_mcp.authoring import workflow
+
+    source = inspect.getsource(workflow._validate_processes)
+    tree = ast.parse(inspect.cleandoc(source).replace("def _validate_processes", "def f", 1))
+    kwargs = {
+        kw.arg
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        for kw in node.keywords
+        if kw.arg
+    }
+    assert "connector_resolution_snapshot" in kwargs, sorted(kwargs)
+
+
+def test_a_carried_registered_code_reaches_the_served_surface():
+    """QA-155-r1-03, High: the identity code had no reader.
+
+    Both identity codes were registered and raised, and every served mismatch
+    still reported `PROCESS_MATERIALIZATION_INTERNAL_ERROR`. The taxonomy's
+    raiser guard passed because the guard's own test raises the code directly —
+    it never asks whether a SURFACE can emit it.
+    """
+    from boomi_mcp.authoring.connector_resolution_snapshot import ConnectorIdentityError
+    from boomi_mcp.categories.integration_builder import _canonical_plan_failure
+    from boomi_mcp.errors import CONNECTOR_REPLAY_IDENTITY_MISMATCH
+
+    code, path = _canonical_plan_failure(
+        ConnectorIdentityError(CONNECTOR_REPLAY_IDENTITY_MISMATCH, "x", component_key="op")
+    )
+    assert code == CONNECTOR_REPLAY_IDENTITY_MISMATCH
+    assert path == "op"
+
+    # ...and an UNREGISTERED code on an exception must not be published.
+    class _Bogus(Exception):
+        code = "NOT_A_REGISTERED_CODE"
+
+    published, _ = _canonical_plan_failure(_Bogus("x"))
+    assert published != "NOT_A_REGISTERED_CODE"
+
+
+def test_the_live_comparison_runs_before_the_first_write():
+    """QA-155-r1-04, High: it ran inside the mutation loop.
+
+    A root ordered after a created dependency refused with
+    `mutation_performed: true`, while this slice's other refusal promises
+    nothing was created — two refusals from one slice with opposite guarantees.
+    The account read now happens exactly once, in the pre-write pass.
+    """
+    import ast
+    from pathlib import Path
+
+    module = Path(__file__).resolve().parents[1] / "src/boomi_mcp/categories/integration_builder.py"
+    tree = ast.parse(module.read_text())
+    calls = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "_live_connector_xml"
+    ]
+    assert len(calls) == 1, (
+        f"the account is read from {len(calls)} places (lines {[c.lineno for c in calls]}); "
+        "one is the pre-write pass and any other is a second authority"
+    )

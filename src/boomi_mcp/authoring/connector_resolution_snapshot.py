@@ -135,11 +135,30 @@ def live_identity_from_component_xml(
     family = connector_family_of(attribute("subType", root))
     action = attribute("customOperationType", text)
     resolved_enough = family is not None and action is not None
+
+    # THE STORED PATH, and it is the whole point for a reused component. Reading
+    # only the subtype and the verb made every live identity "static", which
+    # DISARMED the blank-path net exactly where it matters: a reused operation
+    # the account stores with `<field id="path" value=""/>` needs a binding, and
+    # reporting it as a settled static route let a process be applied whose
+    # connector action carried no Path property at all. Live QA caught that; the
+    # unit tests could not, because each half was right on its own and only the
+    # COMPOSITION was wrong.
+    route_state = "static" if resolved_enough else "unavailable"
+    if family == "rest" and resolved_enough:
+        stored = re.search(r'<field\s+id="path"[^>]*\bvalue="([^"]*)"', text)
+        if stored is None:
+            # A REST operation whose path we cannot find is a route we cannot
+            # read. Silence, not "static" — "static" is the answer that disarms.
+            route_state = "unavailable"
+        elif stored.group(1).strip() == "":
+            route_state = "dynamic"
+
     return ResolvedConnectorComponentIdentityV1(
         component_key=component_key,
         family=family,
         action=action.strip().upper() if isinstance(action, str) else None,
-        route_state="static" if resolved_enough else "unavailable",
+        route_state=route_state,
         source="live",
     )
 

@@ -1343,6 +1343,21 @@ def _validate_processes(
     from ..compiler.process_ir.semantic_validation.pipeline import validate_process_ir
     from ..recipes.materialization import build_symbol_table
 
+    # The snapshot rides along on the TYPED route too. Wiring only the raw route
+    # left every `requires_path_binding` unset here, so the blank-path refusal
+    # fired at wet apply and on no pre-apply surface at all — plan, compile and
+    # `dry_run` each returned success for a document the wet apply then refused.
+    # Live QA measured that; the unit tests could not see it, because they build
+    # the symbol table directly rather than through the route a caller uses.
+    #
+    # This half needs NO account: it resolves from the request's own components,
+    # which is exactly what a pre-apply surface is allowed to know. The live
+    # reading stays at apply, where there is an account to read.
+    from .connector_resolution_snapshot import build_connector_resolution_snapshot
+
+    snapshot = build_connector_resolution_snapshot(
+        normalized.integration_spec.components
+    )
     symbols = build_symbol_table(
         list(normalized.integration_spec.components),
         # #153: the roots are participants too. Without them a `$ref` naming
@@ -1353,6 +1368,7 @@ def _validate_processes(
             for unit in normalized.integration_spec.processes
         ],
         connector_metadata=normalized.connector_metadata,
+        connector_resolution_snapshot=snapshot,
     )
 
     errors = 0
