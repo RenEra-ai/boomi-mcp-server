@@ -117,38 +117,50 @@ def live_identity_from_component_xml(
     wrong for a pre-write comparison that must tolerate a component it only
     partly understands.
     """
-    import re
+    import xml.etree.ElementTree as ET
 
     from ..categories.components.builders.connector_builder import connector_family_of
 
-    text = component_xml if isinstance(component_xml, str) else ""
-    root_match = re.search(r"<[A-Za-z:]*Component[^>]*>", text)
-    root = root_match.group(0) if root_match else ""
+    def _localname(tag):
+        return tag.rsplit("}", 1)[-1] if isinstance(tag, str) else ""
 
-    def attribute(name, scope):
-        found = re.search(name + r'="([^"]*)"', scope)
-        return found.group(1) if found else None
+    # PARSED, not pattern-matched. The first version read attributes with a regex
+    # that assumed `id` preceded `value`, so a perfectly valid
+    # `<field value="" type="string" id="path"/>` reported no blank path and the
+    # net went quiet. Attribute order carries no meaning in XML and this reads raw
+    # platform bytes, so an order-sensitive reader is a reader that is sometimes
+    # wrong for no reason a caller could predict.
+    try:
+        root = ET.fromstring(component_xml if isinstance(component_xml, str) else "")
+    except ET.ParseError:
+        return ResolvedConnectorComponentIdentityV1(
+            component_key=component_key, source="live"
+        )
 
-    family = connector_family_of(attribute("subType", root))
-    action = attribute("customOperationType", text)
+    family = connector_family_of(root.get("subType"))
+    action = None
+    path_fields = []
+    for element in root.iter():
+        if action is None and element.get("customOperationType") is not None:
+            action = element.get("customOperationType")
+        if _localname(element.tag) == "field" and element.get("id") == "path":
+            path_fields.append(element.get("value"))
+
     resolved_enough = family is not None and action is not None
 
     # THE STORED PATH, and it is the whole point for a reused component. Reading
     # only the subtype and the verb made every live identity "static", which
     # DISARMED the blank-path net exactly where it matters: a reused operation
-    # the account stores with `<field id="path" value=""/>` needs a binding, and
-    # reporting it as a settled static route let a process be applied whose
-    # connector action carried no Path property at all. Live QA caught that; the
-    # unit tests could not, because each half was right on its own and only the
-    # COMPOSITION was wrong.
+    # the account stores with a blank path needs a binding, and reporting it as a
+    # settled static route let a process be applied whose connector action
+    # carried no Path property at all.
     route_state = "static" if resolved_enough else "unavailable"
     if family == "rest" and resolved_enough:
-        stored = re.search(r'<field\s+id="path"[^>]*\bvalue="([^"]*)"', text)
-        if stored is None:
+        if not path_fields:
             # A REST operation whose path we cannot find is a route we cannot
             # read. Silence, not "static" — "static" is the answer that disarms.
             route_state = "unavailable"
-        elif stored.group(1).strip() == "":
+        elif any((value or "").strip() == "" for value in path_fields):
             route_state = "dynamic"
 
     return ResolvedConnectorComponentIdentityV1(
@@ -188,15 +200,32 @@ def build_connector_resolution_snapshot(
         key = getattr(component, "key", None)
         if not isinstance(key, str) or not key:
             continue
-        # The ACCOUNT's answer wins where we have it. Not because the config is
+        config = getattr(component, "config", None) or {}
+
+        # SUBMITTED XML OUTRANKS THE DECLARATIONS BESIDE IT. A raw create carries
+        # `config.xml`, and that XML is what gets written — so a request may
+        # declare GET while the payload installs a POST, and reading only the
+        # declarations let the assertion pass on the thing that was NOT applied.
+        submitted = config.get("xml") if isinstance(config, Mapping) else None
+        if isinstance(submitted, str) and submitted.strip():
+            identity = live_identity_from_component_xml(key, submitted)
+            resolved.append(identity.model_copy(update={"source": "config"}))
+            continue
+
+        # The ACCOUNT's answer wins for a REUSE. Not because the config is
         # untrusted, but because comparing a declaration against the config it
-        # was derived from is a tautology — only the live reading is independent.
-        if key in live_xml:
+        # was derived from is a tautology — only an independent reading helps.
+        #
+        # An UPDATE is NOT a reuse. Its live component is the state being
+        # CHANGED, so preferring it would reject a legitimate POST-to-GET update
+        # as a mismatch with its own former self, and would read the path
+        # requirement off the route the request is replacing.
+        action = getattr(component, "action", None)
+        if key in live_xml and action != "update":
             resolved.append(live_identity_from_component_xml(key, live_xml[key]))
             continue
         projection = normalized_identity_projection(
-            getattr(component, "config", None) or {},
-            live_projection=live.get(key),
+            config, live_projection=live.get(key)
         )
         resolved.append(
             ResolvedConnectorComponentIdentityV1(

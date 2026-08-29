@@ -910,3 +910,258 @@ def test_a_dry_run_says_which_checks_it_does_not_perform():
         "refuse on apply"
     )
     assert "may still refuse" in dry_block
+
+
+# --- slice C: what the Stage-2 review found ---------------------------------------
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        '<field id="path" type="string" value=""/>',
+        '<field value="" type="string" id="path"/>',   # the order that used to miss
+        '<field type="string" value="" id="path"/>',
+    ],
+)
+def test_the_live_reading_is_not_attribute_order_sensitive(field):
+    """CDX P1: an order-sensitive regex read raw platform bytes.
+
+    Attribute order carries no meaning in XML, so a reader that depends on it is
+    sometimes wrong for a reason no caller could predict — and the wrong answer
+    here is the one that silences the blank-path net.
+    """
+    from boomi_mcp.authoring.connector_resolution_snapshot import (
+        live_identity_from_component_xml,
+    )
+
+    assert live_identity_from_component_xml("op", _live_rest_op(field)).route_state == "dynamic"
+
+
+def test_malformed_live_xml_resolves_to_nothing_rather_than_raising():
+    """The reader runs on a plan path; raising would make a bad byte fatal."""
+    from boomi_mcp.authoring.connector_resolution_snapshot import (
+        live_identity_from_component_xml,
+    )
+
+    identity = live_identity_from_component_xml("op", "<not-xml")
+    assert identity.route_state == "unavailable"
+    assert not identity.resolved
+
+
+def test_submitted_raw_xml_outranks_the_declarations_beside_it():
+    """CDX P1: a raw create's XML is what gets written.
+
+    The request may declare GET while `config.xml` installs a POST. Reading only
+    the declarations let the assertion pass on the thing that was NOT applied.
+    """
+    from boomi_mcp.authoring.connector_resolution_snapshot import (
+        build_connector_resolution_snapshot,
+    )
+    from boomi_mcp.models.integration_models import IntegrationComponentSpec
+
+    component = IntegrationComponentSpec(
+        key="raw",
+        type="connector-action",
+        config={
+            "connector_type": "rest_client",
+            "method": "GET",
+            "xml": _live_rest_op('<field id="path" value="/x"/>', verb="POST"),
+        },
+    )
+    identity = build_connector_resolution_snapshot([component]).lookup("raw")
+    assert identity.action == "POST", "the submitted XML is the authority"
+
+
+def test_an_update_keeps_its_DESIRED_identity_not_its_old_one():
+    """CDX P2: an update's live component is the state being CHANGED.
+
+    Preferring it would reject a legitimate POST-to-GET update as a mismatch
+    with its own former self.
+    """
+    from boomi_mcp.authoring.connector_resolution_snapshot import (
+        build_connector_resolution_snapshot,
+    )
+    from boomi_mcp.models.integration_models import IntegrationComponentSpec
+
+    updating = IntegrationComponentSpec(
+        key="upd",
+        type="connector-action",
+        action="update",
+        component_id="dead-0000",
+        config={"connector_type": "rest_client", "method": "GET",
+                "base_url": "http://h:8081", "path": "/x"},
+    )
+    identity = build_connector_resolution_snapshot(
+        [updating], live_component_xml={"upd": _live_rest_op('<field id="path" value="/x"/>', verb="POST")}
+    ).lookup("upd")
+    assert identity.action == "GET", "the update's DESIRED verb must survive"
+    assert identity.source == "config"
+
+
+@pytest.mark.parametrize(
+    "replacements,expected",
+    [
+        ([{"name": "k", "target_path": "a"}], "dynamic"),
+        ([{"name": "k", "target_path": "a"}, {"name": "k", "target_path": "b"}], "unavailable"),
+        ([{"name": "absent", "target_path": "a"}], "unavailable"),
+    ],
+)
+def test_only_a_BUILDABLE_replacement_set_projects_as_a_route(replacements, expected):
+    """CDX P2: shape-valid is not builder-valid.
+
+    Duplicate names, or a name with no matching token, pass the shape predicate
+    and are refused by `validate_config` — so projecting them as a settled route
+    promised one for a component that can never be built.
+    """
+    from boomi_mcp.categories.components.builders.connector_builder import (
+        normalized_identity_projection,
+    )
+
+    identity = normalized_identity_projection(
+        {"connector_type": "rest_client", "method": "GET", "base_url": "http://h:8081",
+         "path": "/x/{k}", "path_replacements": replacements}
+    )
+    assert identity.route_state == expected
+
+
+def test_every_shape_of_reuse_is_read_from_the_account(monkeypatch):
+    """CDX P1: an existing component can be named in THREE places.
+
+    The top-level field is only the most obvious: a reference-only reuse puts the
+    id in the config, and a collision reuse resolves by NAME so its id exists
+    only in the plan. A skipped component is one the account never gets to
+    contradict.
+    """
+    from boomi_mcp.categories import integration_builder as ib
+    from boomi_mcp.models.integration_models import IntegrationComponentSpec
+
+    def _config(**extra):
+        return {"connector_type": "rest_client", "method": "GET", **extra}
+
+    spec = type("S", (), {"components": [
+        IntegrationComponentSpec(key="top", type="connector-action",
+                                 component_id="id-top", config=_config()),
+        IntegrationComponentSpec(key="incfg", type="connector-action",
+                                 config=_config(component_id="id-cfg")),
+        IntegrationComponentSpec(key="byname", type="connector-action", config=_config()),
+        IntegrationComponentSpec(key="created", type="connector-action", config=_config()),
+    ]})()
+
+    monkeypatch.setattr(
+        "boomi_mcp.categories.components._shared.component_get_xml",
+        lambda client, cid, *a, **k: {"xml": _live_rest_op('<field id="path" value="/x"/>')},
+    )
+    live = ib._live_connector_xml(
+        boomi_client=object(), spec=spec, resolved_ids={"byname": "id-plan"}
+    )
+    assert set(live) == {"top", "incfg", "byname"}, "a reuse shape is being skipped"
+
+
+def test_the_account_is_read_once_per_apply_not_once_per_root():
+    """CDX P2: N roots x M connectors of platform GETs, and worse — two roots
+    could observe DIFFERENT snapshots of the same account."""
+    import ast
+    from pathlib import Path
+
+    module = Path(__file__).resolve().parents[1] / "src/boomi_mcp/categories/integration_builder.py"
+    tree = ast.parse(module.read_text())
+    apply_plan = next(
+        n for n in ast.walk(tree)
+        if isinstance(n, ast.FunctionDef) and n.name == "_apply_plan"
+    )
+    for node in ast.walk(apply_plan):
+        if isinstance(node, (ast.For, ast.While)):
+            for sub in ast.walk(node):
+                if (isinstance(sub, ast.Call) and isinstance(sub.func, ast.Name)
+                        and sub.func.id == "_live_connector_xml"):
+                    raise AssertionError(
+                        f"the account is read inside a loop at line {sub.lineno}"
+                    )
+
+
+def test_only_a_family_with_a_bindable_location_projects_a_dynamic_route():
+    """The sibling of the builder-validity finding, one level out.
+
+    The replacement branch asked the REST operation validator about every
+    family. That validator refuses most non-REST configs, so the answer came out
+    right by accident — but a config too incomplete for it to refuse, a
+    `database` connector carrying only a verb and a replacement set, projected a
+    settled DYNAMIC REST route. That asks the compiler for a path binding the
+    family capability gate then refuses as unsupported: two contradictory
+    refusals for one component, neither of them the real error.
+    """
+    from boomi_mcp.categories.components.builders.connector_builder import (
+        normalized_identity_projection,
+    )
+
+    for connector_type in ("database", "soap_client", "zzz"):
+        identity = normalized_identity_projection(
+            {
+                "connector_type": connector_type,
+                "method": "GET",
+                "operation_mode": "execute",
+                "path_replacements": [{"name": "k", "target_path": "a"}],
+            }
+        )
+        assert identity.route_state == "unavailable", connector_type
+
+
+def test_the_capability_join_reaches_every_row_of_the_authority():
+    """Non-vacuity: the gate is derived, so the derivation must be total.
+
+    The table is keyed by platform connector type and this module speaks
+    canonical families, so the join goes through the resolvers rather than a
+    hand-written pair list. A key no resolver recognises would silently
+    contribute nothing — fail-closed, but invisibly — so the coverage is
+    asserted rather than assumed.
+    """
+    from boomi_mcp.categories.components.builders.connector_builder import (
+        connector_family_of,
+    )
+    from boomi_mcp.compiler.process_ir.connector_capabilities import (
+        CONNECTOR_FAMILY_CAPABILITIES_V1,
+    )
+
+    unresolved = [
+        key for key in CONNECTOR_FAMILY_CAPABILITIES_V1 if connector_family_of(key) is None
+    ]
+    assert not unresolved, f"capability rows unreachable through the resolvers: {unresolved}"
+    assert any(
+        capability.bindable_locations
+        for capability in CONNECTOR_FAMILY_CAPABILITIES_V1.values()
+    ), "a gate no row can pass decides nothing"
+
+
+def test_the_slice_a_deferral_is_discharged_by_the_live_reading():
+    """`QA-155-r2-01`: declaring a live database operation as a REST one.
+
+    Deferred out of slice A on the recorded grounds that the authority which
+    would close it is the trusted snapshot this slice builds. It is closed by
+    the account reading, not by a second enumeration of the untrusted fact —
+    which is what the structural-fix rule refused there.
+    """
+    from boomi_mcp.authoring.connector_resolution_snapshot import (
+        ConnectorIdentityError,
+        assert_declared_matches_resolved,
+        build_connector_resolution_snapshot,
+    )
+    from boomi_mcp.models.integration_models import IntegrationComponentSpec
+
+    live_database_operation = (
+        '<Component type="connector-action" subType="database">'
+        '<object><operation customOperationType="Get"/></object></Component>'
+    )
+    component = IntegrationComponentSpec(
+        key="op",
+        type="connector-action",
+        component_id="id-1",
+        config={"connector_type": "rest_client", "method": "GET"},
+    )
+    snapshot = build_connector_resolution_snapshot(
+        [component], live_component_xml={"op": live_database_operation}
+    )
+    assert snapshot.lookup("op").family == "database"
+
+    with pytest.raises(ConnectorIdentityError) as raised:
+        assert_declared_matches_resolved(snapshot, {"op": ("rest_client", "GET")})
+    assert raised.value.code == "CONNECTOR_REPLAY_IDENTITY_MISMATCH"

@@ -7625,12 +7625,12 @@ def _resolve_canonical_placement(boomi_client, envelope):
     return matches[0].get("id") or None
 
 
-def _live_connector_xml(*, boomi_client, spec):
+def _live_connector_xml(*, boomi_client, spec, resolved_ids=None):
     """Live XML for every connector component this request REUSES.
 
-    Only components carrying a ``component_id`` are read: those name something
-    the account already holds, and they are the only ones whose stored identity
-    can disagree with what the request declares. A component being CREATED has
+    Only components that NAME something already in the account are read: those
+    are the only ones whose stored identity can disagree with what the request
+    declares. A component being CREATED has
     no account-side truth to compare against, so reading nothing for it is
     correct rather than merely cheap — though it is also why this adds no
     platform calls to a create-only apply.
@@ -7645,10 +7645,22 @@ def _live_connector_xml(*, boomi_client, spec):
     live = {}
     for component in (getattr(spec, "components", None) or ()):
         component_type = getattr(component, "type", None)
-        component_id = getattr(component, "component_id", None)
         key = getattr(component, "key", None)
         if not isinstance(component_type, str) or "connector" not in component_type:
             continue
+        # THREE places an existing component can be named, not one. The top-level
+        # field is only the most obvious: a documented reference-only reuse puts
+        # the id in the config, and a COLLISION reuse resolves by name, so its id
+        # exists only in the plan. Reading the top-level field alone skipped both
+        # — and a skipped component is one the account never gets to contradict,
+        # which is precisely the case this comparison exists for.
+        config = getattr(component, "config", None) or {}
+        component_id = getattr(component, "component_id", None)
+        if not (isinstance(component_id, str) and component_id):
+            candidate = config.get("component_id") if isinstance(config, dict) else None
+            component_id = candidate if isinstance(candidate, str) else None
+        if not (isinstance(component_id, str) and component_id):
+            component_id = (resolved_ids or {}).get(key)
         if not (isinstance(component_id, str) and component_id):
             continue
         if not (isinstance(key, str) and key):
@@ -8771,6 +8783,13 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
         step["key"]: str(step.get("planned_action", ""))
         for step in planned["steps"]
     }
+    # ONE account read for the whole pre-write pass. Inside the loop this was
+    # N roots x M reused connectors of platform GETs, each with its own
+    # deadline — and worse, two roots could observe DIFFERENT snapshots of the
+    # same account and disagree about what it holds.
+    _pre_write_live_xml = _live_connector_xml(
+        boomi_client=boomi_client, spec=spec, resolved_ids=existing_ids
+    )
     for _pkey, _unit in process_units_by_key.items():
         # A NON-WRITING PLANNED ACTION IS SKIPPED FOR THE WHOLE PASS, once, at
         # the top (Codex round 22). Every check below decides whether a WRITE
@@ -8847,9 +8866,7 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
                 # the request can decide must fire before the first write.
                 _build_canonical_symbols(
                     spec=spec,
-                    live_component_xml=_live_connector_xml(
-                        boomi_client=boomi_client, spec=spec
-                    ),
+                    live_component_xml=_pre_write_live_xml,
                 ),
                 _depends_on_by_key,
             )

@@ -1295,6 +1295,7 @@ _EXPECTED_CLASS_COUNTS = {
     "DC-155-L": 37,
     "DC-155-M": 1,
     "DC-155-N": 1,
+    "DC-155-O": 1,
 }
 
 #: Instances counted before finding ids were enumerated. A CLOSED set: a
@@ -1323,6 +1324,7 @@ _NOT_AN_INSTANCE = {
     "CDX-155-r54-01a": "a revision of a row already counted",
     "SELF-155-r51-04": "the structural fix its class owed, not a new instance of it",
     "SELF-155-r47-01a": "a revision of a row that is itself a non-instance",
+    "QA-155-r2-01a": "a revision of a row already counted; counting both double-counts",
     "SELF-155-r47-01": "the class being DISCHARGED — the regeneration done correctly from the final tree — not a new instance of regenerating from a non-final one",
 }
 
@@ -1896,8 +1898,12 @@ def test_a_zero_count_class_row_may_not_name_instances():
         assert not re.findall(r"`([A-Z]+-155-[A-Za-z0-9-]+)`", cell), (
             f"{line.split('|')[1].strip()}: zero instances, yet names one"
         )
-    assert zero_rows == 2, (
-        f"the ledger has {zero_rows} zero-count class rows, not the 2 measured when this "
+    # ONE, since slice C. `DC-155-A` was pre-enumerated at step 0 against the
+    # connector family capability table and stood empty for two slices; the
+    # projection's family-blind route branch is its first instance. `DC-155-F`
+    # is the only class still carrying none.
+    assert zero_rows == 1, (
+        f"the ledger has {zero_rows} zero-count class rows, not the 1 measured when this "
         "check was written; a class opening or closing changes what it covers"
     )
 

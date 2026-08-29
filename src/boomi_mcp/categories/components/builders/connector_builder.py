@@ -347,8 +347,56 @@ def normalized_identity_projection(config, live_projection=None):
 
     # Usable replacements mean ``build()`` BLANKS the path (see its step 6), so
     # the config's ``path`` is a template, not the emitted route.
+    #
+    # ASK THE FAMILY FIRST. This branch used to consult the REST operation
+    # validator about every family, which is a per-family fact modelled outside
+    # the table that owns it. In practice that validator refuses most non-REST
+    # configs and the answer came out right by accident; a config too incomplete
+    # for it to refuse — a `database` connector carrying only a verb and a
+    # replacement set — projected a settled DYNAMIC REST route, which asks the
+    # compiler for a path binding the family gate then refuses as unsupported.
+    # Two contradictory refusals for one component, neither of them the real
+    # error. The authority is the family capability table: a family with no
+    # per-document bindable location has no route to bind, whatever keys the
+    # config happens to carry.
+    # The table is keyed by the PLATFORM connector type, while this module speaks
+    # canonical families, so the join goes through the same resolvers that
+    # produced `family` — never through a hand-written pair list, which is the
+    # second copy of exactly the fact the table owns. A table key no resolver
+    # recognises contributes nothing, so an unrecognised family fails closed.
+    from ....compiler.process_ir.connector_capabilities import (
+        CONNECTOR_FAMILY_CAPABILITIES_V1,
+    )
+
+    bindable = family is not None and any(
+        capability.bindable_locations and connector_family_of(key) == family
+        for key, capability in CONNECTOR_FAMILY_CAPABILITIES_V1.items()
+    )
+
     raw_replacements = config.get("path_replacements")
+    if raw_replacements is not None and not bindable:
+        return NormalizedConnectorIdentity(
+            family=family, action=action, route_state="unavailable"
+        )
     if _is_usable_path_replacements(raw_replacements):
+        # SHAPE-valid is not builder-valid. Duplicate names, or a name with no
+        # matching token in the path, pass the shape predicate and are refused by
+        # `validate_config` — so projecting them as a settled dynamic route
+        # promised a route for a component that can never be built, and could
+        # raise a blank-path diagnostic about it. The full rule is asked here
+        # rather than restated: a restatement is the second copy that drifts.
+        if RestClientOperationBuilder.validate_config(
+            {
+                **config,
+                "component_name": config.get("component_name") or "_projection",
+                "connection_ref_key": config.get("connection_ref_key") or "_c",
+                "depends_on": config.get("depends_on") or ["_c"],
+                "operation_mode": config.get("operation_mode") or "execute",
+            }
+        ) is not None:
+            return NormalizedConnectorIdentity(
+                family=family, action=action, route_state="unavailable"
+            )
         return NormalizedConnectorIdentity(
             family=family, action=action, route_state="dynamic"
         )
