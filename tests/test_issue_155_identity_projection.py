@@ -2803,3 +2803,121 @@ def test_a_snapshot_with_no_account_says_so_rather_than_implying_one():
 
     assert build_connector_resolution_snapshot([]).account_scope is None
     assert build_connector_resolution_snapshot([], account_id="a").account_scope == "a"
+
+
+def test_the_family_comes_from_the_parsed_root_not_from_the_raw_text():
+    """CDX terminal: a comment naming another family hijacked the family hint.
+
+    The hint was a regex over the raw document, and unscoped text is not the
+    document. With the wrong family the real operation element was ignored, so
+    the identity resolved WITH a family and WITHOUT an action — and the
+    comparison skips an unknown action, which is the fail-open.
+
+    Removed rather than hardened: the walk already parses the root, and every
+    text-scan variant of this defect goes with the regex.
+    """
+    from boomi_mcp.authoring.connector_resolution_snapshot import (
+        live_identity_from_component_xml,
+    )
+
+    body = _live_rest_op('<field id="path" value="/x"/>', verb="POST")
+    for prefix in ('<!-- subType="database" -->', "<?xml version='1.0'?>", ""):
+        identity = live_identity_from_component_xml("k", prefix + body)
+        assert identity.family == "rest", prefix
+        assert identity.action == "POST", prefix
+
+
+@pytest.mark.parametrize(
+    "label,config,bound",
+    [
+        ("rest base_url", {"connector_type": "rest_client", "method": "GET"}, True),
+        ("database host", {"connector_type": "database", "operation_mode": "get"}, True),
+        ("soap endpoint", {"connector_type": "soap_client",
+                           "operation_mode": "execute"}, True),
+    ],
+)
+def test_every_family_reports_an_extension_bound_endpoint(label, config, bound):
+    """CDX terminal: only the two REST keys were checked.
+
+    So a database host or SOAP endpoint bound to an environment extension was
+    advertised as a PINNED route — the opposite of what the flag exists to say.
+    """
+    from boomi_mcp.categories.components.builders.connector_builder import (
+        SET_BY_EXTENSION,
+        normalized_identity_projection,
+    )
+
+    key = {"rest base_url": "base_url", "database host": "host",
+           "soap endpoint": "endpoint_url"}[label]
+    identity = normalized_identity_projection({**config, key: SET_BY_EXTENSION})
+    assert identity.extension_bound is bound, label
+    assert identity.route_state == "unavailable"
+
+
+def test_detecting_an_extension_does_not_change_which_field_is_the_endpoint():
+    """Non-vacuity: the first version answered both questions from one scan.
+
+    That truncated the database family's composed host/port/database endpoint,
+    which its own test caught — the two questions have different answers and
+    only one of them is family-specific.
+    """
+    from boomi_mcp.categories.components.builders.connector_builder import (
+        normalized_identity_projection,
+    )
+
+    identity = normalized_identity_projection({
+        "connector_type": "database", "operation_mode": "get",
+        "host": "host.docker.internal", "port": 11433, "dbname": "Expert",
+    })
+    assert identity.endpoint == "host.docker.internal:11433/Expert"
+    assert identity.extension_bound is False
+
+
+def test_the_remediation_matches_the_failure_that_produced_it():
+    """CDX terminal: folding the comparison in brought a second code through
+    one handler, and a verb disagreement was told how to fix parsing."""
+    import ast
+    from pathlib import Path
+
+    module = Path(__file__).resolve().parents[1] / "src/boomi_mcp/authoring/workflow.py"
+    tree = ast.parse(module.read_text())
+    validate = next(
+        n for n in ast.walk(tree)
+        if isinstance(n, ast.FunctionDef) and n.name == "_validate_processes"
+    )
+    assert any(
+        isinstance(n, ast.IfExp)
+        and any(
+            isinstance(c, ast.Name) and c.id == "CONNECTOR_REPLAY_IDENTITY_MISMATCH"
+            for c in ast.walk(n.test)
+        )
+        for n in ast.walk(validate)
+    ), "the planning remediation does not branch on which failure occurred"
+
+
+def test_the_recipe_boundary_translates_an_identity_refusal():
+    """CDX terminal: the refusal escaped as an unstructured failure.
+
+    The bridges translate only `RecipeError`, so a public recipe plan or compile
+    lost the diagnostic contract exactly when the request was refused.
+    """
+    import ast
+    from pathlib import Path
+
+    module = Path(__file__).resolve().parents[1] / "src/boomi_mcp/recipes/engine.py"
+    tree = ast.parse(module.read_text())
+    guarded = [
+        t for t in ast.walk(tree)
+        if isinstance(t, ast.Try)
+        and any(
+            isinstance(c, ast.Call)
+            and getattr(c.func, "id", None) == "build_connector_resolution_snapshot"
+            for c in ast.walk(t)
+        )
+    ]
+    assert guarded, "the recipe route lets an identity refusal escape untranslated"
+    assert any(
+        isinstance(r, ast.Raise)
+        and getattr(getattr(r.exc, "func", None), "id", None) == "RecipeError"
+        for h in guarded[0].handlers for r in ast.walk(h)
+    ), "it catches the refusal but does not translate it to the recipe contract"

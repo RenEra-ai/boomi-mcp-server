@@ -336,6 +336,18 @@ def normalized_identity_projection(config, live_projection=None):
     family = connector_family_of(config.get("connector_type"))
     action = _normalized_action(config, family)
 
+    # TWO SEPARATE QUESTIONS, and conflating them broke one of them. Whether
+    # ANY endpoint field is bound to an environment extension is asked across
+    # every field a family uses — reading only the two REST keys meant a
+    # database `host` or a SOAP `endpoint_url` bound to an extension was never
+    # seen as such, and the identity advertised an account-decided route as
+    # pinned. WHICH field is the endpoint is a different question with a
+    # family-specific answer, and answering it from the same scan truncated the
+    # database family's composed host/port/database endpoint.
+    extension_bound = any(
+        config.get(key) == SET_BY_EXTENSION
+        for key in ("base_url", "url", "host", "endpoint_url", "wsdl_url")
+    )
     endpoint_raw = config.get("base_url")
     if endpoint_raw is None:
         endpoint_raw = config.get("url")
@@ -344,7 +356,7 @@ def normalized_identity_projection(config, live_projection=None):
 
     # The endpoint is bound to an environment extension: the ACCOUNT decides the
     # route, so nothing here can pin it.
-    if endpoint_raw == SET_BY_EXTENSION:
+    if extension_bound:
         # REPORTED, not collapsed. "Unavailable" has four causes and a consumer
         # that needs to know THIS one was inferring it from the absence of the
         # other three, which mismarks a malformed replacement set and misses an

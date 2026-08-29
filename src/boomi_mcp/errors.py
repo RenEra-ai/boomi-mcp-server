@@ -565,7 +565,7 @@ SUBMITTED_XML_UNSETTLED_REASONS: Tuple[str, ...] = (
     "it cannot be parsed",
     "it names more than one operation type",
     "it names an operation type alongside a blank one",
-    "it describes a REST connector action and names no operation type",
+    "it describes a connector action and names no operation type",
 )
 
 

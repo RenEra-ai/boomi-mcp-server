@@ -1353,7 +1353,10 @@ def _validate_processes(
     # This half needs NO account: it resolves from the request's own components,
     # which is exactly what a pre-apply surface is allowed to know. The live
     # reading stays at apply, where there is an account to read.
-    from ..errors import submitted_xml_unsettled_summary
+    from ..errors import (
+        CONNECTOR_REPLAY_IDENTITY_MISMATCH,
+        submitted_xml_unsettled_summary,
+    )
     from .connector_resolution_snapshot import (
         ConnectorIdentityError,
         assert_declared_matches_resolved,
@@ -1393,11 +1396,22 @@ def _validate_processes(
                     message=str(failure),
                     subject_kind="component",
                     subject_id=failure.component_key,
+                    # THE REMEDIATION MUST MATCH THE FAILURE. Folding the
+                    # comparison into construction brought a second code through
+                    # this handler, and a caller whose readable XML simply says
+                    # a different verb was being told how to fix parsing,
+                    # ambiguity and blank verbs — none of which is their problem.
                     remediation=(
-                        "Submitted component XML is refused when {0}. Supply XML "
-                        "that settles what it installs, or omit it and declare "
-                        "the component's configuration instead."
-                    ).format(submitted_xml_unsettled_summary()),
+                        "Declare the connector family and action the component "
+                        "actually resolves to, or correct the component so it "
+                        "resolves to what you declared."
+                        if failure.code == CONNECTOR_REPLAY_IDENTITY_MISMATCH
+                        else (
+                            "Submitted component XML is refused when {0}. Supply "
+                            "XML that settles what it installs, or omit it and "
+                            "declare the component's configuration instead."
+                        ).format(submitted_xml_unsettled_summary())
+                    ),
                 )
             )
     # THE DECLARATION IS AN ASSERTION HERE TOO. Building the snapshot and then

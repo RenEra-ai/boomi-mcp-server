@@ -1747,6 +1747,7 @@ def _compile_processes(
     # canonical compile chain and its contract is that no exemption is
     # reachable — a mismatch here is a defect in the request, not a note about it.
     from ..authoring.connector_resolution_snapshot import (
+        ConnectorIdentityError,
         build_connector_resolution_snapshot,
     )
 
@@ -1755,9 +1756,26 @@ def _compile_processes(
     # and the blank-path refusal — which fires only on an explicit requirement —
     # had nothing to fire on. A snapshot consulted for one fact and discarded
     # before the next is half a resolution.
-    connector_resolution = build_connector_resolution_snapshot(
-        components, declared=connector_metadata or {}
-    )
+    # TRANSLATED AT THIS BOUNDARY. `run_recipes` lets an authoring exception
+    # escape and the recipe bridges translate only `RecipeError`, so a refusal
+    # raised here reached a public recipe plan or compile as an unstructured
+    # failure — the caller losing the diagnostic contract precisely when the
+    # request is refused, which is when they need it.
+    try:
+        connector_resolution = build_connector_resolution_snapshot(
+            components, declared=connector_metadata or {}
+        )
+    except ConnectorIdentityError as identity_error:
+        raise RecipeError(
+            RECIPE_CONSTRAINT_FAILED,
+            str(identity_error),
+            details={
+                "component_key": identity_error.component_key,
+                "cause_codes": sorted(
+                    {failure.code for failure in identity_error.failures}
+                ),
+            },
+        ) from identity_error
 
     symbols = build_symbol_table(
         components,

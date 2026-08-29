@@ -246,31 +246,6 @@ class TrustedConnectorResolutionSnapshotV1(_SnapshotModel):
         return None
 
 
-def _peek_subtype(component_xml):
-    """The root `subType`, read without committing to a full parse.
-
-    The family decides WHICH element is the operation config, so it has to be
-    known before the walk that looks for one. Deliberately tolerant: anything it
-    cannot find simply leaves the family unknown, and the caller then accepts any
-    direct child, which is the behaviour a family we do not model needs.
-    """
-    if not isinstance(component_xml, str):
-        return None
-    import re
-
-    # QUOTE- AND WHITESPACE-INSENSITIVE. Matching only the exact double-quoted
-    # spelling meant a single-quoted or spaced attribute yielded an unknown
-    # family — and an unknown family accepts ANY direct child as the operation
-    # config, so the strictest reader in this module fell back to its loosest
-    # behaviour on a document that is merely punctuated differently.
-    match = re.search(
-        r"""\bsubType\s*=\s*(?:"([^"]*)"|'([^']*)')""", component_xml
-    )
-    if not match:
-        return None
-    return match.group(1) if match.group(1) is not None else match.group(2)
-
-
 def live_identity_from_component_xml(
     component_key: str, component_xml: str
 ) -> ResolvedConnectorComponentIdentityV1:
@@ -319,14 +294,7 @@ def live_identity_from_component_xml(
         "soap_client": {"GenericOperationConfig"},
         "database": {"DatabaseGetAction", "DatabaseSendAction"},
     }
-    _family_hint = connector_family_of(_peek_subtype(component_xml))
-    _OPERATION_CONFIG_ELEMENTS = _CONFIG_ELEMENTS_BY_FAMILY.get(
-        _family_hint,
-        # A family we do not model: accept any direct child, because we do not
-        # know which element is its operation config and refusing to look would
-        # block the raw-XML escape hatch.
-        None,
-    )
+
 
     class _EntityDeclared(Exception):
         pass
@@ -371,11 +339,17 @@ def live_identity_from_component_xml(
             # capture: the component's object element, then Operation, then
             # Configuration. Accepting that trio at any depth let a nested
             # look-alike stand in for the real one.
+            #
+            # EVERY candidate is collected and the FAMILY decides afterwards.
+            # Deciding here needed the family before the walk, which meant
+            # scanning the raw text for a subtype — and unscoped text is not the
+            # document: a comment naming another family hijacked the hint, the
+            # real operation config was then ignored, and the identity resolved
+            # with a family and no action, which the comparison skips. The root
+            # element is the first thing this walk sees; using what it parsed is
+            # both stricter and simpler than looking for it twice.
             great = stack[-4] if len(stack) >= 4 else None
-            if grandparent == "Operation" and great == "object" and (
-                _OPERATION_CONFIG_ELEMENTS is None
-                or local in _OPERATION_CONFIG_ELEMENTS
-            ):
+            if grandparent == "Operation" and great == "object":
                 config_depth = len(stack)
                 # The family decides WHERE the verb is; this element is where to
                 # look. Database names its verb, the others carry it as an
@@ -475,6 +449,14 @@ def live_identity_from_component_xml(
         "DatabaseGetAction": "GET",
         "DatabaseSendAction": "SEND",
     }
+
+    # NOW the family is known, from the parsed root. Keep only the candidates
+    # that are this family's own operation element; a family we do not model
+    # keeps all of them, because we do not know which element is its config and
+    # refusing to look would block the raw-XML escape hatch.
+    _allowed = _CONFIG_ELEMENTS_BY_FAMILY.get(family)
+    if _allowed is not None:
+        actions = [c for c in actions if c["element"] in _allowed]
 
     def _verb_of(config):
         if family == "database":
