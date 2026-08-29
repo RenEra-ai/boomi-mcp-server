@@ -14,7 +14,8 @@ so creation uses raw Serializer POST (see connectors.py _create_component_raw).
 """
 
 import re
-from typing import Any, Dict, Optional
+from dataclasses import dataclass
+from typing import Any, Dict, Mapping, Optional
 
 from boomi_mcp.connector_replay.ids import BOOMI_COMPONENT_ID_RE
 from boomi_mcp.categories.components.builders._preservation_policy import (
@@ -215,6 +216,172 @@ def _is_usable_path_replacements(value: Any) -> bool:
             if not isinstance(field, str) or not field.strip():
                 return False
     return True
+
+
+#: What a connector config settles about its own identity BEFORE anything is
+#: applied. Credential-free by ALLOWLIST — the fields are enumerated here rather
+#: than filtered out of the config, because a denylist over a caller-supplied
+#: mapping admits every key nobody thought of.
+@dataclass(frozen=True)
+class NormalizedConnectorIdentity:
+    """Family, action and route as the CONFIG declares them, pre-apply.
+
+    ``route_state`` is the load-bearing field. ``"static"`` means the config
+    pins one route and the caller may mint an identity from it; anything else
+    means it does not, and the caller mints NOTHING rather than guessing:
+
+    * ``"dynamic"`` — usable ``path_replacements`` are declared, so the emitted
+      operation carries a BLANK path and the real one arrives per document at
+      the process step. Reading ``config["path"]`` here would report a route the
+      emitted component provably does not have.
+    * ``"unavailable"`` — the endpoint is bound to an environment extension
+      (``SET_BY_EXTENSION``), so the account this will run against decides it.
+    """
+
+    family: Optional[str]
+    action: Optional[str]
+    route_state: str
+    endpoint: Optional[str] = None
+    path: Optional[str] = None
+
+    @property
+    def mintable(self) -> bool:
+        """True only when every fact an identity needs is settled here."""
+        return (
+            self.route_state == "static"
+            and self.family is not None
+            and self.action is not None
+            # A route nobody read is not a route anyone knows. Without this the
+            # database family reported itself mintable with ``endpoint=None``.
+            and self.endpoint is not None
+        )
+
+
+def _normalized_action(config: "Mapping[str, Any]", family: Optional[str]) -> Optional[str]:
+    """The connector ACTION this config declares, family-conditionally.
+
+    Mirrors ``authoring.workflow._action_type_from_config`` — the sanctioned
+    pre-apply derivation — rather than importing it: ``workflow`` imports this
+    module, so reaching the other way would invert the dependency. The families
+    it declines to derive (the listener family, plain ``http``) are declined
+    here too; a ``None`` action makes the identity unmintable, which is the
+    honest answer for a family the connector-call allowlist does not admit.
+    """
+    if family == "database":
+        mode = config.get("operation_mode")
+        mode = mode.strip().lower() if isinstance(mode, str) else ""
+        return {"get": "Get", "send": "Send"}.get(mode)
+    if family == "rest":
+        raw = config.get("method")
+        # The SAME non-str normalization the builder validates with: a non-str
+        # method must not project as a valid-looking action.
+        method = raw.strip().upper() if isinstance(raw, str) else ""
+        return method if method in RestClientOperationBuilder.SUPPORTED_METHODS else None
+    if family == "soap_client":
+        mode = config.get("operation_mode")
+        mode = mode.strip().lower() if isinstance(mode, str) else ""
+        return "execute" if mode == "execute" else None
+    return None
+
+
+def normalized_identity_projection(config, live_projection=None):
+    """Credential-free identity facts a connector config settles pre-apply.
+
+    Deliberately does NOT call ``builder.build()``. Every ``build()`` opens by
+    raising ``BuilderValidationError`` on any validation failure, and this runs
+    over configs that have not been validated yet — a projection that raises
+    could not report "this config does not settle a route", which is the answer
+    it exists to give. It also must not have side effects on a plan path.
+
+    ``live_projection`` is an already-credential-free reading of the component
+    as it exists in the account (the shape
+    ``connection_reuse._extract_safe_context`` produces). When supplied it fills
+    only facts the config leaves unsettled; it never overrides a declared one,
+    because the point of the comparison downstream is to notice when the two
+    DISAGREE.
+    """
+    if not isinstance(config, Mapping):
+        return NormalizedConnectorIdentity(
+            family=None, action=None, route_state="unavailable"
+        )
+
+    raw_type = config.get("connector_type")
+    connector_type = raw_type if isinstance(raw_type, str) else ""
+    if _resolve_rest_connector_type(connector_type) is not None:
+        family = "rest"
+    elif _resolve_soap_client_connector_type(connector_type) is not None:
+        family = "soap_client"
+    elif connector_type.strip().lower() == "database":
+        family = "database"
+    else:
+        family = None
+
+    action = _normalized_action(config, family)
+
+    endpoint_raw = config.get("base_url")
+    if endpoint_raw is None:
+        endpoint_raw = config.get("url")
+    if endpoint_raw is None and isinstance(live_projection, Mapping):
+        endpoint_raw = live_projection.get("url") or live_projection.get("endpoint")
+
+    # The endpoint is bound to an environment extension: the ACCOUNT decides the
+    # route, so nothing here can pin it.
+    if endpoint_raw == SET_BY_EXTENSION:
+        return NormalizedConnectorIdentity(
+            family=family, action=action, route_state="unavailable"
+        )
+
+    # Usable replacements mean ``build()`` BLANKS the path (see its step 6), so
+    # the config's ``path`` is a template, not the emitted route.
+    raw_replacements = config.get("path_replacements")
+    if _is_usable_path_replacements(raw_replacements):
+        return NormalizedConnectorIdentity(
+            family=family, action=action, route_state="dynamic"
+        )
+    if raw_replacements is not None:
+        # PRESENT but not usable. ``validate_config`` step 6 refuses this config
+        # outright, so no component will ever be built from it — reporting a
+        # static route here would mint an identity for a thing that cannot exist.
+        # Found by probing this function, not by reading it: the first version
+        # answered ``static``/mintable for exactly this input.
+        return NormalizedConnectorIdentity(
+            family=family, action=action, route_state="unavailable"
+        )
+
+    from ..connection_reuse import _safe_url_skeleton
+
+    # The endpoint is reduced by the SAME rule the reuse surface already applies:
+    # userinfo, PATH, query and fragment are dropped, because a URL path can carry
+    # a webhook token or a session id. RECORDED LIMITATION: two connections that
+    # differ ONLY in their base-URL path therefore project identically here. That
+    # is deliberate — this is a credential-free PRE-APPLY identity, not the route
+    # digest, which reads the applied component's XML and keeps the full path.
+    endpoint = _safe_url_skeleton(endpoint_raw) if endpoint_raw is not None else None
+
+    if endpoint is None and family == "database":
+        # The database family pins its route with discrete fields rather than a
+        # URL. Reading only the URL keys left this ``None`` while the identity
+        # still reported itself mintable — a route nobody read is not a route
+        # anyone knows. Composed host-first so it orders like the JDBC string.
+        host = config.get("host")
+        if isinstance(host, str) and host.strip():
+            port, dbname = config.get("port"), config.get("dbname")
+            endpoint = host.strip()
+            if port not in (None, ""):
+                endpoint = "{0}:{1}".format(endpoint, port)
+            if isinstance(dbname, str) and dbname.strip():
+                endpoint = "{0}/{1}".format(endpoint, dbname.strip())
+
+    raw_path = config.get("path")
+    path = raw_path if isinstance(raw_path, str) else None
+
+    return NormalizedConnectorIdentity(
+        family=family,
+        action=action,
+        route_state="static",
+        endpoint=endpoint,
+        path=path,
+    )
 
 
 def _path_replacement_error(detail: str) -> "BuilderValidationError":

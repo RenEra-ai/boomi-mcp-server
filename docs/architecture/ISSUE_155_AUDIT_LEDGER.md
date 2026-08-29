@@ -110,6 +110,42 @@ CONSTRUCTOR — `SymbolTableV1.rebinding(source, symbols)` — which keeps the c
 keeps `extra="forbid"`, and cannot drop a field nobody named. Recorded here rather than silently
 diverging from the plan: the plan's goal (stop hand-enumerating) is right, its mechanism is not.
 
+### Slice C — implementation record (units landed so far)
+
+**Unit 1 — the symbol-table rebind is derived.** `SymbolTableV1.rebinding(source, symbols)`
+carries every field but `symbols`, derived from `model_fields`, through the CONSTRUCTOR. Both
+reconstruction helpers route through it and neither names a carried field any more. Four
+witnesses; graded by reverting a helper to the enumerated form, which fails.
+
+**Unit 2 — the pre-apply identity projection.** `normalized_identity_projection(config,
+live_projection=None)` returns family, action and route state, credential-free by allowlist. It
+never calls `build()` — checked over the AST, because the first version of that check grepped
+for `.build(` and matched the function's own docstring saying it does not call build; a scan
+that cannot tell prose from a call proves nothing about either.
+
+**Two fail-opens in unit 2 were found by PROBING the function, not by reading it**, and both are
+recorded because each would have minted an identity that cannot exist:
+
+1. A `path_replacements` declaration that is PRESENT but malformed made the first version answer
+   `route_state="static"` and mintable. `validate_config` refuses such a config outright, so no
+   component is ever built from it. It now answers `unavailable`.
+2. The database family reported itself mintable with `endpoint=None`, because the projection read
+   only the URL keys and that family pins its route with discrete `host`/`port`/`dbname` fields.
+   Mintability now requires a route to have actually been read — a route nobody read is not a
+   route anybody knows.
+
+**Recorded limitation, asserted rather than described.** The endpoint is reduced by the same
+credential-free skeleton rule the reuse surface applies, so a base-URL PATH (a webhook token, a
+session id) never reaches the projection. Consequence: two connections differing ONLY in
+base-URL path project identically here. That is deliberate — this is a pre-apply identity, not
+the route digest, which reads the applied component's XML and keeps the full path. A test pins
+the consequence so it cannot drift silently.
+
+**Not yet wired.** Units 1 and 2 are consumed by nothing outside their tests. That is the
+`#180` inertness shape and it is named here rather than left implicit: the next unit is the
+snapshot module plus its first real consumer, and neither of these lands on `dev` before that
+exists.
+
 ## Artifact trust boundary
 
 The slice CREATES AND OWNS: the canonical path binding and its semantic mirrors, the family
