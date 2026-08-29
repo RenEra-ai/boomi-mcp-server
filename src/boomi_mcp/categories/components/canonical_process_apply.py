@@ -106,9 +106,9 @@ def bind_symbols_to_applied_ids(
         else:
             component_id = symbol.component_id
         rebound.append(symbol.model_copy(update={"component_id": component_id}))
-    return SymbolTableV1(
-        symbols=tuple(rebound), idempotency_contracts=symbols.idempotency_contracts
-    )
+    # As in ``placeholder_backed_symbols``: the carried fields are derived, not
+    # listed, so a field added to the table cannot be lost by rebuilding it here.
+    return SymbolTableV1.rebinding(symbols, rebound)
 
 
 def _surviving_placeholders(xml: str, symbols) -> Tuple[str, ...]:

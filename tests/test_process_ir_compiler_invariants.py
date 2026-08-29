@@ -2340,3 +2340,113 @@ def test_a_nested_claimant_beside_a_real_root_entry_is_also_rejected():
     diagnostic = excinfo.value.diagnostics[0]
     assert diagnostic.code == PROCESS_IR_COMPILE_INTERNAL
     assert "exactly one connector call" in diagnostic.message
+
+
+# --- slice C: the symbol-table rebind is DERIVED, not enumerated ------------------
+#
+# Two helpers outside the compiler rebuild SymbolTableV1 after rewriting
+# ``component_id`` — ``placeholder_backed_symbols`` and
+# ``bind_symbols_to_applied_ids``. Both hand-listed the fields to carry, and the
+# model is ``extra="forbid"``, so an omitted field is a DEFAULT rather than an
+# error: a field added to the table would have been silently lost on the way
+# through either helper. These pin the replacement rule and the two measured
+# reasons it does not use ``model_copy``.
+
+
+def _symbol(ref: str, tail: str):
+    from boomi_mcp.compiler.process_ir.contracts import ComponentSymbolV1
+
+    return ComponentSymbolV1(
+        ref=ref,
+        component_id="{0}-{0}-{0}-{0}-{0}{0}{0}".format(tail * 4)[:36],
+        component_type="process",
+    )
+
+
+def test_rebinding_carries_a_field_the_helpers_never_named():
+    """NON-VACUITY: a field nobody enumerated still survives the rebuild.
+
+    The subclass stands in for the next field added to the real table (slice D
+    adds two). The old form named ``idempotency_contracts`` literally, so this
+    field would have been dropped and defaulted without any error.
+    """
+    from boomi_mcp.compiler.process_ir.contracts import SymbolTableV1
+
+    class _TableWithAnUnnamedField(SymbolTableV1):
+        unnamed: str = "default"
+
+    a, b = _symbol("$ref:a", "1"), _symbol("$ref:b", "2")
+    source = _TableWithAnUnnamedField(symbols=(a, b), unnamed="carried")
+
+    rebuilt = _TableWithAnUnnamedField.rebinding(source, (b, a))
+    assert rebuilt.unnamed == "carried", "the rebind dropped a field it never named"
+
+    # The CONTROL: the shape the helpers used before, which is why this exists.
+    enumerated = _TableWithAnUnnamedField(
+        symbols=(b, a), idempotency_contracts=source.idempotency_contracts
+    )
+    assert enumerated.unnamed == "default", (
+        "the control is vacuous — the old enumerated form did not drop the field"
+    )
+
+
+def test_rebinding_reruns_the_canonicalising_sort_that_model_copy_skips():
+    """MEASURED: ``model_copy`` does not re-run field validators.
+
+    The table exists to keep the caller's insertion order out of compiler output.
+    A rebuild via ``model_copy`` would have carried that order straight through.
+    """
+    from boomi_mcp.compiler.process_ir.contracts import SymbolTableV1
+
+    a, b = _symbol("$ref:a", "1"), _symbol("$ref:b", "2")
+    source = SymbolTableV1(symbols=(a, b))
+
+    assert [s.ref for s in SymbolTableV1.rebinding(source, (b, a)).symbols] == [
+        "$ref:a",
+        "$ref:b",
+    ]
+    assert [s.ref for s in source.model_copy(update={"symbols": (b, a)}).symbols] == [
+        "$ref:b",
+        "$ref:a",
+    ], "model_copy re-ran the validator; this test no longer pins anything"
+
+
+def test_model_copy_does_not_honour_extra_forbid_on_this_table():
+    """MEASURED, and the reason the rebind goes through the constructor.
+
+    ``extra="forbid"`` protects the constructor and NOT ``model_copy``: an
+    unknown key becomes a real attribute the model does not declare, so a typo
+    would turn a silent drop into a silent phantom.
+    """
+    import pytest as _pytest
+
+    from boomi_mcp.compiler.process_ir.contracts import SymbolTableV1
+
+    source = SymbolTableV1(symbols=(_symbol("$ref:a", "1"),))
+
+    with _pytest.raises(Exception):
+        SymbolTableV1(symbols=(), not_a_field="x")
+
+    phantom = source.model_copy(update={"not_a_field": "x"})
+    assert getattr(phantom, "not_a_field") == "x"
+    assert "not_a_field" not in SymbolTableV1.model_fields
+
+
+def test_neither_reconstruction_helper_enumerates_the_carried_fields():
+    """The rule has to hold at BOTH callers, not just where it was written.
+
+    A source-text check, because the defect is an ABSENCE — a helper that stops
+    calling ``rebinding`` and lists fields again reintroduces it silently.
+    """
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    for rel in (
+        "src/boomi_mcp/authoring/process_materialization.py",
+        "src/boomi_mcp/categories/components/canonical_process_apply.py",
+    ):
+        text = (root / rel).read_text()
+        assert "SymbolTableV1.rebinding(" in text, f"{rel} no longer uses the derived rebind"
+        assert "idempotency_contracts=" not in text, (
+            f"{rel} names a carried field again — the enumeration is back"
+        )

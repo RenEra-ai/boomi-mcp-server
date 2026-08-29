@@ -295,6 +295,39 @@ class SymbolTableV1(_CompilerModel):
             seen.add(contract.ref)
         return tuple(sorted(value, key=lambda item: item.ref))
 
+    @classmethod
+    def rebinding(cls, source, symbols) -> "SymbolTableV1":
+        """A table with ``symbols`` replaced, CARRYING every other field.
+
+        The carried set is derived from ``model_fields``, never enumerated. Two
+        helpers outside the compiler rebuild this table after rewriting
+        ``component_id`` — one to force placeholders, one to bind applied ids —
+        and both hand-listed the fields to carry. A field added here would not
+        have raised at either site: this model is ``extra="forbid"``, so an
+        omitted field is not an error, it is a DEFAULT. The rebuilt table would
+        have silently lost it.
+
+        Goes through the CONSTRUCTOR rather than ``model_copy(update=...)``.
+        Both properties that makes the difference were measured, not assumed:
+
+        * ``model_copy`` does not re-run the field validators, so the
+          canonicalising sort above would NOT run and the caller's insertion
+          order would reach compiler output — the one thing this class exists to
+          prevent.
+        * ``model_copy`` does not honour ``extra="forbid"`` either: an unknown
+          key becomes a real attribute that ``model_fields`` does not list, so a
+          typo turns a silent drop into a silent phantom.
+
+        A ``source`` missing a field raises ``AttributeError`` rather than
+        defaulting it — loud, and on the side of refusing to guess.
+        """
+        carried = {
+            name: getattr(source, name)
+            for name in cls.model_fields
+            if name != "symbols"
+        }
+        return cls(symbols=tuple(symbols), **carried)
+
     def build_idempotency_index(self) -> dict:
         """Build a ref -> contract index.
 

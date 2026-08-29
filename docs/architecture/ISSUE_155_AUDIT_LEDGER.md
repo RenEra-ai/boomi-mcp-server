@@ -81,6 +81,35 @@ fix batch by default — but note that this slice's two most serious findings, t
 label reconciliation and the vocabulary resolution, were about CONSUMED facts being taken on
 trust, not about self-owned artifacts.
 
+## Slice C — Stage-1 step 0 — baseline
+
+| Field | Value |
+|---|---|
+| Literal baseline SHA | `eb2235144400c80a13c36d70244740eb38929be5` |
+| Branch point | `dev` @ `eb22351` (slice B's landed tip) |
+| Baseline suite | 11,065 tests collected, tree clean |
+| Slice kind | behaviour-affecting — trusted connector-resolution snapshot + blank-path net (plan §5.C, U5 + S11) |
+| Live account | `trainingglebbochkarov-16926N`, rebuilt 2026-08-28 per the §9 runbook; O14 discharged |
+| Trust boundary | CREATES the snapshot module and its diagnostics; CONSUMES `_resolve_existing_components`, the connector builders, the symbol table and the four write sinks |
+
+**Recorded at step 0, before any code — two of the plan's own prescriptions carry measured
+traps.** §5.C says to rewrite the two symbol-table reconstruction helpers as
+`model_copy(update=…)`. Measured on this tree, that instruction is unsafe in two independent
+ways, and both were checked by running them rather than by reading pydantic's docs:
+
+1. `model_copy(update=…)` does NOT re-run field validators. `SymbolTableV1` canonicalises by
+   sorting on `ref` at construction precisely so a caller's insertion order cannot reach
+   compiler output; a rebuild via `model_copy` carries that order straight through. Probe:
+   the constructor yields `['$ref:a','$ref:b']` where `model_copy` yields `['$ref:b','$ref:a']`.
+2. `model_copy(update=…)` does NOT honour `extra="forbid"`. The constructor rejects an unknown
+   key; `model_copy` accepts it and sets a real attribute that `model_fields` does not list.
+   So the prescribed fix trades a silent DROP for a silent PHANTOM.
+
+The applied fix therefore derives the carried field set from `model_fields` and goes through the
+CONSTRUCTOR — `SymbolTableV1.rebinding(source, symbols)` — which keeps the canonicalising sort,
+keeps `extra="forbid"`, and cannot drop a field nobody named. Recorded here rather than silently
+diverging from the plan: the plan's goal (stop hand-enumerating) is right, its mechanism is not.
+
 ## Artifact trust boundary
 
 The slice CREATES AND OWNS: the canonical path binding and its semantic mirrors, the family

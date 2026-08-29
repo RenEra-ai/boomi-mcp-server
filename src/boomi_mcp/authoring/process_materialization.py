@@ -545,14 +545,16 @@ def placeholder_backed_symbols(symbols):
     from ..compiler.process_ir.contracts import SymbolTableV1
     from ..recipes.materialization import placeholder_component_id
 
-    return SymbolTableV1(
-        symbols=tuple(
+    # Every OTHER field is carried by ``rebinding``, derived from the model's own
+    # field set. Enumerating them here is what would drop a new one silently.
+    return SymbolTableV1.rebinding(
+        symbols,
+        (
             symbol.model_copy(
                 update={"component_id": placeholder_component_id(symbol.ref)}
             )
             for symbol in symbols.symbols
         ),
-        idempotency_contracts=symbols.idempotency_contracts,
     )
 
 
