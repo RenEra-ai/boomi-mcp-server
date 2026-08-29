@@ -1753,3 +1753,140 @@ def test_a_wellformed_document_is_readable_even_when_it_classifies_as_nothing():
             config={"connector_type": "a-family-we-do-not-model", "xml": unsupported},
         )
     ])
+
+
+def test_every_registered_replay_code_reaches_a_SERVED_envelope():
+    """QA: registered, raiseable, and emitted by nothing a caller can see.
+
+    The repository already guards that every replay code has a raiser. That
+    guard passes while the code is unreachable, because its own test raises the
+    exception object directly and never asks whether a SURFACE can emit it —
+    which is the failure mode `_canonical_plan_failure`'s own comment records,
+    and which recurred the moment a refusal moved outside the one `try` that
+    reaches the classifier. This asserts the property the other guard cannot.
+    """
+    from boomi_mcp.authoring.connector_resolution_snapshot import ConnectorIdentityError
+    from boomi_mcp.categories import integration_builder as ib
+    from boomi_mcp.errors import ERROR_TAXONOMY
+
+    registered = {
+        code for code in ERROR_TAXONOMY
+        if code.startswith("CONNECTOR_REPLAY_IDENTITY_")
+        or code == "CONNECTOR_REPLAY_SUBMITTED_XML_UNREADABLE"
+    }
+    assert registered, "the check would be vacuous"
+
+    served = set()
+    for code in sorted(registered):
+        envelope = ib._pre_write_refusal(
+            ConnectorIdentityError(code, "constructed", component_key="k")
+        )
+        assert envelope["_success"] is False
+        assert envelope["hint"], code
+        served.add(envelope["error_code"])
+
+    assert registered <= served, {
+        "registered but not servable": sorted(registered - served)
+    }
+
+
+def test_the_apply_wide_resolution_refusal_is_classified():
+    """The specific reachability hole: raised outside every `try`.
+
+    An AST check, because the defect is structural — the refusal fired and wrote
+    nothing, and still reached the caller with `error_code: null` purely because
+    of where the raise sat.
+    """
+    import ast
+    from pathlib import Path
+
+    module = Path(__file__).resolve().parents[1] / "src/boomi_mcp/categories/integration_builder.py"
+    tree = ast.parse(module.read_text())
+    apply_plan = next(
+        n for n in ast.walk(tree)
+        if isinstance(n, ast.FunctionDef) and n.name == "_apply_plan"
+    )
+    build = next(
+        n for n in ast.walk(apply_plan)
+        if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+        and n.func.id == "_build_resolution"
+    )
+    guarded = [
+        t for t in ast.walk(apply_plan)
+        if isinstance(t, ast.Try) and any(sub is build for sub in ast.walk(t))
+    ]
+    assert guarded, "the apply-wide resolution build is raised outside every try"
+
+    classifies = any(
+        isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+        and n.func.id == "_pre_write_refusal"
+        for handler in guarded[0].handlers for n in ast.walk(handler)
+    )
+    assert classifies, "its handler does not serve a classified envelope"
+
+
+def test_the_plan_surface_reports_where_apply_refuses():
+    """QA: `plan` began refusing where its own contract says it reports.
+
+    Its docstring is explicit — planning hands a caller everything wrong with
+    their intent at once, not the first thing that stopped it. So the identical
+    unreadable payload must become a DIAGNOSTIC there and a REFUSAL at apply,
+    and the difference is decided by the surface rather than by the condition.
+    """
+    import ast
+    from pathlib import Path
+
+    module = Path(__file__).resolve().parents[1] / "src/boomi_mcp/authoring/workflow.py"
+    tree = ast.parse(module.read_text())
+    validate = next(
+        n for n in ast.walk(tree)
+        if isinstance(n, ast.FunctionDef) and n.name == "_validate_processes"
+    )
+    handlers = [
+        h for t in ast.walk(validate) if isinstance(t, ast.Try)
+        for h in t.handlers
+        if isinstance(h.type, ast.Name) and h.type.id == "ConnectorIdentityError"
+    ]
+    assert handlers, "the plan surface lets the refusal escape as a raise"
+    assert any(
+        isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id == "_diag"
+        for h in handlers for n in ast.walk(h)
+    ), "the plan surface catches the refusal but reports no diagnostic"
+
+
+@pytest.mark.parametrize(
+    "spliced,expected",
+    [
+        ('<GenericOperationConfig customOperationType="GET"/>'
+         '<operation customOperationType="PATCH"/>', None),
+        ('<operation customOperationType="PATCH"/>'
+         '<GenericOperationConfig customOperationType="GET"/>', None),
+        ('<GenericOperationConfig customOperationType="PATCH"/>'
+         '<operation customOperationType="PATCH"/>', "PATCH"),
+        ('<GenericOperationConfig customOperationType="patch"/>'
+         '<operation customOperationType="PATCH"/>', "PATCH"),
+        ('<operation customOperationType="PATCH"/>', "PATCH"),
+    ],
+)
+def test_two_contradictory_verbs_resolve_to_neither(spliced, expected):
+    """QA (pre-existing): the reader took the FIRST verb it met.
+
+    A decoy element spliced ahead of the real operation therefore decided the
+    identity. Which element the platform runtime honours is NOT established —
+    settling it needs a deploy and an execution — so the reader refuses to
+    choose rather than guessing, which is the rule it already applies to every
+    other fact it cannot settle. Identical repeats are not a contradiction.
+    """
+    from boomi_mcp.authoring.connector_resolution_snapshot import (
+        live_identity_from_component_xml,
+    )
+
+    document = (
+        '<Component type="connector-action" subType="officialboomi-X3979C-rest-prod">'
+        f'<object>{spliced}<field id="path" value="/x"/></object></Component>'
+    )
+    identity = live_identity_from_component_xml("c", document)
+    assert identity.action == expected
+    assert identity.readable is True, "a contradiction is not an unparseable document"
+    if expected is None:
+        assert identity.route_state == "unavailable"

@@ -7721,8 +7721,15 @@ def _request_only_resolution(spec):
     """A resolution built from the REQUEST alone, for a caller with no account.
 
     Exists so that "I have no account context" is something a call site SAYS
-    rather than something it omits. The pre-apply surfaces are entitled to this;
-    an apply is not, and the difference is now visible in the diff.
+    rather than something it omits, now that the argument has no default.
+
+    NO PRODUCTION CALLER TODAY, stated rather than implied: every path through
+    this module threads a real resolution, and the pre-apply surface in the
+    authoring layer builds its own — it cannot import this one without inverting
+    the dependency between the two layers. Its callers are tests. The earlier
+    version of this docstring claimed the distinction was "visible in the diff"
+    at call sites that do not exist, which is a claim wider than its evidence;
+    the affordance is real and the claim was not.
     """
     from ..authoring.connector_resolution_snapshot import (
         build_connector_resolution_snapshot,
@@ -7874,6 +7881,32 @@ def _dry_emit_canonical_plan(plan, symbols, depends_on_by_key) -> None:
     materialize_canonical_process_xml(
         plan=plan, id_registry=dry_ids, symbols=symbols
     )
+
+
+def _pre_write_refusal(exc, *, failed_step=None) -> Dict[str, Any]:
+    """A pre-write failure, as a SERVED envelope.
+
+    One definition, because the alternative already failed once here: the
+    classifier below is correct and general — it serves any code the exception
+    carries that the taxonomy documents — and a refusal still reached callers
+    unclassified, purely because it was raised outside the single ``try`` that
+    called it. Reachability is not a property of the classifier; it is a
+    property of every place an authoring refusal can be raised, and that is what
+    this function makes uniform.
+    """
+    code, path = _canonical_plan_failure(exc)
+    return {
+        "_success": False,
+        "error": _validation_error_message(exc),
+        "error_code": code,
+        "failed_step": failed_step,
+        "partial_results": {},
+        "hint": (
+            "The plan is decided before any component is written; "
+            "nothing was created."
+            + (f" Offending path: {path}." if path else "")
+        ),
+    }
 
 
 def _canonical_plan_failure(exc) -> Tuple[str, Optional[str]]:
@@ -8888,11 +8921,20 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
         build_connector_resolution_snapshot as _build_resolution,
     )
 
-    _resolution = _build_resolution(
-        spec.components,
-        live_component_xml=_pre_write_live_xml,
-        reused_keys=_reused_component_keys,
-    )
+    # CLASSIFIED, like every other pre-write refusal. Hoisting this build out of
+    # the per-root loop — correct, and required so a components-only apply is
+    # checked at all — moved it outside the one `try` that turns a carried code
+    # into a served envelope. The refusal still fired and still wrote nothing;
+    # it just reached the caller with no `error_code`, which is the same defect
+    # this file's classifier was written to fix, one construction later.
+    try:
+        _resolution = _build_resolution(
+            spec.components,
+            live_component_xml=_pre_write_live_xml,
+            reused_keys=_reused_component_keys,
+        )
+    except Exception as _resolution_exc:  # noqa: BLE001 — classified above
+        return _pre_write_refusal(_resolution_exc)
     for _pkey, _unit in process_units_by_key.items():
         # A NON-WRITING PLANNED ACTION IS SKIPPED FOR THE WHOLE PASS, once, at
         # the top (Codex round 22). Every check below decides whether a WRITE
@@ -8972,19 +9014,7 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
                 _depends_on_by_key,
             )
         except Exception as _plan_exc:  # noqa: BLE001 — classified below
-                _code, _path = _canonical_plan_failure(_plan_exc)
-                return {
-                    "_success": False,
-                    "error": _validation_error_message(_plan_exc),
-                    "error_code": _code,
-                    "failed_step": _pkey,
-                    "partial_results": {},
-                    "hint": (
-                        "The plan is decided before any component is written; "
-                        "nothing was created."
-                        + (f" Offending path: {_path}." if _path else "")
-                    ),
-                }
+                return _pre_write_refusal(_plan_exc, failed_step=_pkey)
         # SIBLING SWEEP (§6 AR2-02), recorded rather than re-implemented: the
         # OTHER pre-decidable canonical refusal — `action="update"` with no
         # resolvable target — is already decided before this pass runs. The raw

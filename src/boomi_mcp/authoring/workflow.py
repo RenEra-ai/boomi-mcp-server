@@ -1353,11 +1353,38 @@ def _validate_processes(
     # This half needs NO account: it resolves from the request's own components,
     # which is exactly what a pre-apply surface is allowed to know. The live
     # reading stays at apply, where there is an account to read.
-    from .connector_resolution_snapshot import build_connector_resolution_snapshot
-
-    snapshot = build_connector_resolution_snapshot(
-        normalized.integration_spec.components
+    from .connector_resolution_snapshot import (
+        ConnectorIdentityError,
+        build_connector_resolution_snapshot,
     )
+
+    # THIS SURFACE REPORTS; it does not refuse. That is not a preference, it is
+    # this function's stated contract one docstring above: planning hands a
+    # caller everything wrong with their intent at once, never the first thing
+    # that stopped it. So the identical condition gets two dispositions decided
+    # by the SURFACE — a diagnostic here, a refusal at apply, where the next
+    # thing that happens is a write. Letting the raise through turned `plan`
+    # into a refuser and emptied the report a caller was told to read.
+    snapshot_diagnostics: List[AuthoringDiagnosticV1] = []
+    try:
+        snapshot = build_connector_resolution_snapshot(
+            normalized.integration_spec.components
+        )
+    except ConnectorIdentityError as snapshot_error:
+        snapshot = build_connector_resolution_snapshot(())
+        snapshot_diagnostics.append(
+            _diag(
+                snapshot_error.code,
+                "error",
+                message=str(snapshot_error),
+                subject_kind="component",
+                subject_id=snapshot_error.component_key,
+                remediation=(
+                    "Supply component XML this server can parse, or omit it and "
+                    "declare the component's configuration instead."
+                ),
+            )
+        )
     symbols = build_symbol_table(
         list(normalized.integration_spec.components),
         # #153: the roots are participants too. Without them a `$ref` naming
@@ -1375,7 +1402,7 @@ def _validate_processes(
     warnings = 0
     advisories = 0
     codes: List[str] = []
-    diagnostics: List[AuthoringDiagnosticV1] = []
+    diagnostics: List[AuthoringDiagnosticV1] = list(snapshot_diagnostics)
 
     # #154. Effect declarations are resolved ONCE, here, before any root is
     # validated: identity is checked against the symbol table, effect CONTENT is

@@ -161,16 +161,16 @@ def live_identity_from_component_xml(
         pass
 
     subtype = None
-    action = None
+    actions = []
     path_fields = []
 
     def _start(name, attributes):
-        nonlocal subtype, action
+        nonlocal subtype
         local = name.rsplit("}", 1)[-1].rsplit(":", 1)[-1]
         if subtype is None and "subType" in attributes:
             subtype = attributes["subType"]
-        if action is None and "customOperationType" in attributes:
-            action = attributes["customOperationType"]
+        if "customOperationType" in attributes:
+            actions.append(attributes["customOperationType"])
         if local == "field" and attributes.get("id") == "path":
             path_fields.append(attributes.get("value"))
 
@@ -195,6 +195,19 @@ def live_identity_from_component_xml(
         return unreadable
 
     family = connector_family_of(subtype)
+
+    # EVERY verb the document carries, not the first one. A document with two
+    # different ``customOperationType`` values is one this reader cannot resolve:
+    # which one the platform runtime honours is not established here, and picking
+    # the first made a decoy element spliced ahead of the real operation decide
+    # the identity. Refusing to choose is the only answer that cannot be wrong —
+    # the same rule this module applies to every other fact it cannot settle.
+    #
+    # Identical repeats are not a conflict: a document may state one verb twice.
+    distinct_actions = {
+        value.strip().upper() for value in actions if isinstance(value, str)
+    }
+    action = next(iter(distinct_actions)) if len(distinct_actions) == 1 else None
     resolved_enough = family is not None and action is not None
 
     # THE STORED PATH, and it is the whole point for a reused component. Reading
@@ -215,7 +228,7 @@ def live_identity_from_component_xml(
     return ResolvedConnectorComponentIdentityV1(
         component_key=component_key,
         family=family,
-        action=action.strip().upper() if isinstance(action, str) else None,
+        action=action,
         route_state=route_state,
         source="live",
         document_parsed=True,
