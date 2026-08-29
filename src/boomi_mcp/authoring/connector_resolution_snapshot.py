@@ -246,16 +246,32 @@ def live_identity_from_component_xml(
     # the same rule this module applies to every other fact it cannot settle.
     #
     # Identical repeats are not a conflict: a document may state one verb twice.
-    # A BLANK VERB IS AN ABSENT VERB. Keeping it made a one-character payload
-    # defeat the rule outright: `customOperationType=""` produced a single
-    # distinct value, so the action was "settled" as the empty string and every
-    # check downstream treated it as known.
-    distinct_actions = {
-        value.strip().upper() for value in actions
-        if isinstance(value, str) and value.strip()
+    # ONE SET, TWO ANSWERS. A blank verb is normalised to a distinct marker
+    # rather than discarded, so both questions this document must answer come
+    # from the same place: how many different things does it say, and is the one
+    # thing it says a verb at all.
+    #
+    # Discarding blanks answered the first question wrongly. `customOperationType
+    # =""` alone had to stop being a "settled" empty-string verb — that was a
+    # one-character defeat of the rule — but filtering blanks out before counting
+    # made a blank on the real operation plus a nonblank decoy elsewhere collapse
+    # to a singleton, so the payload was accepted while the verb it installs is
+    # blank. Keeping the blank IN the set makes that a contradiction, which it is.
+    _BLANK = ""
+    verb_tokens = {
+        (value.strip().upper() if value.strip() else _BLANK)
+        for value in actions
+        if isinstance(value, str)
     }
-    action = next(iter(distinct_actions)) if len(distinct_actions) == 1 else None
-    contradicted = len(distinct_actions) > 1
+    distinct_actions = verb_tokens - {_BLANK}
+    # Settled only when the document says exactly ONE thing and that thing is a
+    # verb. Contradicted when it says more than one thing, blank included.
+    action = (
+        next(iter(distinct_actions))
+        if len(verb_tokens) == 1 and len(distinct_actions) == 1
+        else None
+    )
+    contradicted = len(verb_tokens) > 1
     resolved_enough = family is not None and action is not None
 
     # THE STORED PATH, and it is the whole point for a reused component. Reading

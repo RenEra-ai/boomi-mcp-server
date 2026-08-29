@@ -2065,6 +2065,17 @@ _REST_SUBTYPE = "officialboomi-X3979C-rest-prod"
          _REST_SUBTYPE, '<operation customOperationType=""/>', True),
         ("rest action with a whitespace verb", "connector-action", "rest_client",
          _REST_SUBTYPE, '<operation customOperationType="   "/>', True),
+        # MIXED blank and nonblank. Filtering blanks out before counting made
+        # these collapse to a singleton, so a decoy attribute elsewhere in the
+        # document bypassed the missing-verb refusal while the verb actually
+        # installed stayed blank. Both orders, because the first version of the
+        # reader was order-sensitive and this one must not be.
+        ("rest action, blank verb plus a nonblank decoy", "connector-action",
+         "rest_client", _REST_SUBTYPE,
+         '<operation customOperationType=""/><Other customOperationType="GET"/>', True),
+        ("rest action, nonblank decoy before a blank verb", "connector-action",
+         "rest_client", _REST_SUBTYPE,
+         '<Other customOperationType="GET"/><operation customOperationType=""/>', True),
         ("database action, verb in the element name", "connector-action",
          "database", "database", "<Configuration><DatabaseGetAction/></Configuration>",
          False),
