@@ -1407,20 +1407,24 @@ def _validate_processes(
     try:
         assert_declared_matches_resolved(snapshot, normalized.connector_metadata)
     except ConnectorIdentityError as mismatch:
-        snapshot_diagnostics.append(
-            _diag(
-                mismatch.code,
-                "error",
-                message=str(mismatch),
-                subject_kind="component",
-                subject_id=mismatch.component_key,
-                remediation=(
-                    "Declare the connector family and action the component "
-                    "actually resolves to, or correct the component so it "
-                    "resolves to what you declared."
-                ),
+        # EVERY mismatch, because this surface reports rather than refuses. The
+        # comparison now carries them all; catching one exception and emitting
+        # one diagnostic reported the first disagreement and hid the rest.
+        for failure in mismatch.failures:
+            snapshot_diagnostics.append(
+                _diag(
+                    failure.code,
+                    "error",
+                    message=str(failure),
+                    subject_kind="component",
+                    subject_id=failure.component_key,
+                    remediation=(
+                        "Declare the connector family and action the component "
+                        "actually resolves to, or correct the component so it "
+                        "resolves to what you declared."
+                    ),
+                )
             )
-        )
 
     symbols = build_symbol_table(
         list(normalized.integration_spec.components),

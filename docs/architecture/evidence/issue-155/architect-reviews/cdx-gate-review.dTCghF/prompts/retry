@@ -1,0 +1,15 @@
+Approvals are unavailable in this read-only review session and no tool call will
+be granted. Do not wait for one.
+
+Produce the §6 architect implementation review NOW, evaluation 2 of 3, as plain
+text from what you have already read. Judge the correction against the design
+plan you were given: whether each of the four fixes discharges its finding,
+whether the per-family verb derivation is right, whether the reader's new scope
+is complete, whether the deliberate omissions are defensible, whether the
+contradiction rule still earns its place now that the reader is scoped
+correctly, and whether the correction broke anything.
+
+Findings about units belonging to slices D, E or F are out of scope.
+
+END your response with a verdict on its own final line: exactly
+'VERDICT: NO ISSUES' or 'VERDICT: ISSUES FOUND'.

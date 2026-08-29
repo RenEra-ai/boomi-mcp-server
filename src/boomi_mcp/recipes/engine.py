@@ -1738,6 +1738,23 @@ def _compile_processes(
     from ..compiler.process_ir.emitter_registry import emit_process
     from ..compiler.process_ir.pipeline import compile_process_ir_v1
 
+    # THE DECLARATION IS AN ASSERTION HERE TOO. This route never builds a
+    # resolution snapshot, which is exactly why it was missed: a guard keyed on
+    # snapshot construction excluded the one path that constructs none, and the
+    # caller's declared family and action reached compilation unchallenged.
+    #
+    # Raised rather than reported: unlike the planning surface, this is the
+    # canonical compile chain and its contract is that no exemption is
+    # reachable — a mismatch here is a defect in the request, not a note about it.
+    from ..authoring.connector_resolution_snapshot import (
+        assert_declared_matches_resolved,
+        build_connector_resolution_snapshot,
+    )
+
+    assert_declared_matches_resolved(
+        build_connector_resolution_snapshot(components), connector_metadata or {}
+    )
+
     symbols = build_symbol_table(
         components,
         # #153/#154: the composed roots are participants too. Omitting them does

@@ -1,0 +1,75 @@
+You are performing the §6 ARCHITECT IMPLEMENTATION REVIEW for slice C of GitHub
+issue #155, EVALUATION 2 OF 3. Evaluation 1 found four plan-conformance defects.
+This round judges the CORRECTION against the same design plan, which follows
+this brief verbatim.
+
+WHAT EVALUATION 1 FOUND, and what I changed in response. Judge each fix on
+whether it actually discharges the finding, and say plainly where it does not:
+
+1. `high` — caller `connector_metadata` was still authoritative in typed and
+   recipe compilation; the comparison was wired only into the canonical apply
+   helper. FIX: `authoring/workflow.py::_validate_processes` now calls
+   `assert_declared_matches_resolved` and turns a mismatch into a diagnostic
+   rather than a raise, because that surface's contract is to report everything
+   wrong at once. A guard asserts the property — every module that BUILDS a
+   snapshot must COMPARE against one — rather than today's call sites.
+
+2. `high` — the XML authority read the whole document instead of the operation's
+   `<configuration>`, and could not derive non-REST verbs. FIX: the reader is
+   scoped to `Operation/Configuration/<FamilyOperationConfig>`, taken from an
+   archived capture of an executed component. Verbs are now derived per family:
+   `customOperationType` for REST, `operationType` for SOAP, and the ELEMENT NAME
+   for the database family. This broke 24 of the slice's own tests because the
+   fixture corpus used a document shape the platform never emits; the fixtures
+   were rebuilt from the capture.
+
+3. `high` — the planned trusted snapshot model was not built. FIX: the identity
+   now carries `mode`, `account_id`, `component_id`, `component_version` and
+   `live_read_failed`, and the live collector keeps the identity it was
+   discarding. NOT built, deliberately: configuration digests, extension state
+   and `for_root`, whose only consumers are slices D and E.
+
+4. `med` — unreadable reuse failed open. FIX: the collector records a failed read
+   instead of omitting the key, and a reuse whose read-back failed is refused
+   with `CONNECTOR_REPLAY_IDENTITY_UNAVAILABLE` — a code this slice had earlier
+   withdrawn as unproducible and has now reinstated. Never consulting the account
+   still compiles, which is the plan's recorded no-client limitation.
+
+WHAT I MOST WANT JUDGED — answer each explicitly:
+
+A. DOES FIX 1 ACTUALLY CLOSE IT? The comparison now runs on the planning surface.
+   Is there any remaining path that builds a symbol table, or compiles, or
+   applies, where the caller's declared family/action still reaches a decision
+   without being compared? Name it if so.
+
+B. IS THE PER-FAMILY VERB DERIVATION RIGHT? I measured REST from a capture and
+   the database family from this repository's own builders. SOAP I took from a
+   live capture reported by QA. If any of those three is wrong, the reader is
+   silently wrong for that family. Check them against the tree.
+
+C. IS THE SCOPING COMPLETE? The reader now looks only inside the operation's
+   configuration element. Does anything it needs live OUTSIDE that element — for
+   a connection, for an extension-bound route, for a family I have not
+   considered?
+
+D. IS FIX 3's OMISSION DEFENSIBLE? I did not build digests, extension state or
+   `for_root`, on the grounds that their consumers are later slices and a dark
+   surface with no caller is worse than an absent one. Is that right, or does
+   something in slices D or E need one of them to exist NOW in order to be built
+   coherently later?
+
+E. THE CONTRADICTION RULE. Across earlier rounds I added a refusal for submitted
+   XML naming more than one operation type, then extended it for blank verbs,
+   then split resolution from refusal when it silenced the account side. With the
+   reader now correctly scoped, is that rule still earning its place, or is it
+   scaffolding left standing after the real defect was fixed one level down?
+   I would rather delete it than keep it out of sunk cost.
+
+F. ANYTHING THE CORRECTION BROKE. It touched the reader, the collector, the
+   snapshot model, two compile surfaces and the error taxonomy.
+
+Findings about units belonging to slices D, E or F are OUT OF SCOPE — those
+slices are absent by plan.
+
+END your response with a verdict on its own final line: exactly
+'VERDICT: NO ISSUES' or 'VERDICT: ISSUES FOUND'.

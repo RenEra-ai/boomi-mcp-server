@@ -1327,6 +1327,9 @@ _NOT_AN_INSTANCE = {
     "SELF-155-r47-01a": "a revision of a row that is itself a non-instance",
     "QA-155-r2-01a": "a revision of a row already counted; counting both double-counts",
     "QA-155-r2-01b": "a revision of a revision; the original is the counted row",
+    "ARCH-155-r4-01a": "a revision of a row already counted; counting both double-counts",
+    "ARCH-155-r4-03a": "likewise a revision of a counted row",
+    "ARCH-155-r4-04a": "likewise a revision of a counted row",
     "SELF-155-r47-01": "the class being DISCHARGED — the regeneration done correctly from the final tree — not a new instance of regenerating from a non-final one",
 }
 

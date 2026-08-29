@@ -7728,7 +7728,14 @@ def _live_connector_xml(*, boomi_client, spec, existing_ids, conflict_policy):
             reading = {
                 "xml": xml,
                 "component_id": fetched.get("component_id") or component_id,
-                "component_version": fetched.get("version"),
+                # COERCED HERE, at the boundary that knows the client's type.
+                # The client returns an integer and the frozen model declares a
+                # string, so inserting it unvalidated warned at serialization and
+                # broke strict round-trip — hidden by a test that injected a
+                # string the production path never produces.
+                "component_version": (
+                    str(fetched["version"]) if fetched.get("version") is not None else None
+                ),
                 "read_failed": False,
             }
         live[key] = reading
@@ -8950,6 +8957,11 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
             spec.components,
             live_component_xml=_pre_write_live_xml,
             reused_keys=_reused_component_keys,
+            # THE ACCOUNT THIS RESOLUTION DESCRIBES. The field was added to the
+            # model and then passed by nothing, so what AC8j asks for was
+            # populated only in a test — a contract satisfied on paper and empty
+            # everywhere a caller could reach.
+            account_id=_client_account_id(boomi_client),
         )
     except Exception as _resolution_exc:  # noqa: BLE001 — classified above
         return _pre_write_refusal(_resolution_exc)

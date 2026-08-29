@@ -30,7 +30,7 @@ named inside the compiler joins the compiler's published surface.
 
 from __future__ import annotations
 
-from typing import Any, Dict, Mapping, Optional, Sequence, Tuple
+from typing import Any, Dict, Literal, Mapping, Optional, Sequence, Tuple
 
 from pydantic import BaseModel, ConfigDict
 
@@ -73,6 +73,29 @@ class ConnectorIdentityError(Exception):
         self.partial = partial
 
 
+#: The families whose verb location this module has MEASURED — REST and SOAP in
+#: `GenericOperationConfig`, the database family in its action element. A family
+#: outside this set is one whose bytes we cannot judge, and the raw-XML escape
+#: hatch exists to create exactly those.
+_FAMILIES_WITH_A_KNOWN_VERB_LOCATION = frozenset({"rest", "soap_client", "database"})
+
+
+#: CLOSED, as the plan specifies. These were open optional strings, which is a
+#: contract that cannot be violated because it promises nothing: any typo, any
+#: value from a future caller, any silently-renamed mode passed validation.
+ResolvedConnectorModeV1 = Literal["reuse", "create", "update"]
+
+#: WHICH ARTIFACT ANSWERED. The distinction is load-bearing rather than
+#: descriptive: a declaration compared against the configuration it was derived
+#: from cannot disagree, so only a live readback makes the comparison downstream
+#: independent evidence — and the refusal message says which it was.
+ConnectorIdentityAuthorityV1 = Literal[
+    "normalized_structured_fields",
+    "submitted_xml",
+    "live_readback_xml",
+]
+
+
 class _SnapshotModel(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -103,7 +126,14 @@ class ResolvedConnectorComponentIdentityV1(_SnapshotModel):
     #: use it as it already exists, otherwise the declared action. AC8j asks the
     #: snapshot for the mode, and every consumer was reconstructing it from the
     #: reuse predicate instead of reading it here.
-    mode: Optional[str] = None
+    mode: Optional[ResolvedConnectorModeV1] = None
+    #: Which artifact this identity was read from. Closed, and derived rather
+    #: than asserted: the reader that produced it sets it.
+    authority: Optional[ConnectorIdentityAuthorityV1] = None
+    #: The route is bound to an environment extension, so the ACCOUNT decides it
+    #: and nothing here can pin it. A closed flag rather than an inference from
+    #: an unavailable route state, which has three other causes.
+    extension_bound_endpoint: Optional[bool] = None
     #: The account this resolution was taken against. AC8j asks for the ACTUAL
     #: account, and a later slice binds its grants to one; a resolution that
     #: cannot say which account it describes cannot be bound to it.
@@ -112,6 +142,12 @@ class ResolvedConnectorComponentIdentityV1(_SnapshotModel):
     #: with the fetched bytes and were discarded, so nothing downstream could say
     #: WHICH component in WHICH revision it had resolved.
     component_id: Optional[str] = None
+    #: The revision as a STRING, coerced where it enters. The platform client
+    #: returns it as an integer, and this model is frozen with a declared type —
+    #: so inserting it unvalidated emitted a serializer warning and broke strict
+    #: round-trip. My own test hid that by injecting a string the production path
+    #: never produces, which is the fixture-cannot-exhibit-the-defect shape this
+    #: slice keeps finding elsewhere.
     component_version: Optional[str] = None
     #: True when the account WAS consulted for this component and could not be
     #: read; ``None`` when it was never consulted. The distinction is the whole
@@ -171,12 +207,32 @@ class TrustedConnectorResolutionSnapshotV1(_SnapshotModel):
     """
 
     identities: Tuple[ResolvedConnectorComponentIdentityV1, ...] = ()
+    #: The account these identities were resolved against, or ``None`` when the
+    #: resolution had no account to consult. Strict: a snapshot that cannot say
+    #: which account it describes must say so rather than imply one.
+    account_scope: Optional[str] = None
 
     def lookup(self, component_key: str) -> Optional[ResolvedConnectorComponentIdentityV1]:
         for identity in self.identities:
             if identity.component_key == component_key:
                 return identity
         return None
+
+
+def _peek_subtype(component_xml):
+    """The root `subType`, read without committing to a full parse.
+
+    The family decides WHICH element is the operation config, so it has to be
+    known before the walk that looks for one. Deliberately tolerant: anything it
+    cannot find simply leaves the family unknown, and the caller then accepts any
+    direct child, which is the behaviour a family we do not model needs.
+    """
+    if not isinstance(component_xml, str):
+        return None
+    import re
+
+    match = re.search(r'\bsubType="([^"]*)"', component_xml)
+    return match.group(1) if match else None
 
 
 def live_identity_from_component_xml(
@@ -217,6 +273,25 @@ def live_identity_from_component_xml(
 
     from ..categories.components.builders.connector_builder import connector_family_of
 
+    #: The element each family's operation configuration is stored in, read off
+    #: this repository's own builders rather than assumed. FAMILY-SPECIFIC: a
+    #: `GenericOperationConfig` inside a database component is not that family's
+    #: operation config, and treating it as one made the reader answer for a
+    #: document it had not actually understood.
+    _CONFIG_ELEMENTS_BY_FAMILY = {
+        "rest": {"GenericOperationConfig"},
+        "soap_client": {"GenericOperationConfig"},
+        "database": {"DatabaseGetAction", "DatabaseSendAction"},
+    }
+    _family_hint = connector_family_of(_peek_subtype(component_xml))
+    _OPERATION_CONFIG_ELEMENTS = _CONFIG_ELEMENTS_BY_FAMILY.get(
+        _family_hint,
+        # A family we do not model: accept any direct child, because we do not
+        # know which element is its operation config and refusing to look would
+        # block the raw-XML escape hatch.
+        None,
+    )
+
     class _EntityDeclared(Exception):
         pass
 
@@ -249,7 +324,17 @@ def live_identity_from_component_xml(
         stack.append(local)
         if config_depth is None and parent == "Configuration" and len(stack) >= 2:
             grandparent = stack[-3] if len(stack) >= 3 else None
-            if grandparent == "Operation":
+            # THE FAMILY'S OWN ELEMENT, by name. Accepting any direct child of
+            # `Configuration` left an arbitrary `<Other customOperationType=...>`
+            # speaking for the operation — the same defect as reading the whole
+            # document, one level narrower. Measured from the builders: REST and
+            # SOAP both emit `GenericOperationConfig` (REST carries
+            # `customOperationType`, SOAP `operationType`), and the database
+            # family emits its verb AS the element.
+            if grandparent == "Operation" and (
+                _OPERATION_CONFIG_ELEMENTS is None
+                or local in _OPERATION_CONFIG_ELEMENTS
+            ):
                 config_depth = len(stack)
                 # The family decides WHERE the verb is; this element is where to
                 # look. Database names its verb, the others carry it as an
@@ -270,7 +355,14 @@ def live_identity_from_component_xml(
         # rule the declaration was used to select.
         if component_type is None and "type" in attributes:
             component_type = attributes["type"]
-        if local == "field" and attributes.get("id") == "path" and _in_operation_config():
+        # A DIRECT CHILD of the family config, not any descendant. A nested
+        # decoy path otherwise masked an operation that names none.
+        if (
+            local == "field"
+            and attributes.get("id") == "path"
+            and config_depth is not None
+            and len(stack) == config_depth + 1
+        ):
             path_fields.append(attributes.get("value"))
 
     def _end(_name):
@@ -391,6 +483,7 @@ def live_identity_from_component_xml(
         action=action,
         route_state=route_state,
         source="live",
+        authority="live_readback_xml",
         document_parsed=True,
         action_contradicted=contradicted,
         action_blank_present=blank_present,
@@ -484,7 +577,12 @@ def build_connector_resolution_snapshot(
         submitted = config.get("xml") if isinstance(config, Mapping) else None
         if key not in reused and isinstance(submitted, str) and submitted.strip():
             identity = live_identity_from_component_xml(key, submitted).model_copy(
-                update={"mode": mode, "account_id": account_id}
+                update={
+                    "mode": mode,
+                    "account_id": account_id,
+                    "authority": "submitted_xml",
+                    "source": "config",
+                }
             )
             # FAIL CLOSED on the caller's OWN bytes. The tolerance this module
             # applies elsewhere — an unreadable component contributes nothing and
@@ -552,10 +650,17 @@ def build_connector_resolution_snapshot(
             # so a request declaring a connection while submitting an action
             # payload installs an action — and reading the declaration let
             # exactly that request skip this rule.
+            # FAMILY-GENERAL. Scoping settledness to REST left a database
+            # Get-versus-Send or a conflicting SOAP configuration resolving to
+            # nothing, and the comparison then SKIPS an unknown action — so the
+            # caller's declaration stood for both. The scope that belongs to one
+            # family is WHERE THE VERB LIVES, which the reader now knows for all
+            # three; whether the caller's own bytes settle it is the same
+            # question everywhere.
             document_type = identity.document_component_type or ""
             if (
                 "connector-action" in document_type
-                and identity.family == "rest"
+                and identity.family in _FAMILIES_WITH_A_KNOWN_VERB_LOCATION
                 and identity.action is None
                 and not identity.action_contradicted
             ):
@@ -572,7 +677,7 @@ def build_connector_resolution_snapshot(
                     )
                 )
                 continue
-            if identity.family == "rest" and (
+            if identity.family in _FAMILIES_WITH_A_KNOWN_VERB_LOCATION and (
                 identity.action_contradicted or identity.action_blank_present
             ):
                 failures.append(
@@ -647,11 +752,16 @@ def build_connector_resolution_snapshot(
                 endpoint=projection.endpoint,
                 path=projection.path,
                 route_state=projection.route_state,
+                authority="normalized_structured_fields",
+                extension_bound_endpoint=projection.route_state == "unavailable"
+                and projection.family is not None
+                and projection.action is not None,
                 **carried,
             )
         )
     snapshot = TrustedConnectorResolutionSnapshotV1(
-        identities=tuple(sorted(resolved, key=lambda item: item.component_key))
+        identities=tuple(sorted(resolved, key=lambda item: item.component_key)),
+        account_scope=account_id,
     )
     if failures:
         first = failures[0]
@@ -681,6 +791,10 @@ def assert_declared_matches_resolved(
     scope here: the declaration does not carry one, so there is nothing to
     disagree with.
     """
+    # EVERY mismatch, collected. Raising on the first meant the planning
+    # surface — whose contract is to hand back everything wrong at once — caught
+    # one exception and reported one component, however many disagreed.
+    mismatches = []
     for key, pair in sorted(declared.items()):
         identity = snapshot.lookup(key)
         if identity is None:
@@ -712,7 +826,7 @@ def assert_declared_matches_resolved(
                 # A declaration that says nothing asserts nothing.
                 continue
             if str(theirs).strip().lower() != str(mine).strip().lower():
-                raise ConnectorIdentityError(
+                mismatches.append(ConnectorIdentityError(
                     CONNECTOR_REPLAY_IDENTITY_MISMATCH,
                     (
                         "component {0!r} is declared with {1} {2!r}, but {3} "
@@ -731,5 +845,11 @@ def assert_declared_matches_resolved(
                         mine,
                     ),
                     component_key=key,
-                )
+                ))
+    if mismatches:
+        first = mismatches[0]
+        raise ConnectorIdentityError(
+            first.code, str(first), component_key=first.component_key,
+            failures=tuple(mismatches),
+        )
     return dict(declared)

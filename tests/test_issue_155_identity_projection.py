@@ -2202,18 +2202,26 @@ _REST_SUBTYPE = "officialboomi-X3979C-rest-prod"
          "rest_client", _REST_SUBTYPE,
          '<GenericOperationConfig customOperationType="GET"/>'
          '<GenericOperationConfig customOperationType=""/>', True),
-        # The refusal is scoped to the family whose verb location is measured,
-        # exactly like the missing-verb rule beside it. A database payload's
-        # `customOperationType` is not where its verb lives, so contradicting
-        # values there settle nothing about what gets installed.
-        ("database action, blank beside a verb", "connector-action", "database",
-         "database",
+        # A DATABASE action carrying REST-shaped configuration names no database
+        # verb at all — its verb is the element, and no database action element
+        # is present. Refused for naming none, which is the same rule REST gets.
+        #
+        # This cell read `False` while settledness was REST-only, and it was
+        # right then for the wrong reason: the reader was misreading an
+        # irrelevant attribute as a verb, so refusing would have been refusing a
+        # misreading. Now each family reads only its own element, and a database
+        # action with no database action element genuinely settles nothing.
+        ("database action carrying rest-shaped config", "connector-action",
+         "database", "database",
          '<GenericOperationConfig customOperationType=""/>'
-         '<GenericOperationConfig customOperationType="GET"/>', False),
+         '<GenericOperationConfig customOperationType="GET"/>', True),
         ("database action, verb in the element name", "connector-action",
          "database", "database", "<DatabaseGetAction/>", False),
+        # SOAP uses the SAME element as REST — measured from the builder, after
+        # a fixture here invented `SoapOperationConfig`, which is the third
+        # element name in this file that the platform does not emit.
         ("soap action, verb in operationType", "connector-action", "soap_client",
-         "wssoapclientsdk", '<SoapOperationConfig operationType="EXECUTE"/>', False),
+         "wssoapclientsdk", '<GenericOperationConfig operationType="EXECUTE"/>', False),
         ("unmodelled-family action, no verb", "connector-action", "zzz", "zzz",
          "<ZzzOperationConfig/>", False),
         # NAMES ONE — settled.
@@ -2371,9 +2379,18 @@ def test_the_verb_scope_names_only_the_family_whose_verb_location_is_measured():
     snapshot = Path(__file__).resolve().parents[1] / (
         "src/boomi_mcp/authoring/connector_resolution_snapshot.py"
     )
-    assert 'identity.family == "rest"' in snapshot.read_text(), (
-        "the verb rule's family scope is not pinned to the measured family"
+    text = snapshot.read_text()
+    assert "_FAMILIES_WITH_A_KNOWN_VERB_LOCATION" in text, (
+        "the verb rule's scope is not named by the measured-family set"
     )
+    # And the set is exactly the families whose verb location this file derives.
+    from boomi_mcp.authoring.connector_resolution_snapshot import (
+        _FAMILIES_WITH_A_KNOWN_VERB_LOCATION as measured,
+    )
+
+    assert measured == {"rest", "soap_client", "database"}, measured
+    assert "GenericOperationConfig" in text, "the REST/SOAP element is not named"
+    assert "DatabaseGetAction" in text, "the database action element is not named"
 
 
 def test_the_unsettled_reasons_have_exactly_one_authority():
@@ -2498,8 +2515,10 @@ def test_the_refusal_message_names_the_condition_that_fired():
             build_connector_resolution_snapshot([component])
         return str(raised.value)
 
-    two = _refusal('<a customOperationType="PATCH"/><b customOperationType="GET"/>')
-    blank = _refusal('<operation customOperationType=""/><O customOperationType="GET"/>')
+    two = _refusal('<GenericOperationConfig customOperationType="PATCH"/>'
+                   '<GenericOperationConfig customOperationType="GET"/>')
+    blank = _refusal('<GenericOperationConfig customOperationType=""/>'
+                     '<GenericOperationConfig customOperationType="GET"/>')
     assert "more than one operation type" in two
     assert "alongside a blank one" in blank
     assert "more than one operation type" not in blank, (
@@ -2517,34 +2536,41 @@ def test_no_route_builds_a_snapshot_without_asserting_against_it():
     half-connected, and invisible to six delta-scoped reviews because each of
     them only saw the code that was there.
 
-    This asserts the property rather than today's call sites: every module that
-    BUILDS a snapshot must also COMPARE against one.
+    KEYED ON THE COMPILE SINK, not on snapshot construction. The first version of
+    this guard inventoried modules that BUILD a snapshot — and the route that was
+    actually broken builds none, so the guard structurally excluded the one thing
+    it was written to catch. A guard whose population is defined by the mechanism
+    rather than by the RISK cannot see an absence.
     """
     import ast
     from pathlib import Path
 
     src = Path(__file__).resolve().parents[1] / "src/boomi_mcp"
-    builds, asserts = set(), set()
+
+    # THE RISK is a caller's declared family/action reaching a compile decision
+    # unchallenged. So the population is every module that feeds the symbol
+    # table — that is where the declaration becomes authority — regardless of
+    # whether it happens to build a snapshot on the way.
+    sinks, asserts = set(), set()
     for path in src.rglob("*.py"):
         if path.name == "connector_resolution_snapshot.py":
-            continue  # the module that DEFINES them
+            continue  # the module that DEFINES the comparison
         tree = ast.parse(path.read_text())
         for node in ast.walk(tree):
-            if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Name):
+            if not isinstance(node, ast.Call):
                 continue
-            if node.func.id in {
-                "build_connector_resolution_snapshot", "_build_resolution",
-                "_request_only_resolution",
-            }:
-                builds.add(path.name)
-            if node.func.id == "assert_declared_matches_resolved":
+            name = getattr(node.func, "id", None) or getattr(node.func, "attr", None)
+            if name == "build_symbol_table":
+                sinks.add(path.name)
+            if name == "assert_declared_matches_resolved":
                 asserts.add(path.name)
 
-    assert builds, "no module builds a snapshot; this check would be vacuous"
-    unasserted = builds - asserts
+    assert sinks, "nothing feeds the symbol table; this check would be vacuous"
+    unasserted = sinks - asserts
     assert not unasserted, (
-        f"these modules build a connector snapshot and never compare a "
-        f"declaration against it: {sorted(unasserted)}"
+        f"these modules feed the symbol table with caller-declared connector "
+        f"metadata and never compare it against what the components resolve "
+        f"to: {sorted(unasserted)}"
     )
 
 
@@ -2577,3 +2603,169 @@ def test_the_typed_route_reports_a_mismatch_rather_than_raising():
         isinstance(c, ast.Call) and isinstance(c.func, ast.Name) and c.func.id == "_diag"
         for h in guarded[0].handlers for c in ast.walk(h)
     ), "the typed route catches the mismatch but reports no diagnostic"
+
+
+@pytest.mark.parametrize(
+    "label,subtype,connector_type,config,refused",
+    [
+        # AMBIGUITY IS AMBIGUITY IN EVERY FAMILY. Scoping settledness to REST
+        # left these resolving to nothing, and the comparison SKIPS an unknown
+        # action — so the caller's declaration stood unopposed for exactly the
+        # documents that settle least.
+        ("database Get and Send together", "database", "database",
+         "<DatabaseGetAction/><DatabaseSendAction/>", True),
+        ("soap config naming no verb", "wssoapclientsdk", "soap_client",
+         "<GenericOperationConfig/>", True),
+        ("rest config naming no verb", "officialboomi-X3979C-rest-prod",
+         "rest_client", "<GenericOperationConfig/>", True),
+        # ...but a family whose verb location is NOT measured is still one whose
+        # bytes cannot be judged, and the raw-XML escape hatch exists for it.
+        ("unmodelled family naming no verb", "zzz", "zzz",
+         "<GenericOperationConfig/>", False),
+        ("database Get alone", "database", "database", "<DatabaseGetAction/>", False),
+        ("soap execute alone", "wssoapclientsdk", "soap_client",
+         '<GenericOperationConfig operationType="EXECUTE"/>', False),
+    ],
+)
+def test_submitted_settledness_covers_every_family_whose_verb_we_can_find(
+    label, subtype, connector_type, config, refused
+):
+    """ARCHITECT e2: settledness was REST-only while the reader is family-general.
+
+    What belongs to one family is WHERE the verb lives. Whether the caller's own
+    bytes settle it is the same question everywhere the answer is findable.
+    """
+    from boomi_mcp.authoring.connector_resolution_snapshot import (
+        ConnectorIdentityError,
+        build_connector_resolution_snapshot,
+    )
+    from boomi_mcp.models.integration_models import IntegrationComponentSpec
+
+    component = IntegrationComponentSpec(
+        key="k", type="connector-action", action="create",
+        config={"connector_type": connector_type,
+                "xml": _operation_component(subtype, config)},
+    )
+    if refused:
+        with pytest.raises(ConnectorIdentityError) as raised:
+            build_connector_resolution_snapshot([component])
+        assert raised.value.code == "CONNECTOR_REPLAY_SUBMITTED_XML_UNREADABLE", label
+    else:
+        build_connector_resolution_snapshot([component])
+
+
+def test_every_mismatch_is_reported_not_only_the_first():
+    """ARCHITECT e2: the comparison raised on the first disagreement.
+
+    So the planning surface — whose contract is to hand back everything wrong at
+    once — caught one exception and named one component, however many disagreed.
+    """
+    from boomi_mcp.authoring.connector_resolution_snapshot import (
+        ConnectorIdentityError,
+        assert_declared_matches_resolved,
+        build_connector_resolution_snapshot,
+    )
+    from boomi_mcp.models.integration_models import IntegrationComponentSpec
+
+    components = [
+        IntegrationComponentSpec(
+            key=key, type="connector-action", action="create",
+            config={"connector_type": "rest_client", "method": "GET",
+                    "xml": _operation_component(
+                        _REST_SUBTYPE,
+                        '<GenericOperationConfig customOperationType="POST"/>')},
+        )
+        for key in ("a", "b", "c")
+    ]
+    snapshot = build_connector_resolution_snapshot(components)
+    with pytest.raises(ConnectorIdentityError) as raised:
+        assert_declared_matches_resolved(
+            snapshot, {key: ("rest_client", "GET") for key in ("a", "b", "c")}
+        )
+    assert [f.component_key for f in raised.value.failures] == ["a", "b", "c"]
+
+    # CONTROL: agreement raises nothing at all.
+    assert_declared_matches_resolved(
+        snapshot, {key: ("rest_client", "POST") for key in ("a", "b", "c")}
+    )
+
+
+def test_the_snapshot_contract_is_CLOSED_where_the_plan_says_it_is():
+    """ARCHITECT e2: mode and authority were open optional strings.
+
+    A contract of open strings cannot be violated, which is another way of
+    saying it promises nothing — a typo, a value from a future caller, a
+    silently-renamed mode all passed. The plan names both as closed literals and
+    this asserts they are, in the only way that matters: a bogus value is
+    refused by the model rather than by a convention.
+    """
+    import typing
+
+    import pytest as _pytest
+
+    from boomi_mcp.authoring.connector_resolution_snapshot import (
+        ConnectorIdentityAuthorityV1,
+        ResolvedConnectorComponentIdentityV1,
+        ResolvedConnectorModeV1,
+    )
+
+    assert set(typing.get_args(ResolvedConnectorModeV1)) == {"reuse", "create", "update"}
+    assert set(typing.get_args(ConnectorIdentityAuthorityV1)) == {
+        "normalized_structured_fields", "submitted_xml", "live_readback_xml",
+    }
+
+    for field, bogus in (("mode", "recycle"), ("authority", "vibes")):
+        with _pytest.raises(Exception):
+            ResolvedConnectorComponentIdentityV1(component_key="k", **{field: bogus})
+
+
+@pytest.mark.parametrize(
+    "label,live,reused,expected_authority,expected_mode",
+    [
+        ("the account answered", True, True, "live_readback_xml", "reuse"),
+        ("the caller's own xml answered", False, False, "submitted_xml", "create"),
+    ],
+)
+def test_the_authority_is_set_by_whichever_reader_actually_answered(
+    label, live, reused, expected_authority, expected_mode
+):
+    """Which artifact answered is load-bearing, not descriptive.
+
+    A declaration compared against the configuration it was derived from cannot
+    disagree, so only a live readback makes the comparison independent evidence —
+    and the refusal message already says which it was. Recording it as a closed
+    field means a consumer can act on it rather than parse the sentence.
+    """
+    from boomi_mcp.authoring.connector_resolution_snapshot import (
+        build_connector_resolution_snapshot,
+    )
+    from boomi_mcp.models.integration_models import IntegrationComponentSpec
+
+    document = _live_rest_op('<field id="path" value="/x"/>', verb="GET")
+    config = {"connector_type": "rest_client"}
+    if not live:
+        config = {**config, "xml": document}
+    component = IntegrationComponentSpec(
+        key="a", type="connector-action", action="create",
+        component_id="i" if live else None, config=config,
+    )
+    snapshot = build_connector_resolution_snapshot(
+        [component],
+        live_component_xml={"a": {"xml": document, "read_failed": False}} if live else {},
+        reused_keys={"a"} if reused else set(),
+        account_id="acct-X",
+    )
+    identity = snapshot.lookup("a")
+    assert identity.authority == expected_authority, label
+    assert identity.mode == expected_mode
+    assert snapshot.account_scope == "acct-X"
+
+
+def test_a_snapshot_with_no_account_says_so_rather_than_implying_one():
+    """Strict scope: `None` is an answer, and a different one from a value."""
+    from boomi_mcp.authoring.connector_resolution_snapshot import (
+        build_connector_resolution_snapshot,
+    )
+
+    assert build_connector_resolution_snapshot([]).account_scope is None
+    assert build_connector_resolution_snapshot([], account_id="a").account_scope == "a"
