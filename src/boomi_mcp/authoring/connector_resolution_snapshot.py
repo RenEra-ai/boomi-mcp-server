@@ -92,6 +92,12 @@ class ResolvedConnectorComponentIdentityV1(_SnapshotModel):
     path: Optional[str] = None
     #: ``"static"`` | ``"dynamic"`` | ``"unavailable"`` — see the projection.
     route_state: str = "unavailable"
+    #: Whether the document carried a BLANK operation type beside anything else.
+    #: Separate from ``action_contradicted`` because the two rungs that read this
+    #: model want opposite things: the rung that REFUSES caller bytes treats a
+    #: blank as unsettled, and the rung that RESOLVES account bytes must still
+    #: read the real verb sitting next to it or the checks built on it go silent.
+    action_blank_present: Optional[bool] = None
     #: The component type the DOCUMENT declares, which is what the platform
     #: installs. Distinct from the type declared beside it in the request: a
     #: request declaring a connection while submitting an action payload installs
@@ -264,14 +270,23 @@ def live_identity_from_component_xml(
         if isinstance(value, str)
     }
     distinct_actions = verb_tokens - {_BLANK}
-    # Settled only when the document says exactly ONE thing and that thing is a
-    # verb. Contradicted when it says more than one thing, blank included.
-    action = (
-        next(iter(distinct_actions))
-        if len(verb_tokens) == 1 and len(distinct_actions) == 1
-        else None
-    )
-    contradicted = len(verb_tokens) > 1
+    # TWO RUNGS, OPPOSITE DISPOSITIONS, SO TWO SIGNALS. The refusal rung is
+    # additive — every extra thing it treats as unsettled REFUSES more — while
+    # the resolution rung is subtractive: everything it treats as unsettled makes
+    # it resolve LESS, and resolving less is how a net goes silent. One predicate
+    # serving both meant widening the refusal quietly widened the silence.
+    #
+    # Measured: a component the account stores with one real verb and a stray
+    # blank stopped resolving, so the blank-path refusal and the identity
+    # comparison both went quiet and a path-less connector action applied.
+    #
+    # RESOLUTION reads the verbs the document actually names: exactly one
+    # distinct non-blank verb IS the verb, whatever else sits beside it.
+    action = next(iter(distinct_actions)) if len(distinct_actions) == 1 else None
+    # REFUSAL is the caller's problem and keeps the stricter reading: a blank
+    # beside a real verb means the bytes do not settle which one is installed.
+    contradicted = len(distinct_actions) > 1
+    blank_present = _BLANK in verb_tokens
     resolved_enough = family is not None and action is not None
 
     # THE STORED PATH, and it is the whole point for a reused component. Reading
@@ -297,6 +312,7 @@ def live_identity_from_component_xml(
         source="live",
         document_parsed=True,
         action_contradicted=contradicted,
+        action_blank_present=blank_present,
         document_component_type=component_type,
     )
 
@@ -452,16 +468,23 @@ def build_connector_resolution_snapshot(
                     )
                 )
                 continue
-            if identity.action_contradicted:
+            if identity.family == "rest" and (
+                identity.action_contradicted or identity.action_blank_present
+            ):
                 failures.append(
                     ConnectorIdentityError(
                         CONNECTOR_REPLAY_SUBMITTED_XML_UNREADABLE,
                         (
-                            "component {0!r} supplies raw component XML naming "
-                            "more than one operation type, so what it would "
-                            "install is not settled by its own bytes. Supply one "
+                            "component {0!r} supplies raw component XML that "
+                            "names {1}, so what it would install is not settled "
+                            "by its own bytes. Supply exactly one non-blank "
                             "operation type."
-                        ).format(key),
+                        ).format(
+                            key,
+                            "more than one operation type"
+                            if identity.action_contradicted
+                            else "an operation type alongside a blank one",
+                        ),
                         component_key=key,
                     )
                 )

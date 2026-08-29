@@ -2076,6 +2076,13 @@ _REST_SUBTYPE = "officialboomi-X3979C-rest-prod"
         ("rest action, nonblank decoy before a blank verb", "connector-action",
          "rest_client", _REST_SUBTYPE,
          '<Other customOperationType="GET"/><operation customOperationType=""/>', True),
+        # The refusal is scoped to the family whose verb location is measured,
+        # exactly like the missing-verb rule beside it. A database payload's
+        # `customOperationType` is not where its verb lives, so contradicting
+        # values there settle nothing about what gets installed.
+        ("database action, blank beside a verb", "connector-action", "database",
+         "database",
+         '<operation customOperationType=""/><O customOperationType="GET"/>', False),
         ("database action, verb in the element name", "connector-action",
          "database", "database", "<Configuration><DatabaseGetAction/></Configuration>",
          False),
@@ -2280,3 +2287,87 @@ def test_the_unsettled_reasons_have_exactly_one_authority():
     from boomi_mcp.authoring import connector_resolution_snapshot as snapshot
 
     assert snapshot.SUBMITTED_XML_UNSETTLED_REASONS is SUBMITTED_XML_UNSETTLED_REASONS
+
+
+@pytest.mark.parametrize(
+    "label,stored,resolves_to",
+    [
+        ("one verb", '<operation customOperationType="GET"/>', "GET"),
+        # THE REGRESSION. A component the account stores with one real verb and a
+        # stray blank must still resolve, or every check derived from the
+        # snapshot goes quiet for it.
+        ("one verb beside a blank",
+         '<operation customOperationType=""/><Other customOperationType="GET"/>', "GET"),
+        ("two real verbs — genuinely unresolvable",
+         '<a customOperationType="PATCH"/><b customOperationType="GET"/>', None),
+        ("a blank alone", '<operation customOperationType=""/>', None),
+    ],
+)
+def test_the_account_rung_resolves_independently_of_what_the_caller_rung_refuses(
+    label, stored, resolves_to
+):
+    """CDX round 6 + QA H10: one predicate served two rungs facing opposite ways.
+
+    Widening "unsettled" is ADDITIVE where it refuses caller bytes and
+    SUBTRACTIVE where it resolves account bytes — resolving less is how a net
+    goes silent. Widening the refusal to cover a blank therefore stopped a stored
+    component with one real verb and a stray blank from resolving at all, and a
+    path-less connector action applied because the blank-path refusal had nothing
+    left to fire on.
+
+    This asserts the resolution rung directly, THROUGH the consumer that went
+    quiet, so a future widening of the refusal cannot take it down again.
+    """
+    from boomi_mcp.authoring.connector_resolution_snapshot import (
+        build_connector_resolution_snapshot,
+        live_identity_from_component_xml,
+    )
+    from boomi_mcp.models.integration_models import IntegrationComponentSpec
+    from boomi_mcp.recipes.materialization import _requires_path_binding
+
+    document = (
+        f'<Component type="connector-action" subType="{_REST_SUBTYPE}"><object>'
+        f'{stored}<field id="path" type="string" value=""/></object></Component>'
+    )
+    assert live_identity_from_component_xml("op", document).action == resolves_to, label
+
+    component = IntegrationComponentSpec(
+        key="op", type="connector-action", action="create", component_id="id-1",
+        config={"connector_type": "rest_client"},
+    )
+    snapshot = build_connector_resolution_snapshot(
+        [component], live_component_xml={"op": document}, reused_keys={"op"}
+    )
+    # The blank-path net fires only on an explicit True.
+    expected_binding = True if resolves_to is not None else None
+    assert _requires_path_binding(snapshot, "op") is expected_binding, (
+        f"{label}: the blank-path refusal is silent for a stored path-less operation"
+    )
+
+
+def test_the_refusal_message_names_the_condition_that_fired():
+    """QA: the message said "more than one operation type" for a document
+    naming exactly one, beside a blank."""
+    from boomi_mcp.authoring.connector_resolution_snapshot import (
+        ConnectorIdentityError,
+        build_connector_resolution_snapshot,
+    )
+    from boomi_mcp.models.integration_models import IntegrationComponentSpec
+
+    def _refusal(inner):
+        component = IntegrationComponentSpec(
+            key="k", type="connector-action", action="create",
+            config={"connector_type": "rest_client",
+                    "xml": _raw_component(_REST_SUBTYPE, inner, "connector-action")},
+        )
+        with pytest.raises(ConnectorIdentityError) as raised:
+            build_connector_resolution_snapshot([component])
+        return str(raised.value)
+
+    two = _refusal('<a customOperationType="PATCH"/><b customOperationType="GET"/>')
+    blank = _refusal('<operation customOperationType=""/><O customOperationType="GET"/>')
+    assert "more than one operation type" in two
+    assert "alongside a blank one" in blank
+    assert "more than one operation type" not in blank, (
+        "a document naming exactly one verb is told it named several"
+    )
