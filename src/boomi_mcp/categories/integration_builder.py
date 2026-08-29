@@ -7812,9 +7812,7 @@ def _execute_canonical_process(
     # over would have removed the crash and reintroduced the hand-model this
     # slice has been eliminating; `authoring.workflow` already imports this
     # module lazily, so the reverse lazy import is safe.
-    from ..authoring.workflow import _connector_metadata_from_components
     from ..compiler.process_ir.emitter_registry import emitter_revision
-    from ..recipes.materialization import build_symbol_table
     from .components.canonical_process_apply import (
         CanonicalProcessApplyError,
         applied_component_name,
@@ -7918,11 +7916,13 @@ def _execute_canonical_process(
         # Placement was resolved by the CALLER before the mutation loop began
         # (§6 AR1-06 + Codex round 13) — resolving here was after the root's
         # dependencies had already been written. `None` = account root.
-        symbols = build_symbol_table(
-            list(spec.components),
-            process_keys=[u.envelope.component_key for u in (spec.processes or ())],
-            connector_metadata=_connector_metadata_from_components(spec.components),
-        )
+        # The SAME construction the plan path uses. This was a hand copy of
+        # `_build_canonical_symbols` sitting 280 lines below it with byte-identical
+        # arguments — the second-builder shape this slice pre-enumerated, and the
+        # reason that helper's docstring claimed three callers while only two used
+        # it. Threading anything new into the symbol table had two places to reach
+        # here and would have reached one.
+        symbols = _build_canonical_symbols(spec=spec)
         if stored_plan is not None:
             # THE COMPILED PLAN IS EXECUTED, never a rebuild (§6 AR1-01).
             #

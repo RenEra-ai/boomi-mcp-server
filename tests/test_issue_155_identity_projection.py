@@ -183,3 +183,62 @@ def test_the_projection_never_calls_build():
 
     # Non-vacuity: the same walk DOES see the calls it really makes.
     assert called, "the AST walk found no attribute calls at all — it proves nothing"
+
+
+# --- slice C: the canonical symbol table has ONE construction --------------------
+
+
+def test_the_canonical_symbol_table_is_built_in_exactly_one_place():
+    """A second builder of an already-resolved fact is this slice's own defect class.
+
+    The apply path hand-copied ``_build_canonical_symbols`` with byte-identical
+    arguments, 280 lines below the helper — which is why that helper's docstring
+    claimed three callers while only two used it. Threading anything new into the
+    table therefore had two places to reach and would have reached one.
+
+    Counted over the AST so a formatting change cannot silently satisfy it.
+    """
+    import ast
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    module = root / "src/boomi_mcp/categories/integration_builder.py"
+    tree = ast.parse(module.read_text())
+
+    # The ONE sanctioned construction lives inside the shared helper. An earlier
+    # version of this guard forbade every direct call including that one, so it
+    # failed on a clean tree — a guard that cannot pass is not a guard.
+    sanctioned = next(
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.FunctionDef) and node.name == "_build_canonical_symbols"
+    )
+    inside_helper = {
+        id(node)
+        for node in ast.walk(sanctioned)
+        if isinstance(node, ast.Call)
+    }
+    direct = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "build_symbol_table"
+        and id(node) not in inside_helper
+    ]
+    assert direct == [], (
+        "integration_builder builds the symbol table outside the shared helper at "
+        f"line(s) {[n.lineno for n in direct]} — route it through _build_canonical_symbols"
+    )
+
+    helper = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "_build_canonical_symbols"
+    ]
+    assert len(helper) >= 3, (
+        "the shared construction lost a caller; its docstring claims three "
+        f"(plan, apply, pre-write dry emit), found {len(helper)}"
+    )

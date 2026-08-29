@@ -141,6 +141,18 @@ base-URL path project identically here. That is deliberate — this is a pre-app
 the route digest, which reads the applied component's XML and keeps the full path. A test pins
 the consequence so it cannot drift silently.
 
+**Unit 3 — the four symbol-table sinks became three.** The apply path
+(`_execute_canonical_process`) hand-copied `_build_canonical_symbols` with byte-identical
+arguments from 280 lines below it, so threading anything into the canonical symbol table had two
+places to reach and would have reached one. That is `DC-155-B`, a second builder of an
+already-resolved fact, and it was visible in the tree before this slice touched it: the helper's
+docstring claimed "ONE construction, three callers" while only two callers used it. Apply now
+calls the helper — three callers, as the docstring always said — and the two local imports that
+existed only for the hand copy are gone. An AST guard pins that the table is constructed nowhere
+but inside that helper. Graded BOTH directions, which the first version was not: it forbade every
+direct call including the helper's own and therefore failed on a clean tree — a guard that cannot
+pass is not a guard.
+
 **Not yet wired.** Units 1 and 2 are consumed by nothing outside their tests. That is the
 `#180` inertness shape and it is named here rather than left implicit: the next unit is the
 snapshot module plus its first real consumer, and neither of these lands on `dev` before that
