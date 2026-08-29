@@ -202,6 +202,7 @@ def build_connector_resolution_snapshot(
     *,
     live_projections: Optional[Mapping[str, Mapping[str, Any]]] = None,
     live_component_xml: Optional[Mapping[str, str]] = None,
+    reused_keys: Optional[Sequence[str]] = None,
 ) -> TrustedConnectorResolutionSnapshotV1:
     """Resolve every connector component in ``components`` from its own config.
 
@@ -217,6 +218,11 @@ def build_connector_resolution_snapshot(
 
     live = live_projections or {}
     live_xml = live_component_xml or {}
+    # Keys apply will REUSE, answered by the apply-time predicate rather than
+    # inferred here. It decides ONE thing: whether the request's own bytes will
+    # be written at all. When they will not be, they are not this component's
+    # identity, however emphatically they are declared.
+    reused = set(reused_keys or ())
     resolved = []
     for component in components:
         component_type = getattr(component, "type", None)
@@ -227,25 +233,36 @@ def build_connector_resolution_snapshot(
             continue
         config = getattr(component, "config", None) or {}
 
-        # SUBMITTED XML OUTRANKS THE DECLARATIONS BESIDE IT. A raw create carries
-        # `config.xml`, and that XML is what gets written — so a request may
-        # declare GET while the payload installs a POST, and reading only the
-        # declarations let the assertion pass on the thing that was NOT applied.
+        # ONE PRECEDENCE CHAIN, and the question it answers at every step is the
+        # same one: which bytes will this component ACTUALLY have after apply?
+        #
+        # 1. SUBMITTED XML outranks the declarations beside it — WHEN IT WILL BE
+        #    WRITTEN. That XML is what gets installed for a real create, so a
+        #    request may declare GET while the payload installs a POST, and
+        #    reading only the declarations let the assertion pass on the thing
+        #    that was NOT applied. But a raw create that COLLIDES is planned as a
+        #    reuse: apply returns the existing component and the submitted XML is
+        #    never written, so treating it as the identity compared the
+        #    declaration against a payload nothing applies and missed both a
+        #    stored verb mismatch and a stored blank path.
+        # 2. Otherwise the account's reading, for a component that names one and
+        #    is not an UPDATE. An update is not a reuse: its live component is
+        #    the state being CHANGED, so preferring it would reject a legitimate
+        #    POST-to-GET update as a mismatch with its own former self, and read
+        #    the path requirement off the route the request is replacing.
+        # 3. Otherwise the config's own projection.
+        #
+        # A reuse therefore reaches rung 2 and takes the account's bytes. An
+        # explicit reuse-first rung was written here and then REMOVED after a
+        # mutation showed it decided nothing: a reused component is always a
+        # declared create, so rung 2's update test can never exclude it. A rung
+        # no mutant can reach is a rung the next reader has to disprove.
+        action = getattr(component, "action", None)
         submitted = config.get("xml") if isinstance(config, Mapping) else None
-        if isinstance(submitted, str) and submitted.strip():
+        if key not in reused and isinstance(submitted, str) and submitted.strip():
             identity = live_identity_from_component_xml(key, submitted)
             resolved.append(identity.model_copy(update={"source": "config"}))
             continue
-
-        # The ACCOUNT's answer wins for a REUSE. Not because the config is
-        # untrusted, but because comparing a declaration against the config it
-        # was derived from is a tautology — only an independent reading helps.
-        #
-        # An UPDATE is NOT a reuse. Its live component is the state being
-        # CHANGED, so preferring it would reject a legitimate POST-to-GET update
-        # as a mismatch with its own former self, and would read the path
-        # requirement off the route the request is replacing.
-        action = getattr(component, "action", None)
         if key in live_xml and action != "update":
             resolved.append(live_identity_from_component_xml(key, live_xml[key]))
             continue

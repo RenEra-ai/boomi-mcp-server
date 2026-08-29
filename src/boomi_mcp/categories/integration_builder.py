@@ -5510,6 +5510,53 @@ def _authored_process_validation_error(
     )
 
 
+def _will_reuse_at_apply(
+    *, declared_action, existing_component_id, reference_only, conflict_policy
+):
+    """Will apply REUSE this component rather than write it?
+
+    THE predicate, derived from the one branch in ``_apply_plan`` that decides
+    it, and the only place this question is answered. It was answered in three
+    places before: that branch, ``_authored_step_will_reuse`` (issue #139D), and
+    a third consumer that keyed on ``planned_action`` instead and got the corner
+    #139D's docstring had already written down in words — an explicit
+    ``component_id`` skips candidate resolution, so a declared ``create``
+    carrying one keeps ``planned_action="create"`` at plan time while apply
+    reuses it anyway.
+
+    A ``reference_only`` create always reuses, independent of the conflict
+    policy: it describes a dependency on something that already exists.
+    """
+    if declared_action != "create":
+        return False
+    if not existing_component_id:
+        return False
+    return bool(reference_only) or conflict_policy == "reuse"
+
+
+def _component_reference_only(comp) -> bool:
+    """The documented ``reference_only`` binding, read one way everywhere."""
+    config = getattr(comp, "config", None)
+    return isinstance(config, dict) and bool(config.get("reference_only"))
+
+
+def _keys_reused_at_apply(*, spec, existing_ids, conflict_policy):
+    """Every component key apply will reuse, by the one predicate."""
+    reused = set()
+    for comp in (getattr(spec, "components", None) or ()):
+        key = getattr(comp, "key", None)
+        if not (isinstance(key, str) and key):
+            continue
+        if _will_reuse_at_apply(
+            declared_action=getattr(comp, "action", None),
+            existing_component_id=(existing_ids or {}).get(key),
+            reference_only=_component_reference_only(comp),
+            conflict_policy=conflict_policy,
+        ):
+            reused.add(key)
+    return reused
+
+
 def _authored_step_will_reuse(
     steps: List[Dict[str, Any]],
     authored_key: Optional[str],
@@ -5517,13 +5564,9 @@ def _authored_step_will_reuse(
 ) -> bool:
     """Will the single authored process step reuse an existing component at apply?
 
-    Issue #139D. Keyed on the APPLY-time predicate (``_apply_plan``: a declared
-    ``create`` carrying an ``existing_component_id`` reuses under
-    ``conflict_policy="reuse"``), NOT on ``planned_action``. An explicit
-    ``component_id`` skips candidate resolution, so such a step keeps
-    ``planned_action="create"`` at plan time while apply still reuses it — reading
-    ``planned_action`` alone would miss exactly that corner and echo a view of a
-    component the request never authored.
+    Issue #139D. Keyed on the APPLY-time predicate, which now lives in
+    ``_will_reuse_at_apply`` and is asked rather than restated — this function
+    was the second copy of it, and a third copy elsewhere got the corner wrong.
 
     A ``reference_only`` create also reuses at apply, but it is excluded from the
     declared-authoring count, so ``authored_key`` can never name one.
@@ -5533,11 +5576,12 @@ def _authored_step_will_reuse(
     for step in steps:
         if step.get("key") != authored_key:
             continue
-        if step.get("declared_action") != "create":
-            return False
-        if not step.get("existing_component_id"):
-            return False
-        return conflict_policy == "reuse"
+        return _will_reuse_at_apply(
+            declared_action=step.get("declared_action"),
+            existing_component_id=step.get("existing_component_id"),
+            reference_only=False,
+            conflict_policy=conflict_policy,
+        )
     return False
 
 
@@ -7625,8 +7669,8 @@ def _resolve_canonical_placement(boomi_client, envelope):
     return matches[0].get("id") or None
 
 
-def _live_connector_xml(*, boomi_client, spec, planned_actions, existing_ids):
-    """Live XML for every connector component this request REUSES.
+def _live_connector_xml(*, boomi_client, spec, existing_ids, conflict_policy):
+    """Live XML for every connector component apply will REUSE.
 
     Only components the request will USE AS THEY ALREADY EXIST are read: they
     are the only ones whose stored identity can disagree with what the request
@@ -7634,16 +7678,15 @@ def _live_connector_xml(*, boomi_client, spec, planned_actions, existing_ids):
     against, so reading nothing for it is correct rather than merely cheap —
     though it is also why this adds no platform calls to a create-only apply.
 
-    "Reuse" is THE PLANNER'S WORD, not a judgement assembled here. An earlier
-    version searched three places for an id and treated a hit anywhere as a
-    reuse, which re-derives a decision the plan had already made and recorded —
-    and it got that decision wrong twice. A plain create carrying a stray
-    ``component_id`` in its config was read, though that key binds nothing
-    unless ``reference_only`` is set; and every ``conflict_policy="clone"``
-    collision was read, though the planner sets that id DELIBERATELY to name the
-    component being cloned FROM. Both then refused the request against a
-    component it never touches. The plan already distinguishes all of this, so
-    this asks it instead of reconstructing it.
+    "Reuse" is asked of ``_will_reuse_at_apply``, the one predicate, and the
+    history of this line is the argument for that. It first searched three
+    places for an id and treated a hit anywhere as a reuse, which read a plain
+    create's stray config id and every clone collision, and refused both against
+    components the request never touches. It then keyed on ``planned_action``,
+    which misses the opposite corner: an explicit ``component_id`` skips
+    candidate resolution, so a declared ``create`` carrying one stays
+    ``planned_action="create"`` while apply reuses it — and #139D had written
+    that down, in this file, one function away from where I got it wrong.
 
     A component that cannot be read contributes NOTHING, and the comparison then
     skips it. That is the same "I could not tell is not evidence" rule the
@@ -7652,22 +7695,18 @@ def _live_connector_xml(*, boomi_client, spec, planned_actions, existing_ids):
     """
     from .components._shared import component_get_xml
 
+    reused = _keys_reused_at_apply(
+        spec=spec, existing_ids=existing_ids, conflict_policy=conflict_policy
+    )
     live = {}
     for component in (getattr(spec, "components", None) or ()):
         component_type = getattr(component, "type", None)
         key = getattr(component, "key", None)
         if not isinstance(component_type, str) or "connector" not in component_type:
             continue
-        if not (isinstance(key, str) and key):
-            continue
-        # An UPDATE's live component is the state being CHANGED, so the snapshot
-        # keeps the request's desired identity for it — reading it would spend a
-        # platform call on bytes nothing consumes.
-        if (planned_actions or {}).get(key) != "reuse":
+        if key not in reused:
             continue
         component_id = (existing_ids or {}).get(key)
-        if not (isinstance(component_id, str) and component_id):
-            continue
         try:
             fetched = component_get_xml(boomi_client, component_id)
         except Exception:
@@ -7678,7 +7717,7 @@ def _live_connector_xml(*, boomi_client, spec, planned_actions, existing_ids):
     return live
 
 
-def _build_canonical_symbols(*, spec, live_component_xml=None):
+def _build_canonical_symbols(*, spec, live_component_xml=None, reused_keys=None):
     """The compile symbol table for one spec. ONE construction, three callers.
 
     The step function, the pre-write plan build and the pre-write dry emit all
@@ -7702,7 +7741,9 @@ def _build_canonical_symbols(*, spec, live_component_xml=None):
     # the apply path share, so a mismatch refuses before the first write.
     declared = _connector_metadata_from_components(spec.components)
     snapshot = build_connector_resolution_snapshot(
-        spec.components, live_component_xml=live_component_xml
+        spec.components,
+        live_component_xml=live_component_xml,
+        reused_keys=reused_keys,
     )
     assert_declared_matches_resolved(snapshot, declared)
 
@@ -8794,15 +8835,26 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
     # Nothing consumes it when there is no process root: the reading feeds the
     # canonical symbol table, which is built per root. Hoisting it made the call
     # unconditional, so a components-only apply paid for bytes no check reads.
+    # The loop below SKIPS a root planned as a reuse, so "there is a root" is
+    # not the same as "a root will be compiled" — with every root reused, the
+    # pass builds no canonical symbols and nothing reads these bytes. Derived
+    # from the loop's own skip so the two cannot drift apart.
+    _roots_to_compile = [
+        _pkey for _pkey in process_units_by_key
+        if _planned_actions.get(_pkey) != "reuse"
+    ]
     _pre_write_live_xml = (
         _live_connector_xml(
             boomi_client=boomi_client,
             spec=spec,
-            planned_actions=_planned_actions,
             existing_ids=existing_ids,
+            conflict_policy=conflict_policy,
         )
-        if process_units_by_key
+        if _roots_to_compile
         else {}
+    )
+    _reused_component_keys = _keys_reused_at_apply(
+        spec=spec, existing_ids=existing_ids, conflict_policy=conflict_policy
     )
     for _pkey, _unit in process_units_by_key.items():
         # A NON-WRITING PLANNED ACTION IS SKIPPED FOR THE WHOLE PASS, once, at
@@ -8881,6 +8933,7 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
                 _build_canonical_symbols(
                     spec=spec,
                     live_component_xml=_pre_write_live_xml,
+                    reused_keys=_reused_component_keys,
                 ),
                 _depends_on_by_key,
             )
@@ -9262,12 +9315,19 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
             # dependency on something that already exists, never a create or
             # clone. The "fail"/"clone" branches below would otherwise misfire on
             # a deliberately-reused connection.
-            reference_only = isinstance(comp.config, dict) and bool(
-                comp.config.get("reference_only")
-            )
+            reference_only = _component_reference_only(comp)
 
             if comp.action == "create" and existing_id:
-                if reference_only or conflict_policy == "reuse":
+                # ASKED, not restated. This branch is where the reuse decision
+                # is made, and it is now the predicate's only definition site —
+                # so a pre-write check that needs the same answer gets THIS one
+                # rather than a reconstruction of it.
+                if _will_reuse_at_apply(
+                    declared_action=comp.action,
+                    existing_component_id=existing_id,
+                    reference_only=reference_only,
+                    conflict_policy=conflict_policy,
+                ):
                     results[key] = {
                         "status": "reused",
                         "component_id": existing_id,

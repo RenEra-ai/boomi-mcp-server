@@ -520,8 +520,8 @@ def test_apply_reads_the_account_for_reused_connectors(monkeypatch):
     live = ib._live_connector_xml(
         boomi_client=object(),
         spec=_Spec(),
-        planned_actions={"reused_op": "reuse", "created_op": "create"},
         existing_ids={"reused_op": "deadbeef-0000-0000-0000-000000000000"},
+        conflict_policy="reuse",
     )
 
     # ONLY the reused component is read — a created one has no account-side truth,
@@ -556,8 +556,8 @@ def test_an_unreadable_component_skips_the_comparison_rather_than_refusing(monke
     assert ib._live_connector_xml(
         boomi_client=object(),
         spec=_Spec(),
-        planned_actions={"reused_op": "reuse"},
         existing_ids={"reused_op": "deadbeef-0000-0000-0000-000000000000"},
+        conflict_policy="reuse",
     ) == {}
     # and the symbol table still builds, because nothing was contradicted
     assert ib._build_canonical_symbols(spec=_Spec(), live_component_xml={}) is not None
@@ -1034,22 +1034,19 @@ def test_only_a_BUILDABLE_replacement_set_projects_as_a_route(replacements, expe
     assert identity.route_state == expected
 
 
-def test_only_a_planned_REUSE_is_read_from_the_account(monkeypatch):
-    """CDX P1, then QA: the question is not "is there an id" but "is this a reuse".
+def test_only_a_component_APPLY_WILL_REUSE_is_read_from_the_account(monkeypatch):
+    """The read's population is apply's decision, and only apply's.
 
-    An id exists in several places and means several things. A plain create can
-    carry a stray `component_id` in its config, where the key binds nothing
-    unless `reference_only` is set; and a clone collision has an `existing_id`
-    the planner sets DELIBERATELY, to name the component being cloned FROM.
-    Reading either one refuses the request against a component it never touches
-    — which live QA measured as a refusal of every `conflict_policy="clone"`
-    apply. The plan already made this decision; this asks it.
+    Three answers have been wrong here, each in a different direction. Searching
+    three places for an id read a plain create's stray config id and every clone
+    collision, refusing both against components the request never touches. Keying
+    on `planned_action` missed the opposite corner: an explicit `component_id`
+    skips candidate resolution, so a declared create carrying one keeps
+    `planned_action="create"` while apply reuses it. The predicate below is the
+    one apply itself uses, so there is no third direction to be wrong in.
     """
     from boomi_mcp.categories import integration_builder as ib
     from boomi_mcp.models.integration_models import IntegrationComponentSpec
-
-    def _config(**extra):
-        return {"connector_type": "rest_client", "method": "GET", **extra}
 
     reads = []
 
@@ -1061,95 +1058,109 @@ def test_only_a_planned_REUSE_is_read_from_the_account(monkeypatch):
         "boomi_mcp.categories.components._shared.component_get_xml", _fake_get_xml
     )
 
-    spec = type("S", (), {"components": [
-        IntegrationComponentSpec(key="reused", type="connector-action", config=_config()),
-        IntegrationComponentSpec(key="updated", type="connector-action",
-                                 action="update", component_id="id-upd", config=_config()),
-        IntegrationComponentSpec(key="cloned", type="connector-action", config=_config()),
-        IntegrationComponentSpec(key="stray", type="connector-action",
-                                 config=_config(component_id="id-stray")),
-        IntegrationComponentSpec(key="created", type="connector-action", config=_config()),
-    ]})()
+    def _cfg(**extra):
+        return {"connector_type": "rest_client", "method": "GET", **extra}
 
-    live = ib._live_connector_xml(
-        boomi_client=object(),
-        spec=spec,
-        planned_actions={
-            "reused": "reuse",
-            "updated": "update",
-            "cloned": "create_clone",
-            "stray": "create",
-            "created": "create",
-        },
-        existing_ids={
-            "reused": "id-reused",
-            "updated": "id-upd",
-            "cloned": "id-cloned-from",
-            "stray": None,
-            "created": None,
-        },
-    )
-    assert set(live) == {"reused"}, "something other than a planned reuse was read"
-    assert reads == ["id-reused"], f"platform reads beyond the reuse: {reads}"
-
-
-def test_the_reuse_rule_asks_the_planner_rather_than_searching_for_an_id():
-    """Non-vacuity: the guard above passes for a function that reads nothing.
-
-    So this constructs the case the OLD rule got wrong and the new one must get
-    right — the same component key, the same id in the same place, differing
-    only in what the plan decided about it.
-    """
-    from boomi_mcp.categories import integration_builder as ib
-    from boomi_mcp.models.integration_models import IntegrationComponentSpec
-
-    component = IntegrationComponentSpec(
-        key="c", type="connector-action", component_id="id-1",
-        config={"connector_type": "rest_client", "method": "GET"},
-    )
-    spec = type("S", (), {"components": [component]})()
-
-    def _run(planned_action):
-        seen = []
-
-        class _Shared:
-            @staticmethod
-            def component_get_xml(client, component_id, *a, **k):
-                seen.append(component_id)
-                return {"xml": _live_rest_op('<field id="path" value="/x"/>')}
-
-        import sys
-        real = sys.modules["boomi_mcp.categories.components._shared"].component_get_xml
-        sys.modules["boomi_mcp.categories.components._shared"].component_get_xml = (
-            _Shared.component_get_xml
+    cases = [
+        # (label, component, existing id, policy, apply reuses it?)
+        ("explicit id, policy=reuse",
+         IntegrationComponentSpec(key="k", type="connector-action", action="create",
+                                  component_id="i", config=_cfg()), "i", "reuse", True),
+        ("explicit id, policy=clone",
+         IntegrationComponentSpec(key="k", type="connector-action", action="create",
+                                  component_id="i", config=_cfg()), "i", "clone", False),
+        ("explicit id, policy=fail",
+         IntegrationComponentSpec(key="k", type="connector-action", action="create",
+                                  component_id="i", config=_cfg()), "i", "fail", False),
+        ("reference_only, policy=clone",
+         IntegrationComponentSpec(key="k", type="connector-action", action="create",
+                                  config=_cfg(reference_only=True)), "i", "clone", True),
+        ("update",
+         IntegrationComponentSpec(key="k", type="connector-action", action="update",
+                                  component_id="i", config=_cfg()), "i", "reuse", False),
+        ("no existing id",
+         IntegrationComponentSpec(key="k", type="connector-action", action="create",
+                                  config=_cfg()), None, "reuse", False),
+    ]
+    for label, component, existing, policy, reused in cases:
+        reads.clear()
+        live = ib._live_connector_xml(
+            boomi_client=object(),
+            spec=type("S", (), {"components": [component]})(),
+            existing_ids={"k": existing} if existing else {},
+            conflict_policy=policy,
         )
-        try:
-            ib._live_connector_xml(
-                boomi_client=object(), spec=spec,
-                planned_actions={"c": planned_action},
-                existing_ids={"c": "id-1"},
-            )
-        finally:
-            sys.modules["boomi_mcp.categories.components._shared"].component_get_xml = real
-        return seen
-
-    assert _run("reuse") == ["id-1"], "a planned reuse must be read"
-    assert _run("create_clone") == [], "a clone names what it copies, not what it uses"
-    assert _run("create") == [], "a create has no account-side truth"
+        assert bool(live) is reused, f"{label}: read={bool(live)}, apply reuses={reused}"
 
 
-def test_the_pre_write_read_is_skipped_when_nothing_consumes_it():
-    """QA: the hoist made the call unconditional.
+def test_the_reader_and_apply_cannot_disagree_about_what_a_reuse_is():
+    """Non-vacuity, and the structural claim: ONE definition site.
 
-    The reading feeds the canonical symbol table, which is built per process
-    root, so a components-only apply paid platform calls for bytes no check
-    reads. The saving the hoist earns is unaffected — that is a separate guard.
+    The predicate was answered in three places — apply's own branch, the #139D
+    helper, and the reader. Two of the three were reconstructions, and one of
+    those got the corner the third had documented in words. This asserts there
+    is exactly one place left that decides it.
     """
     import ast
     from pathlib import Path
 
     module = Path(__file__).resolve().parents[1] / "src/boomi_mcp/categories/integration_builder.py"
     tree = ast.parse(module.read_text())
+    definitions = [
+        n for n in ast.walk(tree)
+        if isinstance(n, ast.FunctionDef) and n.name == "_will_reuse_at_apply"
+    ]
+    assert len(definitions) == 1, "the reuse predicate has more than one definition"
+
+    # And every consumer ASKS it rather than restating its terms. A restatement
+    # looks like a conflict-policy comparison inside a function that decides
+    # connector reuse.
+    #
+    # SCOPED, and the scope is the point rather than a convenience. Running this
+    # over the whole module finds three more comparisons, and none of them is
+    # this predicate: two are the PROCESS-root path, which has its own reuse rule
+    # and its own apply implementation — no producer in this tree sets
+    # `reference_only` on a process component, so the connector rule does not
+    # even apply there — and the third is the PLAN's own labelling, which is
+    # deliberately allowed to differ from apply and whose divergence is the very
+    # thing #139D documented. A guard that flagged them would be enumerating a
+    # universe it has no authority over. They are recorded in the slice ledger as
+    # a sibling sweep with that justification, not silently excluded.
+    deciders = {
+        "_apply_plan", "_live_connector_xml", "_keys_reused_at_apply",
+        "_authored_step_will_reuse",
+    }
+    functions = [
+        n for n in ast.walk(tree)
+        if isinstance(n, ast.FunctionDef) and n.name in deciders
+    ]
+    assert len(functions) == len(deciders), "a connector-reuse decider went missing"
+
+    offenders = []
+    for function in functions:
+        for node in ast.walk(function):
+            if not isinstance(node, ast.Compare):
+                continue
+            if isinstance(node.left, ast.Name) and node.left.id == "conflict_policy":
+                for comparator in node.comparators:
+                    if isinstance(comparator, ast.Constant) and comparator.value == "reuse":
+                        offenders.append((function.name, node.lineno))
+    assert not offenders, (
+        f"a connector-reuse decider restates the predicate instead of asking it: {offenders}"
+    )
+def test_the_pre_write_read_is_skipped_when_no_root_will_be_compiled():
+    """QA, then the review: "there is a root" is not "a root will be compiled".
+
+    The pre-write loop skips any root planned as a reuse, so an apply whose roots
+    are all reused builds no canonical symbols and reads none of these bytes. The
+    gate is derived from the loop's own skip condition so the two cannot drift.
+    """
+    import ast
+    from pathlib import Path
+
+    module = Path(__file__).resolve().parents[1] / "src/boomi_mcp/categories/integration_builder.py"
+    source = module.read_text()
+    tree = ast.parse(source)
     apply_plan = next(
         n for n in ast.walk(tree)
         if isinstance(n, ast.FunctionDef) and n.name == "_apply_plan"
@@ -1163,12 +1174,13 @@ def test_the_pre_write_read_is_skipped_when_nothing_consumes_it():
             for sub in ast.walk(node)
         )
         and isinstance(node.test, ast.Name)
-        and node.test.id == "process_units_by_key"
+        and node.test.id == "_roots_to_compile"
     ]
-    assert len(guarded) == 1, "the account read is not gated on there being a consumer"
+    assert len(guarded) == 1, "the account read is not gated on a root that will compile"
 
-
-
+    # The gate's own population must exclude exactly what the loop skips.
+    assert '_planned_actions.get(_pkey) != "reuse"' in source
+    assert '_planned_actions.get(_pkey) == "reuse"' in source
 def test_the_account_is_read_once_per_apply_not_once_per_root():
     """CDX P2: N roots x M connectors of platform GETs, and worse — two roots
     could observe DIFFERENT snapshots of the same account."""
@@ -1392,3 +1404,86 @@ def test_every_archived_platform_capture_still_reads():
         if name in read and expected[name][0] is not None:
             assert read[name][0] == expected[name][0], f"{name} now reads {read[name]}"
     assert json.dumps(read), "unserializable"
+
+
+def test_unwritten_submitted_xml_never_outranks_the_account():
+    """CDX round 2 P1: a raw create that COLLIDES is planned as a reuse.
+
+    Its submitted XML is then never written — apply returns the existing
+    component — so treating that XML as the identity compared the declaration
+    against a payload nothing applies, and missed both a stored verb mismatch
+    and a stored blank path. The precedence chain now asks one question at every
+    step: which bytes will this component ACTUALLY have after apply?
+    """
+    from boomi_mcp.authoring.connector_resolution_snapshot import (
+        build_connector_resolution_snapshot,
+    )
+    from boomi_mcp.models.integration_models import IntegrationComponentSpec
+
+    submitted = _live_rest_op('<field id="path" value="/submitted"/>', verb="POST")
+    account = _live_rest_op('<field id="path" type="string" value=""/>', verb="GET")
+    component = IntegrationComponentSpec(
+        key="raw", type="connector-action", action="create",
+        config={"connector_type": "rest_client", "method": "POST", "xml": submitted},
+    )
+
+    reused = build_connector_resolution_snapshot(
+        [component], live_component_xml={"raw": account}, reused_keys={"raw"}
+    ).lookup("raw")
+    assert (reused.action, reused.route_state, reused.source) == ("GET", "dynamic", "live"), (
+        "a reuse must take the account's bytes, not the XML nobody writes"
+    )
+
+    written = build_connector_resolution_snapshot(
+        [component], live_component_xml={"raw": account}, reused_keys=set()
+    ).lookup("raw")
+    assert (written.action, written.source) == ("POST", "config"), (
+        "a real create must still take the XML it submits"
+    )
+
+
+def test_the_precedence_chain_covers_every_way_a_component_gets_its_bytes():
+    """Non-vacuity for the chain: every route in must be reachable.
+
+    Four ways one component key can get its bytes, three distinct answers —
+    a reuse and a plain non-update read share a rung by design, and that is
+    asserted rather than assumed, because an earlier version gave them separate
+    rungs and a mutation showed the first one decided nothing.
+    """
+    from boomi_mcp.authoring.connector_resolution_snapshot import (
+        build_connector_resolution_snapshot,
+    )
+    from boomi_mcp.models.integration_models import IntegrationComponentSpec
+
+    submitted = _live_rest_op('<field id="path" value="/s"/>', verb="POST")
+    account = _live_rest_op('<field id="path" value="/a"/>', verb="DELETE")
+    base = {"connector_type": "rest_client", "method": "GET",
+            "base_url": "http://h:8081", "path": "/c"}
+
+    def _resolve(config, action, live, reused):
+        component = IntegrationComponentSpec(
+            key="k", type="connector-action", action=action, config=config
+        )
+        return build_connector_resolution_snapshot(
+            [component],
+            live_component_xml=({"k": account} if live else None),
+            reused_keys=({"k"} if reused else set()),
+        ).lookup("k")
+
+    rungs = {
+        "reuse takes the account":
+            _resolve({**base, "xml": submitted}, "create", True, True).action,
+        "a write takes its submitted xml":
+            _resolve({**base, "xml": submitted}, "create", True, False).action,
+        "a non-update read takes the account":
+            _resolve(base, "create", True, False).action,
+        "an update keeps its desired identity":
+            _resolve(base, "update", True, False).action,
+    }
+    assert rungs == {
+        "reuse takes the account": "DELETE",
+        "a write takes its submitted xml": "POST",
+        "a non-update read takes the account": "DELETE",
+        "an update keeps its desired identity": "GET",
+    }, rungs
+    assert len(set(rungs.values())) == 3, "two rungs collapsed onto one answer"
