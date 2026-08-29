@@ -205,9 +205,42 @@ def live_identity_from_component_xml(
     actions = []
     path_fields = []
 
+    # THE OPERATION'S OWN ELEMENT, not the document. Measured from a real
+    # platform capture: a connector action stores its facts at
+    # ``Operation/Configuration/<FamilyOperationConfig>`` — for REST that
+    # element carries `customOperationType` and the `path` field beneath it.
+    #
+    # Reading the whole document instead made anything ANYWHERE speak for the
+    # operation: a verb on an unrelated element became the operation's verb, and
+    # an unrelated `field id="path"` made the route look settled. The refusal
+    # this module carries for "a document naming two operation types" exists
+    # because of that, and with the scope corrected a stray attribute elsewhere
+    # is not a contradiction at all — it simply is not the operation's verb.
+    stack = []
+    config_depth = None
+
+    def _in_operation_config():
+        return config_depth is not None and len(stack) >= config_depth
+
     def _start(name, attributes):
-        nonlocal subtype, component_type
+        nonlocal subtype, component_type, config_depth
         local = name.rsplit("}", 1)[-1].rsplit(":", 1)[-1]
+        parent = stack[-1] if stack else None
+        stack.append(local)
+        if config_depth is None and parent == "Configuration" and len(stack) >= 2:
+            grandparent = stack[-3] if len(stack) >= 3 else None
+            if grandparent == "Operation":
+                config_depth = len(stack)
+                # The family decides WHERE the verb is; this element is where to
+                # look. Database names its verb, the others carry it as an
+                # attribute — both measured, from the builders and a capture.
+                actions.append(
+                    {
+                        "element": local,
+                        "customOperationType": attributes.get("customOperationType"),
+                        "operationType": attributes.get("operationType"),
+                    }
+                )
         if subtype is None and "subType" in attributes:
             subtype = attributes["subType"]
         # WHAT THE PAYLOAD SAYS IT IS. The caller's declaration beside the XML is
@@ -217,10 +250,15 @@ def live_identity_from_component_xml(
         # rule the declaration was used to select.
         if component_type is None and "type" in attributes:
             component_type = attributes["type"]
-        if "customOperationType" in attributes:
-            actions.append(attributes["customOperationType"])
-        if local == "field" and attributes.get("id") == "path":
+        if local == "field" and attributes.get("id") == "path" and _in_operation_config():
             path_fields.append(attributes.get("value"))
+
+    def _end(_name):
+        nonlocal config_depth
+        if config_depth is not None and len(stack) == config_depth:
+            config_depth = None
+        if stack:
+            stack.pop()
 
     def _entity_declared(*_args, **_kwargs):
         raise _EntityDeclared
@@ -233,6 +271,7 @@ def live_identity_from_component_xml(
     parser = xml.parsers.expat.ParserCreate()
     parser.EntityDeclHandler = _entity_declared
     parser.StartElementHandler = _start
+    parser.EndElementHandler = _end
     try:
         parser.Parse(component_xml, True)
     except (_EntityDeclared, xml.parsers.expat.ExpatError):
@@ -243,6 +282,28 @@ def live_identity_from_component_xml(
         return unreadable
 
     family = connector_family_of(subtype)
+
+    # WHERE EACH FAMILY KEEPS ITS VERB, measured rather than assumed — the
+    # earlier version asserted one location for every family and was wrong for
+    # two of three, which refused raw-XML replay of the platform's own bytes.
+    #
+    # REST keeps it in ``customOperationType`` (real capture), SOAP in
+    # ``operationType`` (live capture), and the database family keeps it in the
+    # ELEMENT NAME, because its builders emit `<DatabaseGetAction>` and
+    # `<DatabaseSendAction>` and no operation-type attribute at all.
+    _DATABASE_ACTION_ELEMENTS = {
+        "DatabaseGetAction": "GET",
+        "DatabaseSendAction": "SEND",
+    }
+
+    def _verb_of(config):
+        if family == "database":
+            return _DATABASE_ACTION_ELEMENTS.get(config["element"])
+        if family == "soap_client":
+            return config["operationType"]
+        return config["customOperationType"]
+
+    actions = [_verb_of(config) for config in actions]
 
     # EVERY verb the document carries, not the first one. A document with two
     # different ``customOperationType`` values is one this reader cannot resolve:

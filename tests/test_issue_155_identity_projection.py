@@ -702,13 +702,43 @@ def test_the_refusal_is_reached_through_the_single_entry_point():
 # --- slice C: what live QA round 1 found, pinned so it cannot come back ----------
 
 
+#: THE REAL PLATFORM SHAPE, copied from an archived capture of an executed
+#: component (`captures/cap155-e2-post/operation_component.xml`) rather than
+#: modelled. The earlier fixtures put the verb directly under `<object>`, which
+#: the platform never emits — so every test built on them was exercising a
+#: document that cannot exist, and the reader they validated was reading the
+#: whole document because nothing here ever told it otherwise.
 def _live_rest_op(path_field, verb="GET"):
+    return _operation_component(
+        "officialboomi-X3979C-rest-prod",
+        f'<GenericOperationConfig customOperationType="{verb}" '
+        f'operationType="EXECUTE">{path_field}</GenericOperationConfig>',
+    )
+
+
+def _operation_component(subtype, operation_config, outside=""):
+    """A connector ACTION in the shape the platform stores.
+
+    `operation_config` is the content of `Operation/Configuration` — the
+    family's own operation element. `outside` is anything sitting elsewhere in
+    the document, which is where decoys go: the point of scoping the reader is
+    that nothing out there speaks for the operation.
+    """
     return (
         '<bns:Component xmlns:bns="http://api.platform.boomi.com/" '
-        'type="connector-action" subType="officialboomi-X3979C-rest-prod">'
-        f'<bns:object><Operation customOperationType="{verb}">'
-        f"<GenericOperationConfig>{path_field}</GenericOperationConfig>"
-        "</Operation></bns:object></bns:Component>"
+        f'type="connector-action" subType="{subtype}">'
+        f"<bns:object>{outside}"
+        f"<Operation><Configuration>{operation_config}</Configuration></Operation>"
+        "</bns:object></bns:Component>"
+    )
+
+
+def _settings_component(subtype, inner):
+    """A connector CONNECTION, which has no operation element at all."""
+    return (
+        '<bns:Component xmlns:bns="http://api.platform.boomi.com/" '
+        f'type="connector-settings" subType="{subtype}">'
+        f"<bns:object>{inner}</bns:object></bns:Component>"
     )
 
 
@@ -1350,12 +1380,12 @@ def test_the_refusal_is_at_the_DECLARATION_not_at_the_expansion():
         live_identity_from_component_xml,
     )
 
-    unused = (
-        '<?xml version="1.0"?><!DOCTYPE d [<!ENTITY unused "x">]>'
-        '<Component subType="officialboomi-X3979C-rest-prod"><object>'
-        '<operation customOperationType="GET"/>'
-        '<field id="path" value="/x"/></object></Component>'
+    body = _operation_component(
+        _REST_SUBTYPE,
+        '<GenericOperationConfig customOperationType="GET">'
+        '<field id="path" value="/x"/></GenericOperationConfig>',
     )
+    unused = '<?xml version="1.0"?><!DOCTYPE d [<!ENTITY unused "x">]>' + body
     identity = live_identity_from_component_xml("op", unused)
     assert identity.route_state == "unavailable", (
         "an unreferenced entity declaration was accepted, so the refusal is "
@@ -1364,12 +1394,7 @@ def test_the_refusal_is_at_the_DECLARATION_not_at_the_expansion():
 
     # The CONTROL: the same document without the declaration reads normally, so
     # the refusal above is about the entity and not about the shape.
-    without = (
-        '<Component subType="officialboomi-X3979C-rest-prod"><object>'
-        '<operation customOperationType="GET"/>'
-        '<field id="path" value="/x"/></object></Component>'
-    )
-    control = live_identity_from_component_xml("op", without)
+    control = live_identity_from_component_xml("op", body)
     assert (control.family, control.action, control.route_state) == (
         "rest", "GET", "static",
     )
@@ -1502,10 +1527,10 @@ def test_the_precedence_chain_covers_every_way_a_component_gets_its_bytes():
     assert len(set(rungs.values())) == 3, "two rungs collapsed onto one answer"
 
 
-_BYPASS_BODY = (
-    '<Component type="connector-action" subType="officialboomi-X3979C-rest-prod">'
-    '<object><operation customOperationType="PATCH"/>'
-    '<field id="path" type="string" value=""/></object></Component>'
+_BYPASS_BODY = _operation_component(
+    "officialboomi-X3979C-rest-prod",
+    '<GenericOperationConfig customOperationType="PATCH">'
+    '<field id="path" type="string" value=""/></GenericOperationConfig>',
 )
 
 
@@ -1854,53 +1879,67 @@ def test_the_plan_surface_reports_where_apply_refuses():
     ), "the plan surface catches the refusal but reports no diagnostic"
 
 
-@pytest.mark.parametrize(
-    "spliced,expected",
-    [
-        ('<GenericOperationConfig customOperationType="GET"/>'
-         '<operation customOperationType="PATCH"/>', None),
-        ('<operation customOperationType="PATCH"/>'
-         '<GenericOperationConfig customOperationType="GET"/>', None),
-        ('<GenericOperationConfig customOperationType="PATCH"/>'
-         '<operation customOperationType="PATCH"/>', "PATCH"),
-        ('<GenericOperationConfig customOperationType="patch"/>'
-         '<operation customOperationType="PATCH"/>', "PATCH"),
-        ('<operation customOperationType="PATCH"/>', "PATCH"),
-    ],
-)
-def test_two_contradictory_verbs_resolve_to_neither(spliced, expected):
-    """QA (pre-existing): the reader took the FIRST verb it met.
+def test_a_verb_outside_the_operation_does_not_speak_for_it():
+    """The property the scoping fix earns, asserted directly.
 
-    A decoy element spliced ahead of the real operation therefore decided the
-    identity. Which element the platform runtime honours is NOT established —
-    settling it needs a deploy and an execution — so the reader refuses to
-    choose rather than guessing, which is the rule it already applies to every
-    other fact it cannot settle. Identical repeats are not a contradiction.
+    The reader used to parse the whole component, so anything anywhere became
+    the operation's verb — and the contradiction refusal this module carries was
+    built to contain that. With the reader scoped to the operation's own
+    element, a stray attribute elsewhere is not a contradiction; it simply is
+    not the operation's verb, and the operation's real verb still resolves.
     """
     from boomi_mcp.authoring.connector_resolution_snapshot import (
         live_identity_from_component_xml,
     )
 
-    document = (
-        '<Component type="connector-action" subType="officialboomi-X3979C-rest-prod">'
-        f'<object>{spliced}<field id="path" value="/x"/></object></Component>'
+    document = _operation_component(
+        _REST_SUBTYPE,
+        '<GenericOperationConfig customOperationType="PATCH">'
+        '<field id="path" value="/x"/></GenericOperationConfig>',
+        outside='<Unrelated customOperationType="GET"/>'
+                '<Somewhere><field id="path" value="/decoy"/></Somewhere>',
     )
-    identity = live_identity_from_component_xml("c", document)
-    assert identity.action == expected
-    assert identity.readable is True, "a contradiction is not an unparseable document"
-    if expected is None:
-        assert identity.route_state == "unavailable"
+    identity = live_identity_from_component_xml("k", document)
+    assert identity.action == "PATCH", "a decoy outside the operation won"
+    assert identity.route_state == "static", "a decoy path outside the operation won"
+    assert identity.action_contradicted is False
 
+
+@pytest.mark.parametrize(
+    "configs,expected",
+    [
+        ('<GenericOperationConfig customOperationType="PATCH"/>', "PATCH"),
+        ('<GenericOperationConfig customOperationType="PATCH"/>'
+         '<GenericOperationConfig customOperationType="PATCH"/>', "PATCH"),
+        ('<GenericOperationConfig customOperationType="patch"/>'
+         '<GenericOperationConfig customOperationType="PATCH"/>', "PATCH"),
+        # TWO operation configs naming different verbs IS a contradiction: both
+        # are the operation's own, and which one the runtime honours is not
+        # established here.
+        ('<GenericOperationConfig customOperationType="PATCH"/>'
+         '<GenericOperationConfig customOperationType="GET"/>', None),
+    ],
+)
+def test_two_operation_configs_naming_different_verbs_resolve_to_neither(
+    configs, expected
+):
+    """A contradiction is now WITHIN the operation, where it means something."""
+    from boomi_mcp.authoring.connector_resolution_snapshot import (
+        live_identity_from_component_xml,
+    )
+
+    identity = live_identity_from_component_xml(
+        "k", _operation_component(_REST_SUBTYPE, configs)
+    )
+    assert identity.action == expected
+    assert identity.readable is True
 
 def test_caller_xml_naming_two_verbs_is_refused_not_merely_unsettled():
-    """CDX round 4 P1: a defect in the previous round's own fix.
+    """Resolving a contradiction to nothing is fail-open for the CALLER's bytes.
 
-    Resolving a contradiction to nothing is right for the ACCOUNT's bytes and
-    fail-open for the CALLER's: the comparison skips an unknown action, so a
-    component declared with a read verb could install XML that executes a write
-    one. The rule was already stated one branch above — unknown from the account
-    is silence, unknown from the caller is a refusal — and applied to
-    unparseable documents only.
+    The comparison skips an unknown action, so a component declared with a read
+    verb could install XML that executes a write one. Unknown from the account is
+    silence; unknown from the caller is a refusal.
     """
     from boomi_mcp.authoring.connector_resolution_snapshot import (
         ConnectorIdentityError,
@@ -1908,39 +1947,39 @@ def test_caller_xml_naming_two_verbs_is_refused_not_merely_unsettled():
     )
     from boomi_mcp.models.integration_models import IntegrationComponentSpec
 
-    def _component(spliced):
+    def _component(configs):
         return IntegrationComponentSpec(
             key="raw", type="connector-action", action="create",
             config={"connector_type": "rest_client", "method": "GET",
-                    "xml": _live_rest_op('<field id="path" value="/x"/>').replace(
-                        "<bns:object>", f"<bns:object>{spliced}")},
+                    "xml": _operation_component(_REST_SUBTYPE, configs)},
         )
 
-    contradiction = '<GenericOperationConfig customOperationType="DELETE"/>'
     with pytest.raises(ConnectorIdentityError) as raised:
-        build_connector_resolution_snapshot([_component(contradiction)])
+        build_connector_resolution_snapshot([_component(
+            '<GenericOperationConfig customOperationType="DELETE"/>'
+            '<GenericOperationConfig customOperationType="GET"/>')])
     assert raised.value.code == "CONNECTOR_REPLAY_SUBMITTED_XML_UNREADABLE"
 
-    # CONTROL: a document that settles ONE verb is still accepted.
-    settled = build_connector_resolution_snapshot([_component("")]).lookup("raw")
+    settled = build_connector_resolution_snapshot([_component(
+        '<GenericOperationConfig customOperationType="GET"/>')]).lookup("raw")
     assert settled.action == "GET"
 
-
 def test_the_account_branch_keeps_its_silence_on_a_contradiction():
-    """The other half of the asymmetry, asserted so the fix cannot over-reach.
+    """A contradiction in bytes the ACCOUNT served is silence, never a refusal.
 
-    A contradiction in bytes the ACCOUNT served is still silence: refusing there
-    would turn a platform-side oddity into an authoring refusal, which is the
-    thing this module has declined to do since its first line.
+    Refusing there would turn a platform-side oddity into an authoring refusal,
+    which this module has declined to do since its first line.
     """
     from boomi_mcp.authoring.connector_resolution_snapshot import (
         build_connector_resolution_snapshot,
     )
     from boomi_mcp.models.integration_models import IntegrationComponentSpec
 
-    contradictory = _live_rest_op('<field id="path" value="/x"/>').replace(
-        "<bns:object>",
-        '<bns:object><GenericOperationConfig customOperationType="DELETE"/>')
+    contradictory = _operation_component(
+        _REST_SUBTYPE,
+        '<GenericOperationConfig customOperationType="PATCH"/>'
+        '<GenericOperationConfig customOperationType="GET"/>',
+    )
     component = IntegrationComponentSpec(
         key="op", type="connector-action", action="create", component_id="id-1",
         config={"connector_type": "rest_client", "method": "GET"},
@@ -1950,15 +1989,8 @@ def test_the_account_branch_keeps_its_silence_on_a_contradiction():
     ).lookup("op")
     assert identity.action is None and identity.source == "live"
 
-
 def test_every_unresolvable_component_is_reported_and_the_rest_survive():
-    """CDX round 4 P2: raising on the first contradicts the report-all contract.
-
-    And replacing the whole snapshot with an empty one discarded identities that
-    were never in question — including the ones the blank-path refusal is derived
-    from, so a second component's defect could silence a first component's
-    diagnostic.
-    """
+    """Raising on the first contradicts the planning surface's report-all rule."""
     from boomi_mcp.authoring.connector_resolution_snapshot import (
         ConnectorIdentityError,
         build_connector_resolution_snapshot,
@@ -1972,9 +2004,10 @@ def test_every_unresolvable_component_is_reported_and_the_rest_survive():
         )
 
     unparseable = '<!DOCTYPE C [<!ENTITY x "y">]><Component/>'
-    contradictory = _live_rest_op('<field id="path" value="/x"/>').replace(
-        "<bns:object>",
-        '<bns:object><GenericOperationConfig customOperationType="DELETE"/>')
+    contradictory = _operation_component(
+        _REST_SUBTYPE,
+        '<GenericOperationConfig customOperationType="DELETE"/>'
+        '<GenericOperationConfig customOperationType="GET"/>')
     fine = IntegrationComponentSpec(
         key="fine", type="connector-action", action="create",
         config={"connector_type": "rest_client", "method": "GET",
@@ -1983,15 +2016,10 @@ def test_every_unresolvable_component_is_reported_and_the_rest_survive():
 
     with pytest.raises(ConnectorIdentityError) as raised:
         build_connector_resolution_snapshot(
-            [_raw("a", unparseable), _raw("b", contradictory), fine]
-        )
+            [_raw("a", unparseable), _raw("b", contradictory), fine])
     error = raised.value
     assert [f.component_key for f in error.failures] == ["a", "b"]
-    assert error.partial is not None
-    assert [i.component_key for i in error.partial.identities] == ["fine"], (
-        "identities that resolved were discarded with the ones that did not"
-    )
-
+    assert [i.component_key for i in error.partial.identities] == ["fine"]
 
 def test_the_planning_summary_can_classify_a_snapshot_refusal():
     """CDX round 4 P2: `is_valid: false`, `error_count: 1`, `codes: []`.
@@ -2039,7 +2067,10 @@ def test_the_planning_summary_can_classify_a_snapshot_refusal():
 
 
 def _raw_component(subtype, inner, kind="connector-settings"):
-    return f'<Component type="{kind}" subType="{subtype}"><object>{inner}</object></Component>'
+    """Real-shape component. For an ACTION, `inner` is the operation config."""
+    if "connector-action" in kind:
+        return _operation_component(subtype, inner)
+    return _settings_component(subtype, inner)
 
 
 _REST_SUBTYPE = "officialboomi-X3979C-rest-prod"
@@ -2060,11 +2091,11 @@ _REST_SUBTYPE = "officialboomi-X3979C-rest-prod"
         # `operationType`, so a wider scope refused raw-XML replay of the
         # platform's own bytes for both.
         ("rest action with its verb removed", "connector-action", "rest_client",
-         _REST_SUBTYPE, '<operation/>', True),
+         _REST_SUBTYPE, '<GenericOperationConfig/>', True),
         ("rest action with an empty verb", "connector-action", "rest_client",
-         _REST_SUBTYPE, '<operation customOperationType=""/>', True),
+         _REST_SUBTYPE, '<GenericOperationConfig customOperationType=""/>', True),
         ("rest action with a whitespace verb", "connector-action", "rest_client",
-         _REST_SUBTYPE, '<operation customOperationType="   "/>', True),
+         _REST_SUBTYPE, '<GenericOperationConfig customOperationType="   "/>', True),
         # MIXED blank and nonblank. Filtering blanks out before counting made
         # these collapse to a singleton, so a decoy attribute elsewhere in the
         # document bypassed the missing-verb refusal while the verb actually
@@ -2072,36 +2103,47 @@ _REST_SUBTYPE = "officialboomi-X3979C-rest-prod"
         # reader was order-sensitive and this one must not be.
         ("rest action, blank verb plus a nonblank decoy", "connector-action",
          "rest_client", _REST_SUBTYPE,
-         '<operation customOperationType=""/><Other customOperationType="GET"/>', True),
+         '<GenericOperationConfig customOperationType=""/>'
+         '<GenericOperationConfig customOperationType="GET"/>', True),
         ("rest action, nonblank decoy before a blank verb", "connector-action",
          "rest_client", _REST_SUBTYPE,
-         '<Other customOperationType="GET"/><operation customOperationType=""/>', True),
+         '<GenericOperationConfig customOperationType="GET"/>'
+         '<GenericOperationConfig customOperationType=""/>', True),
         # The refusal is scoped to the family whose verb location is measured,
         # exactly like the missing-verb rule beside it. A database payload's
         # `customOperationType` is not where its verb lives, so contradicting
         # values there settle nothing about what gets installed.
         ("database action, blank beside a verb", "connector-action", "database",
          "database",
-         '<operation customOperationType=""/><O customOperationType="GET"/>', False),
+         '<GenericOperationConfig customOperationType=""/>'
+         '<GenericOperationConfig customOperationType="GET"/>', False),
         ("database action, verb in the element name", "connector-action",
-         "database", "database", "<Configuration><DatabaseGetAction/></Configuration>",
-         False),
+         "database", "database", "<DatabaseGetAction/>", False),
         ("soap action, verb in operationType", "connector-action", "soap_client",
-         "wssoapclientsdk", '<operation operationType="EXECUTE"/>', False),
+         "wssoapclientsdk", '<SoapOperationConfig operationType="EXECUTE"/>', False),
         ("unmodelled-family action, no verb", "connector-action", "zzz", "zzz",
-         "<operation/>", False),
+         "<ZzzOperationConfig/>", False),
         # NAMES ONE — settled.
         ("one verb", "connector-action", "rest_client", _REST_SUBTYPE,
-         '<operation customOperationType="GET"/>', False),
+         '<GenericOperationConfig customOperationType="GET"/>', False),
         ("the same verb twice", "connector-action", "rest_client", _REST_SUBTYPE,
-         '<a customOperationType="GET"/><operation customOperationType="GET"/>', False),
+         '<GenericOperationConfig customOperationType="GET"/>'
+         '<GenericOperationConfig customOperationType="GET"/>', False),
         ("the same verb in two cases", "connector-action", "rest_client", _REST_SUBTYPE,
-         '<a customOperationType="get"/><operation customOperationType="GET"/>', False),
+         '<GenericOperationConfig customOperationType="get"/>'
+         '<GenericOperationConfig customOperationType="GET"/>', False),
         # NAMES TWO — settles nothing, and that is the caller's to fix.
         ("two verbs on an operation", "connector-action", "rest_client", _REST_SUBTYPE,
-         '<a customOperationType="PATCH"/><operation customOperationType="GET"/>', True),
-        ("two verbs on a connection", "connector-settings", "rest_client", _REST_SUBTYPE,
-         '<a customOperationType="PATCH"/><b customOperationType="GET"/>', True),
+         '<GenericOperationConfig customOperationType="PATCH"/>'
+         '<GenericOperationConfig customOperationType="GET"/>', True),
+        # A CONNECTION HAS NO OPERATION ELEMENT, so nothing inside one is the
+        # operation's verb and there is nothing to contradict. Under the old
+        # whole-document scope this refused; that was the scope defect, not a
+        # property worth keeping.
+        ("operation configs inside a connection", "connector-settings",
+         "rest_client", _REST_SUBTYPE,
+         '<GenericOperationConfig customOperationType="PATCH"/>'
+         '<GenericOperationConfig customOperationType="GET"/>', False),
     ],
 )
 def test_only_a_CONTRADICTED_submitted_document_is_refused(
@@ -2139,34 +2181,28 @@ def test_only_a_CONTRADICTED_submitted_document_is_refused(
 
 
 def test_the_contradiction_is_recorded_by_the_reader_not_inferred_downstream():
-    """Non-vacuity: the fact is carried, so it cannot be re-derived wrongly.
+    """Non-vacuity: an absent verb and a contradicted one are distinguishable.
 
-    An identity with no action is not evidence of a contradiction, and this
-    asserts the two are distinguishable on the model itself rather than only in
-    the branch that happens to consume them today.
+    Both leave `action` empty, and only one of them is the caller's mistake.
     """
     from boomi_mcp.authoring.connector_resolution_snapshot import (
         live_identity_from_component_xml,
     )
 
     none_named = live_identity_from_component_xml(
-        "k", _raw_component(_REST_SUBTYPE, '<RestConnectionSettings url="http://h"/>')
+        "k", _settings_component(_REST_SUBTYPE,
+                                 '<RestConnectionSettings url="http://h"/>')
     )
     two_named = live_identity_from_component_xml(
-        "k", _raw_component(
+        "k", _operation_component(
             _REST_SUBTYPE,
-            '<a customOperationType="PATCH"/><b customOperationType="GET"/>',
-        )
+            '<GenericOperationConfig customOperationType="PATCH"/>'
+            '<GenericOperationConfig customOperationType="GET"/>')
     )
     assert none_named.action is None and two_named.action is None
     assert none_named.action_contradicted is False
-    assert two_named.action_contradicted is True, (
-        "the reader discards which of the two cases it saw"
-    )
-    # No document read at all: neither true nor false.
-    unparseable = live_identity_from_component_xml("k", "<not-xml")
-    assert unparseable.action_contradicted is None
-
+    assert two_named.action_contradicted is True
+    assert live_identity_from_component_xml("k", "<not-xml").action_contradicted is None
 
 def test_the_served_summary_describes_both_ways_a_document_fails_to_settle():
     """QA (low): the served row still said only "cannot be read".
@@ -2292,15 +2328,23 @@ def test_the_unsettled_reasons_have_exactly_one_authority():
 @pytest.mark.parametrize(
     "label,stored,resolves_to",
     [
-        ("one verb", '<operation customOperationType="GET"/>', "GET"),
+        ("one verb",
+         '<GenericOperationConfig customOperationType="GET">'
+         '<field id="path" type="string" value=""/></GenericOperationConfig>', "GET"),
         # THE REGRESSION. A component the account stores with one real verb and a
         # stray blank must still resolve, or every check derived from the
         # snapshot goes quiet for it.
         ("one verb beside a blank",
-         '<operation customOperationType=""/><Other customOperationType="GET"/>', "GET"),
+         '<GenericOperationConfig customOperationType="">'
+         '<field id="path" type="string" value=""/></GenericOperationConfig>'
+         '<GenericOperationConfig customOperationType="GET"/>', "GET"),
         ("two real verbs — genuinely unresolvable",
-         '<a customOperationType="PATCH"/><b customOperationType="GET"/>', None),
-        ("a blank alone", '<operation customOperationType=""/>', None),
+         '<GenericOperationConfig customOperationType="PATCH">'
+         '<field id="path" type="string" value=""/></GenericOperationConfig>'
+         '<GenericOperationConfig customOperationType="GET"/>', None),
+        ("a blank alone",
+         '<GenericOperationConfig customOperationType="">'
+         '<field id="path" type="string" value=""/></GenericOperationConfig>', None),
     ],
 )
 def test_the_account_rung_resolves_independently_of_what_the_caller_rung_refuses(
@@ -2325,10 +2369,7 @@ def test_the_account_rung_resolves_independently_of_what_the_caller_rung_refuses
     from boomi_mcp.models.integration_models import IntegrationComponentSpec
     from boomi_mcp.recipes.materialization import _requires_path_binding
 
-    document = (
-        f'<Component type="connector-action" subType="{_REST_SUBTYPE}"><object>'
-        f'{stored}<field id="path" type="string" value=""/></object></Component>'
-    )
+    document = _operation_component(_REST_SUBTYPE, stored)
     assert live_identity_from_component_xml("op", document).action == resolves_to, label
 
     component = IntegrationComponentSpec(
