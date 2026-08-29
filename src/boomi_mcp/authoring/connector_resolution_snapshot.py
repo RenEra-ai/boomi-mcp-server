@@ -36,6 +36,7 @@ from pydantic import BaseModel, ConfigDict
 
 from ..errors import (
     CONNECTOR_REPLAY_IDENTITY_MISMATCH,
+    CONNECTOR_REPLAY_IDENTITY_UNAVAILABLE,
     CONNECTOR_REPLAY_SUBMITTED_XML_UNREADABLE,
     SUBMITTED_XML_UNSETTLED_REASONS,
     submitted_xml_unsettled_summary,
@@ -98,6 +99,25 @@ class ResolvedConnectorComponentIdentityV1(_SnapshotModel):
     #: blank as unsettled, and the rung that RESOLVES account bytes must still
     #: read the real verb sitting next to it or the checks built on it go silent.
     action_blank_present: Optional[bool] = None
+    #: What the request will DO with this component — ``"reuse"`` when apply will
+    #: use it as it already exists, otherwise the declared action. AC8j asks the
+    #: snapshot for the mode, and every consumer was reconstructing it from the
+    #: reuse predicate instead of reading it here.
+    mode: Optional[str] = None
+    #: The account this resolution was taken against. AC8j asks for the ACTUAL
+    #: account, and a later slice binds its grants to one; a resolution that
+    #: cannot say which account it describes cannot be bound to it.
+    account_id: Optional[str] = None
+    #: The component and revision the account reading came from. Both arrived
+    #: with the fetched bytes and were discarded, so nothing downstream could say
+    #: WHICH component in WHICH revision it had resolved.
+    component_id: Optional[str] = None
+    component_version: Optional[str] = None
+    #: True when the account WAS consulted for this component and could not be
+    #: read; ``None`` when it was never consulted. The distinction is the whole
+    #: difference between a check that does not apply and a check that failed —
+    #: collapsing them is what let an unreadable reuse pass as an absence.
+    live_read_failed: Optional[bool] = None
     #: The component type the DOCUMENT declares, which is what the platform
     #: installs. Distinct from the type declared beside it in the request: a
     #: request declaring a connection while submitting an action payload installs
@@ -382,8 +402,9 @@ def build_connector_resolution_snapshot(
     components: Sequence[Any],
     *,
     live_projections: Optional[Mapping[str, Mapping[str, Any]]] = None,
-    live_component_xml: Optional[Mapping[str, str]] = None,
+    live_component_xml: Optional[Mapping[str, Any]] = None,
     reused_keys: Optional[Sequence[str]] = None,
+    account_id: Optional[str] = None,
 ) -> TrustedConnectorResolutionSnapshotV1:
     """Resolve every connector component in ``components`` from its own config.
 
@@ -414,6 +435,27 @@ def build_connector_resolution_snapshot(
         if not isinstance(key, str) or not key:
             continue
         config = getattr(component, "config", None) or {}
+        action = getattr(component, "action", None)
+
+        # DERIVED ONCE, before any rung, because every rung records it. The
+        # account reading now carries what the fetch learned rather than only
+        # its bytes; a bare string is still accepted so a caller without the
+        # collector can hand one in.
+        reading = live_xml.get(key)
+        if isinstance(reading, str):
+            reading = {"xml": reading, "read_failed": False}
+        reading = reading or {}
+        live_document = reading.get("xml")
+        mode = "reuse" if key in reused else (action or None)
+        carried = {
+            "mode": mode,
+            "account_id": account_id,
+            "component_id": reading.get("component_id"),
+            "component_version": reading.get("component_version"),
+            "live_read_failed": (
+                bool(reading.get("read_failed")) if key in live_xml else None
+            ),
+        }
 
         # ONE PRECEDENCE CHAIN, and the question it answers at every step is the
         # same one: which bytes will this component ACTUALLY have after apply?
@@ -439,10 +481,11 @@ def build_connector_resolution_snapshot(
         # mutation showed it decided nothing: a reused component is always a
         # declared create, so rung 2's update test can never exclude it. A rung
         # no mutant can reach is a rung the next reader has to disprove.
-        action = getattr(component, "action", None)
         submitted = config.get("xml") if isinstance(config, Mapping) else None
         if key not in reused and isinstance(submitted, str) and submitted.strip():
-            identity = live_identity_from_component_xml(key, submitted)
+            identity = live_identity_from_component_xml(key, submitted).model_copy(
+                update={"mode": mode, "account_id": account_id}
+            )
             # FAIL CLOSED on the caller's OWN bytes. The tolerance this module
             # applies elsewhere — an unreadable component contributes nothing and
             # the comparison skips it — is right for the ACCOUNT's bytes, where an
@@ -552,11 +595,35 @@ def build_connector_resolution_snapshot(
                 continue
             resolved.append(identity.model_copy(update={"source": "config"}))
             continue
-        if key in live_xml and action != "update":
-            resolved.append(live_identity_from_component_xml(key, live_xml[key]))
+        if live_document and action != "update":
+            resolved.append(
+                live_identity_from_component_xml(key, live_document).model_copy(
+                    update=carried
+                )
+            )
+            continue
+        if key in reused and reading.get("read_failed"):
+            # THE ACCOUNT WAS CONSULTED AND COULD NOT ANSWER. That is not the
+            # same as never having asked, and it is the one case where silence
+            # is a fail-open: every check this slice adds derives from the
+            # reading, so a component nobody could examine passes them all.
+            # Measured before this refusal existed — an unbound reused operation
+            # compiled, because the path requirement fell to unknown and the
+            # compiler refuses only an explicit requirement.
+            failures.append(
+                ConnectorIdentityError(
+                    CONNECTOR_REPLAY_IDENTITY_UNAVAILABLE,
+                    (
+                        "component {0!r} is reused from the account, but reading "
+                        "it back failed, so nothing about what it will actually "
+                        "do could be checked."
+                    ).format(key),
+                    component_key=key,
+                )
+            )
             continue
         if key in reused:
-            # A REUSE whose account bytes could not be read resolves to NOTHING.
+            # A REUSE whose account bytes are simply absent resolves to NOTHING.
             # Falling through to the config would make the request's own values
             # authoritative for a component apply is about to DISCARD — measured:
             # a reused operation whose read failed reported a dynamic route from
@@ -565,7 +632,7 @@ def build_connector_resolution_snapshot(
             # answer that cannot be wrong.
             resolved.append(
                 ResolvedConnectorComponentIdentityV1(
-                    component_key=key, source="live"
+                    component_key=key, source="live", **carried
                 )
             )
             continue
@@ -580,6 +647,7 @@ def build_connector_resolution_snapshot(
                 endpoint=projection.endpoint,
                 path=projection.path,
                 route_state=projection.route_state,
+                **carried,
             )
         )
     snapshot = TrustedConnectorResolutionSnapshotV1(

@@ -1,0 +1,72 @@
+You are performing the §6 ARCHITECT IMPLEMENTATION REVIEW for slice C of GitHub
+issue #155 in this repository. This is not a code review of the diff on its own
+merits — a separate Codex commit-review gate has already run six rounds over
+this delta and its findings are all dispositioned. Your job is different and
+narrower: judge the IMPLEMENTATION AGAINST THE DESIGN PLAN that follows this
+brief verbatim.
+
+WHAT SLICE C WAS SUPPOSED TO BUILD, per the plan's section 5.C: a trusted
+connector-resolution snapshot that makes the caller's `connector_metadata` an
+ASSERTION compared against what the components themselves resolve to, rather
+than an override; plus a blank-path cross-check so a connector operation the
+account stores with an empty request path cannot be called without a per-document
+Path binding.
+
+THE DELTA UNDER REVIEW is every commit from `eb22351` (the slice baseline) to
+HEAD. Changed files:
+
+  scripts/rebaseline_m12_12_inventory.py
+  src/boomi_mcp/authoring/connector_resolution_snapshot.py
+  src/boomi_mcp/authoring/process_materialization.py
+  src/boomi_mcp/authoring/workflow.py
+  src/boomi_mcp/categories/components/builders/connector_builder.py
+  src/boomi_mcp/categories/components/canonical_process_apply.py
+  src/boomi_mcp/categories/integration_builder.py
+  src/boomi_mcp/compiler/process_ir/connector_resolution.py
+  src/boomi_mcp/compiler/process_ir/contracts.py
+  src/boomi_mcp/compiler/process_ir/diagnostics.py
+  src/boomi_mcp/errors.py
+  src/boomi_mcp/recipes/materialization.py
+  plus their tests and two regenerated fixtures.
+
+WHAT I MOST WANT YOUR JUDGEMENT ON — answer each explicitly:
+
+1. PLAN CONFORMANCE. Section 5.C names specific artifacts: the snapshot module
+   and its two models, `normalized_identity_projection`, the threading of the
+   snapshot through `build_symbol_table`, `ComponentSymbolV1.requires_path_binding`
+   sourced in ALL modes, the compiler refusal, and the rewrite of the two
+   reconstruction helpers via `model_copy`. For each: was it built, was it built
+   as described, or was it built differently? Where it differs, is the difference
+   justified by something the plan did not know, or is it drift?
+
+2. THINGS THE PLAN REQUIRED THAT MAY BE MISSING. The plan lists AC arms for this
+   slice — AC8j, AC8n and the four formerly fail-open blank-path modes among them
+   — and a recorded limitation about the no-client reference-only case. Check
+   whether each is actually discharged by something in the tree, not merely
+   mentioned in a comment or a ledger row. A delta-scoped review cannot see a
+   plan-versus-implementation gap; that is precisely why this gate exists.
+
+3. SCOPE. Did this slice build things section 5.C did not ask for? Two candidates
+   I already know about and want judged rather than excused: a tracked rebaseline
+   script under `scripts/`, and an import-order test module. Both were added in
+   response to defects found during the slice. Are they in scope for slice C, or
+   should they belong elsewhere?
+
+4. COHERENCE OF THE RESULTING DESIGN. The snapshot now has one precedence chain,
+   a reuse predicate shared with apply, a per-family verb rule scoped to REST,
+   and two separate signals for "contradicted" and "blank present" because one
+   predicate could not serve both a rung that refuses and a rung that resolves.
+   Read those together. Is this a coherent design, or a sequence of local repairs
+   that happens to pass its tests? Say so plainly if it is the latter.
+
+5. WHAT A LATER SLICE WILL REGRET. Slices D, E and F are not started. D adds
+   per-call replay grants and needs the symbol table; E adds apply-boundary
+   rechecks; F ingests evidence. Does anything in slice C's shape make those
+   harder than the plan assumed?
+
+Findings from later slices' units are OUT OF SCOPE — slices D, E and F are
+absent BY PLAN, and an absence finding for one of their units should be stated
+as such rather than raised as a defect.
+
+END your response with a verdict on its own final line: exactly
+'VERDICT: NO ISSUES' or 'VERDICT: ISSUES FOUND'.

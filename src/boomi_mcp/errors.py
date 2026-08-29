@@ -533,11 +533,14 @@ CONNECTOR_REPLAY_IDENTITY_MISMATCH = "CONNECTOR_REPLAY_IDENTITY_MISMATCH"
 CONNECTOR_REPLAY_SUBMITTED_XML_UNREADABLE = (
     "CONNECTOR_REPLAY_SUBMITTED_XML_UNREADABLE"
 )
-#: An IDENTITY_UNAVAILABLE companion is deliberately NOT registered yet, for the
-#: same reason the contract-reference code above is not: its only consumer is the
-#: no-client reuse path, which this slice has not implemented, and a published
-#: code nothing can produce is a promise the system cannot keep. Live QA found it
-#: registered-but-unproducible here once already. It lands with its raiser.
+#: REGISTERED NOW, because it finally has a raiser. It was withdrawn earlier in
+#: this slice for the right reason — a published code nothing can produce is a
+#: promise the system cannot keep, and live QA had found it exactly that — and
+#: the condition it names has since become reachable: apply consults the account
+#: for a component it will REUSE, and that read can fail. Silence there is a
+#: fail-open, because the checks derived from the reading then have nothing to
+#: fire on and a process is applied against a component nobody could examine.
+CONNECTOR_REPLAY_IDENTITY_UNAVAILABLE = "CONNECTOR_REPLAY_IDENTITY_UNAVAILABLE"
 #: The contract-reference code is deliberately NOT registered here. Its grammar and
 #: its only raiser belong to the slice that introduces authored contract references;
 #: registering it now would leave a published code that nothing can produce, which
@@ -640,6 +643,18 @@ ERROR_TAXONOMY: Dict[str, ErrorCodeSpec] = {
             category="connector_replay",
             retryable=False,
             summary=_submitted_xml_unreadable_summary(),
+            owner="#155",
+        ),
+        ErrorCodeSpec(
+            code=CONNECTOR_REPLAY_IDENTITY_UNAVAILABLE,
+            category="connector_replay",
+            retryable=False,
+            summary=(
+                "A connector component this request reuses could not be read "
+                "from the account, so nothing about what it will actually do "
+                "can be checked; the request is refused rather than applied "
+                "against a component nobody could examine."
+            ),
             owner="#155",
         ),
         ErrorCodeSpec(

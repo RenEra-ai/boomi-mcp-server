@@ -530,16 +530,22 @@ def test_apply_reads_the_account_for_reused_connectors(monkeypatch):
     assert set(live) == {"reused_op"}
 
 
-def test_an_unreadable_component_skips_the_comparison_rather_than_refusing(monkeypatch):
-    """A transient platform error must not become an authoring refusal."""
+def test_a_failed_account_read_is_recorded_rather_than_dropped(monkeypatch):
+    """ARCHITECT: an unreadable reuse failed open past the plan's narrow limit.
+
+    Omitting the key made a read that FAILED indistinguishable from a component
+    that is not a reuse at all, so the one case where the account is the
+    authority and it could not be consulted looked exactly like the case where
+    there is no account authority to consult. Every check this slice adds derives
+    from that reading, so the component passed all of them.
+    """
     from boomi_mcp.categories import integration_builder as ib
     from boomi_mcp.models.integration_models import IntegrationComponentSpec
 
     class _Spec:
         components = [
             IntegrationComponentSpec(
-                key="reused_op",
-                type="connector-action",
+                key="reused_op", type="connector-action",
                 component_id="deadbeef-0000-0000-0000-000000000000",
                 config={"connector_type": "rest_client", "method": "GET",
                         "base_url": "http://h:8081"},
@@ -553,17 +559,88 @@ def test_an_unreadable_component_skips_the_comparison_rather_than_refusing(monke
     monkeypatch.setattr(
         "boomi_mcp.categories.components._shared.component_get_xml", _boom
     )
-    assert ib._live_connector_xml(
-        boomi_client=object(),
-        spec=_Spec(),
+    reading = ib._live_connector_xml(
+        boomi_client=object(), spec=_Spec(),
         existing_ids={"reused_op": "deadbeef-0000-0000-0000-000000000000"},
         conflict_policy="reuse",
-    ) == {}
-    # and the symbol table still builds, because nothing was contradicted
-    assert ib._build_canonical_symbols(
-        spec=_Spec(), resolution=ib._request_only_resolution(_Spec())
-    ) is not None
+    )["reused_op"]
+    assert reading["read_failed"] is True
+    assert reading["xml"] is None
 
+
+def test_a_reuse_the_account_could_not_answer_for_is_refused():
+    """The refusal the plan specified, which this slice had left unbuilt.
+
+    Its code was withdrawn earlier in the slice for the right reason — nothing
+    could produce it — and the condition has since become reachable.
+    """
+    from boomi_mcp.authoring.connector_resolution_snapshot import (
+        ConnectorIdentityError,
+        build_connector_resolution_snapshot,
+    )
+    from boomi_mcp.models.integration_models import IntegrationComponentSpec
+
+    component = IntegrationComponentSpec(
+        key="op", type="connector-action", action="create", component_id="id-1",
+        config={"connector_type": "rest_client"},
+    )
+    with pytest.raises(ConnectorIdentityError) as raised:
+        build_connector_resolution_snapshot(
+            [component],
+            live_component_xml={"op": {"xml": None, "read_failed": True}},
+            reused_keys={"op"},
+        )
+    assert raised.value.code == "CONNECTOR_REPLAY_IDENTITY_UNAVAILABLE"
+
+    # THE RECORDED LIMIT, unchanged: never having consulted the account is not
+    # the same as having consulted it and failed. A pre-apply surface has no
+    # client and must still compile.
+    build_connector_resolution_snapshot(
+        [component], live_component_xml={}, reused_keys={"op"}
+    )
+
+
+def test_the_snapshot_carries_the_mode_and_the_account_it_describes():
+    """AC8j: family, action, MODE and the ACTUAL account.
+
+    Mode was reconstructed by each consumer from the reuse predicate, and the
+    account was not carried at all — so a resolution could not say which account
+    it described, which is what a later slice binds its grants to.
+    """
+    from boomi_mcp.authoring.connector_resolution_snapshot import (
+        build_connector_resolution_snapshot,
+    )
+    from boomi_mcp.models.integration_models import IntegrationComponentSpec
+
+    reused = IntegrationComponentSpec(
+        key="reused", type="connector-action", action="create", component_id="id-1",
+        config={"connector_type": "rest_client"},
+    )
+    created = IntegrationComponentSpec(
+        key="created", type="connector-action", action="create",
+        config={"connector_type": "rest_client", "method": "GET",
+                "base_url": "http://h:8081", "path": "/x"},
+    )
+    document = _live_rest_op('<field id="path" value="/x"/>', verb="GET")
+    snapshot = build_connector_resolution_snapshot(
+        [reused, created],
+        live_component_xml={"reused": {"xml": document, "component_id": "id-1",
+                                       "component_version": "7", "read_failed": False}},
+        reused_keys={"reused"},
+        account_id="acct-16926N",
+    )
+    resolved = snapshot.lookup("reused")
+    assert resolved.mode == "reuse"
+    assert resolved.account_id == "acct-16926N"
+    assert resolved.component_id == "id-1"
+    assert resolved.component_version == "7"
+    assert resolved.live_read_failed is False
+
+    # A component that is NOT a reuse carries its declared action as the mode and
+    # no account reading at all.
+    written = snapshot.lookup("created")
+    assert written.mode == "create"
+    assert written.component_id is None and written.live_read_failed is None
 
 def test_the_wired_apply_comparison_refuses_a_declared_GET_over_an_account_POST():
     """End to end through `_build_canonical_symbols`, the shared construction."""
@@ -912,15 +989,20 @@ def test_no_registered_replay_code_is_without_a_production_raiser():
     """QA-155-r43-04, and the rule `errors.py` states for itself.
 
     `CONNECTOR_REPLAY_IDENTITY_UNAVAILABLE` was registered while its only caller
-    was a test, which is exactly the published-code-nothing-can-produce that
-    this module refuses for the contract-reference code. It was removed rather
-    than given an invented consumer; its real one is the no-client reuse path.
+    was a test — the published-code-nothing-can-produce this module refuses for
+    the contract-reference code — and was WITHDRAWN rather than given an invented
+    consumer. It is registered again now because the condition became reachable:
+    apply reads back a component it will reuse, and that read can fail.
+
+    So the assertion is the PROPERTY, not the historical fact. Pinning "this
+    particular code is absent" would have had to be deleted the moment the code
+    earned its place, and a pin that must be deleted to make progress protects
+    nothing. Every registered code in this family must be raised from a
+    NON-TEST source file; that is what was actually wrong the first time.
     """
     from pathlib import Path
 
     from boomi_mcp.errors import ERROR_TAXONOMY
-
-    assert "CONNECTOR_REPLAY_IDENTITY_UNAVAILABLE" not in ERROR_TAXONOMY
 
     src = Path(__file__).resolve().parents[1] / "src"
     registered = {c for c in ERROR_TAXONOMY if c.startswith("CONNECTOR_REPLAY_")}
@@ -931,6 +1013,17 @@ def test_no_registered_replay_code_is_without_a_production_raiser():
             if code in path.read_text()
         ]
         assert hits, f"{code} is registered but named in no source file"
+
+    # NON-VACUITY: the sweep must be able to fail. A code named ONLY where it is
+    # registered has no raiser, and the loop above would still find its own
+    # definition — so the raiser has to be somewhere other than `errors.py`.
+    for code in sorted(registered):
+        raisers = [
+            path
+            for path in src.rglob("*.py")
+            if path.name != "errors.py" and code in path.read_text()
+        ]
+        assert raisers, f"{code} is named only where it is registered"
 
 
 def test_a_dry_run_says_which_checks_it_does_not_perform():

@@ -790,6 +790,11 @@ ISSUE_155_CODES = (
     # rather than a silence, because unlike the account's bytes the caller chooses
     # whether these are readable.
     "CONNECTOR_REPLAY_SUBMITTED_XML_UNREADABLE",
+    # slice C — a component this request REUSES could not be read from the
+    # account, so nothing about what it will do can be checked. Withdrawn earlier
+    # in the slice as unproducible and reinstated once apply's read-back made the
+    # condition reachable.
+    "CONNECTOR_REPLAY_IDENTITY_UNAVAILABLE",
 )
 
 

@@ -7707,13 +7707,31 @@ def _live_connector_xml(*, boomi_client, spec, existing_ids, conflict_policy):
         if key not in reused:
             continue
         component_id = (existing_ids or {}).get(key)
+        # A FAILED READ IS RECORDED, not dropped. Omitting the key made a read
+        # that failed indistinguishable from a component that is not a reuse at
+        # all — so the one case where the account IS the authority and we could
+        # not consult it looked exactly like the case where there is no account
+        # authority to consult. That is the difference between "nothing to
+        # check" and "something to check that I could not".
+        reading = {"xml": None, "component_id": component_id, "read_failed": True}
         try:
             fetched = component_get_xml(boomi_client, component_id)
         except Exception:
+            live[key] = reading
             continue
         xml = fetched.get("xml") if isinstance(fetched, dict) else None
         if isinstance(xml, str) and xml:
-            live[key] = xml
+            # KEEP WHAT THE FETCH ALREADY TOLD US. The id and version came back
+            # with the bytes and were discarded, so any consumer needing to say
+            # WHICH component in WHICH revision it resolved had nothing to say
+            # it with.
+            reading = {
+                "xml": xml,
+                "component_id": fetched.get("component_id") or component_id,
+                "component_version": fetched.get("version"),
+                "read_failed": False,
+            }
+        live[key] = reading
     return live
 
 

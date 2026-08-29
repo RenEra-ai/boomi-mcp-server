@@ -220,6 +220,24 @@ def test_every_registered_replay_code_has_a_raiser():
         ])
     produced.add(unreadable.value.code)
 
+    # The reuse the account could not answer for. Raised from a real component
+    # and a real reading rather than constructed, so this stays a raiser check.
+    with pytest.raises(ConnectorIdentityError) as unavailable:
+        build_connector_resolution_snapshot(
+            [
+                IntegrationComponentSpec(
+                    key="reused",
+                    type="connector-action",
+                    action="create",
+                    component_id="id-1",
+                    config={"connector_type": "rest_client"},
+                )
+            ],
+            live_component_xml={"reused": {"xml": None, "read_failed": True}},
+            reused_keys={"reused"},
+        )
+    produced.add(unavailable.value.code)
+
     assert registered == produced, {
         "registered but never raised": sorted(registered - produced),
         "raised but not registered": sorted(produced - registered),
