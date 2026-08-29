@@ -2412,3 +2412,75 @@ def test_the_refusal_message_names_the_condition_that_fired():
     assert "more than one operation type" not in blank, (
         "a document naming exactly one verb is told it named several"
     )
+
+
+def test_no_route_builds_a_snapshot_without_asserting_against_it():
+    """ARCHITECT: the assertion ran on ONE route and the slice is about all of them.
+
+    Slice C exists to make the caller's `connector_metadata` an assertion rather
+    than an override. The comparison was wired only into the canonical apply
+    helper, so a typed or recipe compile still accepted a declared read verb over
+    a component whose own bytes name a write one — the headline deliverable,
+    half-connected, and invisible to six delta-scoped reviews because each of
+    them only saw the code that was there.
+
+    This asserts the property rather than today's call sites: every module that
+    BUILDS a snapshot must also COMPARE against one.
+    """
+    import ast
+    from pathlib import Path
+
+    src = Path(__file__).resolve().parents[1] / "src/boomi_mcp"
+    builds, asserts = set(), set()
+    for path in src.rglob("*.py"):
+        if path.name == "connector_resolution_snapshot.py":
+            continue  # the module that DEFINES them
+        tree = ast.parse(path.read_text())
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Name):
+                continue
+            if node.func.id in {
+                "build_connector_resolution_snapshot", "_build_resolution",
+                "_request_only_resolution",
+            }:
+                builds.add(path.name)
+            if node.func.id == "assert_declared_matches_resolved":
+                asserts.add(path.name)
+
+    assert builds, "no module builds a snapshot; this check would be vacuous"
+    unasserted = builds - asserts
+    assert not unasserted, (
+        f"these modules build a connector snapshot and never compare a "
+        f"declaration against it: {sorted(unasserted)}"
+    )
+
+
+def test_the_typed_route_reports_a_mismatch_rather_than_raising():
+    """The comparison is wired to the planning surface as a DIAGNOSTIC.
+
+    That surface's contract is to hand back everything wrong at once, so a
+    mismatch belongs alongside the other diagnostics rather than instead of them.
+    """
+    import ast
+    from pathlib import Path
+
+    module = Path(__file__).resolve().parents[1] / "src/boomi_mcp/authoring/workflow.py"
+    tree = ast.parse(module.read_text())
+    validate = next(
+        n for n in ast.walk(tree)
+        if isinstance(n, ast.FunctionDef) and n.name == "_validate_processes"
+    )
+    guarded = [
+        t for t in ast.walk(validate)
+        if isinstance(t, ast.Try)
+        and any(
+            isinstance(c, ast.Call) and isinstance(c.func, ast.Name)
+            and c.func.id == "assert_declared_matches_resolved"
+            for c in ast.walk(t)
+        )
+    ]
+    assert guarded, "the typed route lets a mismatch escape as a raise"
+    assert any(
+        isinstance(c, ast.Call) and isinstance(c.func, ast.Name) and c.func.id == "_diag"
+        for h in guarded[0].handlers for c in ast.walk(h)
+    ), "the typed route catches the mismatch but reports no diagnostic"

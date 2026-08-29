@@ -1356,6 +1356,7 @@ def _validate_processes(
     from ..errors import submitted_xml_unsettled_summary
     from .connector_resolution_snapshot import (
         ConnectorIdentityError,
+        assert_declared_matches_resolved,
         build_connector_resolution_snapshot,
     )
 
@@ -1393,6 +1394,34 @@ def _validate_processes(
                     ).format(submitted_xml_unsettled_summary()),
                 )
             )
+    # THE DECLARATION IS AN ASSERTION HERE TOO. Building the snapshot and then
+    # not comparing against it left the caller's `connector_metadata`
+    # authoritative on every route but the raw one — which is the single thing
+    # this slice exists to end. The comparison ran at the canonical apply helper
+    # and nowhere else, so a typed or recipe compile accepted a declared read
+    # verb over a component whose own bytes name a write one.
+    #
+    # REPORTED, not raised: this surface's contract is to hand back everything
+    # wrong at once, and a mismatch is exactly the kind of thing a caller wants
+    # alongside the rest of its diagnostics rather than instead of them.
+    try:
+        assert_declared_matches_resolved(snapshot, normalized.connector_metadata)
+    except ConnectorIdentityError as mismatch:
+        snapshot_diagnostics.append(
+            _diag(
+                mismatch.code,
+                "error",
+                message=str(mismatch),
+                subject_kind="component",
+                subject_id=mismatch.component_key,
+                remediation=(
+                    "Declare the connector family and action the component "
+                    "actually resolves to, or correct the component so it "
+                    "resolves to what you declared."
+                ),
+            )
+        )
+
     symbols = build_symbol_table(
         list(normalized.integration_spec.components),
         # #153: the roots are participants too. Without them a `$ref` naming
