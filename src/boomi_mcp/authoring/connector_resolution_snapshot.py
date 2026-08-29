@@ -34,7 +34,10 @@ from typing import Any, Dict, Mapping, Optional, Sequence, Tuple
 
 from pydantic import BaseModel, ConfigDict
 
-from ..errors import CONNECTOR_REPLAY_IDENTITY_MISMATCH
+from ..errors import (
+    CONNECTOR_REPLAY_IDENTITY_MISMATCH,
+    CONNECTOR_REPLAY_SUBMITTED_XML_UNREADABLE,
+)
 
 
 class ConnectorIdentityError(Exception):
@@ -81,6 +84,17 @@ class ResolvedConnectorComponentIdentityV1(_SnapshotModel):
     def resolved(self) -> bool:
         """Whether this identity settles enough to be compared against."""
         return self.route_state == "static" and self.family is not None
+
+    @property
+    def readable(self) -> bool:
+        """Whether the document this came from could be read at all.
+
+        A document that parses but says nothing useful still yields a family or
+        an action; one that cannot be parsed yields neither. The distinction
+        matters only where the bytes are the CALLER's, and the caller of this
+        property is the one place that is true.
+        """
+        return self.family is not None or self.action is not None
 
 
 class TrustedConnectorResolutionSnapshotV1(_SnapshotModel):
@@ -168,6 +182,10 @@ def live_identity_from_component_xml(
     try:
         parser.Parse(component_xml, True)
     except (_EntityDeclared, xml.parsers.expat.ExpatError):
+        # UNREADABLE, and the caller above decides what that means. For the
+        # account's bytes it means silence; for the caller's own it means
+        # refusal. The distinction cannot be made here, which is why this
+        # returns a value the caller can recognise rather than deciding.
         return unreadable
 
     family = connector_family_of(subtype)
@@ -261,6 +279,31 @@ def build_connector_resolution_snapshot(
         submitted = config.get("xml") if isinstance(config, Mapping) else None
         if key not in reused and isinstance(submitted, str) and submitted.strip():
             identity = live_identity_from_component_xml(key, submitted)
+            # FAIL CLOSED on the caller's OWN bytes. The tolerance this module
+            # applies elsewhere — an unreadable component contributes nothing and
+            # the comparison skips it — is right for the ACCOUNT's bytes, where an
+            # unreadable answer is a platform problem and refusing would turn a
+            # transient error into an authoring refusal. It is INVERTED here,
+            # because the caller chooses whether its own payload is readable.
+            #
+            # Measured: a thirty-eight byte document-type prefix carrying an
+            # entity subset made this identity empty, the comparison skip, and an
+            # apply proceed that the same document without the prefix refuses —
+            # and the platform DISCARDS that prefix on write, so what landed was
+            # exactly the refused bytes. Two guards this slice ships, defeated by
+            # a prologue neither of them was about.
+            if not identity.readable:
+                raise ConnectorIdentityError(
+                    CONNECTOR_REPLAY_SUBMITTED_XML_UNREADABLE,
+                    (
+                        "component {0!r} supplies raw component XML that cannot be "
+                        "read, so nothing can be checked about what it would "
+                        "install. Remove any document-type or entity declaration: "
+                        "the platform discards them on write, so they change "
+                        "nothing about the component and hide everything about it."
+                    ).format(key),
+                    component_key=key,
+                )
             resolved.append(identity.model_copy(update={"source": "config"}))
             continue
         if key in live_xml and action != "update":

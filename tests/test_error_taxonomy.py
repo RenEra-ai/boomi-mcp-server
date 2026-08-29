@@ -786,6 +786,10 @@ ISSUE_155_CODES = (
     # slice C — the trusted connector-resolution snapshot. Raised in the AUTHORING
     # layer, never under compiler/process_ir: connector identity is an account fact.
     "CONNECTOR_REPLAY_IDENTITY_MISMATCH",
+    # slice C — the caller's OWN submitted component XML cannot be read. A refusal
+    # rather than a silence, because unlike the account's bytes the caller chooses
+    # whether these are readable.
+    "CONNECTOR_REPLAY_SUBMITTED_XML_UNREADABLE",
 )
 
 

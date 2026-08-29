@@ -520,6 +520,19 @@ CONNECTOR_REPLAY_CONFIGURATION_DIGEST_REFUSED = (
 #: joins the compiler's published surface, and connector identity is an account
 #: fact the compiler is not allowed to depend on.
 CONNECTOR_REPLAY_IDENTITY_MISMATCH = "CONNECTOR_REPLAY_IDENTITY_MISMATCH"
+#: The caller's OWN submitted component XML could not be read. Distinct from the
+#: mismatch above, and deliberately a refusal rather than a silence: the tolerance
+#: this family applies to an unreadable ACCOUNT reading — "I could not tell is not
+#: evidence the declaration is wrong" — is INVERTED when the bytes are the
+#: caller's, because there the caller chooses whether they are readable. Live QA
+#: measured the consequence: a document-type declaration carrying an entity
+#: subset, thirty-eight bytes of prefix, made the payload unreadable, the
+#: comparison skip, and an apply proceed that the same bytes without the prefix
+#: refuse — and the platform discards that prefix on write, so what lands is
+#: exactly the refused document.
+CONNECTOR_REPLAY_SUBMITTED_XML_UNREADABLE = (
+    "CONNECTOR_REPLAY_SUBMITTED_XML_UNREADABLE"
+)
 #: An IDENTITY_UNAVAILABLE companion is deliberately NOT registered yet, for the
 #: same reason the contract-reference code above is not: its only consumer is the
 #: no-client reuse path, which this slice has not implemented, and a published
@@ -583,6 +596,17 @@ ERROR_TAXONOMY: Dict[str, ErrorCodeSpec] = {
             summary=(
                 "A connector operation stores a blank request path, so the calling "
                 "step must bind one per document; the document binds none."
+            ),
+            owner="#155",
+        ),
+        ErrorCodeSpec(
+            code=CONNECTOR_REPLAY_SUBMITTED_XML_UNREADABLE,
+            category="connector_replay",
+            retryable=False,
+            summary=(
+                "A connector component supplies raw component XML that cannot be "
+                "read, so nothing can be checked about what it would install; "
+                "submitted bytes are refused rather than trusted unexamined."
             ),
             owner="#155",
         ),

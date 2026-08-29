@@ -196,6 +196,30 @@ def test_every_registered_replay_code_has_a_raiser():
         assert_declared_matches_resolved(snapshot, {"rest_conn": ("rest", "GET")})
     produced.add(mismatch.value.code)
 
+    # The unreadable-payload refusal, raised from the same layer and from a real
+    # component rather than a constructed identity: the caller supplies raw
+    # component XML behind a document-type declaration, which the reader will not
+    # parse, and the caller's own bytes fail closed rather than falling silent.
+    from boomi_mcp.authoring.connector_resolution_snapshot import (
+        build_connector_resolution_snapshot,
+    )
+    from boomi_mcp.models.integration_models import IntegrationComponentSpec
+
+    with pytest.raises(ConnectorIdentityError) as unreadable:
+        build_connector_resolution_snapshot([
+            IntegrationComponentSpec(
+                key="raw",
+                type="connector-action",
+                action="create",
+                config={
+                    "connector_type": "rest_client",
+                    "method": "GET",
+                    "xml": '<!DOCTYPE Component [<!ENTITY x "y">]><Component/>',
+                },
+            )
+        ])
+    produced.add(unreadable.value.code)
+
     assert registered == produced, {
         "registered but never raised": sorted(registered - produced),
         "raised but not registered": sorted(produced - registered),

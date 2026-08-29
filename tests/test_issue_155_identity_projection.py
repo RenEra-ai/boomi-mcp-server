@@ -1487,3 +1487,105 @@ def test_the_precedence_chain_covers_every_way_a_component_gets_its_bytes():
         "an update keeps its desired identity": "GET",
     }, rungs
     assert len(set(rungs.values())) == 3, "two rungs collapsed onto one answer"
+
+
+_BYPASS_BODY = (
+    '<Component type="connector-action" subType="officialboomi-X3979C-rest-prod">'
+    '<object><operation customOperationType="PATCH"/>'
+    '<field id="path" type="string" value=""/></object></Component>'
+)
+
+
+@pytest.mark.parametrize(
+    "prolog",
+    [
+        '<!DOCTYPE Component [<!ENTITY x "y">]>',
+        '<!DOCTYPE Component [<!ENTITY % p "q">]>',
+        '<!DOCTYPE d [<!ENTITY a "aa"><!ENTITY b "&a;&a;">]>',
+    ],
+)
+def test_an_unreadable_submitted_payload_is_refused_not_skipped(prolog):
+    """QA: two guards this slice ships, defeated by a prologue about neither.
+
+    Thirty-eight bytes of document-type declaration made the payload unreadable,
+    which made the identity empty, which made the comparison SKIP — and the
+    platform discards that prologue on write, so what landed was exactly the
+    document the control refuses. The tolerance being exploited is correct for
+    the account's bytes and inverted for the caller's own.
+    """
+    from boomi_mcp.authoring.connector_resolution_snapshot import (
+        ConnectorIdentityError,
+        build_connector_resolution_snapshot,
+    )
+    from boomi_mcp.models.integration_models import IntegrationComponentSpec
+
+    component = IntegrationComponentSpec(
+        key="raw", type="connector-action", action="create",
+        config={"connector_type": "rest_client", "method": "GET",
+                "xml": prolog + _BYPASS_BODY},
+    )
+    with pytest.raises(ConnectorIdentityError) as raised:
+        build_connector_resolution_snapshot([component])
+    assert raised.value.code == "CONNECTOR_REPLAY_SUBMITTED_XML_UNREADABLE"
+
+
+def test_the_unreadable_refusal_has_controls_on_both_sides():
+    """Non-vacuity: a refusal that fires on everything decides nothing.
+
+    Three controls. A readable payload that AGREES still applies. A readable one
+    that disagrees is still refused as a mismatch, under its own code — the new
+    refusal must not swallow the old one. And an unreadable payload on a REUSE
+    still applies, because a reuse never writes those bytes and their readability
+    is irrelevant to what will exist.
+    """
+    from boomi_mcp.authoring.connector_resolution_snapshot import (
+        ConnectorIdentityError,
+        assert_declared_matches_resolved,
+        build_connector_resolution_snapshot,
+    )
+    from boomi_mcp.models.integration_models import IntegrationComponentSpec
+
+    def _apply(xml, reused=None):
+        component = IntegrationComponentSpec(
+            key="raw", type="connector-action", action="create",
+            config={"connector_type": "rest_client", "method": "GET", "xml": xml},
+        )
+        snapshot = build_connector_resolution_snapshot(
+            [component], reused_keys=reused or set()
+        )
+        assert_declared_matches_resolved(snapshot, {"raw": ("rest_client", "GET")})
+
+    _apply(_BYPASS_BODY.replace("PATCH", "GET"))  # agrees: must not raise
+
+    with pytest.raises(ConnectorIdentityError) as mismatch:
+        _apply(_BYPASS_BODY)
+    assert mismatch.value.code == "CONNECTOR_REPLAY_IDENTITY_MISMATCH", (
+        "the unreadable refusal swallowed the mismatch it must not replace"
+    )
+
+    _apply('<!DOCTYPE Component [<!ENTITY x "y">]>' + _BYPASS_BODY, reused={"raw"})
+
+
+def test_the_unreadable_refusal_reaches_a_caller_under_its_own_code():
+    """A code nothing can produce is a promise the system cannot keep.
+
+    This slice already withdrew one code for exactly that, so the reachability of
+    a new one is proven through the SHARED construction and the failure mapping a
+    caller actually sees — not by grepping for the constant.
+    """
+    from boomi_mcp.authoring.connector_resolution_snapshot import ConnectorIdentityError
+    from boomi_mcp.categories import integration_builder as ib
+    from boomi_mcp.models.integration_models import IntegrationComponentSpec
+
+    class _Spec:
+        components = [IntegrationComponentSpec(
+            key="raw", type="connector-action", action="create",
+            config={"connector_type": "rest_client", "method": "GET",
+                    "xml": '<!DOCTYPE Component [<!ENTITY x "y">]>' + _BYPASS_BODY},
+        )]
+        processes = ()
+
+    with pytest.raises(ConnectorIdentityError) as raised:
+        ib._build_canonical_symbols(spec=_Spec())
+    served, _path = ib._canonical_plan_failure(raised.value)
+    assert served == "CONNECTOR_REPLAY_SUBMITTED_XML_UNREADABLE"
