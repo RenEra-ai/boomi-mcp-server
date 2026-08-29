@@ -604,9 +604,10 @@ ERROR_TAXONOMY: Dict[str, ErrorCodeSpec] = {
             category="connector_replay",
             retryable=False,
             summary=(
-                "A connector component supplies raw component XML that cannot be "
-                "read, so nothing can be checked about what it would install; "
-                "submitted bytes are refused rather than trusted unexamined."
+                "A connector component supplies raw component XML that does not "
+                "settle what it would install — it cannot be parsed, or it names "
+                "more than one operation type; submitted bytes are refused "
+                "rather than trusted unexamined."
             ),
             owner="#155",
         ),

@@ -2036,3 +2036,112 @@ def test_the_planning_summary_can_classify_a_snapshot_refusal():
                 seeded["codes"] = True
     assert seeded["errors"], "the error count ignores snapshot failures"
     assert seeded["codes"], "the served code list ignores snapshot failures"
+
+
+def _raw_component(subtype, inner, kind="connector-settings"):
+    return f'<Component type="{kind}" subType="{subtype}"><object>{inner}</object></Component>'
+
+
+_REST_SUBTYPE = "officialboomi-X3979C-rest-prod"
+
+
+@pytest.mark.parametrize(
+    "label,kind,connector_type,subtype,inner,refused",
+    [
+        # NAMES NOTHING — a connection has no operation type to name.
+        ("rest connection", "connector-settings", "rest_client", _REST_SUBTYPE,
+         '<RestConnectionSettings url="http://h:8081"/>', False),
+        ("database connection", "connector-settings", "database", "database",
+         "<DatabaseConnectionSettings/>", False),
+        ("unmodelled family", "connector-settings", "zzz", "zzz", "<Settings/>", False),
+        ("operation with its verb removed", "connector-action", "rest_client",
+         _REST_SUBTYPE, '<operation/>', False),
+        # NAMES ONE — settled.
+        ("one verb", "connector-action", "rest_client", _REST_SUBTYPE,
+         '<operation customOperationType="GET"/>', False),
+        ("the same verb twice", "connector-action", "rest_client", _REST_SUBTYPE,
+         '<a customOperationType="GET"/><operation customOperationType="GET"/>', False),
+        ("the same verb in two cases", "connector-action", "rest_client", _REST_SUBTYPE,
+         '<a customOperationType="get"/><operation customOperationType="GET"/>', False),
+        # NAMES TWO — settles nothing, and that is the caller's to fix.
+        ("two verbs on an operation", "connector-action", "rest_client", _REST_SUBTYPE,
+         '<a customOperationType="PATCH"/><operation customOperationType="GET"/>', True),
+        ("two verbs on a connection", "connector-settings", "rest_client", _REST_SUBTYPE,
+         '<a customOperationType="PATCH"/><b customOperationType="GET"/>', True),
+    ],
+)
+def test_only_a_CONTRADICTED_submitted_document_is_refused(
+    label, kind, connector_type, subtype, inner, refused
+):
+    """QA: the refusal keyed on "no action resolved", which has two causes.
+
+    A document naming TWO operation types settles nothing. A document naming
+    NONE — every raw-XML connector connection — settles nothing about a fact it
+    was never going to state, and leaves it to the configuration beside it. The
+    predicate could not tell them apart, so every raw connection was refused
+    with a message telling its author to supply one operation type instead of
+    the several they had not written.
+
+    This is the breadth control the QA round asked for: one axis, every cell
+    named, with the boundary in both directions.
+    """
+    from boomi_mcp.authoring.connector_resolution_snapshot import (
+        ConnectorIdentityError,
+        build_connector_resolution_snapshot,
+    )
+    from boomi_mcp.models.integration_models import IntegrationComponentSpec
+
+    component = IntegrationComponentSpec(
+        key="k", type=kind, action="create",
+        config={"connector_type": connector_type,
+                "xml": _raw_component(subtype, inner, kind)},
+    )
+    if refused:
+        with pytest.raises(ConnectorIdentityError) as raised:
+            build_connector_resolution_snapshot([component])
+        assert raised.value.code == "CONNECTOR_REPLAY_SUBMITTED_XML_UNREADABLE", label
+    else:
+        build_connector_resolution_snapshot([component])  # must not raise
+
+
+def test_the_contradiction_is_recorded_by_the_reader_not_inferred_downstream():
+    """Non-vacuity: the fact is carried, so it cannot be re-derived wrongly.
+
+    An identity with no action is not evidence of a contradiction, and this
+    asserts the two are distinguishable on the model itself rather than only in
+    the branch that happens to consume them today.
+    """
+    from boomi_mcp.authoring.connector_resolution_snapshot import (
+        live_identity_from_component_xml,
+    )
+
+    none_named = live_identity_from_component_xml(
+        "k", _raw_component(_REST_SUBTYPE, '<RestConnectionSettings url="http://h"/>')
+    )
+    two_named = live_identity_from_component_xml(
+        "k", _raw_component(
+            _REST_SUBTYPE,
+            '<a customOperationType="PATCH"/><b customOperationType="GET"/>',
+        )
+    )
+    assert none_named.action is None and two_named.action is None
+    assert none_named.action_contradicted is False
+    assert two_named.action_contradicted is True, (
+        "the reader discards which of the two cases it saw"
+    )
+    # No document read at all: neither true nor false.
+    unparseable = live_identity_from_component_xml("k", "<not-xml")
+    assert unparseable.action_contradicted is None
+
+
+def test_the_served_summary_describes_both_ways_a_document_fails_to_settle():
+    """QA (low): the served row still said only "cannot be read".
+
+    The code is now also raised for a document that WAS read, and that row is
+    its only served description — the code appears nowhere else in the catalog.
+    """
+    from boomi_mcp.errors import ERROR_TAXONOMY
+
+    summary = ERROR_TAXONOMY["CONNECTOR_REPLAY_SUBMITTED_XML_UNREADABLE"].summary
+    assert "settle" in summary
+    assert "more than one operation type" in summary

@@ -90,6 +90,15 @@ class ResolvedConnectorComponentIdentityV1(_SnapshotModel):
     path: Optional[str] = None
     #: ``"static"`` | ``"dynamic"`` | ``"unavailable"`` — see the projection.
     route_state: str = "unavailable"
+    #: Whether the document named MORE THAN ONE operation type. ``None`` when no
+    #: document was read. Carried rather than inferred from ``action is None``,
+    #: which is true for two different reasons — a contradiction, and a document
+    #: that names no operation type at all. A connector CONNECTION legitimately
+    #: names none, so the proxy refused every raw-XML connection with a message
+    #: telling its author to supply one operation type instead of the several it
+    #: had not written. The reader knows which case it saw; discarding that and
+    #: making the caller re-derive it is the same weaker-key defect one level in.
+    action_contradicted: Optional[bool] = None
     #: Whether the DOCUMENT this came from parsed. ``None`` when no document was
     #: read at all (a config projection). Tracked rather than inferred: the first
     #: version derived it from "did we find a family or an action", which labels a
@@ -225,6 +234,7 @@ def live_identity_from_component_xml(
         value.strip().upper() for value in actions if isinstance(value, str)
     }
     action = next(iter(distinct_actions)) if len(distinct_actions) == 1 else None
+    contradicted = len(distinct_actions) > 1
     resolved_enough = family is not None and action is not None
 
     # THE STORED PATH, and it is the whole point for a reused component. Reading
@@ -249,6 +259,7 @@ def live_identity_from_component_xml(
         route_state=route_state,
         source="live",
         document_parsed=True,
+        action_contradicted=contradicted,
     )
 
 
@@ -355,7 +366,14 @@ def build_connector_resolution_snapshot(
                     )
                 )
                 continue
-            if identity.family is not None and identity.action is None:
+            # CONTRADICTED, not merely unsettled. Keying on "no action was
+            # resolved" refused every raw-XML connector CONNECTION, which names
+            # no operation type because it has none to name — and told its author
+            # to supply one operation type instead of the several they had not
+            # written. A document that says nothing about a fact leaves that fact
+            # to the configuration beside it; a document that says two
+            # contradictory things settles nothing and is the caller's to fix.
+            if identity.action_contradicted:
                 failures.append(
                     ConnectorIdentityError(
                         CONNECTOR_REPLAY_SUBMITTED_XML_UNREADABLE,
