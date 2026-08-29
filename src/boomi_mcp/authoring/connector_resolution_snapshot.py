@@ -373,6 +373,40 @@ def build_connector_resolution_snapshot(
             # written. A document that says nothing about a fact leaves that fact
             # to the configuration beside it; a document that says two
             # contradictory things settles nothing and is the caller's to fix.
+            # A CONNECTOR ACTION MUST NAME ITS VERB. The previous rule permitted
+            # any absence, because a connection legitimately names none — but an
+            # ACTION does not: the submitted bytes replace the component whole,
+            # so a document omitting the operation type installs an operation
+            # whose verb is unsettled while the comparison, which skips unknown
+            # actions, lets a plan classified as a read verb through.
+            #
+            # Scoped to families this module MODELS. For those we know the verb
+            # lives in `customOperationType`, so its absence is a real absence.
+            # For a family we do not model we do not know where its verb lives,
+            # and refusing would block the raw-XML escape hatch that exists to
+            # create exactly those components — which is a mistake this slice has
+            # already made once and does not need to make again.
+            component_type = getattr(component, "type", "") or ""
+            names_an_action = "connector-action" in component_type
+            if (
+                names_an_action
+                and identity.family is not None
+                and identity.action is None
+                and not identity.action_contradicted
+            ):
+                failures.append(
+                    ConnectorIdentityError(
+                        CONNECTOR_REPLAY_SUBMITTED_XML_UNREADABLE,
+                        (
+                            "component {0!r} supplies raw component XML for a "
+                            "connector action that names no operation type, so "
+                            "the verb it would install is unsettled. Name the "
+                            "operation type in the submitted XML."
+                        ).format(key),
+                        component_key=key,
+                    )
+                )
+                continue
             if identity.action_contradicted:
                 failures.append(
                     ConnectorIdentityError(

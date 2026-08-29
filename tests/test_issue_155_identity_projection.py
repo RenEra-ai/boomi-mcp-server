@@ -2054,8 +2054,17 @@ _REST_SUBTYPE = "officialboomi-X3979C-rest-prod"
         ("database connection", "connector-settings", "database", "database",
          "<DatabaseConnectionSettings/>", False),
         ("unmodelled family", "connector-settings", "zzz", "zzz", "<Settings/>", False),
+        # A CONNECTOR ACTION MUST NAME ITS VERB — for a family we model, where we
+        # know the verb lives in `customOperationType`. Previously accepted, which
+        # let a plan classified as a read verb install an operation whose verb was
+        # unsettled, because the comparison skips an unknown action.
         ("operation with its verb removed", "connector-action", "rest_client",
-         _REST_SUBTYPE, '<operation/>', False),
+         _REST_SUBTYPE, '<operation/>', True),
+        # ...but NOT for a family we do not model: we do not know where its verb
+        # lives, and refusing would block the raw-XML escape hatch that exists to
+        # create exactly those components.
+        ("unmodelled-family action, no verb", "connector-action", "zzz", "zzz",
+         "<operation/>", False),
         # NAMES ONE — settled.
         ("one verb", "connector-action", "rest_client", _REST_SUBTYPE,
          '<operation customOperationType="GET"/>', False),

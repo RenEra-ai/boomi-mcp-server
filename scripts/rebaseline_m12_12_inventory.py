@@ -29,6 +29,7 @@ import pathlib
 import re
 import subprocess
 import sys
+import tempfile
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 INVENTORY = ROOT / "tests/fixtures/m12_12/legacy_reachability_inventory.json"
@@ -104,8 +105,17 @@ def main() -> int:
     args = parser.parse_args()
 
     before_doc = DOCUMENT.read_text()
-    if not args.check:
-        _run(str(EMITTER), "--write", str(INVENTORY))
+    before_inventory = INVENTORY.read_text()
+
+    # BOTH CANDIDATES FIRST, then both writes. The inventory used to be written
+    # before the markdown was validated, so any later refusal — a missing emitter
+    # marker, a header that no longer matches, the orphan or prose grade — exited
+    # nonzero with the two generated artifacts disagreeing about which tree they
+    # describe. A rebaseline that half-succeeds is worse than one that fails.
+    with tempfile.TemporaryDirectory() as scratch:
+        candidate = pathlib.Path(scratch) / INVENTORY.name
+        _run(str(EMITTER), "--write", str(candidate))
+        new_inventory = candidate.read_text()
 
     blocks = _emitted_blocks()
     missing = [k for keys in PLACEMENT.values() for k in keys if k not in blocks]
@@ -161,11 +171,31 @@ def main() -> int:
             f"  removed: {sorted(lost)[:5]}\n  added: {sorted(gained)[:5]}"
         )
 
+    # STALE MEANS NONZERO. `--check` used to splice in memory, compare only
+    # non-table lines, print "154 rows -> 154" and exit 0 — so the normal case,
+    # where values change without row counts changing, reported nothing at all.
+    # A check that cannot fail is not a check.
+    stale = []
+    if new_inventory != before_inventory:
+        stale.append(str(INVENTORY.relative_to(ROOT)))
+    if after != before_doc:
+        stale.append(str(DOCUMENT.relative_to(ROOT)))
+
     if args.check:
-        print("check only: no files written")
+        if stale:
+            print("STALE, rebaseline required:")
+            for path in stale:
+                print(f"  {path}")
+            return 1
+        print("up to date")
         return 0
+
+    INVENTORY.write_text(new_inventory)
     DOCUMENT.write_text(after)
-    print(f"rebaselined {INVENTORY.name} and re-emitted section 11")
+    if stale:
+        print(f"rebaselined: {', '.join(stale)}")
+    else:
+        print("already up to date; nothing written differs")
     return 0
 
 
