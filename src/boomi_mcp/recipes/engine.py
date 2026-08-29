@@ -1747,16 +1747,21 @@ def _compile_processes(
     # canonical compile chain and its contract is that no exemption is
     # reachable — a mismatch here is a defect in the request, not a note about it.
     from ..authoring.connector_resolution_snapshot import (
-        assert_declared_matches_resolved,
         build_connector_resolution_snapshot,
     )
 
-    assert_declared_matches_resolved(
-        build_connector_resolution_snapshot(components), connector_metadata or {}
+    # Built ONCE and then USED. The first version compared and threw the
+    # resolution away, so `requires_path_binding` stayed unknown on this route
+    # and the blank-path refusal — which fires only on an explicit requirement —
+    # had nothing to fire on. A snapshot consulted for one fact and discarded
+    # before the next is half a resolution.
+    connector_resolution = build_connector_resolution_snapshot(
+        components, declared=connector_metadata or {}
     )
 
     symbols = build_symbol_table(
         components,
+        connector_resolution_snapshot=connector_resolution,
         # #153/#154: the composed roots are participants too. Omitting them does
         # not fail loudly — reference resolution simply reports the root as
         # UNRESOLVED — so a recipe-composed `process_call` resolved to nothing

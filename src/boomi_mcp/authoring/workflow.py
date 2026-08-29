@@ -1370,7 +1370,8 @@ def _validate_processes(
     snapshot_diagnostics: List[AuthoringDiagnosticV1] = []
     try:
         snapshot = build_connector_resolution_snapshot(
-            normalized.integration_spec.components
+            normalized.integration_spec.components,
+            declared=normalized.connector_metadata,
         )
     except ConnectorIdentityError as snapshot_error:
         # EVERY failure, and the identities that DID resolve. Reporting only the
@@ -1378,7 +1379,12 @@ def _validate_processes(
         # raising did; discarding the siblings suppressed diagnostics for
         # components that were never in question — including the blank-path
         # refusal, which is snapshot-derived.
-        snapshot = snapshot_error.partial or build_connector_resolution_snapshot(())
+        # The fallback resolves NOTHING, so it expects nothing — said explicitly
+        # rather than omitted, because an omitted expectation is exactly what the
+        # three recurrences of this finding were made of.
+        snapshot = snapshot_error.partial or build_connector_resolution_snapshot(
+            (), declared={}
+        )
         for failure in snapshot_error.failures:
             snapshot_diagnostics.append(
                 _diag(
@@ -1404,27 +1410,9 @@ def _validate_processes(
     # REPORTED, not raised: this surface's contract is to hand back everything
     # wrong at once, and a mismatch is exactly the kind of thing a caller wants
     # alongside the rest of its diagnostics rather than instead of them.
-    try:
-        assert_declared_matches_resolved(snapshot, normalized.connector_metadata)
-    except ConnectorIdentityError as mismatch:
-        # EVERY mismatch, because this surface reports rather than refuses. The
-        # comparison now carries them all; catching one exception and emitting
-        # one diagnostic reported the first disagreement and hid the rest.
-        for failure in mismatch.failures:
-            snapshot_diagnostics.append(
-                _diag(
-                    failure.code,
-                    "error",
-                    message=str(failure),
-                    subject_kind="component",
-                    subject_id=failure.component_key,
-                    remediation=(
-                        "Declare the connector family and action the component "
-                        "actually resolves to, or correct the component so it "
-                        "resolves to what you declared."
-                    ),
-                )
-            )
+    # The comparison happens inside the construction above, so a mismatch
+    # arrives in the same failure set as every other refusal and is reported by
+    # the handler that already collects them.
 
     symbols = build_symbol_table(
         list(normalized.integration_spec.components),

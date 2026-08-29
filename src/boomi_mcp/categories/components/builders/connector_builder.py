@@ -243,6 +243,10 @@ class NormalizedConnectorIdentity:
     route_state: str
     endpoint: Optional[str] = None
     path: Optional[str] = None
+    #: The endpoint is bound to an environment extension, so the ACCOUNT decides
+    #: the route. Reported rather than left to be inferred from an unavailable
+    #: route state, which has four causes.
+    extension_bound: bool = False
 
     @property
     def mintable(self) -> bool:
@@ -341,8 +345,13 @@ def normalized_identity_projection(config, live_projection=None):
     # The endpoint is bound to an environment extension: the ACCOUNT decides the
     # route, so nothing here can pin it.
     if endpoint_raw == SET_BY_EXTENSION:
+        # REPORTED, not collapsed. "Unavailable" has four causes and a consumer
+        # that needs to know THIS one was inferring it from the absence of the
+        # other three, which mismarks a malformed replacement set and misses an
+        # extension-bound database field entirely.
         return NormalizedConnectorIdentity(
-            family=family, action=action, route_state="unavailable"
+            family=family, action=action, route_state="unavailable",
+            extension_bound=True,
         )
 
     # Usable replacements mean ``build()`` BLANKS the path (see its step 6), so

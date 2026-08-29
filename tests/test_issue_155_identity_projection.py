@@ -2526,59 +2526,90 @@ def test_the_refusal_message_names_the_condition_that_fired():
     )
 
 
-def test_no_route_builds_a_snapshot_without_asserting_against_it():
-    """ARCHITECT: the assertion ran on ONE route and the slice is about all of them.
+def test_no_resolution_is_built_without_declaring_what_was_expected():
+    """The comparison is part of CONSTRUCTION, so nothing can omit it.
 
-    Slice C exists to make the caller's `connector_metadata` an assertion rather
-    than an override. The comparison was wired only into the canonical apply
-    helper, so a typed or recipe compile still accepted a declared read verb over
-    a component whose own bytes name a write one — the headline deliverable,
-    half-connected, and invisible to six delta-scoped reviews because each of
-    them only saw the code that was there.
+    It was a separate call for most of this slice, and the same finding recurred
+    on three different routes — each fix reaching the routes in front of me and
+    none reaching the next. Two guards failed to close it as well, because a
+    guard has to model the population and I modelled it wrong twice: first as
+    "modules that build a snapshot" (excluding the route that builds none), then
+    as "modules that feed the symbol table" (excluding the routes with no process
+    root).
 
-    KEYED ON THE COMPILE SINK, not on snapshot construction. The first version of
-    this guard inventoried modules that BUILD a snapshot — and the route that was
-    actually broken builds none, so the guard structurally excluded the one thing
-    it was written to catch. A guard whose population is defined by the mechanism
-    rather than by the RISK cannot see an absence.
+    So the property is no longer "every route calls the comparison" but "a
+    resolution cannot exist without one" — and what remains checkable is that
+    every construction says what it expected.
     """
     import ast
     from pathlib import Path
 
     src = Path(__file__).resolve().parents[1] / "src/boomi_mcp"
-
-    # THE RISK is a caller's declared family/action reaching a compile decision
-    # unchallenged. So the population is every module that feeds the symbol
-    # table — that is where the declaration becomes authority — regardless of
-    # whether it happens to build a snapshot on the way.
-    sinks, asserts = set(), set()
+    BUILDERS = {
+        "build_connector_resolution_snapshot", "_build_resolution",
+        "_request_only_resolution",
+    }
+    undeclared = []
+    seen = 0
     for path in src.rglob("*.py"):
         if path.name == "connector_resolution_snapshot.py":
-            continue  # the module that DEFINES the comparison
-        tree = ast.parse(path.read_text())
-        for node in ast.walk(tree):
+            continue
+        for node in ast.walk(ast.parse(path.read_text())):
             if not isinstance(node, ast.Call):
                 continue
             name = getattr(node.func, "id", None) or getattr(node.func, "attr", None)
-            if name == "build_symbol_table":
-                sinks.add(path.name)
-            if name == "assert_declared_matches_resolved":
-                asserts.add(path.name)
+            if name not in BUILDERS:
+                continue
+            seen += 1
+            # `_request_only_resolution` is the named no-account affordance and
+            # declares nothing by design; every other construction must.
+            if name == "_request_only_resolution":
+                continue
+            if not any(k.arg == "declared" for k in node.keywords):
+                undeclared.append(f"{path.name}:{node.lineno}")
 
-    assert sinks, "nothing feeds the symbol table; this check would be vacuous"
-    unasserted = sinks - asserts
-    assert not unasserted, (
-        f"these modules feed the symbol table with caller-declared connector "
-        f"metadata and never compare it against what the components resolve "
-        f"to: {sorted(unasserted)}"
+    assert seen, "no module builds a resolution; this check would be vacuous"
+    assert not undeclared, (
+        f"these constructions do not say what they expected, so nothing is "
+        f"compared against what the components resolve to: {undeclared}"
     )
 
 
-def test_the_typed_route_reports_a_mismatch_rather_than_raising():
-    """The comparison is wired to the planning surface as a DIAGNOSTIC.
+def test_the_comparison_cannot_be_removed_from_construction():
+    """Non-vacuity for the guard above: the fold has to be real.
 
-    That surface's contract is to hand back everything wrong at once, so a
-    mismatch belongs alongside the other diagnostics rather than instead of them.
+    If construction stopped comparing, every call site could still pass
+    `declared` and nothing would check it.
+    """
+    from boomi_mcp.authoring.connector_resolution_snapshot import (
+        ConnectorIdentityError,
+        build_connector_resolution_snapshot,
+    )
+    from boomi_mcp.models.integration_models import IntegrationComponentSpec
+
+    component = IntegrationComponentSpec(
+        key="op", type="connector-action", action="create",
+        config={"connector_type": "rest_client", "method": "GET",
+                "xml": _live_rest_op('<field id="path" value="/x"/>', verb="POST")},
+    )
+    with pytest.raises(ConnectorIdentityError) as raised:
+        build_connector_resolution_snapshot(
+            [component], declared={"op": ("rest_client", "GET")}
+        )
+    assert raised.value.code == "CONNECTOR_REPLAY_IDENTITY_MISMATCH"
+
+    # CONTROL: an agreeing declaration builds normally.
+    snapshot = build_connector_resolution_snapshot(
+        [component], declared={"op": ("rest_client", "POST")}
+    )
+    assert snapshot.lookup("op").action == "POST"
+
+def test_the_planning_surface_still_reports_a_mismatch_rather_than_raising():
+    """Folding the comparison into construction must not turn `plan` into a refuser.
+
+    The mismatch now arrives in the same failure set as every other refusal, so
+    it reaches the handler that already converts them to diagnostics — which is
+    what keeps that surface's report-everything-at-once contract.
     """
     import ast
     from pathlib import Path
@@ -2589,21 +2620,24 @@ def test_the_typed_route_reports_a_mismatch_rather_than_raising():
         n for n in ast.walk(tree)
         if isinstance(n, ast.FunctionDef) and n.name == "_validate_processes"
     )
-    guarded = [
-        t for t in ast.walk(validate)
-        if isinstance(t, ast.Try)
-        and any(
-            isinstance(c, ast.Call) and isinstance(c.func, ast.Name)
-            and c.func.id == "assert_declared_matches_resolved"
-            for c in ast.walk(t)
-        )
+    handlers = [
+        h for t in ast.walk(validate) if isinstance(t, ast.Try)
+        for h in t.handlers
+        if isinstance(h.type, ast.Name) and h.type.id == "ConnectorIdentityError"
     ]
-    assert guarded, "the typed route lets a mismatch escape as a raise"
+    assert handlers, "the planning surface lets a refusal escape as a raise"
     assert any(
-        isinstance(c, ast.Call) and isinstance(c.func, ast.Name) and c.func.id == "_diag"
-        for h in guarded[0].handlers for c in ast.walk(h)
-    ), "the typed route catches the mismatch but reports no diagnostic"
-
+        isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id == "_diag"
+        for h in handlers for n in ast.walk(h)
+    ), "the planning surface catches the refusal but reports no diagnostic"
+    # and the construction it guards declares what it expected
+    assert any(
+        isinstance(n, ast.Call)
+        and (getattr(n.func, "id", None) == "build_connector_resolution_snapshot")
+        and any(k.arg == "declared" for k in n.keywords)
+        for t in ast.walk(validate) if isinstance(t, ast.Try)
+        for n in ast.walk(t)
+    ), "the planning surface builds a resolution without declaring an expectation"
 
 @pytest.mark.parametrize(
     "label,subtype,connector_type,config,refused",

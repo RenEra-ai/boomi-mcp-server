@@ -1,0 +1,68 @@
+You are performing the §6 ARCHITECT IMPLEMENTATION REVIEW for slice C of GitHub
+issue #155, EVALUATION 3 OF 3 — the last this repository's tracked cap allows.
+On this evaluation the loop ENDS: whatever you find, one batched correction is
+applied, the commit review runs over it until clean, and the slice closes on
+that. So tell me what is TRUE, not what is actionable within a budget.
+
+The design plan follows this brief verbatim. Evaluations 1 and 2 found four and
+nine plan-conformance defects respectively; all but one are corrected, and the
+record was amended where my dispositions had overstated what landed.
+
+WHAT CHANGED SINCE EVALUATION 2:
+
+- The recipe compile route now compares the caller's declared connector
+  family/action against what the components resolve to, and RAISES, because that
+  chain's contract is that no exemption is reachable. All three routes now
+  compare.
+- The guard that finds unasserted routes is keyed on the COMPILE SINK — anything
+  feeding `build_symbol_table` with caller metadata — rather than on snapshot
+  construction, which had structurally excluded the one broken route.
+- `assert_declared_matches_resolved` collects EVERY mismatch; the planning
+  surface emits one diagnostic per failure.
+- The reader requires each family's OWN operation-config element
+  (`GenericOperationConfig` for REST and SOAP, the action element for database),
+  and the path field must be a direct child of it.
+- Submitted-XML settledness is family-general across the three families whose
+  verb location is measured; an unmodelled family is still unjudged, preserving
+  the raw-XML escape hatch.
+- `mode` and `authority` are closed literals; the snapshot carries an account
+  scope; a closed extension-bound flag replaced an inference.
+- The component version is coerced to a string at the collector boundary, where
+  the client's integer type is known.
+
+WHAT I KNOW IS STILL OPEN, so do not spend the evaluation rediscovering it:
+
+- `ARCH-155-r5-09`: the read-failed refusal covers transport failures only. A
+  document that fetches successfully and then fails the reader still resolves to
+  an unreadable identity that later checks skip. Recorded as residue with its
+  fix named.
+- Configuration digests, extension state beyond the single flag, and the
+  per-root projection helper are NOT built. Their consumers are slices D and E.
+  Evaluation 2 judged that deferral indefensible; I disagreed and recorded the
+  disagreement rather than resolving it. Rule on it.
+
+WHAT I MOST WANT FROM THIS LAST EVALUATION:
+
+A. IS THE SLICE'S CENTRAL CLAIM TRUE? Slice C exists so that a caller's declared
+   connector family and action cannot override what the component itself
+   resolves to. Is that now true on every path a caller can reach — plan,
+   compile, apply, typed, raw, recipe, components-only? If there is any surface
+   where a declaration still wins, that is the finding that matters most.
+
+B. IS THE READER CORRECT, not merely better? It has been rescoped twice. Judge
+   it against the platform's actual document shape, not against my description.
+
+C. WHAT WOULD YOU REFUSE TO SIGN OFF? Given the loop ends here, name anything
+   you would consider a blocking defect for landing this slice on the
+   integration branch — and separately, anything you would accept as recorded
+   residue.
+
+D. IS THE RECORD HONEST? The ledger claims what this slice built and what it
+   left. Evaluation 2 found four dispositions overstated. Check a sample of the
+   current ones against the tree.
+
+Findings about units belonging to slices D, E or F are OUT OF SCOPE — those
+slices are absent by plan.
+
+END your response with a verdict on its own final line: exactly
+'VERDICT: NO ISSUES' or 'VERDICT: ISSUES FOUND'.

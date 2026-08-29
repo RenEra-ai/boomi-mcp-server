@@ -1,0 +1,15 @@
+Approvals are unavailable in this read-only review session and no tool call will
+be granted. Do not wait for one.
+
+Produce the §6 architect implementation review NOW, evaluation 3 of 3 — the last
+this repository's cap allows — as plain text from what you have already read.
+Judge slice C of issue #155 against the design plan you were given: whether the
+slice's central claim is true on every path a caller can reach, whether the
+reader is correct against the platform's actual document shape, what you would
+refuse to sign off versus accept as recorded residue, and whether the ledger's
+dispositions match the tree.
+
+Findings about units belonging to slices D, E or F are out of scope.
+
+END your response with a verdict on its own final line: exactly
+'VERDICT: NO ISSUES' or 'VERDICT: ISSUES FOUND'.

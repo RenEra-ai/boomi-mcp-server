@@ -7760,7 +7760,11 @@ def _request_only_resolution(spec):
         build_connector_resolution_snapshot,
     )
 
-    return build_connector_resolution_snapshot(spec.components)
+    from ..authoring.workflow import _connector_metadata_from_components
+
+    return build_connector_resolution_snapshot(
+        spec.components, declared=_connector_metadata_from_components(spec.components)
+    )
 
 
 def _build_canonical_symbols(*, spec, resolution):
@@ -8945,6 +8949,7 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
     from ..authoring.connector_resolution_snapshot import (
         build_connector_resolution_snapshot as _build_resolution,
     )
+    from ..authoring.workflow import _connector_metadata_from_components
 
     # CLASSIFIED, like every other pre-write refusal. Hoisting this build out of
     # the per-root loop — correct, and required so a components-only apply is
@@ -8957,6 +8962,10 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
             spec.components,
             live_component_xml=_pre_write_live_xml,
             reused_keys=_reused_component_keys,
+            # DECLARED HERE TOO, so the comparison covers a components-only
+            # apply — a shape with no process root, which never reached the
+            # canonical construction where the comparison used to live.
+            declared=_connector_metadata_from_components(spec.components),
             # THE ACCOUNT THIS RESOLUTION DESCRIBES. The field was added to the
             # model and then passed by nothing, so what AC8j asks for was
             # populated only in a test — a contract satisfied on paper and empty

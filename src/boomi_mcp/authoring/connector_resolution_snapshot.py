@@ -149,6 +149,12 @@ class ResolvedConnectorComponentIdentityV1(_SnapshotModel):
     #: never produces, which is the fixture-cannot-exhibit-the-defect shape this
     #: slice keeps finding elsewhere.
     component_version: Optional[str] = None
+    #: The configuration digest of the document this identity was read from,
+    #: when that document is admissible to the digest projection. ``None`` when
+    #: no document was read or the projection refuses it — a refusal is not a
+    #: digest, and recording one anyway would publish a value nothing can
+    #: reproduce.
+    config_digest: Optional[str] = None
     #: True when the account WAS consulted for this component and could not be
     #: read; ``None`` when it was never consulted. The distinction is the whole
     #: difference between a check that does not apply and a check that failed —
@@ -212,6 +218,27 @@ class TrustedConnectorResolutionSnapshotV1(_SnapshotModel):
     #: which account it describes must say so rather than imply one.
     account_scope: Optional[str] = None
 
+    def for_root(
+        self, root_key: str, component_keys: Sequence[str]
+    ) -> "TrustedConnectorResolutionSnapshotV1":
+        """The identities one process root references, sorted, same scope.
+
+        Takes the keys explicitly rather than deriving them: this model holds no
+        root-to-component edges, and inventing one here would be a second graph
+        walk beside the compiler's own — the defect class this slice has spent
+        the most rounds on. The caller that knows the root's references passes
+        them; this projects and preserves the account scope so a projection can
+        never claim a wider one than the resolution it came from.
+        """
+        wanted = set(component_keys)
+        return TrustedConnectorResolutionSnapshotV1(
+            identities=tuple(
+                identity for identity in self.identities
+                if identity.component_key in wanted
+            ),
+            account_scope=self.account_scope,
+        )
+
     def lookup(self, component_key: str) -> Optional[ResolvedConnectorComponentIdentityV1]:
         for identity in self.identities:
             if identity.component_key == component_key:
@@ -231,8 +258,17 @@ def _peek_subtype(component_xml):
         return None
     import re
 
-    match = re.search(r'\bsubType="([^"]*)"', component_xml)
-    return match.group(1) if match else None
+    # QUOTE- AND WHITESPACE-INSENSITIVE. Matching only the exact double-quoted
+    # spelling meant a single-quoted or spaced attribute yielded an unknown
+    # family — and an unknown family accepts ANY direct child as the operation
+    # config, so the strictest reader in this module fell back to its loosest
+    # behaviour on a document that is merely punctuated differently.
+    match = re.search(
+        r"""\bsubType\s*=\s*(?:"([^"]*)"|'([^']*)')""", component_xml
+    )
+    if not match:
+        return None
+    return match.group(1) if match.group(1) is not None else match.group(2)
 
 
 def live_identity_from_component_xml(
@@ -331,7 +367,12 @@ def live_identity_from_component_xml(
             # SOAP both emit `GenericOperationConfig` (REST carries
             # `customOperationType`, SOAP `operationType`), and the database
             # family emits its verb AS the element.
-            if grandparent == "Operation" and (
+            # ANCHORED to the path the platform actually stores, measured from a
+            # capture: the component's object element, then Operation, then
+            # Configuration. Accepting that trio at any depth let a nested
+            # look-alike stand in for the real one.
+            great = stack[-4] if len(stack) >= 4 else None
+            if grandparent == "Operation" and great == "object" and (
                 _OPERATION_CONFIG_ELEMENTS is None
                 or local in _OPERATION_CONFIG_ELEMENTS
             ):
@@ -394,6 +435,33 @@ def live_identity_from_component_xml(
         return unreadable
 
     family = connector_family_of(subtype)
+
+    def _config_digest():
+        """Slice B's digest over this document, or None when it refuses.
+
+        The digest refuses unknown content BY DESIGN, which is right for an
+        evidence digest and is exactly why this records ``None`` rather than a
+        placeholder: "not admissible" and "digested to nothing" are different
+        facts and a later slice reads this to tell them apart.
+        """
+        # THE DIGEST'S OWN VOCABULARY, not the component-type string. It takes
+        # "operation" or "connection"; passing the platform's component type
+        # made it refuse every real capture, which would have shipped a field
+        # that is always empty — the dark-surface trap this slice argued against
+        # and would otherwise have walked into itself.
+        kind = (
+            "connection"
+            if "connector-settings" in (component_type or "")
+            else "operation"
+        )
+        try:
+            from ..connector_replay.digests import component_config_digest_v1
+
+            return component_config_digest_v1(
+                component_xml, kind, family=family or "rest"
+            )
+        except Exception:
+            return None
 
     # WHERE EACH FAMILY KEEPS ITS VERB, measured rather than assumed — the
     # earlier version asserted one location for every family and was wrong for
@@ -484,6 +552,7 @@ def live_identity_from_component_xml(
         route_state=route_state,
         source="live",
         authority="live_readback_xml",
+        config_digest=_config_digest(),
         document_parsed=True,
         action_contradicted=contradicted,
         action_blank_present=blank_present,
@@ -498,6 +567,7 @@ def build_connector_resolution_snapshot(
     live_component_xml: Optional[Mapping[str, Any]] = None,
     reused_keys: Optional[Sequence[str]] = None,
     account_id: Optional[str] = None,
+    declared: Optional[Mapping[str, Tuple[Optional[str], Optional[str]]]] = None,
 ) -> TrustedConnectorResolutionSnapshotV1:
     """Resolve every connector component in ``components`` from its own config.
 
@@ -753,9 +823,7 @@ def build_connector_resolution_snapshot(
                 path=projection.path,
                 route_state=projection.route_state,
                 authority="normalized_structured_fields",
-                extension_bound_endpoint=projection.route_state == "unavailable"
-                and projection.family is not None
-                and projection.action is not None,
+                extension_bound_endpoint=projection.extension_bound,
                 **carried,
             )
         )
@@ -763,6 +831,23 @@ def build_connector_resolution_snapshot(
         identities=tuple(sorted(resolved, key=lambda item: item.component_key)),
         account_scope=account_id,
     )
+
+    # THE COMPARISON IS PART OF CONSTRUCTION, not a call a route can omit. It was
+    # a separate function for most of this slice, and the same finding recurred
+    # three times on three different routes — each fix reaching the routes that
+    # existed in front of me and none reaching the next one. A guard did not
+    # close it either, twice, because a guard has to model the population and I
+    # modelled it wrong both times.
+    #
+    # There is nothing left to forget: a resolution cannot be built without
+    # saying what was expected of it, and a disagreement joins the same failure
+    # set as every other way this snapshot refuses.
+    if declared:
+        try:
+            assert_declared_matches_resolved(snapshot, declared)
+        except ConnectorIdentityError as mismatch:
+            failures.extend(mismatch.failures)
+
     if failures:
         first = failures[0]
         raise ConnectorIdentityError(
