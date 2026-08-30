@@ -370,11 +370,11 @@ def validate_error_handling(
                 raise _evidence_missing(binding, node_id)
 
             if required == "key_reference":
-                contract = contracts.get(evidence.contract_ref or "")
                 # The contract must exist AND cover THIS operation. A contract
                 # for a different operation is not evidence about this call, and
-                # accepting it would make the binding decorative.
-                if contract is None or contract.operation_ref != binding.operation_ref:
+                # accepting it would make the binding decorative. One lookup on
+                # the pair the index is keyed by decides both.
+                if (evidence.contract_ref or "", binding.operation_ref) not in contracts:
                     raise _evidence_missing(binding, node_id)
 
 
@@ -388,8 +388,10 @@ def _authored_evidence(cfg: SemanticCfgV1, node_id: str) -> Optional[Any]:
 def _require_resolvable(evidence, contracts, binding, node_id: str) -> None:
     if evidence is None or evidence.kind != "key_reference":
         return
-    contract = contracts.get(evidence.contract_ref or "")
-    if contract is None or contract.operation_ref != binding.operation_ref:
+    # Resolved by the PAIR the index is keyed on, so "exists" and "covers this
+    # operation" are one lookup rather than a fetch followed by a comparison the
+    # next edit can forget.
+    if (evidence.contract_ref or "", binding.operation_ref) not in contracts:
         raise _evidence_missing(binding, node_id)
 
 

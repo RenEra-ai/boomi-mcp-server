@@ -800,6 +800,24 @@ def test_shuffled_symbol_and_contract_order_does_not_change_output(monkeypatch):
     assert a_cfg == b_cfg and a_plan == b_plan
     assert emit_process(a_plan, a_syms).process_xml == emit_process(b_plan, b_syms).process_xml
 
+    # ALIAS ORDER. Contracts are keyed by (ref, operation_ref), so one reference
+    # may cover several operations. Those entries sort against each other on the
+    # second element, and the order they were authored in must not reach the
+    # output any more than the order of distinct refs does.
+    aliased = [
+        IdempotencyContractSymbolV1(ref="$ref:C2", operation_ref="$ref:OTHEROP"),
+        *contracts,
+        IdempotencyContractSymbolV1(ref="$ref:C2", operation_ref="$ref:THIRDOP"),
+    ]
+    c_syms = _symbols(contracts=aliased)
+    d_syms = _symbols(contracts=list(reversed(aliased)))
+    c_cfg, c_plan = _compile(doc, c_syms)
+    d_cfg, d_plan = _compile(doc, d_syms)
+    assert c_cfg == d_cfg and c_plan == d_plan
+    assert emit_process(c_plan, c_syms).process_xml == emit_process(d_plan, d_syms).process_xml
+    # ...and the aliases did not disturb the answer for the operation under test.
+    assert c_cfg == a_cfg and c_plan == a_plan
+
 
 def test_a_catch_body_map_with_no_provable_profile_fails_closed():
     # The catch path forks from SCOPE ENTRY state, so a map there has no upstream
@@ -1460,3 +1478,56 @@ def test_the_policy_does_not_lift_the_write_safety_refusal():
     doc = _process_scope(retry={"count": 2, **ALLOW}, op="$ref:PATCHOP")
     diag = _compile_error(doc)
     assert diag.code == PROCESS_IR_SEMANTIC_RETRY_NON_IDEMPOTENT_WRITE
+
+
+def test_one_contract_reference_may_cover_several_operations(monkeypatch):
+    """The re-keying's point, stated as the capability it unlocks.
+
+    A contract binds a reference to the ONE operation it covers. Keyed on the
+    reference alone, a table could name that reference exactly once, so a second
+    contract binding the same reference to a different operation was rejected as
+    a duplicate — which is not what "duplicate" should mean for a pair.
+    """
+    _synthetic_capabilities(monkeypatch, (REST, "PATCH", "conditionally_idempotent"))
+    contracts = [
+        IdempotencyContractSymbolV1(ref="$ref:SHARED", operation_ref="$ref:PATCHOP"),
+        IdempotencyContractSymbolV1(ref="$ref:SHARED", operation_ref="$ref:OTHEROP"),
+    ]
+    symbols = _symbols(contracts=contracts)
+    assert len(symbols.idempotency_contracts) == 2
+
+    index = symbols.build_idempotency_index()
+    assert ("$ref:SHARED", "$ref:PATCHOP") in index
+    assert ("$ref:SHARED", "$ref:OTHEROP") in index
+
+    # It resolves for the operation it covers...
+    doc = _connector_scope(
+        retry={"count": 1},
+        protected="$ref:PATCHOP",
+        idempotency={"kind": "key_reference", "contract_ref": "$ref:SHARED"},
+    )
+    _compile(doc, symbols)
+
+    # ...and a reference covering only OTHER operations is still not evidence here.
+    only_elsewhere = _symbols(
+        contracts=[IdempotencyContractSymbolV1(ref="$ref:SHARED", operation_ref="$ref:OTHEROP")]
+    )
+    with pytest.raises(ProcessIRCompileError) as excinfo:
+        _compile(doc, only_elsewhere)
+    assert (
+        excinfo.value.diagnostics[0].code
+        == PROCESS_IR_SEMANTIC_IDEMPOTENCY_EVIDENCE_MISSING
+    )
+
+
+def test_the_same_reference_and_operation_twice_is_still_a_duplicate():
+    """The pair is what is unique — the ref alone was too strict, not too loose."""
+    import pydantic
+
+    with pytest.raises(pydantic.ValidationError):
+        _symbols(
+            contracts=[
+                IdempotencyContractSymbolV1(ref="$ref:C", operation_ref="$ref:OP"),
+                IdempotencyContractSymbolV1(ref="$ref:C", operation_ref="$ref:OP"),
+            ]
+        )

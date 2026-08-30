@@ -25,7 +25,7 @@ deferred `blocked-by-mechanism` naming that slice, never silently carried.
 | A | canonical dynamic-path binding on both connector roles, its lineage rule, the published family capability, and the explicit process-source replay policy | behaviour-affecting | **CLOSED CLEAN, landed on the integration branch at `6d2205a` 2026-08-27** |
 | B | the packaged replay-evidence registry, identifier grammar, both digest algorithms, the derived audit report, the execution-connector monitor action | src-changing, narrowly reachable | **LANDED on `dev` at `eb22351` 2026-08-28 under `ESCALATE-OPEN`** — baseline `6d2205a`. NOT clean: `CDX-155-r73-01`, `CDX-155-r73-02` and `SELF-155-r65-01` are dispositioned escalated-open and unfixed, with no follow-up issue filed for them. |
 | C | the trusted connector-resolution snapshot and the blank-path cross-check | behaviour-affecting | IN FLIGHT — baseline `eb22351`. Five Stage-2 review rounds and six live QA rounds run, none clean; three of five roster loops (architect, wave gate, closing protocol) have not started. |
-| D | per-call replay grants, the shared reference grammar, candidate discovery, the account-independent semantic revision | mostly unreachable in production | not started |
+| D | per-call replay grants, the shared reference grammar, candidate discovery, the account-independent semantic revision | mostly unreachable in production | IN FLIGHT — baseline `d04a248`. Batch 1 (the contract re-keying) applied and suite-validated; the grammar, grants, discovery and revision row remain. |
 | E | apply-boundary identity rechecks and the evidence attestation tuple | mutation accounting | not started |
 | F | evidence ingestion and production enablement — the only slice that can close #155 | evidence-gated | not started |
 
@@ -1079,6 +1079,36 @@ designs them for, but no claim is made here that they improved what a caller see
 ### Restoration
 
 None used. No provisional correction was ever left unvalidated at HEAD.
+
+## Slice D — Stage-1 step 0 — baseline
+
+| Field | Value |
+|---|---|
+| Literal baseline SHA | `d04a2482d9b43c84765395ec8bbc73495de29fd4` |
+| Branch point | `dev` @ `d04a248` (slice C's landed closing commit) |
+| Baseline suite | 11,235 passed / 18 skipped, tree clean |
+| Slice kind | behaviour-affecting — per-call replay grants, the shared reference grammar, candidate discovery, and the account-independent semantic revision (plan §5.D, U6 + U7) |
+| Live account | `trainingglebbochkarov-16926N`, active |
+| Trust boundary | CREATES the grant symbols and their minter, the authored reference grammar, the discovery action and its diagnostic, and the semantics revision row; CONSUMES the compiler's own lowering and binding resolution, the connector registry built in slice B, and the trusted snapshot built in slice C |
+
+**Recorded at step 0, before the rest of the slice — the step-0 block itself is LATE.** The
+re-keying batch below was applied and validated before this table was written, which inverts the
+order the ledger discipline prescribes. Recorded rather than backdated: the batch's own evidence is
+intact and independently checkable, and the cost of the inversion is that this table was not
+available to the batch it describes.
+
+### Batch 1 — the contract re-keying
+
+Applied as ONE batch because the plan requires it: uniqueness, sort, the index and both consumers
+move together, and a partial change makes accept-versus-refuse depend on authoring order. Keyed on
+`(ref, operation_ref)` rather than the reference alone — a contract binds a reference to the one
+operation it covers, so the same reference covering two operations is two contracts, not a
+duplicate. Resolution is now a single lookup on the pair the index is keyed by, replacing a fetch
+followed by a separate comparison that a later edit could drop.
+
+Validation: the full non-KB suite at 11,237 passed / 18 skipped, and both reverts hand-run against
+the real pre-change text — restoring ref-only uniqueness and restoring the ref-only index each fail
+the capability test, with the restores digest-verified.
 
 ## Slice A — implementation record (what landed, and what validation it still owes)
 

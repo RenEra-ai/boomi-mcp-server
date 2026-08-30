@@ -301,12 +301,20 @@ class SymbolTableV1(_CompilerModel):
         # Same discipline as ``symbols``: duplicates are an authoring error (two
         # contracts under one name have no principled winner), and sorting means
         # the caller's insertion order cannot reach compiler output.
+        #
+        # Keyed on the PAIR, not the ref alone. A contract binds a reference to the
+        # ONE operation it covers, so the same reference covering two operations is
+        # two contracts, not a duplicate — and rejecting it as one made a reference
+        # nameable exactly once per table, which is not what the binding means. The
+        # retry check resolves by the same pair, so what is unique here is exactly
+        # what is looked up there.
         seen = set()
         for contract in value:
-            if contract.ref in seen:
+            key = (contract.ref, contract.operation_ref)
+            if key in seen:
                 raise ValueError("duplicate idempotency contract reference")
-            seen.add(contract.ref)
-        return tuple(sorted(value, key=lambda item: item.ref))
+            seen.add(key)
+        return tuple(sorted(value, key=lambda item: (item.ref, item.operation_ref)))
 
     @classmethod
     def rebinding(cls, source, symbols) -> "SymbolTableV1":
@@ -342,13 +350,16 @@ class SymbolTableV1(_CompilerModel):
         return cls(symbols=tuple(symbols), **carried)
 
     def build_idempotency_index(self) -> dict:
-        """Build a ref -> contract index.
+        """Build a (ref, operation_ref) -> contract index.
 
         Deliberately NOT cached, for exactly the reasons spelled out on
         :meth:`build_index` — a cached private attribute breaks ``__eq__``, goes
         stale under ``model_copy``, and stays writable despite ``frozen=True``.
         """
-        return {contract.ref: contract for contract in self.idempotency_contracts}
+        return {
+            (contract.ref, contract.operation_ref): contract
+            for contract in self.idempotency_contracts
+        }
 
     def build_index(self) -> dict:
         """Build a ref -> symbol index for resolving many references.
