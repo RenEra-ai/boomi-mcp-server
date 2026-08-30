@@ -94,6 +94,14 @@ def _compose_database_endpoint(config: "Mapping[str, Any]") -> Optional[str]:
     return endpoint
 
 
+#: The configuration fields this composer reads. Declared beside it and pinned
+#: against its own body by a test, because the extension question has to scan
+#: every field that reaches the endpoint — detecting the marker on `host` alone
+#: while composing from three fields served `db.internal:SET_BY_EXTENSION/SALES`
+#: as a settled static route.
+_compose_database_endpoint.reads = ("host", "port", "dbname")
+
+
 def _endpoint_reading(source: "Mapping[str, Any]", keys) -> tuple:
     """Every value present under `keys`, and the preferred one, from ONE read.
 
@@ -420,23 +428,29 @@ def normalized_identity_projection(config, live_projection=None):
     # fell back to it anyway, and the marker string survived as a static,
     # mintable endpoint. Detection and selection now read the same fields.
     _endpoint_keys = _ENDPOINT_FIELDS_BY_FAMILY.get(family, _DEFAULT_ENDPOINT_FIELDS)
+    # A composed family's route is settled by every field its composer reads, not
+    # only by the one that names it, so the extension question scans all of them.
+    _composer = _COMPOSED_ENDPOINT_BY_FAMILY.get(family)
+    _scanned_keys = tuple(
+        dict.fromkeys(_endpoint_keys + tuple(getattr(_composer, "reads", ())))
+    )
     # The two questions read the same fields, but they REDUCE them differently:
     # "is the account deciding this route" is true if ANY of the family's endpoint
     # fields carries the marker, while "which value is the endpoint" takes the
     # first one present. Collapsing both onto the first present field lost the
     # marker on a later one — a SOAP config with a concrete `endpoint_url` and an
     # extension-bound `wsdl_url` went from unavailable to a pinned static route.
+    _scanned_values, _ = _endpoint_reading(config, _scanned_keys)
     _declared_values, _declared_endpoint = _endpoint_reading(config, _endpoint_keys)
     _live = live_projection if isinstance(live_projection, Mapping) else {}
     _live_values, _live_endpoint = _endpoint_reading(_live, ("url", "endpoint"))
     # The live reading FILLS an unset fact; it never overrides a declared one.
-    extension_bound = any(value == SET_BY_EXTENSION for value in _declared_values) or (
-        not _declared_values
+    extension_bound = any(value == SET_BY_EXTENSION for value in _scanned_values) or (
+        not _scanned_values
         and any(value == SET_BY_EXTENSION for value in _live_values)
     )
     # A composed family supplies its own value below; everything else uses the
     # field it declared, or the account's reading when it declared none.
-    _composer = _COMPOSED_ENDPOINT_BY_FAMILY.get(family)
     endpoint_raw = (
         None
         if _composer is not None

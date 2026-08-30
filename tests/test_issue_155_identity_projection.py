@@ -3247,13 +3247,79 @@ def test_a_marker_on_any_live_endpoint_key_still_says_the_account_decides(label,
 
 
 def test_both_halves_of_the_extension_question_read_through_one_helper():
-    """Non-vacuity for the structural claim: neither half open-codes the scan."""
+    """Non-vacuity for the structural claim: neither half open-codes the scan.
+
+    Counting calls was not enough — live QA showed a mutant that re-open-coded
+    the live half and left a spare second call on the config kept this green.
+    What matters is WHICH source each call reads, so the check reads the parse
+    tree rather than the text.
+    """
+    import ast
     import inspect
+    import textwrap
 
     from boomi_mcp.categories.components.builders import connector_builder as cb
 
-    body = inspect.getsource(cb.normalized_identity_projection)
-    head = body[: body.index("extension_bound =")]
-    assert head.count("_endpoint_reading(") == 2, (
-        "a half stopped reading through the shared helper: " + head
+    tree = ast.parse(textwrap.dedent(inspect.getsource(cb.normalized_identity_projection)))
+    sources = [
+        node.args[0].id
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "_endpoint_reading"
+        and node.args
+        and isinstance(node.args[0], ast.Name)
+    ]
+    assert "config" in sources, "the declared half no longer reads through the helper"
+    assert "_live" in sources, (
+        "the live half no longer reads through the helper; it reads " + repr(sources)
     )
+
+
+def test_the_composer_declares_exactly_the_fields_it_reads():
+    """The scan set is only right while the declared field list matches the body."""
+    import inspect
+    import re
+
+    from boomi_mcp.categories.components.builders import connector_builder as cb
+
+    body = inspect.getsource(cb._compose_database_endpoint)
+    read_in_body = set(re.findall(r'config\.get\("([a-z_]+)"\)', body))
+    assert read_in_body, "derivation found no config reads — the pin would be vacuous"
+    assert read_in_body == set(cb._compose_database_endpoint.reads), (
+        "the composer's declared fields and the fields it reads have diverged: "
+        f"declared={sorted(cb._compose_database_endpoint.reads)} body={sorted(read_in_body)}"
+    )
+
+
+@pytest.mark.parametrize("field", ["host", "port", "dbname"])
+def test_a_marker_in_any_composed_field_disarms_the_database_route(field):
+    """Live QA cell: detection covered `host` while composition read three fields.
+
+    A marker in `port` or `dbname` was embedded into the composed value and
+    served as a settled static route — `db.internal:SET_BY_EXTENSION/SALES`.
+    """
+    from boomi_mcp.categories.components.builders.connector_builder import (
+        SET_BY_EXTENSION,
+        normalized_identity_projection,
+    )
+
+    config = {
+        "connector_type": "database",
+        "operation_mode": "get",
+        "host": "db.internal",
+        "port": 1433,
+        "dbname": "SALES",
+    }
+    config[field] = SET_BY_EXTENSION
+
+    identity = normalized_identity_projection(config)
+    assert identity.extension_bound is True, field
+    assert identity.route_state == "unavailable", field
+    assert identity.endpoint is None, field
+
+    concrete = normalized_identity_projection(
+        {**config, field: {"host": "db.internal", "port": 1433, "dbname": "SALES"}[field]}
+    )
+    assert concrete.endpoint == "db.internal:1433/SALES", field
+    assert concrete.route_state == "static", field
