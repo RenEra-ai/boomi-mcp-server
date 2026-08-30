@@ -487,7 +487,13 @@ def query_components_action(
                     return None
                 if not isinstance(fetched, dict) or not fetched.get("_success", True):
                     return None
-                version = fetched.get("version")
+                # The version lives on the fetched COMPONENT, not on the envelope.
+                # Reading it off the envelope returned None for every readable
+                # component, so a live account reported as unreadable.
+                component = fetched.get("component")
+                if not isinstance(component, dict):
+                    return None
+                version = component.get("version")
                 if version is None:
                     return None
                 return {"component_id": component_id, "version": version}

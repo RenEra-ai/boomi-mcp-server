@@ -171,5 +171,9 @@ _AUTHORED_CONTRACT_REF_RE: Final = re.compile(AUTHORED_CONTRACT_REF_PATTERN)
 
 def is_authored_contract_ref(value: object) -> bool:
     """Whether ``value`` is a well-formed authored contract reference."""
-    return isinstance(value, str) and _AUTHORED_CONTRACT_REF_RE.match(value) is not None
+    # `fullmatch`, not `match`: `$` matches before a trailing newline, so a
+    # value ending in one would be accepted here while the served JSON-Schema
+    # pattern still declares it invalid — the exact trap this module documents
+    # for its other identifier grammars.
+    return isinstance(value, str) and _AUTHORED_CONTRACT_REF_RE.fullmatch(value) is not None
 

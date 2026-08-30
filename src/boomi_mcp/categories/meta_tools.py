@@ -10263,11 +10263,12 @@ def list_capabilities_action(
         "query_components": {
             "category": "Components",
             "description": "Query Boomi components — all read operations",
-            "actions": ["list", "get", "search", "bulk_get"],
+            "actions": list(_query_components_actions()),
             "read_only": True,
             "parameters": {
                 "profile": "str (required) — Boomi profile name",
-                "action": "str (required) — list | get | search | bulk_get",
+                "action": "str (required) — "
+                          + " | ".join(_query_components_actions()),
                 "component_id": "str (optional) — component ID (required for get)",
                 "component_ids": "str (optional) — JSON array of IDs for bulk_get (max 5)",
                 "config": "JSON str (optional) — action-specific config",

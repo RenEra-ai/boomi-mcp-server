@@ -2084,19 +2084,19 @@ rather than aspirational.
 | LG-e9731d65 | legacy_emitter | src/boomi_mcp/categories/components/builders/process_flow_builder.py | _emit_try_catch_shapes | 2 | 4299 | #160 | delete the legacy semantic shell |
 | LG-9f90fa64 | legacy_semantic_validation | src/boomi_mcp/categories/integration_builder.py | _process_component_preflight | 1 | 5879 | #160 | delete with the legacy semantic shell |
 | LG-599ecc0d | legacy_semantic_validation | src/boomi_mcp/categories/integration_builder.py | _process_ir_semantic_error | 1 | 5905 | #160 | delete with the legacy semantic shell |
-| LG-48cc5eb8 | legacy_transitive_call | server.py | analyze_component | 1 | 1896 | #160 | follow the callee's row; this is an edge, not a site |
-| LG-853101d8 | legacy_transitive_call | server.py | apply_component_edit | 1 | 2054 | #160 | follow the callee's row; this is an edge, not a site |
-| LG-b6bb8a5c | legacy_transitive_call | server.py | build_integration | 1 | 2485 | #160 | follow the callee's row; this is an edge, not a site |
-| LG-489d0ece | legacy_transitive_call | server.py | compose_archetypes | 1 | 2608 | #160 | follow the callee's row; this is an edge, not a site |
-| LG-a389d52e | legacy_transitive_call | server.py | discover_odata_metadata | 1 | 3028 | #160 | follow the callee's row; this is an edge, not a site |
-| LG-1a0b93dd | legacy_transitive_call | server.py | discover_openapi_spec | 1 | 2927 | #160 | follow the callee's row; this is an edge, not a site |
-| LG-97044988 | legacy_transitive_call | server.py | discover_soap_wsdl | 1 | 2979 | #160 | follow the callee's row; this is an edge, not a site |
-| LG-f5622f58 | legacy_transitive_call | server.py | invoke_boomi_api | 1 | 3417 | #160 | follow the callee's row; this is an edge, not a site |
-| LG-963c3aaf | legacy_transitive_call | server.py | manage_component | 1 | 1795 | #160 | follow the callee's row; this is an edge, not a site |
-| LG-2976fe39 | legacy_transitive_call | server.py | manage_connector | 1 | 2158 | #160 | follow the callee's row; this is an edge, not a site |
-| LG-4ce172f4 | legacy_transitive_call | server.py | orchestrate_deploy | 3 | 4318 | #160 | follow the callee's row; this is an edge, not a site |
-| LG-ceea4ac3 | legacy_transitive_call | server.py | prepare_component_edit | 1 | 1974 | #160 | follow the callee's row; this is an edge, not a site |
-| LG-334a4633 | legacy_transitive_call | server.py | search_marketplace_recipes | 1 | 2296 | #160 | follow the callee's row; this is an edge, not a site |
+| LG-48cc5eb8 | legacy_transitive_call | server.py | analyze_component | 1 | 1903 | #160 | follow the callee's row; this is an edge, not a site |
+| LG-853101d8 | legacy_transitive_call | server.py | apply_component_edit | 1 | 2061 | #160 | follow the callee's row; this is an edge, not a site |
+| LG-b6bb8a5c | legacy_transitive_call | server.py | build_integration | 1 | 2492 | #160 | follow the callee's row; this is an edge, not a site |
+| LG-489d0ece | legacy_transitive_call | server.py | compose_archetypes | 1 | 2615 | #160 | follow the callee's row; this is an edge, not a site |
+| LG-a389d52e | legacy_transitive_call | server.py | discover_odata_metadata | 1 | 3035 | #160 | follow the callee's row; this is an edge, not a site |
+| LG-1a0b93dd | legacy_transitive_call | server.py | discover_openapi_spec | 1 | 2934 | #160 | follow the callee's row; this is an edge, not a site |
+| LG-97044988 | legacy_transitive_call | server.py | discover_soap_wsdl | 1 | 2986 | #160 | follow the callee's row; this is an edge, not a site |
+| LG-f5622f58 | legacy_transitive_call | server.py | invoke_boomi_api | 1 | 3424 | #160 | follow the callee's row; this is an edge, not a site |
+| LG-963c3aaf | legacy_transitive_call | server.py | manage_component | 1 | 1802 | #160 | follow the callee's row; this is an edge, not a site |
+| LG-2976fe39 | legacy_transitive_call | server.py | manage_connector | 1 | 2165 | #160 | follow the callee's row; this is an edge, not a site |
+| LG-4ce172f4 | legacy_transitive_call | server.py | orchestrate_deploy | 3 | 4325 | #160 | follow the callee's row; this is an edge, not a site |
+| LG-ceea4ac3 | legacy_transitive_call | server.py | prepare_component_edit | 1 | 1981 | #160 | follow the callee's row; this is an edge, not a site |
+| LG-334a4633 | legacy_transitive_call | server.py | search_marketplace_recipes | 1 | 2303 | #160 | follow the callee's row; this is an edge, not a site |
 | LG-af3aef13 | legacy_transitive_call | src/boomi_mcp/authoring/workflow.py | _legacy_plan_echo | 1 | 1036 | #160 | follow the callee's row; this is an edge, not a site |
 | LG-b7cd58ae | legacy_transitive_call | src/boomi_mcp/authoring/workflow.py | compile_authoring_request_v1 | 1 | 2391 | #160 | follow the callee's row; this is an edge, not a site |
 | LG-14572d6c | legacy_transitive_call | src/boomi_mcp/authoring/workflow.py | plan_authoring_request_v1 | 1 | 1868 | #160 | follow the callee's row; this is an edge, not a site |
@@ -2235,10 +2235,10 @@ example producers are globbed, never enumerated: a sixth example is a diff, not 
 
 | Ledger ID | Census | Path | Symbol | Sites | Baseline line | Owning issue | Disposition |
 |---|---|---|---|---|---|---|---|
-| LG-a4f2eecb | authoring_boundary | server.py | build_from_archetype | 1 | 2557 | #159 | migrate the boundary to canonical ProcessIR |
-| LG-702def56 | authoring_boundary | server.py | build_integration | 1 | 2325 | #159 | migrate the boundary to canonical ProcessIR |
-| LG-e2d1badd | authoring_boundary | server.py | compose_archetypes | 1 | 2585 | #159 | migrate the boundary to canonical ProcessIR |
-| LG-4b265c33 | authoring_boundary | server.py | import_integration_draft | 1 | 2821 | #159 | migrate the boundary to canonical ProcessIR |
+| LG-a4f2eecb | authoring_boundary | server.py | build_from_archetype | 1 | 2564 | #159 | migrate the boundary to canonical ProcessIR |
+| LG-702def56 | authoring_boundary | server.py | build_integration | 1 | 2332 | #159 | migrate the boundary to canonical ProcessIR |
+| LG-e2d1badd | authoring_boundary | server.py | compose_archetypes | 1 | 2592 | #159 | migrate the boundary to canonical ProcessIR |
+| LG-4b265c33 | authoring_boundary | server.py | import_integration_draft | 1 | 2828 | #159 | migrate the boundary to canonical ProcessIR |
 | LG-03af32a7 | authoring_boundary | src/boomi_mcp/patterns/archetypes/api_to_api_sync.py | api_to_api_sync | 1 | 1 | #159 | migrate the archetype to canonical ProcessIR |
 | LG-3a04479d | authoring_boundary | src/boomi_mcp/patterns/archetypes/api_to_database_sync.py | api_to_database_sync | 1 | 1 | #159 | migrate the archetype to canonical ProcessIR |
 | LG-55c06295 | authoring_boundary | src/boomi_mcp/patterns/archetypes/database_to_api_sync.py | database_to_api_sync | 1 | 1 | #159 | migrate the archetype to canonical ProcessIR |
@@ -2346,11 +2346,11 @@ above says what each location means; this one says exactly where the calls are.
 | LG-c45135b8 | component_xml_write | src/boomi_mcp/categories/integration_builder.py | _execute_component | 10 | 3792 | #153/#160 | WRT-build-integration-generic: content guard at BOTH plan and apply boundaries, placed BEFORE all type dispatch (the process and connector arms dispatch before the fall-through ever runs); mutation-tested with an unknown/future declared type. · WRT-build-integration-structured-process: replaced by canonical ProcessIR materialization/apply. · WRT-build-integration-typed-nonprocess: unchanged — the content guard never matches these roots. |
 | LG-1d129c81 | component_xml_write | src/boomi_mcp/categories/meta_tools.py | invoke_api | 1 | 5893 | #160 | WRT-raw-api-component: ONE canonical endpoint parser feeds classification, ID extraction AND transport; the reserved literal `bulk` is matched BEFORE the `<id>` arm and is never a componentId; every update-shaped call runs the two-sided process check. |
 | LG-0c9343f4 | component_xml_write | src/boomi_mcp/categories/shared_resources.py | _get_channel_raw_json | 1 | 204 | #160 | WRT-shared-channel-lossless-read: unchanged — the endpoint is not /Component and the call is a read, so the process-content classifier never applies; it is inventoried so a future edit cannot turn a hand-rolled transport into a write route unnoticed. |
-| LG-efa0b8f0 | http_client_call | server.py | web_callback | 1 | 5388 | #160 | WRT-external-transport-oauth-callback: unchanged — assert the target host/path is the configured token endpoint, never /Component. |
+| LG-efa0b8f0 | http_client_call | server.py | web_callback | 1 | 5395 | #160 | WRT-external-transport-oauth-callback: unchanged — assert the target host/path is the configured token endpoint, never /Component. |
 | LG-7709911a | http_client_call | src/boomi_mcp/categories/deployment/orchestration.py | _listener_probe | 1 | 1048 | #160 | WRT-external-transport-listener-probe: unchanged — the URL comes from the listener's endpoint, never from a Component route. |
 | LG-7e973d10 | http_client_call | src/boomi_mcp/categories/marketplace.py | search_marketplace_recipes_action | 1 | 253 | #160 | WRT-external-transport-marketplace: unchanged — assert the endpoint is the Marketplace GraphQL host and no component XML is submitted. |
 | LG-9b78e266 | http_client_call | src/boomi_mcp/categories/schema_discovery.py | _fetch | 1 | 461 | #160 | WRT-external-transport-schema-discovery: unchanged — the SSRF guard already forbids platform hosts; assert no /Component target is reachable. |
-| LG-c3bf6d69 | raw_api_invoker | server.py | invoke_boomi_api | 1 | 3417 | #160 | WRT-raw-api-component: ONE canonical endpoint parser feeds classification, ID extraction AND transport; the reserved literal `bulk` is matched BEFORE the `<id>` arm and is never a componentId; every update-shaped call runs the two-sided process check. |
+| LG-c3bf6d69 | raw_api_invoker | server.py | invoke_boomi_api | 1 | 3424 | #160 | WRT-raw-api-component: ONE canonical endpoint parser feeds classification, ID extraction AND transport; the reserved literal `bulk` is matched BEFORE the `<id>` arm and is never a componentId; every update-shaped call runs the two-sided process check. |
 
 **SDK evidence** (derived by reading the installed SDK's own method bodies — semantic facts only, no
 vendor line numbers, which drift independently under `boomi>=3.0.1`):

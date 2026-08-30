@@ -1604,7 +1604,7 @@ if query_components_action:
 
         Args:
             profile: Boomi profile name (required)
-            action: One of: list, get, search, bulk_get
+            action: One of: list, get, search, bulk_get, idempotency_contract_candidates
             component_id: Component ID (required for get)
             component_ids: JSON array of component IDs (required for bulk_get, max 5)
             config: JSON string with action-specific configuration
@@ -1698,6 +1698,13 @@ if query_components_action:
                 else:
                     ids = None
                 params["component_ids"] = ids
+            elif action == "idempotency_contract_candidates":
+                # The router reads this action's inputs from `config`, so the
+                # parsed config has to be forwarded. Without this arm the router
+                # received an empty mapping and refused every call for a missing
+                # operation id — the capability was unreachable from the boundary
+                # while its unit tests, which call the module directly, passed.
+                params["config"] = config_data
 
             return query_components_action(sdk, profile, action, **params)
 
@@ -5862,7 +5869,7 @@ if __name__ == "__main__":
         if query_components_action:
             print("\n  Component Discovery:")
             print("  query_components - List, get, search, bulk_get components")
-            print("    Actions: list, get, search, bulk_get")
+            print("    Actions: list, get, search, bulk_get, idempotency_contract_candidates")
         if manage_component_action:
             print("\n  Component Management:")
             print("  manage_component - Create, update, clone, delete components")
