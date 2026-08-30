@@ -2013,3 +2013,97 @@ def test_the_snapshot_not_the_symbol_table_decides_the_observed_identity(monkeyp
         snapshot=snapshot,
     )
     assert len(real.idempotency_grants) == 1, "the observed identity failed to corroborate"
+
+
+def test_a_foreign_account_record_does_not_corroborate(monkeypatch):
+    """The account check that had never once run.
+
+    It imported a helper that does not exist, so the import raised on every
+    machine, the broad handler answered True, and a record belonging to another
+    account corroborated whenever the other fields matched. The comment
+    justifying that fallback reasoned it would otherwise reject every record on
+    a machine missing the helper — the helper was missing on ALL of them.
+    """
+    _synthetic_capabilities(monkeypatch, (REST, "PATCH", "conditionally_idempotent"))
+    from boomi_mcp.authoring.connector_resolution_snapshot import (
+        ResolvedConnectorComponentIdentityV1,
+        TrustedConnectorResolutionSnapshotV1,
+    )
+    from boomi_mcp.compiler.process_ir.connector_resolution import (
+        mint_idempotency_grants,
+        resolve_connector_call_bindings,
+    )
+    from boomi_mcp.connector_replay.digests import account_scope_hash
+
+    digest = "d" * 64
+    symbols = _symbols(
+        contracts=[
+            IdempotencyContractSymbolV1(
+                ref="$ref:C", operation_ref="$ref:PATCHOP", record_digest=digest
+            )
+        ]
+    )
+    doc = _connector_scope(
+        retry={"count": 1},
+        protected="$ref:PATCHOP",
+        idempotency={"kind": "key_reference", "contract_ref": "$ref:C"},
+    )
+    cfg, _plan = _compile(doc, symbols)
+    index = symbols.build_index()
+    binding = next(
+        b for b in resolve_connector_call_bindings(cfg, symbols)
+        if b.operation_ref == "$ref:PATCHOP"
+    )
+    op_key = binding.operation_ref.split(":", 1)[1]
+
+    snapshot = TrustedConnectorResolutionSnapshotV1(
+        identities=(
+            ResolvedConnectorComponentIdentityV1(
+                component_key=op_key,
+                component_id=index[binding.operation_ref].component_id,
+                account_id="account-OURS",
+            ),
+        )
+    )
+
+    def registry(scope_hash):
+        base = _complete_record(digest)
+        record = base.operation_records[0]
+        record.account_scope_hash = scope_hash
+
+        class _Reg:
+            operation_records = (record,)
+
+            @staticmethod
+            def family_for(platform_connector_type):
+                return base.family_for(platform_connector_type)
+
+        return _Reg()
+
+    foreign = mint_idempotency_grants(
+        cfg, symbols, process_root_ref="$ref:R",
+        registry=registry(account_scope_hash("account-THEIRS")), snapshot=snapshot,
+    )
+    assert foreign.idempotency_grants == (), "a foreign-account record corroborated"
+
+    ours = mint_idempotency_grants(
+        cfg, symbols, process_root_ref="$ref:R",
+        registry=registry(account_scope_hash("account-OURS")), snapshot=snapshot,
+    )
+    assert len(ours.idempotency_grants) == 1, "our own account's record failed to corroborate"
+
+
+def test_the_two_account_hashers_are_ONE_authority():
+    """Ingestion stamps the scope; corroboration checks it. A second private copy
+    is how two sides of one comparison come to disagree."""
+    import inspect
+
+    from boomi_mcp.connector_replay import ingest
+    from boomi_mcp.connector_replay.digests import account_scope_hash
+
+    body = inspect.getsource(ingest._account_scope_hash)
+    assert "account_scope_hash" in body, "ingest no longer consumes the shared hasher"
+    assert "hashlib.sha256" not in body, (
+        "ingest computes its own account hash again; the two sides can now drift"
+    )
+    assert account_scope_hash("x") == account_scope_hash("x")

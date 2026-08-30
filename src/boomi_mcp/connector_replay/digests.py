@@ -669,3 +669,23 @@ def component_config_digest_v1(component_xml: str, kind: str, family: str = "res
     return "ComponentConfigDigestV1:" + hashlib.sha256(
         CONFIG_DIGEST_DOMAIN + canonical.encode("utf-8")
     ).hexdigest()
+
+
+def account_scope_hash(account_id: str) -> str:
+    """The account an artifact belongs to, hashed. REFUSES when unknown.
+
+    Exported because two callers need it — ingestion, which stamps a record, and
+    the compiler's corroboration, which checks one — and a second private copy is
+    how two sides of the same comparison come to disagree.
+
+    Hashing the empty string produces the well-known digest of nothing, and every
+    accountless artifact would then carry the SAME scope, so evidence from two
+    different unknown accounts would satisfy the very check this hash exists to
+    enforce. A scope nobody established is not a scope.
+    """
+    import hashlib
+
+    if not account_id:
+        raise ValueError("no account id: the scope an artifact belongs to is unknown")
+    return hashlib.sha256(account_id.encode("utf-8")).hexdigest()
+

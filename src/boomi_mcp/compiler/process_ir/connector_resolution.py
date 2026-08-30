@@ -964,16 +964,20 @@ def _matches_observation(recorded, observed) -> bool:
 
 def _account_matches(record_scope_hash: str, account_id: str) -> bool:
     """Whether a record's account scope hash is the one this account hashes to."""
-    try:
-        from ...connector_replay.digests import account_scope_hash
+    # FAILS CLOSED. The previous form imported a helper that did not exist, so
+    # the import raised on every machine, the broad handler answered True, and a
+    # foreign-account record corroborated whenever the other fields matched —
+    # this check had never once run. The comment justifying that fallback argued
+    # it would otherwise "reject every record on a machine missing the helper";
+    # the helper was missing on ALL of them, which is precisely why an
+    # unanswerable account question must refuse rather than wave through.
+    from ...connector_replay.digests import account_scope_hash
 
-        return account_scope_hash(account_id) == record_scope_hash
-    except Exception:  # noqa: BLE001
-        # No way to compute the scope means no way to corroborate it. Refusing
-        # here would reject every record on a machine missing the helper; the
-        # account comparison is simply not made, and the identity comparisons
-        # above still stand.
-        return True
+    try:
+        computed = account_scope_hash(account_id)
+    except ValueError:
+        return False
+    return computed == record_scope_hash
 
 
 def project_grants_for_root(

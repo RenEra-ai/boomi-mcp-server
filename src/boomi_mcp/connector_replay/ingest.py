@@ -364,13 +364,16 @@ def _account_scope_hash(summary: CaptureSummaryV1) -> str:
     different unknown accounts satisfied the account-consistency check that this
     hash exists to enforce. A scope nobody established is not a scope.
     """
-    if not summary.account_id:
+    from .digests import account_scope_hash
+
+    try:
+        return account_scope_hash(summary.account_id)
+    except ValueError as exc:
         raise IngestRefused(
             f"{summary.scenario}: no account is recorded in the capture's "
             "execution artifacts, so the scope its evidence belongs to is unknown "
             "and an account-bound record cannot rest on it"
-        )
-    return hashlib.sha256(summary.account_id.encode("utf-8")).hexdigest()
+        ) from exc
 
 
 def _input_observation(summary: CaptureSummaryV1) -> InputObservationV1:

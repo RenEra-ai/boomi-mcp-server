@@ -445,6 +445,14 @@ def test_EVERY_compile_sink_projects_a_root():
 
     root = pathlib.Path(__file__).resolve().parents[1] / "src" / "boomi_mcp"
     entries = {"compile_process_ir_v1", "compile_process_ir_model_v1"}
+    # ONE exemption, named with its reason rather than left as a silent gap.
+    # Materialisation compiles a RELOCATABLE artifact from placeholder-backed
+    # symbols, and the plan keeps grants out of the covered plan material so its
+    # fingerprint stays account-independent. Projecting there would compare a
+    # record's real component id against `id-KEY` placeholders, corroborate
+    # nothing, and refuse every legitimate retry. Its enforcement point is the
+    # apply boundary, where the table has been rebound to real applied ids.
+    exempt = {"process_materialization.py::build_materialization_plan"}
     unprojected = []
 
     for path in root.rglob("*.py"):
@@ -469,7 +477,9 @@ def test_EVERY_compile_sink_projects_a_root():
                 for n in ast.walk(fn)
             )
             if not projects:
-                unprojected.append(f"{path.relative_to(root)}::{fn.name}")
+                site = f"{path.name}::{fn.name}"
+                if site not in exempt:
+                    unprojected.append(f"{path.relative_to(root)}::{fn.name}")
 
     assert not unprojected, (
         "these functions compile a process without projecting a root first, so "
@@ -483,6 +493,20 @@ def test_EVERY_compile_sink_projects_a_root():
         and any(e in path.read_text() for e in entries)
     )
     assert found >= 3, f"only {found} sink files found — the sweep is too narrow"
+
+    # The exemption must name a site that EXISTS, or it is a silent hole that
+    # outlives the function it was written for.
+    import ast as _ast
+
+    live = set()
+    for path in root.rglob("*.py"):
+        if "compiler/process_ir" in path.as_posix():
+            continue
+        for fn in _ast.walk(_ast.parse(path.read_text())):
+            if isinstance(fn, (_ast.FunctionDef, _ast.AsyncFunctionDef)):
+                live.add(f"{path.name}::{fn.name}")
+    stale = exempt - live
+    assert not stale, f"the sink exemption names functions that no longer exist: {stale}"
 
 
 def test_an_unlowerable_root_still_projects_with_zero_grants():
