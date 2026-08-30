@@ -2107,3 +2107,67 @@ def test_the_two_account_hashers_are_ONE_authority():
         "ingest computes its own account hash again; the two sides can now drift"
     )
     assert account_scope_hash("x") == account_scope_hash("x")
+
+
+@pytest.mark.parametrize("bogus", [object(), "not-a-snapshot", 42, {"identities": ()}])
+def test_a_miswired_snapshot_is_refused_rather_than_read_as_empty(bogus, monkeypatch):
+    """Passing the object directly was NOT the guarantee I claimed.
+
+    The corroboration reads `identities` and `account_scope` permissively, so a
+    miswired object yielded no identities and no account — and the identity and
+    account checks quietly passed. A value that cannot answer those questions
+    must not be read as answering them.
+    """
+    _synthetic_capabilities(monkeypatch, (REST, "PATCH", "conditionally_idempotent"))
+    from boomi_mcp.compiler.process_ir.connector_resolution import mint_idempotency_grants
+
+    digest = "a" * 64
+    symbols = _symbols(
+        contracts=[
+            IdempotencyContractSymbolV1(
+                ref="$ref:C", operation_ref="$ref:PATCHOP", record_digest=digest
+            )
+        ]
+    )
+    doc = _connector_scope(
+        retry={"count": 1},
+        protected="$ref:PATCHOP",
+        idempotency={"kind": "key_reference", "contract_ref": "$ref:C"},
+    )
+    cfg, _plan = _compile(doc, symbols)
+
+    with pytest.raises(TypeError):
+        mint_idempotency_grants(
+            cfg, symbols, process_root_ref="$ref:R",
+            registry=_complete_record(digest), snapshot=bogus,
+        )
+
+
+def test_a_real_snapshot_is_accepted(monkeypatch):
+    """Control: the assertion must not refuse the genuine article."""
+    _synthetic_capabilities(monkeypatch, (REST, "PATCH", "conditionally_idempotent"))
+    from boomi_mcp.authoring.connector_resolution_snapshot import (
+        TrustedConnectorResolutionSnapshotV1,
+    )
+    from boomi_mcp.compiler.process_ir.connector_resolution import mint_idempotency_grants
+
+    digest = "a" * 64
+    symbols = _symbols(
+        contracts=[
+            IdempotencyContractSymbolV1(
+                ref="$ref:C", operation_ref="$ref:PATCHOP", record_digest=digest
+            )
+        ]
+    )
+    doc = _connector_scope(
+        retry={"count": 1},
+        protected="$ref:PATCHOP",
+        idempotency={"kind": "key_reference", "contract_ref": "$ref:C"},
+    )
+    cfg, _plan = _compile(doc, symbols)
+    minted = mint_idempotency_grants(
+        cfg, symbols, process_root_ref="$ref:R",
+        registry=_complete_record(digest),
+        snapshot=TrustedConnectorResolutionSnapshotV1(),
+    )
+    assert len(minted.idempotency_grants) == 1

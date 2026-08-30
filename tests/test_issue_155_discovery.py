@@ -669,12 +669,17 @@ def test_the_grant_wiring_never_defaults_a_load_bearing_argument():
             for kw in node.keywords:
                 if kw.arg not in load_bearing:
                     continue
-                value = kw.value
-                if (
-                    isinstance(value, ast.Call)
-                    and getattr(value.func, "id", None) == "getattr"
-                    and len(value.args) >= 3
-                ):
+                # WALK the whole expression. Inspecting only a direct call let a
+                # wrapped form through — `getattr(x, "k", "") or "fallback"` is a
+                # BoolOp, not a Call — and the tree already contained exactly that
+                # on a load-bearing argument while this guard stayed green.
+                defaulting = any(
+                    isinstance(inner, ast.Call)
+                    and getattr(inner.func, "id", None) == "getattr"
+                    and len(inner.args) >= 3
+                    for inner in ast.walk(kw.value)
+                )
+                if defaulting:
                     offenders.append(
                         f"{path.relative_to(root)}:{node.lineno} passes {kw.arg}= "
                         "through a defaulting getattr — a wrong or missing "

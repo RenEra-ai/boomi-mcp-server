@@ -768,6 +768,23 @@ def mint_idempotency_grants(
     from .contracts import IdempotencyGrantSymbolV1
 
 
+    # A SUPPLIED SNAPSHOT MUST PRESENT ITS SHAPE. Passing the object directly was
+    # not the guarantee I claimed: the corroboration reads `identities` and
+    # `account_scope` permissively, so a miswired object yielded no identities and
+    # no account, and the identity and account checks quietly passed — the very
+    # fail-open the direct pass was meant to remove. Asserted, not defaulted: a
+    # wrong object is a programming error and says so.
+    if snapshot is not None:
+        missing = [
+            name for name in ("identities", "account_scope") if not hasattr(snapshot, name)
+        ]
+        if missing:
+            raise TypeError(
+                "grant projection was given a snapshot lacking {0!r}; a value that "
+                "cannot answer the identity and account questions must not be "
+                "read as answering them".format(missing)
+            )
+
     contracts = symbols.build_idempotency_index()
     # Built ONCE. Resolving the operation inside the corroboration helper rebuilt
     # the whole index per eligible call, which is O(calls x symbols) over

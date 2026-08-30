@@ -270,7 +270,10 @@ def materialize_canonical_process_xml(
         bound = project_grants_for_root(
             plan.process_ir,
             bound,
-            process_root_ref=getattr(plan, "component_key", "") or "apply",
+            # DIRECT. This is a load-bearing argument, and a defaulting accessor
+            # here would substitute a literal root for a missing one — the same
+            # shape that disabled the gate elsewhere in this slice.
+            process_root_ref=plan.envelope.component_key,
             snapshot=snapshot,
         )
     cfg, emission_plan = (
