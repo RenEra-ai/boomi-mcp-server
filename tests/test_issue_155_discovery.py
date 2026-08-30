@@ -449,15 +449,67 @@ def test_the_production_compile_paths_project_a_root():
         )
 
 
-def test_projection_is_silent_where_the_validator_speaks():
-    """A root that cannot be lowered returns the table unchanged.
+def test_an_unlowerable_root_still_projects_with_zero_grants():
+    """Silent about the failure, but NOT rootless.
 
-    Lowering failures belong to the validator. A projection helper that raised
-    them would report one defect from two layers — the rule the minter follows.
+    Lowering failures belong to the validator, so this raises nothing. The
+    earlier version returned the table UNCHANGED, which switched grant checking
+    off entirely — a lowering failure would have silently restored the weaker
+    per-operation authorisation. The table is projected with no grants instead,
+    so the gate stays on and the call is refused.
     """
     from boomi_mcp.compiler.process_ir.connector_resolution import project_grants_for_root
     from boomi_mcp.compiler.process_ir.contracts import SymbolTableV1
 
     table = SymbolTableV1()
     out = project_grants_for_root(object(), table, process_root_ref="$ref:R")
-    assert out is table or out.process_root_ref is None
+    assert out.process_root_ref == "$ref:R", "a lowering failure left the table rootless"
+    assert out.idempotency_grants == ()
+
+
+def test_the_projection_actually_LOWERS_rather_than_failing_silently():
+    """The check my earlier probe could not make.
+
+    I verified the projection by passing a non-IR object and observing the table
+    come back unchanged — which is exactly what happens whether the lowerer works
+    or is undefined. It was undefined, every projection raised, the broad handler
+    restored the grant-free table, and the gate stayed inert while looking wired.
+
+    This drives a REAL root and asserts the lowerer ran, so an undefined or
+    broken lowerer cannot pass.
+    """
+    from boomi_mcp.compiler.process_ir import connector_resolution as cr
+
+    calls = []
+    real = cr.lower_process_ir_to_cfg if hasattr(cr, "lower_process_ir_to_cfg") else None
+    assert real is None, (
+        "the lowerer is now a module global; this test assumes the function-level "
+        "import that keeps the layering right"
+    )
+
+    import boomi_mcp.compiler.process_ir.lowering as lowering
+
+    original = lowering.lower_process_ir_to_cfg
+
+    def _spy(ir):
+        calls.append(ir)
+        return original(ir)
+
+    lowering.lower_process_ir_to_cfg = _spy
+    try:
+        import sys
+
+        sys.path.insert(0, "tests")
+        from test_process_ir_error_handling import _connector_scope, _symbols
+        from boomi_mcp.models.process_ir import ProcessIRV1
+
+        doc = _connector_scope(retry={"count": 1}, protected="$ref:GETOP")
+        ir = ProcessIRV1.model_validate(doc)
+        cr.project_grants_for_root(ir, _symbols(), process_root_ref="$ref:ROOT")
+    finally:
+        lowering.lower_process_ir_to_cfg = original
+
+    assert calls, (
+        "the projection never reached the lowerer — an undefined name would be "
+        "swallowed by the handler and the gate would be inert"
+    )

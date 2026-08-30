@@ -1649,8 +1649,13 @@ def test_the_minter_mints_a_grant_for_a_call_whose_contract_resolves(monkeypatch
     that is never exercised.
     """
     _synthetic_capabilities(monkeypatch, (REST, "PATCH", "conditionally_idempotent"))
+    digest = "d" * 64
     symbols = _symbols(
-        contracts=[IdempotencyContractSymbolV1(ref="$ref:C", operation_ref="$ref:PATCHOP")]
+        contracts=[
+            IdempotencyContractSymbolV1(
+                ref="$ref:C", operation_ref="$ref:PATCHOP", record_digest=digest
+            )
+        ]
     )
     doc = _connector_scope(
         retry={"count": 1},
@@ -1658,7 +1663,21 @@ def test_the_minter_mints_a_grant_for_a_call_whose_contract_resolves(monkeypatch
         idempotency={"kind": "key_reference", "contract_ref": "$ref:C"},
     )
 
-    minted = _mint(doc, symbols)
+    # Provenance is REQUIRED, so a corroborating record has to exist for anything
+    # to mint — the registry is what turns a caller's claim into evidence.
+    class _Registry:
+        class _R:
+            record_digest = digest
+            contract_ref = "$ref:C"
+            operation_identity = _Identity("op-patch")
+        operation_records = (_R(),)
+
+    from boomi_mcp.compiler.process_ir.connector_resolution import mint_idempotency_grants
+
+    cfg, _plan = _compile(doc, symbols)
+    minted = mint_idempotency_grants(
+        cfg, symbols, process_root_ref="$ref:ROOT", registry=_Registry()
+    )
     assert minted.process_root_ref == "$ref:ROOT"
     assert len(minted.idempotency_grants) == 1, "the minter produced nothing"
     grant = minted.idempotency_grants[0]
@@ -1721,7 +1740,11 @@ def test_a_root_projected_table_requires_a_grant_for_this_very_call(monkeypatch)
     """
     _synthetic_capabilities(monkeypatch, (REST, "PATCH", "conditionally_idempotent"))
     symbols = _symbols(
-        contracts=[IdempotencyContractSymbolV1(ref="$ref:C", operation_ref="$ref:PATCHOP")]
+        contracts=[
+            IdempotencyContractSymbolV1(
+                ref="$ref:C", operation_ref="$ref:PATCHOP", record_digest="c" * 64
+            )
+        ]
     )
     doc = _connector_scope(
         retry={"count": 1},
@@ -1732,7 +1755,19 @@ def test_a_root_projected_table_requires_a_grant_for_this_very_call(monkeypatch)
     # A grant-free table still compiles: that is the pre-projection state.
     _compile(doc, symbols)
 
-    minted = _mint(doc, symbols)
+    class _Registry:
+        class _R:
+            record_digest = "c" * 64
+            contract_ref = "$ref:C"
+            operation_identity = _Identity("op-patch")
+        operation_records = (_R(),)
+
+    from boomi_mcp.compiler.process_ir.connector_resolution import mint_idempotency_grants
+
+    cfg, _plan = _compile(doc, symbols)
+    minted = mint_idempotency_grants(
+        cfg, symbols, process_root_ref="$ref:ROOT", registry=_Registry()
+    )
     assert minted.idempotency_grants, "nothing minted — the rest of this is vacuous"
     _compile(doc, minted)  # the minted table covers this call
 
@@ -1757,6 +1792,13 @@ def test_a_root_projected_table_requires_a_grant_for_this_very_call(monkeypatch)
         == PROCESS_IR_SEMANTIC_IDEMPOTENCY_EVIDENCE_MISSING
     )
 
+
+class _Identity:
+    """The operation identity every real registry record carries."""
+
+    def __init__(self, component_id):
+        self.component_id = component_id
+        self.version = 1
 
 def test_a_contract_naming_a_record_the_registry_lacks_mints_nothing(monkeypatch):
     """A caller-supplied digest is a claim, and the registry is what corroborates it.
@@ -1795,6 +1837,8 @@ def test_a_contract_naming_a_record_the_registry_lacks_mints_nothing(monkeypatch
     class _Holds:
         class _R:
             record_digest = digest
+            contract_ref = "$ref:C"
+            operation_identity = _Identity("op-patch")
         operation_records = (_R(),)
 
     corroborated = mint_idempotency_grants(
@@ -1804,12 +1848,15 @@ def test_a_contract_naming_a_record_the_registry_lacks_mints_nothing(monkeypatch
     assert corroborated.idempotency_grants[0].record_digest == digest
 
 
-def test_a_contract_naming_no_record_still_mints(monkeypatch):
-    """Control: the digest is optional, and its absence is not a refusal.
+def test_a_contract_naming_no_record_mints_NOTHING(monkeypatch):
+    """INVERTED, and the original assertion was the fail-open itself.
 
-    The packaged registry ships with no records at all, so requiring one
-    unconditionally would make every grant unmintable — a check that refuses
-    everything is not a check.
+    I wrote this as a control asserting the digest is optional, reasoning that
+    requiring one would make every grant unmintable while the packaged registry
+    is empty. That reasoning is backwards: a caller could omit the field and
+    authorise a retry on no evidence at all, which is precisely what the digest
+    exists to prevent. Nothing minting until evidence is ingested IS the
+    fail-closed posture the packaged registry already ships in.
     """
     _synthetic_capabilities(monkeypatch, (REST, "PATCH", "conditionally_idempotent"))
     symbols = _symbols(
@@ -1830,5 +1877,57 @@ def test_a_contract_naming_no_record_still_mints(monkeypatch):
     minted = mint_idempotency_grants(
         cfg, symbols, process_root_ref="$ref:ROOT", registry=_Empty()
     )
-    assert len(minted.idempotency_grants) == 1
-    assert minted.idempotency_grants[0].record_digest is None
+    assert minted.idempotency_grants == (), "minted a grant on no evidence at all"
+    # The table is still PROJECTED, so grant checking stays ON and the call is
+    # refused rather than falling back to per-operation authorisation.
+    assert minted.process_root_ref == "$ref:ROOT"
+
+
+def test_a_digest_from_an_UNRELATED_record_does_not_corroborate(monkeypatch):
+    """A digest match alone is not corroboration.
+
+    A symbol could pair a real record's digest with a different contract
+    reference, and the minter would authorise a replay that record never
+    observed. The record must agree about the contract it covers.
+    """
+    _synthetic_capabilities(monkeypatch, (REST, "PATCH", "conditionally_idempotent"))
+    digest = "e" * 64
+    symbols = _symbols(
+        contracts=[
+            IdempotencyContractSymbolV1(
+                ref="$ref:MINE", operation_ref="$ref:PATCHOP", record_digest=digest
+            )
+        ]
+    )
+    doc = _connector_scope(
+        retry={"count": 1},
+        protected="$ref:PATCHOP",
+        idempotency={"kind": "key_reference", "contract_ref": "$ref:MINE"},
+    )
+    from boomi_mcp.compiler.process_ir.connector_resolution import mint_idempotency_grants
+
+    cfg, _ = _compile(doc, symbols)
+
+    class _Unrelated:
+        class _R:
+            record_digest = digest
+            contract_ref = "$ref:SOMEONE_ELSE"      # same digest, other contract
+            operation_identity = _Identity("op-patch")
+        operation_records = (_R(),)
+
+    minted = mint_idempotency_grants(
+        cfg, symbols, process_root_ref="$ref:ROOT", registry=_Unrelated()
+    )
+    assert minted.idempotency_grants == (), "an unrelated record corroborated the call"
+
+    class _Matching:
+        class _R:
+            record_digest = digest
+            contract_ref = "$ref:MINE"
+            operation_identity = _Identity("op-patch")
+        operation_records = (_R(),)
+
+    ok = mint_idempotency_grants(
+        cfg, symbols, process_root_ref="$ref:ROOT", registry=_Matching()
+    )
+    assert len(ok.idempotency_grants) == 1, "the matching record failed to corroborate"

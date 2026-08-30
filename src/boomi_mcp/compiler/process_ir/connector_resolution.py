@@ -786,13 +786,12 @@ def mint_idempotency_grants(cfg, symbols, *, process_root_ref: str, registry=Non
             # An unresolvable reference is the validator's finding, not a reason
             # to mint a grant for a contract that does not cover this call.
             continue
-        if contract.record_digest is not None and not _registry_holds(
-            registry, contract.record_digest
-        ):
-            # The symbol NAMES a record; the registry must be able to corroborate
-            # it. A caller-supplied digest the registry does not hold is a claim
-            # about evidence nobody has, and minting on it would let a fabricated
-            # or foreign-account symbol authorise a retry the system never saw.
+        # Provenance is REQUIRED. Treating the digest as optional let a caller
+        # omit it and mint against an empty registry, which is authorising a
+        # retry on no evidence at all — the exact thing the digest exists to
+        # prevent. Until evidence is ingested, nothing mints, which is the
+        # fail-closed posture the packaged registry already ships in.
+        if not _registry_corroborates(registry, contract, binding, symbols):
             continue
         grant = IdempotencyGrantSymbolV1(
             contract_ref=contract_ref,
@@ -812,14 +811,20 @@ def mint_idempotency_grants(cfg, symbols, *, process_root_ref: str, registry=Non
     )
 
 
-def _registry_holds(registry, record_digest: str) -> bool:
-    """Whether the replay registry holds a record with this digest.
+def _registry_corroborates(registry, contract, binding, symbols) -> bool:
+    """Whether the registry holds a record that covers THIS call.
 
-    A missing registry corroborates NOTHING — it is not an absent constraint. A
-    symbol that names a record is asking to be checked, and answering "no
-    registry, so yes" would make the digest a decoration a caller could set to
-    bypass the check it exists to impose.
+    A digest match alone is not corroboration: a symbol could pair a real
+    record's digest with an unrelated contract reference or a different
+    operation, and the minter would authorise a replay that record never
+    observed. The record has to agree about the contract it covers AND the
+    operation component it was captured against.
+
+    A missing registry corroborates NOTHING — it is not an absent constraint.
     """
+    digest = getattr(contract, "record_digest", None)
+    if not digest:
+        return False
     if registry is None:
         try:
             from ...connector_replay.registry import load_registry
@@ -827,10 +832,27 @@ def _registry_holds(registry, record_digest: str) -> bool:
             registry = load_registry()
         except Exception:  # noqa: BLE001
             return False
-    return any(
-        getattr(record, "record_digest", None) == record_digest
-        for record in getattr(registry, "operation_records", ())
-    )
+
+    # The component the operation reference resolves to, so the record's own
+    # identity can be compared against the call's subject rather than assumed.
+    operation_component_id = None
+    try:
+        symbol = symbols.build_index().get(binding.operation_ref)
+        operation_component_id = getattr(symbol, "component_id", None)
+    except Exception:  # noqa: BLE001
+        operation_component_id = None
+
+    for record in getattr(registry, "operation_records", ()):
+        if getattr(record, "record_digest", None) != digest:
+            continue
+        if getattr(record, "contract_ref", None) != contract.ref:
+            continue
+        if operation_component_id is not None:
+            identity = getattr(record, "operation_identity", None)
+            if getattr(identity, "component_id", None) != operation_component_id:
+                continue
+        return True
+    return False
 
 
 def project_grants_for_root(root_ir, symbols, *, process_root_ref: str, registry=None):
@@ -845,14 +867,28 @@ def project_grants_for_root(root_ir, symbols, *, process_root_ref: str, registry
     are the validator's to report, and a projection helper that raised them would
     report one defect from two layers — the same rule the minter follows.
     """
+    # Imported HERE, not at module scope: `lowering` imports from this module's
+    # siblings and a top-level import inverts that. Verified by resolving the name
+    # rather than by inference — the previous edit left it undefined, every
+    # projection raised, and the broad handler silently restored the grant-free
+    # table, so the gate stayed inert while looking wired.
+    from .lowering import lower_process_ir_to_cfg
+
+    projected = symbols.model_copy(
+        update={"process_root_ref": process_root_ref, "idempotency_grants": ()}
+    )
     try:
         cfg = lower_process_ir_to_cfg(root_ir)
     except Exception:  # noqa: BLE001
-        return symbols
+        # A root that cannot be lowered is the validator's finding. The table is
+        # still PROJECTED, with no grants: falling back to the rootless table
+        # would switch grant checking off entirely, so a lowering failure would
+        # silently restore the weaker per-operation authorisation.
+        return projected
     try:
         return mint_idempotency_grants(
             cfg, symbols, process_root_ref=process_root_ref, registry=registry
         )
     except Exception:  # noqa: BLE001
-        return symbols
+        return projected
 
