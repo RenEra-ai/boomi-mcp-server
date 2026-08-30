@@ -1788,68 +1788,59 @@ class _Identity:
         self.version = 1
 
 def _complete_record(digest, *, contract="$ref:C", operation="op-patch",
-                     connection="conn-1", family=None, action="PATCH"):
-    """A registry record carrying EVERY axis corroboration compares.
+                     connection="conn-1", family="rest", action="PATCH"):
+    """A registry double carrying every axis corroboration compares.
 
-    Built as one helper because a partial stand-in fails corroboration for a
-    reason the test did not intend, which reads as the assertion passing.
+    The FAMILY is validated against the real record model's own field
+    constraint, because that is exactly where three review rounds went wrong:
+    the doubles carried the canonical PLATFORM connector type, which the real
+    model forbids, so the tests agreed with a comparison that could never match
+    genuine evidence. Constructing the whole model is not possible here — its
+    component-id validator requires real Boomi ids and this harness uses
+    synthetic names — so the one field that misled is checked against the
+    authority instead of the whole record being assumed.
+
+    It also provides `family_for`, since corroboration maps the binding's
+    platform type through the registry's vocabulary; a double without it is not
+    a registry, and its absence reads as a corroboration failure the test did
+    not intend.
     """
+    import re
+
     from boomi_mcp.compiler.process_ir.connector_capabilities import REST_FAMILY
+    from boomi_mcp.connector_replay.models import OperationContractRecordV1
+
+    constraint = OperationContractRecordV1.model_fields["family"]
+    pattern = next(
+        (getattr(m, "pattern", None) for m in constraint.metadata
+         if getattr(m, "pattern", None)),
+        None,
+    )
+    assert pattern, "the record model no longer constrains `family`; this pin is vacuous"
+    assert re.fullmatch(pattern, family), (
+        f"fixture family {family!r} is one the real record model would REJECT "
+        f"(pattern {pattern!r}) — a record shaped like this could never load"
+    )
 
     class _R:
         record_digest = digest
         contract_ref = contract
-        operation_identity = _Identity(operation)
-        connection_identity = _Identity(connection)
+        family = None
+        action = None
 
-    _R.family = family if family is not None else REST_FAMILY
+    _R.family = family
     _R.action = action
+    _R.operation_identity = _Identity(operation)
+    _R.connection_identity = _Identity(connection)
 
     class _Reg:
         operation_records = (_R(),)
 
+        @staticmethod
+        def family_for(platform_connector_type):
+            return "rest" if platform_connector_type == REST_FAMILY else None
+
     return _Reg()
-
-def test_a_contract_naming_a_record_the_registry_lacks_mints_nothing(monkeypatch):
-    """A caller-supplied digest is a claim, and the registry is what corroborates it.
-
-    Without this, a fabricated or foreign-account symbol naming any record digest
-    would mint a grant authorising a retry the system never observed. A missing
-    registry corroborates NOTHING — treating absence as assent would make the
-    digest a decoration a caller could set to bypass its own check.
-    """
-    _synthetic_capabilities(monkeypatch, (REST, "PATCH", "conditionally_idempotent"))
-    digest = "f" * 64
-    symbols = _symbols(
-        contracts=[
-            IdempotencyContractSymbolV1(
-                ref="$ref:C", operation_ref="$ref:PATCHOP", record_digest=digest
-            )
-        ]
-    )
-    doc = _connector_scope(
-        retry={"count": 1},
-        protected="$ref:PATCHOP",
-        idempotency={"kind": "key_reference", "contract_ref": "$ref:C"},
-    )
-    from boomi_mcp.compiler.process_ir.connector_resolution import mint_idempotency_grants
-
-    cfg, _ = _compile(doc, symbols)
-
-    class _Empty:
-        operation_records = ()
-
-    minted = mint_idempotency_grants(
-        cfg, symbols, process_root_ref="$ref:ROOT", registry=_Empty()
-    )
-    assert minted.idempotency_grants == (), "minted on a record the registry lacks"
-
-    corroborated = mint_idempotency_grants(
-        cfg, symbols, process_root_ref="$ref:ROOT",
-        registry=_complete_record(digest),
-    )
-    assert len(corroborated.idempotency_grants) == 1
-    assert corroborated.idempotency_grants[0].record_digest == digest
 
 
 def test_a_contract_naming_no_record_mints_NOTHING(monkeypatch):
@@ -1929,35 +1920,24 @@ def test_corroboration_compares_every_axis_the_compiler_can_know(axis, monkeypat
         "contract": "$ref:C",
         "operation": index[binding.operation_ref].component_id,
         "connection": index[binding.connection_ref].component_id,
-        "family": binding.family,
+        # The record's PORTABLE family, not the binding's platform type — the
+        # real model's pattern forbids the platform form, so a fixture using it
+        # would agree with a comparison that can never match real evidence.
+        "family": "rest",
         "action": binding.action,
     }
-
-    def registry(**overrides):
-        values = {**good, **overrides}
-
-        class _R:
-            record_digest = digest
-            contract_ref = values["contract"]
-            operation_identity = _Identity(values["operation"])
-            connection_identity = _Identity(values["connection"])
-            family = values["family"]
-            action = values["action"]
-
-        class _Reg:
-            operation_records = (_R(),)
-
-        return _Reg()
 
     # Control first: everything matching MUST mint, or the negatives below are
     # satisfied by something other than the axis under test.
     minted = mint_idempotency_grants(
-        cfg, symbols, process_root_ref="$ref:R", registry=registry()
+        cfg, symbols, process_root_ref="$ref:R",
+        registry=_complete_record(digest, **good),
     )
     assert len(minted.idempotency_grants) == 1, "the matching record failed to corroborate"
 
+    spoiled_value = "other_family" if axis == "family" else "SOMETHING-ELSE"
     spoiled = mint_idempotency_grants(
         cfg, symbols, process_root_ref="$ref:R",
-        registry=registry(**{axis: "SOMETHING-ELSE"}),
+        registry=_complete_record(digest, **{**good, axis: spoiled_value}),
     )
     assert spoiled.idempotency_grants == (), f"a record with the wrong {axis} corroborated"

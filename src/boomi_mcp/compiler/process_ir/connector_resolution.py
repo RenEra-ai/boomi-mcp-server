@@ -851,6 +851,22 @@ def _registry_corroborates(registry, contract, binding, symbol_index) -> bool:
     operation_component_id = _component(getattr(binding, "operation_ref", None))
     connection_component_id = _component(getattr(binding, "connection_ref", None))
 
+    # TWO NAMESPACES, mapped through the registry that owns the mapping. The
+    # binding carries the canonical PLATFORM connector type; a record carries the
+    # portable vocabulary family, whose own schema forbids the platform form. So
+    # comparing them directly could never match a real record — the check was
+    # refusing all genuine evidence while the tests, which fabricated records
+    # using the platform type, agreed with it. An unmapped type corroborates
+    # nothing: the registry returns None rather than guessing, because inventing
+    # a family would let evidence captured for one connector authorise another.
+    portable_family = None
+    try:
+        portable_family = registry.family_for(getattr(binding, "family", None))
+    except Exception:  # noqa: BLE001
+        portable_family = None
+    if portable_family is None:
+        return False
+
     for record in getattr(registry, "operation_records", ()):
         if getattr(record, "record_digest", None) != digest:
             continue
@@ -866,7 +882,7 @@ def _registry_corroborates(registry, contract, binding, symbol_index) -> bool:
             != connection_component_id
         ):
             continue
-        if getattr(record, "family", None) != getattr(binding, "family", None):
+        if getattr(record, "family", None) != portable_family:
             continue
         if getattr(record, "action", None) != getattr(binding, "action", None):
             continue
