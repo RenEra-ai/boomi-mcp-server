@@ -1076,6 +1076,58 @@ are unchanged; what the revision corrects is the stated blocker, which named the
 where the real one is the account-independence invariant, and a call-site count that was two where
 it is four.
 
+## Slice D — closing report
+
+**Status: CLOSED for landing on the integration branch. The ISSUE remains OPEN — slice D is the
+fourth of six, and #155 closes only on slice F.**
+
+### Which gate covers which tree
+
+| Tree | Commit | What covers it |
+| --- | --- | --- |
+| **W** — the wave-gated tree | `66c4345` | `L4` composite wave gate, archived `wave-gate/wave155j`, exit status captured and measured as zero |
+| **N−1** — the reviewed tree | `7f5114e` | `L2` Stage-2 commit review round 11, run `cdx-review.nv9tF4`, archived, CLEAN over the delta since `90b620b` |
+| **N** — the closing commit | this commit | Record-only: this report, the checkpoint rows above, and the wave-gate archive. Validated by a darkness proof, both ledger scanner files, and the `scratch/**` preflight — never by a further review, which would recurse |
+
+W is a descendant of N−1: the review cleared `7f5114e`, and the two record-only commits after it
+(the review closure and this report) touch nothing outside `docs/architecture/`.
+
+### Gates run
+
+| Loop | Result |
+| --- | --- |
+| `L1` Stage-1 QA | 2 rounds through the public MCP boundary on the live account; round 2 signed off for landing |
+| `L2` Stage-2 commit review | 11 rounds, every one collected and archived; the last returned CLEAN |
+| `L3` §6 architect implementation review | **NOT RUN for this slice.** Under the owner's correction of 2026-08-30 that gate belongs to the FINISHED issue, not to a slice. One evaluation was run for slice D before the correction; its findings were real and are fixed, and it is recorded above as having run under the superseded reading |
+| `L4` composite wave gate | 1 round, PASS on `W` |
+| `L5` closing protocol | this report |
+
+### What this slice built
+
+Idempotency contracts keyed by reference AND operation; one authority owning the authored reference
+grammar, with its own named refusal and the pattern served in the schema; per-call replay grants —
+symbol, minter and consumer — so evidence binds to a CALL rather than to an operation; candidate
+discovery with a closed served field set; and an account-independent semantics revision.
+
+### What it does NOT do, recorded so no closing claim overstates it
+
+- **No production path constructs idempotency contract symbols.** A caller can discover the correct
+  reference and planning still refuses it. Authoring one means accepting caller-supplied provenance
+  at a public boundary, which is the trust surface the evidence slice establishes.
+- **The packaged registry ships empty** — zero semantics definitions, zero operation records — so no
+  grant can mint from real evidence yet. That is the fail-closed posture, not an oversight.
+- **Materialisation deliberately does not enforce grants.** It compiles a relocatable artifact from
+  placeholder-backed symbols, and the plan keeps grants out of plan material so the fingerprint stays
+  account-independent. The enforcement point is the apply boundary, where the table carries real ids.
+
+### Residue
+
+None deferred. Every finding in this slice's loops is fixed or refuted with evidence.
+
+### Restoration
+
+None used. No provisional correction was left unvalidated at HEAD.
+
 ## Slice C — closing report
 
 **Status: CLOSED for landing on the integration branch, with residue recorded and one class left
@@ -1526,6 +1578,7 @@ account-bound operation record it must mint on whatever account is active when i
 | L2 Stage-2 Codex commit review, slice D | 3 / 8 | `e2be34d`, clean | `CONTINUE` | Third evaluation of the window REOPENED after the architect gate returned findings on a tree this loop had already closed clean. Recorded after the validation it governs: round 8's correction has its full suite at 11,285 passed / 18 skipped and its four ledger scanners green. TREND: unresolved findings 2, then 2, then 1 — materially better; affected-class breadth narrowed from two blocking classes to one; highest unrefuted severity stayed critical, so not worsening but not improved. THE RECURRING CLASS was answered structurally at its fourth instance rather than patched a fifth time — a defaulting accessor converting a wiring error into an absent value, now forbidden on the grant-wiring path by a parsed invariant with a non-vacuity floor. NAMED NEXT CORRECTION: none outstanding; the finite next step is one review over the correction delta to confirm it returns clean. Recorded plainly for the trend record: every round of this window found a REAL defect of mine, and three of the four were wiring that looked present and was inert — that is the cost this checkpoint is weighing, and it is why the answer this time was an invariant rather than another instance |
 | L2 Stage-2 Codex commit review, slice D | 6 / 11 | `7f5114e`, clean | `CLOSE-CLEAN` | The eleventh evaluation — run `cdx-review.nv9tF4`, archived `commit-reviews/cdx-review.nv9tF4`, reviewed `7f5114e`, scoped to the delta since `90b620b` — returned NO findings, and the cited review covers the tree this row is written into. Blocking residue: none. Standard residue: none. WHAT THE LOOP COST AND WHY, recorded because the count is the point: eleven evaluations, nineteen findings, thirteen critical by anchor, and every one a real defect. Two thirds of them were not in the mechanism but in MY CLAIMS ABOUT IT — wiring that looked present and was inert (four times, answered at the fourth by an invariant rather than a fifth patch), and tests that passed while the production path did not behave as asserted (four times, each because the test entered below the layer that was broken). The mechanism itself needed few corrections; the assertions about it needed many. This loop closes the REVIEW only — the wave gate and the closing protocol are owed, and under the owner's correction of 2026-08-30 no architect evaluation runs for this slice: that gate belongs to the finished issue |
 | L4 composite wave gate, slice C | 1 / 1 | `7803032`, clean | `CLOSE-CLEAN` — **for THIS loop only** | W = `7803032`, archived `wave-gate/wave155i`. A fresh window: this gate had not run for slice C before. Measured, not inferred — the run was repeated with its exit status captured and reported zero: manifests over 11065 required nodes and 74 active goldens, collection of 11253 tests, the non-KB suite green at 11235 passed and 18 skipped against a skip cap of 30, all 74 active goldens deterministic and byte-exact, and 2 plan-fingerprint cases. An earlier run of this gate FAILED and is recorded rather than hidden: it saw the closing review's evidence archived into the tree before any ledger row cited it, which is a sequencing error of mine — that archive belongs to the closing commit — so the tree was restored and the gate re-run on it |
+| L4 composite wave gate, slice D | 1 / 1 | `66c4345`, clean | `CLOSE-CLEAN` — **for THIS loop only** | W = `66c43457b7de8038babcfa558fca5084596840d0`, archived `wave-gate/wave155j`. A fresh window: this gate had not run for slice D. Measured rather than inferred — the run reported its exit status as zero: manifests over 11,065 required nodes and 74 active goldens, collection of 11,309 tests, the non-KB suite green at 11,291 passed and 18 skipped against a cap of 30, all 74 active goldens deterministic and byte-exact, and 2 plan-fingerprint cases |
 
 **Which gate covers which tree.** The wave gate passed on **W = `706b2f7`**, the tree carrying every
 correction from all four loops — the third wave run, the earlier two invalidated by later code
