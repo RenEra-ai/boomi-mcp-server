@@ -3431,3 +3431,103 @@ def test_only_a_field_the_builder_can_bind_may_claim_an_extension_binding():
         )
         assert identity.route_state == "unavailable", field
         assert identity.extension_bound is not refused_by_builder, field
+
+
+def _module_with(mutation):
+    """Import the builder from a copied tree with one substitution applied."""
+    import os
+    import pathlib
+    import shutil
+    import subprocess
+    import sys
+    import tempfile
+
+    root = pathlib.Path(__file__).resolve().parents[1]
+    rel = "boomi_mcp/categories/components/builders/connector_builder.py"
+    tmp = tempfile.mkdtemp()
+    try:
+        shutil.copytree(root / "src", pathlib.Path(tmp) / "src")
+        target = pathlib.Path(tmp) / "src" / rel
+        text = target.read_text()
+        old, new = mutation
+        assert text.count(old) == 1, "mutation did not match exactly once"
+        target.write_text(text.replace(old, new, 1))
+        return subprocess.run(
+            [sys.executable, "-c", "import boomi_mcp.categories.components.builders.connector_builder"],
+            env={**os.environ, "PYTHONPATH": str(pathlib.Path(tmp) / "src")},
+            capture_output=True,
+            text=True,
+        )
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+@pytest.mark.parametrize(
+    "label, reads",
+    [("a bare string", '"host"'), ("empty", "()"), ("names that are not strings", "(1, 2)")],
+)
+def test_registration_refuses_a_composer_whose_declared_fields_are_malformed(label, reads):
+    """Live QA: the check tested truthiness, so `reads = "host"` imported clean
+    and the scan then looked for four one-letter fields, finding none — the
+    marker went back into the composed route with every guard green."""
+    result = _module_with(
+        (
+            '_compose_database_endpoint.reads = ("host", "port", "dbname")',
+            "_compose_database_endpoint.reads = " + reads,
+        )
+    )
+    assert result.returncode != 0, f"{label}: registration accepted it"
+    assert "must be a non-empty tuple of field names" in result.stderr, label
+
+
+def test_an_empty_composer_registry_still_imports():
+    """Live QA: cleaning up the registration loop's variables made the whole
+    module unimportable the moment the registry was empty — a whole-surface
+    import failure behind a name error that explains nothing."""
+    result = _module_with(
+        (
+            "_validated_composer_registry(\n    {\"database\": _compose_database_endpoint}\n)",
+            "_validated_composer_registry({})",
+        )
+    )
+    assert result.returncode == 0, (
+        "an empty registry must import cleanly, not raise: " + result.stderr
+    )
+
+
+def test_a_composer_without_declared_fields_refuses_rather_than_scanning_nothing():
+    """The read must not default: answering "reads nothing" switches the
+    placeholder refusal off for that family instead of failing closed."""
+    from boomi_mcp.categories.components.builders import connector_builder as cb
+
+    def undeclared(config):
+        return cb._compose_database_endpoint(config)
+
+    saved = cb._COMPOSED_ENDPOINT_BY_FAMILY["database"]
+    cb._COMPOSED_ENDPOINT_BY_FAMILY["database"] = undeclared
+    try:
+        with pytest.raises(AttributeError):
+            cb.normalized_identity_projection(
+                {
+                    "connector_type": "database",
+                    "operation_mode": "get",
+                    "host": "db.internal",
+                    "port": 1433,
+                    "dbname": cb.SET_BY_EXTENSION,
+                }
+            )
+    finally:
+        cb._COMPOSED_ENDPOINT_BY_FAMILY["database"] = saved
+
+    # The registry is restored and the shipped composer still fails closed.
+    identity = cb.normalized_identity_projection(
+        {
+            "connector_type": "database",
+            "operation_mode": "get",
+            "host": "db.internal",
+            "port": 1433,
+            "dbname": cb.SET_BY_EXTENSION,
+        }
+    )
+    assert identity.route_state == "unavailable"
+    assert identity.endpoint is None

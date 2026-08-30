@@ -118,19 +118,40 @@ def _endpoint_reading(source: "Mapping[str, Any]", keys) -> tuple:
 #: Families that BUILD an endpoint instead of declaring one in a single field.
 #: Asked once and reused, so "skip the declared/live selection" and "compose it"
 #: cannot disagree about which families compose.
-_COMPOSED_ENDPOINT_BY_FAMILY = {"database": _compose_database_endpoint}
+def _validated_composer_registry(registry):
+    """Every registered composer must declare the field names it reads.
 
-# Registration requires the field list, checked where the registry is built so a
-# composer cannot be added without one and quietly disable the refusal.
-for _family, _fn in _COMPOSED_ENDPOINT_BY_FAMILY.items():
-    if not getattr(_fn, "reads", ()):
-        raise RuntimeError(
-            "composed-endpoint family {0!r} registers {1} without a non-empty "
-            "`reads`; the extension scan would silently cover no fields".format(
-                _family, getattr(_fn, "__name__", _fn)
+    Checked where the registry is BUILT so a composer cannot be added without
+    one and quietly disable the placeholder refusal. The shape is checked, not
+    just truthiness: a bare string is iterable, so `reads = "host"` would scan
+    for four one-letter fields, find none, and serve the marker inside a
+    composed route exactly as a missing list did.
+
+    Written as a function so it has no module-level loop variables to clean up.
+    Deleting those afterwards made the module unimportable the moment the
+    registry was empty — a whole-surface import failure behind a name error
+    that explains nothing.
+    """
+    for family, composer in registry.items():
+        reads = getattr(composer, "reads", None)
+        if (
+            not isinstance(reads, tuple)
+            or not reads
+            or not all(isinstance(name, str) and name for name in reads)
+        ):
+            raise RuntimeError(
+                "composed-endpoint family {0!r} registers {1} whose `reads` is "
+                "{2!r}; it must be a non-empty tuple of field names, or the "
+                "extension scan silently covers nothing".format(
+                    family, getattr(composer, "__name__", composer), reads
+                )
             )
-        )
-del _family, _fn
+    return registry
+
+
+_COMPOSED_ENDPOINT_BY_FAMILY = _validated_composer_registry(
+    {"database": _compose_database_endpoint}
+)
 
 
 def _reject_misplaced_set_by_extension(
