@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import pathlib
 
+import types
+
 import pytest
 
 from boomi_mcp.compiler.process_ir import connector_capabilities as CC
@@ -2109,7 +2111,19 @@ def test_the_two_account_hashers_are_ONE_authority():
     assert account_scope_hash("x") == account_scope_hash("x")
 
 
-@pytest.mark.parametrize("bogus", [object(), "not-a-snapshot", 42, {"identities": ()}])
+@pytest.mark.parametrize(
+    "bogus",
+    [
+        object(),
+        "not-a-snapshot",
+        42,
+        {"identities": ()},
+        # The SHAPE-COMPATIBLE impostor. A presence check on two attribute names
+        # accepted this, and the corroboration then read empty identities, fell
+        # back to the plan's own symbol ids, and skipped the account comparison.
+        types.SimpleNamespace(identities=(), account_scope=None),
+    ],
+)
 def test_a_miswired_snapshot_is_refused_rather_than_read_as_empty(bogus, monkeypatch):
     """Passing the object directly was NOT the guarantee I claimed.
 
@@ -2140,6 +2154,20 @@ def test_a_miswired_snapshot_is_refused_rather_than_read_as_empty(bogus, monkeyp
         mint_idempotency_grants(
             cfg, symbols, process_root_ref="$ref:R",
             registry=_complete_record(digest), snapshot=bogus,
+        )
+
+    # ...AND THROUGH THE PRODUCTION WRAPPER. The previous version of this test
+    # called the minter directly, one layer below the wrapper whose broad handler
+    # swallowed the error and returned a zero-grant table — so it passed while
+    # production reported "missing idempotency evidence" for a valid write and
+    # never surfaced the miswire. Only the boundary knows.
+    from boomi_mcp.compiler.process_ir.connector_resolution import project_grants_for_root
+    from boomi_mcp.models.process_ir import ProcessIRV1
+
+    with pytest.raises(TypeError):
+        project_grants_for_root(
+            ProcessIRV1.model_validate(doc), symbols,
+            process_root_ref="$ref:R", registry=_complete_record(digest), snapshot=bogus,
         )
 
 

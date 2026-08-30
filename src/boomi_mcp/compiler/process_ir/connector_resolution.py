@@ -774,16 +774,7 @@ def mint_idempotency_grants(
     # no account, and the identity and account checks quietly passed — the very
     # fail-open the direct pass was meant to remove. Asserted, not defaulted: a
     # wrong object is a programming error and says so.
-    if snapshot is not None:
-        missing = [
-            name for name in ("identities", "account_scope") if not hasattr(snapshot, name)
-        ]
-        if missing:
-            raise TypeError(
-                "grant projection was given a snapshot lacking {0!r}; a value that "
-                "cannot answer the identity and account questions must not be "
-                "read as answering them".format(missing)
-            )
+    _require_trusted_snapshot(snapshot)
 
     contracts = symbols.build_idempotency_index()
     # Built ONCE. Resolving the operation inside the corroboration helper rebuilt
@@ -834,6 +825,33 @@ def mint_idempotency_grants(
             "idempotency_grants": tuple(grants),
         }
     )
+
+
+def _require_trusted_snapshot(snapshot) -> None:
+    """Refuse anything but the trusted snapshot type.
+
+    A presence check on two attribute names was not validation: an object
+    defining both — `SimpleNamespace(identities=(), account_scope=None)` — passed
+    it, and the corroboration then read empty identities and no account, fell
+    back to the plan's own symbol ids, and skipped the account comparison
+    entirely. A shape-compatible impostor is exactly what duck-typing cannot
+    tell from the real thing, so the type itself is the authority.
+
+    Imported lazily: the authoring package imports this one, so a module-level
+    import would invert the layering.
+    """
+    if snapshot is None:
+        return
+    from ...authoring.connector_resolution_snapshot import (
+        TrustedConnectorResolutionSnapshotV1,
+    )
+
+    if not isinstance(snapshot, TrustedConnectorResolutionSnapshotV1):
+        raise TypeError(
+            "grant projection requires a TrustedConnectorResolutionSnapshotV1; "
+            "got {0!r}. A value that cannot answer the identity and account "
+            "questions must not be read as answering them.".format(type(snapshot).__name__)
+        )
 
 
 def _registry_corroborates(
@@ -1017,6 +1035,13 @@ def project_grants_for_root(
     # projection raised, and the broad handler silently restored the grant-free
     # table, so the gate stayed inert while looking wired.
     from .lowering import lower_process_ir_to_cfg
+
+    # VALIDATED BEFORE THE GUARDED REGION. Raised inside it, the type error was
+    # swallowed by the handler below and returned as a zero-grant table, so
+    # production reported "missing idempotency evidence" for a valid write while
+    # the real fault was a server-side miswire — and the unit test asserting the
+    # raise passed because it called the minter directly, below this wrapper.
+    _require_trusted_snapshot(snapshot)
 
     projected = symbols.model_copy(
         update={"process_root_ref": process_root_ref, "idempotency_grants": ()}
