@@ -1102,8 +1102,8 @@ fourth of six, and #155 closes only on slice F.**
 
 | Tree | Commit | What covers it |
 | --- | --- | --- |
-| **W** — the wave-gated tree | `cdcc4d2599b4dd3fab907b9ce94f453801bda2e0` | `L4` composite wave gate RE-RUN, archived `wave-gate/wave155k`, exit status captured and measured as zero. The first run's W (`66c4345`, archived `wave-gate/wave155j`) was invalidated when the preflight fix touched a test file, and is retained in the archive rather than removed |
-| **N−1** — the reviewed tree | `8a1bbe4` | `L5` closing-protocol correction review, run `cdx-review.hvdNoc`, archived, reviewing this tree; preceded by run `cdx-review.sZFA7r`, archived, covering the COMPLETE delta since `7f5114e` including the post-preflight test correction, then run `cdx-review.hvdNoc` over the corrections that review demanded, archived, reviewing `8a1bbe4`. Billed to L5 because the L5 preflight caused the correction; the L2 review loop closed clean at eleven rounds on `7f5114e` and is not reopened by it. Between them thirteen findings, all record defects in this report, all fixed above |
+| **W** — the wave-gated tree | `cdcc4d2599b4dd3fab907b9ce94f453801bda2e0` (**W**) | `L4` composite wave gate RE-RUN, archived `wave-gate/wave155k`, exit status captured and measured as zero. The first run's W (`66c4345`, archived `wave-gate/wave155j`) was invalidated when the preflight fix touched a test file, and is retained in the archive rather than removed |
+| **N−1** — the reviewed tree | `8a1bbe4` (**N−1**) | `L5` closing-protocol correction review, run `cdx-review.hvdNoc`, archived, reviewing this tree; preceded by run `cdx-review.sZFA7r`, archived, covering the COMPLETE delta since `7f5114e` including the post-preflight test correction, then run `cdx-review.hvdNoc` over the corrections that review demanded, archived, reviewing `8a1bbe4`. Billed to L5 because the L5 preflight caused the correction; the L2 review loop closed clean at eleven rounds on `7f5114e` and is not reopened by it. Between them thirteen findings, all record defects in this report, all fixed above |
 | **N** — the closing commit | this commit | Record-only: this report, the checkpoint rows above, and the wave-gate archive. Validated by a darkness proof, both ledger scanner files, and the `scratch/**` preflight — never by a further review, which would recurse |
 
 W is a descendant of N−1. One test file changed after the review cleared `7f5114e` — the preflight
@@ -1170,8 +1170,8 @@ closing protocol exists to prevent:
 
 | Tree | Commit | What covers it |
 | --- | --- | --- |
-| **W** — the wave-gated tree | `7803032` | `L4` composite wave gate, archived `wave-gate/wave155i`, exit status captured and measured as zero |
-| **N−1** — the reviewed tree | `7803032` | `L2` Stage-2 commit review round 17, run `cdx-review.ckbK09`, archived, CLEAN over the complete delta since `4e300f4` |
+| **W** — the wave-gated tree | `7803032` (**W**) | `L4` composite wave gate, archived `wave-gate/wave155i`, exit status captured and measured as zero |
+| **N−1** — the reviewed tree | `7803032` (**N−1**) | `L2` Stage-2 commit review round 17, run `cdx-review.ckbK09`, archived, CLEAN over the complete delta since `4e300f4` |
 | **N** — the closing commit | this commit | Record-only by protocol: it adds this report, the two checkpoint rows above, and the closing review's own archive. Validated by a darkness proof (no source, test or script differs between W and the tip), both ledger scanner files re-run whole, and the `scratch/**` preflight — never by a further review, which would recurse |
 
 W and N−1 are the same commit: the wave gate ran on exactly the tree the closing review had cleared,

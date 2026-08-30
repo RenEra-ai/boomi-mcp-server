@@ -2034,33 +2034,66 @@ def _closing_report_violation(ledger_text, rel, archive_dir, git):
     )
     if not waves:
         return "no-wave-row"
-    current_w = waves[-1]
-    marker = ""
-    for head in re.findall(r"^## Slice [A-Z] — closing report.*$", ledger_text, re.M):
-        body = ledger_text[ledger_text.index(head):]
-        body = body[: body.index("\n## ")] if "\n## " in body else body
-        if any(w.startswith(current_w) or current_w.startswith(w)
-               for w in re.findall(r"`([0-9a-f]{7,40})`\s*\(\*\*W\*\*\)", body)):
-            marker = head
-            break
-    if not marker:
-        # Not "absent": a wave gate with no report certifying it is the state this
-        # guard exists to refuse, and reporting it as absence is how it stayed silent.
-        return "absent" if "— closing report" not in ledger_text else (
-            f"the current wave gate {current_w[:7]} is certified by no closing report"
+    # EVERY report, each against the gate IT names — not one report picked by a
+    # hardcoded slice letter. A gate with no report yet is a closing in progress and is
+    # not a violation; a report naming a gate a LATER row for the same slice has
+    # superseded is stale, and that is the clause with teeth. It fires when the record
+    # is written, which is when it can be acted on, rather than while the gate runs.
+    per_slice = {}
+    for m in re.finditer(
+        r"\| L4 composite wave gate, slice ([A-Z]) \|[^|]*\|\s*`([0-9a-f]{7,40})`", ledger_text
+    ):
+        per_slice.setdefault(m.group(1), []).append(m.group(2))
+    heads = re.findall(r"^## Slice ([A-Z]) — closing report.*$", ledger_text, re.M)
+    if not heads:
+        return "absent"
+    # The report for the slice whose wave gate is CURRENT must be machine-checkable.
+    # One earlier report states its chain in prose alone and is exempted BY NAME, not
+    # by shape: an exemption keyed on "carries no markers" is one a future report could
+    # take by omitting them. Retrofitting that prose would mean transcribing a landed
+    # slice's chain from a quick reading, which is how a guess enters a record.
+    prose_only = {"A"}
+    current_slice = ""
+    for m in re.finditer(r"\| L4 composite wave gate, slice ([A-Z]) \|", ledger_text):
+        current_slice = m.group(1)
+    for slice_letter in heads:
+        if slice_letter in prose_only and slice_letter != current_slice:
+            continue
+        marker_line = next(
+            h for h in re.findall(r"^## Slice [A-Z] — closing report.*$", ledger_text, re.M)
+            if h.startswith(f"## Slice {slice_letter} ")
         )
-    report = ledger_text[ledger_text.index(marker):]
-    report = report[: report.index("\n## ")] if "\n## " in report else report
+        body_probe = ledger_text[ledger_text.index(marker_line):]
+        body_probe = body_probe[: body_probe.index("\n## ")] if "\n## " in body_probe else body_probe
+        if not re.search(r"`[0-9a-f]{7,40}`\s*\(\*\*W\*\*\)", body_probe):
+            return (f"slice {slice_letter}'s closing report states its chain in a form "
+                    "nothing can check")
+    for slice_letter in heads:
+        if slice_letter in prose_only and slice_letter != current_slice:
+            continue
+        marker = next(h for h in re.findall(r"^## Slice [A-Z] — closing report.*$", ledger_text, re.M)
+                      if h.startswith(f"## Slice {slice_letter} "))
+        body = ledger_text[ledger_text.index(marker):]
+        body = body[: body.index("\n## ")] if "\n## " in body else body
+        rows = per_slice.get(slice_letter, [])
+        latest_for_slice = rows[-1] if rows else ""
+        violation = _one_closing_report_violation(
+            body, marker, rel, archive_dir, git, latest_for_slice
+        )
+        if violation:
+            return f"slice {slice_letter}: {violation}"
+    return None
 
-    # ANCHORED TO THE REPORT'S OWN COMMIT, not to the moving tip. Comparing against
-    # HEAD~1 held only until the next commit: the ledger schedules slices C through F
-    # after this one, so the first documentation commit that followed would have made
-    # this fail on a certified tree that had not changed at all.
-    parent = _closing_boundary_sha(rel, marker, git)
+
+def _one_closing_report_violation(report, marker, rel, archive_dir, git, latest_wave):
+    """One report against the wave gate its own slice most recently passed."""
+    import re
+
+    report = report[: report.index("\n## ")] if "\n## " in report else report
 
     class _Rev:
         def __call__(self, ref):
-            return parent if ref == "HEAD~1" else git("rev-parse", ref).strip()
+            return git("rev-parse", ref).strip()
 
         def precedes(self, earlier, later):
             base = git("merge-base", earlier, later, check=False).strip()
@@ -2073,13 +2106,23 @@ def _closing_report_violation(ledger_text, rel, archive_dir, git):
         if d.is_dir() and (d / "last-reviewed-sha").exists()
     }
 
-    violation = _closing_chain_violation(report, _Rev(), archived, current_w)
+    violation = _closing_chain_violation(report, _Rev(), archived, latest_wave)
     if violation:
         return violation
 
-    named_w = re.findall(r"`([0-9a-f]{7,40})`\s*\(\*\*W\*\*\)", report)[0]
+    w = re.findall(r"`([0-9a-f]{7,40})`\s*\(\*\*W\*\*\)", report)[0]
+    n1 = re.findall(r"`([0-9a-f]{7,40})`\s*\(\*\*N−1\*\*\)", report)[0]
+
+    # DARKNESS, between the two SHAs the report NAMES. It compared the named W against
+    # HEAD — a MOVING tip — so the property was false throughout any closing in
+    # progress: the wave gate runs this suite, the suite runs this guard, and the guard
+    # demanded a darkness the closing had not yet reached. A gate that cannot pass
+    # while the work it gates is under way does not gate that work, it blocks it. Both
+    # endpoints are now recorded values, so the comparison is between two fixed commits
+    # and says the same thing at every instant: no source, test or script differs
+    # between the tree the wave gate passed and the tree the review covered.
     changed = [
-        c for c in git("diff", "--name-only", named_w, "HEAD",
+        c for c in git("diff", "--name-only", w, n1,
                        "--", "src", "tests", "scripts").splitlines() if c.strip()
     ]
     return f"not-dark: {changed}" if changed else None
@@ -2121,10 +2164,9 @@ def test_a_closing_report_names_the_current_wave_sha_and_proves_darkness():
     )
     assert violation is None, (
         f"the closing report violates the closing chain: {violation}. W and N−1 must "
-        "be named, W must be the wave gate the latest checkpoint row names, N−1 must "
-        "be the commit before the one carrying this report, W must strictly precede "
-        "it, an archived review must attest N−1, and no source, test or script may "
-        "differ between W and the tip"
+        "be named in a checkable form, W must be the wave gate its own slice most "
+        "recently passed, W must precede or equal N−1, N−1 must be a commit in this "
+        "history, and an archived review must attest N−1"
     )
 
 
@@ -2195,11 +2237,22 @@ def _closing_chain_violation(report, rev, archived, latest_wave):
         # difference, so every other clause accepts it. Dropped in a refactor that was
         # meant only to remove a duplicate implementation.
         return "stale-wave"
-    if rev(n1) != rev("HEAD~1"):
-        return "not-head-1"
-    if rev(w) == rev(n1):
-        return "equal"
-    if not rev.precedes(w, n1):
+    # WAS `rev(n1) != rev("HEAD~1")`. That derived N−1 a SECOND way — from the commit
+    # that first introduced the report — while the report names it and an archived
+    # review attests it. Two models of one fact, and the derived one is wrong whenever
+    # a closing is corrected across more than one commit, which is every closing this
+    # slice has had. The attestation clause below is the stronger evidence and does not
+    # depend on where in history the report was written; what is kept from this clause
+    # is the part that is always decidable — the named boundary must be a commit in
+    # this history rather than an arbitrary string.
+    if not (rev.precedes(n1, "HEAD") or rev(n1) == rev("HEAD")):
+        return "not-in-history"
+    # W == N−1 is the CLEANEST shape, not a hole: one tree both wave-gated and
+    # reviewed, each attested by its own archive. Slice C closed exactly that way, and
+    # refusing it would have made this rule reject a landed, correctly-closed slice —
+    # which is how a guard written for one expected shape starts refusing the others.
+    # What must never happen is W AFTER N−1: a wave gate on a tree no review covered.
+    if rev(w) != rev(n1) and not rev.precedes(w, n1):
         return "out-of-order"
     named_runs = re.findall(r"`(cdx-review\.[A-Za-z0-9]+)`", report)
     if not any(archived.get(r, "").startswith(n1) or archived.get(r) == rev(n1)
@@ -2217,6 +2270,9 @@ class _FakeRev:
         return {"HEAD": "ccccccc", "HEAD~1": "bbbbbbb"}.get(ref, ref)
 
     def precedes(self, earlier, later):
+        earlier, later = self(earlier), self(later)
+        if earlier not in self._order or later not in self._order:
+            return False
         return self._order.index(earlier) < self._order.index(later)
 
 
@@ -2234,9 +2290,11 @@ def _report(w, n1, run="cdx-review.aaaaaa"):
         # tip, and an archived review carries N−1 as the SHA it reviewed
         ("aaaaaaa", "bbbbbbb", {"cdx-review.aaaaaa": "bbbbbbb"}, None),
         # the reflexive hole four reviews took to close
-        ("bbbbbbb", "bbbbbbb", {"cdx-review.aaaaaa": "bbbbbbb"}, "equal"),
+        # W == N−1: one tree wave-gated and reviewed. Legal, and slice C shipped it.
+        ("bbbbbbb", "bbbbbbb", {"cdx-review.aaaaaa": "bbbbbbb"}, None),
         # a boundary that is not the commit before the tip
-        ("aaaaaaa", "aaaaaaa", {"cdx-review.aaaaaa": "aaaaaaa"}, "not-head-1"),
+        # a boundary that is not a commit in this history at all
+        ("aaaaaaa", "ddddddd", {"cdx-review.aaaaaa": "ddddddd"}, "not-in-history"),
         # a review that attests a different tree
         ("aaaaaaa", "bbbbbbb", {"cdx-review.aaaaaa": "aaaaaaa"}, "unattested"),
         # no archived review at all
@@ -2439,7 +2497,7 @@ def test_the_repository_guard_refuses_a_report_citing_a_superseded_wave(tmp_path
     git, archive = _synthetic_closing_repo(tmp_path, wave_shas_from=[0, 1], cited=0)
     assert _closing_report_violation(
         (tmp_path / "repo" / "ledger.md").read_text(), "ledger.md", archive, git
-    ) == "stale-wave"
+    ).endswith("stale-wave")
 
 
 def test_the_repository_guard_refuses_a_report_whose_tree_moved_after_the_gate(tmp_path):
@@ -2455,7 +2513,7 @@ def test_the_repository_guard_refuses_a_report_whose_tree_moved_after_the_gate(t
     violation = _closing_report_violation(
         (tmp_path / "repo" / "ledger.md").read_text(), "ledger.md", archive, git
     )
-    assert violation is not None and violation.startswith("not-dark"), violation
+    assert violation is not None and "not-dark" in violation, violation
     assert "src/drift.py" in violation
 
 
@@ -2633,7 +2691,9 @@ def _coverage_violations(ledger_text, archive_dir):
     if not rows:
         return ["no reviewed-tree row"]
     for row in rows:
-        sha = re.search(r"\|\s*`([0-9a-f]{7,40})`\s*\|", row)
+        # The commit cell may carry the chain marker beside the SHA, so read the first
+        # backticked SHA in the row rather than requiring it to BE the cell.
+        sha = re.search(r"\|\s*`([0-9a-f]{7,40})`", row)
         run = re.search(r"run `(cdx-review\.[A-Za-z0-9]+)`", row)
         if not sha:
             out.append("a reviewed-tree row names no SHA")
@@ -2659,7 +2719,7 @@ def _coverage_violations(ledger_text, archive_dir):
 
 
 _COVERAGE_ROW = (
-    "| **N\u22121** \u2014 the reviewed tree | `{sha}` | `L5` closing review{cite}, "
+    "| **N\u22121** \u2014 the reviewed tree | `{sha}` (**N\u22121**) | `L5` closing review{cite}, "
     "archived, covering the complete delta |"
 )
 

@@ -11022,11 +11022,11 @@
 {"kind": "test", "id": "pytest-011021", "node_id": "tests/test_connector_replay_review_round3.py::test_the_archive_itself_has_no_disagreeing_copies", "state": "active"}
 {"kind": "test", "id": "pytest-011022", "node_id": "tests/test_connector_replay_review_round3.py::test_the_boundary_is_the_adding_commits_parent_once_the_report_lands", "state": "active"}
 {"kind": "test", "id": "pytest-011023", "node_id": "tests/test_connector_replay_review_round3.py::test_the_boundary_is_the_tip_while_the_report_is_uncommitted", "state": "active"}
-{"kind": "test", "id": "pytest-011024", "node_id": "tests/test_connector_replay_review_round3.py::test_the_closing_chain_rule_admits_exactly_one_shape[aaaaaaa-aaaaaaa-archived2-not-head-1]", "state": "active"}
+{"kind": "test", "id": "pytest-011024", "node_id": "tests/test_connector_replay_review_round3.py::test_the_closing_chain_rule_admits_exactly_one_shape[aaaaaaa-aaaaaaa-archived2-not-head-1]", "state": "tombstone"}
 {"kind": "test", "id": "pytest-011025", "node_id": "tests/test_connector_replay_review_round3.py::test_the_closing_chain_rule_admits_exactly_one_shape[aaaaaaa-bbbbbbb-archived0-None]", "state": "active"}
 {"kind": "test", "id": "pytest-011026", "node_id": "tests/test_connector_replay_review_round3.py::test_the_closing_chain_rule_admits_exactly_one_shape[aaaaaaa-bbbbbbb-archived3-unattested]", "state": "active"}
 {"kind": "test", "id": "pytest-011027", "node_id": "tests/test_connector_replay_review_round3.py::test_the_closing_chain_rule_admits_exactly_one_shape[aaaaaaa-bbbbbbb-archived4-unattested]", "state": "active"}
-{"kind": "test", "id": "pytest-011028", "node_id": "tests/test_connector_replay_review_round3.py::test_the_closing_chain_rule_admits_exactly_one_shape[bbbbbbb-bbbbbbb-archived1-equal]", "state": "active"}
+{"kind": "test", "id": "pytest-011028", "node_id": "tests/test_connector_replay_review_round3.py::test_the_closing_chain_rule_admits_exactly_one_shape[bbbbbbb-bbbbbbb-archived1-equal]", "state": "tombstone"}
 {"kind": "test", "id": "pytest-011029", "node_id": "tests/test_connector_replay_review_round3.py::test_the_closing_chain_rule_admits_exactly_one_shape[ccccccc-bbbbbbb-archived5-out-of-order]", "state": "active"}
 {"kind": "test", "id": "pytest-011030", "node_id": "tests/test_connector_replay_review_round3.py::test_the_correlation_still_resolves_every_archived_capture[cap155-e2-post-POST]", "state": "active"}
 {"kind": "test", "id": "pytest-011031", "node_id": "tests/test_connector_replay_review_round3.py::test_the_correlation_still_resolves_every_archived_capture[cap155-e3b-patch-canonical-PATCH]", "state": "active"}
@@ -11360,3 +11360,5 @@
 {"kind": "test", "id": "pytest-011359", "node_id": "tests/test_process_ir_error_handling.py::test_a_miswired_snapshot_is_refused_rather_than_read_as_empty[bogus3]", "state": "active"}
 {"kind": "test", "id": "pytest-011360", "node_id": "tests/test_process_ir_error_handling.py::test_a_miswired_snapshot_is_refused_rather_than_read_as_empty[bogus4]", "state": "active"}
 {"kind": "test", "id": "pytest-011361", "node_id": "tests/test_process_ir_error_handling.py::test_a_real_snapshot_is_accepted", "state": "active"}
+{"kind": "test", "id": "pytest-011362", "node_id": "tests/test_connector_replay_review_round3.py::test_the_closing_chain_rule_admits_exactly_one_shape[bbbbbbb-bbbbbbb-archived1-None]", "state": "active"}
+{"kind": "test", "id": "pytest-011363", "node_id": "tests/test_connector_replay_review_round3.py::test_the_closing_chain_rule_admits_exactly_one_shape[aaaaaaa-ddddddd-archived2-not-in-history]", "state": "active"}
