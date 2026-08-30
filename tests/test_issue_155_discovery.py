@@ -628,3 +628,68 @@ def test_the_dry_emit_does_not_enforce_grants_and_the_wet_apply_does():
     )
     assert "snapshot=snapshot" in source, "the projection drops the snapshot it gated on"
     assert "snapshot=None" in str(inspect.signature(cpa.materialize_canonical_process_xml))
+
+
+def test_the_grant_wiring_never_defaults_a_load_bearing_argument():
+    """The STRUCTURAL answer to a defect I shipped four times in this slice.
+
+    Each instance was different code, but one mechanism: a defaulting accessor
+    turned "this is wrong" into "this is absent", and absence was then treated as
+    benign. No production path projected a root; the lowering function was
+    undefined and a broad handler restored the unprojected table; the account
+    hasher was imported from a module that does not define it and the handler
+    answered "corroborated"; and the wet apply asked a snapshot object for a
+    `.snapshot` attribute it does not have and received None, disabling the gate
+    on the only path that writes.
+
+    Patching each site again would be the fifth instance. What the rule wants is
+    to make the shape unwritable: on the grant-wiring path a load-bearing
+    argument is passed directly, so a wrong object RAISES instead of silently
+    disabling enforcement.
+    """
+    import ast
+    import pathlib
+
+    root = pathlib.Path(__file__).resolve().parents[1] / "src" / "boomi_mcp"
+    load_bearing = {"snapshot", "registry", "symbols", "process_root_ref"}
+    offenders = []
+
+    for path in root.rglob("*.py"):
+        tree = ast.parse(path.read_text())
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            name = getattr(node.func, "id", None) or getattr(node.func, "attr", None)
+            if name not in {
+                "project_grants_for_root",
+                "mint_idempotency_grants",
+                "materialize_canonical_process_xml",
+            }:
+                continue
+            for kw in node.keywords:
+                if kw.arg not in load_bearing:
+                    continue
+                value = kw.value
+                if (
+                    isinstance(value, ast.Call)
+                    and getattr(value.func, "id", None) == "getattr"
+                    and len(value.args) >= 3
+                ):
+                    offenders.append(
+                        f"{path.relative_to(root)}:{node.lineno} passes {kw.arg}= "
+                        "through a defaulting getattr — a wrong or missing "
+                        "attribute becomes None and silently disables the gate"
+                    )
+
+    assert not offenders, offenders
+
+    # NON-VACUITY: the sweep must actually reach these call sites, or it asserts
+    # nothing. Counted from the same parse rather than assumed.
+    reached = 0
+    for path in root.rglob("*.py"):
+        for node in ast.walk(ast.parse(path.read_text())):
+            if isinstance(node, ast.Call):
+                name = getattr(node.func, "id", None) or getattr(node.func, "attr", None)
+                if name in {"project_grants_for_root", "materialize_canonical_process_xml"}:
+                    reached += 1
+    assert reached >= 5, f"only {reached} wiring call sites found — the sweep is too narrow"

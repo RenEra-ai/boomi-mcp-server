@@ -8179,7 +8179,13 @@ def _execute_canonical_process(
             # The WET path, and the only one that supplies a snapshot: these are
             # real applied ids and the resolution carries the observed identities
             # and the account the grant check needs.
-            snapshot=getattr(resolution, "snapshot", None),
+            #
+            # `resolution` IS the snapshot. Reaching for `resolution.snapshot`
+            # through a defaulting accessor asked for an attribute that does not
+            # exist and quietly received None, so the guarded projection never
+            # ran and the write path enforced nothing. Passed directly, so a
+            # wrong object raises instead of disabling the gate.
+            snapshot=resolution,
         )
     except CanonicalProcessApplyError as exc:
         return {
