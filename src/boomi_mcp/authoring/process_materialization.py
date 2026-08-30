@@ -547,7 +547,7 @@ def placeholder_backed_symbols(symbols):
 
     # Every OTHER field is carried by ``rebinding``, derived from the model's own
     # field set. Enumerating them here is what would drop a new one silently.
-    return SymbolTableV1.rebinding(
+    relocatable = SymbolTableV1.rebinding(
         symbols,
         (
             symbol.model_copy(
@@ -555,6 +555,18 @@ def placeholder_backed_symbols(symbols):
             )
             for symbol in symbols.symbols
         ),
+    )
+
+    # CLEARED, explicitly. Rebinding preserves every field it is not told to
+    # change, so a table that had been projected for one root carried its
+    # `process_root_ref` and its grants into this relocatable one — which made a
+    # compile that documents itself as unprojected treat grant checking as
+    # ACTIVE, and let a grant minted for a different root satisfy this one
+    # whenever contract, operation and source path happened to match. A
+    # relocatable table describes no account, so it can hold no account-bound
+    # grant.
+    return relocatable.model_copy(
+        update={"process_root_ref": None, "idempotency_grants": ()}
     )
 
 

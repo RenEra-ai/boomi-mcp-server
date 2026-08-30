@@ -573,3 +573,58 @@ def test_the_projection_actually_LOWERS_rather_than_failing_silently():
         "the projection never reached the lowerer — an undefined name would be "
         "swallowed by the handler and the gate would be inert"
     )
+
+
+def test_a_relocatable_table_carries_no_account_bound_grant():
+    """Rebinding preserves what it is not told to change.
+
+    A table projected for one root carried its root reference AND its grants
+    into the relocatable table, so a compile documented as unprojected treated
+    grant checking as ACTIVE — and a grant minted for a DIFFERENT root satisfied
+    this one whenever contract, operation and source path happened to match.
+    A relocatable table describes no account, so it can hold no account-bound
+    grant.
+    """
+    from boomi_mcp.authoring.process_materialization import placeholder_backed_symbols
+    from boomi_mcp.compiler.process_ir.contracts import (
+        IdempotencyGrantSymbolV1,
+        SymbolTableV1,
+    )
+
+    projected = SymbolTableV1(
+        process_root_ref="$ref:SOME_OTHER_ROOT",
+        idempotency_grants=(
+            IdempotencyGrantSymbolV1(
+                contract_ref="$ref:C",
+                operation_ref="$ref:OP",
+                call_source_path="/body/steps/0",
+                record_digest="a" * 64,
+            ),
+        ),
+    )
+    relocatable = placeholder_backed_symbols(projected)
+    assert relocatable.process_root_ref is None, "an inherited root survived rebinding"
+    assert relocatable.idempotency_grants == (), "an inherited grant survived rebinding"
+
+
+def test_the_dry_emit_does_not_enforce_grants_and_the_wet_apply_does():
+    """One function serves a rehearsal and a real write; only one can enforce.
+
+    The dry emit rehearses with `dry-run-` prefixed ids and no snapshot —
+    projecting there compares a record's real id against a rehearsal id and
+    refuses every valid retry. The wet apply supplies the snapshot, which carries
+    the observed identities and the account the check needs. The snapshot is the
+    switch rather than an independent flag, so enforcement is possible exactly
+    where the data to enforce safely exists.
+    """
+    import inspect
+
+    from boomi_mcp.categories.components import canonical_process_apply as cpa
+
+    source = inspect.getsource(cpa.materialize_canonical_process_xml)
+    assert "if snapshot is not None:" in source, (
+        "the apply materialiser projects unconditionally; the dry rehearsal would "
+        "compare real record ids against rehearsal ids and refuse valid evidence"
+    )
+    assert "snapshot=snapshot" in source, "the projection drops the snapshot it gated on"
+    assert "snapshot=None" in str(inspect.signature(cpa.materialize_canonical_process_xml))

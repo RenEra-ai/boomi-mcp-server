@@ -8176,6 +8176,10 @@ def _execute_canonical_process(
             id_registry=id_registry,
             symbols=symbols,
             name_override=clone_name_override,
+            # The WET path, and the only one that supplies a snapshot: these are
+            # real applied ids and the resolution carries the observed identities
+            # and the account the grant check needs.
+            snapshot=getattr(resolution, "snapshot", None),
         )
     except CanonicalProcessApplyError as exc:
         return {

@@ -204,6 +204,7 @@ def materialize_canonical_process_xml(
     id_registry: Mapping[str, str],
     symbols,
     name_override: Optional[str] = None,
+    snapshot=None,
 ) -> str:
     """Recompile the plan's root against REAL ids and produce deployable XML.
 
@@ -253,14 +254,25 @@ def materialize_canonical_process_xml(
     # compile used. Reading it here rather than accepting it as a parameter is
     # the point: there is no argument a caller or a future call site can forget
     # to pass. `None` keeps the strict default rather than overriding it.
-    # PROJECTED at the apply boundary too. This is where bytes are produced, so
-    # a gate that is active in planning and absent here refuses nothing that
-    # matters. The root reference is the plan's own component key.
-    from ...compiler.process_ir.connector_resolution import project_grants_for_root
+    # PROJECTED ONLY WITH A SNAPSHOT, because this one function serves two very
+    # different callers. The DRY emit rehearses with `dry-run-` prefixed ids and
+    # supplies no snapshot: projecting there would compare a record's real id
+    # against a rehearsal id and refuse every valid retry. The WET apply supplies
+    # the resolution's snapshot, which carries the observed identities AND the
+    # account — without it the account comparison has nothing to compare and a
+    # foreign-account record could corroborate.
+    #
+    # So the snapshot is the switch, not a flag a caller can set independently:
+    # enforcement is possible exactly where the data to enforce safely exists.
+    if snapshot is not None:
+        from ...compiler.process_ir.connector_resolution import project_grants_for_root
 
-    bound = project_grants_for_root(
-        plan.process_ir, bound, process_root_ref=getattr(plan, "component_key", "") or "apply"
-    )
+        bound = project_grants_for_root(
+            plan.process_ir,
+            bound,
+            process_root_ref=getattr(plan, "component_key", "") or "apply",
+            snapshot=snapshot,
+        )
     cfg, emission_plan = (
         compile_process_ir_v1(
             plan.process_ir, bound, capabilities=plan.effect_capabilities
