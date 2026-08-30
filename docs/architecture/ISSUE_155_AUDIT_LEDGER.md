@@ -25,7 +25,7 @@ deferred `blocked-by-mechanism` naming that slice, never silently carried.
 | A | canonical dynamic-path binding on both connector roles, its lineage rule, the published family capability, and the explicit process-source replay policy | behaviour-affecting | **CLOSED CLEAN, landed on the integration branch at `6d2205a` 2026-08-27** |
 | B | the packaged replay-evidence registry, identifier grammar, both digest algorithms, the derived audit report, the execution-connector monitor action | src-changing, narrowly reachable | **LANDED on `dev` at `eb22351` 2026-08-28 under `ESCALATE-OPEN`** — baseline `6d2205a`. NOT clean: `CDX-155-r73-01`, `CDX-155-r73-02` and `SELF-155-r65-01` are dispositioned escalated-open and unfixed, with no follow-up issue filed for them. |
 | C | the trusted connector-resolution snapshot and the blank-path cross-check | behaviour-affecting | IN FLIGHT — baseline `eb22351`. Five Stage-2 review rounds and six live QA rounds run, none clean; three of five roster loops (architect, wave gate, closing protocol) have not started. |
-| D | per-call replay grants, the shared reference grammar, candidate discovery, the account-independent semantic revision | mostly unreachable in production | IN FLIGHT — baseline `d04a248`. Batches 1-4 (contract re-keying, authored reference grammar, per-call grants, candidate discovery) applied and suite-validated; the semantic-revision row remains, then the slice's gates. |
+| D | per-call replay grants, the shared reference grammar, candidate discovery, the account-independent semantic revision | mostly unreachable in production | IN FLIGHT — baseline `d04a248`. All five batches applied and suite-validated (contract re-keying, authored reference grammar, per-call grants, candidate discovery, account-independent semantics revision). Implementation COMPLETE; no gate has run yet. |
 | E | apply-boundary identity rechecks and the evidence attestation tuple | mutation accounting | not started |
 | F | evidence ingestion and production enablement — the only slice that can close #155 | evidence-gated | not started |
 
@@ -1200,6 +1200,31 @@ property it defends is unchanged; what was too narrow was its idea of how a code
 
 Rebaselined: the M12.12 inventory and its §11 markdown, for the served-surface edits. Validation:
 the full non-KB suite at 11,256 passed / 18 skipped.
+
+### Batch 5 — the account-independent semantics revision
+
+A `connector_replay_semantics` row joins the compiler revision, carrying the CLASS-LEVEL replay
+semantics a document is compiled against. Operation records are deliberately excluded: they carry an
+account scope hash, and a revision that moved when one account minted a record would report drift
+between two deployments of byte-identical code — the exact failure this revision exists not to have.
+
+The witness asserts BOTH directions, because a test that only proved the revision moves on a
+semantics change would pass just as well if the loader read the whole registry. Hand-run: a loader
+that also reads operation records fails it, and so does deleting the row.
+
+Revision movement, recorded rather than pinned — this value is DERIVED and no literal pin exists:
+before `sha256:6c03af9aac53c5d68b2fbb66056e25757e197f82a674d4cbf0db1c78ab157065`, after
+`sha256:a2bf45680eca84aef17f133ca202fe1a3acf7bde4aa936d402a08484bf1ccc16`. The plan-fingerprint
+fixtures did NOT rotate, and that is correct: the packaged registry ships fail-closed with zero
+semantics definitions and zero operation records, so the row lands as a mechanism for slice F to
+populate rather than as data.
+
+Rebaselined: the M12.12 inventory, for the recipe-layer edit. Validation: the full non-KB suite at
+11,257 passed / 18 skipped.
+
+**Slice D implementation is complete; its gates are not.** Owed: Stage-1 live QA through the public
+tool boundary, the Stage-2 commit review to clean, the §6 architect window, the composite wave gate
+and the closing protocol.
 
 ## Slice A — implementation record (what landed, and what validation it still owes)
 

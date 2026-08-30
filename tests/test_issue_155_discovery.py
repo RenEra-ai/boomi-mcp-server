@@ -113,3 +113,49 @@ def test_the_served_action_list_is_derived_from_the_router():
 
     assert tuple(_query_components_actions()) == QUERY_COMPONENTS_ACTIONS
     assert "idempotency_contract_candidates" in QUERY_COMPONENTS_ACTIONS
+
+
+def test_the_revision_moves_on_class_semantics_and_not_on_an_account_record(monkeypatch):
+    """The fingerprint's account-INDEPENDENCE, asserted in both directions.
+
+    Class-level replay semantics are part of what a document is compiled against,
+    so the revision must move when they change. An operation record is scoped to
+    ONE account — it carries an account scope hash — so a revision that moved
+    when an account minted a record would report drift between two deployments of
+    byte-identical code, which is the failure this revision exists not to have.
+
+    Both halves matter: a witness that only proved movement would pass just as
+    well if the loader read the whole registry.
+    """
+    from boomi_mcp.authoring import contract as contract_module
+
+    baseline = contract_module._compiler_revision()
+
+    class _Semantics:
+        def model_dump(self, mode="json"):
+            return {"semantics_id": "icv1", "revision": 2}
+
+    class _Registry:
+        def __init__(self, semantics=(), records=()):
+            self.semantics_definitions = tuple(semantics)
+            self.operation_records = tuple(records)
+
+    # A class-level semantics change MOVES the revision.
+    monkeypatch.setattr(
+        contract_module, "_replay_registry", lambda: _Registry(semantics=[_Semantics()])
+    )
+    with_semantics = contract_module._compiler_revision()
+    assert with_semantics != baseline, "a class-level semantics change did not move it"
+
+    # An account-scoped operation record does NOT.
+    class _Record:
+        account_scope_hash = "c" * 64
+
+    monkeypatch.setattr(
+        contract_module, "_replay_registry", lambda: _Registry(records=[_Record()])
+    )
+    with_record = contract_module._compiler_revision()
+    assert with_record == baseline, (
+        "minting an account-scoped operation record moved the relocatable "
+        "fingerprint; two deployments of identical code would report drift"
+    )

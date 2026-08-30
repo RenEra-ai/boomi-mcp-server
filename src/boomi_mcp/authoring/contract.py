@@ -866,6 +866,20 @@ def _compiler_revision() -> str:
             lambda: [dict(row) for row in _import("error_handling").retry_rule_specs()],
         ),
         (
+            # The CLASS-LEVEL replay semantics only. Operation records are
+            # deliberately excluded: they carry an account scope hash, and a
+            # fingerprint that moved when an account minted a record would report
+            # drift between two deployments of identical code — the exact failure
+            # this revision is built not to have. What belongs here is the
+            # semantics a document is compiled against, which is the same
+            # everywhere the package is installed.
+            "connector_replay_semantics",
+            lambda: [
+                row.model_dump(mode="json") if hasattr(row, "model_dump") else dict(row)
+                for row in _replay_registry().semantics_definitions
+            ],
+        ),
+        (
             "state_visibility",
             lambda: [
                 dict(row)
@@ -922,6 +936,13 @@ def _compiler_revision() -> str:
         except Exception:  # noqa: BLE001
             payload[key] = "unavailable"
     return sha256_fingerprint(payload)
+
+
+def _replay_registry():
+    """The packaged replay registry, imported lazily like every other authority."""
+    from ..connector_replay.registry import load_registry
+
+    return load_registry()
 
 
 def _import(module: str):
