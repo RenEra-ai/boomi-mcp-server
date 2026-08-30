@@ -767,6 +767,10 @@ def mint_idempotency_grants(cfg, symbols, *, process_root_ref: str, registry=Non
 
 
     contracts = symbols.build_idempotency_index()
+    # Built ONCE. Resolving the operation inside the corroboration helper rebuilt
+    # the whole index per eligible call, which is O(calls x symbols) over
+    # sequences the schema does not bound.
+    symbol_index = symbols.build_index()
     # The evidence lives on the CFG node, which is where the retry check reads it
     # from too. Indexed once: a per-binding scan would be O(bindings x nodes).
     evidence_by_node = {
@@ -791,7 +795,7 @@ def mint_idempotency_grants(cfg, symbols, *, process_root_ref: str, registry=Non
         # retry on no evidence at all — the exact thing the digest exists to
         # prevent. Until evidence is ingested, nothing mints, which is the
         # fail-closed posture the packaged registry already ships in.
-        if not _registry_corroborates(registry, contract, binding, symbols):
+        if not _registry_corroborates(registry, contract, binding, symbol_index):
             continue
         grant = IdempotencyGrantSymbolV1(
             contract_ref=contract_ref,
@@ -811,14 +815,21 @@ def mint_idempotency_grants(cfg, symbols, *, process_root_ref: str, registry=Non
     )
 
 
-def _registry_corroborates(registry, contract, binding, symbols) -> bool:
+def _registry_corroborates(registry, contract, binding, symbol_index) -> bool:
     """Whether the registry holds a record that covers THIS call.
 
     A digest match alone is not corroboration: a symbol could pair a real
-    record's digest with an unrelated contract reference or a different
-    operation, and the minter would authorise a replay that record never
-    observed. The record has to agree about the contract it covers AND the
-    operation component it was captured against.
+    record's digest with an unrelated contract, connection, family or action,
+    and the minter would authorise a replay that record never observed.
+
+    Compared here is everything the COMPILER can know: the contract the record
+    covers, the operation and connection components the call's references
+    resolve to, and the family and action the binding carries. Component
+    VERSIONS, the account scope and route coverage are deliberately not compared
+    — the compiler has no live reading of them, and inventing one from the
+    record itself would compare the record with itself. Those are the
+    apply-boundary recheck's, immediately before the write, where a live reading
+    exists.
 
     A missing registry corroborates NOTHING — it is not an absent constraint.
     """
@@ -833,24 +844,32 @@ def _registry_corroborates(registry, contract, binding, symbols) -> bool:
         except Exception:  # noqa: BLE001
             return False
 
-    # The component the operation reference resolves to, so the record's own
-    # identity can be compared against the call's subject rather than assumed.
-    operation_component_id = None
-    try:
-        symbol = symbols.build_index().get(binding.operation_ref)
-        operation_component_id = getattr(symbol, "component_id", None)
-    except Exception:  # noqa: BLE001
-        operation_component_id = None
+    def _component(ref):
+        symbol = symbol_index.get(ref) if ref else None
+        return getattr(symbol, "component_id", None)
+
+    operation_component_id = _component(getattr(binding, "operation_ref", None))
+    connection_component_id = _component(getattr(binding, "connection_ref", None))
 
     for record in getattr(registry, "operation_records", ()):
         if getattr(record, "record_digest", None) != digest:
             continue
         if getattr(record, "contract_ref", None) != contract.ref:
             continue
-        if operation_component_id is not None:
-            identity = getattr(record, "operation_identity", None)
-            if getattr(identity, "component_id", None) != operation_component_id:
-                continue
+        if operation_component_id is not None and (
+            getattr(getattr(record, "operation_identity", None), "component_id", None)
+            != operation_component_id
+        ):
+            continue
+        if connection_component_id is not None and (
+            getattr(getattr(record, "connection_identity", None), "component_id", None)
+            != connection_component_id
+        ):
+            continue
+        if getattr(record, "family", None) != getattr(binding, "family", None):
+            continue
+        if getattr(record, "action", None) != getattr(binding, "action", None):
+            continue
         return True
     return False
 

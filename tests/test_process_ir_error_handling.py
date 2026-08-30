@@ -1665,18 +1665,11 @@ def test_the_minter_mints_a_grant_for_a_call_whose_contract_resolves(monkeypatch
 
     # Provenance is REQUIRED, so a corroborating record has to exist for anything
     # to mint — the registry is what turns a caller's claim into evidence.
-    class _Registry:
-        class _R:
-            record_digest = digest
-            contract_ref = "$ref:C"
-            operation_identity = _Identity("op-patch")
-        operation_records = (_R(),)
-
     from boomi_mcp.compiler.process_ir.connector_resolution import mint_idempotency_grants
 
     cfg, _plan = _compile(doc, symbols)
     minted = mint_idempotency_grants(
-        cfg, symbols, process_root_ref="$ref:ROOT", registry=_Registry()
+        cfg, symbols, process_root_ref="$ref:ROOT", registry=_complete_record(digest),
     )
     assert minted.process_root_ref == "$ref:ROOT"
     assert len(minted.idempotency_grants) == 1, "the minter produced nothing"
@@ -1755,18 +1748,12 @@ def test_a_root_projected_table_requires_a_grant_for_this_very_call(monkeypatch)
     # A grant-free table still compiles: that is the pre-projection state.
     _compile(doc, symbols)
 
-    class _Registry:
-        class _R:
-            record_digest = "c" * 64
-            contract_ref = "$ref:C"
-            operation_identity = _Identity("op-patch")
-        operation_records = (_R(),)
-
     from boomi_mcp.compiler.process_ir.connector_resolution import mint_idempotency_grants
 
     cfg, _plan = _compile(doc, symbols)
     minted = mint_idempotency_grants(
-        cfg, symbols, process_root_ref="$ref:ROOT", registry=_Registry()
+        cfg, symbols, process_root_ref="$ref:ROOT",
+        registry=_complete_record("c" * 64),
     )
     assert minted.idempotency_grants, "nothing minted — the rest of this is vacuous"
     _compile(doc, minted)  # the minted table covers this call
@@ -1799,6 +1786,29 @@ class _Identity:
     def __init__(self, component_id):
         self.component_id = component_id
         self.version = 1
+
+def _complete_record(digest, *, contract="$ref:C", operation="op-patch",
+                     connection="conn-1", family=None, action="PATCH"):
+    """A registry record carrying EVERY axis corroboration compares.
+
+    Built as one helper because a partial stand-in fails corroboration for a
+    reason the test did not intend, which reads as the assertion passing.
+    """
+    from boomi_mcp.compiler.process_ir.connector_capabilities import REST_FAMILY
+
+    class _R:
+        record_digest = digest
+        contract_ref = contract
+        operation_identity = _Identity(operation)
+        connection_identity = _Identity(connection)
+
+    _R.family = family if family is not None else REST_FAMILY
+    _R.action = action
+
+    class _Reg:
+        operation_records = (_R(),)
+
+    return _Reg()
 
 def test_a_contract_naming_a_record_the_registry_lacks_mints_nothing(monkeypatch):
     """A caller-supplied digest is a claim, and the registry is what corroborates it.
@@ -1834,15 +1844,9 @@ def test_a_contract_naming_a_record_the_registry_lacks_mints_nothing(monkeypatch
     )
     assert minted.idempotency_grants == (), "minted on a record the registry lacks"
 
-    class _Holds:
-        class _R:
-            record_digest = digest
-            contract_ref = "$ref:C"
-            operation_identity = _Identity("op-patch")
-        operation_records = (_R(),)
-
     corroborated = mint_idempotency_grants(
-        cfg, symbols, process_root_ref="$ref:ROOT", registry=_Holds()
+        cfg, symbols, process_root_ref="$ref:ROOT",
+        registry=_complete_record(digest),
     )
     assert len(corroborated.idempotency_grants) == 1
     assert corroborated.idempotency_grants[0].record_digest == digest
@@ -1883,51 +1887,77 @@ def test_a_contract_naming_no_record_mints_NOTHING(monkeypatch):
     assert minted.process_root_ref == "$ref:ROOT"
 
 
-def test_a_digest_from_an_UNRELATED_record_does_not_corroborate(monkeypatch):
-    """A digest match alone is not corroboration.
+@pytest.mark.parametrize(
+    "axis", ["connection", "family", "action", "operation", "contract"]
+)
+def test_corroboration_compares_every_axis_the_compiler_can_know(axis, monkeypatch):
+    """A digest match is not corroboration on any single axis.
 
-    A symbol could pair a real record's digest with a different contract
-    reference, and the minter would authorise a replay that record never
-    observed. The record must agree about the contract it covers.
+    A record captured against a different connection, family or action describes
+    a call the system did not observe. Component VERSIONS, the account scope and
+    route coverage are deliberately NOT compared here: the compiler has no live
+    reading of them, and taking them from the record would compare the record
+    with itself. Those belong to the apply-boundary recheck, where a live
+    reading exists.
     """
     _synthetic_capabilities(monkeypatch, (REST, "PATCH", "conditionally_idempotent"))
-    digest = "e" * 64
+    from boomi_mcp.compiler.process_ir.connector_resolution import (
+        mint_idempotency_grants,
+        resolve_connector_call_bindings,
+    )
+
+    digest = "a" * 64
     symbols = _symbols(
         contracts=[
             IdempotencyContractSymbolV1(
-                ref="$ref:MINE", operation_ref="$ref:PATCHOP", record_digest=digest
+                ref="$ref:C", operation_ref="$ref:PATCHOP", record_digest=digest
             )
         ]
     )
     doc = _connector_scope(
         retry={"count": 1},
         protected="$ref:PATCHOP",
-        idempotency={"kind": "key_reference", "contract_ref": "$ref:MINE"},
+        idempotency={"kind": "key_reference", "contract_ref": "$ref:C"},
     )
-    from boomi_mcp.compiler.process_ir.connector_resolution import mint_idempotency_grants
+    cfg, _plan = _compile(doc, symbols)
+    index = symbols.build_index()
+    binding = next(
+        b for b in resolve_connector_call_bindings(cfg, symbols)
+        if b.operation_ref == "$ref:PATCHOP"
+    )
+    good = {
+        "contract": "$ref:C",
+        "operation": index[binding.operation_ref].component_id,
+        "connection": index[binding.connection_ref].component_id,
+        "family": binding.family,
+        "action": binding.action,
+    }
 
-    cfg, _ = _compile(doc, symbols)
+    def registry(**overrides):
+        values = {**good, **overrides}
 
-    class _Unrelated:
         class _R:
             record_digest = digest
-            contract_ref = "$ref:SOMEONE_ELSE"      # same digest, other contract
-            operation_identity = _Identity("op-patch")
-        operation_records = (_R(),)
+            contract_ref = values["contract"]
+            operation_identity = _Identity(values["operation"])
+            connection_identity = _Identity(values["connection"])
+            family = values["family"]
+            action = values["action"]
 
+        class _Reg:
+            operation_records = (_R(),)
+
+        return _Reg()
+
+    # Control first: everything matching MUST mint, or the negatives below are
+    # satisfied by something other than the axis under test.
     minted = mint_idempotency_grants(
-        cfg, symbols, process_root_ref="$ref:ROOT", registry=_Unrelated()
+        cfg, symbols, process_root_ref="$ref:R", registry=registry()
     )
-    assert minted.idempotency_grants == (), "an unrelated record corroborated the call"
+    assert len(minted.idempotency_grants) == 1, "the matching record failed to corroborate"
 
-    class _Matching:
-        class _R:
-            record_digest = digest
-            contract_ref = "$ref:MINE"
-            operation_identity = _Identity("op-patch")
-        operation_records = (_R(),)
-
-    ok = mint_idempotency_grants(
-        cfg, symbols, process_root_ref="$ref:ROOT", registry=_Matching()
+    spoiled = mint_idempotency_grants(
+        cfg, symbols, process_root_ref="$ref:R",
+        registry=registry(**{axis: "SOMETHING-ELSE"}),
     )
-    assert len(ok.idempotency_grants) == 1, "the matching record failed to corroborate"
+    assert spoiled.idempotency_grants == (), f"a record with the wrong {axis} corroborated"
