@@ -1941,3 +1941,75 @@ def test_corroboration_compares_every_axis_the_compiler_can_know(axis, monkeypat
         registry=_complete_record(digest, **{**good, axis: spoiled_value}),
     )
     assert spoiled.idempotency_grants == (), f"a record with the wrong {axis} corroborated"
+
+
+def test_the_snapshot_not_the_symbol_table_decides_the_observed_identity(monkeypatch):
+    """The architect gate's second critical: corroboration compared records
+    against the SYMBOL TABLE, whose ids are relocatable placeholders chosen by
+    the plan — not against what the account was observed to hold.
+
+    Comparing a record to a placeholder compares it to the request. The snapshot
+    is the independent input, so where it has an answer it is the one used.
+    """
+    _synthetic_capabilities(monkeypatch, (REST, "PATCH", "conditionally_idempotent"))
+    from boomi_mcp.authoring.connector_resolution_snapshot import (
+        ResolvedConnectorComponentIdentityV1,
+        TrustedConnectorResolutionSnapshotV1,
+    )
+    from boomi_mcp.compiler.process_ir.connector_resolution import (
+        mint_idempotency_grants,
+        resolve_connector_call_bindings,
+    )
+
+    digest = "b" * 64
+    symbols = _symbols(
+        contracts=[
+            IdempotencyContractSymbolV1(
+                ref="$ref:C", operation_ref="$ref:PATCHOP", record_digest=digest
+            )
+        ]
+    )
+    doc = _connector_scope(
+        retry={"count": 1},
+        protected="$ref:PATCHOP",
+        idempotency={"kind": "key_reference", "contract_ref": "$ref:C"},
+    )
+    cfg, _plan = _compile(doc, symbols)
+    index = symbols.build_index()
+    binding = next(
+        b for b in resolve_connector_call_bindings(cfg, symbols)
+        if b.operation_ref == "$ref:PATCHOP"
+    )
+    placeholder = index[binding.operation_ref].component_id
+    observed_id = "OBSERVED-OPERATION-ID"
+
+    snapshot = TrustedConnectorResolutionSnapshotV1(
+        identities=(
+            ResolvedConnectorComponentIdentityV1(
+                # The snapshot records the raw component KEY; a symbol's
+                # reference is that key behind the token prefix.
+                component_key=binding.operation_ref.split(":", 1)[1],
+                component_id=observed_id,
+            ),
+        )
+    )
+
+    # A record naming the PLACEHOLDER no longer corroborates once the account has
+    # been observed to hold a different component.
+    stale = mint_idempotency_grants(
+        cfg, symbols, process_root_ref="$ref:R",
+        registry=_complete_record(digest, operation=placeholder),
+        snapshot=snapshot,
+    )
+    assert stale.idempotency_grants == (), (
+        "a record matching the plan's placeholder corroborated against an account "
+        "observed to hold something else"
+    )
+
+    # A record naming what was OBSERVED does.
+    real = mint_idempotency_grants(
+        cfg, symbols, process_root_ref="$ref:R",
+        registry=_complete_record(digest, operation=observed_id),
+        snapshot=snapshot,
+    )
+    assert len(real.idempotency_grants) == 1, "the observed identity failed to corroborate"

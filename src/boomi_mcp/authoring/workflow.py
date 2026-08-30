@@ -1503,7 +1503,7 @@ def _validate_processes(
         # after effect-declaration resolution above, which consumes the root-less
         # table on purpose.
         root_symbols = project_grants_for_root(
-            ir, symbols, process_root_ref=component_key
+            ir, symbols, process_root_ref=component_key, snapshot=snapshot
         )
         report = (
             validate_process_ir(ir, root_symbols, capabilities=root_capabilities)
@@ -2215,6 +2215,11 @@ def build_artifact_descriptors(
 
     Bytes stay internal. Only the digest and the byte length are published.
     """
+    # Imported in THIS function's scope. The sibling import lives inside
+    # `_validate_processes`, so relying on it here would leave the name
+    # undefined — the exact shape a previous round shipped.
+    from ..compiler.process_ir.connector_resolution import project_grants_for_root
+
     from ..compiler.process_ir.contracts import canonical_emission_plan_json
     from ..compiler.process_ir.diagnostics import ProcessIRCompileError
     from ..compiler.process_ir.pipeline import compile_process_ir_model_v1
@@ -2254,10 +2259,17 @@ def build_artifact_descriptors(
             # #154: the SAME per-root context plan validated under. Passed only
             # when present, for the same fail-closed reason as the validate call.
             root_capabilities = (effect_capabilities or {}).get(component_key)
+            # PROJECTED here too. Validating against a projected table while
+            # COMPILING the artifact against the rootless one means the gate is
+            # advisory: the refusal happens where a report is written and not
+            # where bytes are produced.
+            root_symbols = project_grants_for_root(
+                ir, symbols, process_root_ref=component_key
+            )
             reparsed, cfg, plan = (
-                compile_process_ir_model_v1(ir, symbols, capabilities=root_capabilities)
+                compile_process_ir_model_v1(ir, root_symbols, capabilities=root_capabilities)
                 if root_capabilities is not None
-                else compile_process_ir_model_v1(ir, symbols)
+                else compile_process_ir_model_v1(ir, root_symbols)
             )
         except ProcessIRCompileError as exc:
             raise AuthoringWorkflowError(

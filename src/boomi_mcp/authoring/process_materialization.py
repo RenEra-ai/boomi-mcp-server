@@ -694,6 +694,14 @@ def build_materialization_plan(
     # `_validate_processes` resolved. Nothing a caller sends reaches it, so this
     # is not a new trust surface; it is the existing one reaching the last site
     # that needed it. `None` keeps the strict default rather than overriding it.
+    # PROJECTED before materialising. A rootless table here reverted the whole
+    # per-call gate to the older per-operation authority at the last step that
+    # produces emitted bytes.
+    from ..compiler.process_ir.connector_resolution import project_grants_for_root
+
+    relocatable_symbols = project_grants_for_root(
+        process_ir, relocatable_symbols, process_root_ref="materialization"
+    )
     cfg, emission_plan = (
         compile_process_ir_v1(process_ir, relocatable_symbols, capabilities=capabilities)
         if capabilities is not None

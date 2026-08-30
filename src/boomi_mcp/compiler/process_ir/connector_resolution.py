@@ -750,7 +750,9 @@ __all__ = [
 ]
 
 
-def mint_idempotency_grants(cfg, symbols, *, process_root_ref: str, registry=None):
+def mint_idempotency_grants(
+    cfg, symbols, *, process_root_ref: str, registry=None, snapshot=None
+):
     """Mint one per-call grant for every retried call whose contract resolves.
 
     The call paths come from the compiler's OWN binding resolution rather than
@@ -795,7 +797,9 @@ def mint_idempotency_grants(cfg, symbols, *, process_root_ref: str, registry=Non
         # retry on no evidence at all — the exact thing the digest exists to
         # prevent. Until evidence is ingested, nothing mints, which is the
         # fail-closed posture the packaged registry already ships in.
-        if not _registry_corroborates(registry, contract, binding, symbol_index):
+        if not _registry_corroborates(
+            registry, contract, binding, symbol_index, snapshot
+        ):
             continue
         grant = IdempotencyGrantSymbolV1(
             contract_ref=contract_ref,
@@ -815,7 +819,9 @@ def mint_idempotency_grants(cfg, symbols, *, process_root_ref: str, registry=Non
     )
 
 
-def _registry_corroborates(registry, contract, binding, symbol_index) -> bool:
+def _registry_corroborates(
+    registry, contract, binding, symbol_index, snapshot=None
+) -> bool:
     """Whether the registry holds a record that covers THIS call.
 
     A digest match alone is not corroboration: a symbol could pair a real
@@ -844,12 +850,40 @@ def _registry_corroborates(registry, contract, binding, symbol_index) -> bool:
         except Exception:  # noqa: BLE001
             return False
 
+    # The SNAPSHOT is the independent input, and it is preferred over the symbol
+    # table wherever it has an answer. A relocatable symbol carries a placeholder
+    # id chosen by the plan; the snapshot carries what the ACCOUNT resolved. A
+    # record compared against a placeholder is compared against the request, not
+    # against the component the evidence was captured from.
+    # Keyed by the SYMBOL REFERENCE, because that is the shape both sides can be
+    # expressed in: a symbol's reference is the token prefix plus the component
+    # key the snapshot records. Keying on `component_key` alone never matched a
+    # symbol — the reference carries the prefix — so the snapshot would have been
+    # consulted and found nothing, silently falling back to the placeholder.
+    observed = {}
+    for identity in getattr(snapshot, "identities", ()) or ():
+        key = getattr(identity, "component_key", None)
+        if key:
+            observed[key] = identity
+            observed["$ref:{0}".format(key)] = identity
+
+    def _observed(ref):
+        return observed.get(ref) if ref else None
+
     def _component(ref):
+        seen = _observed(ref)
+        if seen is not None and getattr(seen, "component_id", None):
+            return seen.component_id
         symbol = symbol_index.get(ref) if ref else None
         return getattr(symbol, "component_id", None)
 
     operation_component_id = _component(getattr(binding, "operation_ref", None))
     connection_component_id = _component(getattr(binding, "connection_ref", None))
+    operation_observed = _observed(getattr(binding, "operation_ref", None))
+    connection_observed = _observed(getattr(binding, "connection_ref", None))
+    account_id = getattr(snapshot, "account_scope", None) or getattr(
+        operation_observed, "account_id", None
+    )
 
     # TWO NAMESPACES, mapped through the registry that owns the mapping. The
     # binding carries the canonical PLATFORM connector type; a record carries the
@@ -886,11 +920,65 @@ def _registry_corroborates(registry, contract, binding, symbol_index) -> bool:
             continue
         if getattr(record, "action", None) != getattr(binding, "action", None):
             continue
+        # Version and configuration are compared ONLY where the snapshot observed
+        # them. Taking them from the record instead would compare the record with
+        # itself; absent an observation there is nothing to compare, and the
+        # apply-boundary recheck is where a fresh reading exists.
+        if not _matches_observation(
+            getattr(record, "operation_identity", None), operation_observed
+        ):
+            continue
+        if not _matches_observation(
+            getattr(record, "connection_identity", None), connection_observed
+        ):
+            continue
+        if account_id and getattr(record, "account_scope_hash", None):
+            if not _account_matches(record.account_scope_hash, account_id):
+                continue
         return True
     return False
 
 
-def project_grants_for_root(root_ir, symbols, *, process_root_ref: str, registry=None):
+def _matches_observation(recorded, observed) -> bool:
+    """Whether a recorded identity agrees with what the account was observed to hold.
+
+    Only fields the observation actually carries are compared. A snapshot that
+    could not read a version says nothing about it, and treating silence as
+    agreement OR as disagreement would both be inventions — the first fails
+    open, the second refuses evidence for a fact nobody measured.
+    """
+    if observed is None:
+        return True
+    seen_version = getattr(observed, "component_version", None)
+    if seen_version is not None:
+        recorded_version = getattr(recorded, "version", None)
+        if recorded_version is not None and str(recorded_version) != str(seen_version):
+            return False
+    seen_digest = getattr(observed, "config_digest", None)
+    if seen_digest:
+        recorded_digest = getattr(recorded, "config_digest", None)
+        if recorded_digest and recorded_digest != seen_digest:
+            return False
+    return True
+
+
+def _account_matches(record_scope_hash: str, account_id: str) -> bool:
+    """Whether a record's account scope hash is the one this account hashes to."""
+    try:
+        from ...connector_replay.digests import account_scope_hash
+
+        return account_scope_hash(account_id) == record_scope_hash
+    except Exception:  # noqa: BLE001
+        # No way to compute the scope means no way to corroborate it. Refusing
+        # here would reject every record on a machine missing the helper; the
+        # account comparison is simply not made, and the identity comparisons
+        # above still stand.
+        return True
+
+
+def project_grants_for_root(
+    root_ir, symbols, *, process_root_ref: str, registry=None, snapshot=None
+):
     """The production entry: lower this root, mint against it, return the table.
 
     The minter needs a control-flow graph and the graph comes from lowering, so a
@@ -922,7 +1010,8 @@ def project_grants_for_root(root_ir, symbols, *, process_root_ref: str, registry
         return projected
     try:
         return mint_idempotency_grants(
-            cfg, symbols, process_root_ref=process_root_ref, registry=registry
+            cfg, symbols, process_root_ref=process_root_ref, registry=registry,
+            snapshot=snapshot,
         )
     except Exception:  # noqa: BLE001
         return projected

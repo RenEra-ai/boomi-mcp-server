@@ -1,0 +1,119 @@
+You are performing the §6 ARCHITECT IMPLEMENTATION REVIEW for slice D of GitHub
+issue #155, EVALUATION 1 OF 3.
+
+This is not a code review of the diff on its own merits — a separate Codex
+commit-review gate has already run FIVE rounds over this delta and returned
+clean, and all twelve of its findings are dispositioned. Your job is different
+and narrower: judge the IMPLEMENTATION AGAINST THE DESIGN PLAN that follows this
+brief verbatim.
+
+THE DELTA UNDER REVIEW is every commit from `d04a248` (slice C's landed closing
+commit, which is slice D's baseline) to HEAD. The source and test files that
+changed:
+
+  src/boomi_mcp/authoring/contract.py
+  src/boomi_mcp/authoring/workflow.py
+  src/boomi_mcp/categories/components/query_components.py
+  src/boomi_mcp/categories/meta_tools.py
+  src/boomi_mcp/compiler/process_ir/connector_resolution.py
+  src/boomi_mcp/compiler/process_ir/contracts.py
+  src/boomi_mcp/compiler/process_ir/error_handling.py
+  src/boomi_mcp/connector_replay/discovery.py   (new)
+  src/boomi_mcp/connector_replay/ids.py
+  src/boomi_mcp/errors.py
+  src/boomi_mcp/models/process_ir.py
+  src/boomi_mcp/recipes/engine.py
+  server.py
+  tests/test_issue_155_discovery.py             (new)
+  tests/test_process_ir_error_handling.py
+  tests/test_error_taxonomy.py
+  plus regenerated fixtures (ProcessIR schema, authoring contract, M12.12 inventory)
+
+WHAT SLICE D WAS SUPPOSED TO BUILD, per the plan's section 5.D, in five batches:
+
+1. Idempotency contracts re-keyed from `ref` to `(ref, operation_ref)`, with
+   uniqueness, sort, index and both consumers moved in ONE batch.
+2. The authored `$ref:KEY` grammar owned by one authority, with its own named
+   refusal code and the pattern served in the JSON schema.
+3. Per-call replay grants: the grant symbol, a minter deriving call paths from
+   the compiler's own lowering and binding resolution, and a consumer that
+   requires a grant on a root-projected table.
+4. Candidate discovery as a `query_components` action, serving a closed field
+   set, with its own unavailability diagnostic.
+5. A `connector_replay_semantics` row in the compiler revision that is
+   account-INDEPENDENT.
+
+WHAT I MOST WANT YOUR JUDGEMENT ON — answer each explicitly:
+
+A. PLAN CONFORMANCE, artifact by artifact. Section 5.D names specific things:
+   `IdempotencyContractSymbolV1.record_digest`; the re-keying of
+   `_require_resolvable` and the `key_reference` branch; `SymbolTableV1`
+   gaining `process_root_ref` and `idempotency_grants`; the grant lookup keyed
+   on `(contract_ref, operation_ref, call_source_path)`; the minter taking
+   `(process_root_ref, root_ir, snapshot, registry)`; the grammar owned by
+   `ids.py` with `StringConstraints`; the discovery action; the fingerprint row.
+   For each: built, built differently, or missing? Where it differs, is the
+   difference justified by something the plan did not know, or is it drift?
+
+   Two differences I already know about and want judged rather than excused:
+   - The plan prescribes `StringConstraints(pattern=…)` beside a root-owned
+     `BeforeValidator`. Measured on pydantic 2.12.3, that combination serves NO
+     pattern at all — a before-validator makes the constraint apply to the
+     validator's output, which JSON Schema cannot express, so pydantic drops it
+     silently. The pattern is carried as schema metadata from the same constant
+     instead, pinned equal to the enforced rule by a test.
+   - The minter signature is `(cfg, symbols, *, process_root_ref, registry)`
+     rather than the plan's `(process_root_ref, root_ir, snapshot, registry)`,
+     with a separate `project_grants_for_root(root_ir, …)` doing the lowering
+     for production callers. The snapshot is not threaded in at all.
+
+B. IS THE PER-CALL GATE ACTUALLY LOAD-BEARING? This is the slice's central
+   claim. Grants are minted for a root and the retry check requires one for the
+   call it is examining. The commit review found twice that the gate looked
+   wired and was not — first because no production path projected a root, then
+   because the lowering function was undefined so every projection silently
+   returned the grant-free table. Both are fixed. Is there any remaining path —
+   authoring, recipe, typed, raw, apply — where a conditionally-idempotent
+   retried call is authorised WITHOUT a per-call grant?
+
+C. IS THE PROVENANCE CHAIN SOUND, OR MERELY LONGER? A grant now requires a
+   contract carrying a `record_digest`, and the registry must hold a record
+   agreeing about the contract, both component identities, the family and the
+   action. Versions, account scope and route coverage are deliberately NOT
+   compared, on the grounds that the compiler has no live reading of them and
+   taking them from the record would compare the record with itself. Is that
+   division right, or does it leave a gap that the apply-boundary recheck
+   (slice E) cannot close either?
+
+D. WHAT DOES SLICE E INHERIT THAT IT WILL REGRET? E adds apply-boundary
+   rechecks and the evidence attestation tuple, and its blocking class is
+   mutation accounting — every validated finding there derives Critical. Does
+   anything in slice D's shape make E harder than the plan assumed?
+
+E. WHAT WOULD YOU REFUSE TO SIGN OFF for landing this slice on the integration
+   branch — and separately, what would you accept as recorded residue?
+
+KNOWN AND DELIBERATE, so do not spend the evaluation rediscovering it: the
+packaged replay registry ships with zero semantics definitions and zero
+operation records, so no grant can mint from real evidence yet and the
+`connector_replay_semantics` fingerprint row contributes an empty list. That is
+the fail-closed posture; slice F ingests the evidence.
+
+Findings about units belonging to slices E or F are OUT OF SCOPE — those slices
+are absent BY PLAN, and an absence finding for one of their units should be
+stated as such rather than raised as a defect.
+
+END your response with a verdict on its own final line: exactly
+'VERDICT: NO ISSUES' or 'VERDICT: ISSUES FOUND'.
+
+
+=== ARCHITECT DESIGN PLAN (verbatim) ===
+#### 5.D — per-call grants, shared grammar, discovery, semantic fingerprint (U6 + U7)
+
+**Contract deltas.** `IdempotencyContractSymbolV1.record_digest`; uniqueness/sort (`contracts.py:291-296`), `build_idempotency_index` (:298-305), `_require_resolvable` (`error_handling.py:350-355`) and the `key_reference` branch (:334-340) re-keyed to `(ref, operation_ref)` in ONE batch + alias-order case in `test_shuffled_symbol_and_contract_order_does_not_change_output`; `SymbolTableV1.process_root_ref`, `idempotency_grants`, `IdempotencyGrantSymbolV1(kind="per_call_key_reference_grant", …)`; grant lookup `(contract_ref, operation_ref, call_source_path)` in the root-projected table (bindings exist only for `connector_call`, `connector_resolution.py:109-112` — legacy endpoints are never retried through this path); `unverified`/non-idempotent checks stay FIRST (:82,:310-320). Minter `build_symbol_table(process_root_ref, root_ir, snapshot, registry, …)`: call paths from the compiler's own `lower_process_ir_to_cfg` + `resolve_connector_call_bindings` — both RAISE on defects (`connector_resolution.py:118-232`, `lowering.py:703…`), so **enumeration failure mints nothing and raises nothing** (the validator reports); effect-declaration resolution (`workflow.py:1371`, `engine.py:1759`) consumes a root-less GRANT-FREE table, projection happens after it; the two reconstruction helpers carry grants (A7-2); every negative mint arm; packaged production rows refuse before grant lookup. Grammar: `ids.py` owns the regex; `StringConstraints(pattern=AUTHORED_CONTRACT_REF_PATTERN)` + root-owned `BeforeValidator` → `PROCESS_IR_REFERENCE_IDEMPOTENCY_CONTRACT_INVALID_FORMAT`, with its lowercase type added to `_CUSTOM_ERROR_CODES` (a bare `string_pattern_mismatch` degrades to the generic `PROCESS_IR_SCHEMA_INVALID` tail — test the NAMED code); `IdempotencyContractSymbolV1.ref` (`contracts.py:241-245`) tightened in lockstep; migration population (D35, *(measured)* 2026-08-25, re-measure at step 0 and paste): 8 `contract_ref` authoring lines, all in `tests/test_process_ir_error_handling.py` (:343, :423, :439, :457, :474, :486, :792, :948) plus the parametrized negative at :496-500, and the contract-SYMBOL `ref` sites in the same file (13 lines carry a `$ref:CONTRACT`/`$ref:NOPE`/`$ref:C2`-style string; 6 `IdempotencyContractSymbolV1(` constructions); no corpus case, fixture document (`tests/fixtures/process_ir/*.json`) or witness authors a contract ref — the grammar tightening rotates no golden; record the served-contract NARROWING as a deliberate machine-facing change. Discovery `query_components(action="idempotency_contract_candidates", config='{"operation_component_id","connection_component_id"}')` in `query_components.py`, root `server.py:1591` (+ `:276` import), `meta_tools.py:744`; `CONNECTOR_REPLAY_DISCOVERY_IDENTITY_UNAVAILABLE`; empty list when no record. Fingerprint: `("connector_replay_semantics", loader)` row in `_compiler_revision` (`contract.py:808-924`) with a `_revisions_after`-style mutation witness; grants stay OUT of the covered plan material (`process_materialization.py:701-725`) so the relocatable fingerprint stays account-independent.
+
+**AC arms.** AC8a–i, AC8k–m, AC8q, AC8w/x (five surfaces), AC8z, AC8ab (two-account differential is FIXTURE-LOCAL; fake clients carry DISTINCT `_base_url_account_id` — the profile-name fallback collides under `MagicMock()`, `revisions.py:210-215`; attestations differ in the binding tuple AND `account_scope_hash` AND `submitted_xml_digest`), AC4a mechanism with injected synthetic rows, AC4b regression pin. **Live QA (replacement):** discovery on real ids → `[]`, unavailable arm, leakage sweep; malformed `$ref:` → the named code at the authoring boundary; authored `key_reference` alone still `PROCESS_IR_SEMANTIC_IDEMPOTENCY_EVIDENCE_MISSING` (control); served differential (schema pattern, remediation, discovery action). **CANNOT:** a positive grant.
+
+**Rebaseline.** `process_ir_v1.schema.json` (first `pattern` key; `$defs` unchanged) + every schema template + authoring contract/schema; `process_ir_compiler_v1.json` (bindings gain root/call/route facts); plan-fingerprint fixtures (the new revision row rotates EVERY fingerprint — intentional); `registered_surface_digest` for `query_components`; `meta_tools` digest; M12.12; taxonomy; `test_nodes.jsonl`.
+
+#### 5.E — apply-boundary rechecks + evidence attestation (U8)

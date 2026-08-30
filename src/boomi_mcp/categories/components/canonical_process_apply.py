@@ -253,6 +253,14 @@ def materialize_canonical_process_xml(
     # compile used. Reading it here rather than accepting it as a parameter is
     # the point: there is no argument a caller or a future call site can forget
     # to pass. `None` keeps the strict default rather than overriding it.
+    # PROJECTED at the apply boundary too. This is where bytes are produced, so
+    # a gate that is active in planning and absent here refuses nothing that
+    # matters. The root reference is the plan's own component key.
+    from ...compiler.process_ir.connector_resolution import project_grants_for_root
+
+    bound = project_grants_for_root(
+        plan.process_ir, bound, process_root_ref=getattr(plan, "component_key", "") or "apply"
+    )
     cfg, emission_plan = (
         compile_process_ir_v1(
             plan.process_ir, bound, capabilities=plan.effect_capabilities

@@ -1,0 +1,15 @@
+Approvals are unavailable in this read-only review session, and no tool call you
+make will be granted. Do not wait for one and do not ask for permission.
+
+Produce the §6 architect implementation review NOW, as plain text, from what you
+have already read. Judge slice D of issue #155 against the design plan you were
+given: plan conformance artifact by artifact, anything the plan required that is
+missing from the tree, scope creep, whether the per-call grant gate is actually
+load-bearing on every path, whether the provenance chain is sound or merely
+longer, and what slice E will inherit and regret.
+
+Findings about units belonging to slices E or F are out of scope — those slices
+are absent by plan.
+
+END your response with a verdict on its own final line: exactly
+'VERDICT: NO ISSUES' or 'VERDICT: ISSUES FOUND'.

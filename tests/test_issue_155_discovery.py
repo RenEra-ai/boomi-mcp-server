@@ -427,26 +427,62 @@ def test_a_live_component_still_resolves():
     assert result["operation_version"] == 5
 
 
-def test_the_production_compile_paths_project_a_root():
-    """The per-call gate has to be REACHED, not merely implemented.
+def test_EVERY_compile_sink_projects_a_root():
+    """The sink universe is DERIVED from the source, not checked per module.
 
-    Live QA and the commit review both found the same thing: no production path
-    projected a root, so `process_root_ref` was always None, grant lookup was
-    disabled everywhere, and the old per-operation authorisation survived intact.
-    The projection is derived from the compiler's own lowering, so a path that
-    forgets it is a path that never mints.
+    The previous version asserted the projection appeared somewhere in each
+    module. `workflow.py` contains it in the validation loop, so that guard
+    passed while the module's ARTIFACT-compile sink still compiled against the
+    rootless table — and the architect gate then probed all three public entry
+    points and found every one accepting a retried conditionally-idempotent call
+    with zero grants. Presence in a file is not presence at a call.
+
+    Every call to a compile entry outside the compiler package is a sink, and
+    each must be preceded by a projection in ITS OWN function.
     """
-    import inspect
+    import ast
+    import pathlib
 
-    from boomi_mcp.authoring import workflow
-    from boomi_mcp.recipes import engine
+    root = pathlib.Path(__file__).resolve().parents[1] / "src" / "boomi_mcp"
+    entries = {"compile_process_ir_v1", "compile_process_ir_model_v1"}
+    unprojected = []
 
-    for module, label in ((workflow, "authoring"), (engine, "recipe")):
-        source = inspect.getsource(module)
-        assert "project_grants_for_root(" in source, (
-            f"the {label} compile path does not project a root, so every table it "
-            "validates against has no grants and the per-call gate is inert"
-        )
+    for path in root.rglob("*.py"):
+        if "compiler/process_ir" in path.as_posix():
+            continue
+        tree = ast.parse(path.read_text())
+        for fn in ast.walk(tree):
+            if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            calls = [
+                n for n in ast.walk(fn)
+                if isinstance(n, ast.Call)
+                and isinstance(n.func, ast.Name)
+                and n.func.id in entries
+            ]
+            if not calls:
+                continue
+            projects = any(
+                isinstance(n, ast.Call)
+                and isinstance(n.func, ast.Name)
+                and n.func.id == "project_grants_for_root"
+                for n in ast.walk(fn)
+            )
+            if not projects:
+                unprojected.append(f"{path.relative_to(root)}::{fn.name}")
+
+    assert not unprojected, (
+        "these functions compile a process without projecting a root first, so "
+        "the per-call grant gate is inactive there and the old per-operation "
+        f"authorisation applies: {unprojected}"
+    )
+    # Non-vacuity: the derivation must actually find sinks.
+    found = sum(
+        1 for path in root.rglob("*.py")
+        if "compiler/process_ir" not in path.as_posix()
+        and any(e in path.read_text() for e in entries)
+    )
+    assert found >= 3, f"only {found} sink files found — the sweep is too narrow"
 
 
 def test_an_unlowerable_root_still_projects_with_zero_grants():
