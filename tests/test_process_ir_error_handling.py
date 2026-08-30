@@ -1631,3 +1631,128 @@ def test_the_served_schema_advertises_the_same_grammar_it_enforces():
             "the served grammar and the enforced grammar have drifted: "
             f"served={field.get('pattern')!r} authority={AUTHORED_CONTRACT_REF_PATTERN!r}"
         )
+
+
+def _mint(doc, symbols, root="$ref:ROOT"):
+    from boomi_mcp.compiler.process_ir.connector_resolution import mint_idempotency_grants
+
+    cfg, _plan = _compile(doc, symbols)
+    return mint_idempotency_grants(cfg, symbols, process_root_ref=root)
+
+
+def test_the_minter_mints_a_grant_for_a_call_whose_contract_resolves(monkeypatch):
+    """NON-VACUITY for the minter itself.
+
+    The first version of this read the evidence off the binding, where it does
+    not live, so it minted nothing for every input while every other test stayed
+    green — a minter that produces an empty tuple is indistinguishable from one
+    that is never exercised.
+    """
+    _synthetic_capabilities(monkeypatch, (REST, "PATCH", "conditionally_idempotent"))
+    symbols = _symbols(
+        contracts=[IdempotencyContractSymbolV1(ref="$ref:C", operation_ref="$ref:PATCHOP")]
+    )
+    doc = _connector_scope(
+        retry={"count": 1},
+        protected="$ref:PATCHOP",
+        idempotency={"kind": "key_reference", "contract_ref": "$ref:C"},
+    )
+
+    minted = _mint(doc, symbols)
+    assert minted.process_root_ref == "$ref:ROOT"
+    assert len(minted.idempotency_grants) == 1, "the minter produced nothing"
+    grant = minted.idempotency_grants[0]
+    assert grant.contract_ref == "$ref:C"
+    assert grant.operation_ref == "$ref:PATCHOP"
+    assert grant.call_source_path, "a grant must name the call it covers"
+    assert grant.key in minted.build_grant_index()
+
+    # The table it was minted FROM is unchanged — minting projects, never mutates.
+    assert symbols.process_root_ref is None
+    assert symbols.idempotency_grants == ()
+
+
+def test_a_call_with_no_evidence_mints_no_grant(monkeypatch):
+    """The minter describes what IS evidenced; it never invents coverage.
+
+    Stated from measurement, not from my first guess: I wrote this as "a
+    reference covering another operation mints nothing", assuming a read-only
+    call ignores a dangling reference. It does not — a reference that resolves to
+    nothing is refused whichever row it sits on, so that document never reaches
+    the minter at all. The true negative is a call carrying no reference.
+    """
+    _synthetic_capabilities(monkeypatch, (REST, "GET", "read_only"))
+    symbols = _symbols(
+        contracts=[IdempotencyContractSymbolV1(ref="$ref:C", operation_ref="$ref:OTHEROP")]
+    )
+    doc = _connector_scope(retry={"count": 1}, protected="$ref:GETOP")
+
+    minted = _mint(doc, symbols)
+    assert minted.idempotency_grants == ()
+    assert minted.process_root_ref == "$ref:ROOT"
+
+
+def test_an_unresolvable_reference_is_refused_before_any_grant_is_minted(monkeypatch):
+    """Enumeration failure is the validator's to report, from one layer only."""
+    _synthetic_capabilities(monkeypatch, (REST, "GET", "read_only"))
+    symbols = _symbols(
+        contracts=[IdempotencyContractSymbolV1(ref="$ref:C", operation_ref="$ref:OTHEROP")]
+    )
+    doc = _connector_scope(
+        retry={"count": 1},
+        protected="$ref:GETOP",
+        idempotency={"kind": "key_reference", "contract_ref": "$ref:C"},
+    )
+    with pytest.raises(ProcessIRCompileError) as excinfo:
+        _mint(doc, symbols)
+    assert (
+        excinfo.value.diagnostics[0].code
+        == PROCESS_IR_SEMANTIC_IDEMPOTENCY_EVIDENCE_MISSING
+    )
+
+
+def test_a_root_projected_table_requires_a_grant_for_this_very_call(monkeypatch):
+    """The capability grants exist for: evidence per CALL, not per operation.
+
+    A contract covers an operation, so without a per-call grant a second call of
+    the same operation elsewhere in the root inherits evidence nobody minted for
+    it. Checked in both directions — the minted table compiles, and the same
+    table with the grant's call path altered does not.
+    """
+    _synthetic_capabilities(monkeypatch, (REST, "PATCH", "conditionally_idempotent"))
+    symbols = _symbols(
+        contracts=[IdempotencyContractSymbolV1(ref="$ref:C", operation_ref="$ref:PATCHOP")]
+    )
+    doc = _connector_scope(
+        retry={"count": 1},
+        protected="$ref:PATCHOP",
+        idempotency={"kind": "key_reference", "contract_ref": "$ref:C"},
+    )
+
+    # A grant-free table still compiles: that is the pre-projection state.
+    _compile(doc, symbols)
+
+    minted = _mint(doc, symbols)
+    assert minted.idempotency_grants, "nothing minted — the rest of this is vacuous"
+    _compile(doc, minted)  # the minted table covers this call
+
+    # Same contract, same operation, a grant naming a DIFFERENT call site.
+    from boomi_mcp.compiler.process_ir.contracts import IdempotencyGrantSymbolV1
+
+    elsewhere = minted.model_copy(
+        update={
+            "idempotency_grants": (
+                IdempotencyGrantSymbolV1(
+                    contract_ref="$ref:C",
+                    operation_ref="$ref:PATCHOP",
+                    call_source_path="/body/steps/99/somewhere_else",
+                ),
+            )
+        }
+    )
+    with pytest.raises(ProcessIRCompileError) as excinfo:
+        _compile(doc, elsewhere)
+    assert (
+        excinfo.value.diagnostics[0].code
+        == PROCESS_IR_SEMANTIC_IDEMPOTENCY_EVIDENCE_MISSING
+    )

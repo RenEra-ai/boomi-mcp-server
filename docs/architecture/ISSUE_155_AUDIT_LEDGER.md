@@ -25,7 +25,7 @@ deferred `blocked-by-mechanism` naming that slice, never silently carried.
 | A | canonical dynamic-path binding on both connector roles, its lineage rule, the published family capability, and the explicit process-source replay policy | behaviour-affecting | **CLOSED CLEAN, landed on the integration branch at `6d2205a` 2026-08-27** |
 | B | the packaged replay-evidence registry, identifier grammar, both digest algorithms, the derived audit report, the execution-connector monitor action | src-changing, narrowly reachable | **LANDED on `dev` at `eb22351` 2026-08-28 under `ESCALATE-OPEN`** — baseline `6d2205a`. NOT clean: `CDX-155-r73-01`, `CDX-155-r73-02` and `SELF-155-r65-01` are dispositioned escalated-open and unfixed, with no follow-up issue filed for them. |
 | C | the trusted connector-resolution snapshot and the blank-path cross-check | behaviour-affecting | IN FLIGHT — baseline `eb22351`. Five Stage-2 review rounds and six live QA rounds run, none clean; three of five roster loops (architect, wave gate, closing protocol) have not started. |
-| D | per-call replay grants, the shared reference grammar, candidate discovery, the account-independent semantic revision | mostly unreachable in production | IN FLIGHT — baseline `d04a248`. Batches 1 (contract re-keying) and 2 (the authored reference grammar) applied and suite-validated; the grants, discovery action and revision row remain. |
+| D | per-call replay grants, the shared reference grammar, candidate discovery, the account-independent semantic revision | mostly unreachable in production | IN FLIGHT — baseline `d04a248`. Batches 1 (contract re-keying), 2 (authored reference grammar) and 3 (per-call grants: symbol, minter and consumer) applied and suite-validated; the discovery action and the revision row remain. |
 | E | apply-boundary identity rechecks and the evidence attestation tuple | mutation accounting | not started |
 | F | evidence ingestion and production enablement — the only slice that can close #155 | evidence-gated | not started |
 
@@ -1137,6 +1137,38 @@ schema (one `pattern` key, `$defs` unchanged at 40), the authoring contract, and
 inventory. Validation: the full non-KB suite at 11,243 passed / 18 skipped, with both mutants
 hand-run — dropping the compiler symbol's check while the authoring surface stays strict fails the
 lockstep pin, and widening the authority to admit further colons fails the named-code negatives.
+
+### Batch 3 — per-call replay grants
+
+Shapes, minter and consumer land TOGETHER, deliberately. The plan's own risk list names a field
+nothing populates as the vacuity trap this epic has hit twice, and a grant symbol without a minter
+or a minter without a checker would be exactly that.
+
+What it changes: evidence moves from per-OPERATION to per-CALL. A contract binds a reference to the
+operation it covers, so before this a second call of the same operation elsewhere in the same root
+inherited evidence nobody minted for it. The grant names the call site, and on a root-projected
+table the retry check requires one for the very call it is examining. A GRANT-FREE table — one with
+no projected root — still compiles: that is the honest pre-projection state that effect-declaration
+resolution runs in, and demanding a grant there would refuse a document for lacking evidence about a
+call nobody has been asked about yet.
+
+**A defect in my own first version, recorded because the tests would not have caught it.** The
+minter read the authored evidence off the connector-call binding, where it does not live. It
+therefore minted NOTHING for every input, silently, while every other test stayed green — an empty
+result is indistinguishable from a minter that is never exercised. It now reads the CFG node, which
+is the same authority the retry check reads, and the mutant restoring the original form fails the
+non-vacuity test. A second correction of the same kind: a negative test asserted that a read-only
+call ignores a dangling contract reference. Measured, it does not — an unresolvable reference is
+refused whichever row it sits on — so the test states the true negative instead, with the correction
+kept in its own text.
+
+Call paths come from the compiler's own binding resolution rather than a private walk, and
+enumeration failure mints nothing and raises nothing: an unresolvable reference is the validator's
+finding, and reporting it from the minter too would report one defect from two layers.
+
+Validation: the full non-KB suite at 11,247 passed / 18 skipped. Mutants hand-run — reading evidence
+off the binding mints nothing and fails the minter pin; removing the grant check loses call-site
+discrimination; consulting grants on a grant-free table fails five tests.
 
 ## Slice A — implementation record (what landed, and what validation it still owes)
 

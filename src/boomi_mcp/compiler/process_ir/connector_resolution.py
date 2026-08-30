@@ -748,3 +748,55 @@ __all__ = [
     "validate_connector_call_semantics",
     "validate_connector_calls",
 ]
+
+
+def mint_idempotency_grants(cfg, symbols, *, process_root_ref: str):
+    """Mint one per-call grant for every retried call whose contract resolves.
+
+    The call paths come from the compiler's OWN binding resolution rather than
+    from a second walk of the document: a private walk would be a second graph
+    traversal of an already-resolved fact, and the two would disagree the moment
+    either learned something the other did not.
+
+    Enumeration failure MINTS NOTHING AND RAISES NOTHING. The resolver this reads
+    from raises on genuine defects, and those are the validator's to report — a
+    minter that re-raised them would report the same defect twice, from a layer
+    whose job is to describe what is already valid.
+    """
+    from .contracts import IdempotencyGrantSymbolV1
+
+    contracts = symbols.build_idempotency_index()
+    # The evidence lives on the CFG node, which is where the retry check reads it
+    # from too. Indexed once: a per-binding scan would be O(bindings x nodes).
+    evidence_by_node = {
+        node.node_id: getattr(node.semantic, "idempotency", None) for node in cfg.nodes
+    }
+    grants = []
+    seen = set()
+    for binding in resolve_connector_call_bindings(cfg, symbols):
+        evidence = evidence_by_node.get(binding.node_id)
+        if evidence is None or getattr(evidence, "kind", None) != "key_reference":
+            continue
+        contract_ref = getattr(evidence, "contract_ref", None)
+        if not contract_ref:
+            continue
+        if (contract_ref, binding.operation_ref) not in contracts:
+            # An unresolvable reference is the validator's finding, not a reason
+            # to mint a grant for a contract that does not cover this call.
+            continue
+        grant = IdempotencyGrantSymbolV1(
+            contract_ref=contract_ref,
+            operation_ref=binding.operation_ref,
+            call_source_path=binding.source_path,
+        )
+        if grant.key in seen:
+            continue
+        seen.add(grant.key)
+        grants.append(grant)
+    return symbols.model_copy(
+        update={
+            "process_root_ref": process_root_ref,
+            "idempotency_grants": tuple(grants),
+        }
+    )
+

@@ -284,6 +284,50 @@ class IdempotencyContractSymbolV1(_CompilerModel):
         return value
 
 
+class IdempotencyGrantSymbolV1(_CompilerModel):
+    """A contract's coverage of ONE CALL, not merely of one operation.
+
+    A contract binds a reference to the operation it covers, which makes evidence
+    per-OPERATION: every call of that operation in every process inherits it. A
+    grant narrows that to the call site, so a document may carry evidence for the
+    one call it was minted against and not for a second call of the same operation
+    somewhere else in the same root.
+
+    It carries NO key material, for the same reason the contract does not: the
+    fields name a contract, an operation and a position in a document, and there
+    is nowhere to put a key even by mistake.
+    """
+
+    contract_ref: str = Field(..., min_length=1)
+    operation_ref: str = Field(..., min_length=1)
+    call_source_path: str = Field(..., min_length=1)
+    kind: Literal["per_call_key_reference_grant"] = "per_call_key_reference_grant"
+
+    @field_validator("contract_ref", "operation_ref", "call_source_path")
+    @classmethod
+    def _no_surrounding_whitespace(cls, value: str) -> str:
+        if value != value.strip():
+            raise ValueError("grant fields must not carry surrounding whitespace")
+        return value
+
+    @field_validator("contract_ref")
+    @classmethod
+    def _ref_matches_the_authored_grammar(cls, value: str) -> str:
+        from ...connector_replay.ids import is_authored_contract_ref
+
+        if not is_authored_contract_ref(value):
+            raise ValueError(
+                "grant contract reference must be an exact '$ref:KEY' token "
+                "carrying a single key segment"
+            )
+        return value
+
+    @property
+    def key(self) -> tuple:
+        """The triple a lookup uses. One definition, so callers cannot disagree."""
+        return (self.contract_ref, self.operation_ref, self.call_source_path)
+
+
 class SymbolTableV1(_CompilerModel):
     """Closed, deterministic set of resolved references.
 
@@ -299,6 +343,12 @@ class SymbolTableV1(_CompilerModel):
     symbols: Tuple[ComponentSymbolV1, ...] = ()
     #: #142. Defaults to empty, so every pre-#142 table stays byte-identical.
     idempotency_contracts: Tuple[IdempotencyContractSymbolV1, ...] = ()
+    #: The process root these grants were minted against, or None for a GRANT-FREE
+    #: table. Effect-declaration resolution consumes a root-less table on purpose:
+    #: it runs before any root is projected, and requiring grants there would
+    #: demand evidence of a call the caller has not been asked about yet.
+    process_root_ref: Optional[str] = None
+    idempotency_grants: Tuple[IdempotencyGrantSymbolV1, ...] = ()
 
     @field_validator("symbols")
     @classmethod
@@ -334,6 +384,27 @@ class SymbolTableV1(_CompilerModel):
                 raise ValueError("duplicate idempotency contract reference")
             seen.add(key)
         return tuple(sorted(value, key=lambda item: (item.ref, item.operation_ref)))
+
+    @field_validator("idempotency_grants")
+    @classmethod
+    def _grants_unique_and_canonical(
+        cls, value: Tuple[IdempotencyGrantSymbolV1, ...]
+    ) -> Tuple[IdempotencyGrantSymbolV1, ...]:
+        # Keyed on the same triple the lookup uses, so what is unique here is
+        # exactly what is resolved there.
+        seen = set()
+        for grant in value:
+            if grant.key in seen:
+                raise ValueError("duplicate idempotency grant")
+            seen.add(grant.key)
+        return tuple(sorted(value, key=lambda item: item.key))
+
+    def build_grant_index(self) -> dict:
+        """Build a (contract_ref, operation_ref, call_source_path) -> grant index.
+
+        Not cached, for the reasons spelled out on :meth:`build_index`.
+        """
+        return {grant.key: grant for grant in self.idempotency_grants}
 
     @classmethod
     def rebinding(cls, source, symbols) -> "SymbolTableV1":

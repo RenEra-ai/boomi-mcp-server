@@ -284,6 +284,12 @@ def validate_error_handling(
 
     binding_by_node = {binding.node_id: binding for binding in bindings}
     contracts = symbols.build_idempotency_index()
+    # Grants narrow evidence from per-OPERATION to per-CALL, and they are consulted
+    # ONLY on a root-projected table. A grant-free table is the honest state before
+    # any root is projected — effect-declaration resolution runs there — and
+    # demanding a grant in that state would refuse a document for lacking evidence
+    # about a call nobody has been asked about yet.
+    grants = symbols.build_grant_index() if symbols.process_root_ref is not None else None
 
     for region in regions:
         # --- the acknowledgement is legal BY VALUE, before anything else -----
@@ -375,6 +381,16 @@ def validate_error_handling(
                 # accepting it would make the binding decorative. One lookup on
                 # the pair the index is keyed by decides both.
                 if (evidence.contract_ref or "", binding.operation_ref) not in contracts:
+                    raise _evidence_missing(binding, node_id)
+                # ...and on a root-projected table, evidence must have been minted
+                # for THIS CALL. A contract covers an operation, so without this a
+                # second call of the same operation elsewhere in the root inherits
+                # evidence nobody minted for it.
+                if grants is not None and (
+                    evidence.contract_ref or "",
+                    binding.operation_ref,
+                    binding.source_path,
+                ) not in grants:
                     raise _evidence_missing(binding, node_id)
 
 
