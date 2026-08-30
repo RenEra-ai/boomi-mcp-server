@@ -428,26 +428,36 @@ def normalized_identity_projection(config, live_projection=None):
     # fell back to it anyway, and the marker string survived as a static,
     # mintable endpoint. Detection and selection now read the same fields.
     _endpoint_keys = _ENDPOINT_FIELDS_BY_FAMILY.get(family, _DEFAULT_ENDPOINT_FIELDS)
-    # A composed family's route is settled by every field its composer reads, not
-    # only by the one that names it, so the extension question scans all of them.
     _composer = _COMPOSED_ENDPOINT_BY_FAMILY.get(family)
-    _scanned_keys = tuple(
-        dict.fromkeys(_endpoint_keys + tuple(getattr(_composer, "reads", ())))
-    )
+    _composed_keys = tuple(getattr(_composer, "reads", ()))
     # The two questions read the same fields, but they REDUCE them differently:
     # "is the account deciding this route" is true if ANY of the family's endpoint
     # fields carries the marker, while "which value is the endpoint" takes the
     # first one present. Collapsing both onto the first present field lost the
     # marker on a later one — a SOAP config with a concrete `endpoint_url` and an
     # extension-bound `wsdl_url` went from unavailable to a pinned static route.
-    _scanned_values, _ = _endpoint_reading(config, _scanned_keys)
     _declared_values, _declared_endpoint = _endpoint_reading(config, _endpoint_keys)
+    _composed_values, _ = _endpoint_reading(config, _composed_keys)
     _live = live_projection if isinstance(live_projection, Mapping) else {}
     _live_values, _live_endpoint = _endpoint_reading(_live, ("url", "endpoint"))
+    _composed_endpoint = _composer(config) if _composer is not None else None
+    # Precedence keys on whether the CONFIG SETTLES an endpoint, never on whether
+    # some field it reads happens to be present: a database config carrying a
+    # port and no host settles nothing, and reading "a scanned field exists" as
+    # "the config answered" discarded the account's marker on exactly that input.
+    _config_settles = _declared_endpoint is not None or _composed_endpoint is not None
     # The live reading FILLS an unset fact; it never overrides a declared one.
-    extension_bound = any(value == SET_BY_EXTENSION for value in _scanned_values) or (
-        not _scanned_values
+    # Only a field the builder can actually extension-bind may claim a binding:
+    # the placeholder is REFUSED on the others (`SET_BY_EXTENSION_FIELD_NOT_ALLOWED`),
+    # so a marker there is malformed input, not an account-decided route.
+    extension_bound = any(value == SET_BY_EXTENSION for value in _declared_values) or (
+        not _config_settles
         and any(value == SET_BY_EXTENSION for value in _live_values)
+    )
+    # ... but it still may not be composed INTO a route. Fail closed under its own
+    # cause rather than borrowing the extension one.
+    _placeholder_refused = not extension_bound and any(
+        value == SET_BY_EXTENSION for value in _composed_values
     )
     # A composed family supplies its own value below; everything else uses the
     # field it declared, or the account's reading when it declared none.
@@ -467,6 +477,14 @@ def normalized_identity_projection(config, live_projection=None):
         return NormalizedConnectorIdentity(
             family=family, action=action, route_state="unavailable",
             extension_bound=True,
+        )
+
+    # A field the composition needs carries a placeholder the builder refuses, so
+    # no route can be composed and none may be reported. Not extension bound —
+    # claiming that would assert a binding this family cannot emit.
+    if _placeholder_refused:
+        return NormalizedConnectorIdentity(
+            family=family, action=action, route_state="unavailable",
         )
 
     # Usable replacements mean ``build()`` BLANKS the path (see its step 6), so

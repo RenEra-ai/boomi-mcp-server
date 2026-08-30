@@ -3261,19 +3261,43 @@ def test_both_halves_of_the_extension_question_read_through_one_helper():
     from boomi_mcp.categories.components.builders import connector_builder as cb
 
     tree = ast.parse(textwrap.dedent(inspect.getsource(cb.normalized_identity_projection)))
-    sources = [
-        node.args[0].id
-        for node in ast.walk(tree)
-        if isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Name)
-        and node.func.id == "_endpoint_reading"
-        and node.args
-        and isinstance(node.args[0], ast.Name)
+
+    # Which names each helper call BINDS, keyed by the source it reads. Finding
+    # the call is not enough: both calls are needed for endpoint selection, so a
+    # re-open-coded scan can leave them standing and still decide from its own
+    # values. What has to hold is that the DECISION consumes what they bound.
+    bound_by_source = {}
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Assign) or not isinstance(node.value, ast.Call):
+            continue
+        call = node.value
+        if not (isinstance(call.func, ast.Name) and call.func.id == "_endpoint_reading"):
+            continue
+        if not (call.args and isinstance(call.args[0], ast.Name)):
+            continue
+        names = {t.id for t in ast.walk(node.targets[0]) if isinstance(t, ast.Name)}
+        bound_by_source.setdefault(call.args[0].id, set()).update(names)
+
+    decision = [
+        n for n in ast.walk(tree)
+        if isinstance(n, ast.Assign)
+        and any(
+            isinstance(t, ast.Name) and t.id == "extension_bound"
+            for t in ast.walk(n.targets[0])
+        )
     ]
-    assert "config" in sources, "the declared half no longer reads through the helper"
-    assert "_live" in sources, (
-        "the live half no longer reads through the helper; it reads " + repr(sources)
-    )
+    assert decision, "no assignment to extension_bound was found"
+    consumed = {n.id for n in ast.walk(decision[0].value) if isinstance(n, ast.Name)}
+
+    for source in ("config", "_live"):
+        assert source in bound_by_source, (
+            f"nothing reads {source} through the helper any more"
+        )
+        assert bound_by_source[source] & consumed, (
+            f"the extension decision does not consume what the helper read from "
+            f"{source}: it binds {sorted(bound_by_source[source])} but decides from "
+            f"{sorted(consumed)}"
+        )
 
 
 def test_the_composer_declares_exactly_the_fields_it_reads():
@@ -3314,12 +3338,88 @@ def test_a_marker_in_any_composed_field_disarms_the_database_route(field):
     config[field] = SET_BY_EXTENSION
 
     identity = normalized_identity_projection(config)
-    assert identity.extension_bound is True, field
     assert identity.route_state == "unavailable", field
     assert identity.endpoint is None, field
+    # Only `host` is extension-bindable for this family; the builder refuses the
+    # placeholder on the other two, so claiming a binding there would assert one
+    # this family cannot emit. Both fail closed, for different stated reasons.
+    assert identity.extension_bound is (field == "host"), field
 
     concrete = normalized_identity_projection(
         {**config, field: {"host": "db.internal", "port": 1433, "dbname": "SALES"}[field]}
     )
     assert concrete.endpoint == "db.internal:1433/SALES", field
     assert concrete.route_state == "static", field
+
+
+def test_a_secondary_field_alone_does_not_count_as_a_settled_endpoint():
+    """Precedence keys on settlement, not on presence.
+
+    A database config carrying a port and no host composes nothing, so the
+    account's reading is still the answer. Treating "a scanned field is present"
+    as "the config answered" discarded a live marker on exactly that input and
+    reported a static route with no endpoint at all.
+    """
+    from boomi_mcp.categories.components.builders.connector_builder import (
+        SET_BY_EXTENSION,
+        normalized_identity_projection,
+    )
+
+    identity = normalized_identity_projection(
+        {"connector_type": "database", "operation_mode": "get", "port": 1433, "dbname": "S"},
+        live_projection={"url": SET_BY_EXTENSION},
+    )
+    assert identity.extension_bound is True
+    assert identity.route_state == "unavailable"
+
+    # Control: once the config DOES settle an endpoint, the live marker is
+    # correctly ignored — the live reading fills, it never overrides.
+    settled = normalized_identity_projection(
+        {
+            "connector_type": "database",
+            "operation_mode": "get",
+            "host": "db.internal",
+            "port": 1433,
+            "dbname": "S",
+        },
+        live_projection={"url": SET_BY_EXTENSION},
+    )
+    assert settled.extension_bound is False
+    assert settled.endpoint == "db.internal:1433/S"
+
+
+def test_only_a_field_the_builder_can_bind_may_claim_an_extension_binding():
+    """The placeholder is refused on non-extension fields, so a marker there is
+    malformed input rather than an account-decided route. Both fail closed; only
+    the bindable field reports a binding. The builder itself is the authority
+    consulted here, not a second copy of its rules."""
+    import sys
+
+    sys.path.insert(0, "tests")
+    from test_database_connector_builder import _minimal_config
+
+    from boomi_mcp.categories.components.builders.connector_builder import (
+        DatabaseConnectorBuilder,
+        SET_BY_EXTENSION,
+        normalized_identity_projection,
+    )
+
+    for field in ("host", "port", "dbname"):
+        refused_by_builder = (
+            DatabaseConnectorBuilder.validate_config(
+                _minimal_config(**{field: SET_BY_EXTENSION})
+            )
+            is not None
+        )
+        identity = normalized_identity_projection(
+            {
+                "connector_type": "database",
+                "operation_mode": "get",
+                "host": "db.internal",
+                "port": 1433,
+                "dbname": "SALES",
+                field: SET_BY_EXTENSION,
+            }
+        )
+        assert identity.route_state == "unavailable", field
+        assert identity.extension_bound is not refused_by_builder, field
