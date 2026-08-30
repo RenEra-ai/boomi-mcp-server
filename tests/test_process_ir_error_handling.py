@@ -502,7 +502,10 @@ def test_a_contract_ref_must_be_a_reference_not_an_assertion(value):
         _connector_scope(idempotency={"kind": "key_reference", "contract_ref": value})
     )
     assert codes[0][0] in (
-        PROCESS_IR_REFERENCE_INVALID_FORMAT,
+        # Slice D gave the contract grammar its OWN code; before that it borrowed
+        # the generic component-reference one, which could not say which of two
+        # different grammars had been broken.
+        "PROCESS_IR_REFERENCE_IDEMPOTENCY_CONTRACT_INVALID_FORMAT",
         # a bool/other non-string fails the type gate first
         "PROCESS_IR_SCHEMA_INVALID",
     )
@@ -1530,4 +1533,101 @@ def test_the_same_reference_and_operation_twice_is_still_a_duplicate():
                 IdempotencyContractSymbolV1(ref="$ref:C", operation_ref="$ref:OP"),
                 IdempotencyContractSymbolV1(ref="$ref:C", operation_ref="$ref:OP"),
             ]
+        )
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "$ref:ICV1:Rest:patch:x:01",
+        "$ref:has:colon",
+        "$ref:trailing/slash",
+        "$ref:brace{0}",
+    ],
+)
+def test_a_further_structured_contract_ref_is_refused_by_its_own_named_code(value):
+    """The plan's named negative: a value carrying further structure is not a
+    contract reference, and the refusal must NAME the grammar it broke rather
+    than degrade to the generic schema-invalid tail."""
+    codes = _parse_codes(
+        _connector_scope(idempotency={"kind": "key_reference", "contract_ref": value})
+    )
+    assert codes[0][0] == "PROCESS_IR_REFERENCE_IDEMPOTENCY_CONTRACT_INVALID_FORMAT"
+
+
+def test_the_authoring_surface_and_the_compiler_symbol_share_one_grammar():
+    """Lockstep, asserted over the authority's own case set rather than a list.
+
+    A symbol table naming a contract in a form the authoring model would refuse
+    describes a document nobody could have written, and the disagreement surfaces
+    as an unresolvable reference instead of the malformed value it is.
+    """
+    import pydantic
+
+    from boomi_mcp.connector_replay.ids import is_authored_contract_ref
+    from boomi_mcp.models.process_ir import _validate_contract_ref
+
+    cases = [
+        "$ref:OK",
+        "$ref:C0",
+        "$ref:a.b-c_d",
+        "$ref:ICV1:Rest:patch:x:01",
+        "$ref:",
+        "$ref:has space",
+        "literal-component-id",
+        "",
+        "  ",
+    ]
+    for value in cases:
+        authority = is_authored_contract_ref(value)
+
+        authoring_ok = True
+        try:
+            _validate_contract_ref(value)
+        except Exception:
+            authoring_ok = False
+
+        symbol_ok = True
+        try:
+            IdempotencyContractSymbolV1(ref=value, operation_ref="$ref:OP")
+        except pydantic.ValidationError:
+            symbol_ok = False
+
+        assert authoring_ok is authority, f"authoring surface disagrees on {value!r}"
+        assert symbol_ok is authority, f"compiler symbol disagrees on {value!r}"
+
+
+def test_the_served_schema_advertises_the_same_grammar_it_enforces():
+    """Machine-facing: a contract whose schema omits its grammar is a contract a
+    caller cannot conform to without guessing.
+
+    Measured on pydantic 2.12.3: a `BeforeValidator` makes a sibling
+    `StringConstraints(pattern=...)` apply to the validator's OUTPUT, which JSON
+    Schema cannot express, so the pattern is dropped from the served document
+    without error. Carrying it as schema metadata keeps it visible; this pin keeps
+    it EQUAL to the rule actually enforced.
+    """
+    import json
+
+    from boomi_mcp.connector_replay.ids import AUTHORED_CONTRACT_REF_PATTERN
+    from boomi_mcp.models.process_ir import canonical_process_ir_schema_json
+
+    schema = json.loads(canonical_process_ir_schema_json())
+
+    def find(node):
+        if isinstance(node, dict):
+            if "contract_ref" in node and isinstance(node["contract_ref"], dict):
+                yield node["contract_ref"]
+            for value in node.values():
+                yield from find(value)
+        elif isinstance(node, list):
+            for item in node:
+                yield from find(item)
+
+    served = list(find(schema))
+    assert served, "no contract_ref field found in the served schema"
+    for field in served:
+        assert field.get("pattern") == AUTHORED_CONTRACT_REF_PATTERN, (
+            "the served grammar and the enforced grammar have drifted: "
+            f"served={field.get('pattern')!r} authority={AUTHORED_CONTRACT_REF_PATTERN!r}"
         )

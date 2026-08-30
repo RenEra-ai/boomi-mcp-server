@@ -264,6 +264,25 @@ class IdempotencyContractSymbolV1(_CompilerModel):
             )
         return value
 
+    @field_validator("ref")
+    @classmethod
+    def _ref_matches_the_authored_grammar(cls, value: str) -> str:
+        """Tightened in LOCKSTEP with the authoring surface, from one authority.
+
+        A symbol table naming a contract in a form the authoring model would have
+        refused is a table describing a document nobody could have written, and
+        the mismatch surfaces as an unresolvable reference rather than as the
+        malformed value it is. Both sides ask `connector_replay.ids`.
+        """
+        from ...connector_replay.ids import is_authored_contract_ref
+
+        if not is_authored_contract_ref(value):
+            raise ValueError(
+                "idempotency contract reference must be an exact '$ref:KEY' token "
+                "carrying a single key segment"
+            )
+        return value
+
 
 class SymbolTableV1(_CompilerModel):
     """Closed, deterministic set of resolved references.

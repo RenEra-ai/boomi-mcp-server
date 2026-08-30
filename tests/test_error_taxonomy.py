@@ -795,6 +795,11 @@ ISSUE_155_CODES = (
     # in the slice as unproducible and reinstated once apply's read-back made the
     # condition reachable.
     "CONNECTOR_REPLAY_IDENTITY_UNAVAILABLE",
+    # Slice D. The authored idempotency-contract reference has its OWN refusal
+    # rather than borrowing the generic component-reference one: the two grammars
+    # differ (a component reference also admits a literal id, this one never
+    # does), and a shared code cannot say which rule was broken.
+    "PROCESS_IR_REFERENCE_IDEMPOTENCY_CONTRACT_INVALID_FORMAT",
 )
 
 

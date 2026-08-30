@@ -25,7 +25,7 @@ deferred `blocked-by-mechanism` naming that slice, never silently carried.
 | A | canonical dynamic-path binding on both connector roles, its lineage rule, the published family capability, and the explicit process-source replay policy | behaviour-affecting | **CLOSED CLEAN, landed on the integration branch at `6d2205a` 2026-08-27** |
 | B | the packaged replay-evidence registry, identifier grammar, both digest algorithms, the derived audit report, the execution-connector monitor action | src-changing, narrowly reachable | **LANDED on `dev` at `eb22351` 2026-08-28 under `ESCALATE-OPEN`** — baseline `6d2205a`. NOT clean: `CDX-155-r73-01`, `CDX-155-r73-02` and `SELF-155-r65-01` are dispositioned escalated-open and unfixed, with no follow-up issue filed for them. |
 | C | the trusted connector-resolution snapshot and the blank-path cross-check | behaviour-affecting | IN FLIGHT — baseline `eb22351`. Five Stage-2 review rounds and six live QA rounds run, none clean; three of five roster loops (architect, wave gate, closing protocol) have not started. |
-| D | per-call replay grants, the shared reference grammar, candidate discovery, the account-independent semantic revision | mostly unreachable in production | IN FLIGHT — baseline `d04a248`. Batch 1 (the contract re-keying) applied and suite-validated; the grammar, grants, discovery and revision row remain. |
+| D | per-call replay grants, the shared reference grammar, candidate discovery, the account-independent semantic revision | mostly unreachable in production | IN FLIGHT — baseline `d04a248`. Batches 1 (contract re-keying) and 2 (the authored reference grammar) applied and suite-validated; the grants, discovery action and revision row remain. |
 | E | apply-boundary identity rechecks and the evidence attestation tuple | mutation accounting | not started |
 | F | evidence ingestion and production enablement — the only slice that can close #155 | evidence-gated | not started |
 
@@ -1109,6 +1109,34 @@ followed by a separate comparison that a later edit could drop.
 Validation: the full non-KB suite at 11,237 passed / 18 skipped, and both reverts hand-run against
 the real pre-change text — restoring ref-only uniqueness and restoring the ref-only index each fail
 the capability test, with the restores digest-verified.
+
+### Batch 2 — the authored reference grammar
+
+The rule now lives in `connector_replay.ids`, beside the repository's other identifier grammars and
+importing nothing from the compiler or the categories layer. Both consumers ask it: the authoring
+model that ACCEPTS a document and the compiler symbol that RESOLVES one. It was hand-coded in the
+model before, and permissive enough to accept a further-structured value carrying extra colons. The
+refusal has its own registered code, owner `#155`, because the generic component-reference code
+cannot say which of two different grammars was broken — a component reference also admits a literal
+id, a contract reference never does.
+
+**Measured, and it contradicts the plan's prescribed form.** §5.D specifies
+`StringConstraints(pattern=…)` beside a root-owned `BeforeValidator`. On pydantic 2.12.3 that
+combination serves NO pattern at all: a before-validator makes the constraint apply to the
+validator's OUTPUT, which JSON Schema cannot express, so the constraint is dropped from the served
+document without an error. Written as prescribed, the grammar would have been invisible to every
+machine reading the contract while the tests still passed. The pattern is therefore carried as
+schema metadata read from the same constant the validator asks, and a test pins the served pattern
+EQUAL to the enforced one so the two cannot drift.
+
+Served delta, keyed by entry id rather than by list position: exactly ONE added authoring-contract
+entry, for the new diagnostic — nothing removed, nothing changed in place. Recorded because the
+first diff of this rebaseline was index-keyed and reported 2,153 moved leaves, which reads as a
+wholesale reordering; a single insertion had shifted every later index. Rebaselined: the ProcessIR
+schema (one `pattern` key, `$defs` unchanged at 40), the authoring contract, and the M12.12
+inventory. Validation: the full non-KB suite at 11,243 passed / 18 skipped, with both mutants
+hand-run — dropping the compiler symbol's check while the authoring surface stays strict fails the
+lockstep pin, and widening the authority to admit further colons fails the named-code negatives.
 
 ## Slice A — implementation record (what landed, and what validation it still owes)
 

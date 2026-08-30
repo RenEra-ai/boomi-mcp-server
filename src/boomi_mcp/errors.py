@@ -65,6 +65,9 @@ PROCESS_IR_SCHEMA_INVALID_CARDINALITY = "PROCESS_IR_SCHEMA_INVALID_CARDINALITY"
 PROCESS_IR_SCHEMA_VERSION_UNSUPPORTED = "PROCESS_IR_SCHEMA_VERSION_UNSUPPORTED"
 PROCESS_IR_SCHEMA_INVALID = "PROCESS_IR_SCHEMA_INVALID"
 PROCESS_IR_REFERENCE_INVALID_FORMAT = "PROCESS_IR_REFERENCE_INVALID_FORMAT"
+PROCESS_IR_REFERENCE_IDEMPOTENCY_CONTRACT_INVALID_FORMAT = (
+    "PROCESS_IR_REFERENCE_IDEMPOTENCY_CONTRACT_INVALID_FORMAT"
+)
 PROCESS_IR_CAPABILITY_UNSUPPORTED = "PROCESS_IR_CAPABILITY_UNSUPPORTED"
 
 # --- ProcessIR compiler CFG/lowering (M12.2 / issue #137; ADR-001 §7) ---------
@@ -896,6 +899,13 @@ ERROR_TAXONOMY: Dict[str, ErrorCodeSpec] = {
             retryable=False,
             summary="An opaque component reference is not an exact '$ref:KEY' token or literal component id.",
             owner="#136",
+        ),
+        ErrorCodeSpec(
+            code=PROCESS_IR_REFERENCE_IDEMPOTENCY_CONTRACT_INVALID_FORMAT,
+            category="process_ir",
+            retryable=False,
+            summary="An idempotency-contract reference is not an exact '$ref:KEY' token with a single key segment.",
+            owner="#155",
         ),
         ErrorCodeSpec(
             code=PROCESS_IR_CAPABILITY_UNSUPPORTED,

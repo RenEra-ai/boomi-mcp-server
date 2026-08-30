@@ -154,3 +154,22 @@ def is_execution_id(value: object) -> bool:
     except ValueError:
         return False
     return True
+
+
+#: The authored form of an idempotency-contract reference: the ``$ref:`` token
+#: followed by ONE key segment. Owned here, beside the other identifier grammars,
+#: because two consumers need it — the authoring model that accepts documents and
+#: the compiler symbol that resolves them — and a second hand-written copy is how
+#: an authoring surface and its compiler drift into disagreeing about what a
+#: reference IS. The segment excludes ``:`` deliberately: a value carrying further
+#: colons reads as a structured identifier this contract does not define, and
+#: admitting it would let a shape nothing resolves look well-formed.
+AUTHORED_CONTRACT_REF_TOKEN_PREFIX: Final[str] = "$ref:"
+AUTHORED_CONTRACT_REF_PATTERN: Final[str] = r"^\$ref:[A-Za-z0-9_.-]+$"
+_AUTHORED_CONTRACT_REF_RE: Final = re.compile(AUTHORED_CONTRACT_REF_PATTERN)
+
+
+def is_authored_contract_ref(value: object) -> bool:
+    """Whether ``value`` is a well-formed authored contract reference."""
+    return isinstance(value, str) and _AUTHORED_CONTRACT_REF_RE.match(value) is not None
+

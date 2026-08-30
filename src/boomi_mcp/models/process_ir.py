@@ -67,6 +67,8 @@ from typing import (
 )
 
 from pydantic import (
+    BeforeValidator,
+    StringConstraints,
     AfterValidator,
     BaseModel,
     ConfigDict,
@@ -85,6 +87,7 @@ from ..errors import (
     PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY,
     PROCESS_IR_CAPABILITY_PROCESS_CALL_RETURN_PATH_BINDING_UNSUPPORTED,
     PROCESS_IR_CAPABILITY_UNSUPPORTED,
+    PROCESS_IR_REFERENCE_IDEMPOTENCY_CONTRACT_INVALID_FORMAT,
     PROCESS_IR_REFERENCE_INVALID_FORMAT,
     PROCESS_IR_SCHEMA_BRANCH_CARDINALITY,
     PROCESS_IR_SCHEMA_INVALID,
@@ -666,31 +669,49 @@ def _validate_contract_ref(value: str) -> str:
     contract the symbol table has to resolve — and an unresolvable name is an
     error, not a pass.
     """
-    if value != value.strip() or not value:
+    # ASKED, not restated. The grammar lives in `connector_replay.ids`, which owns
+    # this repository's identifier forms and imports nothing from the compiler or
+    # the categories layer. Re-deriving the rule here is how the authoring surface
+    # that ACCEPTS a reference and the compiler symbol that RESOLVES one drift into
+    # disagreeing about what a reference is.
+    from ..connector_replay.ids import is_authored_contract_ref
+
+    if not is_authored_contract_ref(value):
         raise PydanticCustomError(
-            "process_ir_reference_invalid_format",
-            "idempotency contract reference must be a non-blank string "
-            "without surrounding whitespace",
-        )
-    if not value.startswith(_REF_TOKEN_PREFIX):
-        raise PydanticCustomError(
-            "process_ir_reference_invalid_format",
-            "idempotency contract reference must be an exact '$ref:KEY' token — "
-            "a literal id or free-form assertion is not evidence",
-        )
-    key = value[len(_REF_TOKEN_PREFIX):]
-    if not key or any(ch.isspace() for ch in key):
-        raise PydanticCustomError(
-            "process_ir_reference_invalid_format",
-            "'$ref:' token must carry a non-empty, whitespace-free key",
+            "process_ir_reference_idempotency_contract_invalid_format",
+            "idempotency contract reference must be an exact '$ref:KEY' token "
+            "carrying a single key segment — a literal id, a free-form assertion, "
+            "or a further-structured value is not evidence",
         )
     return value
 
 
+def _authored_contract_ref_pattern() -> str:
+    """The served pattern, read from the authority rather than restated here."""
+    from ..connector_replay.ids import AUTHORED_CONTRACT_REF_PATTERN
+
+    return AUTHORED_CONTRACT_REF_PATTERN
+
+
 IdempotencyContractRefV1 = Annotated[
     str,
-    AfterValidator(_validate_contract_ref),
-    Field(description="Opaque idempotency-contract reference: exact '$ref:KEY' token"),
+    # BEFORE the constraint, deliberately. The constraint exists so the grammar is
+    # visible to a machine reading the served schema; the validator exists so a
+    # violation is refused BY NAME. Ordered the other way the constraint rejects
+    # first with a bare pattern mismatch, which degrades to the generic
+    # schema-invalid tail and says nothing about which grammar was broken.
+    BeforeValidator(_validate_contract_ref),
+    # The pattern is SERVED, not enforced twice. Measured on pydantic 2.12.3: a
+    # `BeforeValidator` makes the constraint apply to the validator's OUTPUT, which
+    # cannot be expressed in JSON Schema, so pydantic silently drops a
+    # `StringConstraints(pattern=...)` placed beside one — the grammar would have
+    # been invisible to every machine reading the contract. Carried as schema
+    # metadata instead, from the same constant the validator asks, and pinned equal
+    # to it by a test so the served text and the refusal cannot drift.
+    Field(
+        description="Opaque idempotency-contract reference: exact '$ref:KEY' token",
+        json_schema_extra={"pattern": _authored_contract_ref_pattern()},
+    ),
 ]
 
 
@@ -3023,6 +3044,11 @@ _REMEDIATION = {
     PROCESS_IR_REFERENCE_INVALID_FORMAT: (
         "Use an exact '$ref:KEY' token (non-empty, whitespace-free key) or a literal component id."
     ),
+    PROCESS_IR_REFERENCE_IDEMPOTENCY_CONTRACT_INVALID_FORMAT: (
+        "Use an exact '$ref:KEY' token whose key is a single segment of letters, "
+        "digits, '_', '.' or '-'. A literal component id, a free-form assertion, "
+        "or a further-structured value is not idempotency evidence."
+    ),
     PROCESS_IR_CAPABILITY_UNSUPPORTED: (
         "The referenced construct is capability-gated or unsupported in ProcessIR v1. "
         "Fetch its published state with "
@@ -3074,6 +3100,11 @@ _REMEDIATION = {
 
 _CUSTOM_ERROR_CODES = {
     "process_ir_reference_invalid_format": PROCESS_IR_REFERENCE_INVALID_FORMAT,
+    # #155 slice D — its own code, so a refusal says WHICH grammar was broken. A
+    # bare pattern mismatch would degrade to the generic schema-invalid tail.
+    "process_ir_reference_idempotency_contract_invalid_format": (
+        PROCESS_IR_REFERENCE_IDEMPOTENCY_CONTRACT_INVALID_FORMAT
+    ),
     "process_ir_capability_unsupported": PROCESS_IR_CAPABILITY_UNSUPPORTED,
     "process_ir_schema_invalid_cardinality": PROCESS_IR_SCHEMA_INVALID_CARDINALITY,
     # #141
@@ -3102,6 +3133,9 @@ _MESSAGES = {
     PROCESS_IR_SCHEMA_VERSION_UNSUPPORTED: "unsupported or missing ProcessIR document version",
     PROCESS_IR_SCHEMA_INVALID: "value does not match the strict ProcessIRV1 schema",
     PROCESS_IR_REFERENCE_INVALID_FORMAT: "malformed opaque component reference",
+    PROCESS_IR_REFERENCE_IDEMPOTENCY_CONTRACT_INVALID_FORMAT: (
+        "malformed idempotency-contract reference"
+    ),
     PROCESS_IR_CAPABILITY_UNSUPPORTED: "capability-gated or unsupported construct requested",
     PROCESS_IR_SCHEMA_BRANCH_CARDINALITY: "branch leg count is outside the 2-25 bound",
     PROCESS_IR_SEMANTIC_CONTROL_CONTINUATION_UNSUPPORTED: (

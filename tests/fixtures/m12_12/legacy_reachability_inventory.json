@@ -7292,7 +7292,7 @@
       },
       "producer": "meta_tools.list_capabilities_action()",
       "selector": "authoring_contract",
-      "sha256": "08e0c8e1c3edf74793fce413ac63e00f029b64180f7d03877b0a1ee9d398fb08",
+      "sha256": "80b34dcc6fff55750826aee20db8443497224709abf911fcf3af8211e34c2401",
       "surface_class": "SS-CAPABILITY-CATALOG",
       "value": {
         "actions": [
@@ -7397,11 +7397,11 @@
           }
         ],
         "capability_comparison": {
-          "actual_capability_revision": "sha256:0f7606e1f0206e21b366e1f34842d22118caf97557ef087344522cd32e0b00c2",
+          "actual_capability_revision": "sha256:7d88d93eb863b80538f9996720fe2f45a19d6f2b0324a99c6f3c27395a2efecc",
           "status": "not_requested"
         },
-        "capability_revision": "sha256:0f7606e1f0206e21b366e1f34842d22118caf97557ef087344522cd32e0b00c2",
-        "compiler_revision": "sha256:f9fae117345fce301e39f9c2191be1cee3b49ccf76c972a432f32d32cd85cb43",
+        "capability_revision": "sha256:7d88d93eb863b80538f9996720fe2f45a19d6f2b0324a99c6f3c27395a2efecc",
+        "compiler_revision": "sha256:6c03af9aac53c5d68b2fbb66056e25757e197f82a674d4cbf0db1c78ab157065",
         "contract_version": "2",
         "intent_kinds": [
           "integration_spec",
@@ -7410,11 +7410,11 @@
         ],
         "manifest_version": "1",
         "process_ir_authoring": {
-          "entry_count": 196,
+          "entry_count": 197,
           "entry_counts_by_type": {
             "capability": 29,
             "connector_action": 5,
-            "diagnostic": 64,
+            "diagnostic": 65,
             "doctrine": 39,
             "node": 21,
             "placement": 10,
@@ -7640,7 +7640,7 @@
           "schema_version": "1",
           "source_version": "0.1.0"
         },
-        "schema_revision": "sha256:492b1dff364cc737fa339b54e1afa5193ca6edf13eb3f4820339187306311ddb",
+        "schema_revision": "sha256:6f100f2f86de250ee6a3163f405f12e73807506eabfb6f7c0ed7d718d8abd986",
         "schemas": [
           {
             "owned_by_authoring_contract": true,
@@ -7652,21 +7652,21 @@
           {
             "owned_by_authoring_contract": true,
             "provenance": "runtime_schema_registry",
-            "schema_hash": "sha256:99678e296a6e12040c34f7242747c01f41769416c78dc5a646240e9bbfa178c7",
+            "schema_hash": "sha256:60576f9c9828ecdc65dfc81744af365ad6720217b2ef6904da1ec9718619833a",
             "schema_version": "2",
             "selector": "AuthoringCompileResultV1"
           },
           {
             "owned_by_authoring_contract": true,
             "provenance": "runtime_schema_registry",
-            "schema_hash": "sha256:f35d3eb964de3f24689e86b613e08829a0af3eba6eb965bdef70138bbe280cc0",
+            "schema_hash": "sha256:09791173b5ed771e3ac6d3c9d7da556231741ea07bd65960e5954ea65312d129",
             "schema_version": "2",
             "selector": "AuthoringPlanResultV1"
           },
           {
             "owned_by_authoring_contract": true,
             "provenance": "runtime_schema_registry",
-            "schema_hash": "sha256:4a0246ae3b447dab2b7fa2885e716a91366fb27f4b8b88e4cf941c6975fb238e",
+            "schema_hash": "sha256:1ef6263792615ca2e0d7bb4b6db2c2879a9bc3d82b10b7eaa9698550437c0d78",
             "schema_version": "2",
             "selector": "AuthoringRequestV1"
           },
@@ -7680,13 +7680,13 @@
           {
             "owned_by_authoring_contract": false,
             "provenance": "runtime_schema_registry",
-            "schema_hash": "sha256:3aa5c936a8b0f8d393dd619064b16d53e59b967cc87cee06412f6ae9ac7be2bf",
+            "schema_hash": "sha256:884fcd057b527c83eecf35e441f707a873fa7cc0f1f93ba06528f06d5b607f1b",
             "selector": "IntegrationSpecV1"
           },
           {
             "owned_by_authoring_contract": true,
             "provenance": "runtime_schema_registry",
-            "schema_hash": "sha256:039549a98f710466fe9677e4e19e18ca205060780133ee4b43bb9fa4b1b3fff7",
+            "schema_hash": "sha256:941232bfb58c5b9167054389f5eeebabe8df4cdc2d196e47918c66d02519db78",
             "schema_version": "1",
             "selector": "ProcessIRV1"
           },
@@ -7755,7 +7755,7 @@
           {
             "owned_by_authoring_contract": false,
             "provenance": "runtime_schema_registry",
-            "schema_hash": "sha256:7165544f7888f5dc209df76ec3f4632bd4909694509f48c02069e3a6827775e2",
+            "schema_hash": "sha256:683565e6ef46cad15ecdc4a6f914cab1f3e3e609fdb7f6f97e0aba7b4e5b647e",
             "selector": "recipe_contributions"
           },
           {
@@ -13845,14 +13845,14 @@
     },
     {
       "artifact_id": "SS-SCHEMA-TEMPLATES:schema_name=AuthoringCompileResultV1",
-      "canonical_length": 83987,
+      "canonical_length": 84024,
       "legacy_excerpt": {
         "json_schema.$defs.IntegrationComponentSpec.properties.config.description": "Type-specific configuration payload. For type='process', config.process_kind selects a structured process-flow builder (e.g. 'database_to_api_sync' or 'wrapper_subprocess' — issue #25) and is REQUIRED for any authoring action that emits or rebuilds process XML (create / create_clone / update): such a process without process_kind is rejected at plan time with PROCESS_KIND_REQUIRED (legacy freeform JSON-to-XML process authoring has been removed). A reference-only reuse of an existing process (no XML emitted) may omit it. Use manage_component for an explicit raw process XML escape hatch.",
         "json_schema.$defs.IntegrationSpecV1.properties.processes.description": "Issue #153 M12.15 — canonical process roots authored as ProcessIR. Each entry is one ProcessAuthoringUnitV1: exactly one ProcessComponentEnvelopeV1 plus exactly one ProcessIRV1 root. These are compiled by the canonical chain and materialized by the neutral ProcessComponentMaterializer — they resolve NO legacy process_kind. 'components' remains the home of supporting components and of reference-only existing processes. 'components' and 'processes' share ONE key namespace: a key used by a component and by a process envelope is a duplicate, and all four depends_on directions (component->component, component->process, process->component, process->process) enter one topological order with one cycle check. A TUPLE, per the plan's field type: pydantic coerces list input, so the wire shape is an ordinary JSON array and no caller sends anything different — but unlike this model's legacy List siblings, mutating the collection itself is unrepresentable. Per-element immutability lives on the frozen ProcessAuthoringUnitV1 entries."
       },
       "producer": "meta_tools.get_schema_template_action(...)",
       "selector": "schema_name=AuthoringCompileResultV1",
-      "sha256": "69589b13b14dcc80efacfbe7c4a22253ab0b510451e3a3af87bfa4d357a7e110",
+      "sha256": "961d1b80e969efc15eee4915913135a19b165c2ff663779865df8e5801f9c050",
       "surface_class": "SS-SCHEMA-TEMPLATES",
       "value": {
         "_success": true,
@@ -15365,6 +15365,7 @@
               "properties": {
                 "contract_ref": {
                   "description": "Opaque idempotency-contract reference: exact '$ref:KEY' token",
+                  "pattern": "^\\$ref:[A-Za-z0-9_.-]+$",
                   "title": "Contract Ref",
                   "type": "string"
                 },
@@ -17121,12 +17122,12 @@
         "raw_xml_exposed": false,
         "read_only": true,
         "revision_binding": {
-          "capability_revision": "sha256:0f7606e1f0206e21b366e1f34842d22118caf97557ef087344522cd32e0b00c2",
-          "compiler_revision": "sha256:f9fae117345fce301e39f9c2191be1cee3b49ccf76c972a432f32d32cd85cb43",
+          "capability_revision": "sha256:7d88d93eb863b80538f9996720fe2f45a19d6f2b0324a99c6f3c27395a2efecc",
+          "compiler_revision": "sha256:6c03af9aac53c5d68b2fbb66056e25757e197f82a674d4cbf0db1c78ab157065",
           "contract_version": "2",
-          "schema_revision": "sha256:492b1dff364cc737fa339b54e1afa5193ca6edf13eb3f4820339187306311ddb"
+          "schema_revision": "sha256:6f100f2f86de250ee6a3163f405f12e73807506eabfb6f7c0ed7d718d8abd986"
         },
-        "schema_hash": "sha256:99678e296a6e12040c34f7242747c01f41769416c78dc5a646240e9bbfa178c7",
+        "schema_hash": "sha256:60576f9c9828ecdc65dfc81744af365ad6720217b2ef6904da1ec9718619833a",
         "schema_name": "AuthoringCompileResultV1",
         "schema_version": "2",
         "surface": "MCP authoring contract (issue #146 M12.11)"
@@ -17135,14 +17136,14 @@
     },
     {
       "artifact_id": "SS-SCHEMA-TEMPLATES:schema_name=AuthoringPlanResultV1",
-      "canonical_length": 82661,
+      "canonical_length": 82698,
       "legacy_excerpt": {
         "json_schema.$defs.IntegrationComponentSpec.properties.config.description": "Type-specific configuration payload. For type='process', config.process_kind selects a structured process-flow builder (e.g. 'database_to_api_sync' or 'wrapper_subprocess' — issue #25) and is REQUIRED for any authoring action that emits or rebuilds process XML (create / create_clone / update): such a process without process_kind is rejected at plan time with PROCESS_KIND_REQUIRED (legacy freeform JSON-to-XML process authoring has been removed). A reference-only reuse of an existing process (no XML emitted) may omit it. Use manage_component for an explicit raw process XML escape hatch.",
         "json_schema.$defs.IntegrationSpecV1.properties.processes.description": "Issue #153 M12.15 — canonical process roots authored as ProcessIR. Each entry is one ProcessAuthoringUnitV1: exactly one ProcessComponentEnvelopeV1 plus exactly one ProcessIRV1 root. These are compiled by the canonical chain and materialized by the neutral ProcessComponentMaterializer — they resolve NO legacy process_kind. 'components' remains the home of supporting components and of reference-only existing processes. 'components' and 'processes' share ONE key namespace: a key used by a component and by a process envelope is a duplicate, and all four depends_on directions (component->component, component->process, process->component, process->process) enter one topological order with one cycle check. A TUPLE, per the plan's field type: pydantic coerces list input, so the wire shape is an ordinary JSON array and no caller sends anything different — but unlike this model's legacy List siblings, mutating the collection itself is unrepresentable. Per-element immutability lives on the frozen ProcessAuthoringUnitV1 entries."
       },
       "producer": "meta_tools.get_schema_template_action(...)",
       "selector": "schema_name=AuthoringPlanResultV1",
-      "sha256": "f4a17292dbf718cf23f1e451e1003dd66ded09e973fa965c840eb2e973574117",
+      "sha256": "036a2aca791538a4d7e83810123f1d566c8fc85f59952fde6527d8b9d39d8daa",
       "surface_class": "SS-SCHEMA-TEMPLATES",
       "value": {
         "_success": true,
@@ -18606,6 +18607,7 @@
               "properties": {
                 "contract_ref": {
                   "description": "Opaque idempotency-contract reference: exact '$ref:KEY' token",
+                  "pattern": "^\\$ref:[A-Za-z0-9_.-]+$",
                   "title": "Contract Ref",
                   "type": "string"
                 },
@@ -20341,12 +20343,12 @@
         "raw_xml_exposed": false,
         "read_only": true,
         "revision_binding": {
-          "capability_revision": "sha256:0f7606e1f0206e21b366e1f34842d22118caf97557ef087344522cd32e0b00c2",
-          "compiler_revision": "sha256:f9fae117345fce301e39f9c2191be1cee3b49ccf76c972a432f32d32cd85cb43",
+          "capability_revision": "sha256:7d88d93eb863b80538f9996720fe2f45a19d6f2b0324a99c6f3c27395a2efecc",
+          "compiler_revision": "sha256:6c03af9aac53c5d68b2fbb66056e25757e197f82a674d4cbf0db1c78ab157065",
           "contract_version": "2",
-          "schema_revision": "sha256:492b1dff364cc737fa339b54e1afa5193ca6edf13eb3f4820339187306311ddb"
+          "schema_revision": "sha256:6f100f2f86de250ee6a3163f405f12e73807506eabfb6f7c0ed7d718d8abd986"
         },
-        "schema_hash": "sha256:f35d3eb964de3f24689e86b613e08829a0af3eba6eb965bdef70138bbe280cc0",
+        "schema_hash": "sha256:09791173b5ed771e3ac6d3c9d7da556231741ea07bd65960e5954ea65312d129",
         "schema_name": "AuthoringPlanResultV1",
         "schema_version": "2",
         "surface": "MCP authoring contract (issue #146 M12.11)"
@@ -20355,7 +20357,7 @@
     },
     {
       "artifact_id": "SS-SCHEMA-TEMPLATES:schema_name=AuthoringRequestV1",
-      "canonical_length": 100453,
+      "canonical_length": 100490,
       "legacy_excerpt": {
         "json_schema.$defs.IntegrationComponentSpec.properties.config.description": "Type-specific configuration payload. For type='process', config.process_kind selects a structured process-flow builder (e.g. 'database_to_api_sync' or 'wrapper_subprocess' — issue #25) and is REQUIRED for any authoring action that emits or rebuilds process XML (create / create_clone / update): such a process without process_kind is rejected at plan time with PROCESS_KIND_REQUIRED (legacy freeform JSON-to-XML process authoring has been removed). A reference-only reuse of an existing process (no XML emitted) may omit it. Use manage_component for an explicit raw process XML escape hatch.",
         "json_schema.$defs.IntegrationSpecV1.properties.processes.description": "Issue #153 M12.15 — canonical process roots authored as ProcessIR. Each entry is one ProcessAuthoringUnitV1: exactly one ProcessComponentEnvelopeV1 plus exactly one ProcessIRV1 root. These are compiled by the canonical chain and materialized by the neutral ProcessComponentMaterializer — they resolve NO legacy process_kind. 'components' remains the home of supporting components and of reference-only existing processes. 'components' and 'processes' share ONE key namespace: a key used by a component and by a process envelope is a duplicate, and all four depends_on directions (component->component, component->process, process->component, process->process) enter one topological order with one cycle check. A TUPLE, per the plan's field type: pydantic coerces list input, so the wire shape is an ordinary JSON array and no caller sends anything different — but unlike this model's legacy List siblings, mutating the collection itself is unrepresentable. Per-element immutability lives on the frozen ProcessAuthoringUnitV1 entries.",
@@ -20363,7 +20365,7 @@
       },
       "producer": "meta_tools.get_schema_template_action(...)",
       "selector": "schema_name=AuthoringRequestV1",
-      "sha256": "d8823c408f4999e208d9c26e59101cdc21e20b6aa6a69cdbc42e8b953d2bb99b",
+      "sha256": "c8fb81eff5f135750aec93ee45ce8c323403881743244374f08694992fc4a690",
       "surface_class": "SS-SCHEMA-TEMPLATES",
       "value": {
         "_success": true,
@@ -21946,6 +21948,7 @@
               "properties": {
                 "contract_ref": {
                   "description": "Opaque idempotency-contract reference: exact '$ref:KEY' token",
+                  "pattern": "^\\$ref:[A-Za-z0-9_.-]+$",
                   "title": "Contract Ref",
                   "type": "string"
                 },
@@ -24133,12 +24136,12 @@
         "raw_xml_exposed": false,
         "read_only": true,
         "revision_binding": {
-          "capability_revision": "sha256:0f7606e1f0206e21b366e1f34842d22118caf97557ef087344522cd32e0b00c2",
-          "compiler_revision": "sha256:f9fae117345fce301e39f9c2191be1cee3b49ccf76c972a432f32d32cd85cb43",
+          "capability_revision": "sha256:7d88d93eb863b80538f9996720fe2f45a19d6f2b0324a99c6f3c27395a2efecc",
+          "compiler_revision": "sha256:6c03af9aac53c5d68b2fbb66056e25757e197f82a674d4cbf0db1c78ab157065",
           "contract_version": "2",
-          "schema_revision": "sha256:492b1dff364cc737fa339b54e1afa5193ca6edf13eb3f4820339187306311ddb"
+          "schema_revision": "sha256:6f100f2f86de250ee6a3163f405f12e73807506eabfb6f7c0ed7d718d8abd986"
         },
-        "schema_hash": "sha256:4a0246ae3b447dab2b7fa2885e716a91366fb27f4b8b88e4cf941c6975fb238e",
+        "schema_hash": "sha256:1ef6263792615ca2e0d7bb4b6db2c2879a9bc3d82b10b7eaa9698550437c0d78",
         "schema_name": "AuthoringRequestV1",
         "schema_version": "2",
         "surface": "MCP authoring contract (issue #146 M12.11)"
@@ -24147,14 +24150,14 @@
     },
     {
       "artifact_id": "SS-SCHEMA-TEMPLATES:schema_name=IntegrationSpecV1",
-      "canonical_length": 72099,
+      "canonical_length": 72136,
       "legacy_excerpt": {
         "json_schema.$defs.IntegrationComponentSpec.properties.config.description": "Type-specific configuration payload. For type='process', config.process_kind selects a structured process-flow builder (e.g. 'database_to_api_sync' or 'wrapper_subprocess' — issue #25) and is REQUIRED for any authoring action that emits or rebuilds process XML (create / create_clone / update): such a process without process_kind is rejected at plan time with PROCESS_KIND_REQUIRED (legacy freeform JSON-to-XML process authoring has been removed). A reference-only reuse of an existing process (no XML emitted) may omit it. Use manage_component for an explicit raw process XML escape hatch.",
         "json_schema.properties.processes.description": "Issue #153 M12.15 — canonical process roots authored as ProcessIR. Each entry is one ProcessAuthoringUnitV1: exactly one ProcessComponentEnvelopeV1 plus exactly one ProcessIRV1 root. These are compiled by the canonical chain and materialized by the neutral ProcessComponentMaterializer — they resolve NO legacy process_kind. 'components' remains the home of supporting components and of reference-only existing processes. 'components' and 'processes' share ONE key namespace: a key used by a component and by a process envelope is a duplicate, and all four depends_on directions (component->component, component->process, process->component, process->process) enter one topological order with one cycle check. A TUPLE, per the plan's field type: pydantic coerces list input, so the wire shape is an ordinary JSON array and no caller sends anything different — but unlike this model's legacy List siblings, mutating the collection itself is unrepresentable. Per-element immutability lives on the frozen ProcessAuthoringUnitV1 entries."
       },
       "producer": "meta_tools.get_schema_template_action(...)",
       "selector": "schema_name=IntegrationSpecV1",
-      "sha256": "bbfc21ee2bc41b0449d83cf69086ec7a44207899315bb1e027daa0fb5e1cb61d",
+      "sha256": "9031fa895cef5b52d9447332564d6a38b8223db814f6be50843e2b037b37c68b",
       "surface_class": "SS-SCHEMA-TEMPLATES",
       "value": {
         "_success": true,
@@ -25255,6 +25258,7 @@
               "properties": {
                 "contract_ref": {
                   "description": "Opaque idempotency-contract reference: exact '$ref:KEY' token",
+                  "pattern": "^\\$ref:[A-Za-z0-9_.-]+$",
                   "title": "Contract Ref",
                   "type": "string"
                 },
@@ -34080,13 +34084,13 @@
     },
     {
       "artifact_id": "SS-SCHEMA-TEMPLATES:schema_name=recipe_contributions",
-      "canonical_length": 87966,
+      "canonical_length": 88003,
       "legacy_excerpt": {
         "authoring_note": "These are the ONLY values a registered recipe may return. They carry opaque references and closed enumerations — never configuration, credentials, headers, SQL, raw XML, executable code, JSON pointers, or caller-authored graph edges. Recipe output is validated exactly as direct ProcessIR/topology/component authoring and cannot be exempted."
       },
       "producer": "meta_tools.get_schema_template_action(...)",
       "selector": "schema_name=recipe_contributions",
-      "sha256": "892710db4735b2ce1a13f7bc1eff4a1b7984a894b782f7c7699ed01b41da51dd",
+      "sha256": "c581c0a69ec1675c5ad373bc6e4b4ed6f583a6b690f496bef8548e085e53b2f4",
       "surface_class": "SS-SCHEMA-TEMPLATES",
       "value": {
         "_success": true,
@@ -35841,6 +35845,7 @@
               "properties": {
                 "contract_ref": {
                   "description": "Opaque idempotency-contract reference: exact '$ref:KEY' token",
+                  "pattern": "^\\$ref:[A-Za-z0-9_.-]+$",
                   "title": "Contract Ref",
                   "type": "string"
                 },
@@ -37739,7 +37744,7 @@
       "legacy_excerpt": {},
       "producer": "meta_tools.get_schema_template_action(...) [all axes]",
       "selector": "walked_surface_digest",
-      "sha256": "18330c127a4f2b84c099445682521195fbd30f365e9afe33cfb0cd218ea35872",
+      "sha256": "122c89b25a74719a2203f0578d7ec672e626799b5f1ef0cae9ab5c6178036310",
       "surface_class": "SS-SCHEMA-TEMPLATES",
       "value": {
         "resource_type=component": "8327243ec482fa1641f49265c87694e33616f12db015b3f234dc73db9ed8057c",
@@ -38021,14 +38026,14 @@
         "resource_type=trading_partner|operation=update|standard=rosettanet": "83537ac74be6088a4607997d0e200d76ec7c6367c900aa9923e823d610dd27e1",
         "resource_type=trading_partner|operation=update|standard=tradacoms": "83537ac74be6088a4607997d0e200d76ec7c6367c900aa9923e823d610dd27e1",
         "resource_type=trading_partner|operation=update|standard=x12": "83537ac74be6088a4607997d0e200d76ec7c6367c900aa9923e823d610dd27e1",
-        "schema_name=AuthoringBuildProvenanceV1": "7c5fdf509826fc5d58a7773da7ee099823276be60040626dff987862be5f9c81",
-        "schema_name=AuthoringCompileResultV1": "69589b13b14dcc80efacfbe7c4a22253ab0b510451e3a3af87bfa4d357a7e110",
-        "schema_name=AuthoringPlanResultV1": "f4a17292dbf718cf23f1e451e1003dd66ded09e973fa965c840eb2e973574117",
-        "schema_name=AuthoringRequestV1": "d8823c408f4999e208d9c26e59101cdc21e20b6aa6a69cdbc42e8b953d2bb99b",
-        "schema_name=AuthoringRevisionBindingV1": "28a3d01ff78c886381d42ec2ea4f131bf16d30306699ac31fd2892c26344f879",
-        "schema_name=IntegrationSpecV1": "bbfc21ee2bc41b0449d83cf69086ec7a44207899315bb1e027daa0fb5e1cb61d",
-        "schema_name=ProcessIRV1": "1f1cb5a896f70c70e691609f96c2e4431f8c0eb77cc7f0a2345bfef8d10c87eb",
-        "schema_name=SystemTopologySpecV1": "f74a5b50eb5222df05a6ca13f0da17dbc8b5c2c24c2e0d5baa9bb4dab74dfc8b",
+        "schema_name=AuthoringBuildProvenanceV1": "b0dc81b519eb4ce903b9c88aee57aeba07ea66b5587710e11b463646cc041791",
+        "schema_name=AuthoringCompileResultV1": "961d1b80e969efc15eee4915913135a19b165c2ff663779865df8e5801f9c050",
+        "schema_name=AuthoringPlanResultV1": "036a2aca791538a4d7e83810123f1d566c8fc85f59952fde6527d8b9d39d8daa",
+        "schema_name=AuthoringRequestV1": "c8fb81eff5f135750aec93ee45ce8c323403881743244374f08694992fc4a690",
+        "schema_name=AuthoringRevisionBindingV1": "18f90f99aa018078ee6cdf7de8d71373fc3ed44a01c18dcd4639de000b34c73c",
+        "schema_name=IntegrationSpecV1": "9031fa895cef5b52d9447332564d6a38b8223db814f6be50843e2b037b37c68b",
+        "schema_name=ProcessIRV1": "d11b8eeafa1031c9e21d8d923f640ad926c6e68446c15d10dac0ae62c6e1aac4",
+        "schema_name=SystemTopologySpecV1": "02ea946520c3a853b8efed1d3d3930312e030785f409be3294a5b67187068742",
         "schema_name=account_governance": "d0773b315a5b59bad4bbb0021a2468e5cb4d3a85c4dbac216a887f0194a2ecdc",
         "schema_name=api_service": "c7be12ec5b2c503bd54088bd2c7b00adfa435e3f3fc9610bae0b91117657911b",
         "schema_name=archetype:api_to_api_sync": "7e4653429bdfc56d53ecb1c07fb7f477e11c2180c3afdfad94566cab1ca716e7",
@@ -38037,7 +38042,7 @@
         "schema_name=archetype:http_listener_to_db": "b21d41d870324ce66e872957fa09126dc641354753a0d7681d14d3489f7dcf3f",
         "schema_name=archetype:http_listener_to_rest": "cdd6c9c6fb51cd8afda5c7245a2ef37548939610c1c5235cd9abe1ed9deac3d9",
         "schema_name=archetype:stub_minimal_integration": "28f1d13a8568cea1df47bb1b361708d17e490204c7425787999e80df63f4b0fc",
-        "schema_name=authoring_workflow": "dc5b39533a09a7876d0be9e7660b54b0bdc13de735db400441dac5838c98e8e5",
+        "schema_name=authoring_workflow": "cbd6e6d962acc1e5dac1184b11d99feb1ae220e23b89910262516568b210627b",
         "schema_name=cache_property_authoring": "484017df545d247be99c71ef4be4edf8d47013e565a6e05119c357699229ed6f",
         "schema_name=compose_archetypes": "ec23808a15913ec8ce1d6e510ff941952be25b006a42128216b891d05f1a9d7f",
         "schema_name=design_doctrine": "b47bc0062bf52054609a4b81b8ea98dd5b363c716b079ed0413c1f89bee08a7b",
@@ -38100,7 +38105,7 @@
         "schema_name=governance_pattern:support_folder_isolation_and_privacy": "4f0b206e14ad2f2272b03dfc8c9575dbcc3d454d28894a42602a9cca546de2ed",
         "schema_name=governance_pattern:tools_utilities_folder_non_integration": "50ddcf761e63e68f305271b4f079d8a7effd9b750726a8be784c2c52993c2cbc",
         "schema_name=governance_pattern:tracked_field_naming_generic_and_unique": "42ae3917d1ddb0f23a9dd0e9083a9106a3ed6c18bc06e740a1c07014830204d1",
-        "schema_name=process_ir_authoring": "bbbda1f2ee54b8be1b2a509959c31d7752ace1813ec0cb8019a8b4f1c7e186b4",
+        "schema_name=process_ir_authoring": "2425c66e1d65c51903f8896ce330a582cf8fbed8c85c410da2f00870dad0a40e",
         "schema_name=process_property": "43c9cf66e73fb39b6f1625d00a9a01f876005bfa94b34fb99cb14e0deebe699b",
         "schema_name=recipe:boomi.adapter.api_to_api_sync@1.0.0": "2ebd862ebc5e761e001a57c6d1a05dc64da9c393e7a9b7eed034076b78793627",
         "schema_name=recipe:boomi.adapter.api_to_database_sync@1.0.0": "702186ad1cd04895a3c5c3e36124437ba3e7571236ec401836b23c5151e4f478",
@@ -38110,11 +38115,11 @@
         "schema_name=recipe:boomi.archetype.api_to_database_sync@0.1.0": "11dd70d673f30ddcdf2a97019af74dad45f748eddac2c327a97acbeda4cda268",
         "schema_name=recipe:boomi.compose.db_rest_fanout@1.0.0": "97b21a0860475a0b5834868ab9f89ce852d9a4aac048ffd1c2598bd1ba8303f9",
         "schema_name=recipe:boomi.constraint.inbound_validate@1.0.0": "0347279bfd397f3d4019b70fe3e88d4e08820f229e04d0604a4b740e62493dcb",
-        "schema_name=recipe_contributions": "892710db4735b2ce1a13f7bc1eff4a1b7984a894b782f7c7699ed01b41da51dd",
+        "schema_name=recipe_contributions": "c581c0a69ec1675c5ad373bc6e4b4ed6f583a6b690f496bef8548e085e53b2f4",
         "schema_name=recipe_registry": "a2b609804a653102c1060af678dd609babd70adab25cc45b641bc64d406bfab6",
         "schema_name=script_dataprocess": "86d6cac0e593188c5c6a253e684097dadda0a6c3c331a1d71672c827133af143",
         "schema_name=script_mapping": "165e78ea08d24f54221f6da5973cbe20c7747d1a37f9fde496a42876b594e029",
-        "schema_name=validation_report": "1540a506ada155f53d9573350dd5b9659061595fdaddf9ba357211fe8a9b1933",
+        "schema_name=validation_report": "c422ad3c6693633f699e9ff43b5bdb6983f88078732afab67c61f24e7bb1d829",
         "schema_name=workflow:build_and_verify_http_listener": "bf6ab2e405f375735cd6aaed29da0dbc6b717909dc1c184ba8dbe341f2b95800",
         "schema_name=workflow:build_integration_from_description": "72a20b29bbaf7a0ce39e06fb8514e13831968332bc5d0373d7f100bd7a943be0",
         "schema_name=workflow:compose_multi_target_integration": "6b04f2d192bcaf817a983a1aefda2f2f7b9674ce1c996737137c7ce8d6b932e0",
