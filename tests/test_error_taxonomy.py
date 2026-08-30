@@ -800,6 +800,10 @@ ISSUE_155_CODES = (
     # differ (a component reference also admits a literal id, this one never
     # does), and a shared code cannot say which rule was broken.
     "PROCESS_IR_REFERENCE_IDEMPOTENCY_CONTRACT_INVALID_FORMAT",
+    # Slice D. Discovery's own unavailability, distinct from the compile-time one:
+    # this names a READ that failed while answering a question, not a resolution
+    # that could not be completed while building a plan.
+    "CONNECTOR_REPLAY_DISCOVERY_IDENTITY_UNAVAILABLE",
 )
 
 

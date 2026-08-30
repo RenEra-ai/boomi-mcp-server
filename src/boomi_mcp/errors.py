@@ -544,6 +544,9 @@ CONNECTOR_REPLAY_SUBMITTED_XML_UNREADABLE = (
 #: fail-open, because the checks derived from the reading then have nothing to
 #: fire on and a process is applied against a component nobody could examine.
 CONNECTOR_REPLAY_IDENTITY_UNAVAILABLE = "CONNECTOR_REPLAY_IDENTITY_UNAVAILABLE"
+CONNECTOR_REPLAY_DISCOVERY_IDENTITY_UNAVAILABLE = (
+    "CONNECTOR_REPLAY_DISCOVERY_IDENTITY_UNAVAILABLE"
+)
 #: The contract-reference code is deliberately NOT registered here. Its grammar and
 #: its only raiser belong to the slice that introduces authored contract references;
 #: registering it now would leave a published code that nothing can produce, which
@@ -658,6 +661,13 @@ ERROR_TAXONOMY: Dict[str, ErrorCodeSpec] = {
                 "can be checked; the request is refused rather than applied "
                 "against a component nobody could examine."
             ),
+            owner="#155",
+        ),
+        ErrorCodeSpec(
+            code=CONNECTOR_REPLAY_DISCOVERY_IDENTITY_UNAVAILABLE,
+            category="connector_replay",
+            retryable=False,
+            summary="Candidate discovery could not read the live identity of the named operation or connection.",
             owner="#155",
         ),
         ErrorCodeSpec(

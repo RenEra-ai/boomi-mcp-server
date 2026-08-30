@@ -238,7 +238,26 @@ def test_every_registered_replay_code_has_a_raiser():
         )
     produced.add(unavailable.value.code)
 
+    # Slice D's discovery code is PRODUCED IN A SERVED ENVELOPE, not raised. The
+    # property this test defends is that a published code can actually occur, and
+    # a tool action reports by returning `{"_success": False, "error_code": ...}` —
+    # a caller branches on that exactly as it would on a raised one. Exercised for
+    # real: an identity the account cannot read.
+    from boomi_mcp.connector_replay.discovery import idempotency_contract_candidates
+
+    class _EmptyRegistry:
+        operation_records = ()
+
+    unavailable_discovery = idempotency_contract_candidates(
+        operation_component_id="op-1",
+        connection_component_id="cn-1",
+        live_identity=lambda component_id: None,
+        registry=_EmptyRegistry(),
+    )
+    assert unavailable_discovery["_success"] is False
+    produced.add(unavailable_discovery["error_code"])
+
     assert registered == produced, {
-        "registered but never raised": sorted(registered - produced),
-        "raised but not registered": sorted(produced - registered),
+        "registered but never produced": sorted(registered - produced),
+        "produced but not registered": sorted(produced - registered),
     }

@@ -25,7 +25,7 @@ deferred `blocked-by-mechanism` naming that slice, never silently carried.
 | A | canonical dynamic-path binding on both connector roles, its lineage rule, the published family capability, and the explicit process-source replay policy | behaviour-affecting | **CLOSED CLEAN, landed on the integration branch at `6d2205a` 2026-08-27** |
 | B | the packaged replay-evidence registry, identifier grammar, both digest algorithms, the derived audit report, the execution-connector monitor action | src-changing, narrowly reachable | **LANDED on `dev` at `eb22351` 2026-08-28 under `ESCALATE-OPEN`** — baseline `6d2205a`. NOT clean: `CDX-155-r73-01`, `CDX-155-r73-02` and `SELF-155-r65-01` are dispositioned escalated-open and unfixed, with no follow-up issue filed for them. |
 | C | the trusted connector-resolution snapshot and the blank-path cross-check | behaviour-affecting | IN FLIGHT — baseline `eb22351`. Five Stage-2 review rounds and six live QA rounds run, none clean; three of five roster loops (architect, wave gate, closing protocol) have not started. |
-| D | per-call replay grants, the shared reference grammar, candidate discovery, the account-independent semantic revision | mostly unreachable in production | IN FLIGHT — baseline `d04a248`. Batches 1 (contract re-keying), 2 (authored reference grammar) and 3 (per-call grants: symbol, minter and consumer) applied and suite-validated; the discovery action and the revision row remain. |
+| D | per-call replay grants, the shared reference grammar, candidate discovery, the account-independent semantic revision | mostly unreachable in production | IN FLIGHT — baseline `d04a248`. Batches 1-4 (contract re-keying, authored reference grammar, per-call grants, candidate discovery) applied and suite-validated; the semantic-revision row remains, then the slice's gates. |
 | E | apply-boundary identity rechecks and the evidence attestation tuple | mutation accounting | not started |
 | F | evidence ingestion and production enablement — the only slice that can close #155 | evidence-gated | not started |
 
@@ -1169,6 +1169,37 @@ finding, and reporting it from the minter too would report one defect from two l
 Validation: the full non-KB suite at 11,247 passed / 18 skipped. Mutants hand-run — reading evidence
 off the binding mints nothing and fails the minter pin; removing the grant check loses call-site
 discrimination; consulting grants on a grant-free table fails five tests.
+
+### Batch 4 — candidate discovery
+
+A new action on the component-query tool answers one question: for a named operation and connection,
+does the packaged registry hold a record whose identity matches what the account stores now. Every
+answer is a CANDIDATE and says so in the payload — `authority` and `candidate_only` are fields
+rather than prose someone has to remember — because the compiler decides sufficiency and this
+surface only says which reference is worth naming. An empty list is a real answer: no record for a
+pair is the normal state until evidence is ingested, and reporting it as a failure would make the
+absence of evidence look like a broken read. An unreadable identity fails closed AND names which of
+the two components could not be read.
+
+The served field set is CLOSED by construction — the projection names what it emits — and its test
+asserts EQUALITY against the declared set rather than containment. The underlying record carries a
+capture reference and a route coverage naming a request path; the test plants both and proves
+neither reaches the output, keeping only the coverage KIND.
+
+**The action list is now derived rather than transcribed.** It was hand-written in the router's
+error hint and again in the served capability catalogue. This repository has already been bitten by
+that exact shape — the catalogue advertised ten monitoring actions where the router accepted
+seventeen — so one tuple on the router is the authority and both served copies read it.
+
+**A registered code with no producer, caught by an existing guard.** The repository requires every
+published replay code to be producible, on the reasoning that a caller branching on a code nothing
+emits has written dead error handling. Discovery reports by RETURNING a served envelope rather than
+raising, so the code was registered and unproduced. The guard now checks production rather than only
+raising, and exercises the discovery path for real with an identity the account cannot read — the
+property it defends is unchanged; what was too narrow was its idea of how a code reaches a caller.
+
+Rebaselined: the M12.12 inventory and its §11 markdown, for the served-surface edits. Validation:
+the full non-KB suite at 11,256 passed / 18 skipped.
 
 ## Slice A — implementation record (what landed, and what validation it still owes)
 

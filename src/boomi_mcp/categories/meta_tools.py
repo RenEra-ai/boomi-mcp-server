@@ -35,6 +35,19 @@ from ..kb.account_governance import (
 )
 
 
+def _query_components_actions() -> tuple:
+    """The component-query router's own action list.
+
+    Imported at call time rather than at module load: a module-load import of
+    the components package from here would invert the layering the
+    reachability freeze pins.
+    """
+    from .components.query_components import QUERY_COMPONENTS_ACTIONS
+
+    return QUERY_COMPONENTS_ACTIONS
+
+
+
 # ============================================================================
 # Contact Fields (shared across trading partners and organizations)
 # ============================================================================
@@ -741,7 +754,10 @@ _INTEGRATION_VERIFY = {
 _COMPONENT_OVERVIEW = {
     "resource_type": "component",
     "tools": {
-        "query_components": ["list", "get", "search", "bulk_get"],
+        # DERIVED from the router, not transcribed: a hand-copied action list is
+        # how this catalogue came to advertise ten monitoring actions where the
+        # router accepted seventeen.
+        "query_components": list(_query_components_actions()),
         "manage_component": ["create", "update", "clone", "delete"],
         "analyze_component": ["where_used", "dependencies", "compare_versions", "merge"],
         "prepare_component_edit": ["prepare"],

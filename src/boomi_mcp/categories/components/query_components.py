@@ -408,6 +408,19 @@ def bulk_get_components(
 # Action Router
 # ============================================================================
 
+#: The router's action list, and the ONE place it is written. The served copies —
+#: the hint below and the capability catalogue — derive from this rather than
+#: keeping their own transcript, because a hand-copied action list is how a
+#: catalogue comes to advertise ten actions where the router accepts seventeen.
+QUERY_COMPONENTS_ACTIONS: tuple = (
+    "list",
+    "get",
+    "search",
+    "bulk_get",
+    "idempotency_contract_candidates",
+)
+
+
 def query_components_action(
     boomi_client: Boomi,
     profile: str,
@@ -450,11 +463,46 @@ def query_components_action(
                 }
             return bulk_get_components(boomi_client, profile, component_ids)
 
+        elif action == "idempotency_contract_candidates":
+            config = params.get("config") or {}
+            if not isinstance(config, dict):
+                return {
+                    "_success": False,
+                    "error": "config must be an object for 'idempotency_contract_candidates'",
+                    "hint": 'Provide config like: {"operation_component_id": "...", '
+                            '"connection_component_id": "..."}',
+                }
+            from ...connector_replay.discovery import idempotency_contract_candidates
+
+            def _live_identity(component_id):
+                """The account's current identity for a component, or None.
+
+                Injected so discovery itself stays free of the transport layer.
+                A read that fails is None — never a partial identity, which
+                would let discovery answer from half a fact.
+                """
+                try:
+                    fetched = get_component(boomi_client, profile, component_id)
+                except Exception:
+                    return None
+                if not isinstance(fetched, dict) or not fetched.get("_success", True):
+                    return None
+                version = fetched.get("version")
+                if version is None:
+                    return None
+                return {"component_id": component_id, "version": version}
+
+            return idempotency_contract_candidates(
+                operation_component_id=config.get("operation_component_id"),
+                connection_component_id=config.get("connection_component_id"),
+                live_identity=_live_identity,
+            )
+
         else:
             return {
                 "_success": False,
                 "error": f"Unknown action: {action}",
-                "hint": "Valid actions are: list, get, search, bulk_get",
+                "hint": "Valid actions are: " + ", ".join(QUERY_COMPONENTS_ACTIONS),
             }
 
     except ApiError as e:
@@ -471,4 +519,4 @@ def query_components_action(
         }
 
 
-__all__ = ['query_components_action']
+__all__ = ['QUERY_COMPONENTS_ACTIONS', 'query_components_action']
