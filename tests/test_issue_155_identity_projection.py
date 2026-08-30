@@ -2895,41 +2895,49 @@ def test_the_remediation_matches_the_failure_that_produced_it():
     ), "the planning remediation does not branch on which failure occurred"
 
 
-def test_the_recipe_boundary_translates_an_identity_refusal():
-    """CDX terminal: the translation raised TypeError on its own path.
+def test_the_recipe_boundary_translates_an_identity_refusal(monkeypatch):
+    """CDX terminal: the handler raised TypeError on its own path.
 
-    The first version of this test read the AST for a `RecipeError` raise, and
-    passed on a call inventing a signature the class does not have — so the
-    handler written to preserve the diagnostic contract would have crashed on
-    the exact refusal it exists for. A structural guard cannot tell whether code
-    RUNS; this one performs the construction the handler performs.
+    This test has now been wrong twice, in two different ways, and the second
+    way is the instructive one. First it read the AST for a `RecipeError` raise —
+    which passes on a call that cannot execute. Then it CONSTRUCTED the error
+    the handler was supposed to construct, inside the test — which passes if the
+    handler is deleted, keeps an invalid signature, or never catches at all.
+
+    Both versions avoided the production code. This one calls it: snapshot
+    construction is made to raise, and the assertion is on what `_compile_processes`
+    actually does with that.
     """
     from boomi_mcp.authoring.connector_resolution_snapshot import (
         ConnectorIdentityError,
     )
     from boomi_mcp.errors import CONNECTOR_REPLAY_IDENTITY_MISMATCH
+    from boomi_mcp.recipes import engine
     from boomi_mcp.recipes.engine import RecipeError
-    from boomi_mcp.recipes.errors import RECIPE_CONSTRAINT_FAILED, recipe_diagnostic
 
-    identity_error = ConnectorIdentityError(
-        CONNECTOR_REPLAY_IDENTITY_MISMATCH, "declared GET, resolves POST",
-        component_key="op",
-    )
-    error = RecipeError(
-        tuple(
-            recipe_diagnostic(
-                RECIPE_CONSTRAINT_FAILED,
-                phase="validation",
-                target=failure.component_key,
-                cause_codes=(failure.code,),
-            )
-            for failure in identity_error.failures
+    def _refuse(*_args, **_kwargs):
+        raise ConnectorIdentityError(
+            CONNECTOR_REPLAY_IDENTITY_MISMATCH,
+            "component 'op' is declared with action 'GET', but resolves to 'POST'",
+            component_key="op",
         )
-    )
-    assert error.diagnostics, "the translated error carries no diagnostic"
-    assert error.diagnostics[0].cause_codes == (CONNECTOR_REPLAY_IDENTITY_MISMATCH,)
-    assert error.diagnostics[0].target == "op"
 
+    monkeypatch.setattr(
+        "boomi_mcp.authoring.connector_resolution_snapshot"
+        ".build_connector_resolution_snapshot",
+        _refuse,
+    )
+
+    composed = type("C", (), {"process_roots": ()})()
+    with pytest.raises(RecipeError) as raised:
+        engine._compile_processes(
+            composed=composed, components=(), connector_metadata={}, resolver=None,
+        )
+
+    diagnostics = raised.value.diagnostics
+    assert diagnostics, "the refusal reached the recipe envelope with no diagnostic"
+    assert diagnostics[0].cause_codes == (CONNECTOR_REPLAY_IDENTITY_MISMATCH,)
+    assert diagnostics[0].target == "op"
 
 def test_a_decoy_path_beside_the_operation_config_does_not_settle_its_route():
     """CDX terminal: candidates were filtered by family and their paths were not.

@@ -344,16 +344,20 @@ def normalized_identity_projection(config, live_projection=None):
     # pinned. WHICH field is the endpoint is a different question with a
     # family-specific answer, and answering it from the same scan truncated the
     # database family's composed host/port/database endpoint.
+    _endpoint_keys = ("base_url", "url", "host", "endpoint_url", "wsdl_url")
+    _declares_endpoint = any(config.get(key) is not None for key in _endpoint_keys)
     _live = live_projection if isinstance(live_projection, Mapping) else {}
+    # THE LIVE READING FILLS AN UNSET FACT; it does not override a declared one.
+    # This module's stated precedence is that live data supplies only what the
+    # config leaves unsettled, and an unconditional scan broke it: a caller with
+    # an explicit endpoint and an older account projection marked extension-bound
+    # was refused a route it had actually declared, which for a declared dynamic
+    # route left the path requirement unknown and skipped the blank-path guard.
     extension_bound = any(
-        config.get(key) == SET_BY_EXTENSION
-        for key in ("base_url", "url", "host", "endpoint_url", "wsdl_url")
-    ) or any(
-        # THE LIVE READING TOO. Scanning only the config replaced a check that
-        # had run against the resolved endpoint, so a config with no endpoint of
-        # its own and an extension-bound one from the account reported a static,
-        # mintable route literally equal to the extension marker.
-        _live.get(key) == SET_BY_EXTENSION for key in ("url", "endpoint")
+        config.get(key) == SET_BY_EXTENSION for key in _endpoint_keys
+    ) or (
+        not _declares_endpoint
+        and any(_live.get(key) == SET_BY_EXTENSION for key in ("url", "endpoint"))
     )
     endpoint_raw = config.get("base_url")
     if endpoint_raw is None:
