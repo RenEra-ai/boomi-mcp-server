@@ -177,3 +177,29 @@ def is_authored_contract_ref(value: object) -> bool:
     # for its other identifier grammars.
     return isinstance(value, str) and _AUTHORED_CONTRACT_REF_RE.fullmatch(value) is not None
 
+
+#: A fixed vocabulary the grammar's BEHAVIOUR is fingerprinted over. The pattern
+#: string alone is not the contract: a change from `match` to `fullmatch` altered
+#: what the server accepts while every revision hash stood still, because the
+#: string had not moved. These probes exercise the discriminating shapes, so a
+#: change to HOW the pattern is applied moves the revision even when the pattern
+#: itself does not.
+AUTHORED_CONTRACT_REF_PROBES: Final[tuple] = (
+    "$ref:OK",
+    "$ref:a.b-c_d",
+    "$ref:ABC\n",
+    "$ref:ABC\r\n",
+    "$ref:has:colon",
+    "$ref:has space",
+    "$ref:",
+    "literal-component-id",
+    "",
+)
+
+
+def authored_contract_ref_behaviour() -> tuple:
+    """The grammar's verdict on each probe, as fingerprintable data."""
+    return tuple(
+        (probe, is_authored_contract_ref(probe)) for probe in AUTHORED_CONTRACT_REF_PROBES
+    )
+

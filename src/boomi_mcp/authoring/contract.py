@@ -873,6 +873,18 @@ def _compiler_revision() -> str:
             # this revision is built not to have. What belongs here is the
             # semantics a document is compiled against, which is the same
             # everywhere the package is installed.
+            # The grammar's BEHAVIOUR, not just its pattern string. Changing
+            # `match` to `fullmatch` altered what the server accepts while every
+            # revision hash stood still, because the string had not moved — a
+            # revision that does not move when behaviour moves is the failure this
+            # manifest exists to detect.
+            "connector_replay_ref_grammar",
+            lambda: [
+                [probe, verdict]
+                for probe, verdict in _replay_ids().authored_contract_ref_behaviour()
+            ],
+        ),
+        (
             "connector_replay_semantics",
             lambda: [
                 row.model_dump(mode="json") if hasattr(row, "model_dump") else dict(row)
@@ -936,6 +948,13 @@ def _compiler_revision() -> str:
         except Exception:  # noqa: BLE001
             payload[key] = "unavailable"
     return sha256_fingerprint(payload)
+
+
+def _replay_ids():
+    """The identifier-grammar authority, imported lazily like the rest."""
+    from ..connector_replay import ids
+
+    return ids
 
 
 def _replay_registry():

@@ -493,6 +493,13 @@ def query_components_action(
                 component = fetched.get("component")
                 if not isinstance(component, dict):
                     return None
+                # A soft-deleted component is not a live identity. The account
+                # still serves it with a version, so reading the version alone
+                # reported a deleted component as the thing a candidate would be
+                # matched against.
+                deleted = component.get("deleted")
+                if deleted is True or str(deleted).strip().lower() == "true":
+                    return None
                 version = component.get("version")
                 if version is None:
                     return None

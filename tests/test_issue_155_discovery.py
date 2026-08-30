@@ -189,11 +189,22 @@ def test_every_served_copy_of_the_action_list_names_every_router_action():
 
 
 def test_the_capability_catalogue_serves_the_router_actions():
-    from boomi_mcp.categories.components.query_components import QUERY_COMPONENTS_ACTIONS
-    from boomi_mcp.categories.meta_tools import _query_components_actions
+    """Reads the CATALOGUE, not the helper that feeds it.
 
-    served = tuple(_query_components_actions())
-    assert served == QUERY_COMPONENTS_ACTIONS
+    The first version of this asserted `_query_components_actions() ==
+    QUERY_COMPONENTS_ACTIONS`, which is the same object compared to itself: it
+    would stay green with the catalogue still serving the pre-slice list, which
+    is exactly the state live QA found.
+    """
+    from boomi_mcp.categories.components.query_components import QUERY_COMPONENTS_ACTIONS
+    from boomi_mcp.categories.meta_tools import list_capabilities_action
+
+    catalogue = list_capabilities_action()
+    served = catalogue["tools"]["query_components"]
+    assert tuple(served["actions"]) == QUERY_COMPONENTS_ACTIONS, served["actions"]
+    prose = served["parameters"]["action"]
+    for action in QUERY_COMPONENTS_ACTIONS:
+        assert action in prose, f"the served parameter prose omits {action!r}: {prose}"
 
 
 def test_discovery_is_reachable_THROUGH_THE_ROUTER_not_only_as_a_function():
@@ -248,18 +259,57 @@ def test_discovery_is_reachable_THROUGH_THE_ROUTER_not_only_as_a_function():
     assert fetched == {"op-1": True, "cn-1": True}
 
 
-def test_the_router_forwards_config_for_the_discovery_action():
-    """Defect A in isolation: without the server's arm, config never arrives."""
-    import pathlib
+def test_every_router_action_receives_its_config_AT_THE_SERVER_BOUNDARY():
+    """Derived from the action list, and driven at the layer that was broken.
 
-    server_text = (pathlib.Path(__file__).resolve().parents[1] / "server.py").read_text()
-    start = server_text.index("    def query_components(")
-    end = server_text.index("\n    @", start)
-    body = server_text[start:end]
-    assert 'elif action == "idempotency_contract_candidates":' in body, (
-        "the server builds no params for the discovery action, so the router "
-        "receives an empty config and refuses every call"
-    )
+    The first version of this grepped `server.py` for one literal `elif` line —
+    a guard whose universe was the single action I had just added. Live QA
+    defeated it in one move: a sixth action with a router arm but no server arm
+    reproduces the original defect with every test still green. And the test that
+    claimed to prove reachability called the ROUTER, one layer below the layer
+    that was broken, while its own docstring said only the boundary knows.
+
+    This drives `server.query_components` itself, once per action the router
+    declares, and asserts the config the caller passed actually arrives. A new
+    action without a params arm fails here without anyone remembering to add a
+    case.
+    """
+    import json
+
+    import server as server_module
+    from boomi_mcp.categories.components import query_components as qc
+
+    seen = {}
+
+    def _spy(sdk, profile, action, **params):
+        seen[action] = params
+        return {"_success": True, "spy": True}
+
+    original_router = server_module.query_components_action
+    original_qc = qc.query_components_action
+    server_module.query_components_action = _spy
+    qc.query_components_action = _spy
+    try:
+        for action in qc.QUERY_COMPONENTS_ACTIONS:
+            seen.clear()
+            server_module.query_components(
+                profile="renera",
+                action=action,
+                config=json.dumps({"probe_key": "probe_value"}),
+            )
+            assert action in seen, f"{action}: the server never reached the router"
+            # The invariant is that EVERY action has a params arm — not that the
+            # raw config is forwarded, since most actions legitimately extract a
+            # specific key from it. An action with no arm produces exactly `{}`,
+            # which is the shape the original defect had.
+            assert seen[action] != {}, (
+                f"{action}: the server built NO parameters for this action, so "
+                f"whatever the caller sent in `config` is lost. A new action "
+                f"needs its own arm in the server's parameter builder."
+            )
+    finally:
+        server_module.query_components_action = original_router
+        qc.query_components_action = original_qc
 
 
 @pytest.mark.parametrize(
@@ -286,3 +336,92 @@ def test_a_trailing_newline_does_not_slip_past_the_grammar(value):
     # ...and the enforced answer agrees with the SERVED pattern, which is what a
     # machine validating against the schema would compute.
     assert re.fullmatch(AUTHORED_CONTRACT_REF_PATTERN, value) is None
+
+
+def test_changing_HOW_the_grammar_matches_moves_the_revision():
+    """Live QA: `.match` → `.fullmatch` changed what the server accepts and NO
+    revision moved, because the pattern STRING had not changed.
+
+    A revision that stands still while behaviour moves is the failure the
+    manifest exists to detect, so the fingerprint covers the grammar's verdicts
+    on a fixed probe vocabulary rather than only its pattern text.
+    """
+    from boomi_mcp.authoring import contract as contract_module
+    from boomi_mcp.connector_replay import ids
+
+    baseline = contract_module._compiler_revision()
+
+    class _ShimIds:
+        AUTHORED_CONTRACT_REF_PROBES = ids.AUTHORED_CONTRACT_REF_PROBES
+
+        @staticmethod
+        def authored_contract_ref_behaviour():
+            # Exactly what a `match`-instead-of-fullmatch implementation answers:
+            # the trailing-newline probes flip to accepted.
+            return tuple(
+                (probe, True if probe.rstrip("\r\n") != probe else verdict)
+                for probe, verdict in ids.authored_contract_ref_behaviour()
+            )
+
+    original = contract_module._replay_ids
+    contract_module._replay_ids = lambda: _ShimIds
+    try:
+        moved = contract_module._compiler_revision()
+    finally:
+        contract_module._replay_ids = original
+
+    assert moved != baseline, (
+        "a change to how the grammar matches left the revision unchanged; "
+        "two deployments differing in what they ACCEPT would report no drift"
+    )
+    assert contract_module._compiler_revision() == baseline, "shim leaked"
+
+
+@pytest.mark.parametrize("deleted", [True, "true", "TRUE"])
+def test_a_soft_deleted_component_is_not_a_live_identity(deleted):
+    """Live QA: the account still serves a deleted component WITH a version, so
+    reading the version alone reported it as the thing a candidate matches."""
+    from boomi_mcp.categories.components import query_components as qc
+
+    def _fake_get_component(client, profile, component_id):
+        return {
+            "_success": True,
+            "profile": profile,
+            "component": {"id": component_id, "version": 3, "deleted": deleted},
+        }
+
+    original = qc.get_component
+    qc.get_component = _fake_get_component
+    try:
+        result = qc.query_components_action(
+            object(), "renera", "idempotency_contract_candidates",
+            config={"operation_component_id": "op-1", "connection_component_id": "cn-1"},
+        )
+    finally:
+        qc.get_component = original
+
+    from boomi_mcp.errors import CONNECTOR_REPLAY_DISCOVERY_IDENTITY_UNAVAILABLE
+
+    assert result["_success"] is False
+    assert result["error_code"] == CONNECTOR_REPLAY_DISCOVERY_IDENTITY_UNAVAILABLE
+
+
+def test_a_live_component_still_resolves():
+    """Control: the deleted check must not refuse ordinary components."""
+    from boomi_mcp.categories.components import query_components as qc
+
+    def _fake_get_component(client, profile, component_id):
+        return {"_success": True, "profile": profile,
+                "component": {"id": component_id, "version": 5, "deleted": "false"}}
+
+    original = qc.get_component
+    qc.get_component = _fake_get_component
+    try:
+        result = qc.query_components_action(
+            object(), "renera", "idempotency_contract_candidates",
+            config={"operation_component_id": "op-1", "connection_component_id": "cn-1"},
+        )
+    finally:
+        qc.get_component = original
+    assert result["_success"] is True
+    assert result["operation_version"] == 5
