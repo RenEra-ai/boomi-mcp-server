@@ -1291,6 +1291,11 @@ _EXPECTED_CLASS_COUNTS = {
     "DC-155-I": 2,
     "DC-155-J": 4,
     "DC-155-J2": 3,
+    # Minted at its SECOND instance, which is when the structural-fix trigger fires:
+    # an identifier written in a shape the ledger scanner cannot parse. The first
+    # instance named the pair in prose before a letter existed for it, so the tally
+    # read zero while the mechanism was already recorded.
+    "DC-155-R": 3,
     "DC-155-K": 38,
     "DC-155-L": 37,
     "DC-155-M": 1,
@@ -1312,6 +1317,7 @@ _UNROWED = {"DC-155-C": 2, "DC-155-I": 1}
 #: the reason. Frozen so the set cannot grow silently: a row that names a class is an
 #: instance of it unless it appears here.
 _NOT_AN_INSTANCE = {
+    "CDX-155-r98-02": "its class is CORRECTED by CDX-155-r98-02a, which is the counted row; the original names the superseded class",
     "SELF-155-r5-02": "the sibling sweep the structural fix owed, not a new instance",
     "SELF-155-r28-02": "likewise a sweep",
     "EVAL-155-08": "names the adjacent process class, not this one",
@@ -2445,7 +2451,12 @@ def _wave_evidence_violation(ledger_text, archive_dir):
     import json
     import re
 
-    rows = re.findall(r"^\| L4 composite wave gate, slice B \|.*$", ledger_text, re.M)
+    # DERIVED, not pinned. This read `slice B` literally, so once slices C and D
+    # opened their own wave loops the guard kept re-verifying a landed slice's last
+    # row while the CURRENT gate — the one closure actually rests on — was checked
+    # by nothing. Its own docstring said "the CURRENT gate", and the pin made that
+    # false. The slice letter is data in the row; it is not the guard's to hardcode.
+    rows = re.findall(r"^\| L4 composite wave gate, slice [A-Z] \|.*$", ledger_text, re.M)
     if not rows:
         return "no wave row"
     latest = rows[-1]
@@ -2581,6 +2592,168 @@ def test_the_wave_evidence_rule_admits_only_a_supported_row(tmp_path, sha, cite,
     (archive / "ok").mkdir(parents=True)
     (archive / "ok" / "summary.json").write_text(json.dumps({**_PASSING_WAVE, **attested}))
     assert _wave_evidence_violation(_ROW.format(sha=sha, cite=cite), archive) == expected
+
+
+def _coverage_violations(ledger_text, archive_dir):
+    """Whether every "which gate covers which tree" claim is true of the archive.
+
+    The third axis of the closure-ahead-of-validation class. The first fix was
+    procedural (write the checkpoint after the validation) and held for ORDERING; the
+    second was executable (the wave row must cite an archive attesting the same SHA)
+    and held for REVERIFIABILITY. Neither could catch this one: a closing report named
+    a reviewed tree and cited a review round that had reviewed an ANCESTOR of it, so
+    the citation was archived, attested and honest, and still did not cover the tree
+    being closed. Ordering is about WHEN, reverifiability about WHETHER, and this is
+    about WHAT — the reviewed SHA must be the tree the report closes on.
+    """
+    import re
+
+    out = []
+    rows = re.findall(r"^\|\s*\*\*N.1\*\*[^\n]*$", ledger_text, re.M)
+    if not rows:
+        return ["no reviewed-tree row"]
+    for row in rows:
+        sha = re.search(r"\|\s*`([0-9a-f]{7,40})`\s*\|", row)
+        run = re.search(r"run `(cdx-review\.[A-Za-z0-9]+)`", row)
+        if not sha:
+            out.append("a reviewed-tree row names no SHA")
+            continue
+        if not run:
+            out.append(f"the reviewed-tree row {sha.group(1)} cites no review run")
+            continue
+        # `last-reviewed-sha` is written by the COLLECTOR and only on a completed
+        # round, so its presence is the round's own attestation of what it reviewed.
+        # A failed round deliberately leaves it absent, which is why reading it is a
+        # coverage check and not merely a name comparison.
+        attested = archive_dir / run.group(1) / "last-reviewed-sha"
+        if not attested.is_file():
+            out.append(f"cited review {run.group(1)} has no attested reviewed SHA")
+            continue
+        recorded = attested.read_text().strip()
+        if not recorded.startswith(sha.group(1)):
+            out.append(
+                f"cited review {run.group(1)} reviewed {recorded[:7]}, not the "
+                f"{sha.group(1)} the report closes on"
+            )
+    return out
+
+
+_COVERAGE_ROW = (
+    "| **N\u22121** \u2014 the reviewed tree | `{sha}` | `L5` closing review{cite}, "
+    "archived, covering the complete delta |"
+)
+
+
+@pytest.mark.parametrize(
+    "sha,cite,attested,expected",
+    [
+        ("abc1234", ", run `cdx-review.ok`", "abc1234def", []),
+        # The defect this exists for: an honest, archived, attested citation of a
+        # review that looked at an EARLIER tree than the one being closed.
+        ("abc1234", ", run `cdx-review.ok`", "9999999aaa",
+         ["cited review cdx-review.ok reviewed 9999999, not the abc1234 "
+          "the report closes on"]),
+        # A failed round never gets a reviewed SHA, so citing one cannot pass.
+        ("abc1234", ", run `cdx-review.ok`", None,
+         ["cited review cdx-review.ok has no attested reviewed SHA"]),
+        ("abc1234", "", "abc1234def",
+         ["the reviewed-tree row abc1234 cites no review run"]),
+    ],
+)
+def test_the_coverage_rule_admits_only_a_review_of_the_closing_tree(
+    tmp_path, sha, cite, attested, expected
+):
+    """The rule itself, exercised away from this repository's own record."""
+    archive = tmp_path / "commit-reviews"
+    (archive / "cdx-review.ok").mkdir(parents=True)
+    if attested is not None:
+        (archive / "cdx-review.ok" / "last-reviewed-sha").write_text(attested + "\n")
+    row = _COVERAGE_ROW.format(sha=sha, cite=cite)
+    assert _coverage_violations(row, archive) == expected
+
+
+def test_every_closing_report_reviewed_a_tree_the_archive_attests():
+    """Applied to this ledger, and to EVERY such row rather than the latest.
+
+    The wave rule is scoped to its latest row because twenty-two earlier runs were
+    never archived and that history cannot be supplied. No such excuse applies here:
+    every reviewed-tree claim this ledger makes cites a collected round, so all of
+    them are checkable and all of them are checked.
+    """
+    root = Path(__file__).resolve().parents[1]
+    ledger = (root / "docs/architecture/ISSUE_155_AUDIT_LEDGER.md").read_text()
+    archive = root / "docs/architecture/evidence/issue-155/commit-reviews"
+    violations = _coverage_violations(ledger, archive)
+    assert not violations, f"a closing report closes on an unreviewed tree: {violations}"
+
+
+def _unscannable_finding_ids(ledger_text):
+    """Row identifiers that LOOK like findings and that the scanner cannot parse.
+
+    Second recorded instance of one mechanism: an identifier written in a shape its
+    own consumer does not accept. The first was twelve architect rows spelled with an
+    `e` segment; the response was to rename them, which fixed those twelve and left
+    the hazard intact — forty more rows were written in unaccepted shapes afterwards,
+    including a revision row whose supersession was therefore never verified and the
+    deferred finding a slice closure rested on.
+
+    Renaming is an instance patch. The invariant is that the ledger may not CONTAIN a
+    row the scanner silently skips: its parser drops a non-matching id with no `else`,
+    so an unparseable row is indistinguishable from a row nobody wrote. The grammar is
+    imported from the scanner rather than restated — a second copy would drift exactly
+    as the four earlier hand-copies of this repository's other shapes did.
+    """
+    import re
+    import sys as _sys
+
+    _sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from test_wave_gate import _FINDING_ID_RE
+
+    bad = set()
+    for line in ledger_text.splitlines():
+        if not line.startswith("| "):
+            continue
+        cells = line.split("|")
+        if len(cells) < 6:
+            continue
+        rid = cells[1].strip().strip("*").strip()
+        # A finding id is a bare token carrying the issue infix. Prose cells and the
+        # derived defect-CLASS rows are neither, and the scanner excludes DC rows for
+        # its own reason: their counts are an aggregate, not an append-only record.
+        if not rid or " " in rid or rid.startswith("DC-") or "-155-" not in rid:
+            continue
+        if not re.fullmatch(_FINDING_ID_RE, rid):
+            bad.add(rid)
+    return sorted(bad)
+
+
+@pytest.mark.parametrize(
+    "rid,caught",
+    [
+        ("CDX-155-r98-01", False),
+        ("ARCH-155-r10-03a", False),
+        # The exact shapes this ledger actually shipped unscanned.
+        ("ARCH-155-D1-03", True),
+        ("ARCH-155-B-e3-05a", True),
+        ("SELF-155-D-pf-01", True),
+        ("CDX-155-R-01", True),
+    ],
+)
+def test_the_identifier_rule_catches_the_shapes_that_shipped_unscanned(rid, caught):
+    """Non-vacuity: the rule must reject the real historical shapes, not just parse."""
+    row = f"| {rid} | src | summary | label | class | tier | sha | fixed |"
+    assert bool(_unscannable_finding_ids(row)) is caught
+
+
+def test_every_finding_row_in_this_ledger_is_visible_to_the_scanner():
+    """Applied to this ledger. A row no scanner can read is not a record."""
+    root = Path(__file__).resolve().parents[1]
+    ledger = (root / "docs/architecture/ISSUE_155_AUDIT_LEDGER.md").read_text()
+    unscannable = _unscannable_finding_ids(ledger)
+    assert not unscannable, (
+        "these rows carry finding identifiers the ledger scanner silently skips, so "
+        f"nothing checks their tier, disposition or supersession: {unscannable}"
+    )
 
 
 def test_the_latest_wave_checkpoint_is_reverifiable_from_the_archive():
