@@ -2987,3 +2987,227 @@ def test_an_extension_bound_endpoint_is_seen_from_the_live_projection_too():
     assert identity.extension_bound is True
     assert identity.route_state == "unavailable"
     assert identity.endpoint != SET_BY_EXTENSION
+
+
+@pytest.mark.parametrize(
+    "label, config, expected_endpoint",
+    [
+        (
+            "database declares a host and composes its endpoint",
+            {
+                "connector_type": "database",
+                "operation_mode": "get",
+                "host": "db.internal",
+                "port": 1433,
+                "dbname": "SALES",
+            },
+            "db.internal:1433/SALES",
+        ),
+        (
+            "soap declares its own endpoint field",
+            {
+                "connector_type": "soap_client",
+                "operation_mode": "execute",
+                "endpoint_url": "http://soap.internal/svc",
+            },
+            "http://soap.internal",
+        ),
+    ],
+)
+def test_a_declared_endpoint_is_never_replaced_by_a_stale_live_marker(
+    label, config, expected_endpoint
+):
+    """CDX terminal: detection was family-aware and selection was not.
+
+    Splitting "is this extension bound" from "which field IS the endpoint" was
+    right, but only the first question learned the family. A database config
+    declaring `host` therefore suppressed the live marker as intended, then fell
+    through a `base_url`/`url` lookup that found nothing and took the live value
+    anyway — so the literal marker string survived as a static, mintable
+    endpoint for the two families whose endpoint field is neither of those.
+    """
+    from boomi_mcp.categories.components.builders.connector_builder import (
+        SET_BY_EXTENSION,
+        normalized_identity_projection,
+    )
+
+    identity = normalized_identity_projection(
+        config, live_projection={"url": SET_BY_EXTENSION}
+    )
+
+    assert identity.endpoint == expected_endpoint, label
+    assert identity.extension_bound is False, label
+    assert identity.route_state == "static", label
+
+
+def test_the_endpoint_field_table_stays_inside_its_family_authority():
+    """Structural pin for the recurring class: the endpoint table is a SUBSET.
+
+    Which fields of a family may carry the extension marker is already decided
+    by the three placeholder sets the builders validate against. The endpoint
+    table names the endpoint members of those sets, so it is pinned to them
+    rather than standing beside them as a fourth independent hand-list: if a
+    builder stops accepting the marker on a field, this test forces the endpoint
+    table to be re-examined instead of drifting.
+    """
+    from boomi_mcp.categories.components.builders import connector_builder as cb
+
+    authority = {
+        "rest": cb._REST_EXTENSION_BOUND_PLACEHOLDER_FIELDS,
+        "soap_client": cb._SOAP_EXTENSION_BOUND_PLACEHOLDER_FIELDS,
+        "database": cb._DB_EXTENSION_BOUND_PLACEHOLDER_FIELDS,
+    }
+
+    assert set(cb._ENDPOINT_FIELDS_BY_FAMILY) == set(authority)
+    for family, fields in cb._ENDPOINT_FIELDS_BY_FAMILY.items():
+        assert fields, f"{family} names no endpoint field"
+        assert set(fields) <= set(authority[family]), (
+            f"{family} names an endpoint field its builder cannot extension-bind: "
+            f"{sorted(set(fields) - set(authority[family]))}"
+        )
+
+
+def test_every_family_the_resolver_can_return_has_an_endpoint_field():
+    """Coverage derived from the resolver's own case set, never hand-listed."""
+    import inspect
+    import re
+
+    from boomi_mcp.categories.components.builders import connector_builder as cb
+
+    returned = set(
+        re.findall(
+            r'return "([a-z_]+)"', inspect.getsource(cb.connector_family_of)
+        )
+    )
+    assert returned, "derivation found no families — the pin would be vacuous"
+    # Reading the source can only see LITERAL returns, so the derivation is
+    # complete only while every return is a literal. A family returned through a
+    # variable would be invisible here and leave this file green.
+    body = inspect.getsource(cb.connector_family_of)
+    computed = [
+        line.strip()
+        for line in body.splitlines()
+        if re.match(r"\s*return (?!None\b)(?!\")", line)
+    ]
+    assert not computed, (
+        "connector_family_of returns a non-literal; this pin can no longer "
+        "derive its universe from the source: " + repr(computed)
+    )
+    missing = returned - set(cb._ENDPOINT_FIELDS_BY_FAMILY)
+    assert not missing, f"families with no endpoint field: {sorted(missing)}"
+
+
+@pytest.mark.parametrize(
+    "config",
+    [
+        {"connector_type": "rest_client", "method": "GET"},
+        {"connector_type": "rest_client", "method": "  patch  "},
+        {"connector_type": "rest_client", "method": "TRACE"},
+        {"connector_type": "rest_client", "method": 7},
+        {"connector_type": "rest_client"},
+        {"connector_type": "database", "operation_mode": "get"},
+        {"connector_type": "database", "operation_mode": "SEND"},
+        {"connector_type": "database", "operation_mode": "upsert"},
+        {"connector_type": "database"},
+        {"connector_type": "soap_client", "operation_mode": "execute"},
+        {"connector_type": "soap_client", "operation_mode": "listen"},
+        {"connector_type": "soap_client"},
+        {"connector_type": "http", "method": "GET"},
+        {"connector_type": "ftp"},
+        {},
+    ],
+)
+def test_the_projected_action_agrees_with_the_derivation_it_mirrors(config):
+    """Sibling sweep: the mirror was unpinned, so it could drift silently.
+
+    `_normalized_action` deliberately re-derives what
+    `authoring.workflow._action_type_from_config` decides, because importing the
+    other way would invert the dependency — but nothing asserted the two agree,
+    which is the same defect one level up: a hand-model of a fact whose
+    authority lives elsewhere, with no pin holding it there.
+    """
+    from boomi_mcp.authoring.workflow import _action_type_from_config
+    from boomi_mcp.categories.components.builders.connector_builder import (
+        _normalized_action,
+        connector_family_of,
+    )
+
+    family = connector_family_of(config.get("connector_type"))
+    assert _normalized_action(config, family) == _action_type_from_config(config)
+
+
+def test_a_soap_component_does_not_compare_unequal_to_itself():
+    """The projection agrees with the platform's own spelling of the verb.
+
+    Recorded honestly, because the first version of this docstring claimed a
+    harm that live QA then measured to be unreachable: the identity comparison
+    casefolds both halves, so the lowercase projection never actually refused a
+    SOAP component, and no commit on this branch could have exhibited that. The
+    DRIFT was real — the projection disagreed with the derivation it documents
+    itself as mirroring — and aligning it moved none of the served leaves. What
+    this pins is the agreement, not a refusal that never happened.
+    """
+    from boomi_mcp.authoring.connector_resolution_snapshot import (
+        live_identity_from_component_xml,
+    )
+    from boomi_mcp.categories.components.builders.connector_builder import (
+        normalized_identity_projection,
+    )
+
+    resolved = live_identity_from_component_xml(
+        "op",
+        '<bns:Component xmlns:bns="http://api.platform.boomi.com/"'
+        ' type="connector-action" subType="wssoapclientsdk">'
+        "<bns:object><Operation><Configuration>"
+        '<GenericOperationConfig operationType="EXECUTE"/>'
+        "</Configuration></Operation></bns:object></bns:Component>",
+    )
+    declared = normalized_identity_projection(
+        {
+            "connector_type": "soap_client",
+            "operation_mode": "execute",
+            "endpoint_url": "http://soap.internal/svc",
+        }
+    )
+
+    assert resolved.family == declared.family == "soap_client"
+    assert resolved.action == declared.action == "EXECUTE"
+
+
+def test_a_marker_on_a_later_endpoint_field_still_says_the_account_decides():
+    """Live QA cell N1: the two questions reduce the same fields differently.
+
+    "Is the account deciding this route" is true if ANY of the family's endpoint
+    fields carries the marker; "which value is the endpoint" takes the first one
+    present. Collapsing both onto the first present field lost the marker on a
+    later one, so a SOAP config with a concrete endpoint and an extension-bound
+    WSDL went from unavailable to a pinned static route.
+    """
+    from boomi_mcp.categories.components.builders.connector_builder import (
+        SET_BY_EXTENSION,
+        normalized_identity_projection,
+    )
+
+    identity = normalized_identity_projection(
+        {
+            "connector_type": "soap_client",
+            "operation_mode": "execute",
+            "endpoint_url": "http://soap.internal/svc",
+            "wsdl_url": SET_BY_EXTENSION,
+        }
+    )
+    assert identity.extension_bound is True
+    assert identity.route_state == "unavailable"
+    assert identity.endpoint is None
+
+    # Control: both fields concrete still resolves to a static route.
+    both = normalized_identity_projection(
+        {
+            "connector_type": "soap_client",
+            "operation_mode": "execute",
+            "endpoint_url": "http://soap.internal/svc",
+            "wsdl_url": "http://soap.internal/svc?wsdl",
+        }
+    )
+    assert both.extension_bound is False
+    assert both.route_state == "static"

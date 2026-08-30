@@ -47,6 +47,58 @@ SET_BY_EXTENSION = "SET_BY_EXTENSION"
 _DB_EXTENSION_BOUND_PLACEHOLDER_FIELDS = frozenset({"username", "host"})
 _REST_EXTENSION_BOUND_PLACEHOLDER_FIELDS = frozenset({"base_url", "username"})
 
+# WHICH CONFIG FIELD IS THE ENDPOINT, per family — the one table both the
+# extension-bound question and the endpoint-selection question read. Keeping two
+# hand-lists (a family-wide one for detection, `base_url`/`url` for selection)
+# is what let a database config declaring `host` suppress the live marker and
+# then fall back to it anyway, serving the marker string as a static route.
+#
+# These are the endpoint members of each family's extension-bound placeholder
+# set — the sets just above and `_SOAP_EXTENSION_BOUND_PLACEHOLDER_FIELDS` below
+# are the runtime authority for which fields of a family may carry the marker at
+# all, and a test pins every tuple here as a subset of its family's set so the
+# two cannot drift apart. `url` is deliberately absent: no builder in this module
+# reads `config["url"]`, so the old fallback modelled a key that does not exist.
+_ENDPOINT_FIELDS_BY_FAMILY = {
+    "rest": ("base_url",),
+    # `endpoint_url` is the service address and `wsdl_url` only the contract
+    # location, so the address is preferred when a config carries both.
+    "soap_client": ("endpoint_url", "wsdl_url"),
+    # The database family declares a host and COMPOSES its endpoint from host,
+    # port and database, so this names the DECLARATION and the composition
+    # supplies the value.
+    "database": ("host",),
+}
+# An unmodelled family has no endpoint field we can name. Its action is `None`
+# and its identity therefore unmintable either way (measured), so this only
+# preserves the generic reading for an identity nothing will mint.
+_DEFAULT_ENDPOINT_FIELDS = ("base_url",)
+
+
+def _compose_database_endpoint(config: "Mapping[str, Any]") -> Optional[str]:
+    """The database family pins its route with discrete fields, not a URL.
+
+    Composed host-first so it orders like the JDBC string. Deliberately NOT
+    skeletonized: it is assembled from fields that are already credential-free,
+    and `_safe_url_skeleton` would read it as a URL it is not.
+    """
+    host = config.get("host")
+    if not (isinstance(host, str) and host.strip()):
+        return None
+    endpoint = host.strip()
+    port, dbname = config.get("port"), config.get("dbname")
+    if port not in (None, ""):
+        endpoint = "{0}:{1}".format(endpoint, port)
+    if isinstance(dbname, str) and dbname.strip():
+        endpoint = "{0}/{1}".format(endpoint, dbname.strip())
+    return endpoint
+
+
+#: Families that BUILD an endpoint instead of declaring one in a single field.
+#: Asked once and reused, so "skip the declared/live selection" and "compose it"
+#: cannot disagree about which families compose.
+_COMPOSED_ENDPOINT_BY_FAMILY = {"database": _compose_database_endpoint}
+
 
 def _reject_misplaced_set_by_extension(
     config: Dict[str, Any], allowed: frozenset, family: str
@@ -308,7 +360,11 @@ def _normalized_action(config: "Mapping[str, Any]", family: Optional[str]) -> Op
     if family == "soap_client":
         mode = config.get("operation_mode")
         mode = mode.strip().lower() if isinstance(mode, str) else ""
-        return "execute" if mode == "execute" else None
+        # "EXECUTE", not "execute": the platform stores the verb uppercased in
+        # `operationType`, and the mirrored derivation returns it that way, so a
+        # lowercase projection made every SOAP component compare unequal to
+        # ITSELF and refused its own reuse. The parity test holds the two here.
+        return "EXECUTE" if mode == "execute" else None
     return None
 
 
@@ -344,26 +400,37 @@ def normalized_identity_projection(config, live_projection=None):
     # pinned. WHICH field is the endpoint is a different question with a
     # family-specific answer, and answering it from the same scan truncated the
     # database family's composed host/port/database endpoint.
-    _endpoint_keys = ("base_url", "url", "host", "endpoint_url", "wsdl_url")
-    _declares_endpoint = any(config.get(key) is not None for key in _endpoint_keys)
+    # ONE FAMILY AUTHORITY FOR THE ENDPOINT, answering both questions. Splitting
+    # them was right — whether a field is extension-bound and which field IS the
+    # endpoint are different questions — but I made only the first family-aware,
+    # so a database config declaring `host` suppressed the live marker and then
+    # fell back to it anyway, and the marker string survived as a static,
+    # mintable endpoint. Detection and selection now read the same fields.
+    _endpoint_keys = _ENDPOINT_FIELDS_BY_FAMILY.get(family, _DEFAULT_ENDPOINT_FIELDS)
+    # The two questions read the same fields, but they REDUCE them differently:
+    # "is the account deciding this route" is true if ANY of the family's endpoint
+    # fields carries the marker, while "which value is the endpoint" takes the
+    # first one present. Collapsing both onto the first present field lost the
+    # marker on a later one — a SOAP config with a concrete `endpoint_url` and an
+    # extension-bound `wsdl_url` went from unavailable to a pinned static route.
+    _declared_values = [config[key] for key in _endpoint_keys if config.get(key) is not None]
+    _declared_endpoint = _declared_values[0] if _declared_values else None
     _live = live_projection if isinstance(live_projection, Mapping) else {}
-    # THE LIVE READING FILLS AN UNSET FACT; it does not override a declared one.
-    # This module's stated precedence is that live data supplies only what the
-    # config leaves unsettled, and an unconditional scan broke it: a caller with
-    # an explicit endpoint and an older account projection marked extension-bound
-    # was refused a route it had actually declared, which for a declared dynamic
-    # route left the path requirement unknown and skipped the blank-path guard.
-    extension_bound = any(
-        config.get(key) == SET_BY_EXTENSION for key in _endpoint_keys
-    ) or (
-        not _declares_endpoint
-        and any(_live.get(key) == SET_BY_EXTENSION for key in ("url", "endpoint"))
+    _live_endpoint = next(
+        (_live[key] for key in ("url", "endpoint") if _live.get(key) is not None), None
     )
-    endpoint_raw = config.get("base_url")
-    if endpoint_raw is None:
-        endpoint_raw = config.get("url")
-    if endpoint_raw is None and isinstance(live_projection, Mapping):
-        endpoint_raw = live_projection.get("url") or live_projection.get("endpoint")
+    # The live reading FILLS an unset fact; it never overrides a declared one.
+    extension_bound = any(value == SET_BY_EXTENSION for value in _declared_values) or (
+        not _declared_values and _live_endpoint == SET_BY_EXTENSION
+    )
+    # A composed family supplies its own value below; everything else uses the
+    # field it declared, or the account's reading when it declared none.
+    _composer = _COMPOSED_ENDPOINT_BY_FAMILY.get(family)
+    endpoint_raw = (
+        None
+        if _composer is not None
+        else (_declared_endpoint if _declared_endpoint is not None else _live_endpoint)
+    )
 
     # The endpoint is bound to an environment extension: the ACCOUNT decides the
     # route, so nothing here can pin it.
@@ -452,19 +519,11 @@ def normalized_identity_projection(config, live_projection=None):
     # digest, which reads the applied component's XML and keeps the full path.
     endpoint = _safe_url_skeleton(endpoint_raw) if endpoint_raw is not None else None
 
-    if endpoint is None and family == "database":
-        # The database family pins its route with discrete fields rather than a
-        # URL. Reading only the URL keys left this ``None`` while the identity
-        # still reported itself mintable — a route nobody read is not a route
-        # anyone knows. Composed host-first so it orders like the JDBC string.
-        host = config.get("host")
-        if isinstance(host, str) and host.strip():
-            port, dbname = config.get("port"), config.get("dbname")
-            endpoint = host.strip()
-            if port not in (None, ""):
-                endpoint = "{0}:{1}".format(endpoint, port)
-            if isinstance(dbname, str) and dbname.strip():
-                endpoint = "{0}/{1}".format(endpoint, dbname.strip())
+    if endpoint is None and _composer is not None:
+        # Reading only the URL keys left this ``None`` while the identity still
+        # reported itself mintable — a route nobody read is not a route anyone
+        # knows.
+        endpoint = _composer(config)
 
     raw_path = config.get("path")
     path = raw_path if isinstance(raw_path, str) else None
