@@ -2023,9 +2023,32 @@ def _closing_report_violation(ledger_text, rel, archive_dir, git):
     """
     import re
 
-    marker = "## Slice B — closing report"
-    if marker not in ledger_text:
-        return "absent"
+    # DERIVED, not pinned. Both this marker and the wave-row pattern below read
+    # `slice B` literally, and slice B is the one slice that never wrote a closing
+    # report — so this guard SKIPPED on the real repository for its whole life while
+    # the residue section claimed the chain was checked. The current gate is whatever
+    # the latest wave checkpoint names; the current report is the one certifying that
+    # gate. Deriving both from the ledger is what makes the guard follow the work.
+    waves = re.findall(
+        r"\| L4 composite wave gate, slice [A-Z] \|[^|]*\|\s*`([0-9a-f]{7,40})`", ledger_text
+    )
+    if not waves:
+        return "no-wave-row"
+    current_w = waves[-1]
+    marker = ""
+    for head in re.findall(r"^## Slice [A-Z] — closing report.*$", ledger_text, re.M):
+        body = ledger_text[ledger_text.index(head):]
+        body = body[: body.index("\n## ")] if "\n## " in body else body
+        if any(w.startswith(current_w) or current_w.startswith(w)
+               for w in re.findall(r"`([0-9a-f]{7,40})`\s*\(\*\*W\*\*\)", body)):
+            marker = head
+            break
+    if not marker:
+        # Not "absent": a wave gate with no report certifying it is the state this
+        # guard exists to refuse, and reporting it as absence is how it stayed silent.
+        return "absent" if "— closing report" not in ledger_text else (
+            f"the current wave gate {current_w[:7]} is certified by no closing report"
+        )
     report = ledger_text[ledger_text.index(marker):]
     report = report[: report.index("\n## ")] if "\n## " in report else report
 
@@ -2050,12 +2073,7 @@ def _closing_report_violation(ledger_text, rel, archive_dir, git):
         if d.is_dir() and (d / "last-reviewed-sha").exists()
     }
 
-    waves = re.findall(
-        r"\| L4 composite wave gate, slice B \|[^|]*\|\s*`([0-9a-f]{7,40})`", ledger_text
-    )
-    if not waves:
-        return "no-wave-row"
-    violation = _closing_chain_violation(report, _Rev(), archived, waves[-1])
+    violation = _closing_chain_violation(report, _Rev(), archived, current_w)
     if violation:
         return violation
 
@@ -2083,8 +2101,10 @@ def test_a_closing_report_names_the_current_wave_sha_and_proves_darkness():
         / "docs/architecture/ISSUE_155_AUDIT_LEDGER.md"
     )
     ledger = ledger_path.read_text()
-    if "## Slice B — closing report" not in ledger:
-        pytest.skip("no closing report yet; the check applies once one is written")
+    assert "— closing report" in ledger, (
+        "no closing report exists, so this guard would be vacuous; it skipped on this "
+        "repository for its whole life because it looked for one slice's report by name"
+    )
     root = ledger_path.parents[2]
 
     def git(*args, check=True):
