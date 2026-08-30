@@ -94,6 +94,19 @@ def _compose_database_endpoint(config: "Mapping[str, Any]") -> Optional[str]:
     return endpoint
 
 
+def _endpoint_reading(source: "Mapping[str, Any]", keys) -> tuple:
+    """Every value present under `keys`, and the preferred one, from ONE read.
+
+    The two halves of the extension question read the same fields and reduce
+    them differently: ANY of them carrying the marker means the account decides
+    the route, while the endpoint itself is the FIRST one present. Open-coding
+    that at two call sites is exactly how the declared half got corrected while
+    the live half kept the defect — so both halves now come from here.
+    """
+    values = [source[key] for key in keys if source.get(key) is not None]
+    return values, (values[0] if values else None)
+
+
 #: Families that BUILD an endpoint instead of declaring one in a single field.
 #: Asked once and reused, so "skip the declared/live selection" and "compose it"
 #: cannot disagree about which families compose.
@@ -413,15 +426,13 @@ def normalized_identity_projection(config, live_projection=None):
     # first one present. Collapsing both onto the first present field lost the
     # marker on a later one — a SOAP config with a concrete `endpoint_url` and an
     # extension-bound `wsdl_url` went from unavailable to a pinned static route.
-    _declared_values = [config[key] for key in _endpoint_keys if config.get(key) is not None]
-    _declared_endpoint = _declared_values[0] if _declared_values else None
+    _declared_values, _declared_endpoint = _endpoint_reading(config, _endpoint_keys)
     _live = live_projection if isinstance(live_projection, Mapping) else {}
-    _live_endpoint = next(
-        (_live[key] for key in ("url", "endpoint") if _live.get(key) is not None), None
-    )
+    _live_values, _live_endpoint = _endpoint_reading(_live, ("url", "endpoint"))
     # The live reading FILLS an unset fact; it never overrides a declared one.
     extension_bound = any(value == SET_BY_EXTENSION for value in _declared_values) or (
-        not _declared_values and _live_endpoint == SET_BY_EXTENSION
+        not _declared_values
+        and any(value == SET_BY_EXTENSION for value in _live_values)
     )
     # A composed family supplies its own value below; everything else uses the
     # field it declared, or the account's reading when it declared none.

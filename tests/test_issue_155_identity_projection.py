@@ -3211,3 +3211,49 @@ def test_a_marker_on_a_later_endpoint_field_still_says_the_account_decides():
     )
     assert both.extension_bound is False
     assert both.route_state == "static"
+
+
+@pytest.mark.parametrize(
+    "label, live",
+    [
+        ("marker on the second live key", {"url": "http://concrete/svc", "endpoint": "@MARKER@"}),
+        ("marker on the first live key", {"url": "@MARKER@", "endpoint": "http://concrete/svc"}),
+    ],
+)
+def test_a_marker_on_any_live_endpoint_key_still_says_the_account_decides(label, live):
+    """The same asymmetry as the declared half, found one field-set over.
+
+    Correcting the declared half to scan every field while the live half kept
+    taking the first present key left the identical defect in place: a live
+    projection carrying a concrete address beside an extension-bound one
+    reported a static route. Both halves now read through one helper.
+    """
+    from boomi_mcp.categories.components.builders.connector_builder import (
+        SET_BY_EXTENSION,
+        normalized_identity_projection,
+    )
+
+    resolved = {
+        key: (SET_BY_EXTENSION if value == "@MARKER@" else value)
+        for key, value in live.items()
+    }
+    identity = normalized_identity_projection(
+        {"connector_type": "soap_client", "operation_mode": "execute"},
+        live_projection=resolved,
+    )
+    assert identity.extension_bound is True, label
+    assert identity.route_state == "unavailable", label
+    assert identity.endpoint is None, label
+
+
+def test_both_halves_of_the_extension_question_read_through_one_helper():
+    """Non-vacuity for the structural claim: neither half open-codes the scan."""
+    import inspect
+
+    from boomi_mcp.categories.components.builders import connector_builder as cb
+
+    body = inspect.getsource(cb.normalized_identity_projection)
+    head = body[: body.index("extension_bound =")]
+    assert head.count("_endpoint_reading(") == 2, (
+        "a half stopped reading through the shared helper: " + head
+    )
