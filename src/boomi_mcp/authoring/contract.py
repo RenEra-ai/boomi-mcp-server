@@ -879,10 +879,17 @@ def _compiler_revision() -> str:
             # revision that does not move when behaviour moves is the failure this
             # manifest exists to detect.
             "connector_replay_ref_grammar",
-            lambda: [
-                [probe, verdict]
-                for probe, verdict in _replay_ids().authored_contract_ref_behaviour()
-            ],
+            lambda: {
+                # The pattern ITSELF as well as the probe verdicts. Probes are a
+                # fixed vocabulary, so widening the character set for a value no
+                # probe carries — admitting "/", say — would leave every verdict
+                # unchanged while both parsing and the served schema had moved.
+                "pattern": _replay_ids().AUTHORED_CONTRACT_REF_PATTERN,
+                "probes": [
+                    [probe, verdict]
+                    for probe, verdict in _replay_ids().authored_contract_ref_behaviour()
+                ],
+            },
         ),
         (
             "connector_replay_semantics",

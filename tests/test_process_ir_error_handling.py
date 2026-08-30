@@ -1756,3 +1756,79 @@ def test_a_root_projected_table_requires_a_grant_for_this_very_call(monkeypatch)
         excinfo.value.diagnostics[0].code
         == PROCESS_IR_SEMANTIC_IDEMPOTENCY_EVIDENCE_MISSING
     )
+
+
+def test_a_contract_naming_a_record_the_registry_lacks_mints_nothing(monkeypatch):
+    """A caller-supplied digest is a claim, and the registry is what corroborates it.
+
+    Without this, a fabricated or foreign-account symbol naming any record digest
+    would mint a grant authorising a retry the system never observed. A missing
+    registry corroborates NOTHING — treating absence as assent would make the
+    digest a decoration a caller could set to bypass its own check.
+    """
+    _synthetic_capabilities(monkeypatch, (REST, "PATCH", "conditionally_idempotent"))
+    digest = "f" * 64
+    symbols = _symbols(
+        contracts=[
+            IdempotencyContractSymbolV1(
+                ref="$ref:C", operation_ref="$ref:PATCHOP", record_digest=digest
+            )
+        ]
+    )
+    doc = _connector_scope(
+        retry={"count": 1},
+        protected="$ref:PATCHOP",
+        idempotency={"kind": "key_reference", "contract_ref": "$ref:C"},
+    )
+    from boomi_mcp.compiler.process_ir.connector_resolution import mint_idempotency_grants
+
+    cfg, _ = _compile(doc, symbols)
+
+    class _Empty:
+        operation_records = ()
+
+    minted = mint_idempotency_grants(
+        cfg, symbols, process_root_ref="$ref:ROOT", registry=_Empty()
+    )
+    assert minted.idempotency_grants == (), "minted on a record the registry lacks"
+
+    class _Holds:
+        class _R:
+            record_digest = digest
+        operation_records = (_R(),)
+
+    corroborated = mint_idempotency_grants(
+        cfg, symbols, process_root_ref="$ref:ROOT", registry=_Holds()
+    )
+    assert len(corroborated.idempotency_grants) == 1
+    assert corroborated.idempotency_grants[0].record_digest == digest
+
+
+def test_a_contract_naming_no_record_still_mints(monkeypatch):
+    """Control: the digest is optional, and its absence is not a refusal.
+
+    The packaged registry ships with no records at all, so requiring one
+    unconditionally would make every grant unmintable — a check that refuses
+    everything is not a check.
+    """
+    _synthetic_capabilities(monkeypatch, (REST, "PATCH", "conditionally_idempotent"))
+    symbols = _symbols(
+        contracts=[IdempotencyContractSymbolV1(ref="$ref:C", operation_ref="$ref:PATCHOP")]
+    )
+    doc = _connector_scope(
+        retry={"count": 1},
+        protected="$ref:PATCHOP",
+        idempotency={"kind": "key_reference", "contract_ref": "$ref:C"},
+    )
+    from boomi_mcp.compiler.process_ir.connector_resolution import mint_idempotency_grants
+
+    cfg, _ = _compile(doc, symbols)
+
+    class _Empty:
+        operation_records = ()
+
+    minted = mint_idempotency_grants(
+        cfg, symbols, process_root_ref="$ref:ROOT", registry=_Empty()
+    )
+    assert len(minted.idempotency_grants) == 1
+    assert minted.idempotency_grants[0].record_digest is None

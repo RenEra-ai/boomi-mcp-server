@@ -1341,6 +1341,7 @@ def _validate_processes(
     intent at once, not the first thing that stopped it.
     """
     from ..compiler.process_ir.semantic_validation.pipeline import validate_process_ir
+    from ..compiler.process_ir.connector_resolution import project_grants_for_root
     from ..recipes.materialization import build_symbol_table
 
     # The snapshot rides along on the TYPED route too. Wiring only the raw route
@@ -1495,10 +1496,19 @@ def _validate_processes(
         # `capabilities=None` would override the strict default rather than fall
         # back to it, which is the opposite of fail-closed.
         root_capabilities = resolution.capabilities_by_root.get(component_key)
+        # PROJECT THE ROOT before validating it. Grants are per-call, so the table
+        # a root is validated against has to be the one minted for THAT root —
+        # validating every root against the grant-free table left the per-call
+        # gate inert and preserved the old per-operation authorisation. This runs
+        # after effect-declaration resolution above, which consumes the root-less
+        # table on purpose.
+        root_symbols = project_grants_for_root(
+            ir, symbols, process_root_ref=component_key
+        )
         report = (
-            validate_process_ir(ir, symbols, capabilities=root_capabilities)
+            validate_process_ir(ir, root_symbols, capabilities=root_capabilities)
             if root_capabilities is not None
-            else validate_process_ir(ir, symbols)
+            else validate_process_ir(ir, root_symbols)
         )
         errors += len(report.errors)
         warnings += len(report.warnings)

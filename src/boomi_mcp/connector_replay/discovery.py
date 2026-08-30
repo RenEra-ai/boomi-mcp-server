@@ -127,9 +127,19 @@ def idempotency_contract_candidates(
 
     candidates: List[Dict[str, Any]] = []
     for record in registry.operation_records:
-        if record.operation_identity.component_id != operation_component_id:
+        # Identity is the PAIR of component and version, on both sides. Matching
+        # ids alone offered a record minted against version 2 while the envelope
+        # reported the account at version 9 — a candidate that does not describe
+        # the component the caller was just told about.
+        if (
+            record.operation_identity.component_id,
+            record.operation_identity.version,
+        ) != (operation_component_id, identities["operation"]["version"]):
             continue
-        if record.connection_identity.component_id != connection_component_id:
+        if (
+            record.connection_identity.component_id,
+            record.connection_identity.version,
+        ) != (connection_component_id, identities["connection"]["version"]):
             continue
         candidates.append(_candidate(record))
 

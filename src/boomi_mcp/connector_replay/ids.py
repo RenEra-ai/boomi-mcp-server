@@ -165,7 +165,13 @@ def is_execution_id(value: object) -> bool:
 #: colons reads as a structured identifier this contract does not define, and
 #: admitting it would let a shape nothing resolves look well-formed.
 AUTHORED_CONTRACT_REF_TOKEN_PREFIX: Final[str] = "$ref:"
-AUTHORED_CONTRACT_REF_PATTERN: Final[str] = r"^\$ref:[A-Za-z0-9_.-]+$"
+# Ends with a negative lookahead rather than `$`. Measured against a real
+# Draft 2020-12 validator: a `$`-anchored pattern ACCEPTS "$ref:ABC\n",
+# because `$` may match before a final line terminator — so a client whose
+# input validated against the served schema was then refused at parse time.
+# `(?![\s\S])` means "no character follows" in both ECMA-262 and Python, so
+# the published rule and the enforced one accept the same strings.
+AUTHORED_CONTRACT_REF_PATTERN: Final[str] = r"^\$ref:[A-Za-z0-9_.-]+(?![\s\S])"
 _AUTHORED_CONTRACT_REF_RE: Final = re.compile(AUTHORED_CONTRACT_REF_PATTERN)
 
 

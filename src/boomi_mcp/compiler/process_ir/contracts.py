@@ -253,6 +253,12 @@ class IdempotencyContractSymbolV1(_CompilerModel):
 
     ref: str = Field(..., min_length=1)
     operation_ref: str = Field(..., min_length=1)
+    #: The registry record this contract stands for, when the caller can name one.
+    #: Optional because a table may be built before any evidence exists — the
+    #: state the packaged registry ships in — but when it IS set the minter
+    #: requires the registry to hold a record with this digest, so a symbol cannot
+    #: claim provenance the registry cannot corroborate.
+    record_digest: Optional[str] = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     kind: Literal["opaque_key_binding"] = "opaque_key_binding"
 
     @field_validator("ref", "operation_ref")
@@ -301,6 +307,9 @@ class IdempotencyGrantSymbolV1(_CompilerModel):
     contract_ref: str = Field(..., min_length=1)
     operation_ref: str = Field(..., min_length=1)
     call_source_path: str = Field(..., min_length=1)
+    #: Carried through from the contract, so a grant records WHICH evidence record
+    #: authorised it rather than only that some contract did.
+    record_digest: Optional[str] = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     kind: Literal["per_call_key_reference_grant"] = "per_call_key_reference_grant"
 
     @field_validator("contract_ref", "operation_ref", "call_source_path")

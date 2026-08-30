@@ -1737,6 +1737,7 @@ def _compile_processes(
     from ..compiler.process_ir.diagnostics import ProcessIRCompileError
     from ..compiler.process_ir.emitter_registry import emit_process
     from ..compiler.process_ir.pipeline import compile_process_ir_v1
+    from ..compiler.process_ir.connector_resolution import project_grants_for_root
 
     # THE DECLARATION IS AN ASSERTION HERE TOO. This route never builds a
     # resolution snapshot, which is exactly why it was missed: a guard keyed on
@@ -1846,15 +1847,21 @@ def _compile_processes(
             # to None here. A legacy dialect's exemptions are unreachable from
             # the recipe path by construction.
             root_capabilities = resolution.capabilities_by_root.get(process_key)
+            # Per-call grants are minted for THIS root, exactly as on the
+            # authoring path. Compiling every root against the grant-free table
+            # left the per-call gate inert everywhere it was supposed to apply.
+            root_symbols = project_grants_for_root(
+                root, symbols, process_root_ref=process_key
+            )
             _cfg, plan = (
                 compile_process_ir_v1(
-                    root, symbols, validation_policy=None,
+                    root, root_symbols, validation_policy=None,
                     capabilities=root_capabilities,
                 )
                 if root_capabilities is not None
-                else compile_process_ir_v1(root, symbols, validation_policy=None)
+                else compile_process_ir_v1(root, root_symbols, validation_policy=None)
             )
-            artifacts.append((process_key, emit_process(plan, symbols)))
+            artifacts.append((process_key, emit_process(plan, root_symbols)))
         except ProcessIRCompileError as exc:
             raise RecipeError(
                 (

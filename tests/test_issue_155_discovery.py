@@ -425,3 +425,39 @@ def test_a_live_component_still_resolves():
         qc.get_component = original
     assert result["_success"] is True
     assert result["operation_version"] == 5
+
+
+def test_the_production_compile_paths_project_a_root():
+    """The per-call gate has to be REACHED, not merely implemented.
+
+    Live QA and the commit review both found the same thing: no production path
+    projected a root, so `process_root_ref` was always None, grant lookup was
+    disabled everywhere, and the old per-operation authorisation survived intact.
+    The projection is derived from the compiler's own lowering, so a path that
+    forgets it is a path that never mints.
+    """
+    import inspect
+
+    from boomi_mcp.authoring import workflow
+    from boomi_mcp.recipes import engine
+
+    for module, label in ((workflow, "authoring"), (engine, "recipe")):
+        source = inspect.getsource(module)
+        assert "project_grants_for_root(" in source, (
+            f"the {label} compile path does not project a root, so every table it "
+            "validates against has no grants and the per-call gate is inert"
+        )
+
+
+def test_projection_is_silent_where_the_validator_speaks():
+    """A root that cannot be lowered returns the table unchanged.
+
+    Lowering failures belong to the validator. A projection helper that raised
+    them would report one defect from two layers — the rule the minter follows.
+    """
+    from boomi_mcp.compiler.process_ir.connector_resolution import project_grants_for_root
+    from boomi_mcp.compiler.process_ir.contracts import SymbolTableV1
+
+    table = SymbolTableV1()
+    out = project_grants_for_root(object(), table, process_root_ref="$ref:R")
+    assert out is table or out.process_root_ref is None

@@ -750,7 +750,7 @@ __all__ = [
 ]
 
 
-def mint_idempotency_grants(cfg, symbols, *, process_root_ref: str):
+def mint_idempotency_grants(cfg, symbols, *, process_root_ref: str, registry=None):
     """Mint one per-call grant for every retried call whose contract resolves.
 
     The call paths come from the compiler's OWN binding resolution rather than
@@ -764,6 +764,7 @@ def mint_idempotency_grants(cfg, symbols, *, process_root_ref: str):
     whose job is to describe what is already valid.
     """
     from .contracts import IdempotencyGrantSymbolV1
+
 
     contracts = symbols.build_idempotency_index()
     # The evidence lives on the CFG node, which is where the retry check reads it
@@ -780,14 +781,24 @@ def mint_idempotency_grants(cfg, symbols, *, process_root_ref: str):
         contract_ref = getattr(evidence, "contract_ref", None)
         if not contract_ref:
             continue
-        if (contract_ref, binding.operation_ref) not in contracts:
+        contract = contracts.get((contract_ref, binding.operation_ref))
+        if contract is None:
             # An unresolvable reference is the validator's finding, not a reason
             # to mint a grant for a contract that does not cover this call.
+            continue
+        if contract.record_digest is not None and not _registry_holds(
+            registry, contract.record_digest
+        ):
+            # The symbol NAMES a record; the registry must be able to corroborate
+            # it. A caller-supplied digest the registry does not hold is a claim
+            # about evidence nobody has, and minting on it would let a fabricated
+            # or foreign-account symbol authorise a retry the system never saw.
             continue
         grant = IdempotencyGrantSymbolV1(
             contract_ref=contract_ref,
             operation_ref=binding.operation_ref,
             call_source_path=binding.source_path,
+            record_digest=contract.record_digest,
         )
         if grant.key in seen:
             continue
@@ -799,4 +810,49 @@ def mint_idempotency_grants(cfg, symbols, *, process_root_ref: str):
             "idempotency_grants": tuple(grants),
         }
     )
+
+
+def _registry_holds(registry, record_digest: str) -> bool:
+    """Whether the replay registry holds a record with this digest.
+
+    A missing registry corroborates NOTHING — it is not an absent constraint. A
+    symbol that names a record is asking to be checked, and answering "no
+    registry, so yes" would make the digest a decoration a caller could set to
+    bypass the check it exists to impose.
+    """
+    if registry is None:
+        try:
+            from ...connector_replay.registry import load_registry
+
+            registry = load_registry()
+        except Exception:  # noqa: BLE001
+            return False
+    return any(
+        getattr(record, "record_digest", None) == record_digest
+        for record in getattr(registry, "operation_records", ())
+    )
+
+
+def project_grants_for_root(root_ir, symbols, *, process_root_ref: str, registry=None):
+    """The production entry: lower this root, mint against it, return the table.
+
+    The minter needs a control-flow graph and the graph comes from lowering, so a
+    caller that has only the IR cannot mint. This does the lowering itself, from
+    the compiler's own lowerer, so there is one description of a call's position
+    rather than a private walk that can disagree with it.
+
+    Returns the table UNCHANGED when the root cannot be lowered. Lowering failures
+    are the validator's to report, and a projection helper that raised them would
+    report one defect from two layers — the same rule the minter follows.
+    """
+    try:
+        cfg = lower_process_ir_to_cfg(root_ir)
+    except Exception:  # noqa: BLE001
+        return symbols
+    try:
+        return mint_idempotency_grants(
+            cfg, symbols, process_root_ref=process_root_ref, registry=registry
+        )
+    except Exception:  # noqa: BLE001
+        return symbols
 
