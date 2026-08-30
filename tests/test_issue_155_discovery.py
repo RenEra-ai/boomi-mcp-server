@@ -279,6 +279,24 @@ def test_every_router_action_receives_its_config_AT_THE_SERVER_BOUNDARY():
     import server as server_module
     from boomi_mcp.categories.components import query_components as qc
 
+    # HERMETIC. The server resolves credentials before dispatching, so this test
+    # passed locally where a profile is registered and failed on CI where none
+    # is — the server returned before the router and `seen` stayed empty. A
+    # boundary test that needs a live profile is testing the environment.
+    class _Creds(dict):
+        def __getitem__(self, key):
+            return "x"
+
+        def get(self, key, default=None):
+            return "x"
+
+    original_secret = getattr(server_module, "get_secret", None)
+    original_boomi = getattr(server_module, "Boomi", None)
+    server_module.get_secret = lambda subject, profile: {
+        "account_id": "acct", "username": "u", "password": "p"
+    }
+    server_module.Boomi = lambda **kwargs: object()
+
     seen = {}
 
     def _spy(sdk, profile, action, **params):
@@ -310,6 +328,10 @@ def test_every_router_action_receives_its_config_AT_THE_SERVER_BOUNDARY():
     finally:
         server_module.query_components_action = original_router
         qc.query_components_action = original_qc
+        if original_secret is not None:
+            server_module.get_secret = original_secret
+        if original_boomi is not None:
+            server_module.Boomi = original_boomi
 
 
 @pytest.mark.parametrize(
