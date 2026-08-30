@@ -359,6 +359,12 @@ def live_identity_from_component_xml(
                         "element": local,
                         "customOperationType": attributes.get("customOperationType"),
                         "operationType": attributes.get("operationType"),
+                        # THE PATHS THIS CANDIDATE OWNS. Collected per candidate
+                        # so they are filtered by family alongside it: a shared
+                        # list let a decoy sibling's path field make a genuinely
+                        # path-less operation resolve as a settled route, and the
+                        # blank-path refusal then had nothing to fire on.
+                        "paths": [],
                     }
                 )
         if subtype is None and "subType" in attributes:
@@ -377,8 +383,9 @@ def live_identity_from_component_xml(
             and attributes.get("id") == "path"
             and config_depth is not None
             and len(stack) == config_depth + 1
+            and actions
         ):
-            path_fields.append(attributes.get("value"))
+            actions[-1]["paths"].append(attributes.get("value"))
 
     def _end(_name):
         nonlocal config_depth
@@ -457,6 +464,8 @@ def live_identity_from_component_xml(
     _allowed = _CONFIG_ELEMENTS_BY_FAMILY.get(family)
     if _allowed is not None:
         actions = [c for c in actions if c["element"] in _allowed]
+    # The surviving candidates' paths, and only theirs.
+    path_fields = [value for candidate in actions for value in candidate["paths"]]
 
     def _verb_of(config):
         if family == "database":

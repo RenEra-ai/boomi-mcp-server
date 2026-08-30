@@ -1766,15 +1766,21 @@ def _compile_processes(
             components, declared=connector_metadata or {}
         )
     except ConnectorIdentityError as identity_error:
+        # ONE DIAGNOSTIC PER FAILING COMPONENT, in the shape this module already
+        # uses twenty lines below. My first attempt invented a signature and
+        # raised `TypeError` on the very path it was written to handle — and the
+        # test I wrote for it read the AST for a `RecipeError` raise rather than
+        # triggering one, so it passed on code that cannot execute.
         raise RecipeError(
-            RECIPE_CONSTRAINT_FAILED,
-            str(identity_error),
-            details={
-                "component_key": identity_error.component_key,
-                "cause_codes": sorted(
-                    {failure.code for failure in identity_error.failures}
-                ),
-            },
+            tuple(
+                recipe_diagnostic(
+                    RECIPE_CONSTRAINT_FAILED,
+                    phase="validation",
+                    target=failure.component_key,
+                    cause_codes=(failure.code,),
+                )
+                for failure in identity_error.failures
+            )
         ) from identity_error
 
     symbols = build_symbol_table(

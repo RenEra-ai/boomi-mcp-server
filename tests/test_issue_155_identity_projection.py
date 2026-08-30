@@ -2896,28 +2896,86 @@ def test_the_remediation_matches_the_failure_that_produced_it():
 
 
 def test_the_recipe_boundary_translates_an_identity_refusal():
-    """CDX terminal: the refusal escaped as an unstructured failure.
+    """CDX terminal: the translation raised TypeError on its own path.
 
-    The bridges translate only `RecipeError`, so a public recipe plan or compile
-    lost the diagnostic contract exactly when the request was refused.
+    The first version of this test read the AST for a `RecipeError` raise, and
+    passed on a call inventing a signature the class does not have — so the
+    handler written to preserve the diagnostic contract would have crashed on
+    the exact refusal it exists for. A structural guard cannot tell whether code
+    RUNS; this one performs the construction the handler performs.
     """
-    import ast
-    from pathlib import Path
+    from boomi_mcp.authoring.connector_resolution_snapshot import (
+        ConnectorIdentityError,
+    )
+    from boomi_mcp.errors import CONNECTOR_REPLAY_IDENTITY_MISMATCH
+    from boomi_mcp.recipes.engine import RecipeError
+    from boomi_mcp.recipes.errors import RECIPE_CONSTRAINT_FAILED, recipe_diagnostic
 
-    module = Path(__file__).resolve().parents[1] / "src/boomi_mcp/recipes/engine.py"
-    tree = ast.parse(module.read_text())
-    guarded = [
-        t for t in ast.walk(tree)
-        if isinstance(t, ast.Try)
-        and any(
-            isinstance(c, ast.Call)
-            and getattr(c.func, "id", None) == "build_connector_resolution_snapshot"
-            for c in ast.walk(t)
+    identity_error = ConnectorIdentityError(
+        CONNECTOR_REPLAY_IDENTITY_MISMATCH, "declared GET, resolves POST",
+        component_key="op",
+    )
+    error = RecipeError(
+        tuple(
+            recipe_diagnostic(
+                RECIPE_CONSTRAINT_FAILED,
+                phase="validation",
+                target=failure.component_key,
+                cause_codes=(failure.code,),
+            )
+            for failure in identity_error.failures
         )
-    ]
-    assert guarded, "the recipe route lets an identity refusal escape untranslated"
-    assert any(
-        isinstance(r, ast.Raise)
-        and getattr(getattr(r.exc, "func", None), "id", None) == "RecipeError"
-        for h in guarded[0].handlers for r in ast.walk(h)
-    ), "it catches the refusal but does not translate it to the recipe contract"
+    )
+    assert error.diagnostics, "the translated error carries no diagnostic"
+    assert error.diagnostics[0].cause_codes == (CONNECTOR_REPLAY_IDENTITY_MISMATCH,)
+    assert error.diagnostics[0].target == "op"
+
+
+def test_a_decoy_path_beside_the_operation_config_does_not_settle_its_route():
+    """CDX terminal: candidates were filtered by family and their paths were not.
+
+    So a sibling element's `field id="path"` could make a genuinely path-less
+    operation resolve as a settled static route, and the blank-path refusal —
+    which fires only on an explicit requirement — had nothing to fire on.
+    """
+    from boomi_mcp.authoring.connector_resolution_snapshot import (
+        live_identity_from_component_xml,
+    )
+
+    with_decoy = _operation_component(
+        _REST_SUBTYPE,
+        '<Other><field id="path" value="/decoy"/></Other>'
+        '<GenericOperationConfig customOperationType="GET"/>',
+    )
+    identity = live_identity_from_component_xml("k", with_decoy)
+    assert identity.action == "GET"
+    assert identity.route_state == "unavailable", (
+        "a sibling's path settled the operation's route"
+    )
+
+    owned = _operation_component(
+        _REST_SUBTYPE,
+        '<GenericOperationConfig customOperationType="GET">'
+        '<field id="path" value="/real"/></GenericOperationConfig>',
+    )
+    assert live_identity_from_component_xml("k", owned).route_state == "static"
+
+
+def test_an_extension_bound_endpoint_is_seen_from_the_live_projection_too():
+    """CDX terminal: scanning only the config replaced a resolved-endpoint check.
+
+    A config with no endpoint of its own, whose account reading is extension
+    bound, reported a static mintable route literally equal to the marker.
+    """
+    from boomi_mcp.categories.components.builders.connector_builder import (
+        SET_BY_EXTENSION,
+        normalized_identity_projection,
+    )
+
+    identity = normalized_identity_projection(
+        {"connector_type": "rest_client", "method": "GET"},
+        live_projection={"url": SET_BY_EXTENSION},
+    )
+    assert identity.extension_bound is True
+    assert identity.route_state == "unavailable"
+    assert identity.endpoint != SET_BY_EXTENSION

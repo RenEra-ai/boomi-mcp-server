@@ -344,9 +344,16 @@ def normalized_identity_projection(config, live_projection=None):
     # pinned. WHICH field is the endpoint is a different question with a
     # family-specific answer, and answering it from the same scan truncated the
     # database family's composed host/port/database endpoint.
+    _live = live_projection if isinstance(live_projection, Mapping) else {}
     extension_bound = any(
         config.get(key) == SET_BY_EXTENSION
         for key in ("base_url", "url", "host", "endpoint_url", "wsdl_url")
+    ) or any(
+        # THE LIVE READING TOO. Scanning only the config replaced a check that
+        # had run against the resolved endpoint, so a config with no endpoint of
+        # its own and an extension-bound one from the account reported a static,
+        # mintable route literally equal to the extension marker.
+        _live.get(key) == SET_BY_EXTENSION for key in ("url", "endpoint")
     )
     endpoint_raw = config.get("base_url")
     if endpoint_raw is None:
