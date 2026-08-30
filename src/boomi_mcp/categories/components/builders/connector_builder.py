@@ -120,6 +120,18 @@ def _endpoint_reading(source: "Mapping[str, Any]", keys) -> tuple:
 #: cannot disagree about which families compose.
 _COMPOSED_ENDPOINT_BY_FAMILY = {"database": _compose_database_endpoint}
 
+# Registration requires the field list, checked where the registry is built so a
+# composer cannot be added without one and quietly disable the refusal.
+for _family, _fn in _COMPOSED_ENDPOINT_BY_FAMILY.items():
+    if not getattr(_fn, "reads", ()):
+        raise RuntimeError(
+            "composed-endpoint family {0!r} registers {1} without a non-empty "
+            "`reads`; the extension scan would silently cover no fields".format(
+                _family, getattr(_fn, "__name__", _fn)
+            )
+        )
+del _family, _fn
+
 
 def _reject_misplaced_set_by_extension(
     config: Dict[str, Any], allowed: frozenset, family: str
@@ -429,7 +441,11 @@ def normalized_identity_projection(config, live_projection=None):
     # mintable endpoint. Detection and selection now read the same fields.
     _endpoint_keys = _ENDPOINT_FIELDS_BY_FAMILY.get(family, _DEFAULT_ENDPOINT_FIELDS)
     _composer = _COMPOSED_ENDPOINT_BY_FAMILY.get(family)
-    _composed_keys = tuple(getattr(_composer, "reads", ()))
+    # `.reads` DIRECTLY, never `getattr(..., ())`: a default of "reads nothing"
+    # fails OPEN — it switches the placeholder refusal off for that family and
+    # serves the marker inside a composed route again. A composer registered
+    # without its field list is a programming error and should say so loudly.
+    _composed_keys = () if _composer is None else tuple(_composer.reads)
     # The two questions read the same fields, but they REDUCE them differently:
     # "is the account deciding this route" is true if ANY of the family's endpoint
     # fields carries the marker, while "which value is the endpoint" takes the

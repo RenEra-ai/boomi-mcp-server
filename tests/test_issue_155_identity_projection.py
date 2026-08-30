@@ -3307,13 +3307,20 @@ def test_the_composer_declares_exactly_the_fields_it_reads():
 
     from boomi_mcp.categories.components.builders import connector_builder as cb
 
-    body = inspect.getsource(cb._compose_database_endpoint)
-    read_in_body = set(re.findall(r'config\.get\("([a-z_]+)"\)', body))
-    assert read_in_body, "derivation found no config reads — the pin would be vacuous"
-    assert read_in_body == set(cb._compose_database_endpoint.reads), (
-        "the composer's declared fields and the fields it reads have diverged: "
-        f"declared={sorted(cb._compose_database_endpoint.reads)} body={sorted(read_in_body)}"
-    )
+    # The universe is the REGISTRY, not one composer named by hand: the code
+    # looks the composer up by family, so a second entry without a field list
+    # would be invisible to a pin that only ever inspects the first.
+    assert cb._COMPOSED_ENDPOINT_BY_FAMILY, "no composers registered — pin vacuous"
+    for family, composer in cb._COMPOSED_ENDPOINT_BY_FAMILY.items():
+        declared = set(getattr(composer, "reads", ()))
+        assert declared, f"{family} registers a composer with no declared fields"
+        body = inspect.getsource(composer)
+        read_in_body = set(re.findall(r'config\.get\("([a-z_]+)"\)', body))
+        assert read_in_body, f"{family}: derivation found no config reads — pin vacuous"
+        assert read_in_body == declared, (
+            f"{family}: the composer's declared fields and the fields it reads have "
+            f"diverged: declared={sorted(declared)} body={sorted(read_in_body)}"
+        )
 
 
 @pytest.mark.parametrize("field", ["host", "port", "dbname"])
@@ -3398,13 +3405,14 @@ def test_only_a_field_the_builder_can_bind_may_claim_an_extension_binding():
     sys.path.insert(0, "tests")
     from test_database_connector_builder import _minimal_config
 
+    from boomi_mcp.categories.components.builders import connector_builder as cb_module
     from boomi_mcp.categories.components.builders.connector_builder import (
         DatabaseConnectorBuilder,
         SET_BY_EXTENSION,
         normalized_identity_projection,
     )
 
-    for field in ("host", "port", "dbname"):
+    for field in cb_module._COMPOSED_ENDPOINT_BY_FAMILY["database"].reads:
         refused_by_builder = (
             DatabaseConnectorBuilder.validate_config(
                 _minimal_config(**{field: SET_BY_EXTENSION})
