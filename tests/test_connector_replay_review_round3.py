@@ -2078,14 +2078,16 @@ def _closing_report_violation(ledger_text, rel, archive_dir, git):
         rows = per_slice.get(slice_letter, [])
         latest_for_slice = rows[-1] if rows else ""
         violation = _one_closing_report_violation(
-            body, marker, rel, archive_dir, git, latest_for_slice
+            body, marker, rel, archive_dir, git, latest_for_slice,
+            slice_letter == current_slice,
         )
         if violation:
             return f"slice {slice_letter}: {violation}"
     return None
 
 
-def _one_closing_report_violation(report, marker, rel, archive_dir, git, latest_wave):
+def _one_closing_report_violation(report, marker, rel, archive_dir, git, latest_wave,
+                                 is_current):
     """One report against the wave gate its own slice most recently passed."""
     import re
 
@@ -2125,7 +2127,31 @@ def _one_closing_report_violation(report, marker, rel, archive_dir, git, latest_
         c for c in git("diff", "--name-only", w, n1,
                        "--", "src", "tests", "scripts").splitlines() if c.strip()
     ]
-    return f"not-dark: {changed}" if changed else None
+    if changed:
+        return f"not-dark: {changed}"
+
+    # AND NOTHING EXECUTABLE MAY MOVE AFTER N−1. Checking only `W..N−1` certified an
+    # ancestor: a correction landing after the reviewed tree left the report, the wave
+    # evidence and the review evidence all describing a tree that no longer existed,
+    # and this guard returned clean. A report whose tree has moved is INVALIDATED, and
+    # saying so is not a circularity: a closing whose corrections are still landing has
+    # no business carrying a finished report, and the protocol's own shape is that the
+    # report is written once, in the closing commit, on top of the tree every gate
+    # covered. While corrections are in flight the report is absent and this rule has
+    # nothing to check — which is exactly the state it should be in.
+    # CURRENCY APPLIES TO THE SLICE BEING CLOSED, and only to it. `W..N−1` above is
+    # intrinsic and holds forever; this one is about whether the report still describes
+    # the tip. For a LANDED slice source moving on afterwards is the next slice doing
+    # its work, not an invalidation — asserting it there would refuse every closing
+    # this issue has already made, correctly, as soon as the following slice touched a
+    # file.
+    if not is_current:
+        return None
+    moved = [
+        c for c in git("diff", "--name-only", n1, "HEAD",
+                       "--", "src", "tests", "scripts").splitlines() if c.strip()
+    ]
+    return f"invalidated: source moved after N−1: {moved}" if moved else None
 
 
 def test_a_closing_report_names_the_current_wave_sha_and_proves_darkness():
@@ -2789,21 +2815,37 @@ def _unscannable_finding_ids(ledger_text):
     _sys.path.insert(0, str(Path(__file__).resolve().parent))
     from test_wave_gate import _FINDING_ID_RE
 
+    # CANDIDATES COME FROM TABLE CONTEXT, not from the shape of the token. Selecting
+    # them by shape — a bare token carrying the issue infix — excluded exactly the
+    # malformed identifiers the rule exists to catch: `ARCH-155-r10 03` contains a
+    # space, so the shape filter skipped it and the scanner skipped it too, and the row
+    # stayed invisible with the guard green. A filter that drops what it is looking for
+    # is the same fail-open one level up. The finding table is located by its own `ID`
+    # header and read to the first blank line, which is the boundary the ledger's other
+    # derived checks already use.
     bad = set()
-    for line in ledger_text.splitlines():
-        if not line.startswith("| "):
-            continue
-        cells = line.split("|")
-        if len(cells) < 6:
-            continue
-        rid = cells[1].strip().strip("*").strip()
-        # A finding id is a bare token carrying the issue infix. Prose cells and the
-        # derived defect-CLASS rows are neither, and the scanner excludes DC rows for
-        # its own reason: their counts are an aggregate, not an append-only record.
-        if not rid or " " in rid or rid.startswith("DC-") or "-155-" not in rid:
-            continue
-        if not re.fullmatch(_FINDING_ID_RE, rid):
-            bad.add(rid)
+    lines = ledger_text.splitlines()
+    starts = [
+        i for i, line in enumerate(lines)
+        if line.startswith("|") and line.split("|")[1].strip() == "ID"
+    ]
+    for start in starts:
+        for line in lines[start + 1 :]:
+            if not line.strip():
+                break
+            if not line.startswith("|"):
+                break
+            cells = line.split("|")
+            if len(cells) < 6:
+                continue
+            rid = cells[1].strip().strip("*").strip()
+            # Separator rows and the derived defect-CLASS rows are not findings; the
+            # scanner excludes DC rows for its own reason, that their counts are an
+            # aggregate rather than an append-only record.
+            if not rid or rid == "ID" or set(rid) <= {"-", " "} or rid.startswith("DC-"):
+                continue
+            if not re.fullmatch(_FINDING_ID_RE, rid):
+                bad.add(rid)
     return sorted(bad)
 
 
@@ -2817,12 +2859,18 @@ def _unscannable_finding_ids(ledger_text):
         ("ARCH-155-B-e3-05a", True),
         ("SELF-155-D-pf-01", True),
         ("CDX-155-R-01", True),
+        # Whitespace: the scanner rejects it AND the earlier shape filter
+        # skipped it, so the row was invisible with this guard green.
+        ("ARCH-155-r10 03", True),
+        ("CDX-155-r100-01 ", False),
     ],
 )
 def test_the_identifier_rule_catches_the_shapes_that_shipped_unscanned(rid, caught):
     """Non-vacuity: the rule must reject the real historical shapes, not just parse."""
-    row = f"| {rid} | src | summary | label | class | tier | sha | fixed |"
-    assert bool(_unscannable_finding_ids(row)) is caught
+    table = ("| ID | source | summary | label | class | tier | sha | disposition |\n"
+             "| --- | --- | --- | --- | --- | --- | --- | --- |\n"
+             f"| {rid} | src | summary | label | class | tier | sha | fixed |\n")
+    assert bool(_unscannable_finding_ids(table)) is caught
 
 
 def test_every_finding_row_in_this_ledger_is_visible_to_the_scanner():

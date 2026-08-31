@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 11321, "minimum_collected": 11321, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 11323, "minimum_collected": 11323, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -11362,3 +11362,5 @@
 {"kind": "test", "id": "pytest-011361", "node_id": "tests/test_process_ir_error_handling.py::test_a_real_snapshot_is_accepted", "state": "active"}
 {"kind": "test", "id": "pytest-011362", "node_id": "tests/test_connector_replay_review_round3.py::test_the_closing_chain_rule_admits_exactly_one_shape[bbbbbbb-bbbbbbb-archived1-None]", "state": "active"}
 {"kind": "test", "id": "pytest-011363", "node_id": "tests/test_connector_replay_review_round3.py::test_the_closing_chain_rule_admits_exactly_one_shape[aaaaaaa-ddddddd-archived2-not-in-history]", "state": "active"}
+{"kind": "test", "id": "pytest-011364", "node_id": "tests/test_connector_replay_review_round3.py::test_the_identifier_rule_catches_the_shapes_that_shipped_unscanned[ARCH-155-r10 03-True]", "state": "active"}
+{"kind": "test", "id": "pytest-011365", "node_id": "tests/test_connector_replay_review_round3.py::test_the_identifier_rule_catches_the_shapes_that_shipped_unscanned[CDX-155-r100-01 -False]", "state": "active"}
