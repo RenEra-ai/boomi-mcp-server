@@ -1205,16 +1205,79 @@ are unchanged; what the revision corrects is the stated blocker, which named the
 where the real one is the account-independence invariant, and a call-site count that was two where
 it is four.
 
-## Slice D — why no closing report sits here yet
+## Slice D — closing report
 
-**It is written in the CLOSING COMMIT, not before it.** The report must name W and N−1, and those
-SHAs do not exist until the wave gate and the closing review have run on the final tree — so a
-report written earlier necessarily names a tree that is about to be superseded, which is what the
-closing-chain guard kept refusing. The protocol already says this: commit N carries the report and
-is validated by its darkness proof, the ledger scanners and the preflight rather than by a further
-gate. The finished text is held outside the tree until then. The audit record it draws on is
-complete and unaffected: the finding rows, every checkpoint decision including the withdrawn
-closure at 2 / 29, and the archived evidence for all thirty rounds.
+**Status: CLOSED for landing on the integration branch. Zero unresolved critical findings, zero
+deferred findings, no follow-up issues minted. The ISSUE remains OPEN — slice D is the fourth of
+six, and #155 closes only on slice F.**
+
+### Which gate covers which tree
+
+| Tree | Commit | What covers it |
+| --- | --- | --- |
+| **W** — the wave-gated tree | `a5dafb127c6abc63998442d1e3db4821e972ebad` (**W**) | `L4` composite wave gate, archived `wave-gate/wave155af`: 11365 passed / 18 skipped against a cap of 30, 74 active goldens deterministic and byte-exact, plan fingerprint checked over two cases, exit 0 |
+| **N−1** — the reviewed tree | `a5dafb127c6abc63998442d1e3db4821e972ebad` (**N−1**) | `L5` closing review, run `cdx-review.YgUsMS`, archived `commit-reviews/cdx-review.YgUsMS`, CLEAN over the complete delta since `88b4ed5` |
+| **N** — the closing commit | this commit | Record-only by protocol: this report, the closing checkpoint above, and the closing review's own archive. Validated by a darkness proof, all four ledger scanner files re-run whole, and the `scratch/**` preflight — never by a further review, which would recurse |
+
+W and N−1 are the same commit: the wave gate ran on exactly the tree the closing review had cleared,
+and this commit adds nothing outside `docs/architecture/`.
+
+### What slice D built
+
+Per-call replay grants keyed on the call site, the authored contract-reference grammar owned by one
+module, candidate discovery as a `query_components` action serving a closed field set, and an
+account-independent semantics row in the compiler revision. The per-call gate is load-bearing on
+every production path: the commit review twice found it wired but inert — once because no path
+projected a root, once because the lowering function was undefined so every projection returned the
+grant-free table — and both were fixed and driven from the public boundary rather than from an
+internal layer.
+
+### Gates run, in order
+
+| Loop | Result |
+| --- | --- |
+| `L1` Stage-1 QA | live scenarios through the public tool boundary, then affected re-runs on every applied correction |
+| `L2` Stage-2 commit review | the inner loop, closed clean |
+| `L3` §6 architect implementation review | three evaluations, the tracked maximum; the loop ended on the third by rule and closed on a clean commit review over its correction delta |
+| `L4` composite wave gate | passed on **W**, archived `wave-gate/wave155af` |
+| `L5` closing protocol | 41 evaluations, every one collected through the collector and archived as it was collected; the last two CLEAN |
+
+### What the closing loop cost, and what it bought
+
+Forty-one evaluations is far more than any earlier slice, and the reason is worth recording rather
+than smoothing: after the code settled, the findings turned inward. Rounds 31 through 40 were almost
+entirely about the closing guard itself and about this ledger — a guard that read the record's raw
+bytes while the same file had already decided that a fenced block is an illustration; four
+successive Markdown fence openers that an earlier filter got wrong; three successive Python binding
+shapes that mentioned a validator without running it; and, at the end, two defect-class cells
+assigned to the wrong mechanism and a hand-typed tally that went stale in the batch that made it
+stale.
+
+The tracked rule names that condition exactly — a reader over an open-ended space cannot make the
+coverage claim the structural-fix rule demands — and the rounds that converged were the ones that
+took its remedy literally. Every fix that ADDED a case produced another finding the next round.
+Every fix that REMOVED a model ended its line: the record may now carry no fenced block at all, so
+there is no opener grammar left to get wrong; an accepted rebind is matched as one exact shape, so
+there is no control flow left to trace; and a comparison arm that reported coverage it did not have
+was deleted rather than repaired.
+
+One measurement from that stretch belongs in the permanent record because it corrects a belief this
+repository could otherwise carry forward. Eleven of this branch's eighty-eight adjacent node-manifest
+transitions are illegal — produced by following the documented regeneration, which restores the slice
+baseline and renumbers every id an intermediate commit had already published. Every base the gates
+actually use accepts the result, so nothing had ever reported it. The intra-branch chain is therefore
+not an invariant this repository holds, and a guard claiming to enforce it would be claiming coverage
+over history that cannot be repaired forward and must not be rewritten, since archived attestations
+cite those commits. What the guard claims now is the one thing it can prove: the working tree is a
+legal successor of the manifest it replaces.
+
+### Residue
+
+None. Every finding in this slice is `fixed`, `finding-refuted` or `severity-refuted` on recorded
+evidence; no finding is deferred, so no follow-up issue was filed and none was minted. The four
+recurrences of `DC-155-D` and `DC-155-L` in the closing loop each received a materially different
+structural action rather than another instance patch, which is why the loop was continued at each
+checkpoint rather than escalated.
 
 ## Slice C — closing report
 
@@ -1574,6 +1637,8 @@ the hand-written copy. Each gets its own commit and its own validation before th
 | L5 closing protocol, slice D | 3 / 33 | `ea702f1`, findings | `CONTINUE` | WINDOW RUNS: `cdx-review.A18EaD`, `cdx-review.bD6leM`, `cdx-review.16Lj5D` . WINDOW ROWS: 5 . WINDOW CLASSES: `DC-155-D`, `DC-155-J`, `DC-155-L` . The mandatory thirty-third-evaluation checkpoint. PER-TIER: five findings, two critical by anchor, ZERO unresolved and zero deferred — every row fixed in the batch that followed its round. TREND, on the four recorded axes: highest unrefuted severity flat at critical, unresolved count flat at zero, affected-class breadth flat at one class, and no class minted in the window; nothing worsened and nothing can improve on a residue of zero. The gates reported 1, 2 and 3 findings; the window holds five rows because the first round's finding was a re-disposition of a row an earlier window already owns, not a new one. That rise is the honest signal here, so it is recorded rather than omitted: every finding in this window was about a GUARD the previous round had written, not about the slice. The tracked rule names that exact condition and prescribes shrinking what the checker models, and all three corrections did precisely that — a comparison arm that reported coverage it did not have was REMOVED, a Markdown form the reader cannot parse is now REFUSED rather than learned, and a predicate that matched a call now follows the value. Each is a subtraction. WHAT THE WINDOW BOUGHT: the measurement that eleven of this branch's eighty-eight adjacent manifest transitions are already illegal, produced by following the documented regeneration — so the intra-branch chain is not an invariant this repository holds, and a guard claiming to enforce it would have been claiming coverage over history that cannot be repaired without falsifying archived evidence. NAMED FINITE NEXT CORRECTION: none outstanding. The remaining work is validation, not mutation — this correction's delta review, the composite wave gate on the resulting tree, then the closing report and the preflight. Window resets; cumulative history kept |
 | L5 closing protocol, slice D | 3 / 36 | `e2aeee3`, findings | `CONTINUE` | WINDOW RUNS: `cdx-review.xDOrDR`, `cdx-review.UqVq5a`, `cdx-review.uje73C` . WINDOW ROWS: 6 . WINDOW CLASSES: `DC-155-D`, `DC-155-L` . The mandatory thirty-sixth-evaluation checkpoint. PER-TIER: six findings, ZERO critical, zero unresolved, zero deferred. TREND: highest unrefuted severity fell from critical to standard and stayed there for all three rounds — the first axis to improve materially in this loop; unresolved count flat at zero; breadth flat at one blocking class; no class minted. WHAT THESE ROUNDS WERE ABOUT, stated plainly because the count alone would mislead: every finding was a fresh bypass of a guard the PREVIOUS round had written, and the two guards were readers over the two open spaces the tracked rule names by name — Markdown's fence grammar and Python's binding syntax. Four successive openers were found in one reader and three successive binding shapes in the other, each after the last was fixed. That sequence is the rule's own description of a checker that cannot make a coverage claim, so both spaces are now CLOSED BY PROHIBITION rather than by another case: the record may carry no fenced block at all, and an accepted rebind may not branch. Neither reader has a grammar left to get wrong. A wave run was started during this window and STOPPED before completion, deliberately, when the round's findings arrived — a gate that reads a tree while the tree is being corrected certifies nothing. It produced no result, was never collected, and is therefore not an evaluation; it is recorded here so its absence from the archive is accounted for rather than noticed later. NAMED FINITE NEXT CORRECTION: none outstanding. The remaining work is validation — this correction's delta review, the composite wave gate on the tree that survives it, then the closing report and the preflight. Window resets; cumulative history kept |
 | L5 closing protocol, slice D | 3 / 39 | `9dc0913`, clean | `CONTINUE` | WINDOW RUNS: `cdx-review.PUrT4o`, `cdx-review.ixageJ`, `cdx-review.NOBaDZ` . WINDOW ROWS: 1 . WINDOW CLASSES: `DC-155-D` . The mandatory thirty-ninth-evaluation checkpoint, and the first window in this loop to END CLEAN — the third review found nothing to correct and said so. PER-TIER: one finding, zero critical, zero unresolved, zero deferred. TREND: highest unrefuted severity flat at standard; unresolved count flat at zero; affected BLOCKING-class breadth flat at one, `machine-served schemas/contracts`, which is the axis the workflow names and which has not moved in this loop; the DEFECT-class set — a different axis, and the one that moved — narrowed from two to one, `DC-155-D`, after narrowing from three to two the window before; and the window closed with a clean evaluation. An earlier version of this row reported those two axes as one and gave the merged figure the defect-class trajectory, which flattered the trend on the axis that had not improved. WHAT THESE ROUNDS WERE ABOUT: the code guards stopped producing findings after the two open spaces were closed by prohibition, and the last two rounds were about this RECORD — a hand-typed witness tally that went stale in the same batch that made it stale, and two defect-class cells assigned to the wrong pair. Both were corrected by revision with the originals retained, and the second correction mattered rather than being cosmetic: classing a finding by the subject of its own correction had moved a recurrence out of the class whose count decides whether a structural fix is owed. NAMED FINITE NEXT CORRECTION: none. The loop continues only to collect the validation it already owes — the composite wave gate on this tree, then the closing report and the preflight. Window resets; cumulative history kept |
+| L4 composite wave gate, slice D | 1 / 23 | `a5dafb1`, clean | `CLOSE-CLEAN` | W = `a5dafb127c6abc63998442d1e3db4821e972ebad`, archived `wave-gate/wave155af`. The composite run on the closing tree: 11365 passed, 18 skipped against a cap of 30, 74 active goldens deterministic and byte-exact, plan fingerprint checked over two cases, exit 0. This is the run the closing report names as W, and it is the same commit the closing review cleared, so W equals N−1 |
+| L5 closing protocol, slice D | 2 / 41 | `a5dafb1`, clean | `CLOSE-CLEAN` | WINDOW RUNS: `cdx-review.eKbPKR`, `cdx-review.YgUsMS` . WINDOW ROWS: 1 . WINDOW CLASSES: `DC-155-J` . The slice CLOSES. Every roster gate is current on the final tree, zero critical findings are unresolved, and no standard finding in a blocking class is outstanding — the residue is empty, so nothing is deferred and no follow-up issue exists to file. PER-TIER: one finding, zero critical, zero unresolved, zero deferred. TREND: the window's first review found one standard record defect and its second found nothing, on a tree that had not changed except to carry that correction. WHICH GATE COVERS WHICH TREE: W = `a5dafb1`, the wave-gated tree; N−1 = `a5dafb1`, the tree the closing review cleared; N = this commit, record-only and validated by its darkness proof, the four ledger scanners and the `scratch/**` preflight rather than by a further review. The closing report sits above this table and states the same three trees separately |
 
 ## Deferrals
 
