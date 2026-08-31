@@ -1296,6 +1296,7 @@ _EXPECTED_CLASS_COUNTS = {
     # instance named the pair in prose before a letter existed for it, so the tally
     # read zero while the mechanism was already recorded.
     "DC-155-R": 3,
+    "DC-155-T": 2,
     # Minted when two findings already recorded under two unrelated classes turned
     # out to share one pair: a hand-model of what git itself reports, against git.
     "DC-155-S": 3,
@@ -1320,7 +1321,9 @@ _UNROWED = {"DC-155-C": 2, "DC-155-I": 1}
 #: the reason. Frozen so the set cannot grow silently: a row that names a class is an
 #: instance of it unless it appears here.
 _NOT_AN_INSTANCE = {
+    "EVAL-155-13a": "its class is CORRECTED by EVAL-155-13b; the original names the superseded class",
     "SELF-155-r98-01b": "a revision of a revision; the original is what counts",
+    "SELF-155-r98-01c": "likewise; the original is the counted row",
     "EVAL-155-13": "its class is CORRECTED by EVAL-155-13a; the original names the superseded class",
     "CDX-155-r110-01": "superseded by CDX-155-r110-01a, which refutes it; a refuted row is not an instance",
     "CDX-155-r103-01": "its class is CORRECTED by CDX-155-r103-01a; the original names the superseded class",
@@ -3794,7 +3797,11 @@ def _missing_checkpoint_violation(ledger_text, index_text, slice_letter=None,
             try:
                 entry = json.loads(record.read_text())
             except ValueError:
-                continue
+                # UNREADABLE EVIDENCE IS A VIOLATION, not a round to skip. Skipping it
+                # let a truncated round drop out of the count, and with it the
+                # checkpoint that count made owed — evidence nobody can read failing
+                # open is how a gate certifies what it never saw.
+                return f"wave round {d.name} has unreadable evidence"
             if entry.get("status") == "completed":
                 note(str(entry.get("logical_loop", "")))
 
@@ -3814,7 +3821,18 @@ def _missing_checkpoint_violation(ledger_text, index_text, slice_letter=None,
     # the audited slice from the latest L4 row meant a new slice reaching its third
     # review BEFORE its first wave run was attributed to the previous slice, and its
     # missing checkpoint passed — the gap is widest exactly when the slice is youngest.
-    wanted = {slice_letter} if slice_letter else slices
+    # SLICES THAT HAVE NOT LANDED. A missing checkpoint can only be supplied honestly
+    # while its window is open; for a landed slice the decision was never made and
+    # writing one now would fabricate it, which a review refused when this rule first
+    # surfaced three historical gaps. Those gaps are RECORDED in the checkpoint table
+    # as gap rows instead. Landed slices are read from the slice map, which is where
+    # the record states it, rather than from a list kept here.
+    landed = set()
+    for line in ledger_text.splitlines():
+        m = re.match(r"\|\s*([A-F])\s*\|", line)
+        if m and re.search(r"\bLANDED\b|\bCLOSED CLEAN\b", line):
+            landed.add(m.group(1))
+    wanted = ({slice_letter} if slice_letter else slices) - landed
     for (here, loop), count in sorted(billed.items()):
         if here not in wanted:
             continue
