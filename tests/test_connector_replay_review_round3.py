@@ -3226,49 +3226,35 @@ def test_every_finding_row_in_this_ledger_is_visible_to_the_scanner():
 
 
 def _unfenced_lines(text):
-    """The document's lines with fenced blocks blanked out.
+    """The record's lines. The record may not contain a fenced block at all.
 
-    A fenced illustration is not part of the record. Left in, a quoted example of the
-    checkpoint HEADER hijacked the guard — it read the example's rows and never saw the
-    real table — and a quoted finding row padded a real window. This ledger documents
-    its own formats, so quoting them is a thing it does, not an attack.
+    This began as a filter: a fenced illustration is not part of the record, so blank
+    it. Four consecutive reviews then produced four different openers the filter got
+    wrong — a tilde fence, a four-backtick fence quoting three-backtick examples, and
+    a three-backtick line whose info string carries another backtick, which CommonMark
+    does not treat as an opener at all. Each was a real bypass: quoted rows were read
+    as live record, or live rows were blanked and vanished from a window count.
+
+    That is the shape the tracked rule describes — a reader over Markdown's rendering
+    rules cannot make the coverage claim the structural-fix rule demands, and every
+    case it learns disguises that a little longer. So the filter is GONE. The record
+    is plain lines, a fence-like opener is refused where every reader passes, and
+    there is no opener grammar left to get wrong. Measured when this landed: the
+    ledger contains no fence, so the prohibition costs it nothing.
     """
     import re
 
-    # REFUSE THE FORM THIS CANNOT READ, rather than learn one more case of it.
-    # CommonMark has exactly two fenced-code openers, backtick and tilde; this
-    # function only ever understood backticks, so a `~~~` illustration stayed in the
-    # record and a tilde-fenced closing report was read as a real one (measured).
-    # Teaching it tildes would leave indentation, lazy continuation and the rest of
-    # Markdown's rendering rules — an open space no reader can make a coverage claim
-    # over. Narrowing the INPUT to the one fence form this ledger uses is a claim that
-    # can be made: the document may not contain the other, and says so here.
-    # ONE fence form, ONE length. Refusing tildes alone left the other half of the
-    # same open space: a four-backtick fence quoting three-backtick examples defeats
-    # the toggle below and exposes the quoted rows as live record (measured). Matching
-    # fence lengths would be a Markdown parser, and a parser over Markdown cannot make
-    # the coverage claim this repository's rule demands. So the permitted form is
-    # exactly three backticks and every other fence-like opener is refused. Measured
-    # when written: this ledger contains no fence at all, so the rule costs it nothing.
-    offenders = []
-    for i, line in enumerate(text.splitlines()):
-        run = re.match(r"(`{3,}|~{3,})", line.lstrip())
-        if run and run.group(1) != "```":
-            offenders.append((i + 1, run.group(1)[:6]))
+    offenders = [
+        (i + 1, run.group(1)[:6])
+        for i, line in enumerate(text.splitlines())
+        if (run := re.match(r"(`{3,}|~{3,})", line.lstrip()))
+    ]
     if offenders:
         raise AssertionError(
-            "the record uses a fence this reader does not understand and the ledger "
-            f"may not contain: {offenders}. Exactly three backticks, or no fence."
+            "the record may not contain a fenced block, and this reader does not "
+            f"parse one: {offenders}. Quote a format inline, or in a separate file."
         )
-
-    out, fenced = [], False
-    for line in text.splitlines():
-        if line.lstrip().startswith("```"):
-            fenced = not fenced
-            out.append("")
-            continue
-        out.append("" if fenced else line)
-    return out
+    return text.splitlines()
 
 
 def _table_rows(lines, header_test):
@@ -3905,7 +3891,15 @@ def test_the_guard_reads_the_record_and_not_an_illustration_of_it(name, ledger):
     RELOCATED the recognition escape rather than closing it, which is the signature of
     a checker over free-form text, and the terminating design is named there instead.
     """
-    assert _checkpoint_inventory_violation(ledger) is not None, name
+    try:
+        violation = _checkpoint_inventory_violation(ledger)
+    except AssertionError as refusal:
+        # The fenced cases now end here, and that is the stronger verdict: the record
+        # may not carry a fence at all, so the guard never has to decide what an
+        # illustration was trying to say.
+        assert "may not contain" in str(refusal), name
+        return
+    assert violation is not None, name
 
 
 @pytest.mark.parametrize(
@@ -4473,9 +4467,27 @@ def _raw_ledger_reads(node):
             isinstance(t, ast.Name) and t.id == "ledger_text" for t in stmt.targets
         ):
             continue
-        if any(feeds_the_filter(c) for c in ast.walk(stmt.value)):
-            rebind_line = stmt.lineno
-            break
+        if not any(feeds_the_filter(c) for c in ast.walk(stmt.value)):
+            continue
+        # AND THE VALUE MUST DERIVE SOLELY FROM THE FILTER. A ternary —
+        # `ledger_text = filtered if enabled else ledger_text` — puts a raw load on
+        # the assignment's own line, which a line-number comparison then drops, and
+        # the untaken branch reads the record unfiltered. Constructed and confirmed.
+        # Rather than analyse the expression, require that every occurrence of the
+        # parameter inside it is an argument to the filter.
+        value_args = {
+            id(a) for c in ast.walk(stmt.value) if feeds_the_filter(c) for a in c.args
+        }
+        if any(
+            isinstance(sub, ast.Name)
+            and sub.id == "ledger_text"
+            and isinstance(sub.ctx, ast.Load)
+            and id(sub) not in value_args
+            for sub in ast.walk(stmt.value)
+        ):
+            continue
+        rebind_line = stmt.lineno
+        break
 
     # THE VALUE, not the call. A reader that calls the filter and throws the result
     # away, then searches the raw name, satisfied an earlier version of this check.
@@ -4518,6 +4530,11 @@ _READER_SHAPES = (
      "def f(ledger_text, enabled):\n"
      "    if enabled:\n"
      "        ledger_text = '\\n'.join(_unfenced_lines(ledger_text))\n"
+     "    return ledger_text.count('x')\n"),
+    ("rebinds through a ternary that keeps the raw value", True,
+     "def f(ledger_text, enabled):\n"
+     "    ledger_text = ('\\n'.join(_unfenced_lines(ledger_text))\n"
+     "                   if enabled else ledger_text)\n"
      "    return ledger_text.count('x')\n"),
 )
 
@@ -4574,40 +4591,35 @@ def test_every_reader_of_the_record_reads_the_records_own_view():
 
 
 def test_the_record_may_not_carry_a_fence_this_reader_cannot_read():
-    """Both directions, against the real ledger and against the form it excludes.
+    """Every fence form refused; the record read as the plain lines it is.
 
-    The closing guard was bypassed by a `~~~`-fenced illustration: the reader saw no
-    fence, so the example's heading counted as a closing report and the
-    missing-report refusal went silent. The response is not a second fence rule —
-    Markdown's rendering is exactly the open-ended space the repository's own lesson
-    says a checker cannot cover. The response is that the record may not contain the
-    form, which is a closed claim and is enforced where every reader passes.
+    Four reviews produced four openers an earlier filter got wrong, in both
+    directions — quoted rows read as live record, and live rows blanked out of a
+    window count. Learning a fifth is the move this repository's own rule warns
+    against, so the record simply may not carry one. That is a claim over a closed
+    alphabet: any line opening with three or more backticks or tildes is refused,
+    whatever follows it.
     """
     ledger = (
         Path(__file__).resolve().parent.parent
         / "docs/architecture/ISSUE_155_AUDIT_LEDGER.md"
     )
-    text = ledger.read_text(encoding="utf-8")
+    lines = _unfenced_lines(ledger.read_text(encoding="utf-8"))
 
-    # The live record reads cleanly.
-    assert _unfenced_lines(text)
+    # The live record reads, and reads WHOLE — nothing is blanked, because nothing
+    # does any blanking any more.
+    assert lines and any("| ID |" in line for line in lines)
 
-    # EVERY excluded form is refused rather than silently misread. The tilde fence
-    # was the first found; the four-backtick fence quoting three-backtick examples was
-    # found immediately after, in the same open space — which is why the rule is now
-    # one permitted form at one length rather than a list of rejected ones.
     for label, doc in (
-        ("tilde", "| a |\n~~~markdown\n## Slice Z — closing report\n~~~\n"),
-        ("four backticks",
-         "| a |\n````markdown\n```\n| FENCED ROW |\n```\n````\n"),
+        ("plain three backticks", "| a |\n```\n| ROW |\n```\n"),
+        ("info string with a backtick", "| a |\n```a`b\n| ROW |\n```\n"),
+        ("four backticks", "| a |\n````md\n```\n| ROW |\n```\n````\n"),
+        ("tilde", "| a |\n~~~md\n| ROW |\n~~~\n"),
+        ("indented opener", "| a |\n   ```\n| ROW |\n   ```\n"),
     ):
         with pytest.raises(AssertionError) as excinfo:
             _unfenced_lines(doc)
         assert "may not contain" in str(excinfo.value), label
 
-    # Non-vacuity in the other direction: the permitted form is READ, its contents
-    # blanked rather than counted, and a line-initial inline code span is not a fence.
-    read = _unfenced_lines("| a |\n```markdown\n## Slice Z — closing report\n```\n")
-    assert "## Slice Z — closing report" not in read
-    assert "| a |" in read
-    assert "`x` is code" in _unfenced_lines("`x` is code\n")
+    # And a line-initial inline code span is not a fence.
+    assert _unfenced_lines("`x` is code\n") == ["`x` is code"]
