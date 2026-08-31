@@ -3246,13 +3246,26 @@ def _window_inventory(ledger_text, runs):
         # or not-validated. Honouring `none` on any disposition let a row declare the
         # waiver in one column while its disposition accepted a second half in
         # another — the dual-disposition shape, moved one column over.
-        # EXACT, and only the two dispositions that remove the finding. `startswith`
-        # accepted "finding-refuted in part; remainder validated", which is the
-        # dual-disposition shape again; and `severity-refuted` only changes the TIER,
-        # so the finding stands and still owes its class.
-        full_refutation = disp.split("—")[0].split(";")[0].strip().rstrip(".")
+        # THE WHOLE CELL, not a truncation of it. Cutting at the first separator
+        # accepted "finding-refuted; remainder validated" — the dual-disposition
+        # shape — and simultaneously REJECTED this ledger's established
+        # "not-validated as a defect ..." form, which carries no separator at all. A
+        # waiver now requires the cell to OPEN with one of the two dispositions that
+        # remove a finding and to name no OTHER disposition anywhere in it, so a
+        # contradicting clause cannot hide behind a correct opening. `severity-refuted`
+        # is not among them: it changes the TIER and leaves the finding standing.
+        # A SHAPE, not a keyword scan. Token matching could not tell
+        # "finding-refuted; remainder validated" from a clean refutation, because the
+        # clause that revives the finding uses no disposition word at all — prose
+        # cannot be made to declare its own contradiction. So the waiver requires the
+        # DECLARED shape this ledger already uses for it: the disposition opens with
+        # one of the two dispositions that REMOVE a finding, followed by an em dash
+        # and its evidence. Anything else — a semicolon, a second clause, a bare
+        # status — does not waive, and the row owes its defect class. Narrow by
+        # design: a waiver is the one place a blocking row escapes accounting, so it
+        # is the one place that should be spelled exactly.
         owed = in_blocking and not (
-            waives and full_refutation in ("finding-refuted", "not-validated"))
+            waives and re.match(r"(finding-refuted|not-validated) — ", disp))
         if not in_blocking:
             owed = False
         if owed and klass is None:
