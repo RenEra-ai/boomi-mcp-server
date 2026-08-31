@@ -1188,74 +1188,16 @@ are unchanged; what the revision corrects is the stated blocker, which named the
 where the real one is the account-independence invariant, and a call-site count that was two where
 it is four.
 
-## Slice D — closing report
+## Slice D — why no closing report sits here yet
 
-**Status: CLOSED for landing on the integration branch. The ISSUE remains OPEN — slice D is the
-fourth of six, and #155 closes only on slice F.**
-
-### What the slice built
-
-Per-call replay grants keyed on `(contract_ref, operation_ref, call_source_path)` and minted from
-the compiler's own lowering and binding resolution; the authored `$ref:` grammar owned by one
-authority with its own refusal code; idempotency contracts re-keyed to `(ref, operation_ref)`;
-candidate discovery as a `query_components` action serving a closed field set; and an
-account-independent `connector_replay_semantics` row in the compiler revision.
-
-### Which gate covers which tree
-
-| Tree | Commit | What covers it |
-| --- | --- | --- |
-| **W** — the wave-gated tree | `2a150f0` (**W**) | `L4` composite wave gate, archived `wave-gate/wave155ad`, exit status captured as zero: the non-KB suite green at 11,357 passed and 18 skipped against a cap of 30, all 74 goldens deterministic and byte-exact, 2 plan-fingerprint cases. Twenty-one runs of this gate were needed for this slice, each invalidated by the next correction; the first twenty are retained as the record of gates genuinely passed and then genuinely invalidated |
-| **N−1** — the reviewed tree | `17b5af9` (**N−1**) | `L5` closing review, run `cdx-review.BZ2bvj`, archived, covering the delta since `68b46de`. W is a descendant of N−1 by one record-only commit; no source, test or script differs between them |
-| **N** — the closing commit | this commit | Record-only by protocol: this report and the closing checkpoint. Validated by the darkness proof over source, tests and scripts, all four ledger scanner files re-run whole, and the `scratch/**` preflight — never by a further review, which would recurse |
-
-### Gates
-
-| Gate | Evidence |
-| --- | --- |
-| L1 Stage-1 QA | 2 dispatches through the public tool boundary |
-| L2 Stage-2 commit review | 11 rounds, closed `CLOSE-CLEAN` at `7f5114e`. Nineteen findings, thirteen critical by anchor, every one a real defect — the per-call gate implemented but never reached, provenance treated as optional, corroboration accepting an unrelated record, a family comparison spanning two vocabularies that could never match real evidence |
-| L3 §6 architect review | ONE evaluation, run `cdx-gate-review.SSLdUv`, recorded as having run under the superseded per-slice reading. No further architect evaluation runs for this slice: under the owner's 2026-08-30 correction that gate belongs to the finished issue |
-| L4 composite wave gate | 21 rounds; W = `2a150f0`, archived |
-| L5 closing protocol | 29 evaluations, every one collected and archived; closed `DEFER-STANDARD-AND-CLOSE` |
-
-### Residue carried out of this slice
-
-- `ARCH-155-r10-03` — **DEFERRED**, reason class `blocked-by-mechanism`, placement **#155 slice F**.
-  No production path constructs an idempotency contract symbol, so a caller can discover the correct
-  reference and planning still refuses it. Authoring one means accepting caller-supplied provenance
-  at a public boundary, and establishing that trust surface is what the evidence slice is for. No
-  follow-up issue is minted: the placement is a later slice of this same open issue, which is
-  sequencing rather than debt. **#155 cannot close while this stands.**
-- `CDX-155-r127-01` — **NOT-VALIDATED**, which is a disposition rather than a deferral, under the
-  boundary verdict this loop pre-committed to at its fifteenth evaluation. It counts as an instance of
-  its defect class; only the patch was declined. A residual marker-replay path in the class-tally ratchet, reachable only by a
-  floor sequence none of which has occurred, on a mechanism used exactly once in this ledger.
-- `QA-155-r55-04a` — inherited from slice C, escalated open under the `DC-155-D` escalation, no
-  follow-up filed because filing is the owner's to authorise.
-
-### What this slice cost, and what it bought
-
-The shipped surface was clean at the eleventh Stage-2 evaluation and was never touched again.
-Twenty-nine further evaluations went to the audit record and the guards over it. They found forty
-finding rows invisible to the ledger's own scanner — including a revision whose supersession had
-never been verified and the deferred finding this closure rests on; a closing-chain guard that had
-never once executed; sixteen checkpoint rows filed under the wrong table header; three historical
-loops with twelve, three and three archived evaluations and no recorded decision at any interval; a
-fabricated SHA in an attestation row; five inflated tiers; a stale slice map claiming a landed slice
-was in flight; and a stopping rule that, as first written, would have authorised closing over a
-critical finding.
-
-They also cost seven consecutive rounds narrowing ONE exemption that has been exercised once. The
-freeze written to stop exactly that was applied at the seventh, not the first. Three separate times
-an instrument could not show the thing under investigation and reported its own reach instead: a
-debug print that skipped the disposition cell, a decorator grep that missed a route registered
-another way, and a witness whose history ran backwards so three mutation controls proved nothing.
-Both halves belong in the record.
-
-### Restoration
-
-None used. No provisional correction was left unvalidated at HEAD.
+**It is written in the CLOSING COMMIT, not before it.** The report must name W and N−1, and those
+SHAs do not exist until the wave gate and the closing review have run on the final tree — so a
+report written earlier necessarily names a tree that is about to be superseded, which is what the
+closing-chain guard kept refusing. The protocol already says this: commit N carries the report and
+is validated by its darkness proof, the ledger scanners and the preflight rather than by a further
+gate. The finished text is held outside the tree until then. The audit record it draws on is
+complete and unaffected: the finding rows, every checkpoint decision including the withdrawn
+closure at 2 / 29, and the archived evidence for all thirty rounds.
 
 ## Slice C — closing report
 
