@@ -2163,19 +2163,23 @@ def _one_closing_report_violation(report, marker, rel, archive_dir, git, latest_
         c for c in git("diff", "--name-only", n1, "HEAD",
                        "--", "src", "tests", "scripts").splitlines() if c.strip()
     )
-    watched = ("src/", "tests/", "scripts/")
-    # `=all`, not `=normal`: normal collapses an untracked directory to `src/`, which
-    # still fires but names a directory where the reader needs the file.
-    for line in git("status", "--porcelain", "--untracked-files=all").splitlines():
-        if len(line) < 4:
-            continue
-        # Porcelain v1: XY then the path, and a rename carries `old -> new`. Both
-        # sides are checked, because renaming a source file OUT of a watched tree
-        # changes it just as surely as renaming one in.
-        for path in line[3:].split(" -> "):
-            path = path.strip().strip('"')
-            if path.startswith(watched):
-                moved.add(path)
+    # LET GIT DECIDE MEMBERSHIP, and never split a display-formatted path. Matching
+    # prefixes myself against porcelain v1 output fabricated a watched path out of a
+    # legal filename: a file under a directory named `a -> src` is printed as
+    # `"docs/a -> src/bar.py"`, and splitting on the rename separator yields a
+    # `src/bar.py` that does not exist — the mandatory closing guard then refuses a
+    # tree in which nothing watched changed. Constructed and measured, not reasoned
+    # about. The pathspec makes git answer the membership question, and `-z` makes it
+    # emit NUL-delimited unquoted records, so neither the prefix test nor the rename
+    # separator is mine to get wrong. Same correction as the round before: stop
+    # modelling what the authority already reports.
+    records = git("status", "--porcelain", "-z", "--untracked-files=all",
+                  "--", "src", "tests", "scripts").split("\0")
+    for record in records:
+        # In `-z`, a rename emits the new path and the old path as SEPARATE records,
+        # so there is no separator to split and both sides are seen on their own.
+        if len(record) > 3 and record[2] == " ":
+            moved.add(record[3:])
     return (f"invalidated: source moved after N−1: {sorted(moved)}" if moved else None)
 
 
@@ -2513,6 +2517,14 @@ def _synthetic_closing_repo(tmp_path, wave_shas_from, cited, executable_drift=Fa
         (root / "src" / f"{pending_drift}.py").write_text("y = 2\n")
         if pending_drift.startswith("staged"):
             git("add", "src")
+        if pending_drift == "adversarial_name":
+            # A legal filename whose DISPLAY form contains the rename separator: the
+            # prefix-matching parser fabricated a `src/` path from it and refused a
+            # tree in which nothing watched had changed.
+            (root / "src" / f"{pending_drift}.py").unlink()
+            adversarial = root / "docs" / "a -> src"
+            adversarial.mkdir(parents=True, exist_ok=True)
+            (adversarial / "bar.py").write_text("z = 3\n")
         if pending_drift == "staged_then_removed":
             # Staged, then reverted in the worktree only: invisible to a diff against
             # the commit AND to the untracked listing, yet a plain commit includes it.
@@ -2560,6 +2572,21 @@ def test_the_repository_guard_refuses_a_report_citing_a_superseded_wave(tmp_path
     assert _closing_report_violation(
         (tmp_path / "repo" / "ledger.md").read_text(), "ledger.md", archive, git
     ).endswith("stale-wave")
+
+
+def test_the_repository_guard_does_not_fabricate_a_watched_path(tmp_path):
+    """A legal filename whose display form contains the rename separator.
+
+    The complement of the cases above: this guard is MANDATORY, so a false positive
+    refuses a correct closing outright. Prefix-matching against porcelain v1 read
+    `"docs/a -> src/bar.py"` as two paths and invented a `src/bar.py` nothing created.
+    """
+    git, archive = _synthetic_closing_repo(
+        tmp_path, wave_shas_from=[0], cited=0, pending_drift="adversarial_name"
+    )
+    assert _closing_report_violation(
+        (tmp_path / "repo" / "ledger.md").read_text(), "ledger.md", archive, git
+    ) is None
 
 
 @pytest.mark.parametrize("pending", ["staged", "untracked", "staged_then_removed"])
