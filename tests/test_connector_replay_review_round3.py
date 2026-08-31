@@ -3233,6 +3233,8 @@ def _unfenced_lines(text):
     real table — and a quoted finding row padded a real window. This ledger documents
     its own formats, so quoting them is a thing it does, not an attack.
     """
+    import re
+
     # REFUSE THE FORM THIS CANNOT READ, rather than learn one more case of it.
     # CommonMark has exactly two fenced-code openers, backtick and tilde; this
     # function only ever understood backticks, so a `~~~` illustration stayed in the
@@ -3241,13 +3243,22 @@ def _unfenced_lines(text):
     # Markdown's rendering rules — an open space no reader can make a coverage claim
     # over. Narrowing the INPUT to the one fence form this ledger uses is a claim that
     # can be made: the document may not contain the other, and says so here.
-    offenders = [
-        i + 1 for i, line in enumerate(text.splitlines()) if line.lstrip().startswith("~~~")
-    ]
+    # ONE fence form, ONE length. Refusing tildes alone left the other half of the
+    # same open space: a four-backtick fence quoting three-backtick examples defeats
+    # the toggle below and exposes the quoted rows as live record (measured). Matching
+    # fence lengths would be a Markdown parser, and a parser over Markdown cannot make
+    # the coverage claim this repository's rule demands. So the permitted form is
+    # exactly three backticks and every other fence-like opener is refused. Measured
+    # when written: this ledger contains no fence at all, so the rule costs it nothing.
+    offenders = []
+    for i, line in enumerate(text.splitlines()):
+        run = re.match(r"(`{3,}|~{3,})", line.lstrip())
+        if run and run.group(1) != "```":
+            offenders.append((i + 1, run.group(1)[:6]))
     if offenders:
         raise AssertionError(
-            "the record uses a tilde fence, which this reader does not understand and "
-            f"the ledger may not contain; lines {offenders}. Use a backtick fence."
+            "the record uses a fence this reader does not understand and the ledger "
+            f"may not contain: {offenders}. Exactly three backticks, or no fence."
         )
 
     out, fenced = [], False
@@ -4430,6 +4441,87 @@ def test_the_node_manifest_is_a_legal_successor_of_the_one_it_replaces():
         )
 
 
+def _raw_ledger_reads(node):
+    """Line numbers where ``node`` reads its ledger text WITHOUT the record's view.
+
+    Extracted so the witnesses below drive THIS predicate rather than a second copy
+    of it — a copy is the very defect this file keeps recording, and a witness graded
+    against a private re-implementation grades nothing.
+    """
+    import ast
+
+    def feeds_the_filter(call):
+        return (
+            isinstance(call, ast.Call)
+            and isinstance(call.func, ast.Name)
+            and call.func.id == "_unfenced_lines"
+            and any(
+                isinstance(a, ast.Name) and a.id == "ledger_text" for a in call.args
+            )
+        )
+
+    # THE REBIND MUST BE UNCONDITIONAL, and a statement of the function body itself.
+    # A rebind nested in an `if` used to set the line number and then exempt every
+    # later read, including the branch that never filtered. Following Python's binding
+    # across arbitrary control flow is one of the two open spaces the tracked rule
+    # names, so this does not attempt it: one accepted shape, everything else reported.
+    rebind_line = None
+    for stmt in node.body:
+        if not isinstance(stmt, ast.Assign):
+            continue
+        if not any(
+            isinstance(t, ast.Name) and t.id == "ledger_text" for t in stmt.targets
+        ):
+            continue
+        if any(feeds_the_filter(c) for c in ast.walk(stmt.value)):
+            rebind_line = stmt.lineno
+            break
+
+    # THE VALUE, not the call. A reader that calls the filter and throws the result
+    # away, then searches the raw name, satisfied an earlier version of this check.
+    filtered_args = {
+        id(a) for sub in ast.walk(node) if feeds_the_filter(sub) for a in sub.args
+    }
+    return [
+        sub.lineno
+        for sub in ast.walk(node)
+        if isinstance(sub, ast.Name)
+        and sub.id == "ledger_text"
+        and isinstance(sub.ctx, ast.Load)
+        and id(sub) not in filtered_args
+        and (rebind_line is None or sub.lineno < rebind_line)
+    ]
+
+
+#: Every shape this predicate must judge, with the verdict it must reach. Written as
+#: data so the witness cannot drift from the rule: each is a real function this
+#: repository could plausibly grow, and the two that must offend are the exact two a
+#: review constructed after each earlier version of the predicate went green on them.
+_READER_SHAPES = (
+    ("unconditional rebind", False,
+     "def f(ledger_text):\n"
+     "    ledger_text = '\\n'.join(_unfenced_lines(ledger_text))\n"
+     "    return ledger_text.count('x')\n"),
+    ("passes it straight through", False,
+     "def f(ledger_text):\n"
+     "    return _table_rows(_unfenced_lines(ledger_text), None)\n"),
+    ("discards the filtered value", True,
+     "def f(ledger_text):\n"
+     "    _unfenced_lines(ledger_text)\n"
+     "    return ledger_text.count('x')\n"),
+    ("reads raw before the rebind", True,
+     "def f(ledger_text):\n"
+     "    n = ledger_text.count('x')\n"
+     "    ledger_text = '\\n'.join(_unfenced_lines(ledger_text))\n"
+     "    return n\n"),
+    ("rebinds only on one branch", True,
+     "def f(ledger_text, enabled):\n"
+     "    if enabled:\n"
+     "        ledger_text = '\\n'.join(_unfenced_lines(ledger_text))\n"
+     "    return ledger_text.count('x')\n"),
+)
+
+
 def test_every_reader_of_the_record_reads_the_records_own_view():
     """One view of this document, derived — never a second, weaker one.
 
@@ -4454,54 +4546,12 @@ def test_every_reader_of_the_record_reads_the_records_own_view():
     for node in tree.body:
         if not isinstance(node, ast.FunctionDef):
             continue
-        params = [a.arg for a in node.args.args]
-        if "ledger_text" not in params:
+        if "ledger_text" not in [a.arg for a in node.args.args]:
+            continue
+        if node.name == "_raw_ledger_reads":
             continue
         readers.append(node.name)
-        # THE VALUE, not the call. A reader that calls `_unfenced_lines(ledger_text)`
-        # and throws the result away, then searches the raw name, satisfied the first
-        # version of this check — verified by constructing exactly that function and
-        # watching the predicate return True. So: every LOAD of the parameter must
-        # either be an argument to `_unfenced_lines`, or come after the parameter has
-        # been rebound from it.
-        def feeds_the_filter(call):
-            return (
-                isinstance(call, ast.Call)
-                and isinstance(call.func, ast.Name)
-                and call.func.id == "_unfenced_lines"
-                and any(
-                    isinstance(a, ast.Name) and a.id == "ledger_text"
-                    for a in call.args
-                )
-            )
-
-        rebind_line = None
-        for sub in ast.walk(node):
-            if not isinstance(sub, ast.Assign):
-                continue
-            if not any(
-                isinstance(t, ast.Name) and t.id == "ledger_text" for t in sub.targets
-            ):
-                continue
-            if any(feeds_the_filter(c) for c in ast.walk(sub.value)):
-                if rebind_line is None or sub.lineno < rebind_line:
-                    rebind_line = sub.lineno
-
-        filtered_args = {
-            id(a)
-            for sub in ast.walk(node)
-            if feeds_the_filter(sub)
-            for a in sub.args
-        }
-        raw_loads = [
-            sub.lineno
-            for sub in ast.walk(node)
-            if isinstance(sub, ast.Name)
-            and sub.id == "ledger_text"
-            and isinstance(sub.ctx, ast.Load)
-            and id(sub) not in filtered_args
-            and (rebind_line is None or sub.lineno < rebind_line)
-        ]
+        raw_loads = _raw_ledger_reads(node)
         if raw_loads:
             offenders.append(f"{node.name} (raw at line {min(raw_loads)})")
 
@@ -4513,6 +4563,14 @@ def test_every_reader_of_the_record_reads_the_records_own_view():
         "these functions read the ledger's raw bytes instead of the record's own "
         f"unfenced view, so a fenced illustration counts as a row: {offenders}"
     )
+
+    # NON-VACUITY, both directions, against the predicate the loop above used.
+    for label, must_offend, code in _READER_SHAPES:
+        node = ast.parse(code).body[0]
+        assert bool(_raw_ledger_reads(node)) is must_offend, (
+            f"the predicate judged {label!r} wrongly: it must "
+            f"{'refuse' if must_offend else 'accept'} that shape"
+        )
 
 
 def test_the_record_may_not_carry_a_fence_this_reader_cannot_read():
@@ -4534,13 +4592,22 @@ def test_the_record_may_not_carry_a_fence_this_reader_cannot_read():
     # The live record reads cleanly.
     assert _unfenced_lines(text)
 
-    # And the excluded form is refused rather than silently misread.
-    with pytest.raises(AssertionError) as excinfo:
-        _unfenced_lines("| a |\n~~~markdown\n## Slice Z — closing report\n~~~\n")
-    assert "tilde fence" in str(excinfo.value)
+    # EVERY excluded form is refused rather than silently misread. The tilde fence
+    # was the first found; the four-backtick fence quoting three-backtick examples was
+    # found immediately after, in the same open space — which is why the rule is now
+    # one permitted form at one length rather than a list of rejected ones.
+    for label, doc in (
+        ("tilde", "| a |\n~~~markdown\n## Slice Z — closing report\n~~~\n"),
+        ("four backticks",
+         "| a |\n````markdown\n```\n| FENCED ROW |\n```\n````\n"),
+    ):
+        with pytest.raises(AssertionError) as excinfo:
+            _unfenced_lines(doc)
+        assert "may not contain" in str(excinfo.value), label
 
-    # Non-vacuity in the other direction: the same document with a BACKTICK fence is
-    # read, and the fenced heading is blanked rather than counted.
+    # Non-vacuity in the other direction: the permitted form is READ, its contents
+    # blanked rather than counted, and a line-initial inline code span is not a fence.
     read = _unfenced_lines("| a |\n```markdown\n## Slice Z — closing report\n```\n")
     assert "## Slice Z — closing report" not in read
     assert "| a |" in read
+    assert "`x` is code" in _unfenced_lines("`x` is code\n")
