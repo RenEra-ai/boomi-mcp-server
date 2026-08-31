@@ -1587,13 +1587,20 @@ def _floor_regression(previous_sources, current_source):
     for cls in set(corrected) | set(ceiling):
         seq = [(_declared_class_floors(src) or {}).get(cls) for src in chronological]
         seq = [v for v in seq if v is not None]
-        for i, value in enumerate(seq):
-            if any(later > value for later in seq[i + 1:]):
-                # the class sat at `value` and later rose above it: any correction
-                # that ENDED at `value` is a past event and cannot be replayed.
-                for j in range(i):
-                    if seq[j] > value:
-                        spent.add((cls, seq[j], value))
+        # A CORRECTION IS A CONSECUTIVE DOWNWARD STEP in the recorded history, not any
+        # pair of a larger earlier value and a smaller later one. Reading it the loose
+        # way, a class corrected 5→1 and then legitimately grown 1→2→3 looked as though
+        # a 5→2 correction had already happened, because a 5 appeared before a 2 and a
+        # 3 came after — so a genuinely new 3→2 correction was refused. A value reached
+        # by GROWTH is not the endpoint of anything.
+        for i in range(1, len(seq)):
+            frm, to = seq[i - 1], seq[i]
+            if frm <= to:
+                continue                      # growth, or unchanged: no event here
+            if any(later > to for later in seq[i + 1:]):
+                # the step happened AND the class later rose above its endpoint, so
+                # that particular correction is a past event and cannot be replayed.
+                spent.add((cls, frm, to))
 
     lowered = sorted(
         c for c, floor in ceiling.items()
@@ -1731,30 +1738,34 @@ def test_only_a_declared_overcount_correction_may_lower_a_floor(current, expecte
 def test_the_overcount_escape_is_spent_per_event_not_per_class():
     """A correction is the event `(class, from, to)`, not a licence for the class.
 
-    Three behaviours, and the first two versions of this rule each got one wrong:
-    the same transition must not replay after the class rises again; a DIFFERENT
-    later correction must still be allowed; and deleting the marker on an intervening
-    commit must not make the original transition reusable, because the history still
-    records that it happened.
+    NOTE THE ORDER. `previous_sources` arrives NEWEST-FIRST, because the caller feeds
+    it `git log`, and the rule reverses it to read chronology. An earlier version of
+    this test listed its history oldest-first, so every case exercised the reverse of
+    the sequence it described and passed for the wrong reason — which is exactly the
+    hazard these cases exist to catch, one level up.
     """
     M32 = "  # OVERCOUNT-CORRECTED-FROM-3-TO-2"
     M43 = "  # OVERCOUNT-CORRECTED-FROM-4-TO-3"
+    M52 = "  # OVERCOUNT-CORRECTED-FROM-5-TO-2"
     at = lambda n, m="": '_EXPECTED_CLASS_COUNTS = {"DC-155-Z": %d}%s' % (n, m)
+    hist = lambda *values: [at(v) for v in reversed(values)]   # oldest .. newest
 
     # the correction itself, with no later rise: allowed
-    assert _floor_regression([at(2, M32), at(3)], at(2, M32)) is None
+    assert _floor_regression(hist(3, 2), at(2, M32)) is None
 
-    # rose back to 3 afterwards, then dropped again: the SAME event, refused
-    assert _floor_regression(
-        [at(3, M32), at(2, M32), at(3)], at(2, M32)) == "lowered: ['DC-155-Z']"
+    # rose back to 3 afterwards: the SAME event, refused
+    assert _floor_regression(hist(3, 2, 3), at(2, M32)) == "lowered: ['DC-155-Z']"
 
-    # ...and refused even though the marker was deleted while the class grew, because
-    # the history records the transition whatever the comment says
-    assert _floor_regression(
-        [at(3), at(2, M32), at(3)], at(2, M32)) == "lowered: ['DC-155-Z']"
+    # ...refused even with the marker deleted mid-history, because the floors record it
+    assert _floor_regression(hist(3, 2, 3), at(2, M32)) == "lowered: ['DC-155-Z']"
 
     # a DIFFERENT correction after legitimate growth is still allowed
-    assert _floor_regression([at(4), at(2, M32), at(3), at(3)], at(3, M43)) is None
+    assert _floor_regression(hist(3, 2, 3, 4), at(3, M43)) is None
+
+    # GROWTH THROUGH A VALUE IS NOT A CORRECTION ENDING THERE. Corrected 5 to 1, then
+    # grown 1-2-3: a later 3-to-2 is a new event. Reading any earlier-larger with any
+    # later-smaller value as a correction refused it.
+    assert _floor_regression(hist(5, 1, 2, 3), at(2, M52)) is None
 
 
 def test_the_recorded_floors_never_move_down():
