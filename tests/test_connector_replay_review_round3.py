@@ -2169,6 +2169,17 @@ def _closing_report_violation(ledger_text, rel, archive_dir, git):
     """
     import re
 
+    # THE RECORD'S OWN VIEW, once, for everything below. This function grew a
+    # dozen `re.findall(..., ledger_text)` calls that each read the RAW bytes,
+    # while `_unfenced_lines` had already decided — for the checkpoint tables in
+    # this same file — that a fenced illustration is not part of the record.
+    # Two views of one document is one view too many: fencing a real closing
+    # report changed NOTHING here (measured), so an example heading counted as a
+    # report and a report could hide from the guard that certifies it. Deriving
+    # the view once, from the existing authority, removes the second model
+    # rather than teaching it the same rule again.
+    ledger_text = "\n".join(_unfenced_lines(ledger_text))
+
     # A REPORT IS OWED ONCE A CLOSE DECISION EXISTS, and not one moment before. The
     # rule iterated only the reports that already existed, so a slice could take a
     # closing outcome and simply never write one. Tying the requirement to the
@@ -2873,6 +2884,9 @@ def _wave_evidence_violation(ledger_text, archive_dir):
     quoted counts existed only in the row that quoted them. Ordering was a rule about
     WHEN; this is a rule about WHETHER, and it is executable rather than remembered.
     """
+    # The record's own view — see `_unfenced_lines`. A fenced block is an
+    # illustration, not a row.
+    ledger_text = "\n".join(_unfenced_lines(ledger_text))
     import json
     import re
 
@@ -3031,6 +3045,9 @@ def _coverage_violations(ledger_text, archive_dir):
     being closed. Ordering is about WHEN, reverifiability about WHETHER, and this is
     about WHAT — the reviewed SHA must be the tree the report closes on.
     """
+    # The record's own view — see `_unfenced_lines`. A fenced block is an
+    # illustration, not a row.
+    ledger_text = "\n".join(_unfenced_lines(ledger_text))
     import re
 
     out = []
@@ -3130,6 +3147,9 @@ def _unscannable_finding_ids(ledger_text):
     imported from the scanner rather than restated — a second copy would drift exactly
     as the four earlier hand-copies of this repository's other shapes did.
     """
+    # The record's own view — see `_unfenced_lines`. A fenced block is an
+    # illustration, not a row.
+    ledger_text = "\n".join(_unfenced_lines(ledger_text))
     import re
     import sys as _sys
 
@@ -3308,6 +3328,9 @@ def _window_inventory(ledger_text, runs):
     defect-class column existed — a guard that fails on history nobody can supply
     stops being run, which is a worse outcome than the one it was guarding against.
     """
+    # The record's own view — see `_unfenced_lines`. A fenced block is an
+    # illustration, not a row.
+    ledger_text = "\n".join(_unfenced_lines(ledger_text))
     import re
 
     rows, malformed = _finding_table_rows(ledger_text)
@@ -3442,6 +3465,9 @@ def _checkpoint_inventory_violation(ledger_text):
     last-row rule stops looking at the one before it, and an earlier row's inventory
     could then be wrong for good while its own prose claimed it is checked on every run.
     """
+    # The record's own view — see `_unfenced_lines`. A fenced block is an
+    # illustration, not a row.
+    ledger_text = "\n".join(_unfenced_lines(ledger_text))
     import re
 
     def field(row, name):
@@ -3905,6 +3931,9 @@ def _missing_checkpoint_violation(ledger_text, index_text, slice_letter=None,
     `wave-gate/*/round.json`. Reading the index alone made every wave loop invisible to
     a rule written to police it.
     """
+    # The record's own view — see `_unfenced_lines`. A fenced block is an
+    # illustration, not a row.
+    ledger_text = "\n".join(_unfenced_lines(ledger_text))
     import json
     import re
 
@@ -4297,3 +4326,138 @@ def test_the_owning_commit_is_the_one_that_added_the_report(history, expected):
     assert _commit_that_added(
         "MARK", [sha for sha, _ in history], lambda sha: shown[sha]
     ) == expected
+
+
+def _node_manifest_gate():
+    """The wave gate itself, loaded as a module. The authority, not a copy of it."""
+    import importlib.util
+
+    root = Path(__file__).resolve().parent.parent
+    spec = importlib.util.spec_from_file_location(
+        "_node_manifest_authority", root / "scripts" / "wave_gate.py"
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module, root
+
+
+def test_the_node_manifest_is_a_legal_successor_of_the_one_it_replaces():
+    """A regeneration may APPEND. It may never repoint an id that already exists.
+
+    The procedure invites exactly this mistake: it says restore the slice baseline
+    and re-append, which silently reassigns every id that an intermediate commit
+    already published. Measured here when this guard was written — a regeneration
+    from the slice baseline moved `pytest-011173` off
+    `test_every_closing_checkpoint_agrees_with_its_own_window` and onto a parameter
+    case, and shifted 300-odd rows behind it. The bases the gate actually uses
+    (`origin/dev` for the scratch preflight, the slice baseline for the wave run)
+    both accepted it, so nothing in the suite said a word.
+
+    The fix is not to teach this file the transition rules. `validate_transition`
+    IS the rule, so this asks it — against the manifest the working tree is
+    replacing, which is the comparison the regeneration never makes. That
+    comparison is the whole point: it fires in the window between regenerating and
+    committing, which is the only window in which the mistake is cheap.
+    """
+    import subprocess
+
+    gate, root = _node_manifest_gate()
+    rel = "tests/fixtures/wave_gate/test_nodes.jsonl"
+
+    def at(ref):
+        out = subprocess.run(
+            ["git", "show", f"{ref}:{rel}"], capture_output=True, cwd=root
+        )
+        return out.stdout if out.returncode == 0 else None
+
+    current = gate.parse_manifest((root / rel).read_bytes(), "pytest-nodes")
+
+    checked = []
+    for ref in ("HEAD", "origin/dev"):
+        raw = at(ref)
+        if raw is None:
+            # A fresh clone may not carry `origin/dev`; HEAD always exists inside a
+            # git checkout. Recorded rather than skipped silently, so an absent arm
+            # is visible in the assertion below instead of passing as coverage.
+            continue
+        gate.validate_transition(
+            gate.parse_manifest(raw, "pytest-nodes"), current, "pytest-nodes"
+        )
+        checked.append(ref)
+
+    assert "HEAD" in checked, (
+        "the manifest committed at HEAD could not be read, so this guard checked "
+        f"nothing; refs available: {checked}"
+    )
+
+    # NON-VACUITY, against this very manifest: repoint one live row exactly as the
+    # baseline-restore regeneration did, and the authority must refuse it. Without
+    # this, a `validate_transition` that stopped checking node ids would leave the
+    # guard green and silent.
+    rows = [dict(r) for r in current.rows]
+    victim = next(i for i, r in enumerate(rows) if r["state"] == "active")
+    rows[victim]["node_id"] = rows[victim]["node_id"] + "-repointed"
+    mutant = gate.Manifest("pytest-nodes", dict(current.header), rows)
+    try:
+        gate.validate_transition(current, mutant, "pytest-nodes")
+    except gate.GateFailure as exc:
+        # The CODE, not the message text. The gate carries its stable diagnostic on
+        # the exception; matching prose would pass the day someone rewords it.
+        assert exc.code == "MANIFEST_TRANSITION_ILLEGAL", (
+            f"a repointed id was refused, but not as an illegal transition: {exc.code}"
+        )
+    else:
+        raise AssertionError(
+            "the authority accepted a repointed node id, so this guard proves nothing"
+        )
+
+
+def test_every_reader_of_the_record_reads_the_records_own_view():
+    """One view of this document, derived — never a second, weaker one.
+
+    `_unfenced_lines` decided long ago that a fenced block is an illustration and
+    not part of the record. Seven functions then read the RAW text anyway, and the
+    consequence was measured, not theorised: fencing a real closing report changed
+    nothing, so an example heading counted as the record and a real report could
+    hide from the guard that certifies it.
+
+    Renaming the seven would be an instance patch — the eighth reader is written
+    next week. The population is therefore DERIVED by parsing this module: any
+    module-level function that accepts `ledger_text` must route it through
+    `_unfenced_lines`. There is no exemption list, because an exemption list is the
+    same hand-model one level up.
+    """
+    import ast
+
+    source = Path(__file__).read_text()
+    tree = ast.parse(source)
+
+    readers, offenders = [], []
+    for node in tree.body:
+        if not isinstance(node, ast.FunctionDef):
+            continue
+        params = [a.arg for a in node.args.args]
+        if "ledger_text" not in params:
+            continue
+        readers.append(node.name)
+        routed = any(
+            isinstance(sub, ast.Call)
+            and isinstance(sub.func, ast.Name)
+            and sub.func.id == "_unfenced_lines"
+            and any(
+                isinstance(arg, ast.Name) and arg.id == "ledger_text"
+                for arg in sub.args
+            )
+            for sub in ast.walk(node)
+        )
+        if not routed:
+            offenders.append(node.name)
+
+    assert len(readers) >= 7, (
+        f"only {len(readers)} readers were found, so this guard is not looking at "
+        "the population it claims to cover"
+    )
+    assert not offenders, (
+        "these functions read the ledger's raw bytes instead of the record's own "
+        f"unfenced view, so a fenced illustration counts as a row: {offenders}"
+    )

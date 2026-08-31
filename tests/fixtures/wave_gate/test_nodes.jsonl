@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 11380, "minimum_collected": 11380, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 11382, "minimum_collected": 11382, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -11421,3 +11421,5 @@
 {"kind": "test", "id": "pytest-011420", "node_id": "tests/test_process_ir_error_handling.py::test_a_miswired_snapshot_is_refused_rather_than_read_as_empty[bogus3]", "state": "active"}
 {"kind": "test", "id": "pytest-011421", "node_id": "tests/test_process_ir_error_handling.py::test_a_miswired_snapshot_is_refused_rather_than_read_as_empty[bogus4]", "state": "active"}
 {"kind": "test", "id": "pytest-011422", "node_id": "tests/test_process_ir_error_handling.py::test_a_real_snapshot_is_accepted", "state": "active"}
+{"kind": "test", "id": "pytest-011423", "node_id": "tests/test_connector_replay_review_round3.py::test_the_node_manifest_is_a_legal_successor_of_the_one_it_replaces", "state": "active"}
+{"kind": "test", "id": "pytest-011424", "node_id": "tests/test_connector_replay_review_round3.py::test_every_reader_of_the_record_reads_the_records_own_view", "state": "active"}
