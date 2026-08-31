@@ -3124,7 +3124,13 @@ def _finding_table_rows(ledger_text):
         lines, lambda l: l.startswith("|") and l.split("|")[1].strip() == "ID"
     ):
         if True:
-            cells = line.split("|")
+            # A Markdown row may omit its TRAILING delimiter; the cells are all
+            # there. Splitting without normalising put the last field where the
+            # reader expected the empty tail, so a complete row read as one column
+            # short — and I diagnosed that as a missing disposition and recorded an
+            # unrepairable limitation on it, having printed every cell except the one
+            # that mattered. Normalise the delimiter, then count.
+            cells = (line if line.rstrip().endswith("|") else line.rstrip() + " |").split("|")
             rid = cells[1].strip().strip("*").strip()
             if not rid or rid == "ID" or set(rid) <= {"-", " "} or rid.startswith("DC-"):
                 continue
@@ -3211,17 +3217,12 @@ def _window_inventory(ledger_text, runs):
             # revision declared against an original nobody wrote removed a real
             # finding from every window, since neither row was ever counted.
             if any(run in source for run in runs):
-                # EXISTS, parseable or not. Requiring a PARSEABLE original made a
-                # revision answer for its target's defects: one historical row was
-                # committed with eight columns instead of nine, so it carries no
-                # disposition and cannot be parsed — and the append-only rule forbids
-                # completing it in place, in both directions, so neither the row nor
-                # its revision can be repaired. The revision is not at fault for that.
-                # A missing original is still refused; a malformed one is a separate
-                # fact, reported by the malformed check when it is in scope and
-                # recorded as a standing limitation when it is not.
-                known = {r for r, _ in rows} | {r for r, _ in malformed}
-                if supersedes[rid] not in known:
+                # A revision must point at a row that parses. The softening this
+                # once carried was built on a misreading — the row it exempted was
+                # complete and only missing its trailing delimiter, which the reader
+                # now normalises — so the exemption is removed rather than kept as
+                # dead tolerance.
+                if supersedes[rid] not in parsed:
                     problems.append(
                         f"{rid}: revises {supersedes[rid]}, which has no finding row")
                 # REACHED HERE, not in the loop below: a revision id is always in
@@ -3732,6 +3733,109 @@ def test_a_blocking_row_never_waives_its_defect_class(blocking, disposition, mus
         "WINDOW ROWS: 1 . WINDOW CLASSES: (none) . r |\n"
     )
     violation = _checkpoint_inventory_violation(ledger)
+    assert (violation is not None) is must_refuse, repr(violation)
+
+
+def _missing_checkpoint_violation(ledger_text, index_text, slice_letter=None):
+    """Whether a loop that has run N evaluations has recorded the checkpoints it owes.
+
+    THE FIFTH AXIS of the closure-ahead-of-validation class, and the one every earlier
+    fix left open. Ordering said WHEN a decision may be written, reverifiability
+    WHETHER it can be rechecked, coverage WHAT tree it covers, membership WHICH rounds
+    it may reason from — and none of them requires a checkpoint to EXIST. So the way
+    this class kept recurring was not a wrong checkpoint but an ABSENT one: the rule
+    puts the decision on a fixed interval precisely because the work is absorbing, and
+    a procedure cannot notice its own omission.
+
+    The evaluation count comes from the ARCHIVE — rounds actually collected and billed
+    to the loop — never from the ledger's prose about how many there were. Scoped to
+    the slice being closed: earlier slices predate the convention that names a slice in
+    the logical loop, so their rounds cannot be attributed and demanding checkpoints
+    for them would fail on history nobody can reconstruct.
+    """
+    import json
+    import re
+
+    if slice_letter is None:
+        waves = [r for r in (_checkpoint_rows(ledger_text) or [])
+                 if re.match(r"\s*L4\b", r.split("|")[1].strip().strip("`"))]
+        found = re.search(r"slice ([A-F])", waves[-1]) if waves else None
+        slice_letter = found.group(1) if found else None
+    if not slice_letter:
+        return None
+
+    billed = {}
+    for raw in index_text.splitlines():
+        if not raw.strip():
+            continue
+        try:
+            entry = json.loads(raw)
+        except ValueError:
+            continue
+        if entry.get("status") != "completed":
+            continue
+        loop = str(entry.get("logical_loop", ""))
+        tag = re.match(r"(L\d)", loop)
+        here = re.search(r"slice ([A-F])", loop)
+        if tag and here and here.group(1) == slice_letter:
+            billed[tag.group(1)] = billed.get(tag.group(1), 0) + 1
+
+    recorded = {}
+    for row in _checkpoint_rows(ledger_text) or []:
+        cells = row.split("|")
+        if len(cells) < 3:
+            continue
+        m = re.match(r"\s*(\d+)\s*/\s*(\d+)", cells[2])
+        tag = re.match(r"\s*(L\d)", cells[1].strip().strip("*").strip("`"))
+        here = re.search(r"slice ([A-F])", cells[1])
+        if m and tag and here and here.group(1) == slice_letter:
+            recorded[tag.group(1)] = max(recorded.get(tag.group(1), 0), int(m.group(2)))
+
+    for loop, count in sorted(billed.items()):
+        owed = (count // 3) * 3
+        if owed and recorded.get(loop, 0) < owed:
+            return (f"loop {loop} of slice {slice_letter} has {count} collected "
+                    f"evaluations, so a checkpoint through {owed} is owed; the latest "
+                    f"recorded covers {recorded.get(loop, 0)}")
+    return None
+
+
+def test_a_loop_records_the_checkpoints_its_evaluations_owe():
+    """Applied to this ledger, counting evaluations from the archive."""
+    root = Path(__file__).resolve().parents[1]
+    ledger = (root / "docs/architecture/ISSUE_155_AUDIT_LEDGER.md").read_text()
+    index = root / "docs/architecture/evidence/issue-155/index.jsonl"
+    violation = _missing_checkpoint_violation(
+        ledger, index.read_text() if index.is_file() else "")
+    assert violation is None, f"a mandatory checkpoint is missing: {violation}"
+
+
+@pytest.mark.parametrize(
+    "rounds,latest_cumulative,must_refuse",
+    [
+        (3, 3, False),    # the checkpoint the third evaluation owes, recorded
+        (3, 2, True),     # three evaluations, a checkpoint covering only two
+        (5, 3, False),    # the fourth and fifth owe nothing until the sixth
+        (6, 3, True),     # six run, only three covered
+        (2, 0, False),    # nothing owed yet, and none recorded
+    ],
+)
+def test_the_missing_checkpoint_rule_counts_from_the_archive(
+    rounds, latest_cumulative, must_refuse
+):
+    """The rule itself, away from this repository's record."""
+    import json
+
+    index = "\n".join(json.dumps({
+        "logical_loop": "L5 (closing protocol, slice D — round %d)" % i,
+        "status": "completed",
+    }) for i in range(rounds))
+    ledger = (
+        "| Loop | Evaluation (window / cumulative) | SHA (+dirty) | Outcome | Rationale |\n"
+        "| --- | --- | --- | --- | --- |\n"
+        f"| L5 closing protocol, slice D | 1 / {latest_cumulative} | x | `CONTINUE` | r |\n"
+    )
+    violation = _missing_checkpoint_violation(ledger, index, slice_letter="D")
     assert (violation is not None) is must_refuse, repr(violation)
 
 
