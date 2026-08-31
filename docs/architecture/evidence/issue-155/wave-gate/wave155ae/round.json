@@ -1,0 +1,13 @@
+{
+ "collector": "wave_gate",
+ "durable_dir": "wave-gate/wave155ae",
+ "files": {
+  "wave-gate/wave155ae/summary.json": "0682406f012dbc77d98d3d26f2ec08afeea5648558ff6ccf313bb48e32b74494",
+  "wave-gate/wave155ae/wave.log": "6e6204e2c62f412aa800ee61cacf3ea630ecd6b92a68f63ed41585dfed0a014f"
+ },
+ "logical_loop": "L4 (composite wave gate, slice D \u2014 the tree the closing commit certifies)",
+ "source_run_dir": "/tmp/wave155ae.a0ruXu",
+ "status": "completed",
+ "verdict": "pass",
+ "wave_sha": "8870ae8b22005bf3f29bf1e4834e31b0219d16d8"
+}
