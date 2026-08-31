@@ -1,0 +1,13 @@
+{
+ "collector": "wave_gate",
+ "durable_dir": "wave-gate/wave155q",
+ "files": {
+  "wave-gate/wave155q/summary.json": "5abe6436b72a2e58c1bf56619ae5b1b08c893c1752e428b187421377e377bba4",
+  "wave-gate/wave155q/wave.log": "5b9eee9f0fd34e10dcc2ccf9f27f53b52abe2fe79b36892228735a8d1de4bdcc"
+ },
+ "logical_loop": "L4 (composite wave gate, slice D \u2014 the run on the frozen-guard tree)",
+ "source_run_dir": "/var/folders/xx/nt1fy00j0m337y5mb4zwt3b40000gn/T/wave155q._p4szlli",
+ "status": "completed",
+ "verdict": "pass",
+ "wave_sha": "a1bf213eecdc3912d57a7c3e716089cc563038e2"
+}
