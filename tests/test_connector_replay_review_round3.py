@@ -3095,7 +3095,13 @@ def _window_inventory(ledger_text, runs):
         if not re.fullmatch(r"(?:CDX|SELF|QA|ARCH)-155-r\d+-\d+[a-z]?", rid):
             continue
         found = re.search(r"DC-155-[A-Z]\d?", cells[6])
-        parsed[rid] = (cells[2], found.group(0) if found else None)
+        # The BLOCKING class decides whether a defect class is owed. A row recording
+        # "none" is a scope finding and legitimately carries no defect class; any
+        # other blocking class owes one, and dropping an unparseable cell to None let
+        # a closure-invalid row match the count while vanishing from the inventory.
+        blocking = cells[5].strip().lower()
+        owed = not blocking.startswith("none") and blocking not in {"", "n/a"}
+        parsed[rid] = (cells[2], found.group(0) if found else ("MISSING" if owed else None))
 
     def latest_class(rid):
         """Follow the revision chain to the class that currently stands."""
@@ -3117,59 +3123,99 @@ def _window_inventory(ledger_text, runs):
 
 
 def _checkpoint_inventory_violation(ledger_text):
-    """Whether the latest closing checkpoint agrees with the rows in its own window."""
+    """Whether EVERY closing checkpoint agrees with the rows in its own window.
+
+    Every row, not just the newest: the moment the next checkpoint is appended, a
+    last-row rule stops looking at the one before it, and an earlier row's inventory
+    could then be wrong for good while its own prose claims it is checked on every run.
+    """
     import re
 
-    rows = [
-        line for line in ledger_text.splitlines()
-        if line.startswith("| L5 closing protocol")
-    ]
-    if not rows:
-        return None
-    latest = rows[-1]
-    runs = re.findall(r"WINDOW RUNS:([^|]*)", latest)
-    if not runs:
-        return "the latest closing checkpoint does not name the runs in its window"
-    names = re.findall(r"`(cdx-review\.[A-Za-z0-9]+)`", runs[0])
-    if not names:
-        return "the latest closing checkpoint names no run in its window"
-    stated_rows = re.search(r"WINDOW ROWS:\s*(\d+)", latest)
-    if not stated_rows:
-        return "the latest closing checkpoint states no row count for its window"
-    stated_classes = re.search(r"WINDOW CLASSES:([^|]*)", latest)
-    if not stated_classes:
-        return "the latest closing checkpoint states no defect classes for its window"
+    def field(row, name):
+        # DELIMITED. `([^|]*)` swallowed the rest of the Markdown cell, so class names
+        # mentioned anywhere in the rationale counted as if they were in the formal
+        # list — the inventory could be wrong while the guard passed on prose. The
+        # field ends at the ` . ` separator or at the cell boundary, never later.
+        found = re.search(rf"{name}:(.*?)(?: \. |\|)", row)
+        return found.group(1) if found else None
 
-    inventory = _window_inventory(ledger_text, names)
-    if len(inventory) != int(stated_rows.group(1)):
-        return (f"the window holds {len(inventory)} finding rows but the checkpoint "
-                f"states {stated_rows.group(1)}")
-    derived = {c for c in inventory.values() if c}
-    claimed = set(re.findall(r"DC-155-[A-Z]\d?", stated_classes.group(1)))
-    if derived != claimed:
-        return (f"the window's classes are {sorted(derived)} but the checkpoint claims "
-                f"{sorted(claimed)}")
+    for row in ledger_text.splitlines():
+        if not row.startswith("| L5 closing protocol"):
+            continue
+        # A CHECKPOINT row carries its window/cumulative count in the second cell.
+        # The final-tree validation table also opens rows with this loop name, and
+        # they are summaries rather than decisions — told apart by the count they
+        # carry, not by a list of headings to skip.
+        cells = row.split("|")
+        if len(cells) < 4 or not re.match(r"\s*\d+\s*/\s*\d+\s*$", cells[2]):
+            continue
+        runs_field = field(row, "WINDOW RUNS")
+        if runs_field is None:
+            return "a closing checkpoint does not name the runs in its window"
+        names = re.findall(r"`(cdx-review\.[A-Za-z0-9]+)`", runs_field)
+        if not names:
+            return "a closing checkpoint names no run in its window"
+        # BOUND TO THE CHECKPOINT'S OWN COUNT. The `6 / 6` cell was never read, so a
+        # window could list seven runs — the exact cross-window contamination this
+        # rule exists to refuse — and pass as long as the totals were adjusted to
+        # match. Uniqueness is required too: the same run twice is not two rounds.
+        size = re.match(r"\s*(\d+)\s*/", cells[2])
+        if len(set(names)) != len(names):
+            return f"a closing checkpoint names a run twice: {sorted(names)}"
+        if len(names) != int(size.group(1)):
+            return (f"a closing checkpoint covers {size.group(1)} evaluations but names "
+                    f"{len(names)} runs")
+        stated_rows = re.search(r"WINDOW ROWS:\s*(\d+)", row)
+        if not stated_rows:
+            return "a closing checkpoint states no row count for its window"
+        classes_field = field(row, "WINDOW CLASSES")
+        if classes_field is None:
+            return "a closing checkpoint states no defect classes for its window"
+
+        inventory = _window_inventory(ledger_text, names)
+        missing = sorted(k for k, v in inventory.items() if v == "MISSING")
+        if missing:
+            return (f"these rows are in a blocking class but carry no readable defect "
+                    f"class: {missing}")
+        if len(inventory) != int(stated_rows.group(1)):
+            return (f"a window holds {len(inventory)} finding rows but its checkpoint "
+                    f"states {stated_rows.group(1)}")
+        derived = {c for c in inventory.values() if c}
+        claimed = set(re.findall(r"DC-155-[A-Z]\d?", classes_field))
+        if derived != claimed:
+            return (f"a window's classes are {sorted(derived)} but its checkpoint "
+                    f"claims {sorted(claimed)}")
     return None
 
 
 @pytest.mark.parametrize(
-    "runs,rows,classes,expected",
+    "size,runs,rows,classes,expected",
     [
-        ("`cdx-review.aa`", "1", "`DC-155-G`", None),
+        ("1 / 1", "`cdx-review.aa`", "1", "`DC-155-G`", None),
         # The arithmetic defect: a stated total the window does not support.
-        ("`cdx-review.aa`", "2", "`DC-155-G`",
-         "the window holds 1 finding rows but the checkpoint states 2"),
+        ("1 / 1", "`cdx-review.aa`", "2", "`DC-155-G`",
+         "a window holds 1 finding rows but its checkpoint states 2"),
         # The inventory defect: a class the window does not contain.
-        ("`cdx-review.aa`", "1", "`DC-155-G`, `DC-155-S`",
-         "the window's classes are ['DC-155-G'] but the checkpoint claims "
+        ("1 / 1", "`cdx-review.aa`", "1", "`DC-155-G`, `DC-155-S`",
+         "a window's classes are ['DC-155-G'] but its checkpoint claims "
          "['DC-155-G', 'DC-155-S']"),
         # A window nobody can check.
-        ("", "1", "`DC-155-G`",
-         "the latest closing checkpoint names no run in its window"),
+        ("1 / 1", "", "1", "`DC-155-G`",
+         "a closing checkpoint names no run in its window"),
+        # THE CONTAMINATION THIS RULE EXISTS FOR: a window listing more evaluations
+        # than the checkpoint covers. It passed while the counts were adjusted.
+        ("1 / 1", "`cdx-review.aa`, `cdx-review.bb`", "1", "`DC-155-G`",
+         "a closing checkpoint covers 1 evaluations but names 2 runs"),
+        # The same run twice is not two rounds.
+        ("2 / 2", "`cdx-review.aa`, `cdx-review.aa`", "1", "`DC-155-G`",
+         "a closing checkpoint names a run twice: "
+         "['cdx-review.aa', 'cdx-review.aa']"),
+        # Classes mined from the RATIONALE rather than the formal field.
+        ("1 / 1", "`cdx-review.aa`", "1", "`DC-155-G`", None),
     ],
 )
 def test_the_checkpoint_inventory_rule_refuses_an_unsupported_window(
-    runs, rows, classes, expected
+    size, runs, rows, classes, expected
 ):
     """The rule, exercised away from this repository's own record."""
     # The finding table's real shape: the DEFECT class is its own column, distinct
@@ -3182,14 +3228,63 @@ def test_the_checkpoint_inventory_rule_refuses_an_unsupported_window(
         "| CDX-155-r1-01 | run `cdx-review.aa` | s | P1 | runtime behavior "
         "| DC-155-G a closure ahead of validation | critical | x | fixed |\n"
         "\n"
-        f"| L5 closing protocol | 1 / 1 | x | `CONTINUE` | WINDOW RUNS: {runs} . "
+        f"| L5 closing protocol | {size} | x | `CONTINUE` | WINDOW RUNS: {runs} . "
         f"WINDOW ROWS: {rows} . WINDOW CLASSES: {classes} . rationale |\n"
     )
     assert _checkpoint_inventory_violation(ledger) == expected
 
 
-def test_the_latest_closing_checkpoint_agrees_with_its_own_window():
-    """Applied to this ledger. A checkpoint's inputs are derived, never recalled."""
+def test_the_class_field_is_not_mined_from_the_rationale():
+    """A class named only in prose must not satisfy the formal inventory.
+
+    `([^|]*)` captured the remainder of the Markdown cell, so the rationale supplied
+    classes the formal list omitted and the guard passed on an inventory that was
+    wrong — the field it was added to police was never actually read.
+    """
+    ledger = (
+        "| ID | source | summary | label | blocking | defect class | tier | sha "
+        "| disposition |\n"
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- |\n"
+        "| CDX-155-r1-01 | run `cdx-review.aa` | s | P1 | runtime behavior "
+        "| DC-155-G x | critical | x | fixed |\n"
+        "| CDX-155-r1-02 | run `cdx-review.aa` | s | P1 | runtime behavior "
+        "| DC-155-S x | critical | x | fixed |\n"
+        "\n"
+        "| L5 closing protocol | 1 / 1 | x | `CONTINUE` | WINDOW RUNS: "
+        "`cdx-review.aa` . WINDOW ROWS: 2 . WINDOW CLASSES: `DC-155-G` . the window "
+        "also touched `DC-155-S`, which is prose and must not count |\n"
+    )
+    assert _checkpoint_inventory_violation(ledger) == (
+        "a window's classes are ['DC-155-G', 'DC-155-S'] but its checkpoint claims "
+        "['DC-155-G']"
+    )
+
+
+def test_a_blocking_row_without_a_readable_defect_class_is_refused():
+    """Dropping it to None let it match the count while leaving no class behind."""
+    ledger = (
+        "| ID | source | summary | label | blocking | defect class | tier | sha "
+        "| disposition |\n"
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- |\n"
+        "| CDX-155-r1-01 | run `cdx-review.aa` | s | P1 | mutation accounting "
+        "|  | critical | x | fixed |\n"
+        "\n"
+        "| L5 closing protocol | 1 / 1 | x | `CONTINUE` | WINDOW RUNS: "
+        "`cdx-review.aa` . WINDOW ROWS: 1 . WINDOW CLASSES: `DC-155-G` . r |\n"
+    )
+    assert _checkpoint_inventory_violation(ledger) == (
+        "these rows are in a blocking class but carry no readable defect class: "
+        "['CDX-155-r1-01']"
+    )
+
+
+def test_every_closing_checkpoint_agrees_with_its_own_window():
+    """Applied to this ledger, to EVERY checkpoint. Inputs are derived, never recalled.
+
+    Scoped to the newest row, this stopped checking a checkpoint the moment the next
+    one was written — so an earlier inventory could be wrong permanently while its own
+    prose claimed it was verified on every run.
+    """
     root = Path(__file__).resolve().parents[1]
     ledger = (root / "docs/architecture/ISSUE_155_AUDIT_LEDGER.md").read_text()
     violation = _checkpoint_inventory_violation(ledger)
