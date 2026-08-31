@@ -2147,11 +2147,24 @@ def _one_closing_report_violation(report, marker, rel, archive_dir, git, latest_
     # file.
     if not is_current:
         return None
+    # AGAINST THE WORKING TREE, not against HEAD. The normal state for writing commit
+    # N is an UNCOMMITTED report, and there N−1 is HEAD — so a commit-to-commit
+    # comparison is `HEAD` against `HEAD`, empty by construction, while the pending
+    # commit could carry staged, unstaged or untracked executable changes that no wave
+    # gate and no review ever saw. A check that is trivially satisfied in exactly the
+    # state it exists to police is not a check. Omitting the second endpoint compares
+    # N−1 to the worktree, which also covers the committed case unchanged; untracked
+    # paths are listed separately because `git diff` does not see them at all.
     moved = [
-        c for c in git("diff", "--name-only", n1, "HEAD",
+        c for c in git("diff", "--name-only", n1,
                        "--", "src", "tests", "scripts").splitlines() if c.strip()
     ]
-    return f"invalidated: source moved after N−1: {moved}" if moved else None
+    moved += [
+        c for c in git("ls-files", "--others", "--exclude-standard",
+                       "--", "src", "tests", "scripts").splitlines() if c.strip()
+    ]
+    return (f"invalidated: source moved after N−1: {sorted(set(moved))}"
+            if moved else None)
 
 
 def test_a_closing_report_names_the_current_wave_sha_and_proves_darkness():
@@ -2416,7 +2429,7 @@ def test_the_boundary_is_the_adding_commits_parent_once_the_report_lands(tmp_pat
 
 
 def _synthetic_closing_repo(tmp_path, wave_shas_from, cited, executable_drift=False,
-                            commit_report=False):
+                            commit_report=False, pending_drift=None):
     """A real repository carrying a closing report, built to be driven end to end.
 
     One commit is the wave gate's tree (W), a later one is N−1, and the report either
@@ -2481,6 +2494,13 @@ def _synthetic_closing_repo(tmp_path, wave_shas_from, cited, executable_drift=Fa
     if commit_report:
         git("add", "-A")
         git("commit", "-qm", "the closing report")
+    if pending_drift:
+        # Executable change left in the PENDING commit, which is the state N is
+        # written from. `staged` and `untracked` are distinct blind spots.
+        (root / "src").mkdir(exist_ok=True)
+        (root / "src" / f"{pending_drift}.py").write_text("y = 2\n")
+        if pending_drift == "staged":
+            git("add", "src")
     return git, archive
 
 
@@ -2524,6 +2544,27 @@ def test_the_repository_guard_refuses_a_report_citing_a_superseded_wave(tmp_path
     assert _closing_report_violation(
         (tmp_path / "repo" / "ledger.md").read_text(), "ledger.md", archive, git
     ).endswith("stale-wave")
+
+
+@pytest.mark.parametrize("pending", ["staged", "untracked"])
+def test_the_repository_guard_refuses_executable_change_left_in_the_pending_commit(
+    tmp_path, pending
+):
+    """The state commit N is written from, where the check was trivially satisfied.
+
+    With the report uncommitted, N−1 IS the tip, so comparing the two commits compared
+    HEAD against HEAD and passed however much executable change the pending commit
+    carried. Both blind spots are driven: a staged file `git diff` against a commit
+    still misses, and an untracked file `git diff` never sees at all.
+    """
+    git, archive = _synthetic_closing_repo(
+        tmp_path, wave_shas_from=[0], cited=0, pending_drift=pending
+    )
+    violation = _closing_report_violation(
+        (tmp_path / "repo" / "ledger.md").read_text(), "ledger.md", archive, git
+    )
+    assert violation is not None and "invalidated" in violation, violation
+    assert f"src/{pending}.py" in violation, violation
 
 
 def test_the_repository_guard_refuses_a_report_whose_tree_moved_after_the_gate(tmp_path):
