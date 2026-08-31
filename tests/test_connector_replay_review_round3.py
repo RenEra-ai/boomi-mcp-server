@@ -1296,7 +1296,11 @@ _EXPECTED_CLASS_COUNTS = {
     # instance named the pair in prose before a letter existed for it, so the tally
     # read zero while the mechanism was already recorded.
     "DC-155-R": 3,
-    "DC-155-T": 2,
+    # OVERCOUNT-CORRECTED: minted at two, but the second "instance" was the review
+    # finding that produced the first's correction — one defect reported twice is
+    # one instance, and a floor that locks in an over-count is as wrong as one that
+    # lets a real instance vanish.
+    "DC-155-T": 1,  # OVERCOUNT-CORRECTED
     # Minted when two findings already recorded under two unrelated classes turned
     # out to share one pair: a hand-model of what git itself reports, against git.
     "DC-155-S": 3,
@@ -1321,6 +1325,7 @@ _UNROWED = {"DC-155-C": 2, "DC-155-I": 1}
 #: the reason. Frozen so the set cannot grow silently: a row that names a class is an
 #: instance of it unless it appears here.
 _NOT_AN_INSTANCE = {
+    "CDX-155-r120-04": "its class is CORRECTED by CDX-155-r120-04a",
     "EVAL-155-13a": "its class is CORRECTED by EVAL-155-13b; the original names the superseded class",
     "SELF-155-r98-01b": "a revision of a revision; the original is what counts",
     "SELF-155-r98-01c": "likewise; the original is the counted row",
@@ -1538,6 +1543,8 @@ def _floor_regression(previous_sources, current_source):
     committed. The ceiling over all revisions has no such blind spot, and it also
     refuses a floor raised and then quietly walked back down.
     """
+    import re
+
     ceiling: dict[str, int] = {}
     for source in previous_sources:
         for cls, floor in (_declared_class_floors(source) or {}).items():
@@ -1547,7 +1554,16 @@ def _floor_regression(previous_sources, current_source):
     current = _declared_class_floors(current_source)
     if current is None:
         return "removed"
-    lowered = sorted(c for c, floor in ceiling.items() if current.get(c, -1) < floor)
+    # ONE DECLARED ESCAPE, because a ratchet with none refuses a genuine correction as
+    # firmly as a silent shrink, and a tally recorded too HIGH is as wrong as one
+    # recorded too low. A class whose entry carries the `OVERCOUNT-CORRECTED` marker
+    # may go down: the marker is a declaration in the source, not a judgement made
+    # here, so the escape is visible in a diff and has to be written on purpose. Every
+    # other class still ratchets.
+    corrected = set(re.findall(
+        r'"(DC-[\w-]+)":\s*\d+[,}\s]*#\s*OVERCOUNT-CORRECTED', current_source))
+    lowered = sorted(c for c, floor in ceiling.items()
+                     if current.get(c, -1) < floor and c not in corrected)
     return f"lowered: {lowered}" if lowered else None
 
 
@@ -1649,6 +1665,24 @@ def test_the_repository_comparison_reads_every_recorded_revision(
     git = _repo_with_committed_floors(tmp_path, committed)
     source = f"_EXPECTED_CLASS_COUNTS = {{'A': {working}}}\n"
     assert _floor_regression_in_repo("guard.py", source, git) == expected
+
+
+@pytest.mark.parametrize(
+    "current,expected",
+    [
+        ('_EXPECTED_CLASS_COUNTS = {"A": 2, "DC-155-Z": 3}', "lowered: ['A']"),
+        # The declared escape, and it must be DECLARED — the marker is written on
+        # purpose and shows in a diff, so a corrected over-count is distinguishable
+        # from a silent shrink, which is the only difference that matters here.
+        ('_EXPECTED_CLASS_COUNTS = {"A": 3, "DC-155-Z": 2}  # OVERCOUNT-CORRECTED',
+         None),
+        ('_EXPECTED_CLASS_COUNTS = {"A": 3, "DC-155-Z": 2}', "lowered: ['DC-155-Z']"),
+    ],
+)
+def test_only_a_declared_overcount_correction_may_lower_a_floor(current, expected):
+    """A ratchet with no escape refuses a genuine correction as firmly as a shrink."""
+    previous = ['_EXPECTED_CLASS_COUNTS = {"A": 3, "DC-155-Z": 3}']
+    assert _floor_regression(previous, current) == expected
 
 
 def test_the_recorded_floors_never_move_down():
@@ -3793,7 +3827,12 @@ def _missing_checkpoint_violation(ledger_text, index_text, slice_letter=None,
         for d in sorted(Path(wave_dir).iterdir()):
             record = d / "round.json"
             if not record.is_file():
-                continue
+                # ABSENT evidence is a violation too. Closing only the unreadable case
+                # left the commoner one open: a directory whose record never landed
+                # drops its evaluation from the count, and at an owed boundary that
+                # erases the checkpoint the count demanded — while the directory's
+                # summary still satisfies the wave rule, so nothing else notices.
+                return f"wave round {d.name} has no round record"
             try:
                 entry = json.loads(record.read_text())
             except ValueError:
@@ -3805,42 +3844,55 @@ def _missing_checkpoint_violation(ledger_text, index_text, slice_letter=None,
             if entry.get("status") == "completed":
                 note(str(entry.get("logical_loop", "")))
 
-    recorded = {}
+    # A DECISION and a RECORDED GAP are different states and are tracked separately.
+    # Reading only the count let a `GAP-RECORDED` row — which says explicitly that no
+    # decision was made — satisfy the rule as if one had been; and exempting landed
+    # slices wholesale meant their gap rows could be deleted with the audit still
+    # clean. Every archived loop is audited, and each owed interval must be answered
+    # by one state or the other.
+    decided, gapped = {}, {}
     for row in _checkpoint_rows(ledger_text) or []:
         cells = row.split("|")
-        if len(cells) < 3:
+        if len(cells) < 5:
             continue
         m = re.match(r"\s*(\d+)\s*/\s*(\d+)", cells[2])
         tag = re.match(r"\s*(L\d)", cells[1].strip().strip("*").strip("`"))
         here = re.search(r"slice ([A-F])", cells[1])
-        if m and tag and here:
-            key = (here.group(1), tag.group(1))
-            recorded[key] = max(recorded.get(key, 0), int(m.group(2)))
+        if not (m and tag and here):
+            continue
+        key = (here.group(1), tag.group(1))
+        target = gapped if "GAP-RECORDED" in cells[4] else decided
+        target[key] = max(target.get(key, 0), int(m.group(2)))
 
     # EVERY slice the archive knows, not the one a wave row happens to name. Deriving
     # the audited slice from the latest L4 row meant a new slice reaching its third
     # review BEFORE its first wave run was attributed to the previous slice, and its
     # missing checkpoint passed — the gap is widest exactly when the slice is youngest.
-    # SLICES THAT HAVE NOT LANDED. A missing checkpoint can only be supplied honestly
-    # while its window is open; for a landed slice the decision was never made and
-    # writing one now would fabricate it, which a review refused when this rule first
-    # surfaced three historical gaps. Those gaps are RECORDED in the checkpoint table
-    # as gap rows instead. Landed slices are read from the slice map, which is where
-    # the record states it, rather than from a list kept here.
+    # Landed slices are read from the slice map, where the record states it.
     landed = set()
     for line in ledger_text.splitlines():
         m = re.match(r"\|\s*([A-F])\s*\|", line)
         if m and re.search(r"\bLANDED\b|\bCLOSED CLEAN\b", line):
             landed.add(m.group(1))
-    wanted = ({slice_letter} if slice_letter else slices) - landed
+
     for (here, loop), count in sorted(billed.items()):
-        if here not in wanted:
+        if slice_letter and here != slice_letter:
             continue
         owed = (count // 3) * 3
-        if owed and recorded.get((here, loop), 0) < owed:
+        if not owed:
+            continue
+        # A DURABLE GAP answers only for a LANDED slice. History that cannot be
+        # reconstructed is recorded as a gap and the record says so; a slice still in
+        # flight owes a DECISION, because its window is open and one can still be made
+        # honestly. Without this a gap row would become the way to skip a checkpoint
+        # rather than the way to admit one was skipped.
+        covers = decided.get((here, loop), 0)
+        if here in landed:
+            covers = max(covers, gapped.get((here, loop), 0))
+        if covers < owed:
             return (f"loop {loop} of slice {here} has {count} collected evaluations, "
-                    f"so a checkpoint through {owed} is owed; the latest recorded "
-                    f"covers {recorded.get((here, loop), 0)}")
+                    f"so a recorded decision through {owed} is owed; the record covers "
+                    f"{covers}")
     return None
 
 
