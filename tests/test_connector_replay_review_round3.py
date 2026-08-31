@@ -1325,6 +1325,8 @@ _UNROWED = {"DC-155-C": 2, "DC-155-I": 1}
 #: the reason. Frozen so the set cannot grow silently: a row that names a class is an
 #: instance of it unless it appears here.
 _NOT_AN_INSTANCE = {
+    "CDX-155-r133-01a": "a REVISION of CDX-155-r133-01, which its class row already counts "
+    "as the instance — the same defect re-dispositioned, never a second occurrence",
     "CDX-155-r128-01a": "a REVISION of CDX-155-r128-01, which the class table already counts "
     "as the instance — the same defect re-dispositioned, never a second occurrence",
     "CDX-155-r120-04": "its class is CORRECTED by CDX-155-r120-04a",
@@ -4435,6 +4437,37 @@ def test_the_node_manifest_is_a_legal_successor_of_the_one_it_replaces():
         )
 
 
+def _is_the_permitted_rebind(value):
+    """``"<sep>".join(_unfenced_lines(ledger_text))`` — and nothing else.
+
+    A whitelist rather than a blacklist, because the blacklist lost three times: each
+    refused form was replaced by another expression that mentions the filter without
+    ever evaluating it, and the reader then saw an empty record while the guard stayed
+    green. This shape evaluates the call eagerly, unconditionally, exactly once.
+    """
+    import ast
+
+    if not isinstance(value, ast.Call) or value.keywords:
+        return False
+    joiner = value.func
+    if not isinstance(joiner, ast.Attribute) or joiner.attr != "join":
+        return False
+    if not (isinstance(joiner.value, ast.Constant) and isinstance(joiner.value.value, str)):
+        return False
+    if len(value.args) != 1:
+        return False
+    call = value.args[0]
+    return (
+        isinstance(call, ast.Call)
+        and isinstance(call.func, ast.Name)
+        and call.func.id == "_unfenced_lines"
+        and not call.keywords
+        and len(call.args) == 1
+        and isinstance(call.args[0], ast.Name)
+        and call.args[0].id == "ledger_text"
+    )
+
+
 def _raw_ledger_reads(node):
     """Line numbers where ``node`` reads its ledger text WITHOUT the record's view.
 
@@ -4475,27 +4508,15 @@ def _raw_ledger_reads(node):
         # the untaken branch reads the record unfiltered. Constructed and confirmed.
         # Rather than analyse the expression, require that every occurrence of the
         # parameter inside it is an argument to the filter.
-        value_args = {
-            id(a) for c in ast.walk(stmt.value) if feeds_the_filter(c) for a in c.args
-        }
-        if any(
-            isinstance(sub, ast.Name)
-            and sub.id == "ledger_text"
-            and isinstance(sub.ctx, ast.Load)
-            and id(sub) not in value_args
-            for sub in ast.walk(stmt.value)
-        ):
-            continue
-        # AND THE VALUE MUST NOT BRANCH. Forbidding the raw NAME was not enough:
-        # `filtered if enabled else ""` keeps no raw occurrence, so it passed while
-        # one path never validated anything and handed the readers an empty record —
-        # a vacuous pass, which is worse than a loud one. Python has exactly two
-        # expression-level branch forms, so refusing both is a closed rule rather than
-        # a list that grows; anything more elaborate is a statement, and a statement
-        # is not this shape.
-        if any(
-            isinstance(sub, (ast.IfExp, ast.BoolOp)) for sub in ast.walk(stmt.value)
-        ):
+        # ONE PERMITTED SHAPE, matched exactly. Three weaker rules were tried and each
+        # was defeated by a value that mentions the filter without running it: a
+        # ternary keeping the raw name, a ternary keeping a constant, and a lazy
+        # comprehension the interpreter never draws from. Naming the forms to refuse
+        # is a list that grows for as long as Python has syntax; naming the ONE form
+        # to accept is finite, and it is the only form the readers in this module
+        # actually use. Anything else must pass the filter straight through, which is
+        # accepted everywhere and needs no rebind at all.
+        if not _is_the_permitted_rebind(stmt.value):
             continue
         rebind_line = stmt.lineno
         break
@@ -4555,6 +4576,15 @@ _READER_SHAPES = (
     ("rebinds through a short-circuit", True,
      "def f(ledger_text):\n"
      "    ledger_text = '\\n'.join(_unfenced_lines(ledger_text)) or ''\n"
+     "    return ledger_text.count('x')\n"),
+    ("rebinds from a comprehension nothing draws from", True,
+     "def f(ledger_text):\n"
+     "    ledger_text = next(\n"
+     "        (''.join(_unfenced_lines(ledger_text)) for _ in ()), '')\n"
+     "    return ledger_text.count('x')\n"),
+    ("rebinds from a call that merely mentions the filter", True,
+     "def f(ledger_text):\n"
+     "    ledger_text = _pick(_unfenced_lines(ledger_text), ledger_text)\n"
      "    return ledger_text.count('x')\n"),
 )
 
