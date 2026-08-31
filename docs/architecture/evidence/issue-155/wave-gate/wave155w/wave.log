@@ -1,0 +1,259 @@
+wave_gate: baseline d04a2482d9b43c84765395ec8bbc73495de29fd4 (local)
+wave_gate: TOMBSTONE pytest-nodes pytest-011024 owner=repository disposition=n/a
+wave_gate: TOMBSTONE pytest-nodes pytest-011028 owner=repository disposition=n/a
+wave_gate: manifests ok (11362 required nodes, 74 active goldens)
+wave_gate: collection ok (11362 tests)
+........................................................................ [  0%]
+........................................................................ [  1%]
+........................................................................ [  1%]
+........................................................................ [  2%]
+........................................................................ [  3%]
+........................................................................ [  3%]
+........................................................................ [  4%]
+........................................................................ [  5%]
+........................................................................ [  5%]
+........................................................................ [  6%]
+........................................................................ [  6%]
+........................................................................ [  7%]
+........................................................................ [  8%]
+........................................................................ [  8%]
+.................................................s...................... [  9%]
+........................................................................ [ 10%]
+........................................................................ [ 10%]
+........................................................................ [ 11%]
+........................................................................ [ 12%]
+........................................................................ [ 12%]
+........................................................................ [ 13%]
+........................................................................ [ 13%]
+..........................................................s............. [ 14%]
+........................................................................ [ 15%]
+........................................................................ [ 15%]
+........................................................................ [ 16%]
+........................................................................ [ 17%]
+........................................................................ [ 17%]
+........................................................................ [ 18%]
+........................................................................ [ 19%]
+........................................................................ [ 19%]
+........................................................................ [ 20%]
+........................................................................ [ 20%]
+........................................................................ [ 21%]
+........................................................................ [ 22%]
+........................................................................ [ 22%]
+........................................................................ [ 23%]
+........................................................................ [ 24%]
+........................................................................ [ 24%]
+........................................................................ [ 25%]
+........................................................................ [ 25%]
+........................................................................ [ 26%]
+........................................................................ [ 27%]
+........................................................................ [ 27%]
+........................................................................ [ 28%]
+........................................................................ [ 29%]
+........................................................................ [ 29%]
+........................................................................ [ 30%]
+........................................................................ [ 31%]
+........................................................................ [ 31%]
+........................................................................ [ 32%]
+........................................................................ [ 32%]
+........................................................................ [ 33%]
+........................................................................ [ 34%]
+........................................................................ [ 34%]
+........................................................................ [ 35%]
+........................................................................ [ 36%]
+........................................................................ [ 36%]
+........................................................................ [ 37%]
+........................................................................ [ 38%]
+........................................................................ [ 38%]
+........................................................................ [ 39%]
+........................................................................ [ 39%]
+........................................................................ [ 40%]
+........................................................................ [ 41%]
+........................................................................ [ 41%]
+........................................................................ [ 42%]
+........................................................................ [ 43%]
+........................................................................ [ 43%]
+........................................................................ [ 44%]
+........................................................................ [ 44%]
+........................................................................ [ 45%]
+........................................................................ [ 46%]
+........................................................................ [ 46%]
+........................................................................ [ 47%]
+........................................................................ [ 48%]
+........................................................................ [ 48%]
+........................................................................ [ 49%]
+........................................................................ [ 50%]
+........................................................................ [ 50%]
+........................................................................ [ 51%]
+........................................................................ [ 51%]
+........................................................................ [ 52%]
+........................................................................ [ 53%]
+........................................................................ [ 53%]
+........................................................................ [ 54%]
+........................................................................ [ 55%]
+........................................................................ [ 55%]
+........................................................................ [ 56%]
+........................................................................ [ 57%]
+........................................................................ [ 57%]
+........................................................................ [ 58%]
+........................................................................ [ 58%]
+........................................................................ [ 59%]
+........................................................................ [ 60%]
+........................................................................ [ 60%]
+........................................................................ [ 61%]
+........................................................................ [ 62%]
+........................................................................ [ 62%]
+........................................................................ [ 63%]
+........................................................................ [ 64%]
+........................................................................ [ 64%]
+........................................................................ [ 65%]
+........................................................................ [ 65%]
+........................................................................ [ 66%]
+........................................................................ [ 67%]
+........................................................................ [ 67%]
+........................................................................ [ 68%]
+........................................................................ [ 69%]
+........................................................................ [ 69%]
+........................................................................ [ 70%]
+........................................................................ [ 70%]
+........................................................................ [ 71%]
+........................................................................ [ 72%]
+........................................................................ [ 72%]
+........................................................................ [ 73%]
+........................................................................ [ 74%]
+........................................................................ [ 74%]
+........................................................................ [ 75%]
+........................................................................ [ 76%]
+........................................................................ [ 76%]
+........................................................................ [ 77%]
+........................................................................ [ 77%]
+........................................................................ [ 78%]
+........................................................................ [ 79%]
+........................................................................ [ 79%]
+........................................................................ [ 80%]
+........................................................................ [ 81%]
+........................................................................ [ 81%]
+........................................................................ [ 82%]
+........................................................................ [ 83%]
+........................................................................ [ 83%]
+........................................................................ [ 84%]
+........................................................................ [ 84%]
+........................................................................ [ 85%]
+........................................................................ [ 86%]
+........................................................................ [ 86%]
+........................................................................ [ 87%]
+........................................................................ [ 88%]
+...............................s.....sssssssss...s........s........s.... [ 88%]
+....s................................................................... [ 89%]
+........................................................................ [ 89%]
+........................................................................ [ 90%]
+........................................................................ [ 91%]
+s.......s............................................................... [ 91%]
+........................................................................ [ 92%]
+........................................................................ [ 93%]
+........................................................................ [ 93%]
+........................................................................ [ 94%]
+........................................................................ [ 95%]
+........................................................................ [ 95%]
+........................................................................ [ 96%]
+........................................................................ [ 96%]
+........................................................................ [ 97%]
+........................................................................ [ 98%]
+........................................................................ [ 98%]
+........................................................................ [ 99%]
+..........................................................               [100%]
+=============================== warnings summary ===============================
+tests/test_recipe_security.py:703
+  /Users/gleb/Documents/Projects/Renera/boomi-mcp-server/tests/test_recipe_security.py:703: UserWarning: A custom validator is returning a value other than `self`.
+  Returning anything other than `self` from a top level model validator isn't supported when validating via `__init__`.
+  See the `model_validator` docs (https://docs.pydantic.dev/latest/concepts/validators/#model-validators) for more details.
+    slot: _NestedSlot = _NestedSlot()
+
+tests/test_recipe_security.py:2371
+  /Users/gleb/Documents/Projects/Renera/boomi-mcp-server/tests/test_recipe_security.py:2371: UserWarning: A custom validator is returning a value other than `self`.
+  Returning anything other than `self` from a top level model validator isn't supported when validating via `__init__`.
+  See the `model_validator` docs (https://docs.pydantic.dev/latest/concepts/validators/#model-validators) for more details.
+    leaf: _DeclaredKeysOnlyLeaf = _DeclaredKeysOnlyLeaf()
+
+tests/test_recipe_registry.py::test_a_field_named_like_a_schema_keyword_does_not_break_the_core_walk[schema]
+  /Users/gleb/Documents/Projects/Renera/boomi-mcp-server/.venv/lib/python3.12/site-packages/pydantic/main.py:1804: UserWarning: Field name "schema" in "Colliding" shadows an attribute in parent "RecipeInputBase"
+    return meta(
+
+tests/test_recipe_security.py::test_a_wrap_or_plain_bypass_below_the_root_is_rejected[nested]
+  /Users/gleb/Documents/Projects/Renera/boomi-mcp-server/tests/test_recipe_security.py:940: UserWarning: A custom validator is returning a value other than `self`.
+  Returning anything other than `self` from a top level model validator isn't supported when validating via `__init__`.
+  See the `model_validator` docs (https://docs.pydantic.dev/latest/concepts/validators/#model-validators) for more details.
+    leaf: InnerWrap = InnerWrap()
+
+tests/test_recipe_security.py::test_a_wrap_or_plain_bypass_below_the_root_is_rejected[two_deep]
+  /Users/gleb/Documents/Projects/Renera/boomi-mcp-server/tests/test_recipe_security.py:947: UserWarning: A custom validator is returning a value other than `self`.
+  Returning anything other than `self` from a top level model validator isn't supported when validating via `__init__`.
+  See the `model_validator` docs (https://docs.pydantic.dev/latest/concepts/validators/#model-validators) for more details.
+    leaf: InnerWrap = InnerWrap()
+
+tests/test_recipe_security.py::test_the_types_the_wrap_ban_refused_all_register[DefaultDict]
+tests/test_recipe_security.py::test_the_types_the_wrap_ban_refused_all_register[DefaultDict]
+tests/test_recipe_security.py::test_nine_of_the_twelve_survive_an_engine_round_trip[DefaultDict-raw_value1]
+tests/test_recipe_security.py::test_nine_of_the_twelve_survive_an_engine_round_trip[DefaultDict-raw_value1]
+  /Users/gleb/Documents/Projects/Renera/boomi-mcp-server/.venv/lib/python3.12/site-packages/pydantic/json_schema.py:2442: PydanticJsonSchemaWarning: Default value defaultdict(<class 'str'>, {}) is not JSON serializable; excluding default from JSON schema [non-serializable-default]
+    warnings.warn(message, PydanticJsonSchemaWarning)
+
+tests/test_recipe_security.py::test_a_swap_below_one_container_level_is_caught[dict_value]
+  /Users/gleb/Documents/Projects/Renera/boomi-mcp-server/.venv/lib/python3.12/site-packages/pydantic/main.py:464: UserWarning: Pydantic serializer warnings:
+    PydanticSerializationUnexpectedValue(Expected `str` - serialized value may not be as expected [field_name='label', input_value={'slots': {'a': {'label':...NEL-SQL-SELECT-SECRETS'}, input_type=dict])
+    return self.__pydantic_serializer__.to_python(
+
+tests/test_recipe_security.py::test_a_swap_below_one_container_level_is_caught[tuple_of_tuple]
+  /Users/gleb/Documents/Projects/Renera/boomi-mcp-server/.venv/lib/python3.12/site-packages/pydantic/main.py:464: UserWarning: Pydantic serializer warnings:
+    PydanticSerializationUnexpectedValue(Expected `str` - serialized value may not be as expected [field_name='label', input_value={'slots': [[{'label': 'y'...NEL-SQL-SELECT-SECRETS'}, input_type=dict])
+    return self.__pydantic_serializer__.to_python(
+
+tests/test_recipe_security.py::test_a_swap_below_one_container_level_is_caught[dict_of_list]
+  /Users/gleb/Documents/Projects/Renera/boomi-mcp-server/.venv/lib/python3.12/site-packages/pydantic/main.py:464: UserWarning: Pydantic serializer warnings:
+    PydanticSerializationUnexpectedValue(Expected `str` - serialized value may not be as expected [field_name='label', input_value={'slots': {'a': [{'label'...NEL-SQL-SELECT-SECRETS'}, input_type=dict])
+    return self.__pydantic_serializer__.to_python(
+
+tests/test_recipe_security.py::test_a_typed_dict_field_is_judged_by_its_per_key_hints
+  /Users/gleb/Documents/Projects/Renera/boomi-mcp-server/tests/test_recipe_security.py:3225: UserWarning: A custom validator is returning a value other than `self`.
+  Returning anything other than `self` from a top level model validator isn't supported when validating via `__init__`.
+  See the `model_validator` docs (https://docs.pydantic.dev/latest/concepts/validators/#model-validators) for more details.
+    field: TD = {"member": _DeclaredKeysOnlyLeaf()}
+
+tests/test_recipe_security.py::test_a_failed_trial_does_not_mark_nodes_seen_for_the_next_one
+  /Users/gleb/Documents/Projects/Renera/boomi-mcp-server/tests/test_recipe_security.py:3303: UserWarning: A custom validator is returning a value other than `self`.
+  Returning anything other than `self` from a top level model validator isn't supported when validating via `__init__`.
+  See the `model_validator` docs (https://docs.pydantic.dev/latest/concepts/validators/#model-validators) for more details.
+    payload: _DeclaredKeysOnlyLeaf = _DeclaredKeysOnlyLeaf()
+
+tests/test_recipe_security.py::test_a_failed_trial_does_not_mark_nodes_seen_for_the_next_one
+  /Users/gleb/Documents/Projects/Renera/boomi-mcp-server/tests/test_recipe_security.py:3306: UserWarning: A custom validator is returning a value other than `self`.
+  Returning anything other than `self` from a top level model validator isn't supported when validating via `__init__`.
+  See the `model_validator` docs (https://docs.pydantic.dev/latest/concepts/validators/#model-validators) for more details.
+    payload: _DeclaredKeysOnlyLeaf = _DeclaredKeysOnlyLeaf()
+
+tests/test_recipe_security.py::test_a_hook_on_a_base_after_basemodel_is_still_found
+  /Users/gleb/Documents/Projects/Renera/boomi-mcp-server/tests/test_recipe_security.py:4965: UserWarning: A custom validator is returning a value other than `self`.
+  Returning anything other than `self` from a top level model validator isn't supported when validating via `__init__`.
+  See the `model_validator` docs (https://docs.pydantic.dev/latest/concepts/validators/#model-validators) for more details.
+    _assert_declared_shape(EvilOrder.model_construct(leaf=_DeclaredKeysOnlyLeaf()))
+
+tests/test_recipe_security.py::test_a_hook_on_a_base_after_basemodel_is_still_found
+  /Users/gleb/Documents/Projects/Renera/boomi-mcp-server/tests/test_recipe_security.py:4970: UserWarning: Field name "leaf" in "test_a_hook_on_a_base_after_basemodel_is_still_found.<locals>.EvilDescriptor" shadows an attribute in parent "test_a_hook_on_a_base_after_basemodel_is_still_found.<locals>.DescriptorMixin"
+    class EvilDescriptor(RecipeInputBase, DescriptorMixin):
+
+tests/test_recipe_security.py::test_a_hook_on_a_base_after_basemodel_is_still_found
+  /Users/gleb/Documents/Projects/Renera/boomi-mcp-server/tests/test_recipe_security.py:4975: UserWarning: A custom validator is returning a value other than `self`.
+  Returning anything other than `self` from a top level model validator isn't supported when validating via `__init__`.
+  See the `model_validator` docs (https://docs.pydantic.dev/latest/concepts/validators/#model-validators) for more details.
+    _assert_declared_shape(EvilDescriptor.model_construct(leaf=_DeclaredKeysOnlyLeaf()))
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+SKIPPED [1] tests/test_authoring_examples_policy.py:108: authoring_workflow_sequence_example.json carries no tool parameters
+SKIPPED [1] tests/test_connector_replay_review_round3.py:2585: this filesystem rejects non-UTF-8 filenames
+SKIPPED [6] tests/test_sync_pipeline_adapter_cutover.py:721: chain rejected upstream: SYNC_PIPELINE_CONTROL_FLOW_UNSUPPORTED
+SKIPPED [8] tests/test_sync_pipeline_adapter_cutover.py:721: chain rejected upstream: SYNC_PIPELINE_CONFIG_INVALID
+SKIPPED [2] tests/test_system_topology_models.py:154: identity is supplied by a binding; covered by the bound tests
+11344 passed, 18 skipped, 18 warnings in 920.55s (0:15:20)
+wave_gate: non-KB suite green (11344 passed, 18 skipped, cap 30)
+wave_gate: 74 active goldens deterministic and byte-exact
+wave_gate: plan fingerprint checked:2 case(s)
