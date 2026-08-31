@@ -1,0 +1,13 @@
+{
+ "collector": "wave_gate",
+ "durable_dir": "wave-gate/wave155x",
+ "files": {
+  "wave-gate/wave155x/summary.json": "0d3872227b7d433902533d7b660b918ffc34eb69139d11ff0b1caf9bdaddcf5b",
+  "wave-gate/wave155x/wave.log": "aacd775f5121e5a9ac6820feb225026333d955443ed4b69879c4e222fe9eea34"
+ },
+ "logical_loop": "L4 (composite wave gate, slice D \u2014 the run carrying the declared floor escape)",
+ "source_run_dir": "/var/folders/xx/nt1fy00j0m337y5mb4zwt3b40000gn/T/wave155x.94rf4l4j",
+ "status": "completed",
+ "verdict": "pass",
+ "wave_sha": "125cf23e6f4195a6d58186e5e0095c8d471a4507"
+}
