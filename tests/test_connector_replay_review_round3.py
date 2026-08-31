@@ -3246,8 +3246,13 @@ def _window_inventory(ledger_text, runs):
         # or not-validated. Honouring `none` on any disposition let a row declare the
         # waiver in one column while its disposition accepted a second half in
         # another — the dual-disposition shape, moved one column over.
+        # EXACT, and only the two dispositions that remove the finding. `startswith`
+        # accepted "finding-refuted in part; remainder validated", which is the
+        # dual-disposition shape again; and `severity-refuted` only changes the TIER,
+        # so the finding stands and still owes its class.
+        full_refutation = disp.split("—")[0].split(";")[0].strip().rstrip(".")
         owed = in_blocking and not (
-            waives and disp.startswith(("finding-refuted", "not-validated", "severity-refuted")))
+            waives and full_refutation in ("finding-refuted", "not-validated"))
         if not in_blocking:
             owed = False
         if owed and klass is None:
@@ -3324,13 +3329,16 @@ def _checkpoint_inventory_violation(ledger_text):
             name = str(entry.get("durable_dir", "")).rsplit("/", 1)[-1]
             if name:
                 loop_of_run[name] = str(entry.get("logical_loop", ""))
-    reviewed_by_loop = {}
+    # EACH RUN TO ITS OWN SHA. Keying by loop and unioning let any review sharing a
+    # loop label vouch for a tree a DIFFERENT run reviewed — the same
+    # lose-the-identity defect as pooling every archive, one level in. A checkpoint's
+    # coverage comes from the runs it names, individually.
+    reviewed_of_run = {}
     if archive.is_dir():
         for d in sorted(archive.iterdir()):
             f = d / "last-reviewed-sha"
             if f.is_file():
-                reviewed_by_loop.setdefault(loop_of_run.get(d.name, ""), set()).add(
-                    f.read_text().strip())
+                reviewed_of_run[d.name] = f.read_text().strip()
 
     def label(row):
         cells = row.split("|")
@@ -3417,10 +3425,7 @@ def _checkpoint_inventory_violation(ledger_text):
                 # Missing evidence is a violation, not a reason to skip the body.
                 return f"checkpoint {loop!r} ends its loop without naming a SHA"
             named = sha.group(1)
-            covered = set()
-            for run in names:
-                for candidate in reviewed_by_loop.get(loop_of_run.get(run, ""), ()):
-                    covered.add(candidate)
+            covered = {reviewed_of_run[r] for r in names if r in reviewed_of_run}
             # EXACT when the row writes a full SHA. Accepting a 40-character value
             # because its first seven matched is how a fabricated SHA passes, and
             # this record has already carried one — thirty-three invented characters
@@ -3754,22 +3759,36 @@ def test_every_collected_node_is_pinned_by_the_manifest():
     rows = [json.loads(l) for l in manifest.read_text().splitlines() if l.strip()]
     pinned = {r["node_id"] for r in rows[1:]}
 
-    changed = subprocess.run(
-        ["git", "diff", "--name-only", _SLICE_BASELINE, "HEAD", "--", "tests"],
-        capture_output=True, text=True, cwd=root,
-    )
-    assert changed.returncode == 0, changed.stderr
+    def paths(*args):
+        # `-z`, always. Concatenating display-formatted output and calling `.split()`
+        # corrupts any path containing whitespace or a quoted non-ASCII name, after
+        # which `is_file()` drops it silently — the exact mistake this file already
+        # fixed once for `git status` and I reintroduced here.
+        out = subprocess.run(["git", *args, "-z", "--", "tests"],
+                             capture_output=True, cwd=root)
+        assert out.returncode == 0, out.stderr[-300:]
+        return [q for q in out.stdout.decode("utf-8", "surrogateescape").split("\0") if q]
+
+    # STAGED CONTENT IS WHAT THE NEXT COMMIT HOLDS. Collecting the worktree checks a
+    # tree that may never be committed: a test staged and then reverted in the
+    # worktree is absent from the collection while a plain commit still adds it.
+    # Rather than materialize the index, divergence is refused outright — the guard
+    # then says plainly that it cannot speak for this tree.
+    staged_only = paths("diff", "--name-only", "--cached")
+    unstaged = set(paths("diff", "--name-only"))
+    diverged = sorted(f for f in staged_only
+                      if f in unstaged and f.endswith(".py") and f.startswith("tests/"))
+    assert not diverged, (
+        "these test files differ between the index and the worktree, so what a commit "
+        f"would contain is not what pytest would collect: {diverged}")
     # WORKTREE-INCLUSIVE, and untracked too. `git diff A B` lists only committed
     # paths, so during the ordinary uncommitted-fix workflow a freshly touched or
     # freshly created test file never reached the collection and its unpinned nodes
     # passed — which is the state this guard exists for.
-    worktree = subprocess.run(["git", "diff", "--name-only", _SLICE_BASELINE, "--", "tests"],
-                              capture_output=True, text=True, cwd=root)
-    untracked = subprocess.run(
-        ["git", "ls-files", "--others", "--exclude-standard", "--", "tests"],
-        capture_output=True, text=True, cwd=root)
-    files = sorted({f for f in (changed.stdout + " " + worktree.stdout + " "
-                                + untracked.stdout).split()
+    candidates = (paths("diff", "--name-only", _SLICE_BASELINE, "HEAD")
+                  + paths("diff", "--name-only", _SLICE_BASELINE)
+                  + paths("ls-files", "--others", "--exclude-standard"))
+    files = sorted({f for f in candidates
                     if f.startswith("tests/") and f.endswith(".py") and (root / f).is_file()})
     assert files, "the slice changed no test file; this check would be vacuous"
 
