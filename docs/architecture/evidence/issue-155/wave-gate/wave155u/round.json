@@ -1,0 +1,13 @@
+{
+ "collector": "wave_gate",
+ "durable_dir": "wave-gate/wave155u",
+ "files": {
+  "wave-gate/wave155u/summary.json": "214343abede484363a0f3b22f8baaf25b29354b62b1174d3ddd9e73f92ef137f",
+  "wave-gate/wave155u/wave.log": "b9df9957e91703a28091b07dc630895811583b076a27f2dbc185d83ccc014a82"
+ },
+ "logical_loop": "L4 (composite wave gate, slice D \u2014 the run carrying the checkpoint-existence rule)",
+ "source_run_dir": "/var/folders/xx/nt1fy00j0m337y5mb4zwt3b40000gn/T/wave155u.38ldke4d",
+ "status": "completed",
+ "verdict": "pass",
+ "wave_sha": "5e3f3a5fd9c97a26d797b661d438d7a6d7f9c7e1"
+}
