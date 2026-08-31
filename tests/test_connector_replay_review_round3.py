@@ -1325,6 +1325,7 @@ _UNROWED = {"DC-155-C": 2, "DC-155-I": 1}
 #: the reason. Frozen so the set cannot grow silently: a row that names a class is an
 #: instance of it unless it appears here.
 _NOT_AN_INSTANCE = {
+    "SELF-155-r100-01a": "a REVISION of SELF-155-r100-01, which its class row already counts",
     "CDX-155-r133-01b": "a REVISION of CDX-155-r133-01, which its class row already counts",
     "CDX-155-r134-01": "its class is CORRECTED by CDX-155-r134-01a; the original names the "
     "superseded class",
