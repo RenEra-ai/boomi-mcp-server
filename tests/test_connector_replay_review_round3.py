@@ -3237,7 +3237,19 @@ def _window_inventory(ledger_text, runs):
         # with a reason, in the column for it. A BLANK cell is not such a
         # declaration and still owes.
         flat = _defect_cell.get(stands, "").strip().lower().rstrip(".")
-        owed = not (flat == "none" or re.match(r"none\s*[—(,]", flat))
+        waives = flat == "none" or bool(re.match(r"none\s*[—(,]", flat))
+        blocking_flat = parsed[stands][2].strip().lower().rstrip(".") if stands else ""
+        in_blocking = not (blocking_flat in {"none", "n/a", ""}
+                           or re.match(r"none\s*[—(,]", blocking_flat))
+        disp = parsed[stands][3].strip().lower() if stands else ""
+        # A row IN a blocking class may waive its defect class only by being REFUTED
+        # or not-validated. Honouring `none` on any disposition let a row declare the
+        # waiver in one column while its disposition accepted a second half in
+        # another — the dual-disposition shape, moved one column over.
+        owed = in_blocking and not (
+            waives and disp.startswith(("finding-refuted", "not-validated", "severity-refuted")))
+        if not in_blocking:
+            owed = False
         if owed and klass is None:
             problems.append(f"{rid}: is in a blocking class but carries no defect class")
         inventory[rid] = klass
@@ -3291,14 +3303,34 @@ def _checkpoint_inventory_violation(ledger_text):
         return "the ledger has no checkpoint table"
     # What the ARCHIVE says a collected review actually reviewed — the authority for
     # whether a tree has been validated, never the ledger's own prose about it.
-    archive = Path(__file__).resolve().parents[1] / (
-        "docs/architecture/evidence/issue-155/commit-reviews")
-    reviewed_shas = set()
+    # RUN IDENTITY IS KEPT, and so is the loop each review was billed to. Pooling
+    # every archived SHA let an unrelated loop's review vouch for this one's tree —
+    # logical loops are distinct, and a gate covers a tree only for the loop that ran
+    # it. The loop is read from the evidence index, which is where the archiver
+    # records it, not from the ledger's prose about it.
+    import json as _json
+    root = Path(__file__).resolve().parents[1]
+    archive = root / "docs/architecture/evidence/issue-155/commit-reviews"
+    index = root / "docs/architecture/evidence/issue-155/index.jsonl"
+    loop_of_run = {}
+    if index.is_file():
+        for raw in index.read_text().splitlines():
+            if not raw.strip():
+                continue
+            try:
+                entry = _json.loads(raw)
+            except ValueError:
+                continue
+            name = str(entry.get("durable_dir", "")).rsplit("/", 1)[-1]
+            if name:
+                loop_of_run[name] = str(entry.get("logical_loop", ""))
+    reviewed_by_loop = {}
     if archive.is_dir():
-        for d in archive.iterdir():
+        for d in sorted(archive.iterdir()):
             f = d / "last-reviewed-sha"
             if f.is_file():
-                reviewed_shas.add(f.read_text().strip())
+                reviewed_by_loop.setdefault(loop_of_run.get(d.name, ""), set()).add(
+                    f.read_text().strip())
 
     def label(row):
         cells = row.split("|")
@@ -3330,6 +3362,13 @@ def _checkpoint_inventory_violation(ledger_text):
 
     running = {}
     for loop, window, cumulative, row, has in parsed:
+        # RECOMPUTED per row. Without this, `cells` still held the LAST row parsed by
+        # the loop above, so every check below read one row's outcome and another
+        # row's SHA — the clause ran four times against the same cells and could not
+        # fail. Found by instrumenting the loop rather than by reading it; the
+        # external replica of the same logic refused the mutant correctly, which is
+        # what made the disagreement visible.
+        cells = row.split("|")
         # The DENOMINATOR carries the loop's running total across ALL its rows.
         expected = running.get(loop, 0) + window
         if cumulative != expected:
@@ -3366,14 +3405,33 @@ def _checkpoint_inventory_violation(ledger_text):
         # The checkpoint names the SHA it decided on; the archive records which SHAs a
         # collected review actually covered; a checkpoint whose SHA is in neither may
         # describe the state but may not declare the loop closable.
-        sha = re.search(r"`([0-9a-f]{7,40})`", cells[3] if len(cells) > 3 else "")
-        claims_closure = "CLOSE-CLEAN" in cells[4] or "no correction outstanding" in row
-        if claims_closure and sha and reviewed_shas:
-            covered = any(r.startswith(sha.group(1)) or sha.group(1).startswith(r[:7])
-                          for r in reviewed_shas)
-            if not covered:
-                return (f"checkpoint {loop!r} declares closure on {sha.group(1)}, "
-                        "which no archived review covers")
+        # EVERY loop-ending outcome, enumerated from the workflow's own set rather
+        # than from the one spelling I happened to write. `CONTINUE` starts another
+        # window and `ESCALATE-OPEN` leaves the issue open, so neither asserts a
+        # validated tip; the other three all end the loop and all require one.
+        ENDING = ("CLOSE-CLEAN", "DEFER-STANDARD-AND-PROCEED", "DEFER-STANDARD-AND-CLOSE")
+        outcome = cells[4] if len(cells) > 4 else ""
+        if any(e in outcome for e in ENDING):
+            sha = re.search(r"`([0-9a-f]{7,40})`", cells[3] if len(cells) > 3 else "")
+            if not sha:
+                # Missing evidence is a violation, not a reason to skip the body.
+                return f"checkpoint {loop!r} ends its loop without naming a SHA"
+            named = sha.group(1)
+            covered = set()
+            for run in names:
+                for candidate in reviewed_by_loop.get(loop_of_run.get(run, ""), ()):
+                    covered.add(candidate)
+            # EXACT when the row writes a full SHA. Accepting a 40-character value
+            # because its first seven matched is how a fabricated SHA passes, and
+            # this record has already carried one — thirty-three invented characters
+            # behind a correct prefix.
+            if len(named) == 40:
+                ok = named in covered
+            else:
+                ok = any(c.startswith(named) for c in covered)
+            if not ok:
+                return (f"checkpoint {loop!r} ends its loop on {named[:12]}, which no "
+                        "archived review of that loop covers")
 
         rows_field = field(row, "WINDOW ROWS")
         if rows_field is None or not rows_field.strip().isdigit():
@@ -3701,8 +3759,18 @@ def test_every_collected_node_is_pinned_by_the_manifest():
         capture_output=True, text=True, cwd=root,
     )
     assert changed.returncode == 0, changed.stderr
-    files = sorted(f for f in changed.stdout.split()
-                   if f.startswith("tests/") and f.endswith(".py") and (root / f).is_file())
+    # WORKTREE-INCLUSIVE, and untracked too. `git diff A B` lists only committed
+    # paths, so during the ordinary uncommitted-fix workflow a freshly touched or
+    # freshly created test file never reached the collection and its unpinned nodes
+    # passed — which is the state this guard exists for.
+    worktree = subprocess.run(["git", "diff", "--name-only", _SLICE_BASELINE, "--", "tests"],
+                              capture_output=True, text=True, cwd=root)
+    untracked = subprocess.run(
+        ["git", "ls-files", "--others", "--exclude-standard", "--", "tests"],
+        capture_output=True, text=True, cwd=root)
+    files = sorted({f for f in (changed.stdout + " " + worktree.stdout + " "
+                                + untracked.stdout).split()
+                    if f.startswith("tests/") and f.endswith(".py") and (root / f).is_file()})
     assert files, "the slice changed no test file; this check would be vacuous"
 
     collected = subprocess.run(
