@@ -3057,6 +3057,145 @@ def test_every_finding_row_in_this_ledger_is_visible_to_the_scanner():
     )
 
 
+def _window_inventory(ledger_text, runs):
+    """The finding rows a checkpoint window actually contains, and their classes.
+
+    DERIVED, because a checkpoint's mandatory inputs — how many findings, in which
+    defect classes — were hand-counted and were wrong twice in a row: once by summing
+    a series that did not add up, and once by crediting the window with a class minted
+    in the NEXT one. A checkpoint whose numbers come from memory is a decision informed
+    by whatever the author recalled, which is precisely what the checkpoint rule exists
+    to prevent. A row's window is machine-readable, so its inventory is computable and
+    the row must agree with it.
+    """
+    import re
+
+    # A revision supersedes its original's CLASS but never its WINDOW. A finding
+    # raised in evaluation 5 and reclassified in evaluation 7 still belongs to the
+    # window that found it — reading membership off the revision would silently move
+    # it forward and empty the window that owns it, which is the same
+    # informed-by-a-later-window defect one level down.
+    supersedes = {
+        m.group(1): m.group(2) for m in re.finditer(
+            r"`([A-Za-z]+-155-(?:r\d+-)?\d+[a-z]) → ([A-Za-z0-9-]+)`", ledger_text
+        )
+    }
+    revision_of = {}
+    for rev, orig in supersedes.items():
+        revision_of.setdefault(orig, []).append(rev)
+
+    parsed = {}
+    for line in ledger_text.splitlines():
+        if not line.startswith("| "):
+            continue
+        cells = line.split("|")
+        if len(cells) < 9:
+            continue
+        rid = cells[1].strip()
+        if not re.fullmatch(r"(?:CDX|SELF|QA|ARCH)-155-r\d+-\d+[a-z]?", rid):
+            continue
+        found = re.search(r"DC-155-[A-Z]\d?", cells[6])
+        parsed[rid] = (cells[2], found.group(0) if found else None)
+
+    def latest_class(rid):
+        """Follow the revision chain to the class that currently stands."""
+        seen, current = set(), rid
+        while current in revision_of and current not in seen:
+            seen.add(current)
+            # `a` then `b`: the newest revision is the last one lexically.
+            current = sorted(revision_of[current])[-1]
+        return parsed.get(current, (None, None))[1]
+
+    inventory = {}
+    for rid, (source, _) in parsed.items():
+        if rid in supersedes:
+            continue  # a revision is counted through the row it revises
+        if not any(run in source for run in runs):
+            continue
+        inventory[rid] = latest_class(rid)
+    return inventory
+
+
+def _checkpoint_inventory_violation(ledger_text):
+    """Whether the latest closing checkpoint agrees with the rows in its own window."""
+    import re
+
+    rows = [
+        line for line in ledger_text.splitlines()
+        if line.startswith("| L5 closing protocol")
+    ]
+    if not rows:
+        return None
+    latest = rows[-1]
+    runs = re.findall(r"WINDOW RUNS:([^|]*)", latest)
+    if not runs:
+        return "the latest closing checkpoint does not name the runs in its window"
+    names = re.findall(r"`(cdx-review\.[A-Za-z0-9]+)`", runs[0])
+    if not names:
+        return "the latest closing checkpoint names no run in its window"
+    stated_rows = re.search(r"WINDOW ROWS:\s*(\d+)", latest)
+    if not stated_rows:
+        return "the latest closing checkpoint states no row count for its window"
+    stated_classes = re.search(r"WINDOW CLASSES:([^|]*)", latest)
+    if not stated_classes:
+        return "the latest closing checkpoint states no defect classes for its window"
+
+    inventory = _window_inventory(ledger_text, names)
+    if len(inventory) != int(stated_rows.group(1)):
+        return (f"the window holds {len(inventory)} finding rows but the checkpoint "
+                f"states {stated_rows.group(1)}")
+    derived = {c for c in inventory.values() if c}
+    claimed = set(re.findall(r"DC-155-[A-Z]\d?", stated_classes.group(1)))
+    if derived != claimed:
+        return (f"the window's classes are {sorted(derived)} but the checkpoint claims "
+                f"{sorted(claimed)}")
+    return None
+
+
+@pytest.mark.parametrize(
+    "runs,rows,classes,expected",
+    [
+        ("`cdx-review.aa`", "1", "`DC-155-G`", None),
+        # The arithmetic defect: a stated total the window does not support.
+        ("`cdx-review.aa`", "2", "`DC-155-G`",
+         "the window holds 1 finding rows but the checkpoint states 2"),
+        # The inventory defect: a class the window does not contain.
+        ("`cdx-review.aa`", "1", "`DC-155-G`, `DC-155-S`",
+         "the window's classes are ['DC-155-G'] but the checkpoint claims "
+         "['DC-155-G', 'DC-155-S']"),
+        # A window nobody can check.
+        ("", "1", "`DC-155-G`",
+         "the latest closing checkpoint names no run in its window"),
+    ],
+)
+def test_the_checkpoint_inventory_rule_refuses_an_unsupported_window(
+    runs, rows, classes, expected
+):
+    """The rule, exercised away from this repository's own record."""
+    # The finding table's real shape: the DEFECT class is its own column, distinct
+    # from the blocking class beside it. A fixture with fewer columns would read the
+    # wrong cell and pass while the rule was pointed somewhere else entirely.
+    ledger = (
+        "| ID | source | summary | label | blocking | defect class | tier | sha "
+        "| disposition |\n"
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- |\n"
+        "| CDX-155-r1-01 | run `cdx-review.aa` | s | P1 | runtime behavior "
+        "| DC-155-G a closure ahead of validation | critical | x | fixed |\n"
+        "\n"
+        f"| L5 closing protocol | 1 / 1 | x | `CONTINUE` | WINDOW RUNS: {runs} . "
+        f"WINDOW ROWS: {rows} . WINDOW CLASSES: {classes} . rationale |\n"
+    )
+    assert _checkpoint_inventory_violation(ledger) == expected
+
+
+def test_the_latest_closing_checkpoint_agrees_with_its_own_window():
+    """Applied to this ledger. A checkpoint's inputs are derived, never recalled."""
+    root = Path(__file__).resolve().parents[1]
+    ledger = (root / "docs/architecture/ISSUE_155_AUDIT_LEDGER.md").read_text()
+    violation = _checkpoint_inventory_violation(ledger)
+    assert violation is None, f"the closing checkpoint is unsupported: {violation}"
+
+
 def test_the_latest_wave_checkpoint_is_reverifiable_from_the_archive():
     """Applied to this ledger. Scoped to the LATEST row deliberately.
 

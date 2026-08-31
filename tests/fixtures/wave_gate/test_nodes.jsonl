@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 11329, "minimum_collected": 11329, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 11334, "minimum_collected": 11334, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -11370,3 +11370,8 @@
 {"kind": "test", "id": "pytest-011369", "node_id": "tests/test_connector_replay_review_round3.py::test_the_repository_guard_does_not_fabricate_a_watched_path", "state": "active"}
 {"kind": "test", "id": "pytest-011370", "node_id": "tests/test_connector_replay_review_round3.py::test_the_git_callback_survives_undecodable_output", "state": "active"}
 {"kind": "test", "id": "pytest-011371", "node_id": "tests/test_connector_replay_review_round3.py::test_the_repository_guard_refuses_executable_change_left_in_the_pending_commit[undecodable_name]", "state": "active"}
+{"kind": "test", "id": "pytest-011372", "node_id": "tests/test_connector_replay_review_round3.py::test_the_checkpoint_inventory_rule_refuses_an_unsupported_window[`cdx-review.aa`-1-`DC-155-G`-None]", "state": "active"}
+{"kind": "test", "id": "pytest-011373", "node_id": "tests/test_connector_replay_review_round3.py::test_the_checkpoint_inventory_rule_refuses_an_unsupported_window[`cdx-review.aa`-2-`DC-155-G`-the window holds 1 finding rows but the checkpoint states 2]", "state": "active"}
+{"kind": "test", "id": "pytest-011374", "node_id": "tests/test_connector_replay_review_round3.py::test_the_checkpoint_inventory_rule_refuses_an_unsupported_window[`cdx-review.aa`-1-`DC-155-G`, `DC-155-S`-the window's classes are ['DC-155-G'] but the checkpoint claims ['DC-155-G', 'DC-155-S']]", "state": "active"}
+{"kind": "test", "id": "pytest-011375", "node_id": "tests/test_connector_replay_review_round3.py::test_the_checkpoint_inventory_rule_refuses_an_unsupported_window[-1-`DC-155-G`-the latest closing checkpoint names no run in its window]", "state": "active"}
+{"kind": "test", "id": "pytest-011376", "node_id": "tests/test_connector_replay_review_round3.py::test_the_latest_closing_checkpoint_agrees_with_its_own_window", "state": "active"}
