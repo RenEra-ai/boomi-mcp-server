@@ -1,0 +1,13 @@
+{
+ "collector": "wave_gate",
+ "durable_dir": "wave-gate/wave155r",
+ "files": {
+  "wave-gate/wave155r/summary.json": "87aa71844aa94ec42af619fe8171c2c203090cda03bf0c06fa2c6c6478cc9af2",
+  "wave-gate/wave155r/wave.log": "a59f5802bee1f225a5e7cca83e1759c78c56ea172c72585e159af20805107fe6"
+ },
+ "logical_loop": "L4 (composite wave gate, slice D \u2014 the run on the corrected-freeze tree)",
+ "source_run_dir": "/var/folders/xx/nt1fy00j0m337y5mb4zwt3b40000gn/T/wave155r.hvq39zbx",
+ "status": "completed",
+ "verdict": "pass",
+ "wave_sha": "dd9f3a18086703f33471a629bce9217b01474acd"
+}
