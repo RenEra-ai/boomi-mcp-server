@@ -2147,24 +2147,36 @@ def _one_closing_report_violation(report, marker, rel, archive_dir, git, latest_
     # file.
     if not is_current:
         return None
-    # AGAINST THE WORKING TREE, not against HEAD. The normal state for writing commit
-    # N is an UNCOMMITTED report, and there N−1 is HEAD — so a commit-to-commit
-    # comparison is `HEAD` against `HEAD`, empty by construction, while the pending
-    # commit could carry staged, unstaged or untracked executable changes that no wave
-    # gate and no review ever saw. A check that is trivially satisfied in exactly the
-    # state it exists to police is not a check. Omitting the second endpoint compares
-    # N−1 to the worktree, which also covers the committed case unchanged; untracked
-    # paths are listed separately because `git diff` does not see them at all.
-    moved = [
-        c for c in git("diff", "--name-only", n1,
+    # ASK GIT WHAT THE NEXT COMMIT WOULD CONTAIN, rather than enumerating the ways a
+    # tree can differ. Three rounds of this guard each closed one mode and shipped the
+    # next: commit-to-commit missed the pending commit entirely; adding the worktree
+    # diff missed untracked files; adding those missed a staged file reverted only in
+    # the worktree, which `git diff <n1>` and `ls-files --others` both report as
+    # nothing while a plain `git commit` still includes it — verified by construction,
+    # not reasoned about. The enumeration WAS the defect, so it is replaced by the
+    # authority: `git status --porcelain` is git's own complete answer to what differs
+    # from HEAD right now, across index, worktree, untracked, renames and deletions,
+    # and it is the same instrument this repository's review recipe already uses to
+    # decide whether a tree is dirty. History before HEAD is a separate question and
+    # keeps its commit-to-commit diff.
+    moved = set(
+        c for c in git("diff", "--name-only", n1, "HEAD",
                        "--", "src", "tests", "scripts").splitlines() if c.strip()
-    ]
-    moved += [
-        c for c in git("ls-files", "--others", "--exclude-standard",
-                       "--", "src", "tests", "scripts").splitlines() if c.strip()
-    ]
-    return (f"invalidated: source moved after N−1: {sorted(set(moved))}"
-            if moved else None)
+    )
+    watched = ("src/", "tests/", "scripts/")
+    # `=all`, not `=normal`: normal collapses an untracked directory to `src/`, which
+    # still fires but names a directory where the reader needs the file.
+    for line in git("status", "--porcelain", "--untracked-files=all").splitlines():
+        if len(line) < 4:
+            continue
+        # Porcelain v1: XY then the path, and a rename carries `old -> new`. Both
+        # sides are checked, because renaming a source file OUT of a watched tree
+        # changes it just as surely as renaming one in.
+        for path in line[3:].split(" -> "):
+            path = path.strip().strip('"')
+            if path.startswith(watched):
+                moved.add(path)
+    return (f"invalidated: source moved after N−1: {sorted(moved)}" if moved else None)
 
 
 def test_a_closing_report_names_the_current_wave_sha_and_proves_darkness():
@@ -2499,8 +2511,12 @@ def _synthetic_closing_repo(tmp_path, wave_shas_from, cited, executable_drift=Fa
         # written from. `staged` and `untracked` are distinct blind spots.
         (root / "src").mkdir(exist_ok=True)
         (root / "src" / f"{pending_drift}.py").write_text("y = 2\n")
-        if pending_drift == "staged":
+        if pending_drift.startswith("staged"):
             git("add", "src")
+        if pending_drift == "staged_then_removed":
+            # Staged, then reverted in the worktree only: invisible to a diff against
+            # the commit AND to the untracked listing, yet a plain commit includes it.
+            (root / "src" / f"{pending_drift}.py").unlink()
     return git, archive
 
 
@@ -2546,7 +2562,7 @@ def test_the_repository_guard_refuses_a_report_citing_a_superseded_wave(tmp_path
     ).endswith("stale-wave")
 
 
-@pytest.mark.parametrize("pending", ["staged", "untracked"])
+@pytest.mark.parametrize("pending", ["staged", "untracked", "staged_then_removed"])
 def test_the_repository_guard_refuses_executable_change_left_in_the_pending_commit(
     tmp_path, pending
 ):
