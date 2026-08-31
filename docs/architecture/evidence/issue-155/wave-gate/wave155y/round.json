@@ -1,0 +1,13 @@
+{
+ "collector": "wave_gate",
+ "durable_dir": "wave-gate/wave155y",
+ "files": {
+  "wave-gate/wave155y/summary.json": "3a6b9ac2ad4ff28eeece42493e36d21697c35e4e55a750772bee5fa3c2bca5c9",
+  "wave-gate/wave155y/wave.log": "c05a795fe0c7c0bdfc723d7f765c2f55540b518a353487f4d2f14212da2eddf7"
+ },
+ "logical_loop": "L4 (composite wave gate, slice D \u2014 the run carrying checkpoint 24)",
+ "source_run_dir": "/var/folders/xx/nt1fy00j0m337y5mb4zwt3b40000gn/T/wave155y.ti12cqao",
+ "status": "completed",
+ "verdict": "pass",
+ "wave_sha": "1c2fe9c345bdc1728033a83df9ed075521bfc2e5"
+}
