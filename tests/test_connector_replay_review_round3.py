@@ -3175,7 +3175,7 @@ def _window_inventory(ledger_text, runs):
     for rev, orig in supersedes.items():
         revision_of.setdefault(orig, []).append(rev)
 
-    parsed, duplicates = {}, set()
+    parsed, duplicates, _defect_cell = {}, set(), {}
     for rid, cells in rows:
         if rid in parsed:
             duplicates.add(rid)
@@ -3186,6 +3186,7 @@ def _window_inventory(ledger_text, runs):
         # convention, read from it rather than modelled here.
         found = re.search(r"DC-155-[A-Z]+\d*", cells[6])
         parsed[rid] = (cells[2], found.group(0) if found else None, cells[5], cells[9])
+        _defect_cell[rid] = cells[6]
 
     missing_revision = []
 
@@ -3204,7 +3205,7 @@ def _window_inventory(ledger_text, runs):
         return current
 
     inventory = {}
-    for rid, (source, _, blocking, _disp) in parsed.items():
+    for rid, (source, _, _blocking, _disp) in parsed.items():
         if rid in supersedes:
             # Counted through the row it revises — but that row must EXIST. A
             # revision declared against an original nobody wrote removed a real
@@ -3227,22 +3228,16 @@ def _window_inventory(ledger_text, runs):
             problems.append(f"{rid}: appears twice in the finding tables")
         stands = standing(rid)
         klass = parsed[stands][1] if stands else None
-        # A REFUTED finding is not an instance of anything and owes no defect class —
-        # the same rule the class tally applies, read from the disposition that
-        # stands rather than restated. Reading it off the ORIGINAL would miss a
-        # refutation delivered by a revision, which is how refutations arrive here.
-        refuted = bool(stands) and parsed[stands][3].strip().startswith("finding-refuted")
-        # The BLOCKING class decides whether a defect class is owed. `startswith`
-        # accepted a cell that merely OPENS with the word none, and a blank cell
-        # switched the requirement off entirely.
-        # The ledger's own "no blocking class" forms are `none`, `n/a`, or `none`
-        # followed by an em dash or a parenthesis. A bare `startswith("none")`
-        # accepted a cell that merely OPENS with the word — "none of the listed
-        # classes apply, though it is runtime behavior" — which switches the
-        # requirement off using the very sentence that says it applies.
-        flat = blocking.strip().lower().rstrip(".")
-        owed = not refuted and not (
-            flat in {"none", "n/a", ""} or re.match(r"none\s*[—(]", flat))
+        # WHETHER A CLASS IS OWED IS READ FROM THE FIELD THAT DECLARES IT — the
+        # defect-class cell of the row that stands. An earlier version inferred it
+        # from the DISPOSITION's prose, testing whether it began `finding-refuted`,
+        # which treated a dual disposition opening with a refutation as fully
+        # refuted and so reinstated the exact shape it was added to remove. A
+        # declaration is not a sentence to parse: a row owing no class SAYS none,
+        # with a reason, in the column for it. A BLANK cell is not such a
+        # declaration and still owes.
+        flat = _defect_cell.get(stands, "").strip().lower().rstrip(".")
+        owed = not (flat == "none" or re.match(r"none\s*[—(,]", flat))
         if owed and klass is None:
             problems.append(f"{rid}: is in a blocking class but carries no defect class")
         inventory[rid] = klass
@@ -3294,6 +3289,16 @@ def _checkpoint_inventory_violation(ledger_text):
     rows = _checkpoint_rows(ledger_text)
     if rows is None:
         return "the ledger has no checkpoint table"
+    # What the ARCHIVE says a collected review actually reviewed — the authority for
+    # whether a tree has been validated, never the ledger's own prose about it.
+    archive = Path(__file__).resolve().parents[1] / (
+        "docs/architecture/evidence/issue-155/commit-reviews")
+    reviewed_shas = set()
+    if archive.is_dir():
+        for d in archive.iterdir():
+            f = d / "last-reviewed-sha"
+            if f.is_file():
+                reviewed_shas.add(f.read_text().strip())
 
     def label(row):
         cells = row.split("|")
@@ -3353,6 +3358,23 @@ def _checkpoint_inventory_violation(ledger_text):
                 return f"{run} is claimed by both {seen_runs[run]!r} and {loop!r}"
             seen_runs[run] = loop
 
+        # A CHECKPOINT MAY NOT CLAIM CLOSURE ON A TREE NO REVIEW HAS COVERED. This
+        # class's first axis — a decision written before its owed validation — was
+        # answered PROCEDURALLY ("write the checkpoint after the validation") and has
+        # recurred thirty times, most recently in a row written in the same commit as
+        # the correction it blessed. A procedure cannot enforce an ordering; this can.
+        # The checkpoint names the SHA it decided on; the archive records which SHAs a
+        # collected review actually covered; a checkpoint whose SHA is in neither may
+        # describe the state but may not declare the loop closable.
+        sha = re.search(r"`([0-9a-f]{7,40})`", cells[3] if len(cells) > 3 else "")
+        claims_closure = "CLOSE-CLEAN" in cells[4] or "no correction outstanding" in row
+        if claims_closure and sha and reviewed_shas:
+            covered = any(r.startswith(sha.group(1)) or sha.group(1).startswith(r[:7])
+                          for r in reviewed_shas)
+            if not covered:
+                return (f"checkpoint {loop!r} declares closure on {sha.group(1)}, "
+                        "which no archived review covers")
+
         rows_field = field(row, "WINDOW ROWS")
         if rows_field is None or not rows_field.strip().isdigit():
             return f"checkpoint {loop!r} does not state its row count exactly once"
@@ -3372,6 +3394,11 @@ def _checkpoint_inventory_violation(ledger_text):
             return (f"checkpoint {loop!r} has classes {sorted(derived)} but claims "
                     f"{sorted(claimed)}")
     return None
+
+
+#: This slice's literal baseline. The manifest check derives its scope from the
+#: files changed since it, so the scope follows the work instead of naming one.
+_SLICE_BASELINE = "d04a2482d9b43c84765395ec8bbc73495de29fd4"
 
 
 _AUDIT_BASE = (
@@ -3652,10 +3679,14 @@ def test_every_collected_node_is_pinned_by_the_manifest():
     while the new work was protected by nothing, because collection merely exceeded
     the floor.
 
-    This asserts the other direction for this slice's own file: everything collected
-    from it is named in the manifest. Scoped there deliberately — the manifest is
-    another issue's artifact and widening the assertion to the whole suite would make
-    this test fail for reasons that are not this slice's to fix.
+    This asserts the other direction over EVERY test file this slice touched, derived
+    from the files changed since the slice baseline rather than from a filename written
+    here. It was scoped to one file, and replacing that enumeration is what the SECOND
+    instance of the regenerated-from-a-non-final-tree class requires: a manifest
+    rebuilt every round instead of once from the final tree moved 254 identifiers
+    between commits, and a check watching a single file could not see it. The scope
+    stays inside this slice's own changes — the manifest is another issue's artifact,
+    so this covers what the slice added and not what it inherited.
     """
     import json
     import subprocess
@@ -3665,18 +3696,25 @@ def test_every_collected_node_is_pinned_by_the_manifest():
     rows = [json.loads(l) for l in manifest.read_text().splitlines() if l.strip()]
     pinned = {r["node_id"] for r in rows[1:]}
 
-    mine = Path(__file__).name
+    changed = subprocess.run(
+        ["git", "diff", "--name-only", _SLICE_BASELINE, "HEAD", "--", "tests"],
+        capture_output=True, text=True, cwd=root,
+    )
+    assert changed.returncode == 0, changed.stderr
+    files = sorted(f for f in changed.stdout.split()
+                   if f.startswith("tests/") and f.endswith(".py") and (root / f).is_file())
+    assert files, "the slice changed no test file; this check would be vacuous"
+
     collected = subprocess.run(
-        [sys.executable, "-m", "pytest", f"tests/{mine}", "--collect-only", "-q",
+        [sys.executable, "-m", "pytest", *files, "--collect-only", "-q",
          "-p", "no:cacheprovider"],
         capture_output=True, text=True, cwd=root,
         env={**os.environ, "PYTHONPATH": "src", "PYTHONDONTWRITEBYTECODE": "1"},
     )
     assert collected.returncode == 0, f"collection failed: {collected.stderr[-400:]}"
-    nodes = [
-        ln.strip() for ln in collected.stdout.splitlines()
-        if ln.startswith(f"tests/{mine}::")
-    ]
+    prefixes = tuple(f + "::" for f in files)
+    nodes = [ln.strip() for ln in collected.stdout.splitlines()
+             if ln.startswith(prefixes)]
     assert len(nodes) > 40, f"only {len(nodes)} nodes collected; the check would be thin"
 
     unpinned = sorted(n for n in nodes if n not in pinned)
