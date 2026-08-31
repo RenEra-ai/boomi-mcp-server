@@ -1571,13 +1571,29 @@ def _floor_regression(previous_sources, current_source):
     # drop matched again, and a drop straight past the target matched too. The marker
     # names BOTH ends, so it authorises exactly the one correction it describes and
     # nothing else — any other movement, in either direction, ratchets normally.
-    corrected = {c: (int(a), int(b)) for c, a, b in re.findall(
-        r'"(DC-[\w-]+)":\s*\d+[,}\s]*#\s*OVERCOUNT-CORRECTED-FROM-(\d+)-TO-(\d+)',
-        current_source)}
+    marker_re = r'"(DC-[\w-]+)":\s*\d+[,}\s]*#\s*OVERCOUNT-CORRECTED-FROM-(\d+)-TO-(\d+)'
+    corrected = {c: (int(a), int(b))
+                 for c, a, b in re.findall(marker_re, current_source)}
+
+    # ONE-SHOT, enforced from history rather than promised by a comment. Naming both
+    # endpoints still let the SAME transition repeat: correct 3→2, let the class
+    # legitimately grow back to 3, drop it to 2 again, and the marker matched a second
+    # time. A correction is a single event, so the escape is SPENT once the class has
+    # risen above its corrected target while the marker was already in place — after
+    # that any drop is a new movement and ratchets normally.
+    spent = set()
+    for source in previous_sources:
+        marked = dict(
+            (c, (int(a), int(b))) for c, a, b in re.findall(marker_re, source))
+        declared = _declared_class_floors(source) or {}
+        for cls, (_frm, to) in marked.items():
+            if declared.get(cls, -1) > to:
+                spent.add(cls)
+
     lowered = sorted(
         c for c, floor in ceiling.items()
         if current.get(c, -1) < floor
-        and corrected.get(c) != (floor, current.get(c, -1)))
+        and (c in spent or corrected.get(c) != (floor, current.get(c, -1))))
     return f"lowered: {lowered}" if lowered else None
 
 
@@ -1704,6 +1720,29 @@ def test_only_a_declared_overcount_correction_may_lower_a_floor(current, expecte
     """A ratchet with no escape refuses a genuine correction as firmly as a shrink."""
     previous = ['_EXPECTED_CLASS_COUNTS = {"A": 3, "DC-155-Z": 3}']
     assert _floor_regression(previous, current) == expected
+
+
+def test_the_overcount_escape_is_spent_after_the_class_rises_again():
+    """A correction is a single event, not a standing permission.
+
+    Naming both endpoints still let the SAME transition repeat: correct 3 to 2, let the
+    class legitimately grow back to 3, drop it to 2 again, and the marker matched a
+    second time. The escape is spent once the class has risen above its corrected
+    target with the marker already in place.
+    """
+    M = "  # OVERCOUNT-CORRECTED-FROM-3-TO-2"
+    # oldest -> newest is not assumed: the rule reads the whole set either way.
+    history_before_rise = ['_EXPECTED_CLASS_COUNTS = {"DC-155-Z": 3}',
+                           '_EXPECTED_CLASS_COUNTS = {"DC-155-Z": 2}' + M]
+    assert _floor_regression(
+        history_before_rise, '_EXPECTED_CLASS_COUNTS = {"DC-155-Z": 2}' + M) is None
+
+    # the class legitimately recurred and the floor rose back to 3, marker still there
+    history_after_rise = history_before_rise + [
+        '_EXPECTED_CLASS_COUNTS = {"DC-155-Z": 3}' + M]
+    assert _floor_regression(
+        history_after_rise, '_EXPECTED_CLASS_COUNTS = {"DC-155-Z": 2}' + M
+    ) == "lowered: ['DC-155-Z']"
 
 
 def test_the_recorded_floors_never_move_down():
