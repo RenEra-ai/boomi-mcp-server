@@ -1296,6 +1296,9 @@ _EXPECTED_CLASS_COUNTS = {
     # instance named the pair in prose before a letter existed for it, so the tally
     # read zero while the mechanism was already recorded.
     "DC-155-R": 3,
+    # Minted when two findings already recorded under two unrelated classes turned
+    # out to share one pair: a hand-model of what git itself reports, against git.
+    "DC-155-S": 3,
     "DC-155-K": 38,
     "DC-155-L": 37,
     "DC-155-M": 1,
@@ -1317,6 +1320,8 @@ _UNROWED = {"DC-155-C": 2, "DC-155-I": 1}
 #: the reason. Frozen so the set cannot grow silently: a row that names a class is an
 #: instance of it unless it appears here.
 _NOT_AN_INSTANCE = {
+    "CDX-155-r103-01": "its class is CORRECTED by CDX-155-r103-01a; the original names the superseded class",
+    "CDX-155-r104-01": "likewise corrected by CDX-155-r104-01a",
     "CDX-155-r98-02": "its class is CORRECTED by CDX-155-r98-02a, which is the counted row; the original names the superseded class",
     "SELF-155-r5-02": "the sibling sweep the structural fix owed, not a new instance",
     "SELF-155-r28-02": "likewise a sweep",
@@ -1589,10 +1594,18 @@ def _repo_with_committed_floors(tmp_path, committed_floors):
     root.mkdir()
 
     def git(*args, check=True):
-        out = subprocess.run(["git", *args], capture_output=True, text=True, cwd=root)
+        # BYTES, then surrogateescape — never `text=True`. A legal non-UTF-8 filename
+        # under a watched tree makes `git status -z` emit raw unquoted bytes, and a
+        # strict decode raises before this MANDATORY guard can return its verdict: a
+        # crash where a refusal belongs. `scripts/wave_gate.py::_status` already reads
+        # the same stream this way, so this matches the repository's own handling
+        # rather than inventing a second one.
+        out = subprocess.run(["git", *args], capture_output=True, cwd=root)
+        text = out.stdout.decode("utf-8", "surrogateescape")
         if check:
-            assert out.returncode == 0, f"git {' '.join(args)} failed: {out.stderr.strip()}"
-        return out.stdout
+            err = out.stderr.decode("utf-8", "surrogateescape").strip()
+            assert out.returncode == 0, f"git {' '.join(args)} failed: {err}"
+        return text
 
     git("init", "-q", "-b", "main")
     git("config", "user.email", "qa@example.invalid")
@@ -1649,10 +1662,18 @@ def test_the_recorded_floors_never_move_down():
     root = here.parents[1]
     rel = str(here.relative_to(root))
     def git(*args, check=True):
-        out = subprocess.run(["git", *args], capture_output=True, text=True, cwd=root)
+        # BYTES, then surrogateescape — never `text=True`. A legal non-UTF-8 filename
+        # under a watched tree makes `git status -z` emit raw unquoted bytes, and a
+        # strict decode raises before this MANDATORY guard can return its verdict: a
+        # crash where a refusal belongs. `scripts/wave_gate.py::_status` already reads
+        # the same stream this way, so this matches the repository's own handling
+        # rather than inventing a second one.
+        out = subprocess.run(["git", *args], capture_output=True, cwd=root)
+        text = out.stdout.decode("utf-8", "surrogateescape")
         if check:
-            assert out.returncode == 0, f"git {' '.join(args)} failed: {out.stderr.strip()}"
-        return out.stdout
+            err = out.stderr.decode("utf-8", "surrogateescape").strip()
+            assert out.returncode == 0, f"git {' '.join(args)} failed: {err}"
+        return text
 
     regression = _floor_regression_in_repo(rel, here.read_text(), git)
     assert regression is None, (
@@ -2206,10 +2227,18 @@ def test_a_closing_report_names_the_current_wave_sha_and_proves_darkness():
     root = ledger_path.parents[2]
 
     def git(*args, check=True):
-        out = subprocess.run(["git", *args], capture_output=True, text=True, cwd=root)
+        # BYTES, then surrogateescape — never `text=True`. A legal non-UTF-8 filename
+        # under a watched tree makes `git status -z` emit raw unquoted bytes, and a
+        # strict decode raises before this MANDATORY guard can return its verdict: a
+        # crash where a refusal belongs. `scripts/wave_gate.py::_status` already reads
+        # the same stream this way, so this matches the repository's own handling
+        # rather than inventing a second one.
+        out = subprocess.run(["git", *args], capture_output=True, cwd=root)
+        text = out.stdout.decode("utf-8", "surrogateescape")
         if check:
-            assert out.returncode == 0, f"git {' '.join(args)} failed: {out.stderr.strip()}"
-        return out.stdout
+            err = out.stderr.decode("utf-8", "surrogateescape").strip()
+            assert out.returncode == 0, f"git {' '.join(args)} failed: {err}"
+        return text
 
     violation = _closing_report_violation(
         ledger,
@@ -2394,10 +2423,18 @@ def _synthetic_history(tmp_path, marker):
     root.mkdir()
 
     def git(*args, check=True):
-        out = subprocess.run(["git", *args], capture_output=True, text=True, cwd=root)
+        # BYTES, then surrogateescape — never `text=True`. A legal non-UTF-8 filename
+        # under a watched tree makes `git status -z` emit raw unquoted bytes, and a
+        # strict decode raises before this MANDATORY guard can return its verdict: a
+        # crash where a refusal belongs. `scripts/wave_gate.py::_status` already reads
+        # the same stream this way, so this matches the repository's own handling
+        # rather than inventing a second one.
+        out = subprocess.run(["git", *args], capture_output=True, cwd=root)
+        text = out.stdout.decode("utf-8", "surrogateescape")
         if check:
-            assert out.returncode == 0, f"git {' '.join(args)} failed: {out.stderr.strip()}"
-        return out.stdout
+            err = out.stderr.decode("utf-8", "surrogateescape").strip()
+            assert out.returncode == 0, f"git {' '.join(args)} failed: {err}"
+        return text
 
     git("init", "-q", "-b", "main")
     git("config", "user.email", "qa@example.invalid")
@@ -2463,10 +2500,18 @@ def _synthetic_closing_repo(tmp_path, wave_shas_from, cited, executable_drift=Fa
     root.mkdir()
 
     def git(*args, check=True):
-        out = subprocess.run(["git", *args], capture_output=True, text=True, cwd=root)
+        # BYTES, then surrogateescape — never `text=True`. A legal non-UTF-8 filename
+        # under a watched tree makes `git status -z` emit raw unquoted bytes, and a
+        # strict decode raises before this MANDATORY guard can return its verdict: a
+        # crash where a refusal belongs. `scripts/wave_gate.py::_status` already reads
+        # the same stream this way, so this matches the repository's own handling
+        # rather than inventing a second one.
+        out = subprocess.run(["git", *args], capture_output=True, cwd=root)
+        text = out.stdout.decode("utf-8", "surrogateescape")
         if check:
-            assert out.returncode == 0, f"git {' '.join(args)} failed: {out.stderr.strip()}"
-        return out.stdout
+            err = out.stderr.decode("utf-8", "surrogateescape").strip()
+            assert out.returncode == 0, f"git {' '.join(args)} failed: {err}"
+        return text
 
     git("init", "-q", "-b", "main")
     git("config", "user.email", "qa@example.invalid")
@@ -2517,6 +2562,21 @@ def _synthetic_closing_repo(tmp_path, wave_shas_from, cited, executable_drift=Fa
         (root / "src" / f"{pending_drift}.py").write_text("y = 2\n")
         if pending_drift.startswith("staged"):
             git("add", "src")
+        if pending_drift == "undecodable_name":
+            # A legal filename that is not valid UTF-8. `git status -z` emits it raw
+            # and unquoted, so a strict decode raises where a refusal belongs.
+            (root / "src" / f"{pending_drift}.py").unlink()
+            try:
+                os.write(
+                    os.open(os.path.join(bytes(root), b"src", b"bad\xff.py"),
+                            os.O_WRONLY | os.O_CREAT, 0o644),
+                    b"w = 4\n",
+                )
+            except OSError:  # pragma: no cover - filesystem-dependent
+                # APFS and HFS+ reject a name that is not valid UTF-8, so this case
+                # cannot be built here at all. The decode path it exercises is covered
+                # unconditionally by the blob test below, which needs no such file.
+                pytest.skip("this filesystem rejects non-UTF-8 filenames")
         if pending_drift == "adversarial_name":
             # A legal filename whose DISPLAY form contains the rename separator: the
             # prefix-matching parser fabricated a `src/` path from it and refused a
@@ -2574,6 +2634,30 @@ def test_the_repository_guard_refuses_a_report_citing_a_superseded_wave(tmp_path
     ).endswith("stale-wave")
 
 
+def test_the_git_callback_survives_undecodable_output(tmp_path):
+    """The decode path, on every platform, without needing an undecodable FILENAME.
+
+    The filename case can only be built where the filesystem allows one, which APFS
+    does not — so the guard's real hazard would have been covered on CI alone. A blob
+    carrying the same bytes exercises the identical callback: with `text=True` this
+    raises `UnicodeDecodeError`, and a mandatory guard that raises where it should
+    refuse fails closed in the wrong direction — it takes the whole suite down instead
+    of reporting drift.
+    """
+    import subprocess
+
+    git, _ = _synthetic_closing_repo(tmp_path, wave_shas_from=[0], cited=0)
+    root = tmp_path / "repo"
+    sha = subprocess.run(
+        ["git", "hash-object", "-w", "--stdin"],
+        input=b"raw \xff bytes\n", capture_output=True, cwd=root,
+    ).stdout.decode().strip()
+    out = git("cat-file", "blob", sha)
+    assert "\udcff" in out, (
+        "undecodable output must survive as surrogates rather than raising: " + repr(out)
+    )
+
+
 def test_the_repository_guard_does_not_fabricate_a_watched_path(tmp_path):
     """A legal filename whose display form contains the rename separator.
 
@@ -2589,7 +2673,9 @@ def test_the_repository_guard_does_not_fabricate_a_watched_path(tmp_path):
     ) is None
 
 
-@pytest.mark.parametrize("pending", ["staged", "untracked", "staged_then_removed"])
+@pytest.mark.parametrize(
+    "pending", ["staged", "untracked", "staged_then_removed", "undecodable_name"]
+)
 def test_the_repository_guard_refuses_executable_change_left_in_the_pending_commit(
     tmp_path, pending
 ):
@@ -2607,7 +2693,10 @@ def test_the_repository_guard_refuses_executable_change_left_in_the_pending_comm
         (tmp_path / "repo" / "ledger.md").read_text(), "ledger.md", archive, git
     )
     assert violation is not None and "invalidated" in violation, violation
-    assert f"src/{pending}.py" in violation, violation
+    # The undecodable case cannot be named by its own filename; what matters is that
+    # the guard REFUSES instead of raising, so it is asserted on the refusal alone.
+    if pending != "undecodable_name":
+        assert f"src/{pending}.py" in violation, violation
 
 
 def test_the_repository_guard_refuses_a_report_whose_tree_moved_after_the_gate(tmp_path):
