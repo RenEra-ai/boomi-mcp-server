@@ -1300,7 +1300,7 @@ _EXPECTED_CLASS_COUNTS = {
     # finding that produced the first's correction — one defect reported twice is
     # one instance, and a floor that locks in an over-count is as wrong as one that
     # lets a real instance vanish.
-    "DC-155-T": 1,  # OVERCOUNT-CORRECTED
+    "DC-155-T": 1,  # OVERCOUNT-CORRECTED-FROM-2
     # Minted when two findings already recorded under two unrelated classes turned
     # out to share one pair: a hand-model of what git itself reports, against git.
     "DC-155-S": 3,
@@ -1560,10 +1560,16 @@ def _floor_regression(previous_sources, current_source):
     # may go down: the marker is a declaration in the source, not a judgement made
     # here, so the escape is visible in a diff and has to be written on purpose. Every
     # other class still ratchets.
-    corrected = set(re.findall(
-        r'"(DC-[\w-]+)":\s*\d+[,}\s]*#\s*OVERCOUNT-CORRECTED', current_source))
+    # BOUND TO THE CEILING IT CORRECTS. A bare marker excused the class forever: once
+    # a real second instance raised the floor, the same comment would have accepted
+    # the next genuine drop too, which turns a one-time correction into a permanent
+    # hole. The marker names the value it corrects DOWN FROM, so it stops applying the
+    # moment the class rises past it and has to be rewritten deliberately if ever
+    # needed again.
+    corrected = {c: int(v) for c, v in re.findall(
+        r'"(DC-[\w-]+)":\s*\d+[,}\s]*#\s*OVERCOUNT-CORRECTED-FROM-(\d+)', current_source)}
     lowered = sorted(c for c, floor in ceiling.items()
-                     if current.get(c, -1) < floor and c not in corrected)
+                     if current.get(c, -1) < floor and corrected.get(c) != floor)
     return f"lowered: {lowered}" if lowered else None
 
 
@@ -1674,8 +1680,11 @@ def test_the_repository_comparison_reads_every_recorded_revision(
         # The declared escape, and it must be DECLARED — the marker is written on
         # purpose and shows in a diff, so a corrected over-count is distinguishable
         # from a silent shrink, which is the only difference that matters here.
-        ('_EXPECTED_CLASS_COUNTS = {"A": 3, "DC-155-Z": 2}  # OVERCOUNT-CORRECTED',
+        ('_EXPECTED_CLASS_COUNTS = {"A": 3, "DC-155-Z": 2}  # OVERCOUNT-CORRECTED-FROM-3',
          None),
+        # The marker names a ceiling this class never had, so it excuses nothing.
+        ('_EXPECTED_CLASS_COUNTS = {"A": 3, "DC-155-Z": 2}  # OVERCOUNT-CORRECTED-FROM-9',
+         "lowered: ['DC-155-Z']"),
         ('_EXPECTED_CLASS_COUNTS = {"A": 3, "DC-155-Z": 2}', "lowered: ['DC-155-Z']"),
     ],
 )
@@ -3894,6 +3903,92 @@ def _missing_checkpoint_violation(ledger_text, index_text, slice_letter=None,
                     f"so a recorded decision through {owed} is owed; the record covers "
                     f"{covers}")
     return None
+
+
+def _wave_archive(tmp_path, rounds, drop_record=False, corrupt=False):
+    """A wave archive with `rounds` completed slice-D rounds, optionally damaged."""
+    import json
+
+    root = tmp_path / "wave-gate"
+    root.mkdir()
+    for i in range(rounds):
+        d = root / f"wave{i}"
+        d.mkdir()
+        if drop_record and i == rounds - 1:
+            (d / "summary.json").write_text("{}")   # the directory survives, the record does not
+            continue
+        if corrupt and i == rounds - 1:
+            (d / "round.json").write_text("{not json")
+            continue
+        (d / "round.json").write_text(json.dumps({
+            "logical_loop": "L4 (composite wave gate, slice D)", "status": "completed"}))
+    return root
+
+
+@pytest.mark.parametrize(
+    "drop_record,corrupt,expected",
+    [
+        (False, False, None),
+        # A directory whose record never landed. The commoner damage, and the one the
+        # first version of this refusal missed entirely.
+        (True, False, "has no round record"),
+        (False, True, "has unreadable evidence"),
+    ],
+)
+def test_damaged_wave_evidence_is_refused_not_skipped(tmp_path, drop_record, corrupt, expected):
+    """Skipping damaged evidence drops the evaluation AND the checkpoint it made owed.
+
+    Both branches need a witness because both were written as `continue` first: an
+    archived round that cannot be read is not a round that did not happen, and letting
+    it vanish is how a gate certifies what it never saw.
+    """
+    ledger = (
+        "| Loop | Evaluation (window / cumulative) | SHA (+dirty) | Outcome | Rationale |\n"
+        "| --- | --- | --- | --- | --- |\n"
+        "| L4 composite wave gate, slice D | 3 / 3 | x | `CONTINUE` | r |\n"
+    )
+    wave = _wave_archive(tmp_path, 3, drop_record=drop_record, corrupt=corrupt)
+    violation = _missing_checkpoint_violation(ledger, "", wave_dir=wave)
+    if expected is None:
+        assert violation is None, violation
+    else:
+        assert violation is not None and expected in violation, violation
+
+
+@pytest.mark.parametrize(
+    "landed,gap,expected_refusal",
+    [
+        # A landed slice may answer with a durable gap: the window is closed and the
+        # decision cannot be made honestly now.
+        (True, True, False),
+        # A landed slice with NEITHER a decision nor a gap row is still refused —
+        # which the blanket landed-exemption this replaced would have accepted.
+        (True, False, True),
+        # An in-flight slice owes a DECISION. Accepting a gap here would make the gap
+        # row the way to skip a checkpoint rather than to admit one was skipped.
+        (False, True, True),
+        (False, False, True),
+    ],
+)
+def test_a_recorded_gap_answers_only_for_a_landed_slice(
+    tmp_path, landed, gap, expected_refusal
+):
+    """The three states the gap model distinguishes, each driven separately."""
+    status = "LANDED on `dev` at `abc1234`" if landed else "IN FLIGHT"
+    rows = ""
+    if gap:
+        rows = ("| L4 composite wave gate, slice D | 3 / 3 | x | `GAP-RECORDED` | "
+                "no decision was recorded |\n")
+    ledger = (
+        f"| D | units | kind | {status} |\n"
+        "\n"
+        "| Loop | Evaluation (window / cumulative) | SHA (+dirty) | Outcome | Rationale |\n"
+        "| --- | --- | --- | --- | --- |\n"
+        + rows
+    )
+    wave = _wave_archive(tmp_path, 3)
+    violation = _missing_checkpoint_violation(ledger, "", wave_dir=wave)
+    assert (violation is not None) is expected_refusal, repr(violation)
 
 
 def test_a_loop_records_the_checkpoints_its_evaluations_owe():
