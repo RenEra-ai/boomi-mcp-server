@@ -1320,6 +1320,7 @@ _UNROWED = {"DC-155-C": 2, "DC-155-I": 1}
 #: the reason. Frozen so the set cannot grow silently: a row that names a class is an
 #: instance of it unless it appears here.
 _NOT_AN_INSTANCE = {
+    "SELF-155-r98-01b": "a revision of a revision; the original is what counts",
     "EVAL-155-13": "its class is CORRECTED by EVAL-155-13a; the original names the superseded class",
     "CDX-155-r110-01": "superseded by CDX-155-r110-01a, which refutes it; a refuted row is not an instance",
     "CDX-155-r103-01": "its class is CORRECTED by CDX-155-r103-01a; the original names the superseded class",
@@ -3166,8 +3167,11 @@ def _window_inventory(ledger_text, runs):
 
     rows, malformed = _finding_table_rows(ledger_text)
     in_window = lambda cells: len(cells) > 2 and any(r in cells[2] for r in runs)
-    problems = [f"{rid}: a finding row with the wrong column count"
-                for rid, cells in malformed if in_window(cells)]
+    # A row a later revision SUPERSEDES has had its defects corrected there, so it is
+    # not reported again here — including a malformation. The supersession map is read
+    # below; this list is completed once it is known.
+    malformed_in_window = [(rid, cells) for rid, cells in malformed if in_window(cells)]
+    problems = []
 
     # A revision supersedes its original's CLASS but never its WINDOW. A finding
     # raised in evaluation 5 and reclassified in evaluation 7 still belongs to the
@@ -3181,6 +3185,9 @@ def _window_inventory(ledger_text, runs):
     revision_of = {}
     for rev, orig in supersedes.items():
         revision_of.setdefault(orig, []).append(rev)
+
+    problems += [f"{rid}: a finding row with the wrong column count"
+                 for rid, _ in malformed_in_window if rid not in supersedes]
 
     parsed, duplicates, _defect_cell = {}, set(), {}
     for rid, cells in rows:
