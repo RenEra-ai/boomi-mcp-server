@@ -1300,7 +1300,7 @@ _EXPECTED_CLASS_COUNTS = {
     # finding that produced the first's correction — one defect reported twice is
     # one instance, and a floor that locks in an over-count is as wrong as one that
     # lets a real instance vanish.
-    "DC-155-T": 1,  # OVERCOUNT-CORRECTED-FROM-2
+    "DC-155-T": 1,  # OVERCOUNT-CORRECTED-FROM-2-TO-1
     # Minted when two findings already recorded under two unrelated classes turned
     # out to share one pair: a hand-model of what git itself reports, against git.
     "DC-155-S": 3,
@@ -1566,10 +1566,18 @@ def _floor_regression(previous_sources, current_source):
     # hole. The marker names the value it corrects DOWN FROM, so it stops applying the
     # moment the class rises past it and has to be rewritten deliberately if ever
     # needed again.
-    corrected = {c: int(v) for c, v in re.findall(
-        r'"(DC-[\w-]+)":\s*\d+[,}\s]*#\s*OVERCOUNT-CORRECTED-FROM-(\d+)', current_source)}
-    lowered = sorted(c for c, floor in ceiling.items()
-                     if current.get(c, -1) < floor and corrected.get(c) != floor)
+    # BOUND TO ONE TRANSITION, not to a ceiling. Naming only the value corrected down
+    # FROM left the escape reusable: if the class rose back to that ceiling a later
+    # drop matched again, and a drop straight past the target matched too. The marker
+    # names BOTH ends, so it authorises exactly the one correction it describes and
+    # nothing else — any other movement, in either direction, ratchets normally.
+    corrected = {c: (int(a), int(b)) for c, a, b in re.findall(
+        r'"(DC-[\w-]+)":\s*\d+[,}\s]*#\s*OVERCOUNT-CORRECTED-FROM-(\d+)-TO-(\d+)',
+        current_source)}
+    lowered = sorted(
+        c for c, floor in ceiling.items()
+        if current.get(c, -1) < floor
+        and corrected.get(c) != (floor, current.get(c, -1)))
     return f"lowered: {lowered}" if lowered else None
 
 
@@ -1680,11 +1688,15 @@ def test_the_repository_comparison_reads_every_recorded_revision(
         # The declared escape, and it must be DECLARED — the marker is written on
         # purpose and shows in a diff, so a corrected over-count is distinguishable
         # from a silent shrink, which is the only difference that matters here.
-        ('_EXPECTED_CLASS_COUNTS = {"A": 3, "DC-155-Z": 2}  # OVERCOUNT-CORRECTED-FROM-3',
-         None),
-        # The marker names a ceiling this class never had, so it excuses nothing.
-        ('_EXPECTED_CLASS_COUNTS = {"A": 3, "DC-155-Z": 2}  # OVERCOUNT-CORRECTED-FROM-9',
-         "lowered: ['DC-155-Z']"),
+        ('_EXPECTED_CLASS_COUNTS = {"A": 3, "DC-155-Z": 2}  '
+         '# OVERCOUNT-CORRECTED-FROM-3-TO-2', None),
+        # A ceiling this class never had excuses nothing.
+        ('_EXPECTED_CLASS_COUNTS = {"A": 3, "DC-155-Z": 2}  '
+         '# OVERCOUNT-CORRECTED-FROM-9-TO-2', "lowered: ['DC-155-Z']"),
+        # THE REUSE THE FIRST VERSION ALLOWED: the same marker authorising a DIFFERENT
+        # drop. Naming only the ceiling, a fall past the corrected target matched too.
+        ('_EXPECTED_CLASS_COUNTS = {"A": 3, "DC-155-Z": 1}  '
+         '# OVERCOUNT-CORRECTED-FROM-3-TO-2', "lowered: ['DC-155-Z']"),
         ('_EXPECTED_CLASS_COUNTS = {"A": 3, "DC-155-Z": 2}', "lowered: ['DC-155-Z']"),
     ],
 )
