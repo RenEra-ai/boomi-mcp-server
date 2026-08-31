@@ -3057,6 +3057,45 @@ def test_every_finding_row_in_this_ledger_is_visible_to_the_scanner():
     )
 
 
+def _unfenced_lines(text):
+    """The document's lines with fenced blocks blanked out.
+
+    A fenced illustration is not part of the record. Left in, a quoted example of the
+    checkpoint HEADER hijacked the guard — it read the example's rows and never saw the
+    real table — and a quoted finding row padded a real window. This ledger documents
+    its own formats, so quoting them is a thing it does, not an attack.
+    """
+    out, fenced = [], False
+    for line in text.splitlines():
+        if line.lstrip().startswith("```"):
+            fenced = not fenced
+            out.append("")
+            continue
+        out.append("" if fenced else line)
+    return out
+
+
+def _table_rows(lines, header_test):
+    """Every row of EVERY table whose header satisfies `header_test`.
+
+    Every table, not the first: a second table carrying real rows was ignored whole.
+    The separator row is REQUIRED rather than assumed — skipping a fixed two lines
+    swallowed the first real row whenever a table lacked one.
+    """
+    rows = []
+    for i, line in enumerate(lines):
+        if not header_test(line):
+            continue
+        j = i + 1
+        if j < len(lines) and set(lines[j].replace("|", "").strip()) <= {"-", " ", ":"} \
+                and lines[j].startswith("|"):
+            j += 1
+        while j < len(lines) and lines[j].startswith("|"):
+            rows.append(lines[j])
+            j += 1
+    return rows
+
+
 def _finding_table_rows(ledger_text):
     """Every row of the ledger's finding TABLES, as `(id, cells)`.
 
@@ -3078,16 +3117,12 @@ def _finding_table_rows(ledger_text):
     _sys.path.insert(0, str(Path(__file__).resolve().parent))
     from test_wave_gate import _FINDING_ID_RE
 
-    lines = ledger_text.splitlines()
-    starts = [
-        i for i, line in enumerate(lines)
-        if line.startswith("|") and line.split("|")[1].strip() == "ID"
-    ]
+    lines = _unfenced_lines(ledger_text)
     out, malformed = [], []
-    for start in starts:
-        for line in lines[start + 1:]:
-            if not line.strip() or not line.startswith("|"):
-                break
+    for line in _table_rows(
+        lines, lambda l: l.startswith("|") and l.split("|")[1].strip() == "ID"
+    ):
+        if True:
             cells = line.split("|")
             rid = cells[1].strip().strip("*").strip()
             if not rid or rid == "ID" or set(rid) <= {"-", " "} or rid.startswith("DC-"):
@@ -3222,19 +3257,11 @@ def _checkpoint_rows(ledger_text):
     misses a malformed row, because the first stops all work and the second is caught
     by the next reader.
     """
-    lines = ledger_text.splitlines()
-    header = next(
-        (i for i, line in enumerate(lines)
-         if line.startswith("| Loop | Evaluation (window / cumulative)")),
-        None,
-    )
-    if header is None:
+    lines = _unfenced_lines(ledger_text)
+    test = lambda l: l.startswith("| Loop | Evaluation (window / cumulative)")
+    if not any(test(l) for l in lines):
         return None
-    out, i = [], header + 2
-    while i < len(lines) and lines[i].startswith("|"):
-        out.append(lines[i])
-        i += 1
-    return out
+    return _table_rows(lines, test)
 
 
 def _checkpoint_inventory_violation(ledger_text):
@@ -3523,6 +3550,59 @@ def test_the_standing_class_wins_a_numeric_revision_chain():
         "`cdx-review.aa` . WINDOW ROWS: 1 . WINDOW CLASSES: `DC-155-R` . r |\n"
     )
     assert _checkpoint_inventory_violation(ledger) is None
+
+
+_CK_HDR = ("| Loop | Evaluation (window / cumulative) | SHA (+dirty) | Outcome "
+           "| Rationale |\n| --- | --- | --- | --- | --- |\n")
+_BAD_CK = ("| L5 closing protocol | 7 / 8 | x | `CONTINUE` | WINDOW RUNS: "
+           "`cdx-review.zz` . WINDOW ROWS: 99 . WINDOW CLASSES: `DC-155-Q` . r |\n")
+_GOOD_ROW = ("| CDX-155-r1-01 | run `cdx-review.aa` | s | P1 | runtime behavior "
+             "| DC-155-G a closure | critical | x | fixed |\n")
+_FIND_HDR = ("| ID | source | summary | label | blocking | defect class | tier | sha "
+             "| disposition |\n| --- | --- | --- | --- | --- | --- | --- | --- | --- |\n")
+_OK_CK = ("| L5 closing protocol | 1 / 1 | x | `CONTINUE` | WINDOW RUNS: "
+          "`cdx-review.aa` . WINDOW ROWS: 1 . WINDOW CLASSES: `DC-155-G` . r |\n")
+
+
+@pytest.mark.parametrize(
+    "name,ledger",
+    [
+        # A quoted example of the header hijacked the guard: it read the example's
+        # rows and never reached the real table. This ledger documents its own
+        # formats, so quoting them is a thing it does.
+        ("fenced header before the real table",
+         _FIND_HDR + _GOOD_ROW + "\n```\n" + _CK_HDR + "| Example | 1 / 1 | x | `x` | prose |\n"
+         + "```\n\n" + _CK_HDR + _OK_CK + _BAD_CK),
+        # A second real table was ignored whole.
+        ("a second checkpoint table",
+         _FIND_HDR + _GOOD_ROW + "\n" + _CK_HDR + _OK_CK + "\n## Later\n\n" + _CK_HDR + _BAD_CK),
+        # Skipping a fixed two lines swallowed the first row when a table had no
+        # separator, which is the row most likely to be the newest one.
+        ("no separator row",
+         _FIND_HDR + _GOOD_ROW + "\n"
+         + "| Loop | Evaluation (window / cumulative) | SHA (+dirty) | Outcome | Rationale |\n"
+         + _BAD_CK + _OK_CK),
+        # A fenced illustration of a finding row padded a real window's count.
+        ("fenced finding row pads a window",
+         _FIND_HDR + _GOOD_ROW
+         + "\n```\n" + _FIND_HDR
+         + "| CDX-155-r1-99 | run `cdx-review.aa` | s | P1 | data loss "
+           "| DC-155-Z x | critical | x | fixed |\n```\n\n"
+         + _CK_HDR
+         + "| L5 closing protocol | 1 / 1 | x | `CONTINUE` | WINDOW RUNS: "
+           "`cdx-review.aa` . WINDOW ROWS: 2 . WINDOW CLASSES: `DC-155-G`, "
+           "`DC-155-Z` . r |\n"),
+    ],
+)
+def test_the_guard_reads_the_record_and_not_an_illustration_of_it(name, ledger):
+    """Each case had the guard reading the wrong object entirely.
+
+    These are the last shapes fixed in this loop. The residual paths beyond them are
+    enumerated in the record with a boundary verdict: three successive rewrites each
+    RELOCATED the recognition escape rather than closing it, which is the signature of
+    a checker over free-form text, and the terminating design is named there instead.
+    """
+    assert _checkpoint_inventory_violation(ledger) is not None, name
 
 
 def test_every_closing_checkpoint_agrees_with_its_own_window():
