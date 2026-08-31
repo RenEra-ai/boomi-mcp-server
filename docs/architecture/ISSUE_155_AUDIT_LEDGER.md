@@ -25,7 +25,7 @@ deferred `blocked-by-mechanism` naming that slice, never silently carried.
 | A | canonical dynamic-path binding on both connector roles, its lineage rule, the published family capability, and the explicit process-source replay policy | behaviour-affecting | **CLOSED CLEAN, landed on the integration branch at `6d2205a` 2026-08-27** |
 | B | the packaged replay-evidence registry, identifier grammar, both digest algorithms, the derived audit report, the execution-connector monitor action | src-changing, narrowly reachable | **LANDED on `dev` at `eb22351` 2026-08-28 under `ESCALATE-OPEN`** — baseline `6d2205a`. NOT clean: `CDX-155-r73-01`, `CDX-155-r73-02` and `SELF-155-r65-01` are dispositioned escalated-open and unfixed, with no follow-up issue filed for them. |
 | C | the trusted connector-resolution snapshot and the blank-path cross-check | behaviour-affecting | **LANDED on `dev` at `d04a248` 2026-08-29** — baseline `eb22351`. Its closing commit is slice D's branch point, which is how the staleness was found: this cell still read IN FLIGHT with three of five roster loops unstarted, months of rounds after they ran. Seventeen Stage-2 review rounds, closed `CLOSE-CLEAN` at evaluation 17; three architect evaluations, archived, whose checkpoint decision was never recorded and is now carried as a durable gap row; one composite wave gate on `7803032`. Residue: `QA-155-r55-04a`, escalated open under the `DC-155-D` escalation with no follow-up filed, filing being the owner's to authorise. |
-| D | per-call replay grants, the shared reference grammar, candidate discovery, the account-independent semantic revision | mostly unreachable in production | **LANDED on `dev` at `9e9417f`, CLOSING RECORD IN FLIGHT** — the closing report that commit carried was WITHDRAWN when the review of it found three defects, and correcting one moved a test file, so `a5dafb1` is a STALE wave: it no longer covers the tree. A fresh composite run and a rewritten report are owed before this slice's closing record stands — baseline `d04a248`. Stage-1 QA 2 rounds; Stage-2 commit review 11 rounds, closed clean at `7f5114e`; composite wave gate: `a5dafb1` archived `wave-gate/wave155af` — invalidated by the correction above and superseded in turn, as `cdcc4d2` was before it; L5 closing protocol, whose own correction reviews are billed to it and not to the review loop. ONE architect evaluation ran before the owner's 2026-08-30 correction and is recorded as having run under the superseded per-slice reading; no further architect evaluation runs for this slice — that gate belongs to the finished issue. Residue: `ARCH-155-r10-03` deferred `blocked-by-mechanism` to slice F at the L5 checkpoint, so issue #155 stays OPEN over it. |
+| D | per-call replay grants, the shared reference grammar, candidate discovery, the account-independent semantic revision | mostly unreachable in production | **CLOSED, landing on `dev`** — its first closing record (at `9e9417f`) was WITHDRAWN when the review of it found three defects in the report, and the chain was re-established: W = `2526ff1`, a rewritten report, and this closing commit. Residue: `ARCH-155-r10-03a` deferred `blocked-by-mechanism` to slice F, so issue #155 stays OPEN over it — baseline `d04a248`. Stage-1 QA 2 rounds; Stage-2 commit review 11 rounds, closed clean at `7f5114e`; composite wave gate: W = `2526ff1` archived `wave-gate/wave155ag`, superseding `a5dafb1` (`wave-gate/wave155af`) and `cdcc4d2`, each invalidated by a correction that landed after it; L5 closing protocol, whose own correction reviews are billed to it and not to the review loop. ONE architect evaluation ran before the owner's 2026-08-30 correction and is recorded as having run under the superseded per-slice reading; no further architect evaluation runs for this slice — that gate belongs to the finished issue. Residue: `ARCH-155-r10-03` deferred `blocked-by-mechanism` to slice F at the L5 checkpoint, so issue #155 stays OPEN over it. |
 | E | apply-boundary identity rechecks and the evidence attestation tuple | mutation accounting | not started |
 | F | evidence ingestion and production enablement — the only slice that can close #155 | evidence-gated, and BOTH GATES ARE NOW OPEN | not started — but no longer blocked. The counterparty serves all six verbs as of `sandbox-services@68ddb68`, and the account is live through 2026-10-27; measured at `EVAL-155-13`, not assumed. This slice is what closes #155. |
 
@@ -1214,21 +1214,101 @@ are unchanged; what the revision corrects is the stated blocker, which named the
 where the real one is the account-independence invariant, and a call-site count that was two where
 it is four.
 
-## Slice D — why no closing report sits here yet
+## Slice D — closing report
 
-**It is written in the CLOSING COMMIT, and this tree is not it.** A first closing report was written,
-landed, and then withdrawn: the review that graded it found three defects in the report itself — a
-gate history transcribed from another slice, a `not-validated` boundary verdict left out of the
-residue summary, and an escalation described as a deferral. Correcting the third needed a revision
-row, a revision row needs the scanner to know it is not a new instance, and that edit moved a test
-file after the tree the report named as reviewed. So the report's own chain stopped being true, and
-a closing report whose chain is false is worse than none.
+**Status: CLOSED for landing on the integration branch, carrying one deferred Standard finding to
+slice F. Zero unresolved critical findings, no follow-up issue minted. The ISSUE remains OPEN —
+slice D is the fourth of six, and #155 closes only on slice F.**
 
-The chain is being re-established on the corrected tree: a review over the correction, a fresh
-composite wave run for a new **W**, then the report rewritten to name **W**, **N−1** and **N** as
-they actually are. The audit record itself is complete and unaffected — every finding row, every
-checkpoint including the withdrawal above, and every archived gate round is in the tree. What is
-missing is only the summary, and it is missing on purpose.
+This is the second closing report written for this slice. The first was landed and then WITHDRAWN:
+the review that graded it found three defects in the report itself, and correcting one of them moved
+a test file, so the chain it named stopped being true. That withdrawal is recorded in the checkpoint
+table rather than smoothed over, and the paragraph below on what the loop cost is written because of
+it.
+
+### Which gate covers which tree
+
+| Tree | Commit | What covers it |
+| --- | --- | --- |
+| **W** — the wave-gated tree | `2526ff178a901e68ab5c809ba024c35c99db3a1e` (**W**) | `L4` composite wave gate, archived `wave-gate/wave155ag`: 11366 passed / 18 skipped against a cap of 30, 74 active goldens deterministic and byte-exact, plan fingerprint checked over two cases, exit 0 |
+| **N−1** — the reviewed tree | `2526ff178a901e68ab5c809ba024c35c99db3a1e` (**N−1**) | `L5` closing review, run `cdx-review.4BSOXK`, archived `commit-reviews/cdx-review.4BSOXK`, CLEAN over the complete delta since `259280c` |
+| **N** — the closing commit | this commit | Record-only by protocol: this report, the closing checkpoint above, the wave run's archive and the closing review's own archive. Validated by a darkness proof, all four ledger scanner files re-run whole, and the `scratch/**` preflight — never by a further review, which would recurse |
+
+W and N−1 are the same commit: the wave gate ran on exactly the tree the closing review had cleared,
+and this commit adds nothing outside `docs/architecture/`. The earlier wave runs `cdcc4d2` and
+`a5dafb1` are superseded and marked stale in the slice map; each was invalidated by a correction that
+landed after it, which is the protocol working rather than failing.
+
+### What slice D built
+
+Per-call replay grants keyed on the call site, the authored contract-reference grammar owned by one
+module, candidate discovery as a `query_components` action serving a closed field set, and an
+account-independent semantics row in the compiler revision. The per-call gate is load-bearing on
+every production path: the commit review twice found it wired but inert — once because no path
+projected a root, once because the lowering function was undefined so every projection returned the
+grant-free table — and both were fixed and driven from the public boundary rather than from an
+internal layer.
+
+### Gates run
+
+| Loop | Result |
+| --- | --- |
+| `L1` Stage-1 QA | live scenarios through the public tool boundary, then affected re-runs on every applied correction |
+| `L2` Stage-2 commit review | the inner loop, closed clean |
+| `L3` §6 architect implementation review | ONE evaluation ran for this slice, before the owner's 2026-08-30 correction, and is recorded as having run under the superseded per-slice reading. That correction moved the gate to the ISSUE, so no further architect evaluation runs for slice D — **and the issue-level architect window is still owed**. An earlier version of this report claimed three evaluations and a reached cap, which would have retired a gate nobody has run |
+| `L4` composite wave gate | passed on **W**, archived `wave-gate/wave155ag` |
+| `L5` closing protocol | every round collected through the collector and archived as it was collected, never read from a poll; the final two evaluations CLEAN |
+
+### What the closing loop cost, and what it bought
+
+The closing loop ran far longer than any earlier slice's, and the reason is worth recording rather
+than smoothing: after the code settled, the findings turned inward. The later rounds were almost
+entirely about the closing guard itself and about this ledger — a guard that read the record's raw
+bytes while the same file had already decided that a fenced block is an illustration; four
+successive Markdown fence openers an earlier filter got wrong; four successive Python binding shapes
+that mentioned a validator without running it; and, at the end, summaries disagreeing with the rows
+they summarise.
+
+The tracked rule names that condition exactly — a reader over an open-ended space cannot make the
+coverage claim the structural-fix rule demands — and the rounds that converged were the ones that
+took its remedy literally. Every fix that ADDED a case produced another finding the next round.
+Every fix that REMOVED a model ended its line: the record may now carry no fenced block at all, so
+there is no opener grammar left to get wrong; an accepted rebind is matched as one exact shape, so
+there is no control flow left to trace; a comparison arm that reported coverage it did not have was
+deleted rather than repaired; and the last guard this loop wrote had half of itself deleted one
+round after it shipped, because its premise — that a loop with no checkpoint row had run no
+evaluations — is false twice over on this ledger and would have refused two truthful rows of a
+landed report.
+
+Two measurements from that stretch belong in the permanent record. First: eleven of this branch's
+eighty-eight adjacent node-manifest transitions are illegal, produced by following the documented
+regeneration, which restores the slice baseline and renumbers every id an intermediate commit had
+already published. Every base the gates actually use accepts the result, so nothing had ever
+reported it; the intra-branch chain is therefore not an invariant this repository holds, and a guard
+claiming to enforce it would be claiming coverage over history that cannot be repaired forward and
+must not be rewritten, since archived attestations cite those commits. Second: a closing report is
+the artifact this loop is least able to write from memory, and the guard that now exists checks the
+one claim family that is decidable — residue the slice map names — and says in as many words that
+gate-history counts are not coverable.
+
+### Residue
+
+**One deferred finding.** `ARCH-155-r10-03a` is a Standard finding in the capability-reachability
+blocking class, deferred with reason class `blocked-by-mechanism` and placement **#155 slice F**:
+authoring a contract symbol means accepting caller-supplied provenance at a public boundary, and
+establishing that trust surface is what the evidence slice exists to do, so the acceptance path
+cannot be built before the thing it accepts. No follow-up issue was filed and none was minted — the
+placement is a later slice of THIS open issue, which is sequencing rather than debt.
+
+**One boundary verdict.** `CDX-155-r127-01` stands as `not-validated`, under the verdict this loop
+pre-committed to at its fifteenth evaluation: a finding that only hardens an artifact the slice
+itself owns gets a verdict at reconciliation rather than a further fix batch. It is a known guard
+limitation, enumerated on its own row, and it is not residue in a blocking class.
+
+Everything else is `fixed`, `finding-refuted` or `severity-refuted` on recorded evidence. The
+recurrences of `DC-155-D`, `DC-155-J` and `DC-155-L` in the closing loop each received a materially
+different structural action rather than another instance patch, which is why the loop was continued
+at each checkpoint rather than escalated.
 
 ## Slice C — closing report
 
@@ -1592,6 +1672,8 @@ the hand-written copy. Each gets its own commit and its own validation before th
 | L5 closing protocol, slice D | 2 / 41 | `a5dafb1`, clean | `DEFER-STANDARD-AND-CLOSE` — **WITHDRAWN** | WINDOW RUNS: `cdx-review.eKbPKR`, `cdx-review.YgUsMS` . WINDOW ROWS: 1 . WINDOW CLASSES: `DC-155-J` . WITHDRAWN by its own validation, which is the third time this loop has recorded that outcome and the reason the rule exists. The post-close review found three defects IN THE CLOSING REPORT, and correcting one of them required a revision row, which requires the scanner to know that revision is not a new instance — so a test file moved after N−1 and the darkness proof this row rests on stopped being true. The closing chain is therefore re-established on the corrected tree before the slice closes again: a fresh review over the correction, a fresh composite wave run, a new W, and the report rewritten to name them. Nothing about the slice's CONTENT changed; what changed is that the record now says something true about which tree its gates cover. The original text of this decision follows so the withdrawal is legible rather than silent — it read: The slice CLOSES, carrying one deferred finding. This is the LAST owed loop of the slice and every other required gate is current on the final tree, which is what makes this outcome legal rather than `CLOSE-CLEAN`: `ARCH-155-r10-03a` is a Standard finding in the capability-reachability class, deferred `blocked-by-mechanism` with placement **#155 slice F**, enumerated on its own row with the mechanism named. Zero critical findings are unresolved. The placement is a later slice of this same open issue and was planned before the deferral, so this is sequencing and not debt minting; no follow-up issue is filed. An earlier version of this row read `CLOSE-CLEAN` and said the residue was empty — a claim taken from the closing loop's own windows, which did end at zero, and wrongly applied to the SLICE. The slice map had named the deferral all along. PER-TIER: one finding, zero critical, zero unresolved, zero deferred. TREND: the window's first review found one standard record defect and its second found nothing, on a tree that had not changed except to carry that correction. WHICH GATE COVERS WHICH TREE: W = `a5dafb1`, the wave-gated tree; N−1 = `a5dafb1`, the tree the closing review cleared; N = this commit, record-only and validated by its darkness proof, the four ledger scanners and the `scratch/**` preflight rather than by a further review. The closing report sits above this table and states the same three trees separately |
 | L5 closing protocol, slice D | 1 / 42 | `168f631`, findings | `CONTINUE` | WINDOW RUNS: `cdx-review.Wdczou` . WINDOW ROWS: 3 . WINDOW CLASSES: `DC-155-J` . The forty-second-evaluation checkpoint, opened because the previous row's `DEFER-STANDARD-AND-CLOSE` did not survive its own validation — the third time in this loop, and recorded rather than smoothed. PER-TIER: three findings, zero critical, zero unresolved, zero deferred. WHAT THE ROUND FOUND — TWO in the closing report and one in a finding row, none in the code (an earlier version of this row said all three were in the report, which is the same summary defect the round was about): a gate history transcribed from another slice's shape, which would have retired an issue-level architect window nobody has run; a `not-validated` boundary verdict omitted from a residue summary that claimed to be exhaustive; and — this is the finding-row one — an escalation described as a deferral in the very row written to show the enumeration had been done by measurement. The pattern across all three is one thing: a report is a SUMMARY, and every defect here was a summary disagreeing with the rows it summarises — which is why the closing report is the last artifact this loop should trust itself to write from memory. NAMED FINITE NEXT CORRECTION: none outstanding; the corrections are applied. The remaining work is the chain the withdrawal invalidated — a review over this correction, a fresh composite wave run for a new W, then the report rewritten to name W, N−1 and N as they actually are. Window resets; cumulative history kept |
 | L5 closing protocol, slice D | 3 / 45 | `259280c`, clean | `CONTINUE` | WINDOW RUNS: `cdx-review.m1O1dC`, `cdx-review.aRN7Y3`, `cdx-review.RGo74R` . WINDOW ROWS: 4 . WINDOW CLASSES: `DC-155-D`, `DC-155-J` . The forty-fifth-evaluation checkpoint, and the window ends CLEAN. PER-TIER: four findings, zero critical, zero unresolved, zero deferred. TREND: highest unrefuted severity flat at standard; unresolved count flat at zero; blocking-class breadth flat at one, `machine-served schemas/contracts`; defect-class set two, and the window closed with a clean evaluation. WHAT THIS WINDOW SETTLED: the summary class finally got a structural response rather than a fourth hand correction — and then the response's own first version was found to rest on a false premise and was cut in half. That sequence is the whole lesson of this loop compressed into two rounds: the clause that claimed a loop with no checkpoint row had run no evaluations was wrong twice on this very ledger, and would have refused two truthful rows of a landed report. It was deleted rather than widened, and the coverage claim now names the gate-history family as NOT covered and says why. What survives is the clause whose premise holds. NAMED FINITE NEXT CORRECTION: none. The remaining work is the chain the withdrawal invalidated — a fresh composite wave run for a new W, then the report rewritten to name W, N−1 and N as they actually are. Window resets; cumulative history kept |
+| L4 composite wave gate, slice D | 1 / 24 | `2526ff1`, clean | `CLOSE-CLEAN` | W = `2526ff178a901e68ab5c809ba024c35c99db3a1e`, archived `wave-gate/wave155ag`. The composite run on the re-established closing tree: 11366 passed, 18 skipped against a cap of 30, 74 active goldens deterministic and byte-exact, plan fingerprint checked over two cases, exit 0. This supersedes `a5dafb1` (`wave-gate/wave155af`), which a later correction invalidated exactly as one invalidated `cdcc4d2` before it |
+| L5 closing protocol, slice D | 1 / 46 | `2526ff1`, clean | `DEFER-STANDARD-AND-CLOSE` | WINDOW RUNS: `cdx-review.4BSOXK` . WINDOW ROWS: 0 . WINDOW CLASSES: none . The slice CLOSES, carrying one deferred finding. This is the LAST owed loop of the slice and every other required gate is current on the final tree, which is what makes this outcome legal rather than `CLOSE-CLEAN`: `ARCH-155-r10-03a` is a Standard finding in the capability-reachability class, deferred `blocked-by-mechanism` with placement **#155 slice F**, enumerated on its own row with the mechanism named, and its placement is a later slice of this same open issue that was planned before the deferral — sequencing, not debt minting, and no follow-up issue is filed. Zero critical findings are unresolved. `CDX-155-r127-01` stands `not-validated` under a pre-committed boundary verdict and is named in the report rather than left to be inferred from its absence. THE SECOND TIME THIS SLICE HAS RECORDED A CLOSING DECISION: the first read `CLOSE-CLEAN`, said the residue was empty, and was WITHDRAWN when its own validation found three defects in the report — a residue claim taken from the closing loop's windows and applied to the SLICE, a gate history transcribed from another slice's shape, and an escalation called a deferral. The record now carries both the withdrawal and this decision, because a closure that had to be taken twice is a fact about the work. WHICH GATE COVERS WHICH TREE: W = `2526ff1`, the wave-gated tree; N−1 = `2526ff1`, the tree the closing review cleared; N = this commit, record-only and validated by its darkness proof, the four ledger scanners and the `scratch/**` preflight rather than by a further review |
 
 ## Deferrals
 

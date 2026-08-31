@@ -1,0 +1,13 @@
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+SKIPPED [1] tests/test_authoring_examples_policy.py:108: authoring_workflow_sequence_example.json carries no tool parameters
+SKIPPED [1] tests/test_connector_replay_review_round3.py:2744: this filesystem rejects non-UTF-8 filenames
+SKIPPED [6] tests/test_sync_pipeline_adapter_cutover.py:721: chain rejected upstream: SYNC_PIPELINE_CONTROL_FLOW_UNSUPPORTED
+SKIPPED [8] tests/test_sync_pipeline_adapter_cutover.py:721: chain rejected upstream: SYNC_PIPELINE_CONFIG_INVALID
+SKIPPED [2] tests/test_system_topology_models.py:154: identity is supplied by a binding; covered by the bound tests
+11366 passed, 18 skipped, 18 warnings in 927.99s (0:15:27)
+wave_gate: non-KB suite green (11366 passed, 18 skipped, cap 30)
+wave_gate: 74 active goldens deterministic and byte-exact
+wave_gate: plan fingerprint checked:2 case(s)
+
