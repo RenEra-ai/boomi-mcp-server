@@ -3233,6 +3233,23 @@ def _unfenced_lines(text):
     real table — and a quoted finding row padded a real window. This ledger documents
     its own formats, so quoting them is a thing it does, not an attack.
     """
+    # REFUSE THE FORM THIS CANNOT READ, rather than learn one more case of it.
+    # CommonMark has exactly two fenced-code openers, backtick and tilde; this
+    # function only ever understood backticks, so a `~~~` illustration stayed in the
+    # record and a tilde-fenced closing report was read as a real one (measured).
+    # Teaching it tildes would leave indentation, lazy continuation and the rest of
+    # Markdown's rendering rules — an open space no reader can make a coverage claim
+    # over. Narrowing the INPUT to the one fence form this ledger uses is a claim that
+    # can be made: the document may not contain the other, and says so here.
+    offenders = [
+        i + 1 for i, line in enumerate(text.splitlines()) if line.lstrip().startswith("~~~")
+    ]
+    if offenders:
+        raise AssertionError(
+            "the record uses a tilde fence, which this reader does not understand and "
+            f"the ledger may not contain; lines {offenders}. Use a backtick fence."
+        )
+
     out, fenced = [], False
     for line in text.splitlines():
         if line.lstrip().startswith("```"):
@@ -4345,19 +4362,29 @@ def test_the_node_manifest_is_a_legal_successor_of_the_one_it_replaces():
     """A regeneration may APPEND. It may never repoint an id that already exists.
 
     The procedure invites exactly this mistake: it says restore the slice baseline
-    and re-append, which silently reassigns every id that an intermediate commit
-    already published. Measured here when this guard was written — a regeneration
-    from the slice baseline moved `pytest-011173` off
-    `test_every_closing_checkpoint_agrees_with_its_own_window` and onto a parameter
-    case, and shifted 300-odd rows behind it. The bases the gate actually uses
-    (`origin/dev` for the scratch preflight, the slice baseline for the wave run)
-    both accepted it, so nothing in the suite said a word.
+    and re-append, which silently reassigns every id an intermediate commit already
+    published. Measured when this guard was written — a regeneration from the slice
+    baseline moved `pytest-011173` off
+    `test_every_closing_checkpoint_agrees_with_its_own_window` onto a parameter case
+    and shifted 300-odd rows behind it, and the bases the gate actually uses
+    (`origin/dev`, the slice baseline) both accepted it.
 
-    The fix is not to teach this file the transition rules. `validate_transition`
-    IS the rule, so this asks it — against the manifest the working tree is
-    replacing, which is the comparison the regeneration never makes. That
-    comparison is the whole point: it fires in the window between regenerating and
-    committing, which is the only window in which the mistake is cheap.
+    WHAT THIS GUARD DOES NOT DO, stated because a review found it claiming
+    otherwise: it does not audit branch history. An id appended after `origin/dev`
+    and repointed by a later commit is invisible to a `origin/dev` comparison — the
+    row simply looks new — so that arm gave coverage it did not have and is gone.
+    Auditing adjacent committed pairs is not the fix either: measured on this branch,
+    ELEVEN of 88 pairs are already illegal, because following the documented
+    regeneration produces exactly that, and the eleven cannot be repaired forward
+    (restoring an id is itself a repoint) nor rewritten (archived attestations cite
+    those commits). The gate is scoped to the base transition ON PURPOSE; the
+    intra-branch chain is not an invariant this repository holds.
+
+    So this asks the one question it can answer, against the one manifest the
+    regeneration never consults: is the working tree a legal successor of the
+    manifest it REPLACES? That fires between regenerating and committing, which is
+    the only moment the mistake is cheap — and it asks `validate_transition`, the
+    gate's own rule, rather than modelling it a second time.
     """
     import subprocess
 
@@ -4372,22 +4399,13 @@ def test_the_node_manifest_is_a_legal_successor_of_the_one_it_replaces():
 
     current = gate.parse_manifest((root / rel).read_bytes(), "pytest-nodes")
 
-    checked = []
-    for ref in ("HEAD", "origin/dev"):
-        raw = at(ref)
-        if raw is None:
-            # A fresh clone may not carry `origin/dev`; HEAD always exists inside a
-            # git checkout. Recorded rather than skipped silently, so an absent arm
-            # is visible in the assertion below instead of passing as coverage.
-            continue
-        gate.validate_transition(
-            gate.parse_manifest(raw, "pytest-nodes"), current, "pytest-nodes"
-        )
-        checked.append(ref)
-
-    assert "HEAD" in checked, (
+    previous = at("HEAD")
+    assert previous is not None, (
         "the manifest committed at HEAD could not be read, so this guard checked "
-        f"nothing; refs available: {checked}"
+        "nothing"
+    )
+    gate.validate_transition(
+        gate.parse_manifest(previous, "pytest-nodes"), current, "pytest-nodes"
     )
 
     # NON-VACUITY, against this very manifest: repoint one live row exactly as the
@@ -4440,18 +4458,52 @@ def test_every_reader_of_the_record_reads_the_records_own_view():
         if "ledger_text" not in params:
             continue
         readers.append(node.name)
-        routed = any(
-            isinstance(sub, ast.Call)
-            and isinstance(sub.func, ast.Name)
-            and sub.func.id == "_unfenced_lines"
-            and any(
-                isinstance(arg, ast.Name) and arg.id == "ledger_text"
-                for arg in sub.args
+        # THE VALUE, not the call. A reader that calls `_unfenced_lines(ledger_text)`
+        # and throws the result away, then searches the raw name, satisfied the first
+        # version of this check — verified by constructing exactly that function and
+        # watching the predicate return True. So: every LOAD of the parameter must
+        # either be an argument to `_unfenced_lines`, or come after the parameter has
+        # been rebound from it.
+        def feeds_the_filter(call):
+            return (
+                isinstance(call, ast.Call)
+                and isinstance(call.func, ast.Name)
+                and call.func.id == "_unfenced_lines"
+                and any(
+                    isinstance(a, ast.Name) and a.id == "ledger_text"
+                    for a in call.args
+                )
             )
+
+        rebind_line = None
+        for sub in ast.walk(node):
+            if not isinstance(sub, ast.Assign):
+                continue
+            if not any(
+                isinstance(t, ast.Name) and t.id == "ledger_text" for t in sub.targets
+            ):
+                continue
+            if any(feeds_the_filter(c) for c in ast.walk(sub.value)):
+                if rebind_line is None or sub.lineno < rebind_line:
+                    rebind_line = sub.lineno
+
+        filtered_args = {
+            id(a)
             for sub in ast.walk(node)
-        )
-        if not routed:
-            offenders.append(node.name)
+            if feeds_the_filter(sub)
+            for a in sub.args
+        }
+        raw_loads = [
+            sub.lineno
+            for sub in ast.walk(node)
+            if isinstance(sub, ast.Name)
+            and sub.id == "ledger_text"
+            and isinstance(sub.ctx, ast.Load)
+            and id(sub) not in filtered_args
+            and (rebind_line is None or sub.lineno < rebind_line)
+        ]
+        if raw_loads:
+            offenders.append(f"{node.name} (raw at line {min(raw_loads)})")
 
     assert len(readers) >= 7, (
         f"only {len(readers)} readers were found, so this guard is not looking at "
@@ -4461,3 +4513,34 @@ def test_every_reader_of_the_record_reads_the_records_own_view():
         "these functions read the ledger's raw bytes instead of the record's own "
         f"unfenced view, so a fenced illustration counts as a row: {offenders}"
     )
+
+
+def test_the_record_may_not_carry_a_fence_this_reader_cannot_read():
+    """Both directions, against the real ledger and against the form it excludes.
+
+    The closing guard was bypassed by a `~~~`-fenced illustration: the reader saw no
+    fence, so the example's heading counted as a closing report and the
+    missing-report refusal went silent. The response is not a second fence rule —
+    Markdown's rendering is exactly the open-ended space the repository's own lesson
+    says a checker cannot cover. The response is that the record may not contain the
+    form, which is a closed claim and is enforced where every reader passes.
+    """
+    ledger = (
+        Path(__file__).resolve().parent.parent
+        / "docs/architecture/ISSUE_155_AUDIT_LEDGER.md"
+    )
+    text = ledger.read_text(encoding="utf-8")
+
+    # The live record reads cleanly.
+    assert _unfenced_lines(text)
+
+    # And the excluded form is refused rather than silently misread.
+    with pytest.raises(AssertionError) as excinfo:
+        _unfenced_lines("| a |\n~~~markdown\n## Slice Z — closing report\n~~~\n")
+    assert "tilde fence" in str(excinfo.value)
+
+    # Non-vacuity in the other direction: the same document with a BACKTICK fence is
+    # read, and the fenced heading is blanked rather than counted.
+    read = _unfenced_lines("| a |\n```markdown\n## Slice Z — closing report\n```\n")
+    assert "## Slice Z — closing report" not in read
+    assert "| a |" in read
