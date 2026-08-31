@@ -3228,46 +3228,20 @@ def _window_inventory(ledger_text, runs):
             problems.append(f"{rid}: appears twice in the finding tables")
         stands = standing(rid)
         klass = parsed[stands][1] if stands else None
-        # WHETHER A CLASS IS OWED IS READ FROM THE FIELD THAT DECLARES IT — the
-        # defect-class cell of the row that stands. An earlier version inferred it
-        # from the DISPOSITION's prose, testing whether it began `finding-refuted`,
-        # which treated a dual disposition opening with a refutation as fully
-        # refuted and so reinstated the exact shape it was added to remove. A
-        # declaration is not a sentence to parse: a row owing no class SAYS none,
-        # with a reason, in the column for it. A BLANK cell is not such a
-        # declaration and still owes.
-        flat = _defect_cell.get(stands, "").strip().lower().rstrip(".")
-        waives = flat == "none" or bool(re.match(r"none\s*[—(,]", flat))
+        # NO WAIVER. Three successive versions tried to let a blocking row declare
+        # `none` for its defect class when its disposition refuted the finding, and
+        # each was defeated by a trailing clause that revives the finding using no
+        # disposition word at all — first a prefix test, then a truncation, then a
+        # shape. The clause is prose, and prose cannot be made to declare its own
+        # contradiction, so every version of this waiver is a model of language rather
+        # than a check on a field. The waiver is REMOVED: a row in a blocking class
+        # carries a defect class, without exception. A refuted finding belongs to no
+        # blocking class — there is no finding — so it records `none` THERE, in the
+        # column that decides, and needs no exemption. Nothing here parses a
+        # disposition any more.
         blocking_flat = parsed[stands][2].strip().lower().rstrip(".") if stands else ""
-        in_blocking = not (blocking_flat in {"none", "n/a", ""}
-                           or re.match(r"none\s*[—(,]", blocking_flat))
-        disp = parsed[stands][3].strip().lower() if stands else ""
-        # A row IN a blocking class may waive its defect class only by being REFUTED
-        # or not-validated. Honouring `none` on any disposition let a row declare the
-        # waiver in one column while its disposition accepted a second half in
-        # another — the dual-disposition shape, moved one column over.
-        # THE WHOLE CELL, not a truncation of it. Cutting at the first separator
-        # accepted "finding-refuted; remainder validated" — the dual-disposition
-        # shape — and simultaneously REJECTED this ledger's established
-        # "not-validated as a defect ..." form, which carries no separator at all. A
-        # waiver now requires the cell to OPEN with one of the two dispositions that
-        # remove a finding and to name no OTHER disposition anywhere in it, so a
-        # contradicting clause cannot hide behind a correct opening. `severity-refuted`
-        # is not among them: it changes the TIER and leaves the finding standing.
-        # A SHAPE, not a keyword scan. Token matching could not tell
-        # "finding-refuted; remainder validated" from a clean refutation, because the
-        # clause that revives the finding uses no disposition word at all — prose
-        # cannot be made to declare its own contradiction. So the waiver requires the
-        # DECLARED shape this ledger already uses for it: the disposition opens with
-        # one of the two dispositions that REMOVE a finding, followed by an em dash
-        # and its evidence. Anything else — a semicolon, a second clause, a bare
-        # status — does not waive, and the row owes its defect class. Narrow by
-        # design: a waiver is the one place a blocking row escapes accounting, so it
-        # is the one place that should be spelled exactly.
-        owed = in_blocking and not (
-            waives and re.match(r"(finding-refuted|not-validated) — ", disp))
-        if not in_blocking:
-            owed = False
+        owed = not (blocking_flat in {"none", "n/a", ""}
+                    or re.match(r"none\s*[—(,]", blocking_flat))
         if owed and klass is None:
             problems.append(f"{rid}: is in a blocking class but carries no defect class")
         inventory[rid] = klass
