@@ -1320,6 +1320,7 @@ _UNROWED = {"DC-155-C": 2, "DC-155-I": 1}
 #: the reason. Frozen so the set cannot grow silently: a row that names a class is an
 #: instance of it unless it appears here.
 _NOT_AN_INSTANCE = {
+    "CDX-155-r110-01": "superseded by CDX-155-r110-01a, which refutes it; a refuted row is not an instance",
     "CDX-155-r103-01": "its class is CORRECTED by CDX-155-r103-01a; the original names the superseded class",
     "CDX-155-r104-01": "likewise corrected by CDX-155-r104-01a",
     "CDX-155-r98-02": "its class is CORRECTED by CDX-155-r98-02a, which is the counted row; the original names the superseded class",
@@ -3184,12 +3185,12 @@ def _window_inventory(ledger_text, runs):
         # naming two classes names the new one first. That is the record's own
         # convention, read from it rather than modelled here.
         found = re.search(r"DC-155-[A-Z]+\d*", cells[6])
-        parsed[rid] = (cells[2], found.group(0) if found else None, cells[5])
+        parsed[rid] = (cells[2], found.group(0) if found else None, cells[5], cells[9])
 
     missing_revision = []
 
-    def latest_class(rid):
-        """Follow the revision chain to the class that currently stands."""
+    def standing(rid):
+        """The row at the end of `rid`'s revision chain — the one that stands."""
         seen, current = set(), rid
         while current in revision_of and current not in seen:
             seen.add(current)
@@ -3200,10 +3201,10 @@ def _window_inventory(ledger_text, runs):
         if current not in parsed:
             missing_revision.append(current)
             return None
-        return parsed[current][1]
+        return current
 
     inventory = {}
-    for rid, (source, _, blocking) in parsed.items():
+    for rid, (source, _, blocking, _disp) in parsed.items():
         if rid in supersedes:
             # Counted through the row it revises — but that row must EXIST. A
             # revision declared against an original nobody wrote removed a real
@@ -3224,7 +3225,13 @@ def _window_inventory(ledger_text, runs):
             continue
         if rid in duplicates:
             problems.append(f"{rid}: appears twice in the finding tables")
-        klass = latest_class(rid)
+        stands = standing(rid)
+        klass = parsed[stands][1] if stands else None
+        # A REFUTED finding is not an instance of anything and owes no defect class —
+        # the same rule the class tally applies, read from the disposition that
+        # stands rather than restated. Reading it off the ORIGINAL would miss a
+        # refutation delivered by a revision, which is how refutations arrive here.
+        refuted = bool(stands) and parsed[stands][3].strip().startswith("finding-refuted")
         # The BLOCKING class decides whether a defect class is owed. `startswith`
         # accepted a cell that merely OPENS with the word none, and a blank cell
         # switched the requirement off entirely.
@@ -3234,7 +3241,8 @@ def _window_inventory(ledger_text, runs):
         # classes apply, though it is runtime behavior" — which switches the
         # requirement off using the very sentence that says it applies.
         flat = blocking.strip().lower().rstrip(".")
-        owed = not (flat in {"none", "n/a", ""} or re.match(r"none\s*[—(]", flat))
+        owed = not refuted and not (
+            flat in {"none", "n/a", ""} or re.match(r"none\s*[—(]", flat))
         if owed and klass is None:
             problems.append(f"{rid}: is in a blocking class but carries no defect class")
         inventory[rid] = klass
