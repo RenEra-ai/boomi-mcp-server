@@ -1325,6 +1325,7 @@ _UNROWED = {"DC-155-C": 2, "DC-155-I": 1}
 #: the reason. Frozen so the set cannot grow silently: a row that names a class is an
 #: instance of it unless it appears here.
 _NOT_AN_INSTANCE = {
+    "CDX-155-r128-01": "superseded by CDX-155-r128-01a; the revision is the counted row",
     "CDX-155-r120-04": "its class is CORRECTED by CDX-155-r120-04a",
     "EVAL-155-13a": "its class is CORRECTED by EVAL-155-13b; the original names the superseded class",
     "SELF-155-r98-01b": "a revision of a revision; the original is what counts",
@@ -2167,6 +2168,28 @@ def _closing_report_violation(ledger_text, rel, archive_dir, git):
     """
     import re
 
+    # A REPORT IS OWED ONCE A CLOSE DECISION EXISTS, and not one moment before. The
+    # rule iterated only the reports that already existed, so a slice could take a
+    # closing outcome and simply never write one. Tying the requirement to the
+    # DECISION rather than to the tree also dissolves the ordering knot this loop kept
+    # hitting: a report must name W and N−1, which do not exist until the gates have
+    # run, so it belongs in the closing commit — and that is exactly the commit that
+    # records the close decision. Before the decision, nothing is owed; after it, the
+    # report and the decision arrive together or the gate refuses.
+    for row in _checkpoint_rows(ledger_text) or []:
+        cells = row.split("|")
+        if len(cells) < 5 or not re.match(r"\s*L5\b", cells[1].strip().strip("*").strip("`")):
+            continue
+        if "WITHDRAWN" in cells[4]:
+            continue
+        if "CLOSE-CLEAN" not in cells[4] and "AND-CLOSE" not in cells[4]:
+            continue
+        here = re.search(r"slice ([A-F])", cells[1])
+        if here and here.group(1) not in re.findall(
+                r"^## Slice ([A-Z]) — closing report.*$", ledger_text, re.M):
+            return (f"slice {here.group(1)} records a closing decision but has written no "
+                    "closing report")
+
     # DERIVED, not pinned. Both this marker and the wave-row pattern below read
     # `slice B` literally, and slice B is the one slice that never wrote a closing
     # report — so this guard SKIPPED on the real repository for its whole life while
@@ -2191,6 +2214,7 @@ def _closing_report_violation(ledger_text, rel, archive_dir, git):
     heads = re.findall(r"^## Slice ([A-Z]) — closing report.*$", ledger_text, re.M)
     if not heads:
         return "absent"
+
     # The report for the slice whose wave gate is CURRENT must be machine-checkable.
     # One earlier report states its chain in prose alone and is exempted BY NAME, not
     # by shape: an exemption keyed on "carries no markers" is one a future report could
@@ -4103,6 +4127,46 @@ def test_the_missing_checkpoint_rule_counts_from_the_archive(
     violation = _missing_checkpoint_violation(ledger, index, slice_letter="D",
                                               wave_dir=tmp_path / "none")
     assert (violation is not None) is must_refuse, repr(violation)
+
+
+@pytest.mark.parametrize(
+    "outcome,report,must_refuse",
+    [
+        # No close decision yet: nothing is owed, which is what lets the report live in
+        # the commit that records the decision and names the trees the gates produced.
+        ("`CONTINUE`", False, False),
+        ("`DEFER-STANDARD-AND-CLOSE` — WITHDRAWN", False, False),
+        # A close decision without its report is the fail-open this replaces.
+        ("`DEFER-STANDARD-AND-CLOSE`", False, True),
+        ("`CLOSE-CLEAN`", False, True),
+        ("`CLOSE-CLEAN`", True, False),
+    ],
+)
+def test_a_closing_decision_requires_its_report(outcome, report, must_refuse):
+    """Iterating only the reports that exist let a slice close without writing one."""
+    body = ""
+    if report:
+        body = ("## Slice D — closing report\n\n"
+                "| `abc1234` (**W**) | wave |\n"
+                "| `abc1234` (**N−1**) | review `cdx-review.zz` |\n\n")
+    ledger = (
+        "| ID | source | summary | label | blocking | defect class | tier | sha "
+        "| disposition |\n"
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- |\n"
+        "| CDX-155-r1-01 | run `cdx-review.aa` | s | P1 | runtime behavior "
+        "| DC-155-G x | critical | x | fixed |\n"
+        "\n" + body +
+        "| Loop | Evaluation (window / cumulative) | SHA (+dirty) | Outcome | Rationale |\n"
+        "| --- | --- | --- | --- | --- |\n"
+        f"| L5 closing protocol, slice D | 1 / 1 | `abc1234` | {outcome} | r |\n"
+    )
+    violation = _closing_report_violation(
+        ledger, "ledger.md", Path("/nonexistent"), lambda *a, **k: "")
+    if must_refuse:
+        assert violation == "slice D records a closing decision but has written no closing report"
+    else:
+        assert violation != (
+            "slice D records a closing decision but has written no closing report"), violation
 
 
 def test_every_closing_checkpoint_agrees_with_its_own_window():
