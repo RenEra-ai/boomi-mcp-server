@@ -1,0 +1,13 @@
+{
+ "collector": "wave_gate",
+ "durable_dir": "wave-gate/wave155aa",
+ "files": {
+  "wave-gate/wave155aa/summary.json": "a23c03f20cd6a959a7af11dc22af7bb02977fad9f801170e2dc174c3caef1b31",
+  "wave-gate/wave155aa/wave.log": "51c03f36fa2465ddb4fec1a62404575e5c2a1f471aa9f5b795b157675a0596cf"
+ },
+ "logical_loop": "L4 (composite wave gate, slice D \u2014 the run on the one-shot-escape tree)",
+ "source_run_dir": "/var/folders/xx/nt1fy00j0m337y5mb4zwt3b40000gn/T/wave155aa.0orjv3we",
+ "status": "completed",
+ "verdict": "pass",
+ "wave_sha": "e7b1fc984f489932cececb2e6a83a5b968cf5d96"
+}
