@@ -4683,33 +4683,38 @@ def test_the_record_may_not_carry_a_fence_this_reader_cannot_read():
 
 
 def _report_disagrees_with_the_rows(ledger_text):
-    """Where a closing report's checkable claims contradict the rows beneath it.
+    """Where a closing report omits residue the slice map names as that slice's.
 
     STRUCTURAL, at the fourth instance of one mechanism: a hand-written summary
-    disagreeing with the record it summarises. The four, in order — a residue
-    section reading "None" while a deferral stood on its own row and in the slice
-    map; a gate table claiming three architect evaluations for a slice that has no
-    architect checkpoint row at all, which would have retired an issue-level window
-    nobody has run; a residue summary omitting a `not-validated` boundary verdict;
-    and a correction row calling an escalation a deferral. Every one was corrected by
-    hand, and the next report would have been written by hand too.
+    disagreeing with the record it summarises. The four, in order — a residue section
+    reading "None" while a deferral stood on its own row and in the slice map; a gate
+    table crediting a slice with three architect evaluations when it had one; a
+    residue summary omitting a `not-validated` boundary verdict; and a correction row
+    calling an escalation a deferral.
 
-    The authority is the ledger's own rows, so the two claims that can be derived are
-    derived. A report may not credit a loop with evaluations the checkpoint table
-    never recorded for its slice, and it may not omit a finding the slice map names
-    as that slice's residue. What is NOT covered, stated rather than implied: a
-    residue sentence can still omit a row the slice map does not name, because
-    nothing in this ledger attributes an arbitrary finding row to a slice — that
-    attribution is the missing authority, and inventing one here would be the same
-    hand-model one level up.
+    ONE of those four is mechanically checkable and it is the one implemented here.
+    The slice map states each slice's residue by finding id, so a report that does not
+    mention what the map names is contradicting a row in the same document, and that
+    is decidable.
+
+    THE GATE-HISTORY FAMILY IS NOT, and the attempt is recorded rather than left as a
+    silent gap, because a first version of this guard shipped believing it was. It
+    inferred "the checkpoint table records no L3 row for this slice, so the report may
+    not credit L3 with evaluations" — and that inference is wrong twice over,
+    measured on this very ledger: a loop records a checkpoint only every third
+    evaluation, so one or two genuine rounds leave no row at all; and loop labels are
+    not consistently slice-suffixed, so slice C's thirteen-round QA loop is recorded
+    under a label the lookup never sees. Its two truthful report rows would have been
+    refused. Counting evaluations out of English prose is the other half of the same
+    open space this repository's rule says a checker cannot cover, so this one does
+    not enter it.
     """
     import re
 
     ledger_text = "\n".join(_unfenced_lines(ledger_text))
     problems = []
 
-    reports = re.findall(r"^## Slice ([A-Z]) — closing report.*$", ledger_text, re.M)
-    for slice_letter in reports:
+    for slice_letter in re.findall(r"^## Slice ([A-Z]) — closing report.*$", ledger_text, re.M):
         marker = next(
             h for h in re.findall(r"^## Slice [A-Z] — closing report.*$", ledger_text, re.M)
             if h.startswith(f"## Slice {slice_letter} ")
@@ -4717,34 +4722,20 @@ def _report_disagrees_with_the_rows(ledger_text):
         body = ledger_text[ledger_text.index(marker):]
         body = body[: body.index("\n## ")] if "\n## " in body else body
 
-        # (a) A loop the checkpoint table never recorded for this slice may not be
-        #     credited with evaluations in the report's gate table.
-        recorded = {
-            m.group(1)
-            for m in re.finditer(rf"^\| (L\d)[^|]*slice {slice_letter} \|", ledger_text, re.M)
-        }
-        for claim in re.finditer(r"^\| `(L\d)`[^|]*\| ([^|]*)\|", body, re.M):
-            loop, text = claim.group(1), claim.group(2)
-            if loop in recorded:
-                continue
-            if re.search(r"\b(two|three|four|five|\d+) evaluations\b", text):
-                problems.append(
-                    f"slice {slice_letter}'s report credits {loop} with evaluations, but the "
-                    f"checkpoint table records no {loop} row for that slice"
-                )
-
-        # (b) A finding the slice map names for this slice must appear in its report.
         row = next(
             (l for l in ledger_text.splitlines() if l.startswith(f"| {slice_letter} | ")), None
         )
-        if row:
-            for named in re.findall(r"`([A-Z]+-155-r\d+-\d+[a-z]?)`", row):
-                stem = named.rstrip("abcdefghijklmnopqrstuvwxyz")
-                if stem not in body:
-                    problems.append(
-                        f"slice {slice_letter}'s slice map names {named} but its closing "
-                        "report never mentions it"
-                    )
+        if not row:
+            continue
+        for named in re.findall(r"`([A-Z]+-155-r\d+-\d+[a-z]?)`", row):
+            # The STEM, so a report citing the revision satisfies a map naming the
+            # original and the other way round: they are one finding.
+            stem = named.rstrip("abcdefghijklmnopqrstuvwxyz")
+            if stem not in body:
+                problems.append(
+                    f"slice {slice_letter}'s slice map names {named} but its closing "
+                    "report never mentions it"
+                )
     return problems
 
 
@@ -4754,37 +4745,29 @@ def test_a_closing_report_agrees_with_the_rows_it_summarises():
         Path(__file__).resolve().parent.parent
         / "docs/architecture/ISSUE_155_AUDIT_LEDGER.md"
     )
-    text = ledger.read_text(encoding="utf-8")
-    assert _report_disagrees_with_the_rows(text) == []
+    assert _report_disagrees_with_the_rows(ledger.read_text(encoding="utf-8")) == []
 
-    # NON-VACUITY, one witness per clause, each reproducing a defect a review found.
     hdr = ("| Loop | Evaluation (window / cumulative) | SHA (+dirty) | Outcome | Rationale |\n"
            "| --- | --- | --- | --- | --- |\n"
            "| L5 closing protocol, slice Z | 1 / 1 | `x` | `CONTINUE` | r |\n\n")
     smap = "| Z | units | kind | LANDED, residue `ARCH-155-r10-03` deferred to slice F |\n\n"
 
-    credits_a_loop_that_never_ran = hdr + smap + (
-        "## Slice Z — closing report\n\n"
-        "| Loop | Result |\n| --- | --- |\n"
-        "| `L3` §6 architect implementation review | three evaluations, the cap reached |\n"
-        "| `L5` closing protocol | 1 evaluation |\n\n"
-        "Residue: `ARCH-155-r10-03` deferred.\n")
-    problems = _report_disagrees_with_the_rows(credits_a_loop_that_never_ran)
-    assert any("records no L3 row" in p for p in problems), problems
+    # MUST REFUSE: the map names a deferral the report never mentions. This is the
+    # defect as it actually occurred — the first slice-D report said "Residue: None".
+    omits = hdr + smap + "## Slice Z — closing report\n\nResidue: none.\n"
+    assert any("never mentions it" in p for p in _report_disagrees_with_the_rows(omits))
 
-    omits_the_residue_the_map_names = hdr + smap + (
-        "## Slice Z — closing report\n\n"
-        "| Loop | Result |\n| --- | --- |\n"
-        "| `L5` closing protocol | 1 evaluation |\n\n"
-        "Residue: none.\n")
-    problems = _report_disagrees_with_the_rows(omits_the_residue_the_map_names)
-    assert any("never mentions it" in p for p in problems), problems
+    # MUST ACCEPT: the same report naming it, and naming it by its REVISION, since a
+    # revision and its original are one finding.
+    for citation in ("`ARCH-155-r10-03`", "`ARCH-155-r10-03a`"):
+        names = hdr + smap + f"## Slice Z — closing report\n\nResidue: {citation}, deferred.\n"
+        assert _report_disagrees_with_the_rows(names) == [], citation
 
-    # And the corrected form of the same document passes, so the guard is not simply
-    # refusing every report it is shown.
-    correct = hdr + smap + (
-        "## Slice Z — closing report\n\n"
-        "| Loop | Result |\n| --- | --- |\n"
-        "| `L5` closing protocol | 1 evaluation |\n\n"
-        "Residue: `ARCH-155-r10-03`, deferred to slice F.\n")
-    assert _report_disagrees_with_the_rows(correct) == []
+    # AND MUST NOT REFUSE A TRUTHFUL GATE TABLE for a loop with too few evaluations to
+    # have recorded a checkpoint — the inference an earlier version made, which would
+    # have refused two rows of slice C's landed report.
+    truthful = hdr + smap + (
+        "## Slice Z — closing report\n\n| Loop | Result |\n| --- | --- |\n"
+        "| `L1` Stage-1 QA | 13 rounds |\n| `L3` architect | 1 evaluation |\n\n"
+        "Residue: `ARCH-155-r10-03`, deferred.\n")
+    assert _report_disagrees_with_the_rows(truthful) == []
