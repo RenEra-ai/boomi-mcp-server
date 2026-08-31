@@ -3211,7 +3211,17 @@ def _window_inventory(ledger_text, runs):
             # revision declared against an original nobody wrote removed a real
             # finding from every window, since neither row was ever counted.
             if any(run in source for run in runs):
-                if supersedes[rid] not in parsed:
+                # EXISTS, parseable or not. Requiring a PARSEABLE original made a
+                # revision answer for its target's defects: one historical row was
+                # committed with eight columns instead of nine, so it carries no
+                # disposition and cannot be parsed — and the append-only rule forbids
+                # completing it in place, in both directions, so neither the row nor
+                # its revision can be repaired. The revision is not at fault for that.
+                # A missing original is still refused; a malformed one is a separate
+                # fact, reported by the malformed check when it is in scope and
+                # recorded as a standing limitation when it is not.
+                known = {r for r, _ in rows} | {r for r, _ in malformed}
+                if supersedes[rid] not in known:
                     problems.append(
                         f"{rid}: revises {supersedes[rid]}, which has no finding row")
                 # REACHED HERE, not in the loop below: a revision id is always in
@@ -3688,6 +3698,41 @@ def test_the_guard_reads_the_record_and_not_an_illustration_of_it(name, ledger):
     a checker over free-form text, and the terminating design is named there instead.
     """
     assert _checkpoint_inventory_violation(ledger) is not None, name
+
+
+@pytest.mark.parametrize(
+    "blocking,disposition,must_refuse",
+    [
+        # THE WITNESS FOR REMOVING THE WAIVER: the input on which the old helper and
+        # the new one disagree — a row IN a blocking class whose defect-class cell
+        # says `none` and whose disposition is refutation-shaped. Three earlier
+        # versions let that waive the class, each defeated by a trailing clause
+        # carrying no disposition word. Without this case the whole change could be
+        # reverted with every other test still green, which is what the review found.
+        ("runtime behavior", "finding-refuted — measured", True),
+        ("runtime behavior", "finding-refuted — evidence; remainder validated", True),
+        ("runtime behavior", "not-validated as a defect and handled by supersession", True),
+        # A refuted finding belongs to no blocking class, so it records that in the
+        # column that DECIDES and needs no exemption anywhere else.
+        ("none — the finding is refuted", "finding-refuted — measured", False),
+    ],
+)
+def test_a_blocking_row_never_waives_its_defect_class(blocking, disposition, must_refuse):
+    """The waiver is gone: a blocking row carries a class, without exception."""
+    ledger = (
+        "| ID | source | summary | label | blocking | defect class | tier | sha "
+        "| disposition |\n"
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- |\n"
+        f"| CDX-155-r1-01 | run `cdx-review.aa` | s | P1 | {blocking} | none — refuted "
+        f"| critical | x | {disposition} |\n"
+        "\n"
+        "| Loop | Evaluation (window / cumulative) | SHA (+dirty) | Outcome | Rationale |\n"
+        "| --- | --- | --- | --- | --- |\n"
+        "| L5 closing protocol | 1 / 1 | x | `CONTINUE` | WINDOW RUNS: `cdx-review.aa` . "
+        "WINDOW ROWS: 1 . WINDOW CLASSES: (none) . r |\n"
+    )
+    violation = _checkpoint_inventory_violation(ledger)
+    assert (violation is not None) is must_refuse, repr(violation)
 
 
 def test_every_closing_checkpoint_agrees_with_its_own_window():
