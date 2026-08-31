@@ -4486,6 +4486,17 @@ def _raw_ledger_reads(node):
             for sub in ast.walk(stmt.value)
         ):
             continue
+        # AND THE VALUE MUST NOT BRANCH. Forbidding the raw NAME was not enough:
+        # `filtered if enabled else ""` keeps no raw occurrence, so it passed while
+        # one path never validated anything and handed the readers an empty record —
+        # a vacuous pass, which is worse than a loud one. Python has exactly two
+        # expression-level branch forms, so refusing both is a closed rule rather than
+        # a list that grows; anything more elaborate is a statement, and a statement
+        # is not this shape.
+        if any(
+            isinstance(sub, (ast.IfExp, ast.BoolOp)) for sub in ast.walk(stmt.value)
+        ):
+            continue
         rebind_line = stmt.lineno
         break
 
@@ -4535,6 +4546,15 @@ _READER_SHAPES = (
      "def f(ledger_text, enabled):\n"
      "    ledger_text = ('\\n'.join(_unfenced_lines(ledger_text))\n"
      "                   if enabled else ledger_text)\n"
+     "    return ledger_text.count('x')\n"),
+    ("rebinds through a ternary whose other path validates nothing", True,
+     "def f(ledger_text, enabled):\n"
+     "    ledger_text = ('\\n'.join(_unfenced_lines(ledger_text))\n"
+     "                   if enabled else '')\n"
+     "    return ledger_text.count('x')\n"),
+    ("rebinds through a short-circuit", True,
+     "def f(ledger_text):\n"
+     "    ledger_text = '\\n'.join(_unfenced_lines(ledger_text)) or ''\n"
      "    return ledger_text.count('x')\n"),
 )
 
@@ -4606,9 +4626,12 @@ def test_the_record_may_not_carry_a_fence_this_reader_cannot_read():
     )
     lines = _unfenced_lines(ledger.read_text(encoding="utf-8"))
 
-    # The live record reads, and reads WHOLE — nothing is blanked, because nothing
-    # does any blanking any more.
-    assert lines and any("| ID |" in line for line in lines)
+    # The live record reads, and reads WHOLE. Asserting that one header SURVIVED
+    # would leave every other line free to vanish while the claim stayed green, so
+    # the comparison is exact: what comes back is the document, line for line.
+    text = ledger.read_text(encoding="utf-8")
+    assert lines == text.splitlines()
+    assert any("| ID |" in line for line in lines)
 
     for label, doc in (
         ("plain three backticks", "| a |\n```\n| ROW |\n```\n"),
