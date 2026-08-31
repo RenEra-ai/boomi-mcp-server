@@ -1320,6 +1320,7 @@ _UNROWED = {"DC-155-C": 2, "DC-155-I": 1}
 #: the reason. Frozen so the set cannot grow silently: a row that names a class is an
 #: instance of it unless it appears here.
 _NOT_AN_INSTANCE = {
+    "EVAL-155-13": "its class is CORRECTED by EVAL-155-13a; the original names the superseded class",
     "CDX-155-r110-01": "superseded by CDX-155-r110-01a, which refutes it; a refuted row is not an instance",
     "CDX-155-r103-01": "its class is CORRECTED by CDX-155-r103-01a; the original names the superseded class",
     "CDX-155-r104-01": "likewise corrected by CDX-155-r104-01a",
@@ -3736,35 +3737,35 @@ def test_a_blocking_row_never_waives_its_defect_class(blocking, disposition, mus
     assert (violation is not None) is must_refuse, repr(violation)
 
 
-def _missing_checkpoint_violation(ledger_text, index_text, slice_letter=None):
-    """Whether a loop that has run N evaluations has recorded the checkpoints it owes.
+def _missing_checkpoint_violation(ledger_text, index_text, slice_letter=None,
+                                  wave_dir=None):
+    """Whether every loop that has run N evaluations has recorded the checkpoints it owes.
 
-    THE FIFTH AXIS of the closure-ahead-of-validation class, and the one every earlier
-    fix left open. Ordering said WHEN a decision may be written, reverifiability
-    WHETHER it can be rechecked, coverage WHAT tree it covers, membership WHICH rounds
-    it may reason from — and none of them requires a checkpoint to EXIST. So the way
-    this class kept recurring was not a wrong checkpoint but an ABSENT one: the rule
-    puts the decision on a fixed interval precisely because the work is absorbing, and
-    a procedure cannot notice its own omission.
+    THE FIFTH AXIS of the closure-ahead-of-validation class. Ordering said WHEN a
+    decision may be written, reverifiability WHETHER it can be rechecked, coverage WHAT
+    tree it covers, membership WHICH rounds it may reason from — and none of them
+    requires a checkpoint to EXIST. Absence was how the class kept recurring, which is
+    what a fixed-interval rule is for: a procedure cannot notice its own omission.
 
-    The evaluation count comes from the ARCHIVE — rounds actually collected and billed
-    to the loop — never from the ledger's prose about how many there were. Scoped to
-    the slice being closed: earlier slices predate the convention that names a slice in
-    the logical loop, so their rounds cannot be attributed and demanding checkpoints
-    for them would fail on history nobody can reconstruct.
+    Counts come from the ARCHIVE, never from the ledger's prose — and from BOTH of the
+    archive's authorities. Review rounds are indexed; composite-wave rounds are not,
+    because a wave run has no collector attestation to index, so they live only as
+    `wave-gate/*/round.json`. Reading the index alone made every wave loop invisible to
+    a rule written to police it.
     """
     import json
     import re
 
-    if slice_letter is None:
-        waves = [r for r in (_checkpoint_rows(ledger_text) or [])
-                 if re.match(r"\s*L4\b", r.split("|")[1].strip().strip("`"))]
-        found = re.search(r"slice ([A-F])", waves[-1]) if waves else None
-        slice_letter = found.group(1) if found else None
-    if not slice_letter:
-        return None
+    slices, billed = set(), {}
 
-    billed = {}
+    def note(loop_text):
+        tag = re.match(r"(L\d)", loop_text)
+        here = re.search(r"slice ([A-F])", loop_text)
+        if tag and here:
+            slices.add(here.group(1))
+            billed[(here.group(1), tag.group(1))] = billed.get(
+                (here.group(1), tag.group(1)), 0) + 1
+
     for raw in index_text.splitlines():
         if not raw.strip():
             continue
@@ -3772,13 +3773,23 @@ def _missing_checkpoint_violation(ledger_text, index_text, slice_letter=None):
             entry = json.loads(raw)
         except ValueError:
             continue
-        if entry.get("status") != "completed":
-            continue
-        loop = str(entry.get("logical_loop", ""))
-        tag = re.match(r"(L\d)", loop)
-        here = re.search(r"slice ([A-F])", loop)
-        if tag and here and here.group(1) == slice_letter:
-            billed[tag.group(1)] = billed.get(tag.group(1), 0) + 1
+        if entry.get("status") == "completed":
+            note(str(entry.get("logical_loop", "")))
+
+    if wave_dir is None:
+        wave_dir = (Path(__file__).resolve().parents[1]
+                    / "docs/architecture/evidence/issue-155/wave-gate")
+    if wave_dir and Path(wave_dir).is_dir():
+        for d in sorted(Path(wave_dir).iterdir()):
+            record = d / "round.json"
+            if not record.is_file():
+                continue
+            try:
+                entry = json.loads(record.read_text())
+            except ValueError:
+                continue
+            if entry.get("status") == "completed":
+                note(str(entry.get("logical_loop", "")))
 
     recorded = {}
     for row in _checkpoint_rows(ledger_text) or []:
@@ -3788,15 +3799,23 @@ def _missing_checkpoint_violation(ledger_text, index_text, slice_letter=None):
         m = re.match(r"\s*(\d+)\s*/\s*(\d+)", cells[2])
         tag = re.match(r"\s*(L\d)", cells[1].strip().strip("*").strip("`"))
         here = re.search(r"slice ([A-F])", cells[1])
-        if m and tag and here and here.group(1) == slice_letter:
-            recorded[tag.group(1)] = max(recorded.get(tag.group(1), 0), int(m.group(2)))
+        if m and tag and here:
+            key = (here.group(1), tag.group(1))
+            recorded[key] = max(recorded.get(key, 0), int(m.group(2)))
 
-    for loop, count in sorted(billed.items()):
+    # EVERY slice the archive knows, not the one a wave row happens to name. Deriving
+    # the audited slice from the latest L4 row meant a new slice reaching its third
+    # review BEFORE its first wave run was attributed to the previous slice, and its
+    # missing checkpoint passed — the gap is widest exactly when the slice is youngest.
+    wanted = {slice_letter} if slice_letter else slices
+    for (here, loop), count in sorted(billed.items()):
+        if here not in wanted:
+            continue
         owed = (count // 3) * 3
-        if owed and recorded.get(loop, 0) < owed:
-            return (f"loop {loop} of slice {slice_letter} has {count} collected "
-                    f"evaluations, so a checkpoint through {owed} is owed; the latest "
-                    f"recorded covers {recorded.get(loop, 0)}")
+        if owed and recorded.get((here, loop), 0) < owed:
+            return (f"loop {loop} of slice {here} has {count} collected evaluations, "
+                    f"so a checkpoint through {owed} is owed; the latest recorded "
+                    f"covers {recorded.get((here, loop), 0)}")
     return None
 
 
@@ -3821,7 +3840,7 @@ def test_a_loop_records_the_checkpoints_its_evaluations_owe():
     ],
 )
 def test_the_missing_checkpoint_rule_counts_from_the_archive(
-    rounds, latest_cumulative, must_refuse
+    tmp_path, rounds, latest_cumulative, must_refuse
 ):
     """The rule itself, away from this repository's record."""
     import json
@@ -3835,7 +3854,8 @@ def test_the_missing_checkpoint_rule_counts_from_the_archive(
         "| --- | --- | --- | --- | --- |\n"
         f"| L5 closing protocol, slice D | 1 / {latest_cumulative} | x | `CONTINUE` | r |\n"
     )
-    violation = _missing_checkpoint_violation(ledger, index, slice_letter="D")
+    violation = _missing_checkpoint_violation(ledger, index, slice_letter="D",
+                                              wave_dir=tmp_path / "none")
     assert (violation is not None) is must_refuse, repr(violation)
 
 
