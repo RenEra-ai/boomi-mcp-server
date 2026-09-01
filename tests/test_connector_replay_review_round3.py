@@ -1326,6 +1326,8 @@ _UNROWED = {"DC-155-C": 2, "DC-155-I": 1}
 #: the reason. Frozen so the set cannot grow silently: a row that names a class is an
 #: instance of it unless it appears here.
 _NOT_AN_INSTANCE = {
+    "CDX-155-r144-02a": "a REVISION narrowing an overstated resolution, not a second "
+    "defect — the class row counts the original once",
     "QA-155-r66-03a": "a REVISION correcting an identifier, not a second defect — the row's "
     "text belongs to the report's r66-04 and its class row counts it once",
     "QA-155-r66-01": "ONE defect found by two gates — the Stage-2 review found it in the "
@@ -4821,6 +4823,23 @@ _BOUNDARY_ENTRY = "build_integration_action"
 #: file exists to refuse, committed by the guard itself.
 _TESTS_ROOT = Path(__file__).resolve().parent
 
+#: The SERVED wrappers that delegate to the apply entry, derived from the tool
+#: module rather than listed. A test that calls `server.build_integration(...)`
+#: drives the same boundary without naming the entry, and #180's lesson is that
+#: the served path is the one whose coverage claims are worth least when
+#: assumed: six such tests existed and the first two versions of this census
+#: could not see any of them.
+def _served_boundary_wrappers():
+    module = ast.parse(
+        (_TESTS_ROOT.parent / "server.py").read_text(encoding="utf-8")
+    )
+    return {
+        node.name for node in ast.walk(module)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and _BOUNDARY_ENTRY in set(_call_names(node))
+    }
+
+
 
 def _call_names(node):
     """Every callable name in *node*, in BOTH forms a call site can take.
@@ -4840,7 +4859,7 @@ def _call_names(node):
             yield func.attr
 
 
-def _boundary_callers(tree):
+def _boundary_callers(tree, served=frozenset()):
     """Names that reach the apply entry: the entry itself, plus module-local
     wrappers, to a fixed point.
 
@@ -4853,7 +4872,7 @@ def _boundary_callers(tree):
         node.name: node for node in tree.body
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
     }
-    reaching = {_BOUNDARY_ENTRY}
+    reaching = {_BOUNDARY_ENTRY} | served
     while True:
         grown = {
             name for name, node in module_functions.items()
@@ -4864,7 +4883,7 @@ def _boundary_callers(tree):
         reaching |= grown
 
 
-def _tests_driving_the_apply_boundary(tree):
+def _tests_driving_the_apply_boundary(tree, served=frozenset()):
     """Every test function in *tree* that reaches the public apply entry.
 
     Deliberately action-AGNOSTIC. One function serves `plan`, `compile` and
@@ -4873,7 +4892,7 @@ def _tests_driving_the_apply_boundary(tree):
     an argument that is frequently a variable. Over-inclusion cannot leave the
     sibling sweep incomplete — under-inclusion is what did.
     """
-    reaching = _boundary_callers(tree)
+    reaching = _boundary_callers(tree, served)
     for fn in ast.walk(tree):
         if not isinstance(fn, ast.FunctionDef) or not fn.name.startswith("test_"):
             continue
@@ -4902,14 +4921,21 @@ def test_a_witness_at_the_apply_boundary_asserts_without_an_escape():
     before changing it: the id is always present, so the guard was never doing
     anything except concealing its own absence. Both are unconditional now.
     """
-    scanned, in_scope, offenders = [], [], []
+    served = _served_boundary_wrappers()
+    scanned, in_scope, unseeded, offenders = [], [], [], []
     for path in sorted(_TESTS_ROOT.rglob("test_*.py")):
         try:
             tree = ast.parse(path.read_text(encoding="utf-8"))
         except SyntaxError:  # pragma: no cover - a parse failure is another test's
             continue
         scanned.append(path)
-        for fn in _tests_driving_the_apply_boundary(tree):
+        # The SAME census run twice, once without the served seed. The
+        # difference is the population that enters only through the tool entry,
+        # and comparing the two is the only thing that proves the seed is wired
+        # into this sweep rather than merely computed beside it: dropping the
+        # argument at this call site left every assertion green.
+        unseeded += [fn.name for fn in _tests_driving_the_apply_boundary(tree)]
+        for fn in _tests_driving_the_apply_boundary(tree, served):
             in_scope.append((path.name, fn.name))
             offenders += [(path.name, name, line)
                           for name, line in _conditional_assertions(fn)]
@@ -4922,6 +4948,17 @@ def test_a_witness_at_the_apply_boundary_asserts_without_an_escape():
         "the census did not include its own file, so the root did not resolve"
     )
     assert in_scope, "the selector matched no test at all; the sweep is vacuous"
+    assert served, (
+        "no served wrapper was derived from the tool module, so every test that "
+        "enters through one is silently outside this sweep"
+    )
+    assert len(in_scope) > len(unseeded), (
+        "seeding the census with the served wrappers added no test, so either "
+        "the seed never reached the selector or nothing enters through the tool "
+        "entry any more: {0} seeded vs {1} unseeded".format(
+            len(in_scope), len(unseeded)
+        )
+    )
     assert offenders == [], (
         "a test reaching the apply boundary guards an assertion behind a "
         "condition; an unreached case is then indistinguishable from a passing "
@@ -4935,10 +4972,10 @@ def test_the_escape_rule_refuses_the_shape_that_cost_four_rounds():
     Without this the rule above is a sweep over a set that happens to be empty,
     which is how a guard passes forever while modelling nothing.
     """
-    def _hits(source):
+    def _hits(source, served=frozenset()):
         tree = ast.parse(source)
         return [list(_conditional_assertions(fn))
-                for fn in _tests_driving_the_apply_boundary(tree)]
+                for fn in _tests_driving_the_apply_boundary(tree, served)]
 
     # The shape that cost four rounds, named directly.
     assert _hits(
@@ -4967,6 +5004,26 @@ def test_the_escape_rule_refuses_the_shape_that_cost_four_rounds():
         "    if result.get('build_id'):\n"
         "        assert result['ok']\n"
     ) == [[("test_x", 5)]]
+
+    # And through a wrapper defined in ANOTHER module — the served tool entry,
+    # which delegates to the apply function. Six existing tests enter this way
+    # and no earlier version of the census could see one of them.
+    assert _hits(
+        "def test_x():\n"
+        "    result = server.build_integration(profile='p', action='apply', config=c)\n"
+        "    if result.get('build_id'):\n"
+        "        assert result['ok']\n",
+        served=frozenset({"build_integration"}),
+    ) == [[("test_x", 3)]]
+
+    # The SAME source with no served set is out of scope, which is what makes
+    # the seeding load-bearing rather than decorative.
+    assert _hits(
+        "def test_x():\n"
+        "    result = server.build_integration(profile='p', action='apply', config=c)\n"
+        "    if result.get('build_id'):\n"
+        "        assert result['ok']\n"
+    ) == []
 
     # CONTROLS. An unconditional witness passes, and a test that never reaches
     # the boundary is out of scope by construction — the rule is derived from
