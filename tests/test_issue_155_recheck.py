@@ -384,28 +384,72 @@ def test_a_dynamic_path_needs_service_wide_coverage():
 
 
 def test_a_static_record_authorises_only_the_routes_it_enumerates():
-    """And a call whose route cannot be named is NOT thereby covered."""
-    registry = _Registry([
-        _Record(DIGEST, _Identity("op-1", 3, OP_CFG), _Identity("conn-1", 5, CONN_CFG),
-                route_coverage=_StaticCoverage(ROUTE))
-    ])
-    covered = recheck_grant_identities(
-        grants=(_Grant(DIGEST, route_digest=ROUTE),),
-        registry=registry, live_identity=_live(),
-    )
-    assert covered.ok, covered.drifts
+    """And the route is COMPUTED from the live bytes, not taken from the grant.
 
+    A first version read a `route_digest` off the grant. The real
+    `IdempotencyGrantSymbolV1` forbids extra fields and has no such field, and its
+    minter supplies none — so every real static grant was refused as route drift,
+    and the test passed only because the fake grant invented the field. That is
+    the fixture-you-wrote-is-not-evidence failure in its purest form, and the
+    correction is not to add the field to the fake but to compute the route where
+    the live bytes are: this boundary already reads both components, and a route
+    digest is a function of the connection and the operation together.
+    """
+    import pathlib as _pathlib
+
+    from boomi_mcp.connector_replay.digests import route_digest_v1
+
+    caps = (
+        _pathlib.Path(__file__).resolve().parents[1]
+        / "docs/architecture/evidence/issue-155/captures"
+    )
+    conn_xml = (caps / "cap155-e1-conn-readback" / "rest-conn-c4281346.xml").read_text()
+    op_xml = sorted(caps.rglob("operation_component.xml"))[0].read_text()
+    live_route = route_digest_v1(conn_xml, op_xml)
+
+    def _reader(component_id, kind, family=None):
+        xml = op_xml if kind == "operation" else conn_xml
+        return {
+            "version": 3 if kind == "operation" else 5,
+            "config_digest": OP_CFG if kind == "operation" else CONN_CFG,
+            "xml": xml,
+        }
+
+    def _registry_covering(*routes):
+        return _Registry([
+            _Record(DIGEST, _Identity("op-1", 3, OP_CFG),
+                    _Identity("conn-1", 5, CONN_CFG),
+                    route_coverage=_StaticCoverage(*routes))
+        ])
+
+    # COVERED: the record enumerates the route the live components actually form.
+    covered = recheck_grant_identities(
+        grants=(_Grant(DIGEST),), registry=_registry_covering(live_route),
+        live_identity=_reader,
+    )
+    assert covered.ok, (covered.drifts, covered.unavailable)
+
+    # NOT COVERED: a record enumerating some other route does not authorise this one.
     other = "RouteDigestV1:" + "8" * 64
-    for label, grant in (
-        ("a route the record does not cover", _Grant(DIGEST, route_digest=other)),
-        ("a route this recheck cannot name", _Grant(DIGEST)),
-    ):
-        outcome = recheck_grant_identities(
-            grants=(grant,), registry=registry, live_identity=_live()
-        )
-        assert [d["reason"] for d in outcome.drifts] == ["route_coverage"], label
-    # And the route itself is never served — it is a path.
-    assert ROUTE not in repr(outcome.drifts)
+    outcome = recheck_grant_identities(
+        grants=(_Grant(DIGEST),), registry=_registry_covering(other),
+        live_identity=_reader,
+    )
+    assert [d["reason"] for d in outcome.drifts] == ["route_coverage"]
+
+    # UNCOMPUTABLE: a reader that returns no bytes cannot name the route, and an
+    # unnameable route is not a covered one — the fail-open direction, closed.
+    blind = recheck_grant_identities(
+        grants=(_Grant(DIGEST),), registry=_registry_covering(live_route),
+        live_identity=lambda c, k, f=None: {
+            "version": 3 if k == "operation" else 5,
+            "config_digest": OP_CFG if k == "operation" else CONN_CFG,
+        },
+    )
+    assert [d["reason"] for d in blind.drifts] == ["route_coverage"]
+    assert blind.drifts[0]["observed"] == "uncomputable"
+    # And no route is ever served in the clear.
+    assert live_route not in repr(outcome.drifts) + repr(blind.drifts)
 
 
 def test_two_records_sharing_a_digest_and_contract_are_refused_not_resolved():

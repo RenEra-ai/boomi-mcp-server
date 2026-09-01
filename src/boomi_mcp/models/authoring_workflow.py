@@ -898,6 +898,10 @@ class ConnectorReplayEvidenceBindingAttestationV1(_AuthoringModel):
     #: route is a path — the one shape this record must never carry.
     route_coverage_kind: Optional[NonEmptyString] = None
     capture_digest: Optional[str] = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    #: Service-wide coverage carries its OWN capture, and its digest can differ
+    #: from the operation record's. Kept separately so the attestation can still
+    #: name the capture that established the coverage after the registry rotates.
+    route_capture_digest: Optional[str] = Field(default=None, pattern=r"^[0-9a-f]{64}$")
 
 
 class ProcessMutationAttestationV1(_AuthoringModel):

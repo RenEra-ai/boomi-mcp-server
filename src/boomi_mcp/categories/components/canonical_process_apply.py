@@ -405,6 +405,7 @@ def build_mutation_attestation(
                     connection_version=_field(g, "connection_version"),
                     route_coverage_kind=_field(g, "route_coverage_kind"),
                     capture_digest=_field(g, "capture_digest"),
+                    route_capture_digest=_field(g, "route_capture_digest"),
                 )
                 for g in (replay_evidence_bindings or ())
                 if _field(g, "record_digest")

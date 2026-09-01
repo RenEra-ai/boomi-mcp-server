@@ -9659,7 +9659,18 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
                         _BUILD_REGISTRY[durable_build_id][
                             "process_readbacks"
                         ].append(outcome["readback"].model_dump(mode="json"))
-                if not outcome["result"].get("_success", True):
+                # ONLY A PROVEN NO-WRITE FAILURE RETURNS HERE. The first version
+                # returned on every failure, which fixed one direction and opened
+                # the other: a submission that MAY have committed — an update
+                # reporting `write_attempted: True` after a transport exception, a
+                # create the platform confirmed whose attestation could not be
+                # built — skipped the reconciliation entirely, so drift during a
+                # write that landed went unreported. `write_attempted` is the
+                # module's own field for this and is trusted where it is present;
+                # its absence means unknown, and unknown reconciles.
+                _step_result = outcome.get("result") or {}
+                _proven_no_write = _step_result.get("write_attempted") is False
+                if not _step_result.get("_success", True) and _proven_no_write:
                     return _partial_failure(
                         error=outcome.get("error") or f"Failed at step '{key}'",
                         failed_step=key,
@@ -9732,6 +9743,15 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
                             # not answering the question at all is how it avoids that.
                             hint=_post_refusal["hint"],
                         )
+                if not _step_result.get("_success", True):
+                    # The failure that was NOT a proven no-write. It has now passed
+                    # through reconciliation, which is the point of the split.
+                    return _partial_failure(
+                        error=outcome.get("error") or f"Failed at step '{key}'",
+                        failed_step=key,
+                        error_code=outcome.get("error_code"),
+                        step_result=outcome.get("step_result"),
+                    )
                 continue
 
             comp = _component_for_key(key, components_by_key)

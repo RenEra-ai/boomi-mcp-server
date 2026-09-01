@@ -310,6 +310,13 @@ class IdempotencyGrantSymbolV1(_CompilerModel):
     #: Carried through from the contract, so a grant records WHICH evidence record
     #: authorised it rather than only that some contract did.
     record_digest: Optional[str] = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    #: Whether THIS CALL composes its path per document. A compile-time fact, and
+    #: the grant contract listed route coverage from the start — it shipped without
+    #: it, and the apply boundary then had no way to tell a dynamically bound call
+    #: from a static one. A dynamic path can never be identified by a static route
+    #: digest, so its evidence must be service-wide; the boundary cannot infer that
+    #: from anything it can read live, which is why the fact travels on the grant.
+    dynamic_path: bool = False
     kind: Literal["per_call_key_reference_grant"] = "per_call_key_reference_grant"
 
     @field_validator("contract_ref", "operation_ref", "call_source_path")

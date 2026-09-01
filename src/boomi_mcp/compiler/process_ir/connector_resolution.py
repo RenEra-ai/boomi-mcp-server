@@ -786,6 +786,13 @@ def mint_idempotency_grants(
     evidence_by_node = {
         node.node_id: getattr(node.semantic, "idempotency", None) for node in cfg.nodes
     }
+    # The same walk answers the route question, from the node's own semantic — the
+    # binding does not carry it and a second traversal to find out would be the
+    # duplicate-walk defect this module already refuses.
+    dynamic_path_by_node = {
+        node.node_id: getattr(node.semantic, "path_binding", None) is not None
+        for node in cfg.nodes
+    }
     grants = []
     seen = set()
     for binding in resolve_connector_call_bindings(cfg, symbols):
@@ -814,6 +821,7 @@ def mint_idempotency_grants(
             operation_ref=binding.operation_ref,
             call_source_path=binding.source_path,
             record_digest=contract.record_digest,
+            dynamic_path=dynamic_path_by_node.get(binding.node_id, False),
         )
         if grant.key in seen:
             continue

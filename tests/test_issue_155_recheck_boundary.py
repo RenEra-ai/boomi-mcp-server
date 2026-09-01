@@ -981,3 +981,52 @@ def test_an_update_rechecks_at_its_push_not_before_its_merge():
     _run(lambda: called.append(1) or None)
     assert called, "the hook was not consulted on the permitting arm"
     assert pushed, "a permitting hook did not reach the platform"
+
+
+def test_only_a_proven_no_write_skips_reconciliation():
+    """Both directions of the split, asserted on the source's own structure.
+
+    The first version returned on EVERY step failure, which fixed one direction
+    and opened the other: a submission that may have committed — an update
+    reporting `write_attempted: True` after a transport exception, a create the
+    platform confirmed whose attestation could not be built — skipped the
+    reconciliation entirely, so drift during a write that landed went unreported.
+
+    The property is about ORDER, and order is not observable from a served
+    envelope: both arms return a partial failure, and what differs is whether the
+    reconciliation ran on the way. So this reads the module — and reads it for the
+    two facts that decide the behaviour, not for a spelling.
+    """
+    import ast
+
+    src = (
+        Path(__file__).resolve().parents[1]
+        / "src/boomi_mcp/categories/integration_builder.py"
+    ).read_text()
+    tree = ast.parse(src)
+
+    # The early return is gated on a PROVEN no-write, never on failure alone.
+    guarded = [
+        node for node in ast.walk(tree)
+        if isinstance(node, ast.If)
+        and "_proven_no_write" in ast.dump(node.test)
+        and "_success" in ast.dump(node.test)
+    ]
+    assert guarded, (
+        "the early return is not gated on a proven no-write, so a submission that "
+        "may have committed skips reconciliation"
+    )
+
+    # And `_proven_no_write` is decided by the module's own field, not inferred:
+    # its absence must read as unknown, and unknown must reconcile.
+    assign = next(
+        node for node in ast.walk(tree)
+        if isinstance(node, ast.Assign)
+        and any(getattr(t, "id", None) == "_proven_no_write" for t in node.targets)
+    )
+    rendered = ast.dump(assign.value)
+    assert "write_attempted" in rendered, rendered
+    assert "False" in rendered, (
+        "`_proven_no_write` must test for an explicit False; a truthiness test "
+        "would read a missing field as proof of no write"
+    )

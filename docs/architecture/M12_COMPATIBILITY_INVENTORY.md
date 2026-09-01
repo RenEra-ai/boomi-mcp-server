@@ -2124,13 +2124,13 @@ rather than aspirational.
 | LG-3cf79d6e | legacy_transitive_call | src/boomi_mcp/categories/integration_builder.py | _apply_plan | 4 | 8611 | #160 | follow the callee's row; this is an edge, not a site |
 | LG-3a7213a4 | legacy_transitive_call | src/boomi_mcp/categories/integration_builder.py | _authored_process_validation_error | 1 | 5525 | #160 | follow the callee's row; this is an edge, not a site |
 | LG-86e93983 | legacy_transitive_call | src/boomi_mcp/categories/integration_builder.py | _build_plan | 4 | 5996 | #160 | follow the callee's row; this is an edge, not a site |
-| LG-ab4b2334 | legacy_transitive_call | src/boomi_mcp/categories/integration_builder.py | _compile_authoring | 1 | 10836 | #160 | follow the callee's row; this is an edge, not a site |
+| LG-ab4b2334 | legacy_transitive_call | src/boomi_mcp/categories/integration_builder.py | _compile_authoring | 1 | 10856 | #160 | follow the callee's row; this is an edge, not a site |
 | LG-01c3922d | legacy_transitive_call | src/boomi_mcp/categories/integration_builder.py | _execute_canonical_process | 2 | 8277 | #160 | follow the callee's row; this is an edge, not a site |
 | LG-f16d0493 | legacy_transitive_call | src/boomi_mcp/categories/integration_builder.py | _execute_component | 23 | 3770 | #160 | follow the callee's row; this is an edge, not a site |
-| LG-308b6e78 | legacy_transitive_call | src/boomi_mcp/categories/integration_builder.py | _plan_authoring | 1 | 10774 | #160 | follow the callee's row; this is an edge, not a site |
+| LG-308b6e78 | legacy_transitive_call | src/boomi_mcp/categories/integration_builder.py | _plan_authoring | 1 | 10794 | #160 | follow the callee's row; this is an edge, not a site |
 | LG-f1e10478 | legacy_transitive_call | src/boomi_mcp/categories/integration_builder.py | _process_component_preflight | 2 | 5770 | #160 | follow the callee's row; this is an edge, not a site |
 | LG-4ef294c2 | legacy_transitive_call | src/boomi_mcp/categories/integration_builder.py | _resolve_preservation_policy | 1 | 1392 | #160 | follow the callee's row; this is an edge, not a site |
-| LG-1f766152 | legacy_transitive_call | src/boomi_mcp/categories/integration_builder.py | build_integration_action | 4 | 11163 | #160 | follow the callee's row; this is an edge, not a site |
+| LG-1f766152 | legacy_transitive_call | src/boomi_mcp/categories/integration_builder.py | build_integration_action | 4 | 11183 | #160 | follow the callee's row; this is an edge, not a site |
 | LG-8796f643 | legacy_transitive_call | src/boomi_mcp/categories/integration_builder.py | build_structured_update_xml | 1 | 3389 | #160 | follow the callee's row; this is an edge, not a site |
 | LG-06774e06 | legacy_transitive_call | src/boomi_mcp/categories/schema_discovery.py | discover_odata_metadata_action | 1 | 1763 | #160 | follow the callee's row; this is an edge, not a site |
 | LG-eb660e0c | legacy_transitive_call | src/boomi_mcp/categories/schema_discovery.py | discover_openapi_spec_action | 1 | 1705 | #160 | follow the callee's row; this is an edge, not a site |
@@ -2224,7 +2224,7 @@ rather than aspirational.
 | LG-6a39c73a | unclassified_reference | src/boomi_mcp/patterns/primitives/document_cache_retrieve.py | DocumentCacheRetrievePrimitive | 1 | 121 | #160 | residue: a watched name mentioned in a shape the census does not classify |
 | LG-7e4e86fe | unclassified_reference | src/boomi_mcp/patterns/primitives/flow_control.py | FlowControlPrimitive | 1 | 100 | #160 | residue: a watched name mentioned in a shape the census does not classify |
 | LG-4cfdfe60 | unclassified_reference | src/boomi_mcp/patterns/primitives/return_documents.py | ReturnDocumentsPrimitive | 1 | 109 | #160 | residue: a watched name mentioned in a shape the census does not classify |
-| LG-7e87f855 | unclassified_reference | src/boomi_mcp/patterns/primitives/throw_exception.py | ThrowExceptionPrimitive | 1 | 130 | #160 | residue: a watched name mentioned in a shape the census does not classify |## 11.3 Legacy `process_kind` producer census
+| LG-7e87f855 | unclassified_reference | src/boomi_mcp/patterns/primitives/throw_exception.py | ThrowExceptionPrimitive | 1 | 130 | #160 | residue: a watched name mentioned in a shape the census does not classify |
 
 `process_kind_producer` rows are **writes** — a dict-literal key, a subscript assignment, a keyword
 argument, or an `IntegrationComponentSpec(type="process")` construction. `process_kind_consumer`
@@ -2275,6 +2275,7 @@ example producers are globbed, never enumerated: a sixth example is a diff, not 
 | LG-78a58f1a | process_kind_producer | src/boomi_mcp/patterns/archetypes/http_listener_to_db.py | HttpListenerToDbArchetype.emit_spec | 1 | 1104 | #159 | migrate the archetype to canonical ProcessIR |
 | LG-2749063b | process_kind_producer | src/boomi_mcp/patterns/archetypes/http_listener_to_db.py | _build_listener_main_process | 2 | 746 | #159 | migrate the archetype to canonical ProcessIR |
 | LG-1e119c4f | process_kind_producer | src/boomi_mcp/patterns/archetypes/http_listener_to_rest.py | HttpListenerToRestArchetype.emit_spec | 1 | 537 | #159 | migrate the archetype to canonical ProcessIR |
+
 ## 11.4 Caller-reachable Component-XML write routes
 
 The **sinks** are derived by the scanner; this table only says what each one MEANS and who owns it.
@@ -2348,6 +2349,7 @@ above says what each location means; this one says exactly where the calls are.
 | LG-7e973d10 | http_client_call | src/boomi_mcp/categories/marketplace.py | search_marketplace_recipes_action | 1 | 253 | #160 | WRT-external-transport-marketplace: unchanged — assert the endpoint is the Marketplace GraphQL host and no component XML is submitted. |
 | LG-9b78e266 | http_client_call | src/boomi_mcp/categories/schema_discovery.py | _fetch | 1 | 461 | #160 | WRT-external-transport-schema-discovery: unchanged — the SSRF guard already forbids platform hosts; assert no /Component target is reachable. |
 | LG-c3bf6d69 | raw_api_invoker | server.py | invoke_boomi_api | 1 | 3424 | #160 | WRT-raw-api-component: ONE canonical endpoint parser feeds classification, ID extraction AND transport; the reserved literal `bulk` is matched BEFORE the `<id>` arm and is never a componentId; every update-shaped call runs the two-sided process check. |**SDK evidence** (derived by reading the installed SDK's own method bodies — semantic facts only, no
+
 vendor line numbers, which drift independently under `boomi>=3.0.1`):
 
 | Fact | Derived value |

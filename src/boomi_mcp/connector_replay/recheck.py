@@ -238,22 +238,11 @@ def recheck_grant_identities(
                     "observed": "dynamic_path",
                 }
             )
-        elif coverage_kind == "static_path":
-            route_digest = getattr(grant, "route_digest", None)
-            covered = tuple(getattr(coverage, "route_digests", ()) or ())
-            # A static record authorises the routes it enumerates and no others. A
-            # call whose route this recheck cannot name is not thereby covered —
-            # that is the fail-open direction — so an absent route is a refusal.
-            if route_digest is None or route_digest not in covered:
-                drifts.append(
-                    {
-                        "reason": "route_coverage",
-                        "contract_ref": getattr(grant, "contract_ref", None),
-                        "recorded": "static_path",
-                        # The route itself is a PATH. Not served.
-                        "observed": "<redacted>" if route_digest else "unknown",
-                    }
-                )
+        # The static-coverage arm is checked AFTER the identities are read, below,
+        # because the route digest is computed from the live bytes those reads
+        # return. A first version expected the digest on the grant; the grant model
+        # forbids extra fields and has none, so every real static grant was refused
+        # and only a fake grant that invented the field passed.
 
         if account_scope_hash is not None:
             recorded_scope = getattr(record, "account_scope_hash", None)
@@ -267,6 +256,7 @@ def recheck_grant_identities(
                         "observed": "<redacted>",
                     }
                 )
+        read_xml: Dict[str, Any] = {}
         for label, recorded in (
             ("operation", getattr(record, "operation_identity", None)),
             ("connection", getattr(record, "connection_identity", None)),
@@ -310,6 +300,33 @@ def recheck_grant_identities(
                     },
                 )
             drifts.extend(_identity_drifts(label, recorded, observed))
+            read_xml[label] = (observed or {}).get("xml")
+
+        if coverage_kind == "static_path":
+            covered = tuple(getattr(coverage, "route_digests", ()) or ())
+            route_digest = None
+            if read_xml.get("connection") and read_xml.get("operation"):
+                try:
+                    from .digests import route_digest_v1
+
+                    route_digest = route_digest_v1(
+                        read_xml["connection"], read_xml["operation"]
+                    )
+                except Exception:  # noqa: BLE001 — an uncomputable route is not a covered one
+                    route_digest = None
+            # A static record authorises the routes it enumerates and no others, and
+            # a route this boundary cannot compute is NOT thereby covered — that is
+            # the fail-open direction.
+            if route_digest is None or route_digest not in covered:
+                drifts.append(
+                    {
+                        "reason": "route_coverage",
+                        "contract_ref": getattr(grant, "contract_ref", None),
+                        "recorded": "static_path",
+                        # A route is a PATH. Neither side is served.
+                        "observed": "<redacted>" if route_digest else "uncomputable",
+                    }
+                )
 
         # THE CONCRETE EVIDENCE, captured from the record this grant resolved to.
         capture = getattr(record, "capture", None)
@@ -337,6 +354,21 @@ def recheck_grant_identities(
                 "route_coverage_kind": getattr(coverage, "kind", None),
                 "capture_digest": getattr(capture, "capture_digest", None)
                 or getattr(capture, "digest", None),
+                # SERVICE-WIDE COVERAGE HAS ITS OWN CAPTURE, and its digest can
+                # differ from the operation record's. Persisting only the latter
+                # leaves the attestation unable to name the capture that
+                # established the coverage once the registry has rotated — which
+                # is the whole reason the concrete tuple is carried at all.
+                "route_capture_digest": (
+                    getattr(
+                        getattr(coverage, "service_wide_capture", None),
+                        "capture_digest",
+                        None,
+                    )
+                    or getattr(
+                        getattr(coverage, "service_wide_capture", None), "digest", None
+                    )
+                ),
             }
         )
 
@@ -437,7 +469,11 @@ def live_identity_reader(boomi_client, *, read_component_xml=None):
             # NOT an account failure. The account answered; this server cannot
             # project what it answered with.
             return {"reason": "projection_unsupported"}
-        return {"version": version, "config_digest": digest}
+        # THE BYTES ARE KEPT. A route digest is computed from the connection and
+        # the operation TOGETHER, and this reader is the only thing that holds
+        # both — the grant cannot carry a route digest, because the route depends
+        # on live configuration the compiler never saw.
+        return {"version": version, "config_digest": digest, "xml": xml}
 
     return live_identity
 
