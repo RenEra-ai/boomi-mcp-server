@@ -441,10 +441,24 @@ def live_identity_reader(boomi_client, *, read_component_xml=None):
         # neither the root's deletion flag nor anything that moves with it — so
         # every comparison passes and the write proceeds against a component that
         # is gone. This repository already recorded the platform behaviour at
-        # discovery; the reader simply was not looking. Read from the fetched
-        # metadata where the getter supplies it, and from the root attribute
-        # otherwise, because the two transports differ in which they carry.
+        # discovery; the reader simply was not looking.
+        #
+        # THE COMPONENT'S OWN PARSER IS THE AUTHORITY, and a first version claimed
+        # the getter supplied `deleted` "where the transports differ". Live QA
+        # measured that branch DEAD — the getter builds its dict from an explicit
+        # key list with no `deleted` entry, on 34 of 34 connector components — so a
+        # hand-rolled regex over the first two kilobytes was the entire guard. The
+        # repository's own `parse_component_xml` reads the flag; it is asked first,
+        # the fetched key is honoured if a caller does supply one, and the regex
+        # remains only as a last resort for a payload neither can read.
         deleted = fetched.get("deleted")
+        if deleted is None:
+            try:
+                from ..categories.components._shared import parse_component_xml
+
+                deleted = (parse_component_xml(xml) or {}).get("deleted")
+            except Exception:  # noqa: BLE001 — fall through to the textual probe
+                deleted = None
         if deleted is None:
             match = re.search(r'\bdeleted="([^"]*)"', xml[:2048])
             deleted = match.group(1) if match else None

@@ -65,7 +65,14 @@ def _candidate(record: Any) -> Dict[str, Any]:
         "record_digest": record.record_digest,
         # The KIND only. A static coverage carries the route it covers, and a
         # route is a path — exactly the shape this projection must not serve.
-        "route_coverage_kind": type(coverage).__name__ if coverage is not None else None,
+        #
+        # FROM THE MODEL'S OWN `kind`, not from its class name. Both coverage
+        # models declare `kind` and pin it with a pattern, and the apply-boundary
+        # attestation serves that value under this same key — while this one
+        # served the Python class name, so a consumer correlating a candidate with
+        # an attestation could never match them. One served name, two disjoint
+        # vocabularies; the class name is a hand-model that moves on a rename.
+        "route_coverage_kind": getattr(coverage, "kind", None) if coverage is not None else None,
     }
 
 

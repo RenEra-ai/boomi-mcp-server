@@ -1325,6 +1325,8 @@ _UNROWED = {"DC-155-C": 2, "DC-155-I": 1}
 #: the reason. Frozen so the set cannot grow silently: a row that names a class is an
 #: instance of it unless it appears here.
 _NOT_AN_INSTANCE = {
+    "QA-155-r66-03a": "a REVISION correcting an identifier, not a second defect — the row's "
+    "text belongs to the report's r66-04 and its class row counts it once",
     "QA-155-r66-01": "ONE defect found by two gates — the Stage-2 review found it in the "
     "source and live QA found it in the account, in the same delta. The workflow counts "
     "distinct post-reconciliation defects, so it is counted once, on CDX-155-r141-01",

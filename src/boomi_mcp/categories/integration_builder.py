@@ -10309,10 +10309,13 @@ def _replay_pre_push_refusal(*, grants, registry, boomi_client, results):
     )
     if outcome.ok:
         return None
+    # NO `partial_results` HERE. This refusal is returned through the update path
+    # and nested by the step result, so passing the loop's results embeds a SECOND
+    # copy of them inside the envelope that already serves them authoritatively —
+    # taken at a different moment, so a reader finding the nested one gets a
+    # strictly staler answer to a question already answered above it.
     return _replay_recheck_refusal(
-        outcome,
-        wrote_nothing=not _anything_written(results),
-        partial_results=dict(results or {}),
+        outcome, wrote_nothing=not _anything_written(results)
     )
 
 

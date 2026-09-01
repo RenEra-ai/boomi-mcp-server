@@ -81,6 +81,12 @@ def test_the_served_candidate_field_set_is_CLOSED():
             self.component_id, self.version = cid, version
 
     class _Coverage:
+        # `kind` is declared and pattern-pinned on BOTH real coverage models, and
+        # the served value is taken from it. A stub without it pinned the class
+        # NAME instead — which is what let this projection and the apply-boundary
+        # attestation serve one key under two disjoint vocabularies.
+        kind = "static_path"
+
         route = "/admin/api/v1/clients/{id}"      # a path — must NOT be served
 
     class _Record:
@@ -102,7 +108,7 @@ def test_the_served_candidate_field_set_is_CLOSED():
     blob = repr(served)
     assert "SHOULD-NEVER-BE-SERVED" not in blob
     assert "/admin/api/v1/clients" not in blob, "a route path reached the projection"
-    assert served["route_coverage_kind"] == "_Coverage"
+    assert served["route_coverage_kind"] == "static_path"
 
 
 def test_the_served_action_list_is_derived_from_the_router():

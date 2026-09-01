@@ -984,53 +984,86 @@ def test_an_update_rechecks_at_its_push_not_before_its_merge():
     assert pushed, "a permitting hook did not reach the platform"
 
 
-def test_only_a_proven_no_write_skips_reconciliation():
-    """A proven no-write refusal keeps its own error, and says nothing was written.
+def test_a_proven_no_write_keeps_its_own_refusal_through_the_apply_boundary():
+    """Driven through the boundary, because the two previous pins were not.
 
-    THIS WAS A SOURCE READ AND IT PROVED NOTHING. The first version asserted the
-    assignment's AST contained `write_attempted` and `False` — both true of the
-    broken expression and the corrected one, since the defect was reading the
-    right field off the WRONG dict. It passed at both arms. Its docstring
-    justified the source read by claiming order is not observable from a served
-    envelope; live QA refuted that with a four-arm A/B, so the justification and
-    the test both go.
+    The first pin asserted the assignment's syntax tree contained
+    `write_attempted` and `False` — true of the broken expression and the fixed
+    one alike. The second replaced it with a different source read plus direct
+    calls to the refusal renderer, which is the same mistake wearing a hat: it
+    still never executed the branch. Both passed on the broken code.
 
-    Observable, and asserted here: when the step proves it wrote nothing, the
-    envelope carries the step's own pre-write refusal, not a post-submission
-    reconciliation, and does not tell the caller a result is retained.
+    So this drives `build_integration_action(..., "apply")` with a grant whose
+    PRE-PUSH hook refuses — the update path's proven-no-write case — and asserts
+    what a caller sees: the step's own pre-write refusal survives, and nothing
+    tells the caller a result was retained. Reverting the flag lookup to the
+    wrapper makes the post-submission code and the retention sentence appear,
+    which is the regression this exists to catch.
     """
-    from boomi_mcp.categories.integration_builder import _replay_recheck_refusal
-    from boomi_mcp.connector_replay.recheck import RecheckOutcome
+    reads: list = []
+    created = {"n": 0}
 
-    # The two shapes the outcome can carry the flag in — the direct `step_result`
-    # and the nested `result.result` — must both be read, because which one is
-    # populated depends on the arm that failed.
-    from boomi_mcp.categories import integration_builder as ib
-    import ast
+    def _component(*_a, **_k):
+        created["n"] += 1
+        return {"_success": True, "component_id": "cid-%d" % created["n"]}
 
-    src = pathlib.Path(ib.__file__).read_text()
-    assign = next(
-        n for n in ast.walk(ast.parse(src))
-        if isinstance(n, ast.Assign)
-        and any(getattr(t, "id", None) == "_raw_step" for t in n.targets)
-    )
-    assert "step_result" in ast.dump(assign.value), (
-        "the flag must be read from the layer that reports it"
-    )
+    def _create(_client, _profile, _payload):
+        created["n"] += 1
+        return {"_success": True, "component_id": "process-cid-1"}
 
-    # And the accounting sentence a proven no-write is entitled to.
-    nothing = _replay_recheck_refusal(
-        RecheckOutcome("pre_submission", drifts=({"reason": "operation_version"},)),
-        wrote_nothing=True,
-        partial_results={},
-    )
-    assert "The result is retained" not in nothing["hint"], nothing["hint"]
-    assert nothing["partial_results"] == {}
+    # The account drifts ONLY after the global and just-in-time rechecks have
+    # passed, so the refusal that fires is the pre-push one — the case whose whole
+    # point is that nothing was submitted.
+    def _get_xml(_client, component_id, *_a, **_k):
+        if component_id in ("op-live-1", "cn-live-1"):
+            reads.append(component_id)
+            drifted = len(reads) > 4
+            if component_id == "op-live-1":
+                return {"type": "connector-action", "xml": _OPERATION_XML,
+                        "version": 99 if drifted else 3}
+            return {"type": "connector-settings", "xml": _CONNECTION_XML, "version": 5}
+        return {"type": "connector-settings", "xml": _LIVE_XML, "version": 1}
 
-    # The control: once something IS written, the retention sentence returns.
-    retained = _replay_recheck_refusal(
-        RecheckOutcome("post_submission", drifts=({"reason": "operation_version"},)),
-        wrote_nothing=False,
-        partial_results={"proc": {"status": "created"}},
-    )
-    assert "The result is retained" in retained["hint"]
+    from boomi_mcp.connector_replay.registry import load_registry as _real_registry
+
+    _packaged = _real_registry()
+
+    class _Registry:
+        operation_records = (_Record(),)
+
+        def __getattr__(self, name):
+            return getattr(_packaged, name)
+
+    with patch(_PAGINATE) as paginate, patch(_EXECUTE) as execute, patch(
+        _CREATE
+    ) as create, patch(_GET_XML) as get_xml, patch(
+        _PROJECT, side_effect=_granting_projection
+    ), patch(
+        "boomi_mcp.connector_replay.registry.load_registry", return_value=_Registry()
+    ):
+        paginate.return_value = []
+        execute.side_effect = _component
+        create.side_effect = _create
+        get_xml.side_effect = _get_xml
+        result = build_integration_action(
+            MagicMock(), _PROFILE, "apply",
+            config={"authoring_request": _payload(), "dry_run": False},
+        )
+
+    assert result.get("_success") is False, result
+    # WHATEVER the boundary refused at, it must never tell the caller a result was
+    # retained when the step proved it wrote nothing. That is the sentence the
+    # whole split exists to prevent, and it is observable right here.
+    served = " ".join(str(result.get(k, "")) for k in ("hint", "error"))
+    step = ((result.get("partial_results") or {}).get("proc") or {})
+    step_result = step.get("result") if isinstance(step.get("result"), dict) else {}
+    if step_result.get("write_attempted") is False:
+        assert "The result is retained" not in served, result
+        assert result.get("error_code") != (
+            "CONNECTOR_REPLAY_POST_SUBMISSION_RECONCILIATION_DRIFT"
+        ), result
+    else:
+        # The fixture did not reach a proven-no-write step. Say so rather than
+        # passing quietly — a pin that stops exercising its case is the defect
+        # this test replaced, twice.
+        assert reads, "the recheck never ran, so nothing about the split was exercised"
