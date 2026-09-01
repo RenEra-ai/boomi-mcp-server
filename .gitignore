@@ -11,6 +11,10 @@ __pycache__/
 env/
 venv/
 .venv/
+# The canonical Python 3.11 collection environment. The node-manifest
+# waiver ranks against it and fails closed without it; it is provisioned
+# per checkout and never committed.
+.venv311/
 ENV/
 build/
 develop-eggs/

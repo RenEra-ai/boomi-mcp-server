@@ -4557,26 +4557,53 @@ def test_the_node_manifest_is_a_legal_successor_of_the_one_it_replaces():
         divergence rather than a live defect, and the measurement is recorded so
         the next reader need not redo it.
 
-        INTERPRETER: the canonical one is Python 3.11. When a 3.11 with pytest is
-        on the path it is used; otherwise this falls back to the interpreter
-        running the suite, which is the fallback the regeneration procedure itself
-        allows, and the equality it owes is discharged by the `scratch/**`
-        preflight running the real CI collection on the closing commit.
+        INTERPRETER: FAIL CLOSED. The canonical collection runs on Python 3.11
+        with the pinned pytest, because the node-id grammar and the summary line
+        are part of the gate's parsing contract and an unpinned pytest can change
+        either. Ranking under anything else is ranking under a different
+        authority, and the preflight cannot repair the mistake afterwards: the
+        gate's collection parser returns a SET, so order is never compared there
+        — verified in `scripts/wave_gate.py`. So this refuses to guess. Measured
+        while closing this: 3.11 and 3.12 with the pinned pytest and autoload off
+        produce the IDENTICAL order over 11,432 nodes, which is why the earlier
+        fallback did no harm in practice and is still not a licence to keep it.
 
         A full collection, which is why it is a thunk: only a regeneration that
         already failed the strict transition pays for it.
         """
         import os
-        import shutil
-        import sys
+        import re as _re
+        import subprocess as _sub
 
-        canonical = shutil.which("python3.11")
-        if canonical:
-            probe = subprocess.run([canonical, "-c", "import pytest"],
-                                   capture_output=True)
+        pinned = _re.search(
+            r"^pytest==(\S+)$",
+            (root / "requirements-dev.txt").read_text(encoding="utf-8"),
+            _re.MULTILINE,
+        )
+        assert pinned, "requirements-dev.txt does not pin pytest; the rank has no contract"
+        want = pinned.group(1)
+
+        def _usable(path):
+            if not path:
+                return None
+            probe = _sub.run(
+                [str(path), "-c",
+                 "import sys, pytest; print(sys.version_info[:2], pytest.__version__)"],
+                capture_output=True, text=True)
             if probe.returncode != 0:
-                canonical = None
-        interpreter = canonical or sys.executable
+                return None
+            head, _, version = probe.stdout.strip().rpartition(" ")
+            return str(path) if head.startswith("(3, 11)") and version == want else None
+
+        interpreter = (_usable(root / ".venv311" / "bin" / "python")
+                       or _usable(shutil.which("python3.11")))
+        assert interpreter, (
+            "no canonical collection environment: this rank must come from Python "
+            "3.11 with pytest=={0}, and neither .venv311 nor python3.11 on PATH "
+            "provides it. Provision one — `python3.11 -m venv .venv311 && "
+            ".venv311/bin/python -m pip install -r requirements-dev.txt` — rather "
+            "than ranking the manifest under a different authority".format(want)
+        )
 
         out = subprocess.run(
             [interpreter, "-m", "pytest", "tests", "--ignore=tests/kb",
