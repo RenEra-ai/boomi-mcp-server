@@ -20,17 +20,51 @@ _ASSET = _REPO / "src" / "boomi_mcp" / "connector_replay" / "registry_v1.json"
 _ASSET_REL = "src/boomi_mcp/connector_replay/registry_v1.json"
 
 
-def test_the_packaged_registry_ships_dark():
-    """No evidence rows and no operation records until a capture is ingested.
+def test_every_packaged_row_is_reproducible_from_the_capture_archive():
+    """No row may exist that re-ingesting the archive would not produce.
 
-    A registry shipping pre-filled rows would assert replay safety no execution
-    observed. This is the pin that stops one being added by hand.
+    THIS REPLACES THE DARKNESS PIN, which asserted the registry shipped with no
+    rows at all. That pin protected one property — that a row asserting replay
+    safety no execution observed cannot be added by hand — and it protected it
+    only while the registry was empty, so ingesting real evidence would have
+    retired the guarantee along with the assertion.
+
+    The property survives in a stronger form: every packaged row must be
+    REPRODUCED by re-running the ingester over the checksummed capture archive.
+    A hand-written row fails because the ingester would not produce it; an
+    altered capture fails because the archive manifest would not verify; and a
+    row for a verb whose capture carries no counterparty attestation fails
+    because the classifier refuses it. Emptiness was a proxy for that. This is
+    the thing itself.
     """
-    reg = load_registry()
-    assert reg.evidence_records == ()
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "_ingest_script", _REPO / "scripts" / "ingest_connector_replay_evidence.py")
+    script = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(script)
+
+    present = {name: verb for name, verb in script.ACTIONS.items()
+               if (script.CAPTURES / name).is_dir()}
+    reproduced = script.ingest(
+        script.ARCHIVE, [script.CAPTURES / n for n in present],
+        family="rest", actions=present,
+    )
     payload = json.loads(_ASSET.read_text())
-    assert payload["evidence_records"] == []
-    assert payload["operation_records"] == []
+    packaged = payload["evidence_records"]
+    assert packaged, (
+        "the packaged registry carries no evidence rows, so this check would be "
+        "vacuous; if the intent is to ship dark again, delete this test with the "
+        "reason rather than leaving it green over nothing"
+    )
+    expected = [
+        json.loads(r.model_dump_json(exclude_none=True))
+        for r in sorted(reproduced, key=lambda r: (r.family, r.action))
+    ]
+    assert packaged == expected, (
+        "the packaged rows are not what re-ingesting the archive produces; a row "
+        "no capture supports has entered the registry"
+    )
 
 
 def test_the_vocabulary_is_populated_from_executed_captures():
@@ -53,8 +87,16 @@ def test_every_absence_reads_as_unverified():
     ``unverified`` — never as a permissive default.
     """
     reg = load_registry()
-    for family, action in [("rest", "PATCH"), ("rest", "DELETE"), ("nope", "GET")]:
+    # ABSENCES, chosen because they ARE absent: an unmapped connector family, a
+    # verb the archive carries no attested capture for, and a family/action pair
+    # that never appeared. The list previously named PATCH and DELETE, which was
+    # correct only while the registry was empty — now that both are observed, a
+    # test asserting they read unverified would be asserting the ingestion failed.
+    for family, action in [("nope", "GET"), ("rest", "POST"), ("rest", "CONNECT")]:
         assert reg.retry_safety(family, action) is RetrySafetyV1.UNVERIFIED
+    # ...and the positive side, so this is a fail-CLOSED seam rather than a
+    # function that returns unverified for everything.
+    assert reg.retry_safety("rest", "PATCH") is RetrySafetyV1.CONDITIONALLY_IDEMPOTENT
 
 
 def test_a_registry_that_cannot_be_parsed_is_refused_not_skipped():

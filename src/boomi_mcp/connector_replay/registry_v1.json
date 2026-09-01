@@ -1,156 +1,316 @@
 {
-  "evidence_records": [],
-  "operation_records": [],
-  "projection_allowlists": [
-    {
-      "component_kind": "connection",
-      "excluded_fields": [
-        "auth",
-        "awsAccessKey",
-        "awsDuration",
-        "awsPrivateKey",
-        "awsProfileArn",
-        "awsPublicCertificate",
-        "awsRegion",
-        "awsRoleArn",
-        "awsRolesAnywhereCustomRegion",
-        "awsRolesAnywhereRegion",
-        "awsSecretKey",
-        "awsService",
-        "awsSessionName",
-        "awsTrustAnchorArn",
-        "connectTimeout",
-        "cookieScope",
-        "customAuthCredentials",
-        "customAwsRegion",
-        "customAwsService",
-        "domain",
-        "enableConnectionPooling",
-        "idleTimeout",
-        "maxTotal",
-        "oauthContext",
-        "password",
-        "preemptive",
-        "privateCertificate",
-        "publicCertificate",
-        "readTimeout",
-        "username",
-        "workstation"
-      ],
-      "family": "rest",
-      "included_attributes": [],
-      "included_elements": [
-        "GenericConnectionConfig",
-        "field",
-        "OAuth2Config",
-        "credentials",
-        "accessTokenEndpoint",
-        "authorizationTokenEndpoint",
-        "accessTokenParameters",
-        "authorizationParameters",
-        "jwtParameters",
-        "scope",
-        "expiration",
-        "sslOptions",
-        "bns:Component",
-        "bns:object",
-        "bns:description",
-        "bns:encryptedValues",
-        "bns:GlobalVariableReferences"
-      ],
-      "included_property_fields": [],
-      "included_value_fields": [
-        "url"
-      ],
-      "projection_version": 4,
-      "qname_aware_attrs": [],
-      "qname_aware_tags": [],
-      "included_scope_attributes": [
-        "field/type"
-      ],
-      "excluded_scope_attributes": [
-        "OAuth2Config/grantType",
-        "accessTokenEndpoint/url",
-        "authorizationTokenEndpoint/url",
-        "credentials/clientId",
-        "properties/value"
-      ]
+ "evidence_records": [
+  {
+   "family": "rest",
+   "action": "DELETE",
+   "side_effect": "write",
+   "retry_safety": "conditionally_idempotent",
+   "accepts_input": "documents_consumed",
+   "produces_output": "return_documents_received",
+   "capture": {
+    "execution_id": "execution-d999b19c-8f5f-4d46-9d93-11de5846c7a4-2026.08.27",
+    "captured_at": "2026-08-27T20:33:34Z",
+    "account_scope_hash": "74e3eb7225a05f258fc2f39c66b2bde09153627c66268f1ece7298107430e1ae",
+    "summary": {
+     "placement": "downstream",
+     "input_observation": "documents_consumed",
+     "output_observation": "return_documents_received",
+     "effect": "state_unchanged_after_replay",
+     "replay": "conflict_without_second_effect",
+     "scope": "single_operation",
+     "sources": [
+      "endpoint_readback",
+      "execution_connector",
+      "execution_record"
+     ]
     },
-    {
-      "component_kind": "operation",
-      "excluded_fields": [],
-      "family": "rest",
-      "included_attributes": [
-        "customOperationType"
-      ],
-      "included_elements": [
-        "Operation",
-        "Configuration",
-        "GenericOperationConfig",
-        "field",
-        "customProperties",
-        "properties",
-        "Options",
-        "Tracking",
-        "TrackedFields",
-        "Caching",
-        "Archiving",
-        "bns:Component",
-        "bns:object",
-        "bns:description",
-        "bns:encryptedValues",
-        "bns:GlobalVariableReferences"
-      ],
-      "included_property_fields": [
-        "queryParameters",
-        "requestHeaders"
-      ],
-      "included_value_fields": [
-        "path",
-        "followRedirects"
-      ],
-      "projection_version": 4,
-      "qname_aware_attrs": [],
-      "qname_aware_tags": [],
-      "included_scope_attributes": [
-        "Archiving/directory",
-        "Archiving/enabled",
-        "GenericOperationConfig/customOperationType",
-        "GenericOperationConfig/operationType",
-        "Operation/customOperationType",
-        "Operation/operationType",
-        "Operation/returnApplicationErrors",
-        "Operation/trackResponse",
-        "field/type"
-      ],
-      "excluded_scope_attributes": [
-        "properties/value"
-      ]
-    }
-  ],
-  "schema_version": 1,
-  "semantics_definitions": [],
-  "vocabulary": [
-    {
-      "action_source": "operation_component",
-      "family": "rest",
-      "platform_connector_type": "officialboomi-X3979C-rest-prod",
-      "recognised_actions": [
-        "DELETE",
-        "GET",
-        "HEAD",
-        "OPTIONS",
-        "PATCH",
-        "POST",
-        "PUT",
-        "TRACE"
-      ],
-      "safe_actions": [
-        "GET",
-        "HEAD",
-        "OPTIONS",
-        "TRACE"
-      ]
-    }
-  ]
+    "capture_digest": "34614e7c081fdc699ae38cd8ce916ed56da6300460a25e57189e83a32e1df144"
+   },
+   "capture_digest": "34614e7c081fdc699ae38cd8ce916ed56da6300460a25e57189e83a32e1df144",
+   "execution_ids": [
+    "execution-d999b19c-8f5f-4d46-9d93-11de5846c7a4-2026.08.27",
+    "execution-18b59781-67b7-4f31-afc6-89a619efd15b-2026.08.27"
+   ],
+   "operation_component_id": "ef18e7f1-1d34-4245-b715-1bc4713dc992"
+  },
+  {
+   "family": "rest",
+   "action": "HEAD",
+   "side_effect": "read",
+   "retry_safety": "unverified",
+   "accepts_input": "documents_consumed",
+   "produces_output": "no_output_observed",
+   "capture": {
+    "execution_id": "execution-487d4ceb-32e5-4f1e-95ec-9a2d64475607-2026.08.27",
+    "captured_at": "2026-08-27T13:32:00Z",
+    "account_scope_hash": "74e3eb7225a05f258fc2f39c66b2bde09153627c66268f1ece7298107430e1ae",
+    "summary": {
+     "placement": "downstream",
+     "input_observation": "documents_consumed",
+     "output_observation": "no_output_observed",
+     "effect": "read_only",
+     "replay": "not_exercised",
+     "scope": "single_operation",
+     "sources": [
+      "endpoint_readback",
+      "execution_connector",
+      "execution_record"
+     ]
+    },
+    "capture_digest": "e403860b635d5f6f130f10757aedfe281b480d7b733ff780ebe56e176ef0d3a8"
+   },
+   "capture_digest": "e403860b635d5f6f130f10757aedfe281b480d7b733ff780ebe56e176ef0d3a8",
+   "execution_ids": [
+    "execution-487d4ceb-32e5-4f1e-95ec-9a2d64475607-2026.08.27"
+   ]
+  },
+  {
+   "family": "rest",
+   "action": "OPTIONS",
+   "side_effect": "read",
+   "retry_safety": "unverified",
+   "accepts_input": "documents_consumed",
+   "produces_output": "no_output_observed",
+   "capture": {
+    "execution_id": "execution-88a1330f-52a2-4a68-ba95-7d4698618bda-2026.08.27",
+    "captured_at": "2026-08-27T13:32:19Z",
+    "account_scope_hash": "74e3eb7225a05f258fc2f39c66b2bde09153627c66268f1ece7298107430e1ae",
+    "summary": {
+     "placement": "downstream",
+     "input_observation": "documents_consumed",
+     "output_observation": "no_output_observed",
+     "effect": "read_only",
+     "replay": "not_exercised",
+     "scope": "single_operation",
+     "sources": [
+      "endpoint_readback",
+      "execution_connector",
+      "execution_record"
+     ]
+    },
+    "capture_digest": "67ed7efbf5691516d1aeefcd4138743b00951fa8be7740fe50d1f2e5cc0812b1"
+   },
+   "capture_digest": "67ed7efbf5691516d1aeefcd4138743b00951fa8be7740fe50d1f2e5cc0812b1",
+   "execution_ids": [
+    "execution-88a1330f-52a2-4a68-ba95-7d4698618bda-2026.08.27"
+   ]
+  },
+  {
+   "family": "rest",
+   "action": "PATCH",
+   "side_effect": "write",
+   "retry_safety": "conditionally_idempotent",
+   "accepts_input": "documents_consumed",
+   "produces_output": "return_documents_received",
+   "capture": {
+    "execution_id": "execution-58bc6079-7b94-4793-b110-113d5f951dd3-2026.08.27",
+    "captured_at": "2026-08-27T20:22:58Z",
+    "account_scope_hash": "74e3eb7225a05f258fc2f39c66b2bde09153627c66268f1ece7298107430e1ae",
+    "summary": {
+     "placement": "downstream",
+     "input_observation": "documents_consumed",
+     "output_observation": "return_documents_received",
+     "effect": "state_unchanged_after_replay",
+     "replay": "same_effect",
+     "scope": "single_operation",
+     "sources": [
+      "endpoint_readback",
+      "execution_connector",
+      "execution_record"
+     ]
+    },
+    "capture_digest": "dec268ab22bd2f6b15df6a85c537abd949dc5d3813261f74c119d6c0f788a1bb"
+   },
+   "capture_digest": "dec268ab22bd2f6b15df6a85c537abd949dc5d3813261f74c119d6c0f788a1bb",
+   "execution_ids": [
+    "execution-58bc6079-7b94-4793-b110-113d5f951dd3-2026.08.27",
+    "execution-7d1f0df7-282c-4dfa-886e-91c5ab506f24-2026.08.27"
+   ],
+   "operation_component_id": "428246b5-832c-43ff-a707-600870d62b4a"
+  },
+  {
+   "family": "rest",
+   "action": "TRACE",
+   "side_effect": "read",
+   "retry_safety": "unverified",
+   "accepts_input": "documents_consumed",
+   "produces_output": "no_output_observed",
+   "capture": {
+    "execution_id": "execution-0aa56e9d-237e-45d7-9062-aa01811aeff3-2026.08.27",
+    "captured_at": "2026-08-27T13:32:33Z",
+    "account_scope_hash": "74e3eb7225a05f258fc2f39c66b2bde09153627c66268f1ece7298107430e1ae",
+    "summary": {
+     "placement": "downstream",
+     "input_observation": "documents_consumed",
+     "output_observation": "no_output_observed",
+     "effect": "read_only",
+     "replay": "not_exercised",
+     "scope": "single_operation",
+     "sources": [
+      "endpoint_readback",
+      "execution_connector",
+      "execution_record"
+     ]
+    },
+    "capture_digest": "0c62c0fb6ca337c438fe4779e7b3b9b5fd11ab775fef1f62c3bfc5af2be53081"
+   },
+   "capture_digest": "0c62c0fb6ca337c438fe4779e7b3b9b5fd11ab775fef1f62c3bfc5af2be53081",
+   "execution_ids": [
+    "execution-0aa56e9d-237e-45d7-9062-aa01811aeff3-2026.08.27"
+   ]
+  }
+ ],
+ "operation_records": [],
+ "projection_allowlists": [
+  {
+   "component_kind": "connection",
+   "excluded_fields": [
+    "auth",
+    "awsAccessKey",
+    "awsDuration",
+    "awsPrivateKey",
+    "awsProfileArn",
+    "awsPublicCertificate",
+    "awsRegion",
+    "awsRoleArn",
+    "awsRolesAnywhereCustomRegion",
+    "awsRolesAnywhereRegion",
+    "awsSecretKey",
+    "awsService",
+    "awsSessionName",
+    "awsTrustAnchorArn",
+    "connectTimeout",
+    "cookieScope",
+    "customAuthCredentials",
+    "customAwsRegion",
+    "customAwsService",
+    "domain",
+    "enableConnectionPooling",
+    "idleTimeout",
+    "maxTotal",
+    "oauthContext",
+    "password",
+    "preemptive",
+    "privateCertificate",
+    "publicCertificate",
+    "readTimeout",
+    "username",
+    "workstation"
+   ],
+   "family": "rest",
+   "included_attributes": [],
+   "included_elements": [
+    "GenericConnectionConfig",
+    "field",
+    "OAuth2Config",
+    "credentials",
+    "accessTokenEndpoint",
+    "authorizationTokenEndpoint",
+    "accessTokenParameters",
+    "authorizationParameters",
+    "jwtParameters",
+    "scope",
+    "expiration",
+    "sslOptions",
+    "bns:Component",
+    "bns:object",
+    "bns:description",
+    "bns:encryptedValues",
+    "bns:GlobalVariableReferences"
+   ],
+   "included_property_fields": [],
+   "included_value_fields": [
+    "url"
+   ],
+   "projection_version": 4,
+   "qname_aware_attrs": [],
+   "qname_aware_tags": [],
+   "included_scope_attributes": [
+    "field/type"
+   ],
+   "excluded_scope_attributes": [
+    "OAuth2Config/grantType",
+    "accessTokenEndpoint/url",
+    "authorizationTokenEndpoint/url",
+    "credentials/clientId",
+    "properties/value"
+   ]
+  },
+  {
+   "component_kind": "operation",
+   "excluded_fields": [],
+   "family": "rest",
+   "included_attributes": [
+    "customOperationType"
+   ],
+   "included_elements": [
+    "Operation",
+    "Configuration",
+    "GenericOperationConfig",
+    "field",
+    "customProperties",
+    "properties",
+    "Options",
+    "Tracking",
+    "TrackedFields",
+    "Caching",
+    "Archiving",
+    "bns:Component",
+    "bns:object",
+    "bns:description",
+    "bns:encryptedValues",
+    "bns:GlobalVariableReferences"
+   ],
+   "included_property_fields": [
+    "queryParameters",
+    "requestHeaders"
+   ],
+   "included_value_fields": [
+    "path",
+    "followRedirects"
+   ],
+   "projection_version": 4,
+   "qname_aware_attrs": [],
+   "qname_aware_tags": [],
+   "included_scope_attributes": [
+    "Archiving/directory",
+    "Archiving/enabled",
+    "GenericOperationConfig/customOperationType",
+    "GenericOperationConfig/operationType",
+    "Operation/customOperationType",
+    "Operation/operationType",
+    "Operation/returnApplicationErrors",
+    "Operation/trackResponse",
+    "field/type"
+   ],
+   "excluded_scope_attributes": [
+    "properties/value"
+   ]
+  }
+ ],
+ "schema_version": 1,
+ "semantics_definitions": [],
+ "vocabulary": [
+  {
+   "action_source": "operation_component",
+   "family": "rest",
+   "platform_connector_type": "officialboomi-X3979C-rest-prod",
+   "recognised_actions": [
+    "DELETE",
+    "GET",
+    "HEAD",
+    "OPTIONS",
+    "PATCH",
+    "POST",
+    "PUT",
+    "TRACE"
+   ],
+   "safe_actions": [
+    "GET",
+    "HEAD",
+    "OPTIONS",
+    "TRACE"
+   ]
+  }
+ ]
 }

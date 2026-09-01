@@ -1023,6 +1023,98 @@ def _account_matches(record_scope_hash: str, account_id: str) -> bool:
     return computed == record_scope_hash
 
 
+def project_idempotency_contracts(symbols, *, registry=None, snapshot=None):
+    """Mint contract symbols for registry records the snapshot can PLACE (#155 F).
+
+    Slice D built the grant minter and the discovery surface and left this gap
+    recorded rather than filled: no production path constructed a contract
+    symbol, so an author could discover the right reference and planning would
+    still refuse it. This is that path.
+
+    THE DIVISION OF LABOUR IS DELIBERATE, and it is what keeps this from becoming
+    a second authority on whether evidence covers a call. This function only
+    PROPOSES: for each operation record, it asks the trusted snapshot which
+    component symbol carries the identity the record names, and mints a contract
+    binding that record's reference to that operation. Whether the proposal
+    survives is decided by the corroboration the grant minter already owns, which
+    compares the contract, connection, family and action — and the compile gate
+    requires BOTH a resolvable contract AND a per-call grant, so a contract this
+    function proposes wrongly yields no grant and the call still refuses.
+
+    Identity is the PAIR of component and version on both sides, which is the
+    same rule discovery applies: a record minted against version 2 does not
+    describe a component the account now serves at version 9.
+    """
+    from .contracts import IdempotencyContractSymbolV1
+
+    if registry is None:
+        from ...connector_replay.registry import load_registry
+
+        registry = load_registry()
+    records = tuple(getattr(registry, "operation_records", ()) or ())
+    if not records:
+        # The packaged state until evidence is ingested. Returning the table
+        # unchanged is not a fallback: there is nothing to propose.
+        return symbols
+    _require_trusted_snapshot(snapshot)
+    identities = tuple(getattr(snapshot, "identities", ()) or ())
+    if not identities:
+        return symbols
+
+    by_component = {}
+    for identity in identities:
+        component_id = getattr(identity, "component_id", None)
+        version = getattr(identity, "component_version", None)
+        if component_id and version is not None:
+            by_component[(str(component_id), str(version))] = identity
+
+    symbol_index = symbols.build_index()
+    existing = {(c.ref, c.operation_ref) for c in symbols.idempotency_contracts}
+    minted = []
+    for record in records:
+        operation = getattr(record, "operation_identity", None)
+        connection = getattr(record, "connection_identity", None)
+        if operation is None or connection is None:
+            continue
+        placed = by_component.get(
+            (str(getattr(operation, "component_id", "")),
+             str(getattr(operation, "version", "")))
+        )
+        if placed is None:
+            # The account does not serve this component at this version, or the
+            # snapshot never observed it. Silence is the honest answer: a record
+            # nobody can place is not evidence about anything in this plan.
+            continue
+        # The CONNECTION must be placed too. Without it a record minted against
+        # one connection would be proposed for an operation now pointing at
+        # another, and the corroboration would be asked to reject something this
+        # function should never have offered.
+        if (str(getattr(connection, "component_id", "")),
+                str(getattr(connection, "version", ""))) not in by_component:
+            continue
+        operation_ref = "$ref:{0}".format(getattr(placed, "component_key", ""))
+        if operation_ref not in symbol_index:
+            continue
+        key = (record.contract_ref, operation_ref)
+        if key in existing:
+            continue
+        existing.add(key)
+        minted.append(
+            IdempotencyContractSymbolV1(
+                ref=record.contract_ref,
+                operation_ref=operation_ref,
+                record_digest=record.record_digest,
+            )
+        )
+    if not minted:
+        return symbols
+    return symbols.model_copy(
+        update={
+            "idempotency_contracts": tuple(symbols.idempotency_contracts) + tuple(minted)
+        }
+    )
+
+
 def project_grants_for_root(
     root_ir, symbols, *, process_root_ref: str, registry=None, snapshot=None
 ):
@@ -1050,6 +1142,17 @@ def project_grants_for_root(
     # the real fault was a server-side miswire — and the unit test asserting the
     # raise passed because it called the minter directly, below this wrapper.
     _require_trusted_snapshot(snapshot)
+
+    # CONTRACTS FIRST, HERE rather than at each caller. A grant is a contract's
+    # coverage of one call, so the minter below reads the contract index and can
+    # mint nothing without it. Folding the projection in means every production
+    # path that already projects a root gets contracts by construction; adding
+    # the call at each of the five call sites instead would be a hand-list of
+    # exactly the kind this issue has recorded thirty-one instances of, and the
+    # sixth caller written next year would silently get no contracts.
+    symbols = project_idempotency_contracts(
+        symbols, registry=registry, snapshot=snapshot
+    )
 
     projected = symbols.model_copy(
         update={"process_root_ref": process_root_ref, "idempotency_grants": ()}
