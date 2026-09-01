@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 11421, "minimum_collected": 11421, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 11423, "minimum_collected": 11423, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -11463,3 +11463,5 @@
 {"kind": "test", "id": "pytest-011462", "node_id": "tests/test_issue_155_recheck_boundary.py::test_every_refusal_states_its_cause_and_states_retention_only_when_retained[False-unreadable account-unavailable1-None]", "state": "active"}
 {"kind": "test", "id": "pytest-011463", "node_id": "tests/test_issue_155_recheck_boundary.py::test_every_refusal_states_its_cause_and_states_retention_only_when_retained[False-missing record-unavailable2-None]", "state": "active"}
 {"kind": "test", "id": "pytest-011464", "node_id": "tests/test_issue_155_recheck_boundary.py::test_every_refusal_states_its_cause_and_states_retention_only_when_retained[False-real drift-None-drifts3]", "state": "active"}
+{"kind": "test", "id": "pytest-011465", "node_id": "tests/test_issue_155_recheck_boundary.py::test_the_exception_exit_serves_only_the_unattested_write", "state": "active"}
+{"kind": "test", "id": "pytest-011466", "node_id": "tests/test_issue_155_recheck_boundary.py::test_the_success_exit_serves_only_the_unattested_write", "state": "active"}

@@ -3837,7 +3837,18 @@ def test_a_confirmed_write_is_durable_before_it_is_attested():
     assert writes[0]["result_component_id"] == _PROCESS_ID
     assert writes[0]["component_key"] == "proc"
     assert writes[0]["submitted_xml_digest"].startswith("sha256:")
-    assert result.get("process_writes") == writes
+    # CONTAINMENT, not equality. These two assertions read `envelope == record`,
+    # and the two are deliberately different collections since #155 slice E: the
+    # record is the WRITE LOG and keeps every confirmed note the instant it is
+    # confirmed, while the envelope serves only the notes no attestation covers.
+    # They are equal exactly when nothing was attested, which is true of this
+    # scenario and of no scenario carrying a mutation — so the equality was a
+    # latent contradiction that passed by luck. What these tests mean, in their
+    # own words one line up, is "it is durable, not only served"; containment says
+    # that and stays true.
+    for _note in (result.get("process_writes") or []):
+        assert _note in writes, (_note, writes)
+    assert writes
 
 
 def test_the_integration_spec_arm_also_reparses_its_units():
@@ -4674,7 +4685,19 @@ def test_a_confirmed_write_with_no_id_is_recorded_as_unidentified():
     assert note["submitted_xml_digest"].startswith("sha256:")
     # ...and it is durable, not only served.
     build_id = result.get("build_id")
-    assert build_id and ib._BUILD_REGISTRY[build_id].get("process_writes") == writes
+    # CONTAINMENT, not equality. These two assertions read `envelope == record`,
+    # and the two are deliberately different collections since #155 slice E: the
+    # record is the WRITE LOG and keeps every confirmed note the instant it is
+    # confirmed, while the envelope serves only the notes no attestation covers.
+    # They are equal exactly when nothing was attested, which is true of this
+    # scenario and of no scenario carrying a mutation — so the equality was a
+    # latent contradiction that passed by luck. What these tests mean, in their
+    # own words one line up, is "it is durable, not only served"; containment says
+    # that and stays true.
+    assert build_id
+    _recorded = ib._BUILD_REGISTRY[build_id].get("process_writes") or []
+    for _note in writes:
+        assert _note in _recorded, (_note, _recorded)
 
 
 def test_no_write_note_is_recorded_for_a_step_that_never_wrote():

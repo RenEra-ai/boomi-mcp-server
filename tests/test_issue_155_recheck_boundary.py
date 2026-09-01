@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -661,22 +662,34 @@ def test_no_exit_serves_a_write_as_both_attested_and_pending():
     That is checkable on the SERVED ENVELOPE, so it is checked there — on every
     exit this suite can reach, in the form a caller actually sees.
 
-    COVERAGE, stated with its limit: the returned-failure and exception exits are
-    driven live below; the success exit's unattested set is unreachable through
-    the public boundary by construction (an attestation is appended for every
-    confirmed write on that path) and is graded by direct call. A new exit is
-    covered by this test only if it is reachable from one of these; the honest
-    claim is the property, not exhaustiveness over future code.
+    COVERAGE, corrected by measurement after the first version of this sentence
+    was wrong. Live QA instrumented the derivation and recorded the calling frame:
+    this test reaches ``_partial_failure`` and ONLY that exit — the exception exit
+    was reached by zero tests through it, and the success exit by none. So the
+    other two are graded by DIRECT CALL in the two tests below, in the mixed shape
+    where the raw list and the derived list actually differ. Reverting any one
+    exit to serving the raw notes now fails: that was measured too, and before
+    these were added, reverting the exception exit passed the entire suite.
     """
     def _matching(component_id, _kind=None, _family=None):
         return {"type": "connector-settings", "xml": _LIVE_XML, "version": 1}
 
     result, _created, _reads = _apply_with_a_grant_drifting_at(drift_after_reads=4)
-    if result.get("error_code") == "CONNECTOR_REPLAY_POST_SUBMISSION_RECONCILIATION_DRIFT":
-        attested = {m.get("component_key") for m in (result.get("process_mutations") or [])}
-        pending = {n.get("component_key") for n in (result.get("process_writes") or [])}
-        assert attested, "no attestation survived the refusal"
-        assert not (attested & pending), (attested, pending)
+    # NO `if`. The first version guarded this on the error code and had no else, so
+    # switching the boundary off in source made it PASS silently while the test it
+    # sits beside failed — the exact self-escape this file's own docstring records
+    # twenty lines above, reintroduced four rounds after it was recorded. Live QA
+    # caught it by mutating the source rather than by reading the test.
+    assert result.get("error_code") == (
+        "CONNECTOR_REPLAY_POST_SUBMISSION_RECONCILIATION_DRIFT"
+    ), (
+        "the post-submission exit was not reached, so the disjointness property "
+        "was not exercised at it: %r" % result.get("error_code")
+    )
+    attested = {m.get("component_key") for m in (result.get("process_mutations") or [])}
+    pending = {n.get("component_key") for n in (result.get("process_writes") or [])}
+    assert attested, "no attestation survived the refusal"
+    assert not (attested & pending), (attested, pending)
 
     # The DERIVATION itself, over the shapes the three exits pass it: models at
     # two call sites, dumps at the third. QA measured these agreeing; this pins it.
@@ -791,3 +804,92 @@ def test_an_unreadable_account_is_not_reported_as_a_mismatch():
         partial_results={},
     )
     assert "no longer matches" in drift["error"]
+
+
+def _mixed_write_evidence():
+    """One attested root and one confirmed-but-unattested root.
+
+    THE ONLY SHAPE THAT GRADES A DERIVATION. Where every write is unattested the
+    raw list and the derived list are equal, so an exit serving either passes —
+    which is why the exception exit was reached by live tests for rounds and still
+    survived being reverted to raw. Live QA measured that directly: with the
+    historic raw block restored at that exit, the entire suite stayed green.
+    """
+    class _Mutation:
+        component_key = "proc1"
+
+        def model_dump(self, mode=None):
+            return {"component_key": "proc1", "result_component_id": "cid-1"}
+
+    notes = [
+        {"component_key": "proc1", "result_component_id": "cid-1",
+         "attestation_pending": True},
+        {"component_key": "proc2", "result_component_id": "cid-2",
+         "attestation_pending": True},
+    ]
+    return [_Mutation()], notes
+
+
+def test_the_exception_exit_serves_only_the_unattested_write():
+    """The exit live QA found unguarded — graded where it can actually be graded.
+
+    It is a module-level function, so it is called directly rather than reached
+    through an escape whose recipe depends on which exception type one internal
+    call site happens to catch. What matters is the property, and the property is
+    checkable here without staging a throw.
+    """
+    from boomi_mcp.categories.integration_builder import _apply_escape_evidence
+
+    mutations, notes = _mixed_write_evidence()
+    evidence = _apply_escape_evidence(
+        durable_build_id=None,
+        results={},
+        process_mutations=mutations,
+        process_readbacks=[],
+        apply_warnings=[],
+        results_complete=True,
+        process_writes=notes,
+    )
+    served = evidence.get("process_writes") or []
+    assert [n["component_key"] for n in served] == ["proc2"], evidence
+    attested = {m.get("component_key") for m in (evidence.get("process_mutations") or [])}
+    assert not (attested & {n["component_key"] for n in served}), evidence
+
+
+def test_the_success_exit_serves_only_the_unattested_write():
+    """The third exit, graded AT THE EXIT rather than at the helper it calls.
+
+    A first version asserted the helper's output and left the exit itself
+    ungraded here — so reverting the exit to the raw list was killed only by a
+    test in another file, at suite width. Live QA set the bar explicitly: each
+    exit must die at NODE width, because a revert caught only by a distant file
+    is caught by accident of what else happens to run.
+
+    Its unattested set is unreachable through the public boundary by construction
+    — an attestation is appended for every confirmed write on that path — so the
+    exit is called directly. That limit is real and stated; what is NOT acceptable
+    is grading the helper and calling the exit covered.
+    """
+    from boomi_mcp.categories.integration_builder import _finalize_apply_success
+
+    mutations, notes = _mixed_write_evidence()
+    envelope = _finalize_apply_success(
+        # `model_dump` is the only thing the exit asks of the spec on this path.
+        # `model_dump` and `name` are all the exit asks of the spec here.
+        spec=SimpleNamespace(name="s", model_dump=lambda: {"name": "s"}),
+        profile=_PROFILE,
+        boomi_client=MagicMock(),
+        durable_build_id=None,
+        authoring_bundle=None,
+        results={},
+        execution_order=[],
+        process_mutations=mutations,
+        process_readbacks=[],
+        process_writes=notes,
+        apply_warnings=[],
+        planned={},
+    )
+    served = envelope.get("process_writes") or []
+    assert [n["component_key"] for n in served] == ["proc2"], envelope
+    attested = {m.get("component_key") for m in (envelope.get("process_mutations") or [])}
+    assert not (attested & {n["component_key"] for n in served}), envelope
