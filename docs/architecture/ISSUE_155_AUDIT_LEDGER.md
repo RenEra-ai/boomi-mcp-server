@@ -2045,6 +2045,47 @@ empty proves no executable code moved, but it is not what the `dev` ruleset eval
 account when it lands plus a counterparty accepting six REST verbs. The class-level PATCH evidence F
 depends on is banked and archived at `captures/cap155-e3b-patch-*`, so that dependency is discharged.
 
+## Slice F — Stage-1 step 0 — baseline
+
+| Field | Value |
+|---|---|
+| Literal baseline SHA | `59299b1ca0b61271e1d34ee3989c560244dd2367` |
+| Branch point | `dev` @ `59299b1` (slice E's landed closing commit) |
+| Baseline suite | 11,415 passed / 18 skipped, tree clean |
+| Slice kind | behaviour-affecting — evidence ingestion, the verb rows, the operation record, and the manifest flip (plan section 5.F) |
+| Blocking class | machine-served schemas/contracts — the registry rows and the capability manifest are served to callers |
+| Live account | `trainingglebbochkarov-16926N`, active; the counterparty answers on its published port and the local runtime is up |
+| Trust boundary | CREATES the ingested registry rows, the operation contract record, and the manifest flip. CONSUMES the capture archive, the ingestion mechanism landed dark in slice B, and the platform records — a finding that only hardens one of the created artifacts gets a boundary verdict at reconciliation |
+
+**Written BEFORE any code in this slice.** What the evidence actually supports was MEASURED before
+anything was planned around it, and the measurement corrected a claim I was carrying: the working
+note said all six verb captures were attested, and they are not. Ingesting the six executed verb
+captures refuses on the first one, because none carries a counterparty access log and the classifier
+holds that an execution status cannot stand in for an outcome — the platform reports COMPLETE for a
+request the counterparty refused.
+
+**What the archive supports today, each figure from running the classifier over the capture:**
+
+| Verb | Capture | Classifies to |
+|---|---|---|
+| DELETE | `cap155-e5-delete-attested` | write / conditionally idempotent — 204 then 404 with the state unmoved on replay, which is the conflict-without-second-effect outcome |
+| PATCH | `cap155-e5-patch-attested` | write / conditionally idempotent — 200 twice, only the volatile modification timestamp differing, with one positive and two negative controls |
+| HEAD | `cap155-e4-head-status` | read / unverified — 200, no state change |
+| OPTIONS | `cap155-e4-options-status` | read / unverified — 204, no state change |
+| TRACE | `cap155-e4-trace-status` | read / unverified — 200, no state change |
+| POST | none attested | refused: no counterparty attestation |
+| PUT | none attested | refused: no counterparty attestation |
+
+The negative control `cap155-e4-negative-control` classifies UNKNOWN, which is what makes the five
+positive classifications mean something: the classifier is not answering "read" to everything put in
+front of it.
+
+**Consequence for scope.** Two missing attested captures are a MISSING FIXTURE, not a block, and this
+repository's rule is to provision a missing fixture rather than report around it. The counterparty is
+live and serves every verb, and the runtime is up, so the two captures are takeable and will be taken
+before the rows are minted. Whether they prove anything is a question for the classifier, not for me.
+
+
 ## Slice E — closing report (CLOSE-CLEAN)
 
 **Outcome: CLOSE-CLEAN.** Slice E's code is complete, every roster gate owed at this slice is
