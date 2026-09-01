@@ -105,14 +105,19 @@ def recheck_grant_identities(
     *,
     grants: Sequence[Any],
     registry: Any,
-    live_identity: Callable[[str], Optional[Mapping[str, Any]]],
+    live_identity: Callable[..., Optional[Mapping[str, Any]]],
     account_scope_hash: Optional[str] = None,
     boundary: str = "pre_submission",
 ) -> RecheckOutcome:
     """Recheck every identity the supplied grants consumed.
 
-    ``live_identity`` takes a component id AND the kind being read, and returns
-    ``{"version", "config_digest"}`` or ``None`` when the account cannot be read.
+    ``live_identity`` takes a component id, the KIND being read, and the record's
+    FAMILY. It returns ``{"version", "config_digest"}``, or a mapping carrying
+    ``reason`` when no identity could be established — ``account_unreadable`` when
+    the account did not answer, ``projection_unsupported`` when it answered and
+    this server cannot project the answer. ``None`` is still accepted and read as
+    the former, so a caller written against the older contract fails closed rather
+    than silently.
 
     THE KIND IS PASSED, NOT SNIFFED. A first version derived it from the fetched
     component's type string, and the platform spells a connection
@@ -140,15 +145,20 @@ def recheck_grant_identities(
     }
 
     drifts: List[Dict[str, Any]] = []
-    read_once: Dict[str, Optional[Mapping[str, Any]]] = {}
+    read_once: Dict[Tuple[Any, ...], Optional[Mapping[str, Any]]] = {}
 
     def _read(component_id, kind, family=None):
-        # Read ONCE per component across all grants. Two grants over the same
-        # operation must not produce two reads, and — more importantly — must not
-        # be able to see two different answers within one recheck.
-        if component_id not in read_once:
-            read_once[component_id] = live_identity(component_id, kind, family)
-        return read_once[component_id]
+        # Read ONCE per (component, kind, family). The key was the component id
+        # alone, which was right while the reading depended on nothing else — and
+        # stopped being right the moment the family reached the projection, because
+        # the same component digests differently under two families. Two grants of
+        # different families over one component then shared the first one's
+        # reading, and a truthful record took a false digest drift. Each grant
+        # alone passed, which is why only a cross-family pair exposes it.
+        key = (component_id, kind, family)
+        if key not in read_once:
+            read_once[key] = live_identity(component_id, kind, family)
+        return read_once[key]
 
     for grant in grants:
         digest = getattr(grant, "record_digest", None)

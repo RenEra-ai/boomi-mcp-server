@@ -9264,8 +9264,27 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
         # as the escape path (QA-153-r15-01). Same reason both carry the
         # attestations: a field present on one exit and absent from the others
         # is the shape three review rounds already found here.
-        if process_writes:
-            envelope["process_writes"] = list(process_writes)
+        # DERIVED HERE TOO, exactly as the success exit derives it. This path
+        # served the RAW note list, which was accidentally correct only while no
+        # failing exit could occur after an attestation was recorded — and moving
+        # the post-submission reconciliation below the attestation appends (which
+        # is what stopped that refusal from dropping the attestation) made such an
+        # exit reachable for the first time. Live QA measured the result: one
+        # envelope carrying `process_mutations[0]` for `proc` AND
+        # `process_writes[0]` for `proc` with `attestation_pending: true` — the
+        # same key, the same component id, and opposite claims about whether it
+        # was attested.
+        #
+        # A write is unattested when no attestation covers it. That is one
+        # sentence and it belongs in one place; two exits deriving it two ways is
+        # how they disagree, and this exit is the one that was guessing.
+        _failed_attested_keys = {m.component_key for m in process_mutations}
+        _failed_unattested = [
+            note for note in process_writes
+            if note.get("component_key") not in _failed_attested_keys
+        ]
+        if _failed_unattested:
+            envelope["process_writes"] = _failed_unattested
         if process_mutations:
             envelope["process_mutations"] = [
                 m.model_dump(mode="json") for m in process_mutations
@@ -10220,7 +10239,15 @@ def _replay_recheck_refusal(
         )
         detail = outcome.unavailable.get("detail") or "a live identity could not be read"
         payload: Dict[str, Any] = {"unavailable": outcome.unavailable}
+        # THE REMEDIATION FOLLOWS THE CAUSE. The detail sentence learned to say
+        # "the account is not at fault" for a projection gap, and the hint and the
+        # error line went on telling the caller to recompile or ingest evidence —
+        # the exact remediation the finding said cannot work, surviving in a
+        # different field. Live QA caught the residue in the same envelope as the
+        # fix. A caller reads whichever field its UI shows; all three now agree.
+        projection_gap = outcome.unavailable.get("reason") == "projection_unsupported"
     else:
+        projection_gap = False
         code = (
             CONNECTOR_REPLAY_PRE_SUBMISSION_IDENTITY_DRIFT
             if pre
@@ -10234,8 +10261,13 @@ def _replay_recheck_refusal(
     return {
         "_success": False,
         "error": (
-            "A component an evidence-bound call depends on no longer matches the "
-            "replay evidence: {0}".format(detail)
+            (
+                "A component an evidence-bound call depends on cannot be checked "
+                "against the replay evidence: {0}"
+                if projection_gap
+                else "A component an evidence-bound call depends on no longer "
+                "matches the replay evidence: {0}"
+            ).format(detail)
         ),
         "error_code": code,
         # THE FILE'S PRE-WRITE SHAPE, not a third variant of it. `_pre_write_refusal`
@@ -10256,11 +10288,20 @@ def _replay_recheck_refusal(
         # saw `retained`. Computing a field twice under two vocabularies is how the
         # two disagree; the deriver owns it.
         "hint": (
-            "Recompile against the current components, or ingest evidence for "
-            "them, before retrying this write."
-            if wrote_nothing
-            else "The result is retained. Reconcile the written components "
-            "against the evidence before relying on the replay contract."
+            (
+                "This server cannot project that component's configuration for "
+                "comparison, so the replay contract cannot be checked. Neither "
+                "re-authoring nor re-ingesting evidence changes that — report the "
+                "component's shape."
+            )
+            if projection_gap
+            else (
+                "Recompile against the current components, or ingest evidence for "
+                "them, before retrying this write."
+                if wrote_nothing
+                else "The result is retained. Reconcile the written components "
+                "against the evidence before relying on the replay contract."
+            )
         ),
     }
 

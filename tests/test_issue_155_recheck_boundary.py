@@ -576,3 +576,68 @@ def test_the_written_question_is_answered_by_the_module_s_own_status_set():
         assert _anything_written({"k": {"status": status}}) is True, status
 
     assert _anything_written({}) is False
+
+
+def test_a_projection_gap_does_not_survive_as_a_remediation_that_cannot_work():
+    """All three served fields must name the same cause.
+
+    The detail sentence learned to say the account is not at fault; the hint and
+    the error line went on telling the caller to recompile or ingest evidence —
+    the exact remediation that cannot resolve a projection gap, surviving in a
+    different field. A caller reads whichever field its UI happens to show.
+    """
+    from boomi_mcp.categories.integration_builder import _replay_recheck_refusal
+    from boomi_mcp.connector_replay.recheck import RecheckOutcome
+
+    gap = RecheckOutcome(
+        "pre_submission",
+        unavailable={
+            "subject": "operation",
+            "component_id": "op-1",
+            "reason": "projection_unsupported",
+            "detail": "…this server cannot project its configuration for comparison…",
+        },
+    )
+    envelope = _replay_recheck_refusal(gap, wrote_nothing=True, partial_results={})
+    blob = " ".join(str(envelope.get(k, "")) for k in ("error", "hint"))
+    assert "ingest evidence" not in blob, envelope
+    assert "Recompile against the current components" not in blob, envelope
+    assert "cannot project" in envelope["hint"]
+
+    # THE CONTROL. A real drift must still carry the remediation that DOES work,
+    # or this fix would have removed the guidance instead of aiming it.
+    drift = RecheckOutcome(
+        "pre_submission",
+        drifts=({"reason": "operation_version", "component_id": "op-1"},),
+    )
+    envelope = _replay_recheck_refusal(drift, wrote_nothing=True, partial_results={})
+    assert "Recompile against the current components" in envelope["hint"]
+
+
+def test_a_failing_exit_never_reports_a_write_as_both_attested_and_pending():
+    """One envelope, one claim per write.
+
+    The failing exit served the raw confirmed-write notes while the success exit
+    DERIVED the unattested ones. That was accidentally correct only while no
+    failing exit could occur after an attestation had been recorded — and moving
+    the post-submission reconciliation below the attestation appends made exactly
+    such an exit reachable. Live QA then measured one envelope carrying
+    `process_mutations[0]` for `proc` and `process_writes[0]` for `proc` with
+    `attestation_pending: true`: same key, same id, opposite claims.
+    """
+    def _drifted_after(component_id, _kind=None, _family=None):
+        return {"type": "connector-settings", "xml": _LIVE_XML, "version": 1}
+
+    result, _created, reads = _apply_with_a_grant_drifting_at(drift_after_reads=4)
+    if result.get("error_code") != "CONNECTOR_REPLAY_POST_SUBMISSION_RECONCILIATION_DRIFT":
+        import pytest as _pytest
+
+        _pytest.skip("the post-submission boundary was not reached on this fixture")
+
+    attested = {m.get("component_key") for m in (result.get("process_mutations") or [])}
+    pending = {n.get("component_key") for n in (result.get("process_writes") or [])}
+    assert attested, "no attestation survived the refusal"
+    assert not (attested & pending), (
+        "the envelope claims the same component is both attested and awaiting "
+        "attestation: attested=%r pending=%r" % (sorted(attested), sorted(pending))
+    )

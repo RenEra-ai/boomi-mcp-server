@@ -277,3 +277,45 @@ def test_the_record_s_family_reaches_the_projection():
     assert outcome.ok, (outcome.drifts, outcome.unavailable)
     assert seen, "the reader was never called"
     assert {f for _c, _k, f in seen} == {"database"}, seen
+
+
+def test_one_component_read_under_two_families_is_two_readings():
+    """The cache key must follow everything the reading depends on.
+
+    It keyed on the component id alone, which was right while the reading
+    depended on nothing else — and stopped being right the moment the record's
+    family reached the projection, because one component digests differently
+    under two families. Two grants of different families over the same component
+    then shared the first one's reading and a truthful record took a false digest
+    drift. Each grant alone passes, so only a cross-family pair exposes it.
+    """
+    seen = []
+
+    def reader(component_id, kind, family=None):
+        seen.append((component_id, kind, family))
+        # Each family legitimately projects to a different digest.
+        return {"version": 3, "config_digest": f"ComponentConfigDigestV1:{family[0] * 64}"}
+
+    class _Rec:
+        def __init__(self, family, digest_char):
+            self.record_digest = digest_char * 64
+            self.family = family
+            self.account_scope_hash = "a" * 64
+            cfg = f"ComponentConfigDigestV1:{family[0] * 64}"
+            self.operation_identity = _Identity("shared-op", 3, cfg)
+            self.connection_identity = _Identity("shared-op", 3, cfg)
+
+    class _Reg:
+        operation_records = (_Rec("rest", "1"), _Rec("database", "2"))
+
+    outcome = recheck_grant_identities(
+        grants=(_Grant("1" * 64), _Grant("2" * 64, contract_ref="$ref:C2")),
+        registry=_Reg(),
+        live_identity=reader,
+    )
+    families = {f for _c, _k, f in seen}
+    assert families == {"rest", "database"}, (
+        "the two families shared one reading, so a truthful record would take a "
+        "false digest drift: %r" % (seen,)
+    )
+    assert outcome.ok, (outcome.drifts, outcome.unavailable)

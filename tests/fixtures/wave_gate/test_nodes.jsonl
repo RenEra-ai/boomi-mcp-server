@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 11407, "minimum_collected": 11407, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 11410, "minimum_collected": 11410, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -11448,3 +11448,6 @@
 {"kind": "test", "id": "pytest-011447", "node_id": "tests/test_issue_155_recheck.py::test_the_record_s_family_reaches_the_projection", "state": "active"}
 {"kind": "test", "id": "pytest-011448", "node_id": "tests/test_issue_155_recheck_boundary.py::test_a_projection_that_cannot_complete_never_reads_as_no_grants", "state": "active"}
 {"kind": "test", "id": "pytest-011449", "node_id": "tests/test_issue_155_recheck_boundary.py::test_the_written_question_is_answered_by_the_module_s_own_status_set", "state": "active"}
+{"kind": "test", "id": "pytest-011450", "node_id": "tests/test_issue_155_recheck.py::test_one_component_read_under_two_families_is_two_readings", "state": "active"}
+{"kind": "test", "id": "pytest-011451", "node_id": "tests/test_issue_155_recheck_boundary.py::test_a_projection_gap_does_not_survive_as_a_remediation_that_cannot_work", "state": "active"}
+{"kind": "test", "id": "pytest-011452", "node_id": "tests/test_issue_155_recheck_boundary.py::test_a_failing_exit_never_reports_a_write_as_both_attested_and_pending", "state": "active"}

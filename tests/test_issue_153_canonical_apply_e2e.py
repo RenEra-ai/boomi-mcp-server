@@ -1715,9 +1715,24 @@ def test_execution_warnings_survive_a_partial_failure():
     ).read_text()
     # The partial-failure envelope and the success envelope must BOTH carry the
     # accumulated execution warnings.
-    partial = src.index('"partial_results": results,')
-    window = src[partial:partial + 1400]
-    assert "apply_warnings" in window, (
+    #
+    # SCANNED OVER THE FUNCTION, not over a fixed byte window. The window was 1400
+    # characters, which held only while nothing else was added to the envelope —
+    # and a later slice added an eight-line derivation of the unattested-write
+    # list, pushing the warning merge to 2465 characters and failing this test
+    # while the property it defends was intact. A distance is not the boundary;
+    # the function is, and `ast` knows where it ends.
+    import ast as _ast
+
+    _fn = next(
+        node for node in _ast.walk(_ast.parse(src))
+        if isinstance(node, _ast.FunctionDef) and node.name == "_partial_failure"
+    )
+    _body = _ast.get_source_segment(src, _fn) or ""
+    assert '"partial_results": results,' in _body, (
+        "this test no longer reads the envelope it means to read"
+    )
+    assert "apply_warnings" in _body, (
         "the canonical partial-failure envelope drops execution warnings"
     )
     assert ib is not None
