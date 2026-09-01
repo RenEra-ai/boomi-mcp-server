@@ -4739,6 +4739,22 @@ def test_the_collector_search_skips_a_miss_instead_of_dying_on_it(tmp_path):
     ok = _shim("canonical", "(3, 11) " + want)
     assert _canonical_collector([ok], want) == str(ok)
 
+    # CONTINUATION PAST A LAUNCHABLE MISMATCH, which is the production shape: a
+    # repository-local environment that runs but carries the wrong versions, with
+    # a usable interpreter behind it on the path. Every case above used a
+    # SINGLETON list, so a collector that gave up after the first launchable
+    # mismatch passed all of them — measured by writing exactly that regression
+    # and watching this test stay green. A mismatch means "not this one", and
+    # only a list proves it does not also mean "stop".
+    assert _canonical_collector(
+        [_shim("first_old_py", "(3, 10) " + want), ok], want) == str(ok)
+    assert _canonical_collector(
+        [_shim("first_old_pytest", "(3, 11) 0.0.0"), ok], want) == str(ok)
+    # ...and a mismatch that cannot even launch must not stop the search either.
+    assert _canonical_collector(
+        [tmp_path / "gone" / "python", _shim("junk_first", "nonsense"), ok],
+        want) == str(ok)
+
     # A candidate that exists but is not an interpreter at all.
     junk = tmp_path / "junk"
     junk.write_text("not an interpreter")
