@@ -4402,6 +4402,37 @@ def _node_manifest_gate():
     return module, root
 
 
+def _canonical_collector(candidates, want):
+    """The first candidate that IS Python 3.11 carrying pytest ``want``.
+
+    Extracted so the miss cases can be driven. A `Path` is always truthy, so the
+    first version launched a repository-local interpreter that a fresh checkout
+    does not have and raised `FileNotFoundError` instead of trying the one on the
+    path — measured, not reasoned: the exception, not the fallback, is what a
+    clean clone got.
+    """
+    import subprocess as _sub
+
+    for path in candidates:
+        if not path:
+            continue
+        try:
+            probe = _sub.run(
+                [str(path), "-c",
+                 "import sys, pytest; print(sys.version_info[:2], pytest.__version__)"],
+                capture_output=True, text=True)
+        except OSError:
+            # Absent, not executable, or a broken symlink — all of them mean
+            # "not this one", never "stop looking".
+            continue
+        if probe.returncode != 0:
+            continue
+        head, _, version = probe.stdout.strip().rpartition(" ")
+        if head.startswith("(3, 11)") and version == want:
+            return str(path)
+    return None
+
+
 def _assert_legal_manifest_successor(gate, at_head, current, landing_of, ranks_of):
     """The successor rule, plus the one waiver the wave gate forces.
 
@@ -4583,20 +4614,8 @@ def test_the_node_manifest_is_a_legal_successor_of_the_one_it_replaces():
         assert pinned, "requirements-dev.txt does not pin pytest; the rank has no contract"
         want = pinned.group(1)
 
-        def _usable(path):
-            if not path:
-                return None
-            probe = _sub.run(
-                [str(path), "-c",
-                 "import sys, pytest; print(sys.version_info[:2], pytest.__version__)"],
-                capture_output=True, text=True)
-            if probe.returncode != 0:
-                return None
-            head, _, version = probe.stdout.strip().rpartition(" ")
-            return str(path) if head.startswith("(3, 11)") and version == want else None
-
-        interpreter = (_usable(root / ".venv311" / "bin" / "python")
-                       or _usable(shutil.which("python3.11")))
+        interpreter = _canonical_collector(
+            [root / ".venv311" / "bin" / "python", shutil.which("python3.11")], want)
         assert interpreter, (
             "no canonical collection environment: this rank must come from Python "
             "3.11 with pytest=={0}, and neither .venv311 nor python3.11 on PATH "
@@ -4654,6 +4673,45 @@ def test_the_node_manifest_is_a_legal_successor_of_the_one_it_replaces():
     # below. They used to be checked here against `origin/dev`, which reintroduced
     # exactly the defect the thunk removed: a clone without that ref went red on
     # the strict path, where no landing base is needed at all.
+
+
+def test_the_collector_search_skips_a_miss_instead_of_dying_on_it(tmp_path):
+    """Each way a candidate can fail to be the canonical collector.
+
+    The case that mattered: a repository-local interpreter a fresh checkout does
+    not have. A `Path` is truthy whether or not it exists, so the first version
+    launched it and raised instead of trying the next candidate — measured on a
+    parked directory, and the exception is what a clean clone would have got.
+    """
+    import re as _re
+    import shutil as _shutil
+    import sys as _sys
+
+    real = _shutil.which("python3.11")
+    pinned = _re.search(
+        r"^pytest==(\S+)$",
+        (Path(__file__).resolve().parents[1] / "requirements-dev.txt").read_text(),
+        _re.MULTILINE,
+    )
+    assert pinned, "requirements-dev.txt no longer pins pytest"
+
+    # ABSENT path, then None, then a real interpreter that is not 3.11 — none of
+    # them may end the search, and none may raise.
+    missing = tmp_path / "nowhere" / "bin" / "python"
+    assert not missing.exists()
+    found = _canonical_collector([missing, None, _sys.executable], pinned.group(1))
+    # The running interpreter is 3.12 here, so it is a MISS, not a match: the
+    # search must have walked every candidate and returned nothing.
+    assert found is None or found == real, found
+
+    # A candidate that exists but is not an interpreter at all.
+    junk = tmp_path / "junk"
+    junk.write_text("not an interpreter")
+    junk.chmod(0o755)
+    assert _canonical_collector([junk], pinned.group(1)) is None
+
+    # And nothing at all is None rather than an exception.
+    assert _canonical_collector([], pinned.group(1)) is None
 
 
 def test_the_successor_waiver_only_excuses_a_repair_that_is_real():

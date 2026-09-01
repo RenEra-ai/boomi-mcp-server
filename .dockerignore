@@ -23,6 +23,10 @@
 # Virtual environments
 .venv/
 venv/
+# The canonical Python 3.11 collection environment the node-manifest
+# waiver ranks against. Provisioned per checkout, 137 MB, and the
+# Dockerfile copies the whole context — git ignoring it is not enough.
+.venv311/
 ENV/
 env/
 
