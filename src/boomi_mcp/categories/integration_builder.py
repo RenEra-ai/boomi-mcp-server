@@ -8984,6 +8984,20 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
         )
     except Exception as _resolution_exc:  # noqa: BLE001 — classified above
         return _pre_write_refusal(_resolution_exc)
+    # THE EVIDENCE CHANNEL'S APPLY-SIDE STATE, built once for the whole pass.
+    # The registry is loaded ONCE rather than per root: two roots must not be able
+    # to see two different registries inside one apply, and the packaged artifact
+    # ships empty, so this is a cheap read that yields no grants until slice F
+    # ingests evidence.
+    _replay_grants_for_pass: List[Any] = []
+    _replay_bindings_by_root: Dict[str, Tuple[Any, ...]] = {}
+    try:
+        from ..connector_replay.registry import load_registry as _load_replay_registry
+
+        _replay_registry = _load_replay_registry()
+    except Exception:  # noqa: BLE001 — no registry corroborates nothing, and mints nothing
+        _replay_registry = None
+
     for _pkey, _unit in process_units_by_key.items():
         # A NON-WRITING PLANNED ACTION IS SKIPPED FOR THE WHOLE PASS, once, at
         # the top (Codex round 22). Every check below decides whether a WRITE
@@ -9050,6 +9064,30 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
             # ...and EMIT it dry (QA-153-r15-02): several request-decidable
             # refusals live in the emitter, not the compiler, so compiling
             # alone left them to fire at apply — after the dependencies.
+            # THIS ROOT'S GRANTS, projected from the compiler's own lowering and
+            # binding resolution — never a private walk, which would be a second
+            # traversal of an already-resolved fact and would disagree the moment
+            # either side learned something the other did not. The projection is
+            # what makes the recheck below reachable at all: slice D's review
+            # twice found this gate wired and inert, once because no production
+            # path projected a root.
+            try:
+                from ..compiler.process_ir.connector_resolution import (
+                    project_grants_for_root as _project_grants_for_root,
+                )
+
+                _root_symbols = _project_grants_for_root(
+                    _pre_plan.process_ir,
+                    _build_canonical_symbols(spec=spec, resolution=_resolution),
+                    process_root_ref=_pre_plan.envelope.component_key,
+                    registry=_replay_registry,
+                    snapshot=_resolution,
+                )
+                _root_grants = tuple(getattr(_root_symbols, "idempotency_grants", ()) or ())
+            except Exception:  # noqa: BLE001 — a projection failure mints nothing
+                _root_grants = ()
+            _replay_grants_for_pass.extend(_root_grants)
+            _replay_bindings_by_root[_pkey] = _root_grants
             _dry_emit_canonical_plan(
                 _pre_plan,
                 # The LIVE reading happens HERE, in the pre-write pass, not in the
@@ -9095,6 +9133,50 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
                     "nothing was created."
                 ),
             }
+
+    # (d) THE GLOBAL PRE-FIRST-WRITE REPLAY RECHECK (#155 slice E).
+    #
+    # The compiler minted every grant above from what it could know. It could not
+    # know component VERSIONS, the account scope, or route coverage — it has no
+    # live reading of them, and taking them from the record would compare the
+    # record with itself. `_registry_corroborates` says exactly that and names
+    # this boundary as where the comparison belongs. Between compiling a plan and
+    # writing it, the operation or connection it was evidenced against can be
+    # edited, replaced, or become unreadable, and a grant minted before that edit
+    # authorises a retry the evidence no longer covers.
+    #
+    # HERE, not in the mutation loop, for the reason this pass already states for
+    # every other check in it: a refusal that fires before the first write can
+    # honestly report that nothing was created. The just-in-time recheck below
+    # cannot make that promise and does not.
+    #
+    # SCOPE: grants only. A root that minted none performs no live read, so an
+    # apply that carries no evidence pays no extra platform call — measured by a
+    # counting reader in the unit tests rather than asserted here.
+    if not dry_run and _replay_grants_for_pass:
+        from ..connector_replay.recheck import (
+            live_identity_reader as _live_identity_reader,
+            recheck_grant_identities as _recheck_grants,
+        )
+
+        _outcome = _recheck_grants(
+            grants=_replay_grants_for_pass,
+            registry=_replay_registry,
+            # THE MODULE'S OWN READER, handed in. Left to its default the recheck
+            # imports the component getter straight from the shared layer, which
+            # is a SECOND path to the account from a module that already has one —
+            # so this file's single network seam no longer covers every read it
+            # makes, and a test that fakes the boundary would silently exercise a
+            # real transport. Caught by a boundary test whose reads never arrived.
+            live_identity=_live_identity_reader(
+                boomi_client,
+                read_component_xml=lambda _cid, _kind: component_get_xml(boomi_client, _cid),
+            ),
+            account_scope_hash=_replay_account_scope_hash(boomi_client),
+            boundary="pre_submission",
+        )
+        if not _outcome.ok:
+            return _replay_recheck_refusal(_outcome, wrote_nothing=True)
 
     durable_build_id: Optional[str] = None
     if authoring_bundle is not None and process_units_by_key and not dry_run:
@@ -9929,6 +10011,84 @@ def _verify_build(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]
             )
 
     return result
+
+
+def _replay_account_scope_hash(boomi_client: Any) -> Optional[str]:
+    """The account scope an evidence record must have been captured in.
+
+    ``None`` when the client exposes no account. That is NOT treated as a match:
+    the recheck simply does not compare a scope it cannot obtain, and the identity
+    comparison still runs. Inventing a scope from the record would compare the
+    record with itself, which is the exact reasoning the compiler gives for
+    leaving scope to this boundary in the first place.
+    """
+    account_id = _client_account_id(boomi_client)
+    if not account_id:
+        return None
+    try:
+        from ..connector_replay.digests import account_scope_hash
+
+        return account_scope_hash(account_id)
+    except Exception:  # noqa: BLE001 — an underivable scope is simply not compared
+        return None
+
+
+def _replay_recheck_refusal(outcome, *, wrote_nothing: bool) -> Dict[str, Any]:
+    """Render a recheck outcome as a served refusal.
+
+    FOUR codes rather than one, because two boundaries times two failure modes are
+    four situations an operator responds to differently. ``wrote_nothing`` decides
+    the pre/post half and is passed by the CALLER rather than inferred here: only
+    the caller knows whether anything has been written yet, and a helper guessing
+    it would be the guess that turns a retained partial into "nothing happened".
+    """
+    from ..errors import (
+        CONNECTOR_REPLAY_POST_SUBMISSION_RECONCILIATION_DRIFT,
+        CONNECTOR_REPLAY_POST_SUBMISSION_RECONCILIATION_UNAVAILABLE,
+        CONNECTOR_REPLAY_PRE_SUBMISSION_IDENTITY_DRIFT,
+        CONNECTOR_REPLAY_PRE_SUBMISSION_IDENTITY_UNAVAILABLE,
+    )
+
+    pre = outcome.boundary == "pre_submission"
+    if outcome.unavailable is not None:
+        code = (
+            CONNECTOR_REPLAY_PRE_SUBMISSION_IDENTITY_UNAVAILABLE
+            if pre
+            else CONNECTOR_REPLAY_POST_SUBMISSION_RECONCILIATION_UNAVAILABLE
+        )
+        detail = outcome.unavailable.get("detail") or "a live identity could not be read"
+        payload: Dict[str, Any] = {"unavailable": outcome.unavailable}
+    else:
+        code = (
+            CONNECTOR_REPLAY_PRE_SUBMISSION_IDENTITY_DRIFT
+            if pre
+            else CONNECTOR_REPLAY_POST_SUBMISSION_RECONCILIATION_DRIFT
+        )
+        detail = "; ".join(
+            "{0} for {1}".format(d.get("reason"), d.get("component_id") or d.get("contract_ref"))
+            for d in outcome.drifts
+        )
+        payload = {"drifts": list(outcome.drifts)}
+    return {
+        "_success": False,
+        "error": (
+            "A component an evidence-bound call depends on no longer matches the "
+            "replay evidence: {0}".format(detail)
+        ),
+        "error_code": code,
+        "replay_recheck": payload,
+        # THE ACCOUNTING SENTENCE, and the reason there are four codes. A
+        # pre-first-write refusal wrote nothing; anything later did, and saying
+        # otherwise is how an operator is told nothing happened when something did.
+        "mutation_status": "none" if wrote_nothing else "retained",
+        "hint": (
+            "Recompile against the current components, or ingest evidence for "
+            "them, before retrying this write."
+            if wrote_nothing
+            else "The result is retained. Reconcile the written components "
+            "against the evidence before relying on the replay contract."
+        ),
+    }
 
 
 def _client_account_id(boomi_client: Any) -> Optional[str]:

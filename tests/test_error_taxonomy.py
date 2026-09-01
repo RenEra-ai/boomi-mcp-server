@@ -804,6 +804,19 @@ ISSUE_155_CODES = (
     # this names a READ that failed while answering a question, not a resolution
     # that could not be completed while building a plan.
     "CONNECTOR_REPLAY_DISCOVERY_IDENTITY_UNAVAILABLE",
+    # Slice E — the apply-boundary rechecks. FOUR codes, because two boundaries
+    # times two failure modes are four distinguishable situations and collapsing
+    # any pair loses the distinction that decides what an operator does next.
+    # PRE versus POST says whether the component exists yet: a pre-submission
+    # refusal for the step it guards has written nothing, while a post-submission
+    # failure is a reconciliation problem over a RETAINED result. DRIFT versus
+    # UNAVAILABLE says whether an answer was obtained at all — the account read
+    # and disagreeing, versus the account not readable, which is the fail-open
+    # this channel exists to remove.
+    "CONNECTOR_REPLAY_PRE_SUBMISSION_IDENTITY_DRIFT",
+    "CONNECTOR_REPLAY_PRE_SUBMISSION_IDENTITY_UNAVAILABLE",
+    "CONNECTOR_REPLAY_POST_SUBMISSION_RECONCILIATION_DRIFT",
+    "CONNECTOR_REPLAY_POST_SUBMISSION_RECONCILIATION_UNAVAILABLE",
 )
 
 

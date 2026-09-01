@@ -2333,6 +2333,27 @@ def _one_closing_report_violation(report, marker, rel, archive_dir, git, latest_
     # file.
     if not is_current:
         return None
+    # AND "CURRENT" MEANS STILL CLOSING, which the newest wave row does not decide.
+    # `is_current` names the slice owning the latest wave checkpoint, and that slice
+    # keeps owning it after it lands — so the moment the NEXT slice touched a source
+    # file, this guard refused a closing that had already been made correctly, with
+    # its report, its wave run and its review all still true of the tree they name.
+    # Measured: slice E's first source edit failed this on slice D's landed report.
+    #
+    # The distinction is not in the prose. A slice map records a closure in the same
+    # commit as the report, so reading "CLOSED" there would skip the check on exactly
+    # the commit it exists for. What separates them is PUBLICATION: while a slice is
+    # closing, the tree its report names is not yet on the integration branch; once it
+    # lands, it is. Git answers that, so git is asked. An unresolvable `origin/dev`
+    # falls through to checking, which is the fail-closed direction.
+    # `--is-ancestor` answers through its EXIT CODE and prints nothing, and this
+    # callback returns stdout — so it would have read as "not landed" in both
+    # directions and the skip would never fire. Merge-base IDENTITY answers the same
+    # question on stdout: the merge base of an ancestor with its descendant is the
+    # ancestor itself. Verified by running both forms before choosing.
+    base = git("merge-base", n1, "origin/dev", check=False).strip()
+    if base and base == n1:
+        return None
     # ASK GIT WHAT THE NEXT COMMIT WOULD CONTAIN, rather than enumerating the ways a
     # tree can differ. Three rounds of this guard each closed one mode and shipped the
     # next: commit-to-commit missed the pending commit entirely; adding the worktree

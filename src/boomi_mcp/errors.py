@@ -547,6 +547,31 @@ CONNECTOR_REPLAY_IDENTITY_UNAVAILABLE = "CONNECTOR_REPLAY_IDENTITY_UNAVAILABLE"
 CONNECTOR_REPLAY_DISCOVERY_IDENTITY_UNAVAILABLE = (
     "CONNECTOR_REPLAY_DISCOVERY_IDENTITY_UNAVAILABLE"
 )
+#: The apply-boundary rechecks (#155 slice E). Four codes, because two boundaries
+#: times two failure modes are four distinguishable situations for an operator and
+#: collapsing any pair loses the distinction that decides what to do next.
+#:
+#: PRE vs POST is about whether the component exists yet. A pre-submission refusal
+#: for the step it guards has written nothing; a post-submission failure is a
+#: reconciliation problem over a result that is RETAINED. Reporting the second as
+#: the first would tell an operator nothing happened when something did.
+#:
+#: DRIFT vs UNAVAILABLE is about whether an answer was obtained. Drift means the
+#: account was read and disagrees with the evidence; unavailable means it could not
+#: be read at all. Silence on the second is the fail-open this channel exists to
+#: remove — a check with nothing to fire on passes.
+CONNECTOR_REPLAY_PRE_SUBMISSION_IDENTITY_DRIFT = (
+    "CONNECTOR_REPLAY_PRE_SUBMISSION_IDENTITY_DRIFT"
+)
+CONNECTOR_REPLAY_PRE_SUBMISSION_IDENTITY_UNAVAILABLE = (
+    "CONNECTOR_REPLAY_PRE_SUBMISSION_IDENTITY_UNAVAILABLE"
+)
+CONNECTOR_REPLAY_POST_SUBMISSION_RECONCILIATION_DRIFT = (
+    "CONNECTOR_REPLAY_POST_SUBMISSION_RECONCILIATION_DRIFT"
+)
+CONNECTOR_REPLAY_POST_SUBMISSION_RECONCILIATION_UNAVAILABLE = (
+    "CONNECTOR_REPLAY_POST_SUBMISSION_RECONCILIATION_UNAVAILABLE"
+)
 #: The contract-reference code is deliberately NOT registered here. Its grammar and
 #: its only raiser belong to the slice that introduces authored contract references;
 #: registering it now would leave a published code that nothing can produce, which
@@ -660,6 +685,47 @@ ERROR_TAXONOMY: Dict[str, ErrorCodeSpec] = {
                 "from the account, so nothing about what it will actually do "
                 "can be checked; the request is refused rather than applied "
                 "against a component nobody could examine."
+            ),
+            owner="#155",
+        ),
+        ErrorCodeSpec(
+            code=CONNECTOR_REPLAY_PRE_SUBMISSION_IDENTITY_DRIFT,
+            category="connector_replay",
+            retryable=False,
+            summary=(
+                "A component an evidence-bound call depends on changed between "
+                "compile and write; nothing was written for that step."
+            ),
+            owner="#155",
+        ),
+        ErrorCodeSpec(
+            code=CONNECTOR_REPLAY_PRE_SUBMISSION_IDENTITY_UNAVAILABLE,
+            category="connector_replay",
+            retryable=False,
+            summary=(
+                "The account's identity for a component an evidence-bound call "
+                "depends on could not be read before the write."
+            ),
+            owner="#155",
+        ),
+        ErrorCodeSpec(
+            code=CONNECTOR_REPLAY_POST_SUBMISSION_RECONCILIATION_DRIFT,
+            category="connector_replay",
+            retryable=False,
+            summary=(
+                "After the write, a component an evidence-bound call depends on "
+                "no longer matches the evidence; the result is retained."
+            ),
+            owner="#155",
+        ),
+        ErrorCodeSpec(
+            code=CONNECTOR_REPLAY_POST_SUBMISSION_RECONCILIATION_UNAVAILABLE,
+            category="connector_replay",
+            retryable=False,
+            summary=(
+                "After the write, the account's identity for a component an "
+                "evidence-bound call depends on could not be read; the result is "
+                "retained."
             ),
             owner="#155",
         ),

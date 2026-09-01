@@ -853,6 +853,36 @@ class ResolvedProcessPlacementV1(_AuthoringModel):
     folder_id: Optional[NonEmptyString] = None
 
 
+class ConnectorReplayEvidenceBindingAttestationV1(_AuthoringModel):
+    """One evidence-bound call, recorded as part of what a mutation actually did.
+
+    A grant authorises a retry of ONE CALL against ONE operation record. When the
+    mutation carrying that call is written, the binding it relied on becomes part
+    of the mutation-accounting record — otherwise "this process was applied" and
+    "this process was applied while a replay contract authorised one of its calls"
+    are the same sentence, and only the second is true.
+
+    It carries NO key material and no digests of the account's configuration, for
+    the same reason the grant and the contract do not: the fields name a contract,
+    an operation, a position in a document, and the record that authorised it.
+    There is nowhere to put a key even by mistake.
+    """
+
+    contract_ref: NonEmptyString
+    operation_ref: NonEmptyString
+    call_source_path: NonEmptyString
+    #: The record this binding was authorised by, so an audit can find the
+    #: evidence rather than only learn that some evidence existed.
+    #:
+    #: The PRODUCER'S shape, not this module's `DigestString`. The registry writes
+    #: `record_digest` as bare lowercase hex; `DigestString` requires a `sha256:`
+    #: prefix. Constructed with the latter, this field rejected every digest a
+    #: grant actually carries — an identifier written in a shape its own consumer
+    #: does not accept, which is a defect class this issue has already recorded
+    #: three times. Caught here by constructing one, not by reading the type name.
+    record_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
 class ProcessMutationAttestationV1(_AuthoringModel):
     """What apply actually did to ONE process root, bound to the plan it executed.
 
@@ -886,6 +916,13 @@ class ProcessMutationAttestationV1(_AuthoringModel):
     result_component_id: NonEmptyString
     resolved_placement: ResolvedProcessPlacementV1
     submitted_xml_digest: DigestString
+    #: ADDITIVE, and empty on every mutation that carried no grant — which is
+    #: every mutation until evidence is ingested. A sorted tuple rather than a set
+    #: or a list, so two applies of the same plan produce byte-identical
+    #: attestations: an accounting record whose ordering depends on dict iteration
+    #: is not a record you can compare.
+    replay_evidence_bindings: Tuple[ConnectorReplayEvidenceBindingAttestationV1, ...] = ()
+
 
     @model_validator(mode="after")
     def _targeting_matches_the_action(self) -> "ProcessMutationAttestationV1":

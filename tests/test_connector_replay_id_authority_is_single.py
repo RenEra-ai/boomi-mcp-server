@@ -257,6 +257,61 @@ def test_every_registered_replay_code_has_a_raiser():
     assert unavailable_discovery["_success"] is False
     produced.add(unavailable_discovery["error_code"])
 
+    # Slice E's four rechecks, each produced in a served envelope from a REAL
+    # recheck outcome rather than by naming the constant. All four are needed
+    # because the renderer chooses between them on two independent axes, and a
+    # test that produced one would leave three published codes that nothing has
+    # been shown to emit — the exact property this check exists to defend.
+    from boomi_mcp.categories.integration_builder import _replay_recheck_refusal
+    from boomi_mcp.connector_replay.recheck import recheck_grant_identities
+
+    class _Ident:
+        def __init__(self, component_id, version, config_digest):
+            self.component_id = component_id
+            self.version = version
+            self.config_digest = config_digest
+
+    class _Record:
+        record_digest = "b" * 64
+        account_scope_hash = "a" * 64
+        operation_identity = _Ident("op-1", 3, "ComponentConfigDigestV1:" + "1" * 64)
+        connection_identity = _Ident("cn-1", 5, "ComponentConfigDigestV1:" + "2" * 64)
+
+    class _Registry:
+        operation_records = (_Record(),)
+
+    class _Grant:
+        record_digest = "b" * 64
+        contract_ref = "$ref:C"
+        operation_ref = "$ref:op"
+        call_source_path = "/body/steps/0"
+
+    def _outcome(boundary, live):
+        return recheck_grant_identities(
+            grants=(_Grant(),),
+            registry=_Registry(),
+            live_identity=live,
+            boundary=boundary,
+        )
+
+    _drifted = lambda cid, _kind: {
+        "version": 99,
+        "config_digest": "ComponentConfigDigestV1:" + "1" * 64,
+    }
+    _unreadable = lambda cid, _kind: None
+
+    for boundary, wrote_nothing in (("pre_submission", True), ("post_submission", False)):
+        for live in (_drifted, _unreadable):
+            envelope = _replay_recheck_refusal(
+                _outcome(boundary, live), wrote_nothing=wrote_nothing
+            )
+            assert envelope["_success"] is False
+            # The accounting sentence travels with the code, and it is the reason
+            # there are four: a pre-first-write refusal wrote nothing, anything
+            # later did.
+            assert envelope["mutation_status"] == ("none" if wrote_nothing else "retained")
+            produced.add(envelope["error_code"])
+
     assert registered == produced, {
         "registered but never produced": sorted(registered - produced),
         "produced but not registered": sorted(produced - registered),
