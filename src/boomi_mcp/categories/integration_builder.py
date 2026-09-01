@@ -9080,21 +9080,35 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
             # what makes the recheck below reachable at all: slice D's review
             # twice found this gate wired and inert, once because no production
             # path projected a root.
-            try:
-                from ..compiler.process_ir.connector_resolution import (
-                    project_grants_for_root as _project_grants_for_root,
-                )
+            from ..compiler.process_ir.connector_resolution import (
+                project_grants_for_root as _project_grants_for_root,
+            )
 
-                _root_symbols = _project_grants_for_root(
-                    _pre_plan.process_ir,
-                    _build_canonical_symbols(spec=spec, resolution=_resolution),
-                    process_root_ref=_pre_plan.envelope.component_key,
-                    registry=_replay_registry,
-                    snapshot=_resolution,
-                )
-                _root_grants = tuple(getattr(_root_symbols, "idempotency_grants", ()) or ())
-            except Exception:  # noqa: BLE001 — a projection failure mints nothing
-                _root_grants = ()
+            # HOISTED OUT OF THE GUARDED REGION, and the guard is gone with it.
+            # The first version wrapped this whole block in a bare `except` that
+            # set `_root_grants = ()` — and empty grants is not a neutral outcome
+            # here: it is the single value that switches off the global recheck,
+            # the just-in-time recheck, the post-submission reconciliation AND the
+            # attestation binding, all four, silently. Live QA seeded one exception
+            # at this call site and watched the identical write that the control
+            # refused get committed with `_success: true`, no error, no warning,
+            # and an accounting record affirmatively stating the write carried no
+            # replay evidence.
+            #
+            # `_build_canonical_symbols` in particular raises on a declared-vs-
+            # resolved identity mismatch — a refusal, read as an absence.
+            # `project_grants_for_root` already refuses to do this one layer down
+            # and says why: falling back would silently restore weaker
+            # authorisation. Anything raised here now surfaces through the same
+            # pre-write refusal every other failure in this pass uses.
+            _root_symbols = _project_grants_for_root(
+                _pre_plan.process_ir,
+                _build_canonical_symbols(spec=spec, resolution=_resolution),
+                process_root_ref=_pre_plan.envelope.component_key,
+                registry=_replay_registry,
+                snapshot=_resolution,
+            )
+            _root_grants = tuple(getattr(_root_symbols, "idempotency_grants", ()) or ())
             _replay_grants_for_pass.extend(_root_grants)
             _replay_bindings_by_root[_pkey] = _root_grants
             _dry_emit_canonical_plan(
@@ -9179,13 +9193,15 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
             # real transport. Caught by a boundary test whose reads never arrived.
             live_identity=_live_identity_reader(
                 boomi_client,
-                read_component_xml=lambda _cid, _kind: component_get_xml(boomi_client, _cid),
+                read_component_xml=lambda _cid, _kind, _family=None: component_get_xml(boomi_client, _cid),
             ),
             account_scope_hash=_replay_account_scope_hash(boomi_client),
             boundary="pre_submission",
         )
         if not _outcome.ok:
-            return _replay_recheck_refusal(_outcome, wrote_nothing=True)
+            return _replay_recheck_refusal(
+                _outcome, wrote_nothing=True, partial_results={}
+            )
 
     durable_build_id: Optional[str] = None
     if authoring_bundle is not None and process_units_by_key and not dry_run:
@@ -9339,7 +9355,7 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
                         registry=_replay_registry,
                         live_identity=_live_identity_reader(
                             boomi_client,
-                            read_component_xml=lambda _cid, _kind: component_get_xml(
+                            read_component_xml=lambda _cid, _kind, _family=None: component_get_xml(
                                 boomi_client, _cid
                             ),
                         ),
@@ -9397,48 +9413,6 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
                     replay_grants=_root_replay_grants,
                 )
                 results[key] = outcome["result"]
-                # THE POST-SUBMISSION RECONCILIATION. The component now exists, so
-                # a mismatch here is never "no mutation" — it is a reconciliation
-                # failure over a RETAINED result, and the vocabulary keeps that
-                # distinct because collapsing it is how an operator is told nothing
-                # happened when something did. The result stays in `results` and is
-                # returned with the refusal rather than being discarded.
-                if not dry_run and _root_replay_grants:
-                    _post = _recheck_grants(
-                        grants=_root_replay_grants,
-                        registry=_replay_registry,
-                        live_identity=_live_identity_reader(
-                            boomi_client,
-                            read_component_xml=lambda _cid, _kind: component_get_xml(
-                                boomi_client, _cid
-                            ),
-                        ),
-                        account_scope_hash=_replay_account_scope_hash(boomi_client),
-                        boundary="post_submission",
-                    )
-                    if not _post.ok:
-                        # Same constructor. The envelope already carries
-                        # `partial_results`, which is where the RETAINED result of
-                        # this very write is served from — the thing that makes this
-                        # a reconciliation failure rather than a refusal.
-                        _post_refusal = _replay_recheck_refusal(
-                            _post, wrote_nothing=False
-                        )
-                        return _partial_failure(
-                            error=_post_refusal["error"],
-                            failed_step=key,
-                            error_code=_post_refusal["error_code"],
-                            replay_recheck=_post_refusal["replay_recheck"],
-                            # `mutation_status` is DELIBERATELY not passed. This
-                            # file already derives it from the results themselves,
-                            # and the derived answer overrode the one carried here —
-                            # correctly, because inside the loop the results are the
-                            # authority on what was written and a value copied from
-                            # the refusal is a second model of the same fact. What
-                            # this exit must not do is claim nothing happened, and
-                            # not answering the question at all is how it avoids that.
-                            hint=_post_refusal["hint"],
-                        )
                 if outcome.get("applied_name") and outcome.get("requested_name") and (
                     outcome["applied_name"] != outcome["requested_name"]
                 ):
@@ -9601,6 +9575,62 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
                         _BUILD_REGISTRY[durable_build_id][
                             "process_readbacks"
                         ].append(outcome["readback"].model_dump(mode="json"))
+                # PLACED AFTER THE RECORD OF THE WRITE, not before it. The first
+                # version returned here directly after `results[key] = …`, roughly
+                # 165 lines above the appends that record what the write did — so
+                # the one root whose write triggered the reconciliation was the one
+                # root whose attestation the envelope could not carry, and
+                # `replay_evidence_bindings` lives on that attestation. Live QA
+                # measured it: the refusal that exists to say a replay contract
+                # authorised this write served no record that any contract
+                # authorised anything, and the envelope's own `process_writes`
+                # entry said `attestation_pending: true` for an attestation that
+                # never arrived. `_partial_failure` states the invariant this
+                # broke — no failing exit may drop an attestation — and it was
+                # broken by PLACEMENT, which is why the one-constructor guard
+                # could not see it.
+                # THE POST-SUBMISSION RECONCILIATION. The component now exists, so
+                # a mismatch here is never "no mutation" — it is a reconciliation
+                # failure over a RETAINED result, and the vocabulary keeps that
+                # distinct because collapsing it is how an operator is told nothing
+                # happened when something did. The result stays in `results` and is
+                # returned with the refusal rather than being discarded.
+                if not dry_run and _root_replay_grants:
+                    _post = _recheck_grants(
+                        grants=_root_replay_grants,
+                        registry=_replay_registry,
+                        live_identity=_live_identity_reader(
+                            boomi_client,
+                            read_component_xml=lambda _cid, _kind, _family=None: component_get_xml(
+                                boomi_client, _cid
+                            ),
+                        ),
+                        account_scope_hash=_replay_account_scope_hash(boomi_client),
+                        boundary="post_submission",
+                    )
+                    if not _post.ok:
+                        # Same constructor. The envelope already carries
+                        # `partial_results`, which is where the RETAINED result of
+                        # this very write is served from — the thing that makes this
+                        # a reconciliation failure rather than a refusal.
+                        _post_refusal = _replay_recheck_refusal(
+                            _post, wrote_nothing=False
+                        )
+                        return _partial_failure(
+                            error=_post_refusal["error"],
+                            failed_step=key,
+                            error_code=_post_refusal["error_code"],
+                            replay_recheck=_post_refusal["replay_recheck"],
+                            # `mutation_status` is DELIBERATELY not passed. This
+                            # file already derives it from the results themselves,
+                            # and the derived answer overrode the one carried here —
+                            # correctly, because inside the loop the results are the
+                            # authority on what was written and a value copied from
+                            # the refusal is a second model of the same fact. What
+                            # this exit must not do is claim nothing happened, and
+                            # not answering the question at all is how it avoids that.
+                            hint=_post_refusal["hint"],
+                        )
                 if not outcome["result"].get("_success", True):
                     return _partial_failure(
                         error=outcome.get("error") or f"Failed at step '{key}'",
@@ -10124,14 +10154,21 @@ def _verify_build(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]
 def _anything_written(results: Mapping[str, Any]) -> bool:
     """Whether this apply has already written to the account.
 
-    DERIVED from the loop's own results rather than tracked in a flag, because a
-    flag is a second copy of a fact the results already carry and the two drift.
-    A refusal that says "nothing was created" while a component exists is the
-    single worst thing a mutation-accounting record can say, so the question is
-    answered by looking at what was recorded, not by remembering.
+    DERIVED from the loop's own results, and derived through THIS MODULE'S OWN
+    non-writing status set rather than a second list of writing ones. The first
+    version named `created` and `updated` and treated everything else as unwritten
+    — which inverts the rule the module states twenty lines from the set: an
+    unknown status counts as WRITTEN, and `failed` is deliberately a writing
+    status, "a step that committed and then failed to report must stay visible to
+    the write-accounting checks". Live QA measured the disagreement on `failed`,
+    `deployed` and the empty status, all three in the fail-open direction.
+
+    The asymmetry is the whole point: over-reporting costs a retry-safety hint,
+    under-reporting tells an operator nothing needs cleaning up when something
+    does.
     """
     for outcome in (results or {}).values():
-        if str((outcome or {}).get("status")) in ("created", "updated"):
+        if str((outcome or {}).get("status", "")) not in _NON_WRITING_STEP_STATUSES:
             return True
     return False
 
@@ -10156,7 +10193,9 @@ def _replay_account_scope_hash(boomi_client: Any) -> Optional[str]:
         return None
 
 
-def _replay_recheck_refusal(outcome, *, wrote_nothing: bool) -> Dict[str, Any]:
+def _replay_recheck_refusal(
+    outcome, *, wrote_nothing: bool, failed_step=None, partial_results=None
+) -> Dict[str, Any]:
     """Render a recheck outcome as a served refusal.
 
     FOUR codes rather than one, because two boundaries times two failure modes are
@@ -10199,11 +10238,23 @@ def _replay_recheck_refusal(outcome, *, wrote_nothing: bool) -> Dict[str, Any]:
             "replay evidence: {0}".format(detail)
         ),
         "error_code": code,
+        # THE FILE'S PRE-WRITE SHAPE, not a third variant of it. `_pre_write_refusal`
+        # carries `failed_step` and `partial_results` because a caller branches on
+        # them, and a caller reading `partial_results` to decide what to reconcile
+        # must get `{}` rather than `None`. The mutation-loop exits get these from
+        # `_partial_failure`; this one is served whole, so it carries them itself.
+        "failed_step": failed_step,
+        "partial_results": dict(partial_results or {}),
         "replay_recheck": payload,
-        # THE ACCOUNTING SENTENCE, and the reason there are four codes. A
-        # pre-first-write refusal wrote nothing; anything later did, and saying
-        # otherwise is how an operator is told nothing happened when something did.
-        "mutation_status": "none" if wrote_nothing else "retained",
+        # `mutation_status` IS NOT SET HERE. This module publishes a tri-state —
+        # performed, possible, none — derived from the results themselves, and the
+        # first version of this helper added a fourth value, `retained`, that no
+        # served envelope could carry: the two call sites inside the mutation loop
+        # deliberately let the derived value stand, and the one site that returns
+        # this dict whole is a pre-write refusal the deriver already answers `none`
+        # for. Live QA measured the served value across nine cells and never once
+        # saw `retained`. Computing a field twice under two vocabularies is how the
+        # two disagree; the deriver owns it.
         "hint": (
             "Recompile against the current components, or ingest evidence for "
             "them, before retrying this write."

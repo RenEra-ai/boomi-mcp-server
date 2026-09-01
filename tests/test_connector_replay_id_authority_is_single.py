@@ -294,11 +294,11 @@ def test_every_registered_replay_code_has_a_raiser():
             boundary=boundary,
         )
 
-    _drifted = lambda cid, _kind: {
+    _drifted = lambda cid, _kind, _family=None: {
         "version": 99,
         "config_digest": "ComponentConfigDigestV1:" + "1" * 64,
     }
-    _unreadable = lambda cid, _kind: None
+    _unreadable = lambda cid, _kind, _family=None: None
 
     for boundary, wrote_nothing in (("pre_submission", True), ("post_submission", False)):
         for live in (_drifted, _unreadable):
@@ -306,10 +306,15 @@ def test_every_registered_replay_code_has_a_raiser():
                 _outcome(boundary, live), wrote_nothing=wrote_nothing
             )
             assert envelope["_success"] is False
-            # The accounting sentence travels with the code, and it is the reason
-            # there are four: a pre-first-write refusal wrote nothing, anything
-            # later did.
-            assert envelope["mutation_status"] == ("none" if wrote_nothing else "retained")
+            # The envelope carries the file's pre-write SHAPE — `failed_step` and
+            # `partial_results` — because a caller branches on both. It does NOT
+            # carry `mutation_status`: this module derives that from the results
+            # themselves, and a value computed here as well was a second
+            # vocabulary that no served envelope ever carried (live QA measured it
+            # across nine cells and never saw it once).
+            assert "mutation_status" not in envelope
+            assert envelope["partial_results"] == {}
+            assert "failed_step" in envelope
             produced.add(envelope["error_code"])
 
     assert registered == produced, {

@@ -262,7 +262,7 @@ def _apply_with_a_grant(*, live_identity_xml):
 
 def test_a_drifted_component_refuses_at_the_boundary_before_anything_is_written():
     """The claim this slice exists to make, made where a caller can see it."""
-    def _drifted(component_id, _kind=None):
+    def _drifted(component_id, _kind=None, _family=None):
         if component_id == "op-live-1":
             # The account moved on: a version the evidence never observed.
             return {"type": "connector-action", "xml": _OPERATION_XML, "version": 99}
@@ -288,7 +288,7 @@ def test_a_drifted_component_refuses_at_the_boundary_before_anything_is_written(
 
 def test_an_unreadable_component_refuses_rather_than_passing_silently():
     """Silence is the fail-open the whole channel exists to remove."""
-    def _unreadable(component_id, _kind=None):
+    def _unreadable(component_id, _kind=None, _family=None):
         if component_id in ("op-live-1", "cn-live-1"):
             raise RuntimeError("the account cannot be read for this component")
         return {"type": "connector-settings", "xml": _LIVE_XML, "version": 1}
@@ -306,7 +306,7 @@ def test_an_unreadable_component_refuses_rather_than_passing_silently():
 def test_a_matching_account_lets_the_evidence_bound_apply_through():
     """The control. Without it the two refusals above could be a guard that always
     refuses, which would pass them both and mean nothing."""
-    def _matching(component_id, _kind=None):
+    def _matching(component_id, _kind=None, _family=None):
         if component_id == "op-live-1":
             return {"type": "connector-action", "xml": _OPERATION_XML, "version": 3}
         if component_id == "cn-live-1":
@@ -425,26 +425,44 @@ def test_the_post_submission_failure_retains_its_result():
     # Let the global pass and the just-in-time recheck both succeed, then drift.
     result, _created, reads = _apply_with_a_grant_drifting_at(drift_after_reads=4)
 
-    if result.get("error_code") == "CONNECTOR_REPLAY_POST_SUBMISSION_RECONCILIATION_DRIFT":
-        assert result.get("mutation_status") != "none"
-        assert result.get("partial_results"), (
-            "a post-submission failure served no partial results, so the retained "
-            "write is invisible to the caller it belongs to"
-        )
-    else:
-        # The read budget did not reach the third boundary on this fixture. Say so
-        # rather than passing silently: a test that quietly checks nothing is worse
-        # than one that is absent.
-        assert len(reads) >= 4, (
-            "fewer reads than expected reached the recheck boundaries: %r" % reads
-        )
+    # NO SELF-ESCAPE. An earlier version fell back to `assert len(reads) >= 4`
+    # whenever the third boundary was not reached, so a change that stopped
+    # reaching it left the test green on a different assertion — which live QA
+    # called out, correctly, as a test that can stop checking the thing it names.
+    assert result.get("error_code") == (
+        "CONNECTOR_REPLAY_POST_SUBMISSION_RECONCILIATION_DRIFT"
+    ), (
+        "the post-submission boundary was not reached; error_code=%r reads=%r"
+        % (result.get("error_code"), reads)
+    )
+    assert result.get("mutation_status") != "none"
+    assert result.get("partial_results"), (
+        "a post-submission failure served no partial results, so the retained "
+        "write is invisible to the caller it belongs to"
+    )
+    # AND THE ATTESTATION FOR THE WRITE SURVIVES THE REFUSAL. This is the property
+    # that was actually broken: the reconciliation returned before the appends that
+    # record what the write did, so the one root whose write triggered the check was
+    # the one root whose attestation the envelope could not carry — and
+    # `replay_evidence_bindings` lives on that attestation.
+    mutations = result.get("process_mutations") or []
+    assert mutations, (
+        "a post-submission refusal dropped the attestation for the root it had "
+        "just written; `_partial_failure` states that no failing exit may do that"
+    )
+    bindings = [b for m in mutations if isinstance(m, dict)
+                for b in (m.get("replay_evidence_bindings") or ())]
+    assert bindings, (
+        "the refusal that exists to say a replay contract authorised this write "
+        "served no record that any contract authorised anything"
+    )
 
 
 def test_a_successful_evidence_bound_apply_attests_what_authorised_it():
     """The mutation-accounting half. Without it, "this process was applied" and
     "this process was applied while a replay contract authorised one of its
     calls" are the same sentence in the record, and only the second is true."""
-    def _matching(component_id, _kind=None):
+    def _matching(component_id, _kind=None, _family=None):
         if component_id == "op-live-1":
             return {"type": "connector-action", "xml": _OPERATION_XML, "version": 3}
         if component_id == "cn-live-1":
@@ -468,3 +486,93 @@ def test_a_successful_evidence_bound_apply_attests_what_authorised_it():
     assert one["contract_ref"] == "$ref:CONTRACT"
     assert one["call_source_path"] == "/body/steps/0"
     assert one["record_digest"] == "b" * 64
+
+
+def test_a_projection_that_cannot_complete_never_reads_as_no_grants():
+    """The fail-open live QA found, pinned so it cannot come back.
+
+    Empty grants is not a neutral value here: it is the ONE value that switches
+    off the global recheck, the just-in-time recheck, the post-submission
+    reconciliation and the attestation binding, all four at once. An earlier
+    version wrapped the projection — and the symbol build evaluated as its
+    argument, which raises on a declared-versus-resolved identity mismatch — in a
+    bare `except` that produced exactly that value. QA seeded one exception there
+    and watched the identical write its control refused get committed with
+    `_success: true` and an accounting record asserting the write carried no
+    replay evidence.
+    """
+    def _boom(*_a, **_k):
+        raise RuntimeError("the projection could not complete")
+
+    def _matching(component_id, _kind=None, _family=None):
+        return {"type": "connector-settings", "xml": _LIVE_XML, "version": 1}
+
+    created = {"n": 0}
+
+    def _component(*_args, **_kwargs):
+        created["n"] += 1
+        return {"_success": True, "component_id": "cid-%d" % created["n"]}
+
+    def _create(_client, _profile, _payload_in):
+        created["n"] += 1
+        return {"_success": True, "component_id": "process-cid-1"}
+
+    with patch(_PAGINATE) as paginate, patch(_EXECUTE) as execute, patch(
+        _CREATE
+    ) as create, patch(_GET_XML) as get_xml, patch(_PROJECT, side_effect=_boom):
+        paginate.return_value = []
+        execute.side_effect = _component
+        create.side_effect = _create
+        get_xml.side_effect = lambda _c, cid, *a, **k: _matching(cid)
+        try:
+            result = build_integration_action(
+                MagicMock(),
+                _PROFILE,
+                "apply",
+                config={"authoring_request": _payload(), "dry_run": False},
+            )
+        except RuntimeError:
+            # PROPAGATING IS AN HONEST OUTCOME. The patch replaces the projector
+            # for all five of its call sites, so which frame raises first is not
+            # this test's subject; the subject is that the failure is never
+            # converted into "there were no grants". An exception reaching the
+            # caller says so as loudly as a refusal does.
+            return
+
+    # A SERVED REFUSAL is the other honest outcome — and the apply-side handler
+    # produces one, because the projection now sits inside the same `try` that
+    # classifies every other pre-write failure in this pass.
+    assert result.get("_success") is not True, (
+        "a projection that could not complete was read as 'no grants' and the "
+        "apply proceeded unchecked: %r" % {k: result.get(k) for k in
+                                          ("_success", "error_code", "results")}
+    )
+
+
+def test_the_written_question_is_answered_by_the_module_s_own_status_set():
+    """`_anything_written` must not be a second, narrower list of writing statuses.
+
+    The module owns the question as data — the NON-writing statuses — plus the
+    rule that an unknown status counts as WRITTEN, because the two error
+    directions are not symmetric: over-reporting costs a retry-safety hint, while
+    under-reporting tells an operator nothing needs cleaning up when something
+    does. An allowlist of writing statuses inverts that, and live QA measured the
+    disagreement on `failed`, `deployed` and the empty status — all three in the
+    fail-open direction.
+    """
+    from boomi_mcp.categories.integration_builder import (
+        _NON_WRITING_STEP_STATUSES,
+        _anything_written,
+    )
+
+    for status in ("reused", "refused"):
+        assert status in _NON_WRITING_STEP_STATUSES
+        assert _anything_written({"k": {"status": status}}) is False, status
+
+    # Every other status counts as written, including the three QA measured and
+    # any this repository grows later — which is the point of deriving from the
+    # non-writing set rather than naming the writing ones.
+    for status in ("created", "updated", "failed", "deployed", "", "a-new-status"):
+        assert _anything_written({"k": {"status": status}}) is True, status
+
+    assert _anything_written({}) is False

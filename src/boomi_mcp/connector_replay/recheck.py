@@ -142,12 +142,12 @@ def recheck_grant_identities(
     drifts: List[Dict[str, Any]] = []
     read_once: Dict[str, Optional[Mapping[str, Any]]] = {}
 
-    def _read(component_id, kind):
+    def _read(component_id, kind, family=None):
         # Read ONCE per component across all grants. Two grants over the same
         # operation must not produce two reads, and — more importantly — must not
         # be able to see two different answers within one recheck.
         if component_id not in read_once:
-            read_once[component_id] = live_identity(component_id, kind)
+            read_once[component_id] = live_identity(component_id, kind, family)
         return read_once[component_id]
 
     for grant in grants:
@@ -188,18 +188,33 @@ def recheck_grant_identities(
             component_id = getattr(recorded, "component_id", None)
             if not component_id:
                 continue
-            observed = _read(component_id, label)
-            if observed is None:
+            observed = _read(component_id, label, getattr(record, "family", None))
+            reason = (observed or {}).get("reason") if observed is not None else None
+            if observed is None or reason:
+                # TWO CAUSES, TWO SENTENCES. Both fail closed — an identity nobody
+                # could establish never authorises a retry — but they name different
+                # systems, and a remediation aimed at the wrong one is worse than
+                # none. Kept as one code because the CONSEQUENCE is identical and a
+                # caller branches on consequence; the detail says which.
+                detail = (
+                    f"the account's identity for the {label} component "
+                    f"{component_id!r} could not be read"
+                    if reason != "projection_unsupported"
+                    else (
+                        f"the {label} component {component_id!r} was read from the "
+                        "account, but this server cannot project its configuration "
+                        "for comparison — the account is not at fault and "
+                        "re-authoring will not change it"
+                    )
+                )
                 return RecheckOutcome(
                     boundary,
                     unavailable={
                         "subject": label,
                         "component_id": component_id,
                         "contract_ref": getattr(grant, "contract_ref", None),
-                        "detail": (
-                            f"the account's identity for the {label} component "
-                            f"{component_id!r} could not be read"
-                        ),
+                        "reason": reason or "account_unreadable",
+                        "detail": detail,
                     },
                 )
             drifts.extend(_identity_drifts(label, recorded, observed))
@@ -240,25 +255,49 @@ def live_identity_reader(boomi_client, *, read_component_xml=None):
         def read_component_xml(component_id, _kind):
             return component_get_xml(boomi_client, component_id)
 
-    def live_identity(component_id, kind):
+    def live_identity(component_id, kind, family=None):
+        """Read one component, or say WHY it could not be turned into an identity.
+
+        Returns the identity, or a ``{"reason": …}`` mapping the caller renders.
+        A first version collapsed every failure into ``None`` and the comparison
+        rendered all of them as "the account's identity … could not be read" —
+        which is false for two of the causes and sends an operator to look at the
+        wrong system. Live QA measured it on THIRTY of forty-five of this account's
+        connector components: the read succeeded perfectly and the SERVER could not
+        project the result, because the projection is an allowlist and refuses any
+        component carrying a field the published spec does not list. The remediation
+        that sentence carries — recompile, ingest evidence — cannot resolve a
+        projection gap in this repository's own code.
+        """
         try:
             fetched = read_component_xml(component_id, kind)
-        except Exception:  # noqa: BLE001 — every cause is one answer here
-            return None
+        except Exception:  # noqa: BLE001 — a transport failure IS an unread account
+            return {"reason": "account_unreadable"}
         if not isinstance(fetched, Mapping):
-            return None
+            return {"reason": "account_unreadable"}
         xml = fetched.get("xml") or fetched.get("component_xml")
         version = fetched.get("version")
         if not xml or version in (None, ""):
-            return None
+            return {"reason": "account_unreadable"}
         try:
             version = int(version)
         except (TypeError, ValueError):
-            return None
+            return {"reason": "account_unreadable"}
         try:
-            digest = component_config_digest_v1(xml, kind)
-        except Exception:  # noqa: BLE001 — an unprojectable body is no reading
-            return None
+            # THE RECORD'S FAMILY, when the caller supplies it. The projection is
+            # per-family and the default is `rest`; digesting a database component
+            # under the REST projection compares two different things, and the
+            # evidence record carries the family precisely so it need not be
+            # guessed.
+            digest = (
+                component_config_digest_v1(xml, kind, family)
+                if family
+                else component_config_digest_v1(xml, kind)
+            )
+        except Exception:  # noqa: BLE001
+            # NOT an account failure. The account answered; this server cannot
+            # project what it answered with.
+            return {"reason": "projection_unsupported"}
         return {"version": version, "config_digest": digest}
 
     return live_identity

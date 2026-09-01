@@ -65,7 +65,7 @@ def _live(**overrides):
         "conn-1": {"version": 5, "config_digest": CONN_CFG},
     }
     table.update(overrides)
-    return lambda component_id, _kind: table.get(component_id)
+    return lambda component_id, _kind, _family=None: table.get(component_id)
 
 
 def test_a_root_with_no_grant_reads_nothing_at_all():
@@ -79,7 +79,7 @@ def test_a_root_with_no_grant_reads_nothing_at_all():
     """
     calls = []
 
-    def counting(component_id, _kind):
+    def counting(component_id, _kind, _family=None):
         calls.append(component_id)
         return {"version": 1, "config_digest": OP_CFG}
 
@@ -137,7 +137,7 @@ def test_an_unreadable_component_is_a_refusal_and_not_a_pass():
     outcome = recheck_grant_identities(
         grants=(_Grant(DIGEST),),
         registry=_registry(),
-        live_identity=lambda component_id, _kind: None,
+        live_identity=lambda component_id, _kind, _family=None: None,
     )
     assert not outcome.ok
     assert outcome.unavailable["subject"] == "operation"
@@ -190,9 +190,9 @@ def test_two_grants_over_one_component_read_it_once():
     """Two reads could return two answers inside one recheck, which is not a check."""
     calls = []
 
-    def counting(component_id, kind):
+    def counting(component_id, kind, family=None):
         calls.append(component_id)
-        return _live()(component_id, kind)
+        return _live()(component_id, kind, family)
 
     outcome = recheck_grant_identities(
         grants=(_Grant(DIGEST), _Grant(DIGEST, contract_ref="$ref:C2")),
@@ -213,3 +213,67 @@ def test_the_boundary_travels_with_the_outcome():
             boundary=boundary,
         )
         assert outcome.boundary == boundary
+
+
+def test_a_reason_shape_is_never_mistaken_for_an_identity():
+    """The reader's return contract changed, so pin what a consumer must handle.
+
+    `live_identity` used to return an identity or `None`. It now returns an
+    identity or `{"reason": …}`, because collapsing every failure into `None` let
+    the comparison render a server-side projection gap as "the account's identity
+    could not be read" — false for that cause, and its remediation cannot fix it.
+    Live QA measured the gap on 30 of 45 of one account's connector components.
+
+    A reason mapping is TRUTHY, which is exactly how a careless consumer would
+    read it as an identity with a missing version. Both shapes are driven here so
+    that reading cannot creep back in, and the two sentences are asserted apart —
+    they name different systems, and a remediation aimed at the wrong one is worse
+    than none.
+    """
+    for reason, names_the_account in (
+        ("account_unreadable", True),
+        ("projection_unsupported", False),
+    ):
+        outcome = recheck_grant_identities(
+            grants=(_Grant(DIGEST),),
+            registry=_registry(),
+            live_identity=lambda component_id, _kind, _family=None: {"reason": reason},
+        )
+        assert not outcome.ok, reason
+        assert not outcome.drifts, "a reason shape was compared as if it were an identity"
+        assert outcome.unavailable["reason"] == reason
+        detail = outcome.unavailable["detail"]
+        assert ("could not be read" in detail) is names_the_account, detail
+        if not names_the_account:
+            assert "the account is not at fault" in detail
+
+
+def test_the_record_s_family_reaches_the_projection():
+    """The evidence record carries a family; the reader must not default past it.
+
+    The projection is per-family and defaults to REST, so digesting a database
+    component under the REST projection compares two different things and then
+    reports the account as unreadable. The record carries the family precisely so
+    it need not be guessed, and this asserts it arrives.
+    """
+    seen = []
+
+    def reader(component_id, kind, family=None):
+        seen.append((component_id, kind, family))
+        return _live()(component_id, kind, family)
+
+    class _FamiliedRegistry:
+        operation_records = tuple(
+            type("R", (), {**{k: getattr(r, k) for k in
+                             ("record_digest", "operation_identity",
+                              "connection_identity", "account_scope_hash")},
+                           "family": "database"})()
+            for r in _registry().operation_records
+        )
+
+    outcome = recheck_grant_identities(
+        grants=(_Grant(DIGEST),), registry=_FamiliedRegistry(), live_identity=reader
+    )
+    assert outcome.ok, (outcome.drifts, outcome.unavailable)
+    assert seen, "the reader was never called"
+    assert {f for _c, _k, f in seen} == {"database"}, seen
