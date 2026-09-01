@@ -343,6 +343,7 @@ def build_mutation_attestation(
     observed_placement: Optional[str] = None,
     observed_folder_id: Optional[str] = None,
     applied_folder_id: Optional[str] = None,
+    replay_evidence_bindings=(),
 ):
     """The apply-time mutation attestation for one root.
 
@@ -372,10 +373,35 @@ def build_mutation_attestation(
             component_key=key,
         )
 
+    from ...models.authoring_workflow import (
+        ConnectorReplayEvidenceBindingAttestationV1,
+    )
+
+    # SORTED, so two applies of the same plan attest byte-identically. An
+    # accounting record whose ordering depends on how a dict happened to iterate
+    # is not a record anyone can compare, and comparison is the only thing a
+    # mutation-accounting record is for.
+    bindings = tuple(
+        sorted(
+            (
+                ConnectorReplayEvidenceBindingAttestationV1(
+                    contract_ref=g.contract_ref,
+                    operation_ref=g.operation_ref,
+                    call_source_path=g.call_source_path,
+                    record_digest=g.record_digest,
+                )
+                for g in (replay_evidence_bindings or ())
+                if getattr(g, "record_digest", None)
+            ),
+            key=lambda b: (b.contract_ref, b.operation_ref, b.call_source_path),
+        )
+    )
+
     return ProcessMutationAttestationV1(
         component_key=key,
         plan_fingerprint=plan.plan_fingerprint,
         account_scope_hash=account_scope_hash,
+        replay_evidence_bindings=bindings,
         action=action,
         # A create never names a target; an update's target IS its result.
         target_component_id=target_component_id if action == "update" else None,

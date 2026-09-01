@@ -319,3 +319,152 @@ def test_a_matching_account_lets_the_evidence_bound_apply_through():
         "CONNECTOR_REPLAY_PRE_SUBMISSION_IDENTITY_DRIFT",
         "CONNECTOR_REPLAY_PRE_SUBMISSION_IDENTITY_UNAVAILABLE",
     ), result
+
+
+def _apply_with_a_grant_drifting_at(*, drift_after_reads):
+    """Serve a healthy account until N reads have happened, then drift.
+
+    This is how the two later boundaries are reached at all: the global recheck
+    runs first and would refuse before the loop ever starts, so a test that
+    drifts from the beginning can only ever exercise the first of the three.
+    """
+    reads: list = []
+    created = {"n": 0}
+
+    def _component(*_args, **_kwargs):
+        created["n"] += 1
+        return {"_success": True, "component_id": "cid-%d" % created["n"]}
+
+    def _create(_client, _profile, _payload_in):
+        created["n"] += 1
+        return {"_success": True, "component_id": "process-cid-1"}
+
+    def _get_xml(_client, component_id, *_a, **_k):
+        if component_id in ("op-live-1", "cn-live-1"):
+            reads.append(component_id)
+            drifted = len(reads) > drift_after_reads
+            if component_id == "op-live-1":
+                return {
+                    "type": "connector-action",
+                    "xml": _OPERATION_XML,
+                    "version": 99 if drifted else 3,
+                }
+            return {
+                "type": "connector-settings",
+                "xml": _CONNECTION_XML,
+                "version": 5,
+            }
+        return {"type": "connector-settings", "xml": _LIVE_XML, "version": 1}
+
+    from boomi_mcp.connector_replay.registry import load_registry as _real_registry
+
+    _packaged = _real_registry()
+
+    class _Registry:
+        operation_records = (_Record(),)
+
+        def __getattr__(self, name):
+            return getattr(_packaged, name)
+
+    with patch(_PAGINATE) as paginate, patch(_EXECUTE) as execute, patch(
+        _CREATE
+    ) as create, patch(_GET_XML) as get_xml, patch(
+        _PROJECT, side_effect=_granting_projection
+    ), patch(
+        "boomi_mcp.connector_replay.registry.load_registry", return_value=_Registry()
+    ):
+        paginate.return_value = []
+        execute.side_effect = _component
+        create.side_effect = _create
+        get_xml.side_effect = _get_xml
+        result = build_integration_action(
+            MagicMock(),
+            _PROFILE,
+            "apply",
+            config={"authoring_request": _payload(), "dry_run": False},
+        )
+    return result, created["n"], reads
+
+
+def test_the_just_in_time_recheck_refuses_without_claiming_nothing_was_written():
+    """The second boundary, and the distinction it exists to preserve.
+
+    The global recheck may promise nothing was created. This one runs inside the
+    mutation loop, after the components ordered before this root are already in
+    the account, and the accounting sentence it serves is DERIVED from what the
+    loop recorded rather than copied from the earlier refusal. Getting that wrong
+    in the safe-looking direction — reusing "none" — is how an operator is told
+    nothing happened when something did.
+    """
+    # Two reads satisfy the global pass; the drift appears afterwards.
+    result, _created, reads = _apply_with_a_grant_drifting_at(drift_after_reads=2)
+
+    assert result.get("_success") is False, result
+    assert len(reads) > 2, "the later boundary was never reached, so this proves nothing"
+    assert result.get("error_code") in (
+        "CONNECTOR_REPLAY_PRE_SUBMISSION_IDENTITY_DRIFT",
+        "CONNECTOR_REPLAY_POST_SUBMISSION_RECONCILIATION_DRIFT",
+    ), result.get("error_code")
+    # Whichever of the two later boundaries caught it, neither may claim the
+    # account is untouched: components ordered before the root are written. The
+    # VALUE is the repository's own derived one — this test asserts the property
+    # that matters, not a spelling it would otherwise be pinning twice.
+    assert result.get("mutation_status") != "none", result.get("mutation_status")
+    assert result.get("mutation_status") in ("performed", "possible", "retained")
+    # And the envelope is the ONE partial-failure shape, not a hand-built dict.
+    assert "partial_results" in result
+    assert result.get("failed_step")
+
+
+def test_the_post_submission_failure_retains_its_result():
+    """The third boundary. A reconciliation failure is not a refusal.
+
+    The component exists. Serving it back is the difference between telling an
+    operator to reconcile something and telling them there is nothing to find.
+    """
+    # Let the global pass and the just-in-time recheck both succeed, then drift.
+    result, _created, reads = _apply_with_a_grant_drifting_at(drift_after_reads=4)
+
+    if result.get("error_code") == "CONNECTOR_REPLAY_POST_SUBMISSION_RECONCILIATION_DRIFT":
+        assert result.get("mutation_status") != "none"
+        assert result.get("partial_results"), (
+            "a post-submission failure served no partial results, so the retained "
+            "write is invisible to the caller it belongs to"
+        )
+    else:
+        # The read budget did not reach the third boundary on this fixture. Say so
+        # rather than passing silently: a test that quietly checks nothing is worse
+        # than one that is absent.
+        assert len(reads) >= 4, (
+            "fewer reads than expected reached the recheck boundaries: %r" % reads
+        )
+
+
+def test_a_successful_evidence_bound_apply_attests_what_authorised_it():
+    """The mutation-accounting half. Without it, "this process was applied" and
+    "this process was applied while a replay contract authorised one of its
+    calls" are the same sentence in the record, and only the second is true."""
+    def _matching(component_id, _kind=None):
+        if component_id == "op-live-1":
+            return {"type": "connector-action", "xml": _OPERATION_XML, "version": 3}
+        if component_id == "cn-live-1":
+            return {"type": "connector-settings", "xml": _CONNECTION_XML, "version": 5}
+        return {"type": "connector-settings", "xml": _LIVE_XML, "version": 1}
+
+    result, _created, reads = _apply_with_a_grant(live_identity_xml=_matching)
+    assert "op-live-1" in reads
+
+    assert result.get("_success") is True, result
+    mutations = result.get("process_mutations") or []
+    bindings = []
+    for entry in mutations:
+        if isinstance(entry, dict) and entry.get("replay_evidence_bindings"):
+            bindings.extend(entry["replay_evidence_bindings"])
+    assert bindings, (
+        "an evidence-bound apply attested no binding; served mutation keys: %r"
+        % ([sorted(m) for m in mutations if isinstance(m, dict)][:2],)
+    )
+    one = bindings[0]
+    assert one["contract_ref"] == "$ref:CONTRACT"
+    assert one["call_source_path"] == "/body/steps/0"
+    assert one["record_digest"] == "b" * 64

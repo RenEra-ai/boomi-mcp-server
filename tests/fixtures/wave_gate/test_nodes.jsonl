@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 11400, "minimum_collected": 11400, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 11403, "minimum_collected": 11403, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -11441,3 +11441,6 @@
 {"kind": "test", "id": "pytest-011440", "node_id": "tests/test_issue_155_recheck_boundary.py::test_a_drifted_component_refuses_at_the_boundary_before_anything_is_written", "state": "active"}
 {"kind": "test", "id": "pytest-011441", "node_id": "tests/test_issue_155_recheck_boundary.py::test_an_unreadable_component_refuses_rather_than_passing_silently", "state": "active"}
 {"kind": "test", "id": "pytest-011442", "node_id": "tests/test_issue_155_recheck_boundary.py::test_a_matching_account_lets_the_evidence_bound_apply_through", "state": "active"}
+{"kind": "test", "id": "pytest-011443", "node_id": "tests/test_issue_155_recheck_boundary.py::test_the_just_in_time_recheck_refuses_without_claiming_nothing_was_written", "state": "active"}
+{"kind": "test", "id": "pytest-011444", "node_id": "tests/test_issue_155_recheck_boundary.py::test_the_post_submission_failure_retains_its_result", "state": "active"}
+{"kind": "test", "id": "pytest-011445", "node_id": "tests/test_issue_155_recheck_boundary.py::test_a_successful_evidence_bound_apply_attests_what_authorised_it", "state": "active"}
