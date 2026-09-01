@@ -1,0 +1,10 @@
+{
+ "gate": "composite wave gate",
+ "command": "scripts/wave_gate.py wave --base 55546fb9ba6c3509b18b3d67f970edad35bec164",
+ "status": "completed",
+ "verdict": "fail",
+ "wave_sha": "1d5f31b5a2c7582fec2e7769b038d7be1bec210f",
+ "refusal": "MANIFEST_TRANSITION_ILLEGAL",
+ "detail": "two rows appended already tombstoned: pytest-011453, pytest-011472",
+ "exit_code": 1
+}

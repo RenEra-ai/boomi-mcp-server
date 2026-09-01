@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 11431, "minimum_collected": 11431, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 11432, "minimum_collected": 11432, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -11425,52 +11425,51 @@
 {"kind": "test", "id": "pytest-011424", "node_id": "tests/test_connector_replay_review_round3.py::test_every_reader_of_the_record_reads_the_records_own_view", "state": "active"}
 {"kind": "test", "id": "pytest-011425", "node_id": "tests/test_connector_replay_review_round3.py::test_the_record_may_not_carry_a_fence_this_reader_cannot_read", "state": "active"}
 {"kind": "test", "id": "pytest-011426", "node_id": "tests/test_connector_replay_review_round3.py::test_a_closing_report_agrees_with_the_rows_it_summarises", "state": "active"}
-{"kind": "test", "id": "pytest-011427", "node_id": "tests/test_issue_155_recheck.py::test_a_root_with_no_grant_reads_nothing_at_all", "state": "active"}
-{"kind": "test", "id": "pytest-011428", "node_id": "tests/test_issue_155_recheck.py::test_the_matching_account_passes", "state": "active"}
-{"kind": "test", "id": "pytest-011429", "node_id": "tests/test_issue_155_recheck.py::test_each_half_of_each_identity_drifts_on_its_own[override0-operation_version]", "state": "active"}
-{"kind": "test", "id": "pytest-011430", "node_id": "tests/test_issue_155_recheck.py::test_each_half_of_each_identity_drifts_on_its_own[override1-operation_config_digest]", "state": "active"}
-{"kind": "test", "id": "pytest-011431", "node_id": "tests/test_issue_155_recheck.py::test_each_half_of_each_identity_drifts_on_its_own[override2-connection_version]", "state": "active"}
-{"kind": "test", "id": "pytest-011432", "node_id": "tests/test_issue_155_recheck.py::test_each_half_of_each_identity_drifts_on_its_own[override3-connection_config_digest]", "state": "active"}
-{"kind": "test", "id": "pytest-011433", "node_id": "tests/test_issue_155_recheck.py::test_an_unreadable_component_is_a_refusal_and_not_a_pass", "state": "active"}
-{"kind": "test", "id": "pytest-011434", "node_id": "tests/test_issue_155_recheck.py::test_a_grant_whose_record_is_gone_is_unavailable_not_clean", "state": "active"}
-{"kind": "test", "id": "pytest-011435", "node_id": "tests/test_issue_155_recheck.py::test_a_foreign_account_scope_drifts", "state": "active"}
-{"kind": "test", "id": "pytest-011436", "node_id": "tests/test_issue_155_recheck.py::test_no_digest_and_no_scope_hash_reaches_the_caller", "state": "active"}
-{"kind": "test", "id": "pytest-011437", "node_id": "tests/test_issue_155_recheck.py::test_two_grants_over_one_component_read_it_once", "state": "active"}
-{"kind": "test", "id": "pytest-011438", "node_id": "tests/test_issue_155_recheck.py::test_the_boundary_travels_with_the_outcome", "state": "active"}
-{"kind": "test", "id": "pytest-011439", "node_id": "tests/test_issue_155_recheck_boundary.py::test_an_apply_that_carries_no_evidence_pays_nothing_for_the_recheck", "state": "active"}
-{"kind": "test", "id": "pytest-011440", "node_id": "tests/test_issue_155_recheck_boundary.py::test_a_drifted_component_refuses_at_the_boundary_before_anything_is_written", "state": "active"}
-{"kind": "test", "id": "pytest-011441", "node_id": "tests/test_issue_155_recheck_boundary.py::test_an_unreadable_component_refuses_rather_than_passing_silently", "state": "active"}
-{"kind": "test", "id": "pytest-011442", "node_id": "tests/test_issue_155_recheck_boundary.py::test_a_matching_account_lets_the_evidence_bound_apply_through", "state": "active"}
-{"kind": "test", "id": "pytest-011443", "node_id": "tests/test_issue_155_recheck_boundary.py::test_the_just_in_time_recheck_refuses_without_claiming_nothing_was_written", "state": "active"}
-{"kind": "test", "id": "pytest-011444", "node_id": "tests/test_issue_155_recheck_boundary.py::test_the_post_submission_failure_retains_its_result", "state": "active"}
-{"kind": "test", "id": "pytest-011445", "node_id": "tests/test_issue_155_recheck_boundary.py::test_a_successful_evidence_bound_apply_attests_what_authorised_it", "state": "active"}
-{"kind": "test", "id": "pytest-011446", "node_id": "tests/test_issue_155_recheck.py::test_a_reason_shape_is_never_mistaken_for_an_identity", "state": "active"}
-{"kind": "test", "id": "pytest-011447", "node_id": "tests/test_issue_155_recheck.py::test_the_record_s_family_reaches_the_projection", "state": "active"}
-{"kind": "test", "id": "pytest-011448", "node_id": "tests/test_issue_155_recheck_boundary.py::test_a_projection_that_cannot_complete_never_reads_as_no_grants", "state": "active"}
-{"kind": "test", "id": "pytest-011449", "node_id": "tests/test_issue_155_recheck_boundary.py::test_the_written_question_is_answered_by_the_module_s_own_status_set", "state": "active"}
-{"kind": "test", "id": "pytest-011450", "node_id": "tests/test_issue_155_recheck.py::test_one_component_read_under_two_families_is_two_readings", "state": "active"}
-{"kind": "test", "id": "pytest-011451", "node_id": "tests/test_issue_155_recheck_boundary.py::test_a_projection_gap_does_not_survive_as_a_remediation_that_cannot_work", "state": "active"}
-{"kind": "test", "id": "pytest-011452", "node_id": "tests/test_issue_155_recheck_boundary.py::test_a_failing_exit_never_reports_a_write_as_both_attested_and_pending", "state": "active"}
-{"kind": "test", "id": "pytest-011453", "node_id": "tests/test_issue_155_recheck_boundary.py::test_every_exit_that_serves_confirmed_writes_derives_them_the_same_way", "state": "tombstone"}
-{"kind": "test", "id": "pytest-011454", "node_id": "tests/test_issue_155_recheck_boundary.py::test_a_projection_gap_over_a_retained_write_still_says_it_is_retained", "state": "active"}
-{"kind": "test", "id": "pytest-011455", "node_id": "tests/test_issue_155_recheck_boundary.py::test_an_unreadable_account_is_not_reported_as_a_mismatch", "state": "active"}
-{"kind": "test", "id": "pytest-011456", "node_id": "tests/test_issue_155_recheck_boundary.py::test_no_exit_serves_a_write_as_both_attested_and_pending", "state": "active"}
-{"kind": "test", "id": "pytest-011457", "node_id": "tests/test_issue_155_recheck_boundary.py::test_every_refusal_states_its_cause_and_states_retention_only_when_retained[True-projection gap-unavailable0-None]", "state": "active"}
-{"kind": "test", "id": "pytest-011458", "node_id": "tests/test_issue_155_recheck_boundary.py::test_every_refusal_states_its_cause_and_states_retention_only_when_retained[True-unreadable account-unavailable1-None]", "state": "active"}
-{"kind": "test", "id": "pytest-011459", "node_id": "tests/test_issue_155_recheck_boundary.py::test_every_refusal_states_its_cause_and_states_retention_only_when_retained[True-missing record-unavailable2-None]", "state": "active"}
-{"kind": "test", "id": "pytest-011460", "node_id": "tests/test_issue_155_recheck_boundary.py::test_every_refusal_states_its_cause_and_states_retention_only_when_retained[True-real drift-None-drifts3]", "state": "active"}
-{"kind": "test", "id": "pytest-011461", "node_id": "tests/test_issue_155_recheck_boundary.py::test_every_refusal_states_its_cause_and_states_retention_only_when_retained[False-projection gap-unavailable0-None]", "state": "active"}
-{"kind": "test", "id": "pytest-011462", "node_id": "tests/test_issue_155_recheck_boundary.py::test_every_refusal_states_its_cause_and_states_retention_only_when_retained[False-unreadable account-unavailable1-None]", "state": "active"}
-{"kind": "test", "id": "pytest-011463", "node_id": "tests/test_issue_155_recheck_boundary.py::test_every_refusal_states_its_cause_and_states_retention_only_when_retained[False-missing record-unavailable2-None]", "state": "active"}
-{"kind": "test", "id": "pytest-011464", "node_id": "tests/test_issue_155_recheck_boundary.py::test_every_refusal_states_its_cause_and_states_retention_only_when_retained[False-real drift-None-drifts3]", "state": "active"}
-{"kind": "test", "id": "pytest-011465", "node_id": "tests/test_issue_155_recheck_boundary.py::test_the_exception_exit_serves_only_the_unattested_write", "state": "active"}
-{"kind": "test", "id": "pytest-011466", "node_id": "tests/test_issue_155_recheck_boundary.py::test_the_success_exit_serves_only_the_unattested_write", "state": "active"}
-{"kind": "test", "id": "pytest-011467", "node_id": "tests/test_issue_155_recheck.py::test_a_dynamic_path_needs_service_wide_coverage", "state": "active"}
-{"kind": "test", "id": "pytest-011468", "node_id": "tests/test_issue_155_recheck.py::test_a_static_record_authorises_only_the_routes_it_enumerates", "state": "active"}
-{"kind": "test", "id": "pytest-011469", "node_id": "tests/test_issue_155_recheck.py::test_two_records_sharing_a_digest_and_contract_are_refused_not_resolved", "state": "active"}
-{"kind": "test", "id": "pytest-011470", "node_id": "tests/test_issue_155_recheck.py::test_a_soft_deleted_component_is_not_a_live_component", "state": "active"}
-{"kind": "test", "id": "pytest-011471", "node_id": "tests/test_issue_155_recheck_boundary.py::test_an_update_rechecks_at_its_push_not_before_its_merge", "state": "active"}
-{"kind": "test", "id": "pytest-011472", "node_id": "tests/test_issue_155_recheck_boundary.py::test_only_a_proven_no_write_skips_reconciliation", "state": "tombstone"}
-{"kind": "test", "id": "pytest-011473", "node_id": "tests/test_issue_155_recheck_boundary.py::test_a_proven_no_write_keeps_its_own_refusal_through_the_apply_boundary", "state": "active"}
-{"kind": "test", "id": "pytest-011474", "node_id": "tests/test_connector_replay_review_round3.py::test_a_witness_at_the_apply_boundary_asserts_without_an_escape", "state": "active"}
-{"kind": "test", "id": "pytest-011475", "node_id": "tests/test_connector_replay_review_round3.py::test_the_escape_rule_refuses_the_shape_that_cost_four_rounds", "state": "active"}
+{"kind": "test", "id": "pytest-011427", "node_id": "tests/test_connector_replay_review_round3.py::test_the_successor_waiver_only_excuses_a_repair_that_is_real", "state": "active"}
+{"kind": "test", "id": "pytest-011428", "node_id": "tests/test_connector_replay_review_round3.py::test_a_witness_at_the_apply_boundary_asserts_without_an_escape", "state": "active"}
+{"kind": "test", "id": "pytest-011429", "node_id": "tests/test_connector_replay_review_round3.py::test_the_escape_rule_refuses_the_shape_that_cost_four_rounds", "state": "active"}
+{"kind": "test", "id": "pytest-011430", "node_id": "tests/test_issue_155_recheck.py::test_a_root_with_no_grant_reads_nothing_at_all", "state": "active"}
+{"kind": "test", "id": "pytest-011431", "node_id": "tests/test_issue_155_recheck.py::test_the_matching_account_passes", "state": "active"}
+{"kind": "test", "id": "pytest-011432", "node_id": "tests/test_issue_155_recheck.py::test_each_half_of_each_identity_drifts_on_its_own[override0-operation_version]", "state": "active"}
+{"kind": "test", "id": "pytest-011433", "node_id": "tests/test_issue_155_recheck.py::test_each_half_of_each_identity_drifts_on_its_own[override1-operation_config_digest]", "state": "active"}
+{"kind": "test", "id": "pytest-011434", "node_id": "tests/test_issue_155_recheck.py::test_each_half_of_each_identity_drifts_on_its_own[override2-connection_version]", "state": "active"}
+{"kind": "test", "id": "pytest-011435", "node_id": "tests/test_issue_155_recheck.py::test_each_half_of_each_identity_drifts_on_its_own[override3-connection_config_digest]", "state": "active"}
+{"kind": "test", "id": "pytest-011436", "node_id": "tests/test_issue_155_recheck.py::test_an_unreadable_component_is_a_refusal_and_not_a_pass", "state": "active"}
+{"kind": "test", "id": "pytest-011437", "node_id": "tests/test_issue_155_recheck.py::test_a_grant_whose_record_is_gone_is_unavailable_not_clean", "state": "active"}
+{"kind": "test", "id": "pytest-011438", "node_id": "tests/test_issue_155_recheck.py::test_a_foreign_account_scope_drifts", "state": "active"}
+{"kind": "test", "id": "pytest-011439", "node_id": "tests/test_issue_155_recheck.py::test_no_digest_and_no_scope_hash_reaches_the_caller", "state": "active"}
+{"kind": "test", "id": "pytest-011440", "node_id": "tests/test_issue_155_recheck.py::test_two_grants_over_one_component_read_it_once", "state": "active"}
+{"kind": "test", "id": "pytest-011441", "node_id": "tests/test_issue_155_recheck.py::test_the_boundary_travels_with_the_outcome", "state": "active"}
+{"kind": "test", "id": "pytest-011442", "node_id": "tests/test_issue_155_recheck.py::test_a_reason_shape_is_never_mistaken_for_an_identity", "state": "active"}
+{"kind": "test", "id": "pytest-011443", "node_id": "tests/test_issue_155_recheck.py::test_the_record_s_family_reaches_the_projection", "state": "active"}
+{"kind": "test", "id": "pytest-011444", "node_id": "tests/test_issue_155_recheck.py::test_one_component_read_under_two_families_is_two_readings", "state": "active"}
+{"kind": "test", "id": "pytest-011445", "node_id": "tests/test_issue_155_recheck.py::test_a_dynamic_path_needs_service_wide_coverage", "state": "active"}
+{"kind": "test", "id": "pytest-011446", "node_id": "tests/test_issue_155_recheck.py::test_a_static_record_authorises_only_the_routes_it_enumerates", "state": "active"}
+{"kind": "test", "id": "pytest-011447", "node_id": "tests/test_issue_155_recheck.py::test_two_records_sharing_a_digest_and_contract_are_refused_not_resolved", "state": "active"}
+{"kind": "test", "id": "pytest-011448", "node_id": "tests/test_issue_155_recheck.py::test_a_soft_deleted_component_is_not_a_live_component", "state": "active"}
+{"kind": "test", "id": "pytest-011449", "node_id": "tests/test_issue_155_recheck_boundary.py::test_an_apply_that_carries_no_evidence_pays_nothing_for_the_recheck", "state": "active"}
+{"kind": "test", "id": "pytest-011450", "node_id": "tests/test_issue_155_recheck_boundary.py::test_a_drifted_component_refuses_at_the_boundary_before_anything_is_written", "state": "active"}
+{"kind": "test", "id": "pytest-011451", "node_id": "tests/test_issue_155_recheck_boundary.py::test_an_unreadable_component_refuses_rather_than_passing_silently", "state": "active"}
+{"kind": "test", "id": "pytest-011452", "node_id": "tests/test_issue_155_recheck_boundary.py::test_a_matching_account_lets_the_evidence_bound_apply_through", "state": "active"}
+{"kind": "test", "id": "pytest-011453", "node_id": "tests/test_issue_155_recheck_boundary.py::test_the_just_in_time_recheck_refuses_without_claiming_nothing_was_written", "state": "active"}
+{"kind": "test", "id": "pytest-011454", "node_id": "tests/test_issue_155_recheck_boundary.py::test_the_post_submission_failure_retains_its_result", "state": "active"}
+{"kind": "test", "id": "pytest-011455", "node_id": "tests/test_issue_155_recheck_boundary.py::test_a_successful_evidence_bound_apply_attests_what_authorised_it", "state": "active"}
+{"kind": "test", "id": "pytest-011456", "node_id": "tests/test_issue_155_recheck_boundary.py::test_a_projection_that_cannot_complete_never_reads_as_no_grants", "state": "active"}
+{"kind": "test", "id": "pytest-011457", "node_id": "tests/test_issue_155_recheck_boundary.py::test_the_written_question_is_answered_by_the_module_s_own_status_set", "state": "active"}
+{"kind": "test", "id": "pytest-011458", "node_id": "tests/test_issue_155_recheck_boundary.py::test_a_projection_gap_does_not_survive_as_a_remediation_that_cannot_work", "state": "active"}
+{"kind": "test", "id": "pytest-011459", "node_id": "tests/test_issue_155_recheck_boundary.py::test_a_failing_exit_never_reports_a_write_as_both_attested_and_pending", "state": "active"}
+{"kind": "test", "id": "pytest-011460", "node_id": "tests/test_issue_155_recheck_boundary.py::test_no_exit_serves_a_write_as_both_attested_and_pending", "state": "active"}
+{"kind": "test", "id": "pytest-011461", "node_id": "tests/test_issue_155_recheck_boundary.py::test_every_refusal_states_its_cause_and_states_retention_only_when_retained[True-projection gap-unavailable0-None]", "state": "active"}
+{"kind": "test", "id": "pytest-011462", "node_id": "tests/test_issue_155_recheck_boundary.py::test_every_refusal_states_its_cause_and_states_retention_only_when_retained[True-unreadable account-unavailable1-None]", "state": "active"}
+{"kind": "test", "id": "pytest-011463", "node_id": "tests/test_issue_155_recheck_boundary.py::test_every_refusal_states_its_cause_and_states_retention_only_when_retained[True-missing record-unavailable2-None]", "state": "active"}
+{"kind": "test", "id": "pytest-011464", "node_id": "tests/test_issue_155_recheck_boundary.py::test_every_refusal_states_its_cause_and_states_retention_only_when_retained[True-real drift-None-drifts3]", "state": "active"}
+{"kind": "test", "id": "pytest-011465", "node_id": "tests/test_issue_155_recheck_boundary.py::test_every_refusal_states_its_cause_and_states_retention_only_when_retained[False-projection gap-unavailable0-None]", "state": "active"}
+{"kind": "test", "id": "pytest-011466", "node_id": "tests/test_issue_155_recheck_boundary.py::test_every_refusal_states_its_cause_and_states_retention_only_when_retained[False-unreadable account-unavailable1-None]", "state": "active"}
+{"kind": "test", "id": "pytest-011467", "node_id": "tests/test_issue_155_recheck_boundary.py::test_every_refusal_states_its_cause_and_states_retention_only_when_retained[False-missing record-unavailable2-None]", "state": "active"}
+{"kind": "test", "id": "pytest-011468", "node_id": "tests/test_issue_155_recheck_boundary.py::test_every_refusal_states_its_cause_and_states_retention_only_when_retained[False-real drift-None-drifts3]", "state": "active"}
+{"kind": "test", "id": "pytest-011469", "node_id": "tests/test_issue_155_recheck_boundary.py::test_a_projection_gap_over_a_retained_write_still_says_it_is_retained", "state": "active"}
+{"kind": "test", "id": "pytest-011470", "node_id": "tests/test_issue_155_recheck_boundary.py::test_an_unreadable_account_is_not_reported_as_a_mismatch", "state": "active"}
+{"kind": "test", "id": "pytest-011471", "node_id": "tests/test_issue_155_recheck_boundary.py::test_the_exception_exit_serves_only_the_unattested_write", "state": "active"}
+{"kind": "test", "id": "pytest-011472", "node_id": "tests/test_issue_155_recheck_boundary.py::test_the_success_exit_serves_only_the_unattested_write", "state": "active"}
+{"kind": "test", "id": "pytest-011473", "node_id": "tests/test_issue_155_recheck_boundary.py::test_an_update_rechecks_at_its_push_not_before_its_merge", "state": "active"}
+{"kind": "test", "id": "pytest-011474", "node_id": "tests/test_issue_155_recheck_boundary.py::test_a_proven_no_write_keeps_its_own_refusal_through_the_apply_boundary", "state": "active"}

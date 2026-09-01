@@ -1,0 +1,13 @@
+{
+ "collector": "wave_gate",
+ "durable_dir": "wave-gate/wave155ah",
+ "files": {
+  "wave-gate/wave155ah/summary.json": "3738a30201531e05bea8d305f155c0557786f9b809e457819a502d965a9e060b",
+  "wave-gate/wave155ah/wave.log": "72564b90c88bdc2ce9e5566f0a75baa515b86c1c4740fdc44226d6b9bdd464a3"
+ },
+ "logical_loop": "L4 (composite wave gate, slice E \u2014 refused on the node manifest)",
+ "source_run_dir": "/tmp/wave155ah",
+ "status": "completed",
+ "verdict": "fail",
+ "wave_sha": "1d5f31b5a2c7582fec2e7769b038d7be1bec210f"
+}
