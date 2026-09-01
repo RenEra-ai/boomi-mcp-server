@@ -4687,7 +4687,6 @@ def test_the_collector_search_skips_a_miss_instead_of_dying_on_it(tmp_path):
     import shutil as _shutil
     import sys as _sys
 
-    real = _shutil.which("python3.11")
     pinned = _re.search(
         r"^pytest==(\S+)$",
         (Path(__file__).resolve().parents[1] / "requirements-dev.txt").read_text(),
@@ -4695,23 +4694,38 @@ def test_the_collector_search_skips_a_miss_instead_of_dying_on_it(tmp_path):
     )
     assert pinned, "requirements-dev.txt no longer pins pytest"
 
-    # ABSENT path, then None, then a real interpreter that is not 3.11 — none of
-    # them may end the search, and none may raise.
+    # ABSENT path, then None, then the running interpreter — the first two may
+    # neither raise nor end the search, whatever the third turns out to be.
+    #
+    # WHAT THE THIRD IS gets DETERMINED, not assumed. The first version of this
+    # assertion assumed the runner was 3.12 and so a miss; on the required 3.11
+    # job the runner is a match and the search rightly returns it, and the
+    # assertion failed — which would have broken the required check. Asserting an
+    # environment fact instead of deriving it is the defect class this slice has
+    # recorded twenty-two times, committed inside the witness written to police a
+    # different instance of it.
+    import pytest as _pytest
+
+    want = pinned.group(1)
+    runner_is_canonical = (
+        _sys.version_info[:2] == (3, 11) and _pytest.__version__ == want
+    )
     missing = tmp_path / "nowhere" / "bin" / "python"
     assert not missing.exists()
-    found = _canonical_collector([missing, None, _sys.executable], pinned.group(1))
-    # The running interpreter is 3.12 here, so it is a MISS, not a match: the
-    # search must have walked every candidate and returned nothing.
-    assert found is None or found == real, found
+    found = _canonical_collector([missing, None, _sys.executable], want)
+    assert found == (_sys.executable if runner_is_canonical else None), (
+        f"runner canonical={runner_is_canonical} ({_sys.version_info[:2]}, "
+        f"pytest {_pytest.__version__}); search returned {found!r}"
+    )
 
     # A candidate that exists but is not an interpreter at all.
     junk = tmp_path / "junk"
     junk.write_text("not an interpreter")
     junk.chmod(0o755)
-    assert _canonical_collector([junk], pinned.group(1)) is None
+    assert _canonical_collector([junk], want) is None
 
     # And nothing at all is None rather than an exception.
-    assert _canonical_collector([], pinned.group(1)) is None
+    assert _canonical_collector([], want) is None
 
 
 def test_the_successor_waiver_only_excuses_a_repair_that_is_real():
