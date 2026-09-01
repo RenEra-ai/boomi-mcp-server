@@ -105,7 +105,7 @@ def recheck_grant_identities(
     *,
     grants: Sequence[Any],
     registry: Any,
-    live_identity: Callable[..., Optional[Mapping[str, Any]]],
+    live_identity: Callable[[str, str, Optional[str]], Optional[Mapping[str, Any]]],
     account_scope_hash: Optional[str] = None,
     boundary: str = "pre_submission",
 ) -> RecheckOutcome:
@@ -250,12 +250,16 @@ def live_identity_reader(boomi_client, *, read_component_xml=None):
     the repository's component getter but a caller supplies its own, which is what
     lets the boundary tests drive a real apply against a fake client.
 
-    Returns ``None`` for a component it cannot read, which the comparison treats
-    as an unavailability rather than a pass. Every failure mode collapses to that
-    one answer ON PURPOSE: a transport error, a deleted component and a body the
-    digest cannot project are different causes with the same consequence — no
-    live reading exists — and distinguishing them here would invite a caller to
-    treat some of them as benign.
+    Returns the identity, or a mapping carrying ``reason`` when none could be
+    established. The two reasons are NOT interchangeable and this docstring said
+    the opposite for one round: it argued that collapsing every cause was
+    deliberate, because a transport error and an unprojectable body have the same
+    consequence. They do — neither authorises a retry — but they do not have the
+    same CAUSE, and the served sentence named the account for both. Live QA
+    measured a projection gap on the large majority of one account's connector
+    components, every one of them reported as an account that could not be read.
+    So ``account_unreadable`` and ``projection_unsupported`` are distinguished
+    here and stay distinguished all the way to the caller. Both still fail closed.
     """
     from .digests import component_config_digest_v1
 

@@ -641,3 +641,100 @@ def test_a_failing_exit_never_reports_a_write_as_both_attested_and_pending():
         "the envelope claims the same component is both attested and awaiting "
         "attestation: attested=%r pending=%r" % (sorted(attested), sorted(pending))
     )
+
+
+def test_every_exit_that_serves_confirmed_writes_derives_them_the_same_way():
+    """One sentence, one definition — asserted over the exits, not over one of them.
+
+    The module served confirmed-write notes from THREE exits: the success exit
+    derived the unattested ones, the returned-failure exit served the raw list,
+    and the exception exit still did after the first fix. Fixing the reported site
+    and leaving its sibling is the same defect with a smaller blast radius, which
+    is what live QA found within one round. Derived by parsing the module rather
+    than by naming the three exits, so a fourth cannot be added quietly.
+    """
+    import ast
+
+    src = (
+        Path(__file__).resolve().parents[1]
+        / "src/boomi_mcp/categories/integration_builder.py"
+    ).read_text()
+    tree = ast.parse(src)
+
+    assigns = [
+        node for node in ast.walk(tree)
+        if isinstance(node, ast.Subscript)
+        and isinstance(node.value, ast.Name)
+        and node.value.id in ("envelope", "evidence", "apply_result")
+        and isinstance(node.slice, ast.Constant)
+        and node.slice.value == "process_writes"
+    ]
+    assert len(assigns) >= 3, (
+        "expected every exit that serves confirmed writes to be visible here; "
+        "found %d" % len(assigns)
+    )
+
+    # Each one must be fed by the shared derivation, never by a fresh list of the
+    # raw notes.
+    for node in assigns:
+        parent = next(
+            p for p in ast.walk(tree)
+            if isinstance(p, ast.Assign) and any(t is node for t in p.targets)
+        )
+        served = ast.dump(parent.value)
+        assert "process_writes" not in served or "_unattested" in served, (
+            "an exit serves the raw confirmed-write notes rather than the "
+            "derived unattested ones: %s" % ast.get_source_segment(src, parent)
+        )
+
+
+def test_a_projection_gap_over_a_retained_write_still_says_it_is_retained():
+    """Two independent facts, and a branch that picked one dropped the other.
+
+    Why the check could not be completed and whether a component now exists are
+    unrelated questions. Nesting the projection-gap sentence above the retention
+    sentence answered only the first, so a caller was told what could not be
+    checked and never told that something was written and needs reconciling —
+    which is the mutation-accounting half, and the direction this slice exists to
+    prevent.
+    """
+    from boomi_mcp.categories.integration_builder import _replay_recheck_refusal
+    from boomi_mcp.connector_replay.recheck import RecheckOutcome
+
+    gap = RecheckOutcome(
+        "post_submission",
+        unavailable={"subject": "operation", "component_id": "op-1",
+                     "reason": "projection_unsupported", "detail": "…cannot project…"},
+    )
+    retained = _replay_recheck_refusal(gap, wrote_nothing=False, partial_results={"k": {}})
+    assert "cannot project" in retained["hint"]
+    assert "The result is retained" in retained["hint"], retained["hint"]
+
+    # And the control: nothing written means no retention claim at all.
+    nothing = _replay_recheck_refusal(gap, wrote_nothing=True, partial_results={})
+    assert "cannot project" in nothing["hint"]
+    assert "retained" not in nothing["hint"], nothing["hint"]
+
+
+def test_an_unreadable_account_is_not_reported_as_a_mismatch():
+    """Neither unavailable arm compared anything, so neither may open with a
+    comparison result. The projection arm got its own sentence first and left its
+    sibling asserting a mismatch nobody measured."""
+    from boomi_mcp.categories.integration_builder import _replay_recheck_refusal
+    from boomi_mcp.connector_replay.recheck import RecheckOutcome
+
+    for reason in ("account_unreadable", "projection_unsupported"):
+        envelope = _replay_recheck_refusal(
+            RecheckOutcome("pre_submission", unavailable={"reason": reason, "detail": "x"}),
+            wrote_nothing=True,
+            partial_results={},
+        )
+        assert "no longer matches" not in envelope["error"], (reason, envelope["error"])
+
+    # The control: a real drift IS a comparison result and still says so.
+    drift = _replay_recheck_refusal(
+        RecheckOutcome("pre_submission", drifts=({"reason": "operation_version"},)),
+        wrote_nothing=True,
+        partial_results={},
+    )
+    assert "no longer matches" in drift["error"]

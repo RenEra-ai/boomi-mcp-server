@@ -9278,11 +9278,7 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
         # A write is unattested when no attestation covers it. That is one
         # sentence and it belongs in one place; two exits deriving it two ways is
         # how they disagree, and this exit is the one that was guessing.
-        _failed_attested_keys = {m.component_key for m in process_mutations}
-        _failed_unattested = [
-            note for note in process_writes
-            if note.get("component_key") not in _failed_attested_keys
-        ]
+        _failed_unattested = _unattested_write_notes(process_writes, process_mutations)
         if _failed_unattested:
             envelope["process_writes"] = _failed_unattested
         if process_mutations:
@@ -9889,11 +9885,7 @@ def _finalize_apply_success(
     # covers. Normally that set is empty and the envelope is byte-identical to
     # before; if the control flow ever changes so that it is not, the caller
     # learns about the write instead of the claim quietly becoming false.
-    _attested_keys = {m.get("component_key") for m in serialized_mutations}
-    _unattested_writes = [
-        note for note in process_writes
-        if note.get("component_key") not in _attested_keys
-    ]
+    _unattested_writes = _unattested_write_notes(process_writes, serialized_mutations)
     if _unattested_writes:
         apply_result["process_writes"] = _unattested_writes
     if authoring_bundle is not None:
@@ -10260,11 +10252,17 @@ def _replay_recheck_refusal(
         payload = {"drifts": list(outcome.drifts)}
     return {
         "_success": False,
+        # THE OPENING SENTENCE FOLLOWS WHAT HAPPENED. "No longer matches" is a
+        # comparison result, and neither unavailable arm performed a comparison —
+        # the projection gap was given its own opening and the unreadable-account
+        # arm was left with the old one, which asserts a mismatch nobody measured.
+        # The branch was already one expression wide; it just had two arms and
+        # three cases.
         "error": (
             (
                 "A component an evidence-bound call depends on cannot be checked "
                 "against the replay evidence: {0}"
-                if projection_gap
+                if (projection_gap or outcome.unavailable is not None)
                 else "A component an evidence-bound call depends on no longer "
                 "matches the replay evidence: {0}"
             ).format(detail)
@@ -10287,21 +10285,37 @@ def _replay_recheck_refusal(
         # for. Live QA measured the served value across nine cells and never once
         # saw `retained`. Computing a field twice under two vocabularies is how the
         # two disagree; the deriver owns it.
-        "hint": (
-            (
-                "This server cannot project that component's configuration for "
-                "comparison, so the replay contract cannot be checked. Neither "
-                "re-authoring nor re-ingesting evidence changes that — report the "
-                "component's shape."
+        # TWO INDEPENDENT FACTS, COMPOSED — not a branch that picks one. The
+        # first version nested the projection-gap case ABOVE `wrote_nothing`, so
+        # a gap over a RETAINED write lost "the result is retained": the caller
+        # was told what could not be checked and not that a component exists
+        # needing reconciliation. That is the mutation-accounting half of the
+        # sentence, and dropping it is the direction this whole slice exists to
+        # prevent. Whether the write is retained does not depend on why the check
+        # could not be completed, so the two are stated separately.
+        "hint": " ".join(
+            part
+            for part in (
+                (
+                    "This server cannot project that component's configuration "
+                    "for comparison, so the replay contract cannot be checked. "
+                    "Neither re-authoring nor re-ingesting evidence changes that "
+                    "— report the component's shape."
+                    if projection_gap
+                    else "Recompile against the current components, or ingest "
+                    "evidence for them, before retrying this write."
+                    if wrote_nothing
+                    else None
+                ),
+                (
+                    None
+                    if wrote_nothing
+                    else "The result is retained. Reconcile the written "
+                    "components against the evidence before relying on the "
+                    "replay contract."
+                ),
             )
-            if projection_gap
-            else (
-                "Recompile against the current components, or ingest evidence for "
-                "them, before retrying this write."
-                if wrote_nothing
-                else "The result is retained. Reconcile the written components "
-                "against the evidence before relying on the replay contract."
-            )
+            if part
         ),
     }
 
@@ -10846,6 +10860,34 @@ def _decorate_typed_apply(result: Dict[str, Any], cfg: Dict[str, Any]) -> None:
         result.setdefault("error_code", AUTHORING_APPLY_VALIDATION_REQUIRED)
 
 
+def _unattested_write_notes(process_writes, mutations) -> List[Dict[str, Any]]:
+    """The confirmed writes no attestation covers — ONE definition, three exits.
+
+    A write is unattested when no attestation names its component key. That is one
+    sentence, and this module was expressing it in three places: the success exit
+    derived it, the returned-failure exit served the raw note list, and the
+    EXCEPTION exit still does. The raw form was accidentally correct only while no
+    failing exit could occur after an attestation had been recorded — and moving
+    the post-submission reconciliation below the attestation appends made exactly
+    such an exit reachable, at which point one envelope claimed the same component
+    was both attested and awaiting attestation.
+
+    Fixing the returned exit and leaving the exception exit would have been the
+    same defect with a smaller blast radius, and live QA said so by finding the
+    sibling immediately. `mutations` accepts either the models or their dumps, so
+    every caller passes what it already holds rather than converting first —
+    a conversion at three call sites is three chances to convert differently.
+    """
+    attested = {
+        (m.get("component_key") if isinstance(m, dict) else getattr(m, "component_key", None))
+        for m in (mutations or ())
+    }
+    return [
+        note for note in (process_writes or ())
+        if note.get("component_key") not in attested
+    ]
+
+
 def _apply_escape_evidence(
     *,
     durable_build_id: Optional[str],
@@ -10909,8 +10951,12 @@ def _apply_escape_evidence(
     # component exists, and the caller needs it to reconcile. Taken from the
     # per-apply list rather than the durable record, so the RAW route — which
     # mints no durable record — reports them as well (QA-153-r15-01).
-    if process_writes:
-        evidence["process_writes"] = list(process_writes)
+    # DERIVED HERE TOO. This exit serves its own `process_mutations` in the same
+    # dict, and the boundary handler merges the whole thing into the envelope —
+    # so the raw list put the same component key on both sides of one response.
+    _escape_unattested = _unattested_write_notes(process_writes, serialized_mutations)
+    if _escape_unattested:
+        evidence["process_writes"] = _escape_unattested
     return evidence
 
 
