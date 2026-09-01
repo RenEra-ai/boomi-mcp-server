@@ -670,6 +670,14 @@ def test_no_exit_serves_a_write_as_both_attested_and_pending():
     where the raw list and the derived list actually differ. Reverting any one
     exit to serving the raw notes now fails: that was measured too, and before
     these were added, reverting the exception exit passed the entire suite.
+
+    THE RESIDUAL LIMIT, restored after a correction dropped it: a property has to
+    be DRIVEN at an exit, so a genuinely new fourth serving exit is caught by
+    nothing here, and nothing at head enumerates the serving sites. That
+    enumeration was the deleted parse-based guard, and it is not coming back — it
+    failed open on six spellings of the assignment it modelled. This is a limit
+    accepted deliberately, not an oversight: the property is stronger where it
+    reaches, and the alternative was a pin that looked stronger and was not.
     """
     def _matching(component_id, _kind=None, _family=None):
         return {"type": "connector-settings", "xml": _LIVE_XML, "version": 1}
@@ -874,8 +882,10 @@ def test_the_success_exit_serves_only_the_unattested_write():
 
     mutations, notes = _mixed_write_evidence()
     envelope = _finalize_apply_success(
-        # `model_dump` is the only thing the exit asks of the spec on this path.
-        # `model_dump` and `name` are all the exit asks of the spec here.
+        # `model_dump` and `name` are what the exit asks of the spec on this path,
+        # both discovered by running into the AttributeError rather than by
+        # reading — which is why the stand-in is deliberately minimal: if the exit
+        # ever asks for a third thing, this breaks loudly instead of drifting.
         spec=SimpleNamespace(name="s", model_dump=lambda: {"name": "s"}),
         profile=_PROFILE,
         boomi_client=MagicMock(),

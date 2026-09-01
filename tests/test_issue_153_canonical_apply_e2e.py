@@ -3846,9 +3846,15 @@ def test_a_confirmed_write_is_durable_before_it_is_attested():
     # latent contradiction that passed by luck. What these tests mean, in their
     # own words one line up, is "it is durable, not only served"; containment says
     # that and stays true.
-    for _note in (result.get("process_writes") or []):
-        assert _note in writes, (_note, writes)
-    assert writes
+    # NOT VACUOUS ON THE ENVELOPE SIDE. A bare "every served note is in the
+    # record" says nothing when the envelope serves none, which is this
+    # scenario's normal shape — so the relation being asserted is stated for
+    # BOTH cases: whatever the envelope serves is a subset of the record, and
+    # the record itself is non-empty because a write was confirmed.
+    _served = result.get("process_writes") or []
+    assert all(_note in writes for _note in _served), (_served, writes)
+    assert writes, "the write log is empty although a write was confirmed"
+    assert len(_served) <= len(writes)
 
 
 def test_the_integration_spec_arm_also_reparses_its_units():
