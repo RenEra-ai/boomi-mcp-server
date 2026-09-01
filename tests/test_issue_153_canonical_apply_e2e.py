@@ -3467,8 +3467,8 @@ def test_an_all_reuse_apply_that_fails_late_never_says_reconcile():
     assert result["mutation_status"] == "none", result
     assert "reconcile" not in result.get("hint", "").lower(), result.get("hint")
     build_id = result.get("build_id")
-    if build_id:
-        assert ib._BUILD_REGISTRY[build_id]["status"] != "failed_partial"
+    assert build_id, result
+    assert ib._BUILD_REGISTRY[build_id]["status"] != "failed_partial"
 
 
 def test_a_reused_root_is_not_refused_for_a_body_it_never_compiles():

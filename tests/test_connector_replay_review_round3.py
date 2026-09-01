@@ -12,6 +12,7 @@ These tests supply the case the archive lacks.
 
 from __future__ import annotations
 
+import ast
 import json
 import os
 import shutil
@@ -4799,3 +4800,101 @@ def test_a_closing_report_agrees_with_the_rows_it_summarises():
         "| `L1` Stage-1 QA | 13 rounds |\n| `L3` architect | 1 evaluation |\n\n"
         "Residue: `ARCH-155-r10-03`, deferred.\n")
     assert _report_disagrees_with_the_rows(truthful) == []
+
+
+# --- A boundary witness asserts unconditionally -------------------------------
+#
+# DC-155-L, fourth consecutive round on one pin. The class's standing invariant —
+# a witness must EXECUTE the production path it names — was satisfied by the third
+# attempt and it still graded nothing: it drove the boundary on a route where the
+# case cannot arise, and carried an `if` whose false branch asserted something
+# weaker. The escape is what makes that survivable, so the escape is what this
+# refuses. The scope is DERIVED, not listed: a test is in scope exactly when it
+# calls the public apply entry point, which is the property that makes an
+# unreached case indistinguishable from a passing one.
+_BOUNDARY_ENTRY = "build_integration_action"
+
+
+def _tests_driving_the_apply_boundary(tree):
+    """Every test function in *tree* that calls the public apply entry."""
+    for fn in ast.walk(tree):
+        if not isinstance(fn, ast.FunctionDef) or not fn.name.startswith("test_"):
+            continue
+        called = {
+            node.func.id
+            for node in ast.walk(fn)
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+        }
+        if _BOUNDARY_ENTRY in called:
+            yield fn
+
+
+def _conditional_assertions(fn):
+    """`(name, lineno)` for every assertion this function guards behind an `if`."""
+    for node in ast.walk(fn):
+        if not isinstance(node, ast.If):
+            continue
+        for inner in ast.walk(node):
+            if isinstance(inner, ast.Assert):
+                yield fn.name, node.lineno
+                break
+
+
+def test_a_witness_at_the_apply_boundary_asserts_without_an_escape():
+    """Sweep of the mechanism across every artifact that has one.
+
+    Two instances existed when this was written: the pin this round replaced, and
+    a #153 witness that read `build_id` and asserted the build registry's status
+    only `if build_id` — so the day the envelope stopped carrying one, the
+    assertion would have vanished rather than failed. Measured before changing it:
+    the id is always present, so the guard was never doing anything except
+    concealing its own absence. Both are unconditional now.
+    """
+    offenders = []
+    for path in sorted(Path("tests").rglob("test_*.py")):
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+        except SyntaxError:  # pragma: no cover - a parse failure is another test's
+            continue
+        for fn in _tests_driving_the_apply_boundary(tree):
+            offenders += [(str(path), name, line)
+                          for name, line in _conditional_assertions(fn)]
+    assert offenders == [], (
+        "a test driving the apply boundary guards an assertion behind a condition; "
+        "an unreached case is then indistinguishable from a passing one: "
+        "{0}".format(offenders)
+    )
+
+
+def test_the_escape_rule_refuses_the_shape_that_cost_four_rounds():
+    """Non-vacuity: the exact shape the guard exists to exclude, and its control.
+
+    Without this the rule above is a sweep over a set that happens to be empty,
+    which is how a guard passes forever while modelling nothing.
+    """
+    escaping = ast.parse(
+        "def test_x():\n"
+        "    result = build_integration_action(c, p, 'apply', config={})\n"
+        "    if result.get('write_attempted') is False:\n"
+        "        assert result['error_code'] == 'A'\n"
+    )
+    plain = ast.parse(
+        "def test_x():\n"
+        "    result = build_integration_action(c, p, 'apply', config={})\n"
+        "    assert result['error_code'] == 'A'\n"
+    )
+    # An `if` in a test that never touches the boundary is out of scope by
+    # construction — the rule is derived from the entry point, not from a file
+    # list, and a parametrized helper may legitimately assert per case.
+    elsewhere = ast.parse(
+        "def test_x():\n"
+        "    for reason, names_it in CASES:\n"
+        "        if not names_it:\n"
+        "            assert 'not at fault' in detail\n"
+    )
+    found = [list(_conditional_assertions(fn))
+             for fn in _tests_driving_the_apply_boundary(escaping)]
+    assert found == [[("test_x", 3)]], found
+    assert [list(_conditional_assertions(fn))
+            for fn in _tests_driving_the_apply_boundary(plain)] == [[]]
+    assert list(_tests_driving_the_apply_boundary(elsewhere)) == []

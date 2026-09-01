@@ -983,24 +983,63 @@ def test_an_update_rechecks_at_its_push_not_before_its_merge():
     assert called, "the hook was not consulted on the permitting arm"
     assert pushed, "a permitting hook did not reach the platform"
 
+_LIVE_PROCESS_XML = (
+    '<bns:Component xmlns:bns="http://api.platform.boomi.com/" '
+    'type="process" name="M12.15 Process" folderId="f"><bns:object><process>'
+    "</process></bns:object></bns:Component>"
+)
+
+
+def _updating_payload():
+    """The same fixture, declared as an UPDATE of an existing process.
+
+    The pre-push hook is an argument of `_apply_structured_update`, so it exists
+    on the update route and nowhere else. The previous version of this test left
+    the envelope on `create` and therefore could not reach the hook at all —
+    measured, not assumed: it produced `status: created` and no `write_attempted`
+    field, and passed through a fallback branch that has been deleted with it.
+
+    The envelope is declared BEFORE the request is compiled. Editing the dumped
+    payload afterwards instead makes apply refuse with `AUTHORING_PLAN_STALE`,
+    because the compile hash no longer describes the request — also measured.
+    """
+    from _m12_11_support import appliable_process_unit
+
+    request = process_ir_request(
+        units=(
+            appliable_process_unit(action="update", component_id="existing-proc-1"),
+        )
+    )
+    result, _internals = compile_authoring_request_v1(
+        request, boomi_client=MagicMock(), profile=_PROFILE
+    )
+    payload = request.model_dump(mode="json")
+    payload["expected_capability_revision"] = result.revision_binding.capability_revision
+    payload["expected_compile_hash"] = result.revision_binding.compile_hash
+    return payload
+
 
 def test_a_proven_no_write_keeps_its_own_refusal_through_the_apply_boundary():
-    """Driven through the boundary, because the two previous pins were not.
+    """Graded by running the mutant, because three previous pins were not.
 
-    The first pin asserted the assignment's syntax tree contained
+    The first asserted that the assignment's syntax tree mentioned
     `write_attempted` and `False` — true of the broken expression and the fixed
-    one alike. The second replaced it with a different source read plus direct
-    calls to the refusal renderer, which is the same mistake wearing a hat: it
-    still never executed the branch. Both passed on the broken code.
+    one alike. The second swapped that source read for a different source read
+    plus direct calls to the refusal renderer, and I graded it by reverting the
+    code and watching it fail: what failed was the syntax-tree assertion, not the
+    behaviour. The third finally drove the boundary but on the CREATE route,
+    where no pre-push hook exists, and carried an `else` branch that passed on
+    the wrong shape.
 
-    So this drives `build_integration_action(..., "apply")` with a grant whose
-    PRE-PUSH hook refuses — the update path's proven-no-write case — and asserts
-    what a caller sees: the step's own pre-write refusal survives, and nothing
-    tells the caller a result was retained. Reverting the flag lookup to the
-    wrapper makes the post-submission code and the retention sentence appear,
-    which is the regression this exists to catch.
+    What this asserts is the difference the mutant actually makes, measured by
+    running it: with the flag read from the raw step result the caller sees the
+    step's OWN pre-submission refusal; reading only the wrapper (the reintroduced
+    defect) lets the post-submission reconciliation overwrite it with a code that
+    says a result was retained, for a component the platform was never asked to
+    write.
     """
     reads: list = []
+    pushed: list = []
     created = {"n": 0}
 
     def _component(*_a, **_k):
@@ -1011,9 +1050,10 @@ def test_a_proven_no_write_keeps_its_own_refusal_through_the_apply_boundary():
         created["n"] += 1
         return {"_success": True, "component_id": "process-cid-1"}
 
-    # The account drifts ONLY after the global and just-in-time rechecks have
-    # passed, so the refusal that fires is the pre-push one — the case whose whole
-    # point is that nothing was submitted.
+    # The account drifts only after the global and just-in-time rechecks have
+    # read clean, so the refusal that fires is the PRE-PUSH one — the case whose
+    # whole point is that the update was abandoned before submission. The count
+    # is measured against this fixture: four clean reads, then drift.
     def _get_xml(_client, component_id, *_a, **_k):
         if component_id in ("op-live-1", "cn-live-1"):
             reads.append(component_id)
@@ -1022,6 +1062,8 @@ def test_a_proven_no_write_keeps_its_own_refusal_through_the_apply_boundary():
                 return {"type": "connector-action", "xml": _OPERATION_XML,
                         "version": 99 if drifted else 3}
             return {"type": "connector-settings", "xml": _CONNECTION_XML, "version": 5}
+        if component_id == "existing-proc-1":
+            return {"type": "process", "xml": _LIVE_PROCESS_XML, "version": 1}
         return {"type": "connector-settings", "xml": _LIVE_XML, "version": 1}
 
     from boomi_mcp.connector_replay.registry import load_registry as _real_registry
@@ -1034,6 +1076,10 @@ def test_a_proven_no_write_keeps_its_own_refusal_through_the_apply_boundary():
         def __getattr__(self, name):
             return getattr(_packaged, name)
 
+    client = MagicMock()
+    client.component.update_component_raw.side_effect = (
+        lambda *a, **k: pushed.append(a)
+    )
     with patch(_PAGINATE) as paginate, patch(_EXECUTE) as execute, patch(
         _CREATE
     ) as create, patch(_GET_XML) as get_xml, patch(
@@ -1046,24 +1092,25 @@ def test_a_proven_no_write_keeps_its_own_refusal_through_the_apply_boundary():
         create.side_effect = _create
         get_xml.side_effect = _get_xml
         result = build_integration_action(
-            MagicMock(), _PROFILE, "apply",
-            config={"authoring_request": _payload(), "dry_run": False},
+            client, _PROFILE, "apply",
+            config={"authoring_request": _updating_payload(), "dry_run": False},
         )
 
-    assert result.get("_success") is False, result
-    # WHATEVER the boundary refused at, it must never tell the caller a result was
-    # retained when the step proved it wrote nothing. That is the sentence the
-    # whole split exists to prevent, and it is observable right here.
-    served = " ".join(str(result.get(k, "")) for k in ("hint", "error"))
+    # NON-VACUITY, asserted before anything else and with no branch to escape
+    # into: this fixture must actually land on the proven-no-write step, or the
+    # rest of the test is about some other case.
     step = ((result.get("partial_results") or {}).get("proc") or {})
     step_result = step.get("result") if isinstance(step.get("result"), dict) else {}
-    if step_result.get("write_attempted") is False:
-        assert "The result is retained" not in served, result
-        assert result.get("error_code") != (
-            "CONNECTOR_REPLAY_POST_SUBMISSION_RECONCILIATION_DRIFT"
-        ), result
-    else:
-        # The fixture did not reach a proven-no-write step. Say so rather than
-        # passing quietly — a pin that stops exercising its case is the defect
-        # this test replaced, twice.
-        assert reads, "the recheck never ran, so nothing about the split was exercised"
+    assert step_result.get("write_attempted") is False, result
+    assert pushed == [], "the platform was asked to write despite the refusal"
+    assert step.get("status") == "refused", step
+
+    # THE MUTANT'S SIGNATURE. Reading only the wrapper makes the served code
+    # become the post-submission one and promotes its retention hint to the top
+    # level of the envelope — both measured by running that edit against this
+    # exact fixture.
+    assert result.get("_success") is False, result
+    assert result.get("error_code") == (
+        "CONNECTOR_REPLAY_PRE_SUBMISSION_IDENTITY_DRIFT"
+    ), result
+    assert "The result is retained" not in str(result.get("hint", "")), result
