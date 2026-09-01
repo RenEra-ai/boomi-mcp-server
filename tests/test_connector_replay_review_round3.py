@@ -4400,32 +4400,60 @@ def _node_manifest_gate():
     return module, root
 
 
-def _assert_legal_manifest_successor(gate, at_head, at_landing, current):
+def _assert_legal_manifest_successor(gate, at_head, current, landing_of):
     """The successor rule, plus the one waiver the wave gate forces.
 
-    Extracted from the test so BOTH arms of the waiver can be driven with
-    synthetic manifests. Inline, the "HEAD was already legal" arm could only be
-    reasoned about, and this slice's record is a list of what happens when I
-    reason about a branch instead of executing it.
+    ``landing_of`` is a THUNK, resolved only on the waiver path. Resolving it up
+    front made a clone without that ref go red on a tree that needed no waiver at
+    all — a guard failing for a reason unrelated to what it checks.
+
+    Extracted from the test so every arm can be driven with synthetic manifests.
+    Inline, the arms could only be reasoned about, and this slice's record is a
+    list of what happens when I reason about a branch instead of executing it.
     """
     try:
         gate.validate_transition(at_head, current, "pytest-nodes")
         return "strict"
     except gate.GateFailure:
         pass
+
+    at_landing = landing_of()
+    assert at_landing is not None, (
+        "the manifest could not be read at the landing base, so the closing "
+        "regeneration cannot be told apart from an arbitrary repoint"
+    )
     # The repair must be REAL: legal at the base the wave gate will judge, and
-    # repairing a committed manifest that is NOT legal there. If HEAD were
-    # already legal, nothing needs repairing and the deletion is refused.
+    # repairing a committed manifest that is NOT legal there.
     gate.validate_transition(at_landing, current, "pytest-nodes")
     try:
         gate.validate_transition(at_landing, at_head, "pytest-nodes")
     except gate.GateFailure:
-        return "waived"
-    raise AssertionError(
-        "the committed manifest is already a legal successor of the landing base, "
-        "so this regeneration repairs nothing and its deletions and repoints are "
-        "refused"
-    )
+        pass
+    else:
+        raise AssertionError(
+            "the committed manifest is already a legal successor of the landing "
+            "base, so this regeneration repairs nothing and its deletions and "
+            "repoints are refused"
+        )
+    # AND THE REPAIR MUST BE ONLY THAT REPAIR. Without this the waiver excused
+    # any deletion that happened to accompany a born-tombstone: a regeneration
+    # dropping an unrelated ACTIVE identity is still legal at the landing base
+    # and still repairs the tombstone, so it was waived and a required test
+    # simply disappeared. The removable set is DERIVED — the rows appended after
+    # the landing base that HEAD carries as tombstones — never asserted.
+    born_tombstoned = {
+        row["node_id"] for row in at_head.rows[len(at_landing.rows):]
+        if row["state"] == "tombstone"
+    }
+    removed = ({row["node_id"] for row in at_head.rows}
+               - {row["node_id"] for row in current.rows})
+    if removed != born_tombstoned:
+        raise AssertionError(
+            "the regeneration removed identities the wave gate does not require "
+            "it to remove, so this is not the repair it claims to be: removed "
+            "{0}, removable {1}".format(sorted(removed), sorted(born_tombstoned))
+        )
+    return "waived"
 
 
 def test_the_node_manifest_is_a_legal_successor_of_the_one_it_replaces():
@@ -4475,12 +4503,11 @@ def test_the_node_manifest_is_a_legal_successor_of_the_one_it_replaces():
         "nothing"
     )
     at_head = gate.parse_manifest(previous, "pytest-nodes")
-    landing = at("origin/dev")
-    assert landing is not None, (
-        "the manifest could not be read at the landing base, so the closing "
-        "regeneration cannot be told apart from an arbitrary repoint"
-    )
-    at_landing = gate.parse_manifest(landing, "pytest-nodes")
+
+    def landing_of():
+        raw = at("origin/dev")
+        return gate.parse_manifest(raw, "pytest-nodes") if raw is not None else None
+
     # A test created and retired inside one slice leaves a row that was APPENDED
     # ALREADY TOMBSTONED at the landing base, and the wave gate refuses exactly
     # that — "a row added and removed within the same range needs no row at all".
@@ -4488,7 +4515,7 @@ def test_the_node_manifest_is_a_legal_successor_of_the_one_it_replaces():
     # repoint and is what this guard otherwise exists to stop. The two rules meet
     # head-on at the close, and the gate's base transition is the one that will
     # actually judge the landing.
-    _assert_legal_manifest_successor(gate, at_head, at_landing, current)
+    _assert_legal_manifest_successor(gate, at_head, current, landing_of)
 
     # NON-VACUITY, against this very manifest: repoint one live row exactly as the
     # baseline-restore regeneration did, and the authority must refuse it. Without
@@ -4535,20 +4562,23 @@ def test_the_node_manifest_is_a_legal_successor_of_the_one_it_replaces():
 
 
 def test_the_successor_waiver_only_excuses_a_repair_that_is_real():
-    """Both arms of the waiver, driven — not reasoned about.
+    """Every arm of the waiver, driven — not reasoned about.
 
     Arm one: the committed manifest is illegal at the landing base and the tree
     fixes it. That is the closing regeneration and it is waived. Arm two: the
     committed manifest is ALREADY legal there, so a tree that deletes a row is
-    repairing nothing and must be refused however it looks against HEAD.
+    repairing nothing. Arm three: the tree is itself illegal at the landing base,
+    so a broken committed manifest must not excuse it. Arm four: the tree drops
+    an unrelated ACTIVE identity alongside the tombstone, which is legal at the
+    landing base and repairs the tombstone and is still not this repair.
     """
     gate, _root = _node_manifest_gate()
 
     def manifest(rows):
+        active = sum(1 for r in rows if r["state"] == "active")
         header = {
             "kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes",
-            "minimum_active": sum(1 for r in rows if r["state"] == "active"),
-            "minimum_collected": sum(1 for r in rows if r["state"] == "active"),
+            "minimum_active": active, "minimum_collected": active,
             "maximum_skipped": 30, "bootstrap_base": "0" * 40,
         }
         return gate.Manifest("pytest-nodes", header, [dict(r) for r in rows])
@@ -4558,20 +4588,19 @@ def test_the_successor_waiver_only_excuses_a_repair_that_is_real():
                 "state": state}
 
     landing = manifest([row(1, "a"), row(2, "b")])
-    # HEAD appended a third row and retired it in the same range — the shape the
-    # wave gate refuses, so HEAD is NOT a legal successor of the landing base.
+    of_landing = lambda: landing
+
+    # ARM ONE — the closing regeneration.
     head_illegal = manifest([row(1, "a"), row(2, "b"), row(3, "c", "tombstone")])
     repaired = manifest([row(1, "a"), row(2, "b")])
     assert _assert_legal_manifest_successor(
-        gate, head_illegal, landing, repaired
+        gate, head_illegal, repaired, of_landing
     ) == "waived"
 
-    # ARM TWO: HEAD is legal at the landing base, so the same deletion earns no
-    # waiver. Without this the waiver would excuse any deletion that HEAD happens
-    # to refuse, which is every deletion.
+    # ARM TWO — nothing to repair, so nothing is excused.
     head_legal = manifest([row(1, "a"), row(2, "b"), row(3, "c")])
     try:
-        _assert_legal_manifest_successor(gate, head_legal, landing, repaired)
+        _assert_legal_manifest_successor(gate, head_legal, repaired, of_landing)
     except AssertionError as exc:
         assert "repairs nothing" in str(exc), exc
     else:
@@ -4580,17 +4609,15 @@ def test_the_successor_waiver_only_excuses_a_repair_that_is_real():
             "repair, so the waiver excuses anything"
         )
 
-    # ARM THREE, and it is the one my first witness set missed: HEAD is illegal at
-    # the landing base AND so is the tree. A broken HEAD must not excuse a broken
-    # tree. Measured — without this case, deleting the landing-base check from the
-    # helper left both other arms green, which is the whole failure mode this
-    # slice keeps re-learning.
+    # ARM THREE — a broken record must not excuse a broken tree. Measured:
+    # without this case, deleting the landing-base check left every other arm
+    # green.
     tree_also_illegal = manifest([
         row(1, "a"), row(2, "b"), row(3, "c", "tombstone"), row(4, "d", "tombstone"),
     ])
     try:
         _assert_legal_manifest_successor(
-            gate, head_illegal, landing, tree_also_illegal
+            gate, head_illegal, tree_also_illegal, of_landing
         )
     except gate.GateFailure as exc:
         assert exc.code == "MANIFEST_TRANSITION_ILLEGAL", exc.code
@@ -4600,9 +4627,36 @@ def test_the_successor_waiver_only_excuses_a_repair_that_is_real():
             "the committed manifest was broken too"
         )
 
-    # AND THE ORDINARY CASE still takes the strict path rather than the waiver.
+    # ARM FOUR — the hole the review found. HEAD carries a born-tombstone AND an
+    # unrelated active row; a regeneration that drops both is legal at the
+    # landing base and does repair the tombstone, and every earlier version of
+    # this waiver accepted it while a required identity vanished.
+    head_mixed = manifest([
+        row(1, "a"), row(2, "b"), row(3, "c", "tombstone"), row(4, "d"),
+    ])
+    drops_both = manifest([row(1, "a"), row(2, "b")])
+    try:
+        _assert_legal_manifest_successor(gate, head_mixed, drops_both, of_landing)
+    except AssertionError as exc:
+        assert "does not require it to remove" in str(exc), exc
+    else:
+        raise AssertionError(
+            "an active identity was dropped under cover of the tombstone repair"
+        )
+    # ...while dropping ONLY the tombstone, keeping the active row, is the repair.
+    keeps_active = manifest([row(1, "a"), row(2, "b"), row(3, "d")])
     assert _assert_legal_manifest_successor(
-        gate, landing, landing, manifest([row(1, "a"), row(2, "b"), row(3, "c")])
+        gate, head_mixed, keeps_active, of_landing
+    ) == "waived"
+
+    # ARM FIVE — the ordinary case takes the strict path and never resolves the
+    # landing base at all, which is what keeps a clone lacking that ref green.
+    def _must_not_be_called():
+        raise AssertionError("the landing base was resolved on the strict path")
+
+    assert _assert_legal_manifest_successor(
+        gate, landing, manifest([row(1, "a"), row(2, "b"), row(3, "c")]),
+        _must_not_be_called,
     ) == "strict"
 
 

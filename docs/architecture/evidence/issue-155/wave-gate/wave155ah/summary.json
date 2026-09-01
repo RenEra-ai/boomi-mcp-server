@@ -6,5 +6,6 @@
  "wave_sha": "1d5f31b5a2c7582fec2e7769b038d7be1bec210f",
  "refusal": "MANIFEST_TRANSITION_ILLEGAL",
  "detail": "two rows appended already tombstoned: pytest-011453, pytest-011472",
- "exit_code": 1
+ "exit_code": 2,
+ "exit_code_provenance": "measured by re-running the command in a detached worktree at the refused SHA; the first archive recorded 1, which was never measured, and its log carried the exit of a shell pipeline rather than of the gate"
 }
