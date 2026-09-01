@@ -4814,18 +4814,70 @@ def test_a_closing_report_agrees_with_the_rows_it_summarises():
 # unreached case indistinguishable from a passing one.
 _BOUNDARY_ENTRY = "build_integration_action"
 
+#: The census root, resolved from THIS FILE rather than the working directory.
+#: Measured: with a relative `Path("tests")` and pytest launched from `tests/`,
+#: the sweep looked for `tests/tests`, found no files, and passed in 0.12s having
+#: checked nothing — a guard whose universe collapses silently is the class this
+#: file exists to refuse, committed by the guard itself.
+_TESTS_ROOT = Path(__file__).resolve().parent
+
+
+def _call_names(node):
+    """Every callable name in *node*, in BOTH forms a call site can take.
+
+    `build_integration_action(...)` is an `ast.Name`; the equally common
+    `integration_builder.build_integration_action(...)` is an `ast.Attribute`
+    and was invisible to the first version of this sweep, so a witness written
+    that way escaped the rule entirely.
+    """
+    for inner in ast.walk(node):
+        if not isinstance(inner, ast.Call):
+            continue
+        func = inner.func
+        if isinstance(func, ast.Name):
+            yield func.id
+        elif isinstance(func, ast.Attribute):
+            yield func.attr
+
+
+def _boundary_callers(tree):
+    """Names that reach the apply entry: the entry itself, plus module-local
+    wrappers, to a fixed point.
+
+    This suite's own `_apply` helper is exactly such a wrapper, and a test that
+    calls it drives the boundary without ever naming it. One level of resolution
+    would still miss a wrapper around a wrapper, so this iterates until the set
+    stops growing rather than assuming a depth.
+    """
+    module_functions = {
+        node.name: node for node in tree.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    }
+    reaching = {_BOUNDARY_ENTRY}
+    while True:
+        grown = {
+            name for name, node in module_functions.items()
+            if name not in reaching and reaching & set(_call_names(node))
+        }
+        if not grown:
+            return reaching
+        reaching |= grown
+
 
 def _tests_driving_the_apply_boundary(tree):
-    """Every test function in *tree* that calls the public apply entry."""
+    """Every test function in *tree* that reaches the public apply entry.
+
+    Deliberately action-AGNOSTIC. One function serves `plan`, `compile` and
+    `apply`, and an assertion escape is no more acceptable on a plan witness
+    than on an apply one; selecting on the action string would also mean reading
+    an argument that is frequently a variable. Over-inclusion cannot leave the
+    sibling sweep incomplete — under-inclusion is what did.
+    """
+    reaching = _boundary_callers(tree)
     for fn in ast.walk(tree):
         if not isinstance(fn, ast.FunctionDef) or not fn.name.startswith("test_"):
             continue
-        called = {
-            node.func.id
-            for node in ast.walk(fn)
-            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
-        }
-        if _BOUNDARY_ENTRY in called:
+        if reaching & set(_call_names(fn)):
             yield fn
 
 
@@ -4843,58 +4895,91 @@ def _conditional_assertions(fn):
 def test_a_witness_at_the_apply_boundary_asserts_without_an_escape():
     """Sweep of the mechanism across every artifact that has one.
 
-    Two instances existed when this was written: the pin this round replaced, and
-    a #153 witness that read `build_id` and asserted the build registry's status
-    only `if build_id` — so the day the envelope stopped carrying one, the
-    assertion would have vanished rather than failed. Measured before changing it:
-    the id is always present, so the guard was never doing anything except
-    concealing its own absence. Both are unconditional now.
+    Two instances existed when this was written: the pin the fourth round
+    replaced, and a #153 witness that read `build_id` and asserted the build
+    registry's status only `if build_id` — so the day the envelope stopped
+    carrying one, the assertion would have vanished rather than failed. Measured
+    before changing it: the id is always present, so the guard was never doing
+    anything except concealing its own absence. Both are unconditional now.
     """
-    offenders = []
-    for path in sorted(Path("tests").rglob("test_*.py")):
+    scanned, in_scope, offenders = [], [], []
+    for path in sorted(_TESTS_ROOT.rglob("test_*.py")):
         try:
             tree = ast.parse(path.read_text(encoding="utf-8"))
         except SyntaxError:  # pragma: no cover - a parse failure is another test's
             continue
+        scanned.append(path)
         for fn in _tests_driving_the_apply_boundary(tree):
-            offenders += [(str(path), name, line)
+            in_scope.append((path.name, fn.name))
+            offenders += [(path.name, name, line)
                           for name, line in _conditional_assertions(fn)]
+
+    # THE CENSUS PROVES ITSELF FIRST. Both floors are read off the run rather
+    # than typed: this module must be among the files walked, and the selector
+    # must have matched something. A sweep that silently sees nothing reports
+    # exactly the same empty `offenders` as a clean tree.
+    assert Path(__file__).resolve() in scanned, (
+        "the census did not include its own file, so the root did not resolve"
+    )
+    assert in_scope, "the selector matched no test at all; the sweep is vacuous"
     assert offenders == [], (
-        "a test driving the apply boundary guards an assertion behind a condition; "
-        "an unreached case is then indistinguishable from a passing one: "
-        "{0}".format(offenders)
+        "a test reaching the apply boundary guards an assertion behind a "
+        "condition; an unreached case is then indistinguishable from a passing "
+        "one: {0}".format(offenders)
     )
 
 
 def test_the_escape_rule_refuses_the_shape_that_cost_four_rounds():
-    """Non-vacuity: the exact shape the guard exists to exclude, and its control.
+    """Non-vacuity: every call form the rule must see, and the ones it must not.
 
     Without this the rule above is a sweep over a set that happens to be empty,
     which is how a guard passes forever while modelling nothing.
     """
-    escaping = ast.parse(
+    def _hits(source):
+        tree = ast.parse(source)
+        return [list(_conditional_assertions(fn))
+                for fn in _tests_driving_the_apply_boundary(tree)]
+
+    # The shape that cost four rounds, named directly.
+    assert _hits(
         "def test_x():\n"
         "    result = build_integration_action(c, p, 'apply', config={})\n"
         "    if result.get('write_attempted') is False:\n"
         "        assert result['error_code'] == 'A'\n"
-    )
-    plain = ast.parse(
+    ) == [[("test_x", 3)]]
+
+    # The same shape reached through the module-qualified form, which the first
+    # version of this sweep did not see at all.
+    assert _hits(
+        "def test_x():\n"
+        "    result = integration_builder.build_integration_action(c, p, 'apply')\n"
+        "    if result.get('build_id'):\n"
+        "        assert result['ok']\n"
+    ) == [[("test_x", 3)]]
+
+    # And through a module-local wrapper, which is how this suite's own
+    # boundary tests are written.
+    assert _hits(
+        "def _apply(payload):\n"
+        "    return build_integration_action(c, p, 'apply', config=payload)\n"
+        "def test_x():\n"
+        "    result = _apply({})\n"
+        "    if result.get('build_id'):\n"
+        "        assert result['ok']\n"
+    ) == [[("test_x", 5)]]
+
+    # CONTROLS. An unconditional witness passes, and a test that never reaches
+    # the boundary is out of scope by construction — the rule is derived from
+    # the entry point, not from a file list, and a parametrized helper may
+    # legitimately assert per case.
+    assert _hits(
         "def test_x():\n"
         "    result = build_integration_action(c, p, 'apply', config={})\n"
         "    assert result['error_code'] == 'A'\n"
-    )
-    # An `if` in a test that never touches the boundary is out of scope by
-    # construction — the rule is derived from the entry point, not from a file
-    # list, and a parametrized helper may legitimately assert per case.
-    elsewhere = ast.parse(
+    ) == [[]]
+    assert _hits(
         "def test_x():\n"
         "    for reason, names_it in CASES:\n"
         "        if not names_it:\n"
         "            assert 'not at fault' in detail\n"
-    )
-    found = [list(_conditional_assertions(fn))
-             for fn in _tests_driving_the_apply_boundary(escaping)]
-    assert found == [[("test_x", 3)]], found
-    assert [list(_conditional_assertions(fn))
-            for fn in _tests_driving_the_apply_boundary(plain)] == [[]]
-    assert list(_tests_driving_the_apply_boundary(elsewhere)) == []
+    ) == []
