@@ -881,6 +881,23 @@ class ConnectorReplayEvidenceBindingAttestationV1(_AuthoringModel):
     #: does not accept, which is a defect class this issue has already recorded
     #: three times. Caught here by constructing one, not by reading the type name.
     record_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+    #: THE CONCRETE EVIDENCE, so this record survives the registry. A binding that
+    #: names only logical refs and a digest cannot say what authorised a write once
+    #: the row it points at is rotated or removed — the reader would have to consult
+    #: a registry whose present contents are a different fact. These are populated
+    #: from the record that was actually RECHECKED at the boundary, not from a
+    #: second lookup at write time, so the attestation and the check agree by
+    #: construction. Optional because a binding minted before this field existed
+    #: stays valid; absent means "not captured", never "none".
+    account_scope_hash: Optional[str] = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    operation_component_id: Optional[NonEmptyString] = None
+    operation_version: Optional[int] = None
+    connection_component_id: Optional[NonEmptyString] = None
+    connection_version: Optional[int] = None
+    #: The KIND only. A static coverage enumerates the routes it covers, and a
+    #: route is a path — the one shape this record must never carry.
+    route_coverage_kind: Optional[NonEmptyString] = None
+    capture_digest: Optional[str] = Field(default=None, pattern=r"^[0-9a-f]{64}$")
 
 
 class ProcessMutationAttestationV1(_AuthoringModel):

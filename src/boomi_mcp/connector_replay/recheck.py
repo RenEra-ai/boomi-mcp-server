@@ -34,12 +34,14 @@ Two boundaries, two meanings:
 
 from __future__ import annotations
 
+import re
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 
 #: What a recheck compares, in the order it reports them. Written as data so the
 #: reasons are a closed set: a caller cannot be handed a reason this module does
 #: not define, and a test can assert the set rather than a sample of it.
 DRIFT_REASONS: Tuple[str, ...] = (
+    "route_coverage",
     "operation_version",
     "operation_config_digest",
     "connection_version",
@@ -49,14 +51,23 @@ DRIFT_REASONS: Tuple[str, ...] = (
 
 
 class RecheckOutcome:
-    """One recheck's verdict: the drifts found, or the read that failed."""
+    """One recheck's verdict, and the concrete evidence it checked against.
 
-    __slots__ = ("drifts", "unavailable", "boundary")
+    ``bindings`` carries what each grant actually resolved to — the identities,
+    route coverage kind and capture digest of the record that authorised it. The
+    attestation is built from THIS rather than from a second registry lookup at
+    write time: a row can rotate or be removed between the two, and a durable
+    accounting record that depends on the registry's present contents cannot say
+    what authorised a write once the registry has moved on.
+    """
 
-    def __init__(self, boundary: str, drifts=(), unavailable=None):
+    __slots__ = ("drifts", "unavailable", "boundary", "bindings")
+
+    def __init__(self, boundary: str, drifts=(), unavailable=None, bindings=()):
         self.boundary = boundary
         self.drifts = tuple(drifts)
         self.unavailable = unavailable
+        self.bindings = tuple(bindings)
 
     @property
     def ok(self) -> bool:
@@ -139,12 +150,37 @@ def recheck_grant_identities(
         # documents that carry no evidence at all.
         return RecheckOutcome(boundary)
 
-    records = {
-        getattr(record, "record_digest", None): record
-        for record in getattr(registry, "operation_records", ()) or ()
-    }
+    # KEYED BY WHAT IDENTIFIES A RECORD, not by the digest alone. A dict
+    # comprehension over `record_digest` silently keeps the LAST record on a
+    # collision, and the loader dedupes on `contract_ref` — it does not reject
+    # duplicate digests. A grant minted for one contract would then be rechecked
+    # against a different record entirely, so matching identities on the wrong
+    # record could return `ok` while the granted one had drifted. The pair is what
+    # a grant actually names, and a colliding pair is refused rather than resolved.
+    records = {}
+    for record in getattr(registry, "operation_records", ()) or ():
+        key = (
+            getattr(record, "record_digest", None),
+            getattr(record, "contract_ref", None),
+        )
+        if key in records:
+            return RecheckOutcome(
+                boundary,
+                unavailable={
+                    "subject": "operation_record",
+                    "contract_ref": key[1],
+                    "reason": "ambiguous_record",
+                    "detail": (
+                        "the registry holds more than one operation record for this "
+                        "contract and digest, so which one authorised the grant "
+                        "cannot be decided"
+                    ),
+                },
+            )
+        records[key] = record
 
     drifts: List[Dict[str, Any]] = []
+    bindings: List[Dict[str, Any]] = []
     read_once: Dict[Tuple[Any, ...], Optional[Mapping[str, Any]]] = {}
 
     def _read(component_id, kind, family=None):
@@ -161,8 +197,12 @@ def recheck_grant_identities(
         return read_once[key]
 
     for grant in grants:
-        digest = getattr(grant, "record_digest", None)
-        record = records.get(digest)
+        record = records.get(
+            (
+                getattr(grant, "record_digest", None),
+                getattr(grant, "contract_ref", None),
+            )
+        )
         if record is None:
             # A grant whose record is gone is not a drift to describe — there is
             # nothing left to compare it against. It is an unavailability, and it
@@ -179,6 +219,42 @@ def recheck_grant_identities(
                     ),
                 },
             )
+        # ROUTE COVERAGE, WHICH NOTHING READ. Every comparison in the closed set
+        # above can match while the record covers a different route entirely — or
+        # covers enumerated static routes while the call composes its path per
+        # document. The models say it plainly: a dynamically bound path requires
+        # SERVICE-WIDE coverage, because its route is composed per document, so no
+        # static digest identifies it and none may be minted. The compiler cannot
+        # check this (it has no live reading) and the ledger assigns it here; it
+        # simply was not implemented, and the closed field set made that invisible.
+        coverage = getattr(record, "route_coverage", None)
+        coverage_kind = getattr(coverage, "kind", None)
+        if getattr(grant, "dynamic_path", False) and coverage_kind != "service_wide":
+            drifts.append(
+                {
+                    "reason": "route_coverage",
+                    "contract_ref": getattr(grant, "contract_ref", None),
+                    "recorded": coverage_kind or "none",
+                    "observed": "dynamic_path",
+                }
+            )
+        elif coverage_kind == "static_path":
+            route_digest = getattr(grant, "route_digest", None)
+            covered = tuple(getattr(coverage, "route_digests", ()) or ())
+            # A static record authorises the routes it enumerates and no others. A
+            # call whose route this recheck cannot name is not thereby covered —
+            # that is the fail-open direction — so an absent route is a refusal.
+            if route_digest is None or route_digest not in covered:
+                drifts.append(
+                    {
+                        "reason": "route_coverage",
+                        "contract_ref": getattr(grant, "contract_ref", None),
+                        "recorded": "static_path",
+                        # The route itself is a PATH. Not served.
+                        "observed": "<redacted>" if route_digest else "unknown",
+                    }
+                )
+
         if account_scope_hash is not None:
             recorded_scope = getattr(record, "account_scope_hash", None)
             if recorded_scope != account_scope_hash:
@@ -207,7 +283,13 @@ def recheck_grant_identities(
                 # none. Kept as one code because the CONSEQUENCE is identical and a
                 # caller branches on consequence; the detail says which.
                 detail = (
-                    f"the account's identity for the {label} component "
+                    (
+                        f"the {label} component {component_id!r} is DELETED in the "
+                        "account, so the replay evidence describes a component that "
+                        "is no longer live"
+                    )
+                    if reason == "component_deleted"
+                    else f"the account's identity for the {label} component "
                     f"{component_id!r} could not be read"
                     if reason != "projection_unsupported"
                     else (
@@ -229,6 +311,35 @@ def recheck_grant_identities(
                 )
             drifts.extend(_identity_drifts(label, recorded, observed))
 
+        # THE CONCRETE EVIDENCE, captured from the record this grant resolved to.
+        capture = getattr(record, "capture", None)
+        bindings.append(
+            {
+                "contract_ref": getattr(grant, "contract_ref", None),
+                "operation_ref": getattr(grant, "operation_ref", None),
+                "call_source_path": getattr(grant, "call_source_path", None),
+                "record_digest": getattr(record, "record_digest", None),
+                "account_scope_hash": getattr(record, "account_scope_hash", None),
+                "operation_component_id": getattr(
+                    getattr(record, "operation_identity", None), "component_id", None
+                ),
+                "operation_version": getattr(
+                    getattr(record, "operation_identity", None), "version", None
+                ),
+                "connection_component_id": getattr(
+                    getattr(record, "connection_identity", None), "component_id", None
+                ),
+                "connection_version": getattr(
+                    getattr(record, "connection_identity", None), "version", None
+                ),
+                # The KIND only. A static coverage carries the routes it covers,
+                # and a route is a path — the shape this record must not carry.
+                "route_coverage_kind": getattr(coverage, "kind", None),
+                "capture_digest": getattr(capture, "capture_digest", None)
+                or getattr(capture, "digest", None),
+            }
+        )
+
     # Deduplicated by the whole reason tuple: the same component drifting under two
     # grants is one drift, reported once.
     seen, unique = set(), []
@@ -238,7 +349,7 @@ def recheck_grant_identities(
             continue
         seen.add(key)
         unique.append(drift)
-    return RecheckOutcome(boundary, drifts=unique)
+    return RecheckOutcome(boundary, drifts=unique, bindings=bindings)
 
 
 def live_identity_reader(boomi_client, *, read_component_xml=None):
@@ -293,6 +404,20 @@ def live_identity_reader(boomi_client, *, read_component_xml=None):
         version = fetched.get("version")
         if not xml or version in (None, ""):
             return {"reason": "account_unreadable"}
+        # A SOFT DELETE IS NOT A LIVE COMPONENT. Boomi returns a deleted component
+        # with its original version and XML, and the configuration digest projects
+        # neither the root's deletion flag nor anything that moves with it — so
+        # every comparison passes and the write proceeds against a component that
+        # is gone. This repository already recorded the platform behaviour at
+        # discovery; the reader simply was not looking. Read from the fetched
+        # metadata where the getter supplies it, and from the root attribute
+        # otherwise, because the two transports differ in which they carry.
+        deleted = fetched.get("deleted")
+        if deleted is None:
+            match = re.search(r'\bdeleted="([^"]*)"', xml[:2048])
+            deleted = match.group(1) if match else None
+        if str(deleted).strip().lower() == "true":
+            return {"reason": "component_deleted"}
         try:
             version = int(version)
         except (TypeError, ValueError):

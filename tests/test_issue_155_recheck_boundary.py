@@ -174,7 +174,16 @@ class _Record:
     """
 
     record_digest = "b" * 64
+    # NAMED, because a grant resolves its record by the (digest, contract_ref)
+    # PAIR — the loader dedupes contract refs and not digests, so the digest alone
+    # can select the wrong record. A stand-in that omits the ref cannot resolve at
+    # all, which is how this fixture stopped exercising the recheck the moment the
+    # lookup was corrected.
+    contract_ref = "$ref:CONTRACT"
     account_scope_hash = "a" * 64
+    #: Service-wide, because these cells drive a call whose route this harness does
+    #: not name — and a static record authorises only the routes it enumerates.
+    route_coverage = type("_ServiceWide", (), {"kind": "service_wide"})()
     operation_identity = _Ident("op-live-1", 3, _digest(_OPERATION_XML, "operation"))
     connection_identity = _Ident("cn-live-1", 5, _digest(_CONNECTION_XML, "connection"))
 
@@ -903,3 +912,72 @@ def test_the_success_exit_serves_only_the_unattested_write():
     assert [n["component_key"] for n in served] == ["proc2"], envelope
     attested = {m.get("component_key") for m in (envelope.get("process_mutations") or [])}
     assert not (attested & {n["component_key"] for n in served}), envelope
+
+
+def test_an_update_rechecks_at_its_push_not_before_its_merge():
+    """The window the plan names, and the reason it names it.
+
+    An update does real work between the caller's decision to proceed and the
+    submission: it materializes the process, fetches the live component and merges.
+    A check made before all of that can go stale during it, and the drift is then
+    caught only by the POST-submit check — which converts a refusal that was still
+    free into a retained mutation. The plan requires a callback after merge and
+    materialization and immediately before the platform update.
+
+    Driven where the hook actually runs: past the policy short-circuit, past the
+    live fetch, past the merge. An arm that returns before the hook would prove
+    nothing about the hook, which is why the first version of this test — using
+    the no-policy short-circuit — was replaced.
+    """
+    from boomi_mcp.categories.integration_builder import _apply_structured_update
+    from boomi_mcp.categories.components.builders._process_preservation import (
+        PROCESS_PRESERVATION_POLICY,
+    )
+
+    live = (
+        '<bns:Component xmlns:bns="http://api.platform.boomi.com/" '
+        'type="process" name="p" folderId="f"><bns:object><process>'
+        "</process></bns:object></bns:Component>"
+    )
+    pushed, called = [], []
+
+    class _Comp:
+        type = "process"
+        key = "proc"
+        config: dict = {}
+
+    def _run(hook):
+        client = MagicMock()
+        client.component.update_component_raw.side_effect = (
+            lambda *a, **k: pushed.append(a)
+        )
+        with patch(_GET_XML) as get_xml:
+            get_xml.return_value = {"type": "process", "xml": live}
+            return _apply_structured_update(
+                client, _PROFILE, "cid-1", _Comp(), live,
+                PROCESS_PRESERVATION_POLICY, on_pre_push=hook,
+            )
+
+    # REFUSING HOOK: the platform must not be called, and the envelope must say
+    # nothing was written — an update that refuses here is precisely the case that
+    # must not be reported as a retained mutation.
+    def _refuse():
+        called.append(1)
+        return {
+            "_success": False,
+            "error_code": "CONNECTOR_REPLAY_PRE_SUBMISSION_IDENTITY_DRIFT",
+        }
+
+    out = _run(_refuse)
+    assert called, "the pre-push hook was never consulted"
+    assert pushed == [], "the platform was called despite a refusing pre-push hook"
+    assert out.get("_success") is False
+    assert out.get("write_attempted") is False, out
+
+    # PERMITTING HOOK — the control. Without it the assertions above are satisfied
+    # by an update path that never pushes at all.
+    pushed.clear()
+    called.clear()
+    _run(lambda: called.append(1) or None)
+    assert called, "the hook was not consulted on the permitting arm"
+    assert pushed, "a permitting hook did not reach the platform"

@@ -3195,7 +3195,17 @@ def _apply_structured_update(
     comp: IntegrationComponentSpec,
     built_xml: str,
     policy: Optional[PreservationPolicy],
+    on_pre_push=None,
 ) -> Dict[str, Any]:
+    """Read-merge-write one component, with a hook at the push itself.
+
+    ``on_pre_push`` runs immediately before the platform call and may return a
+    refusal envelope to abort the push. It exists because an update does real work
+    between the caller's decision to proceed and the submission — it materializes,
+    fetches the live component and merges — and a check made before all of that
+    can go stale during it, turning a preventable refusal into a retained
+    mutation. This is the boundary the plan names for exactly that reason.
+    """
     if policy is None:
         return {
             "write_attempted": False,
@@ -3259,6 +3269,17 @@ def _apply_structured_update(
     submitted_xml_digest = "sha256:" + hashlib.sha256(
         merged_xml.encode("utf-8")
     ).hexdigest()
+    if on_pre_push is not None:
+        # AFTER the merge and the digest, BEFORE the platform call. Everything the
+        # push depends on now exists, and nothing has been submitted — the only
+        # point where a refusal is both fully informed and still free.
+        _refusal = on_pre_push()
+        if _refusal is not None:
+            # `write_attempted: False` because nothing was sent. The caller's
+            # accounting reads this field, and an update that refuses here is
+            # exactly the case that must not be reported as a retained mutation.
+            _refusal.setdefault("write_attempted", False)
+            return _refusal
     try:
         boomi_client.component.update_component_raw(target_id, merged_xml)
     except Exception as exc:
@@ -8002,6 +8023,12 @@ def _execute_canonical_process(
     #: pre-write pass. Empty for every root that carries no replay evidence,
     #: which is every root until evidence is ingested.
     replay_grants=(),
+    #: Runs immediately before an UPDATE is pushed, after the live component has
+    #: been fetched and merged. A create needs no equivalent: it has nothing to
+    #: fetch, so the caller's just-in-time check is already adjacent to its
+    #: submission. An update does real work in between, and this is where a check
+    #: is both fully informed and still free to refuse.
+    on_pre_push=None,
 ) -> Dict[str, Any]:
     """Materialize and apply ONE canonical ProcessIR root, and attest it.
 
@@ -8254,6 +8281,7 @@ def _execute_canonical_process(
             _process_update_shim(envelope),
             xml,
             PROCESS_PRESERVATION_POLICY,
+            on_pre_push=on_pre_push,
         )
     else:
         # Digested immediately BEFORE the raw create call (§6 AR1-05c, plan §4
@@ -9369,6 +9397,10 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
                 # a root repeating the global check's components is not free but
                 # is bounded by the number of distinct components its grants name.
                 _root_replay_grants = _replay_bindings_by_root.get(key) or ()
+                # Falls back to the grants when no recheck ran (a dry run, or a
+                # root with no grants), so the attestation is never emptier than
+                # what the write actually relied on.
+                _root_replay_evidence = _root_replay_grants
                 if not dry_run and _root_replay_grants:
                     from ..connector_replay.recheck import (
                         live_identity_reader as _live_identity_reader,
@@ -9387,6 +9419,17 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
                         account_scope_hash=_replay_account_scope_hash(boomi_client),
                         boundary="pre_submission",
                     )
+                    # WHAT THE JIT RECHECK RESOLVED, kept for the ATTESTATION and
+                    # not substituted for the grants. The alternative to carrying it
+                    # is a second registry lookup at write time, and between the two
+                    # a row can rotate or be removed — so the durable record would
+                    # describe a registry state rather than the evidence that
+                    # actually authorised this write. Held in its own name because
+                    # the rechecks below still take grants: overwriting the grants
+                    # with these mappings made the post-submission recheck read a
+                    # digest off a dict, find no record, and refuse a healthy apply.
+                    if _jit.bindings:
+                        _root_replay_evidence = _jit.bindings
                     if not _jit.ok:
                         # THROUGH THE ONE CONSTRUCTOR, like every other failing exit
                         # from this loop. Returning a hand-built envelope here is the
@@ -9435,7 +9478,23 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
                     on_write_confirmed=_note_write,
                     precompiled_plan=precompiled_plans.get(key),
                     resolution=_resolution,
-                    replay_grants=_root_replay_grants,
+                    replay_grants=_root_replay_evidence,
+                    # THE UPDATE'S OWN BOUNDARY. The just-in-time check above runs
+                    # before this call, and an update then materializes, fetches
+                    # and merges before it submits — so identity that drifts during
+                    # that work turns a refusal the check could have made into a
+                    # retained mutation the post-submit check merely reports. The
+                    # plan names this callback for exactly that window.
+                    on_pre_push=(
+                        (lambda: _replay_pre_push_refusal(
+                            grants=_root_replay_grants,
+                            registry=_replay_registry,
+                            boomi_client=boomi_client,
+                            results=results,
+                        ))
+                        if _root_replay_grants and not dry_run
+                        else None
+                    ),
                 )
                 results[key] = outcome["result"]
                 if outcome.get("applied_name") and outcome.get("requested_name") and (
@@ -9600,6 +9659,23 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
                         _BUILD_REGISTRY[durable_build_id][
                             "process_readbacks"
                         ].append(outcome["readback"].model_dump(mode="json"))
+                if not outcome["result"].get("_success", True):
+                    return _partial_failure(
+                        error=outcome.get("error") or f"Failed at step '{key}'",
+                        failed_step=key,
+                        error_code=outcome.get("error_code"),
+                        step_result=outcome.get("step_result"),
+                    )
+
+                # AND AFTER THE STEP'S OWN FAILURE IS DECIDED. A proven no-write
+                # failure — an update whose pre-write fetch failed, carrying
+                # `write_attempted: False` — reached this block first and had its
+                # real error replaced by a reconciliation code that says "the
+                # result is retained", for a root that was refused and never
+                # submitted. That is the single worst thing this record can say,
+                # and it is the failure this whole slice exists to prevent, made by
+                # the slice itself.
+                #
                 # PLACED AFTER THE RECORD OF THE WRITE, not before it. The first
                 # version returned here directly after `results[key] = …`, roughly
                 # 165 lines above the appends that record what the write did — so
@@ -9656,13 +9732,6 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
                             # not answering the question at all is how it avoids that.
                             hint=_post_refusal["hint"],
                         )
-                if not outcome["result"].get("_success", True):
-                    return _partial_failure(
-                        error=outcome.get("error") or f"Failed at step '{key}'",
-                        failed_step=key,
-                        error_code=outcome.get("error_code"),
-                        step_result=outcome.get("step_result"),
-                    )
                 continue
 
             comp = _component_for_key(key, components_by_key)
@@ -10170,6 +10239,43 @@ def _verify_build(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]
             )
 
     return result
+
+
+def _replay_pre_push_refusal(*, grants, registry, boomi_client, results):
+    """Re-run the identity recheck at an update's push, or return ``None``.
+
+    Its own function because a lambda at the call site would put the whole check
+    inside an argument list, where the reason it exists cannot be written down.
+
+    Returns a served refusal on drift or unavailability, and `None` to proceed.
+    The refusal is built with `wrote_nothing` DERIVED from the loop's results, not
+    assumed: this fires before this component's push, but components ordered
+    earlier may already exist, and only the results know.
+    """
+    from ..connector_replay.recheck import (
+        live_identity_reader as _live_identity_reader,
+        recheck_grant_identities as _recheck_grants,
+    )
+
+    outcome = _recheck_grants(
+        grants=grants,
+        registry=registry,
+        live_identity=_live_identity_reader(
+            boomi_client,
+            read_component_xml=lambda _cid, _kind, _family=None: (
+                component_get_xml(boomi_client, _cid)
+            ),
+        ),
+        account_scope_hash=_replay_account_scope_hash(boomi_client),
+        boundary="pre_submission",
+    )
+    if outcome.ok:
+        return None
+    return _replay_recheck_refusal(
+        outcome,
+        wrote_nothing=not _anything_written(results),
+        partial_results=dict(results or {}),
+    )
 
 
 def _anything_written(results: Mapping[str, Any]) -> bool:

@@ -381,17 +381,33 @@ def build_mutation_attestation(
     # accounting record whose ordering depends on how a dict happened to iterate
     # is not a record anyone can compare, and comparison is the only thing a
     # mutation-accounting record is for.
+    def _field(source, name):
+        # The boundary hands over resolved MAPPINGS carrying the concrete evidence;
+        # older callers hand over grant objects. Both are read the same way rather
+        # than converted at the call sites, because a conversion in three places is
+        # three chances to convert differently.
+        if isinstance(source, Mapping):
+            return source.get(name)
+        return getattr(source, name, None)
+
     bindings = tuple(
         sorted(
             (
                 ConnectorReplayEvidenceBindingAttestationV1(
-                    contract_ref=g.contract_ref,
-                    operation_ref=g.operation_ref,
-                    call_source_path=g.call_source_path,
-                    record_digest=g.record_digest,
+                    contract_ref=_field(g, "contract_ref"),
+                    operation_ref=_field(g, "operation_ref"),
+                    call_source_path=_field(g, "call_source_path"),
+                    record_digest=_field(g, "record_digest"),
+                    account_scope_hash=_field(g, "account_scope_hash"),
+                    operation_component_id=_field(g, "operation_component_id"),
+                    operation_version=_field(g, "operation_version"),
+                    connection_component_id=_field(g, "connection_component_id"),
+                    connection_version=_field(g, "connection_version"),
+                    route_coverage_kind=_field(g, "route_coverage_kind"),
+                    capture_digest=_field(g, "capture_digest"),
                 )
                 for g in (replay_evidence_bindings or ())
-                if getattr(g, "record_digest", None)
+                if _field(g, "record_digest")
             ),
             key=lambda b: (b.contract_ref, b.operation_ref, b.call_source_path),
         )

@@ -3753,7 +3753,15 @@ def test_an_update_says_so_when_its_requested_folder_is_not_applied():
             return {"type": "process", "xml": elsewhere}
         return {"type": "connector-settings", "xml": _LIVE_COMPONENT_XML}
 
-    def _update(_client, _profile, _target, _comp, xml, _policy):
+    def _update(_client, _profile, _target, _comp, xml, _policy, on_pre_push=None):
+        # The real update takes a pre-push hook since #155 slice E, and a double
+        # that drops it hides whichever refusal the hook exists to make. Honoured
+        # here rather than merely accepted: if a caller passes one, it runs, and a
+        # refusal it returns is what this stand-in returns.
+        if on_pre_push is not None:
+            refusal = on_pre_push()
+            if refusal is not None:
+                return refusal
         return {"_success": True, "component_id": "existing-proc",
                 "submitted_xml": xml}
 

@@ -24,11 +24,19 @@ class _Identity:
 
 
 class _Record:
-    def __init__(self, digest, op, conn, scope="a" * 64):
+    # `contract_ref` and `route_coverage` are NOT optional on the real model
+    # (`OperationContractRecordV1`), and leaving them off a stand-in is how a
+    # fixture stops being able to exhibit what the code now checks: the recheck
+    # resolves a grant by the (digest, contract_ref) PAIR, because the loader
+    # dedupes contract refs and not digests.
+    def __init__(self, digest, op, conn, scope="a" * 64, contract_ref="$ref:C",
+                 route_coverage=None):
         self.record_digest = digest
+        self.contract_ref = contract_ref
         self.operation_identity = op
         self.connection_identity = conn
         self.account_scope_hash = scope
+        self.route_coverage = route_coverage
 
 
 class _Registry:
@@ -37,9 +45,12 @@ class _Registry:
 
 
 class _Grant:
-    def __init__(self, digest, contract_ref="$ref:C"):
+    def __init__(self, digest, contract_ref="$ref:C", dynamic_path=False,
+                 route_digest=None):
         self.record_digest = digest
         self.contract_ref = contract_ref
+        self.dynamic_path = dynamic_path
+        self.route_digest = route_digest
         self.operation_ref = "$ref:op"
         self.call_source_path = "/body/steps/0"
 
@@ -195,7 +206,7 @@ def test_two_grants_over_one_component_read_it_once():
         return _live()(component_id, kind, family)
 
     outcome = recheck_grant_identities(
-        grants=(_Grant(DIGEST), _Grant(DIGEST, contract_ref="$ref:C2")),
+        grants=(_Grant(DIGEST), _Grant(DIGEST)),
         registry=_registry(),
         live_identity=counting,
     )
@@ -265,8 +276,9 @@ def test_the_record_s_family_reaches_the_projection():
     class _FamiliedRegistry:
         operation_records = tuple(
             type("R", (), {**{k: getattr(r, k) for k in
-                             ("record_digest", "operation_identity",
-                              "connection_identity", "account_scope_hash")},
+                             ("record_digest", "contract_ref", "route_coverage",
+                              "operation_identity", "connection_identity",
+                              "account_scope_hash")},
                            "family": "database"})()
             for r in _registry().operation_records
         )
@@ -299,6 +311,8 @@ def test_one_component_read_under_two_families_is_two_readings():
     class _Rec:
         def __init__(self, family, digest_char):
             self.record_digest = digest_char * 64
+            self.contract_ref = "$ref:C" if digest_char == "1" else "$ref:C2"
+            self.route_coverage = None
             self.family = family
             self.account_scope_hash = "a" * 64
             cfg = f"ComponentConfigDigestV1:{family[0] * 64}"
@@ -319,3 +333,117 @@ def test_one_component_read_under_two_families_is_two_readings():
         "false digest drift: %r" % (seen,)
     )
     assert outcome.ok, (outcome.drifts, outcome.unavailable)
+
+
+class _StaticCoverage:
+    kind = "static_path"
+
+    def __init__(self, *digests):
+        self.route_digests = tuple(digests)
+
+
+class _ServiceWideCoverage:
+    kind = "service_wide"
+
+
+ROUTE = "RouteDigestV1:" + "7" * 64
+
+
+def test_a_dynamic_path_needs_service_wide_coverage():
+    """The check that was never written, and the closed field set hid it.
+
+    Every other comparison could match while the record covered a different route
+    entirely — or covered enumerated static routes while the call composes its path
+    per document. The models say it in as many words: a dynamically bound path has
+    no static digest that identifies it, so the evidence must be service-wide or it
+    does not exist. The compiler cannot check this because it has no live reading;
+    the ledger assigns it to this boundary, and nothing here read it.
+    """
+    registry = _Registry([
+        _Record(DIGEST, _Identity("op-1", 3, OP_CFG), _Identity("conn-1", 5, CONN_CFG),
+                route_coverage=_StaticCoverage(ROUTE))
+    ])
+    outcome = recheck_grant_identities(
+        grants=(_Grant(DIGEST, dynamic_path=True),),
+        registry=registry, live_identity=_live(),
+    )
+    assert [d["reason"] for d in outcome.drifts] == ["route_coverage"]
+
+    # The control: the SAME dynamic call against service-wide coverage passes, so
+    # the refusal is about coverage and not about dynamic paths as such.
+    ok = recheck_grant_identities(
+        grants=(_Grant(DIGEST, dynamic_path=True),),
+        registry=_Registry([
+            _Record(DIGEST, _Identity("op-1", 3, OP_CFG),
+                    _Identity("conn-1", 5, CONN_CFG),
+                    route_coverage=_ServiceWideCoverage())
+        ]),
+        live_identity=_live(),
+    )
+    assert ok.ok, (ok.drifts, ok.unavailable)
+
+
+def test_a_static_record_authorises_only_the_routes_it_enumerates():
+    """And a call whose route cannot be named is NOT thereby covered."""
+    registry = _Registry([
+        _Record(DIGEST, _Identity("op-1", 3, OP_CFG), _Identity("conn-1", 5, CONN_CFG),
+                route_coverage=_StaticCoverage(ROUTE))
+    ])
+    covered = recheck_grant_identities(
+        grants=(_Grant(DIGEST, route_digest=ROUTE),),
+        registry=registry, live_identity=_live(),
+    )
+    assert covered.ok, covered.drifts
+
+    other = "RouteDigestV1:" + "8" * 64
+    for label, grant in (
+        ("a route the record does not cover", _Grant(DIGEST, route_digest=other)),
+        ("a route this recheck cannot name", _Grant(DIGEST)),
+    ):
+        outcome = recheck_grant_identities(
+            grants=(grant,), registry=registry, live_identity=_live()
+        )
+        assert [d["reason"] for d in outcome.drifts] == ["route_coverage"], label
+    # And the route itself is never served — it is a path.
+    assert ROUTE not in repr(outcome.drifts)
+
+
+def test_two_records_sharing_a_digest_and_contract_are_refused_not_resolved():
+    """A grant names ONE record. Two candidates is not a tie to break silently.
+
+    The loader dedupes contract refs and does not reject duplicate digests, and a
+    dict comprehension over the digest keeps the last — so a grant minted for one
+    contract could be rechecked against another record entirely, and matching
+    identities on the wrong one would authorise a write the granted record no
+    longer covers.
+    """
+    twin = _Record(DIGEST, _Identity("op-1", 3, OP_CFG), _Identity("conn-1", 5, CONN_CFG))
+    outcome = recheck_grant_identities(
+        grants=(_Grant(DIGEST),),
+        registry=_Registry([twin, twin]),
+        live_identity=_live(),
+    )
+    assert not outcome.ok
+    assert outcome.unavailable["reason"] == "ambiguous_record"
+
+
+def test_a_soft_deleted_component_is_not_a_live_component():
+    """Boomi returns a deleted component with its original version and XML, and the
+    configuration digest projects nothing that moves with deletion — so every
+    comparison passes and the write proceeds against a component that is gone."""
+    for label, fetched in (
+        ("root attribute", {"xml": '<bns:Component deleted="true" version="3"/>',
+                            "version": 3}),
+        ("fetched metadata", {"xml": "<x/>", "version": 3, "deleted": True}),
+    ):
+        outcome = recheck_grant_identities(
+            grants=(_Grant(DIGEST),),
+            registry=_registry(),
+            live_identity=lambda c, k, f=None, _f=fetched: (
+                __import__("boomi_mcp.connector_replay.recheck", fromlist=["x"])
+                .live_identity_reader(None, read_component_xml=lambda *a, **kw: _f)(c, k, f)
+            ),
+        )
+        assert not outcome.ok, label
+        assert outcome.unavailable["reason"] == "component_deleted", label
+        assert "DELETED" in outcome.unavailable["detail"], label
