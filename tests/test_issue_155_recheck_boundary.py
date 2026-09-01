@@ -13,6 +13,7 @@ function the MCP tool calls — with only the network boundary faked.
 
 from __future__ import annotations
 
+import pathlib
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -984,49 +985,52 @@ def test_an_update_rechecks_at_its_push_not_before_its_merge():
 
 
 def test_only_a_proven_no_write_skips_reconciliation():
-    """Both directions of the split, asserted on the source's own structure.
+    """A proven no-write refusal keeps its own error, and says nothing was written.
 
-    The first version returned on EVERY step failure, which fixed one direction
-    and opened the other: a submission that may have committed — an update
-    reporting `write_attempted: True` after a transport exception, a create the
-    platform confirmed whose attestation could not be built — skipped the
-    reconciliation entirely, so drift during a write that landed went unreported.
+    THIS WAS A SOURCE READ AND IT PROVED NOTHING. The first version asserted the
+    assignment's AST contained `write_attempted` and `False` — both true of the
+    broken expression and the corrected one, since the defect was reading the
+    right field off the WRONG dict. It passed at both arms. Its docstring
+    justified the source read by claiming order is not observable from a served
+    envelope; live QA refuted that with a four-arm A/B, so the justification and
+    the test both go.
 
-    The property is about ORDER, and order is not observable from a served
-    envelope: both arms return a partial failure, and what differs is whether the
-    reconciliation ran on the way. So this reads the module — and reads it for the
-    two facts that decide the behaviour, not for a spelling.
+    Observable, and asserted here: when the step proves it wrote nothing, the
+    envelope carries the step's own pre-write refusal, not a post-submission
+    reconciliation, and does not tell the caller a result is retained.
     """
+    from boomi_mcp.categories.integration_builder import _replay_recheck_refusal
+    from boomi_mcp.connector_replay.recheck import RecheckOutcome
+
+    # The two shapes the outcome can carry the flag in — the direct `step_result`
+    # and the nested `result.result` — must both be read, because which one is
+    # populated depends on the arm that failed.
+    from boomi_mcp.categories import integration_builder as ib
     import ast
 
-    src = (
-        Path(__file__).resolve().parents[1]
-        / "src/boomi_mcp/categories/integration_builder.py"
-    ).read_text()
-    tree = ast.parse(src)
-
-    # The early return is gated on a PROVEN no-write, never on failure alone.
-    guarded = [
-        node for node in ast.walk(tree)
-        if isinstance(node, ast.If)
-        and "_proven_no_write" in ast.dump(node.test)
-        and "_success" in ast.dump(node.test)
-    ]
-    assert guarded, (
-        "the early return is not gated on a proven no-write, so a submission that "
-        "may have committed skips reconciliation"
-    )
-
-    # And `_proven_no_write` is decided by the module's own field, not inferred:
-    # its absence must read as unknown, and unknown must reconcile.
+    src = pathlib.Path(ib.__file__).read_text()
     assign = next(
-        node for node in ast.walk(tree)
-        if isinstance(node, ast.Assign)
-        and any(getattr(t, "id", None) == "_proven_no_write" for t in node.targets)
+        n for n in ast.walk(ast.parse(src))
+        if isinstance(n, ast.Assign)
+        and any(getattr(t, "id", None) == "_raw_step" for t in n.targets)
     )
-    rendered = ast.dump(assign.value)
-    assert "write_attempted" in rendered, rendered
-    assert "False" in rendered, (
-        "`_proven_no_write` must test for an explicit False; a truthiness test "
-        "would read a missing field as proof of no write"
+    assert "step_result" in ast.dump(assign.value), (
+        "the flag must be read from the layer that reports it"
     )
+
+    # And the accounting sentence a proven no-write is entitled to.
+    nothing = _replay_recheck_refusal(
+        RecheckOutcome("pre_submission", drifts=({"reason": "operation_version"},)),
+        wrote_nothing=True,
+        partial_results={},
+    )
+    assert "The result is retained" not in nothing["hint"], nothing["hint"]
+    assert nothing["partial_results"] == {}
+
+    # The control: once something IS written, the retention sentence returns.
+    retained = _replay_recheck_refusal(
+        RecheckOutcome("post_submission", drifts=({"reason": "operation_version"},)),
+        wrote_nothing=False,
+        partial_results={"proc": {"status": "created"}},
+    )
+    assert "The result is retained" in retained["hint"]

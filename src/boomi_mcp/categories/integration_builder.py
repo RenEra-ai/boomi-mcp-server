@@ -9669,7 +9669,25 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
                 # module's own field for this and is trusted where it is present;
                 # its absence means unknown, and unknown reconciles.
                 _step_result = outcome.get("result") or {}
-                _proven_no_write = _step_result.get("write_attempted") is False
+                # THE RAW STEP RESULT CARRIES THE FLAG, not the wrapper. The step
+                # function reports `write_attempted` on `exec_result`, which this
+                # outcome surfaces as `step_result`; the wrapper under `result`
+                # carries only the served envelope. Reading the wrapper meant the
+                # flag was NEVER seen, `_proven_no_write` was always False, and a
+                # genuine pre-write refusal could still be overwritten by a
+                # post-submission reconciliation error claiming a result was
+                # retained — which is the defect the previous round fixed,
+                # reintroduced one layer off by reading the wrong dict.
+                _raw_step = outcome.get("step_result")
+                if not isinstance(_raw_step, dict):
+                    # The nested form the wrapper carries for some arms, checked
+                    # second so the direct one wins when both exist.
+                    _raw_step = _step_result.get("result")
+                _raw_step = _raw_step if isinstance(_raw_step, dict) else {}
+                _proven_no_write = (
+                    _raw_step.get("write_attempted") is False
+                    or _step_result.get("write_attempted") is False
+                )
                 if not _step_result.get("_success", True) and _proven_no_write:
                     return _partial_failure(
                         error=outcome.get("error") or f"Failed at step '{key}'",
