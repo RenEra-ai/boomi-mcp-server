@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 11413, "minimum_collected": 11413, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 11421, "minimum_collected": 11421, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -11451,6 +11451,15 @@
 {"kind": "test", "id": "pytest-011450", "node_id": "tests/test_issue_155_recheck.py::test_one_component_read_under_two_families_is_two_readings", "state": "active"}
 {"kind": "test", "id": "pytest-011451", "node_id": "tests/test_issue_155_recheck_boundary.py::test_a_projection_gap_does_not_survive_as_a_remediation_that_cannot_work", "state": "active"}
 {"kind": "test", "id": "pytest-011452", "node_id": "tests/test_issue_155_recheck_boundary.py::test_a_failing_exit_never_reports_a_write_as_both_attested_and_pending", "state": "active"}
-{"kind": "test", "id": "pytest-011453", "node_id": "tests/test_issue_155_recheck_boundary.py::test_every_exit_that_serves_confirmed_writes_derives_them_the_same_way", "state": "active"}
+{"kind": "test", "id": "pytest-011453", "node_id": "tests/test_issue_155_recheck_boundary.py::test_every_exit_that_serves_confirmed_writes_derives_them_the_same_way", "state": "tombstone"}
 {"kind": "test", "id": "pytest-011454", "node_id": "tests/test_issue_155_recheck_boundary.py::test_a_projection_gap_over_a_retained_write_still_says_it_is_retained", "state": "active"}
 {"kind": "test", "id": "pytest-011455", "node_id": "tests/test_issue_155_recheck_boundary.py::test_an_unreadable_account_is_not_reported_as_a_mismatch", "state": "active"}
+{"kind": "test", "id": "pytest-011456", "node_id": "tests/test_issue_155_recheck_boundary.py::test_no_exit_serves_a_write_as_both_attested_and_pending", "state": "active"}
+{"kind": "test", "id": "pytest-011457", "node_id": "tests/test_issue_155_recheck_boundary.py::test_every_refusal_states_its_cause_and_states_retention_only_when_retained[True-projection gap-unavailable0-None]", "state": "active"}
+{"kind": "test", "id": "pytest-011458", "node_id": "tests/test_issue_155_recheck_boundary.py::test_every_refusal_states_its_cause_and_states_retention_only_when_retained[True-unreadable account-unavailable1-None]", "state": "active"}
+{"kind": "test", "id": "pytest-011459", "node_id": "tests/test_issue_155_recheck_boundary.py::test_every_refusal_states_its_cause_and_states_retention_only_when_retained[True-missing record-unavailable2-None]", "state": "active"}
+{"kind": "test", "id": "pytest-011460", "node_id": "tests/test_issue_155_recheck_boundary.py::test_every_refusal_states_its_cause_and_states_retention_only_when_retained[True-real drift-None-drifts3]", "state": "active"}
+{"kind": "test", "id": "pytest-011461", "node_id": "tests/test_issue_155_recheck_boundary.py::test_every_refusal_states_its_cause_and_states_retention_only_when_retained[False-projection gap-unavailable0-None]", "state": "active"}
+{"kind": "test", "id": "pytest-011462", "node_id": "tests/test_issue_155_recheck_boundary.py::test_every_refusal_states_its_cause_and_states_retention_only_when_retained[False-unreadable account-unavailable1-None]", "state": "active"}
+{"kind": "test", "id": "pytest-011463", "node_id": "tests/test_issue_155_recheck_boundary.py::test_every_refusal_states_its_cause_and_states_retention_only_when_retained[False-missing record-unavailable2-None]", "state": "active"}
+{"kind": "test", "id": "pytest-011464", "node_id": "tests/test_issue_155_recheck_boundary.py::test_every_refusal_states_its_cause_and_states_retention_only_when_retained[False-real drift-None-drifts3]", "state": "active"}

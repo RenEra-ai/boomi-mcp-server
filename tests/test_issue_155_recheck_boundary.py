@@ -643,49 +643,102 @@ def test_a_failing_exit_never_reports_a_write_as_both_attested_and_pending():
     )
 
 
-def test_every_exit_that_serves_confirmed_writes_derives_them_the_same_way():
-    """One sentence, one definition — asserted over the exits, not over one of them.
+def test_no_exit_serves_a_write_as_both_attested_and_pending():
+    """The PROPERTY the exits owe, not the spelling they happen to use.
 
-    The module served confirmed-write notes from THREE exits: the success exit
-    derived the unattested ones, the returned-failure exit served the raw list,
-    and the exception exit still did after the first fix. Fixing the reported site
-    and leaving its sibling is the same defect with a smaller blast radius, which
-    is what live QA found within one round. Derived by parsing the module rather
-    than by naming the three exits, so a fourth cannot be added quietly.
+    The first version of this guard parsed the module for
+    ``envelope["process_writes"] = …`` and required the shared derivation on the
+    right-hand side. Live QA graded it with fourteen mutants and killed six —
+    including ``_notes = list(process_writes)`` followed by the assignment, which
+    is the house style all three real exits use, and a `_partial_failure(
+    process_writes=…)` call whose ``**extra`` bag reaches ``envelope.update``
+    with no subscript anywhere. Its docstring claimed a fourth exit could not be
+    added quietly; six spellings could.
+
+    A guard over a spelling is an enumeration of the ways to write something, and
+    this issue has recorded that class more than any other. What the exits owe is
+    one sentence: a write is either attested or awaiting attestation, never both.
+    That is checkable on the SERVED ENVELOPE, so it is checked there — on every
+    exit this suite can reach, in the form a caller actually sees.
+
+    COVERAGE, stated with its limit: the returned-failure and exception exits are
+    driven live below; the success exit's unattested set is unreachable through
+    the public boundary by construction (an attestation is appended for every
+    confirmed write on that path) and is graded by direct call. A new exit is
+    covered by this test only if it is reachable from one of these; the honest
+    claim is the property, not exhaustiveness over future code.
     """
-    import ast
+    def _matching(component_id, _kind=None, _family=None):
+        return {"type": "connector-settings", "xml": _LIVE_XML, "version": 1}
 
-    src = (
-        Path(__file__).resolve().parents[1]
-        / "src/boomi_mcp/categories/integration_builder.py"
-    ).read_text()
-    tree = ast.parse(src)
+    result, _created, _reads = _apply_with_a_grant_drifting_at(drift_after_reads=4)
+    if result.get("error_code") == "CONNECTOR_REPLAY_POST_SUBMISSION_RECONCILIATION_DRIFT":
+        attested = {m.get("component_key") for m in (result.get("process_mutations") or [])}
+        pending = {n.get("component_key") for n in (result.get("process_writes") or [])}
+        assert attested, "no attestation survived the refusal"
+        assert not (attested & pending), (attested, pending)
 
-    assigns = [
-        node for node in ast.walk(tree)
-        if isinstance(node, ast.Subscript)
-        and isinstance(node.value, ast.Name)
-        and node.value.id in ("envelope", "evidence", "apply_result")
-        and isinstance(node.slice, ast.Constant)
-        and node.slice.value == "process_writes"
-    ]
-    assert len(assigns) >= 3, (
-        "expected every exit that serves confirmed writes to be visible here; "
-        "found %d" % len(assigns)
+    # The DERIVATION itself, over the shapes the three exits pass it: models at
+    # two call sites, dumps at the third. QA measured these agreeing; this pins it.
+    from boomi_mcp.categories.integration_builder import _unattested_write_notes
+
+    class _M:
+        component_key = "proc1"
+
+    notes = [{"component_key": "proc1"}, {"component_key": "proc2"}]
+    as_models = _unattested_write_notes(notes, [_M()])
+    as_dumps = _unattested_write_notes(notes, [{"component_key": "proc1"}])
+    assert as_models == as_dumps == [{"component_key": "proc2"}], (as_models, as_dumps)
+    # And the empty cases, which decide whether an exit serves the key at all.
+    assert _unattested_write_notes([], [_M()]) == []
+    assert _unattested_write_notes(notes, []) == notes
+
+
+#: THE WHOLE CAUSE AXIS, and it has FOUR values, not the three the first version
+#: of this matrix assumed: the recheck also mints a missing-record shape carrying
+#: a `subject` and NO `reason` key. Live QA found it while grading the composed
+#: hint — the fix for the opening sentence happened to cover it and the fix for
+#: the hint did not, which is exactly the kind of gap an incomplete axis leaves.
+_HINT_CAUSES = (
+    ("projection gap", {"reason": "projection_unsupported", "detail": "d"}, None),
+    ("unreadable account", {"reason": "account_unreadable", "detail": "d"}, None),
+    ("missing record", {"subject": "operation_record", "detail": "d"}, None),
+    ("real drift", None, ({"reason": "operation_version"},)),
+)
+
+
+@pytest.mark.parametrize("label,unavailable,drifts", _HINT_CAUSES)
+@pytest.mark.parametrize("wrote_nothing", (True, False))
+def test_every_refusal_states_its_cause_and_states_retention_only_when_retained(
+    label, unavailable, drifts, wrote_nothing
+):
+    """Two independent facts, composed — over the FULL matrix, not a corner of it.
+
+    The hint was rebuilt to compose the cause and the retention statement instead
+    of branching between them, and the rebuild composed only the retention half:
+    the cause sentence stayed gated on `wrote_nothing` for every cause but the
+    projection gap, so six of sixteen combinations carried no cause at all. A real
+    drift over a retained write told the caller what to reconcile and nothing
+    about the drift. Measured by QA at both arms and identical, so it was
+    pre-existing rather than introduced — and still wrong.
+    """
+    from boomi_mcp.categories.integration_builder import _replay_recheck_refusal
+    from boomi_mcp.connector_replay.recheck import RecheckOutcome
+
+    outcome = RecheckOutcome(
+        "pre_submission" if wrote_nothing else "post_submission",
+        drifts=drifts or (),
+        unavailable=unavailable,
     )
+    hint = _replay_recheck_refusal(
+        outcome, wrote_nothing=wrote_nothing, partial_results={}
+    )["hint"]
 
-    # Each one must be fed by the shared derivation, never by a fresh list of the
-    # raw notes.
-    for node in assigns:
-        parent = next(
-            p for p in ast.walk(tree)
-            if isinstance(p, ast.Assign) and any(t is node for t in p.targets)
-        )
-        served = ast.dump(parent.value)
-        assert "process_writes" not in served or "_unattested" in served, (
-            "an exit serves the raw confirmed-write notes rather than the "
-            "derived unattested ones: %s" % ast.get_source_segment(src, parent)
-        )
+    stated_cause = ("cannot project" in hint) or ("Recompile" in hint)
+    assert stated_cause, f"{label} / wrote_nothing={wrote_nothing} states no cause: {hint!r}"
+    assert ("The result is retained" in hint) is (not wrote_nothing), hint
+    # Exactly ONE cause sentence — composing two facts must not double the first.
+    assert hint.count("Recompile") + hint.count("cannot project") == 1, hint
 
 
 def test_a_projection_gap_over_a_retained_write_still_says_it_is_retained():

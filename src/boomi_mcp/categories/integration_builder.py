@@ -9347,6 +9347,16 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
                     record = _BUILD_REGISTRY.get(durable_build_id)
                     if record is None:
                         return
+                    # THE RECORD KEEPS EVERY NOTE, and that is deliberate — it is
+                    # the write log, not the response, and a note is appended the
+                    # instant a write is confirmed, before any attestation exists.
+                    # Filtering here would drop the very evidence the log is for.
+                    # What must not happen is the RECORD and the ENVELOPE
+                    # disagreeing about the same component, so the readers that
+                    # SERVE from this record derive the unattested set exactly as
+                    # the envelope does. Live QA verified no reader touches the raw
+                    # key today; this comment is what keeps that true on purpose
+                    # rather than by luck.
                     record.setdefault("process_writes", []).append(note)
 
                 # THE JUST-IN-TIME RECHECK, immediately before THIS submission.
@@ -10297,6 +10307,14 @@ def _replay_recheck_refusal(
             part
             for part in (
                 (
+                    # THE CAUSE SENTENCE IS ALWAYS EMITTED. It used to be gated on
+                    # `wrote_nothing` for every cause but the projection gap, so a
+                    # real drift over a RETAINED write told the caller what to
+                    # reconcile and never what to do about the drift itself — six
+                    # of sixteen combinations carried no cause at all, measured.
+                    # Whether a component was written and what went wrong are the
+                    # two independent facts this hint was rebuilt to compose; the
+                    # first rebuild composed only one of them.
                     "This server cannot project that component's configuration "
                     "for comparison, so the replay contract cannot be checked. "
                     "Neither re-authoring nor re-ingesting evidence changes that "
@@ -10304,8 +10322,6 @@ def _replay_recheck_refusal(
                     if projection_gap
                     else "Recompile against the current components, or ingest "
                     "evidence for them, before retrying this write."
-                    if wrote_nothing
-                    else None
                 ),
                 (
                     None
