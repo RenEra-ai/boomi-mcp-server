@@ -4447,7 +4447,13 @@ def _assert_legal_manifest_successor(gate, at_head, current, landing_of):
     }
     removed = ({row["node_id"] for row in at_head.rows}
                - {row["node_id"] for row in current.rows})
-    if removed != born_tombstoned:
+    # SUBSET, not equality. A born-tombstoned identity the tree brings BACK is
+    # removed from nothing — the wave gate accepts it as an ordinary active
+    # append — and requiring equality refused that legal regeneration. What must
+    # hold is only that nothing OUTSIDE the removable set disappears, which is
+    # also what keeps an active identity from vanishing: a born-tombstone is by
+    # construction not active at HEAD.
+    if not removed <= born_tombstoned:
         raise AssertionError(
             "the regeneration removed identities the wave gate does not require "
             "it to remove, so this is not the repair it claims to be: removed "
@@ -4538,27 +4544,10 @@ def test_the_node_manifest_is_a_legal_successor_of_the_one_it_replaces():
             "the authority accepted a repointed node id, so this guard proves nothing"
         )
 
-    # NON-VACUITY FOR THE WAIVER ITSELF: a tree that is illegal at the landing base
-    # gets no waiver, whatever HEAD looks like. Without this the waiver would be a
-    # hole shaped exactly like the rule it protects.
-    landing = at("origin/dev")
-    assert landing is not None
-    at_landing = gate.parse_manifest(landing, "pytest-nodes")
-    broken = [dict(r) for r in current.rows]
-    broken[0]["node_id"] = broken[0]["node_id"] + "-repointed"
-    try:
-        gate.validate_transition(
-            at_landing,
-            gate.Manifest("pytest-nodes", dict(current.header), broken),
-            "pytest-nodes",
-        )
-    except gate.GateFailure as exc:
-        assert exc.code == "MANIFEST_TRANSITION_ILLEGAL", exc.code
-    else:
-        raise AssertionError(
-            "the landing-base check accepted a repointed id, so the waiver's own "
-            "condition proves nothing"
-        )
+    # The waiver's own arms are witnessed on SYNTHETIC manifests in the test
+    # below. They used to be checked here against `origin/dev`, which reintroduced
+    # exactly the defect the thunk removed: a clone without that ref went red on
+    # the strict path, where no landing base is needed at all.
 
 
 def test_the_successor_waiver_only_excuses_a_repair_that_is_real():
@@ -4649,7 +4638,32 @@ def test_the_successor_waiver_only_excuses_a_repair_that_is_real():
         gate, head_mixed, keeps_active, of_landing
     ) == "waived"
 
-    # ARM FIVE — the ordinary case takes the strict path and never resolves the
+    # ARM FIVE — a born-tombstoned identity the tree BRINGS BACK. The wave gate
+    # takes it as an ordinary active append and nothing is lost, so the waiver
+    # must permit it. An earlier version required the removed set to EQUAL the
+    # removable one and refused this outright, which would have blocked a legal
+    # regeneration the day a deleted test came back under its own name.
+    reactivated = manifest([row(1, "a"), row(2, "b"), row(3, "c")])
+    assert _assert_legal_manifest_successor(
+        gate, head_illegal, reactivated, of_landing
+    ) == "waived"
+
+    # ARM SIX — a repoint is still refused on the waiver path, so the waiver's
+    # own landing-base check is not decorative. Checked here on synthetic
+    # manifests rather than against the real landing ref, because resolving that
+    # ref outside the waiver path is the fresh-clone defect itself.
+    repointed = manifest([row(1, "a"), row(2, "zz")])
+    try:
+        _assert_legal_manifest_successor(gate, head_illegal, repointed, of_landing)
+    except gate.GateFailure as exc:
+        assert exc.code == "MANIFEST_TRANSITION_ILLEGAL", exc.code
+    else:
+        raise AssertionError(
+            "the waiver accepted a repointed identity, so its landing-base check "
+            "proves nothing"
+        )
+
+    # ARM SEVEN — the ordinary case takes the strict path and never resolves the
     # landing base at all, which is what keeps a clone lacking that ref green.
     def _must_not_be_called():
         raise AssertionError("the landing base was resolved on the strict path")
