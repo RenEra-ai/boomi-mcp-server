@@ -1,0 +1,8 @@
+wave_gate: baseline 55546fb9ba6c3509b18b3d67f970edad35bec164 (local)
+wave_gate: manifests ok (11433 required nodes, 74 active goldens)
+wave_gate: collection ok (11433 tests)
+11415 passed, 18 skipped, 18 warnings in 911.44s (0:15:11)
+wave_gate: non-KB suite green (11415 passed, 18 skipped, cap 30)
+wave_gate: 74 active goldens deterministic and byte-exact
+wave_gate: plan fingerprint checked:2 case(s)
+exit status: 0
