@@ -1326,6 +1326,8 @@ _UNROWED = {"DC-155-C": 2, "DC-155-I": 1}
 #: the reason. Frozen so the set cannot grow silently: a row that names a class is an
 #: instance of it unless it appears here.
 _NOT_AN_INSTANCE = {
+    "CDX-155-r148-01a": "a REVISION supplying the disposition the original lacked, "
+    "not a second defect — the class row counts the original once",
     "CDX-155-r144-02a": "a REVISION narrowing an overstated resolution, not a second "
     "defect — the class row counts the original once",
     "QA-155-r66-03a": "a REVISION correcting an identifier, not a second defect — the row's "
@@ -4400,12 +4402,14 @@ def _node_manifest_gate():
     return module, root
 
 
-def _assert_legal_manifest_successor(gate, at_head, current, landing_of):
+def _assert_legal_manifest_successor(gate, at_head, current, landing_of, ranks_of):
     """The successor rule, plus the one waiver the wave gate forces.
 
-    ``landing_of`` is a THUNK, resolved only on the waiver path. Resolving it up
-    front made a clone without that ref go red on a tree that needed no waiver at
-    all — a guard failing for a reason unrelated to what it checks.
+    ``landing_of`` and ``ranks_of`` are THUNKS, resolved only on the waiver path.
+    Resolving the first up front made a clone without that ref go red on a tree
+    that needed no waiver at all — a guard failing for a reason unrelated to what
+    it checks — and the second costs a full collection, which no tree taking the
+    strict path should pay.
 
     Extracted from the test so every arm can be driven with synthetic manifests.
     Inline, the arms could only be reasoned about, and this slice's record is a
@@ -4458,6 +4462,31 @@ def _assert_legal_manifest_successor(gate, at_head, current, landing_of):
             "the regeneration removed identities the wave gate does not require "
             "it to remove, so this is not the repair it claims to be: removed "
             "{0}, removable {1}".format(sorted(removed), sorted(born_tombstoned))
+        )
+    # AND THE BLOCK IT REWRITES MUST BE IN COLLECTION ORDER. Everything above is
+    # decided from three manifests, and three manifests cannot tell a legal
+    # reordering from a repoint: the closing regeneration re-derives the appended
+    # block in collection order while the committed one accumulated it in the
+    # order tests were added, so the two genuinely differ and every rule keyed on
+    # the committed order refuses the legal case — measured, 47 mismatches
+    # against the real regeneration. The authority that DOES separate them is the
+    # collection itself, and it is the one thing the earlier version never asked.
+    ranks = ranks_of()
+    appended = [row["node_id"] for row in current.rows[len(at_landing.rows):]]
+    unknown = [node for node in appended if node not in ranks]
+    if unknown:
+        raise AssertionError(
+            "the regeneration appended identities this tree does not collect, so "
+            "their order cannot be checked against anything: {0}".format(unknown)
+        )
+    order = [ranks[node] for node in appended]
+    inversions = [(appended[i], appended[i + 1])
+                  for i in range(len(order) - 1) if order[i] >= order[i + 1]]
+    if inversions:
+        raise AssertionError(
+            "the appended block is not in collection order, so at least one "
+            "identifier was repointed rather than re-derived: {0}".format(
+                inversions[:3])
         )
     return "waived"
 
@@ -4514,6 +4543,28 @@ def test_the_node_manifest_is_a_legal_successor_of_the_one_it_replaces():
         raw = at("origin/dev")
         return gate.parse_manifest(raw, "pytest-nodes") if raw is not None else None
 
+    def ranks_of():
+        """The tree's own collection order — the authority the manifests lack.
+
+        A full collection, which is why it is a thunk: only a regeneration that
+        already failed the strict transition pays for it.
+        """
+        import os
+        import sys
+
+        out = subprocess.run(
+            [sys.executable, "-m", "pytest", "tests", "--ignore=tests/kb",
+             "--collect-only", "-q", "-p", "no:cacheprovider", "-p", "no:randomly"],
+            capture_output=True, text=True, cwd=root,
+            env={**os.environ, "PYTHONPATH": "src", "PYTHONDONTWRITEBYTECODE": "1",
+                 "BOOMI_LOCAL": "true", "BOOMI_DOCS_ENABLED": "false",
+                 "BOOMI_GOTCHAS_ENABLED": "false"},
+        )
+        assert out.returncode == 0, f"collection failed: {out.stderr[-400:]}"
+        nodes = [ln.strip() for ln in out.stdout.splitlines() if "::" in ln.strip()]
+        assert len(nodes) > 1000, f"only {len(nodes)} nodes collected; too thin to rank"
+        return {node: position for position, node in enumerate(nodes)}
+
     # A test created and retired inside one slice leaves a row that was APPENDED
     # ALREADY TOMBSTONED at the landing base, and the wave gate refuses exactly
     # that — "a row added and removed within the same range needs no row at all".
@@ -4521,7 +4572,9 @@ def test_the_node_manifest_is_a_legal_successor_of_the_one_it_replaces():
     # repoint and is what this guard otherwise exists to stop. The two rules meet
     # head-on at the close, and the gate's base transition is the one that will
     # actually judge the landing.
-    _assert_legal_manifest_successor(gate, at_head, current, landing_of)
+    _assert_legal_manifest_successor(
+        gate, at_head, current, landing_of, ranks_of
+    )
 
     # NON-VACUITY, against this very manifest: repoint one live row exactly as the
     # baseline-restore regeneration did, and the authority must refuse it. Without
@@ -4578,18 +4631,23 @@ def test_the_successor_waiver_only_excuses_a_repair_that_is_real():
 
     landing = manifest([row(1, "a"), row(2, "b")])
     of_landing = lambda: landing
+    # The collection order these synthetic nodes would have. It is the authority
+    # that separates a legal re-derivation of the appended block from a repoint,
+    # and passing it explicitly is what lets both be driven here.
+    of_ranks = lambda: {"a": 0, "b": 1, "c": 2, "d": 3}
 
     # ARM ONE — the closing regeneration.
     head_illegal = manifest([row(1, "a"), row(2, "b"), row(3, "c", "tombstone")])
     repaired = manifest([row(1, "a"), row(2, "b")])
     assert _assert_legal_manifest_successor(
-        gate, head_illegal, repaired, of_landing
+        gate, head_illegal, repaired, of_landing, of_ranks
     ) == "waived"
 
     # ARM TWO — nothing to repair, so nothing is excused.
     head_legal = manifest([row(1, "a"), row(2, "b"), row(3, "c")])
     try:
-        _assert_legal_manifest_successor(gate, head_legal, repaired, of_landing)
+        _assert_legal_manifest_successor(
+            gate, head_legal, repaired, of_landing, of_ranks)
     except AssertionError as exc:
         assert "repairs nothing" in str(exc), exc
     else:
@@ -4606,7 +4664,7 @@ def test_the_successor_waiver_only_excuses_a_repair_that_is_real():
     ])
     try:
         _assert_legal_manifest_successor(
-            gate, head_illegal, tree_also_illegal, of_landing
+            gate, head_illegal, tree_also_illegal, of_landing, of_ranks
         )
     except gate.GateFailure as exc:
         assert exc.code == "MANIFEST_TRANSITION_ILLEGAL", exc.code
@@ -4625,7 +4683,8 @@ def test_the_successor_waiver_only_excuses_a_repair_that_is_real():
     ])
     drops_both = manifest([row(1, "a"), row(2, "b")])
     try:
-        _assert_legal_manifest_successor(gate, head_mixed, drops_both, of_landing)
+        _assert_legal_manifest_successor(
+            gate, head_mixed, drops_both, of_landing, of_ranks)
     except AssertionError as exc:
         assert "does not require it to remove" in str(exc), exc
     else:
@@ -4635,7 +4694,7 @@ def test_the_successor_waiver_only_excuses_a_repair_that_is_real():
     # ...while dropping ONLY the tombstone, keeping the active row, is the repair.
     keeps_active = manifest([row(1, "a"), row(2, "b"), row(3, "d")])
     assert _assert_legal_manifest_successor(
-        gate, head_mixed, keeps_active, of_landing
+        gate, head_mixed, keeps_active, of_landing, of_ranks
     ) == "waived"
 
     # ARM FIVE — a born-tombstoned identity the tree BRINGS BACK. The wave gate
@@ -4645,7 +4704,7 @@ def test_the_successor_waiver_only_excuses_a_repair_that_is_real():
     # regeneration the day a deleted test came back under its own name.
     reactivated = manifest([row(1, "a"), row(2, "b"), row(3, "c")])
     assert _assert_legal_manifest_successor(
-        gate, head_illegal, reactivated, of_landing
+        gate, head_illegal, reactivated, of_landing, of_ranks
     ) == "waived"
 
     # ARM SIX — a repoint is still refused on the waiver path, so the waiver's
@@ -4654,7 +4713,8 @@ def test_the_successor_waiver_only_excuses_a_repair_that_is_real():
     # ref outside the waiver path is the fresh-clone defect itself.
     repointed = manifest([row(1, "a"), row(2, "zz")])
     try:
-        _assert_legal_manifest_successor(gate, head_illegal, repointed, of_landing)
+        _assert_legal_manifest_successor(
+            gate, head_illegal, repointed, of_landing, of_ranks)
     except gate.GateFailure as exc:
         assert exc.code == "MANIFEST_TRANSITION_ILLEGAL", exc.code
     else:
@@ -4663,14 +4723,63 @@ def test_the_successor_waiver_only_excuses_a_repair_that_is_real():
             "proves nothing"
         )
 
-    # ARM SEVEN — the ordinary case takes the strict path and never resolves the
-    # landing base at all, which is what keeps a clone lacking that ref green.
+    # ARM SEVEN — THE REVIEWER'S CASE, and the one that had no disposition until
+    # the collection order was brought in. HEAD appends a tombstone and an active
+    # row; the tree swaps those two positions. Nothing is removed, so the subset
+    # rule passes, and the landing-base transition is legal, so the wave gate
+    # cannot see it either — yet both identifiers now name different tests. Only
+    # the collection order separates it from the reordering the closing
+    # regeneration legitimately performs.
+    head_swappable = manifest([
+        row(1, "a"), row(2, "b"), row(3, "c", "tombstone"), row(4, "d"),
+    ])
+    swapped = manifest([row(1, "a"), row(2, "b"), row(3, "d"), row(4, "c")])
+    try:
+        _assert_legal_manifest_successor(
+            gate, head_swappable, swapped, of_landing, of_ranks)
+    except AssertionError as exc:
+        assert "not in collection order" in str(exc), exc
+    else:
+        raise AssertionError(
+            "a swap inside the appended block was waived, so two identifiers "
+            "silently changed which test they name"
+        )
+    # ...and the same block IN collection order is the legal re-derivation.
+    in_order = manifest([row(1, "a"), row(2, "b"), row(3, "c"), row(4, "d")])
+    assert _assert_legal_manifest_successor(
+        gate, head_swappable, in_order, of_landing, of_ranks
+    ) == "waived"
+
+    # ARM EIGHT — an appended identity this tree does not collect. Its order
+    # cannot be checked against anything, so it is refused rather than skipped:
+    # an unrankable row would otherwise slip past the order rule silently, which
+    # is how a check quietly stops covering the row it was written for.
+    # Nothing removed — `ghost` is APPENDED beside the survivors, so the subset
+    # rule passes and only the rank lookup can object. The first version of this
+    # arm replaced `d` instead of adding to it, which made the subset rule fire
+    # first and left the check it was written for ungraded.
+    ghost = manifest([row(1, "a"), row(2, "b"), row(3, "c"), row(4, "d"),
+                      row(5, "ghost")])
+    try:
+        _assert_legal_manifest_successor(
+            gate, head_swappable, ghost, of_landing, of_ranks)
+    except AssertionError as exc:
+        assert "does not collect" in str(exc), exc
+    else:
+        raise AssertionError(
+            "an identity absent from the collection was waived, so the order "
+            "rule silently skipped a row"
+        )
+
+    # ARM NINE — the ordinary case takes the strict path and never resolves the
+    # landing base or the collection at all, which is what keeps a clone lacking
+    # that ref green and what keeps the collection off the common path.
     def _must_not_be_called():
         raise AssertionError("the landing base was resolved on the strict path")
 
     assert _assert_legal_manifest_successor(
         gate, landing, manifest([row(1, "a"), row(2, "b"), row(3, "c")]),
-        _must_not_be_called,
+        _must_not_be_called, _must_not_be_called,
     ) == "strict"
 
 
