@@ -4546,19 +4546,45 @@ def test_the_node_manifest_is_a_legal_successor_of_the_one_it_replaces():
     def ranks_of():
         """The tree's own collection order — the authority the manifests lack.
 
+        Run in the CI ENVIRONMENT, not in whatever environment happens to be
+        invoking pytest: the endgame gate fixes `PYTHONPATH`, no bytecode, plugin
+        autoload OFF and the three platform variables, and a rank derived under a
+        different configuration is a different authority. Autoload in particular
+        is what keeps a randomising plugin arriving through a transitive
+        dependency from reordering the very thing being ranked. Measured on this
+        tree when the divergence was found: with autoload on and off the order is
+        IDENTICAL, 11,432 nodes in the same sequence — so this alignment closes a
+        divergence rather than a live defect, and the measurement is recorded so
+        the next reader need not redo it.
+
+        INTERPRETER: the canonical one is Python 3.11. When a 3.11 with pytest is
+        on the path it is used; otherwise this falls back to the interpreter
+        running the suite, which is the fallback the regeneration procedure itself
+        allows, and the equality it owes is discharged by the `scratch/**`
+        preflight running the real CI collection on the closing commit.
+
         A full collection, which is why it is a thunk: only a regeneration that
         already failed the strict transition pays for it.
         """
         import os
+        import shutil
         import sys
 
+        canonical = shutil.which("python3.11")
+        if canonical:
+            probe = subprocess.run([canonical, "-c", "import pytest"],
+                                   capture_output=True)
+            if probe.returncode != 0:
+                canonical = None
+        interpreter = canonical or sys.executable
+
         out = subprocess.run(
-            [sys.executable, "-m", "pytest", "tests", "--ignore=tests/kb",
-             "--collect-only", "-q", "-p", "no:cacheprovider", "-p", "no:randomly"],
+            [interpreter, "-m", "pytest", "tests", "--ignore=tests/kb",
+             "--collect-only", "-q", "-p", "no:cacheprovider"],
             capture_output=True, text=True, cwd=root,
             env={**os.environ, "PYTHONPATH": "src", "PYTHONDONTWRITEBYTECODE": "1",
-                 "BOOMI_LOCAL": "true", "BOOMI_DOCS_ENABLED": "false",
-                 "BOOMI_GOTCHAS_ENABLED": "false"},
+                 "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1", "BOOMI_LOCAL": "true",
+                 "BOOMI_DOCS_ENABLED": "false", "BOOMI_GOTCHAS_ENABLED": "false"},
         )
         assert out.returncode == 0, f"collection failed: {out.stderr[-400:]}"
         nodes = [ln.strip() for ln in out.stdout.splitlines() if "::" in ln.strip()]
