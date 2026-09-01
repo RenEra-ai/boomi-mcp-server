@@ -4718,6 +4718,27 @@ def test_the_collector_search_skips_a_miss_instead_of_dying_on_it(tmp_path):
         f"pytest {_pytest.__version__}); search returned {found!r}"
     )
 
+    # LAUNCHABLE BUT NOT CANONICAL, both halves, and both DETERMINISTIC rather
+    # than borrowed from whatever interpreter happens to be running. The previous
+    # version leaned on the runner being 3.12; on the required 3.11 job it is
+    # canonical, so no mismatch was exercised at all and a collector that dropped
+    # its version checks entirely passed — measured by running that mutant under
+    # a real 3.11.
+    def _shim(name, line):
+        path = tmp_path / name
+        path.write_text("#!/bin/sh\necho '{0}'\n".format(line))
+        path.chmod(0o755)
+        return path
+
+    # Right pytest, wrong Python.
+    assert _canonical_collector([_shim("old_py", "(3, 10) " + want)], want) is None
+    # Right Python, wrong pytest.
+    assert _canonical_collector([_shim("old_pytest", "(3, 11) 0.0.0")], want) is None
+    # Both right — the control, without which the two above would pass on a
+    # collector that simply refused everything.
+    ok = _shim("canonical", "(3, 11) " + want)
+    assert _canonical_collector([ok], want) == str(ok)
+
     # A candidate that exists but is not an interpreter at all.
     junk = tmp_path / "junk"
     junk.write_text("not an interpreter")
