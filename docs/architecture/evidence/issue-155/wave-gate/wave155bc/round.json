@@ -1,0 +1,13 @@
+{
+ "collector": "wave_gate",
+ "durable_dir": "wave-gate/wave155bc",
+ "files": {
+  "wave-gate/wave155bc/summary.json": "7f6baa35a0197baedd882db2955da5d7f021edd12722d34a2ea086e8cd90e297",
+  "wave-gate/wave155bc/wave.log": "a5516882f93056367d7584e5243f5ea936cc436cfec5b1a92afe7b26abca1363"
+ },
+ "logical_loop": "L4 (composite wave gate, slice F \u2014 PASS on the final tree after the closing correction)",
+ "source_run_dir": "/private/tmp/claude-501/-Users-gleb-Documents-Projects-Renera-boomi-mcp-server/8defa524-ca7e-4e75-a277-89c795d0dba6/scratchpad/wave155bc",
+ "status": "completed",
+ "verdict": "pass",
+ "wave_sha": "0744065102156959af90b13b3b7cc294096d6a97"
+}

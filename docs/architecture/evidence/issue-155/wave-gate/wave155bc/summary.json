@@ -1,0 +1,27 @@
+{
+ "gate": "composite wave gate",
+ "command": "scripts/wave_gate.py wave --base 59299b1ca0b61271e1d34ee3989c560244dd2367 --require-plan-fingerprint",
+ "status": "completed",
+ "verdict": "pass",
+ "wave_sha": "0744065102156959af90b13b3b7cc294096d6a97",
+ "manifests": {
+  "required_nodes": 11450,
+  "active_goldens": 74
+ },
+ "collection": {
+  "tests": 11450
+ },
+ "suite": {
+  "passed": 11432,
+  "skipped": 18,
+  "skip_cap": 30
+ },
+ "goldens": {
+  "active": 74,
+  "deterministic": true,
+  "byte_exact": true
+ },
+ "plan_fingerprint_cases": 2,
+ "exit_code": 0,
+ "exit_code_provenance": "captured directly from the command into a file, not through a shell pipeline. This run REPLACES the earlier pass at b52b89d, which the closing loop's structural extension invalidated: that correction added a test, so the darkness proof over src/tests/scripts no longer held against it and a wave result cannot be carried across a change to the tree it validated"
+}
