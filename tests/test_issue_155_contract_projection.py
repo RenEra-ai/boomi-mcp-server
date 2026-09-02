@@ -614,3 +614,111 @@ def test_the_public_compile_entry_reads_a_named_component_and_stringifies_it():
     assert sorted(reads) == sorted(
         [operation.component_id, connection.component_id]
     ), reads
+
+
+def test_an_authored_reference_only_reuse_compiles_a_retried_evidenced_write():
+    """THE CALLER-AUTHORABLE POSITIVE PATH, end to end at the public entry.
+
+    This is the assertion the capability manifest rests on, and it took three
+    attempts to be able to write it honestly. The first two admission witnesses
+    proved shapes I had constructed — a hand-built snapshot, then a component
+    form the authoring surface refuses — and each passed without ever reaching
+    the evidence question. Review supplied the shape that does reach it: the
+    documented `action="create"` with `config.reference_only=true`, which is how
+    a caller says "use the component that already exists".
+
+    Everything below is packaged or archived: the registry record, the component
+    bytes, the semantics. Only the network boundary is faked, and it returns the
+    platform's own shapes. The document is a retried PATCH carrying a
+    `key_reference` naming the packaged contract — the thing that refused for
+    want of evidence at every earlier point in this slice.
+    """
+    from unittest.mock import MagicMock
+
+    from boomi_mcp.authoring.workflow import compile_authoring_request_v1
+    from boomi_mcp.compiler.process_ir import connector_resolution as CR
+    from boomi_mcp.connector_replay.registry import load_registry
+
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from _m12_11_support import (  # noqa: E402
+        APPLIABLE_CONN,
+        APPLIABLE_OP,
+        ProcessAuthoringUnitV1,
+        ProcessComponentEnvelopeV1,
+        appliable_process_ir_request,
+    )
+    from _process_ir_capability_witnesses import _connector_scope  # noqa: E402
+    from boomi_mcp.models.process_ir import parse_process_ir_v1  # noqa: E402
+
+    record = load_registry().operation_records[0]
+    operation, connection = record.operation_identity, record.connection_identity
+    captures = (Path(__file__).resolve().parents[1]
+                / "docs/architecture/evidence/issue-155/captures"
+                / "cap155-e7-patch-operation-record")
+    operation_xml = (captures / "component_op_tgt.xml").read_text(encoding="utf-8")
+    connection_xml = (captures / "component_connection.xml").read_text(encoding="utf-8")
+
+    def _get_xml(_client, component_id, *_a, **_k):
+        is_operation = component_id == operation.component_id
+        return {
+            "component_id": component_id,
+            "version": operation.version if is_operation else connection.version,
+            "xml": operation_xml if is_operation else connection_xml,
+        }
+
+    projections = []
+    real = CR.project_grants_for_root
+
+    def _spy(ir, symbols, *, process_root_ref, registry=None, snapshot=None):
+        table = real(ir, symbols, process_root_ref=process_root_ref,
+                     registry=registry, snapshot=snapshot)
+        projections.append((
+            [c.ref for c in table.idempotency_contracts],
+            len(table.idempotency_grants),
+        ))
+        return table
+
+    # The DECLARED config must agree with what the account stores — slice C's
+    # comparison refuses a request declaring a GET while reusing a PATCH, and it
+    # correctly refused an earlier version of this fixture.
+    request = appliable_process_ir_request(
+        units=(ProcessAuthoringUnitV1(
+            envelope=ProcessComponentEnvelopeV1(
+                component_key="proc", name="M12.15 Process", action="create",
+                depends_on=("conn", "op", "getop")),
+            process_ir=parse_process_ir_v1(_connector_scope(
+                protected="$ref:op",
+                upstream="$ref:getop",
+                retry={"count": 2},
+                idempotency={"kind": "key_reference",
+                             "contract_ref": record.contract_ref},
+            ))),),
+        components=(
+            dict(APPLIABLE_CONN, component_id=connection.component_id,
+                 action="create",
+                 config=dict(APPLIABLE_CONN["config"], reference_only=True)),
+            dict(APPLIABLE_OP, component_id=operation.component_id, action="create",
+                 config=dict(APPLIABLE_OP["config"], reference_only=True,
+                             method="PATCH",
+                             path="/admin/cdscm/api/v1/clients/"
+                                  "41172938-b9bd-4495-b411-9851f5ac7b00")),
+            dict(APPLIABLE_OP, key="getop", name="M12.15 get", action="create",
+                 config=dict(APPLIABLE_OP["config"], component_name="M12.15 get")),
+        ),
+    )
+
+    with patch.object(CR, "project_grants_for_root", _spy), \
+         patch("boomi_mcp.categories.components._shared.component_get_xml", _get_xml), \
+         patch("boomi_mcp.categories.integration_builder.paginate_metadata",
+               lambda *a, **k: []):
+        result, _internals = compile_authoring_request_v1(
+            request, boomi_client=MagicMock(), profile="qa")
+
+    assert result is not None, "the evidenced retried write did not compile"
+    # EVERY projection, not just the first. The materialization plan recompiles
+    # the IR, and it was handed the contract-free table — so semantic validation
+    # passed on evidence the plan build then could not see, and compile refused
+    # for want of what it had just accepted.
+    assert projections, "no projection ran; this test proves nothing"
+    assert all(refs == [record.contract_ref] and grants == 1
+               for refs, grants in projections), projections

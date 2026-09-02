@@ -2871,21 +2871,19 @@ PROCESS_IR_V1_CAPABILITIES: Mapping[str, str] = MappingProxyType(
         # FORBIDDEN_NAMES) — and this row is now projected into the public
         # authoring contract. "replay safety" is the public term throughout.
         # Safe to rename: the manifest key had never been served.
-        # #155 M12.17 slice F: GATED, after TWO withdrawn flips, and the reason
-        # is worth keeping because it is the same reason twice. The evidence is
-        # real — seven attested REST captures, one account-scoped operation
-        # contract record from a live double execution — and the compiler now
-        # derives its replay verdict from that observation, retains the trusted
-        # snapshot through compile, threads the account, and refuses an
-        # incomplete live identity. Each flip was made when the path worked in a
-        # shape I had CONSTRUCTED, and withdrawn when the shape a caller can
-        # actually author turned out not to reach it: an `update` component
-        # deliberately ignores the live reading, and a `create` carrying an
-        # explicit id is refused before it gets there. So the authored shape that
-        # both reuses a component and admits a contract does not exist yet. That
-        # is a reachability question for the authoring surface, not an evidence
-        # question, and this row stays closed until an authored shape reaches it.
-        "verified_write_replay_safety": "gated",  # #142; evidence landed in #155
+        # #155 M12.17 slice F: SUPPORTED, on the third attempt and the first one
+        # that is true. Two earlier flips were withdrawn in this same slice
+        # because each admission proved a shape I had CONSTRUCTED — a hand-built
+        # trusted snapshot, then a component form the authoring surface refuses —
+        # and each passed without reaching the evidence question at all. The
+        # shape that reaches it is the documented reference-only reuse: a caller
+        # names the component that already exists, its live identity is read, the
+        # packaged record is placed against it, and a retried write carrying a
+        # `key_reference` compiles. Two defects had to go first: the trusted
+        # snapshot was not retained past planning, and the materialization plan
+        # recompiled the IR against a table with no contracts — so semantic
+        # validation passed on evidence the plan build could not see.
+        "verified_write_replay_safety": "supported",  # #142, evidenced by #155
         # #155 M12.17. The per-document request path, and the explicit
         # acknowledgement that a retried process-scope region may replay its own
         # document producer. Both are SUPPORTED: authorable through this

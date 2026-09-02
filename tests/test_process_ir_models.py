@@ -1378,14 +1378,13 @@ def test_capability_manifest_immutable_and_complete():
     assert PROCESS_IR_V1_CAPABILITIES["catch_error_type_lists"] == "unsupported"
     assert PROCESS_IR_V1_CAPABILITIES["retry_backoff_authoring"] == "unsupported"
     assert PROCESS_IR_V1_CAPABILITIES["queue_topology"] == "unsupported"
-    # ...while these four are genuinely "not yet", each blocked on a different
+    # ...while these three are genuinely "not yet", each blocked on a different
     # missing thing (see the manifest comments).
     assert PROCESS_IR_V1_CAPABILITIES["catch_failure_trigger_selection"] == "gated"
-    # #155 slice F, flipped and withdrawn twice. The evidence landed and the
-    # compiler consumes it; what does not exist yet is an AUTHORED shape that
-    # both reuses a component and admits a contract, so the gate stays closed on
-    # reachability rather than on evidence.
-    assert PROCESS_IR_V1_CAPABILITIES["verified_write_replay_safety"] == "gated"
+    # #155 slice F. Flipped and withdrawn twice before this stuck: the authored
+    # shape that reaches the evidence is reference-only reuse, and two retention
+    # defects had to be fixed before it compiled.
+    assert PROCESS_IR_V1_CAPABILITIES["verified_write_replay_safety"] == "supported"
     assert PROCESS_IR_V1_CAPABILITIES["listener_error_scope"] == "gated"
     assert PROCESS_IR_V1_CAPABILITIES["nested_try_catch"] == "gated"
     # #175. The pair is the whole point: the non-returning form is what V1 emits,
@@ -1415,6 +1414,7 @@ def test_capability_manifest_immutable_and_complete():
         "source_replay_policy",
         "terminal_process_call",
         "typed_idempotency_evidence",
+        "verified_write_replay_safety",
     ]
 
 

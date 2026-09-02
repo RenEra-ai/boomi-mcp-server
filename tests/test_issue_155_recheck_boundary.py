@@ -189,12 +189,24 @@ class _Record:
     connection_identity = _Ident("cn-live-1", 5, _digest(_CONNECTION_XML, "connection"))
 
 
-class _Grant:
-    record_digest = "b" * 64
-    contract_ref = "$ref:CONTRACT"
-    operation_ref = "$ref:api_op"
-    call_source_path = "/body/steps/0"
-    key = ("$ref:CONTRACT", "$ref:api_op", "/body/steps/0")
+def _Grant():
+    """A REAL grant symbol, not a stand-in with the right attribute names.
+
+    This was a bare class whose fields merely looked like a grant's. It survived
+    because the projected table was never re-validated on the path these tests
+    drive — and #155 slice F closed that gap: the materialization plan now
+    compiles against the projected table, which validates it, and every one of
+    these tests failed with a model-type error. The object was never a valid
+    grant; nothing had asked.
+    """
+    from boomi_mcp.compiler.process_ir.contracts import IdempotencyGrantSymbolV1
+
+    return IdempotencyGrantSymbolV1(
+        contract_ref="$ref:CONTRACT",
+        operation_ref="$ref:api_op",
+        call_source_path="/body/steps/0",
+        record_digest="b" * 64,
+    )
 
 
 def _granting_projection(root_ir, symbols, **kwargs):

@@ -2405,8 +2405,17 @@ def build_artifact_descriptors(
         # pointed at retention instead of at the compile count.
         unit = units_by_key.get(component_key)
         if unit is not None:
+            # THE PROJECTED TABLE, not the rootless one. This helper RECOMPILES
+            # the IR to build the plan, and it was handed `symbols` — the table
+            # with no contracts and no grants — so a document whose semantic
+            # validation had just passed on projected evidence was refused here
+            # for missing that same evidence. The projection above is what makes
+            # the evidence reachable at all; compiling the plan against a table
+            # that lacks it means the gate passes where a report is written and
+            # fails where bytes are produced, which is the exact inversion the
+            # comment above this projection warns about.
             materialization_plan = _build_compile_time_plan(
-                unit, symbols, conflict_policy,
+                unit, root_symbols, conflict_policy,
                 (effect_capabilities or {}).get(component_key),
             )
             materialization_plans[component_key] = materialization_plan

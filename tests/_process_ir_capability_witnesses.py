@@ -49,6 +49,7 @@ What remains inline, and why each is acceptable:
 from __future__ import annotations
 
 import copy
+import pathlib
 import hashlib
 import json
 import sys
@@ -974,51 +975,117 @@ def _w_definedparameter_property_source():
 
 
 def _w_verified_write_replay_safety():
-    """REFUSES, and the refusal it observes is what #155 slice F actually moved.
+    """ADMITS through the CALLER-AUTHORABLE path, on the third attempt.
 
-    Before the evidence landed this observed
-    `PROCESS_IR_SEMANTIC_RETRY_NON_IDEMPOTENT_WRITE`: the capability table
-    hand-wrote `unverified` for every write, which the retry check treats as
-    never retryable and checks BEFORE evidence, so no contract could ever have
-    been consulted. Slice F ingested seven attested REST captures and packaged
-    one account-scoped operation contract record, and the compiler now derives
-    the verdict from that observation — so the same document reaches the EVIDENCE
-    question instead. "This may never be retried" became "this may be retried
-    with evidence you have not supplied", which is a real move.
+    Two earlier versions of this witness were admissions that got withdrawn in
+    the same slice. The first built its own trusted snapshot — the one object the
+    public compile path cannot produce. The second used a component shape the
+    authoring surface refuses. Both passed, and both passed for the same reason:
+    the document never reached the evidence question, so "it compiled" said
+    nothing about whether evidence was consulted.
 
-    THE CAPABILITY STAYS GATED, and this witness was twice written as an
-    admission and twice reverted. Each time the admission compiled a shape I had
-    constructed — a hand-built snapshot the public path cannot produce, then a
-    component shape the authoring surface refuses — and each time the reason it
-    passed was that it never reached the evidence question at all. What is
-    missing is an AUTHORED shape that both reuses a component and admits a
-    contract: an `update` deliberately ignores the live reading, and a `create`
-    carrying an explicit id is refused before the snapshot is built. The positive
-    path is exercised in `tests/test_issue_155_contract_projection.py` against a
-    snapshot carrying a complete reused identity, which is the shape apply
-    produces and the authoring surface does not.
+    This one authors the documented reference-only reuse — a caller naming the
+    component that already exists — over the packaged operation contract record,
+    and asserts that the projection actually MINTED the contract and a per-call
+    grant. That last assertion is the correction: a compile that succeeds without
+    minting is exactly what the withdrawn versions were measuring.
     """
-    doc = _connector_scope(
-        protected="$ref:PATCHOP",
-        retry={"count": 2},
-        idempotency={"kind": "verified_action"},
+    from unittest.mock import MagicMock, patch
+
+    from boomi_mcp.authoring.workflow import compile_authoring_request_v1
+    from boomi_mcp.compiler.process_ir import connector_resolution as CR
+    from boomi_mcp.connector_replay.registry import load_registry
+    from boomi_mcp.models.process_ir import parse_process_ir_v1
+    from _m12_11_support import (
+        APPLIABLE_CONN,
+        APPLIABLE_OP,
+        ProcessAuthoringUnitV1,
+        ProcessComponentEnvelopeV1,
+        appliable_process_ir_request,
+    )
+
+    record = load_registry().operation_records[0]
+    operation = record.operation_identity
+    connection = record.connection_identity
+    captures = (
+        pathlib.Path(__file__).resolve().parents[1]
+        / "docs/architecture/evidence/issue-155/captures"
+        / "cap155-e7-patch-operation-record"
     )
 
     def run():
-        return _compile_refusal(doc, error_symbols())
+        operation_xml = (captures / "component_op_tgt.xml").read_text(encoding="utf-8")
+        connection_xml = (captures / "component_connection.xml").read_text(
+            encoding="utf-8")
+        projections = []
+        real = CR.project_grants_for_root
 
-    def observe(refusal):
-        assert refusal == (
-            (
-                "PROCESS_IR_SEMANTIC_IDEMPOTENCY_EVIDENCE_MISSING",
-                "/body/steps/1/try_body/steps/0/idempotency",
+        def _spy(ir, symbols, *, process_root_ref, registry=None, snapshot=None):
+            table = real(ir, symbols, process_root_ref=process_root_ref,
+                         registry=registry, snapshot=snapshot)
+            projections.append((
+                [c.ref for c in table.idempotency_contracts],
+                len(table.idempotency_grants),
+            ))
+            return table
+
+        def _get_xml(_client, component_id, *_a, **_k):
+            is_operation = component_id == operation.component_id
+            return {
+                "component_id": component_id,
+                "version": operation.version if is_operation else connection.version,
+                "xml": operation_xml if is_operation else connection_xml,
+            }
+
+        request = appliable_process_ir_request(
+            units=(ProcessAuthoringUnitV1(
+                envelope=ProcessComponentEnvelopeV1(
+                    component_key="proc", name="M12.15 Process", action="create",
+                    depends_on=("conn", "op", "getop")),
+                process_ir=parse_process_ir_v1(_connector_scope(
+                    protected="$ref:op",
+                    upstream="$ref:getop",
+                    retry={"count": 2},
+                    idempotency={"kind": "key_reference",
+                                 "contract_ref": record.contract_ref},
+                ))),),
+            components=(
+                dict(APPLIABLE_CONN, component_id=connection.component_id,
+                     action="create",
+                     config=dict(APPLIABLE_CONN["config"], reference_only=True)),
+                dict(APPLIABLE_OP, component_id=operation.component_id,
+                     action="create",
+                     config=dict(APPLIABLE_OP["config"], reference_only=True,
+                                 method="PATCH",
+                                 path="/admin/cdscm/api/v1/clients/"
+                                      "41172938-b9bd-4495-b411-9851f5ac7b00")),
+                dict(APPLIABLE_OP, key="getop", name="M12.15 get", action="create",
+                     config=dict(APPLIABLE_OP["config"],
+                                 component_name="M12.15 get")),
             ),
-        ), refusal
+        )
+        with patch.object(CR, "project_grants_for_root", _spy), \
+             patch("boomi_mcp.categories.components._shared.component_get_xml",
+                   _get_xml), \
+             patch("boomi_mcp.categories.integration_builder.paginate_metadata",
+                   lambda *a, **k: []):
+            result, _internals = compile_authoring_request_v1(
+                request, boomi_client=MagicMock(), profile="capability-witness")
+        return result, projections, record.contract_ref
+
+    def observe(outcome):
+        result, projections, contract_ref = outcome
+        assert result is not None, "the evidenced retried write did not compile"
+        assert projections, "no projection ran, so nothing about evidence was shown"
+        # MINTED, not merely compiled. Both withdrawn versions of this witness
+        # would have passed the assertion above.
+        assert all(refs == [contract_ref] and grants == 1
+                   for refs, grants in projections), projections
 
     return CapabilityWitness(
         "verified_write_replay_safety",
-        "refuses",
-        PROVENANCE_INLINE_REFUSAL,
+        "admits",
+        PROVENANCE_INLINE_ADMISSION,
         run,
         observe,
     )
