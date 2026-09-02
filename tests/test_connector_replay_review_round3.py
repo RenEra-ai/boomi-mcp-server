@@ -6356,12 +6356,34 @@ def _checkpoint_count_disagreements(ledger_text, index_text, wave_dir=None):
         key = (here.group(1), tag.group(1))
         claimed[key] = max(claimed.get(key, 0), int(m.group(2)))
 
+    # WHETHER THE LOOP IS STILL OPEN decides which comparison applies. A loop that
+    # recorded `CONTINUE` and then archived a fourth and fifth round owes nothing
+    # until the sixth, so demanding the count equal the archive mid-window would
+    # refuse correct work — and a gate that blocks a correct closing is a worse
+    # failure than one that misses a malformed row, which this file already says
+    # in as many words. So: an open loop must cover the greatest owed multiple of
+    # three; a loop whose latest decision ENDS it must account for every round.
+    ending = set()
+    for row in _checkpoint_rows(ledger_text) or []:
+        cells = row.split("|")
+        if len(cells) < 5:
+            continue
+        tag = re.match(r"\s*(L\d)", cells[1].strip().strip("*").strip("`"))
+        here = re.search(r"slice ([A-F])", cells[1])
+        m = re.match(r"\s*(\d+)\s*/\s*(\d+)", cells[2])
+        if not (tag and here and m):
+            continue
+        key = (here.group(1), tag.group(1))
+        if int(m.group(2)) == claimed.get(key) and "CONTINUE" not in cells[4]:
+            ending.add(key)
+
     disagreements = []
     for key, rounds in sorted(archived.items()):
         if key not in claimed:
             continue
-        if claimed[key] < rounds:
-            disagreements.append((key, claimed[key], rounds))
+        owed = rounds if key in ending else (rounds // 3) * 3
+        if claimed[key] < owed:
+            disagreements.append((key, claimed[key], owed))
     return disagreements
 
 
@@ -6398,6 +6420,19 @@ def test_the_count_rule_catches_an_understated_loop():
 
     exact = understated.replace("| 3 / 3 |", "| 4 / 4 |")
     assert _checkpoint_count_disagreements(exact, index, wave_dir=False) == []
+
+    # MID-WINDOW IS LEGAL. A loop that decided `CONTINUE` at three and has since
+    # archived a fourth round owes nothing until the sixth; the first version of
+    # this rule refused exactly that, which would have blocked correct work.
+    continuing = understated.replace("`CLOSE-CLEAN`", "`CONTINUE`")
+    assert _checkpoint_count_disagreements(continuing, index, wave_dir=False) == []
+    five = "\n".join(index.splitlines() + [index.splitlines()[0]])
+    assert _checkpoint_count_disagreements(continuing, five, wave_dir=False) == []
+    # ...but at the sixth it is owed again.
+    six = "\n".join(index.splitlines() + [index.splitlines()[0]] * 2)
+    assert _checkpoint_count_disagreements(continuing, six, wave_dir=False) == [
+        (("F", "L2"), 3, 6)
+    ], _checkpoint_count_disagreements(continuing, six, wave_dir=False)
 
     # Claiming MORE than the archive holds is a different defect with its own
     # rules — a round billed to this loop that produced no archive — and this
