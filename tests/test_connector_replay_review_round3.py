@@ -1327,6 +1327,8 @@ _UNROWED = {"DC-155-C": 2, "DC-155-I": 1}
 #: the reason. Frozen so the set cannot grow silently: a row that names a class is an
 #: instance of it unless it appears here.
 _NOT_AN_INSTANCE = {
+    "CDX-155-r171-02a": "a REVISION replacing a disposition the contract does not admit "
+    "with `fixed`, not a second defect — the class row counts the original once",
     "CDX-155-r148-01a": "a REVISION supplying the disposition the original lacked, "
     "not a second defect — the class row counts the original once",
     "CDX-155-r144-02a": "a REVISION narrowing an overstated resolution, not a second "
@@ -5697,6 +5699,19 @@ def test_every_recompiling_consumer_on_the_evidenced_route_gets_the_grants():
     )
 
     record, operation, connection, request = _evidenced_reference_only_request()
+    # THE ROOTS THIS TEST AUTHORED, read off the request it built. Every other
+    # expectation in this check is supplied by the route: the projector's return
+    # was the value under test, and the requested root that replaced it is a
+    # caller-controlled argument — a consumer asking for the wrong root, or for
+    # none, made the key wrong or skipped the branch. These literals are the one
+    # thing nothing under test can steer.
+    #
+    # A SET, not `units[0]`. With a single-unit fixture the first unit's key was
+    # a universal oracle, so a regression projecting EVERY process under that one
+    # key stayed green while the check appeared to be about roots at all. The
+    # two-root arm at the end of this test is what makes the set mean something.
+    _AUTHORED_ROOTS = frozenset(
+        unit.envelope.component_key for unit in request.intent.units)
     captures = (_TESTS_ROOT.parent
                 / "docs/architecture/evidence/issue-155/captures"
                 / "cap155-e7-patch-operation-record")
@@ -5826,6 +5841,9 @@ def test_every_recompiling_consumer_on_the_evidenced_route_gets_the_grants():
         table = _project(*args, **kwargs)
         pair = (table.process_root_ref, tuple(table.idempotency_grants or ()))
         minted.append(pair)
+        if requested not in _AUTHORED_ROOTS:
+            mismatched.append(("asked-for-an-unauthored-root",
+                               sorted(_AUTHORED_ROOTS), requested))
         if requested is not None and table.process_root_ref != requested:
             mismatched.append(("projected-a-different-root", requested,
                                table.process_root_ref))
@@ -5977,6 +5995,10 @@ def test_every_recompiling_consumer_on_the_evidenced_route_gets_the_grants():
     # entries get; applying it only to those left the reached consumers, which
     # are most of the population, on the weaker check.
     assert minted, "the projection never ran on the evidenced route"
+    assert all(root in _AUTHORED_ROOTS for root, _grants in routed if root is not None), (
+        "a compile received a table projected for a root this request never "
+        "authored: %s, authored %s" % (routed, sorted(_AUTHORED_ROOTS))
+    )
     assert not mismatched, (
         "a compile received a table that is not the one minted for its root — "
         "the projection was replaced between the mint and the recompile: %s"
@@ -6081,3 +6103,90 @@ def test_every_recompiling_consumer_on_the_evidenced_route_gets_the_grants():
     # relocatable materialization table clears its root ref precisely so a grant
     # minted for another root cannot satisfy this one. Recorded, not asserted on.
     assert isinstance(rootless, list)
+
+
+def test_two_authored_roots_each_get_their_own_projection():
+    """The multi-root arm, which the single-unit fixture could not express.
+
+    With one unit in the request, that unit's key was a universal oracle: a
+    regression projecting EVERY process under the first key satisfied every
+    assertion, so a check written entirely about roots could not see a wrong
+    root at all. Review supplied both halves of that — the oracle problem and
+    the fact that adding a second unit would have failed the clean tree — and
+    the fixture turned out to support two roots, measured, so the limit was mine
+    rather than the repository's.
+    """
+    from unittest.mock import MagicMock, patch
+
+    from boomi_mcp.categories.integration_builder import build_integration_action
+    from boomi_mcp.compiler.process_ir import connector_resolution as CR
+
+    sys.path.insert(0, str(_TESTS_ROOT))
+    from _m12_11_support import (  # noqa: E402
+        ProcessAuthoringUnitV1,
+        ProcessComponentEnvelopeV1,
+    )
+    from test_issue_155_contract_projection import (  # noqa: E402
+        _evidenced_reference_only_request,
+    )
+
+    record, operation, connection, request = _evidenced_reference_only_request()
+    first = request.intent.units[0]
+    second = ProcessAuthoringUnitV1(
+        envelope=ProcessComponentEnvelopeV1(
+            component_key="proc2", name="M12.15 Second", action="create",
+            depends_on=first.envelope.depends_on),
+        process_ir=first.process_ir,
+    )
+    two_root = request.model_copy(update={"intent": request.intent.model_copy(
+        update={"units": (first, second)})})
+    authored = {unit.envelope.component_key for unit in two_root.intent.units}
+    assert len(authored) == 2, authored
+
+    captures = (_TESTS_ROOT.parent
+                / "docs/architecture/evidence/issue-155/captures"
+                / "cap155-e7-patch-operation-record")
+    operation_xml = (captures / "component_op_tgt.xml").read_text(encoding="utf-8")
+    connection_xml = (captures / "component_connection.xml").read_text(encoding="utf-8")
+
+    def _get_xml(_client, component_id, *_a, **_k):
+        is_operation = component_id == operation.component_id
+        return {
+            "component_id": component_id,
+            "type": "connector-settings",
+            "version": operation.version if is_operation else connection.version,
+            "xml": operation_xml if is_operation else connection_xml,
+        }
+
+    requested, delivered = [], []
+    _project = CR.project_grants_for_root
+
+    def _recording_projection(*args, **kwargs):
+        root = kwargs.get("process_root_ref")
+        if root is None and len(args) > 2:
+            root = args[2]
+        requested.append(root)
+        table = _project(*args, **kwargs)
+        delivered.append((root, table.process_root_ref))
+        return table
+
+    with patch("boomi_mcp.categories.integration_builder.paginate_metadata",
+               lambda *a, **k: []), \
+         patch("boomi_mcp.categories.components._shared.component_get_xml", _get_xml), \
+         patch("boomi_mcp.categories.integration_builder.component_get_xml", _get_xml), \
+         patch.object(CR, "project_grants_for_root", _recording_projection):
+        compiled = build_integration_action(
+            MagicMock(), "qa", "compile",
+            config={"authoring_request": two_root.model_dump(mode="json")})
+
+    assert compiled.get("_success") is True, compiled
+    # EACH ROOT ASKED FOR ON ITS OWN BEHALF. A regression projecting every unit
+    # under the first key leaves this set with one member while the compile still
+    # succeeds — which is exactly the shape the single-unit fixture could not
+    # distinguish from correct behaviour.
+    assert set(requested) == authored, (
+        "the projections did not cover each authored root separately: asked for "
+        "%s, authored %s" % (sorted(set(requested)), sorted(authored))
+    )
+    # And each projection answered for the root it was asked about.
+    assert all(asked == answered for asked, answered in delivered), delivered

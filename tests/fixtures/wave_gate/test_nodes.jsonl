@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 11447, "minimum_collected": 11445, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 11448, "minimum_collected": 11445, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -11492,3 +11492,4 @@
 {"kind": "test", "id": "pytest-011491", "node_id": "tests/test_connector_replay_review_round3.py::test_the_recompile_rule_refuses_the_shapes_that_escape_a_name_check", "state": "tombstone"}
 {"kind": "test", "id": "pytest-011492", "node_id": "tests/test_issue_155_contract_projection.py::test_the_evidenced_write_survives_the_wet_apply_route_not_only_compile", "state": "active"}
 {"kind": "test", "id": "pytest-011493", "node_id": "tests/test_connector_replay_review_round3.py::test_every_recompiling_consumer_on_the_evidenced_route_gets_the_grants", "state": "active"}
+{"kind": "test", "id": "pytest-011494", "node_id": "tests/test_connector_replay_review_round3.py::test_two_authored_roots_each_get_their_own_projection", "state": "active"}
