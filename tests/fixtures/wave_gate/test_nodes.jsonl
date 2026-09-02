@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 11448, "minimum_collected": 11445, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 11448, "minimum_collected": 11433, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -11475,22 +11475,19 @@
 {"kind": "test", "id": "pytest-011474", "node_id": "tests/test_issue_155_recheck_boundary.py::test_a_proven_no_write_keeps_its_own_refusal_through_the_apply_boundary", "state": "active"}
 {"kind": "test", "id": "pytest-011475", "node_id": "tests/test_connector_replay_review_round3.py::test_the_collector_search_skips_a_miss_instead_of_dying_on_it", "state": "active"}
 {"kind": "test", "id": "pytest-011476", "node_id": "tests/test_connector_replay_registry.py::test_every_packaged_row_is_reproducible_from_the_capture_archive", "state": "active"}
-{"kind": "test", "id": "pytest-011477", "node_id": "tests/test_issue_155_contract_projection.py::test_a_record_the_snapshot_can_place_mints_a_contract", "state": "active"}
-{"kind": "test", "id": "pytest-011478", "node_id": "tests/test_issue_155_contract_projection.py::test_a_record_the_snapshot_cannot_place_mints_nothing[kwargs0-the account serves the operation at another version]", "state": "active"}
-{"kind": "test", "id": "pytest-011479", "node_id": "tests/test_issue_155_contract_projection.py::test_a_record_the_snapshot_cannot_place_mints_nothing[kwargs1-the account serves the connection at another version]", "state": "active"}
-{"kind": "test", "id": "pytest-011480", "node_id": "tests/test_issue_155_contract_projection.py::test_a_record_the_snapshot_cannot_place_mints_nothing[kwargs2-no symbol carries the operation the record names]", "state": "active"}
-{"kind": "test", "id": "pytest-011481", "node_id": "tests/test_issue_155_contract_projection.py::test_a_record_the_snapshot_cannot_place_mints_nothing[kwargs3-no symbol carries the connection the record names]", "state": "active"}
-{"kind": "test", "id": "pytest-011482", "node_id": "tests/test_issue_155_contract_projection.py::test_an_empty_registry_leaves_the_table_untouched", "state": "active"}
-{"kind": "test", "id": "pytest-011483", "node_id": "tests/test_issue_155_contract_projection.py::test_the_production_entry_projects_contracts_before_grants", "state": "active"}
-{"kind": "test", "id": "pytest-011484", "node_id": "tests/test_issue_155_contract_projection.py::test_an_evidenced_retried_write_compiles_and_an_unevidenced_one_does_not", "state": "active"}
-{"kind": "test", "id": "pytest-011485", "node_id": "tests/test_issue_155_contract_projection.py::test_evidence_may_not_weaken_a_capability_the_transport_defines", "state": "active"}
-{"kind": "test", "id": "pytest-011486", "node_id": "tests/test_issue_155_contract_projection.py::test_the_capability_derivation_fails_closed_without_hiding_a_defect", "state": "active"}
-{"kind": "test", "id": "pytest-011487", "node_id": "tests/test_issue_155_contract_projection.py::test_the_compile_route_can_place_a_record_for_a_component_the_author_names", "state": "active"}
-{"kind": "test", "id": "pytest-011488", "node_id": "tests/test_issue_155_contract_projection.py::test_the_public_compile_entry_reads_a_named_component_and_stringifies_it", "state": "active"}
-{"kind": "test", "id": "pytest-011489", "node_id": "tests/test_issue_155_contract_projection.py::test_an_authored_reference_only_reuse_compiles_a_retried_evidenced_write", "state": "active"}
-{"kind": "test", "id": "pytest-011490", "node_id": "tests/test_connector_replay_review_round3.py::test_every_recompiling_consumer_is_handed_the_projected_table", "state": "tombstone"}
-{"kind": "test", "id": "pytest-011491", "node_id": "tests/test_connector_replay_review_round3.py::test_the_recompile_rule_refuses_the_shapes_that_escape_a_name_check", "state": "tombstone"}
+{"kind": "test", "id": "pytest-011477", "node_id": "tests/test_connector_replay_review_round3.py::test_every_recompiling_consumer_on_the_evidenced_route_gets_the_grants", "state": "active"}
+{"kind": "test", "id": "pytest-011478", "node_id": "tests/test_connector_replay_review_round3.py::test_each_authored_root_is_projected_for_its_own_process", "state": "active"}
+{"kind": "test", "id": "pytest-011479", "node_id": "tests/test_issue_155_contract_projection.py::test_a_record_the_snapshot_can_place_mints_a_contract", "state": "active"}
+{"kind": "test", "id": "pytest-011480", "node_id": "tests/test_issue_155_contract_projection.py::test_a_record_the_snapshot_cannot_place_mints_nothing[kwargs0-the account serves the operation at another version]", "state": "active"}
+{"kind": "test", "id": "pytest-011481", "node_id": "tests/test_issue_155_contract_projection.py::test_a_record_the_snapshot_cannot_place_mints_nothing[kwargs1-the account serves the connection at another version]", "state": "active"}
+{"kind": "test", "id": "pytest-011482", "node_id": "tests/test_issue_155_contract_projection.py::test_a_record_the_snapshot_cannot_place_mints_nothing[kwargs2-no symbol carries the operation the record names]", "state": "active"}
+{"kind": "test", "id": "pytest-011483", "node_id": "tests/test_issue_155_contract_projection.py::test_a_record_the_snapshot_cannot_place_mints_nothing[kwargs3-no symbol carries the connection the record names]", "state": "active"}
+{"kind": "test", "id": "pytest-011484", "node_id": "tests/test_issue_155_contract_projection.py::test_an_empty_registry_leaves_the_table_untouched", "state": "active"}
+{"kind": "test", "id": "pytest-011485", "node_id": "tests/test_issue_155_contract_projection.py::test_the_production_entry_projects_contracts_before_grants", "state": "active"}
+{"kind": "test", "id": "pytest-011486", "node_id": "tests/test_issue_155_contract_projection.py::test_an_evidenced_retried_write_compiles_and_an_unevidenced_one_does_not", "state": "active"}
+{"kind": "test", "id": "pytest-011487", "node_id": "tests/test_issue_155_contract_projection.py::test_evidence_may_not_weaken_a_capability_the_transport_defines", "state": "active"}
+{"kind": "test", "id": "pytest-011488", "node_id": "tests/test_issue_155_contract_projection.py::test_the_capability_derivation_fails_closed_without_hiding_a_defect", "state": "active"}
+{"kind": "test", "id": "pytest-011489", "node_id": "tests/test_issue_155_contract_projection.py::test_the_compile_route_can_place_a_record_for_a_component_the_author_names", "state": "active"}
+{"kind": "test", "id": "pytest-011490", "node_id": "tests/test_issue_155_contract_projection.py::test_the_public_compile_entry_reads_a_named_component_and_stringifies_it", "state": "active"}
+{"kind": "test", "id": "pytest-011491", "node_id": "tests/test_issue_155_contract_projection.py::test_an_authored_reference_only_reuse_compiles_a_retried_evidenced_write", "state": "active"}
 {"kind": "test", "id": "pytest-011492", "node_id": "tests/test_issue_155_contract_projection.py::test_the_evidenced_write_survives_the_wet_apply_route_not_only_compile", "state": "active"}
-{"kind": "test", "id": "pytest-011493", "node_id": "tests/test_connector_replay_review_round3.py::test_every_recompiling_consumer_on_the_evidenced_route_gets_the_grants", "state": "active"}
-{"kind": "test", "id": "pytest-011494", "node_id": "tests/test_connector_replay_review_round3.py::test_two_authored_roots_each_get_their_own_projection", "state": "tombstone"}
-{"kind": "test", "id": "pytest-011495", "node_id": "tests/test_connector_replay_review_round3.py::test_each_authored_root_is_projected_for_its_own_process", "state": "active"}
