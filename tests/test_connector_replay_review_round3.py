@@ -1327,6 +1327,8 @@ _UNROWED = {"DC-155-C": 2, "DC-155-I": 1}
 #: the reason. Frozen so the set cannot grow silently: a row that names a class is an
 #: instance of it unless it appears here.
 _NOT_AN_INSTANCE = {
+    "CDX-155-r182-02a": "a REVISION replacing two dispositions with one, not a second "
+    "defect — the class row counts the original once",
     "SELF-155-r119-01a": "a REVISION correcting an evidence citation, not a second defect "
     "— the class row counts the original once",
     "CDX-155-r171-02a": "a REVISION replacing a disposition the contract does not admit "
@@ -6362,6 +6364,12 @@ def _terminal_checkpoint_understates_its_archive(ledger_text, index_text, wave_d
         here = re.search(r"slice ([A-F])", cells[1])
         if not (m and tag and here):
             continue
+        # A GAP RECORD IS NOT A DECISION, so it must not replace one. Assigning
+        # unconditionally let a retrospective gap row written after a real close
+        # displace that close; the outcome filter then skipped the loop entirely
+        # and any understatement in the closing row went unseen.
+        if "GAP-RECORDED" in cells[4] and (here.group(1), tag.group(1)) in latest:
+            continue
         latest[(here.group(1), tag.group(1))] = (int(m.group(2)), cells[4])
 
     understated = []
@@ -6373,7 +6381,11 @@ def _terminal_checkpoint_understates_its_archive(ledger_text, index_text, wave_d
         # open; and a GAP-RECORDED row is deliberately a non-decision elsewhere in
         # this file, so treating it as terminal here would refuse a valid record.
         # Only an outcome that actually ENDS a loop is this check's business.
-        if not any(word in outcome for word in ("CLOSE", "ESCALATE")):
+        # EVERY outcome that ends this loop. `DEFER-STANDARD-AND-PROCEED` closes
+        # the loop and advances to the next gate, so a figure it understates is
+        # understated for good — and it matched neither of the two spellings I
+        # first thought to look for.
+        if not any(word in outcome for word in ("CLOSE", "ESCALATE", "PROCEED")):
             continue
         if "WITHDRAWN" in outcome:
             continue
@@ -6426,6 +6438,21 @@ def test_the_terminal_count_rule_leaves_open_loops_alone():
         rows(3, "`DEFER-STANDARD-AND-CLOSE` — WITHDRAWN"), index, wave_dir=False) == []
     assert _terminal_checkpoint_understates_its_archive(
         rows(3, "`GAP-RECORDED`"), index, wave_dir=False) == []
+
+    # `DEFER-STANDARD-AND-PROCEED` ENDS the loop and advances to the next gate,
+    # so an understated figure under it is understated for good.
+    assert _terminal_checkpoint_understates_its_archive(
+        rows(3, "`DEFER-STANDARD-AND-PROCEED`"), index, wave_dir=False) == [
+        (("F", "L2"), 3, 4)]
+
+    # A GAP RECORD AFTER A CLOSE must not displace the close, or the
+    # understatement in the closing row disappears behind a non-decision.
+    masked = header + (
+        "| L2 Stage-2 Codex commit review, slice F | 3 / 3 | `a`, clean | `CLOSE-CLEAN` | x |\n"
+        "| L2 Stage-2 Codex commit review, slice F | 3 / 3 | `b`, clean | `GAP-RECORDED` | x |")
+    assert _terminal_checkpoint_understates_its_archive(masked, index, wave_dir=False) == [
+        (("F", "L2"), 3, 4)], _terminal_checkpoint_understates_its_archive(
+            masked, index, wave_dir=False)
 
     # THE CASE THIS CHECK EXISTS FOR, which its first version MISSED: a closing
     # row understating its count below an earlier checkpoint. Selecting the
