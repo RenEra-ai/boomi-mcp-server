@@ -9148,7 +9148,17 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
                 # from one slice with opposite guarantees. Live QA measured that;
                 # the ordering invariant this file already states is that a refusal
                 # the request can decide must fire before the first write.
-                _build_canonical_symbols(spec=spec, resolution=_resolution),
+                #
+                # THE PROJECTED TABLE, computed immediately above and previously
+                # thrown away here in favour of a fresh one. This helper
+                # RECOMPILES the root, so handing it a table with no contracts
+                # and no grants made the dry emit refuse an evidenced write for
+                # missing the very evidence the pre-write pass had just minted —
+                # the wet apply route failing where compile had started
+                # succeeding. Third instance of one mechanism in this slice: a
+                # projected table computed and then discarded at a consumer that
+                # recompiles. The other two were in the authoring workflow.
+                _root_symbols,
                 _depends_on_by_key,
             )
         except Exception as _plan_exc:  # noqa: BLE001 — classified below

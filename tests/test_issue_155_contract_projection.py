@@ -722,3 +722,135 @@ def test_an_authored_reference_only_reuse_compiles_a_retried_evidenced_write():
     assert projections, "no projection ran; this test proves nothing"
     assert all(refs == [record.contract_ref] and grants == 1
                for refs, grants in projections), projections
+
+
+def _evidenced_reference_only_request():
+    """The archived PATCH record, authored as a caller can author it.
+
+    Shared by the compile witness above and the wet-apply witness below so the
+    two cannot silently drift onto different documents — the whole point of the
+    apply witness is that it is the SAME request travelling further.
+    """
+    from boomi_mcp.connector_replay.registry import load_registry
+
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from _m12_11_support import (  # noqa: E402
+        APPLIABLE_CONN,
+        APPLIABLE_OP,
+        ProcessAuthoringUnitV1,
+        ProcessComponentEnvelopeV1,
+        appliable_process_ir_request,
+    )
+    from _process_ir_capability_witnesses import _connector_scope  # noqa: E402
+    from boomi_mcp.models.process_ir import parse_process_ir_v1  # noqa: E402
+
+    record = load_registry().operation_records[0]
+    operation, connection = record.operation_identity, record.connection_identity
+    return record, operation, connection, appliable_process_ir_request(
+        units=(ProcessAuthoringUnitV1(
+            envelope=ProcessComponentEnvelopeV1(
+                component_key="proc", name="M12.15 Process", action="create",
+                depends_on=("conn", "op", "getop")),
+            process_ir=parse_process_ir_v1(_connector_scope(
+                protected="$ref:op",
+                upstream="$ref:getop",
+                retry={"count": 2},
+                idempotency={"kind": "key_reference",
+                             "contract_ref": record.contract_ref},
+            ))),),
+        components=(
+            dict(APPLIABLE_CONN, component_id=connection.component_id,
+                 action="create",
+                 config=dict(APPLIABLE_CONN["config"], reference_only=True)),
+            dict(APPLIABLE_OP, component_id=operation.component_id, action="create",
+                 config=dict(APPLIABLE_OP["config"], reference_only=True,
+                             method="PATCH",
+                             path="/admin/cdscm/api/v1/clients/"
+                                  "41172938-b9bd-4495-b411-9851f5ac7b00")),
+            dict(APPLIABLE_OP, key="getop", name="M12.15 get", action="create",
+                 config=dict(APPLIABLE_OP["config"], component_name="M12.15 get")),
+        ),
+    )
+
+
+def test_the_evidenced_write_survives_the_wet_apply_route_not_only_compile():
+    """`action="apply", dry_run=False` — the route that produces bytes.
+
+    Compile succeeding said less than it looked like it said. The pre-write pass
+    inside apply recomputes the plan through `_dry_emit_canonical_plan`, and
+    that call was handed a FRESH symbol table rather than the projected one two
+    lines above it, so the recompile could not see the grants the projection had
+    just minted: compile returned a plan and the wet route refused the same
+    document for missing evidence. Nothing internal disagreed — the layers were
+    each self-consistent — which is exactly why this witness drives the public
+    entry with `dry_run` false and lets the write happen against a faked
+    network, instead of asserting on a helper.
+    """
+    import json
+    from unittest.mock import MagicMock, patch
+
+    from boomi_mcp.categories.integration_builder import build_integration_action
+
+    record, operation, connection, request = _evidenced_reference_only_request()
+    captures = (Path(__file__).resolve().parents[1]
+                / "docs/architecture/evidence/issue-155/captures"
+                / "cap155-e7-patch-operation-record")
+    operation_xml = (captures / "component_op_tgt.xml").read_text(encoding="utf-8")
+    connection_xml = (captures / "component_connection.xml").read_text(encoding="utf-8")
+
+    submitted: dict = {}
+
+    def _get_xml(_client, component_id, *_a, **_k):
+        if component_id == "process-cid-1" and "xml" in submitted:
+            return {"type": "process", "xml": submitted["xml"]}
+        is_operation = component_id == operation.component_id
+        return {
+            "component_id": component_id,
+            "type": "connector-settings",
+            "version": operation.version if is_operation else connection.version,
+            "xml": operation_xml if is_operation else connection_xml,
+        }
+
+    def _create(_client, _profile, payload_in):
+        submitted["xml"] = payload_in["xml"]
+        return {"_success": True, "component_id": "process-cid-1"}
+
+    created = {"n": 0}
+
+    def _component(*_a, **_k):
+        created["n"] += 1
+        return {"_success": True, "component_id": "cid-%d" % created["n"]}
+
+    with patch("boomi_mcp.categories.integration_builder.paginate_metadata",
+               lambda *a, **k: []), \
+         patch("boomi_mcp.categories.integration_builder._execute_component",
+               _component), \
+         patch("boomi_mcp.categories.integration_builder.create_component", _create), \
+         patch("boomi_mcp.categories.integration_builder.component_get_xml", _get_xml), \
+         patch("boomi_mcp.categories.components._shared.component_get_xml", _get_xml):
+        # The caller's real two-step: compile, then apply BOUND to that compile.
+        # A typed apply refuses an unbound request outright, so the compile is
+        # part of the route under test rather than setup — and it runs inside
+        # the same fakes, because a reference-only reuse reads the account.
+        payload = request.model_dump(mode="json")
+        compiled = build_integration_action(
+            MagicMock(), "qa", "compile",
+            config={"authoring_request": payload},
+        )
+        assert compiled.get("_success") is True, compiled
+        binding = compiled["authoring_result"]["revision_binding"]
+        payload["expected_capability_revision"] = binding["capability_revision"]
+        payload["expected_compile_hash"] = binding["compile_hash"]
+
+        result = build_integration_action(
+            MagicMock(), "qa", "apply",
+            config={"authoring_request": payload, "dry_run": False},
+        )
+
+    assert result.get("_success") is True, result
+    # The pre-write refusal this witness exists for names itself.
+    assert "IDEMPOTENCY_EVIDENCE_MISSING" not in json.dumps(result), result
+    # And the write actually happened — a route that refused before the first
+    # submission would also satisfy an assertion about the absence of an error.
+    assert submitted.get("xml"), "no process component was submitted"
+    assert record.contract_ref  # the document under apply carried the reference

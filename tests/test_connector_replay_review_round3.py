@@ -5513,3 +5513,254 @@ def test_the_escape_rule_refuses_the_shape_that_cost_four_rounds():
         "        if not names_it:\n"
         "            assert 'not at fault' in detail\n"
     ) == []
+
+
+# --- A recompiling consumer receives the PROJECTED table ----------------------
+#
+# Three instances in one slice, which is what makes this an invariant rather than
+# a third patch. A caller computes the root-projected symbol table — the one
+# carrying the idempotency contracts and per-call grants — and then hands a
+# consumer that RECOMPILES the root a different, unprojected table. Semantic
+# validation passes on evidence the recompile cannot see, so the gate passes
+# where a report is written and fails where bytes are produced. It happened at
+# the artifact compile, at the materialization-plan build, and at the pre-write
+# dry emit, and each was found only because someone drove that exact route.
+#
+# THE POPULATION IS DERIVED, not listed. The first version of this guard named
+# three functions in a frozen tuple, and review pointed out that this is the very
+# class the guard exists to close, one level up: rename a consumer, or add a
+# fourth, and the sweep stops watching it while still reporting success. The
+# authority for "recompiles a root" is the compiler package's own declared
+# entries, and the population is the transitive closure of what reaches them,
+# narrowed to functions that actually accept a symbol table. Measured: that names
+# SEVEN consumers where the hand-list named three.
+_COMPILER_AUTHORITY = "boomi_mcp/compiler/process_ir/pipeline.py"
+
+#: A projection is one of these calls. This IS the runtime authority for the
+#: invariant — the function that mints the contracts and grants — so naming it is
+#: the pin, not a hand-model of a population.
+_ROOT_PROJECTORS = frozenset({"project_grants_for_root", "_project_grants_for_root"})
+
+
+def _declared_compiler_entries(src_root):
+    """The compile entries the compiler package itself publishes."""
+    tree = ast.parse((src_root / _COMPILER_AUTHORITY).read_text(encoding="utf-8"))
+    entries = set()
+    for node in ast.walk(tree):
+        is_all = (
+            (isinstance(node, ast.AnnAssign)
+             and getattr(node.target, "id", None) == "__all__")
+            or (isinstance(node, ast.Assign)
+                and any(getattr(t, "id", None) == "__all__" for t in node.targets))
+        )
+        if not is_all:
+            continue
+        for element in getattr(node.value, "elts", []):
+            if isinstance(element, ast.Constant) and str(element.value).startswith("compile_"):
+                entries.add(element.value)
+    return entries
+
+
+def _called_names(node):
+    """Every callee name mentioned anywhere under `node`."""
+    names = set()
+    for inner in ast.walk(node):
+        if isinstance(inner, ast.Call):
+            callee = inner.func
+            name = (callee.id if isinstance(callee, ast.Name)
+                    else callee.attr if isinstance(callee, ast.Attribute) else None)
+            if name:
+                names.add(name)
+    return names
+
+
+def _recompiling_consumers(src_root):
+    """`{function name: {symbol-table parameter names}}`, derived from the tree.
+
+    A consumer recompiles if it transitively reaches a declared compile entry,
+    and it is a CONSUMER of a table if it accepts one. Both halves come from the
+    source: nothing here lists which functions matter.
+    """
+    signatures, callees = {}, {}
+    for path in sorted(src_root.rglob("*.py")):
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+        except SyntaxError:  # pragma: no cover - another test's problem
+            continue
+        for function in ast.walk(tree):
+            if not isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            args = function.args
+            params = [a.arg for a in args.posonlyargs + args.args + args.kwonlyargs]
+            signatures.setdefault(function.name, []).append(params)
+            callees.setdefault(function.name, set()).update(_called_names(function))
+
+    reaching = set(_declared_compiler_entries(src_root))
+    growing = True
+    while growing:
+        growing = False
+        for name, called in callees.items():
+            if name not in reaching and (called & reaching):
+                reaching.add(name)
+                growing = True
+
+    consumers = {}
+    for name in sorted(reaching):
+        for params in signatures.get(name, []):
+            carried = {p for p in params if "symbol" in p}
+            if carried:
+                consumers.setdefault(name, set()).update(carried)
+    return consumers, signatures
+
+
+def _table_argument(call, consumer, signatures):
+    """The symbol-table argument of `call`, by KEYWORD or by position.
+
+    Reading positions only let a `symbols=` keyword call skip the check entirely
+    — the shape review found, and the one a refactor reaches for first.
+    """
+    for keyword in call.keywords:
+        if keyword.arg in consumer:
+            return keyword.value
+    for params in signatures:
+        for name in consumer:
+            if name in params:
+                index = params.index(name)
+                if len(call.args) > index:
+                    return call.args[index]
+    return None
+
+
+def _unprojected_recompiles(tree, consumers, signatures):
+    """`(consumer, lineno, argument)` for each recompile handed an unprojected table."""
+    offenders = []
+    for function in ast.walk(tree):
+        if not isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+
+        # WHERE each name was last bound, and from what. A function-wide set of
+        # projected names accepted a name that was projected and then reassigned
+        # from something else before the call — so the binding is tracked by line
+        # and the later assignment wins, which is what the interpreter does.
+        projected, rebound = {}, {}
+        for node in ast.walk(function):
+            if not isinstance(node, ast.Assign):
+                continue
+            source = None
+            if isinstance(node.value, ast.Call):
+                callee = node.value.func
+                source = (callee.id if isinstance(callee, ast.Name)
+                          else callee.attr if isinstance(callee, ast.Attribute) else None)
+            book = projected if source in _ROOT_PROJECTORS else rebound
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    book.setdefault(target.id, []).append(node.lineno)
+
+        if not projected:
+            # A function that never projects cannot have discarded a projection.
+            # Its table arrived from a caller, and the obligation lives THERE —
+            # checked by this same sweep, at that call site.
+            continue
+
+        args = function.args
+        own = {a.arg for a in args.posonlyargs + args.args + args.kwonlyargs
+               if "symbol" in a.arg}
+
+        for node in ast.walk(function):
+            if not isinstance(node, ast.Call):
+                continue
+            callee = node.func
+            name = (callee.id if isinstance(callee, ast.Name)
+                    else callee.attr if isinstance(callee, ast.Attribute) else None)
+            if name not in consumers:
+                continue
+            argument = _table_argument(node, consumers[name], signatures.get(name, []))
+            if argument is None:
+                continue
+            if isinstance(argument, ast.Name):
+                if argument.id in own:
+                    continue          # a pass-through of this function's own table
+                mints = [l for l in projected.get(argument.id, []) if l < node.lineno]
+                clobbers = [l for l in rebound.get(argument.id, []) if l < node.lineno]
+                if mints and (not clobbers or max(mints) > max(clobbers)):
+                    continue
+            offenders.append((
+                name, node.lineno,
+                argument.id if isinstance(argument, ast.Name)
+                else type(argument).__name__,
+            ))
+    return offenders
+
+
+def test_every_recompiling_consumer_is_handed_the_projected_table():
+    """Sweep of the mechanism across the whole source tree."""
+    src_root = _TESTS_ROOT.parent / "src"
+    consumers, signatures = _recompiling_consumers(src_root)
+
+    assert len(consumers) >= 7, (
+        "the derived population collapsed to %d consumers; the compiler package's "
+        "declared entries or the call graph moved, and a sweep over a shrunken "
+        "population reports success without looking: %s" % (len(consumers), sorted(consumers))
+    )
+
+    scanned, offenders = [], []
+    for path in sorted(src_root.rglob("*.py")):
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+        except SyntaxError:  # pragma: no cover - another test's problem
+            continue
+        scanned.append(path)
+        offenders += [(path.name, *row)
+                      for row in _unprojected_recompiles(tree, consumers, signatures)]
+
+    assert scanned, "the census walked no source files"
+    assert offenders == [], (
+        "a consumer that recompiles the root was handed a table this function "
+        "did not project, so evidence minted for the root is invisible to it: "
+        "{0}".format(offenders)
+    )
+
+
+def test_the_recompile_rule_refuses_the_shapes_that_escape_a_name_check():
+    """Non-vacuity, over every shape review showed the first version missed."""
+    src_root = _TESTS_ROOT.parent / "src"
+    consumers, signatures = _recompiling_consumers(src_root)
+
+    def offenders(source):
+        return [row[0] for row in
+                _unprojected_recompiles(ast.parse(source), consumers, signatures)]
+
+    header = ("def f(spec, resolution):\n"
+              "    root_symbols = project_grants_for_root(ir, s, process_root_ref=k)\n")
+
+    # 1. The defect itself: the projection computed, then a fresh table passed.
+    assert offenders(header + "    _dry_emit_canonical_plan(p, build(spec), d)\n") == [
+        "_dry_emit_canonical_plan"], "the original discard is no longer caught"
+
+    # 2. The fix.
+    assert offenders(header + "    _dry_emit_canonical_plan(p, root_symbols, d)\n") == []
+
+    # 3. KEYWORD form — invisible to a positional-only reading.
+    assert offenders(
+        header + "    _dry_emit_canonical_plan(p, symbols=build(spec), depends_on_by_key=d)\n"
+    ) == ["_dry_emit_canonical_plan"], "a keyword argument escaped the check"
+
+    # 4. REBOUND name — projected, then overwritten before the call. A
+    #    function-wide name set accepted this; the interpreter does not.
+    assert offenders(
+        header
+        + "    root_symbols = build(spec)\n"
+        + "    _dry_emit_canonical_plan(p, root_symbols, d)\n"
+    ) == ["_dry_emit_canonical_plan"], "a rebound name escaped the check"
+
+    # 5. A consumer the hand-list never named. This is the finding that replaced
+    #    the list with a derivation, so the witness must show the new one covered.
+    assert "materialize_canonical_process_xml" in consumers
+    assert offenders(
+        header + "    materialize_canonical_process_xml(p, build(spec), d)\n"
+    ) == ["materialize_canonical_process_xml"], "a derived consumer is not enforced"
+
+    # 6. Out of scope, and must stay so: a function that projects nothing merely
+    #    passes on what it was given, and refusing that would refuse every
+    #    legitimate caller in the tree — measured, six of them.
+    assert offenders("def f(symbols):\n    _dry_emit_canonical_plan(p, symbols, d)\n") == []
