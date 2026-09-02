@@ -5719,8 +5719,9 @@ def test_every_recompiling_consumer_on_the_evidenced_route_gets_the_grants():
     frames = []
     dropped = []
     relocatable = []
-    pending = []
+    pending = {}
     unconsumed = []
+    mismatched = []
 
     def _watch(module_name, consumer, parameters):
         module = importlib.import_module("boomi_mcp." + module_name.split("boomi_mcp.")[-1]
@@ -5822,15 +5823,15 @@ def test_every_recompiling_consumer_on_the_evidenced_route_gets_the_grants():
         # itself is the expectation: once a projection exists, the next compile
         # in this run must be given it.
         if pair[0] is not None:
-            # ONE SLOT, not a stack. Appending let unconsumed mints accumulate —
-            # measured, six projections mint on this route and four compiles
-            # consume one — so `pending[-1]` could be a NEWER mint than the one
-            # owed, and a table projected for a different root satisfied it. The
-            # rule is "the next compile after a mint must be that mint"; a mint
-            # followed by another mint with no compile between is a table that
-            # went to the relocatable path, which is what overwriting records.
-            del pending[:]
-            pending.append(pair)
+            # KEYED BY ROOT. Two wrong shapes preceded this one and each was the
+            # other's failure: a global STACK let a stale pair from one root
+            # satisfy a compile for another, and a single SLOT fixed that by
+            # discarding an unmatched obligation the moment any later root
+            # minted — so a second root could skip its own projection, recompile
+            # with the first root's table, and leave nothing to object. An
+            # obligation belongs to the root it was minted for; keeping one per
+            # root is what makes both shapes impossible rather than trading them.
+            pending[pair[0]] = pair
         return table
 
     def _recording_core(ir, symbols, *args, **kwargs):
@@ -5840,14 +5841,24 @@ def test_every_recompiling_consumer_on_the_evidenced_route_gets_the_grants():
                     tuple(getattr(symbols, "idempotency_grants", ()) or ()))
         routed.append(observed)
         is_relocatable = any(table is symbols for table in relocatable)
-        if pending and not is_relocatable:
-            # The compile that follows a mint must BE the mint. A rootless table
-            # here is the erasure this check exists for; a different pair is the
-            # substitution.
-            if observed == pending[-1]:
-                pending.pop()
+        if observed[0] is None and pending and not is_relocatable:
+            # A ROOTLESS COMPILE WHILE AN OBLIGATION IS OUTSTANDING. Skipping
+            # these left the erasure path open a second time: the violation was
+            # recorded nowhere, and the next mint for the same root overwrote the
+            # undischarged entry, so a valid later compile discharged it and the
+            # run ended clean. Recording it here means the erasure cannot be
+            # forgotten by anything that happens afterwards.
+            mismatched.append(("erased-while-owed", sorted(pending), observed))
+        if observed[0] is not None and not is_relocatable:
+            owed = pending.get(observed[0])
+            if owed is None:
+                # A root-carrying table nobody minted for that root, or a second
+                # delivery of one already consumed.
+                mismatched.append(("unminted-or-replayed", observed))
+            elif observed != owed:
+                mismatched.append((owed, observed))
             else:
-                unconsumed.append((pending[-1], observed))
+                del pending[observed[0]]
         if frames and observed != frames[-1][1] and not is_relocatable:
             # INCLUDING a transition to None. A consumer that erases the
             # projection on its way to the core is the defect, not an
@@ -5947,10 +5958,18 @@ def test_every_recompiling_consumer_on_the_evidenced_route_gets_the_grants():
     # entries get; applying it only to those left the reached consumers, which
     # are most of the population, on the weaker check.
     assert minted, "the projection never ran on the evidenced route"
-    assert not unconsumed, (
-        "a projection was minted and the compile that followed it received "
-        "something else — the projected table was erased or replaced between "
-        "the mint and the recompile: %s" % (unconsumed,)
+    assert not mismatched, (
+        "a compile received a table that is not the one minted for its root — "
+        "the projection was replaced between the mint and the recompile: %s"
+        % (mismatched,)
+    )
+    # EVERY ROOT'S OBLIGATION DISCHARGED. An erasure, or a consumer skipping its
+    # own projection and recompiling with another root's table, both show up
+    # here: the root that minted never got its table into a compile.
+    assert not pending, (
+        "a projection was minted for a root and no compile ever received it, so "
+        "the recompile ran without the grants that root was granted: %s"
+        % (sorted(pending),)
     )
     assert not dropped, (
         "a recompiling consumer was handed a projected table and delivered a "
