@@ -1333,6 +1333,7 @@ def _validate_processes(
     declarations: Any = None,
     conflict_policy: str = "reuse",
     literal_indexes: Any = None,
+    boomi_client: Any = None,
 ) -> Tuple[ValidationReportSummaryV1, Tuple[AuthoringDiagnosticV1, ...], Any, Any]:
     """Run the unified #143 semantic validator over every authored process.
 
@@ -1359,6 +1360,7 @@ def _validate_processes(
         submitted_xml_unsettled_summary,
     )
     from .connector_resolution_snapshot import (
+        live_readings_for_declared_components,
         ConnectorIdentityError,
         assert_declared_matches_resolved,
         build_connector_resolution_snapshot,
@@ -1373,9 +1375,20 @@ def _validate_processes(
     # into a refuser and emptied the report a caller was told to read.
     snapshot_diagnostics: List[AuthoringDiagnosticV1] = []
     try:
+        # LIVE READINGS FOR EXPLICITLY NAMED COMPONENTS ONLY (#155 slice F).
+        # Without them this snapshot carries no component identity, so a registry
+        # record can never be placed here and an evidenced retried write refuses
+        # for want of evidence it has no way to present. Reading only the
+        # components the author already named as existing keeps a create-only
+        # plan at exactly its previous platform-call count.
+        _declared_live = live_readings_for_declared_components(
+            boomi_client, normalized.integration_spec.components
+        )
         snapshot = build_connector_resolution_snapshot(
             normalized.integration_spec.components,
             declared=normalized.connector_metadata,
+            live_component_xml=_declared_live or None,
+            reused_keys=tuple(_declared_live),
         )
     except ConnectorIdentityError as snapshot_error:
         # EVERY failure, and the identities that DID resolve. Reporting only the
@@ -1856,6 +1869,7 @@ def plan_authoring_request_v1(
         request.effect_declarations,
         request.intent.conflict_policy,
         literal_indexes=_literal_profile_indexes(boomi_client, normalized),
+        boomi_client=boomi_client,
     )
     topology_diagnostics = _validate_topology(request, normalized, profile)
     decisions, decision_diagnostics = _evaluate_decisions(request, normalized)

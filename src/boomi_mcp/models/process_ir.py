@@ -2871,17 +2871,18 @@ PROCESS_IR_V1_CAPABILITIES: Mapping[str, str] = MappingProxyType(
         # FORBIDDEN_NAMES) — and this row is now projected into the public
         # authoring contract. "replay safety" is the public term throughout.
         # Safe to rename: the manifest key had never been served.
-        # #155 M12.17 slice F: still GATED, and the reason changed. The evidence
-        # exists now — seven attested REST captures and one account-scoped
-        # operation contract record — and the compiler does resolve a replay
-        # verdict from it. What is missing is REACH: a contract symbol is minted
-        # by placing a record against the trusted snapshot's component identity,
-        # and the snapshot built on the plan/compile route carries no identity at
-        # all, because slice C deferred the live reading to apply. So the
-        # construct is authorable at apply and not through compile, which is not
-        # what `supported` claims. Live QA measured this; the flip was made and
-        # withdrawn in the same slice rather than shipped as a false claim.
-        "verified_write_replay_safety": "gated",  # #142; evidence landed in #155
+        # #155 M12.17 slice F: SUPPORTED, and it took two attempts to be able to
+        # say so. The evidence landed first — seven attested REST captures and
+        # one account-scoped operation contract record from a live double
+        # execution — and the flip was made and WITHDRAWN in the same slice when
+        # live QA measured that the construct was unauthorable: a contract is
+        # placed against the trusted snapshot's component identity, and the
+        # plan/compile snapshot carried none. The gate was closed on REACH, not
+        # on evidence. Reach is now closed too: the compile route reads live
+        # identities for components the author explicitly NAMES, and only those,
+        # so a plan that creates its components costs exactly what it did before.
+        # Driven at the public compile entry, not at a hand-built snapshot.
+        "verified_write_replay_safety": "supported",  # #142, evidenced by #155
         # #155 M12.17. The per-document request path, and the explicit
         # acknowledgement that a retried process-scope region may replay its own
         # document producer. Both are SUPPORTED: authorable through this

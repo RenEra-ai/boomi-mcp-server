@@ -18,6 +18,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -437,3 +438,155 @@ def test_the_capability_derivation_fails_closed_without_hiding_a_defect():
             CC.lookup_capability(CC.REST_FAMILY, "PATCH")
     finally:
         registry_module.load_registry = original
+
+
+def test_the_compile_route_can_place_a_record_for_a_component_the_author_names():
+    """The REACH defect live QA found, and the narrow fix for it.
+
+    QA drove five plan shapes through the public compile route: every one
+    resolved create-mode with no component identity, so no registry record could
+    be placed and an evidenced retried write refused for want of evidence it had
+    no way to present. The identical code at apply placed the record correctly —
+    the mechanism was right and its POSITION was wrong.
+
+    The fix reads live identities on the compile route for components the author
+    has explicitly NAMED, and only those. This asserts both halves: the named
+    component's identity reaches the snapshot and the record is placed, and a
+    plan that names nothing reads nothing — which is what keeps slice C's
+    deferred-live-read decision intact for every plan that creates its
+    components.
+    """
+    from unittest.mock import MagicMock
+
+    from boomi_mcp.authoring.connector_resolution_snapshot import (
+        build_connector_resolution_snapshot,
+        live_readings_for_declared_components,
+    )
+    from boomi_mcp.compiler.process_ir.connector_capabilities import REST_FAMILY
+    from boomi_mcp.compiler.process_ir.contracts import ComponentSymbolV1
+    from boomi_mcp.connector_replay.registry import load_registry
+
+    record = load_registry().operation_records[0]
+    operation, connection = record.operation_identity, record.connection_identity
+
+    class _Component:
+        def __init__(self, key, component_id, component_type, connector_type):
+            self.key = key
+            self.component_id = component_id
+            self.type = component_type
+            self.component_type = component_type
+            self.connector_type = connector_type
+            self.config = {"connector_type": "rest", "method": record.action}
+
+    named = [
+        _Component("PATCHLIVE", operation.component_id, "connector-action", REST_FAMILY),
+        _Component("CONNLIVE", connection.component_id, "connector-settings", REST_FAMILY),
+    ]
+    reads = []
+
+    def _get_xml(_client, component_id, *_a, **_k):
+        reads.append(component_id)
+        version = (operation.version if component_id == operation.component_id
+                   else connection.version)
+        return {"component_id": component_id, "version": version, "xml": "<x/>"}
+
+    with patch("boomi_mcp.categories.components._shared.component_get_xml", _get_xml):
+        readings = live_readings_for_declared_components(MagicMock(), named)
+        # A PLAN THAT NAMES NOTHING READS NOTHING — the cost invariant, asserted
+        # beside the positive so it cannot quietly regress.
+        before = len(reads)
+        creates = [_Component("NEW", None, "connector-action", REST_FAMILY)]
+        assert live_readings_for_declared_components(MagicMock(), creates) == {}
+        assert len(reads) == before, "a create-only plan reached the platform"
+
+    # STRINGS, which is the identity model's contract: the platform reports an
+    # integer and the reader normalises it. Asserting the raw integer here is
+    # what let the un-normalised version reach the public entry and raise.
+    assert {k: v["component_version"] for k, v in readings.items()} == {
+        "PATCHLIVE": str(operation.version), "CONNLIVE": str(connection.version)
+    }
+
+    snapshot = build_connector_resolution_snapshot(
+        named, declared={}, live_component_xml=readings,
+        reused_keys=tuple(readings),
+    )
+    # Stringified on BOTH sides, which is what the projection itself compares —
+    # the snapshot carries the version as the platform reported it and the record
+    # as the model typed it, and asserting one form against the other would fail
+    # a placement that is correct.
+    placed = {i.component_key: (i.component_id, str(i.component_version))
+              for i in snapshot.identities}
+    assert placed.get("PATCHLIVE") == (
+        operation.component_id, str(operation.version)
+    ), placed
+
+    symbols = error_symbols(
+        ComponentSymbolV1(
+            ref="$ref:PATCHLIVE", component_id=operation.component_id,
+            component_type="connector-action", connector_type=REST_FAMILY,
+            action_type=record.action, connection_ref="$ref:CONNLIVE",
+            input_profile_ref="$ref:P1", output_profile_ref="$ref:P2",
+        ),
+        ComponentSymbolV1(
+            ref="$ref:CONNLIVE", component_id=connection.component_id,
+            component_type="connector-settings", connector_type=REST_FAMILY,
+        ),
+    )
+    projected = project_idempotency_contracts(
+        symbols, registry=None, snapshot=snapshot)
+    assert [c.ref for c in projected.idempotency_contracts] == [record.contract_ref], (
+        "the compile-route snapshot still cannot place the packaged record"
+    )
+
+
+def test_the_public_compile_entry_reads_a_named_component_and_stringifies_it():
+    """Driven at the PUBLIC entry, because a hand-built snapshot already fooled me.
+
+    The withdrawn capability flip rested on an admission witness that constructed
+    its own snapshot, and live QA named that as the defect: it is the one object
+    the public compile path cannot produce. So this drives
+    `compile_authoring_request_v1` itself.
+
+    It also pins the bug that only the public entry could reveal. The identity
+    model types the component version as a string and the platform reports an
+    integer; the reader passed it through raw and every hand-built check still
+    passed, while the real entry raised a validation error on the first named
+    component.
+    """
+    from unittest.mock import MagicMock
+
+    from boomi_mcp.authoring.workflow import compile_authoring_request_v1
+    from boomi_mcp.connector_replay.registry import load_registry
+
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from _m12_11_support import (  # noqa: E402
+        APPLIABLE_CONN,
+        APPLIABLE_OP,
+        appliable_process_ir_request,
+    )
+
+    record = load_registry().operation_records[0]
+    operation, connection = record.operation_identity, record.connection_identity
+    reads = []
+
+    def _get_xml(_client, component_id, *_a, **_k):
+        reads.append(component_id)
+        version = (operation.version if component_id == operation.component_id
+                   else connection.version)
+        # The PLATFORM's shape: an integer version, which is what broke this.
+        return {"component_id": component_id, "version": version, "xml": "<x/>"}
+
+    request = appliable_process_ir_request(components=(
+        dict(APPLIABLE_CONN, component_id=connection.component_id, action="update"),
+        dict(APPLIABLE_OP, component_id=operation.component_id, action="update"),
+    ))
+    with patch("boomi_mcp.categories.components._shared.component_get_xml", _get_xml), \
+         patch("boomi_mcp.categories.integration_builder.paginate_metadata",
+               lambda *a, **k: []):
+        result, _internals = compile_authoring_request_v1(
+            request, boomi_client=MagicMock(), profile="qa")
+
+    assert result is not None
+    assert sorted(reads) == sorted(
+        [operation.component_id, connection.component_id]
+    ), reads

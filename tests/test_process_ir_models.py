@@ -1378,15 +1378,14 @@ def test_capability_manifest_immutable_and_complete():
     assert PROCESS_IR_V1_CAPABILITIES["catch_error_type_lists"] == "unsupported"
     assert PROCESS_IR_V1_CAPABILITIES["retry_backoff_authoring"] == "unsupported"
     assert PROCESS_IR_V1_CAPABILITIES["queue_topology"] == "unsupported"
-    # ...while these four are genuinely "not yet", each blocked on a different
+    # ...while these three are genuinely "not yet", each blocked on a different
     # missing thing (see the manifest comments).
     assert PROCESS_IR_V1_CAPABILITIES["catch_failure_trigger_selection"] == "gated"
-    # #155 slice F: the evidence landed and the gate did NOT open. The compiler
-    # resolves a replay verdict from an observation now, but a contract symbol is
-    # minted by placing a record against the trusted snapshot's component
-    # identity, and the plan/compile snapshot carries none — so the construct is
-    # reachable at apply and not through compile. Live QA measured it.
-    assert PROCESS_IR_V1_CAPABILITIES["verified_write_replay_safety"] == "gated"
+    # #155 slice F. Flipped, withdrawn on a live-QA reachability finding, then
+    # flipped again once the compile route could place a record for a component
+    # the author names. Both halves were measured, the second at the public
+    # compile entry rather than at a snapshot built by the test.
+    assert PROCESS_IR_V1_CAPABILITIES["verified_write_replay_safety"] == "supported"
     assert PROCESS_IR_V1_CAPABILITIES["listener_error_scope"] == "gated"
     assert PROCESS_IR_V1_CAPABILITIES["nested_try_catch"] == "gated"
     # #175. The pair is the whole point: the non-returning form is what V1 emits,
@@ -1416,6 +1415,7 @@ def test_capability_manifest_immutable_and_complete():
         "source_replay_policy",
         "terminal_process_call",
         "typed_idempotency_evidence",
+        "verified_write_replay_safety",
     ]
 
 

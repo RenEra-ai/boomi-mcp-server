@@ -929,3 +929,60 @@ def assert_declared_matches_resolved(
             failures=tuple(mismatches),
         )
     return dict(declared)
+
+
+def live_readings_for_declared_components(boomi_client, components) -> Dict[str, Any]:
+    """Live identity readings for components the author NAMES as already existing.
+
+    #155 slice F. A contract symbol is minted by placing a registry record
+    against this snapshot's component identity and VERSION, and both fields come
+    only from a live reading. The plan and compile route supplied none, so no
+    record could ever be placed there and an evidenced retried write refused for
+    want of evidence it had no way to present — measured by live QA across five
+    plan shapes, every one create-mode with nothing minted, while the identical
+    code at apply placed the record correctly.
+
+    THE SCOPE IS THE NARROW ONE ON PURPOSE. Slice C deferred the live reading to
+    apply and the plan-time cost of that decision was measured when it was taken,
+    so this does not reopen it wholesale: only components carrying an EXPLICIT
+    component id are read — the ones the author has already told us exist. A plan
+    that creates everything reads nothing and costs exactly what it cost before.
+    Resolving ids by NAME would be the wholesale version and is deliberately not
+    done here; a caller who wants a replay contract can name the component the
+    contract was minted against, which is the same component the record binds.
+
+    A component that cannot be read contributes NOTHING rather than refusing:
+    matching the existing rule at apply, where a transient platform error must
+    not become an authoring refusal.
+    """
+    from ..categories.components._shared import component_get_xml
+
+    readings: Dict[str, Any] = {}
+    if boomi_client is None:
+        return readings
+    for component in components or ():
+        key = getattr(component, "key", None)
+        component_id = getattr(component, "component_id", None)
+        if not key or not component_id:
+            continue
+        try:
+            fetched = component_get_xml(boomi_client, str(component_id))
+        except Exception:  # noqa: BLE001 - an unreadable component observed nothing
+            readings[key] = {"read_failed": True}
+            continue
+        if not isinstance(fetched, dict):
+            readings[key] = {"read_failed": True}
+            continue
+        # STRINGIFIED, because the identity model types the version as a string
+        # and the platform reports it as an integer. Passing it through raw made
+        # the public compile entry raise a validation error — found by driving
+        # that entry rather than a hand-built snapshot, which is the same lesson
+        # this slice has already paid for once.
+        version = fetched.get("version")
+        readings[key] = {
+            "component_id": fetched.get("component_id") or str(component_id),
+            "component_version": None if version is None else str(version),
+            "xml": fetched.get("xml"),
+            "read_failed": False,
+        }
+    return readings
