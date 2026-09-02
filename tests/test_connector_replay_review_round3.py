@@ -5556,7 +5556,13 @@ def _declared_compiler_entries(src_root):
         if not is_all:
             continue
         for element in getattr(node.value, "elts", []):
-            if isinstance(element, ast.Constant) and str(element.value).startswith("compile_"):
+            if isinstance(element, ast.Constant):
+                # EVERY exported entry, with no prefix filter. Filtering on
+                # `compile_` dropped `parse_and_compile_process_ir_v1`, which is
+                # a public compile entry that takes a symbol table and reaches
+                # the compiler through a PRIVATE core — so the closure could not
+                # recover it either, and a wrapper built on it was invisible to
+                # the whole sweep while the population floor still passed.
                 entries.add(element.value)
     return entries
 
@@ -5631,40 +5637,71 @@ def _table_argument(call, consumer, signatures):
     return None
 
 
+def _carries_the_table(node, carrying):
+    """Does this expression DERIVE from something that already carries the table?
+
+    Lineage, not name membership. `relocatable = _strip(symbols)` still carries
+    what its caller projected; `build_symbol_table(spec)` carries nothing however
+    it is named.
+    """
+    if isinstance(node, ast.Call):
+        name = (node.func.id if isinstance(node.func, ast.Name)
+                else node.func.attr if isinstance(node.func, ast.Attribute) else None)
+        if name in _ROOT_PROJECTORS:
+            return True
+    return any(isinstance(inner, ast.Name) and inner.id in carrying
+               for inner in ast.walk(node))
+
+
 def _unprojected_recompiles(tree, consumers, signatures):
-    """`(consumer, lineno, argument)` for each recompile handed an unprojected table."""
+    """`(consumer, lineno, argument)` for each recompile handed an unprojected table.
+
+    A function is IN SCOPE if it projects a table or is handed one. Both are ways
+    of holding the table a recompiling consumer must receive, and the first
+    version of this check scoped to projecting functions ALONE — so a forwarding
+    wrapper could take its caller's projection and pass a freshly built table
+    instead, discarding it with nothing to notice. A function that neither
+    receives nor mints a table is genuinely out of scope: whether the raw route
+    should carry grants at all is a different question from whether a projection
+    survives, and answering it here would be a claim this sweep cannot support.
+    """
     offenders = []
     for function in ast.walk(tree):
         if not isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef)):
             continue
 
-        # WHERE each name was last bound, and from what. A function-wide set of
-        # projected names accepted a name that was projected and then reassigned
-        # from something else before the call — so the binding is tracked by line
-        # and the later assignment wins, which is what the interpreter does.
-        projected, rebound = {}, {}
+        args = function.args
+        params = {a.arg for a in args.posonlyargs + args.args + args.kwonlyargs
+                  if "symbol" in a.arg}
+        projects = any(
+            isinstance(n, ast.Assign) and isinstance(n.value, ast.Call)
+            and ((n.value.func.id if isinstance(n.value.func, ast.Name)
+                  else n.value.func.attr if isinstance(n.value.func, ast.Attribute)
+                  else None) in _ROOT_PROJECTORS)
+            for n in ast.walk(function))
+        if not (projects or params):
+            continue
+
+        # A LOCAL PROJECTION SUPERSEDES THE PARAMETER it derived from. Exempting
+        # the parameter unconditionally is how a function could project, then
+        # hand the recompiler the original table it had just superseded, and be
+        # read as a harmless pass-through.
+        carrying = set() if projects else set(params)
+
+        # WHERE each name was last bound, and whether that binding carries. A
+        # function-wide set of projected names accepted a name projected and then
+        # reassigned from something else before the call; bindings are tracked by
+        # line so the last one before the call decides, as the interpreter does.
+        binds = {}
         for node in ast.walk(function):
             if not isinstance(node, ast.Assign):
                 continue
-            source = None
-            if isinstance(node.value, ast.Call):
-                callee = node.value.func
-                source = (callee.id if isinstance(callee, ast.Name)
-                          else callee.attr if isinstance(callee, ast.Attribute) else None)
-            book = projected if source in _ROOT_PROJECTORS else rebound
+            carried = _carries_the_table(node.value, carrying)
             for target in node.targets:
                 if isinstance(target, ast.Name):
-                    book.setdefault(target.id, []).append(node.lineno)
-
-        if not projected:
-            # A function that never projects cannot have discarded a projection.
-            # Its table arrived from a caller, and the obligation lives THERE —
-            # checked by this same sweep, at that call site.
-            continue
-
-        args = function.args
-        own = {a.arg for a in args.posonlyargs + args.args + args.kwonlyargs
-               if "symbol" in a.arg}
+                    binds.setdefault(target.id, []).append((node.lineno, carried))
+                    if carried:
+                        carrying.add(target.id)
 
         for node in ast.walk(function):
             if not isinstance(node, ast.Call):
@@ -5678,12 +5715,11 @@ def _unprojected_recompiles(tree, consumers, signatures):
             if argument is None:
                 continue
             if isinstance(argument, ast.Name):
-                if argument.id in own:
-                    continue          # a pass-through of this function's own table
-                mints = [l for l in projected.get(argument.id, []) if l < node.lineno]
-                clobbers = [l for l in rebound.get(argument.id, []) if l < node.lineno]
-                if mints and (not clobbers or max(mints) > max(clobbers)):
+                prior = [(l, ok) for l, ok in binds.get(argument.id, []) if l < node.lineno]
+                if (prior[-1][1] if prior else argument.id in carrying):
                     continue
+            elif _carries_the_table(argument, carrying):
+                continue
             offenders.append((
                 name, node.lineno,
                 argument.id if isinstance(argument, ast.Name)
@@ -5697,7 +5733,7 @@ def test_every_recompiling_consumer_is_handed_the_projected_table():
     src_root = _TESTS_ROOT.parent / "src"
     consumers, signatures = _recompiling_consumers(src_root)
 
-    assert len(consumers) >= 7, (
+    assert len(consumers) >= 8, (
         "the derived population collapsed to %d consumers; the compiler package's "
         "declared entries or the call graph moved, and a sweep over a shrunken "
         "population reports success without looking: %s" % (len(consumers), sorted(consumers))
@@ -5760,7 +5796,35 @@ def test_the_recompile_rule_refuses_the_shapes_that_escape_a_name_check():
         header + "    materialize_canonical_process_xml(p, build(spec), d)\n"
     ) == ["materialize_canonical_process_xml"], "a derived consumer is not enforced"
 
-    # 6. Out of scope, and must stay so: a function that projects nothing merely
-    #    passes on what it was given, and refusing that would refuse every
-    #    legitimate caller in the tree — measured, six of them.
-    assert offenders("def f(symbols):\n    _dry_emit_canonical_plan(p, symbols, d)\n") == []
+    # 6. Forwarding a received table is fine; DISCARDING one is not. Scoping to
+    #    projecting functions alone missed the second shape entirely.
+    wrapper = ("def w(unit, symbols, cp):\n"
+               "    return build_materialization_plan(envelope=e, process_ir=i, symbols=%s,\n"
+               "        conflict_policy=cp, compiler_revision=r, emitter_revision=r,\n"
+               "        materializer_revision=r)\n")
+    assert offenders(wrapper % "symbols") == []
+    assert offenders(wrapper % "_strip(symbols)") == [], (
+        "a table DERIVED from the one this function was handed still carries it; "
+        "refusing that would refuse every legitimate caller in the tree"
+    )
+    assert offenders(wrapper % "build_symbol_table(x)") == ["build_materialization_plan"], (
+        "a wrapper discarding its caller's projection went unseen"
+    )
+
+    # 7. A function that PROJECTS may not then hand over the parameter it
+    #    superseded. Read as a pass-through, this was invisible.
+    assert offenders(
+        "def f(symbols):\n"
+        "    root_symbols = project_grants_for_root(ir, symbols, process_root_ref=k)\n"
+        "    _dry_emit_canonical_plan(plan, symbols, depends_on_by_key=d)\n"
+    ) == ["_dry_emit_canonical_plan"], "the superseded parameter was accepted"
+
+    # 8. A function that neither receives nor mints a table is out of scope, and
+    #    must stay so: whether the raw route should carry grants at all is a
+    #    separate question this sweep cannot answer.
+    assert offenders("def f():\n    _dry_emit_canonical_plan(p, build(x), d)\n") == []
+
+    # 9. The authority's WHOLE exported surface seeds the population. A prefix
+    #    filter dropped this entry, and the closure could not recover it because
+    #    it reaches the compiler through a private core.
+    assert "parse_and_compile_process_ir_v1" in consumers
