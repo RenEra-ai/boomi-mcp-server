@@ -1,0 +1,13 @@
+{
+ "collector": "wave_gate",
+ "durable_dir": "wave-gate/wave155bb",
+ "files": {
+  "wave-gate/wave155bb/summary.json": "08fb5e878c4990208a17a633b9cf7bef290c95d9c100e2782f587096c7f31e27",
+  "wave-gate/wave155bb/wave.log": "b77063871425b4258d46fd0041836ae09e6a9583e0142af35d9b1feb6a8187b9"
+ },
+ "logical_loop": "L4 (composite wave gate, slice F \u2014 the REFUSED first evaluation)",
+ "source_run_dir": "/private/tmp/claude-501/-Users-gleb-Documents-Projects-Renera-boomi-mcp-server/8defa524-ca7e-4e75-a277-89c795d0dba6/scratchpad/wave155bb",
+ "status": "completed",
+ "verdict": "refused",
+ "wave_sha": null
+}

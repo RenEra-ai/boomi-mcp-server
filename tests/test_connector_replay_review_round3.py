@@ -1327,6 +1327,8 @@ _UNROWED = {"DC-155-C": 2, "DC-155-I": 1}
 #: the reason. Frozen so the set cannot grow silently: a row that names a class is an
 #: instance of it unless it appears here.
 _NOT_AN_INSTANCE = {
+    "SELF-155-r119-01a": "a REVISION correcting an evidence citation, not a second defect "
+    "— the class row counts the original once",
     "CDX-155-r171-02a": "a REVISION replacing a disposition the contract does not admit "
     "with `fixed`, not a second defect — the class row counts the original once",
     "CDX-155-r148-01a": "a REVISION supplying the disposition the original lacked, "
@@ -6283,3 +6285,122 @@ def test_each_authored_root_is_projected_for_its_own_process():
         "the wet apply did not submit one component per authored process: %s"
         % (sorted(submitted),)
     )
+
+
+def _checkpoint_count_disagreements(ledger_text, index_text, wave_dir=None):
+    """Where a checkpoint's CUMULATIVE count disagrees with the archive.
+
+    `DC-155-J` recurred twice after its structural fix was delivered, and both
+    recurrences are the same shape the fix does not cover: the earlier invariant
+    checks a closing REPORT against the slice map's residue, and these are
+    CHECKPOINT COUNTS transcribed from memory. A count is not a summary of prose,
+    it is a count of archived rounds, so it is derivable — and a derived count
+    cannot disagree with itself.
+
+    The rule: for each loop that has archived rounds, the highest cumulative
+    figure any of its checkpoints records must equal the number of rounds the
+    archive holds for it. A checkpoint claiming fewer evaluations than the
+    archive proves is understating the loop while closing it, which is the one
+    direction this error must never run.
+    """
+    import json
+    import re
+
+    ledger_text = "\n".join(_unfenced_lines(ledger_text))
+    archived = {}
+    for raw in index_text.splitlines():
+        if not raw.strip():
+            continue
+        try:
+            entry = json.loads(raw)
+        except ValueError:
+            continue
+        if entry.get("status") != "completed":
+            continue
+        loop = str(entry.get("logical_loop", ""))
+        tag = re.match(r"(L\d)", loop)
+        here = re.search(r"slice ([A-F])", loop)
+        if tag and here:
+            archived[(here.group(1), tag.group(1))] = archived.get(
+                (here.group(1), tag.group(1)), 0) + 1
+
+    if wave_dir is None:
+        wave_dir = (Path(__file__).resolve().parents[1]
+                    / "docs/architecture/evidence/issue-155/wave-gate")
+    if wave_dir and Path(wave_dir).is_dir():
+        for d in sorted(Path(wave_dir).iterdir()):
+            record = d / "round.json"
+            if not record.is_file():
+                continue
+            try:
+                entry = json.loads(record.read_text())
+            except ValueError:
+                continue
+            loop = str(entry.get("logical_loop", ""))
+            tag = re.match(r"(L\d)", loop)
+            here = re.search(r"slice ([A-F])", loop)
+            if tag and here:
+                archived[(here.group(1), tag.group(1))] = archived.get(
+                    (here.group(1), tag.group(1)), 0) + 1
+
+    claimed = {}
+    for row in _checkpoint_rows(ledger_text) or []:
+        cells = row.split("|")
+        if len(cells) < 5:
+            continue
+        m = re.match(r"\s*(\d+)\s*/\s*(\d+)", cells[2])
+        tag = re.match(r"\s*(L\d)", cells[1].strip().strip("*").strip("`"))
+        here = re.search(r"slice ([A-F])", cells[1])
+        if not (m and tag and here):
+            continue
+        key = (here.group(1), tag.group(1))
+        claimed[key] = max(claimed.get(key, 0), int(m.group(2)))
+
+    disagreements = []
+    for key, rounds in sorted(archived.items()):
+        if key not in claimed:
+            continue
+        if claimed[key] < rounds:
+            disagreements.append((key, claimed[key], rounds))
+    return disagreements
+
+
+def test_no_checkpoint_claims_fewer_evaluations_than_the_archive_holds():
+    """The count is DERIVED from the archive, never transcribed."""
+    root = _TESTS_ROOT.parent
+    ledger = (root / "docs/architecture/ISSUE_155_AUDIT_LEDGER.md").read_text(encoding="utf-8")
+    index = (root / "docs/architecture/evidence/issue-155/index.jsonl").read_text(encoding="utf-8")
+    disagreements = _checkpoint_count_disagreements(ledger, index)
+    assert not disagreements, (
+        "a checkpoint records fewer evaluations than its archive holds, so it is "
+        "understating the loop it closes: {0}".format(disagreements)
+    )
+
+
+def test_the_count_rule_catches_an_understated_loop():
+    """Non-vacuity, in both directions."""
+    import json
+
+    index = "\n".join(json.dumps({
+        "status": "completed",
+        "logical_loop": "L2 (Stage-2 Codex commit review, slice F)",
+    }) for _ in range(4))
+
+    header = ("| Loop | Evaluation (window / cumulative) | Tree | Outcome | Rationale |\n"
+              "| --- | --- | --- | --- | --- |\n")
+    understated = header + (
+        "| L2 Stage-2 Codex commit review, slice F | 3 / 3 | `abc`, clean | `CLOSE-CLEAN` "
+        "| WINDOW RUNS: none |"
+    )
+    assert _checkpoint_count_disagreements(understated, index, wave_dir=False) == [
+        (("F", "L2"), 3, 4)
+    ], _checkpoint_count_disagreements(understated, index, wave_dir=False)
+
+    exact = understated.replace("| 3 / 3 |", "| 4 / 4 |")
+    assert _checkpoint_count_disagreements(exact, index, wave_dir=False) == []
+
+    # Claiming MORE than the archive holds is a different defect with its own
+    # rules — a round billed to this loop that produced no archive — and this
+    # check deliberately does not adjudicate it.
+    ahead = understated.replace("| 3 / 3 |", "| 3 / 9 |")
+    assert _checkpoint_count_disagreements(ahead, index, wave_dir=False) == []

@@ -1,0 +1,16 @@
+{
+ "gate": "composite wave gate",
+ "command": "scripts/wave_gate.py wave --base 59299b1ca0b61271e1d34ee3989c560244dd2367 --require-plan-fingerprint",
+ "status": "completed",
+ "verdict": "refused",
+ "wave_sha": null,
+ "refusal": "MANIFEST_TRANSITION_ILLEGAL",
+ "refused_rows": [
+  "pytest-011490",
+  "pytest-011491",
+  "pytest-011494"
+ ],
+ "finding": "SELF-155-r119-01",
+ "exit_code": 0,
+ "exit_code_provenance": "the gate reported its refusal on stdout and returned 0 through a shell pipeline; the REFUSAL LINE is the verdict here, not the status, and the pass that followed was re-run without a pipe so its exit code could be read directly"
+}

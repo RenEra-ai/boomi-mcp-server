@@ -1,0 +1,2 @@
+wave_gate: baseline 59299b1ca0b61271e1d34ee3989c560244dd2367 (local)
+MANIFEST_TRANSITION_ILLEGAL pytest-nodes: rows ['pytest-011490', 'pytest-011491', 'pytest-011494'] are appended already tombstoned; a tombstone records the retirement of a row that existed, so an identity that was never active cannot be introduced retired. A row added and removed within the same range needs no row at all.
