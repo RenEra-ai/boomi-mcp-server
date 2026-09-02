@@ -5752,9 +5752,16 @@ def test_every_recompiling_consumer_on_the_evidenced_route_gets_the_grants():
 
     _core = _pipeline._compile_parsed_process_ir_v1
 
+    tables_seen = []
+
     def _recording_core(ir, symbols, *args, **kwargs):
         compiles.append((getattr(symbols, "process_root_ref", None),
                          len(getattr(symbols, "idempotency_grants", ()) or ())))
+        if getattr(symbols, "process_root_ref", None) is not None:
+            # Kept so the entry nothing calls can be driven with a REAL projected
+            # table and a real model, rather than a constructed pair whose shape
+            # I would be choosing.
+            tables_seen.append((symbols, ir))
         return _core(ir, symbols, *args, **kwargs)
 
     submitted = {}
@@ -5820,10 +5827,11 @@ def test_every_recompiling_consumer_on_the_evidenced_route_gets_the_grants():
     # SEVEN of the eight derived consumers execute on this route — MEASURED, not
     # chosen: the floor was 4 and accepted a route covering half the population.
     # The eighth, `parse_and_compile_process_ir_v1`, is not reached by the typed
-    # authoring route at all; it is covered by the seam above rather than by a
-    # wrapper, because it and the other public entry both call that one core.
-    # That is the whole reason the check moved to the seam: coverage stops
-    # depending on which bindings this test remembered to patch.
+    # authoring route at all — and a shared seam cannot observe a function
+    # nothing calls, so leaving it at that was an admission that a regression
+    # confined to that entry would pass. It is DRIVEN DIRECTLY below, with a real
+    # projected table captured from this very route, so the derived population of
+    # eight is covered in full: seven by the route, one by that arm.
     reached = {name for name, _root, _grants in seen}
     assert len(reached) >= 7, (
         "only %d derived consumers executed on the evidenced route, so this "
@@ -5850,6 +5858,30 @@ def test_every_recompiling_consumer_on_the_evidenced_route_gets_the_grants():
     # grants are the ones the compiler will look for. A consumer reached with a
     # root ref but no grants is the defect this whole line of work started from:
     # the recompile refusing evidence semantic validation had already accepted.
+    # THE EIGHTH CONSUMER, driven directly. A shared seam cannot observe a
+    # function nothing calls, and the typed authoring route does not call this
+    # one — so the floor of seven was an admission that a regression confined to
+    # it would pass. It is a public compile entry taking a symbol table, so the
+    # invariant applies to it whether or not this repo's own routes reach it.
+    projected = [table for table in (row for row in tables_seen) if table is not None]
+    assert projected, "no projected table was captured to drive the eighth entry with"
+    eighth = []
+
+    def _recording_core_direct(ir, symbols, *args, **kwargs):
+        eighth.append((getattr(symbols, "process_root_ref", None),
+                       len(getattr(symbols, "idempotency_grants", ()) or ())))
+        return _core(ir, symbols, *args, **kwargs)
+
+    with patch.object(_pipeline, "_compile_parsed_process_ir_v1", _recording_core_direct):
+        _pipeline.parse_and_compile_process_ir_v1(
+            projected[0][1].model_dump(mode="json"), projected[0][0])
+
+    assert eighth, "the eighth public entry did not reach the compile core"
+    assert all(root is not None and grants >= 1 for root, grants in eighth), (
+        "the omitted public compile entry dropped the root reference or the "
+        "grants before delegating to the shared core: %s" % (eighth,)
+    )
+
     granted = [row for row in seen if row[1] is not None]
     assert granted, (
         "no consumer on the evidenced route received a root-projected table: %s" % (seen,)
