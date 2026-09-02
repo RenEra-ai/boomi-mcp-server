@@ -6122,6 +6122,7 @@ def test_each_authored_root_is_projected_for_its_own_process():
     the document it was handed, and the request goes through compile AND
     revision-bound wet apply.
     """
+    import inspect
     import json
     from unittest.mock import MagicMock, patch
 
@@ -6207,9 +6208,14 @@ def test_each_authored_root_is_projected_for_its_own_process():
         if root is None and len(args) > 2:
             root = args[2]
         ir = kwargs.get("root_ir") if "root_ir" in kwargs else (args[0] if args else None)
-        # THE PAIRING: which document was projected under which key. A set of
-        # names cannot distinguish two consumers that swapped them.
-        pairs.append((_fingerprint(ir) if ir is not None else None, root))
+        # THE PAIRING, PER STAGE: which document was projected under which key,
+        # and by whom. A route-wide set of valid pairs is still satisfied when one
+        # stage reuses the first unit's document for both units and another stage
+        # supplies the missing name — every pair valid, the mapping broken. The
+        # caller's own frame names the stage, so the check no longer depends on a
+        # list of stages I would have had to write down.
+        stage = inspect.stack()[1].function
+        pairs.append((stage, _fingerprint(ir) if ir is not None else None, root))
         return _project(*args, **kwargs)
 
     def _drive(action, config_extra=None):
@@ -6241,17 +6247,39 @@ def test_each_authored_root_is_projected_for_its_own_process():
     assert applied.get("_success") is True, applied
     apply_pairs = list(pairs)
 
+    authored_roots = set(expected.values())
     for label, observed in (("compile", compile_pairs), ("apply", apply_pairs)):
         assert observed, "no projection ran on the %s route" % (label,)
-        wrong = [(document is not None and expected.get(document), root)
-                 for document, root in observed
-                 if document is not None and expected.get(document) != root]
-        assert not wrong, (
-            "on the %s route a process was projected under another process's "
-            "key: %s" % (label, wrong)
-        )
-        assert {root for document, root in observed if document is not None} == set(
-            expected.values()), (
-            "the %s route did not project both authored roots: %s"
-            % (label, sorted({r for d, r in observed if d is not None}))
-        )
+        stages = sorted({stage for stage, _document, _root in observed})
+        for stage in stages:
+            here = [(document, root) for stage_, document, root in observed
+                    if stage_ == stage and document is not None]
+            if not here:
+                continue
+            wrong = [(expected.get(document), root) for document, root in here
+                     if expected.get(document) != root]
+            assert not wrong, (
+                "on the %s route, stage %r projected a process under another "
+                "process's key: %s" % (label, stage, wrong)
+            )
+            # PER STAGE, not per route. A route-wide set of individually valid
+            # pairs is still satisfied when one stage reuses the first unit's
+            # document for both units and a different stage supplies the missing
+            # name. Every stage that projects at all must cover both roots.
+            assert {root for _document, root in here} == authored_roots, (
+                "on the %s route, stage %r did not project both authored roots: "
+                "%s" % (label, stage, sorted({r for _d, r in here}))
+            )
+
+    # THE WET LEG ACTUALLY RAN. An apply that stopped at the dry-run branch would
+    # leave the apply-only stages unobserved while every assertion above still
+    # held on the compile-side projections it did make.
+    apply_stages = {stage for stage, _document, _root in apply_pairs}
+    assert {"_apply_plan", "materialize_canonical_process_xml"} <= apply_stages, (
+        "the wet leg did not reach the apply-only projections: %s"
+        % (sorted(apply_stages),)
+    )
+    assert len(submitted) == len(expected), (
+        "the wet apply did not submit one component per authored process: %s"
+        % (sorted(submitted),)
+    )
