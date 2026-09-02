@@ -6346,6 +6346,12 @@ def _terminal_checkpoint_understates_its_archive(ledger_text, index_text, wave_d
                 key = (here.group(1), tag.group(1))
                 archived[key] = archived.get(key, 0) + 1
 
+    # IN LEDGER ORDER, never by the count. Selecting the "latest" row by its own
+    # cumulative figure let the value under audit choose which row gets audited:
+    # a closing row that UNDERSTATES its count is then not the latest, so the
+    # loop reads as still open and the understatement — the one thing this checks
+    # — goes unreported. The last row written is the last decision, whatever
+    # number it carries.
     latest = {}
     for row in _checkpoint_rows(ledger_text) or []:
         cells = row.split("|")
@@ -6356,19 +6362,20 @@ def _terminal_checkpoint_understates_its_archive(ledger_text, index_text, wave_d
         here = re.search(r"slice ([A-F])", cells[1])
         if not (m and tag and here):
             continue
-        key = (here.group(1), tag.group(1))
-        cumulative = int(m.group(2))
-        if cumulative >= latest.get(key, (-1, ""))[0]:
-            latest[key] = (cumulative, cells[4])
+        latest[(here.group(1), tag.group(1))] = (int(m.group(2)), cells[4])
 
     understated = []
     for key, rounds in sorted(archived.items()):
         if key not in latest:
             continue
         cumulative, outcome = latest[key]
-        # A WITHDRAWN decision is not a decision, and a loop still open owes
-        # nothing until its own next boundary — neither is this check's business.
-        if "WITHDRAWN" in outcome or "CONTINUE" in outcome:
+        # A WITHDRAWN decision is not a decision; a `CONTINUE` leaves the loop
+        # open; and a GAP-RECORDED row is deliberately a non-decision elsewhere in
+        # this file, so treating it as terminal here would refuse a valid record.
+        # Only an outcome that actually ENDS a loop is this check's business.
+        if not any(word in outcome for word in ("CLOSE", "ESCALATE")):
+            continue
+        if "WITHDRAWN" in outcome:
             continue
         if cumulative < rounds:
             understated.append((key, cumulative, rounds))
@@ -6417,3 +6424,17 @@ def test_the_terminal_count_rule_leaves_open_loops_alone():
         rows(2, "`CONTINUE`"), index, wave_dir=False) == []
     assert _terminal_checkpoint_understates_its_archive(
         rows(3, "`DEFER-STANDARD-AND-CLOSE` — WITHDRAWN"), index, wave_dir=False) == []
+    assert _terminal_checkpoint_understates_its_archive(
+        rows(3, "`GAP-RECORDED`"), index, wave_dir=False) == []
+
+    # THE CASE THIS CHECK EXISTS FOR, which its first version MISSED: a closing
+    # row understating its count below an earlier checkpoint. Selecting the
+    # latest row by its own figure meant the understatement hid the row that
+    # carried it.
+    ordered = header + (
+        "| L2 Stage-2 Codex commit review, slice F | 3 / 6 | `a`, clean | `CONTINUE` | x |\n"
+        "| L2 Stage-2 Codex commit review, slice F | 1 / 4 | `b`, clean | `CLOSE-CLEAN` | x |")
+    seven = "\n".join(index.splitlines() + [index.splitlines()[0]] * 3)
+    assert _terminal_checkpoint_understates_its_archive(ordered, seven, wave_dir=False) == [
+        (("F", "L2"), 4, 7)
+    ], _terminal_checkpoint_understates_its_archive(ordered, seven, wave_dir=False)
