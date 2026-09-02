@@ -1065,8 +1065,26 @@ def project_idempotency_contracts(symbols, *, registry=None, snapshot=None):
     for identity in identities:
         component_id = getattr(identity, "component_id", None)
         version = getattr(identity, "component_version", None)
-        if component_id and version is not None:
-            by_component[(str(component_id), str(version))] = identity
+        if not component_id or version is None:
+            continue
+        # A COMPLETE, UNCHANGED, REUSED reading or nothing. An identity carrying
+        # an id and a version but no readable configuration says the component
+        # exists, not that this plan will run the component the record observed —
+        # and the downstream matcher compares configuration digests only when
+        # they are present, so an incomplete reading could carry a grant on the
+        # id alone. `mode` must be reuse for the same reason: a component being
+        # created or updated is not the one the record was minted against.
+        if getattr(identity, "live_read_failed", None):
+            continue
+        if getattr(identity, "mode", None) != "reuse":
+            continue
+        if not getattr(identity, "config_digest", None):
+            continue
+        # ALL aliases, not the last one to be seen. Two authored keys may name
+        # the same live operation, and overwriting left the record projected onto
+        # only the surviving alias — so a retried call through the other legal
+        # name failed for missing evidence while both resolved to one operation.
+        by_component.setdefault((str(component_id), str(version)), []).append(identity)
 
     symbol_index = symbols.build_index()
     existing = {(c.ref, c.operation_ref) for c in symbols.idempotency_contracts}
@@ -1076,11 +1094,11 @@ def project_idempotency_contracts(symbols, *, registry=None, snapshot=None):
         connection = getattr(record, "connection_identity", None)
         if operation is None or connection is None:
             continue
-        placed = by_component.get(
+        placed_all = by_component.get(
             (str(getattr(operation, "component_id", "")),
              str(getattr(operation, "version", "")))
         )
-        if placed is None:
+        if not placed_all:
             # The account does not serve this component at this version, or the
             # snapshot never observed it. Silence is the honest answer: a record
             # nobody can place is not evidence about anything in this plan.
@@ -1092,20 +1110,21 @@ def project_idempotency_contracts(symbols, *, registry=None, snapshot=None):
         if (str(getattr(connection, "component_id", "")),
                 str(getattr(connection, "version", ""))) not in by_component:
             continue
-        operation_ref = "$ref:{0}".format(getattr(placed, "component_key", ""))
-        if operation_ref not in symbol_index:
-            continue
-        key = (record.contract_ref, operation_ref)
-        if key in existing:
-            continue
-        existing.add(key)
-        minted.append(
-            IdempotencyContractSymbolV1(
-                ref=record.contract_ref,
-                operation_ref=operation_ref,
-                record_digest=record.record_digest,
+        for placed in placed_all:
+            operation_ref = "$ref:{0}".format(getattr(placed, "component_key", ""))
+            if operation_ref not in symbol_index:
+                continue
+            key = (record.contract_ref, operation_ref)
+            if key in existing:
+                continue
+            existing.add(key)
+            minted.append(
+                IdempotencyContractSymbolV1(
+                    ref=record.contract_ref,
+                    operation_ref=operation_ref,
+                    record_digest=record.record_digest,
+                )
             )
-        )
     if not minted:
         return symbols
     return symbols.model_copy(

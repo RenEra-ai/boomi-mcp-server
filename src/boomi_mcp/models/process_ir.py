@@ -2871,18 +2871,21 @@ PROCESS_IR_V1_CAPABILITIES: Mapping[str, str] = MappingProxyType(
         # FORBIDDEN_NAMES) — and this row is now projected into the public
         # authoring contract. "replay safety" is the public term throughout.
         # Safe to rename: the manifest key had never been served.
-        # #155 M12.17 slice F: SUPPORTED, and it took two attempts to be able to
-        # say so. The evidence landed first — seven attested REST captures and
-        # one account-scoped operation contract record from a live double
-        # execution — and the flip was made and WITHDRAWN in the same slice when
-        # live QA measured that the construct was unauthorable: a contract is
-        # placed against the trusted snapshot's component identity, and the
-        # plan/compile snapshot carried none. The gate was closed on REACH, not
-        # on evidence. Reach is now closed too: the compile route reads live
-        # identities for components the author explicitly NAMES, and only those,
-        # so a plan that creates its components costs exactly what it did before.
-        # Driven at the public compile entry, not at a hand-built snapshot.
-        "verified_write_replay_safety": "supported",  # #142, evidenced by #155
+        # #155 M12.17 slice F: GATED, after TWO withdrawn flips, and the reason
+        # is worth keeping because it is the same reason twice. The evidence is
+        # real — seven attested REST captures, one account-scoped operation
+        # contract record from a live double execution — and the compiler now
+        # derives its replay verdict from that observation, retains the trusted
+        # snapshot through compile, threads the account, and refuses an
+        # incomplete live identity. Each flip was made when the path worked in a
+        # shape I had CONSTRUCTED, and withdrawn when the shape a caller can
+        # actually author turned out not to reach it: an `update` component
+        # deliberately ignores the live reading, and a `create` carrying an
+        # explicit id is refused before it gets there. So the authored shape that
+        # both reuses a component and admits a contract does not exist yet. That
+        # is a reachability question for the authoring surface, not an evidence
+        # question, and this row stays closed until an authored shape reaches it.
+        "verified_write_replay_safety": "gated",  # #142; evidence landed in #155
         # #155 M12.17. The per-document request path, and the explicit
         # acknowledgement that a retried process-scope region may replay its own
         # document producer. Both are SUPPORTED: authorable through this

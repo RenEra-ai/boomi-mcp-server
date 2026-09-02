@@ -1384,11 +1384,19 @@ def _validate_processes(
         _declared_live = live_readings_for_declared_components(
             boomi_client, normalized.integration_spec.components
         )
+        # THE ACCOUNT, threaded. Without it the snapshot carries no account scope,
+        # and the registry corroboration SKIPS its account check whenever that
+        # value is falsey — so a plan run against a different account than the
+        # one a record was observed on would have been granted. Read from the
+        # client, which is the account the plan is actually addressing; the
+        # profile is an alias and two profiles may name one account.
+        from ..categories.integration_builder import _client_account_id
         snapshot = build_connector_resolution_snapshot(
             normalized.integration_spec.components,
             declared=normalized.connector_metadata,
             live_component_xml=_declared_live or None,
             reused_keys=tuple(_declared_live),
+            account_id=_client_account_id(boomi_client) if boomi_client else None,
         )
     except ConnectorIdentityError as snapshot_error:
         # EVERY failure, and the identities that DID resolve. Reporting only the
@@ -1610,7 +1618,8 @@ def _validate_processes(
         advisory_count=advisories,
         codes=tuple(sorted(set(codes))),
     )
-    return summary, tuple(diagnostics), symbols, resolution.capabilities_by_root
+    return (summary, tuple(diagnostics), symbols,
+            resolution.capabilities_by_root, snapshot)
 
 
 def _validate_topology(
@@ -1843,6 +1852,13 @@ class _PlanInternals:
     #: populated by compile, retained on the bundle, EXECUTED by apply. `None`
     #: before compile has run; an empty mapping means no canonical roots.
     materialization_plans: Optional[Mapping[str, Any]] = None
+    #: #155 slice F: the TRUSTED SNAPSHOT plan resolved. Compile must project
+    #: grants against the same reading of the account that validation used —
+    #: re-projecting without it silently yields a table with no contracts and no
+    #: grants, so an evidenced retried write validates in `plan` and then refuses
+    #: in `compile` for want of the evidence plan had just accepted. Measured:
+    #: zero contracts and zero grants on the retained table before this existed.
+    connector_resolution_snapshot: Any = None
     #: #154: the per-root trusted effect context PLAN resolved. Compile reuses
     #: the resolution rather than redoing it, so the artifact cannot be compiled
     #: under a different context than the one validation reported against.
@@ -1864,7 +1880,13 @@ def plan_authoring_request_v1(
         )
 
     normalized = _normalize_intent(request)
-    validation, validation_diagnostics, symbols, effect_capabilities = _validate_processes(
+    (
+        validation,
+        validation_diagnostics,
+        symbols,
+        effect_capabilities,
+        resolution_snapshot,
+    ) = _validate_processes(
         normalized,
         request.effect_declarations,
         request.intent.conflict_policy,
@@ -2094,6 +2116,7 @@ def plan_authoring_request_v1(
         semantic_hash=semantic_hash,
         plan_hash=plan_hash,
         effect_capabilities=effect_capabilities,
+        connector_resolution_snapshot=resolution_snapshot,
     )
     return result, internals
 
@@ -2216,6 +2239,7 @@ def build_artifact_descriptors(
     symbols: Any,
     conflict_policy: str = "reuse",
     effect_capabilities: Optional[Mapping[str, Any]] = None,
+    connector_resolution_snapshot: Any = None,
 ) -> Tuple[Tuple[ArtifactFingerprintV1, ...], Tuple[ProcessCfgSummaryV1, ...]]:
     """Compile every authored process and fingerprint what came out.
 
@@ -2278,7 +2302,10 @@ def build_artifact_descriptors(
             # advisory: the refusal happens where a report is written and not
             # where bytes are produced.
             root_symbols = project_grants_for_root(
-                ir, symbols, process_root_ref=component_key
+                ir,
+                symbols,
+                process_root_ref=component_key,
+                snapshot=connector_resolution_snapshot,
             )
             reparsed, cfg, plan = (
                 compile_process_ir_model_v1(ir, root_symbols, capabilities=root_capabilities)
@@ -2456,6 +2483,7 @@ def compile_authoring_request_v1(
         internals.symbols,
         request.intent.conflict_policy,
         internals.effect_capabilities,
+        internals.connector_resolution_snapshot,
     )
     # RETAINED on the internals (AR1-01), so the bundle — and therefore apply —
     # executes the very plans this compile fingerprinted, never a rebuild.

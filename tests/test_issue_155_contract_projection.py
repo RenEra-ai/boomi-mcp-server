@@ -191,16 +191,26 @@ class _Registry:
 
 
 def _snapshot(*, operation_version="7", connection_version="3"):
-    """What slice C's trusted reading of the account observed."""
+    """What slice C's trusted reading of the account observed.
+
+    CARRIES `mode` AND a config digest, because a real reading does. The first
+    version of this fixture supplied only an id and a version, and the placement
+    accepted it — so the test proved placement on a reading the production
+    snapshot cannot produce. Review found the same hole in the code: an identity
+    with an id but no readable configuration says the component EXISTS, not that
+    this plan runs the one the record observed.
+    """
     return TrustedConnectorResolutionSnapshotV1(
         identities=(
             ResolvedConnectorComponentIdentityV1(
                 component_key="PATCHLIVE", component_id=_OP_ID,
                 component_version=operation_version, family="rest", action="PATCH",
+                mode="reuse", config_digest=_CFG, live_read_failed=False,
             ),
             ResolvedConnectorComponentIdentityV1(
                 component_key="CONNLIVE", component_id=_CONN_ID,
                 component_version=connection_version, family="rest",
+                mode="reuse", config_digest=_CFG, live_read_failed=False,
             ),
         ),
         account_scope=_ACCOUNT,
@@ -484,11 +494,25 @@ def test_the_compile_route_can_place_a_record_for_a_component_the_author_names()
     ]
     reads = []
 
+    # THE ARCHIVED COMPONENT BYTES, not a stub. A placeholder document carries
+    # no readable configuration, so the snapshot derives no config digest and the
+    # placement — correctly — refuses it. Using the real bytes is what makes this
+    # test exercise the path a caller takes rather than a shape only a test
+    # produces.
+    captures = (Path(__file__).resolve().parents[1]
+                / "docs/architecture/evidence/issue-155/captures"
+                / "cap155-e7-patch-operation-record")
+    operation_xml = (captures / "component_op_tgt.xml").read_text(encoding="utf-8")
+    connection_xml = (captures / "component_connection.xml").read_text(encoding="utf-8")
+
     def _get_xml(_client, component_id, *_a, **_k):
         reads.append(component_id)
-        version = (operation.version if component_id == operation.component_id
-                   else connection.version)
-        return {"component_id": component_id, "version": version, "xml": "<x/>"}
+        is_operation = component_id == operation.component_id
+        return {
+            "component_id": component_id,
+            "version": operation.version if is_operation else connection.version,
+            "xml": operation_xml if is_operation else connection_xml,
+        }
 
     with patch("boomi_mcp.categories.components._shared.component_get_xml", _get_xml):
         readings = live_readings_for_declared_components(MagicMock(), named)

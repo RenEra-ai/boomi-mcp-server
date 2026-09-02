@@ -23,7 +23,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from boomi_mcp.connector_replay.ingest import ingest, IngestRefused  # noqa: E402
+from boomi_mcp.connector_replay.ingest import (  # noqa: E402
+    IngestRefused,
+    ingest,
+    verify_archive,
+)
 
 ARCHIVE = ROOT / "docs/architecture/evidence/issue-155"
 CAPTURES = ARCHIVE / "captures"
@@ -59,11 +63,17 @@ def main() -> int:
                         help="update the packaged registry; otherwise report only")
     args = parser.parse_args()
 
-    present = {name: verb for name, verb in ACTIONS.items()
-               if (CAPTURES / name).is_dir()}
-    absent = sorted(set(ACTIONS) - set(present))
-    for name in absent:
-        print(f"absent, no row minted: {name} ({ACTIONS[name]})")
+    absent = sorted(name for name in ACTIONS if not (CAPTURES / name).is_dir())
+    if absent:
+        # REFUSED, not skipped. Filtering a missing capture out let `--write`
+        # exit zero and replace the packaged registry with a SMALLER evidence
+        # set — which could leave a capability served as supported with no
+        # production record behind it. The ingester's own rule is that an
+        # unverifiable candidate is refused; an absent one is the same case.
+        print("refusing to publish: configured captures are missing: "
+              + ", ".join(absent), file=sys.stderr)
+        return 2
+    present = dict(ACTIONS)
 
     try:
         rows = ingest(ARCHIVE, [CAPTURES / n for n in present],
@@ -88,8 +98,16 @@ def main() -> int:
     for name in sorted(OPERATION_RECORD_CAPTURES):
         directory = CAPTURES / name
         if not directory.is_dir():
-            print(f"absent, no operation record minted: {name}")
-            continue
+            print(f"refusing to publish: operation-record capture {name} is missing",
+                  file=sys.stderr)
+            return 2
+        # VERIFIED against the archive manifest, exactly as the class-level
+        # captures are. These two files carry the account, the component
+        # identities and the semantics this registry serves as authority, and
+        # they were parsed directly — so an altered file beside a stale manifest
+        # could have been published, because the registry validates SHAPE and
+        # not archive bytes.
+        verify_archive(ARCHIVE, directory)
         record = json.loads((directory / "operation_record.json").read_text("utf-8"))
         derivation = json.loads((directory / "record_derivation.json").read_text("utf-8"))
         definition = derivation.get("semantics_definition")

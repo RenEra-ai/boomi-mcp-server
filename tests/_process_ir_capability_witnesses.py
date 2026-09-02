@@ -974,77 +974,51 @@ def _w_definedparameter_property_source():
 
 
 def _w_verified_write_replay_safety():
-    """ADMITS — through the PUBLIC compile entry, which is the whole correction.
+    """REFUSES, and the refusal it observes is what #155 slice F actually moved.
 
-    This witness has been all three states in one slice, and the middle one is
-    why it now looks like this. It began as a refusal: no production row
-    classified a stock write replay-safe. #155 ingested seven attested REST
-    captures and one account-scoped operation contract record, so it was flipped
-    to an admission — and the admission built its own trusted snapshot. Live QA
-    found the defect that hid behind exactly that: the public plan and compile
-    route produced no snapshot identity at all, so the construct was unauthorable
-    and the manifest claim was false. The flip was withdrawn in the same slice.
+    Before the evidence landed this observed
+    `PROCESS_IR_SEMANTIC_RETRY_NON_IDEMPOTENT_WRITE`: the capability table
+    hand-wrote `unverified` for every write, which the retry check treats as
+    never retryable and checks BEFORE evidence, so no contract could ever have
+    been consulted. Slice F ingested seven attested REST captures and packaged
+    one account-scoped operation contract record, and the compiler now derives
+    the verdict from that observation — so the same document reaches the EVIDENCE
+    question instead. "This may never be retried" became "this may be retried
+    with evidence you have not supplied", which is a real move.
 
-    A witness that constructs its own precondition proves the code works and says
-    nothing about whether a caller can reach it. So this one constructs nothing:
-    it drives `compile_authoring_request_v1` — the function the authoring tool
-    calls — with an operation the author NAMES by component id, and asserts the
-    compile succeeds and that the live identity read actually happened. The
-    network boundary is the only thing faked, and it returns the platform's own
-    shape, an integer version, because passing that through unnormalised is the
-    bug the public entry caught and a hand-built snapshot did not.
+    THE CAPABILITY STAYS GATED, and this witness was twice written as an
+    admission and twice reverted. Each time the admission compiled a shape I had
+    constructed — a hand-built snapshot the public path cannot produce, then a
+    component shape the authoring surface refuses — and each time the reason it
+    passed was that it never reached the evidence question at all. What is
+    missing is an AUTHORED shape that both reuses a component and admits a
+    contract: an `update` deliberately ignores the live reading, and a `create`
+    carrying an explicit id is refused before the snapshot is built. The positive
+    path is exercised in `tests/test_issue_155_contract_projection.py` against a
+    snapshot carrying a complete reused identity, which is the shape apply
+    produces and the authoring surface does not.
     """
-    from unittest.mock import MagicMock, patch
-
-    from boomi_mcp.authoring.workflow import compile_authoring_request_v1
-    from boomi_mcp.connector_replay.registry import load_registry
-    from _m12_11_support import (
-        APPLIABLE_CONN,
-        APPLIABLE_OP,
-        appliable_process_ir_request,
+    doc = _connector_scope(
+        protected="$ref:PATCHOP",
+        retry={"count": 2},
+        idempotency={"kind": "verified_action"},
     )
 
-    record = load_registry().operation_records[0]
-    operation = record.operation_identity
-    connection = record.connection_identity
-
     def run():
-        reads = []
+        return _compile_refusal(doc, error_symbols())
 
-        def _get_xml(_client, component_id, *_a, **_k):
-            reads.append(component_id)
-            version = (operation.version if component_id == operation.component_id
-                       else connection.version)
-            return {"component_id": component_id, "version": version, "xml": "<x/>"}
-
-        request = appliable_process_ir_request(components=(
-            dict(APPLIABLE_CONN, component_id=connection.component_id,
-                 action="update"),
-            dict(APPLIABLE_OP, component_id=operation.component_id, action="update"),
-        ))
-        with patch("boomi_mcp.categories.components._shared.component_get_xml",
-                   _get_xml), \
-             patch("boomi_mcp.categories.integration_builder.paginate_metadata",
-                   lambda *a, **k: []):
-            result, _internals = compile_authoring_request_v1(
-                request, boomi_client=MagicMock(), profile="capability-witness")
-        return result, reads
-
-    def observe(outcome):
-        result, reads = outcome
-        assert result is not None, "the public compile entry produced no result"
-        # ...and it reached the account for the named components, which is what
-        # makes the identity available for a record to be placed against. A pass
-        # with no reads would mean the identity came from somewhere this witness
-        # cannot vouch for.
-        assert sorted(reads) == sorted(
-            [operation.component_id, connection.component_id]
-        ), reads
+    def observe(refusal):
+        assert refusal == (
+            (
+                "PROCESS_IR_SEMANTIC_IDEMPOTENCY_EVIDENCE_MISSING",
+                "/body/steps/1/try_body/steps/0/idempotency",
+            ),
+        ), refusal
 
     return CapabilityWitness(
         "verified_write_replay_safety",
-        "admits",
-        PROVENANCE_INLINE_ADMISSION,
+        "refuses",
+        PROVENANCE_INLINE_REFUSAL,
         run,
         observe,
     )
