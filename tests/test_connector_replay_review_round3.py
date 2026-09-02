@@ -5718,7 +5718,7 @@ def test_every_recompiling_consumer_on_the_evidenced_route_gets_the_grants():
     routed = []
     frames = []
     dropped = []
-    relocatable = set()
+    relocatable = []
     pending = []
     unconsumed = []
 
@@ -5802,7 +5802,12 @@ def test_every_recompiling_consumer_on_the_evidenced_route_gets_the_grants():
 
     def _recording_placeholder(*args, **kwargs):
         table = _placeholder(*args, **kwargs)
-        relocatable.add(id(table))
+        # THE OBJECT, not its address. `id()` of a released object is reusable,
+        # so a later rootless table could land on the same address and be taken
+        # for the deliberate relocation — which would let it bypass both erasure
+        # checks. A strong reference also keeps the object alive, so the address
+        # cannot be recycled while this list holds it.
+        relocatable.append(table)
         return table
 
     def _recording_projection(*args, **kwargs):
@@ -5817,6 +5822,14 @@ def test_every_recompiling_consumer_on_the_evidenced_route_gets_the_grants():
         # itself is the expectation: once a projection exists, the next compile
         # in this run must be given it.
         if pair[0] is not None:
+            # ONE SLOT, not a stack. Appending let unconsumed mints accumulate —
+            # measured, six projections mint on this route and four compiles
+            # consume one — so `pending[-1]` could be a NEWER mint than the one
+            # owed, and a table projected for a different root satisfied it. The
+            # rule is "the next compile after a mint must be that mint"; a mint
+            # followed by another mint with no compile between is a table that
+            # went to the relocatable path, which is what overwriting records.
+            del pending[:]
             pending.append(pair)
         return table
 
@@ -5826,7 +5839,8 @@ def test_every_recompiling_consumer_on_the_evidenced_route_gets_the_grants():
         observed = (getattr(symbols, "process_root_ref", None),
                     tuple(getattr(symbols, "idempotency_grants", ()) or ()))
         routed.append(observed)
-        if pending and id(symbols) not in relocatable:
+        is_relocatable = any(table is symbols for table in relocatable)
+        if pending and not is_relocatable:
             # The compile that follows a mint must BE the mint. A rootless table
             # here is the erasure this check exists for; a different pair is the
             # substitution.
@@ -5834,7 +5848,7 @@ def test_every_recompiling_consumer_on_the_evidenced_route_gets_the_grants():
                 pending.pop()
             else:
                 unconsumed.append((pending[-1], observed))
-        if frames and observed != frames[-1][1] and id(symbols) not in relocatable:
+        if frames and observed != frames[-1][1] and not is_relocatable:
             # INCLUDING a transition to None. A consumer that erases the
             # projection on its way to the core is the defect, not an
             # observation to skip.
