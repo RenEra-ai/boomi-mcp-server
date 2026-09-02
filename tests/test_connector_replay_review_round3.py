@@ -5863,24 +5863,50 @@ def test_every_recompiling_consumer_on_the_evidenced_route_gets_the_grants():
     # one — so the floor of seven was an admission that a regression confined to
     # it would pass. It is a public compile entry taking a symbol table, so the
     # invariant applies to it whether or not this repo's own routes reach it.
-    projected = [table for table in (row for row in tables_seen) if table is not None]
-    assert projected, "no projected table was captured to drive the eighth entry with"
-    eighth = []
+    assert tables_seen, "no projected table was captured to drive unreached entries with"
+    captured_table, captured_ir = tables_seen[0]
 
-    def _recording_core_direct(ir, symbols, *args, **kwargs):
-        eighth.append((getattr(symbols, "process_root_ref", None),
-                       len(getattr(symbols, "idempotency_grants", ()) or ())))
-        return _core(ir, symbols, *args, **kwargs)
-
-    with patch.object(_pipeline, "_compile_parsed_process_ir_v1", _recording_core_direct):
-        _pipeline.parse_and_compile_process_ir_v1(
-            projected[0][1].model_dump(mode="json"), projected[0][0])
-
-    assert eighth, "the eighth public entry did not reach the compile core"
-    assert all(root is not None and grants >= 1 for root, grants in eighth), (
-        "the omitted public compile entry dropped the root reference or the "
-        "grants before delegating to the shared core: %s" % (eighth,)
+    # DERIVED COVERAGE, not a hard-coded omission. The first version named the
+    # one entry the route missed, so a ninth consumer arriving unreached would
+    # have left the test green while it still claimed the population. The set is
+    # computed instead: whatever the route did not reach must have a driver here,
+    # and a member with neither fails, naming itself.
+    drivers = {
+        "parse_and_compile_process_ir_v1": lambda table: _pipeline.
+        parse_and_compile_process_ir_v1(captured_ir.model_dump(mode="json"), table),
+    }
+    unreached = set(consumers) - reached
+    undriven = sorted(unreached - set(drivers))
+    assert not undriven, (
+        "these derived consumers are neither reached by the evidenced route nor "
+        "driven directly, so a projection regression in them would pass: %s"
+        % (undriven,)
     )
+
+    for consumer in sorted(unreached):
+        direct = []
+
+        def _recording_core_direct(ir, symbols, *args, **kwargs):
+            # THE TABLE ITSELF, not its shape. Recording `(root, len(grants))`
+            # accepted a substituted table carrying a FOREIGN root and one grant
+            # — which is worse than dropping the projection, because grants would
+            # then be checked against a root that never minted them.
+            direct.append((getattr(symbols, "process_root_ref", None),
+                           tuple(getattr(symbols, "idempotency_grants", ()) or ())))
+            return _core(ir, symbols, *args, **kwargs)
+
+        with patch.object(_pipeline, "_compile_parsed_process_ir_v1",
+                          _recording_core_direct):
+            drivers[consumer](captured_table)
+
+        assert direct, "%s did not reach the compile core" % (consumer,)
+        expected = (captured_table.process_root_ref,
+                    tuple(captured_table.idempotency_grants or ()))
+        assert all(observed == expected for observed in direct), (
+            "%s did not deliver the table it was given to the shared core — the "
+            "root or the grants changed on the way through: got %s, gave %s"
+            % (consumer, direct, [expected])
+        )
 
     granted = [row for row in seen if row[1] is not None]
     assert granted, (
