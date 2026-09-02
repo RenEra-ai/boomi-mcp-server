@@ -2093,6 +2093,38 @@ live and serves every verb, and the runtime is up, so the two captures are takea
 before the rows are minted. Whether they prove anything is a question for the classifier, not for me.
 
 
+## Slice F — the reachability fork, stated for the owner
+
+**What landed and works.** Seven REST verb rows ingested from attested captures; one account-scoped
+operation contract record minted from a live PATCH double execution, with the semantics definition
+the registry requires or it refuses the record; a production path that mints contract symbols from
+records the trusted snapshot can place; and a capability lookup that derives its replay verdict from
+the ingested observation instead of a hand-written unclassified value. Live QA confirmed the served
+connector rows, the candidate discovery surface, the account-scope gate and a zero platform-call
+delta for plans carrying no replay evidence.
+
+**What does not work, measured.** The construct is not authorable through plan or compile. A contract
+is minted by placing a record against the trusted snapshot's component identity, and the snapshot
+built on the plan and compile route carries no identity at all: the identity and version fields are
+populated only from a live reading, and that route passes none. Live QA drove five plan shapes and
+every one resolved create-mode with no identity and minted nothing. The same code at apply, where a
+live reading IS supplied, places the record correctly — so the minter, the record, the account scope
+and the reuse detection are all right and the defect is POSITION.
+
+**Why this is a fork and not a bug fix.** Making compile place a record means giving the compile
+route a live reading, and slice C deferred that reading to apply as a recorded decision, with the
+plan-time cost delta measured as part of accepting it. Reversing it changes what every plan carrying
+a reused component costs, and today that delta is zero platform calls. There is no cheaper route:
+the placement compares component AND version, version exists only in a live reading, and matching on
+the component alone would let a record minted against one version authorise another — which is the
+exact confusion the pair comparison was introduced to prevent.
+
+**Consequence recorded rather than decided.** The capability manifest stays `gated`, and its published
+reason now names REACH rather than evidence. The flip to `supported` was made on the strength of the
+evidence and withdrawn in the same slice once live QA measured the reach, which is recorded at
+`QA-155-r69-01`. The slice does not claim what it cannot serve.
+
+
 ## Slice E — closing report (CLOSE-CLEAN)
 
 **Outcome: CLOSE-CLEAN.** Slice E's code is complete, every roster gate owed at this slice is
