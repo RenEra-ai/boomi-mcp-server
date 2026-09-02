@@ -5715,6 +5715,7 @@ def test_every_recompiling_consumer_on_the_evidenced_route_gets_the_grants():
     # modules by name was me re-deriving a weaker version of a mechanism that
     # already existed, and it left exactly the hole that comment describes.
     compiles = []
+    routed = []
 
     def _watch(module_name, consumer, parameters):
         module = importlib.import_module("boomi_mcp." + module_name.split("boomi_mcp.")[-1]
@@ -5748,15 +5749,33 @@ def test_every_recompiling_consumer_on_the_evidenced_route_gets_the_grants():
 
     assert stack, "no derived consumer could be wrapped; this test proves nothing"
 
+    from boomi_mcp.compiler.process_ir import connector_resolution as CR
     from boomi_mcp.compiler.process_ir import pipeline as _pipeline
 
     _core = _pipeline._compile_parsed_process_ir_v1
 
     tables_seen = []
+    minted = []
+
+    # WHAT THE PROJECTION ACTUALLY MINTED, captured at the authority itself. The
+    # routed assertions compared only non-nullness and a count, so a consumer
+    # substituting a DIFFERENT non-null root while keeping one grant passed — and
+    # the compile gate enables grant lookup on any non-null root, so a foreign
+    # root does not disable the check, it redirects it. Nothing downstream may
+    # alter the pair; that is what "the projected table reaches the recompile"
+    # means, and comparing shapes never said it.
+    _project = CR.project_grants_for_root
+
+    def _recording_projection(*args, **kwargs):
+        table = _project(*args, **kwargs)
+        minted.append((table.process_root_ref, tuple(table.idempotency_grants or ())))
+        return table
 
     def _recording_core(ir, symbols, *args, **kwargs):
         compiles.append((getattr(symbols, "process_root_ref", None),
                          len(getattr(symbols, "idempotency_grants", ()) or ())))
+        routed.append((getattr(symbols, "process_root_ref", None),
+                       tuple(getattr(symbols, "idempotency_grants", ()) or ())))
         if getattr(symbols, "process_root_ref", None) is not None:
             # Kept so the entry nothing calls can be driven with a REAL projected
             # table and a real model, rather than a constructed pair whose shape
@@ -5794,6 +5813,8 @@ def test_every_recompiling_consumer_on_the_evidenced_route_gets_the_grants():
             entered.enter_context(watcher)
         entered.enter_context(patch.object(
             _pipeline, "_compile_parsed_process_ir_v1", _recording_core))
+        entered.enter_context(patch.object(
+            CR, "project_grants_for_root", _recording_projection))
         entered.enter_context(patch(
             "boomi_mcp.categories.integration_builder.paginate_metadata",
             lambda *a, **k: []))
@@ -5842,6 +5863,18 @@ def test_every_recompiling_consumer_on_the_evidenced_route_gets_the_grants():
     # ride one core compile. Measured on this route, 6 compiles reach the core
     # under 15 consumer entries, and any relation between the two numbers would
     # be a claim about the call graph rather than about the invariant.
+    # EVERY routed projected observation must equal a pair the projection minted
+    # — not merely look like one. This is the same exactness the directly driven
+    # entries get; applying it only to those left the reached consumers, which
+    # are most of the population, on the weaker check.
+    assert minted, "the projection never ran on the evidenced route"
+    stray = [pair for pair in routed if pair[0] is not None and pair not in minted]
+    assert not stray, (
+        "a recompiling consumer on the route received a projected table that no "
+        "projection minted — the root or the grants were substituted between the "
+        "mint and the recompile: %s not in %s" % (stray, minted)
+    )
+
     # Every compile of a ROOT-PROJECTED table carries that root's grants. This is
     # the invariant itself, asserted on the value at the one seam both public
     # entries pass through.
