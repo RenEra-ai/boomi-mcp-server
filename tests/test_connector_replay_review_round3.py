@@ -6289,179 +6289,28 @@ def test_each_authored_root_is_projected_for_its_own_process():
     )
 
 
-def _terminal_checkpoint_understates_its_archive(ledger_text, index_text, wave_dir=None):
-    """A checkpoint that ENDS a loop must account for every archived round.
-
-    THIS IS DELIBERATELY MUCH NARROWER THAN ITS FIRST TWO VERSIONS, and the
-    narrowing is the correction. Written as this class's structural fix, it began
-    by modelling the whole checkpoint cadence: every third evaluation, windows
-    that reset on `CONTINUE`, cumulative history kept across resets, revisions,
-    withdrawals, supersessions. Three consecutive review findings said the same
-    thing about it — it refused CORRECT states, first every mid-window one, then
-    offset windows, then loops whose terminal row had been withdrawn — and this
-    file already records why that direction is the worse one: a gate that blocks
-    a correct closing stops all work, where one that misses a malformed row is
-    caught by the next reader. The cadence model already exists and works
-    (`_missing_checkpoint_violation`); re-deriving it here was the mistake.
-
-    What was actually found, twice, is one thing: a decision that CLOSES a loop
-    while recording fewer evaluations than the archive holds. That needs no
-    cadence at all — a loop that is ending has no next window to defer to, so its
-    figure is simply the count. Only the latest checkpoint of each loop is
-    considered, and a withdrawn one is not a decision.
-    """
-    import json
-    import re
-
-    ledger_text = "\n".join(_unfenced_lines(ledger_text))
-    archived = {}
-    for raw in index_text.splitlines():
-        if not raw.strip():
-            continue
-        try:
-            entry = json.loads(raw)
-        except ValueError:
-            continue
-        if entry.get("status") != "completed":
-            continue
-        loop = str(entry.get("logical_loop", ""))
-        tag, here = re.match(r"(L\d)", loop), re.search(r"slice ([A-F])", loop)
-        if tag and here:
-            key = (here.group(1), tag.group(1))
-            archived[key] = archived.get(key, 0) + 1
-
-    if wave_dir is None:
-        wave_dir = (Path(__file__).resolve().parents[1]
-                    / "docs/architecture/evidence/issue-155/wave-gate")
-    if wave_dir and Path(wave_dir).is_dir():
-        for d in sorted(Path(wave_dir).iterdir()):
-            record = d / "round.json"
-            if not record.is_file():
-                continue
-            try:
-                entry = json.loads(record.read_text())
-            except ValueError:
-                continue
-            loop = str(entry.get("logical_loop", ""))
-            tag, here = re.match(r"(L\d)", loop), re.search(r"slice ([A-F])", loop)
-            if tag and here:
-                key = (here.group(1), tag.group(1))
-                archived[key] = archived.get(key, 0) + 1
-
-    # IN LEDGER ORDER, never by the count. Selecting the "latest" row by its own
-    # cumulative figure let the value under audit choose which row gets audited:
-    # a closing row that UNDERSTATES its count is then not the latest, so the
-    # loop reads as still open and the understatement — the one thing this checks
-    # — goes unreported. The last row written is the last decision, whatever
-    # number it carries.
-    latest = {}
-    for row in _checkpoint_rows(ledger_text) or []:
-        cells = row.split("|")
-        if len(cells) < 5:
-            continue
-        m = re.match(r"\s*(\d+)\s*/\s*(\d+)", cells[2])
-        tag = re.match(r"\s*(L\d)", cells[1].strip().strip("*").strip("`"))
-        here = re.search(r"slice ([A-F])", cells[1])
-        if not (m and tag and here):
-            continue
-        # A GAP RECORD IS NOT A DECISION, so it must not replace one. Assigning
-        # unconditionally let a retrospective gap row written after a real close
-        # displace that close; the outcome filter then skipped the loop entirely
-        # and any understatement in the closing row went unseen.
-        if "GAP-RECORDED" in cells[4] and (here.group(1), tag.group(1)) in latest:
-            continue
-        latest[(here.group(1), tag.group(1))] = (int(m.group(2)), cells[4])
-
-    understated = []
-    for key, rounds in sorted(archived.items()):
-        if key not in latest:
-            continue
-        cumulative, outcome = latest[key]
-        # A WITHDRAWN decision is not a decision; a `CONTINUE` leaves the loop
-        # open; and a GAP-RECORDED row is deliberately a non-decision elsewhere in
-        # this file, so treating it as terminal here would refuse a valid record.
-        # Only an outcome that actually ENDS a loop is this check's business.
-        # EVERY outcome that ends this loop. `DEFER-STANDARD-AND-PROCEED` closes
-        # the loop and advances to the next gate, so a figure it understates is
-        # understated for good — and it matched neither of the two spellings I
-        # first thought to look for.
-        if not any(word in outcome for word in ("CLOSE", "ESCALATE", "PROCEED")):
-            continue
-        if "WITHDRAWN" in outcome:
-            continue
-        if cumulative < rounds:
-            understated.append((key, cumulative, rounds))
-    return understated
-
-
-def test_no_loop_closes_while_recording_fewer_evaluations_than_it_ran():
-    """The count of a loop-ENDING decision is derived, never transcribed."""
-    root = _TESTS_ROOT.parent
-    ledger = (root / "docs/architecture/ISSUE_155_AUDIT_LEDGER.md").read_text(encoding="utf-8")
-    index = (root / "docs/architecture/evidence/issue-155/index.jsonl").read_text(encoding="utf-8")
-    understated = _terminal_checkpoint_understates_its_archive(ledger, index)
-    assert not understated, (
-        "a checkpoint ends its loop while recording fewer evaluations than the "
-        "archive holds: {0}".format(understated)
-    )
-
-
-def test_the_terminal_count_rule_leaves_open_loops_alone():
-    """Non-vacuity, and — as importantly — non-interference."""
-    import json
-
-    index = "\n".join(json.dumps({
-        "status": "completed",
-        "logical_loop": "L2 (Stage-2 Codex commit review, slice F)",
-    }) for _ in range(4))
-    header = ("| Loop | Evaluation (window / cumulative) | Tree | Outcome | Rationale |\n"
-              "| --- | --- | --- | --- | --- |\n")
-
-    def rows(count, outcome):
-        return header + (
-            "| L2 Stage-2 Codex commit review, slice F | 3 / %d | `abc`, clean | %s "
-            "| WINDOW RUNS: none |" % (count, outcome))
-
-    # CLOSING on an understated count is the defect, and it is named.
-    assert _terminal_checkpoint_understates_its_archive(
-        rows(3, "`CLOSE-CLEAN`"), index, wave_dir=False) == [(("F", "L2"), 3, 4)]
-    assert _terminal_checkpoint_understates_its_archive(
-        rows(4, "`CLOSE-CLEAN`"), index, wave_dir=False) == []
-
-    # EVERY state the previous versions wrongly refused now passes: an open loop
-    # mid-window, an offset window, and a withdrawn terminal decision.
-    assert _terminal_checkpoint_understates_its_archive(
-        rows(3, "`CONTINUE`"), index, wave_dir=False) == []
-    assert _terminal_checkpoint_understates_its_archive(
-        rows(2, "`CONTINUE`"), index, wave_dir=False) == []
-    assert _terminal_checkpoint_understates_its_archive(
-        rows(3, "`DEFER-STANDARD-AND-CLOSE` — WITHDRAWN"), index, wave_dir=False) == []
-    assert _terminal_checkpoint_understates_its_archive(
-        rows(3, "`GAP-RECORDED`"), index, wave_dir=False) == []
-
-    # `DEFER-STANDARD-AND-PROCEED` ENDS the loop and advances to the next gate,
-    # so an understated figure under it is understated for good.
-    assert _terminal_checkpoint_understates_its_archive(
-        rows(3, "`DEFER-STANDARD-AND-PROCEED`"), index, wave_dir=False) == [
-        (("F", "L2"), 3, 4)]
-
-    # A GAP RECORD AFTER A CLOSE must not displace the close, or the
-    # understatement in the closing row disappears behind a non-decision.
-    masked = header + (
-        "| L2 Stage-2 Codex commit review, slice F | 3 / 3 | `a`, clean | `CLOSE-CLEAN` | x |\n"
-        "| L2 Stage-2 Codex commit review, slice F | 3 / 3 | `b`, clean | `GAP-RECORDED` | x |")
-    assert _terminal_checkpoint_understates_its_archive(masked, index, wave_dir=False) == [
-        (("F", "L2"), 3, 4)], _terminal_checkpoint_understates_its_archive(
-            masked, index, wave_dir=False)
-
-    # THE CASE THIS CHECK EXISTS FOR, which its first version MISSED: a closing
-    # row understating its count below an earlier checkpoint. Selecting the
-    # latest row by its own figure meant the understatement hid the row that
-    # carried it.
-    ordered = header + (
-        "| L2 Stage-2 Codex commit review, slice F | 3 / 6 | `a`, clean | `CONTINUE` | x |\n"
-        "| L2 Stage-2 Codex commit review, slice F | 1 / 4 | `b`, clean | `CLOSE-CLEAN` | x |")
-    seven = "\n".join(index.splitlines() + [index.splitlines()[0]] * 3)
-    assert _terminal_checkpoint_understates_its_archive(ordered, seven, wave_dir=False) == [
-        (("F", "L2"), 4, 7)
-    ], _terminal_checkpoint_understates_its_archive(ordered, seven, wave_dir=False)
+# THE TERMINAL-COUNT GUARD WAS REMOVED HERE, and this note is the record of why.
+#
+# It was added as the structural extension for `DC-155-J` when two checkpoints
+# were found recording fewer evaluations than the archive held. Over five review
+# rounds it drew NINE critical findings, every one of the form "this guard is
+# wrong", and in both directions: it refused valid records — mid-window states,
+# offset windows, withdrawn closures, gap records, a same-loop replay after a
+# decision to proceed — and it also missed the very understatement it existed to
+# catch, because it chose which row to audit using the number it was auditing.
+# It never once caught a real occurrence. Both real occurrences were found by the
+# review gate, which is the mechanism the workflow already relies on for this.
+#
+# The subject it tried to mechanise is not a fact in the tree. It is the
+# workflow's own decision policy — absolute boundaries, windows that reset,
+# cumulative history kept across resets, revisions, withdrawals, supersessions,
+# gap records that are not decisions, deferrals that end a loop and deferrals
+# that do not, and replays that keep a loop's identity. Every version of the
+# guard was a second model of that policy sitting beside the one that already
+# works, and a second model of a policy is not an invariant derived from a
+# runtime authority — it is the hand-model this class is named for, one level up.
+#
+# A guard that has never caught its case and has cost nine criticals is not
+# insurance against the defect; it is another instance of it. Removing it was
+# pre-committed at this loop's sixth-evaluation checkpoint, on exactly the
+# condition that then occurred.
