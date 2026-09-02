@@ -5812,9 +5812,23 @@ def test_every_recompiling_consumer_on_the_evidenced_route_gets_the_grants():
         return table
 
     def _recording_projection(*args, **kwargs):
+        # THE ROOT THAT WAS ASKED FOR, which is an argument rather than a result.
+        # Keying obligations on the root the projector RETURNED meant the value
+        # under test was also the key: a projection asked for one root and
+        # answering with another stored itself under the wrong key, and the
+        # compile that followed discharged it with nothing to compare. The
+        # requested root is independent of everything the mutant controls
+        # downstream, and it was already being intercepted here — the earlier
+        # reading that this needed new machinery was simply wrong.
+        requested = kwargs.get("process_root_ref")
+        if requested is None and len(args) > 2:
+            requested = args[2]
         table = _project(*args, **kwargs)
         pair = (table.process_root_ref, tuple(table.idempotency_grants or ()))
         minted.append(pair)
+        if requested is not None and table.process_root_ref != requested:
+            mismatched.append(("projected-a-different-root", requested,
+                               table.process_root_ref))
         # PENDING until a compile consumes it. The frame stack could only see a
         # consumer's INCOMING table, so a consumer entered rootless that projects
         # INTERNALLY — which the wet materialization path does — had no frame and
@@ -5822,7 +5836,12 @@ def test_every_recompiling_consumer_on_the_evidenced_route_gets_the_grants():
         # passed every check while the public apply still succeeded. The mint
         # itself is the expectation: once a projection exists, the next compile
         # in this run must be given it.
-        if pair[0] is not None:
+        if requested is not None:
+            # Keyed by the REQUEST, so a projector answering with a foreign root
+            # leaves the requested root's obligation outstanding as well as
+            # recording the substitution above.
+            pending[requested] = pair
+        elif pair[0] is not None:
             # KEYED BY ROOT. Two wrong shapes preceded this one and each was the
             # other's failure: a global STACK let a stale pair from one root
             # satisfy a compile for another, and a single SLOT fixed that by
