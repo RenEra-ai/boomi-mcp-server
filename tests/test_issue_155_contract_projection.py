@@ -394,3 +394,46 @@ def test_evidence_may_not_weaken_a_capability_the_transport_defines():
         "the packaged evidence no longer reaches the capability table; the whole "
         "chain this slice built is inert again"
     )
+
+
+def test_the_capability_derivation_fails_closed_without_hiding_a_defect():
+    """Three outcomes, each driven, because the handler's WIDTH is the property.
+
+    The derivation reads a packaged registry, so it needs a fallback for a build
+    that cannot read one. The first version caught `Exception`, which is a
+    superclass of the `AssertionError` the #149 transport guard raises when a
+    served producer reaches the platform — a genuine layering violation would
+    have become a silently un-derived row. Narrowing it to the builtin error
+    families then swung the other way: `RegistryInvalid` derives straight from
+    `Exception`, so a malformed packaged registry would have crashed the compiler
+    instead of falling back. Both were found by checking rather than by reading.
+    """
+    import boomi_mcp.compiler.process_ir.connector_capabilities as CC
+    import boomi_mcp.connector_replay.registry as registry_module
+
+    def _raising(exc):
+        def _load():
+            raise exc
+        return _load
+
+    original = registry_module.load_registry
+    try:
+        # 1. EVIDENCE PRESENT — the value moves. Without this the two fallbacks
+        #    below would pass on a derivation that never fires.
+        assert CC.lookup_capability(CC.REST_FAMILY, "PATCH").retry_safety == (
+            "conditionally_idempotent"
+        )
+
+        # 2. REGISTRY UNREADABLE — fall back to the table, do not crash.
+        registry_module.load_registry = _raising(
+            registry_module.RegistryInvalid("malformed"))
+        assert CC.lookup_capability(CC.REST_FAMILY, "PATCH").retry_safety == "unverified"
+
+        # 3. A DEFECT IN THIS REPOSITORY — surface it. The transport guard's own
+        #    exception type stands in for "something that must never be hidden".
+        registry_module.load_registry = _raising(
+            AssertionError("the derivation reached the Boomi transport"))
+        with pytest.raises(AssertionError, match="reached the Boomi transport"):
+            CC.lookup_capability(CC.REST_FAMILY, "PATCH")
+    finally:
+        registry_module.load_registry = original

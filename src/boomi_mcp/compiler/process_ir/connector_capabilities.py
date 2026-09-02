@@ -386,6 +386,18 @@ def connector_capability_rows() -> Tuple[Mapping[str, Any], ...]:
     """
     rows = []
     for spec in CONNECTOR_CALL_CAPABILITIES_V1.values():
+        # THROUGH THE ACCESSOR, not the raw table. Live QA found this row builder
+        # reading the table directly while `lookup_capability` derived a replay
+        # verdict from ingested evidence, so every served connector row described
+        # the pre-derivation world — telling a caller a document was impossible
+        # that the compiler had just started accepting. The generic rule text
+        # published beside these rows was correct, which made the pair worse than
+        # a single stale string: composing them produced a contradiction.
+        #
+        # The fix is to READ WHAT THE COMPILER READS. Editing the published text
+        # would have restated the derivation in a second place, which is the
+        # hand-copy class this issue has recorded thirty-two instances of.
+        spec = lookup_capability(spec.family, spec.action) or spec
         dumped = spec.model_dump(mode="json")
         row = {PUBLIC_CAPABILITY_FIELDS[key]: value for key, value in dumped.items()}
         # The family fact is JOINED, never restated per action: an action row
@@ -443,8 +455,12 @@ def _with_observed_retry_safety(row: ConnectorCapabilityV1) -> ConnectorCapabili
     if row.retry_safety not in _RETRY_SAFETY_OPEN_TO_EVIDENCE:
         return row
     try:
-        from ...connector_replay.registry import load_registry
-
+        from ...connector_replay.registry import RegistryInvalid, load_registry
+    except ImportError:
+        # A build without the replay package observes nothing and says so by
+        # leaving the table's value alone.
+        return row
+    try:
         registry = load_registry()
         # TWO VOCABULARIES, translated by the one that owns the mapping. This
         # compiler keys capabilities on the PLATFORM connector type; the evidence
@@ -456,7 +472,22 @@ def _with_observed_retry_safety(row: ConnectorCapabilityV1) -> ConnectorCapabili
         if family is None:
             return row
         observed = registry.retry_safety(family, row.action)
-    except Exception:  # noqa: BLE001 - an unreadable registry observed nothing
+    except (OSError, RegistryInvalid) as exc:
+        # NARROW, and the width mattered. This caught `Exception`, which is a
+        # superclass of the `AssertionError` the #149 transport guard raises when
+        # a served producer reaches the platform — so a genuine layering
+        # violation would have been swallowed into a silent fallback and served
+        # as an un-derived row. Checked: under that guard this derivation
+        # resolves correctly and reaches no transport, so the handler was hiding
+        # nothing; it was still the wrong shape for a fail-closed path.
+        #
+        # What is caught is what an unreadable or malformed packaged registry
+        # actually raises — and `RegistryInvalid` derives straight from
+        # `Exception`, so an earlier narrowing to the builtin error families
+        # would have turned a malformed registry from a fallback into a crash in
+        # the compiler. Checked rather than assumed. Anything else is a defect in
+        # this repository and must surface as one.
+        del exc
         return row
     value = getattr(observed, "value", observed)
     if value in (None, "unverified") or value == row.retry_safety:

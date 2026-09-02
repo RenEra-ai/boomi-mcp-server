@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 11441, "minimum_collected": 11441, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 11442, "minimum_collected": 11442, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -11484,3 +11484,4 @@
 {"kind": "test", "id": "pytest-011483", "node_id": "tests/test_issue_155_contract_projection.py::test_the_production_entry_projects_contracts_before_grants", "state": "active"}
 {"kind": "test", "id": "pytest-011484", "node_id": "tests/test_issue_155_contract_projection.py::test_an_evidenced_retried_write_compiles_and_an_unevidenced_one_does_not", "state": "active"}
 {"kind": "test", "id": "pytest-011485", "node_id": "tests/test_issue_155_contract_projection.py::test_evidence_may_not_weaken_a_capability_the_transport_defines", "state": "active"}
+{"kind": "test", "id": "pytest-011486", "node_id": "tests/test_issue_155_contract_projection.py::test_the_capability_derivation_fails_closed_without_hiding_a_defect", "state": "active"}

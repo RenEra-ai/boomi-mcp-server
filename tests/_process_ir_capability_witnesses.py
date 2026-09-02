@@ -974,96 +974,51 @@ def _w_definedparameter_property_source():
 
 
 def _w_verified_write_replay_safety():
-    """ADMITS since #155 slice F, and the change of kind is the whole story.
+    """REFUSES — and the refusal CHANGED, which is what #155 slice F moved.
 
-    This witness used to observe a refusal, and the docstring said why: "no
-    production row classifies a stock write replay-safe". That was true for as
-    long as the packaged evidence registry was empty. Slice F ingested seven
-    attested REST captures and minted one account-scoped operation contract
-    record from a live double execution, so a stock write IS now classified —
-    by observation, not by assertion.
+    Before the evidence landed this witness observed
+    `PROCESS_IR_SEMANTIC_RETRY_NON_IDEMPOTENT_WRITE`: the capability table
+    hand-wrote `unverified` for every write, the retry check treats that as never
+    retryable, and it is checked BEFORE evidence — so no contract could ever have
+    been consulted.
 
-    The document below therefore COMPILES, and every part of the chain it
-    exercises is packaged rather than injected: the capability's replay verdict
-    is derived from the ingested evidence row, the contract symbol is projected
-    from the packaged operation record, and the per-call grant is minted against
-    the trusted snapshot's reading of the account. The only fixture is the
-    snapshot, which stands for the account the record was observed on — a unit
-    test has no live account to read.
+    Slice F ingested seven attested REST captures and packaged one account-scoped
+    operation contract record, and the compiler now derives the replay verdict
+    from that observation. So the same document reaches the EVIDENCE question and
+    refuses there instead. That is a real move: the first refusal says "this may
+    never be retried", the second says "this may be retried with evidence you
+    have not supplied".
 
-    The refusal that used to live here has not been deleted: it is the negative
-    arm of `tests/test_issue_155_contract_projection.py`, which asserts that the
-    same document still refuses with no record, with no authored evidence, and
-    with evidence naming a contract nobody minted.
+    The capability stays `gated` because the evidence still cannot be supplied
+    through this route. A contract symbol is minted by placing a record against
+    the trusted snapshot's component identity, and the snapshot built on
+    plan/compile carries no identity — slice C deferred the live reading to
+    apply. Live QA measured it across five plan shapes: every one `mode:"create"`,
+    `component_id: None`, nothing minted. The positive path is exercised at the
+    apply-shaped boundary in `tests/test_issue_155_contract_projection.py`, which
+    supplies the snapshot the public compile route cannot yet produce.
     """
-    from boomi_mcp.authoring.connector_resolution_snapshot import (
-        ResolvedConnectorComponentIdentityV1,
-        TrustedConnectorResolutionSnapshotV1,
-    )
-    from boomi_mcp.compiler.process_ir.connector_capabilities import REST_FAMILY
-    from boomi_mcp.compiler.process_ir.connector_resolution import (
-        project_grants_for_root,
-    )
-    from boomi_mcp.compiler.process_ir.contracts import ComponentSymbolV1
-    from boomi_mcp.connector_replay.registry import load_registry
-
-    record = load_registry().operation_records[0]
-    operation, connection = record.operation_identity, record.connection_identity
-
     doc = _connector_scope(
-        protected="$ref:LIVEPATCH",
+        protected="$ref:PATCHOP",
         retry={"count": 2},
-        idempotency={"kind": "key_reference", "contract_ref": record.contract_ref},
+        idempotency={"kind": "verified_action"},
     )
 
     def run():
-        symbols = error_symbols(
-            ComponentSymbolV1(
-                ref="$ref:LIVEPATCH", component_id=operation.component_id,
-                component_type="connector-action", connector_type=REST_FAMILY,
-                action_type=record.action, connection_ref="$ref:LIVECONN",
-                input_profile_ref="$ref:P1", output_profile_ref="$ref:P2",
-            ),
-            ComponentSymbolV1(
-                ref="$ref:LIVECONN", component_id=connection.component_id,
-                component_type="connector-settings", connector_type=REST_FAMILY,
-            ),
-        )
-        snapshot = TrustedConnectorResolutionSnapshotV1(
-            identities=(
-                ResolvedConnectorComponentIdentityV1(
-                    component_key="LIVEPATCH", component_id=operation.component_id,
-                    component_version=str(operation.version),
-                    family="rest", action=record.action,
-                ),
-                ResolvedConnectorComponentIdentityV1(
-                    component_key="LIVECONN", component_id=connection.component_id,
-                    component_version=str(connection.version), family="rest",
-                ),
-            ),
-            account_scope="trainingglebbochkarov-16926N",
-        )
-        table = project_grants_for_root(
-            _parse(doc), symbols, process_root_ref="$ref:ROOT", snapshot=snapshot,
-        )
-        return table, _compile_refusal(doc, table)
+        return _compile_refusal(doc, error_symbols())
 
-    def observe(result):
-        table, refusal = result
-        assert refusal == (), (
-            "an evidenced retried write must compile; it refused with " f"{refusal}"
-        )
-        # ...and it compiled because the evidence chain reached it, not because
-        # the checks stopped running. Both halves are asserted: a table with no
-        # contract and no grant would also produce no refusal if the retry check
-        # had been removed.
-        assert [c.ref for c in table.idempotency_contracts] == [record.contract_ref]
-        assert len(table.idempotency_grants) == 1, table.idempotency_grants
+    def observe(refusal):
+        assert refusal == (
+            (
+                "PROCESS_IR_SEMANTIC_IDEMPOTENCY_EVIDENCE_MISSING",
+                "/body/steps/1/try_body/steps/0/idempotency",
+            ),
+        ), refusal
 
     return CapabilityWitness(
         "verified_write_replay_safety",
-        "admits",
-        PROVENANCE_INLINE_ADMISSION,
+        "refuses",
+        PROVENANCE_INLINE_REFUSAL,
         run,
         observe,
     )

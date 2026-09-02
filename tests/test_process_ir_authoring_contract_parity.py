@@ -169,13 +169,33 @@ def test_the_public_capability_field_map_is_total_and_injective():
 
 
 def test_connector_rows_carry_every_field_with_verbatim_values():
+    """Verbatim against WHAT THE COMPILER RESOLVES, not against the raw table.
+
+    Both this pin and the row builder read `CONNECTOR_CALL_CAPABILITIES_V1`
+    directly, and #155 slice F gave the table an accessor that derives a replay
+    verdict from ingested evidence. The row builder now goes through it — so a
+    pin still reading the raw table would demand the served rows keep describing
+    a world the compiler had left, and would have failed the fix rather than the
+    defect. The authority for "what is published" is the same function the
+    compiler asks; that is the whole point of routing the rows through it.
+    """
+    from boomi_mcp.compiler.process_ir.connector_capabilities import lookup_capability
+
     rows = {(row["family"], row["action"]): row for row in connector_capability_rows()}
     assert len(rows) == len(CONNECTOR_CALL_CAPABILITIES_V1)
+    derived = 0
     for spec in CONNECTOR_CALL_CAPABILITIES_V1.values():
         row = rows[(spec.family, spec.action)]
-        dumped = spec.model_dump(mode="json")
+        resolved = lookup_capability(spec.family, spec.action)
+        assert resolved is not None, (spec.family, spec.action)
+        derived += resolved != spec
+        dumped = resolved.model_dump(mode="json")
         for internal, public in PUBLIC_CAPABILITY_FIELDS.items():
             assert row[public] == dumped[internal], (spec.family, spec.action, internal)
+    assert derived, (
+        "no row differs from its table entry, so this test cannot tell the "
+        "accessor from the raw table and the property it now asserts is untested"
+    )
 
 
 def test_retry_rules_reproduce_the_shipped_fail_closed_rule():
