@@ -1,0 +1,66 @@
+{
+  "_success": true,
+  "status_code": 200,
+  "method": "POST",
+  "endpoint": "ExecutionConnector/query",
+  "url": "https://api.boomi.com/api/rest/v1/trainingglebbochkarov-16926N/ExecutionConnector/query",
+  "profile": "renera",
+  "data": {
+    "@type": "QueryResult",
+    "result": [
+      {
+        "@type": "ExecutionConnector",
+        "id": "RVhFQ19DT05OdHJ1ZTpub2RhdGE6c2hhcGUxOjpleGVjdXRpb24tMTE2YTcxMWItNGM1ZC00NzgyLWI4NTItOTAxNWEzZjFiNTZkLTIwMjYuMDkuMDE",
+        "executionId": "execution-116a711b-4c5d-4782-b852-9015a3f1b56d-2026.09.01",
+        "executionConnector": "Start",
+        "connectorType": "nodata",
+        "actionType": "nodata",
+        "errorCount": 0,
+        "successCount": 1,
+        "size": 0,
+        "isStartShape": true,
+        "recordType": "nodata"
+      },
+      {
+        "@type": "ExecutionConnector",
+        "id": "RVhFQ19DT05OZmFsc2U6cmV0dXJuOnJldHVybjpzaGFwZTQ6ZXhlY3V0aW9uLTExNmE3MTFiLTRjNWQtNDc4Mi1iODUyLTkwMTVhM2YxYjU2ZC0yMDI2LjA5LjAx",
+        "executionId": "execution-116a711b-4c5d-4782-b852-9015a3f1b56d-2026.09.01",
+        "executionConnector": "shape4",
+        "connectorType": "return",
+        "actionType": "return",
+        "errorCount": 0,
+        "successCount": 1,
+        "size": 301,
+        "isStartShape": false,
+        "recordType": "return"
+      },
+      {
+        "@type": "ExecutionConnector",
+        "id": "RVhFQ19DT05OZmFsc2U6RVhFQ1VURToyZmU0ODhlNC0zMTY5LTQ1MjktOTUxNS1kODU0NTcwYzhmZmM6Zjc1OWJjMGMtZGQzOC00OWFiLWIxMDEtNGNiZmFjZTY1YTU0OmV4ZWN1dGlvbi0xMTZhNzExYi00YzVkLTQ3ODItYjg1Mi05MDE1YTNmMWI1NmQtMjAyNi4wOS4wMQ",
+        "executionId": "execution-116a711b-4c5d-4782-b852-9015a3f1b56d-2026.09.01",
+        "executionConnector": "_TEST_155E6_src_GET_20260901195210",
+        "connectorType": "officialboomi-X3979C-rest-prod",
+        "actionType": "EXECUTE",
+        "errorCount": 0,
+        "successCount": 1,
+        "size": 301,
+        "isStartShape": false,
+        "recordType": "connector"
+      },
+      {
+        "@type": "ExecutionConnector",
+        "id": "RVhFQ19DT05OZmFsc2U6RVhFQ1VURToyZmU0ODhlNC0zMTY5LTQ1MjktOTUxNS1kODU0NTcwYzhmZmM6MjRlYzJkMDQtZThkNi00ODRkLWEyM2EtNGMxMzg2MTQzODA3OmV4ZWN1dGlvbi0xMTZhNzExYi00YzVkLTQ3ODItYjg1Mi05MDE1YTNmMWI1NmQtMjAyNi4wOS4wMQ",
+        "executionId": "execution-116a711b-4c5d-4782-b852-9015a3f1b56d-2026.09.01",
+        "executionConnector": "_TEST_155E6_PUT_20260901195210",
+        "connectorType": "officialboomi-X3979C-rest-prod",
+        "actionType": "EXECUTE",
+        "errorCount": 0,
+        "successCount": 1,
+        "size": 301,
+        "isStartShape": false,
+        "recordType": "connector"
+      }
+    ],
+    "numberOfResults": 4
+  }
+}

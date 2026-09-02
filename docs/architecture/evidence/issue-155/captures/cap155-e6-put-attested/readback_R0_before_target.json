@@ -1,0 +1,20 @@
+{
+  "utc": "2026-09-01T19:52:27.492361+00:00",
+  "path": "/admin/cdscm/api/v1/clients/0265a8ec-da14-4347-ab5d-fcf7850b4636",
+  "status": 200,
+  "sha256": "a598e9d8b709baf2a3f8d8b1962520abc09599fa5fe0387b6f89bd0256e9dabe",
+  "bytes": 312,
+  "body": {
+    "clientId": "_E6_PUT_20260901195210",
+    "name": "E6 Target Before",
+    "status": "PENDING",
+    "doomedField": "this field must disappear on replace",
+    "key": "0265a8ec-da14-4347-ab5d-fcf7850b4636",
+    "createdOn": "2026-09-01T19:52:10.683Z",
+    "createdBy": "integration",
+    "modifiedOn": "2026-09-01T19:52:10.683Z",
+    "modifiedBy": "integration"
+  },
+  "label": "target R0_before",
+  "business_sha256": "32f27970853ce698b992373a1f46d9e19c9dcee9821f3c88b8675f28dcdb115d"
+}

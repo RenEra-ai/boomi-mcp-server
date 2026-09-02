@@ -1,0 +1,14 @@
+2026-09-01T19:54:04.293125715Z INFO:     192.168.65.1:38321 - "GET /admin/cdscm/api/v1/clients/f99f1add-1b01-4a65-938f-1382f2935d1c HTTP/1.1" 200 OK
+2026-09-01T19:54:05.326159757Z INFO:     192.168.65.1:42112 - "GET /admin/cdscm/api/v1/matters/c4016c66-fb7c-4fab-bb2e-edda725d6b89 HTTP/1.1" 404 Not Found
+2026-09-01T19:54:05.327899007Z INFO:     192.168.65.1:29939 - "GET /admin/cdscm/api/v1/clients/f99f1add-1b01-4a65-938f-1382f2935d1c HTTP/1.1" 200 OK
+2026-09-01T19:54:05.329479174Z INFO:     192.168.65.1:25264 - "GET /admin/cdscm/api/v1/clients/c4016c66-fb7c-4fab-bb2e-edda725d6b89 HTTP/1.1" 200 OK
+2026-09-01T19:54:06.563131716Z INFO:     192.168.65.1:43561 - "GET /admin/cdscm/api/v1/clients/c4016c66-fb7c-4fab-bb2e-edda725d6b89 HTTP/1.1" 200 OK
+2026-09-01T19:54:06.583224299Z INFO:     192.168.65.1:17527 - "POST /admin/cdscm/api/v1/matters HTTP/1.1" 201 Created
+2026-09-01T19:54:21.718581584Z INFO:     192.168.65.1:26387 - "GET /admin/cdscm/api/v1/matters/c4016c66-fb7c-4fab-bb2e-edda725d6b89 HTTP/1.1" 200 OK
+2026-09-01T19:54:21.721000251Z INFO:     192.168.65.1:43654 - "GET /admin/cdscm/api/v1/clients/f99f1add-1b01-4a65-938f-1382f2935d1c HTTP/1.1" 200 OK
+2026-09-01T19:54:21.722684251Z INFO:     192.168.65.1:53746 - "GET /admin/cdscm/api/v1/clients/c4016c66-fb7c-4fab-bb2e-edda725d6b89 HTTP/1.1" 200 OK
+2026-09-01T19:54:22.343787876Z INFO:     192.168.65.1:55323 - "GET /admin/cdscm/api/v1/clients/c4016c66-fb7c-4fab-bb2e-edda725d6b89 HTTP/1.1" 200 OK
+2026-09-01T19:54:22.356875001Z INFO:     192.168.65.1:22350 - "POST /admin/cdscm/api/v1/matters HTTP/1.1" 409 Conflict
+2026-09-01T19:54:30.697328338Z INFO:     192.168.65.1:47992 - "GET /admin/cdscm/api/v1/matters/c4016c66-fb7c-4fab-bb2e-edda725d6b89 HTTP/1.1" 200 OK
+2026-09-01T19:54:30.699649255Z INFO:     192.168.65.1:33684 - "GET /admin/cdscm/api/v1/clients/f99f1add-1b01-4a65-938f-1382f2935d1c HTTP/1.1" 200 OK
+2026-09-01T19:54:30.701300338Z INFO:     192.168.65.1:37148 - "GET /admin/cdscm/api/v1/clients/c4016c66-fb7c-4fab-bb2e-edda725d6b89 HTTP/1.1" 200 OK

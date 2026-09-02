@@ -1,0 +1,14 @@
+INFO:     192.168.65.1:38321 - "GET /admin/cdscm/api/v1/clients/f99f1add-1b01-4a65-938f-1382f2935d1c HTTP/1.1" 200 OK
+INFO:     192.168.65.1:42112 - "GET /admin/cdscm/api/v1/matters/c4016c66-fb7c-4fab-bb2e-edda725d6b89 HTTP/1.1" 404 Not Found
+INFO:     192.168.65.1:29939 - "GET /admin/cdscm/api/v1/clients/f99f1add-1b01-4a65-938f-1382f2935d1c HTTP/1.1" 200 OK
+INFO:     192.168.65.1:25264 - "GET /admin/cdscm/api/v1/clients/c4016c66-fb7c-4fab-bb2e-edda725d6b89 HTTP/1.1" 200 OK
+INFO:     192.168.65.1:43561 - "GET /admin/cdscm/api/v1/clients/c4016c66-fb7c-4fab-bb2e-edda725d6b89 HTTP/1.1" 200 OK
+INFO:     192.168.65.1:17527 - "POST /admin/cdscm/api/v1/matters HTTP/1.1" 201 Created
+INFO:     192.168.65.1:26387 - "GET /admin/cdscm/api/v1/matters/c4016c66-fb7c-4fab-bb2e-edda725d6b89 HTTP/1.1" 200 OK
+INFO:     192.168.65.1:43654 - "GET /admin/cdscm/api/v1/clients/f99f1add-1b01-4a65-938f-1382f2935d1c HTTP/1.1" 200 OK
+INFO:     192.168.65.1:53746 - "GET /admin/cdscm/api/v1/clients/c4016c66-fb7c-4fab-bb2e-edda725d6b89 HTTP/1.1" 200 OK
+INFO:     192.168.65.1:55323 - "GET /admin/cdscm/api/v1/clients/c4016c66-fb7c-4fab-bb2e-edda725d6b89 HTTP/1.1" 200 OK
+INFO:     192.168.65.1:22350 - "POST /admin/cdscm/api/v1/matters HTTP/1.1" 409 Conflict
+INFO:     192.168.65.1:47992 - "GET /admin/cdscm/api/v1/matters/c4016c66-fb7c-4fab-bb2e-edda725d6b89 HTTP/1.1" 200 OK
+INFO:     192.168.65.1:33684 - "GET /admin/cdscm/api/v1/clients/f99f1add-1b01-4a65-938f-1382f2935d1c HTTP/1.1" 200 OK
+INFO:     192.168.65.1:37148 - "GET /admin/cdscm/api/v1/clients/c4016c66-fb7c-4fab-bb2e-edda725d6b89 HTTP/1.1" 200 OK

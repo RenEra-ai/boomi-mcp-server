@@ -1,0 +1,20 @@
+{
+  "gcr_id": "R0VOX0NPTk5fUkVDX2V4ZWN1dGlvbi0zNzUyYmRhNy1mMGFmLTQ1MTgtODcyOC0xZjVjYmY5MzFjMDEtMjAyNi4wOS4wMTpjb25uZWN0b3ItYWViYWNmNWUtYTg2MS00YWYwLTg2YzUtYTAyNjMyOGI2ZjA3",
+  "operationName": "_TEST_155E6_POST_20260901195354",
+  "actionType": "EXECUTE",
+  "status": "SUCCESS",
+  "size": 186,
+  "documentIndex": 0,
+  "download_response": {
+    "_success": true,
+    "generic_connector_record_id": "R0VOX0NPTk5fUkVDX2V4ZWN1dGlvbi0zNzUyYmRhNy1mMGFmLTQ1MTgtODcyOC0xZjVjYmY5MzFjMDEtMjAyNi4wOS4wMTpjb25uZWN0b3ItYWViYWNmNWUtYTg2MS00YWYwLTg2YzUtYTAyNjMyOGI2ZjA3",
+    "download_url": "https://platform.boomi.com/account/trainingglebbochkarov-16926N/api/download/ConnectorDocument-4a0f4cc7-7bdb-4bb6-922d-764a57696769",
+    "status_code": 202,
+    "message": "Beginning download.",
+    "_downloaded": true,
+    "content": "{\"message\":\"Matters record already exists\",\"developerMessage\":\"a record with this key is already stored; use PUT or PATCH\",\"errors\":[],\"data\":null,\"timestamp\":\"2026-09-01T19:54:22.356Z\"}",
+    "content_type": "text/*; charset=UTF-8",
+    "size_bytes": 186
+  },
+  "content": null
+}

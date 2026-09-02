@@ -1,0 +1,41 @@
+{
+  "method": "parsed-datetime window attribution",
+  "verb": "POST",
+  "target_path": "/admin/cdscm/api/v1/matters",
+  "readback_path": "/admin/cdscm/api/v1/matters/c4016c66-fb7c-4fab-bb2e-edda725d6b89",
+  "executions": 2,
+  "logged_requests_of_verb_on_target": 2,
+  "window_overlaps": [],
+  "attributed": [
+    {
+      "execution_label": "run1",
+      "ts": "2026-09-01T19:54:06.583224299Z",
+      "method": "POST",
+      "path": "/admin/cdscm/api/v1/matters",
+      "status": "201",
+      "reason": "Created",
+      "line": "2026-09-01T19:54:06.583224299Z INFO:     192.168.65.1:17527 - \"POST /admin/cdscm/api/v1/matters HTTP/1.1\" 201 Created",
+      "plain": "INFO:     192.168.65.1:17527 - \"POST /admin/cdscm/api/v1/matters HTTP/1.1\" 201 Created",
+      "execution_id": "execution-040dc855-b5c1-44fb-9382-b07a2d0f1705-2026.09.01"
+    },
+    {
+      "execution_label": "run2_identical_replay",
+      "ts": "2026-09-01T19:54:22.356875001Z",
+      "method": "POST",
+      "path": "/admin/cdscm/api/v1/matters",
+      "status": "409",
+      "reason": "Conflict",
+      "line": "2026-09-01T19:54:22.356875001Z INFO:     192.168.65.1:22350 - \"POST /admin/cdscm/api/v1/matters HTTP/1.1\" 409 Conflict",
+      "plain": "INFO:     192.168.65.1:22350 - \"POST /admin/cdscm/api/v1/matters HTTP/1.1\" 409 Conflict",
+      "execution_id": "execution-3752bda7-f0af-4518-8728-1f5cbf931c01-2026.09.01"
+    }
+  ],
+  "unattributed": [],
+  "per_execution_counts": {
+    "run1": 1,
+    "run2_identical_replay": 1
+  },
+  "exactly_one_request_per_execution": true,
+  "log_covers_both_executions": true,
+  "agrees_with_string_comparison_pass": true
+}

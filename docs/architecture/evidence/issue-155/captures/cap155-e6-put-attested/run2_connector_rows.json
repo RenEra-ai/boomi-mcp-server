@@ -1,0 +1,50 @@
+[
+  {
+    "executionId": "execution-6541710d-8096-4bac-a651-5b3703d92097-2026.09.01",
+    "executionConnector": "shape4",
+    "connectorType": "return",
+    "actionType": "return",
+    "isStartShape": false,
+    "recordType": "return",
+    "successCount": 1,
+    "errorCount": 0,
+    "size": 301,
+    "id": "RVhFQ19DT05OZmFsc2U6cmV0dXJuOnJldHVybjpzaGFwZTQ6ZXhlY3V0aW9uLTY1NDE3MTBkLTgwOTYtNGJhYy1hNjUxLTViMzcwM2Q5MjA5Ny0yMDI2LjA5LjAx"
+  },
+  {
+    "executionId": "execution-6541710d-8096-4bac-a651-5b3703d92097-2026.09.01",
+    "executionConnector": "_TEST_155E6_src_GET_20260901195210",
+    "connectorType": "officialboomi-X3979C-rest-prod",
+    "actionType": "EXECUTE",
+    "isStartShape": false,
+    "recordType": "connector",
+    "successCount": 1,
+    "errorCount": 0,
+    "size": 301,
+    "id": "RVhFQ19DT05OZmFsc2U6RVhFQ1VURToyZmU0ODhlNC0zMTY5LTQ1MjktOTUxNS1kODU0NTcwYzhmZmM6Zjc1OWJjMGMtZGQzOC00OWFiLWIxMDEtNGNiZmFjZTY1YTU0OmV4ZWN1dGlvbi02NTQxNzEwZC04MDk2LTRiYWMtYTY1MS01YjM3MDNkOTIwOTctMjAyNi4wOS4wMQ"
+  },
+  {
+    "executionId": "execution-6541710d-8096-4bac-a651-5b3703d92097-2026.09.01",
+    "executionConnector": "_TEST_155E6_PUT_20260901195210",
+    "connectorType": "officialboomi-X3979C-rest-prod",
+    "actionType": "EXECUTE",
+    "isStartShape": false,
+    "recordType": "connector",
+    "successCount": 1,
+    "errorCount": 0,
+    "size": 301,
+    "id": "RVhFQ19DT05OZmFsc2U6RVhFQ1VURToyZmU0ODhlNC0zMTY5LTQ1MjktOTUxNS1kODU0NTcwYzhmZmM6MjRlYzJkMDQtZThkNi00ODRkLWEyM2EtNGMxMzg2MTQzODA3OmV4ZWN1dGlvbi02NTQxNzEwZC04MDk2LTRiYWMtYTY1MS01YjM3MDNkOTIwOTctMjAyNi4wOS4wMQ"
+  },
+  {
+    "executionId": "execution-6541710d-8096-4bac-a651-5b3703d92097-2026.09.01",
+    "executionConnector": "Start",
+    "connectorType": "nodata",
+    "actionType": "nodata",
+    "isStartShape": true,
+    "recordType": "nodata",
+    "successCount": 1,
+    "errorCount": 0,
+    "size": 0,
+    "id": "RVhFQ19DT05OdHJ1ZTpub2RhdGE6c2hhcGUxOjpleGVjdXRpb24tNjU0MTcxMGQtODA5Ni00YmFjLWE2NTEtNWIzNzAzZDkyMDk3LTIwMjYuMDkuMDE"
+  }
+]

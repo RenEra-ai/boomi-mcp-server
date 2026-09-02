@@ -1,0 +1,20 @@
+{
+  "gcr_id": "R0VOX0NPTk5fUkVDX2V4ZWN1dGlvbi0wNDBkYzg1NS1iNWMxLTQ0ZmItOTM4Mi1iMDdhMmQwZjE3MDUtMjAyNi4wOS4wMTpjb25uZWN0b3ItMTRhZDlmMzItZGNkYi00Yjk0LTkwN2ItY2VkZDI3YmU1OWI1",
+  "operationName": "_TEST_155E6_src_GET_20260901195354",
+  "actionType": "EXECUTE",
+  "status": "SUCCESS",
+  "size": 301,
+  "documentIndex": 0,
+  "download_response": {
+    "_success": true,
+    "generic_connector_record_id": "R0VOX0NPTk5fUkVDX2V4ZWN1dGlvbi0wNDBkYzg1NS1iNWMxLTQ0ZmItOTM4Mi1iMDdhMmQwZjE3MDUtMjAyNi4wOS4wMTpjb25uZWN0b3ItMTRhZDlmMzItZGNkYi00Yjk0LTkwN2ItY2VkZDI3YmU1OWI1",
+    "download_url": "https://platform.boomi.com/account/trainingglebbochkarov-16926N/api/download/ConnectorDocument-f067eb11-5554-42f0-bf4f-895c9b78133a",
+    "status_code": 202,
+    "message": "Beginning download.",
+    "_downloaded": true,
+    "content": "{\"clientId\":\"_E6_TPL_20260901195354\",\"name\":\"E6 Template (send body source)\",\"status\":\"ACTIVE\",\"e6Marker\":\"double-attested\",\"key\":\"c4016c66-fb7c-4fab-bb2e-edda725d6b89\",\"createdOn\":\"2026-09-01T19:53:54.031Z\",\"createdBy\":\"integration\",\"modifiedOn\":\"2026-09-01T19:53:54.031Z\",\"modifiedBy\":\"integration\"}",
+    "content_type": "text/*; charset=UTF-8",
+    "size_bytes": 301
+  },
+  "content": null
+}

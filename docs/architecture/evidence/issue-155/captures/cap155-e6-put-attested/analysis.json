@@ -1,0 +1,93 @@
+{
+  "verb": "PUT",
+  "scenario": "cap155-e6-put-attested",
+  "account_id": "trainingglebbochkarov-16926N",
+  "route": "banked cap155-e2-put operation XML + cap155-e3b canonical process, re-created verbatim (identity+folder attrs stripped, root name= substituted, operation/connection refs remapped, send actionType swapped; path bytes UNEDITED)",
+  "executions": [
+    {
+      "label": "run1",
+      "execution_id": "execution-116a711b-4c5d-4782-b852-9015a3f1b56d-2026.09.01",
+      "status": "COMPLETE",
+      "inbound": 1,
+      "outbound": 2
+    },
+    {
+      "label": "run2_identical_replay",
+      "execution_id": "execution-6541710d-8096-4bac-a651-5b3703d92097-2026.09.01",
+      "status": "COMPLETE",
+      "inbound": 1,
+      "outbound": 2
+    }
+  ],
+  "counterparty_requests": [
+    {
+      "execution_label": "run1",
+      "execution_id": "execution-116a711b-4c5d-4782-b852-9015a3f1b56d-2026.09.01",
+      "stamp": "2026-09-01T19:52:30.170564296Z",
+      "request": "INFO:     192.168.65.1:35414 - \"PUT /admin/cdscm/api/v1/clients/0265a8ec-da14-4347-ab5d-fcf7850b4636 HTTP/1.1\" 200 OK",
+      "http_status": "200",
+      "reason": "OK"
+    },
+    {
+      "execution_label": "run2_identical_replay",
+      "execution_id": "execution-6541710d-8096-4bac-a651-5b3703d92097-2026.09.01",
+      "stamp": "2026-09-01T19:52:47.890963805Z",
+      "request": "INFO:     192.168.65.1:42791 - \"PUT /admin/cdscm/api/v1/clients/0265a8ec-da14-4347-ab5d-fcf7850b4636 HTTP/1.1\" 200 OK",
+      "http_status": "200",
+      "reason": "OK"
+    }
+  ],
+  "attribution_is_unambiguous": true,
+  "log_covers_both_executions": true,
+  "window_overlaps": [],
+  "state": {
+    "state_key": "readback HTTP status + sha256 of body with ['modifiedOn', 'modifiedBy', 'timestamp'] stripped",
+    "run1_status": "COMPLETE",
+    "run2_status": "COMPLETE",
+    "both_executions_reported_success": true,
+    "target_status_R0_R1_R2": [
+      200,
+      200,
+      200
+    ],
+    "target_business_R0_R1_R2": [
+      "32f27970853c",
+      "28e608199eec",
+      "28e608199eec"
+    ],
+    "first_write_changed_business_state": true,
+    "resource_state_converged_R1_R2": true,
+    "full_state_identical_R1_R2": false,
+    "modifiedOn_R0": "2026-09-01T19:52:10.683Z",
+    "modifiedOn_R1": "2026-09-01T19:52:30.168Z",
+    "modifiedOn_R2": "2026-09-01T19:52:47.889Z",
+    "modifiedOn_moved_R1_to_R2": true,
+    "createdOn_stable_R1_to_R2": true,
+    "CONTROL_untouched_R0_R1_R2": true,
+    "control_sha256": "7328d802c972fa1892aa6747012f2648afb141709a627ac808d09c9a71bab4d6",
+    "body_source_stable_across_runs": true
+  },
+  "platform_discrimination": {
+    "counterparty_statuses": [
+      "200",
+      "200"
+    ],
+    "send_stage_rows": [
+      "_TEST_155E6_PUT_20260901195210"
+    ],
+    "discriminating_diffs": {
+      "gcr": {},
+      "connector_rows": {}
+    }
+  },
+  "clock_skew_control": {
+    "host_before": "2026-09-01T19:52:26.440510+00:00",
+    "host_after": "2026-09-01T19:52:26.452072+00:00",
+    "container_stamps": [
+      "2026-09-01T19:52:26.450881295Z"
+    ],
+    "round_trip_ms": 11.562,
+    "last_stamp": "2026-09-01T19:52:26.450881295Z",
+    "stamp_within_host_bracket": true
+  }
+}

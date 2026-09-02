@@ -130,6 +130,72 @@
   },
   {
    "family": "rest",
+   "action": "POST",
+   "side_effect": "write",
+   "retry_safety": "conditionally_idempotent",
+   "accepts_input": "documents_consumed",
+   "produces_output": "return_documents_received",
+   "capture": {
+    "execution_id": "execution-040dc855-b5c1-44fb-9382-b07a2d0f1705-2026.09.01",
+    "captured_at": "2026-09-01T19:54:06Z",
+    "account_scope_hash": "636bee2908a4c701926ca07c280703374adaef0eb8cdab907d2222267f75e0e2",
+    "summary": {
+     "placement": "downstream",
+     "input_observation": "documents_consumed",
+     "output_observation": "return_documents_received",
+     "effect": "state_unchanged_after_replay",
+     "replay": "conflict_without_second_effect",
+     "scope": "single_operation",
+     "sources": [
+      "endpoint_readback",
+      "execution_connector",
+      "execution_record"
+     ]
+    },
+    "capture_digest": "80e530d635dbb659cb5fcf1a30b0ae4c69dda26a1b7e26050e68aea23ad921ec"
+   },
+   "capture_digest": "80e530d635dbb659cb5fcf1a30b0ae4c69dda26a1b7e26050e68aea23ad921ec",
+   "execution_ids": [
+    "execution-040dc855-b5c1-44fb-9382-b07a2d0f1705-2026.09.01",
+    "execution-3752bda7-f0af-4518-8728-1f5cbf931c01-2026.09.01"
+   ],
+   "operation_component_id": "90b5c5e4-3496-460d-b5a7-5f1557dfeba4"
+  },
+  {
+   "family": "rest",
+   "action": "PUT",
+   "side_effect": "write",
+   "retry_safety": "conditionally_idempotent",
+   "accepts_input": "documents_consumed",
+   "produces_output": "return_documents_received",
+   "capture": {
+    "execution_id": "execution-116a711b-4c5d-4782-b852-9015a3f1b56d-2026.09.01",
+    "captured_at": "2026-09-01T19:52:28Z",
+    "account_scope_hash": "636bee2908a4c701926ca07c280703374adaef0eb8cdab907d2222267f75e0e2",
+    "summary": {
+     "placement": "downstream",
+     "input_observation": "documents_consumed",
+     "output_observation": "return_documents_received",
+     "effect": "state_unchanged_after_replay",
+     "replay": "same_effect",
+     "scope": "single_operation",
+     "sources": [
+      "endpoint_readback",
+      "execution_connector",
+      "execution_record"
+     ]
+    },
+    "capture_digest": "a065632cfbf9157e3b4c74ef8605de01f8ca8e8af2eab25ce037540072eff7d4"
+   },
+   "capture_digest": "a065632cfbf9157e3b4c74ef8605de01f8ca8e8af2eab25ce037540072eff7d4",
+   "execution_ids": [
+    "execution-116a711b-4c5d-4782-b852-9015a3f1b56d-2026.09.01",
+    "execution-6541710d-8096-4bac-a651-5b3703d92097-2026.09.01"
+   ],
+   "operation_component_id": "24ec2d04-e8d6-484d-a23a-4c1386143807"
+  },
+  {
+   "family": "rest",
    "action": "TRACE",
    "side_effect": "read",
    "retry_safety": "unverified",

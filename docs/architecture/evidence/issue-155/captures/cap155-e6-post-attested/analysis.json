@@ -1,0 +1,119 @@
+{
+  "verb": "POST",
+  "scenario": "cap155-e6-post-attested",
+  "account_id": "trainingglebbochkarov-16926N",
+  "route": "banked cap155-e2-post operation XML + cap155-e3b canonical process, re-created verbatim (identity+folder attrs stripped, root name= substituted, operation/connection refs remapped, send actionType swapped; path bytes UNEDITED)",
+  "executions": [
+    {
+      "label": "run1",
+      "execution_id": "execution-040dc855-b5c1-44fb-9382-b07a2d0f1705-2026.09.01",
+      "status": "COMPLETE",
+      "inbound": 1,
+      "outbound": 2
+    },
+    {
+      "label": "run2_identical_replay",
+      "execution_id": "execution-3752bda7-f0af-4518-8728-1f5cbf931c01-2026.09.01",
+      "status": "COMPLETE",
+      "inbound": 1,
+      "outbound": 2
+    }
+  ],
+  "counterparty_requests": [
+    {
+      "execution_label": "run1",
+      "execution_id": "execution-040dc855-b5c1-44fb-9382-b07a2d0f1705-2026.09.01",
+      "stamp": "2026-09-01T19:54:06.583224299Z",
+      "request": "INFO:     192.168.65.1:17527 - \"POST /admin/cdscm/api/v1/matters HTTP/1.1\" 201 Created",
+      "http_status": "201",
+      "reason": "Created"
+    },
+    {
+      "execution_label": "run2_identical_replay",
+      "execution_id": "execution-3752bda7-f0af-4518-8728-1f5cbf931c01-2026.09.01",
+      "stamp": "2026-09-01T19:54:22.356875001Z",
+      "request": "INFO:     192.168.65.1:22350 - \"POST /admin/cdscm/api/v1/matters HTTP/1.1\" 409 Conflict",
+      "http_status": "409",
+      "reason": "Conflict"
+    }
+  ],
+  "attribution_is_unambiguous": true,
+  "log_covers_both_executions": true,
+  "window_overlaps": [],
+  "state": {
+    "state_key": "readback HTTP status + sha256 of body with ['modifiedOn', 'modifiedBy', 'timestamp'] stripped",
+    "run1_status": "COMPLETE",
+    "run2_status": "COMPLETE",
+    "both_executions_reported_success": true,
+    "target_status_R0_R1_R2": [
+      404,
+      200,
+      200
+    ],
+    "target_business_R0_R1_R2": [
+      "bb09de49c4f0",
+      "95837de84b6a",
+      "95837de84b6a"
+    ],
+    "first_write_changed_business_state": true,
+    "resource_state_converged_R1_R2": true,
+    "full_state_identical_R1_R2": true,
+    "modifiedOn_R0": null,
+    "modifiedOn_R1": "2026-09-01T19:54:06.581Z",
+    "modifiedOn_R2": "2026-09-01T19:54:06.581Z",
+    "modifiedOn_moved_R1_to_R2": false,
+    "createdOn_stable_R1_to_R2": true,
+    "CONTROL_untouched_R0_R1_R2": true,
+    "control_sha256": "285c58397411d8a51412516b7f6795631ed7df43467098238d9c29d971dbd095",
+    "body_source_stable_across_runs": true
+  },
+  "platform_discrimination": {
+    "counterparty_statuses": [
+      "201",
+      "409"
+    ],
+    "send_stage_rows": [
+      "_TEST_155E6_POST_20260901195354"
+    ],
+    "discriminating_diffs": {
+      "gcr": {
+        "_TEST_155E6_POST_20260901195354": {
+          "size": [
+            301,
+            186
+          ]
+        },
+        "shape4": {
+          "size": [
+            301,
+            186
+          ]
+        }
+      },
+      "connector_rows": {
+        "_TEST_155E6_POST_20260901195354": {
+          "size": [
+            301,
+            186
+          ]
+        },
+        "shape4": {
+          "size": [
+            301,
+            186
+          ]
+        }
+      }
+    }
+  },
+  "clock_skew_control": {
+    "host_before": "2026-09-01T19:54:04.282658+00:00",
+    "host_after": "2026-09-01T19:54:04.294182+00:00",
+    "container_stamps": [
+      "2026-09-01T19:54:04.293125715Z"
+    ],
+    "round_trip_ms": 11.524,
+    "last_stamp": "2026-09-01T19:54:04.293125715Z",
+    "stamp_within_host_bracket": true
+  }
+}

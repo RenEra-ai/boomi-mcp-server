@@ -1,0 +1,335 @@
+[
+  {
+    "file": "mock_access_log.txt",
+    "proves": "counterparty access log covering BOTH executions (PUT x2), same format as cap155-e5-delete-attested/mock_access_log.txt",
+    "scenario": "cap155-e6-put-attested",
+    "account_id": "trainingglebbochkarov-16926N",
+    "sha256": "dae5ddbb506d4b416d3c217bb326cdb04cc05bdb70002cc25704de229d8fe4e2",
+    "byte_length": 1652,
+    "redacted": false
+  },
+  {
+    "file": "mock_access_log_timestamped.txt",
+    "proves": "the same log with dockerd's per-line RFC3339 stamps \u2014 the bytes attribution is computed from",
+    "scenario": "cap155-e6-put-attested",
+    "account_id": "trainingglebbochkarov-16926N",
+    "sha256": "d93979dc2dc6cab195747f7f6e1ca50410535376f30f1a235ab90a9f0f64ef2b",
+    "byte_length": 2086,
+    "redacted": false
+  },
+  {
+    "file": "access_log_attribution.json",
+    "proves": "per-execution attribution of each logged request of the verb under test",
+    "scenario": "cap155-e6-put-attested",
+    "account_id": "trainingglebbochkarov-16926N",
+    "sha256": "cf956ba604e415157ee51ba5002d945462030e39034023350b34a0eb5874e155",
+    "byte_length": 1856,
+    "redacted": false
+  },
+  {
+    "file": "execute_calls.json",
+    "proves": "the two execute_process calls with their host-clock attribution windows",
+    "scenario": "cap155-e6-put-attested",
+    "account_id": "trainingglebbochkarov-16926N",
+    "sha256": "8b37e7781e4154dfb9bf69e2929f54b931853ba36fdbff0420e9c10a019998bb",
+    "byte_length": 2643,
+    "redacted": false
+  },
+  {
+    "file": "run1_execution_record.json",
+    "proves": "RAW ExecutionRecord envelope for run1",
+    "scenario": "cap155-e6-put-attested",
+    "account_id": "trainingglebbochkarov-16926N",
+    "sha256": "2363ef98a57e08a2f2e1a9ffe3fc8b4e185b99396fd9eae0afac82130cb7c5b0",
+    "byte_length": 1228,
+    "redacted": false
+  },
+  {
+    "file": "run1_execution_connector_raw.json",
+    "proves": "RAW ExecutionConnector envelope for run1 \u2014 the raw platform response, preserved because the flattened rows drop executionId and the ingest correlates per record on that field",
+    "scenario": "cap155-e6-put-attested",
+    "account_id": "trainingglebbochkarov-16926N",
+    "sha256": "68ee556fd5bb027f10a4549f96cf60b91caf3d66a1bf5b59c9cd9d627197f2cb",
+    "byte_length": 2676,
+    "redacted": false
+  },
+  {
+    "file": "run1_generic_connector_record_raw.json",
+    "proves": "RAW GenericConnectorRecord envelope for run1 (keeps executionId)",
+    "scenario": "cap155-e6-put-attested",
+    "account_id": "trainingglebbochkarov-16926N",
+    "sha256": "8f39e99933f58f92c7c2ce65201974cf9136aaf54e724dfb0329e623d80829c3",
+    "byte_length": 6823,
+    "redacted": false
+  },
+  {
+    "file": "run1_connector_rows.json",
+    "proves": "execution-connector rows for run1, executionId RETAINED",
+    "scenario": "cap155-e6-put-attested",
+    "account_id": "trainingglebbochkarov-16926N",
+    "sha256": "832457e24909cb214b5fec4ee486456e1db88b08954ebf6c184545ad2e52b32a",
+    "byte_length": 2009,
+    "redacted": false
+  },
+  {
+    "file": "run1_gcr_rows.json",
+    "proves": "generic-connector rows for run1, executionId RETAINED",
+    "scenario": "cap155-e6-put-attested",
+    "account_id": "trainingglebbochkarov-16926N",
+    "sha256": "99f6d2f9bcaf793a17c16ba44dd998503aca12b65844761ba917a8ae5c9541a5",
+    "byte_length": 2049,
+    "redacted": false
+  },
+  {
+    "file": "run1_doc00.json",
+    "proves": "connector document ordinal 0 for run1 (op=_TEST_155E6_src_GET_20260901195210, present=True)",
+    "scenario": "cap155-e6-put-attested",
+    "account_id": "trainingglebbochkarov-16926N",
+    "sha256": "e1d94026e3f168220dd9a2099e207b69f6340a6091b1f883e075f841e2bd764c",
+    "byte_length": 1249,
+    "redacted": false
+  },
+  {
+    "file": "run1_doc01.json",
+    "proves": "connector document ordinal 1 for run1 (op=shape4, present=True)",
+    "scenario": "cap155-e6-put-attested",
+    "account_id": "trainingglebbochkarov-16926N",
+    "sha256": "34e18814dbc65d345fde1e16b97cb7b394b55076d7da06122f412589bf6a4c2b",
+    "byte_length": 1220,
+    "redacted": false
+  },
+  {
+    "file": "run1_doc02.json",
+    "proves": "connector document ordinal 2 for run1 (op=_TEST_155E6_PUT_20260901195210, present=True)",
+    "scenario": "cap155-e6-put-attested",
+    "account_id": "trainingglebbochkarov-16926N",
+    "sha256": "6ce9d08d1253d6773c74ab5f2cf814851236c760bd7cd42251d82e875c55d898",
+    "byte_length": 1245,
+    "redacted": false
+  },
+  {
+    "file": "run1_doc03.json",
+    "proves": "connector document ordinal 3 for run1 (op=shape1, present=True)",
+    "scenario": "cap155-e6-put-attested",
+    "account_id": "trainingglebbochkarov-16926N",
+    "sha256": "57244ac67be4e7ddff343fabfdd220ba75d247e4770037127021570136bf88e3",
+    "byte_length": 879,
+    "redacted": false
+  },
+  {
+    "file": "run2_execution_record.json",
+    "proves": "RAW ExecutionRecord envelope for run2_identical_replay",
+    "scenario": "cap155-e6-put-attested",
+    "account_id": "trainingglebbochkarov-16926N",
+    "sha256": "80beef928d98acb44bf4137a4c3615ef7e3dfa45e2aa1381fd772e3661156751",
+    "byte_length": 1226,
+    "redacted": false
+  },
+  {
+    "file": "run2_execution_connector_raw.json",
+    "proves": "RAW ExecutionConnector envelope for run2_identical_replay \u2014 the raw platform response, preserved because the flattened rows drop executionId and the ingest correlates per record on that field",
+    "scenario": "cap155-e6-put-attested",
+    "account_id": "trainingglebbochkarov-16926N",
+    "sha256": "40c376249d80729d81a44d76e91f1f5070895ed6e6dd63eae21e43fafe7c5ffe",
+    "byte_length": 2676,
+    "redacted": false
+  },
+  {
+    "file": "run2_generic_connector_record_raw.json",
+    "proves": "RAW GenericConnectorRecord envelope for run2_identical_replay (keeps executionId)",
+    "scenario": "cap155-e6-put-attested",
+    "account_id": "trainingglebbochkarov-16926N",
+    "sha256": "48f7bf2839390c7e6d1a7044ec64c5d5d66502a2acfc02a5f6f34f3f5385c309",
+    "byte_length": 6823,
+    "redacted": false
+  },
+  {
+    "file": "run2_connector_rows.json",
+    "proves": "execution-connector rows for run2_identical_replay, executionId RETAINED",
+    "scenario": "cap155-e6-put-attested",
+    "account_id": "trainingglebbochkarov-16926N",
+    "sha256": "270b20b2df6af51ad9b28f5aba20d48b69205119ace3f128579a192ab3bc5af6",
+    "byte_length": 2009,
+    "redacted": false
+  },
+  {
+    "file": "run2_gcr_rows.json",
+    "proves": "generic-connector rows for run2_identical_replay, executionId RETAINED",
+    "scenario": "cap155-e6-put-attested",
+    "account_id": "trainingglebbochkarov-16926N",
+    "sha256": "ea26ab720f63a442cbd731a48bf05c3e2246c05df1055aec08cbab57baab8455",
+    "byte_length": 2049,
+    "redacted": false
+  },
+  {
+    "file": "run2_doc00.json",
+    "proves": "connector document ordinal 0 for run2_identical_replay (op=_TEST_155E6_PUT_20260901195210, present=True)",
+    "scenario": "cap155-e6-put-attested",
+    "account_id": "trainingglebbochkarov-16926N",
+    "sha256": "fcfbbbf7d6578ac153bb50a611f1c1a748a48bc09696b1bdf89ae6a9355f4759",
+    "byte_length": 1245,
+    "redacted": false
+  },
+  {
+    "file": "run2_doc01.json",
+    "proves": "connector document ordinal 1 for run2_identical_replay (op=shape1, present=True)",
+    "scenario": "cap155-e6-put-attested",
+    "account_id": "trainingglebbochkarov-16926N",
+    "sha256": "88232a95a12f1b3a2f244e5d138247540c8cb174a343b7b72f39499a8bcaacda",
+    "byte_length": 879,
+    "redacted": false
+  },
+  {
+    "file": "run2_doc02.json",
+    "proves": "connector document ordinal 2 for run2_identical_replay (op=_TEST_155E6_src_GET_20260901195210, present=True)",
+    "scenario": "cap155-e6-put-attested",
+    "account_id": "trainingglebbochkarov-16926N",
+    "sha256": "860a064d05eccb5dd11c5b86b8444faa1c9611fe7c31bbc1ce3629defdbf5154",
+    "byte_length": 1249,
+    "redacted": false
+  },
+  {
+    "file": "run2_doc03.json",
+    "proves": "connector document ordinal 3 for run2_identical_replay (op=shape4, present=True)",
+    "scenario": "cap155-e6-put-attested",
+    "account_id": "trainingglebbochkarov-16926N",
+    "sha256": "a7cd3131e962f31545d424a045dd67f0c8314c975f11ff78037dcda7def49d6b",
+    "byte_length": 1220,
+    "redacted": false
+  },
+  {
+    "file": "readback_R0_before_target.json",
+    "proves": "target resource at R0_before",
+    "scenario": "cap155-e6-put-attested",
+    "account_id": "trainingglebbochkarov-16926N",
+    "sha256": "dd0b33311567bd6d2ca8623c8299a9f46b6c062b3efa351bcbec2e86e30b36b8",
+    "byte_length": 739,
+    "redacted": false
+  },
+  {
+    "file": "readback_R0_before_template.json",
+    "proves": "template resource at R0_before",
+    "scenario": "cap155-e6-put-attested",
+    "account_id": "trainingglebbochkarov-16926N",
+    "sha256": "dc8bbfbacf3e49cfa2328b02b6ddb566516cfa0b5ffc5c2c3b2b3db6e26a6854",
+    "byte_length": 730,
+    "redacted": false
+  },
+  {
+    "file": "readback_R0_before_control.json",
+    "proves": "control resource at R0_before  \u2014 NEGATIVE CONTROL: never referenced by any operation component",
+    "scenario": "cap155-e6-put-attested",
+    "account_id": "trainingglebbochkarov-16926N",
+    "sha256": "0ed8e4ba02ae9cc7498ec3118be9cc6aebb6caafea4570a62171f32295f8a142",
+    "byte_length": 685,
+    "redacted": false
+  },
+  {
+    "file": "readback_R1_between_target.json",
+    "proves": "target resource at R1_between",
+    "scenario": "cap155-e6-put-attested",
+    "account_id": "trainingglebbochkarov-16926N",
+    "sha256": "d0b8a11d47a29de40db470a195c86e054047f88a0041a9c0f1d103fc98800b8c",
+    "byte_length": 729,
+    "redacted": false
+  },
+  {
+    "file": "readback_R1_between_template.json",
+    "proves": "template resource at R1_between",
+    "scenario": "cap155-e6-put-attested",
+    "account_id": "trainingglebbochkarov-16926N",
+    "sha256": "bfc9aa967c3ecda56efddffd8a827a8b265e93350db26cd4a3a0656d8ee08450",
+    "byte_length": 731,
+    "redacted": false
+  },
+  {
+    "file": "readback_R1_between_control.json",
+    "proves": "control resource at R1_between  \u2014 NEGATIVE CONTROL: never referenced by any operation component",
+    "scenario": "cap155-e6-put-attested",
+    "account_id": "trainingglebbochkarov-16926N",
+    "sha256": "612e1fe3620475932a266c29f27ac7192ca705ebce6304f3eb83615d99952e51",
+    "byte_length": 686,
+    "redacted": false
+  },
+  {
+    "file": "readback_R2_after_target.json",
+    "proves": "target resource at R2_after",
+    "scenario": "cap155-e6-put-attested",
+    "account_id": "trainingglebbochkarov-16926N",
+    "sha256": "c751c9fabea411de5e583e4a50f6cd603c7224b86ee07c64ce58cd183e892fa6",
+    "byte_length": 727,
+    "redacted": false
+  },
+  {
+    "file": "readback_R2_after_template.json",
+    "proves": "template resource at R2_after",
+    "scenario": "cap155-e6-put-attested",
+    "account_id": "trainingglebbochkarov-16926N",
+    "sha256": "1f1e302ae79b5b3a9fa4d42436abc4caf03563b7710e17a79dc8bb99ca7d3a8f",
+    "byte_length": 729,
+    "redacted": false
+  },
+  {
+    "file": "readback_R2_after_control.json",
+    "proves": "control resource at R2_after  \u2014 NEGATIVE CONTROL: never referenced by any operation component",
+    "scenario": "cap155-e6-put-attested",
+    "account_id": "trainingglebbochkarov-16926N",
+    "sha256": "4e0772168b9c07815998ce9183459294fc5f6b7878d9b55e35dfcf175af4bc2d",
+    "byte_length": 684,
+    "redacted": false
+  },
+  {
+    "file": "component_op_src.xml",
+    "proves": "stored Boomi component XML for op_src (re-created from cap155-e2-put/source_operation_component.xml, path bytes unedited)",
+    "scenario": "cap155-e6-put-attested",
+    "account_id": "trainingglebbochkarov-16926N",
+    "sha256": "cd9e8f9b28acaf808c1f5ea3204e3fbd8a670a66376af528348aeb5e089114cc",
+    "byte_length": 1424,
+    "redacted": true
+  },
+  {
+    "file": "component_op_tgt.xml",
+    "proves": "stored Boomi component XML for op_tgt (re-created from cap155-e2-put/operation_component.xml, path bytes unedited)",
+    "scenario": "cap155-e6-put-attested",
+    "account_id": "trainingglebbochkarov-16926N",
+    "sha256": "b0052ab97ace3f3ae4e5803dba2ee814d0e0198fa5039390ab7f8d64875d5843",
+    "byte_length": 1364,
+    "redacted": true
+  },
+  {
+    "file": "component_process.xml",
+    "proves": "stored process XML (re-created from cap155-e3b-patch-canonical/component_process.xml)",
+    "scenario": "cap155-e6-put-attested",
+    "account_id": "trainingglebbochkarov-16926N",
+    "sha256": "0f8e56796fdeb07b045aac969e8fbf6d9f6ca4705f1a7f052d04c0d9b29a7235",
+    "byte_length": 2454,
+    "redacted": true
+  },
+  {
+    "file": "fixture_derivation.json",
+    "proves": "provenance of every fixture byte: banked source, digests, substitutions",
+    "scenario": "cap155-e6-put-attested",
+    "account_id": "trainingglebbochkarov-16926N",
+    "sha256": "d1ff300631ce175d13ab79efe4a0e3c45d13b947ec59eafeed2feabd01cb2f31",
+    "byte_length": 5121,
+    "redacted": false
+  },
+  {
+    "file": "analysis.json",
+    "proves": "the derived verdict for this verb",
+    "scenario": "cap155-e6-put-attested",
+    "account_id": "trainingglebbochkarov-16926N",
+    "sha256": "a346c5dae20f6b915907e41b037a9fa03ce010931822a1a1237901a0647a896d",
+    "byte_length": 3174,
+    "redacted": false
+  },
+  {
+    "file": "account_liveness.json",
+    "proves": "C1 account liveness, redacted",
+    "scenario": "cap155-e6-put-attested",
+    "account_id": "trainingglebbochkarov-16926N",
+    "sha256": "46d828f19b337ee34b91681cbd51432db5b9752158da37b5e3d48b867754811d",
+    "byte_length": 980,
+    "redacted": false
+  }
+]

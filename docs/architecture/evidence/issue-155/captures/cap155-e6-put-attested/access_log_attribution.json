@@ -1,0 +1,41 @@
+{
+  "method": "parsed-datetime window attribution",
+  "verb": "PUT",
+  "target_path": "/admin/cdscm/api/v1/clients/0265a8ec-da14-4347-ab5d-fcf7850b4636",
+  "readback_path": "/admin/cdscm/api/v1/clients/0265a8ec-da14-4347-ab5d-fcf7850b4636",
+  "executions": 2,
+  "logged_requests_of_verb_on_target": 2,
+  "window_overlaps": [],
+  "attributed": [
+    {
+      "execution_label": "run1",
+      "ts": "2026-09-01T19:52:30.170564296Z",
+      "method": "PUT",
+      "path": "/admin/cdscm/api/v1/clients/0265a8ec-da14-4347-ab5d-fcf7850b4636",
+      "status": "200",
+      "reason": "OK",
+      "line": "2026-09-01T19:52:30.170564296Z INFO:     192.168.65.1:35414 - \"PUT /admin/cdscm/api/v1/clients/0265a8ec-da14-4347-ab5d-fcf7850b4636 HTTP/1.1\" 200 OK",
+      "plain": "INFO:     192.168.65.1:35414 - \"PUT /admin/cdscm/api/v1/clients/0265a8ec-da14-4347-ab5d-fcf7850b4636 HTTP/1.1\" 200 OK",
+      "execution_id": "execution-116a711b-4c5d-4782-b852-9015a3f1b56d-2026.09.01"
+    },
+    {
+      "execution_label": "run2_identical_replay",
+      "ts": "2026-09-01T19:52:47.890963805Z",
+      "method": "PUT",
+      "path": "/admin/cdscm/api/v1/clients/0265a8ec-da14-4347-ab5d-fcf7850b4636",
+      "status": "200",
+      "reason": "OK",
+      "line": "2026-09-01T19:52:47.890963805Z INFO:     192.168.65.1:42791 - \"PUT /admin/cdscm/api/v1/clients/0265a8ec-da14-4347-ab5d-fcf7850b4636 HTTP/1.1\" 200 OK",
+      "plain": "INFO:     192.168.65.1:42791 - \"PUT /admin/cdscm/api/v1/clients/0265a8ec-da14-4347-ab5d-fcf7850b4636 HTTP/1.1\" 200 OK",
+      "execution_id": "execution-6541710d-8096-4bac-a651-5b3703d92097-2026.09.01"
+    }
+  ],
+  "unattributed": [],
+  "per_execution_counts": {
+    "run1": 1,
+    "run2_identical_replay": 1
+  },
+  "exactly_one_request_per_execution": true,
+  "log_covers_both_executions": true,
+  "agrees_with_string_comparison_pass": true
+}

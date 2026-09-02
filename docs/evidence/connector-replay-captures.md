@@ -17,7 +17,12 @@ the safe direction: a registry that failed to load, or loaded empty, denies.
 
 ## Observed actions
 
-**No actions have been verified.** The registry ships empty: the mechanism
-that ingests captures is in place, but the rows are minted in a later step.
-
-The operative consequence is that every write currently refuses a retry.
+| family | action | side effect | retry safety | executions | capture |
+| --- | --- | --- | --- | --- | --- |
+| rest | DELETE | write | conditionally_idempotent | 2 | `34614e7c081f` |
+| rest | HEAD | read | unverified | 1 | `e403860b635d` |
+| rest | OPTIONS | read | unverified | 1 | `67ed7efbf569` |
+| rest | PATCH | write | conditionally_idempotent | 2 | `dec268ab22bd` |
+| rest | POST | write | conditionally_idempotent | 2 | `80e530d635db` |
+| rest | PUT | write | conditionally_idempotent | 2 | `a065632cfbf9` |
+| rest | TRACE | read | unverified | 1 | `0c62c0fb6ca3` |

@@ -92,7 +92,14 @@ def test_every_absence_reads_as_unverified():
     # that never appeared. The list previously named PATCH and DELETE, which was
     # correct only while the registry was empty — now that both are observed, a
     # test asserting they read unverified would be asserting the ingestion failed.
-    for family, action in [("nope", "GET"), ("rest", "POST"), ("rest", "CONNECT")]:
+    # DERIVED, so this list cannot name a pair that ingestion has since observed:
+    # the previous revision named POST, which was absent when it was written and
+    # is now attested, so the test asserted the ingestion had failed.
+    observed = {(r.family, r.action) for r in reg.evidence_records}
+    absent = [p for p in [("nope", "GET"), ("rest", "CONNECT"), ("rest", "GET")]
+              if p not in observed]
+    assert len(absent) == 3, f"a chosen absence is now observed: {absent}"
+    for family, action in absent:
         assert reg.retry_safety(family, action) is RetrySafetyV1.UNVERIFIED
     # ...and the positive side, so this is a fail-CLOSED seam rather than a
     # function that returns unverified for everything.

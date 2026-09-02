@@ -1,0 +1,20 @@
+{
+  "utc": "2026-09-01T19:52:27.494473+00:00",
+  "path": "/admin/cdscm/api/v1/clients/c4016c66-fb7c-4fab-bb2e-edda725d6b89",
+  "status": 200,
+  "sha256": "0367c61b81ad0157c1a15066005d7880a0b20aa720c84bb57229b68d1889d016",
+  "bytes": 301,
+  "body": {
+    "clientId": "_E6_TPL_20260901195210",
+    "name": "E6 Template (send body source)",
+    "status": "ACTIVE",
+    "e6Marker": "double-attested",
+    "key": "c4016c66-fb7c-4fab-bb2e-edda725d6b89",
+    "createdOn": "2026-09-01T19:52:10.676Z",
+    "createdBy": "integration",
+    "modifiedOn": "2026-09-01T19:52:10.676Z",
+    "modifiedBy": "integration"
+  },
+  "label": "template R0_before",
+  "business_sha256": "cfd03b5f52977a80b6243bd3a9e12f7524f94c50b908400b0772062bac3a502b"
+}
