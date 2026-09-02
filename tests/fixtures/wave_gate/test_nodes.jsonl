@@ -11491,5 +11491,7 @@
 {"kind": "test", "id": "pytest-011490", "node_id": "tests/test_issue_155_contract_projection.py::test_the_public_compile_entry_reads_a_named_component_and_stringifies_it", "state": "active"}
 {"kind": "test", "id": "pytest-011491", "node_id": "tests/test_issue_155_contract_projection.py::test_an_authored_reference_only_reuse_compiles_a_retried_evidenced_write", "state": "active"}
 {"kind": "test", "id": "pytest-011492", "node_id": "tests/test_issue_155_contract_projection.py::test_the_evidenced_write_survives_the_wet_apply_route_not_only_compile", "state": "active"}
-{"kind": "test", "id": "pytest-011493", "node_id": "tests/test_connector_replay_review_round3.py::test_no_checkpoint_claims_fewer_evaluations_than_the_archive_holds", "state": "active"}
-{"kind": "test", "id": "pytest-011494", "node_id": "tests/test_connector_replay_review_round3.py::test_the_count_rule_catches_an_understated_loop", "state": "active"}
+{"kind": "test", "id": "pytest-011493", "node_id": "tests/test_connector_replay_review_round3.py::test_no_checkpoint_claims_fewer_evaluations_than_the_archive_holds", "state": "tombstone"}
+{"kind": "test", "id": "pytest-011494", "node_id": "tests/test_connector_replay_review_round3.py::test_the_count_rule_catches_an_understated_loop", "state": "tombstone"}
+{"kind": "test", "id": "pytest-011495", "node_id": "tests/test_connector_replay_review_round3.py::test_no_loop_closes_while_recording_fewer_evaluations_than_it_ran", "state": "active"}
+{"kind": "test", "id": "pytest-011496", "node_id": "tests/test_connector_replay_review_round3.py::test_the_terminal_count_rule_leaves_open_loops_alone", "state": "active"}

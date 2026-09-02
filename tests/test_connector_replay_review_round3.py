@@ -6287,21 +6287,26 @@ def test_each_authored_root_is_projected_for_its_own_process():
     )
 
 
-def _checkpoint_count_disagreements(ledger_text, index_text, wave_dir=None):
-    """Where a checkpoint's CUMULATIVE count disagrees with the archive.
+def _terminal_checkpoint_understates_its_archive(ledger_text, index_text, wave_dir=None):
+    """A checkpoint that ENDS a loop must account for every archived round.
 
-    `DC-155-J` recurred twice after its structural fix was delivered, and both
-    recurrences are the same shape the fix does not cover: the earlier invariant
-    checks a closing REPORT against the slice map's residue, and these are
-    CHECKPOINT COUNTS transcribed from memory. A count is not a summary of prose,
-    it is a count of archived rounds, so it is derivable — and a derived count
-    cannot disagree with itself.
+    THIS IS DELIBERATELY MUCH NARROWER THAN ITS FIRST TWO VERSIONS, and the
+    narrowing is the correction. Written as this class's structural fix, it began
+    by modelling the whole checkpoint cadence: every third evaluation, windows
+    that reset on `CONTINUE`, cumulative history kept across resets, revisions,
+    withdrawals, supersessions. Three consecutive review findings said the same
+    thing about it — it refused CORRECT states, first every mid-window one, then
+    offset windows, then loops whose terminal row had been withdrawn — and this
+    file already records why that direction is the worse one: a gate that blocks
+    a correct closing stops all work, where one that misses a malformed row is
+    caught by the next reader. The cadence model already exists and works
+    (`_missing_checkpoint_violation`); re-deriving it here was the mistake.
 
-    The rule: for each loop that has archived rounds, the highest cumulative
-    figure any of its checkpoints records must equal the number of rounds the
-    archive holds for it. A checkpoint claiming fewer evaluations than the
-    archive proves is understating the loop while closing it, which is the one
-    direction this error must never run.
+    What was actually found, twice, is one thing: a decision that CLOSES a loop
+    while recording fewer evaluations than the archive holds. That needs no
+    cadence at all — a loop that is ending has no next window to defer to, so its
+    figure is simply the count. Only the latest checkpoint of each loop is
+    considered, and a withdrawn one is not a decision.
     """
     import json
     import re
@@ -6318,11 +6323,10 @@ def _checkpoint_count_disagreements(ledger_text, index_text, wave_dir=None):
         if entry.get("status") != "completed":
             continue
         loop = str(entry.get("logical_loop", ""))
-        tag = re.match(r"(L\d)", loop)
-        here = re.search(r"slice ([A-F])", loop)
+        tag, here = re.match(r"(L\d)", loop), re.search(r"slice ([A-F])", loop)
         if tag and here:
-            archived[(here.group(1), tag.group(1))] = archived.get(
-                (here.group(1), tag.group(1)), 0) + 1
+            key = (here.group(1), tag.group(1))
+            archived[key] = archived.get(key, 0) + 1
 
     if wave_dir is None:
         wave_dir = (Path(__file__).resolve().parents[1]
@@ -6337,13 +6341,12 @@ def _checkpoint_count_disagreements(ledger_text, index_text, wave_dir=None):
             except ValueError:
                 continue
             loop = str(entry.get("logical_loop", ""))
-            tag = re.match(r"(L\d)", loop)
-            here = re.search(r"slice ([A-F])", loop)
+            tag, here = re.match(r"(L\d)", loop), re.search(r"slice ([A-F])", loop)
             if tag and here:
-                archived[(here.group(1), tag.group(1))] = archived.get(
-                    (here.group(1), tag.group(1)), 0) + 1
+                key = (here.group(1), tag.group(1))
+                archived[key] = archived.get(key, 0) + 1
 
-    claimed = {}
+    latest = {}
     for row in _checkpoint_rows(ledger_text) or []:
         cells = row.split("|")
         if len(cells) < 5:
@@ -6354,88 +6357,63 @@ def _checkpoint_count_disagreements(ledger_text, index_text, wave_dir=None):
         if not (m and tag and here):
             continue
         key = (here.group(1), tag.group(1))
-        claimed[key] = max(claimed.get(key, 0), int(m.group(2)))
+        cumulative = int(m.group(2))
+        if cumulative >= latest.get(key, (-1, ""))[0]:
+            latest[key] = (cumulative, cells[4])
 
-    # WHETHER THE LOOP IS STILL OPEN decides which comparison applies. A loop that
-    # recorded `CONTINUE` and then archived a fourth and fifth round owes nothing
-    # until the sixth, so demanding the count equal the archive mid-window would
-    # refuse correct work — and a gate that blocks a correct closing is a worse
-    # failure than one that misses a malformed row, which this file already says
-    # in as many words. So: an open loop must cover the greatest owed multiple of
-    # three; a loop whose latest decision ENDS it must account for every round.
-    ending = set()
-    for row in _checkpoint_rows(ledger_text) or []:
-        cells = row.split("|")
-        if len(cells) < 5:
-            continue
-        tag = re.match(r"\s*(L\d)", cells[1].strip().strip("*").strip("`"))
-        here = re.search(r"slice ([A-F])", cells[1])
-        m = re.match(r"\s*(\d+)\s*/\s*(\d+)", cells[2])
-        if not (tag and here and m):
-            continue
-        key = (here.group(1), tag.group(1))
-        if int(m.group(2)) == claimed.get(key) and "CONTINUE" not in cells[4]:
-            ending.add(key)
-
-    disagreements = []
+    understated = []
     for key, rounds in sorted(archived.items()):
-        if key not in claimed:
+        if key not in latest:
             continue
-        owed = rounds if key in ending else (rounds // 3) * 3
-        if claimed[key] < owed:
-            disagreements.append((key, claimed[key], owed))
-    return disagreements
+        cumulative, outcome = latest[key]
+        # A WITHDRAWN decision is not a decision, and a loop still open owes
+        # nothing until its own next boundary — neither is this check's business.
+        if "WITHDRAWN" in outcome or "CONTINUE" in outcome:
+            continue
+        if cumulative < rounds:
+            understated.append((key, cumulative, rounds))
+    return understated
 
 
-def test_no_checkpoint_claims_fewer_evaluations_than_the_archive_holds():
-    """The count is DERIVED from the archive, never transcribed."""
+def test_no_loop_closes_while_recording_fewer_evaluations_than_it_ran():
+    """The count of a loop-ENDING decision is derived, never transcribed."""
     root = _TESTS_ROOT.parent
     ledger = (root / "docs/architecture/ISSUE_155_AUDIT_LEDGER.md").read_text(encoding="utf-8")
     index = (root / "docs/architecture/evidence/issue-155/index.jsonl").read_text(encoding="utf-8")
-    disagreements = _checkpoint_count_disagreements(ledger, index)
-    assert not disagreements, (
-        "a checkpoint records fewer evaluations than its archive holds, so it is "
-        "understating the loop it closes: {0}".format(disagreements)
+    understated = _terminal_checkpoint_understates_its_archive(ledger, index)
+    assert not understated, (
+        "a checkpoint ends its loop while recording fewer evaluations than the "
+        "archive holds: {0}".format(understated)
     )
 
 
-def test_the_count_rule_catches_an_understated_loop():
-    """Non-vacuity, in both directions."""
+def test_the_terminal_count_rule_leaves_open_loops_alone():
+    """Non-vacuity, and — as importantly — non-interference."""
     import json
 
     index = "\n".join(json.dumps({
         "status": "completed",
         "logical_loop": "L2 (Stage-2 Codex commit review, slice F)",
     }) for _ in range(4))
-
     header = ("| Loop | Evaluation (window / cumulative) | Tree | Outcome | Rationale |\n"
               "| --- | --- | --- | --- | --- |\n")
-    understated = header + (
-        "| L2 Stage-2 Codex commit review, slice F | 3 / 3 | `abc`, clean | `CLOSE-CLEAN` "
-        "| WINDOW RUNS: none |"
-    )
-    assert _checkpoint_count_disagreements(understated, index, wave_dir=False) == [
-        (("F", "L2"), 3, 4)
-    ], _checkpoint_count_disagreements(understated, index, wave_dir=False)
 
-    exact = understated.replace("| 3 / 3 |", "| 4 / 4 |")
-    assert _checkpoint_count_disagreements(exact, index, wave_dir=False) == []
+    def rows(count, outcome):
+        return header + (
+            "| L2 Stage-2 Codex commit review, slice F | 3 / %d | `abc`, clean | %s "
+            "| WINDOW RUNS: none |" % (count, outcome))
 
-    # MID-WINDOW IS LEGAL. A loop that decided `CONTINUE` at three and has since
-    # archived a fourth round owes nothing until the sixth; the first version of
-    # this rule refused exactly that, which would have blocked correct work.
-    continuing = understated.replace("`CLOSE-CLEAN`", "`CONTINUE`")
-    assert _checkpoint_count_disagreements(continuing, index, wave_dir=False) == []
-    five = "\n".join(index.splitlines() + [index.splitlines()[0]])
-    assert _checkpoint_count_disagreements(continuing, five, wave_dir=False) == []
-    # ...but at the sixth it is owed again.
-    six = "\n".join(index.splitlines() + [index.splitlines()[0]] * 2)
-    assert _checkpoint_count_disagreements(continuing, six, wave_dir=False) == [
-        (("F", "L2"), 3, 6)
-    ], _checkpoint_count_disagreements(continuing, six, wave_dir=False)
+    # CLOSING on an understated count is the defect, and it is named.
+    assert _terminal_checkpoint_understates_its_archive(
+        rows(3, "`CLOSE-CLEAN`"), index, wave_dir=False) == [(("F", "L2"), 3, 4)]
+    assert _terminal_checkpoint_understates_its_archive(
+        rows(4, "`CLOSE-CLEAN`"), index, wave_dir=False) == []
 
-    # Claiming MORE than the archive holds is a different defect with its own
-    # rules — a round billed to this loop that produced no archive — and this
-    # check deliberately does not adjudicate it.
-    ahead = understated.replace("| 3 / 3 |", "| 3 / 9 |")
-    assert _checkpoint_count_disagreements(ahead, index, wave_dir=False) == []
+    # EVERY state the previous versions wrongly refused now passes: an open loop
+    # mid-window, an offset window, and a withdrawn terminal decision.
+    assert _terminal_checkpoint_understates_its_archive(
+        rows(3, "`CONTINUE`"), index, wave_dir=False) == []
+    assert _terminal_checkpoint_understates_its_archive(
+        rows(2, "`CONTINUE`"), index, wave_dir=False) == []
+    assert _terminal_checkpoint_understates_its_archive(
+        rows(3, "`DEFER-STANDARD-AND-CLOSE` — WITHDRAWN"), index, wave_dir=False) == []
