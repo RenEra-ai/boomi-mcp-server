@@ -5637,71 +5637,107 @@ def _table_argument(call, consumer, signatures):
     return None
 
 
-def _carries_the_table(node, carrying):
-    """Does this expression DERIVE from something that already carries the table?
+def _binding_history(function):
+    """`[(lineno, name, carries)]` in SOURCE order, with lineage that can be LOST.
 
-    Lineage, not name membership. `relocatable = _strip(symbols)` still carries
-    what its caller projected; `build_symbol_table(spec)` carries nothing however
-    it is named.
+    Three separate defects lived in the previous shape of this, and all three
+    were the same mistake: reading `ast.walk` order as program order. The walk
+    yields a top-level assignment before a nested one, so "the last binding
+    before the call" picked the wrong one; and a set that only ever grew meant a
+    name rebound from something unprojected stayed carrying forever. Bindings are
+    therefore replayed in line order and a non-carrying rebind REMOVES the name.
     """
+    assignments = sorted(
+        (node for node in ast.walk(function) if isinstance(node, ast.Assign)),
+        key=lambda node: (node.lineno, node.col_offset),
+    )
+    args = function.args
+    params = {a.arg for a in args.posonlyargs + args.args + args.kwonlyargs
+              if "symbol" in a.arg}
+    projects = any(
+        isinstance(node.value, ast.Call)
+        and ((node.value.func.id if isinstance(node.value.func, ast.Name)
+              else node.value.func.attr if isinstance(node.value.func, ast.Attribute)
+              else None) in _ROOT_PROJECTORS)
+        for node in assignments)
+
+    # A LOCAL PROJECTION SUPERSEDES the parameter it derived from: once this
+    # function has projected, the raw parameter is not the table a recompiling
+    # consumer may be handed.
+    carrying = set() if projects else set(params)
+    history = []
+    for node in assignments:
+        carried = _expression_carries(node.value, carrying)
+        for target in node.targets:
+            if isinstance(target, ast.Name):
+                history.append((node.lineno, target.id, carried))
+                if carried:
+                    carrying.add(target.id)
+                else:
+                    carrying.discard(target.id)
+    return history, (set() if projects else set(params)), projects or bool(params)
+
+
+def _expression_carries(node, carrying):
+    """Does this expression provably hand on a table that carries the projection?
+
+    THE MODELLED SPACE IS DELIBERATELY SMALL, and everything outside it is
+    REFUSED rather than accepted. Four rounds of review each found a new
+    expression this analysis read wrongly — a tuple indexed to select the other
+    element, a wrapped call over a stale name — because "mentions a carrying
+    name" is not value flow, and chasing arbitrary Python expressions is an
+    unbounded space that a finite checker cannot bind. So exactly three forms are
+    recognised: a projector call, a bare carrying name, and a single-level
+    derivation whose every argument is a carrying name. A subscript, a
+    comprehension, a conditional or a call mixing a carrying name with a fresh
+    construction is UNREADABLE, and an unreadable table is refused.
+    """
+    if isinstance(node, ast.Name):
+        return node.id in carrying
     if isinstance(node, ast.Call):
         name = (node.func.id if isinstance(node.func, ast.Name)
                 else node.func.attr if isinstance(node.func, ast.Attribute) else None)
         if name in _ROOT_PROJECTORS:
             return True
-    return any(isinstance(inner, ast.Name) and inner.id in carrying
-               for inner in ast.walk(node))
+        supplied = list(node.args) + [kw.value for kw in node.keywords]
+        names = [a for a in supplied if isinstance(a, ast.Name)]
+        # Every argument a NAME, at least one of them carrying. A call that also
+        # builds something inline is exactly the discard this guard exists for.
+        return bool(names) and len(names) == len(supplied) and any(
+            a.id in carrying for a in names)
+    return False
 
 
 def _unprojected_recompiles(tree, consumers, signatures):
     """`(consumer, lineno, argument)` for each recompile handed an unprojected table.
 
     A function is IN SCOPE if it projects a table or is handed one. Both are ways
-    of holding the table a recompiling consumer must receive, and the first
-    version of this check scoped to projecting functions ALONE — so a forwarding
-    wrapper could take its caller's projection and pass a freshly built table
-    instead, discarding it with nothing to notice. A function that neither
-    receives nor mints a table is genuinely out of scope: whether the raw route
-    should carry grants at all is a different question from whether a projection
-    survives, and answering it here would be a claim this sweep cannot support.
+    of holding the table a recompiling consumer must receive, and scoping to
+    projecting functions ALONE let a forwarding wrapper take its caller's
+    projection and pass a freshly built table instead. A function that neither
+    receives nor mints a table stays out of scope: whether the raw route should
+    carry grants at all is a different question, and answering it here would be a
+    claim this sweep cannot support.
     """
     offenders = []
     for function in ast.walk(tree):
         if not isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef)):
             continue
-
-        args = function.args
-        params = {a.arg for a in args.posonlyargs + args.args + args.kwonlyargs
-                  if "symbol" in a.arg}
-        projects = any(
-            isinstance(n, ast.Assign) and isinstance(n.value, ast.Call)
-            and ((n.value.func.id if isinstance(n.value.func, ast.Name)
-                  else n.value.func.attr if isinstance(n.value.func, ast.Attribute)
-                  else None) in _ROOT_PROJECTORS)
-            for n in ast.walk(function))
-        if not (projects or params):
+        history, initial, in_scope = _binding_history(function)
+        if not in_scope:
             continue
 
-        # A LOCAL PROJECTION SUPERSEDES THE PARAMETER it derived from. Exempting
-        # the parameter unconditionally is how a function could project, then
-        # hand the recompiler the original table it had just superseded, and be
-        # read as a harmless pass-through.
-        carrying = set() if projects else set(params)
-
-        # WHERE each name was last bound, and whether that binding carries. A
-        # function-wide set of projected names accepted a name projected and then
-        # reassigned from something else before the call; bindings are tracked by
-        # line so the last one before the call decides, as the interpreter does.
-        binds = {}
-        for node in ast.walk(function):
-            if not isinstance(node, ast.Assign):
-                continue
-            carried = _carries_the_table(node.value, carrying)
-            for target in node.targets:
-                if isinstance(target, ast.Name):
-                    binds.setdefault(target.id, []).append((node.lineno, carried))
-                    if carried:
-                        carrying.add(target.id)
+        def carrying_at(line):
+            """The carrying set as of `line`, replayed in SOURCE order."""
+            live = set(initial)
+            for lineno, name, carried in history:
+                if lineno >= line:
+                    break
+                if carried:
+                    live.add(name)
+                else:
+                    live.discard(name)
+            return live
 
         for node in ast.walk(function):
             if not isinstance(node, ast.Call):
@@ -5714,11 +5750,7 @@ def _unprojected_recompiles(tree, consumers, signatures):
             argument = _table_argument(node, consumers[name], signatures.get(name, []))
             if argument is None:
                 continue
-            if isinstance(argument, ast.Name):
-                prior = [(l, ok) for l, ok in binds.get(argument.id, []) if l < node.lineno]
-                if (prior[-1][1] if prior else argument.id in carrying):
-                    continue
-            elif _carries_the_table(argument, carrying):
+            if _expression_carries(argument, carrying_at(node.lineno)):
                 continue
             offenders.append((
                 name, node.lineno,
@@ -5828,3 +5860,33 @@ def test_the_recompile_rule_refuses_the_shapes_that_escape_a_name_check():
     #    filter dropped this entry, and the closure could not recover it because
     #    it reaches the compiler through a private core.
     assert "parse_and_compile_process_ir_v1" in consumers
+
+    # 10-12. THE UNREADABLE SHAPES. Each of these read as clean while handing the
+    #    recompiler an unprojected table, and each is a different way of taking
+    #    "mentions a carrying name" or "the last binding ast.walk yielded" for
+    #    value flow. They are the reason the modelled space is now three forms
+    #    and everything else is refused rather than accepted.
+    assert offenders(
+        header + "    _dry_emit_canonical_plan(p, (root_symbols, build(spec))[1], d)\n"
+    ) == ["_dry_emit_canonical_plan"], "an expression selecting the OTHER value passed"
+
+    assert offenders(
+        "def f(s, cond):\n"
+        "    if cond:\n"
+        "        root_symbols = project_grants_for_root(i, s, process_root_ref=k)\n"
+        "    root_symbols = build(spec)\n"
+        "    _dry_emit_canonical_plan(p, root_symbols, d)\n"
+    ) == ["_dry_emit_canonical_plan"], (
+        "a nested projection read as later than a top-level rebind; ast.walk "
+        "order is not program order"
+    )
+
+    assert offenders(
+        header
+        + "    root_symbols = build(spec)\n"
+        + "    _dry_emit_canonical_plan(p, normalize(root_symbols), d)\n"
+    ) == ["_dry_emit_canonical_plan"], "lineage survived a non-carrying rebind"
+
+    # 13. And the form that must still pass, so the refusal is not blanket: a
+    #     single-level derivation over names that all carry.
+    assert offenders(header + "    _dry_emit_canonical_plan(p, _strip(root_symbols), d)\n") == []
