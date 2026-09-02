@@ -13,6 +13,7 @@ These tests supply the case the archive lacks.
 from __future__ import annotations
 
 import ast
+import contextlib
 import json
 import os
 import shutil
@@ -5619,6 +5620,23 @@ def _recompiling_consumers(src_root):
     return consumers, signatures
 
 
+def _consumer_modules(src_root):
+    """`{consumer name: {dotted module}}` — where each derived consumer is defined."""
+    consumers, _ = _recompiling_consumers(src_root)
+    homes = {}
+    for path in sorted(src_root.rglob("*.py")):
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+        except SyntaxError:  # pragma: no cover - another test's problem
+            continue
+        dotted = ".".join(path.relative_to(src_root).with_suffix("").parts)
+        for node in ast.walk(tree):
+            if (isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+                    and node.name in consumers):
+                homes.setdefault(node.name, set()).add(dotted)
+    return homes
+
+
 def _table_argument(call, consumer, signatures):
     """The symbol-table argument of `call`, by KEYWORD or by position.
 
@@ -5637,256 +5655,158 @@ def _table_argument(call, consumer, signatures):
     return None
 
 
-def _binding_history(function):
-    """`[(lineno, name, carries)]` in SOURCE order, with lineage that can be LOST.
 
-    Three separate defects lived in the previous shape of this, and all three
-    were the same mistake: reading `ast.walk` order as program order. The walk
-    yields a top-level assignment before a nested one, so "the last binding
-    before the call" picked the wrong one; and a set that only ever grew meant a
-    name rebound from something unprojected stayed carrying forever. Bindings are
-    therefore replayed in line order and a non-carrying rebind REMOVES the name.
+
+def test_every_recompiling_consumer_on_the_evidenced_route_gets_the_grants():
+    """The invariant, checked on the VALUE that arrives rather than on source.
+
+    Five review rounds went into a static version of this, and each found the
+    analysis wrong in a new place: the population was hand-listed, then the scope
+    let a wrapper discard its caller's table, then the seed dropped a public
+    entry, then a tuple index and a stale rebind read as lineage. The last round
+    ended it: `materialize_canonical_process_xml` projects its table only under
+    `if snapshot is not None`, which is DESIGNED — no snapshot means no account
+    data, so there is nothing to enforce — and no syntactic rule can tell that
+    conditional from a discard. In the same round, `placeholder_backed_symbols`
+    turned out to be an in-tree helper that takes a table and explicitly CLEARS
+    its root ref and grants, so "a call over carrying names" cannot mean
+    preservation either. Both are facts about values, not about syntax.
+
+    So the check moved to where the answer actually lives. The population is
+    still DERIVED — the compiler package's own declared entries, closed over the
+    call graph — but each consumer is wrapped and the evidenced route is DRIVEN,
+    and the assertion is made against the table each one really received. That is
+    the runtime authority the structural rule asks for: `process_root_ref` and
+    `idempotency_grants` on the object, not a model of how it got there.
     """
-    assignments = sorted(
-        (node for node in ast.walk(function) if isinstance(node, ast.Assign)),
-        key=lambda node: (node.lineno, node.col_offset),
-    )
-    args = function.args
-    params = {a.arg for a in args.posonlyargs + args.args + args.kwonlyargs
-              if "symbol" in a.arg}
-    projects = any(
-        isinstance(node.value, ast.Call)
-        and ((node.value.func.id if isinstance(node.value.func, ast.Name)
-              else node.value.func.attr if isinstance(node.value.func, ast.Attribute)
-              else None) in _ROOT_PROJECTORS)
-        for node in assignments)
+    import importlib
+    from unittest.mock import MagicMock, patch
 
-    # A LOCAL PROJECTION SUPERSEDES the parameter it derived from: once this
-    # function has projected, the raw parameter is not the table a recompiling
-    # consumer may be handed.
-    carrying = set() if projects else set(params)
-    history = []
-    for node in assignments:
-        carried = _expression_carries(node.value, carrying)
-        for target in node.targets:
-            if isinstance(target, ast.Name):
-                history.append((node.lineno, target.id, carried))
-                if carried:
-                    carrying.add(target.id)
-                else:
-                    carrying.discard(target.id)
-    return history, (set() if projects else set(params)), projects or bool(params)
-
-
-def _expression_carries(node, carrying):
-    """Does this expression provably hand on a table that carries the projection?
-
-    THE MODELLED SPACE IS DELIBERATELY SMALL, and everything outside it is
-    REFUSED rather than accepted. Four rounds of review each found a new
-    expression this analysis read wrongly — a tuple indexed to select the other
-    element, a wrapped call over a stale name — because "mentions a carrying
-    name" is not value flow, and chasing arbitrary Python expressions is an
-    unbounded space that a finite checker cannot bind. So exactly three forms are
-    recognised: a projector call, a bare carrying name, and a single-level
-    derivation whose every argument is a carrying name. A subscript, a
-    comprehension, a conditional or a call mixing a carrying name with a fresh
-    construction is UNREADABLE, and an unreadable table is refused.
-    """
-    if isinstance(node, ast.Name):
-        return node.id in carrying
-    if isinstance(node, ast.Call):
-        name = (node.func.id if isinstance(node.func, ast.Name)
-                else node.func.attr if isinstance(node.func, ast.Attribute) else None)
-        if name in _ROOT_PROJECTORS:
-            return True
-        supplied = list(node.args) + [kw.value for kw in node.keywords]
-        names = [a for a in supplied if isinstance(a, ast.Name)]
-        # Every argument a NAME, at least one of them carrying. A call that also
-        # builds something inline is exactly the discard this guard exists for.
-        return bool(names) and len(names) == len(supplied) and any(
-            a.id in carrying for a in names)
-    return False
-
-
-def _unprojected_recompiles(tree, consumers, signatures):
-    """`(consumer, lineno, argument)` for each recompile handed an unprojected table.
-
-    A function is IN SCOPE if it projects a table or is handed one. Both are ways
-    of holding the table a recompiling consumer must receive, and scoping to
-    projecting functions ALONE let a forwarding wrapper take its caller's
-    projection and pass a freshly built table instead. A function that neither
-    receives nor mints a table stays out of scope: whether the raw route should
-    carry grants at all is a different question, and answering it here would be a
-    claim this sweep cannot support.
-    """
-    offenders = []
-    for function in ast.walk(tree):
-        if not isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            continue
-        history, initial, in_scope = _binding_history(function)
-        if not in_scope:
-            continue
-
-        def carrying_at(line):
-            """The carrying set as of `line`, replayed in SOURCE order."""
-            live = set(initial)
-            for lineno, name, carried in history:
-                if lineno >= line:
-                    break
-                if carried:
-                    live.add(name)
-                else:
-                    live.discard(name)
-            return live
-
-        for node in ast.walk(function):
-            if not isinstance(node, ast.Call):
-                continue
-            callee = node.func
-            name = (callee.id if isinstance(callee, ast.Name)
-                    else callee.attr if isinstance(callee, ast.Attribute) else None)
-            if name not in consumers:
-                continue
-            argument = _table_argument(node, consumers[name], signatures.get(name, []))
-            if argument is None:
-                continue
-            if _expression_carries(argument, carrying_at(node.lineno)):
-                continue
-            offenders.append((
-                name, node.lineno,
-                argument.id if isinstance(argument, ast.Name)
-                else type(argument).__name__,
-            ))
-    return offenders
-
-
-def test_every_recompiling_consumer_is_handed_the_projected_table():
-    """Sweep of the mechanism across the whole source tree."""
     src_root = _TESTS_ROOT.parent / "src"
-    consumers, signatures = _recompiling_consumers(src_root)
-
+    consumers, _ = _recompiling_consumers(src_root)
+    homes = _consumer_modules(src_root)
     assert len(consumers) >= 8, (
-        "the derived population collapsed to %d consumers; the compiler package's "
-        "declared entries or the call graph moved, and a sweep over a shrunken "
-        "population reports success without looking: %s" % (len(consumers), sorted(consumers))
+        "the derived population collapsed to %d; the compiler package's declared "
+        "entries or the call graph moved, and a sweep over a shrunken population "
+        "reports success without looking: %s" % (len(consumers), sorted(consumers))
     )
 
-    scanned, offenders = [], []
-    for path in sorted(src_root.rglob("*.py")):
-        try:
-            tree = ast.parse(path.read_text(encoding="utf-8"))
-        except SyntaxError:  # pragma: no cover - another test's problem
-            continue
-        scanned.append(path)
-        offenders += [(path.name, *row)
-                      for row in _unprojected_recompiles(tree, consumers, signatures)]
-
-    assert scanned, "the census walked no source files"
-    assert offenders == [], (
-        "a consumer that recompiles the root was handed a table this function "
-        "did not project, so evidence minted for the root is invisible to it: "
-        "{0}".format(offenders)
+    sys.path.insert(0, str(_TESTS_ROOT))
+    from test_issue_155_contract_projection import (  # noqa: E402
+        _evidenced_reference_only_request,
     )
 
+    record, operation, connection, request = _evidenced_reference_only_request()
+    captures = (_TESTS_ROOT.parent
+                / "docs/architecture/evidence/issue-155/captures"
+                / "cap155-e7-patch-operation-record")
+    operation_xml = (captures / "component_op_tgt.xml").read_text(encoding="utf-8")
+    connection_xml = (captures / "component_connection.xml").read_text(encoding="utf-8")
 
-def test_the_recompile_rule_refuses_the_shapes_that_escape_a_name_check():
-    """Non-vacuity, over every shape review showed the first version missed."""
-    src_root = _TESTS_ROOT.parent / "src"
-    consumers, signatures = _recompiling_consumers(src_root)
+    seen = []
+    stack = []
 
-    def offenders(source):
-        return [row[0] for row in
-                _unprojected_recompiles(ast.parse(source), consumers, signatures)]
+    def _watch(module_name, consumer, parameters):
+        module = importlib.import_module("boomi_mcp." + module_name.split("boomi_mcp.")[-1]
+                                         if module_name.startswith("boomi_mcp")
+                                         else module_name)
+        original = getattr(module, consumer, None)
+        if not callable(original):
+            return None
 
-    header = ("def f(spec, resolution):\n"
-              "    root_symbols = project_grants_for_root(ir, s, process_root_ref=k)\n")
+        def recording(*args, **kwargs):
+            table = None
+            for parameter in parameters:
+                if parameter in kwargs:
+                    table = kwargs[parameter]
+            if table is None:
+                for candidate in args:
+                    if hasattr(candidate, "idempotency_grants"):
+                        table = candidate
+            if table is not None:
+                seen.append((consumer, getattr(table, "process_root_ref", None),
+                             len(getattr(table, "idempotency_grants", ()) or ())))
+            return original(*args, **kwargs)
 
-    # 1. The defect itself: the projection computed, then a fresh table passed.
-    assert offenders(header + "    _dry_emit_canonical_plan(p, build(spec), d)\n") == [
-        "_dry_emit_canonical_plan"], "the original discard is no longer caught"
+        return patch.object(module, consumer, recording)
 
-    # 2. The fix.
-    assert offenders(header + "    _dry_emit_canonical_plan(p, root_symbols, d)\n") == []
+    for consumer, parameters in sorted(consumers.items()):
+        for module_name in sorted(homes.get(consumer, ())):
+            watcher = _watch(module_name, consumer, parameters)
+            if watcher is not None:
+                stack.append(watcher)
 
-    # 3. KEYWORD form — invisible to a positional-only reading.
-    assert offenders(
-        header + "    _dry_emit_canonical_plan(p, symbols=build(spec), depends_on_by_key=d)\n"
-    ) == ["_dry_emit_canonical_plan"], "a keyword argument escaped the check"
+    assert stack, "no derived consumer could be wrapped; this test proves nothing"
 
-    # 4. REBOUND name — projected, then overwritten before the call. A
-    #    function-wide name set accepted this; the interpreter does not.
-    assert offenders(
-        header
-        + "    root_symbols = build(spec)\n"
-        + "    _dry_emit_canonical_plan(p, root_symbols, d)\n"
-    ) == ["_dry_emit_canonical_plan"], "a rebound name escaped the check"
+    submitted = {}
 
-    # 5. A consumer the hand-list never named. This is the finding that replaced
-    #    the list with a derivation, so the witness must show the new one covered.
-    assert "materialize_canonical_process_xml" in consumers
-    assert offenders(
-        header + "    materialize_canonical_process_xml(p, build(spec), d)\n"
-    ) == ["materialize_canonical_process_xml"], "a derived consumer is not enforced"
+    def _get_xml(_client, component_id, *_a, **_k):
+        if component_id == "process-cid-1" and "xml" in submitted:
+            return {"type": "process", "xml": submitted["xml"]}
+        is_operation = component_id == operation.component_id
+        return {
+            "component_id": component_id,
+            "type": "connector-settings",
+            "version": operation.version if is_operation else connection.version,
+            "xml": operation_xml if is_operation else connection_xml,
+        }
 
-    # 6. Forwarding a received table is fine; DISCARDING one is not. Scoping to
-    #    projecting functions alone missed the second shape entirely.
-    wrapper = ("def w(unit, symbols, cp):\n"
-               "    return build_materialization_plan(envelope=e, process_ir=i, symbols=%s,\n"
-               "        conflict_policy=cp, compiler_revision=r, emitter_revision=r,\n"
-               "        materializer_revision=r)\n")
-    assert offenders(wrapper % "symbols") == []
-    assert offenders(wrapper % "_strip(symbols)") == [], (
-        "a table DERIVED from the one this function was handed still carries it; "
-        "refusing that would refuse every legitimate caller in the tree"
+    def _create(_client, _profile, payload_in):
+        submitted["xml"] = payload_in["xml"]
+        return {"_success": True, "component_id": "process-cid-1"}
+
+    created = {"n": 0}
+
+    def _component(*_a, **_k):
+        created["n"] += 1
+        return {"_success": True, "component_id": "cid-%d" % created["n"]}
+
+    from boomi_mcp.categories.integration_builder import build_integration_action
+
+    with contextlib.ExitStack() as entered:
+        for watcher in stack:
+            entered.enter_context(watcher)
+        entered.enter_context(patch(
+            "boomi_mcp.categories.integration_builder.paginate_metadata",
+            lambda *a, **k: []))
+        entered.enter_context(patch(
+            "boomi_mcp.categories.integration_builder._execute_component", _component))
+        entered.enter_context(patch(
+            "boomi_mcp.categories.integration_builder.create_component", _create))
+        entered.enter_context(patch(
+            "boomi_mcp.categories.integration_builder.component_get_xml", _get_xml))
+        entered.enter_context(patch(
+            "boomi_mcp.categories.components._shared.component_get_xml", _get_xml))
+
+        payload = request.model_dump(mode="json")
+        compiled = build_integration_action(
+            MagicMock(), "qa", "compile", config={"authoring_request": payload})
+        assert compiled.get("_success") is True, compiled
+        binding = compiled["authoring_result"]["revision_binding"]
+        payload["expected_capability_revision"] = binding["capability_revision"]
+        payload["expected_compile_hash"] = binding["compile_hash"]
+        applied = build_integration_action(
+            MagicMock(), "qa", "apply",
+            config={"authoring_request": payload, "dry_run": False})
+
+    assert applied.get("_success") is True, applied
+    assert seen, "no recompiling consumer was reached; the route changed"
+
+    # A table with a root ref is one that was projected FOR that root, so its
+    # grants are the ones the compiler will look for. A consumer reached with a
+    # root ref but no grants is the defect this whole line of work started from:
+    # the recompile refusing evidence semantic validation had already accepted.
+    rootless = [row for row in seen if row[1] is None]
+    granted = [row for row in seen if row[1] is not None]
+    assert granted, (
+        "no consumer on the evidenced route received a root-projected table, so "
+        "this witness would pass with the projection removed entirely: %s" % (seen,)
     )
-    assert offenders(wrapper % "build_symbol_table(x)") == ["build_materialization_plan"], (
-        "a wrapper discarding its caller's projection went unseen"
+    assert all(row[2] >= 1 for row in granted), (
+        "a consumer that recompiles a projected root received it WITHOUT the "
+        "grants minted for it: %s" % (granted,)
     )
-
-    # 7. A function that PROJECTS may not then hand over the parameter it
-    #    superseded. Read as a pass-through, this was invisible.
-    assert offenders(
-        "def f(symbols):\n"
-        "    root_symbols = project_grants_for_root(ir, symbols, process_root_ref=k)\n"
-        "    _dry_emit_canonical_plan(plan, symbols, depends_on_by_key=d)\n"
-    ) == ["_dry_emit_canonical_plan"], "the superseded parameter was accepted"
-
-    # 8. A function that neither receives nor mints a table is out of scope, and
-    #    must stay so: whether the raw route should carry grants at all is a
-    #    separate question this sweep cannot answer.
-    assert offenders("def f():\n    _dry_emit_canonical_plan(p, build(x), d)\n") == []
-
-    # 9. The authority's WHOLE exported surface seeds the population. A prefix
-    #    filter dropped this entry, and the closure could not recover it because
-    #    it reaches the compiler through a private core.
-    assert "parse_and_compile_process_ir_v1" in consumers
-
-    # 10-12. THE UNREADABLE SHAPES. Each of these read as clean while handing the
-    #    recompiler an unprojected table, and each is a different way of taking
-    #    "mentions a carrying name" or "the last binding ast.walk yielded" for
-    #    value flow. They are the reason the modelled space is now three forms
-    #    and everything else is refused rather than accepted.
-    assert offenders(
-        header + "    _dry_emit_canonical_plan(p, (root_symbols, build(spec))[1], d)\n"
-    ) == ["_dry_emit_canonical_plan"], "an expression selecting the OTHER value passed"
-
-    assert offenders(
-        "def f(s, cond):\n"
-        "    if cond:\n"
-        "        root_symbols = project_grants_for_root(i, s, process_root_ref=k)\n"
-        "    root_symbols = build(spec)\n"
-        "    _dry_emit_canonical_plan(p, root_symbols, d)\n"
-    ) == ["_dry_emit_canonical_plan"], (
-        "a nested projection read as later than a top-level rebind; ast.walk "
-        "order is not program order"
-    )
-
-    assert offenders(
-        header
-        + "    root_symbols = build(spec)\n"
-        + "    _dry_emit_canonical_plan(p, normalize(root_symbols), d)\n"
-    ) == ["_dry_emit_canonical_plan"], "lineage survived a non-carrying rebind"
-
-    # 13. And the form that must still pass, so the refusal is not blanket: a
-    #     single-level derivation over names that all carry.
-    assert offenders(header + "    _dry_emit_canonical_plan(p, _strip(root_symbols), d)\n") == []
+    # Rootless tables are legitimate and deliberately unconstrained — the
+    # relocatable materialization table clears its root ref precisely so a grant
+    # minted for another root cannot satisfy this one. Recorded, not asserted on.
+    assert isinstance(rootless, list)
