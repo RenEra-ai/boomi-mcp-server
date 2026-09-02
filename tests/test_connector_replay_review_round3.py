@@ -6105,17 +6105,24 @@ def test_every_recompiling_consumer_on_the_evidenced_route_gets_the_grants():
     assert isinstance(rootless, list)
 
 
-def test_two_authored_roots_each_get_their_own_projection():
-    """The multi-root arm, which the single-unit fixture could not express.
+def test_each_authored_root_is_projected_for_its_own_process():
+    """The multi-root arm, as a PAIRING and driven through the wet route.
 
-    With one unit in the request, that unit's key was a universal oracle: a
-    regression projecting EVERY process under the first key satisfied every
-    assertion, so a check written entirely about roots could not see a wrong
-    root at all. Review supplied both halves of that — the oracle problem and
-    the fact that adding a second unit would have failed the clean tree — and
-    the fixture turned out to support two roots, measured, so the limit was mine
-    rather than the repository's.
+    Three aggregates preceded this one and each was defeated the same way. The
+    authored root was `units[0]`, which a single-unit fixture made a universal
+    oracle. Then it was the SET of authored keys, which two consumers swapping
+    roots between them satisfies exactly. And the witness drove only compile,
+    leaving any regression confined to the apply-only projection unreached. The
+    common defect is mine and it is one defect: I kept asserting that the right
+    NAMES appeared somewhere, which is not the claim. The claim is that each
+    process is projected under its OWN key.
+
+    So the units carry DIFFERENT documents — sharing one IR removed the only
+    value-level distinction between them — the recorder keys each projection by
+    the document it was handed, and the request goes through compile AND
+    revision-bound wet apply.
     """
+    import json
     from unittest.mock import MagicMock, patch
 
     from boomi_mcp.categories.integration_builder import build_integration_action
@@ -6126,30 +6133,52 @@ def test_two_authored_roots_each_get_their_own_projection():
         ProcessAuthoringUnitV1,
         ProcessComponentEnvelopeV1,
     )
+    from _process_ir_capability_witnesses import _connector_scope  # noqa: E402
+    from boomi_mcp.models.process_ir import parse_process_ir_v1  # noqa: E402
     from test_issue_155_contract_projection import (  # noqa: E402
         _evidenced_reference_only_request,
     )
 
     record, operation, connection, request = _evidenced_reference_only_request()
     first = request.intent.units[0]
+    # A DIFFERENT document for the second root. Reusing the first unit's IR left
+    # the two units indistinguishable by value, so a projection could be paired
+    # with either and no assertion could tell.
     second = ProcessAuthoringUnitV1(
         envelope=ProcessComponentEnvelopeV1(
             component_key="proc2", name="M12.15 Second", action="create",
             depends_on=first.envelope.depends_on),
-        process_ir=first.process_ir,
+        process_ir=parse_process_ir_v1(_connector_scope(
+            protected="$ref:op",
+            upstream="$ref:getop",
+            retry={"count": 3},
+            idempotency={"kind": "key_reference",
+                         "contract_ref": record.contract_ref},
+        )),
     )
     two_root = request.model_copy(update={"intent": request.intent.model_copy(
         update={"units": (first, second)})})
-    authored = {unit.envelope.component_key for unit in two_root.intent.units}
-    assert len(authored) == 2, authored
+
+    def _fingerprint(ir):
+        return json.dumps(ir.model_dump(mode="json"), sort_keys=True)
+
+    expected = {_fingerprint(unit.process_ir): unit.envelope.component_key
+                for unit in two_root.intent.units}
+    assert len(expected) == 2, (
+        "the two units are indistinguishable by value, so no pairing assertion "
+        "below can mean anything"
+    )
 
     captures = (_TESTS_ROOT.parent
                 / "docs/architecture/evidence/issue-155/captures"
                 / "cap155-e7-patch-operation-record")
     operation_xml = (captures / "component_op_tgt.xml").read_text(encoding="utf-8")
     connection_xml = (captures / "component_connection.xml").read_text(encoding="utf-8")
+    submitted = {}
 
     def _get_xml(_client, component_id, *_a, **_k):
+        if component_id in submitted:
+            return {"type": "process", "xml": submitted[component_id]}
         is_operation = component_id == operation.component_id
         return {
             "component_id": component_id,
@@ -6158,35 +6187,71 @@ def test_two_authored_roots_each_get_their_own_projection():
             "xml": operation_xml if is_operation else connection_xml,
         }
 
-    requested, delivered = [], []
+    created = {"n": 0}
+
+    def _create(_client, _profile, payload_in):
+        created["n"] += 1
+        component_id = "process-cid-%d" % created["n"]
+        submitted[component_id] = payload_in["xml"]
+        return {"_success": True, "component_id": component_id}
+
+    def _component(*_a, **_k):
+        created["n"] += 1
+        return {"_success": True, "component_id": "cid-%d" % created["n"]}
+
+    pairs = []
     _project = CR.project_grants_for_root
 
     def _recording_projection(*args, **kwargs):
         root = kwargs.get("process_root_ref")
         if root is None and len(args) > 2:
             root = args[2]
-        requested.append(root)
-        table = _project(*args, **kwargs)
-        delivered.append((root, table.process_root_ref))
-        return table
+        ir = kwargs.get("root_ir") if "root_ir" in kwargs else (args[0] if args else None)
+        # THE PAIRING: which document was projected under which key. A set of
+        # names cannot distinguish two consumers that swapped them.
+        pairs.append((_fingerprint(ir) if ir is not None else None, root))
+        return _project(*args, **kwargs)
 
-    with patch("boomi_mcp.categories.integration_builder.paginate_metadata",
-               lambda *a, **k: []), \
-         patch("boomi_mcp.categories.components._shared.component_get_xml", _get_xml), \
-         patch("boomi_mcp.categories.integration_builder.component_get_xml", _get_xml), \
-         patch.object(CR, "project_grants_for_root", _recording_projection):
-        compiled = build_integration_action(
-            MagicMock(), "qa", "compile",
-            config={"authoring_request": two_root.model_dump(mode="json")})
+    def _drive(action, config_extra=None):
+        with patch("boomi_mcp.categories.integration_builder.paginate_metadata",
+                   lambda *a, **k: []), \
+             patch("boomi_mcp.categories.integration_builder._execute_component",
+                   _component), \
+             patch("boomi_mcp.categories.integration_builder.create_component", _create), \
+             patch("boomi_mcp.categories.components._shared.component_get_xml", _get_xml), \
+             patch("boomi_mcp.categories.integration_builder.component_get_xml", _get_xml), \
+             patch.object(CR, "project_grants_for_root", _recording_projection):
+            return build_integration_action(
+                MagicMock(), "qa", action,
+                config=dict({"authoring_request": payload}, **(config_extra or {})))
 
+    payload = two_root.model_dump(mode="json")
+    compiled = _drive("compile")
     assert compiled.get("_success") is True, compiled
-    # EACH ROOT ASKED FOR ON ITS OWN BEHALF. A regression projecting every unit
-    # under the first key leaves this set with one member while the compile still
-    # succeeds — which is exactly the shape the single-unit fixture could not
-    # distinguish from correct behaviour.
-    assert set(requested) == authored, (
-        "the projections did not cover each authored root separately: asked for "
-        "%s, authored %s" % (sorted(set(requested)), sorted(authored))
-    )
-    # And each projection answered for the root it was asked about.
-    assert all(asked == answered for asked, answered in delivered), delivered
+    compile_pairs = list(pairs)
+
+    binding = compiled["authoring_result"]["revision_binding"]
+    payload["expected_capability_revision"] = binding["capability_revision"]
+    payload["expected_compile_hash"] = binding["compile_hash"]
+    del pairs[:]
+    # THE WET ROUTE, not compile alone. A regression confined to the apply-only
+    # projection is invisible to a compile-only witness, and the single-root wet
+    # guard cannot see a root mistake at all.
+    applied = _drive("apply", {"dry_run": False})
+    assert applied.get("_success") is True, applied
+    apply_pairs = list(pairs)
+
+    for label, observed in (("compile", compile_pairs), ("apply", apply_pairs)):
+        assert observed, "no projection ran on the %s route" % (label,)
+        wrong = [(document is not None and expected.get(document), root)
+                 for document, root in observed
+                 if document is not None and expected.get(document) != root]
+        assert not wrong, (
+            "on the %s route a process was projected under another process's "
+            "key: %s" % (label, wrong)
+        )
+        assert {root for document, root in observed if document is not None} == set(
+            expected.values()), (
+            "the %s route did not project both authored roots: %s"
+            % (label, sorted({r for d, r in observed if d is not None}))
+        )
