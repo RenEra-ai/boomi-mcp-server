@@ -234,9 +234,24 @@ def test_operation_records_are_exposed_not_silently_dropped():
     rows that decide whether a write may be retried, and it will do so quietly.
     """
     reg = load_registry()
-    assert reg.operation_records == ()
     payload = json.loads(_ASSET.read_text())
     assert "operation_records" in payload, "the packaged file must declare the key"
+    # EXPOSED, not merely declared. The assertion was `== ()`, which proved the
+    # key survived the loader only for as long as it was empty — the state the
+    # property was written to outlive. Compare what the loader exposes against
+    # what the file declares, so the check keeps biting now that records exist.
+    assert len(reg.operation_records) == len(payload["operation_records"]), (
+        "the loader dropped an operation record the packaged file declares"
+    )
+    assert {r.contract_ref for r in reg.operation_records} == {
+        r["contract_ref"] for r in payload["operation_records"]
+    }
+    # ...and the semantics each record cites must be exposed too, because the
+    # registry refuses a record whose semantics it cannot resolve — so a silently
+    # dropped definition would surface as a missing record, not as itself.
+    cited = {(r.semantics_id, r.semantics_revision) for r in reg.operation_records}
+    published = {(d.semantics_id, d.revision) for d in reg.semantics_definitions}
+    assert cited <= published, (cited, published)
 
 
 def test_a_key_this_build_does_not_understand_is_refused():

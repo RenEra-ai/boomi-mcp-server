@@ -333,7 +333,30 @@ def test_source_isolation_is_derived_from_the_graph_not_the_authored_scope():
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("op", ["$ref:PATCHOP", "$ref:DBSEND"])
+def _never_retryable_refs():
+    """Operation refs the compiler still treats as never retryable, DERIVED.
+
+    This was the hand-list `["$ref:PATCHOP", "$ref:DBSEND"]`, and issue #155's
+    evidence slice rotted it: REST PATCH now carries an observed replay verdict,
+    so the list asserted a refusal that had correctly stopped happening. Reading
+    the capability the compiler actually resolves means the set shrinks by itself
+    as evidence lands, instead of turning into a false pin.
+    """
+    from boomi_mcp.compiler.process_ir.connector_capabilities import lookup_capability
+    from boomi_mcp.compiler.process_ir.error_handling import _NEVER_RETRYABLE
+
+    refs = []
+    for symbol in _symbols().symbols:
+        if symbol.component_type != "connector-action" or not symbol.action_type:
+            continue
+        capability = lookup_capability(symbol.connector_type, symbol.action_type)
+        if capability is not None and capability.retry_safety in _NEVER_RETRYABLE:
+            refs.append(symbol.ref)
+    assert refs, "no never-retryable action remains; this check would be vacuous"
+    return sorted(set(refs))
+
+
+@pytest.mark.parametrize("op", _never_retryable_refs())
 def test_retry_over_an_unverified_write_is_rejected(op):
     diag = _compile_error(_connector_scope(retry={"count": 1}, protected=op))
     assert diag.code == PROCESS_IR_SEMANTIC_RETRY_NON_IDEMPOTENT_WRITE
@@ -350,11 +373,16 @@ def test_retry_over_an_unverified_write_is_rejected(op):
 def test_authored_evidence_cannot_override_an_unverified_row(evidence):
     # The registry decides; evidence only ever discharges an obligation a
     # retry-safe row imposes. If this ever passes, the safety gate is decorative.
+    # NAMED FROM THE DERIVED SET, because this test is about an UNVERIFIED row
+    # and REST PATCH stopped being one when its evidence was ingested. Pointing
+    # it at PATCH would assert that observed evidence is ignored, which is the
+    # opposite of the property.
+    unverified = _never_retryable_refs()[0]
     contracts = (
-        IdempotencyContractSymbolV1(ref="$ref:CONTRACT", operation_ref="$ref:PATCHOP"),
+        IdempotencyContractSymbolV1(ref="$ref:CONTRACT", operation_ref=unverified),
     )
     diag = _compile_error(
-        _connector_scope(retry={"count": 1}, protected="$ref:PATCHOP", idempotency=evidence),
+        _connector_scope(retry={"count": 1}, protected=unverified, idempotency=evidence),
         _symbols(contracts=contracts),
     )
     assert diag.code == PROCESS_IR_SEMANTIC_RETRY_NON_IDEMPOTENT_WRITE
@@ -367,12 +395,50 @@ def test_synthetic_non_idempotent_row_is_rejected(monkeypatch):
 
 
 def test_no_production_row_claims_write_replay_safety():
-    # The live-capture decision, pinned as a test so a later slice cannot quietly
-    # promote a write to replay-safe without revisiting §G4.
+    """The table still claims nothing — and now, neither may the LOOKUP, unless
+    an observed capture says so.
+
+    The original body checked only the static table, and issue #155's evidence
+    slice went around it: retry safety is now DERIVED at lookup from ingested
+    captures, so the compiler could see a replay-safe write while every table row
+    still read `unverified` and this test still passed. It was pinning the place
+    the decision used to live.
+
+    So both halves are asserted. The table remains the fail-closed record, and
+    every promotion the compiler resolves must be traceable to a registry row
+    that observed it — which is the §G4 decision restated where it now applies:
+    a later slice still cannot promote a write to replay-safe, it can only
+    OBSERVE one.
+    """
+    from boomi_mcp.connector_replay.registry import load_registry
+
+    registry = load_registry()
     for row in CC.CONNECTOR_CALL_CAPABILITIES_V1.values():
         if row.side_effect == "write":
             assert row.retry_safety == "unverified", row.action
         assert row.retry_safety in ("read_only", "unverified"), row.action
+
+    promoted = []
+    for (family, action), row in CC.CONNECTOR_CALL_CAPABILITIES_V1.items():
+        resolved = CC.lookup_capability(family, action)
+        if resolved.retry_safety == row.retry_safety:
+            continue
+        promoted.append((family, action, row.retry_safety, resolved.retry_safety))
+        portable = registry.family_for(family)
+        assert portable is not None, (family, action)
+        # `row.action`, not the dict key: the key is casefolded for lookup while
+        # the registry's rows carry the action as the platform reports it, and
+        # asking under the folded form answers `unverified` for everything.
+        observed = registry.retry_safety(portable, row.action)
+        assert getattr(observed, "value", observed) == resolved.retry_safety, (
+            "the compiler resolved a retry safety no evidence row reports: "
+            f"{family}/{action} -> {resolved.retry_safety}"
+        )
+    assert promoted, (
+        "no capability differs from its table row, so the second half of this "
+        "test checked nothing; if the registry is meant to ship without evidence "
+        "again, say so here rather than leaving a vacuous loop"
+    )
 
 
 def test_retry_zero_over_an_unverified_write_compiles():
@@ -962,14 +1028,16 @@ def test_the_emitted_error_graph_passes_the_structural_verifier():
 
 def test_no_authored_value_reaches_a_diagnostic_or_the_emitted_xml():
     sentinel = "SENTINELVALUE12345"
+    # Driven on an action that still refuses, so there IS a diagnostic to search.
+    unverified = _never_retryable_refs()[0]
     contracts = (
         IdempotencyContractSymbolV1(
-            ref="$ref:{0}".format(sentinel), operation_ref="$ref:PATCHOP"
+            ref="$ref:{0}".format(sentinel), operation_ref=unverified
         ),
     )
     doc = _connector_scope(
         retry={"count": 1},
-        protected="$ref:PATCHOP",
+        protected=unverified,
         idempotency={"kind": "key_reference", "contract_ref": "$ref:{0}".format(sentinel)},
     )
     with pytest.raises(ProcessIRCompileError) as excinfo:
@@ -1480,7 +1548,8 @@ def test_the_policy_does_not_lift_the_write_safety_refusal():
     do with — a policy that quietly lifted both would turn an opt-in about
     duplicate READS into permission to duplicate WRITES.
     """
-    doc = _process_scope(retry={"count": 2, **ALLOW}, op="$ref:PATCHOP")
+    # Named from the derived never-retryable set for the same reason as above.
+    doc = _process_scope(retry={"count": 2, **ALLOW}, op=_never_retryable_refs()[0])
     diag = _compile_error(doc)
     assert diag.code == PROCESS_IR_SEMANTIC_RETRY_NON_IDEMPOTENT_WRITE
 

@@ -407,7 +407,64 @@ def lookup_capability(family: str, action: str) -> Optional[ConnectorCapabilityV
     ``rest_client`` miss a row that ``officialboomi-…-rest-…`` hits and silently
     reject a supported call.
     """
-    return CONNECTOR_CALL_CAPABILITIES_V1.get((family, str(action or "").casefold()))
+    row = CONNECTOR_CALL_CAPABILITIES_V1.get((family, str(action or "").casefold()))
+    return row if row is None else _with_observed_retry_safety(row)
+
+
+#: Retry-safety values the OBSERVATION may replace. A table row that already
+#: states a safety from the transport's own definition — a read-only action — is
+#: not something a capture can weaken, and `non_idempotent` is a verdict the
+#: table does not carry. Only the unclassified value is open to evidence.
+_RETRY_SAFETY_OPEN_TO_EVIDENCE = frozenset({"unverified"})
+
+
+def _with_observed_retry_safety(row: ConnectorCapabilityV1) -> ConnectorCapabilityV1:
+    """Let an OBSERVED replay verdict replace an unclassified one (#155 slice F).
+
+    Until this slice the table's retry safety was the only answer the compiler
+    had, and for every write it read `unverified` — which the retry check treats
+    as never retryable, BEFORE it looks at evidence. So ingesting attested
+    captures changed what the registry could report and nothing about what the
+    compiler would permit: the evidence channel stopped one layer short of its
+    consumer, which is the failure #180 recorded and this issue's own slice D
+    review found twice.
+
+    Measured before this existed: with all seven verb rows ingested, the registry
+    answered `conditionally_idempotent` for a REST PATCH and the compiler still
+    refused the same call as a non-idempotent write.
+
+    THE DIRECTION IS ONE-WAY. Evidence may only replace `unverified`, the value
+    that means "nobody has classified this". It may not touch `read_only`, which
+    the table derives from the transport's own definition of a safe method, and
+    an absent or unreadable registry leaves the table's value untouched — so this
+    can loosen the gate only where an execution was actually observed, and fails
+    closed everywhere else.
+    """
+    if row.retry_safety not in _RETRY_SAFETY_OPEN_TO_EVIDENCE:
+        return row
+    try:
+        from ...connector_replay.registry import load_registry
+
+        registry = load_registry()
+        # TWO VOCABULARIES, translated by the one that owns the mapping. This
+        # compiler keys capabilities on the PLATFORM connector type; the evidence
+        # registry keys rows on the logical family. Asking it for a safety under
+        # the platform type returns `unverified` for everything — measured, and
+        # it is how this derivation would have shipped firing for nothing, which
+        # is the same defect one layer up from the one it was written to fix.
+        family = registry.family_for(row.family)
+        if family is None:
+            return row
+        observed = registry.retry_safety(family, row.action)
+    except Exception:  # noqa: BLE001 - an unreadable registry observed nothing
+        return row
+    value = getattr(observed, "value", observed)
+    if value in (None, "unverified") or value == row.retry_safety:
+        return row
+    if value not in ConnectorCapabilityV1.model_fields["retry_safety"].annotation.__args__:
+        # A verdict this compiler has no field for is not one it may act on.
+        return row
+    return row.model_copy(update={"retry_safety": value})
 
 
 __all__ = [

@@ -1,0 +1,396 @@
+"""The positive replay path, end to end (#155 slice F).
+
+Slice D built the grant minter, the discovery surface and the apply-boundary
+rechecks, and recorded the gap this file closes: no production path constructed
+an idempotency contract symbol, so a caller could discover the correct reference
+and planning would still refuse it. `ARCH-155-r10-03` says so in as many words —
+"adding genuine records in the evidence slice will not by itself make a candidate
+usable".
+
+So this asserts the thing the manifest flip claims: given a registry record the
+trusted snapshot can place, a retried conditionally-idempotent write COMPILES.
+Every negative beside it is what keeps that from being a rubber stamp.
+"""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+import pytest
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from _wave_gate_golden_corpus import error_symbols  # noqa: E402
+
+
+def _symbols():
+    """The corpus table plus a PATCH operation carrying LIVE-SHAPED identifiers.
+
+    The shared fixture's component ids are readable placeholders — `op-patch`,
+    `conn-1` — and a registry record cannot name one, because the record model
+    validates its identity as a real Boomi component id. So corroboration would
+    compare the record's id against a placeholder and refuse every time, and the
+    positive path would be untestable on the shared symbols. These two symbols
+    exist so the identity comparison has something it CAN match; the rest of the
+    table is the corpus's.
+    """
+    from boomi_mcp.compiler.process_ir.connector_capabilities import REST_FAMILY
+    from boomi_mcp.compiler.process_ir.contracts import ComponentSymbolV1
+
+    return error_symbols(
+        ComponentSymbolV1(
+            ref="$ref:PATCHLIVE",
+            component_id=_OP_ID,
+            component_type="connector-action",
+            connector_type=REST_FAMILY,
+            action_type="PATCH",
+            connection_ref="$ref:CONNLIVE",
+            input_profile_ref="$ref:P1",
+            output_profile_ref="$ref:P2",
+        ),
+        ComponentSymbolV1(
+            ref="$ref:CONNLIVE",
+            component_id=_CONN_ID,
+            component_type="connector-settings",
+            connector_type=REST_FAMILY,
+        ),
+    )
+from _process_ir_capability_witnesses import _connector_scope, _parse  # noqa: E402
+
+from boomi_mcp.authoring.connector_resolution_snapshot import (  # noqa: E402
+    ResolvedConnectorComponentIdentityV1,
+    TrustedConnectorResolutionSnapshotV1,
+)
+from boomi_mcp.compiler.process_ir.connector_resolution import (  # noqa: E402
+    project_grants_for_root,
+    project_idempotency_contracts,
+)
+from boomi_mcp.connector_replay.models import (  # noqa: E402
+    CaptureReferenceV1,
+    LiveComponentIdentityV1,
+    OperationContractRecordV1,
+    StaticRouteCoverageV1,
+)
+
+_CONTRACT = "$ref:CONTRACT"
+_DIGEST = "b" * 64
+_ACCOUNT = "account-under-test"
+
+
+def _scope():
+    """The scope THIS account hashes to, from the repository's own helper.
+
+    A literal here would make the record describe a different account, and the
+    account comparison fails closed — so the contract would project and the grant
+    would silently not follow, which is exactly the mechanism live QA flagged for
+    the operation record. Deriving it means this test exercises that comparison
+    rather than stepping around it.
+    """
+    from boomi_mcp.connector_replay.digests import account_scope_hash
+
+    return account_scope_hash(_ACCOUNT)
+
+
+_SCOPE = _scope()
+
+
+_OP_ID = "11111111-2222-3333-4444-555555555555"
+_CONN_ID = "66666666-7777-8888-9999-aaaaaaaaaaaa"
+_CFG = "ComponentConfigDigestV1:" + "d" * 64
+
+
+def _capture():
+    """DERIVED from a real attested capture, never hand-built.
+
+    The record's nested shapes — the capture reference, its closed observation
+    set, the route coverage — are the schema's, and typing them out here would be
+    a hand-model of exactly the sort this issue has recorded thirty-one instances
+    of. It would also drift the day the schema gains a field. So the reference
+    comes from the archived PATCH double execution, summarised by the ingester's
+    own helper: the fixture's provenance is an executed capture, which is what
+    this repository's fixture rule requires.
+    """
+    from boomi_mcp.connector_replay.capture import summarize
+    from boomi_mcp.connector_replay.ingest import _capture_reference
+    from boomi_mcp.connector_replay.models import SideEffectV1
+
+    root = Path(__file__).resolve().parents[1]
+    directory = (root / "docs/architecture/evidence/issue-155/captures"
+                 / "cap155-e5-patch-attested")
+    return _capture_reference(summarize(directory, method_hint="PATCH"),
+                              SideEffectV1.WRITE)
+
+
+def _route_digest():
+    """A well-formed route digest, DERIVED from archived component bytes.
+
+    Computed by the repository's Route Digest helper from the archived REST
+    connection readback and the archived PATCH operation. A digest typed here
+    would be a claim about a route nobody derived.
+
+    The pairing is a fixture convenience and is stated rather than hidden: this
+    test measures which records the projection can PLACE, and placement is
+    decided by component identity, never by route coverage. The record needs a
+    well-formed coverage value; it does not need one describing these captures'
+    relationship to each other.
+    """
+    from boomi_mcp.connector_replay.digests import route_digest_v1
+
+    captures = (Path(__file__).resolve().parents[1]
+                / "docs/architecture/evidence/issue-155/captures")
+    return route_digest_v1(
+        (captures / "cap155-e1-conn-readback" / "rest-conn-c4281346.xml")
+        .read_text(encoding="utf-8"),
+        (captures / "cap155-e5-patch-attested" / "component_op_tgt.xml")
+        .read_text(encoding="utf-8"),
+    )
+
+
+def _record(*, operation_id=_OP_ID, operation_version=7,
+            connection_id=_CONN_ID, connection_version=3,
+            contract_ref=_CONTRACT):
+    return OperationContractRecordV1(
+        contract_ref=contract_ref,
+        family="rest",
+        action="PATCH",
+        semantics_id="ICV1",
+        semantics_revision=1,
+        account_scope_hash=_SCOPE,
+        operation_identity=LiveComponentIdentityV1(
+            component_id=operation_id, version=operation_version,
+            config_digest=_CFG),
+        connection_identity=LiveComponentIdentityV1(
+            component_id=connection_id, version=connection_version,
+            config_digest=_CFG),
+        route_coverage=StaticRouteCoverageV1(route_digests=(_route_digest(),)),
+        capture=_capture(),
+        record_digest=_DIGEST,
+    )
+
+
+class _Registry:
+    """Only the operation records are injected; everything else is the real one.
+
+    The corroboration translates the compiler's platform connector type into the
+    registry's logical family through `family_for`, so a stand-in that answers
+    only `operation_records` makes every corroboration fail for a reason that has
+    nothing to do with the record — which is exactly what the first version of
+    this fixture did, and it read as "the evidence does not cover this call".
+    """
+
+    def __init__(self, *records):
+        from boomi_mcp.connector_replay.registry import load_registry
+
+        self.operation_records = tuple(records)
+        self._packaged = load_registry()
+
+    def __getattr__(self, name):
+        return getattr(self._packaged, name)
+
+
+def _snapshot(*, operation_version="7", connection_version="3"):
+    """What slice C's trusted reading of the account observed."""
+    return TrustedConnectorResolutionSnapshotV1(
+        identities=(
+            ResolvedConnectorComponentIdentityV1(
+                component_key="PATCHLIVE", component_id=_OP_ID,
+                component_version=operation_version, family="rest", action="PATCH",
+            ),
+            ResolvedConnectorComponentIdentityV1(
+                component_key="CONNLIVE", component_id=_CONN_ID,
+                component_version=connection_version, family="rest",
+            ),
+        ),
+        account_scope=_ACCOUNT,
+    )
+
+
+def _doc(evidence=None):
+    return _parse(_connector_scope(
+        protected="$ref:PATCHLIVE",
+        retry={"count": 2},
+        idempotency=evidence,
+    ))
+
+
+def test_a_record_the_snapshot_can_place_mints_a_contract():
+    projected = project_idempotency_contracts(
+        _symbols(), registry=_Registry(_record()), snapshot=_snapshot())
+    minted = [c for c in projected.idempotency_contracts]
+    assert [(c.ref, c.operation_ref, c.record_digest) for c in minted] == [
+        (_CONTRACT, "$ref:PATCHLIVE", _DIGEST)
+    ], minted
+
+
+@pytest.mark.parametrize(
+    "kwargs,why",
+    [
+        (dict(operation_version=9),
+         "the account serves the operation at another version"),
+        (dict(connection_version=9),
+         "the account serves the connection at another version"),
+        (dict(operation_id="bbbbbbbb-cccc-dddd-eeee-ffffffffffff"),
+         "no symbol carries the operation the record names"),
+        (dict(connection_id="cccccccc-dddd-eeee-ffff-000000000000"),
+         "no symbol carries the connection the record names"),
+    ],
+)
+def test_a_record_the_snapshot_cannot_place_mints_nothing(kwargs, why):
+    """Each way a record can fail to describe THIS plan, driven separately.
+
+    Identity is the PAIR of component and version on BOTH sides, which is the
+    rule discovery already applies: a record minted against one version does not
+    describe a component the account now serves at another.
+    """
+    projected = project_idempotency_contracts(
+        _symbols(), registry=_Registry(_record(**kwargs)), snapshot=_snapshot())
+    assert projected.idempotency_contracts == (), why
+
+
+def test_an_empty_registry_leaves_the_table_untouched():
+    symbols = _symbols()
+    assert project_idempotency_contracts(
+        symbols, registry=_Registry(), snapshot=_snapshot()) is symbols
+
+
+def test_the_production_entry_projects_contracts_before_grants():
+    """The wiring, at the entry every production path already calls.
+
+    Asserted through `project_grants_for_root` rather than the projection alone,
+    because a projection nothing calls is the defect this slice exists to close —
+    and slice D's own review found that gate wired-but-inert twice.
+    """
+    table = project_grants_for_root(
+        _doc({"kind": "key_reference", "contract_ref": _CONTRACT}),
+        _symbols(),
+        process_root_ref="$ref:ROOT",
+        registry=_Registry(_record()),
+        snapshot=_snapshot(),
+    )
+    assert [c.ref for c in table.idempotency_contracts] == [_CONTRACT]
+    assert table.idempotency_grants, (
+        "contracts were projected but no grant followed, so the per-call gate "
+        "would still refuse the write this record authorises"
+    )
+
+
+def _compile_errors(evidence, *, registry, snapshot):
+    from boomi_mcp.compiler.process_ir.semantic_validation.pipeline import (
+        validate_process_ir,
+    )
+
+    doc = _doc(evidence)
+    table = project_grants_for_root(
+        doc, _symbols(), process_root_ref="$ref:ROOT",
+        registry=registry, snapshot=snapshot,
+    )
+    return [(e.code, e.path) for e in validate_process_ir(doc, table).errors]
+
+
+def test_an_evidenced_retried_write_compiles_and_an_unevidenced_one_does_not():
+    """THE CLAIM THE MANIFEST FLIP RESTS ON, asserted end to end.
+
+    Before this slice the chain stopped two layers short of the compiler and did
+    so silently. Measured at the time: with all seven verb rows ingested, the
+    registry answered `conditionally_idempotent` for a REST PATCH and the
+    compiler refused the very same call as a non-idempotent write, because its
+    capability table carried a hand-written `unverified` and never asked. Then,
+    with the capability derived, it refused for evidence instead — the contract
+    existed but no production path had ever built one.
+
+    So this asserts the whole path in one place: attested capture, ingested row,
+    capability derived from the observation, contract projected from the registry
+    record, per-call grant minted, compile permitted. And beside it the three
+    ways it must still refuse, because a gate that only ever says yes is not a
+    gate.
+    """
+    registry, snapshot = _Registry(_record()), _snapshot()
+
+    assert _compile_errors(
+        {"kind": "key_reference", "contract_ref": _CONTRACT},
+        registry=registry, snapshot=snapshot,
+    ) == [], "an evidenced retried write must compile"
+
+    # NO EVIDENCE AUTHORED. The capability is now observed, which is exactly when
+    # a missing contract must still refuse — otherwise deriving the capability
+    # would have turned an evidence gate into a permission.
+    assert _compile_errors(None, registry=registry, snapshot=snapshot) == [
+        ("PROCESS_IR_SEMANTIC_IDEMPOTENCY_EVIDENCE_MISSING",
+         "/body/steps/1/try_body/steps/0/idempotency")
+    ]
+
+    # EVIDENCE NAMING A CONTRACT NOBODY MINTED.
+    assert _compile_errors(
+        {"kind": "key_reference", "contract_ref": "$ref:NOSUCH"},
+        registry=registry, snapshot=snapshot,
+    ) == [("PROCESS_IR_SEMANTIC_IDEMPOTENCY_EVIDENCE_MISSING",
+           "/body/steps/1/try_body/steps/0/idempotency")]
+
+    # AND WITH NO RECORD AT ALL the same document refuses, which is the state the
+    # registry shipped in and the one every account without this evidence is in.
+    assert _compile_errors(
+        {"kind": "key_reference", "contract_ref": _CONTRACT},
+        registry=_Registry(), snapshot=snapshot,
+    ) == [("PROCESS_IR_SEMANTIC_IDEMPOTENCY_EVIDENCE_MISSING",
+           "/body/steps/1/try_body/steps/0/idempotency")]
+
+
+def test_evidence_may_not_weaken_a_capability_the_transport_defines():
+    """One-way, and asserted rather than assumed.
+
+    An observation may replace `unverified` — the value meaning nobody has
+    classified this action. It may not touch `read_only`, which the table derives
+    from the transport's own definition of a safe method. Without this, a capture
+    of a GET that happened to move state would rewrite a transport guarantee into
+    a replay verdict.
+    """
+    from boomi_mcp.compiler.process_ir.connector_capabilities import (
+        REST_FAMILY,
+        lookup_capability,
+    )
+
+    read_only = lookup_capability(REST_FAMILY, "GET")
+    assert read_only is not None and read_only.retry_safety == "read_only", read_only
+
+    # THE RESTRICTION DRIVEN, not merely stated. No read-only action currently
+    # has a positive row, so removing the restriction changes nothing today and a
+    # test asserting `read_only` stays `read_only` grades an unreachable branch —
+    # measured: with the clause deleted the whole file still passed. This makes
+    # the case reachable by having the registry report a positive verdict for the
+    # safe method, which is exactly the day the restriction has to hold.
+    import boomi_mcp.compiler.process_ir.connector_capabilities as CC
+    from boomi_mcp.connector_replay.models import RetrySafetyV1
+
+    class _Loud:
+        def __init__(self, packaged):
+            self._packaged = packaged
+
+        def retry_safety(self, family, action):
+            return RetrySafetyV1.CONDITIONALLY_IDEMPOTENT
+
+        def __getattr__(self, name):
+            return getattr(self._packaged, name)
+
+    from boomi_mcp.connector_replay import registry as _reg_module
+
+    packaged = _reg_module.load_registry()
+    original = _reg_module.load_registry
+    _reg_module.load_registry = lambda: _Loud(packaged)
+    try:
+        assert CC.lookup_capability(REST_FAMILY, "GET").retry_safety == "read_only", (
+            "an observation rewrote a safety the transport defines"
+        )
+        assert (CC.lookup_capability(REST_FAMILY, "PATCH").retry_safety
+                == "conditionally_idempotent"), "the open value did not move"
+    finally:
+        _reg_module.load_registry = original
+
+    # ...and the value that IS open to evidence has actually moved, so the test
+    # above is a restriction rather than a description of a function that never
+    # changes anything.
+    observed = lookup_capability(REST_FAMILY, "PATCH")
+    assert observed is not None and observed.retry_safety == "conditionally_idempotent", (
+        "the packaged evidence no longer reaches the capability table; the whole "
+        "chain this slice built is inert again"
+    )

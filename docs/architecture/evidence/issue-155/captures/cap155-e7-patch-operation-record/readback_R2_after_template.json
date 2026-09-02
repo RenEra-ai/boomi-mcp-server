@@ -1,0 +1,20 @@
+{
+  "utc": "2026-09-02T05:33:42.752079+00:00",
+  "path": "/admin/cdscm/api/v1/clients/1ccd7554-7f2e-4e05-83ac-194d20b16b2d",
+  "status": 200,
+  "sha256": "f4fe6987ddf7d5a4ffccc63fe1bec002e7f55d3590461e7562fbfaa4f36846f1",
+  "bytes": 302,
+  "body": {
+    "clientId": "_E7_TPL_20260902053242",
+    "name": "E7 Template (PATCH body source)",
+    "status": "ACTIVE",
+    "e7Marker": "double-attested",
+    "key": "1ccd7554-7f2e-4e05-83ac-194d20b16b2d",
+    "createdOn": "2026-09-02T05:32:46.868Z",
+    "createdBy": "integration",
+    "modifiedOn": "2026-09-02T05:32:46.868Z",
+    "modifiedBy": "integration"
+  },
+  "label": "template R2_after",
+  "business_sha256": "8d33f3a55c04c5a38f9653150de5c8e0bf362a17806547bb5405606fec7a69f2"
+}

@@ -134,6 +134,7 @@ def test_the_revision_moves_on_class_semantics_and_not_on_an_account_record(monk
     well if the loader read the whole registry.
     """
     from boomi_mcp.authoring import contract as contract_module
+    from boomi_mcp.connector_replay.registry import load_registry as _real_registry
 
     baseline = contract_module._compiler_revision()
 
@@ -154,13 +155,29 @@ def test_the_revision_moves_on_class_semantics_and_not_on_an_account_record(monk
     assert with_semantics != baseline, "a class-level semantics change did not move it"
 
     # An account-scoped operation record does NOT.
+    #
+    # THE COMPARISON HOLDS THE CLASS MATERIAL FIXED. This arm used to build a
+    # registry with no semantics at all and compare it against the packaged
+    # baseline, which was the same thing only while the packaged registry shipped
+    # empty. Once #155 published a semantics definition the two differed for a
+    # reason that had nothing to do with the record, and the test reported an
+    # account-independence failure that was its own. The arm now varies exactly
+    # one thing: the record.
     class _Record:
         account_scope_hash = "c" * 64
 
+    packaged_semantics = tuple(_real_registry().semantics_definitions)
     monkeypatch.setattr(
-        contract_module, "_replay_registry", lambda: _Registry(records=[_Record()])
+        contract_module, "_replay_registry",
+        lambda: _Registry(semantics=packaged_semantics),
+    )
+    without_record = contract_module._compiler_revision()
+    monkeypatch.setattr(
+        contract_module, "_replay_registry",
+        lambda: _Registry(semantics=packaged_semantics, records=[_Record()]),
     )
     with_record = contract_module._compiler_revision()
+    baseline = without_record
     assert with_record == baseline, (
         "minting an account-scoped operation record moved the relocatable "
         "fingerprint; two deployments of identical code would report drift"

@@ -47,6 +47,11 @@ ACTIONS = {
     "cap155-e6-put-attested": "PUT",
 }
 
+#: Captures that minted an ACCOUNT-SCOPED operation contract record. Separate
+#: from the class-level set above because a record's meaning is bounded by the
+#: account it was observed on, which the class-level rows are deliberately not.
+OPERATION_RECORD_CAPTURES = ("cap155-e7-patch-operation-record",)
+
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
@@ -73,6 +78,47 @@ def main() -> int:
               f"digest={row.capture_digest[:16]}")
 
     payload = json.loads(REGISTRY.read_text(encoding="utf-8"))
+
+    # OPERATION RECORDS and the semantics they cite, read from the capture that
+    # minted them. A record is account-scoped, so unlike the class-level evidence
+    # rows it is only meaningful on the account it was minted against — and the
+    # registry refuses any record whose semantics definition it cannot resolve,
+    # so the two must be published together or neither loads.
+    definitions, records = [], []
+    for name in sorted(OPERATION_RECORD_CAPTURES):
+        directory = CAPTURES / name
+        if not directory.is_dir():
+            print(f"absent, no operation record minted: {name}")
+            continue
+        record = json.loads((directory / "operation_record.json").read_text("utf-8"))
+        derivation = json.loads((directory / "record_derivation.json").read_text("utf-8"))
+        definition = derivation.get("semantics_definition")
+        if definition is None:
+            raise SystemExit(
+                f"{name}: the capture carries an operation record but no semantics "
+                "definition, and the registry refuses a record it cannot resolve"
+            )
+        # Only the fields the registry's model defines; the derivation carries its
+        # own provenance alongside them and that stays in the archive.
+        definitions.append({
+            k: definition[k] for k in
+            ("semantics_id", "revision", "mechanism", "key_scope", "duplicate_guarantee")
+        })
+        records.append(record)
+        print(f"operation record: {record['family']}/{record['action']} "
+              f"{record['contract_ref']} scope={record['account_scope_hash'][:16]}")
+
+    seen, unique = set(), []
+    for definition in definitions:
+        key = (definition["semantics_id"], definition["revision"])
+        if key not in seen:
+            seen.add(key)
+            unique.append(definition)
+    payload["semantics_definitions"] = sorted(
+        unique, key=lambda d: (d["semantics_id"], d["revision"]))
+    payload["operation_records"] = sorted(
+        records, key=lambda r: (r["family"], r["action"], r["contract_ref"]))
+
     payload["evidence_records"] = [
         json.loads(r.model_dump_json(exclude_none=True))
         for r in sorted(rows, key=lambda r: (r.family, r.action))

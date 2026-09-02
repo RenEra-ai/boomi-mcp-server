@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 11433, "minimum_collected": 11433, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 11441, "minimum_collected": 11441, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -5567,7 +5567,7 @@
 {"kind": "test", "id": "pytest-005566", "node_id": "tests/test_process_ir_error_handling.py::test_retry_count_rejects_out_of_range_and_wrong_types[bad6]", "state": "active"}
 {"kind": "test", "id": "pytest-005567", "node_id": "tests/test_process_ir_error_handling.py::test_retry_count_rejects_out_of_range_and_wrong_types[bad7]", "state": "active"}
 {"kind": "test", "id": "pytest-005568", "node_id": "tests/test_process_ir_error_handling.py::test_retry_over_an_unverified_write_is_rejected[$ref:DBSEND]", "state": "active"}
-{"kind": "test", "id": "pytest-005569", "node_id": "tests/test_process_ir_error_handling.py::test_retry_over_an_unverified_write_is_rejected[$ref:PATCHOP]", "state": "active"}
+{"kind": "test", "id": "pytest-005569", "node_id": "tests/test_process_ir_error_handling.py::test_retry_over_an_unverified_write_is_rejected[$ref:PATCHOP]", "state": "tombstone"}
 {"kind": "test", "id": "pytest-005570", "node_id": "tests/test_process_ir_error_handling.py::test_retry_zero_over_an_unverified_write_compiles", "state": "active"}
 {"kind": "test", "id": "pytest-005571", "node_id": "tests/test_process_ir_error_handling.py::test_secret_shaped_keys_under_a_try_catch_are_rejected", "state": "active"}
 {"kind": "test", "id": "pytest-005572", "node_id": "tests/test_process_ir_error_handling.py::test_shuffled_symbol_and_contract_order_does_not_change_output", "state": "active"}
@@ -11475,3 +11475,12 @@
 {"kind": "test", "id": "pytest-011474", "node_id": "tests/test_issue_155_recheck_boundary.py::test_a_proven_no_write_keeps_its_own_refusal_through_the_apply_boundary", "state": "active"}
 {"kind": "test", "id": "pytest-011475", "node_id": "tests/test_connector_replay_review_round3.py::test_the_collector_search_skips_a_miss_instead_of_dying_on_it", "state": "active"}
 {"kind": "test", "id": "pytest-011476", "node_id": "tests/test_connector_replay_registry.py::test_every_packaged_row_is_reproducible_from_the_capture_archive", "state": "active"}
+{"kind": "test", "id": "pytest-011477", "node_id": "tests/test_issue_155_contract_projection.py::test_a_record_the_snapshot_can_place_mints_a_contract", "state": "active"}
+{"kind": "test", "id": "pytest-011478", "node_id": "tests/test_issue_155_contract_projection.py::test_a_record_the_snapshot_cannot_place_mints_nothing[kwargs0-the account serves the operation at another version]", "state": "active"}
+{"kind": "test", "id": "pytest-011479", "node_id": "tests/test_issue_155_contract_projection.py::test_a_record_the_snapshot_cannot_place_mints_nothing[kwargs1-the account serves the connection at another version]", "state": "active"}
+{"kind": "test", "id": "pytest-011480", "node_id": "tests/test_issue_155_contract_projection.py::test_a_record_the_snapshot_cannot_place_mints_nothing[kwargs2-no symbol carries the operation the record names]", "state": "active"}
+{"kind": "test", "id": "pytest-011481", "node_id": "tests/test_issue_155_contract_projection.py::test_a_record_the_snapshot_cannot_place_mints_nothing[kwargs3-no symbol carries the connection the record names]", "state": "active"}
+{"kind": "test", "id": "pytest-011482", "node_id": "tests/test_issue_155_contract_projection.py::test_an_empty_registry_leaves_the_table_untouched", "state": "active"}
+{"kind": "test", "id": "pytest-011483", "node_id": "tests/test_issue_155_contract_projection.py::test_the_production_entry_projects_contracts_before_grants", "state": "active"}
+{"kind": "test", "id": "pytest-011484", "node_id": "tests/test_issue_155_contract_projection.py::test_an_evidenced_retried_write_compiles_and_an_unevidenced_one_does_not", "state": "active"}
+{"kind": "test", "id": "pytest-011485", "node_id": "tests/test_issue_155_contract_projection.py::test_evidence_may_not_weaken_a_capability_the_transport_defines", "state": "active"}

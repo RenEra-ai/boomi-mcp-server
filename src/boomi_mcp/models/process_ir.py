@@ -2871,7 +2871,11 @@ PROCESS_IR_V1_CAPABILITIES: Mapping[str, str] = MappingProxyType(
         # FORBIDDEN_NAMES) — and this row is now projected into the public
         # authoring contract. "replay safety" is the public term throughout.
         # Safe to rename: the manifest key had never been served.
-        "verified_write_replay_safety": "gated",  # #142
+        # #155 M12.17 slice F: SUPPORTED. Seven attested REST captures ingested
+        # and one account-scoped operation contract record minted from a live
+        # double execution, so the compiler resolves a replay verdict from an
+        # OBSERVATION. The admission witness compiles the document end to end.
+        "verified_write_replay_safety": "supported",  # #142, evidenced by #155
         # #155 M12.17. The per-document request path, and the explicit
         # acknowledgement that a retried process-scope region may replay its own
         # document producer. Both are SUPPORTED: authorable through this

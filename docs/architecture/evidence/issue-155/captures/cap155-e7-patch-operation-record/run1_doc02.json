@@ -1,0 +1,20 @@
+{
+  "gcr_id": "R0VOX0NPTk5fUkVDX2V4ZWN1dGlvbi0yOWJiNzAwMi1lMjMwLTQ4ZmYtOGM0ZC1jZDAwNWZkMzIxMzktMjAyNi4wOS4wMjpjb25uZWN0b3ItNTcwYzY5MDEtZTc4NS00ZGVkLWE0ZTgtMmNkMDI2ODc5MGJi",
+  "operationName": "shape1",
+  "actionType": "nodata",
+  "status": "SUCCESS",
+  "size": 0,
+  "documentIndex": 0,
+  "download_response": {
+    "_success": true,
+    "generic_connector_record_id": "R0VOX0NPTk5fUkVDX2V4ZWN1dGlvbi0yOWJiNzAwMi1lMjMwLTQ4ZmYtOGM0ZC1jZDAwNWZkMzIxMzktMjAyNi4wOS4wMjpjb25uZWN0b3ItNTcwYzY5MDEtZTc4NS00ZGVkLWE0ZTgtMmNkMDI2ODc5MGJi",
+    "download_url": "https://platform.boomi.com/account/trainingglebbochkarov-16926N/api/download/ConnectorDocument-66e2160d-ede4-4e3b-942a-7c11bfc093cf",
+    "status_code": 202,
+    "message": "Beginning download.",
+    "_downloaded": true,
+    "content": "",
+    "content_type": "text/*; charset=UTF-8",
+    "size_bytes": 0
+  },
+  "content": null
+}

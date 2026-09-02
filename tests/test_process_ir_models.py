@@ -1378,10 +1378,15 @@ def test_capability_manifest_immutable_and_complete():
     assert PROCESS_IR_V1_CAPABILITIES["catch_error_type_lists"] == "unsupported"
     assert PROCESS_IR_V1_CAPABILITIES["retry_backoff_authoring"] == "unsupported"
     assert PROCESS_IR_V1_CAPABILITIES["queue_topology"] == "unsupported"
-    # ...while these four are genuinely "not yet", each blocked on a different
+    # ...while these three are genuinely "not yet", each blocked on a different
     # missing thing (see the manifest comments).
     assert PROCESS_IR_V1_CAPABILITIES["catch_failure_trigger_selection"] == "gated"
-    assert PROCESS_IR_V1_CAPABILITIES["verified_write_replay_safety"] == "gated"
+    # #155 slice F: no longer "not yet". The thing it was blocked on — an
+    # execution actually observed twice against a live counterparty — exists now:
+    # seven attested REST captures are ingested and one account-scoped operation
+    # contract record is packaged, so the compiler resolves a replay verdict from
+    # an OBSERVATION rather than refusing for want of one.
+    assert PROCESS_IR_V1_CAPABILITIES["verified_write_replay_safety"] == "supported"
     assert PROCESS_IR_V1_CAPABILITIES["listener_error_scope"] == "gated"
     assert PROCESS_IR_V1_CAPABILITIES["nested_try_catch"] == "gated"
     # #175. The pair is the whole point: the non-returning form is what V1 emits,
@@ -1411,6 +1416,10 @@ def test_capability_manifest_immutable_and_complete():
         "source_replay_policy",
         "terminal_process_call",
         "typed_idempotency_evidence",
+        # #155 slice F. The evidence slice moved this one from `gated`: the
+        # capability was blocked on an observation, and the observation now
+        # exists in the packaged registry.
+        "verified_write_replay_safety",
     ]
 
 
