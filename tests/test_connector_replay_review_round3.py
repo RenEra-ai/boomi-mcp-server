@@ -5716,6 +5716,11 @@ def test_every_recompiling_consumer_on_the_evidenced_route_gets_the_grants():
     # already existed, and it left exactly the hole that comment describes.
     compiles = []
     routed = []
+    frames = []
+    dropped = []
+    relocatable = set()
+    pending = []
+    unconsumed = []
 
     def _watch(module_name, consumer, parameters):
         module = importlib.import_module("boomi_mcp." + module_name.split("boomi_mcp.")[-1]
@@ -5734,10 +5739,27 @@ def test_every_recompiling_consumer_on_the_evidenced_route_gets_the_grants():
                 for candidate in args:
                     if hasattr(candidate, "idempotency_grants"):
                         table = candidate
-            if table is not None:
-                seen.append((consumer, getattr(table, "process_root_ref", None),
-                             len(getattr(table, "idempotency_grants", ()) or ())))
-            return original(*args, **kwargs)
+            if table is None:
+                return original(*args, **kwargs)
+            root = getattr(table, "process_root_ref", None)
+            seen.append((consumer, root,
+                         len(getattr(table, "idempotency_grants", ()) or ())))
+            if root is None:
+                # Entered without a projection: this consumer owes nothing, and
+                # the rootless relocatable table is a designed state.
+                return original(*args, **kwargs)
+            # CORRELATED, incoming against outgoing. Selecting observations by
+            # the root the CORE saw meant a consumer erasing both the root and
+            # the grants vanished from the comparison altogether, while the other
+            # recompiles kept the positive assertions satisfied. The expectation
+            # has to come from what the consumer was HANDED, so that erasing it
+            # is a violation rather than an exemption.
+            frames.append((consumer,
+                           (root, tuple(getattr(table, "idempotency_grants", ()) or ()))))
+            try:
+                return original(*args, **kwargs)
+            finally:
+                frames.pop()
 
         return patch.object(module, consumer, recording)
 
@@ -5766,16 +5788,57 @@ def test_every_recompiling_consumer_on_the_evidenced_route_gets_the_grants():
     # means, and comparing shapes never said it.
     _project = CR.project_grants_for_root
 
+    # THE ONE DELIBERATE CLEARING, identified by the helper that performs it.
+    # A relocatable table describes no account, so it can hold no account-bound
+    # grant, and this helper clears the root and the grants for exactly that
+    # reason — it is a documented derivation, not a discard. Recording its
+    # OUTPUTS BY IDENTITY is what lets the correlation refuse every other
+    # clearing, including the same edit made anywhere else: measured, erasing the
+    # projection at the materialization recompile changes no public result, so
+    # nothing else in the suite would have objected.
+    from boomi_mcp.authoring import process_materialization as _PM
+
+    _placeholder = _PM.placeholder_backed_symbols
+
+    def _recording_placeholder(*args, **kwargs):
+        table = _placeholder(*args, **kwargs)
+        relocatable.add(id(table))
+        return table
+
     def _recording_projection(*args, **kwargs):
         table = _project(*args, **kwargs)
-        minted.append((table.process_root_ref, tuple(table.idempotency_grants or ())))
+        pair = (table.process_root_ref, tuple(table.idempotency_grants or ()))
+        minted.append(pair)
+        # PENDING until a compile consumes it. The frame stack could only see a
+        # consumer's INCOMING table, so a consumer entered rootless that projects
+        # INTERNALLY — which the wet materialization path does — had no frame and
+        # no expectation, and clearing its own projection before recompiling
+        # passed every check while the public apply still succeeded. The mint
+        # itself is the expectation: once a projection exists, the next compile
+        # in this run must be given it.
+        if pair[0] is not None:
+            pending.append(pair)
         return table
 
     def _recording_core(ir, symbols, *args, **kwargs):
         compiles.append((getattr(symbols, "process_root_ref", None),
                          len(getattr(symbols, "idempotency_grants", ()) or ())))
-        routed.append((getattr(symbols, "process_root_ref", None),
-                       tuple(getattr(symbols, "idempotency_grants", ()) or ())))
+        observed = (getattr(symbols, "process_root_ref", None),
+                    tuple(getattr(symbols, "idempotency_grants", ()) or ()))
+        routed.append(observed)
+        if pending and id(symbols) not in relocatable:
+            # The compile that follows a mint must BE the mint. A rootless table
+            # here is the erasure this check exists for; a different pair is the
+            # substitution.
+            if observed == pending[-1]:
+                pending.pop()
+            else:
+                unconsumed.append((pending[-1], observed))
+        if frames and observed != frames[-1][1] and id(symbols) not in relocatable:
+            # INCLUDING a transition to None. A consumer that erases the
+            # projection on its way to the core is the defect, not an
+            # observation to skip.
+            dropped.append((frames[-1][0], frames[-1][1], observed))
         if getattr(symbols, "process_root_ref", None) is not None:
             # Kept so the entry nothing calls can be driven with a REAL projected
             # table and a real model, rather than a constructed pair whose shape
@@ -5815,6 +5878,8 @@ def test_every_recompiling_consumer_on_the_evidenced_route_gets_the_grants():
             _pipeline, "_compile_parsed_process_ir_v1", _recording_core))
         entered.enter_context(patch.object(
             CR, "project_grants_for_root", _recording_projection))
+        entered.enter_context(patch.object(
+            _PM, "placeholder_backed_symbols", _recording_placeholder))
         entered.enter_context(patch(
             "boomi_mcp.categories.integration_builder.paginate_metadata",
             lambda *a, **k: []))
@@ -5868,6 +5933,16 @@ def test_every_recompiling_consumer_on_the_evidenced_route_gets_the_grants():
     # entries get; applying it only to those left the reached consumers, which
     # are most of the population, on the weaker check.
     assert minted, "the projection never ran on the evidenced route"
+    assert not unconsumed, (
+        "a projection was minted and the compile that followed it received "
+        "something else — the projected table was erased or replaced between "
+        "the mint and the recompile: %s" % (unconsumed,)
+    )
+    assert not dropped, (
+        "a recompiling consumer was handed a projected table and delivered a "
+        "different one to the compile core — the projection was altered or "
+        "erased on the way through: %s" % (dropped,)
+    )
     stray = [pair for pair in routed if pair[0] is not None and pair not in minted]
     assert not stray, (
         "a recompiling consumer on the route received a projected table that no "
