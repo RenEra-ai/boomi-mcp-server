@@ -5706,6 +5706,16 @@ def test_every_recompiling_consumer_on_the_evidenced_route_gets_the_grants():
     seen = []
     stack = []
 
+    # THE SHARED SEAM, not a per-name patch. Both public compile entries call
+    # `_compile_parsed_process_ir_v1`, so instrumenting it observes every
+    # compile however it was reached — through a sibling entry, through the
+    # package's own re-export, or through an alias this test has never heard of.
+    # This repo had already learnt that lesson and written it down at
+    # `_process_ir_capability_witnesses.record_compiles`; patching defining
+    # modules by name was me re-deriving a weaker version of a mechanism that
+    # already existed, and it left exactly the hole that comment describes.
+    compiles = []
+
     def _watch(module_name, consumer, parameters):
         module = importlib.import_module("boomi_mcp." + module_name.split("boomi_mcp.")[-1]
                                          if module_name.startswith("boomi_mcp")
@@ -5738,6 +5748,15 @@ def test_every_recompiling_consumer_on_the_evidenced_route_gets_the_grants():
 
     assert stack, "no derived consumer could be wrapped; this test proves nothing"
 
+    from boomi_mcp.compiler.process_ir import pipeline as _pipeline
+
+    _core = _pipeline._compile_parsed_process_ir_v1
+
+    def _recording_core(ir, symbols, *args, **kwargs):
+        compiles.append((getattr(symbols, "process_root_ref", None),
+                         len(getattr(symbols, "idempotency_grants", ()) or ())))
+        return _core(ir, symbols, *args, **kwargs)
+
     submitted = {}
 
     def _get_xml(_client, component_id, *_a, **_k):
@@ -5766,6 +5785,8 @@ def test_every_recompiling_consumer_on_the_evidenced_route_gets_the_grants():
     with contextlib.ExitStack() as entered:
         for watcher in stack:
             entered.enter_context(watcher)
+        entered.enter_context(patch.object(
+            _pipeline, "_compile_parsed_process_ir_v1", _recording_core))
         entered.enter_context(patch(
             "boomi_mcp.categories.integration_builder.paginate_metadata",
             lambda *a, **k: []))
@@ -5790,22 +5811,54 @@ def test_every_recompiling_consumer_on_the_evidenced_route_gets_the_grants():
             config={"authoring_request": payload, "dry_run": False})
 
     assert applied.get("_success") is True, applied
-    assert seen, "no recompiling consumer was reached; the route changed"
+
+    # EVERY compile on the route, counted at the seam. `assert seen` accepted a
+    # single observation, so a recompile that moved to an uninstrumented binding
+    # left this green — the guard's whole claim is population coverage, and one
+    # observation is not a population.
+    assert compiles, "no compile reached the shared core; the route changed"
+    # SEVEN of the eight derived consumers execute on this route — MEASURED, not
+    # chosen: the floor was 4 and accepted a route covering half the population.
+    # The eighth, `parse_and_compile_process_ir_v1`, is not reached by the typed
+    # authoring route at all; it is covered by the seam above rather than by a
+    # wrapper, because it and the other public entry both call that one core.
+    # That is the whole reason the check moved to the seam: coverage stops
+    # depending on which bindings this test remembered to patch.
+    reached = {name for name, _root, _grants in seen}
+    assert len(reached) >= 7, (
+        "only %d derived consumers executed on the evidenced route, so this "
+        "witness covers a fraction of the population it names: %s of %s"
+        % (len(reached), sorted(reached), sorted(consumers))
+    )
+    # NOT compared against the consumer count: consumers nest, so several of them
+    # ride one core compile. Measured on this route, 6 compiles reach the core
+    # under 15 consumer entries, and any relation between the two numbers would
+    # be a claim about the call graph rather than about the invariant.
+    # Every compile of a ROOT-PROJECTED table carries that root's grants. This is
+    # the invariant itself, asserted on the value at the one seam both public
+    # entries pass through.
+    assert all(grants >= 1 for root, grants in compiles if root is not None), (
+        "a root-projected table reached the compile core WITHOUT the grants "
+        "minted for that root: %s" % (compiles,)
+    )
+    assert any(root is not None for root, _ in compiles), (
+        "no projected table reached the compile core, so this witness would "
+        "pass with the projection removed entirely: %s" % (compiles,)
+    )
 
     # A table with a root ref is one that was projected FOR that root, so its
     # grants are the ones the compiler will look for. A consumer reached with a
     # root ref but no grants is the defect this whole line of work started from:
     # the recompile refusing evidence semantic validation had already accepted.
-    rootless = [row for row in seen if row[1] is None]
     granted = [row for row in seen if row[1] is not None]
     assert granted, (
-        "no consumer on the evidenced route received a root-projected table, so "
-        "this witness would pass with the projection removed entirely: %s" % (seen,)
+        "no consumer on the evidenced route received a root-projected table: %s" % (seen,)
     )
     assert all(row[2] >= 1 for row in granted), (
         "a consumer that recompiles a projected root received it WITHOUT the "
         "grants minted for it: %s" % (granted,)
     )
+    rootless = [row for row in seen if row[1] is None]
     # Rootless tables are legitimate and deliberately unconstrained — the
     # relocatable materialization table clears its root ref precisely so a grant
     # minted for another root cannot satisfy this one. Recorded, not asserted on.
