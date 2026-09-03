@@ -1,0 +1,29 @@
+You are the §6 ARCHITECT IMPLEMENTATION REVIEW for GitHub issue #155 ("M12.17 — Connector dynamic path and connector/replay contracts"), evaluation 2 of an owner-fixed maximum of 3.
+
+Judge the IMPLEMENTATION AGAINST THE DESIGN PLAN inlined verbatim below. That is your job here, and it is different from the repository's own commit review, which has already run to completion on this delta and returned clean. Do not re-do a line-level code review; look for plan-vs-implementation gaps, missing units, contract drift, and claims the tree does not support.
+
+## What you are judging
+
+The issue's six slices A–F all LANDED on `dev` before this arc began, at `9812b98bdb85fc5619128fdfd31408535eedba16`. Evaluation 1 of this gate (run `cdx-gate-architect.1rDWHb`) then judged the whole `9860842..9812b98` arc and returned ISSUES FOUND with six findings.
+
+Everything since is the correction arc for those six findings plus what the gates found in the corrections. Review `git diff 9812b98bdb85fc5619128fdfd31408535eedba16..HEAD` — 34 commits, 19 source files, ~1188 insertions.
+
+## The six findings from evaluation 1, and their dispositions
+
+Verify these dispositions against the tree. If a disposition is wrong, say so — that is the single most valuable thing you can return.
+
+1. **Critical — an operation contract can authorize replay its capture did not observe.** Disposition: FIXED. `registry.py` now compares the capture's observed replay against the cited semantics' duplicate guarantee, and separately recomputes the record digest through a newly published minter (`digests.operation_record_digest_v1`) and refuses a mismatch.
+2. **Blocking — fetched-but-unreadable live identity falls back to caller authority.** Disposition: FIXED in `connector_resolution_snapshot.py`; an unreadable readback refuses rather than retaining an unparsed identity.
+3. **Critical — missing actual account identity treated as "skip the check".** Disposition: FIXED at both the minter and the apply-boundary recheck; a record naming an account scope refuses when the account is unknown.
+4. **Blocking — rootless compilation disables the per-call grant requirement.** Disposition: **finding-refuted**, with measurements pinned as a test. Judge this refutation specifically. The argument: the plan's own root-isolation clause requires a table with no process root to carry no grants; the read-only compile phase projects a root and mints nothing; so keeping the root would refuse every legitimate conditionally-idempotent retry at plan time. The relocatable artifact is account-independent by contract while a grant is account-bound evidence. Enforcement is the apply boundary.
+5. **Critical — Unit 8 violates three mutation-accounting requirements.** Disposition: FIXED, all three (create-side pre-push boundary; mutation-uncertain retention of digest/readback/attestation; the served binding's full tuple with sort and dedup).
+6. **Closure evidence is not current or internally coherent.** Disposition: slice map corrected; the live positive path re-verified by live QA at the tip.
+
+## Specific things to check
+
+- Does the correction arc introduce contract drift the plan does not sanction? Several served surfaces moved: the mutation attestation's evidence binding gained four fields, the authoring contract rotated, a new `connector_path_equivalence` row joined the compiler revision, and the discovery envelope gained `superseded_records`.
+- Is any unit of the plan still missing or only partially built, at the tip?
+- Are the recorded LIMITS honest? Two are load-bearing: the attestation's sort/dedup key cannot be exercised through the public boundary (the surface admits one evidenced connector call per process root), and `plan` performs no declared-vs-live identity comparison.
+- Does anything in the tree contradict a claim in `docs/architecture/ISSUE_155_AUDIT_LEDGER.md`?
+
+Report concrete issues with file:line. END with a verdict on its OWN FINAL LINE: exactly `VERDICT: NO ISSUES` or `VERDICT: ISSUES FOUND`.

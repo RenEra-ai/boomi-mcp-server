@@ -1356,6 +1356,12 @@ _UNROWED = {"DC-155-C": 2, "DC-155-I": 1}
 #: the reason. Frozen so the set cannot grow silently: a row that names a class is an
 #: instance of it unless it appears here.
 _NOT_AN_INSTANCE = {
+    "ARCH-155-r13-01a": "a REVISION supplying the class, tier and disposition its "
+    "original carried empty on arrival — one defect, counted at the original",
+    "ARCH-155-r13-03a": "a REVISION supplying the class, tier and disposition its "
+    "original carried empty on arrival — one defect, counted at the original",
+    "ARCH-155-r13-05a": "a REVISION supplying the class and the SEVERITY that "
+    "measurement moved — one finding, counted at the original",
     "QA-155-r71-03a": "a REVISION recording that a limit went stale when a later "
     "correction changed what it described — counted at the original",
     "CDX-155-r187-02a": "a REVISION correcting the CLAIM its original's disposition "
