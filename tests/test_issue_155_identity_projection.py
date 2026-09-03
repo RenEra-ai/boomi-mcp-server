@@ -3837,3 +3837,51 @@ def test_paths_are_compared_by_the_equivalence_the_route_digest_uses(
     else:
         with pytest.raises(ConnectorIdentityError):
             _compare(_live_op(path=stored), {"op_patch": declared})
+
+
+def test_the_path_equivalence_moves_the_published_revision():
+    """A revision that does not move when behaviour moves is the failure the
+    revision manifest is built to detect — its own words, on the sibling row.
+
+    `comparable_path` decides which two spellings of a route the
+    declared-versus-live check treats as one, so changing it changes what the
+    server accepts. Before this projection existed, flipping it left BOTH
+    published revisions byte-identical — measured, not inferred — so a server
+    upgraded across that change reported its build provenance as matching while
+    the build had been validated under the older rule.
+
+    Driven by mutating the function itself rather than by reading the projection,
+    because a projection that lists a name and never exercises it would pass a
+    test written the other way round.
+    """
+    from unittest.mock import patch
+
+    import boomi_mcp.connector_replay.digests as digests
+    from boomi_mcp.authoring.contract import (
+        get_authoring_revisions,
+        reset_manifest_cache,
+    )
+
+    # THE MANIFEST IS MEMOIZED, so without this the second call returns the first
+    # call's answer and the assertion below compares a value with itself. The
+    # first version of this test did exactly that and reported the defect as
+    # still present when it was fixed — the measurement was of the cache.
+    reset_manifest_cache()
+    before = get_authoring_revisions()["compiler_revision"]
+
+    def _folds_dot_segments(path):
+        return digests._remove_dot_segments(digests._normalize_percent_encoding(path.strip()))
+
+    with patch.object(digests, "comparable_path", _folds_dot_segments):
+        reset_manifest_cache()
+        after = get_authoring_revisions()["compiler_revision"]
+    reset_manifest_cache()
+
+    assert after != before, (
+        "the compiler revision stood still while the path equivalence changed, so "
+        "a build validated under the old rule would report as current"
+    )
+
+    # ...and it is stable when nothing changes, or the assertion above would pass
+    # for any two calls.
+    assert get_authoring_revisions()["compiler_revision"] == before

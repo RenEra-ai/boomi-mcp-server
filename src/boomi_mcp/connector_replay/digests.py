@@ -52,6 +52,8 @@ __all__ = [
     "RECORD_DIGEST_DOMAIN",
     "operation_record_digest_v1",
     "comparable_path",
+    "PATH_EQUIVALENCE_PROBES",
+    "path_equivalence_behaviour",
 ]
 
 #: Domain separators. A digest is over ``domain + payload``, so two algorithms that
@@ -746,3 +748,36 @@ def comparable_path(path: str) -> str:
     case-insensitive is folded.
     """
     return _normalize_percent_encoding(path.strip())
+
+
+#: The distinctions `comparable_path` is required to draw, as a fixed vocabulary.
+#: Owned by this module because the probes describe THIS function's behaviour, the
+#: same way the identifier grammar owns its own.
+PATH_EQUIVALENCE_PROBES: Final[tuple] = (
+    "/items/a%2Fb",      # percent-escape hex — case-insensitive, must fold
+    "/items/a%2fb",
+    "/Orders/42",        # literal characters — case-sensitive, must NOT fold
+    "/orders/42",
+    "/../admin",         # dot segments — context-dependent, must NOT fold
+    "/admin",
+    "/a/./b",
+    "/a/b",
+    "/secret?/../x",     # a query the route digest refuses outright
+    "/x",
+)
+
+
+def path_equivalence_behaviour() -> tuple:
+    """What `comparable_path` reduces each probe to, as fingerprintable data.
+
+    The OUTPUTS rather than pairwise verdicts: an output carries strictly more
+    than an equal/unequal answer, so a change that alters a normalization without
+    flipping any pair is still visible.
+
+    This exists because a served revision that does not move when validator
+    behaviour moves is the failure the revision manifest is built to detect —
+    and this function decides what the declared-versus-live path check accepts.
+    Changing it altered acceptance while both published revisions stood still,
+    measured, which is the same defect its sibling grammar row was added to close.
+    """
+    return tuple((probe, comparable_path(probe)) for probe in PATH_EQUIVALENCE_PROBES)

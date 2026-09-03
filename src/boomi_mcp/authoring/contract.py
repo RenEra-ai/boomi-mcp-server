@@ -892,6 +892,17 @@ def _compiler_revision() -> str:
             },
         ),
         (
+            # WHAT THE DECLARED-VERSUS-LIVE PATH CHECK ACCEPTS. Same reason as the
+            # grammar row above and the same failure: this function decides which
+            # two spellings of a route count as one, and changing it altered
+            # acceptance while both published revisions stood still — measured by
+            # flipping it and recomputing, not inferred. A server upgraded across
+            # that change would have reported its provenance as matching while the
+            # build had been validated under the older rule.
+            "connector_path_equivalence",
+            lambda: [list(pair) for pair in _replay_digests().path_equivalence_behaviour()],
+        ),
+        (
             "connector_replay_semantics",
             lambda: [
                 row.model_dump(mode="json") if hasattr(row, "model_dump") else dict(row)
@@ -962,6 +973,13 @@ def _replay_ids():
     from ..connector_replay import ids
 
     return ids
+
+
+def _replay_digests():
+    """The digest and path-equivalence authority, imported lazily like the rest."""
+    from ..connector_replay import digests
+
+    return digests
 
 
 def _replay_registry():
