@@ -1347,6 +1347,8 @@ _UNROWED = {"DC-155-C": 2, "DC-155-I": 1}
 #: the reason. Frozen so the set cannot grow silently: a row that names a class is an
 #: instance of it unless it appears here.
 _NOT_AN_INSTANCE = {
+    "ARCH-155-r12-02a": "a REVISION supplying the disposition the original left "
+    "pending, not a second defect — the class row counts the original once",
     "ARCH-155-r12-03a": "a REVISION supplying the disposition the original left "
     "pending, not a second defect — the class row counts the original once",
     "CDX-155-r182-02a": "a REVISION replacing two dispositions with one, not a second "
@@ -1416,6 +1418,7 @@ _CLASS_NAMED_IN_PROSE = [
     # THEN, so the row as first committed says so in prose rather than naming an
     # id. Its class is supplied by the revision that carries its disposition —
     # `ARCH-155-r12-03a` — and the class row counts the original once.
+    "ARCH-155-r12-02",
     "ARCH-155-r12-03",
     "CDX-155-r22-06",
     "CDX-155-r23-01",

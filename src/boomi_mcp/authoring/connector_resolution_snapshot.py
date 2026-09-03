@@ -762,11 +762,32 @@ def build_connector_resolution_snapshot(
             resolved.append(identity.model_copy(update={"source": "config"}))
             continue
         if live_document and action != "update":
-            resolved.append(
-                live_identity_from_component_xml(key, live_document).model_copy(
-                    update=carried
+            live_read = live_identity_from_component_xml(key, live_document)
+            if not live_read.readable:
+                # FETCHED AND UNREADABLE IS NOT SILENCE. The refusal below covers
+                # a fetch that failed; this covers a fetch that SUCCEEDED and
+                # whose bytes the strict reader rejected — the account was
+                # consulted and could not answer, which is the same fail-open by
+                # a different route. Appending it as a live identity left every
+                # field unknown, and the declared-versus-live comparison skips
+                # unknown fields, so the caller's declaration stood unchallenged:
+                # an operation the account stores as a PATCH could be declared a
+                # GET and compiled inside a retried region with no grant.
+                failures.append(
+                    ConnectorIdentityError(
+                        CONNECTOR_REPLAY_IDENTITY_UNAVAILABLE,
+                        (
+                            "component {0!r} was read back from the account, but "
+                            "its document could not be parsed, so nothing about "
+                            "what it will actually do could be checked. A "
+                            "declaration is an assertion, and there is nothing "
+                            "here to check it against."
+                        ).format(key),
+                        component_key=key,
+                    )
                 )
-            )
+                continue
+            resolved.append(live_read.model_copy(update=carried))
             continue
         if key in reused and reading.get("read_failed"):
             # THE ACCOUNT WAS CONSULTED AND COULD NOT ANSWER. That is not the

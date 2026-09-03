@@ -874,3 +874,98 @@ def test_the_evidenced_write_survives_the_wet_apply_route_not_only_compile():
     # submission would also satisfy an assertion about the absence of an error.
     assert submitted.get("xml"), "no process component was submitted"
     assert record.contract_ref  # the document under apply carried the reference
+
+
+def test_an_unreadable_live_component_refuses_rather_than_trusting_the_caller():
+    """A fetched document nobody can read is not a licence to believe the caller.
+
+    The issue-level architect gate found this by probe: a live document the outer
+    parser ACCEPTS and the strict identity reader REJECTS was still appended as a
+    live identity, every one of its fields unknown. The declared-versus-live
+    comparison skips unknown fields — correctly, since a declaration that says
+    nothing asserts nothing — so the caller's declaration stood unchallenged, and
+    an operation the account stores as a PATCH could be declared a GET and
+    compiled inside a retried region with no grant.
+
+    The distinction the code was missing is between never having asked and having
+    asked and got an answer nobody can read. The second is the account being
+    consulted and failing to answer, which this module already refuses when the
+    FETCH fails; it now refuses when the fetch succeeds and the bytes do not.
+    """
+    import pathlib
+    from unittest.mock import patch
+
+    from boomi_mcp.authoring.connector_resolution_snapshot import (
+        live_identity_from_component_xml,
+    )
+    from boomi_mcp.categories.integration_builder import build_integration_action
+    from boomi_mcp.connector_replay.registry import load_registry
+    from boomi_mcp.models.process_ir import parse_process_ir_v1
+
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from _m12_11_support import (  # noqa: E402
+        APPLIABLE_CONN,
+        APPLIABLE_OP,
+        ProcessAuthoringUnitV1,
+        ProcessComponentEnvelopeV1,
+        appliable_process_ir_request,
+    )
+    from _process_ir_capability_witnesses import _connector_scope  # noqa: E402
+
+    # ACCEPTED by the outer parser, REJECTED by the strict reader. Both halves
+    # are asserted, because a document that fails both parsers would exercise the
+    # long-standing fetch-failure refusal instead of the one under test.
+    unreadable = ('<?xml version="1.0"?><!DOCTYPE r [<!ENTITY e "x">]>'
+                  '<bns:Component xmlns:bns="http://api.platform.boomi.com/" id="i"/>')
+    import xml.etree.ElementTree as ET
+    ET.fromstring(unreadable)
+    assert not live_identity_from_component_xml("k", unreadable).readable
+
+    record = load_registry().operation_records[0]
+    operation, connection = record.operation_identity, record.connection_identity
+    captures = (Path(__file__).resolve().parents[1]
+                / "docs/architecture/evidence/issue-155/captures"
+                / "cap155-e7-patch-operation-record")
+    connection_xml = (captures / "component_connection.xml").read_text(encoding="utf-8")
+
+    # DECLARED GET over a component the account actually holds as a PATCH, inside
+    # a retried region and with no evidence: exactly the shape the caller's
+    # declaration must not be able to authorise on its own.
+    request = appliable_process_ir_request(
+        units=(ProcessAuthoringUnitV1(
+            envelope=ProcessComponentEnvelopeV1(
+                component_key="proc", name="P", action="create",
+                depends_on=("conn", "op", "getop")),
+            process_ir=parse_process_ir_v1(_connector_scope(
+                protected="$ref:op", upstream="$ref:getop", retry={"count": 2}))),),
+        components=(
+            dict(APPLIABLE_CONN, component_id=connection.component_id, action="create",
+                 config=dict(APPLIABLE_CONN["config"], reference_only=True)),
+            dict(APPLIABLE_OP, component_id=operation.component_id, action="create",
+                 config=dict(APPLIABLE_OP["config"], reference_only=True, method="GET")),
+            dict(APPLIABLE_OP, key="getop", name="G",
+                 config=dict(APPLIABLE_OP["config"], component_name="G")),
+        ),
+    )
+
+    def _get_xml(_client, component_id, *_a, **_k):
+        is_operation = component_id == operation.component_id
+        return {
+            "component_id": component_id,
+            "type": "connector-settings",
+            "version": operation.version if is_operation else connection.version,
+            "xml": unreadable if is_operation else connection_xml,
+        }
+
+    with patch("boomi_mcp.categories.integration_builder.paginate_metadata",
+               lambda *a, **k: []), \
+         patch("boomi_mcp.categories.components._shared.component_get_xml", _get_xml), \
+         patch("boomi_mcp.categories.integration_builder.component_get_xml", _get_xml):
+        result = build_integration_action(
+            _evidenced_client(), "qa", "compile",
+            config={"authoring_request": request.model_dump(mode="json")})
+
+    assert result.get("_success") is not True, (
+        "a retried call over a component nobody could read compiled on the "
+        "strength of the caller's own declaration: %s" % (sorted(result),)
+    )
