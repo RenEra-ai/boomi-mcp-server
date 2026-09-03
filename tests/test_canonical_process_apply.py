@@ -600,8 +600,15 @@ def test_a_binding_from_another_account_refuses_rather_than_being_attested():
     equal. So the comparison is against the REGISTRY-side scope for this apply,
     which is the value the boundary recheck itself compared against.
     """
-    with pytest.raises(cpa.CanonicalProcessApplyError):
+    with pytest.raises(cpa.CanonicalProcessApplyError) as raised:
         _attest([_binding(account_scope_hash=_SCOPE_B)])
+    # THE CODE, not merely the exception type. The first version asserted only
+    # that something was raised, and the code it raised said a component id was
+    # missing — a served code describing a different failure, which a machine
+    # reader would have acted on.
+    assert raised.value.error_code == (
+        "CONNECTOR_REPLAY_POST_SUBMISSION_RECONCILIATION_DRIFT"
+    )
 
     # A binding that makes NO account claim is not a foreign one. Absent means
     # "not captured" — the model says so — and refusing it would invent a

@@ -416,13 +416,27 @@ def build_mutation_attestation(
             # This is the last gate before the record becomes durable, and it is
             # not redundant with the recheck: a root whose recheck did not run
             # falls back to raw grants, and that path reaches here unchecked.
+            # THE CODE NAMES WHAT HAPPENED. The first version reused the
+            # result-id code, which says a component id is missing — nothing here
+            # is missing, and a served code that describes a different failure is
+            # worse than a generic one because a machine reader acts on it. This
+            # is a reconciliation failure found after the write, over a retained
+            # result, which is exactly what the registered code means.
+            #
+            # Reaching it at all means the pre-submission recheck did not run:
+            # whenever a root carries grants and the apply is not a dry run, that
+            # recheck runs and compares this same scope, so in production this is
+            # defence in depth rather than the enforcement point. It is kept
+            # because this is the last gate before the record becomes durable, and
+            # a durable record claiming evidence from another account is the one
+            # thing it must never say.
             raise CanonicalProcessApplyError(
                 "an evidence binding for process {0!r} names account scope {1!r}, "
                 "which is not the scope this apply is authorised in; the "
                 "attestation would claim evidence from another account".format(
                     key, _scope
                 ),
-                error_code="PROCESS_MATERIALIZATION_RESULT_ID_MISSING",
+                error_code="CONNECTOR_REPLAY_POST_SUBMISSION_RECONCILIATION_DRIFT",
                 component_key=key,
             )
         _attested.append(
