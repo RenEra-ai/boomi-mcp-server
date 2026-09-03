@@ -294,6 +294,32 @@ def _refuse_unresolvable_records(vocabulary, evidence, operation_records, semant
                 f"{record.semantics_id!r} revision {record.semantics_revision}, which "
                 "this registry does not publish — a record whose meaning is not "
                 "defined here cannot be interpreted here")
+        # THE CAPTURE MUST HAVE OBSERVED WHAT THE SEMANTICS CLAIM. A class-level
+        # evidence row already binds its verdict to its capture's replay
+        # observation — that binding is what makes a row evidence rather than an
+        # assertion — but an operation record was fields-only: it named a
+        # semantics definition carrying a duplicate guarantee, and nothing
+        # checked that guarantee against what the capture actually saw. The
+        # issue-level architect gate demonstrated the consequence by probe: a
+        # record whose replay observation said NOT EXERCISED, with its
+        # same-effect semantics and a stale digest left in place, loaded, minted
+        # a contract and a grant, and compiled. Provenance-shaped authorization
+        # is not replay evidence.
+        #
+        # The rule is equality, not a lattice. A guarantee is a claim about what
+        # the counterparty does with a repeated key; the observation is what it
+        # was seen to do. `not_exercised` and `duplicate_effect` support NO
+        # guarantee at all — the first saw nothing, and the second saw the
+        # opposite of every guarantee this enum can express.
+        definition = published[(record.semantics_id, record.semantics_revision)]
+        observed = record.capture.summary.replay.value
+        guaranteed = definition.duplicate_guarantee.value
+        if observed != guaranteed:
+            raise RegistryInvalid(
+                f"operation record {record.contract_ref} cites semantics "
+                f"guaranteeing {guaranteed!r}, but its capture observed "
+                f"{observed!r}; a record authorises the replay its capture SAW, "
+                "not the one its semantics describe")
         # The record and the capture it rests on must belong to the SAME account.
         # A record bound to one account, resting on evidence gathered in another, is
         # a claim about an environment nobody observed.

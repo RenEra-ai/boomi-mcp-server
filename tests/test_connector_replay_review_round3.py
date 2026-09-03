@@ -1347,6 +1347,8 @@ _UNROWED = {"DC-155-C": 2, "DC-155-I": 1}
 #: the reason. Frozen so the set cannot grow silently: a row that names a class is an
 #: instance of it unless it appears here.
 _NOT_AN_INSTANCE = {
+    "ARCH-155-r12-01a": "a REVISION supplying the disposition the original left "
+    "pending, not a second defect — the class row counts the original once",
     "ARCH-155-r12-02a": "a REVISION supplying the disposition the original left "
     "pending, not a second defect — the class row counts the original once",
     "ARCH-155-r12-03a": "a REVISION supplying the disposition the original left "
@@ -1418,6 +1420,7 @@ _CLASS_NAMED_IN_PROSE = [
     # THEN, so the row as first committed says so in prose rather than naming an
     # id. Its class is supplied by the revision that carries its disposition —
     # `ARCH-155-r12-03a` — and the class row counts the original once.
+    "ARCH-155-r12-01",
     "ARCH-155-r12-02",
     "ARCH-155-r12-03",
     "CDX-155-r22-06",
@@ -6345,3 +6348,72 @@ def test_each_authored_root_is_projected_for_its_own_process():
 # insurance against the defect; it is another instance of it. Removing it was
 # pre-committed at this loop's sixth-evaluation checkpoint, on exactly the
 # condition that then occurred.
+
+
+def test_an_operation_record_cannot_authorise_a_replay_its_capture_never_saw():
+    """A record authorises the replay its capture SAW, not the one it describes.
+
+    A class-level evidence row already binds its verdict to its capture's replay
+    observation, and that binding is what makes a row evidence rather than an
+    assertion. An operation record carried no such binding: it named a semantics
+    definition with a duplicate guarantee, and nothing compared that guarantee
+    with what the capture recorded. The issue-level architect gate demonstrated
+    the consequence by probe — a record whose replay observation said NOT
+    EXERCISED, with its same-effect semantics and stale digest untouched, loaded
+    and minted a contract and a grant.
+
+    Provenance-shaped authorization is not replay evidence, and the difference is
+    exactly one comparison.
+    """
+    import json
+    from importlib import resources
+    from unittest.mock import patch
+
+    import boomi_mcp.connector_replay.registry as registry_module
+
+    raw = json.loads(resources.files("boomi_mcp.connector_replay")
+                     .joinpath("registry_v1.json").read_text("utf-8"))
+    assert raw["operation_records"], "no packaged record; this witness would be vacuous"
+    guaranteed = {d["semantics_id"]: d["duplicate_guarantee"]
+                  for d in raw["semantics_definitions"]}
+    record = raw["operation_records"][0]
+    assert record["capture"]["summary"]["replay"] == guaranteed[record["semantics_id"]], (
+        "the packaged record's observation and guarantee already disagree; the "
+        "control below would then prove nothing"
+    )
+
+    def _load(payload):
+        text = json.dumps(payload)
+
+        class _Resource:
+            def joinpath(self, *_a):
+                return self
+
+            def read_text(self, *_a, **_k):
+                return text
+
+        registry_module.load_registry.cache_clear()
+        try:
+            with patch.object(registry_module.resources, "files",
+                              lambda *_a, **_k: _Resource()):
+                return registry_module.load_registry(), None
+        except registry_module.RegistryInvalid as exc:
+            return None, str(exc)
+        finally:
+            registry_module.load_registry.cache_clear()
+
+    loaded, refusal = _load(raw)
+    assert loaded is not None and refusal is None, (
+        "the untampered packaged registry must still load, or the refusal below "
+        "is not evidence of anything: %s" % (refusal,)
+    )
+
+    for observation in ("not_exercised", "duplicate_effect"):
+        tampered = json.loads(json.dumps(raw))
+        tampered["operation_records"][0]["capture"]["summary"]["replay"] = observation
+        loaded, refusal = _load(tampered)
+        assert loaded is None, (
+            "a record whose capture observed %r still loaded, so it authorises a "
+            "replay nobody saw" % (observation,)
+        )
+        assert "capture observed" in (refusal or ""), refusal
