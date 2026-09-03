@@ -453,8 +453,14 @@ def test_the_post_submission_failure_retains_its_result():
     The component exists. Serving it back is the difference between telling an
     operator to reconcile something and telling them there is nothing to find.
     """
-    # Let the global pass and the just-in-time recheck both succeed, then drift.
-    result, _created, reads = _apply_with_a_grant_drifting_at(drift_after_reads=4)
+    # Let the global pass, the just-in-time recheck AND the pre-push boundary all
+    # succeed, then drift. The threshold was 4, which stopped reaching the third
+    # boundary the moment the CREATE arm gained the pre-push callback the update
+    # arm always had — the drift was then caught before the write, which is the
+    # correct outcome for that window and the wrong setup for this test. Six is
+    # the reads those three checks consume; the assertion below refuses to
+    # self-escape if a later change moves the count again.
+    result, _created, reads = _apply_with_a_grant_drifting_at(drift_after_reads=6)
 
     # NO SELF-ESCAPE. An earlier version fell back to `assert len(reads) >= 4`
     # whenever the third boundary was not reached, so a change that stopped
@@ -712,7 +718,11 @@ def test_no_exit_serves_a_write_as_both_attested_and_pending():
     def _matching(component_id, _kind=None, _family=None):
         return {"type": "connector-settings", "xml": _LIVE_XML, "version": 1}
 
-    result, _created, _reads = _apply_with_a_grant_drifting_at(drift_after_reads=4)
+    # SIX, not four: the create arm now runs the pre-push boundary the update arm
+    # always had, so a drift at four is caught before the write and this exit is
+    # never reached. The assertion below has no escape hatch, which is why the
+    # threshold has to move with the boundary rather than the assertion softening.
+    result, _created, _reads = _apply_with_a_grant_drifting_at(drift_after_reads=6)
     # NO `if`. The first version guarded this on the error code and had no else, so
     # switching the boundary off in source made it PASS silently while the test it
     # sits beside failed — the exact self-escape this file's own docstring records
@@ -1134,3 +1144,211 @@ def test_a_proven_no_write_keeps_its_own_refusal_through_the_apply_boundary():
         "CONNECTOR_REPLAY_PRE_SUBMISSION_IDENTITY_DRIFT"
     ), result
     assert "The result is retained" not in str(result.get("hint", "")), result
+
+
+def _apply_creating_with_drift_during_materialization():
+    """Drift the operation AFTER the just-in-time recheck, on the CREATE route.
+
+    The window the issue-level architect gate probed: the recheck runs, passes,
+    and then this function materializes the process before submitting it. A
+    drift landing in that gap used to be written and reported afterwards.
+
+    The process create is recorded SEPARATELY from the connector creates rather
+    than inferred from a total, so "the process was not written" is asserted
+    from the call that would have written it.
+    """
+    reads: list = []
+    connector_creates = {"n": 0}
+    process_creates: list = []
+
+    def _component(*_args, **_kwargs):
+        connector_creates["n"] += 1
+        return {"_success": True, "component_id": "cid-%d" % connector_creates["n"]}
+
+    def _create(_client, _profile, payload_in):
+        process_creates.append(payload_in)
+        return {"_success": True, "component_id": "process-cid-1"}
+
+    def _get_xml(_client, component_id, *_a, **_k):
+        if component_id in ("op-live-1", "cn-live-1"):
+            reads.append(component_id)
+            # FOUR: the global pass and the just-in-time recheck consume two
+            # reads each, so the drift appears in the materialization window and
+            # nowhere earlier. Reaching this window is asserted below, not hoped.
+            drifted = len(reads) > 4
+            if component_id == "op-live-1":
+                return {
+                    "type": "connector-action",
+                    "xml": _OPERATION_XML,
+                    "version": 99 if drifted else 3,
+                }
+            return {
+                "type": "connector-settings",
+                "xml": _CONNECTION_XML,
+                "version": 5,
+            }
+        return {"type": "connector-settings", "xml": _LIVE_XML, "version": 1}
+
+    from boomi_mcp.connector_replay.registry import load_registry as _real_registry
+
+    _packaged = _real_registry()
+
+    class _Registry:
+        operation_records = (_Record(),)
+
+        def __getattr__(self, name):
+            return getattr(_packaged, name)
+
+    with patch(_PAGINATE) as paginate, patch(_EXECUTE) as execute, patch(
+        _CREATE
+    ) as create, patch(_GET_XML) as get_xml, patch(
+        _PROJECT, side_effect=_granting_projection
+    ), patch(
+        "boomi_mcp.connector_replay.registry.load_registry", return_value=_Registry()
+    ):
+        paginate.return_value = []
+        execute.side_effect = _component
+        create.side_effect = _create
+        get_xml.side_effect = _get_xml
+        result = build_integration_action(
+            MagicMock(),
+            _PROFILE,
+            "apply",
+            config={"authoring_request": _payload(), "dry_run": False},
+        )
+    return result, process_creates, reads
+
+
+def test_a_drift_inside_the_materialization_window_refuses_before_the_write():
+    """The create arm's own pre-push boundary.
+
+    The update arm carried a pre-push callback from the start; the create arm
+    went straight to the platform, and the parameter's own docstring recorded
+    why that was thought safe — "a create has nothing to fetch, so the caller's
+    just-in-time check is already adjacent to its submission". Measured false:
+    this function materializes the process between that check and the create
+    call. The architect's probe changed the operation version in exactly that
+    gap and got a written process with the drift reported afterwards.
+
+    Both halves are asserted, because either alone is satisfiable by a bug: the
+    named PRE-submission code (a POST-submission code here means the write
+    happened first) AND the platform never being asked to create the process.
+    """
+    result, process_creates, reads = _apply_creating_with_drift_during_materialization()
+
+    # NON-VACUITY FIRST. If the earlier boundaries had already refused, the
+    # materialization window would never be entered and the rest of this test
+    # would pass without exercising anything. Six reads means all three checks
+    # ran: global pass, just-in-time recheck, and the new pre-push boundary.
+    assert len(reads) == 6, reads
+
+    assert result.get("error_code") == (
+        "CONNECTOR_REPLAY_PRE_SUBMISSION_IDENTITY_DRIFT"
+    ), result
+    assert process_creates == [], (
+        "the process was written despite a drift detected before submission"
+    )
+    step = ((result.get("partial_results") or {}).get("proc") or {})
+    # `refused`, not `failed`: the distinction is what tells a reconciler there
+    # is nothing to reconcile for this component.
+    assert step.get("status") == "refused", step
+
+
+def test_a_mutation_uncertain_push_retains_the_accounting_it_owes():
+    """A lost answer is not a licence to forget what was sent.
+
+    The platform is asked to write and never answers. The write may have landed;
+    `mutation_status` says `performed` because this server cannot claim
+    otherwise. What the caller used to get alongside that word was nothing: no
+    mutation attestation, no readback, no durable write note — and, since a
+    replay grant authorised the call, no record that any evidence had been
+    consumed. The plan requires a post-submit failure to retain the component
+    id, the platform result, the readback state, the mutation accounting and the
+    evidence attestation.
+
+    Graded against the reverted source: with the retention removed, the two
+    PRESENT assertions below both fail while the failure itself still reports —
+    i.e. the fix adds evidence rather than changing the verdict.
+    """
+    import boomi_mcp.categories.integration_builder as ib
+
+    def _component(*_a, **_k):
+        return {"_success": True, "component_id": "cid-1"}
+
+    def _create(_c, _p, _payload):
+        return {"_success": True, "component_id": "process-cid-1"}
+
+    def _get_xml(_c, component_id, *_a, **_k):
+        if component_id == "op-live-1":
+            return {"type": "connector-action", "xml": _OPERATION_XML, "version": 3}
+        if component_id == "cn-live-1":
+            return {"type": "connector-settings", "xml": _CONNECTION_XML, "version": 5}
+        if component_id == "existing-proc-1":
+            return {"type": "process", "xml": _LIVE_PROCESS_XML, "version": 1}
+        return {"type": "connector-settings", "xml": _LIVE_XML, "version": 1}
+
+    from boomi_mcp.connector_replay.registry import load_registry as _real_registry
+
+    _packaged = _real_registry()
+
+    class _Registry:
+        operation_records = (_Record(),)
+
+        def __getattr__(self, name):
+            return getattr(_packaged, name)
+
+    client = MagicMock()
+    # The bytes leave this process; the platform's answer never comes back.
+    client.component.update_component_raw.side_effect = RuntimeError(
+        "connection reset by peer after submission"
+    )
+
+    with patch(_PAGINATE) as paginate, patch(_EXECUTE) as execute, patch(
+        _CREATE
+    ) as create, patch(_GET_XML) as get_xml, patch(
+        _PROJECT, side_effect=_granting_projection
+    ), patch(
+        "boomi_mcp.connector_replay.registry.load_registry", return_value=_Registry()
+    ):
+        paginate.return_value = []
+        execute.side_effect = _component
+        create.side_effect = _create
+        get_xml.side_effect = _get_xml
+        result = build_integration_action(
+            client,
+            _PROFILE,
+            "apply",
+            config={"authoring_request": _updating_payload(), "dry_run": False},
+        )
+
+    # NON-VACUITY: this must be the uncertain arm, not a refusal and not a
+    # success. A refusal would carry `write_attempted: False` and owe none of
+    # what follows.
+    step = ((result.get("partial_results") or {}).get("proc") or {})
+    step_result = step.get("result") if isinstance(step.get("result"), dict) else {}
+    assert step_result.get("write_attempted") is True, result
+    assert result.get("mutation_status") == "performed", result
+    # The failure still fails. Retention must not launder it into a success.
+    assert result.get("_success") is False, result
+    assert step_result.get("error_code") == "UPDATE_PRESERVATION_PUSH_FAILED", step
+
+    mutations = result.get("process_mutations") or []
+    assert mutations, "a submission that may have landed was not attested"
+    attested = mutations[0]
+    attested = attested if isinstance(attested, dict) else attested.model_dump(
+        mode="json"
+    )
+    # The digest of the bytes as they LEFT — the only handle a reconciler has on
+    # a write the platform never acknowledged.
+    assert str(attested.get("submitted_xml_digest", "")).startswith("sha256:"), attested
+    # ...and WHAT AUTHORISED IT. "This process may have been applied" and "this
+    # process may have been applied under a replay contract" are different
+    # sentences, and only the second one is true here.
+    assert attested.get("replay_evidence_bindings"), attested
+
+    assert result.get("process_readbacks"), "the uncertainty state was not recorded"
+
+    record = ib._BUILD_REGISTRY.get(result.get("build_id")) or {}
+    notes = record.get("process_writes") or []
+    assert notes, "the write log has no entry for a submission that may have landed"
+    assert notes[0].get("write_confirmed") is False, notes

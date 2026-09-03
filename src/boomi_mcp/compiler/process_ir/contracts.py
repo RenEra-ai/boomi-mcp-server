@@ -317,6 +317,19 @@ class IdempotencyGrantSymbolV1(_CompilerModel):
     #: digest, so its evidence must be service-wide; the boundary cannot infer that
     #: from anything it can read live, which is why the fact travels on the grant.
     dynamic_path: bool = False
+    #: The root this grant was minted for, and the connection its operation
+    #: resolves to. Both are facts only the root's symbol table knows, and the
+    #: minter is holding that table and the resolved binding at the instant it
+    #: mints — so they are recorded HERE rather than re-derived downstream, where
+    #: a second traversal would be a second chance to disagree.
+    #:
+    #: They exist because the durable attestation is required to sort and
+    #: deduplicate bindings by `(process_root_ref, call_identity, contract_ref,
+    #: operation_ref, connection_ref)`, and a record that cannot express two of
+    #: its own key fields cannot enforce that key. Optional so a grant minted
+    #: before they existed stays valid.
+    process_root_ref: Optional[str] = None
+    connection_ref: Optional[str] = None
     kind: Literal["per_call_key_reference_grant"] = "per_call_key_reference_grant"
 
     @field_validator("contract_ref", "operation_ref", "call_source_path")

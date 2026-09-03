@@ -342,6 +342,12 @@ def recheck_grant_identities(
                 "contract_ref": getattr(grant, "contract_ref", None),
                 "operation_ref": getattr(grant, "operation_ref", None),
                 "call_source_path": getattr(grant, "call_source_path", None),
+                # CARRIED FROM THE GRANT, not re-derived. The minter recorded
+                # which root it minted for and which connection the operation
+                # resolves to; asking a second authority here is how the durable
+                # record comes to name a different connection than the check did.
+                "process_root_ref": getattr(grant, "process_root_ref", None),
+                "connection_ref": getattr(grant, "connection_ref", None),
                 "record_digest": getattr(record, "record_digest", None),
                 "account_scope_hash": getattr(record, "account_scope_hash", None),
                 "operation_component_id": getattr(
@@ -355,6 +361,24 @@ def recheck_grant_identities(
                 ),
                 "connection_version": getattr(
                     getattr(record, "connection_identity", None), "version", None
+                ),
+                # BOTH CONFIGURATION DIGESTS. This module compares them — they
+                # are two of its six drift reasons — and the durable record
+                # carried neither, so an auditor reading an attestation could see
+                # that ids and versions had been checked and could not see that
+                # configuration had been. A credential-only version advance is
+                # exactly the case these distinguish, and it is the case the
+                # whole comparison exists for.
+                #
+                # They are digests over a projection that deliberately EXCLUDES
+                # credential material (the username, the OAuth2 element, the
+                # token URL and every credential reference), so recording them
+                # adds an identifier, never a secret.
+                "operation_config_digest": getattr(
+                    getattr(record, "operation_identity", None), "config_digest", None
+                ),
+                "connection_config_digest": getattr(
+                    getattr(record, "connection_identity", None), "config_digest", None
                 ),
                 # The KIND only. A static coverage carries the routes it covers,
                 # and a route is a path — the shape this record must not carry.

@@ -862,15 +862,27 @@ class ConnectorReplayEvidenceBindingAttestationV1(_AuthoringModel):
     "this process was applied while a replay contract authorised one of its calls"
     are the same sentence, and only the second is true.
 
-    It carries NO key material and no digests of the account's configuration, for
-    the same reason the grant and the contract do not: the fields name a contract,
-    an operation, a position in a document, and the record that authorised it.
-    There is nowhere to put a key even by mistake.
+    It carries NO key material. The configuration digests it does carry are
+    one-way hashes over a projection that deliberately EXCLUDES every credential
+    field — the username, the OAuth2 credentials element, the token URL and every
+    credential reference — so they identify a configuration without exposing any
+    part of it. An earlier version of this docstring claimed the record carried
+    "no digests of the account's configuration" and treated that as a safety
+    property; it was neither: the boundary COMPARES those digests, and an
+    accounting record that omits what was compared cannot show that a
+    credential-only version advance was ruled out. That is the one case the
+    digests exist to catch.
     """
 
     contract_ref: NonEmptyString
     operation_ref: NonEmptyString
     call_source_path: NonEmptyString
+    #: The root this binding belongs to and the connection its operation runs on.
+    #: The first two members of the sort/dedup key, and the reason this record can
+    #: enforce that key at all. Carried from the grant, which is where both facts
+    #: were resolved. Optional: absent means a binding minted before they existed.
+    process_root_ref: Optional[NonEmptyString] = None
+    connection_ref: Optional[NonEmptyString] = None
     #: The record this binding was authorised by, so an audit can find the
     #: evidence rather than only learn that some evidence existed.
     #:
@@ -894,6 +906,15 @@ class ConnectorReplayEvidenceBindingAttestationV1(_AuthoringModel):
     operation_version: Optional[int] = None
     connection_component_id: Optional[NonEmptyString] = None
     connection_version: Optional[int] = None
+    #: WHAT THE BOUNDARY ACTUALLY COMPARED. The producer's shape, pinned: the
+    #: registry writes these prefixed, and a field that rejects the only form its
+    #: own producer emits is the defect class this issue has recorded three times.
+    operation_config_digest: Optional[str] = Field(
+        default=None, pattern=r"^ComponentConfigDigestV1:[0-9a-f]{64}$"
+    )
+    connection_config_digest: Optional[str] = Field(
+        default=None, pattern=r"^ComponentConfigDigestV1:[0-9a-f]{64}$"
+    )
     #: The KIND only. A static coverage enumerates the routes it covers, and a
     #: route is a path — the one shape this record must never carry.
     route_coverage_kind: Optional[NonEmptyString] = None

@@ -969,3 +969,48 @@ def test_an_unreadable_live_component_refuses_rather_than_trusting_the_caller():
         "a retried call over a component nobody could read compiled on the "
         "strength of the caller's own declaration: %s" % (sorted(result),)
     )
+
+
+def test_a_minted_grant_names_its_root_and_its_connection():
+    """The two facts the durable attestation keys on, recorded where they are known.
+
+    The attestation contract sorts and deduplicates bindings by
+    `(process_root_ref, call_identity, contract_ref, operation_ref,
+    connection_ref)`. Two of those five were unavailable to it — the grant
+    carried neither — so the key it enforced was a three-field prefix and the
+    dedup did not exist at all.
+
+    Both are read from the minter's own inputs: the root it was called for, and
+    the connection the compiler's binding resolution already attached to the
+    operation. Asserting them HERE, at the mint, rather than at the attestation,
+    because the attestation can only carry what the mint recorded.
+    """
+    table = project_grants_for_root(
+        _doc({"kind": "key_reference", "contract_ref": _CONTRACT}),
+        _symbols(),
+        process_root_ref="$ref:ROOT",
+        registry=_Registry(_record()),
+        snapshot=_snapshot(),
+    )
+    assert table.idempotency_grants, "no grant was minted, so nothing is asserted"
+    grant = table.idempotency_grants[0]
+    assert grant.process_root_ref == "$ref:ROOT", grant
+    # NOT a literal: the connection the compiler resolved for this call is the
+    # only correct answer, and hard-coding a name here would pass even if the
+    # minter attached some other connection's reference.
+    from boomi_mcp.compiler.process_ir.connector_resolution import (
+        resolve_connector_call_bindings,
+    )
+    from boomi_mcp.compiler.process_ir.lowering import lower_process_ir_to_cfg
+
+    symbols = _symbols()
+    cfg = lower_process_ir_to_cfg(
+        _doc({"kind": "key_reference", "contract_ref": _CONTRACT})
+    )
+    resolved = {
+        b.source_path: b.connection_ref
+        for b in resolve_connector_call_bindings(cfg, symbols)
+    }
+    assert grant.connection_ref == resolved[grant.call_source_path], (
+        grant, resolved,
+    )

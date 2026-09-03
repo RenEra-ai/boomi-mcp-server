@@ -3298,6 +3298,17 @@ def _apply_structured_update(
                 f"{_validation_error_message(exc)}"
             ),
             "exception_type": type(exc).__name__,
+            # THE BYTES LEFT THIS PROCESS. Dropping them here is what made a
+            # mutation-uncertain update unattestable: the caller reported
+            # `mutation_status="performed"` with no mutation, no readback and no
+            # replay attestation, so a reconciler was told a write may have
+            # landed and given nothing to identify it by. The push either landed
+            # or it did not — either way THESE are the bytes it would have
+            # written, and the digest was already computed above, immediately
+            # before the call. Carried on the success arm since #153; carried
+            # here now, for the arm where it actually matters.
+            "submitted_xml": merged_xml,
+            "submitted_xml_digest": submitted_xml_digest,
         }
     return {
         "write_attempted": True,
@@ -8023,11 +8034,15 @@ def _execute_canonical_process(
     #: pre-write pass. Empty for every root that carries no replay evidence,
     #: which is every root until evidence is ingested.
     replay_grants=(),
-    #: Runs immediately before an UPDATE is pushed, after the live component has
-    #: been fetched and merged. A create needs no equivalent: it has nothing to
-    #: fetch, so the caller's just-in-time check is already adjacent to its
-    #: submission. An update does real work in between, and this is where a check
-    #: is both fully informed and still free to refuse.
+    #: Runs immediately before the component is pushed, on BOTH arms. The update
+    #: arm calls it after the live component has been fetched and merged; the
+    #: create arm after its late materialization and digest. The claim that a
+    #: create needs no equivalent — "it has nothing to fetch, so the caller's
+    #: just-in-time check is already adjacent to its submission" — was measured
+    #: false: this function materializes between that check and the create call,
+    #: so an identity drifting in that window was written and only reported
+    #: afterwards. Both arms now refuse in the window where a refusal still
+    #: costs nothing.
     on_pre_push=None,
 ) -> Dict[str, Any]:
     """Materialize and apply ONE canonical ProcessIR root, and attest it.
@@ -8290,7 +8305,34 @@ def _execute_canonical_process(
         precomputed_digest = "sha256:" + hashlib.sha256(
             xml.encode("utf-8")
         ).hexdigest()
-        exec_result = create_component(boomi_client, profile, {"xml": xml})
+        # THE CREATE'S OWN BOUNDARY, and it was missing. The update arm has
+        # carried this callback since the plan named the window; the create arm
+        # went straight to the platform, so the just-in-time check ran BEFORE
+        # the late materialization this branch performs, and any identity that
+        # drifted in between turned a refusal the check could have made into a
+        # write that only the post-submission check reports. The issue-level
+        # architect gate demonstrated it: changing the operation version during
+        # apply materialization wrote the process and detected the drift
+        # afterwards.
+        #
+        # Placed after the digest and before the call, exactly where the update
+        # arm places it — the one point where a refusal is both fully informed
+        # and still free.
+        #
+        # The refusal becomes THIS ARM'S `exec_result`; it is never returned
+        # directly. The enclosing function's contract is a `{"result": …}`
+        # envelope built below, and returning the bare refusal skipped that —
+        # `KeyError: 'result'` at the caller, which reads `outcome["result"]`,
+        # i.e. a refusal that reached the caller as an unexplained crash with a
+        # process half-applied. The failure path below already knows how to
+        # serve a `write_attempted: False` exec result: it reports `refused`,
+        # not `failed`, and lifts the error code onto the envelope.
+        _refusal = on_pre_push() if on_pre_push is not None else None
+        if _refusal is not None:
+            _refusal.setdefault("write_attempted", False)
+            exec_result = _refusal
+        else:
+            exec_result = create_component(boomi_client, profile, {"xml": xml})
 
     component_id = _extract_component_id(exec_result) or (
         target_id if action == "update" else None
@@ -8305,6 +8347,19 @@ def _execute_canonical_process(
     # derived), so it is fixed at the condition, not at the site.
     succeeded = bool(exec_result.get("_success", False))
 
+    # THE THREE OUTCOMES, named once and read everywhere below. They were two —
+    # succeeded and everything else — and "everything else" silently merged the
+    # arm that provably wrote nothing with the arm whose write may have landed.
+    # Those are opposite facts for a reconciler, and the second one is the whole
+    # reason this accounting exists.
+    #
+    # `wrote_nothing` is POSITIONAL, never inferred from the action: only an
+    # exit stamped `write_attempted: False` — a pre-push refusal on either arm —
+    # may claim it. An absent stamp means the request was issued, so uncertainty
+    # is the fail-safe reading.
+    wrote_nothing = (not succeeded) and exec_result.get("write_attempted") is False
+    mutation_uncertain = (not succeeded) and not wrote_nothing
+
     # THE WRITE IS RECORDED DURABLY THE INSTANT THE PLATFORM CONFIRMS IT
     # (§6 AR3-03). Everything that follows — the readback, the placement
     # identity, the attestation construction — happens AFTER the component
@@ -8318,7 +8373,7 @@ def _execute_canonical_process(
     # digest of the submitted bytes and the platform's own reported name are
     # what let a human find the orphan, and `result_component_id_missing` tells
     # a machine reader that "no id" is a measurement and not an omission.
-    if on_write_confirmed is not None and succeeded:
+    if on_write_confirmed is not None and (succeeded or mutation_uncertain):
         on_write_confirmed({
             "component_key": key,
             "action": action,
@@ -8329,6 +8384,13 @@ def _execute_canonical_process(
                 or precomputed_digest
             ),
             "attestation_pending": True,
+            # WHETHER THE PLATFORM ANSWERED. The log's purpose is reconciling an
+            # account against what this process sent, and a submission whose
+            # answer was lost is precisely the entry a reconciler must chase —
+            # it was the one entry the log did not have. Recorded as a MEASURED
+            # field rather than by omission, so "no note" keeps meaning "nothing
+            # was sent" instead of quietly covering two different situations.
+            "write_confirmed": succeeded,
         })
     # `status` is derived from what the PLATFORM confirmed, not from the action
     # that was attempted (QA-153-r3-02). It read `"updated" if action ==
@@ -8360,12 +8422,11 @@ def _execute_canonical_process(
     # `COMPONENT_GET_DEADLINE_EXCEEDED` is not in the taxonomy at all.
     #
     # `_apply_structured_update` now reports `write_attempted` on every exit,
-    # stamped by position relative to its own push. A create reaches this point
-    # only by having called `create_component`, so the request was issued.
-    if not succeeded:
-        wrote_nothing = exec_result.get("write_attempted") is False
-    else:
-        wrote_nothing = False
+    # stamped by position relative to its own push. The create arm reports it
+    # too: it reaches this point either by having called `create_component` (the
+    # request was issued) or by its own pre-push refusal, which stamps
+    # `write_attempted: False` and never reaches the platform. The reading below
+    # is therefore positional on both arms rather than assumed from the action.
     result = _canonical_result(
         status=(
             ("updated" if action == "update" else "created") if succeeded
@@ -8375,20 +8436,34 @@ def _execute_canonical_process(
         result=exec_result,
         _success=succeeded,
     )
-    if not succeeded:
-        # The step's OWN diagnosis travels, exactly as the component arm lifts
-        # it. Hard-setting `error_code: None` buried the real code — measured:
-        # `UPDATE_PRESERVATION_FETCH_FAILED` sitting one level down at
-        # `partial_results[key].result.error_code` — and dropping `step_result`
-        # left the two participant kinds reporting failure in two shapes.
-        step_error = exec_result.get("error") if isinstance(exec_result, dict) else None
-        step_code = exec_result.get("error_code") if isinstance(exec_result, dict) else None
-        return {"result": result,
-                "error": step_error or f"Failed at step '{key}'",
-                "error_code": step_code,
-                "step_result": exec_result,
-                "component_id": component_id,
-                "mutation": None, "readback": None}
+    # The step's OWN diagnosis travels, exactly as the component arm lifts it.
+    # Hard-setting `error_code: None` buried the real code — measured:
+    # `UPDATE_PRESERVATION_FETCH_FAILED` sitting one level down at
+    # `partial_results[key].result.error_code` — and dropping `step_result` left
+    # the two participant kinds reporting failure in two shapes.
+    step_error = exec_result.get("error") if isinstance(exec_result, dict) else None
+    step_code = exec_result.get("error_code") if isinstance(exec_result, dict) else None
+    _failure_envelope = {
+        "error": step_error or f"Failed at step '{key}'",
+        "error_code": step_code,
+        "step_result": exec_result,
+    }
+    if wrote_nothing:
+        # NOTHING WAS SENT, so there is nothing to attest and nothing to read
+        # back. This is the only failure that may report a null mutation, and it
+        # can say so because a pre-push exit stamped it — not because the code
+        # assumed it.
+        return {"result": result, "component_id": component_id,
+                "mutation": None, "readback": None, **_failure_envelope}
+    # A MUTATION-UNCERTAIN SUBMISSION FALLS THROUGH. The plan requires a
+    # post-submit failure to retain the component id, the platform result, the
+    # readback/uncertainty state, the mutation accounting AND the evidence
+    # attestation; returning here retained none of them, so a write that may
+    # have landed with a replay grant behind it was reported as an error with no
+    # record that any evidence had authorised it. Everything below — the
+    # readback, the placement reading, the attestation — is exactly what that
+    # retention consists of, and it is already written; the bug was leaving
+    # before it.
 
     # The mutation attestation — over the bytes that were SENT. For an update
     # those are the MERGED bytes; `_apply_structured_update` reports them so the
@@ -8466,6 +8541,11 @@ def _execute_canonical_process(
             # its calls" are the same sentence in the accounting record, and only
             # the second is true.
             replay_evidence_bindings=replay_grants,
+            # THE SCOPE THE BOUNDARY ITSELF COMPARED AGAINST. Without it the
+            # nested-scope invariant in the constructor has nothing to compare to
+            # and passes vacuously — a check present in source and absent in
+            # effect, which this issue has now recorded more than once.
+            replay_account_scope_hash=_replay_account_scope_hash(boomi_client),
             # ONE read of the submitted bytes for BOTH placement facts, so the
             # attested name and id can never describe different reads (AR2-04).
             applied_folder_name=_applied_placement["folder_name"],
@@ -8492,6 +8572,20 @@ def _execute_canonical_process(
     except CanonicalProcessApplyError as exc:
         # A create that reported success without an id fails CLOSED: the mutation
         # stands but cannot be attested, and recording nothing would be worse.
+        #
+        # On the mutation-UNCERTAIN arm the push failure is the primary fact and
+        # keeps the envelope: replacing it with "could not attest" would answer a
+        # question nobody asked while hiding the one that was. The attestation
+        # failure rides along under its own key so neither is lost — and the
+        # write note recorded above still stands, unattested, which is precisely
+        # what `_unattested_write_notes` exists to surface.
+        if not succeeded:
+            return {"result": {**result, "attestation_error": str(exc)},
+                    "component_id": component_id,
+                    "mutation": None, "readback": None,
+                    "attestation_error": str(exc),
+                    "attestation_error_code": exc.error_code,
+                    **_failure_envelope}
         return {"result": {**result, "_success": False, "error": str(exc)},
                 "error": str(exc), "error_code": exc.error_code,
                 "component_id": component_id, "mutation": None, "readback": None}
@@ -8570,13 +8664,20 @@ def _execute_canonical_process(
         pass
 
 
-    return {"result": result, "component_id": component_id,
-            "mutation": mutation, "readback": readback,
-            "applied_name": applied_name,
-            # Overlay-aware (Codex round 13): the loop's rename warning compares
-            # this against the live name, and `envelope.name` here made every
-            # HEALTHY clone warn that the platform had renamed it.
-            "requested_name": _requested_name()}
+    outcome = {"result": result, "component_id": component_id,
+               "mutation": mutation, "readback": readback,
+               "applied_name": applied_name,
+               # Overlay-aware (Codex round 13): the loop's rename warning
+               # compares this against the live name, and `envelope.name` here
+               # made every HEALTHY clone warn that the platform had renamed it.
+               "requested_name": _requested_name()}
+    if not succeeded:
+        # THE FAILURE STILL FAILS. Retaining the accounting does not upgrade a
+        # mutation-uncertain submission into a success — the caller's error
+        # handling reads these keys and must keep taking the failure branch,
+        # now with the evidence attached rather than discarded.
+        outcome.update(_failure_envelope)
+    return outcome
 
 
 def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Dict[str, Any]:

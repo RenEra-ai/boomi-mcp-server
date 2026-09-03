@@ -505,3 +505,122 @@ def test_the_unforged_control_still_materializes():
         plan=_plan(), id_registry=_REGISTRY, symbols=_symbols()
     )
     assert xml.startswith("<?xml")
+
+
+# ---------------------------------------------------------------------------
+# The evidence bindings the attestation carries
+# ---------------------------------------------------------------------------
+
+_SCOPE_A = "a" * 64
+_SCOPE_B = "b" * 64
+
+
+def _binding(**over):
+    """One resolved binding, in the mapping shape the recheck boundary hands over."""
+    base = {
+        "contract_ref": "$ref:C1",
+        "operation_ref": "$ref:op",
+        "call_source_path": "/body/steps/0",
+        "process_root_ref": "$ref:ROOT",
+        "connection_ref": "$ref:conn",
+        "record_digest": "c" * 64,
+        "account_scope_hash": _SCOPE_A,
+        "operation_component_id": "op-1",
+        "operation_version": 3,
+        "connection_component_id": "cn-1",
+        "connection_version": 5,
+        "operation_config_digest": "ComponentConfigDigestV1:" + ("d" * 64),
+        "connection_config_digest": "ComponentConfigDigestV1:" + ("e" * 64),
+        "route_coverage_kind": "service_wide",
+    }
+    base.update(over)
+    return base
+
+
+def _attest(bindings, *, scope=_SCOPE_A):
+    plan = _plan()
+    xml = cpa.materialize_canonical_process_xml(
+        plan=plan, id_registry=_REGISTRY, symbols=_symbols()
+    )
+    return cpa.build_mutation_attestation(
+        plan=plan, action="create", target_component_id=None,
+        result_component_id="NEW-ROOT", submitted_xml=xml,
+        account_scope_hash=_DIGEST,
+        replay_evidence_bindings=bindings,
+        replay_account_scope_hash=scope,
+    )
+
+
+def test_one_consumed_grant_is_attested_once():
+    """A duplicate is a second claim that a second grant was consumed.
+
+    The construction sorted on three of the five key fields and deduplicated on
+    none, so the same binding arriving twice — the same root, call, contract,
+    operation and connection — was recorded twice. An accounting record that
+    double-counts what authorised a write is describing something that did not
+    happen.
+    """
+    att = _attest([_binding(), _binding()])
+    assert len(att.replay_evidence_bindings) == 1, att.replay_evidence_bindings
+
+    # ...and two GENUINELY different calls of the same contract stay two: the
+    # dedup must collapse repeats, never distinct bindings.
+    att = _attest([_binding(), _binding(call_source_path="/body/steps/4")])
+    assert len(att.replay_evidence_bindings) == 2, att.replay_evidence_bindings
+
+
+def test_the_binding_order_is_the_key_the_contract_names():
+    """Byte-identical records for the same set, whatever order it arrives in."""
+    one = _attest([
+        _binding(call_source_path="/body/steps/4"),
+        _binding(connection_ref="$ref:aaa"),
+        _binding(),
+    ])
+    other = _attest([
+        _binding(),
+        _binding(call_source_path="/body/steps/4"),
+        _binding(connection_ref="$ref:aaa"),
+    ])
+    assert [b.model_dump() for b in one.replay_evidence_bindings] == [
+        b.model_dump() for b in other.replay_evidence_bindings
+    ]
+    # NON-VACUITY: three distinct keys, so the comparison is over an order that
+    # could have differed rather than over a one-element list.
+    assert len(one.replay_evidence_bindings) == 3
+
+
+def test_a_binding_from_another_account_refuses_rather_than_being_attested():
+    """The nested-scope invariant, at the last gate before the record is durable.
+
+    The plan words it as "nested account scope equals the parent attestation
+    scope". Taken literally that is unsatisfiable and the test would be
+    unwritable: the parent's `account_scope_hash` is the authoring layer's
+    fingerprint over a keyed payload, the binding's is the registry's plain
+    `sha256(account_id)` — two digests of the same account by two owners, never
+    equal. So the comparison is against the REGISTRY-side scope for this apply,
+    which is the value the boundary recheck itself compared against.
+    """
+    with pytest.raises(cpa.CanonicalProcessApplyError):
+        _attest([_binding(account_scope_hash=_SCOPE_B)])
+
+    # A binding that makes NO account claim is not a foreign one. Absent means
+    # "not captured" — the model says so — and refusing it would invent a
+    # disagreement out of silence.
+    att = _attest([_binding(account_scope_hash=None)])
+    assert len(att.replay_evidence_bindings) == 1
+
+
+def test_the_attestation_records_what_the_boundary_compared():
+    """Both configuration digests, or the record cannot show they were checked.
+
+    A credential-only version advance is the case these digests exist to catch,
+    and the boundary compares them — but the durable record carried neither, so
+    an auditor could see that ids and versions were checked and could not see
+    that configuration was.
+    """
+    att = _attest([_binding()])
+    bound = att.replay_evidence_bindings[0]
+    assert bound.operation_config_digest == "ComponentConfigDigestV1:" + ("d" * 64)
+    assert bound.connection_config_digest == "ComponentConfigDigestV1:" + ("e" * 64)
+    assert bound.process_root_ref == "$ref:ROOT"
+    assert bound.connection_ref == "$ref:conn"

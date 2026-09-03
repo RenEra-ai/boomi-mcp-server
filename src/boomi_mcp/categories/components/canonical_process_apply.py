@@ -344,6 +344,7 @@ def build_mutation_attestation(
     observed_folder_id: Optional[str] = None,
     applied_folder_id: Optional[str] = None,
     replay_evidence_bindings=(),
+    replay_account_scope_hash: Optional[str] = None,
 ):
     """The apply-time mutation attestation for one root.
 
@@ -390,28 +391,78 @@ def build_mutation_attestation(
             return source.get(name)
         return getattr(source, name, None)
 
-    bindings = tuple(
-        sorted(
-            (
-                ConnectorReplayEvidenceBindingAttestationV1(
-                    contract_ref=_field(g, "contract_ref"),
-                    operation_ref=_field(g, "operation_ref"),
-                    call_source_path=_field(g, "call_source_path"),
-                    record_digest=_field(g, "record_digest"),
-                    account_scope_hash=_field(g, "account_scope_hash"),
-                    operation_component_id=_field(g, "operation_component_id"),
-                    operation_version=_field(g, "operation_version"),
-                    connection_component_id=_field(g, "connection_component_id"),
-                    connection_version=_field(g, "connection_version"),
-                    route_coverage_kind=_field(g, "route_coverage_kind"),
-                    capture_digest=_field(g, "capture_digest"),
-                    route_capture_digest=_field(g, "route_capture_digest"),
-                )
-                for g in (replay_evidence_bindings or ())
-                if _field(g, "record_digest")
-            ),
-            key=lambda b: (b.contract_ref, b.operation_ref, b.call_source_path),
+    _attested = []
+    for g in (replay_evidence_bindings or ()):
+        if not _field(g, "record_digest"):
+            continue
+        _scope = _field(g, "account_scope_hash")
+        if (
+            _scope
+            and replay_account_scope_hash
+            and _scope != replay_account_scope_hash
+        ):
+            # THE NESTED SCOPE MUST NAME THE PARENT'S ACCOUNT. The plan words
+            # this as "nested account scope equals the parent attestation scope",
+            # and taken literally that is unsatisfiable: the parent's
+            # `account_scope_hash` is `sha256_fingerprint({scope, keyed_on,
+            # account_id})` from the authoring layer, while a binding's is the
+            # registry's `sha256(account_id)` — two different digests of the same
+            # account, by two different owners, which can never compare equal.
+            # Measured, not assumed. So the invariant is enforced against the
+            # REGISTRY-side scope for this apply, which is the same value the
+            # boundary recheck compared against; the two sides of the comparison
+            # therefore come from one authority instead of two.
+            #
+            # This is the last gate before the record becomes durable, and it is
+            # not redundant with the recheck: a root whose recheck did not run
+            # falls back to raw grants, and that path reaches here unchecked.
+            raise CanonicalProcessApplyError(
+                "an evidence binding for process {0!r} names account scope {1!r}, "
+                "which is not the scope this apply is authorised in; the "
+                "attestation would claim evidence from another account".format(
+                    key, _scope
+                ),
+                error_code="PROCESS_MATERIALIZATION_RESULT_ID_MISSING",
+                component_key=key,
+            )
+        _attested.append(
+            ConnectorReplayEvidenceBindingAttestationV1(
+                contract_ref=_field(g, "contract_ref"),
+                operation_ref=_field(g, "operation_ref"),
+                call_source_path=_field(g, "call_source_path"),
+                process_root_ref=_field(g, "process_root_ref"),
+                connection_ref=_field(g, "connection_ref"),
+                record_digest=_field(g, "record_digest"),
+                account_scope_hash=_scope,
+                operation_component_id=_field(g, "operation_component_id"),
+                operation_version=_field(g, "operation_version"),
+                connection_component_id=_field(g, "connection_component_id"),
+                connection_version=_field(g, "connection_version"),
+                operation_config_digest=_field(g, "operation_config_digest"),
+                connection_config_digest=_field(g, "connection_config_digest"),
+                route_coverage_kind=_field(g, "route_coverage_kind"),
+                capture_digest=_field(g, "capture_digest"),
+                route_capture_digest=_field(g, "route_capture_digest"),
+            )
         )
+
+    # THE KEY THE CONTRACT NAMES, both to order and to deduplicate. It sorted on
+    # three fields and deduplicated on none, so two applies could attest the same
+    # binding twice — and a duplicate in an accounting record is a second claim
+    # that a second grant was consumed, which is a different fact from the one
+    # that happened. `dict` keeps the FIRST of each key and preserves order, so
+    # the sort below decides the record and the dedup cannot reorder it.
+    def _key(b):
+        return (
+            b.process_root_ref or "",
+            b.call_source_path,
+            b.contract_ref,
+            b.operation_ref,
+            b.connection_ref or "",
+        )
+
+    bindings = tuple(
+        {_key(b): b for b in sorted(_attested, key=_key)}.values()
     )
 
     return ProcessMutationAttestationV1(

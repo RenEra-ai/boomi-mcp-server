@@ -822,6 +822,14 @@ def mint_idempotency_grants(
             call_source_path=binding.source_path,
             record_digest=contract.record_digest,
             dynamic_path=dynamic_path_by_node.get(binding.node_id, False),
+            # FROM THE RESOLVED BINDING AND THIS CALL'S OWN ROOT, at the one
+            # point that holds both. `binding.connection_ref` is the compiler's
+            # resolution of which connection this operation runs on — the same
+            # value `_registry_corroborates` above just checked the evidence
+            # against — so the grant and the check cannot describe different
+            # connections.
+            process_root_ref=process_root_ref,
+            connection_ref=getattr(binding, "connection_ref", None),
         )
         if grant.key in seen:
             continue
