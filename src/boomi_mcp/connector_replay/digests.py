@@ -750,6 +750,24 @@ def comparable_path(path: str) -> str:
     return _normalize_percent_encoding(path.strip())
 
 
+#: Every branch `rest_route_decision` has, named by the input that reaches it.
+#: Derived from the function's own structure rather than from the two cases this
+#: issue happened to change.
+_ROUTE_DECISION_CASES: Final[dict] = {
+    "unmodelled-family": ((("/a", "/b"), False, True)),
+    "unresolved-identity": ((("/a",), True, False)),
+    "no-path-field": (((), True, True)),
+    "blank-only": ((("",), True, True)),
+    "blank-plus-one-route": ((("", "/a"), True, True)),
+    "blank-plus-two-routes": ((("", "/a", "/b"), True, True)),
+    "blank-plus-two-spellings": ((("", "/a", "/%61"), True, True)),
+    "one-route": ((("/a",), True, True)),
+    "one-route-two-spellings": ((("/a", "/%61"), True, True)),
+    "two-distinct-routes": ((("/a", "/b"), True, True)),
+    "three-routes": ((("/a", "/b", "/c"), True, True)),
+}
+
+
 def _percent_probe_domain() -> tuple:
     """One probe per octet, in both hex spellings — DERIVED, never sampled.
 
@@ -802,10 +820,11 @@ def _percent_probe_domain() -> tuple:
     # of one route to accepting them moved acceptance while every probe output,
     # and both served revisions, stood still. A behaviour authority that projects
     # its helper and not its own decision is projecting the wrong thing.
-    probes.extend((
-        "\x00route-conflict:one-route-two-spellings",
-        "\x00route-conflict:two-distinct-routes",
-    ))
+    # THE AUTHORITY'S FULL CASE SET, not two samples of it. Two probes covered
+    # the pair whose answer changed and left the blank, missing, unmodelled and
+    # unresolved branches invisible — the same sample-instead-of-derive defect
+    # this oracle has now produced twice, one axis in each time.
+    probes.extend("\x00route-decision:" + case for case in _ROUTE_DECISION_CASES)
     probes.extend((
         "/%",        # a percent with nothing after it
         "/%2",       # one hex digit — a truncated escape
@@ -851,27 +870,25 @@ def path_equivalence_behaviour() -> tuple:
     #: The route reader's verdict on the two cases whose answer this issue
     #: changed, carried as data beside the normalizer's outputs so a change to
     #: EITHER moves the revision. Derived by running the reader, never restated.
-    def _reader_verdict(spellings):
-        # THE DECISION ITSELF, called. An earlier version built a component
-        # document to ask this question and the reader refused the document —
-        # proving only that the XML had been guessed wrong, for the third time in
-        # this issue. The decision is a pure function of the stored paths, so the
-        # oracle asks it directly.
+    def _reader_verdict(case):
+        # THE DECISION ITSELF, called, and serialized WHOLE. An earlier version
+        # built a component document to ask this question and the reader refused
+        # it — the third hand-built fixture in this issue to prove only that the
+        # shape had been guessed wrong. A later one recorded merely whether a
+        # path came back, so changing WHICH route is retained moved declaration
+        # matching and left the revision still.
         from ..authoring.connector_resolution_snapshot import rest_route_decision
 
+        fields, modelled, resolved = _ROUTE_DECISION_CASES[case]
         state, conflicting, path = rest_route_decision(
-            list(spellings), modelled=True, resolved_enough=True
+            list(fields), modelled=modelled, resolved_enough=resolved
         )
-        return "%s/%s/%s" % (state, bool(conflicting), bool(path))
+        return "%s/%s/%s" % (state, bool(conflicting), path)
 
     for probe in PATH_EQUIVALENCE_PROBES:
-        if probe.startswith("\x00route-conflict:"):
-            spellings = (
-                ("/route/a", "/route/%61") if probe.endswith("one-route-two-spellings")
-                else ("/route/a", "/route/b")
-            )
+        if probe.startswith("\x00route-decision:"):
             try:
-                results.append((probe, _reader_verdict(spellings)))
+                results.append((probe, _reader_verdict(probe.split(":", 1)[1])))
             except Exception as refusal:  # noqa: BLE001
                 results.append((probe, "refused:" + type(refusal).__name__))
             continue

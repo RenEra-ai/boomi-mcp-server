@@ -4400,4 +4400,6 @@ def test_a_declaration_free_conflict_does_not_claim_a_declaration_disagreed():
             declared={},
         )
     assert raised.value.code == CONNECTOR_REPLAY_IDENTITY_UNAVAILABLE
-    assert "no declaration can resolve this" in (raised.value.remediation or "")
+    assert "no declaration can resolve this" in (raised.value.remediation or "").lower()
+    # ...and it points at the document that actually holds the surplus route.
+    assert "the component in the account" in (raised.value.remediation or "")

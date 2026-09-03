@@ -38,6 +38,7 @@ from ..errors import (
     CONNECTOR_REPLAY_IDENTITY_MISMATCH,
     CONNECTOR_REPLAY_IDENTITY_UNAVAILABLE,
     CONNECTOR_REPLAY_SUBMITTED_XML_UNREADABLE,
+    CONNECTOR_REPLAY_SUBMITTED_XML_UNREADABLE,
     SUBMITTED_XML_UNSETTLED_REASONS,
     submitted_xml_unsettled_summary,
 )
@@ -290,13 +291,26 @@ def rest_route_decision(path_fields, *, modelled: bool, resolved_enough: bool):
         # A REST operation whose path we cannot find is a route we cannot read.
         # Silence, not "static" — "static" is the answer that disarms.
         return "unavailable", False, None
-    if any((value or "").strip() == "" for value in path_fields):
-        return "dynamic", False, None
 
     from ..connector_replay.digests import comparable_path
 
+    # THE CONFLICT IS COUNTED BEFORE ANY EARLY RETURN, because it is a fact about
+    # the non-blank routes and nothing about a blank one changes it. The first
+    # version tested for a blank path first and returned `dynamic`, so a
+    # component holding a blank path AND two distinct routes was reported as
+    # merely dynamic — and the conflict refusal it should have triggered was
+    # bypassed by supplying the very binding the blank path asks for.
     routes = {comparable_path(v) for v in (x.strip() for x in path_fields) if v}
-    if len(routes) > 1:
+    conflicting = len(routes) > 1
+
+    if any((value or "").strip() == "" for value in path_fields):
+        # A blank path means the route is composed per document. That is still
+        # true when the stored routes contradict each other, and the contradiction
+        # is still disqualifying — a binding composes ONE of them, and which one
+        # is exactly what nobody can say.
+        return "dynamic", conflicting, None
+
+    if conflicting:
         # DISTINCT AFTER NORMALIZATION, so a genuine contradiction rather than two
         # spellings of one thing. Unreadable for the same reason a missing path
         # is, and additionally a CONFLICT: one is silence, this is a component
@@ -935,21 +949,7 @@ def build_connector_resolution_snapshot(
             # accurate one here: nothing about what the component will actually
             # do can be checked, so the request is refused rather than applied
             # against a component nobody could examine.
-            failures.append(ConnectorIdentityError(
-                CONNECTOR_REPLAY_IDENTITY_UNAVAILABLE,
-                (
-                    "component {0!r} is stored with more than one route, so what "
-                    "it will actually call cannot be established. Remove the "
-                    "surplus path from the component."
-                ).format(_identity.component_key),
-                component_key=_identity.component_key,
-                field="path",
-                remediation=(
-                    "The component itself stores two different routes. Remove the "
-                    "surplus path from the component; no declaration can resolve "
-                    "this, because the ambiguity is in the stored document."
-                ),
-            ))
+            failures.append(_route_conflict_error(_identity))
 
     if declared:
         try:
@@ -1015,6 +1015,36 @@ def declared_paths_from_components(
         if isinstance(declared, str) and declared.strip():
             paths[component.key] = declared
     return paths
+
+
+def _route_conflict_error(identity) -> "ConnectorIdentityError":
+    """The refusal for a component that carries more than one route.
+
+    CLASSIFIED BY WHERE THE BYTES CAME FROM. The first version always used the
+    unavailable code, which is registered for a reused ACCOUNT component that
+    could not be read — and the case this refusal was added for is a raw create
+    whose own submitted payload contradicts itself, where no stored component
+    exists at all. A code-driven client was told to go and look at a component
+    the request had not yet created, and the remediation sent it to the wrong
+    document. The submitted-XML code's own summary covers this exactly: raw
+    component XML that does not settle what it would install.
+    """
+    submitted = getattr(identity, "authority", None) == "submitted_xml"
+    where = "the XML this request submits" if submitted else "the component in the account"
+    return ConnectorIdentityError(
+        CONNECTOR_REPLAY_SUBMITTED_XML_UNREADABLE if submitted
+        else CONNECTOR_REPLAY_IDENTITY_UNAVAILABLE,
+        (
+            "component {0!r} carries more than one route in {1}, so what it "
+            "would actually call cannot be established."
+        ).format(identity.component_key, where),
+        component_key=identity.component_key,
+        field="path",
+        remediation=(
+            "Remove the surplus path from {0}. No declaration can resolve this, "
+            "because the ambiguity is in the document itself.".format(where)
+        ),
+    )
 
 
 def assert_declared_matches_resolved(
@@ -1089,21 +1119,7 @@ def assert_declared_matches_resolved(
         # applies within a component, not only across them.
         _route_unusable = bool(identity.route_conflicting)
         if _route_unusable:
-            mismatches.append(ConnectorIdentityError(
-                CONNECTOR_REPLAY_IDENTITY_MISMATCH,
-                (
-                    "component {0!r} is stored with more than one route, so it "
-                    "cannot serve a single one and no declaration can be checked "
-                    "against it. Remove the surplus path from the component."
-                ).format(key),
-                component_key=key,
-                field="path",
-                remediation=(
-                    "The component itself stores two different routes. Remove the "
-                    "surplus path from the component; no declaration can resolve "
-                    "this, because the ambiguity is in the stored document."
-                ),
-            ))
+            mismatches.append(_route_conflict_error(identity))
         declared_path = None if _route_unusable else (declared_paths or {}).get(key)
         live_path = identity.path if identity.route_state == "static" else None
         # CASE FOLDING IS PER FIELD, because the fields are not the same kind of
@@ -1174,12 +1190,34 @@ def assert_declared_matches_resolved(
                     ),
                     component_key=key,
                     field=label,
-                    remediation=(
-                        "The declaration disagrees with the account on {0!r}. "
-                        "Correct that field to what the component resolves to; "
-                        "the other declared fields matched.".format(label)
-                    ),
                 ))
+    # THE REMEDIATION IS BUILT AFTER EVERY MISMATCH IS KNOWN. Attaching it inside
+    # the loop meant the first failure asserted that "the other declared fields
+    # matched" before the later fields had been compared — and when both the verb
+    # and the path disagreed, the served text said the one that was also wrong
+    # was fine. It also said "the account" for an identity read from the caller's
+    # OWN submitted XML, which names the wrong document. `_pre_write_refusal`
+    # serves this verbatim, so it is contract text and not a note.
+    _declared_mismatches = [m for m in mismatches if m.remediation is None]
+    if _declared_mismatches:
+        _fields = sorted({m.field for m in _declared_mismatches if m.field})
+        _identity = snapshot.lookup(_declared_mismatches[0].component_key)
+        _where = (
+            "the XML this request submits"
+            if getattr(_identity, "authority", None) == "submitted_xml"
+            else "the account"
+        )
+        _text = (
+            "The declaration disagrees with {0} on {1}. Correct {2} to what the "
+            "component resolves to.".format(
+                _where,
+                " and ".join(repr(f) for f in _fields),
+                "those fields" if len(_fields) > 1 else "that field",
+            )
+        )
+        for m in _declared_mismatches:
+            m.remediation = _text
+
     if mismatches:
         first = mismatches[0]
         # THE FIELD TRAVELS WITH THE CODE. Every surface that renders one of these
