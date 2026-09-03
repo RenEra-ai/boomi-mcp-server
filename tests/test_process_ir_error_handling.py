@@ -2272,3 +2272,49 @@ def test_a_real_snapshot_is_accepted(monkeypatch):
         snapshot=TrustedConnectorResolutionSnapshotV1(),
     )
     assert len(minted.idempotency_grants) == 1
+
+
+def test_a_replay_declaration_is_graded_wherever_it_is_authored():
+    """The same declaration cannot mean one thing inside a retry and nothing outside.
+
+    Live QA measured the asymmetry: `idempotency` sits on the CALL, so it is
+    authorable on a call no try/catch surrounds — and the gate returned before
+    looking whenever no error region existed. So the identical declaration naming
+    an operation the registry does not record was refused inside a retried region
+    and accepted in silence outside one, with nothing in the envelope to tell the
+    two apart. Position decided meaning.
+
+    It was never harmlessly inert: for an operation the registry DOES record, a
+    non-retried call already mints an evidence binding, so minting never depended
+    on the retry — only the check did.
+
+    Both arms are asserted, because a rule that refuses everything would satisfy
+    the first alone.
+    """
+    unverified = _never_retryable_refs()[0]
+    dangling = "$ref:icv1:rest:patch:nothing_records_this:1"
+
+    def _bare_call(**extra):
+        # A producer first, then the graded call — the shape live QA drove. The
+        # write consumes documents, so a lone call fails cardinality before ever
+        # reaching the evidence rule and would grade the wrong thing.
+        return _doc([
+            {"kind": "connector_call", "operation_ref": "$ref:GETOP"},
+            {"kind": "connector_call", "operation_ref": unverified, **extra},
+            {"kind": "stop"},
+        ])
+
+    # CONTROL FIRST: the same document with NO declaration compiles. Without this
+    # the refusal below could be about the shape rather than the declaration.
+    _compile(_bare_call(), _symbols())
+
+    # OUTSIDE any try/catch — the position that used to pass in silence.
+    with pytest.raises(ProcessIRCompileError) as raised:
+        _compile(
+            _bare_call(idempotency={"kind": "key_reference",
+                                    "contract_ref": dangling}),
+            _symbols(),
+        )
+    assert any(d.code == PROCESS_IR_SEMANTIC_IDEMPOTENCY_EVIDENCE_MISSING
+               for d in raised.value.diagnostics), [
+        d.code for d in raised.value.diagnostics]

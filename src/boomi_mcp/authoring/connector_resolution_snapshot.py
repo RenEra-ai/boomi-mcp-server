@@ -938,6 +938,23 @@ def build_connector_resolution_snapshot(
         # component here handed an ordinary caller the identical path problem
         # twice. This loop exists for the components the comparator never sees,
         # which is exactly the ones absent from the declaration map.
+        #
+        # AND ITS REACH IS BOUNDED BY WHAT THE SNAPSHOT WAS GIVEN, which the
+        # sentence above overstated until live QA measured it. An identity only
+        # carries an account-side route when the caller handed this builder the
+        # live XML for that component. On a components-only apply — one that
+        # reuses components and authors no process root — the apply path collects
+        # no live XML at all, so a reused component holds no account identity,
+        # `route_conflicting` is never set, and this loop has nothing to refuse.
+        # The SUBMITTED-XML rung is unaffected and does refuse there; it is the
+        # ACCOUNT rung that is unreachable on that one surface.
+        #
+        # Recorded rather than closed by widening the read, because the widening
+        # would buy nothing: a reuse writes nothing to the component it reuses,
+        # and any request that adds a process root re-enables the live read and
+        # refuses. So the gap admits no bad write — what it admitted was a
+        # comment claiming a coverage the code does not have, which is the defect
+        # being fixed here.
         if _identity.component_key in (declared or {}):
             continue
         if getattr(_identity, "route_conflicting", None):

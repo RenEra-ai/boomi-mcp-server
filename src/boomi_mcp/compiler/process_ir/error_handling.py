@@ -277,13 +277,39 @@ def validate_error_handling(
     emitter will see.
     """
     regions = derive_error_regions(cfg)
-    if not regions:
-        # No error handler authored: nothing here applies, and every pre-#142
-        # payload takes this exit unchanged.
-        return
-
     binding_by_node = {binding.node_id: binding for binding in bindings}
     contracts = symbols.build_idempotency_index()
+
+    # A REPLAY DECLARATION IS GRADED WHEREVER IT IS AUTHORED, not only where an
+    # error handler happens to surround it. `idempotency` sits on the CALL, so it
+    # is authorable on a call outside every try/catch — and this function used to
+    # return before looking whenever no region existed. Live QA measured what that
+    # produced: the identical declaration refused as unevidenced inside a retried
+    # region, and was accepted in silence outside one, on the same operation. A
+    # caller could not tell the two apart from the envelope, and the meaning of
+    # their declaration depended on its POSITION rather than on its content.
+    #
+    # It is not a case where the declaration is harmlessly inert, either: on an
+    # operation the registry DOES record, a non-retried call already mints an
+    # evidence binding. So minting never depended on the retry; only the check
+    # did. This makes the two agree — the same missing evidence is named in both
+    # positions — rather than teaching the envelope a second way to say nothing.
+    in_a_region = {
+        node_id
+        for region in regions
+        for node_id in tuple(region.try_node_ids) + tuple(region.catch_node_ids)
+    }
+    for node_id, binding in sorted(binding_by_node.items()):
+        if node_id in in_a_region:
+            continue  # graded below, in its region, with the retry rules too
+        _require_resolvable(
+            _authored_evidence(cfg, node_id), contracts, binding, node_id
+        )
+
+    if not regions:
+        # No error handler authored: nothing FURTHER here applies, and every
+        # pre-#142 payload takes this exit unchanged.
+        return
     # Grants narrow evidence from per-OPERATION to per-CALL, and they are consulted
     # ONLY on a root-projected table. A grant-free table is the honest state before
     # any root is projected — effect-declaration resolution runs there — and

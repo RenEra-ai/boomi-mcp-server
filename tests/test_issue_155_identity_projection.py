@@ -4580,3 +4580,65 @@ def test_compile_serves_the_failure_s_own_field_and_remediation():
         "told the caller to correct the two fields that were right"
     )
     assert json.dumps(served.model_dump(mode="json")).count("a-route-nothing-stores") == 0 or True
+
+
+def test_the_account_rung_needs_live_xml_and_says_so():
+    """The declaration-independent refusal reaches only as far as it was fed.
+
+    Live QA measured the boundary this pins. The loop refuses a contradictory
+    STORED route for components the comparator never visits — and an identity
+    carries an account-side route only when the builder was handed live XML for
+    it. Given none, there is nothing to contradict.
+
+    Pinned because the comment above it claimed otherwise, and a comment claiming
+    a coverage the code lacks is what a later reader builds on. Both arms are
+    asserted: with the live XML the refusal fires, without it the identity is
+    simply unresolved — not silently agreed with.
+    """
+    from boomi_mcp.authoring.connector_resolution_snapshot import (
+        build_connector_resolution_snapshot,
+    )
+    from boomi_mcp.models.integration_models import IntegrationComponentSpec
+
+    base = _live_xml("cap155-e2-post")
+    two_routes = base.replace(
+        "</GenericOperationConfig>",
+        '<field id="path" type="string" value="/a-second-route"/>'
+        "</GenericOperationConfig>", 1)
+    # HARNESS CONTROL, asserted rather than skipped: a probe that silently failed
+    # to plant its second route would test nothing and report green.
+    assert two_routes != base, "the two-route mutant did not apply"
+
+    component = IntegrationComponentSpec(
+        key="op", type="connector-action",
+        component_id="deadbeef-0000-0000-0000-000000000000", config={})
+
+    # WITH the live reading: the account route is known, the contradiction is
+    # seen, and the request is refused. This arm is what makes the other one
+    # meaningful — without it, "did not refuse" could just mean "never worked".
+    from boomi_mcp.authoring.connector_resolution_snapshot import (
+        ConnectorIdentityError,
+    )
+
+    with pytest.raises(ConnectorIdentityError) as refused:
+        build_connector_resolution_snapshot(
+            [component], live_component_xml={"op": two_routes})
+    assert refused.value.code == "CONNECTOR_REPLAY_IDENTITY_UNAVAILABLE", (
+        "the account rung must report that the component could not be read as one "
+        "route, not that a DECLARATION disagreed — nothing was declared here"
+    )
+
+    # WITHOUT it — the components-only apply shape — nothing about the account is
+    # known, so nothing is refused. The point is that this is SILENCE, not assent:
+    # no identity claims a settled route either.
+    starved = build_connector_resolution_snapshot([component], live_component_xml={})
+    for identity in (getattr(starved, "identities", ()) or ()):
+        if identity.component_key != "op":
+            continue
+        assert not getattr(identity, "route_conflicting", None), (
+            "a conflict was reported for a component whose account state was never "
+            "read — that verdict has no evidence behind it"
+        )
+        assert not getattr(identity, "path", None), (
+            "a route was reported for a component nobody read"
+        )
