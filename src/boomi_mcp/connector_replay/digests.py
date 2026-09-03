@@ -750,12 +750,34 @@ def comparable_path(path: str) -> str:
     return _normalize_percent_encoding(path.strip())
 
 
-#: The distinctions `comparable_path` is required to draw, as a fixed vocabulary.
-#: Owned by this module because the probes describe THIS function's behaviour, the
-#: same way the identifier grammar owns its own.
+def _percent_probe_domain() -> tuple:
+    """One probe per octet, in both hex spellings — DERIVED, never sampled.
+
+    The normalizer makes a per-octet decision: an unreserved byte is decoded to
+    its character, everything else keeps its escape with the hex upper-cased.
+    Sampling one escape covers ONE of those arms. A release that dropped the
+    decoding while keeping the upper-casing would leave every sampled output
+    unchanged — and with it both published revisions — while a stored `/A` and a
+    declared `/%41` flipped from a match to a refusal. That is the same
+    stale-provenance defect this projection was added to close, reachable again
+    through the half it did not look at.
+
+    So the domain is every byte rather than a chosen few, in upper and lower hex
+    so the case-folding arm is covered per octet too. It is 512 short strings:
+    the cost of the honest version is nothing, and the sampled version was only
+    ever cheaper to write.
+    """
+    return tuple(
+        "/%{0:02X}".format(byte) for byte in range(256)
+    ) + tuple(
+        "/%{0:02x}".format(byte) for byte in range(256)
+    )
+
+
+#: The distinctions `comparable_path` is required to draw. The structural cases are
+#: named because each stands for a rule; the percent-escape cases are DERIVED over
+#: the whole octet domain, because that rule is decided per byte.
 PATH_EQUIVALENCE_PROBES: Final[tuple] = (
-    "/items/a%2Fb",      # percent-escape hex — case-insensitive, must fold
-    "/items/a%2fb",
     "/Orders/42",        # literal characters — case-sensitive, must NOT fold
     "/orders/42",
     "/../admin",         # dot segments — context-dependent, must NOT fold
@@ -764,7 +786,7 @@ PATH_EQUIVALENCE_PROBES: Final[tuple] = (
     "/a/b",
     "/secret?/../x",     # a query the route digest refuses outright
     "/x",
-)
+) + _percent_probe_domain()
 
 
 def path_equivalence_behaviour() -> tuple:

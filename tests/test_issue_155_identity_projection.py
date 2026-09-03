@@ -3885,3 +3885,49 @@ def test_the_path_equivalence_moves_the_published_revision():
     # ...and it is stable when nothing changes, or the assertion above would pass
     # for any two calls.
     assert get_authoring_revisions()["compiler_revision"] == before
+
+
+def test_the_revision_oracle_covers_both_normalization_arms():
+    """Sampling one escape covered one of the two per-octet decisions.
+
+    The normalizer decides per byte: an unreserved octet decodes to its
+    character, everything else keeps its escape with the hex upper-cased. The
+    first probe vocabulary sampled `%2F` only — the reserved arm — so a release
+    that dropped the DECODING while keeping the upper-casing left every probe
+    output unchanged, and with it both published revisions, while a stored `/A`
+    and a declared `/%41` flipped from a match to a refusal.
+
+    That is the stale-provenance defect the projection exists to close, reachable
+    again through the half it did not look at. The probes are now derived over the
+    whole octet domain in both hex spellings rather than chosen.
+    """
+    from unittest.mock import patch
+
+    import boomi_mcp.connector_replay.digests as digests
+    from boomi_mcp.authoring.contract import (
+        get_authoring_revisions,
+        reset_manifest_cache,
+    )
+
+    # NON-VACUITY: the derived domain must actually contain both arms.
+    outputs = dict(digests.path_equivalence_behaviour())
+    assert outputs["/%41"] == "/A", "no probe exercises the decoding arm"
+    assert outputs["/%2F"] == "/%2F", "no probe exercises the escape-keeping arm"
+    assert outputs["/%2f"] == "/%2F", "no probe exercises the hex-case arm"
+
+    reset_manifest_cache()
+    before = get_authoring_revisions()["compiler_revision"]
+
+    def _keeps_every_escape(match):
+        # The mutant: upper-case the hex, never decode the unreserved byte.
+        return "%" + match.group(1).upper()
+
+    with patch.object(digests, "_UNRESERVED", frozenset()):
+        reset_manifest_cache()
+        after = get_authoring_revisions()["compiler_revision"]
+    reset_manifest_cache()
+
+    assert after != before, (
+        "dropping the unreserved decoding left the compiler revision unmoved, so "
+        "a build validated under the old normalization reports as current"
+    )
