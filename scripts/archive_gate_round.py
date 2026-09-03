@@ -243,21 +243,48 @@ ARCHITECT_ROW_PATHS = {
 #: attestation already binds by sha256. Nothing here is typed by hand: an
 #: artifact whose last non-empty line is not a verdict yields none, and the round
 #: is archived without one rather than with a guess.
+#: The two verdicts the architect gate prompt permits. A closed set, because the
+#: prompt that binds the session states exactly these and the row records what the
+#: gate concluded — a value outside them is a turn that did not conclude.
+ARCHITECT_VERDICTS = ("NO ISSUES", "ISSUES FOUND")
+
+
 def architect_verdict_from_artifact(run_dir: Path, attestation: dict):
     """The verdict a collected architect round carries, or None."""
     # STRIPPED, because `not "\n"` is False and a whitespace-only verdict would
     # otherwise satisfy this the way it once satisfied the check this replaced.
     attested = attestation.get("parsedVerdict")
     if isinstance(attested, str) and attested.strip():
+        # The collector's own parser produced this one, under the shared rule.
         return attested
     artifact = run_dir / "review.md"
     if not artifact.is_file():
         return None
-    lines = [l.strip() for l in artifact.read_text(encoding="utf-8").splitlines()]
-    for line in reversed(lines):
+    try:
+        text = artifact.read_text(encoding="utf-8")
+    except (UnicodeDecodeError, OSError):
+        # UNREADABLE IS NO VERDICT, and it must not be an exception here. This
+        # runs AFTER the staging directory has been renamed to its durable
+        # destination, and the raise was outside the rollback that guards the
+        # rename — so undecodable bytes left a published directory nothing
+        # accounted for, which the next run refuses as unaccounted and which
+        # therefore blocks the corrected retry. Returning None routes it into the
+        # caller's existing unresolved-verdict path, which removes the directory
+        # it just published. The digest preflight does not catch this because it
+        # hashes raw bytes and never decodes them.
+        return None
+    for line in reversed([l.strip() for l in text.splitlines()]):
         if not line:
             continue
-        return line[len("VERDICT:"):].strip() if line.startswith("VERDICT:") else None
+        if not line.startswith("VERDICT:"):
+            return None
+        verdict = line[len("VERDICT:"):].strip()
+        # THE PROTOCOL'S OWN ENUM. The gate prompt permits exactly two verdicts,
+        # and anything else on that line — a truncated turn, a paraphrase, a
+        # model that answered in prose — is not one of them. Returned as-is it
+        # was merely truthy, so the round archived as completed carrying a
+        # verdict no reader can act on and no gate defines.
+        return verdict if verdict in ARCHITECT_VERDICTS else None
     return None
 
 #: The attestation `gate-attest` writes carries no reviewed SHA under any

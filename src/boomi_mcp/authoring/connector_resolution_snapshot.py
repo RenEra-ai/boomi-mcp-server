@@ -535,6 +535,17 @@ def live_identity_from_component_xml(
             route_state = "unavailable"
         elif any((value or "").strip() == "" for value in path_fields):
             route_state = "dynamic"
+        elif len({(value or "").strip() for value in path_fields}) > 1:
+            # TWO DIFFERENT STORED PATHS IS A ROUTE WE CANNOT READ, and it must
+            # be answered the same way as one we cannot find. Left `static`, the
+            # identity says the route is settled while carrying no path: the
+            # blank-path net reads "settled" as "needs no binding" and the
+            # declared-versus-live comparison skips a path it has nothing to
+            # compare, so an ambiguous component passes both. This module already
+            # states the rule for the sibling case one branch above — "static" is
+            # the answer that disarms — and this is the same case reached from
+            # the other side.
+            route_state = "unavailable"
 
     # THE PATH ITSELF, kept — not just the state derived from it. This reader
     # extracted the account's stored path in order to decide `route_state` and
@@ -880,7 +891,16 @@ def build_connector_resolution_snapshot(
     # set as every other way this snapshot refuses.
     if declared:
         try:
-            assert_declared_matches_resolved(snapshot, declared)
+            # THE PATHS TOO, derived here from the components this function is
+            # already resolving. Without them the typed plan and compile route
+            # compared family and action and skipped the path, so a declaration
+            # naming a path the account does not store compiled CLEAN and was
+            # refused only at wet apply — a preview that disagrees with the write
+            # it previews, which is the asymmetry this repository has been caught
+            # by before and in this same direction.
+            assert_declared_matches_resolved(
+                snapshot, declared, declared_paths_from_components(components)
+            )
         except ConnectorIdentityError as mismatch:
             failures.extend(mismatch.failures)
 
@@ -894,6 +914,30 @@ def build_connector_resolution_snapshot(
             partial=snapshot,
         )
     return snapshot
+
+
+def declared_paths_from_components(
+    components: Sequence[Any],
+) -> Dict[str, Optional[str]]:
+    """``component key -> the path the caller DECLARED``, read off the plan.
+
+    Its own function rather than a third element on the connector-metadata tuple:
+    that tuple's shape is consumed across the recipes layer by several producers,
+    and widening it for one field would be a cross-subsystem refactor. Read from
+    the same component configs in the same order, so the two derivations cannot
+    describe different components.
+
+    A component that declares no path is absent, not present-and-empty — the
+    comparison treats a missing declaration as asserting nothing, and an empty
+    string is the dynamic-path authoring form rather than a claim about a route.
+    """
+    paths: Dict[str, Optional[str]] = {}
+    for component in components:
+        config = component.config or {}
+        declared = config.get("path")
+        if isinstance(declared, str) and declared.strip():
+            paths[component.key] = declared
+    return paths
 
 
 def assert_declared_matches_resolved(
@@ -954,10 +998,20 @@ def assert_declared_matches_resolved(
         # so the one value shown was the one that would not be used.
         declared_path = (declared_paths or {}).get(key)
         live_path = identity.path if identity.route_state == "static" else None
-        for label, mine, theirs in (
-            ("family", identity.family, declared_family),
-            ("action", identity.action, declared_action),
-            ("path", live_path, declared_path),
+        # CASE FOLDING IS PER FIELD, because the fields are not the same kind of
+        # thing. A family and an action are vocabulary tokens whose spelling the
+        # platform varies — `rest` and `REST`, `PATCH` and `patch` — and folding
+        # them is what makes the comparison work at all. A PATH is not a token:
+        # RFC 3986 makes the scheme and host case-insensitive and everything after
+        # them case-sensitive, so `/Orders/42` and `/orders/42` are different
+        # resources on any case-sensitive upstream. Folding it would accept a
+        # declaration that names a resource the account does not serve, and this
+        # module's own route digest already treats paths that way — it lower-cases
+        # the scheme and nothing else.
+        for label, mine, theirs, fold in (
+            ("family", identity.family, declared_family, True),
+            ("action", identity.action, declared_action, True),
+            ("path", live_path, declared_path, False),
         ):
             if theirs is None or mine is None:
                 # A declaration that says nothing asserts nothing.
@@ -966,7 +1020,11 @@ def assert_declared_matches_resolved(
                 # A declared BLANK path is the dynamic-path authoring form, not a
                 # claim about a route — the binding composes it per document.
                 continue
-            if str(theirs).strip().lower() != str(mine).strip().lower():
+            _mine = str(mine).strip()
+            _theirs = str(theirs).strip()
+            if fold:
+                _mine, _theirs = _mine.lower(), _theirs.lower()
+            if _theirs != _mine:
                 mismatches.append(ConnectorIdentityError(
                     CONNECTOR_REPLAY_IDENTITY_MISMATCH,
                     (

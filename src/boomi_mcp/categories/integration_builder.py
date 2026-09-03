@@ -7808,12 +7808,10 @@ def _build_canonical_symbols(*, spec, resolution):
     """
     from ..authoring.connector_resolution_snapshot import (
         assert_declared_matches_resolved,
+        declared_paths_from_components,
         build_connector_resolution_snapshot,
     )
-    from ..authoring.workflow import (
-        _connector_metadata_from_components,
-        _declared_paths_from_components,
-    )
+    from ..authoring.workflow import _connector_metadata_from_components
     from ..recipes.materialization import build_symbol_table
 
     # The caller's connector metadata is an ASSERTION, compared against what the
@@ -7838,7 +7836,7 @@ def _build_canonical_symbols(*, spec, resolution):
     # path is what will execute — so the caller was being shown the one value
     # that would not be used.
     assert_declared_matches_resolved(
-        snapshot, declared, _declared_paths_from_components(spec.components)
+        snapshot, declared, declared_paths_from_components(spec.components)
     )
 
     return build_symbol_table(

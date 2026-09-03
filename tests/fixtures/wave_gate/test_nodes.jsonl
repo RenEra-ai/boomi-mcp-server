@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 11474, "minimum_collected": 11474, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 11480, "minimum_collected": 11480, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -11518,3 +11518,9 @@
 {"kind": "test", "id": "pytest-011517", "node_id": "tests/test_issue_155_identity_projection.py::test_the_live_reader_keeps_the_path_it_read", "state": "active"}
 {"kind": "test", "id": "pytest-011518", "node_id": "tests/test_issue_155_recheck_boundary.py::test_a_drift_inside_the_materialization_window_refuses_before_the_write", "state": "active"}
 {"kind": "test", "id": "pytest-011519", "node_id": "tests/test_issue_155_recheck_boundary.py::test_a_mutation_uncertain_push_retains_the_accounting_it_owes", "state": "active"}
+{"kind": "test", "id": "pytest-011520", "node_id": "tests/test_archive_gate_round.py::test_a_verdict_outside_the_protocol_enum_is_not_a_verdict", "state": "active"}
+{"kind": "test", "id": "pytest-011521", "node_id": "tests/test_archive_gate_round.py::test_an_undecodable_artifact_yields_no_verdict_rather_than_raising", "state": "active"}
+{"kind": "test", "id": "pytest-011522", "node_id": "tests/test_issue_155_identity_projection.py::test_an_ambiguous_live_route_is_unreadable_and_never_settled[one stored path-None-static-True]", "state": "active"}
+{"kind": "test", "id": "pytest-011523", "node_id": "tests/test_issue_155_identity_projection.py::test_an_ambiguous_live_route_is_unreadable_and_never_settled[the same path twice-same-static-True]", "state": "active"}
+{"kind": "test", "id": "pytest-011524", "node_id": "tests/test_issue_155_identity_projection.py::test_an_ambiguous_live_route_is_unreadable_and_never_settled[two different paths-other-unavailable-False]", "state": "active"}
+{"kind": "test", "id": "pytest-011525", "node_id": "tests/test_issue_155_identity_projection.py::test_a_path_is_compared_case_sensitively_and_a_verb_is_not", "state": "active"}

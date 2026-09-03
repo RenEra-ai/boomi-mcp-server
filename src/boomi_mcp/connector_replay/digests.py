@@ -49,6 +49,8 @@ __all__ = [
     "CONFIG_DIGEST_DOMAIN",
     "route_digest_v1",
     "component_config_digest_v1",
+    "RECORD_DIGEST_DOMAIN",
+    "operation_record_digest_v1",
 ]
 
 #: Domain separators. A digest is over ``domain + payload``, so two algorithms that
@@ -56,6 +58,7 @@ __all__ = [
 #: this, adding a second digest later silently makes the first one ambiguous.
 ROUTE_DIGEST_DOMAIN: Final[bytes] = b"RouteDigestV1\0"
 CONFIG_DIGEST_DOMAIN: Final[bytes] = b"ComponentConfigDigestV1\0"
+RECORD_DIGEST_DOMAIN: Final[bytes] = b"OperationContractRecordV1\0"
 
 #: The closed projection. Nothing outside this contributes to a config digest.
 #:
@@ -689,3 +692,27 @@ def account_scope_hash(account_id: str) -> str:
         raise ValueError("no account id: the scope an artifact belongs to is unknown")
     return hashlib.sha256(account_id.encode("utf-8")).hexdigest()
 
+
+
+def operation_record_digest_v1(record: object) -> str:
+    """The digest of an operation record, over the record MINUS the digest field.
+
+    PUBLISHED HERE because the loader has to be able to recompute it. This value
+    is the evidence IDENTITY — grants carry it, the apply-boundary recheck matches
+    on it, and the durable mutation attestation records it — and until now the
+    only thing that computed it was the out-of-repo capture harness. So the
+    packaged registry shipped an identifier nothing in the repository could
+    check: alter a record's content while keeping its internal cross-checks
+    consistent, and the stale digest was accepted as the identity of evidence
+    that no longer described what it authorised.
+
+    Domain-separated like its siblings, and over the model's own JSON dump so the
+    serialization is the one the record is published in. The digest field is
+    removed rather than blanked: a placeholder would make the digest depend on
+    the placeholder's spelling.
+    """
+    import hashlib
+
+    body = record.model_dump(mode="json") if hasattr(record, "model_dump") else dict(record)
+    body.pop("record_digest", None)
+    return hashlib.sha256(RECORD_DIGEST_DOMAIN + _canonical(body)).hexdigest()

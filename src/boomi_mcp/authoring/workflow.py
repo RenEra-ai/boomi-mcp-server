@@ -356,30 +356,6 @@ def _connector_metadata_from_components(
     return metadata
 
 
-def _declared_paths_from_components(
-    components: Sequence[IntegrationComponentSpec],
-) -> Dict[str, Optional[str]]:
-    """``component key -> the path the caller DECLARED``, read off the plan.
-
-    Its own function rather than a third element on the connector-metadata tuple:
-    that tuple's shape is consumed across the recipes layer by several producers,
-    and widening it for one field would be a cross-subsystem refactor. Read from
-    the same component configs in the same order, so the two derivations cannot
-    describe different components.
-
-    A component that declares no path is absent, not present-and-empty — the
-    comparison treats a missing declaration as asserting nothing, and an empty
-    string is the dynamic-path authoring form rather than a claim about a route.
-    """
-    paths: Dict[str, Optional[str]] = {}
-    for component in components:
-        config = component.config or {}
-        declared = config.get("path")
-        if isinstance(declared, str) and declared.strip():
-            paths[component.key] = declared
-    return paths
-
-
 def _reparsed_unit(unit):
     """A unit whose nested ProcessIR is SERVER-OWNED, not the caller's object.
 

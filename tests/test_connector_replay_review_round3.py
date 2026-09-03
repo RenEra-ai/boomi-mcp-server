@@ -1323,6 +1323,9 @@ _EXPECTED_CLASS_COUNTS = {
     # one instance, and a floor that locks in an over-count is as wrong as one that
     # lets a real instance vanish.
     "DC-155-T": 1,  # OVERCOUNT-CORRECTED-FROM-2-TO-1
+    # Minted at the issue-level review round for a defect whose mechanism is
+    # placement relative to a commit point, not a missing format constraint.
+    "DC-155-V": 1,
     # Minted at the issue-level architect gate, where one reviewer-grouped finding
     # carried three defects sharing one pair: a fact the boundary established and
     # the record it produces then dropped. Counted as ONE row because that is what
@@ -2140,12 +2143,16 @@ def test_a_zero_count_class_row_may_not_name_instances():
         assert not re.findall(r"`([A-Z]+-155-[A-Za-z0-9-]+)`", cell), (
             f"{line.split('|')[1].strip()}: zero instances, yet names one"
         )
-    # ONE, since slice C. `DC-155-A` was pre-enumerated at step 0 against the
-    # connector family capability table and stood empty for two slices; the
-    # projection's family-blind route branch is its first instance. `DC-155-F`
-    # is the only class still carrying none.
-    assert zero_rows == 1, (
-        f"the ledger has {zero_rows} zero-count class rows, not the 1 measured when this "
+    # ZERO, since the issue-level review round. `DC-155-A` was pre-enumerated at
+    # step 0 and stood empty for two slices until the projection's family-blind
+    # route branch opened it. `DC-155-F` was the last empty one — minted at step 0
+    # against a hazard that had not yet occurred — and the architect gate's own
+    # verdict reader, which accepted any truthy string where the prompt defines
+    # exactly two, is its first instance. Every pre-enumerated class has now been
+    # met by a real defect, which is worth stating: a taxonomy written in advance
+    # that never fills is a taxonomy describing the wrong hazards.
+    assert zero_rows == 0, (
+        f"the ledger has {zero_rows} zero-count class rows, not the 0 measured when this "
         "check was written; a class opening or closing changes what it covers"
     )
 
@@ -6516,15 +6523,40 @@ def test_an_operation_record_cannot_authorise_a_replay_its_capture_never_saw():
         "is not evidence of anything: %s" % (refusal,)
     )
 
+    # THE FORGERY IS COMPLETED, not merely attempted. A tamper that leaves the
+    # record digest stale is now caught one check earlier, by the digest itself —
+    # so asserting on the raw edit would prove the digest check works and say
+    # NOTHING about this one. The digest is recomputed here through the published
+    # minter, exactly as a forger with the repository in front of them would, and
+    # what remains is a record that is internally consistent in every mechanical
+    # way and still claims a replay its capture never saw.
+    from boomi_mcp.connector_replay.digests import operation_record_digest_v1
+    from boomi_mcp.connector_replay.models import OperationContractRecordV1
+
     for observation in ("not_exercised", "duplicate_effect"):
         tampered = json.loads(json.dumps(raw))
-        tampered["operation_records"][0]["capture"]["summary"]["replay"] = observation
+        row = tampered["operation_records"][0]
+        row["capture"]["summary"]["replay"] = observation
+        row["record_digest"] = operation_record_digest_v1(
+            OperationContractRecordV1(**{**row, "record_digest": "0" * 64})
+        )
         loaded, refusal = _load(tampered)
         assert loaded is None, (
             "a record whose capture observed %r still loaded, so it authorises a "
             "replay nobody saw" % (observation,)
         )
-        assert "capture observed" in (refusal or ""), refusal
+        assert "capture observed" in (refusal or ""), (
+            "the refusal came from some other check, so this witness no longer "
+            "covers the semantic one: %s" % (refusal,)
+        )
+
+    # ...and the digest check itself, which the completed forgery above steps
+    # past: the same edit WITHOUT recomputing the digest is refused for naming an
+    # identity that no longer describes the record it sits on.
+    stale = json.loads(json.dumps(raw))
+    stale["operation_records"][0]["capture"]["summary"]["replay"] = "not_exercised"
+    loaded, refusal = _load(stale)
+    assert loaded is None and "hashes to" in (refusal or ""), refusal
 
 
 def test_a_summary_that_attests_nothing_is_refused(tmp_path):

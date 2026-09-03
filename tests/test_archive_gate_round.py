@@ -2487,3 +2487,55 @@ def test_a_MISSING_binding_side_is_refused_not_skipped(tmp_path, break_it, expec
     assert result.returncode == 1, (expect, result.stdout)
     assert expect in result.stderr, (expect, result.stderr)
     assert not (root / "architect-reviews" / run.name).exists(), expect
+
+
+def test_a_verdict_outside_the_protocol_enum_is_not_a_verdict(tmp_path):
+    """`VERDICT: BANANA` was merely truthy, so the round archived as completed.
+
+    The gate prompt that binds the architect session permits exactly two
+    verdicts. Anything else on that final line — a truncated turn, a paraphrase,
+    a model that answered in prose — is a turn that did not conclude, and a row
+    recording it names a verdict no reader can act on and no gate defines.
+    """
+    module = _archiver_module()
+    ARCHITECT_VERDICTS = module.ARCHITECT_VERDICTS
+    architect_verdict_from_artifact = module.architect_verdict_from_artifact
+
+    run = tmp_path / "round"
+    run.mkdir()
+
+    for verdict in ARCHITECT_VERDICTS:
+        (run / "review.md").write_text("findings\n\nVERDICT: %s\n" % verdict)
+        assert architect_verdict_from_artifact(run, {}) == verdict
+
+    for bogus in ("BANANA", "no issues", "ISSUES  FOUND", "", "MAYBE"):
+        (run / "review.md").write_text("findings\n\nVERDICT: %s\n" % bogus)
+        assert architect_verdict_from_artifact(run, {}) is None, bogus
+
+    # The attestation branch is untouched: that value came from the collector's
+    # own parser under the shared rule, and this function is not a second opinion
+    # on it.
+    (run / "review.md").write_text("findings\n\nVERDICT: BANANA\n")
+    assert architect_verdict_from_artifact(run, {"parsedVerdict": "NO ISSUES"}) == "NO ISSUES"
+
+
+def test_an_undecodable_artifact_yields_no_verdict_rather_than_raising(tmp_path):
+    """It runs AFTER the round has been published, outside the rename's rollback.
+
+    The digest preflight hashes raw bytes and never decodes them, so invalid
+    UTF-8 reaches this read intact. Raising here left a durable directory nothing
+    accounted for — which the next run refuses as unaccounted, blocking the very
+    retry that would fix it. Returning None routes it into the caller's existing
+    unresolved-verdict path, which removes what it just published.
+    """
+    architect_verdict_from_artifact = _archiver_module().architect_verdict_from_artifact
+
+    run = tmp_path / "round"
+    run.mkdir()
+    (run / "review.md").write_bytes(b"findings\n\nVERDICT: NO ISSUES\n\xff\xfe invalid")
+
+    assert architect_verdict_from_artifact(run, {}) is None
+
+    # NON-VACUITY: the same bytes decoded would have carried a valid verdict, so
+    # this asserts the decode failure and not merely a missing line.
+    assert b"VERDICT: NO ISSUES" in (run / "review.md").read_bytes()

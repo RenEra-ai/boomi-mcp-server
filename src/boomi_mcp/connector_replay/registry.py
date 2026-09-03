@@ -311,6 +311,27 @@ def _refuse_unresolvable_records(vocabulary, evidence, operation_records, semant
         # was seen to do. `not_exercised` and `duplicate_effect` support NO
         # guarantee at all — the first saw nothing, and the second saw the
         # opposite of every guarantee this enum can express.
+        # THE DIGEST IS THE EVIDENCE IDENTITY, so it must describe THIS record.
+        # Every check around it compares fields against each other, which a
+        # tampered record can satisfy by changing them together — the capture's
+        # replay observation and the semantics it cites, for instance. None of
+        # them looks at the identifier the compiler, the apply-boundary recheck
+        # and the durable attestation all carry, so materially different evidence
+        # could keep an existing authority identifier and every downstream record
+        # would name a digest that no longer describes what authorised the write.
+        #
+        # Recomputed from the published minter rather than a second copy of the
+        # rule: until now the only thing that computed this value was the
+        # out-of-repo capture harness, which is why nothing here could check it.
+        from .digests import operation_record_digest_v1
+
+        recomputed = operation_record_digest_v1(record)
+        if recomputed != record.record_digest:
+            raise RegistryInvalid(
+                f"operation record {record.contract_ref} carries record digest "
+                f"{record.record_digest}, but its own content hashes to "
+                f"{recomputed}; the digest is the identity every grant and "
+                "attestation records, so it must describe the record it sits on")
         definition = published[(record.semantics_id, record.semantics_revision)]
         observed = record.capture.summary.replay.value
         guaranteed = definition.duplicate_guarantee.value

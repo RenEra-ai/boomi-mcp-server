@@ -3675,3 +3675,86 @@ def test_the_live_reader_keeps_the_path_it_read():
     assert read.path in json.dumps(record), (
         "the path the reader kept is not the route the counterparty was called on"
     )
+
+
+def _captured_operation_xml():
+    """The account's own PATCH operation, from the evidence archive.
+
+    Not a shape typed here. A hand-built document was refused as unreadable
+    earlier in this same round and proved only that the shape had been guessed
+    wrong — twice, on two different properties.
+    """
+    from pathlib import Path
+
+    return (
+        Path(__file__).resolve().parents[1] / _CAPTURES
+        / "cap155-e8-patch-operation-record" / "component_op_tgt.xml"
+    ).read_text()
+
+
+@pytest.mark.parametrize(
+    "label,duplicate,expected_state,expects_path",
+    [
+        ("one stored path", None, "static", True),
+        # Duplicates collapse: the same value twice is still one answer.
+        ("the same path twice", "same", "static", True),
+        # Two DIFFERENT stored paths is a route that cannot be read, and it must
+        # be answered like one that cannot be found. Left `static`, the identity
+        # says the route is settled while carrying no path — the blank-path net
+        # reads settled as "needs no binding", and the declared-versus-live
+        # comparison skips a path it has nothing to compare, so the ambiguous
+        # component passes both checks.
+        ("two different paths", "other", "unavailable", False),
+    ],
+)
+def test_an_ambiguous_live_route_is_unreadable_and_never_settled(
+    label, duplicate, expected_state, expects_path
+):
+    import re
+
+    from boomi_mcp.authoring.connector_resolution_snapshot import (
+        live_identity_from_component_xml,
+    )
+
+    xml = _captured_operation_xml()
+    field = re.search(r'<field id="path"[^>]*/>', xml).group(0)
+    if duplicate == "same":
+        xml = xml.replace(field, field + field, 1)
+    elif duplicate == "other":
+        xml = xml.replace(field, field + field.replace('value="', 'value="/other', 1), 1)
+
+    read = live_identity_from_component_xml("op_patch", xml)
+    assert read.route_state == expected_state, (label, read.route_state)
+    assert bool(read.path) is expects_path, (label, read.path)
+
+
+def test_a_path_is_compared_case_sensitively_and_a_verb_is_not():
+    """The two fields are not the same kind of thing.
+
+    A family and an action are vocabulary tokens whose spelling the platform
+    varies, and folding their case is what makes the comparison work at all. A
+    path is not a token: RFC 3986 makes the scheme and host case-insensitive and
+    everything after them case-sensitive, so `/Orders/42` and `/orders/42` name
+    different resources on any case-sensitive upstream. Routing the path through
+    the shared fold accepted them as equal — the wet apply would reuse the live
+    route while the caller's declaration named another.
+
+    This module's own route digest already draws the line here: it lower-cases
+    the scheme and nothing else.
+    """
+    from boomi_mcp.authoring.connector_resolution_snapshot import ConnectorIdentityError
+
+    assert _compare(_live_op(path="/Orders/42"), {"op_patch": "/Orders/42"}) is not None
+
+    with pytest.raises(ConnectorIdentityError):
+        _compare(_live_op(path="/Orders/42"), {"op_patch": "/orders/42"})
+
+    # ...while the verb keeps its fold, which is the half that must NOT change.
+    from boomi_mcp.authoring.connector_resolution_snapshot import (
+        TrustedConnectorResolutionSnapshotV1, assert_declared_matches_resolved,
+    )
+
+    snapshot = TrustedConnectorResolutionSnapshotV1(identities=(_live_op(),))
+    assert assert_declared_matches_resolved(
+        snapshot, {"op_patch": ("http", "patch")}, {}
+    ) is not None
