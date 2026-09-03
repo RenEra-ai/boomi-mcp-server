@@ -90,7 +90,7 @@ def test_the_served_candidate_field_set_is_CLOSED():
         route = "/admin/api/v1/clients/{id}"      # a path — must NOT be served
 
     class _Record:
-        contract_ref = "$ref:C"
+        contract_ref = "$ref:icv1:rest:patch:c:1"
         family = "rest"
         action = "PATCH"
         semantics_id = "icv1"
@@ -646,7 +646,7 @@ def test_a_relocatable_table_keeps_its_own_grants_and_only_its_own():
         process_root_ref="$ref:SOME_OTHER_ROOT",
         idempotency_grants=(
             IdempotencyGrantSymbolV1(
-                contract_ref="$ref:C",
+                contract_ref="$ref:icv1:rest:patch:c:1",
                 operation_ref="$ref:OP",
                 call_source_path="/body/steps/0",
                 record_digest="a" * 64,
@@ -785,7 +785,7 @@ def _superseded_registry(*, op_version, conn_version):
         kind = "service_wide"
 
     class _Record:
-        contract_ref = "$ref:C"
+        contract_ref = "$ref:icv1:rest:patch:c:1"
         family = "rest"
         action = "PATCH"
         semantics_id = "icv1"
@@ -855,7 +855,7 @@ def test_an_empty_list_says_whether_evidence_exists_at_another_version(
     assert row["operation_version_current"] == 3
     assert row["connection_version_recorded"] == conn_recorded
     assert row["connection_version_current"] == 3
-    assert row["contract_ref"] == "$ref:C"
+    assert row["contract_ref"] == "$ref:icv1:rest:patch:c:1"
 
 
 def test_never_captured_and_captured_but_moved_are_distinguishable():

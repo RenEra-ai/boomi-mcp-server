@@ -180,7 +180,7 @@ class _Record:
     # can select the wrong record. A stand-in that omits the ref cannot resolve at
     # all, which is how this fixture stopped exercising the recheck the moment the
     # lookup was corrected.
-    contract_ref = "$ref:CONTRACT"
+    contract_ref = "$ref:icv1:rest:patch:contract:1"
     # NO ACCOUNT CLAIM. This read as a literal hash, which made the record claim
     # an account no client in this harness is ever in — invisible while a missing
     # account SKIPPED the scope comparison instead of failing it. With that arm
@@ -210,7 +210,7 @@ def _Grant():
     from boomi_mcp.compiler.process_ir.contracts import IdempotencyGrantSymbolV1
 
     return IdempotencyGrantSymbolV1(
-        contract_ref="$ref:CONTRACT",
+        contract_ref="$ref:icv1:rest:patch:contract:1",
         operation_ref="$ref:api_op",
         call_source_path="/body/steps/0",
         record_digest="b" * 64,
@@ -520,7 +520,7 @@ def test_a_successful_evidence_bound_apply_attests_what_authorised_it():
         % ([sorted(m) for m in mutations if isinstance(m, dict)][:2],)
     )
     one = bindings[0]
-    assert one["contract_ref"] == "$ref:CONTRACT"
+    assert one["contract_ref"] == "$ref:icv1:rest:patch:contract:1"
     assert one["call_source_path"] == "/body/steps/0"
     assert one["record_digest"] == "b" * 64
 

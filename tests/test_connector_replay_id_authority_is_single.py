@@ -277,7 +277,7 @@ def test_every_registered_replay_code_has_a_raiser():
         # coverage is consulted before the identities — a stand-in missing either
         # produces an UNAVAILABLE for the wrong reason and silently stops
         # producing the DRIFT codes this check exists to prove are reachable.
-        contract_ref = "$ref:C"
+        contract_ref = "$ref:icv1:rest:patch:c:1"
         route_coverage = type("_ServiceWide", (), {"kind": "service_wide"})()
         account_scope_hash = "a" * 64
         operation_identity = _Ident("op-1", 3, "ComponentConfigDigestV1:" + "1" * 64)
@@ -288,7 +288,7 @@ def test_every_registered_replay_code_has_a_raiser():
 
     class _Grant:
         record_digest = "b" * 64
-        contract_ref = "$ref:C"
+        contract_ref = "$ref:icv1:rest:patch:c:1"
         operation_ref = "$ref:op"
         call_source_path = "/body/steps/0"
 

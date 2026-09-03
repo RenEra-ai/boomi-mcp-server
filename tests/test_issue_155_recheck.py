@@ -29,7 +29,7 @@ class _Record:
     # fixture stops being able to exhibit what the code now checks: the recheck
     # resolves a grant by the (digest, contract_ref) PAIR, because the loader
     # dedupes contract refs and not digests.
-    def __init__(self, digest, op, conn, scope="a" * 64, contract_ref="$ref:C",
+    def __init__(self, digest, op, conn, scope="a" * 64, contract_ref="$ref:icv1:rest:patch:c:1",
                  route_coverage=None):
         self.record_digest = digest
         self.contract_ref = contract_ref
@@ -45,7 +45,7 @@ class _Registry:
 
 
 class _Grant:
-    def __init__(self, digest, contract_ref="$ref:C", dynamic_path=False,
+    def __init__(self, digest, contract_ref="$ref:icv1:rest:patch:c:1", dynamic_path=False,
                  route_digest=None):
         self.record_digest = digest
         self.contract_ref = contract_ref
@@ -362,7 +362,7 @@ def test_one_component_read_under_two_families_is_two_readings():
     class _Rec:
         def __init__(self, family, digest_char):
             self.record_digest = digest_char * 64
-            self.contract_ref = "$ref:C" if digest_char == "1" else "$ref:C2"
+            self.contract_ref = "$ref:icv1:rest:patch:c:1" if digest_char == "1" else "$ref:icv1:rest:patch:c2:1"
             self.route_coverage = None
             self.family = family
             self.account_scope_hash = "a" * 64
@@ -374,7 +374,7 @@ def test_one_component_read_under_two_families_is_two_readings():
         operation_records = (_Rec("rest", "1"), _Rec("database", "2"))
 
     outcome = recheck_grant_identities(
-        grants=(_Grant("1" * 64), _Grant("2" * 64, contract_ref="$ref:C2")),
+        grants=(_Grant("1" * 64), _Grant("2" * 64, contract_ref="$ref:icv1:rest:patch:c2:1")),
         registry=_Reg(),
         live_identity=reader,
         # A record here declares an account scope, so the observation
@@ -606,7 +606,7 @@ def test_the_resolved_binding_carries_the_route_digests_it_compared():
         config_digest = "ComponentConfigDigestV1:" + "b" * 64
 
     class _Record:
-        contract_ref = "$ref:C"
+        contract_ref = "$ref:icv1:rest:patch:c:1"
         operation_ref = "$ref:op"
         record_digest = "c" * 64
         account_scope_hash = None
@@ -618,7 +618,7 @@ def test_the_resolved_binding_carries_the_route_digests_it_compared():
         action = "PATCH"
 
     class _Grant:
-        contract_ref = "$ref:C"
+        contract_ref = "$ref:icv1:rest:patch:c:1"
         operation_ref = "$ref:op"
         call_source_path = "/body/steps/0"
         record_digest = "c" * 64

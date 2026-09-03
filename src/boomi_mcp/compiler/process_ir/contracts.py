@@ -251,6 +251,17 @@ class IdempotencyContractSymbolV1(_CompilerModel):
     even if a caller tried to put one there.
     """
 
+    #: The SAME anchored grammar the authoring surface enforces, imported rather
+    #: than restated. A compiler that accepts references its own authoring layer
+    #: rejects is a fork of the contract with no announcement: a document refused
+    #: at the door would resolve fine one layer in, and which layer is right
+    #: becomes a matter of opinion. One constant, five surfaces.
+    #: Graded by the ONE shared grammar. Not a `pattern=` constraint: the served
+    #: rule ends in a negative lookahead, which pydantic's regex engine does not
+    #: support and which is there because a `$`-anchored pattern accepts a
+    #: trailing newline in a Draft 2020-12 validator. The import is function-local
+    #: because the compiler package must not eagerly import the replay layer — a
+    #: guard test pins exactly that, and a module-level import broke it.
     ref: str = Field(..., min_length=1)
     operation_ref: str = Field(..., min_length=1)
     #: The registry record this contract stands for, when the caller can name one.
@@ -260,6 +271,23 @@ class IdempotencyContractSymbolV1(_CompilerModel):
     #: claim provenance the registry cannot corroborate.
     record_digest: Optional[str] = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     kind: Literal["opaque_key_binding"] = "opaque_key_binding"
+
+    @field_validator("ref")
+    @classmethod
+    def _ref_obeys_the_one_shared_grammar(cls, value: str) -> str:
+        from ...connector_replay.ids import (
+            AUTHORED_CONTRACT_REF_PATTERN,
+            is_authored_contract_ref,
+        )
+
+        if not is_authored_contract_ref(value):
+            raise ValueError(
+                f"contract reference {value!r} does not match the one shared "
+                f"grammar {AUTHORED_CONTRACT_REF_PATTERN}; a compiler that "
+                "accepted references its own authoring layer rejects would be a "
+                "fork of the contract with no announcement"
+            )
+        return value
 
     @field_validator("ref", "operation_ref")
     @classmethod

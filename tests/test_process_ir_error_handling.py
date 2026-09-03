@@ -367,7 +367,7 @@ def test_retry_over_an_unverified_write_is_rejected(op):
     "evidence",
     [
         {"kind": "verified_action"},
-        {"kind": "key_reference", "contract_ref": "$ref:CONTRACT"},
+        {"kind": "key_reference", "contract_ref": "$ref:icv1:rest:patch:contract:1"},
     ],
 )
 def test_authored_evidence_cannot_override_an_unverified_row(evidence):
@@ -379,7 +379,7 @@ def test_authored_evidence_cannot_override_an_unverified_row(evidence):
     # opposite of the property.
     unverified = _never_retryable_refs()[0]
     contracts = (
-        IdempotencyContractSymbolV1(ref="$ref:CONTRACT", operation_ref=unverified),
+        IdempotencyContractSymbolV1(ref="$ref:icv1:rest:patch:contract:1", operation_ref=unverified),
     )
     diag = _compile_error(
         _connector_scope(retry={"count": 1}, protected=unverified, idempotency=evidence),
@@ -484,13 +484,13 @@ def test_idempotent_write_with_verified_action_evidence_compiles(monkeypatch):
 def test_idempotent_write_rejects_the_wrong_evidence_kind(monkeypatch):
     _synthetic_capabilities(monkeypatch, (REST, "PATCH", "idempotent_write"))
     contracts = (
-        IdempotencyContractSymbolV1(ref="$ref:CONTRACT", operation_ref="$ref:PATCHOP"),
+        IdempotencyContractSymbolV1(ref="$ref:icv1:rest:patch:contract:1", operation_ref="$ref:PATCHOP"),
     )
     diag = _compile_error(
         _connector_scope(
             retry={"count": 1},
             protected="$ref:PATCHOP",
-            idempotency={"kind": "key_reference", "contract_ref": "$ref:CONTRACT"},
+            idempotency={"kind": "key_reference", "contract_ref": "$ref:icv1:rest:patch:contract:1"},
         ),
         _symbols(contracts=contracts),
     )
@@ -500,13 +500,13 @@ def test_idempotent_write_rejects_the_wrong_evidence_kind(monkeypatch):
 def test_conditionally_idempotent_requires_a_matching_key_contract(monkeypatch):
     _synthetic_capabilities(monkeypatch, (REST, "PATCH", "conditionally_idempotent"))
     contracts = (
-        IdempotencyContractSymbolV1(ref="$ref:CONTRACT", operation_ref="$ref:PATCHOP"),
+        IdempotencyContractSymbolV1(ref="$ref:icv1:rest:patch:contract:1", operation_ref="$ref:PATCHOP"),
     )
     _compile(
         _connector_scope(
             retry={"count": 1},
             protected="$ref:PATCHOP",
-            idempotency={"kind": "key_reference", "contract_ref": "$ref:CONTRACT"},
+            idempotency={"kind": "key_reference", "contract_ref": "$ref:icv1:rest:patch:contract:1"},
         ),
         _symbols(contracts=contracts),
     )
@@ -524,7 +524,7 @@ def test_conditionally_idempotent_rejects_an_unresolved_contract(monkeypatch):
         _connector_scope(
             retry={"count": 1},
             protected="$ref:PATCHOP",
-            idempotency={"kind": "key_reference", "contract_ref": "$ref:NOPE"},
+            idempotency={"kind": "key_reference", "contract_ref": "$ref:icv1:rest:patch:nope:1"},
         )
     )
     assert diag.code == PROCESS_IR_SEMANTIC_IDEMPOTENCY_EVIDENCE_MISSING
@@ -535,13 +535,13 @@ def test_conditionally_idempotent_rejects_a_contract_for_another_operation(monke
     # call is not evidence about this one. Without this the binding is decorative.
     _synthetic_capabilities(monkeypatch, (REST, "PATCH", "conditionally_idempotent"))
     contracts = (
-        IdempotencyContractSymbolV1(ref="$ref:CONTRACT", operation_ref="$ref:GETOP"),
+        IdempotencyContractSymbolV1(ref="$ref:icv1:rest:patch:contract:1", operation_ref="$ref:GETOP"),
     )
     diag = _compile_error(
         _connector_scope(
             retry={"count": 1},
             protected="$ref:PATCHOP",
-            idempotency={"kind": "key_reference", "contract_ref": "$ref:CONTRACT"},
+            idempotency={"kind": "key_reference", "contract_ref": "$ref:icv1:rest:patch:contract:1"},
         ),
         _symbols(contracts=contracts),
     )
@@ -553,7 +553,7 @@ def test_read_only_needs_no_evidence_but_a_dangling_contract_still_fails():
     diag = _compile_error(
         _connector_scope(
             retry={"count": 5},
-            idempotency={"kind": "key_reference", "contract_ref": "$ref:NOPE"},
+            idempotency={"kind": "key_reference", "contract_ref": "$ref:icv1:rest:patch:nope:1"},
         )
     )
     assert diag.code == PROCESS_IR_SEMANTIC_IDEMPOTENCY_EVIDENCE_MISSING
@@ -856,13 +856,13 @@ def test_every_retry_count_renders_deterministically(count):
 def test_shuffled_symbol_and_contract_order_does_not_change_output(monkeypatch):
     _synthetic_capabilities(monkeypatch, (REST, "PATCH", "conditionally_idempotent"))
     contracts = [
-        IdempotencyContractSymbolV1(ref="$ref:C{0}".format(i), operation_ref="$ref:PATCHOP")
+        IdempotencyContractSymbolV1(ref="$ref:icv1:rest:patch:c{0}:1".format(i), operation_ref="$ref:PATCHOP")
         for i in range(4)
     ]
     doc = _connector_scope(
         retry={"count": 1},
         protected="$ref:PATCHOP",
-        idempotency={"kind": "key_reference", "contract_ref": "$ref:C2"},
+        idempotency={"kind": "key_reference", "contract_ref": "$ref:icv1:rest:patch:c2:1"},
     )
     a_syms = _symbols(contracts=contracts)
     b_syms = _symbols(contracts=list(reversed(contracts)))
@@ -876,9 +876,9 @@ def test_shuffled_symbol_and_contract_order_does_not_change_output(monkeypatch):
     # second element, and the order they were authored in must not reach the
     # output any more than the order of distinct refs does.
     aliased = [
-        IdempotencyContractSymbolV1(ref="$ref:C2", operation_ref="$ref:OTHEROP"),
+        IdempotencyContractSymbolV1(ref="$ref:icv1:rest:patch:c2:1", operation_ref="$ref:OTHEROP"),
         *contracts,
-        IdempotencyContractSymbolV1(ref="$ref:C2", operation_ref="$ref:THIRDOP"),
+        IdempotencyContractSymbolV1(ref="$ref:icv1:rest:patch:c2:1", operation_ref="$ref:THIRDOP"),
     ]
     c_syms = _symbols(contracts=aliased)
     d_syms = _symbols(contracts=list(reversed(aliased)))
@@ -1027,18 +1027,22 @@ def test_the_emitted_error_graph_passes_the_structural_verifier():
 
 
 def test_no_authored_value_reaches_a_diagnostic_or_the_emitted_xml():
-    sentinel = "SENTINELVALUE12345"
+    # Lower case because the contract grammar's alphabet is lower case. The
+    # sentinel's job is to be FINDABLE if it leaks, not to be shouted: an
+    # unrepresentable value cannot be planted at all, and a test that cannot
+    # plant its needle proves nothing about whether needles escape.
+    sentinel = "sentinelvalue12345"
     # Driven on an action that still refuses, so there IS a diagnostic to search.
     unverified = _never_retryable_refs()[0]
     contracts = (
         IdempotencyContractSymbolV1(
-            ref="$ref:{0}".format(sentinel), operation_ref=unverified
+            ref="$ref:icv1:rest:patch:{0}:1".format(sentinel), operation_ref=unverified
         ),
     )
     doc = _connector_scope(
         retry={"count": 1},
         protected=unverified,
-        idempotency={"kind": "key_reference", "contract_ref": "$ref:{0}".format(sentinel)},
+        idempotency={"kind": "key_reference", "contract_ref": "$ref:icv1:rest:patch:{0}:1".format(sentinel)},
     )
     with pytest.raises(ProcessIRCompileError) as excinfo:
         _compile(doc, _symbols(contracts=contracts))
@@ -1564,27 +1568,27 @@ def test_one_contract_reference_may_cover_several_operations(monkeypatch):
     """
     _synthetic_capabilities(monkeypatch, (REST, "PATCH", "conditionally_idempotent"))
     contracts = [
-        IdempotencyContractSymbolV1(ref="$ref:SHARED", operation_ref="$ref:PATCHOP"),
-        IdempotencyContractSymbolV1(ref="$ref:SHARED", operation_ref="$ref:OTHEROP"),
+        IdempotencyContractSymbolV1(ref="$ref:icv1:rest:patch:shared:1", operation_ref="$ref:PATCHOP"),
+        IdempotencyContractSymbolV1(ref="$ref:icv1:rest:patch:shared:1", operation_ref="$ref:OTHEROP"),
     ]
     symbols = _symbols(contracts=contracts)
     assert len(symbols.idempotency_contracts) == 2
 
     index = symbols.build_idempotency_index()
-    assert ("$ref:SHARED", "$ref:PATCHOP") in index
-    assert ("$ref:SHARED", "$ref:OTHEROP") in index
+    assert ("$ref:icv1:rest:patch:shared:1", "$ref:PATCHOP") in index
+    assert ("$ref:icv1:rest:patch:shared:1", "$ref:OTHEROP") in index
 
     # It resolves for the operation it covers...
     doc = _connector_scope(
         retry={"count": 1},
         protected="$ref:PATCHOP",
-        idempotency={"kind": "key_reference", "contract_ref": "$ref:SHARED"},
+        idempotency={"kind": "key_reference", "contract_ref": "$ref:icv1:rest:patch:shared:1"},
     )
     _compile(doc, symbols)
 
     # ...and a reference covering only OTHER operations is still not evidence here.
     only_elsewhere = _symbols(
-        contracts=[IdempotencyContractSymbolV1(ref="$ref:SHARED", operation_ref="$ref:OTHEROP")]
+        contracts=[IdempotencyContractSymbolV1(ref="$ref:icv1:rest:patch:shared:1", operation_ref="$ref:OTHEROP")]
     )
     with pytest.raises(ProcessIRCompileError) as excinfo:
         _compile(doc, only_elsewhere)
@@ -1601,8 +1605,8 @@ def test_the_same_reference_and_operation_twice_is_still_a_duplicate():
     with pytest.raises(pydantic.ValidationError):
         _symbols(
             contracts=[
-                IdempotencyContractSymbolV1(ref="$ref:C", operation_ref="$ref:OP"),
-                IdempotencyContractSymbolV1(ref="$ref:C", operation_ref="$ref:OP"),
+                IdempotencyContractSymbolV1(ref="$ref:icv1:rest:patch:c:1", operation_ref="$ref:OP"),
+                IdempotencyContractSymbolV1(ref="$ref:icv1:rest:patch:c:1", operation_ref="$ref:OP"),
             ]
         )
 
@@ -1724,14 +1728,14 @@ def test_the_minter_mints_a_grant_for_a_call_whose_contract_resolves(monkeypatch
     symbols = _symbols(
         contracts=[
             IdempotencyContractSymbolV1(
-                ref="$ref:C", operation_ref="$ref:PATCHOP", record_digest=digest
+                ref="$ref:icv1:rest:patch:c:1", operation_ref="$ref:PATCHOP", record_digest=digest
             )
         ]
     )
     doc = _connector_scope(
         retry={"count": 1},
         protected="$ref:PATCHOP",
-        idempotency={"kind": "key_reference", "contract_ref": "$ref:C"},
+        idempotency={"kind": "key_reference", "contract_ref": "$ref:icv1:rest:patch:c:1"},
     )
 
     # Provenance is REQUIRED, so a corroborating record has to exist for anything
@@ -1745,7 +1749,7 @@ def test_the_minter_mints_a_grant_for_a_call_whose_contract_resolves(monkeypatch
     assert minted.process_root_ref == "$ref:ROOT"
     assert len(minted.idempotency_grants) == 1, "the minter produced nothing"
     grant = minted.idempotency_grants[0]
-    assert grant.contract_ref == "$ref:C"
+    assert grant.contract_ref == "$ref:icv1:rest:patch:c:1"
     assert grant.operation_ref == "$ref:PATCHOP"
     assert grant.call_source_path, "a grant must name the call it covers"
     assert grant.key in minted.build_grant_index()
@@ -1766,7 +1770,7 @@ def test_a_call_with_no_evidence_mints_no_grant(monkeypatch):
     """
     _synthetic_capabilities(monkeypatch, (REST, "GET", "read_only"))
     symbols = _symbols(
-        contracts=[IdempotencyContractSymbolV1(ref="$ref:C", operation_ref="$ref:OTHEROP")]
+        contracts=[IdempotencyContractSymbolV1(ref="$ref:icv1:rest:patch:c:1", operation_ref="$ref:OTHEROP")]
     )
     doc = _connector_scope(retry={"count": 1}, protected="$ref:GETOP")
 
@@ -1779,12 +1783,12 @@ def test_an_unresolvable_reference_is_refused_before_any_grant_is_minted(monkeyp
     """Enumeration failure is the validator's to report, from one layer only."""
     _synthetic_capabilities(monkeypatch, (REST, "GET", "read_only"))
     symbols = _symbols(
-        contracts=[IdempotencyContractSymbolV1(ref="$ref:C", operation_ref="$ref:OTHEROP")]
+        contracts=[IdempotencyContractSymbolV1(ref="$ref:icv1:rest:patch:c:1", operation_ref="$ref:OTHEROP")]
     )
     doc = _connector_scope(
         retry={"count": 1},
         protected="$ref:GETOP",
-        idempotency={"kind": "key_reference", "contract_ref": "$ref:C"},
+        idempotency={"kind": "key_reference", "contract_ref": "$ref:icv1:rest:patch:c:1"},
     )
     with pytest.raises(ProcessIRCompileError) as excinfo:
         _mint(doc, symbols)
@@ -1806,14 +1810,14 @@ def test_a_root_projected_table_requires_a_grant_for_this_very_call(monkeypatch)
     symbols = _symbols(
         contracts=[
             IdempotencyContractSymbolV1(
-                ref="$ref:C", operation_ref="$ref:PATCHOP", record_digest="c" * 64
+                ref="$ref:icv1:rest:patch:c:1", operation_ref="$ref:PATCHOP", record_digest="c" * 64
             )
         ]
     )
     doc = _connector_scope(
         retry={"count": 1},
         protected="$ref:PATCHOP",
-        idempotency={"kind": "key_reference", "contract_ref": "$ref:C"},
+        idempotency={"kind": "key_reference", "contract_ref": "$ref:icv1:rest:patch:c:1"},
     )
 
     # A grant-free table still compiles: that is the pre-projection state.
@@ -1836,7 +1840,7 @@ def test_a_root_projected_table_requires_a_grant_for_this_very_call(monkeypatch)
         update={
             "idempotency_grants": (
                 IdempotencyGrantSymbolV1(
-                    contract_ref="$ref:C",
+                    contract_ref="$ref:icv1:rest:patch:c:1",
                     operation_ref="$ref:PATCHOP",
                     call_source_path="/body/steps/99/somewhere_else",
                 ),
@@ -1858,7 +1862,7 @@ class _Identity:
         self.component_id = component_id
         self.version = 1
 
-def _complete_record(digest, *, contract="$ref:C", operation="op-patch",
+def _complete_record(digest, *, contract="$ref:icv1:rest:patch:c:1", operation="op-patch",
                      connection="conn-1", family="rest", action="PATCH"):
     """A registry double carrying every axis corroboration compares.
 
@@ -1926,12 +1930,12 @@ def test_a_contract_naming_no_record_mints_NOTHING(monkeypatch):
     """
     _synthetic_capabilities(monkeypatch, (REST, "PATCH", "conditionally_idempotent"))
     symbols = _symbols(
-        contracts=[IdempotencyContractSymbolV1(ref="$ref:C", operation_ref="$ref:PATCHOP")]
+        contracts=[IdempotencyContractSymbolV1(ref="$ref:icv1:rest:patch:c:1", operation_ref="$ref:PATCHOP")]
     )
     doc = _connector_scope(
         retry={"count": 1},
         protected="$ref:PATCHOP",
-        idempotency={"kind": "key_reference", "contract_ref": "$ref:C"},
+        idempotency={"kind": "key_reference", "contract_ref": "$ref:icv1:rest:patch:c:1"},
     )
     from boomi_mcp.compiler.process_ir.connector_resolution import mint_idempotency_grants
 
@@ -1972,14 +1976,14 @@ def test_corroboration_compares_every_axis_the_compiler_can_know(axis, monkeypat
     symbols = _symbols(
         contracts=[
             IdempotencyContractSymbolV1(
-                ref="$ref:C", operation_ref="$ref:PATCHOP", record_digest=digest
+                ref="$ref:icv1:rest:patch:c:1", operation_ref="$ref:PATCHOP", record_digest=digest
             )
         ]
     )
     doc = _connector_scope(
         retry={"count": 1},
         protected="$ref:PATCHOP",
-        idempotency={"kind": "key_reference", "contract_ref": "$ref:C"},
+        idempotency={"kind": "key_reference", "contract_ref": "$ref:icv1:rest:patch:c:1"},
     )
     cfg, _plan = _compile(doc, symbols)
     index = symbols.build_index()
@@ -1988,7 +1992,7 @@ def test_corroboration_compares_every_axis_the_compiler_can_know(axis, monkeypat
         if b.operation_ref == "$ref:PATCHOP"
     )
     good = {
-        "contract": "$ref:C",
+        "contract": "$ref:icv1:rest:patch:c:1",
         "operation": index[binding.operation_ref].component_id,
         "connection": index[binding.connection_ref].component_id,
         # The record's PORTABLE family, not the binding's platform type — the
@@ -2036,14 +2040,14 @@ def test_the_snapshot_not_the_symbol_table_decides_the_observed_identity(monkeyp
     symbols = _symbols(
         contracts=[
             IdempotencyContractSymbolV1(
-                ref="$ref:C", operation_ref="$ref:PATCHOP", record_digest=digest
+                ref="$ref:icv1:rest:patch:c:1", operation_ref="$ref:PATCHOP", record_digest=digest
             )
         ]
     )
     doc = _connector_scope(
         retry={"count": 1},
         protected="$ref:PATCHOP",
-        idempotency={"kind": "key_reference", "contract_ref": "$ref:C"},
+        idempotency={"kind": "key_reference", "contract_ref": "$ref:icv1:rest:patch:c:1"},
     )
     cfg, _plan = _compile(doc, symbols)
     index = symbols.build_index()
@@ -2110,14 +2114,14 @@ def test_a_foreign_account_record_does_not_corroborate(monkeypatch):
     symbols = _symbols(
         contracts=[
             IdempotencyContractSymbolV1(
-                ref="$ref:C", operation_ref="$ref:PATCHOP", record_digest=digest
+                ref="$ref:icv1:rest:patch:c:1", operation_ref="$ref:PATCHOP", record_digest=digest
             )
         ]
     )
     doc = _connector_scope(
         retry={"count": 1},
         protected="$ref:PATCHOP",
-        idempotency={"kind": "key_reference", "contract_ref": "$ref:C"},
+        idempotency={"kind": "key_reference", "contract_ref": "$ref:icv1:rest:patch:c:1"},
     )
     cfg, _plan = _compile(doc, symbols)
     index = symbols.build_index()
@@ -2208,14 +2212,14 @@ def test_a_miswired_snapshot_is_refused_rather_than_read_as_empty(bogus, monkeyp
     symbols = _symbols(
         contracts=[
             IdempotencyContractSymbolV1(
-                ref="$ref:C", operation_ref="$ref:PATCHOP", record_digest=digest
+                ref="$ref:icv1:rest:patch:c:1", operation_ref="$ref:PATCHOP", record_digest=digest
             )
         ]
     )
     doc = _connector_scope(
         retry={"count": 1},
         protected="$ref:PATCHOP",
-        idempotency={"kind": "key_reference", "contract_ref": "$ref:C"},
+        idempotency={"kind": "key_reference", "contract_ref": "$ref:icv1:rest:patch:c:1"},
     )
     cfg, _plan = _compile(doc, symbols)
 
@@ -2252,14 +2256,14 @@ def test_a_real_snapshot_is_accepted(monkeypatch):
     symbols = _symbols(
         contracts=[
             IdempotencyContractSymbolV1(
-                ref="$ref:C", operation_ref="$ref:PATCHOP", record_digest=digest
+                ref="$ref:icv1:rest:patch:c:1", operation_ref="$ref:PATCHOP", record_digest=digest
             )
         ]
     )
     doc = _connector_scope(
         retry={"count": 1},
         protected="$ref:PATCHOP",
-        idempotency={"kind": "key_reference", "contract_ref": "$ref:C"},
+        idempotency={"kind": "key_reference", "contract_ref": "$ref:icv1:rest:patch:c:1"},
     )
     cfg, _plan = _compile(doc, symbols)
     minted = mint_idempotency_grants(

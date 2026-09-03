@@ -1418,12 +1418,22 @@ def _validate_processes(
                     message=str(failure),
                     subject_kind="component",
                     subject_id=failure.component_key,
-                    # THE REMEDIATION MUST MATCH THE FAILURE. Folding the
-                    # comparison into construction brought a second code through
-                    # this handler, and a caller whose readable XML simply says
-                    # a different verb was being told how to fix parsing,
-                    # ambiguity and blank verbs — none of which is their problem.
-                    remediation=(
+                    # THE FAILURE IS THE AUTHORITY ON ITS OWN REMEDIATION, and
+                    # this handler stopped deciding. It used to switch on the code
+                    # with a hand-written two-branch conditional: the mismatch code
+                    # got one sentence and EVERYTHING ELSE got the submitted-XML
+                    # one. Live QA measured what that costs. The route-conflict
+                    # refusal for a component read from the ACCOUNT is raised as
+                    # the unavailable code, fell into the else branch, and told the
+                    # caller their submitted XML could not be parsed — about a
+                    # document they never submitted. A path mismatch was told to
+                    # correct the family and the action, the two fields that were
+                    # right. Both sentences already existed, computed correctly at
+                    # the point that knows which field disagreed; a second opinion
+                    # here could only be a worse copy of one. The branch survives
+                    # ONLY as the fallback for a failure that carries no sentence
+                    # of its own, so an unattributed refusal is still remediable.
+                    remediation=failure.remediation or (
                         "Declare the connector family and action the component "
                         "actually resolves to, or correct the component so it "
                         "resolves to what you declared."
@@ -1434,6 +1444,11 @@ def _validate_processes(
                             "declare the component's configuration instead."
                         ).format(submitted_xml_unsettled_summary())
                     ),
+                    # The offending field, machine-readably. `path` is this
+                    # model's field locator and it was being served empty, so the
+                    # only place the field was named was inside English prose —
+                    # which a caller correcting the request cannot act on.
+                    path=failure.field or "",
                 )
             )
     # THE DECLARATION IS AN ASSERTION HERE TOO. Building the snapshot and then

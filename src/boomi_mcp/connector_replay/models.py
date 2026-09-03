@@ -27,7 +27,13 @@ from typing import Final
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from .ids import is_evidence_component_id, is_execution_id
+from .ids import (
+    AUTHORED_CONTRACT_REF_PATTERN,
+    CONTRACT_ID_SEGMENT,
+    is_authored_contract_ref,
+    is_evidence_component_id,
+    is_execution_id,
+)
 
 __all__ = [
     "ReplayRegistryModel",
@@ -140,6 +146,84 @@ class ConnectorVocabularyMappingV1(ReplayRegistryModel):
     #: changed" is consistent with a read AND with a write that no-opped, and only
     #: the verb's declared semantics separate them.
     safe_actions: tuple[str, ...] = ()
+    #: The RECORDED raw-action -> grammar-safe-identifier mapping, as sorted pairs.
+    #:
+    #: Recorded rather than folded at the point of use. The obvious fold is
+    #: lowercase, and on today's vocabulary it happens to be injective — but a fold
+    #: that is injective on the values seen so far is not a mapping, it is a
+    #: coincidence with a nice name, and the first raw pair that collides under it
+    #: would silently give two contracts one identifier. Writing the mapping down
+    #: makes a collision a refusal at mint, where the vocabulary is in view, rather
+    #: than an ambiguity discovered by whoever is holding the reference later.
+    #:
+    #: The family half needs no second field: `family` is already the stable,
+    #: grammar-safe name this maps the raw `platform_connector_type` onto, and a
+    #: parallel `family_id` carrying the same value would be one more hand-kept
+    #: copy of a fact that already has an owner.
+    action_ids: tuple[tuple[str, str], ...] = ()
+
+    @property
+    def family_id(self) -> str:
+        """The grammar-safe family identifier — `family`, named for its role."""
+        return self.family
+
+    def action_id(self, action: str) -> str:
+        """The grammar-safe identifier for one raw action, or refuse."""
+        for raw, ident in self.action_ids:
+            if raw == action:
+                return ident
+        raise ValueError(
+            f"action {action!r} has no recorded identifier for family "
+            f"{self.family!r}; the vocabulary is closed, and an unrecorded action "
+            "is one this registry cannot name"
+        )
+
+    @field_validator("action_ids")
+    @classmethod
+    def _identifiers_are_sorted_and_grammar_safe(
+        cls, value: tuple[tuple[str, str], ...]
+    ) -> tuple[tuple[str, str], ...]:
+        if list(value) != sorted(value):
+            raise ValueError("action identifiers must be sorted, so one map has one form")
+        raws = [raw for raw, _ in value]
+        if len(set(raws)) != len(raws):
+            raise ValueError("an action is mapped twice, so its identifier is ambiguous")
+        idents = [ident for _, ident in value]
+        if len(set(idents)) != len(idents):
+            # A COLLISION IS A MINT-TIME FAILURE, never a silent fold: two raw
+            # actions sharing one identifier means two contracts share one
+            # reference, and nothing downstream could tell them apart.
+            raise ValueError(
+                "two raw actions share one identifier: "
+                + repr(sorted({i for i in idents if idents.count(i) > 1}))
+            )
+        for _, ident in value:
+            if not re.fullmatch(CONTRACT_ID_SEGMENT, ident):
+                raise ValueError(
+                    f"action identifier {ident!r} is not grammar-safe "
+                    f"({CONTRACT_ID_SEGMENT})"
+                )
+        return value
+
+    @model_validator(mode="after")
+    def _the_identifier_map_is_total(self) -> "ConnectorVocabularyMappingV1":
+        """Every recognised action has an identifier, and no others do.
+
+        Totality in both directions. A missing entry leaves an action this
+        registry recognises but cannot name; a surplus entry names an action it
+        does not recognise, which is a mapping to nothing.
+        """
+        if not self.action_ids:
+            return self
+        mapped = {raw for raw, _ in self.action_ids}
+        recognised = set(self.recognised_actions)
+        if mapped != recognised:
+            raise ValueError(
+                "the action identifier map is not total over the recognised "
+                f"actions: unmapped={sorted(recognised - mapped)}, "
+                f"unrecognised={sorted(mapped - recognised)}"
+            )
+        return self
 
     @field_validator("recognised_actions")
     @classmethod
@@ -639,12 +723,35 @@ class ServiceWideRouteCoverageV1(ReplayRegistryModel):
 class OperationContractRecordV1(ReplayRegistryModel):
     """An account-bound record that a specific operation's replay was observed."""
 
+    #: Constrained by the ONE shared grammar, not by "non-empty". A reference is
+    #: the name a relocatable artifact carries to reach this record, so a record
+    #: whose own name the authoring surface would reject is a record nothing can
+    #: cite. Whether the name is the RIGHT one — the derivation from the
+    #: vocabulary — is checked at the registry, where the vocabulary is in view.
     contract_ref: str = Field(min_length=1)
     family: str = Field(min_length=1, pattern=r"^[a-z][a-z0-9_]*$")
     action: str = Field(min_length=1)
     semantics_id: str = Field(min_length=1)
     semantics_revision: int = Field(ge=1)
     account_scope_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+    @field_validator("contract_ref")
+    @classmethod
+    def _ref_obeys_the_one_shared_grammar(cls, value: str) -> str:
+        """The record's own name must be one the authoring surface would accept.
+
+        Not a `pattern=` constraint: the grammar ends in a negative lookahead,
+        which pydantic's regex engine does not support. Whether the name is the
+        RIGHT one — the derivation from the registry's vocabulary — is checked at
+        the registry, where the vocabulary is in view; this only rules out a
+        record nothing could cite.
+        """
+        if not is_authored_contract_ref(value):
+            raise ValueError(
+                f"contract reference {value!r} does not match the one shared "
+                f"grammar {AUTHORED_CONTRACT_REF_PATTERN}"
+            )
+        return value
     operation_identity: LiveComponentIdentityV1
     connection_identity: LiveComponentIdentityV1
     route_coverage: StaticRouteCoverageV1 | ServiceWideRouteCoverageV1

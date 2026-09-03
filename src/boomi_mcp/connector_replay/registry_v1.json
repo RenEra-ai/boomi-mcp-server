@@ -228,7 +228,7 @@
  ],
  "operation_records": [
   {
-   "contract_ref": "$ref:rest.patch.cds_client.static_route.v1",
+   "contract_ref": "$ref:icv1:rest:patch:resource_identity_upsert_static_route_same_effect:1",
    "family": "rest",
    "action": "PATCH",
    "semantics_id": "resource_identity_upsert_static_route_same_effect",
@@ -269,7 +269,7 @@
     },
     "capture_digest": "7b5dac1b83c5ebf7a949521465cfe09aff04314b7de00ee2146aff587a74daf5"
    },
-   "record_digest": "e662c9e40ac8f568206afdd4e056a30b32ab04235876905c27986a247726a598"
+   "record_digest": "a679146d4113714c158ff89c36567c2a8682571d7710ecbe56cb86271ac704c3"
   }
  ],
  "projection_allowlists": [
@@ -308,6 +308,13 @@
     "username",
     "workstation"
    ],
+   "excluded_scope_attributes": [
+    "OAuth2Config/grantType",
+    "accessTokenEndpoint/url",
+    "authorizationTokenEndpoint/url",
+    "credentials/clientId",
+    "properties/value"
+   ],
    "family": "rest",
    "included_attributes": [],
    "included_elements": [
@@ -330,26 +337,22 @@
     "bns:GlobalVariableReferences"
    ],
    "included_property_fields": [],
+   "included_scope_attributes": [
+    "field/type"
+   ],
    "included_value_fields": [
     "url"
    ],
    "projection_version": 4,
    "qname_aware_attrs": [],
-   "qname_aware_tags": [],
-   "included_scope_attributes": [
-    "field/type"
-   ],
-   "excluded_scope_attributes": [
-    "OAuth2Config/grantType",
-    "accessTokenEndpoint/url",
-    "authorizationTokenEndpoint/url",
-    "credentials/clientId",
-    "properties/value"
-   ]
+   "qname_aware_tags": []
   },
   {
    "component_kind": "operation",
    "excluded_fields": [],
+   "excluded_scope_attributes": [
+    "properties/value"
+   ],
    "family": "rest",
    "included_attributes": [
     "customOperationType"
@@ -376,13 +379,6 @@
     "queryParameters",
     "requestHeaders"
    ],
-   "included_value_fields": [
-    "path",
-    "followRedirects"
-   ],
-   "projection_version": 4,
-   "qname_aware_attrs": [],
-   "qname_aware_tags": [],
    "included_scope_attributes": [
     "Archiving/directory",
     "Archiving/enabled",
@@ -394,9 +390,13 @@
     "Operation/trackResponse",
     "field/type"
    ],
-   "excluded_scope_attributes": [
-    "properties/value"
-   ]
+   "included_value_fields": [
+    "path",
+    "followRedirects"
+   ],
+   "projection_version": 4,
+   "qname_aware_attrs": [],
+   "qname_aware_tags": []
   }
  ],
  "schema_version": 1,
@@ -411,6 +411,40 @@
  ],
  "vocabulary": [
   {
+   "action_ids": [
+    [
+     "DELETE",
+     "delete"
+    ],
+    [
+     "GET",
+     "get"
+    ],
+    [
+     "HEAD",
+     "head"
+    ],
+    [
+     "OPTIONS",
+     "options"
+    ],
+    [
+     "PATCH",
+     "patch"
+    ],
+    [
+     "POST",
+     "post"
+    ],
+    [
+     "PUT",
+     "put"
+    ],
+    [
+     "TRACE",
+     "trace"
+    ]
+   ],
    "action_source": "operation_component",
    "family": "rest",
    "platform_connector_type": "officialboomi-X3979C-rest-prod",

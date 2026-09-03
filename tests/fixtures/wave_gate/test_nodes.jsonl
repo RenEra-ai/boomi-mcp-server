@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 11508, "minimum_collected": 11508, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 11526, "minimum_collected": 11526, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -11553,3 +11553,21 @@
 {"kind": "test", "id": "pytest-011552", "node_id": "tests/test_connector_replay_review_round3.py::test_a_replay_claim_needs_the_artifact_that_observes_replay", "state": "active"}
 {"kind": "test", "id": "pytest-011553", "node_id": "tests/test_issue_155_recheck.py::test_the_resolved_binding_carries_the_route_digests_it_compared", "state": "active"}
 {"kind": "test", "id": "pytest-011554", "node_id": "tests/test_issue_155_identity_projection.py::test_the_plan_surface_compares_the_declared_route_against_the_account", "state": "active"}
+{"kind": "test", "id": "pytest-011555", "node_id": "tests/test_issue_155_contract_id_grammar.py::test_the_grammar_is_the_one_the_issue_specifies", "state": "active"}
+{"kind": "test", "id": "pytest-011556", "node_id": "tests/test_issue_155_contract_id_grammar.py::test_the_grammar_refuses[$ref:rest.patch.cds_client.static_route.v1-the dotted form this replaced]", "state": "active"}
+{"kind": "test", "id": "pytest-011557", "node_id": "tests/test_issue_155_contract_id_grammar.py::test_the_grammar_refuses[$ref:icv1:REST:patch:sem:1-upper case is outside the alphabet]", "state": "active"}
+{"kind": "test", "id": "pytest-011558", "node_id": "tests/test_issue_155_contract_id_grammar.py::test_the_grammar_refuses[$ref:icv1:rest:patch:sem:0-revision zero]", "state": "active"}
+{"kind": "test", "id": "pytest-011559", "node_id": "tests/test_issue_155_contract_id_grammar.py::test_the_grammar_refuses[$ref:icv1:rest:patch:sem:01-a leading zero is a second spelling of one revision]", "state": "active"}
+{"kind": "test", "id": "pytest-011560", "node_id": "tests/test_issue_155_contract_id_grammar.py::test_the_grammar_refuses[$ref:icv1:rest:patch:sem:1\\n-a trailing newline, which a $-anchored rule admits]", "state": "active"}
+{"kind": "test", "id": "pytest-011561", "node_id": "tests/test_issue_155_contract_id_grammar.py::test_the_grammar_refuses[$ref:icv1:rest:patch:1-too few segments]", "state": "active"}
+{"kind": "test", "id": "pytest-011562", "node_id": "tests/test_issue_155_contract_id_grammar.py::test_the_grammar_refuses[$ref:icv1:rest:patch:sem:1:extra-too many segments]", "state": "active"}
+{"kind": "test", "id": "pytest-011563", "node_id": "tests/test_issue_155_contract_id_grammar.py::test_the_grammar_refuses[$ref:icv1:rest::sem:1-an empty segment]", "state": "active"}
+{"kind": "test", "id": "pytest-011564", "node_id": "tests/test_issue_155_contract_id_grammar.py::test_the_grammar_refuses[$ref:icv2:rest:patch:sem:1-a version tag this grammar does not define]", "state": "active"}
+{"kind": "test", "id": "pytest-011565", "node_id": "tests/test_issue_155_contract_id_grammar.py::test_the_grammar_refuses[icv1:rest:patch:sem:1-the bare id is not the authored form]", "state": "active"}
+{"kind": "test", "id": "pytest-011566", "node_id": "tests/test_issue_155_contract_id_grammar.py::test_the_grammar_refuses[$ref:icv1:rest:patch:sem-1:1-a hyphen is outside the alphabet]", "state": "active"}
+{"kind": "test", "id": "pytest-011567", "node_id": "tests/test_issue_155_contract_id_grammar.py::test_the_constructor_is_the_only_way_to_build_one", "state": "active"}
+{"kind": "test", "id": "pytest-011568", "node_id": "tests/test_issue_155_contract_id_grammar.py::test_the_action_identifier_map_is_total_and_injective", "state": "active"}
+{"kind": "test", "id": "pytest-011569", "node_id": "tests/test_issue_155_contract_id_grammar.py::test_the_packaged_record_is_named_by_its_own_derivation", "state": "active"}
+{"kind": "test", "id": "pytest-011570", "node_id": "tests/test_issue_155_contract_id_grammar.py::test_a_grammatical_but_wrong_name_is_refused_by_the_registry", "state": "active"}
+{"kind": "test", "id": "pytest-011571", "node_id": "tests/test_issue_155_contract_id_grammar.py::test_one_regex_is_shared_by_every_surface_that_handles_a_reference", "state": "active"}
+{"kind": "test", "id": "pytest-011572", "node_id": "tests/test_issue_155_identity_projection.py::test_compile_serves_the_failure_s_own_field_and_remediation", "state": "active"}

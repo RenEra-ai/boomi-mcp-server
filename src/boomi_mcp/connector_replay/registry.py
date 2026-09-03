@@ -20,6 +20,7 @@ from typing import Any
 
 from boomi_mcp.errors import CONNECTOR_REPLAY_REGISTRY_INVALID
 
+from .ids import authored_contract_ref
 from .models import (
     CapabilityEvidenceRecordV1,
     ComponentProjectionAllowlistV1,
@@ -254,8 +255,25 @@ def _refuse_unresolvable_records(vocabulary, evidence, operation_records, semant
     # portable family, and a dict comprehension kept only the last mapping's
     # actions — so whether a row was accepted depended on vocabulary ORDER.
     families: dict[str, set] = {}
+    #: raw (family, action) -> the grammar-safe identifier pair the contract
+    #: reference is built from. Assembled beside `families` from the same
+    #: mappings, so the two cannot disagree about which actions a family has.
+    identifiers: dict[tuple[str, str], tuple[str, str]] = {}
     for entry in vocabulary:
         families.setdefault(entry.family, set()).update(entry.recognised_actions)
+        for raw_action, action_id in entry.action_ids:
+            key = (entry.family, raw_action)
+            pair = (entry.family_id, action_id)
+            # INJECTIVE ACROSS THE WHOLE VOCABULARY, not only within one mapping.
+            # Two connector types can map to one family, and the per-mapping
+            # validators cannot see each other — so a collision between mappings
+            # would only surface here, as two raw actions minting one reference.
+            if identifiers.get(key, pair) != pair:
+                raise RegistryInvalid(
+                    f"vocabulary maps {key!r} to two different identifier pairs; "
+                    "a raw action with two identifiers means one contract has two "
+                    "references, and a set of references stops being a set")
+            identifiers[key] = pair
     # A SET would silently accept two CONTRADICTORY definitions for one id and
     # revision — they differ, so both survive, and which one interprets a record
     # then depends on iteration order.
@@ -288,6 +306,24 @@ def _refuse_unresolvable_records(vocabulary, evidence, operation_records, semant
             raise RegistryInvalid(
                 f"operation record {record.contract_ref} names an unrecognised "
                 f"action {record.action!r}")
+        # THE REFERENCE IS DERIVED, NOT TRUSTED. The record carries its own name
+        # because whoever reads the record needs it, but the registry rebuilds it
+        # from the vocabulary and the cited semantics and refuses a disagreement.
+        # Without this the reference is a free string that merely LOOKS
+        # structured: it would pass the grammar while naming a family, an action
+        # or a revision the record does not actually describe, and every consumer
+        # downstream resolves by that name.
+        expected = authored_contract_ref(
+            *identifiers[(record.family, record.action)],
+            record.semantics_id,
+            record.semantics_revision,
+        )
+        if record.contract_ref != expected:
+            raise RegistryInvalid(
+                f"operation record names itself {record.contract_ref!r}, but its "
+                f"own family, action, semantics and revision derive {expected!r}; "
+                "a reference that does not follow from the record it names is a "
+                "name for something else")
         if (record.semantics_id, record.semantics_revision) not in published:
             raise RegistryInvalid(
                 f"operation record {record.contract_ref} cites semantics "

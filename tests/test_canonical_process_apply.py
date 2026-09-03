@@ -518,7 +518,7 @@ _SCOPE_B = "b" * 64
 def _binding(**over):
     """One resolved binding, in the mapping shape the recheck boundary hands over."""
     base = {
-        "contract_ref": "$ref:C1",
+        "contract_ref": "$ref:icv1:rest:patch:c1:1",
         "operation_ref": "$ref:op",
         "call_source_path": "/body/steps/0",
         "process_root_ref": "$ref:ROOT",

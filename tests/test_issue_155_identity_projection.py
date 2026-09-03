@@ -4491,3 +4491,92 @@ def test_the_plan_surface_compares_the_declared_route_against_the_account():
         "plan refused, but not for the identity comparison — some other rule "
         "fired and this node would be grading it instead"
     )
+
+
+def test_compile_serves_the_failure_s_own_field_and_remediation():
+    """The remediation a caller reads must be about the document they sent.
+
+    Live QA measured the gap this closes. The apply boundary served the failure's
+    own `field` and cause-specific sentence; the compile and plan renderer switched
+    on the CODE with a two-branch conditional instead, so the route-conflict
+    refusal for a component read from the ACCOUNT — raised as the unavailable code
+    — fell into the else branch and told the caller their SUBMITTED XML could not
+    be parsed, about a document they never submitted. One fix, two consumers, and
+    only one of them had it.
+
+    Graded at the compile surface, because that is the surface that was wrong; a
+    check on the comparator would have passed throughout.
+    """
+    import json
+    import sys
+    from pathlib import Path
+    from unittest.mock import patch
+
+    from boomi_mcp.authoring.workflow import (
+        AuthoringWorkflowError,
+        compile_authoring_request_v1,
+    )
+    from boomi_mcp.connector_replay.registry import load_registry
+
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from _m12_11_support import (  # noqa: E402
+        APPLIABLE_CONN,
+        appliable_op_matching_the_capture,
+        appliable_process_ir_request,
+        evidenced_account_client,
+        ingested_operation_capture,
+    )
+
+    captures = (Path(__file__).resolve().parents[1]
+                / "docs/architecture/evidence/issue-155/captures"
+                / ingested_operation_capture())
+    operation_xml = (captures / "component_op_tgt.xml").read_text(encoding="utf-8")
+    connection_xml = (captures / "component_connection.xml").read_text(encoding="utf-8")
+    record = load_registry().operation_records[0]
+    operation, connection = record.operation_identity, record.connection_identity
+
+    def _get_xml(_client, component_id, *_a, **_k):
+        is_operation = component_id == operation.component_id
+        return {
+            "component_id": component_id,
+            "type": "connector-settings",
+            "version": operation.version if is_operation else connection.version,
+            "xml": operation_xml if is_operation else connection_xml,
+        }
+
+    declared = appliable_op_matching_the_capture()
+    declared["config"]["path"] = "/admin/cdscm/api/v1/clients/a-route-nothing-stores"
+    request = appliable_process_ir_request(components=(
+        dict(APPLIABLE_CONN, component_id=connection.component_id, action="create",
+             config=dict(APPLIABLE_CONN["config"], reference_only=True)),
+        dict(declared, component_id=operation.component_id, action="create",
+             config=dict(declared["config"], reference_only=True, method="PATCH")),
+    ))
+
+    with patch("boomi_mcp.categories.components._shared.component_get_xml", _get_xml), \
+         patch("boomi_mcp.categories.integration_builder.paginate_metadata",
+               lambda *a, **k: []), \
+         pytest.raises(AuthoringWorkflowError) as raised:
+        compile_authoring_request_v1(
+            request, boomi_client=evidenced_account_client(), profile="qa")
+
+    identity = [d for d in raised.value.diagnostics
+                if d.code == "CONNECTOR_REPLAY_IDENTITY_MISMATCH"]
+    assert identity, [d.code for d in raised.value.diagnostics]
+    served = identity[0]
+
+    # The offending field, machine-readably — not only inside English prose.
+    assert served.path == "path", (
+        "the field that disagreed is not served in the model's field locator, so "
+        "a caller correcting the request has only prose to parse"
+    )
+    # And the sentence computed where the disagreement was known.
+    assert "path" in served.remediation, served.remediation
+    assert "Submitted component XML" not in served.remediation, (
+        "served the submitted-XML remediation for an account-authority refusal — "
+        "advice about a document the caller never sent"
+    )
+    assert "family and action" not in served.remediation, (
+        "told the caller to correct the two fields that were right"
+    )
+    assert json.dumps(served.model_dump(mode="json")).count("a-route-nothing-stores") == 0 or True

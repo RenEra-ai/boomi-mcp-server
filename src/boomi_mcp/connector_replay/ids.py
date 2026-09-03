@@ -156,14 +156,89 @@ def is_execution_id(value: object) -> bool:
     return True
 
 
+#: One grammar-safe identifier segment. The alphabet is closed and lowercase, so
+#: a segment can never carry the delimiter and an identifier can never be
+#: ambiguous about where its parts divide.
+CONTRACT_ID_SEGMENT: Final[str] = r"[a-z0-9_]+"
+
+#: The canonical idempotency-contract identifier:
+#: ``icv1:<family_id>:<action_id>:<semantics_id>:<revision>``.
+#:
+#: The version tag is part of the identifier rather than metadata beside it,
+#: because a consumer holding only the string must be able to tell which grammar
+#: produced it. The revision excludes zero and leading zeros so one revision has
+#: exactly one spelling — otherwise ``:1`` and ``:01`` are two references to one
+#: contract, and a set of references stops being a set.
+#:
+#: DERIVED FROM ABSTRACT SEMANTICS ONLY: no account, no component GUID, no
+#: capture identity appears in any segment, so the same abstract contract derives
+#: the same identifier in every account. That is what lets a relocatable artifact
+#: carry a reference at all.
+CANONICAL_CONTRACT_ID_PREFIX: Final[str] = "icv1"
+CANONICAL_CONTRACT_ID_BODY: Final[str] = (
+    rf"{CANONICAL_CONTRACT_ID_PREFIX}:{CONTRACT_ID_SEGMENT}:{CONTRACT_ID_SEGMENT}"
+    rf":{CONTRACT_ID_SEGMENT}:[1-9][0-9]*"
+)
+CANONICAL_CONTRACT_ID_PATTERN: Final[str] = rf"^{CANONICAL_CONTRACT_ID_BODY}(?![\s\S])"
+_CANONICAL_CONTRACT_ID_RE: Final = re.compile(CANONICAL_CONTRACT_ID_PATTERN)
+
+
+def is_canonical_contract_id(value: object) -> bool:
+    """Whether ``value`` is a well-formed bare canonical contract identifier."""
+    return isinstance(value, str) and _CANONICAL_CONTRACT_ID_RE.fullmatch(value) is not None
+
+
+def canonical_contract_id(
+    family_id: str, action_id: str, semantics_id: str, revision: int
+) -> str:
+    """Build the canonical identifier, or refuse.
+
+    THE ONLY CONSTRUCTOR. Every surface that needs one calls this rather than
+    formatting the parts itself, because a second formatter is how a mint and a
+    validator come to disagree about a string they both claim to own — and a
+    reference that mints but does not validate is a contract nobody can use.
+
+    Refuses rather than emitting something the grammar would reject: a segment
+    that is not grammar-safe here becomes an unparseable reference downstream,
+    where the part that produced it is no longer in view.
+    """
+    parts = {"family_id": family_id, "action_id": action_id,
+             "semantics_id": semantics_id}
+    for name, value in parts.items():
+        if not isinstance(value, str) or not re.fullmatch(CONTRACT_ID_SEGMENT, value):
+            raise ValueError(
+                f"{name}={value!r} is not a grammar-safe contract identifier "
+                f"segment ({CONTRACT_ID_SEGMENT}); a fold that produces one must "
+                "be recorded in the registry vocabulary, never applied here"
+            )
+    if not isinstance(revision, int) or isinstance(revision, bool) or revision < 1:
+        raise ValueError(
+            f"revision={revision!r} must be a positive integer; the grammar "
+            "admits no zero and no leading zero, so one revision has one spelling"
+        )
+    built = f"{CANONICAL_CONTRACT_ID_PREFIX}:{family_id}:{action_id}:{semantics_id}:{revision}"
+    # The constructor grades its own output against the published rule. Without
+    # this the two could drift apart silently on any edit to either.
+    assert is_canonical_contract_id(built), built
+    return built
+
+
+def authored_contract_ref(
+    family_id: str, action_id: str, semantics_id: str, revision: int
+) -> str:
+    """The authored ``$ref:`` form of the canonical identifier."""
+    return AUTHORED_CONTRACT_REF_TOKEN_PREFIX + canonical_contract_id(
+        family_id, action_id, semantics_id, revision
+    )
+
+
 #: The authored form of an idempotency-contract reference: the ``$ref:`` token
-#: followed by ONE key segment. Owned here, beside the other identifier grammars,
-#: because two consumers need it — the authoring model that accepts documents and
-#: the compiler symbol that resolves them — and a second hand-written copy is how
-#: an authoring surface and its compiler drift into disagreeing about what a
-#: reference IS. The segment excludes ``:`` deliberately: a value carrying further
-#: colons reads as a structured identifier this contract does not define, and
-#: admitting it would let a shape nothing resolves look well-formed.
+#: followed by the canonical identifier. Owned here, beside the other identifier
+#: grammars, because several consumers need it — the authoring model that accepts
+#: documents, the compiler symbol that resolves them, the registry mint, the
+#: compile-time grant check and the discovery surface — and a second hand-written
+#: copy is how an authoring surface and its compiler drift into disagreeing about
+#: what a reference IS.
 AUTHORED_CONTRACT_REF_TOKEN_PREFIX: Final[str] = "$ref:"
 # Ends with a negative lookahead rather than `$`. Measured against a real
 # Draft 2020-12 validator: a `$`-anchored pattern ACCEPTS "$ref:ABC\n",
@@ -171,7 +246,7 @@ AUTHORED_CONTRACT_REF_TOKEN_PREFIX: Final[str] = "$ref:"
 # input validated against the served schema was then refused at parse time.
 # `(?![\s\S])` means "no character follows" in both ECMA-262 and Python, so
 # the published rule and the enforced one accept the same strings.
-AUTHORED_CONTRACT_REF_PATTERN: Final[str] = r"^\$ref:[A-Za-z0-9_.-]+(?![\s\S])"
+AUTHORED_CONTRACT_REF_PATTERN: Final[str] = rf"^\$ref:{CANONICAL_CONTRACT_ID_BODY}(?![\s\S])"
 _AUTHORED_CONTRACT_REF_RE: Final = re.compile(AUTHORED_CONTRACT_REF_PATTERN)
 
 

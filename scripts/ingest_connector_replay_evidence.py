@@ -17,12 +17,20 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
+from boomi_mcp.connector_replay.digests import (  # noqa: E402
+    operation_record_digest_v1,
+)
+from boomi_mcp.connector_replay.ids import authored_contract_ref  # noqa: E402
+from boomi_mcp.connector_replay.models import (  # noqa: E402
+    OperationContractRecordV1,
+)
 from boomi_mcp.connector_replay.ingest import (  # noqa: E402
     IngestRefused,
     ingest,
@@ -63,6 +71,19 @@ ACTIONS = {
 # five values, and BOTH configuration digests are among the ones that did not
 # move: that is the credential-only version advance this issue documents,
 # observed rather than argued.
+def _grammar_safe_identifier(raw: str) -> str:
+    """Fold one raw vocabulary value onto the contract grammar's alphabet.
+
+    Deliberately narrow: lower-case, and hyphens and dots to underscores. It is
+    NOT asked to be injective — nothing about a fold can promise that — which is
+    why every caller records its output and lets the registry models refuse a
+    collision. A fold that silently merged two raw values would give two
+    contracts one name, and the failure would surface as a reference resolving to
+    the wrong evidence rather than as an error here.
+    """
+    return re.sub(r"[^a-z0-9_]", "_", raw.lower())
+
+
 OPERATION_RECORD_CAPTURES = ("cap155-e9-patch-operation-record",)
 
 
@@ -98,6 +119,21 @@ def main() -> int:
 
     payload = json.loads(REGISTRY.read_text(encoding="utf-8"))
 
+    # THE GRAMMAR-SAFE ACTION IDENTIFIERS, DERIVED HERE AND RECORDED THERE.
+    # The registry's raw vocabulary is the platform's, and the platform's is not
+    # grammar-safe: verbs are upper case and a connector type carries hyphens and
+    # an account segment. A contract reference needs a closed lowercase alphabet,
+    # so something must fold — and the choice is whether the fold happens at mint,
+    # once, where a collision can be refused while the whole vocabulary is in
+    # view, or at every point of use, where two raw values quietly becoming one
+    # identifier is invisible. It happens here. The model then re-checks totality
+    # and injectivity on load, so the recorded map cannot be edited into a lie.
+    for entry in payload.get("vocabulary", []):
+        entry["action_ids"] = sorted(
+            [action, _grammar_safe_identifier(action)]
+            for action in entry.get("recognised_actions", [])
+        )
+
     # OPERATION RECORDS and the semantics they cite, read from the capture that
     # minted them. A record is account-scoped, so unlike the class-level evidence
     # rows it is only meaningful on the account it was minted against — and the
@@ -131,6 +167,32 @@ def main() -> int:
             k: definition[k] for k in
             ("semantics_id", "revision", "mechanism", "key_scope", "duplicate_guarantee")
         })
+        # THE REFERENCE IS DERIVED, NOT COPIED. The capture carries a
+        # `contract_ref` its author typed, and that author was me — the same hand
+        # the record is meant to be independent of. Rebuilding it from the
+        # record's own family, action, semantics and revision means the published
+        # name follows from the published facts, and the registry re-derives it on
+        # load, so a name and the record it names cannot drift apart. The capture
+        # file is left exactly as archived: it is evidence, and evidence is not
+        # edited to agree with a later decision about naming.
+        record = dict(record, contract_ref=authored_contract_ref(
+            record["family"],
+            _grammar_safe_identifier(record["action"]),
+            record["semantics_id"],
+            record["semantics_revision"],
+        ))
+        # AND THE DIGEST FOLLOWS THE CONTENT. The digest is the evidence
+        # IDENTITY — grants carry it, the apply recheck matches on it, the durable
+        # attestation records it — so deriving a new reference without recomputing
+        # it would publish a record whose identity described an earlier version of
+        # itself. The loader recomputes and refuses a mismatch, which is how this
+        # was caught rather than shipped.
+        record["record_digest"] = operation_record_digest_v1(
+            OperationContractRecordV1.model_validate(
+                {k: v for k, v in record.items() if k != "record_digest"}
+                | {"record_digest": "0" * 64}
+            )
+        )
         records.append(record)
         print(f"operation record: {record['family']}/{record['action']} "
               f"{record['contract_ref']} scope={record['account_scope_hash'][:16]}")

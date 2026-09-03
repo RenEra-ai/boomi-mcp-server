@@ -94,7 +94,7 @@ from boomi_mcp.connector_replay.models import (  # noqa: E402
     StaticRouteCoverageV1,
 )
 
-_CONTRACT = "$ref:CONTRACT"
+_CONTRACT = "$ref:icv1:rest:patch:contract:1"
 _DIGEST = "b" * 64
 _ACCOUNT = "account-under-test"
 
@@ -353,7 +353,7 @@ def test_an_evidenced_retried_write_compiles_and_an_unevidenced_one_does_not():
 
     # EVIDENCE NAMING A CONTRACT NOBODY MINTED.
     assert _compile_errors(
-        {"kind": "key_reference", "contract_ref": "$ref:NOSUCH"},
+        {"kind": "key_reference", "contract_ref": "$ref:icv1:rest:patch:nosuch:1"},
         registry=registry, snapshot=snapshot,
     ) == [("PROCESS_IR_SEMANTIC_IDEMPOTENCY_EVIDENCE_MISSING",
            "/body/steps/1/try_body/steps/0/idempotency")]
