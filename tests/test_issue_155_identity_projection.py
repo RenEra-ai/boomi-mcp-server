@@ -4255,10 +4255,149 @@ def test_the_served_refusal_names_the_field_that_disagreed():
     from boomi_mcp.authoring.connector_resolution_snapshot import ConnectorIdentityError
 
     served = _pre_write_refusal(ConnectorIdentityError(
-        "CONNECTOR_REPLAY_IDENTITY_MISMATCH", "m", component_key="op", field="path"))
+        "CONNECTOR_REPLAY_IDENTITY_MISMATCH", "m", component_key="op", field="path",
+        remediation="The declaration disagrees with the account on 'path'."))
     assert served["field"] == "path"
+    # ...and the hint is the ERROR's own sentence, not one inferred from the
+    # field. Inferring produced a single claim for three situations and was wrong
+    # for two: raw XML disagreeing with itself, and a stored route conflict, both
+    # have no declaration to correct yet were told to correct one.
     assert "'path'" in served["hint"]
+    assert "The declaration disagrees" in served["hint"]
+
+    # A refusal with a field but NO remediation adds no sentence of its own.
+    quiet = _pre_write_refusal(ConnectorIdentityError(
+        "CONNECTOR_REPLAY_IDENTITY_MISMATCH", "m", component_key="op", field="path"))
+    assert quiet["field"] == "path"
+    assert "disagrees" not in quiet["hint"]
 
     # ...and a refusal that knows no field does not invent one.
     assert "field" not in _pre_write_refusal(ConnectorIdentityError(
         "CONNECTOR_REPLAY_IDENTITY_MISMATCH", "m", component_key="op"))
+
+
+def test_one_route_in_two_spellings_stays_comparable():
+    """The fail-open assembled from two correct halves that disagreed.
+
+    The conflict flag was computed from NORMALIZED routes while the state and the
+    retained path were computed from RAW spellings. A component repeating one
+    route as `/A` and `/%41` therefore read as non-conflicting AND unreadable AND
+    path-less — so the comparison had nothing to compare and accepted any
+    declaration at all, including an unrelated one. Neither half was wrong on its
+    own; they were answering about different sets.
+    """
+    from boomi_mcp.authoring.connector_resolution_snapshot import rest_route_decision
+
+    state, conflicting, path = rest_route_decision(
+        ["/route/a", "/route/%61"], modelled=True, resolved_enough=True)
+    assert (state, conflicting) == ("static", False)
+    assert path, "one route in two spellings retained no path to compare against"
+
+    state, conflicting, path = rest_route_decision(
+        ["/route/a", "/route/b"], modelled=True, resolved_enough=True)
+    assert (state, conflicting, path) == ("unavailable", True, None)
+
+    # ...and the arms that must not change.
+    assert rest_route_decision([], modelled=True, resolved_enough=True) == (
+        "unavailable", False, None)
+    assert rest_route_decision(["/a", ""], modelled=True, resolved_enough=True) == (
+        "dynamic", False, None)
+    assert rest_route_decision(
+        ["/a", "/b"], modelled=False, resolved_enough=True)[1] is False, (
+        "an unmodelled family's two path-named fields are two unknowns, not two routes")
+
+
+def test_the_route_decision_moves_the_published_revision():
+    """The oracle fingerprinted the normalizer and not the reader that uses it.
+
+    Changing the reader from rejecting two spellings of one route to accepting
+    them moved what the validator accepts while every normalizer output — and
+    both served revisions — stood still. A behaviour authority that projects its
+    helper rather than its own decision is projecting the wrong thing.
+    """
+    from unittest.mock import patch
+
+    import boomi_mcp.authoring.connector_resolution_snapshot as crs
+    from boomi_mcp.authoring.contract import (
+        get_authoring_revisions,
+        reset_manifest_cache,
+    )
+
+    def _revision():
+        reset_manifest_cache()
+        return get_authoring_revisions()["compiler_revision"]
+
+    before = _revision()
+
+    def _rejects_equivalent_spellings(path_fields, *, modelled, resolved_enough):
+        if modelled and resolved_enough and len(set(path_fields)) > 1:
+            return "unavailable", True, None
+        return crs.rest_route_decision.__wrapped__(
+            path_fields, modelled=modelled, resolved_enough=resolved_enough
+        ) if hasattr(crs.rest_route_decision, "__wrapped__") else ("static", False, None)
+
+    with patch.object(crs, "rest_route_decision", _rejects_equivalent_spellings):
+        after = _revision()
+    reset_manifest_cache()
+
+    assert after != before, (
+        "the route reader's decision changed and the compiler revision did not"
+    )
+
+
+def test_a_route_conflict_is_reported_once_per_component():
+    """Both failure lists are serialized, so covering a component twice shows twice.
+
+    The declaration-independent loop and the comparator each raised for the same
+    component, and an ordinary compile or apply caller received the identical path
+    problem in duplicate.
+    """
+    from boomi_mcp.authoring.connector_resolution_snapshot import (
+        ConnectorIdentityError,
+        build_connector_resolution_snapshot,
+    )
+
+    class _Component:
+        key = "op"
+        component_id = "op-1"
+        config = {"connector_type": "http", "method": "PATCH"}
+        type = "connector-action"
+
+    with pytest.raises(ConnectorIdentityError) as raised:
+        build_connector_resolution_snapshot(
+            [_Component()],
+            live_component_xml={"op": _ambiguous_operation_xml()},
+            reused_keys=["op"],
+            declared={"op": ("http", "PATCH")},   # ...the comparator WILL visit it.
+        )
+    conflicts = [f for f in raised.value.failures if "more than one route" in str(f)]
+    assert len(conflicts) == 1, [str(f)[:60] for f in raised.value.failures]
+
+
+def test_a_declaration_free_conflict_does_not_claim_a_declaration_disagreed():
+    """The mismatch code's registered summary says a DECLARED field disagrees.
+
+    This block exists for the case where nothing was declared, so a code-driven
+    client was told a declaration disagreed when there was none.
+    """
+    from boomi_mcp.authoring.connector_resolution_snapshot import (
+        ConnectorIdentityError,
+        build_connector_resolution_snapshot,
+    )
+    from boomi_mcp.errors import CONNECTOR_REPLAY_IDENTITY_UNAVAILABLE
+
+    class _Component:
+        key = "op"
+        component_id = "op-1"
+        config = {"connector_type": "http", "method": "PATCH"}
+        type = "connector-action"
+
+    with pytest.raises(ConnectorIdentityError) as raised:
+        build_connector_resolution_snapshot(
+            [_Component()],
+            live_component_xml={"op": _ambiguous_operation_xml()},
+            reused_keys=["op"],
+            declared={},
+        )
+    assert raised.value.code == CONNECTOR_REPLAY_IDENTITY_UNAVAILABLE
+    assert "no declaration can resolve this" in (raised.value.remediation or "")

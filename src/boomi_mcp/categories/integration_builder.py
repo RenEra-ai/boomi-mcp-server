@@ -7986,10 +7986,16 @@ def _pre_write_refusal(exc, *, failed_step=None) -> Dict[str, Any]:
     field = getattr(exc, "field", None)
     if field:
         envelope["field"] = field
-        envelope["hint"] += (
-            " The declaration disagrees with the account on {0!r}; correct that "
-            "field, not the ones the message shows as matching.".format(field)
-        )
+    # THE REMEDIATION COMES FROM THE ERROR, never from the field. Inferring it
+    # here produced one sentence for three different situations, and it was wrong
+    # for two of them: raw submitted XML that disagrees with ITSELF has no
+    # declaration to correct, and a component storing two routes has none either
+    # — yet both were told their declaration disagreed with the account and sent
+    # to edit it. A served hint is contract text, so it says what the code that
+    # raised it knows, or it says nothing extra.
+    remediation = getattr(exc, "remediation", None)
+    if remediation:
+        envelope["hint"] += " " + str(remediation)
     return envelope
 
 

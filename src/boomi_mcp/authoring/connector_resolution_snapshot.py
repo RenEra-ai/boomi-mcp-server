@@ -59,6 +59,7 @@ class ConnectorIdentityError(Exception):
         failures: "Tuple[ConnectorIdentityError, ...]" = (),
         partial: "Optional[TrustedConnectorResolutionSnapshotV1]" = None,
         field: "Optional[str]" = None,
+        remediation: "Optional[str]" = None,
     ) -> None:
         super().__init__(message)
         self.code = code
@@ -71,6 +72,12 @@ class ConnectorIdentityError(Exception):
         #: action, which are the two fields that were right. A caller following
         #: it literally edits what is already correct.
         self.field = field
+        #: WHAT TO DO, from the code that knows why. Inferring it downstream from
+        #: the field alone produced a sentence that was wrong for two of the three
+        #: cases: it told a caller their declaration disagreed with the account,
+        #: which is false for raw submitted XML that disagrees with ITSELF, and
+        #: false again for a stored route conflict where no declaration exists.
+        self.remediation = remediation
         #: EVERY component that failed, not just the first. A surface whose
         #: contract is to report everything wrong at once cannot honour it if the
         #: builder stops at the first bad component — and the surface that
@@ -258,6 +265,44 @@ class TrustedConnectorResolutionSnapshotV1(_SnapshotModel):
             if identity.component_key == component_key:
                 return identity
         return None
+
+
+def rest_route_decision(path_fields, *, modelled: bool, resolved_enough: bool):
+    """``(route_state, conflicting, live_path)`` from a component's stored paths.
+
+    PURE, and its own function, for two reasons that both bit. The state, the
+    conflict flag and the retained path were derived from two DIFFERENT sets —
+    the conflict from normalized routes, the other two from raw spellings — so a
+    component repeating one route in two spellings read as non-conflicting AND
+    unreadable AND path-less, which made the comparison skip it and accept any
+    declaration at all. One function, one set, and they cannot disagree again.
+
+    And the served revision has to fingerprint this DECISION, not just the
+    normalizer under it: changing the reader from rejecting two spellings of one
+    route to accepting them moved acceptance while every normalizer output stood
+    still. A pure function can be projected by calling it, which is why this is
+    not a block inside the XML reader — the oracle would otherwise have to build
+    a component document to ask a question about a list of strings.
+    """
+    if not (modelled and resolved_enough):
+        return ("static" if resolved_enough else "unavailable"), False, None
+    if not path_fields:
+        # A REST operation whose path we cannot find is a route we cannot read.
+        # Silence, not "static" — "static" is the answer that disarms.
+        return "unavailable", False, None
+    if any((value or "").strip() == "" for value in path_fields):
+        return "dynamic", False, None
+
+    from ..connector_replay.digests import comparable_path
+
+    routes = {comparable_path(v) for v in (x.strip() for x in path_fields) if v}
+    if len(routes) > 1:
+        # DISTINCT AFTER NORMALIZATION, so a genuine contradiction rather than two
+        # spellings of one thing. Unreadable for the same reason a missing path
+        # is, and additionally a CONFLICT: one is silence, this is a component
+        # that cannot serve a single route whatever anyone declares about it.
+        return "unavailable", True, None
+    return "static", False, (routes.pop() if routes else None)
 
 
 def live_identity_from_component_xml(
@@ -541,72 +586,9 @@ def live_identity_from_component_xml(
     # the account stores with a blank path needs a binding, and reporting it as a
     # settled static route let a process be applied whose connector action
     # carried no Path property at all.
-    route_state = "static" if resolved_enough else "unavailable"
-    if family == "rest" and resolved_enough:
-        if not path_fields:
-            # A REST operation whose path we cannot find is a route we cannot
-            # read. Silence, not "static" — "static" is the answer that disarms.
-            route_state = "unavailable"
-        elif any((value or "").strip() == "" for value in path_fields):
-            route_state = "dynamic"
-        elif len({(value or "").strip() for value in path_fields}) > 1:
-            # TWO DIFFERENT STORED PATHS IS A ROUTE WE CANNOT READ, and it must
-            # be answered the same way as one we cannot find. Left `static`, the
-            # identity says the route is settled while carrying no path: the
-            # blank-path net reads "settled" as "needs no binding" and the
-            # declared-versus-live comparison skips a path it has nothing to
-            # compare, so an ambiguous component passes both. This module already
-            # states the rule for the sibling case one branch above — "static" is
-            # the answer that disarms — and this is the same case reached from
-            # the other side.
-            route_state = "unavailable"
-
-    # THE PATH ITSELF, kept — not just the state derived from it. This reader
-    # extracted the account's stored path in order to decide `route_state` and
-    # then threw the value away, so a resolved identity reported WHETHER the
-    # route was readable and never WHAT it was. The declared-versus-live
-    # comparison had nothing to compare, which is why a caller could declare one
-    # path, have the live one execute, and be shown their own back.
-    #
-    # Second instance of the class this issue minted one round earlier — a fact
-    # established at a boundary and dropped before the record that boundary
-    # exists to produce — so the correction is at the construction below, which
-    # now carries every fact this function determined rather than a hand-picked
-    # subset of them.
-    #
-    # ONLY WHEN THE ROUTE IS SETTLED AND UNAMBIGUOUS. A dynamic route has no
-    # single stored path by definition, and two differing path fields are a
-    # component this reader cannot describe with one value — recording either
-    # would be inventing the answer the ambiguity denies.
-    stored_paths = {(value or "").strip() for value in path_fields}
-    #: TWO DIFFERENT STORED PATHS is a property of the COMPONENT, not of any
-    #: declaration about it — the component cannot serve one route, so there is
-    #: nothing a caller could declare that would be checkable against it. Recorded
-    #: as its own fact rather than folded into `route_state`: live QA measured
-    #: that marking such a component `unavailable` changed no served behaviour at
-    #: all, because nothing distinguishes `unavailable` from `static` on the paths
-    #: that consume it — the branch existed and did nothing. Genuine
-    #: unreadability keeps its silence; this is the case where we CAN read and
-    #: what we read contradicts itself.
-    #: DISTINCTNESS IS THE ROUTE'S OWN, not the raw spelling's, and only where a
-    #: route is modelled. Two spellings of one route — `/A` and `/%41` — are one
-    #: route by the published normalizer, so calling them a conflict would refuse
-    #: a component the evidence layer considers unambiguous; and for a family
-    #: whose config element this module does not model, the note above says
-    #: plainly that we do not know which element is its config, so two
-    #: path-named fields there are two unknowns rather than two routes.
-    _routed_family = family == "rest"
-    if _routed_family:
-        from ..connector_replay.digests import comparable_path as _route_form
-
-        _distinct_routes = {_route_form(p) for p in stored_paths if p}
-    else:
-        _distinct_routes = set()
-    route_conflicting = len(_distinct_routes) > 1
-    live_path = (
-        stored_paths.pop() if route_state == "static" and len(stored_paths) == 1
-        else None
-    ) if path_fields else None
+    route_state, route_conflicting, live_path = rest_route_decision(
+        path_fields, modelled=(family == "rest"), resolved_enough=resolved_enough
+    )
 
     return ResolvedConnectorComponentIdentityV1(
         component_key=component_key,
@@ -936,16 +918,37 @@ def build_connector_resolution_snapshot(
     # The refusal was written to be declaration-independent and was then gated on
     # a declaration, which is the whole of the defect.
     for _identity in getattr(snapshot, "identities", ()) or ():
+        # ONLY WHAT THE COMPARATOR WILL NOT VISIT. It raises its own conflict for
+        # every component it examines, and both failure lists are serialized by
+        # the authoring workflow and the recipe engine — so covering the same
+        # component here handed an ordinary caller the identical path problem
+        # twice. This loop exists for the components the comparator never sees,
+        # which is exactly the ones absent from the declaration map.
+        if _identity.component_key in (declared or {}):
+            continue
         if getattr(_identity, "route_conflicting", None):
+            # NOT a mismatch code. The registered summary for the mismatch says a
+            # DECLARED family or action disagrees with the account — and this
+            # block exists for the case where nothing was declared at all, so a
+            # code-driven client would have been told a declaration disagreed
+            # when there was none. The unavailable code's own summary is the
+            # accurate one here: nothing about what the component will actually
+            # do can be checked, so the request is refused rather than applied
+            # against a component nobody could examine.
             failures.append(ConnectorIdentityError(
-                CONNECTOR_REPLAY_IDENTITY_MISMATCH,
+                CONNECTOR_REPLAY_IDENTITY_UNAVAILABLE,
                 (
-                    "component {0!r} is stored with more than one route, so it "
-                    "cannot serve a single one. Remove the surplus path from the "
-                    "component."
+                    "component {0!r} is stored with more than one route, so what "
+                    "it will actually call cannot be established. Remove the "
+                    "surplus path from the component."
                 ).format(_identity.component_key),
                 component_key=_identity.component_key,
                 field="path",
+                remediation=(
+                    "The component itself stores two different routes. Remove the "
+                    "surplus path from the component; no declaration can resolve "
+                    "this, because the ambiguity is in the stored document."
+                ),
             ))
 
     if declared:
@@ -984,6 +987,7 @@ def build_connector_resolution_snapshot(
             component_key=first.component_key,
             failures=tuple(failures),
             field=first.field,
+            remediation=first.remediation,
             partial=snapshot,
         )
     return snapshot
@@ -1094,6 +1098,11 @@ def assert_declared_matches_resolved(
                 ).format(key),
                 component_key=key,
                 field="path",
+                remediation=(
+                    "The component itself stores two different routes. Remove the "
+                    "surplus path from the component; no declaration can resolve "
+                    "this, because the ambiguity is in the stored document."
+                ),
             ))
         declared_path = None if _route_unusable else (declared_paths or {}).get(key)
         live_path = identity.path if identity.route_state == "static" else None
@@ -1165,6 +1174,11 @@ def assert_declared_matches_resolved(
                     ),
                     component_key=key,
                     field=label,
+                    remediation=(
+                        "The declaration disagrees with the account on {0!r}. "
+                        "Correct that field to what the component resolves to; "
+                        "the other declared fields matched.".format(label)
+                    ),
                 ))
     if mismatches:
         first = mismatches[0]
@@ -1175,6 +1189,7 @@ def assert_declared_matches_resolved(
         raise ConnectorIdentityError(
             first.code, str(first), component_key=first.component_key,
             failures=tuple(mismatches), field=first.field,
+            remediation=first.remediation,
         )
     return dict(declared)
 

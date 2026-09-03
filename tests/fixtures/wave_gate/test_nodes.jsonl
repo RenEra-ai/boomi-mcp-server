@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 11499, "minimum_collected": 11499, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 11503, "minimum_collected": 11503, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -11541,5 +11541,9 @@
 {"kind": "test", "id": "pytest-011540", "node_id": "tests/test_issue_155_identity_projection.py::test_a_route_conflict_does_not_suppress_the_verb_check", "state": "active"}
 {"kind": "test", "id": "pytest-011541", "node_id": "tests/test_issue_155_identity_projection.py::test_a_conflicting_route_is_refused_with_no_declaration_at_all", "state": "active"}
 {"kind": "test", "id": "pytest-011542", "node_id": "tests/test_issue_155_identity_projection.py::test_the_served_refusal_names_the_field_that_disagreed", "state": "active"}
-{"kind": "test", "id": "pytest-011543", "node_id": "tests/test_issue_155_recheck_boundary.py::test_a_drift_inside_the_materialization_window_refuses_before_the_write", "state": "active"}
-{"kind": "test", "id": "pytest-011544", "node_id": "tests/test_issue_155_recheck_boundary.py::test_a_mutation_uncertain_push_retains_the_accounting_it_owes", "state": "active"}
+{"kind": "test", "id": "pytest-011543", "node_id": "tests/test_issue_155_identity_projection.py::test_one_route_in_two_spellings_stays_comparable", "state": "active"}
+{"kind": "test", "id": "pytest-011544", "node_id": "tests/test_issue_155_identity_projection.py::test_the_route_decision_moves_the_published_revision", "state": "active"}
+{"kind": "test", "id": "pytest-011545", "node_id": "tests/test_issue_155_identity_projection.py::test_a_route_conflict_is_reported_once_per_component", "state": "active"}
+{"kind": "test", "id": "pytest-011546", "node_id": "tests/test_issue_155_identity_projection.py::test_a_declaration_free_conflict_does_not_claim_a_declaration_disagreed", "state": "active"}
+{"kind": "test", "id": "pytest-011547", "node_id": "tests/test_issue_155_recheck_boundary.py::test_a_drift_inside_the_materialization_window_refuses_before_the_write", "state": "active"}
+{"kind": "test", "id": "pytest-011548", "node_id": "tests/test_issue_155_recheck_boundary.py::test_a_mutation_uncertain_push_retains_the_accounting_it_owes", "state": "active"}

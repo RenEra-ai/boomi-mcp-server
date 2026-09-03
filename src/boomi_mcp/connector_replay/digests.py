@@ -796,6 +796,16 @@ def _percent_probe_domain() -> tuple:
     # stopped trimming, would move behaviour with every well-formed probe
     # unchanged — which is the shape of the last three findings against this
     # oracle, each one a dimension derived on one axis and sampled on the next.
+    # THE READER'S OWN DECISION, not just the normalizer's. The oracle
+    # fingerprinted what `comparable_path` returns and nothing about whether the
+    # route reader USES it — so changing that reader from rejecting two spellings
+    # of one route to accepting them moved acceptance while every probe output,
+    # and both served revisions, stood still. A behaviour authority that projects
+    # its helper and not its own decision is projecting the wrong thing.
+    probes.extend((
+        "\x00route-conflict:one-route-two-spellings",
+        "\x00route-conflict:two-distinct-routes",
+    ))
     probes.extend((
         "/%",        # a percent with nothing after it
         "/%2",       # one hex digit — a truncated escape
@@ -838,7 +848,33 @@ def path_equivalence_behaviour() -> tuple:
     measured, which is the same defect its sibling grammar row was added to close.
     """
     results = []
+    #: The route reader's verdict on the two cases whose answer this issue
+    #: changed, carried as data beside the normalizer's outputs so a change to
+    #: EITHER moves the revision. Derived by running the reader, never restated.
+    def _reader_verdict(spellings):
+        # THE DECISION ITSELF, called. An earlier version built a component
+        # document to ask this question and the reader refused the document —
+        # proving only that the XML had been guessed wrong, for the third time in
+        # this issue. The decision is a pure function of the stored paths, so the
+        # oracle asks it directly.
+        from ..authoring.connector_resolution_snapshot import rest_route_decision
+
+        state, conflicting, path = rest_route_decision(
+            list(spellings), modelled=True, resolved_enough=True
+        )
+        return "%s/%s/%s" % (state, bool(conflicting), bool(path))
+
     for probe in PATH_EQUIVALENCE_PROBES:
+        if probe.startswith("\x00route-conflict:"):
+            spellings = (
+                ("/route/a", "/route/%61") if probe.endswith("one-route-two-spellings")
+                else ("/route/a", "/route/b")
+            )
+            try:
+                results.append((probe, _reader_verdict(spellings)))
+            except Exception as refusal:  # noqa: BLE001
+                results.append((probe, "refused:" + type(refusal).__name__))
+            continue
         try:
             results.append((probe, comparable_path(probe)))
         except Exception as refusal:  # noqa: BLE001
