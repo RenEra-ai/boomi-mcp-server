@@ -1014,3 +1014,72 @@ def test_a_minted_grant_names_its_root_and_its_connection():
     assert grant.connection_ref == resolved[grant.call_source_path], (
         grant, resolved,
     )
+
+
+def test_the_relocatable_compile_cannot_be_the_evidence_gate():
+    """Why the materialization compile does not enforce the per-call grant rule.
+
+    The issue-level architect gate read this as drift: the same conditional table
+    refuses when projected-but-grantless and compiles when rootless-and-grantless,
+    against a plan clause that requires a per-call grant unconditionally. The
+    three measurements below are the refutation, and they are a TEST rather than
+    a comment because the comment that stood here was itself wrong for four
+    rounds and nobody had run it.
+
+    They also record what would break if someone "fixed" it by keeping the root.
+    """
+    from boomi_mcp.authoring.process_materialization import placeholder_backed_symbols
+    from boomi_mcp.compiler.process_ir.semantic_validation.pipeline import (
+        validate_process_ir,
+    )
+
+    doc = _doc({"kind": "key_reference", "contract_ref": _CONTRACT})
+
+    # 0. THE CORROBORATED STATE: root projected, one grant, compiles clean.
+    #    Every arm below is this table with one thing changed, so the comparison
+    #    is over a single variable rather than over two different fixtures.
+    projected = project_grants_for_root(
+        doc, _symbols(), process_root_ref="$ref:ROOT",
+        registry=_Registry(_record()), snapshot=_snapshot(),
+    )
+    assert projected.process_root_ref is not None
+    assert len(projected.idempotency_grants) == 1
+    assert not validate_process_ir(doc, projected).errors
+
+    # 1. KEEP THE ROOT, DROP THE GRANTS — the counterfactual. This is what the
+    #    read-only compile phase actually holds: it projects a root and mints
+    #    nothing, because no live evidence has been resolved there. The per-call
+    #    check activates on any table whose root is set, so this refuses.
+    kept_root = projected.model_copy(update={"idempotency_grants": ()})
+    assert "PROCESS_IR_SEMANTIC_IDEMPOTENCY_EVIDENCE_MISSING" in [
+        e.code for e in validate_process_ir(doc, kept_root).errors
+    ], (
+        "keeping the root no longer refuses a grantless conditional retry, so "
+        "clearing it is no longer load-bearing and this refutation is stale"
+    )
+
+    # 2. CLEARING BOTH IS WHAT MAKES THE RELOCATABLE COMPILE PASS. Without it,
+    #    arm 1 would apply to every materialization — refusing every legitimate
+    #    conditionally-idempotent retry at plan time, on a compile that cannot
+    #    consult evidence because the artifact it produces must stay
+    #    account-independent.
+    relocatable = placeholder_backed_symbols(projected)
+    assert relocatable.process_root_ref is None
+    assert not relocatable.idempotency_grants
+    assert not validate_process_ir(doc, relocatable).errors
+
+    # 3. THE MECHANISM THE OLD COMMENT GAVE IS FALSE. It said projecting here
+    #    would "compare a record's real component id against `id-KEY`
+    #    placeholders, corroborate nothing". Corroboration resolves ids through
+    #    the trusted snapshot, so placeholder-backed symbols mint perfectly well.
+    #    Recorded because a rationale nobody executes is how the wrong reason
+    #    survives a rewrite of the right code.
+    minted = project_grants_for_root(
+        doc, placeholder_backed_symbols(_symbols()), process_root_ref="$ref:ROOT",
+        registry=_Registry(_record()), snapshot=_snapshot(),
+    )
+    assert minted.idempotency_grants, (
+        "placeholders defeated corroboration after all — if this ever fails, the "
+        "comment at process_materialization.py was right and this test is the "
+        "thing that is wrong"
+    )

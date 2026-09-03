@@ -710,12 +710,33 @@ def build_materialization_plan(
     # The symbols here are placeholder-backed on purpose: materialisation
     # produces a RELOCATABLE artifact, and the plan keeps grants out of the
     # covered plan material precisely so its fingerprint stays
-    # account-independent. Projecting a root here would compare a record's real
-    # component id against `id-KEY` placeholders, corroborate nothing, and refuse
-    # every legitimate conditionally-idempotent retry — a gate that refuses
-    # everything is not a gate. The enforcement point is the APPLY boundary,
-    # where `bind_symbols_to_applied_ids` has rebound the table to real ids and a
-    # record can actually be matched.
+    # account-independent.
+    #
+    # CLEARING THE ROOT IS LOAD-BEARING, and the reason is not the one this
+    # comment used to give. It claimed that projecting here "would compare a
+    # record's real component id against `id-KEY` placeholders, corroborate
+    # nothing". Measured false: projecting a root on placeholder-backed symbols
+    # MINTS the grant and compiles clean, because corroboration resolves ids
+    # through the trusted snapshot and the snapshot carries the account's real
+    # ids — the placeholders never reach that comparison.
+    #
+    # What is true is upstream. The table arriving here is ALREADY root-projected
+    # (measured: `process_root_ref` set, zero grants) because projection happens
+    # in the read-only compile phase, where no live evidence has been resolved
+    # and so nothing mints. The per-call grant check activates on any table whose
+    # root is set, so keeping the root would run that check against an empty
+    # grant set and refuse EVERY legitimate conditionally-idempotent retry — the
+    # old comment's conclusion, reached for the right reason at last.
+    #
+    # So the relocatable compile deliberately does not judge per-call evidence,
+    # and cannot: evidence is account-bound, this artifact is account-independent
+    # by contract, and the two cannot be satisfied at once. The enforcement point
+    # is the APPLY boundary, where the table has been rebound to real ids, the
+    # registry has been consulted, and a record can actually be matched. The
+    # issue-level architect gate read this asymmetry as drift from the plan's
+    # unqualified "conditional retry requires a per-call grant"; the plan's own
+    # root-isolation clause is what forces it, and the direction is fail-closed —
+    # a clean plan followed by an apply-time refusal, never the reverse.
     cfg, emission_plan = (
         compile_process_ir_v1(process_ir, relocatable_symbols, capabilities=capabilities)
         if capabilities is not None
