@@ -1,0 +1,12 @@
+{
+ "collector": "wave_gate",
+ "durable_dir": "wave-gate/wave.yEW3SI",
+ "files": {
+  "wave-gate/wave.yEW3SI/summary.json": "24b53a0f8540dc674e1f4f466aa395124a75c9a4c91162f77ad768cc76def6da"
+ },
+ "logical_loop": "L4 (composite wave gate, issue-level correction arc)",
+ "source_run_dir": "/tmp/wave.yEW3SI",
+ "status": "completed",
+ "verdict": "pass",
+ "wave_sha": "b7e86f8596874304582a8775a44009700b7453bd"
+}

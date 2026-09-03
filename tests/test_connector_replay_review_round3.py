@@ -6708,7 +6708,12 @@ def test_the_wave_contract_matches_every_archived_summary():
     # merely allowed: a new archive that conforms to nothing would otherwise
     # simply not be checked, which is the failure this whole guard is about.
     assert checked + len(legacy) + len(refused) == len(summaries)
-    assert checked == 37, f"{checked} structured passing summaries checked"
+    # INCLUSIONS MAY GROW, exclusions may not. Every archived round adds a
+    # conforming summary, so pinning the checked count exactly would make this
+    # test a chore that is edited on every pass — and an assertion edited by
+    # reflex stops being read. What must not move is what this guard DECLINES to
+    # look at, which is why the two exclusion counts below are exact.
+    assert checked >= 37, f"only {checked} structured passing summaries checked"
     assert len(refused) == 2, f"refused runs carry no arms by right: {refused}"
     assert len(legacy) == 2, (
         f"the pre-structured summaries were {legacy}; a NEW archive in a "

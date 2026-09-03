@@ -1,0 +1,14 @@
+{
+ "gate": "composite wave gate",
+ "command": "scripts/wave_gate.py wave --base 9812b98bdb85fc5619128fdfd31408535eedba16 --require-plan-fingerprint",
+ "status": "completed",
+ "verdict": "pass",
+ "wave_sha": "b7e86f8596874304582a8775a44009700b7453bd",
+ "manifests": {"required_nodes": 11492, "active_goldens": 74},
+ "collection": {"tests": 11492},
+ "suite": {"passed": 11473, "skipped": 19, "skip_cap": 30},
+ "goldens": {"active": 74, "deterministic": true, "byte_exact": true},
+ "plan_fingerprint_cases": 2,
+ "exit_code": 0,
+ "exit_code_provenance": "captured directly into a file, not through a shell pipeline. Run on a CLEAN tree: an earlier pass validated the same content with the node manifest still uncommitted, and was re-run after committing so the wave SHA names exactly what was validated. That earlier pass refused first, on a node appended already tombstoned — a row born and retired inside one baseline-to-head range, produced by rebaselining the manifest once per correction instead of once from the baseline."
+}
