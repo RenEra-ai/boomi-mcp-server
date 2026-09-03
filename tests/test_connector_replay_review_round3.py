@@ -1353,6 +1353,8 @@ _UNROWED = {"DC-155-C": 2, "DC-155-I": 1}
 #: the reason. Frozen so the set cannot grow silently: a row that names a class is an
 #: instance of it unless it appears here.
 _NOT_AN_INSTANCE = {
+    "QA-155-r55-04b": "a REVISION applying the fix its own escalation recorded for "
+    "whoever took it up — same defect, one instance, counted at the original",
     "CDX-155-r73-01a": "a REVISION applying the correction the original escalated "
     "when a spent slice-B window forbade it — same defect, now fixed at a gate "
     "whose checkpoint window is fresh; the class row counts the original once",

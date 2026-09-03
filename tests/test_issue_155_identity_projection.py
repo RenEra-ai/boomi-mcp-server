@@ -3302,8 +3302,9 @@ def test_both_halves_of_the_extension_question_read_through_one_helper():
 
 def test_the_composer_declares_exactly_the_fields_it_reads():
     """The scan set is only right while the declared field list matches the body."""
+    import ast
     import inspect
-    import re
+    import textwrap
 
     from boomi_mcp.categories.components.builders import connector_builder as cb
 
@@ -3314,8 +3315,33 @@ def test_the_composer_declares_exactly_the_fields_it_reads():
     for family, composer in cb._COMPOSED_ENDPOINT_BY_FAMILY.items():
         declared = set(getattr(composer, "reads", ()))
         assert declared, f"{family} registers a composer with no declared fields"
-        body = inspect.getsource(composer)
-        read_in_body = set(re.findall(r'config\.get\("([a-z_]+)"\)', body))
+        # PARSED, NOT PATTERN-MATCHED. The derivation was a regular expression
+        # requiring double quotes, so a composer reading a single-quoted field
+        # name declared a field the scan could not see — and served the marker
+        # inside the composed route with this guard and its sibling both green.
+        # Live QA found that by writing the single-quoted form, which is why the
+        # fix is the language's own parser rather than a second pattern: quoting
+        # is one of arbitrarily many spellings a regex must be told about, and
+        # the parser already knows them all.
+        tree = ast.parse(textwrap.dedent(inspect.getsource(composer)))
+        read_in_body = set()
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call) or not node.args:
+                continue
+            func = node.func
+            if not isinstance(func, ast.Attribute) or func.attr != "get":
+                continue
+            if not isinstance(func.value, ast.Name) or func.value.id != "config":
+                continue
+            key = node.args[0]
+            # A NON-LITERAL KEY IS NOT A FIELD THIS PIN CAN CHECK, and pretending
+            # otherwise would be worse than saying so: a computed key means the
+            # declaration cannot be verified from the body at all.
+            assert isinstance(key, ast.Constant) and isinstance(key.value, str), (
+                f"{family}: the composer reads a config key this pin cannot "
+                f"resolve statically, so its declaration is unverifiable"
+            )
+            read_in_body.add(key.value)
         assert read_in_body, f"{family}: derivation found no config reads — pin vacuous"
         assert read_in_body == declared, (
             f"{family}: the composer's declared fields and the fields it reads have "
