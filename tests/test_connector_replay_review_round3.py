@@ -1353,6 +1353,8 @@ _UNROWED = {"DC-155-C": 2, "DC-155-I": 1}
 #: the reason. Frozen so the set cannot grow silently: a row that names a class is an
 #: instance of it unless it appears here.
 _NOT_AN_INSTANCE = {
+    "QA-155-r4-01a": "a REVISION supplying the half of the disposition the "
+    "original claimed complete — one defect, counted at the original",
     "QA-155-r4-02": "a RECURRENCE of QA-155-r3-04 measured at a later round — one "
     "defect reported by two gates is one instance, counted at the original",
     "SELF-155-r65-01a": "a REVISION recording that the original's premise no longer "

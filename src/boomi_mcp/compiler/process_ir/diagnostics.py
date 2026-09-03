@@ -253,7 +253,13 @@ _REMEDIATION = {
     ),
     PROCESS_IR_SEMANTIC_IDEMPOTENCY_EVIDENCE_MISSING: (
         "Supply the typed idempotency evidence this action requires, and make sure a "
-        "referenced contract resolves and names this same operation."
+        "referenced contract resolves and names this same operation. To see whether "
+        "evidence exists for these components, call query_components with "
+        "action='idempotency_contract_candidates': it returns the usable candidates, "
+        "and — when a component's version has moved past the one the evidence was "
+        "recorded against — a superseded_records entry naming which side moved. "
+        "This refusal reads the same whether evidence was never captured or was "
+        "voided by a version advance; that surface is what tells the two apart."
     ),
     PROCESS_IR_SEMANTIC_CATCH_UNTERMINATED: (
         "End the catch body with a stop, an exception, or a staging cache write. "
