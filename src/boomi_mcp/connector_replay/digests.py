@@ -720,17 +720,29 @@ def operation_record_digest_v1(record: object) -> str:
 
 
 def comparable_path(path: str) -> str:
-    """A stored path reduced to the form two spellings of it share.
+    """A stored path reduced ONLY by what is safe to reduce out of context.
 
-    PUBLISHED so the declared-versus-live comparison and the route digest agree
-    by construction instead of by intention. The digest already treats a path
-    this way — percent-escape hex is case-insensitive under RFC 3986 while the
-    literal characters around it are not, and dot segments resolve — so a
-    comparison that skipped the normalization refused `%2f` against a stored
-    `%2F` and rejected a request the evidence layer considers identical.
+    Percent-escape hex is case-insensitive under RFC 3986 wherever the path ends
+    up, so folding it is context-free and correct: `%2f` and `%2F` are the same
+    octet against any base. That is the whole of what this does.
 
-    Deliberately NOT a lower-casing: that is the opposite error, and the one this
-    replaced. `/Orders` and `/orders` are different resources on a case-sensitive
-    upstream, so only the parts the standard declares case-insensitive are folded.
+    DOT SEGMENTS ARE DELIBERATELY NOT RESOLVED, and the first version of this
+    function resolved them — which invented an equivalence the composed route
+    does not have. `route_digest_v1` removes them only AFTER joining the
+    operation path to the connection base, and that order is load-bearing:
+    against base `https://h/api`, `/../admin` addresses `/admin` while `/admin`
+    addresses `/api/admin`. Folded in isolation the two compare equal, so the
+    declared-versus-live check would approve a reuse whose live route is not the
+    one the caller asserted — and their route digests, computed the correct way,
+    differ. The same folding also swallowed `/secret?/../x` into `/x`, hiding a
+    query the digest refuses outright.
+
+    Two paths differing only by a dot segment are therefore reported as a
+    mismatch. That is a refusal a caller can fix by declaring the path the account
+    stores, and the alternative was accepting a route nobody checked.
+
+    Deliberately NOT a lower-casing either: `/Orders` and `/orders` are different
+    resources on a case-sensitive upstream. Only what the standard declares
+    case-insensitive is folded.
     """
-    return _remove_dot_segments(_normalize_percent_encoding(path.strip()))
+    return _normalize_percent_encoding(path.strip())

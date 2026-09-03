@@ -3804,7 +3804,18 @@ def test_a_path_mismatch_names_the_field_and_never_the_value():
         # digest already normalizes it. A strict string compare refused a request
         # the evidence layer considers the same route.
         ("/items/a%2Fb", "/items/a%2fb", True),
-        ("/a/./b", "/a/b", True),
+        # DOT SEGMENTS DO NOT FOLD, and an earlier version of this parametrize
+        # asserted that they did. Resolving them out of context invents an
+        # equivalence the composed route does not have: the route digest resolves
+        # them only after joining the operation path to the connection base, so
+        # against base `https://h/api` a stored `/../admin` addresses `/admin`
+        # while a declared `/admin` addresses `/api/admin`. Folded in isolation
+        # those compared equal and the check would have approved a reuse whose
+        # live route was not the asserted one.
+        ("/a/./b", "/a/b", False),
+        ("/../admin", "/admin", False),
+        # ...and the same folding swallowed a query the route digest refuses.
+        ("/secret?/../x", "/x", False),
         # ...while the literal characters around the escapes stay case-sensitive,
         # which is the whole point of not lower-casing.
         ("/Orders/42", "/orders/42", False),
