@@ -51,6 +51,7 @@ __all__ = [
     "component_config_digest_v1",
     "RECORD_DIGEST_DOMAIN",
     "operation_record_digest_v1",
+    "comparable_path",
 ]
 
 #: Domain separators. A digest is over ``domain + payload``, so two algorithms that
@@ -716,3 +717,20 @@ def operation_record_digest_v1(record: object) -> str:
     body = record.model_dump(mode="json") if hasattr(record, "model_dump") else dict(record)
     body.pop("record_digest", None)
     return hashlib.sha256(RECORD_DIGEST_DOMAIN + _canonical(body)).hexdigest()
+
+
+def comparable_path(path: str) -> str:
+    """A stored path reduced to the form two spellings of it share.
+
+    PUBLISHED so the declared-versus-live comparison and the route digest agree
+    by construction instead of by intention. The digest already treats a path
+    this way — percent-escape hex is case-insensitive under RFC 3986 while the
+    literal characters around it are not, and dot segments resolve — so a
+    comparison that skipped the normalization refused `%2f` against a stored
+    `%2F` and rejected a request the evidence layer considers identical.
+
+    Deliberately NOT a lower-casing: that is the opposite error, and the one this
+    replaced. `/Orders` and `/orders` are different resources on a case-sensitive
+    upstream, so only the parts the standard declares case-insensitive are folded.
+    """
+    return _remove_dot_segments(_normalize_percent_encoding(path.strip()))

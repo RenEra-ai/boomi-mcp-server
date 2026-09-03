@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 11480, "minimum_collected": 11480, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 11485, "minimum_collected": 11485, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -11524,3 +11524,8 @@
 {"kind": "test", "id": "pytest-011523", "node_id": "tests/test_issue_155_identity_projection.py::test_an_ambiguous_live_route_is_unreadable_and_never_settled[the same path twice-same-static-True]", "state": "active"}
 {"kind": "test", "id": "pytest-011524", "node_id": "tests/test_issue_155_identity_projection.py::test_an_ambiguous_live_route_is_unreadable_and_never_settled[two different paths-other-unavailable-False]", "state": "active"}
 {"kind": "test", "id": "pytest-011525", "node_id": "tests/test_issue_155_identity_projection.py::test_a_path_is_compared_case_sensitively_and_a_verb_is_not", "state": "active"}
+{"kind": "test", "id": "pytest-011526", "node_id": "tests/test_issue_155_identity_projection.py::test_a_path_mismatch_names_the_field_and_never_the_value", "state": "active"}
+{"kind": "test", "id": "pytest-011527", "node_id": "tests/test_issue_155_identity_projection.py::test_paths_are_compared_by_the_equivalence_the_route_digest_uses[/items/a%2Fb-/items/a%2fb-True]", "state": "active"}
+{"kind": "test", "id": "pytest-011528", "node_id": "tests/test_issue_155_identity_projection.py::test_paths_are_compared_by_the_equivalence_the_route_digest_uses[/a/./b-/a/b-True]", "state": "active"}
+{"kind": "test", "id": "pytest-011529", "node_id": "tests/test_issue_155_identity_projection.py::test_paths_are_compared_by_the_equivalence_the_route_digest_uses[/Orders/42-/orders/42-False]", "state": "active"}
+{"kind": "test", "id": "pytest-011530", "node_id": "tests/test_issue_155_identity_projection.py::test_paths_are_compared_by_the_equivalence_the_route_digest_uses[/items/a%2Fb-/items/a%2Fc-False]", "state": "active"}

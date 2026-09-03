@@ -1008,10 +1008,19 @@ def assert_declared_matches_resolved(
         # declaration that names a resource the account does not serve, and this
         # module's own route digest already treats paths that way — it lower-cases
         # the scheme and nothing else.
-        for label, mine, theirs, fold in (
-            ("family", identity.family, declared_family, True),
-            ("action", identity.action, declared_action, True),
-            ("path", live_path, declared_path, False),
+        # WHETHER THE VALUE MAY BE SHOWN is decided per field too, and for a
+        # different reason than the folding. A family and an action are closed
+        # vocabulary tokens — `rest`, `PATCH` — and naming them is what makes the
+        # diagnostic actionable. A PATH is caller- and account-supplied and can
+        # carry a webhook or session token in a segment, so echoing it would let a
+        # read-only plan or compile recover the account's stored route. The
+        # authority contract is explicit: a diagnostic may name the offending
+        # field, never the value at it. The apply-boundary recheck already reports
+        # drift this way, naming which field diverged and redacting what it held.
+        for label, mine, theirs, fold, show in (
+            ("family", identity.family, declared_family, True, True),
+            ("action", identity.action, declared_action, True, True),
+            ("path", live_path, declared_path, False, False),
         ):
             if theirs is None or mine is None:
                 # A declaration that says nothing asserts nothing.
@@ -1024,6 +1033,16 @@ def assert_declared_matches_resolved(
             _theirs = str(theirs).strip()
             if fold:
                 _mine, _theirs = _mine.lower(), _theirs.lower()
+            else:
+                # THE EQUIVALENCE THE EVIDENCE LAYER ALREADY USES. Percent-escape
+                # hex is case-insensitive under RFC 3986 and dot segments resolve,
+                # so a strict string compare refused `%2f` against a stored `%2F`
+                # — a request the route digest considers the same route. Both
+                # sides go through the published normalizer rather than a second
+                # reading of the standard.
+                from ..connector_replay.digests import comparable_path
+
+                _mine, _theirs = comparable_path(_mine), comparable_path(_theirs)
             if _theirs != _mine:
                 mismatches.append(ConnectorIdentityError(
                     CONNECTOR_REPLAY_IDENTITY_MISMATCH,
@@ -1034,14 +1053,14 @@ def assert_declared_matches_resolved(
                     ).format(
                         key,
                         label,
-                        theirs,
+                        theirs if show else "<redacted>",
                         # Naming the SOURCE is the difference between a real
                         # finding and a tautology: "the account stores" is
                         # independent evidence, "its own configuration" is not.
                         "the component stored in the account"
                         if identity.source == "live"
                         else "its own configuration",
-                        mine,
+                        mine if show else "<redacted>",
                     ),
                     component_key=key,
                 ))

@@ -3758,3 +3758,71 @@ def test_a_path_is_compared_case_sensitively_and_a_verb_is_not():
     assert assert_declared_matches_resolved(
         snapshot, {"op_patch": ("http", "patch")}, {}
     ) is not None
+
+
+def test_a_path_mismatch_names_the_field_and_never_the_value():
+    """A diagnostic may name the offending field, never the value at it.
+
+    This repository's authority contract states that rule outright, and a REST
+    operation path is not a vocabulary token — it is caller- and account-supplied
+    and a segment can carry a webhook or session token. Feeding it to the mismatch
+    formatter meant a READ-ONLY plan or compile, given nothing but an existing
+    component id and a wrong path, recovered the account's stored route from the
+    served refusal. The apply-boundary recheck already reports drift the right
+    way: it names which field diverged and redacts what it held.
+
+    The family and action values stay visible on purpose. They are closed
+    vocabulary tokens that cannot carry a secret, and naming them is what makes
+    that half of the diagnostic actionable.
+    """
+    from boomi_mcp.authoring.connector_resolution_snapshot import ConnectorIdentityError
+
+    secret = "/hook/tkn-NOTASECRETBUTSHAPEDLIKEONE/items"
+    with pytest.raises(ConnectorIdentityError) as raised:
+        _compare(_live_op(path=secret), {"op_patch": "/somewhere/else"})
+    message = str(raised.value)
+    assert "NOTASECRETBUTSHAPEDLIKEONE" not in message, message
+    assert "/somewhere/else" not in message, message
+    assert "path" in message and "<redacted>" in message
+
+    # The control: an action mismatch still names both values, so the redaction
+    # above is a decision about paths and not a blanket silencing.
+    from boomi_mcp.authoring.connector_resolution_snapshot import (
+        TrustedConnectorResolutionSnapshotV1, assert_declared_matches_resolved,
+    )
+
+    snapshot = TrustedConnectorResolutionSnapshotV1(identities=(_live_op(),))
+    with pytest.raises(ConnectorIdentityError) as raised:
+        assert_declared_matches_resolved(snapshot, {"op_patch": ("http", "DELETE")}, {})
+    assert "DELETE" in str(raised.value) and "PATCH" in str(raised.value)
+
+
+@pytest.mark.parametrize(
+    "stored,declared,equal",
+    [
+        # Percent-escape hex is case-insensitive under RFC 3986, and the route
+        # digest already normalizes it. A strict string compare refused a request
+        # the evidence layer considers the same route.
+        ("/items/a%2Fb", "/items/a%2fb", True),
+        ("/a/./b", "/a/b", True),
+        # ...while the literal characters around the escapes stay case-sensitive,
+        # which is the whole point of not lower-casing.
+        ("/Orders/42", "/orders/42", False),
+        ("/items/a%2Fb", "/items/a%2Fc", False),
+    ],
+)
+def test_paths_are_compared_by_the_equivalence_the_route_digest_uses(
+    stored, declared, equal
+):
+    """One normalizer, published, so the two sides agree by construction.
+
+    Restating the standard in a second place is how the comparison and the digest
+    come to disagree about whether two spellings are the same route.
+    """
+    from boomi_mcp.authoring.connector_resolution_snapshot import ConnectorIdentityError
+
+    if equal:
+        assert _compare(_live_op(path=stored), {"op_patch": declared}) is not None
+    else:
+        with pytest.raises(ConnectorIdentityError):
+            _compare(_live_op(path=stored), {"op_patch": declared})
