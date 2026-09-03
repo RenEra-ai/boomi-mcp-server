@@ -382,10 +382,15 @@ def derive_row(kind: str, run_dir: Path, durable: Path, rel_root: Path,
         refusal = read_json(durable, "refusal.json")
         row.update({name: _dig(attestation, path)
                     for name, path in ARCHITECT_ROW_PATHS.items()})
-        if not row.get("verdict"):
-            # DERIVED from the artifact, because the installed collector no
-            # longer sources one for this gate. See the note above the helper.
-            row["verdict"] = architect_verdict_from_artifact(durable, attestation or {})
+        # THE ROW GETS THE VALIDATED VERDICT, ALWAYS — not only when the
+        # attestation carried none. Taking the raw value whenever it was truthy
+        # meant the enum decided whether the round could be archived and then
+        # played no part in what was archived: an attestation carrying an
+        # unclear verdict beside an artifact carrying a valid one passed
+        # preflight through the fallback and still wrote the unclear value into
+        # the index, which the downstream scanner then trusts. A constraint that
+        # gates admission but not the record is a constraint on the gate only.
+        row["verdict"] = architect_verdict_from_artifact(durable, attestation or {})
         row["reviewed_sha"] = ARCHITECT_ROUND_RECORDS_NO_REVIEWED_SHA
         if status_override:
             row["status"] = status_override

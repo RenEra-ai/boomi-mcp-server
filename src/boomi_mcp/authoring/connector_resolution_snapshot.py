@@ -588,9 +588,21 @@ def live_identity_from_component_xml(
     #: that consume it — the branch existed and did nothing. Genuine
     #: unreadability keeps its silence; this is the case where we CAN read and
     #: what we read contradicts itself.
-    route_conflicting = bool(path_fields) and len(
-        {p for p in stored_paths if p}
-    ) > 1
+    #: DISTINCTNESS IS THE ROUTE'S OWN, not the raw spelling's, and only where a
+    #: route is modelled. Two spellings of one route — `/A` and `/%41` — are one
+    #: route by the published normalizer, so calling them a conflict would refuse
+    #: a component the evidence layer considers unambiguous; and for a family
+    #: whose config element this module does not model, the note above says
+    #: plainly that we do not know which element is its config, so two
+    #: path-named fields there are two unknowns rather than two routes.
+    _routed_family = family == "rest"
+    if _routed_family:
+        from ..connector_replay.digests import comparable_path as _route_form
+
+        _distinct_routes = {_route_form(p) for p in stored_paths if p}
+    else:
+        _distinct_routes = set()
+    route_conflicting = len(_distinct_routes) > 1
     live_path = (
         stored_paths.pop() if route_state == "static" and len(stored_paths) == 1
         else None
@@ -916,6 +928,26 @@ def build_connector_resolution_snapshot(
     # There is nothing left to forget: a resolution cannot be built without
     # saying what was expected of it, and a disagreement joins the same failure
     # set as every other way this snapshot refuses.
+    # A CONTRADICTORY STORED ROUTE IS REFUSED WHETHER OR NOT ANYTHING WAS
+    # DECLARED. The check below runs inside the comparator, and the comparator
+    # runs only when a declaration exists — so a raw-XML create that names no
+    # connector type produced an EMPTY declaration map, skipped the comparator
+    # entirely, and carried a component with two routes straight to the write.
+    # The refusal was written to be declaration-independent and was then gated on
+    # a declaration, which is the whole of the defect.
+    for _identity in getattr(snapshot, "identities", ()) or ():
+        if getattr(_identity, "route_conflicting", None):
+            failures.append(ConnectorIdentityError(
+                CONNECTOR_REPLAY_IDENTITY_MISMATCH,
+                (
+                    "component {0!r} is stored with more than one route, so it "
+                    "cannot serve a single one. Remove the surplus path from the "
+                    "component."
+                ).format(_identity.component_key),
+                component_key=_identity.component_key,
+                field="path",
+            ))
+
     if declared:
         try:
             # THE PATHS TOO, derived here from the components this function is
@@ -940,11 +972,18 @@ def build_connector_resolution_snapshot(
 
     if failures:
         first = failures[0]
+        # THE FIELD SURVIVES THIS WRAPPER TOO. It was threaded onto the
+        # comparator's own exception and then dropped here, one layer out — and
+        # this is the exception the production apply path actually catches, so
+        # the machine-readable field existed everywhere except where it is read.
+        # The test that covered it stopped at the comparator, which is why it
+        # passed while the served envelope carried nothing.
         raise ConnectorIdentityError(
             first.code,
             str(first),
             component_key=first.component_key,
             failures=tuple(failures),
+            field=first.field,
             partial=snapshot,
         )
     return snapshot
@@ -1037,7 +1076,15 @@ def assert_declared_matches_resolved(
         # for one component. No declaration can be checked against that, and a
         # process reusing it would call whichever the platform picks. Refusing at
         # the write boundary is the only answer that is not a guess.
-        if identity.route_conflicting:
+        # A CONTRADICTORY ROUTE SUPPRESSES ONLY THE PATH COMPARISON. The first
+        # version continued past the whole component, which silently dropped the
+        # family and action checks for it — contradicting the rule this function
+        # states forty lines above, that route readability must never gate verb
+        # verification, and forcing a caller through one correction cycle per
+        # field on a component with two things wrong. The report-all contract
+        # applies within a component, not only across them.
+        _route_unusable = bool(identity.route_conflicting)
+        if _route_unusable:
             mismatches.append(ConnectorIdentityError(
                 CONNECTOR_REPLAY_IDENTITY_MISMATCH,
                 (
@@ -1048,8 +1095,7 @@ def assert_declared_matches_resolved(
                 component_key=key,
                 field="path",
             ))
-            continue
-        declared_path = (declared_paths or {}).get(key)
+        declared_path = None if _route_unusable else (declared_paths or {}).get(key)
         live_path = identity.path if identity.route_state == "static" else None
         # CASE FOLDING IS PER FIELD, because the fields are not the same kind of
         # thing. A family and an action are vocabulary tokens whose spelling the

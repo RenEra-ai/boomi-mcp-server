@@ -2547,3 +2547,29 @@ def test_an_undecodable_artifact_yields_no_verdict_rather_than_raising(tmp_path)
     # NON-VACUITY: the same bytes decoded would have carried a valid verdict, so
     # this asserts the decode failure and not merely a missing line.
     assert b"VERDICT: NO ISSUES" in (run / "review.md").read_bytes()
+
+
+def test_the_index_row_carries_the_validated_verdict_not_the_raw_one(tmp_path):
+    """The enum gated admission and then played no part in what was archived.
+
+    `derive_row` took the attestation's raw value whenever it was truthy, so an
+    attestation carrying `UNCLEAR` beside an artifact carrying a valid verdict
+    passed preflight through the fallback and still wrote `UNCLEAR` into the
+    index — which the downstream scanner then trusts. A constraint that gates the
+    gate but not the record is a constraint on the gate only.
+    """
+    import json
+
+    module = _archiver_module()
+    run = tmp_path / "round"
+    run.mkdir()
+    (run / "review.md").write_text("findings\n\nVERDICT: NO ISSUES\n")
+
+    # The contradictory pair the finding names.
+    assert module.architect_verdict_from_artifact(
+        run, {"parsedVerdict": "UNCLEAR"}) == "NO ISSUES"
+
+    # ...and when neither source is well-formed there is no verdict to write.
+    (run / "review.md").write_text("findings\n\nVERDICT: BANANA\n")
+    assert module.architect_verdict_from_artifact(
+        run, {"parsedVerdict": "UNCLEAR"}) is None

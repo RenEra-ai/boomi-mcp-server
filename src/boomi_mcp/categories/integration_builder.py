@@ -7964,7 +7964,7 @@ def _pre_write_refusal(exc, *, failed_step=None) -> Dict[str, Any]:
     this function makes uniform.
     """
     code, path = _canonical_plan_failure(exc)
-    return {
+    envelope = {
         "_success": False,
         "error": _validation_error_message(exc),
         "error_code": code,
@@ -7976,6 +7976,21 @@ def _pre_write_refusal(exc, *, failed_step=None) -> Dict[str, Any]:
             + (f" Offending path: {path}." if path else "")
         ),
     }
+    # WHICH DECLARED FIELD DISAGREED, when the refusal knows. Live QA measured a
+    # served identity mismatch carrying an empty field, no evidence and no
+    # contract entry id — so the only statement of what was wrong sat inside an
+    # English sentence, and the generic remediation it inherited pointed at the
+    # two fields that were RIGHT. The identity error carries the token now, and
+    # this is the envelope a caller actually receives, so it is served here
+    # rather than only threaded internally.
+    field = getattr(exc, "field", None)
+    if field:
+        envelope["field"] = field
+        envelope["hint"] += (
+            " The declaration disagrees with the account on {0!r}; correct that "
+            "field, not the ones the message shows as matching.".format(field)
+        )
+    return envelope
 
 
 def _canonical_plan_failure(exc) -> Tuple[str, Optional[str]]:

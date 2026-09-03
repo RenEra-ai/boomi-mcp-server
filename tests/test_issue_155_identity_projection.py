@@ -4144,3 +4144,121 @@ def test_every_identity_refusal_names_the_field_it_is_about():
         assert raised.value.field == expected, (declared, raised.value.field)
         # ...and on the OUTER exception, which is the one every surface renders.
         assert raised.value.failures[0].field == expected
+
+
+def _ambiguous_operation_xml(second="/other"):
+    import re
+
+    xml = _captured_operation_xml()
+    field = re.search(r'<field id="path"[^>]*/>', xml).group(0)
+    return xml.replace(field, field + field.replace('value="', 'value="%s' % second, 1), 1)
+
+
+def test_two_spellings_of_one_route_are_not_a_conflict():
+    """Distinctness is the ROUTE's, not the raw spelling's.
+
+    The first predicate compared stored strings, so `/A` and `/%41` — one route
+    by the published normalizer, and one route to the evidence layer — were
+    called a conflict and the component refused. A guard that rejects what its
+    own equivalence calls identical is measuring something other than the thing
+    it names.
+    """
+    import re
+
+    from boomi_mcp.authoring.connector_resolution_snapshot import (
+        live_identity_from_component_xml,
+    )
+
+    xml = _captured_operation_xml()
+    field = re.search(r'<field id="path"[^>]*/>', xml).group(0)
+    stored = re.search(r'value="([^"]+)"', field).group(1)
+    # The SAME route, percent-encoding one unreserved character.
+    encoded = stored.replace("a", "%61", 1)
+    assert encoded != stored, "the probe did not re-spell anything"
+
+    same = live_identity_from_component_xml(
+        "op", xml.replace(field, field + field.replace(stored, encoded, 1), 1)
+    )
+    assert not same.route_conflicting, "two spellings of one route read as a conflict"
+
+    different = live_identity_from_component_xml("op", _ambiguous_operation_xml())
+    assert different.route_conflicting is True
+
+
+def test_a_route_conflict_does_not_suppress_the_verb_check():
+    """Route readability must never gate verb verification — this module's own rule.
+
+    The first version continued past the whole component on a conflict, dropping
+    the family and action comparisons for it. A caller with two things wrong
+    would have been told about one, corrected it, and been told about the next —
+    which is the multi-cycle behaviour the report-all contract exists to prevent,
+    and the rule is stated explicitly forty lines above the code that broke it.
+    """
+    from boomi_mcp.authoring.connector_resolution_snapshot import (
+        ConnectorIdentityError,
+        TrustedConnectorResolutionSnapshotV1,
+        assert_declared_matches_resolved,
+        live_identity_from_component_xml,
+    )
+
+    ambiguous = live_identity_from_component_xml("op", _ambiguous_operation_xml())
+    with pytest.raises(ConnectorIdentityError) as raised:
+        assert_declared_matches_resolved(
+            TrustedConnectorResolutionSnapshotV1(identities=(ambiguous,)),
+            {"op": ("http", "DELETE")}, {},
+        )
+    fields = sorted(f.field for f in raised.value.failures)
+    assert fields == ["action", "path"], fields
+
+
+def test_a_conflicting_route_is_refused_with_no_declaration_at_all():
+    """The refusal was written declaration-independent and then gated on one.
+
+    The comparator runs only when a declaration map is non-empty, and a raw-XML
+    create that names no connector type produces an empty one — so a component
+    storing two routes skipped the comparator entirely and reached the write.
+    The check now runs over the resolved identities themselves, which is where
+    the fact lives.
+    """
+    from boomi_mcp.authoring.connector_resolution_snapshot import (
+        ConnectorIdentityError,
+        build_connector_resolution_snapshot,
+    )
+
+    class _Component:
+        key = "op"
+        component_id = "op-1"
+        config = {"connector_type": "http", "method": "PATCH"}
+        type = "connector-action"
+
+    with pytest.raises(ConnectorIdentityError) as raised:
+        build_connector_resolution_snapshot(
+            [_Component()],
+            live_component_xml={"op": _ambiguous_operation_xml()},
+            reused_keys=["op"],
+            declared={},          # ...exactly what the raw route supplies.
+        )
+    assert raised.value.field == "path"
+    # THE OUTER exception carries it — that is the one production catches.
+    assert any(f.field == "path" for f in raised.value.failures)
+
+
+def test_the_served_refusal_names_the_field_that_disagreed():
+    """The field existed everywhere except where a caller reads it.
+
+    It was threaded onto the comparator's exception, dropped by the wrapper the
+    apply path catches, and never serialized into the envelope. The test that
+    covered it stopped at the comparator, which is why it passed while the served
+    refusal carried nothing.
+    """
+    from boomi_mcp.categories.integration_builder import _pre_write_refusal
+    from boomi_mcp.authoring.connector_resolution_snapshot import ConnectorIdentityError
+
+    served = _pre_write_refusal(ConnectorIdentityError(
+        "CONNECTOR_REPLAY_IDENTITY_MISMATCH", "m", component_key="op", field="path"))
+    assert served["field"] == "path"
+    assert "'path'" in served["hint"]
+
+    # ...and a refusal that knows no field does not invent one.
+    assert "field" not in _pre_write_refusal(ConnectorIdentityError(
+        "CONNECTOR_REPLAY_IDENTITY_MISMATCH", "m", component_key="op"))
