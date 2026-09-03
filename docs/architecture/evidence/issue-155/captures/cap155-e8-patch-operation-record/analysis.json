@@ -1,0 +1,93 @@
+{
+  "verb": "PATCH",
+  "scenario": "cap155-e8-patch-operation-record",
+  "account_id": "trainingglebbochkarov-16926N",
+  "route": "banked cap155-e5-patch-attested operation + process XML, re-created verbatim (identity+folder attrs stripped, root name= substituted, operation/connection refs remapped; path bytes UNEDITED). The PATCH operation is a DURABLE account fixture, reused unchanged.",
+  "executions": [
+    {
+      "label": "run1",
+      "execution_id": "execution-3663904b-b15c-43da-8970-2098154a02cb-2026.09.03",
+      "status": "COMPLETE",
+      "inbound": 1,
+      "outbound": 2
+    },
+    {
+      "label": "run2_identical_replay",
+      "execution_id": "execution-1639ef10-b48c-4611-90a9-fb92b377214c-2026.09.03",
+      "status": "COMPLETE",
+      "inbound": 1,
+      "outbound": 2
+    }
+  ],
+  "counterparty_requests": [
+    {
+      "execution_label": "run1",
+      "execution_id": "execution-3663904b-b15c-43da-8970-2098154a02cb-2026.09.03",
+      "stamp": "2026-09-03T05:56:40.158522427Z",
+      "request": "INFO:     192.168.65.1:60412 - \"PATCH /admin/cdscm/api/v1/clients/41172938-b9bd-4495-b411-9851f5ac7b00 HTTP/1.1\" 200 OK",
+      "http_status": "200",
+      "reason": "OK"
+    },
+    {
+      "execution_label": "run2_identical_replay",
+      "execution_id": "execution-1639ef10-b48c-4611-90a9-fb92b377214c-2026.09.03",
+      "stamp": "2026-09-03T05:56:50.328132959Z",
+      "request": "INFO:     192.168.65.1:40665 - \"PATCH /admin/cdscm/api/v1/clients/41172938-b9bd-4495-b411-9851f5ac7b00 HTTP/1.1\" 200 OK",
+      "http_status": "200",
+      "reason": "OK"
+    }
+  ],
+  "attribution_is_unambiguous": true,
+  "log_covers_both_executions": true,
+  "window_overlaps": [],
+  "state": {
+    "state_key": "readback HTTP status + sha256 of body with ['modifiedOn', 'modifiedBy', 'timestamp'] stripped",
+    "run1_status": "COMPLETE",
+    "run2_status": "COMPLETE",
+    "both_executions_reported_success": true,
+    "target_status_R0_R1_R2": [
+      200,
+      200,
+      200
+    ],
+    "target_business_R0_R1_R2": [
+      "63f99d8d8744",
+      "bc5d34d8654c",
+      "bc5d34d8654c"
+    ],
+    "first_write_changed_business_state": true,
+    "resource_state_converged_R1_R2": true,
+    "full_state_identical_R1_R2": false,
+    "modifiedOn_R0": "2026-09-03T05:56:19.930Z",
+    "modifiedOn_R1": "2026-09-03T05:56:40.156Z",
+    "modifiedOn_R2": "2026-09-03T05:56:50.326Z",
+    "modifiedOn_moved_R1_to_R2": true,
+    "createdOn_stable_R1_to_R2": true,
+    "CONTROL_untouched_R0_R1_R2": true,
+    "control_sha256": "ae4acf5eb88323210a61ff257deb1bb6149e8e0b09d5597eee4f05cce120be6b",
+    "body_source_stable_across_runs": true
+  },
+  "platform_discrimination": {
+    "counterparty_statuses": [
+      "200",
+      "200"
+    ],
+    "send_stage_rows": [
+      "_QA_FIXTURE_155_PATCH_client"
+    ],
+    "discriminating_diffs": {
+      "gcr": {},
+      "connector_rows": {}
+    }
+  },
+  "clock_skew_control": {
+    "host_before": "2026-09-03T05:56:33.555810+00:00",
+    "host_after": "2026-09-03T05:56:33.567962+00:00",
+    "container_stamps": [
+      "2026-09-03T05:56:33.566906174Z"
+    ],
+    "round_trip_ms": 12.152,
+    "last_stamp": "2026-09-03T05:56:33.566906174Z",
+    "stamp_within_host_bracket": true
+  }
+}

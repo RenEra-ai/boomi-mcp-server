@@ -1630,6 +1630,20 @@ if query_components_action:
             bulk_get - Retrieve up to 5 components by ID (metadata only, no XML):
                 component_ids='["id1", "id2", "id3"]'
 
+            idempotency_contract_candidates - Which replay-evidence contract, if any,
+            covers an operation/connection pair right now. Read-only, and NEVER a
+            grant: every candidate is labelled non-authoritative, because the
+            compiler decides whether evidence is sufficient, not this tool.
+                config='{"operation_component_id": "...", "connection_component_id": "..."}'
+                Returns `candidates` (usable now) and `superseded_records` (a record
+                exists for this pair, but a component version has moved past the one
+                it was recorded against — `moved` names which side). An empty
+                `candidates` list with an empty `superseded_records` means no evidence
+                was ever captured; an empty list WITH a superseded row means it was
+                captured and then voided, which a compile refusal alone cannot tell
+                you. Component versions advance on any update, including a credential
+                rotation that changes nothing this evidence depends on.
+
         Component types:
             Processes: process, processproperty, processroute
             Connectors: connector-settings, connector-action

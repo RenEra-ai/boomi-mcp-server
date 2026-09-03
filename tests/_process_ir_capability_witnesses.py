@@ -983,7 +983,7 @@ def _capability_witness_client():
 
     derivation = (_p.Path(__file__).resolve().parents[1]
                   / "docs/architecture/evidence/issue-155/captures"
-                  / "cap155-e7-patch-operation-record/record_derivation.json")
+                  / "cap155-e8-patch-operation-record/record_derivation.json")
     account = json.loads(derivation.read_text(encoding="utf-8"))[
         "account_scope_hash"]["account_id"]
     client = MagicMock()
@@ -1028,7 +1028,7 @@ def _w_verified_write_replay_safety():
     captures = (
         pathlib.Path(__file__).resolve().parents[1]
         / "docs/architecture/evidence/issue-155/captures"
-        / "cap155-e7-patch-operation-record"
+        / "cap155-e8-patch-operation-record"
     )
 
     def run():

@@ -54,7 +54,16 @@ ACTIONS = {
 #: Captures that minted an ACCOUNT-SCOPED operation contract record. Separate
 #: from the class-level set above because a record's meaning is bounded by the
 #: account it was observed on, which the class-level rows are deliberately not.
-OPERATION_RECORD_CAPTURES = ("cap155-e7-patch-operation-record",)
+# `e8` SUPERSEDES `e7`, which stays archived rather than being overwritten: the
+# evidence archive is append-only, and a capture is the primary record of what
+# the account actually did at a moment. `e7` was taken when the connection was
+# at version 1; the drift cells that had to run in the same QA round advanced it
+# to version 3, and a component version is monotonic — so the record `e7` mints
+# can no longer be placed against the live component. The two differ in exactly
+# five values, and BOTH configuration digests are among the ones that did not
+# move: that is the credential-only version advance this issue documents,
+# observed rather than argued.
+OPERATION_RECORD_CAPTURES = ("cap155-e8-patch-operation-record",)
 
 
 def main() -> int:

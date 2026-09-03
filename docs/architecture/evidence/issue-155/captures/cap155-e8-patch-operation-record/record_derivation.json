@@ -1,0 +1,166 @@
+{
+  "what": "the OperationContractRecordV1 for REST PATCH minted on trainingglebbochkarov-16926N from this capture",
+  "capture_digest": {
+    "value": "8e0bbd3e447b5e1eb82349c1db51c6f5e82da255b94716895eb40b9ecba5e2cb",
+    "computed_by": "boomi_mcp.connector_replay.capture.summarize(<this dir>)",
+    "covers_file_count": 41,
+    "covers_files": [
+      "PROVENANCE.md",
+      "access_log_attribution.json",
+      "account_liveness.json",
+      "analysis.json",
+      "component_connection.xml",
+      "component_identity.json",
+      "component_op_src.xml",
+      "component_op_tgt.xml",
+      "component_process.xml",
+      "execute_calls.json",
+      "fixture_derivation.json",
+      "mock_access_log.txt",
+      "mock_access_log_timestamped.txt",
+      "readback_R0_before_control.json",
+      "readback_R0_before_target.json",
+      "readback_R0_before_template.json",
+      "readback_R1_between_control.json",
+      "readback_R1_between_target.json",
+      "readback_R1_between_template.json",
+      "readback_R2_after_control.json",
+      "readback_R2_after_target.json",
+      "readback_R2_after_template.json",
+      "records.json",
+      "run1_connector_rows.json",
+      "run1_doc00.json",
+      "run1_doc01.json",
+      "run1_doc02.json",
+      "run1_doc03.json",
+      "run1_execution_connector_raw.json",
+      "run1_execution_record.json",
+      "run1_gcr_rows.json",
+      "run1_generic_connector_record_raw.json",
+      "run2_connector_rows.json",
+      "run2_doc00.json",
+      "run2_doc01.json",
+      "run2_doc02.json",
+      "run2_doc03.json",
+      "run2_execution_connector_raw.json",
+      "run2_execution_record.json",
+      "run2_gcr_rows.json",
+      "run2_generic_connector_record_raw.json"
+    ],
+    "excluded_files": [
+      "operation_record.json",
+      "record_derivation.json"
+    ],
+    "why_excluded": "summarize() digests every regular file in the directory, so a record stored beside its own digest has no fixed point; these two are the only files that cannot precede their own input",
+    "reproduce": "copy this directory, delete ['operation_record.json', 'record_derivation.json'], then summarize(copy, 'PATCH').capture_digest"
+  },
+  "record_digest": {
+    "value": "7c950c06cf1f3cce09f6d494cee70058d7f6e42467a43901e909834fd35d5ea5",
+    "algorithm": "sha256(b'OperationContractRecordV1\\x00' + digests._canonical(model_dump(mode='json') without record_digest))",
+    "note": "the repo publishes no minter for this field: nothing in src/ computes a record_digest, so the algorithm is stated in full here rather than cited"
+  },
+  "family": {
+    "value": "rest",
+    "computed_by": "registry.family_for('officialboomi-X3979C-rest-prod')",
+    "operation_subType": "officialboomi-X3979C-rest-prod",
+    "connection_subType": "officialboomi-X3979C-rest-prod"
+  },
+  "action": {
+    "value": "PATCH",
+    "read_from": "the live operation component's customOperationType",
+    "counterparty_log_methods": [
+      "PATCH"
+    ],
+    "summary_observed_methods": [
+      "GET",
+      "PATCH"
+    ]
+  },
+  "classification": {
+    "side_effect": "write",
+    "retry_safety": "conditionally_idempotent",
+    "computed_by": "ingest.classify(summary, action, safe_actions)",
+    "safe_actions": [
+      "GET",
+      "HEAD",
+      "OPTIONS",
+      "TRACE"
+    ]
+  },
+  "account_scope_hash": {
+    "value": "636bee2908a4c701926ca07c280703374adaef0eb8cdab907d2222267f75e0e2",
+    "computed_by": "ingest._account_scope_hash(summary) -> digests.account_scope_hash",
+    "account_id_source": "the account id the summariser read out of the execution records, not a constant",
+    "account_id": "trainingglebbochkarov-16926N"
+  },
+  "operation_identity": {
+    "component_id": "485f3b01-fba5-4850-8281-2fc19decefb7",
+    "version": 1,
+    "config_digest": "ComponentConfigDigestV1:f17536a5c40b38f45ac096040d6b02db2623805881b7245bb052d652350eadc4",
+    "config_digest_computed_by": "digests.component_config_digest_v1(<live op xml>, 'operation', 'rest')",
+    "version_source": "GET /Component/{id} after the capture",
+    "version_before_capture": "1",
+    "readback_sha256_after": "adb229bca78856eeb6364c54898b9162ffd5572e65bd197888bcb8270e090aea",
+    "bytes_unchanged_across_capture": true,
+    "durable": true
+  },
+  "connection_identity": {
+    "component_id": "2fe488e4-3169-4529-9515-d854570c8ffc",
+    "version": 3,
+    "config_digest": "ComponentConfigDigestV1:fcf8f849d61d23baa7cb52dfdb2d8acf86416bdbf9fc549f25f256b3e0382171",
+    "config_digest_computed_by": "digests.component_config_digest_v1(<live conn xml>, 'connection', 'rest')",
+    "version_source": "GET /Component/{id} after the capture",
+    "version_before_capture": "3",
+    "readback_sha256_after": "a1d3dc900fef7fdb5ba6c822b13a744fe13f4de33c8840fe318ad478a19ff536",
+    "bytes_unchanged_across_capture": true,
+    "durable": true
+  },
+  "route_coverage": {
+    "kind": "static_path",
+    "route_digests": [
+      "RouteDigestV1:51ebcac8a02d2e9c5bb65963b8df6e3efde01fbba0a73fcfdf7b30e9bca5fdef"
+    ],
+    "computed_by": "digests.route_digest_v1(<live conn xml>, <live op xml>)",
+    "why_static": "the operation carries a non-blank path field, so a static route digest identifies it; a blank path is how a dynamically bound route is authored and route_digest_v1 refuses it, which is when service-wide coverage would be the only honest form",
+    "operation_path": "/admin/cdscm/api/v1/clients/41172938-b9bd-4495-b411-9851f5ac7b00",
+    "connection_url": "http://host.docker.internal:8081"
+  },
+  "capture_reference": {
+    "execution_id": "execution-3663904b-b15c-43da-8970-2098154a02cb-2026.09.03",
+    "captured_at": "2026-09-03T05:56:40Z",
+    "account_scope_hash": "636bee2908a4c701926ca07c280703374adaef0eb8cdab907d2222267f75e0e2",
+    "summary": {
+      "placement": "downstream",
+      "input_observation": "documents_consumed",
+      "output_observation": "return_documents_received",
+      "effect": "state_unchanged_after_replay",
+      "replay": "same_effect",
+      "scope": "single_operation",
+      "sources": [
+        "endpoint_readback",
+        "execution_connector",
+        "execution_record"
+      ]
+    },
+    "capture_digest": "8e0bbd3e447b5e1eb82349c1db51c6f5e82da255b94716895eb40b9ecba5e2cb"
+  },
+  "semantics_definition": {
+    "semantics_id": "resource_identity_upsert_static_route_same_effect",
+    "revision": 1,
+    "mechanism": "resource_identity_upsert",
+    "key_scope": "static_route",
+    "duplicate_guarantee": "same_effect",
+    "derived_from": {
+      "replay_observation": "same_effect",
+      "mechanism_basis": "the operation addresses one fixed resource identity in its path and the counterparty accepted both requests (200/200) with no deduplication or conflict, so the replay re-applied to the same identity",
+      "key_scope_basis": "route_digest_v1 minted a static route digest",
+      "duplicate_guarantee_basis": "ingest._replay_observation(summary) == same_effect"
+    },
+    "registry_status": "the packaged registry_v1.json publishes semantics_definitions: [], so ingesting this record without publishing this definition is refused by registry._refuse_unresolvable_records"
+  },
+  "contract_ref": {
+    "value": "$ref:rest.patch.cds_client.static_route.v1",
+    "checked_by": "ids.is_authored_contract_ref",
+    "result": true
+  }
+}

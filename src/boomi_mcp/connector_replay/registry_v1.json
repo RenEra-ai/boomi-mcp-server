@@ -241,7 +241,7 @@
    },
    "connection_identity": {
     "component_id": "2fe488e4-3169-4529-9515-d854570c8ffc",
-    "version": 1,
+    "version": 3,
     "config_digest": "ComponentConfigDigestV1:fcf8f849d61d23baa7cb52dfdb2d8acf86416bdbf9fc549f25f256b3e0382171"
    },
    "route_coverage": {
@@ -251,8 +251,8 @@
     ]
    },
    "capture": {
-    "execution_id": "execution-29bb7002-e230-48ff-8c4d-cd005fd32139-2026.09.02",
-    "captured_at": "2026-09-02T05:33:04Z",
+    "execution_id": "execution-3663904b-b15c-43da-8970-2098154a02cb-2026.09.03",
+    "captured_at": "2026-09-03T05:56:40Z",
     "account_scope_hash": "636bee2908a4c701926ca07c280703374adaef0eb8cdab907d2222267f75e0e2",
     "summary": {
      "placement": "downstream",
@@ -267,9 +267,9 @@
       "execution_record"
      ]
     },
-    "capture_digest": "b4b2e7017dd68a9e1ca7c69ab37a1ca490719802b3ff04c764cd55db2071793e"
+    "capture_digest": "8e0bbd3e447b5e1eb82349c1db51c6f5e82da255b94716895eb40b9ecba5e2cb"
    },
-   "record_digest": "f6df0ab7ff60fb2f7c8ce4e623d818a4fe62153abc1c832ebfdafa1b53cf8259"
+   "record_digest": "7c950c06cf1f3cce09f6d494cee70058d7f6e42467a43901e909834fd35d5ea5"
   }
  ],
  "projection_allowlists": [

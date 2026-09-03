@@ -1,0 +1,50 @@
+[
+  {
+    "executionId": "execution-3663904b-b15c-43da-8970-2098154a02cb-2026.09.03",
+    "executionConnector": "_TEST_155E7_src_GET_20260903055606",
+    "connectorType": "officialboomi-X3979C-rest-prod",
+    "actionType": "EXECUTE",
+    "isStartShape": false,
+    "recordType": "connector",
+    "successCount": 1,
+    "errorCount": 0,
+    "size": 302,
+    "id": "RVhFQ19DT05OZmFsc2U6RVhFQ1VURToyZmU0ODhlNC0zMTY5LTQ1MjktOTUxNS1kODU0NTcwYzhmZmM6M2FhMzQ4OWQtOGQ2NS00ZWIxLThjYjItNjE2YzljNTIxMjIyOmV4ZWN1dGlvbi0zNjYzOTA0Yi1iMTVjLTQzZGEtODk3MC0yMDk4MTU0YTAyY2ItMjAyNi4wOS4wMw"
+  },
+  {
+    "executionId": "execution-3663904b-b15c-43da-8970-2098154a02cb-2026.09.03",
+    "executionConnector": "shape4",
+    "connectorType": "return",
+    "actionType": "return",
+    "isStartShape": false,
+    "recordType": "return",
+    "successCount": 1,
+    "errorCount": 0,
+    "size": 302,
+    "id": "RVhFQ19DT05OZmFsc2U6cmV0dXJuOnJldHVybjpzaGFwZTQ6ZXhlY3V0aW9uLTM2NjM5MDRiLWIxNWMtNDNkYS04OTcwLTIwOTgxNTRhMDJjYi0yMDI2LjA5LjAz"
+  },
+  {
+    "executionId": "execution-3663904b-b15c-43da-8970-2098154a02cb-2026.09.03",
+    "executionConnector": "Start",
+    "connectorType": "nodata",
+    "actionType": "nodata",
+    "isStartShape": true,
+    "recordType": "nodata",
+    "successCount": 1,
+    "errorCount": 0,
+    "size": 0,
+    "id": "RVhFQ19DT05OdHJ1ZTpub2RhdGE6c2hhcGUxOjpleGVjdXRpb24tMzY2MzkwNGItYjE1Yy00M2RhLTg5NzAtMjA5ODE1NGEwMmNiLTIwMjYuMDkuMDM"
+  },
+  {
+    "executionId": "execution-3663904b-b15c-43da-8970-2098154a02cb-2026.09.03",
+    "executionConnector": "_QA_FIXTURE_155_PATCH_client",
+    "connectorType": "officialboomi-X3979C-rest-prod",
+    "actionType": "EXECUTE",
+    "isStartShape": false,
+    "recordType": "connector",
+    "successCount": 1,
+    "errorCount": 0,
+    "size": 302,
+    "id": "RVhFQ19DT05OZmFsc2U6RVhFQ1VURToyZmU0ODhlNC0zMTY5LTQ1MjktOTUxNS1kODU0NTcwYzhmZmM6NDg1ZjNiMDEtZmJhNS00ODUwLTgyODEtMmZjMTlkZWNlZmI3OmV4ZWN1dGlvbi0zNjYzOTA0Yi1iMTVjLTQzZGEtODk3MC0yMDk4MTU0YTAyY2ItMjAyNi4wOS4wMw"
+  }
+]

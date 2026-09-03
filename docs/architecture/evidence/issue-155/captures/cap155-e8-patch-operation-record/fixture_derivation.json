@@ -1,0 +1,133 @@
+{
+  "note": "every component was created by POSTing BANKED, proven-operable component XML; the builder under test authored nothing here",
+  "durable_operation": {
+    "component_id": "485f3b01-fba5-4850-8281-2fc19decefb7",
+    "name": "_QA_FIXTURE_155_PATCH_client",
+    "created_this_run": false,
+    "durable": true,
+    "banked_source": "cap155-e5-patch-attested/component_op_tgt.xml",
+    "banked_sha256": "dab74c75a11f1cebc694f0c26808038095891366fc8c79c04c5260e73b3f2276",
+    "created_xml_sha256": null,
+    "substitutions": {
+      "note": "not re-created this run"
+    },
+    "version_before_capture": "1",
+    "readback_sha256_before": "adb229bca78856eeb6364c54898b9162ffd5572e65bd197888bcb8270e090aea",
+    "persisted_name": "_QA_FIXTURE_155_PATCH_client",
+    "persisted_verb": "PATCH",
+    "banked_path": "/admin/cdscm/api/v1/clients/41172938-b9bd-4495-b411-9851f5ac7b00",
+    "persisted_path": "/admin/cdscm/api/v1/clients/41172938-b9bd-4495-b411-9851f5ac7b00",
+    "path_bytes_unedited": true
+  },
+  "durable_connection": {
+    "component_id": "2fe488e4-3169-4529-9515-d854570c8ffc",
+    "version_before_capture": "3",
+    "persisted_name": "Sandbox CDS Mock REST (no-auth)",
+    "readback_sha256_before": "a1d3dc900fef7fdb5ba6c822b13a744fe13f4de33c8840fe318ad478a19ff536",
+    "url": "http://host.docker.internal:8081",
+    "created_this_run": false,
+    "durable": true
+  },
+  "ops": {
+    "op_src": {
+      "component_id": "3aa3489d-8d65-4eb1-8cb2-616c9c521222",
+      "name": "_TEST_155E7_src_GET_20260903055606",
+      "banked_source": "cap155-e5-patch-attested/component_op_src.xml",
+      "banked_sha256": "539286b99fb24f8e6d6e421b0a08b2d3e8c9559a5ca16a9d243fc3ac4dc1da7d",
+      "created_xml_sha256": "db1963272bb1a26fa6bbfbff6c321f35ffed8e66b8b34119f640d29f64085531",
+      "readback_sha256": "94604786ad3b55c4b64e4b1d9c30c759022f0ae2427803120ec7100900fba7d6",
+      "substitutions": {
+        "old_name": "_TEST_155E5_src_GET_20260827202224",
+        "new_name": "_TEST_155E7_src_GET_20260903055606",
+        "id_remap": {},
+        "root_attrs_stripped": [
+          "componentId",
+          "version",
+          "createdDate",
+          "createdBy",
+          "modifiedDate",
+          "modifiedBy",
+          "deleted",
+          "currentVersion",
+          "branchName",
+          "branchId",
+          "folderFullPath",
+          "folderId",
+          "folderName"
+        ]
+      },
+      "banked_path": "/admin/cdscm/api/v1/clients/1ccd7554-7f2e-4e05-83ac-194d20b16b2d",
+      "persisted_path": "/admin/cdscm/api/v1/clients/1ccd7554-7f2e-4e05-83ac-194d20b16b2d",
+      "path_bytes_unedited": true,
+      "persisted_verb": "GET"
+    }
+  },
+  "process": {
+    "component_id": "73499fe2-b6d4-4af3-9657-7080c6da9aab",
+    "name": "_TEST_155E7_proc_PATCH_20260903055606",
+    "banked_source": "cap155-e5-patch-attested/component_process.xml",
+    "banked_sha256": "6f111b6a0cb25f5f1884223a54c0a3afd160cd98fcfc18d637a683533daffca2",
+    "created_xml_sha256": "c726b32240a6e55d185425c771a4b48472bc79511d4d91d5cf30b1b58e67bfdf",
+    "readback_sha256": "32cc4b6d5323cbe5203f73e094906d8539ca21b72becf3caf7751570fa58f2cf",
+    "substitutions": {
+      "old_name": "_TEST_155E5_proc_PATCH_20260827202224",
+      "new_name": "_TEST_155E7_proc_PATCH_20260903055606",
+      "id_remap": {
+        "fcf75daa-6b4f-4a4f-9b63-af6bf49fd692": "3aa3489d-8d65-4eb1-8cb2-616c9c521222",
+        "428246b5-832c-43ff-a707-600870d62b4a": "485f3b01-fba5-4850-8281-2fc19decefb7",
+        "c4281346-83e9-4026-856d-ede718ec68a0": "2fe488e4-3169-4529-9515-d854570c8ffc"
+      },
+      "root_attrs_stripped": [
+        "componentId",
+        "version",
+        "createdDate",
+        "createdBy",
+        "modifiedDate",
+        "modifiedBy",
+        "deleted",
+        "currentVersion",
+        "branchName",
+        "branchId",
+        "folderFullPath",
+        "folderId",
+        "folderName"
+      ]
+    },
+    "operation_ids_in_readback": [
+      "3aa3489d-8d65-4eb1-8cb2-616c9c521222",
+      "485f3b01-fba5-4850-8281-2fc19decefb7"
+    ],
+    "connection_ids_in_readback": [
+      "2fe488e4-3169-4529-9515-d854570c8ffc"
+    ],
+    "send_action_types_in_readback": [
+      "GET",
+      "PATCH"
+    ]
+  },
+  "counterparty_seed": {
+    "note": "the counterparty accepts a caller-supplied `key`, so the resources were re-seeded at the EXACT keys the banked operation XML already points at; no path byte was edited",
+    "pre_clear": {
+      "tpl": {
+        "key": "1ccd7554-7f2e-4e05-83ac-194d20b16b2d",
+        "pre_clear_delete_status": 404,
+        "readback_before_seed": 404
+      },
+      "tgt": {
+        "key": "41172938-b9bd-4495-b411-9851f5ac7b00",
+        "pre_clear_delete_status": 404,
+        "readback_before_seed": 404
+      }
+    },
+    "operation_path": "/admin/cdscm/api/v1/clients/41172938-b9bd-4495-b411-9851f5ac7b00",
+    "attribution_path": "/admin/cdscm/api/v1/clients/41172938-b9bd-4495-b411-9851f5ac7b00",
+    "readback_target_path": "/admin/cdscm/api/v1/clients/41172938-b9bd-4495-b411-9851f5ac7b00",
+    "template_path": "/admin/cdscm/api/v1/clients/1ccd7554-7f2e-4e05-83ac-194d20b16b2d",
+    "control_path": "/admin/cdscm/api/v1/clients/c14b53d2-c829-445f-a35d-ce2df7a3b6d4",
+    "seed": {
+      "tpl": "1ccd7554-7f2e-4e05-83ac-194d20b16b2d",
+      "tgt": "41172938-b9bd-4495-b411-9851f5ac7b00",
+      "ctl": "c14b53d2-c829-445f-a35d-ce2df7a3b6d4"
+    }
+  }
+}

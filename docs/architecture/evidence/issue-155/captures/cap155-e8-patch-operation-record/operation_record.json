@@ -1,0 +1,44 @@
+{
+  "contract_ref": "$ref:rest.patch.cds_client.static_route.v1",
+  "family": "rest",
+  "action": "PATCH",
+  "semantics_id": "resource_identity_upsert_static_route_same_effect",
+  "semantics_revision": 1,
+  "account_scope_hash": "636bee2908a4c701926ca07c280703374adaef0eb8cdab907d2222267f75e0e2",
+  "operation_identity": {
+    "component_id": "485f3b01-fba5-4850-8281-2fc19decefb7",
+    "version": 1,
+    "config_digest": "ComponentConfigDigestV1:f17536a5c40b38f45ac096040d6b02db2623805881b7245bb052d652350eadc4"
+  },
+  "connection_identity": {
+    "component_id": "2fe488e4-3169-4529-9515-d854570c8ffc",
+    "version": 3,
+    "config_digest": "ComponentConfigDigestV1:fcf8f849d61d23baa7cb52dfdb2d8acf86416bdbf9fc549f25f256b3e0382171"
+  },
+  "route_coverage": {
+    "kind": "static_path",
+    "route_digests": [
+      "RouteDigestV1:51ebcac8a02d2e9c5bb65963b8df6e3efde01fbba0a73fcfdf7b30e9bca5fdef"
+    ]
+  },
+  "capture": {
+    "execution_id": "execution-3663904b-b15c-43da-8970-2098154a02cb-2026.09.03",
+    "captured_at": "2026-09-03T05:56:40Z",
+    "account_scope_hash": "636bee2908a4c701926ca07c280703374adaef0eb8cdab907d2222267f75e0e2",
+    "summary": {
+      "placement": "downstream",
+      "input_observation": "documents_consumed",
+      "output_observation": "return_documents_received",
+      "effect": "state_unchanged_after_replay",
+      "replay": "same_effect",
+      "scope": "single_operation",
+      "sources": [
+        "endpoint_readback",
+        "execution_connector",
+        "execution_record"
+      ]
+    },
+    "capture_digest": "8e0bbd3e447b5e1eb82349c1db51c6f5e82da255b94716895eb40b9ecba5e2cb"
+  },
+  "record_digest": "7c950c06cf1f3cce09f6d494cee70058d7f6e42467a43901e909834fd35d5ea5"
+}
