@@ -5974,6 +5974,14 @@ def test_audit_ledger_attestations_have_durable_matching_evidence():
         # decision-bearing result, so it neither consumes a checkpoint window nor
         # counts toward the loop's trend.
         "commit-reviews/cdx-review.vZRYC4": "failed",
+        # ...and its two re-runs over the SAME delta, both identical: terminal
+        # and empty at zero elapsed minutes. Diagnosed rather than assumed — a
+        # trivial `send` on a fresh session ("reply with exactly: PROBE OK") came
+        # back `status:"failed"` with an empty message too, so the backend was
+        # failing every turn and this was not the review verb, the scope, or the
+        # delta. None of the three is an evaluation; the anchor never advanced.
+        "commit-reviews/cdx-review.H7WLhV": "failed",
+        "commit-reviews/cdx-review.fZyHi1": "failed",
         # #153 L2 round 26: STUCK — 58 events, then 18 minutes of total silence.
         # Aborted with `interrupt` and collected `failed`, so no
         # `last-reviewed-sha` was written and the next round re-reviews the SAME
