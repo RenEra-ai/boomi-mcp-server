@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 11450, "minimum_collected": 11433, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 11474, "minimum_collected": 11474, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -11074,7 +11074,7 @@
 {"kind": "test", "id": "pytest-011073", "node_id": "tests/test_connector_replay_review_round3.py::test_the_wave_evidence_rule_admits_only_a_supported_row[abc1234-, archived `wave-gate/ok`-attested4-cited archive ok records completed/fail, not a passing run]", "state": "active"}
 {"kind": "test", "id": "pytest-011074", "node_id": "tests/test_connector_replay_review_round3.py::test_the_wave_evidence_rule_admits_only_a_supported_row[abc1234-, archived `wave-gate/ok`-attested5-cited archive ok records timeout/pass, not a passing run]", "state": "active"}
 {"kind": "test", "id": "pytest-011075", "node_id": "tests/test_connector_replay_review_round3.py::test_the_wave_evidence_rule_admits_only_a_supported_row[abc1234-, archived `wave-gate/ok`-attested6-cited archive ok records exit_code 1]", "state": "active"}
-{"kind": "test", "id": "pytest-011076", "node_id": "tests/test_connector_replay_review_round3.py::test_the_wave_evidence_rule_admits_only_a_supported_row[abc1234-, archived `wave-gate/ok`-attested7-the row quotes 11,037 for suite.passed but ok attests 1]", "state": "active"}
+{"kind": "test", "id": "pytest-011076", "node_id": "tests/test_connector_replay_review_round3.py::test_the_wave_evidence_rule_admits_only_a_supported_row[abc1234-, archived `wave-gate/ok`-attested7-the row quotes 11,037 for suite.passed but ok attests 1]", "state": "tombstone"}
 {"kind": "test", "id": "pytest-011077", "node_id": "tests/test_connector_replay_review_round3.py::test_the_wave_evidence_rule_admits_only_a_supported_row[abc1234-, archived `wave-gate/ok`-attested8-the row quotes 74 for goldens.active but ok attests 9]", "state": "active"}
 {"kind": "test", "id": "pytest-011078", "node_id": "tests/test_connector_replay_review_round3.py::test_the_wave_evidence_rule_admits_only_a_supported_row[abc1234-, archived `wave-gate/ok`-attested9-cited archive ok attests goldens.deterministic is false]", "state": "active"}
 {"kind": "test", "id": "pytest-011079", "node_id": "tests/test_connector_replay_review_round3.py::test_the_wave_evidence_rule_admits_only_a_supported_row[abc1234--attested1-the latest wave row (abc1234) cites no archived evidence]", "state": "active"}
@@ -11493,3 +11493,28 @@
 {"kind": "test", "id": "pytest-011492", "node_id": "tests/test_issue_155_contract_projection.py::test_the_evidenced_write_survives_the_wet_apply_route_not_only_compile", "state": "active"}
 {"kind": "test", "id": "pytest-011493", "node_id": "tests/test_issue_155_contract_projection.py::test_an_unreadable_live_component_refuses_rather_than_trusting_the_caller", "state": "active"}
 {"kind": "test", "id": "pytest-011494", "node_id": "tests/test_connector_replay_review_round3.py::test_an_operation_record_cannot_authorise_a_replay_its_capture_never_saw", "state": "active"}
+{"kind": "test", "id": "pytest-011495", "node_id": "tests/test_canonical_process_apply.py::test_one_consumed_grant_is_attested_once", "state": "active"}
+{"kind": "test", "id": "pytest-011496", "node_id": "tests/test_canonical_process_apply.py::test_the_binding_order_is_the_key_the_contract_names", "state": "active"}
+{"kind": "test", "id": "pytest-011497", "node_id": "tests/test_canonical_process_apply.py::test_a_binding_from_another_account_refuses_rather_than_being_attested", "state": "active"}
+{"kind": "test", "id": "pytest-011498", "node_id": "tests/test_canonical_process_apply.py::test_the_attestation_records_what_the_boundary_compared", "state": "active"}
+{"kind": "test", "id": "pytest-011499", "node_id": "tests/test_connector_replay_review_round3.py::test_the_wave_evidence_rule_admits_only_a_supported_row[abc1234-, archived `wave-gate/ok`-attested7-the row quotes 11037 for suite.passed but ok attests 1]", "state": "active"}
+{"kind": "test", "id": "pytest-011500", "node_id": "tests/test_connector_replay_review_round3.py::test_a_summary_that_attests_nothing_is_refused", "state": "active"}
+{"kind": "test", "id": "pytest-011501", "node_id": "tests/test_connector_replay_review_round3.py::test_a_count_written_as_text_is_not_a_count", "state": "active"}
+{"kind": "test", "id": "pytest-011502", "node_id": "tests/test_connector_replay_review_round3.py::test_a_row_that_states_no_figure_for_a_required_arm_is_refused", "state": "active"}
+{"kind": "test", "id": "pytest-011503", "node_id": "tests/test_connector_replay_review_round3.py::test_the_wave_contract_matches_every_archived_summary", "state": "active"}
+{"kind": "test", "id": "pytest-011504", "node_id": "tests/test_issue_155_contract_projection.py::test_a_minted_grant_names_its_root_and_its_connection", "state": "active"}
+{"kind": "test", "id": "pytest-011505", "node_id": "tests/test_issue_155_contract_projection.py::test_the_relocatable_compile_cannot_be_the_evidence_gate", "state": "active"}
+{"kind": "test", "id": "pytest-011506", "node_id": "tests/test_issue_155_discovery.py::test_an_empty_list_says_whether_evidence_exists_at_another_version[connection-moved]", "state": "active"}
+{"kind": "test", "id": "pytest-011507", "node_id": "tests/test_issue_155_discovery.py::test_an_empty_list_says_whether_evidence_exists_at_another_version[operation-moved]", "state": "active"}
+{"kind": "test", "id": "pytest-011508", "node_id": "tests/test_issue_155_discovery.py::test_an_empty_list_says_whether_evidence_exists_at_another_version[both-moved]", "state": "active"}
+{"kind": "test", "id": "pytest-011509", "node_id": "tests/test_issue_155_discovery.py::test_never_captured_and_captured_but_moved_are_distinguishable", "state": "active"}
+{"kind": "test", "id": "pytest-011510", "node_id": "tests/test_issue_155_discovery.py::test_a_usable_record_is_a_candidate_and_never_a_superseded_row", "state": "active"}
+{"kind": "test", "id": "pytest-011511", "node_id": "tests/test_issue_155_discovery.py::test_the_superseded_projection_is_CLOSED_and_leaks_nothing", "state": "active"}
+{"kind": "test", "id": "pytest-011512", "node_id": "tests/test_issue_155_identity_projection.py::test_a_declared_path_the_account_does_not_store_is_refused", "state": "active"}
+{"kind": "test", "id": "pytest-011513", "node_id": "tests/test_issue_155_identity_projection.py::test_an_unsettled_path_is_silence_and_never_a_mismatch[no path declared-identity_over0-paths0]", "state": "active"}
+{"kind": "test", "id": "pytest-011514", "node_id": "tests/test_issue_155_identity_projection.py::test_an_unsettled_path_is_silence_and_never_a_mismatch[blank declared path-identity_over1-paths1]", "state": "active"}
+{"kind": "test", "id": "pytest-011515", "node_id": "tests/test_issue_155_identity_projection.py::test_an_unsettled_path_is_silence_and_never_a_mismatch[dynamic route-identity_over2-paths2]", "state": "active"}
+{"kind": "test", "id": "pytest-011516", "node_id": "tests/test_issue_155_identity_projection.py::test_an_unsettled_path_is_silence_and_never_a_mismatch[unreadable route-identity_over3-paths3]", "state": "active"}
+{"kind": "test", "id": "pytest-011517", "node_id": "tests/test_issue_155_identity_projection.py::test_the_live_reader_keeps_the_path_it_read", "state": "active"}
+{"kind": "test", "id": "pytest-011518", "node_id": "tests/test_issue_155_recheck_boundary.py::test_a_drift_inside_the_materialization_window_refuses_before_the_write", "state": "active"}
+{"kind": "test", "id": "pytest-011519", "node_id": "tests/test_issue_155_recheck_boundary.py::test_a_mutation_uncertain_push_retains_the_accounting_it_owes", "state": "active"}
