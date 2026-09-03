@@ -837,4 +837,20 @@ def path_equivalence_behaviour() -> tuple:
     Changing it altered acceptance while both published revisions stood still,
     measured, which is the same defect its sibling grammar row was added to close.
     """
-    return tuple((probe, comparable_path(probe)) for probe in PATH_EQUIVALENCE_PROBES)
+    results = []
+    for probe in PATH_EQUIVALENCE_PROBES:
+        try:
+            results.append((probe, comparable_path(probe)))
+        except Exception as refusal:  # noqa: BLE001
+            # A REFUSAL IS A RESULT, recorded per probe. The revision builder
+            # wraps each authority in a try/except that substitutes the constant
+            # "unavailable", so a single raising probe would collapse this whole
+            # row to that constant — and every later behaviour change would then
+            # produce the identical revision, because the row no longer varies.
+            # An oracle that stops distinguishing after the first refusal is worse
+            # than one that never existed: it reports stability it is no longer
+            # measuring. The malformed probes above exist precisely to fingerprint
+            # a hardening that would raise, so this is the case they were added
+            # for, not a hypothetical.
+            results.append((probe, "refused:" + type(refusal).__name__))
+    return tuple(results)

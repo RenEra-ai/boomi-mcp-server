@@ -1029,10 +1029,12 @@ def assert_declared_matches_resolved(
                 # A declared BLANK path is the dynamic-path authoring form, not a
                 # claim about a route — the binding composes it per document.
                 continue
-            _mine = str(mine).strip()
-            _theirs = str(theirs).strip()
+            _mine = str(mine)
+            _theirs = str(theirs)
             if fold:
-                _mine, _theirs = _mine.lower(), _theirs.lower()
+                # A vocabulary token: trimmed and case-folded here, because there
+                # is no published normalizer for one.
+                _mine, _theirs = _mine.strip().lower(), _theirs.strip().lower()
             else:
                 # THE EQUIVALENCE THE EVIDENCE LAYER ALREADY USES. Percent-escape
                 # hex is case-insensitive under RFC 3986 and dot segments resolve,

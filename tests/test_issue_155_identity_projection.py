@@ -3986,3 +3986,86 @@ def test_the_revision_oracle_derives_its_casing_per_nibble():
         "a normalization accepting only uniformly-cased escapes left the compiler "
         "revision unmoved, so mixed-case spellings could stop matching silently"
     )
+
+
+def test_a_refusing_probe_does_not_blind_the_revision_oracle():
+    """The revision builder substitutes a constant when an authority raises.
+
+    So one raising probe collapsed this whole row to `"unavailable"` — and every
+    later behaviour change then produced the IDENTICAL revision, because the row
+    no longer varied with anything. An oracle that stops distinguishing after the
+    first refusal reports stability it is not measuring, which is worse than not
+    having one. The malformed probes exist to fingerprint exactly a hardening that
+    would raise, so this is the case they were added for.
+
+    Measured as three revisions, not two: baseline, hardened-to-raise, and
+    hardened-plus-a-further-change. All three must differ. Under the raise-out
+    form the last two were byte-identical.
+    """
+    import re
+    from unittest.mock import patch
+
+    import boomi_mcp.connector_replay.digests as digests
+    from boomi_mcp.authoring.contract import (
+        get_authoring_revisions,
+        reset_manifest_cache,
+    )
+
+    def _revision():
+        reset_manifest_cache()
+        return get_authoring_revisions()["compiler_revision"]
+
+    baseline = _revision()
+
+    _real = digests.comparable_path
+    _malformed = re.compile(r"%(?![0-9A-Fa-f]{2})")
+
+    def _hardened(path):
+        if _malformed.search(path):
+            raise ValueError("malformed percent escape")
+        return _real(path)
+
+    def _hardened_and_lowered(path):
+        if _malformed.search(path):
+            raise ValueError("malformed percent escape")
+        return _real(path).lower()
+
+    with patch.object(digests, "comparable_path", _hardened):
+        hardened = _revision()
+    with patch.object(digests, "comparable_path", _hardened_and_lowered):
+        hardened_and_changed = _revision()
+    reset_manifest_cache()
+
+    assert hardened != baseline, "a hardening that refuses did not move the revision"
+    assert hardened_and_changed != hardened, (
+        "after a refusing probe the oracle stopped distinguishing, so a further "
+        "acceptance change produced the same revision"
+    )
+
+    # ...and the refusal is recorded per probe rather than taking the row down.
+    with patch.object(digests, "comparable_path", _hardened):
+        outputs = dict(digests.path_equivalence_behaviour())
+    assert outputs["/%ZZ"].startswith("refused:"), outputs["/%ZZ"]
+    assert outputs["/%41"] == "/A", "a refusal on one probe erased the others"
+
+
+def test_the_normalizer_is_the_only_place_a_path_is_trimmed():
+    """The whitespace probes are only honest if the trim is caller-reachable.
+
+    The comparison used to strip both operands itself and then call a helper that
+    strips again. With the trim duplicated, removing the redundant one changed
+    nothing a caller could observe — yet the probe fingerprinting it would have
+    rotated every caller binding for identical served behaviour. That is false
+    drift, and the fix was to remove the duplicate rather than to stop looking:
+    the helper is now the sole trimming boundary, so the probe describes a
+    decision that really is its own.
+    """
+    from boomi_mcp.authoring.connector_resolution_snapshot import ConnectorIdentityError
+
+    # An untrimmed declaration still matches a trimmed stored path, which is only
+    # true if something trims — and the only thing left that does is the helper.
+    assert _compare(_live_op(path="/Orders/42"), {"op_patch": "  /Orders/42  "}) is not None
+
+    # ...and it is still a real comparison, not a trim that swallows everything.
+    with pytest.raises(ConnectorIdentityError):
+        _compare(_live_op(path="/Orders/42"), {"op_patch": "  /orders/42  "})

@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 11490, "minimum_collected": 11490, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 11492, "minimum_collected": 11492, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -11535,3 +11535,5 @@
 {"kind": "test", "id": "pytest-011534", "node_id": "tests/test_issue_155_identity_projection.py::test_the_path_equivalence_moves_the_published_revision", "state": "active"}
 {"kind": "test", "id": "pytest-011535", "node_id": "tests/test_issue_155_identity_projection.py::test_the_revision_oracle_covers_both_normalization_arms", "state": "active"}
 {"kind": "test", "id": "pytest-011536", "node_id": "tests/test_issue_155_identity_projection.py::test_the_revision_oracle_derives_its_casing_per_nibble", "state": "active"}
+{"kind": "test", "id": "pytest-011537", "node_id": "tests/test_issue_155_identity_projection.py::test_a_refusing_probe_does_not_blind_the_revision_oracle", "state": "active"}
+{"kind": "test", "id": "pytest-011538", "node_id": "tests/test_issue_155_identity_projection.py::test_the_normalizer_is_the_only_place_a_path_is_trimmed", "state": "active"}
