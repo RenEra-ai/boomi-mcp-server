@@ -7810,7 +7810,10 @@ def _build_canonical_symbols(*, spec, resolution):
         assert_declared_matches_resolved,
         build_connector_resolution_snapshot,
     )
-    from ..authoring.workflow import _connector_metadata_from_components
+    from ..authoring.workflow import (
+        _connector_metadata_from_components,
+        _declared_paths_from_components,
+    )
     from ..recipes.materialization import build_symbol_table
 
     # The caller's connector metadata is an ASSERTION, compared against what the
@@ -7829,7 +7832,14 @@ def _build_canonical_symbols(*, spec, resolution):
     # make irrelevant. `resolution` is REQUIRED rather than defaulted for exactly
     # that reason: a caller cannot forget what it has no default for.
     snapshot = resolution
-    assert_declared_matches_resolved(snapshot, declared)
+    # The declared PATHS travel beside the family/action declaration, from the
+    # same components: a caller who names a component id and asserts a path the
+    # account does not store is asserting something false, and the account's
+    # path is what will execute — so the caller was being shown the one value
+    # that would not be used.
+    assert_declared_matches_resolved(
+        snapshot, declared, _declared_paths_from_components(spec.components)
+    )
 
     return build_symbol_table(
         list(spec.components),

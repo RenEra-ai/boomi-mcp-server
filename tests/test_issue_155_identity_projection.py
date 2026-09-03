@@ -3557,3 +3557,121 @@ def test_a_composer_without_declared_fields_refuses_rather_than_scanning_nothing
     )
     assert identity.route_state == "unavailable"
     assert identity.endpoint is None
+
+
+def _live_op(**over):
+    from boomi_mcp.authoring.connector_resolution_snapshot import (
+        ResolvedConnectorComponentIdentityV1,
+    )
+
+    base = dict(
+        component_key="op_patch", family="rest", action="PATCH",
+        path="/admin/cdscm/api/v1/clients/41172938", route_state="static",
+        source="live", authority="live_readback_xml",
+    )
+    base.update(over)
+    return ResolvedConnectorComponentIdentityV1(**base)
+
+
+def _compare(identity, paths):
+    from boomi_mcp.authoring.connector_resolution_snapshot import (
+        TrustedConnectorResolutionSnapshotV1,
+        assert_declared_matches_resolved,
+    )
+
+    snapshot = TrustedConnectorResolutionSnapshotV1(identities=(identity,))
+    return assert_declared_matches_resolved(
+        snapshot, {"op_patch": ("http", "PATCH")}, paths
+    )
+
+
+def test_a_declared_path_the_account_does_not_store_is_refused():
+    """The declaration is an assertion about the route, not an override of it.
+
+    Live QA measured the gap: a reused operation declared with a path that
+    differs from the component the account stores compiled clean, the LIVE path
+    executed, and the served envelope echoed the caller's declared value — so the
+    one path the caller was shown was the one that would not be used. The action
+    mismatch beside it was already refused with exactly the right principle; the
+    path was the field the comparison did not cover.
+
+    It could not cover it: the live reader extracted the account's stored path in
+    order to decide the route state and then discarded the value, so there was
+    nothing on the resolved identity to compare against.
+    """
+    from boomi_mcp.authoring.connector_resolution_snapshot import ConnectorIdentityError
+
+    live = "/admin/cdscm/api/v1/clients/41172938"
+    assert _compare(_live_op(), {"op_patch": live}) is not None
+
+    with pytest.raises(ConnectorIdentityError) as raised:
+        _compare(_live_op(), {"op_patch": "/totally/different/path"})
+    assert "path" in str(raised.value)
+    assert "assertion, not an override" in str(raised.value)
+
+
+@pytest.mark.parametrize(
+    "label,identity_over,paths",
+    [
+        ("no path declared", {}, {}),
+        # A declared BLANK path is the dynamic-path authoring form: the binding
+        # composes the route per document, so it claims nothing about a stored one.
+        ("blank declared path", {}, {"op_patch": "   "}),
+        # "I could not tell" has never been evidence a declaration is wrong, and
+        # these two are exactly that: a dynamic route has no single stored path,
+        # and an unavailable one could not be read at all.
+        ("dynamic route", {"route_state": "dynamic"}, {"op_patch": "/other"}),
+        ("unreadable route", {"route_state": "unavailable"}, {"op_patch": "/other"}),
+    ],
+)
+def test_an_unsettled_path_is_silence_and_never_a_mismatch(label, identity_over, paths):
+    """The refusal must fire on disagreement, never on absence.
+
+    Each of these would be a false refusal, and a false refusal on this path
+    breaks every config whose endpoint the account resolves at runtime — which is
+    the failure mode the family/action comparison was already written to avoid.
+    """
+    assert _compare(_live_op(**identity_over), paths) is not None
+
+
+def test_the_live_reader_keeps_the_path_it_read():
+    """The root cause, asserted at the reader rather than at the comparison.
+
+    The route state is DERIVED from the stored path, so the reader always had the
+    value; it recorded whether the route was readable and never what it was. A
+    fact established at a boundary and dropped before the record that boundary
+    exists to produce — the second instance of that pair in this issue.
+
+    The XML is a CAPTURED component from the evidence archive, not a shape typed
+    here. A first version of this test hand-built the document and the reader
+    refused it as unreadable — proving only that I had guessed the shape wrong,
+    which is exactly the fixture-provenance failure this repository already
+    records: a fixture the author wrote is not evidence about the author's code.
+    """
+    import json
+    from boomi_mcp.authoring.connector_resolution_snapshot import (
+        live_identity_from_component_xml,
+    )
+
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1] / _CAPTURES / "cap155-e8-patch-operation-record"
+    xml = (root / "component_op_tgt.xml").read_text()
+    # The COUNTERPARTY's own log, which recorded the route the execution
+    # actually called. Independent of the component XML the reader parses, so
+    # this cannot pass by agreeing with its own input.
+    stored = root / "access_log_attribution.json"
+    # The path the ACCOUNT stores, read from the record the capture derived —
+    # never retyped here, so this cannot pass by agreeing with itself.
+    record = json.loads(stored.read_text())
+
+    read = live_identity_from_component_xml("op_patch", xml)
+    assert read.readable, read
+    assert read.route_state == "static", read
+    assert read.path, (
+        "the reader decided the route state from the stored path and then "
+        "discarded the value it decided from"
+    )
+    assert read.path in json.dumps(record), (
+        "the path the reader kept is not the route the counterparty was called on"
+    )

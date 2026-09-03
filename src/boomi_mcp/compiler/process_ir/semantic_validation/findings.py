@@ -231,7 +231,11 @@ def finding(
             code,
             "Fetch this code's authoring rule with "
             "get_schema_template(schema_name='process_ir_authoring', "
-            "category='diagnostic').",
+            "authoring_entry_id=<the id this diagnostic serves in "
+            "authoring_contract_entry_ids>). The category sweep this used to name "
+            "pages at twenty of sixty-five entries, so following it literally left "
+            "most diagnostics off the first page of their own remediation's route; "
+            "the entry id resolves in one call and the diagnostic already carries it.",
         ),
         evidence=tuple(
             ValidationEvidenceV1(key=key, value=value) for key, value in evidence

@@ -536,11 +536,35 @@ def live_identity_from_component_xml(
         elif any((value or "").strip() == "" for value in path_fields):
             route_state = "dynamic"
 
+    # THE PATH ITSELF, kept — not just the state derived from it. This reader
+    # extracted the account's stored path in order to decide `route_state` and
+    # then threw the value away, so a resolved identity reported WHETHER the
+    # route was readable and never WHAT it was. The declared-versus-live
+    # comparison had nothing to compare, which is why a caller could declare one
+    # path, have the live one execute, and be shown their own back.
+    #
+    # Second instance of the class this issue minted one round earlier — a fact
+    # established at a boundary and dropped before the record that boundary
+    # exists to produce — so the correction is at the construction below, which
+    # now carries every fact this function determined rather than a hand-picked
+    # subset of them.
+    #
+    # ONLY WHEN THE ROUTE IS SETTLED AND UNAMBIGUOUS. A dynamic route has no
+    # single stored path by definition, and two differing path fields are a
+    # component this reader cannot describe with one value — recording either
+    # would be inventing the answer the ambiguity denies.
+    stored_paths = {(value or "").strip() for value in path_fields}
+    live_path = (
+        stored_paths.pop() if route_state == "static" and len(stored_paths) == 1
+        else None
+    ) if path_fields else None
+
     return ResolvedConnectorComponentIdentityV1(
         component_key=component_key,
         family=family,
         action=action,
         route_state=route_state,
+        path=live_path or None,
         source="live",
         authority="live_readback_xml",
         config_digest=_config_digest(),
@@ -875,6 +899,7 @@ def build_connector_resolution_snapshot(
 def assert_declared_matches_resolved(
     snapshot: TrustedConnectorResolutionSnapshotV1,
     declared: Mapping[str, Tuple[Optional[str], Optional[str]]],
+    declared_paths: Optional[Mapping[str, Optional[str]]] = None,
 ) -> Dict[str, Tuple[Optional[str], Optional[str]]]:
     """Compare the caller's declaration against what the components resolve to.
 
@@ -884,9 +909,12 @@ def assert_declared_matches_resolved(
     declaration is wrong, and refusing on it would break every config whose
     endpoint is bound to an environment extension.
 
-    Only the FAMILY and ACTION are compared. The endpoint is deliberately out of
-    scope here: the declaration does not carry one, so there is nothing to
-    disagree with.
+    FAMILY, ACTION and — when the caller supplies them — the declared PATHS are
+    compared. The paths arrive in their own argument rather than inside
+    ``declared`` deliberately: that mapping's two-tuple shape is consumed across
+    the recipes layer by several producers, and widening it to carry a third fact
+    would be a cross-subsystem refactor for one field. The endpoint proper stays
+    out of scope, as it always was — no declaration carries one.
     """
     # EVERY mismatch, collected. Raising on the first meant the planning
     # surface — whose contract is to hand back everything wrong at once — caught
@@ -915,12 +943,28 @@ def assert_declared_matches_resolved(
         # unequal to itself. Both sides go through the same derivation.
         declared_family = connector_family_of(pair[0])
         declared_action = pair[1]
+        # THE PATH IS COMPARED ONLY WHERE BOTH SIDES SETTLE IT. A declaration
+        # carrying no path asserts nothing about the route; a live identity whose
+        # route is `dynamic` has no single stored path by definition, and one
+        # whose route is `unavailable` could not be read — both are "I could not
+        # tell", which this function has never treated as evidence a declaration
+        # is wrong. Live QA measured the gap this closes: a caller declaring a
+        # path that differs from the account's compiled clean, the live path
+        # executed, and the served envelope echoed the caller's own value back,
+        # so the one value shown was the one that would not be used.
+        declared_path = (declared_paths or {}).get(key)
+        live_path = identity.path if identity.route_state == "static" else None
         for label, mine, theirs in (
             ("family", identity.family, declared_family),
             ("action", identity.action, declared_action),
+            ("path", live_path, declared_path),
         ):
             if theirs is None or mine is None:
                 # A declaration that says nothing asserts nothing.
+                continue
+            if not str(theirs).strip():
+                # A declared BLANK path is the dynamic-path authoring form, not a
+                # claim about a route — the binding composes it per document.
                 continue
             if str(theirs).strip().lower() != str(mine).strip().lower():
                 mismatches.append(ConnectorIdentityError(
