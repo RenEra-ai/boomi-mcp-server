@@ -2877,9 +2877,15 @@ PROCESS_IR_V1_CAPABILITIES: Mapping[str, str] = MappingProxyType(
         # trusted snapshot, then a component form the authoring surface refuses —
         # and each passed without reaching the evidence question at all. The
         # shape that reaches it is the documented reference-only reuse: a caller
-        # names the component that already exists, its live identity is read, the
-        # packaged record is placed against it, and a retried write carrying a
-        # `key_reference` compiles. Two defects had to go first: the trusted
+        # names the component that already exists — its `component_id` TOGETHER
+        # WITH a `config`, which is either the full one or one carrying
+        # `reference_only: true`; a bare `component_id` with no `config` at all is
+        # refused by the capability check, measured live at both shapes. The
+        # earlier wording said only "names the component that already exists",
+        # which reads as the bare form and is exactly the misreading live QA
+        # reproduced. Its live identity is then read, the packaged record is
+        # placed against it, and a retried write carrying a `key_reference`
+        # compiles. Two defects had to go first: the trusted
         # snapshot was not retained past planning, and the materialization plan
         # recompiled the IR against a table with no contracts — so semantic
         # validation passed on evidence the plan build could not see.

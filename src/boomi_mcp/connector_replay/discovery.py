@@ -41,6 +41,19 @@ CANDIDATE_FIELDS: tuple = (
     "route_coverage_kind",
 )
 
+#: Everything a SUPERSEDED row may carry. Closed for the same reason
+#: `CANDIDATE_FIELDS` is closed: a projection that can grow a field silently is
+#: not a closed contract. Versions and a reference only — no bodies, no routes, no
+#: digests of anything the account holds.
+SUPERSEDED_FIELDS: tuple = (
+    "contract_ref",
+    "operation_version_recorded",
+    "operation_version_current",
+    "connection_version_recorded",
+    "connection_version_current",
+    "moved",
+)
+
 #: The one value the `authority` field may take. A candidate is never authority,
 #: so the field is a constant rather than something a caller can vary.
 CANDIDATE_AUTHORITY = "non_authoritative_candidate"
@@ -132,25 +145,66 @@ def idempotency_contract_candidates(
 
         registry = load_registry()
 
+    #: What a SUPERSEDED record may say about itself. Deliberately narrower than a
+    #: candidate: this is not a contract anyone may name, it is an explanation of
+    #: why the candidate list is empty, so it carries the versions and the
+    #: reference and nothing else.
     candidates: List[Dict[str, Any]] = []
+    superseded: List[Dict[str, Any]] = []
     for record in registry.operation_records:
         # Identity is the PAIR of component and version, on both sides. Matching
         # ids alone offered a record minted against version 2 while the envelope
         # reported the account at version 9 — a candidate that does not describe
         # the component the caller was just told about.
+        # BOTH IDS FIRST, then both versions. Splitting the pair this way is what
+        # lets an empty candidate list explain itself: a record for these very
+        # components, at a version the account has moved past, is a completely
+        # different situation from no record at all — and the caller was shown the
+        # same empty list for both.
         if (
             record.operation_identity.component_id,
-            record.operation_identity.version,
-        ) != (operation_component_id, identities["operation"]["version"]):
-            continue
-        if (
             record.connection_identity.component_id,
-            record.connection_identity.version,
-        ) != (connection_component_id, identities["connection"]["version"]):
+        ) != (operation_component_id, connection_component_id):
+            continue
+        operation_moved = (
+            record.operation_identity.version != identities["operation"]["version"]
+        )
+        connection_moved = (
+            record.connection_identity.version != identities["connection"]["version"]
+        )
+        if operation_moved or connection_moved:
+            # A Boomi component version advances on ANY update, including one
+            # confined to fields the configuration digest deliberately excludes —
+            # rotating a credential is the routine case. The evidence is then
+            # voided, correctly and fail-closed, and until now the refusal a
+            # caller received was indistinguishable from never having captured
+            # anything. This row is that distinction.
+            #
+            # WHETHER THE CONFIGURATION ALSO CHANGED IS NOT SERVED HERE, and that
+            # is a design decision rather than an omission: answering it means
+            # fetching the component's XML and projecting it, which would put
+            # credential-bearing bytes into a surface whose whole construction is
+            # that there is nowhere for them to ride along. The digest comparison
+            # already exists at the apply boundary, which reads the account by
+            # design and refuses on exactly that basis.
+            superseded.append({
+                "contract_ref": record.contract_ref,
+                "operation_version_recorded": record.operation_identity.version,
+                "operation_version_current": identities["operation"]["version"],
+                "connection_version_recorded": record.connection_identity.version,
+                "connection_version_current": identities["connection"]["version"],
+                "moved": tuple(
+                    side for side, moved in (
+                        ("operation", operation_moved),
+                        ("connection", connection_moved),
+                    ) if moved
+                ),
+            })
             continue
         candidates.append(_candidate(record))
 
     candidates.sort(key=lambda item: (item["contract_ref"], item["record_digest"]))
+    superseded.sort(key=lambda item: item["contract_ref"])
     return {
         "_success": True,
         "authority": CANDIDATE_AUTHORITY,
@@ -159,11 +213,14 @@ def idempotency_contract_candidates(
         "connection_component_id": connection_component_id,
         "connection_version": identities["connection"]["version"],
         "candidates": candidates,
+        # EMPTY IS STILL AN ANSWER, and this is what makes it a legible one.
+        "superseded_records": superseded,
     }
 
 
 __all__ = [
     "CANDIDATE_AUTHORITY",
     "CANDIDATE_FIELDS",
+    "SUPERSEDED_FIELDS",
     "idempotency_contract_candidates",
 ]

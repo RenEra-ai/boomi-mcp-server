@@ -743,3 +743,127 @@ def test_the_grant_wiring_never_defaults_a_load_bearing_argument():
                 if name in {"project_grants_for_root", "materialize_canonical_process_xml"}:
                     reached += 1
     assert reached >= 5, f"only {reached} wiring call sites found — the sweep is too narrow"
+
+
+def _superseded_registry(*, op_version, conn_version):
+    """A registry holding one record for the pair at the versions given."""
+    class _Identity:
+        def __init__(self, component_id, version):
+            self.component_id = component_id
+            self.version = version
+
+    class _Coverage:
+        kind = "service_wide"
+
+    class _Record:
+        contract_ref = "$ref:C"
+        family = "rest"
+        action = "PATCH"
+        semantics_id = "icv1"
+        semantics_revision = 1
+        account_scope_hash = "a" * 64
+        operation_identity = _Identity("op-1", op_version)
+        connection_identity = _Identity("cn-1", conn_version)
+        route_coverage = _Coverage()
+        record_digest = "b" * 64
+        capture = {"raw_body": "SHOULD-NEVER-BE-SERVED"}
+
+    return _Registry([_Record()])
+
+
+def _ask(registry, *, op_version=3, conn_version=3):
+    def live(component_id):
+        return {
+            "component_id": component_id,
+            "version": op_version if component_id == "op-1" else conn_version,
+        }
+
+    return idempotency_contract_candidates(
+        operation_component_id="op-1",
+        connection_component_id="cn-1",
+        live_identity=live,
+        registry=registry,
+    )
+
+
+@pytest.mark.parametrize(
+    "op_recorded,conn_recorded,moved",
+    [
+        (3, 1, ("connection",)),
+        (1, 3, ("operation",)),
+        (1, 1, ("operation", "connection")),
+    ],
+    ids=["connection-moved", "operation-moved", "both-moved"],
+)
+def test_an_empty_list_says_whether_evidence_exists_at_another_version(
+    op_recorded, conn_recorded, moved
+):
+    """The discriminator a caller could not previously see.
+
+    A Boomi component version advances on ANY update, including one confined to
+    fields the configuration digest deliberately excludes — rotating a credential
+    is the routine trigger. The evidence is then voided, correctly and
+    fail-closed, and the refusal a caller received was word-for-word the one they
+    would get having captured nothing at all. Live QA measured that: a sweep over
+    the whole served refusal found no mention of a version, a record, a registry,
+    a capture, the contract reference or the connection id.
+
+    Both halves are asserted, because either alone is satisfiable by a bug: the
+    candidate list must still be EMPTY (a superseded record is not a contract
+    anyone may name), and the envelope must say a record exists at another
+    version and which side moved.
+    """
+    result = _ask(_superseded_registry(op_version=op_recorded, conn_version=conn_recorded))
+
+    assert result["_success"] is True
+    assert result["candidates"] == [], (
+        "a record whose component moved was offered as usable evidence"
+    )
+    assert len(result["superseded_records"]) == 1
+    row = result["superseded_records"][0]
+    assert tuple(row["moved"]) == moved
+    assert row["operation_version_recorded"] == op_recorded
+    assert row["operation_version_current"] == 3
+    assert row["connection_version_recorded"] == conn_recorded
+    assert row["connection_version_current"] == 3
+    assert row["contract_ref"] == "$ref:C"
+
+
+def test_never_captured_and_captured_but_moved_are_distinguishable():
+    """The two states the caller could not tell apart, side by side."""
+    never = _ask(_Registry())
+    moved = _ask(_superseded_registry(op_version=3, conn_version=1))
+
+    assert never["candidates"] == moved["candidates"] == []
+    # ...and this is the whole point: the lists agree, the envelopes do not.
+    assert never["superseded_records"] == []
+    assert moved["superseded_records"] != []
+
+
+def test_a_usable_record_is_a_candidate_and_never_a_superseded_row():
+    """The positive control. Without it every assertion above is satisfied by a
+    projection that has simply stopped producing candidates."""
+    result = _ask(_superseded_registry(op_version=3, conn_version=3))
+    assert len(result["candidates"]) == 1
+    assert result["superseded_records"] == []
+
+
+def test_the_superseded_projection_is_CLOSED_and_leaks_nothing():
+    """Same rule as the candidate projection, and for the same reason.
+
+    This row explains a refusal; it is not a contract reference anyone may act on,
+    so it carries strictly less. A route is a path and a capture holds a body —
+    neither has anywhere to ride along here, and this asserts that by equality
+    rather than by absence of the two strings it happens to know about.
+    """
+    from boomi_mcp.connector_replay.discovery import SUPERSEDED_FIELDS
+
+    result = _ask(_superseded_registry(op_version=1, conn_version=1))
+    row = result["superseded_records"][0]
+    assert set(row) == set(SUPERSEDED_FIELDS)
+
+    blob = repr(result)
+    assert "SHOULD-NEVER-BE-SERVED" not in blob
+    assert "record_digest" not in repr(row), (
+        "a superseded row names evidence a caller must not act on"
+    )
