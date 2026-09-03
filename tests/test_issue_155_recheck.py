@@ -60,6 +60,9 @@ OP_CFG = "ComponentConfigDigestV1:" + "1" * 64
 CONN_CFG = "ComponentConfigDigestV1:" + "2" * 64
 
 
+_SCOPE = "a" * 64
+
+
 def _registry():
     return _Registry([
         _Record(
@@ -95,7 +98,13 @@ def test_a_root_with_no_grant_reads_nothing_at_all():
         return {"version": 1, "config_digest": OP_CFG}
 
     outcome = recheck_grant_identities(
-        grants=(), registry=_registry(), live_identity=counting
+        grants=(), registry=_registry(), live_identity=counting,
+        # A record here declares an account scope, so the observation
+        # must carry the same one. These calls omitted it and relied
+        # on a missing scope SKIPPING the comparison — the fail-open
+        # arm the issue-level architect gate found; with it closed, a
+        # scope claim needs a knower.
+        account_scope_hash=_SCOPE,
     )
     assert outcome.ok
     assert calls == []
@@ -137,6 +146,12 @@ def test_each_half_of_each_identity_drifts_on_its_own(override, expected):
         grants=(_Grant(DIGEST),),
         registry=_registry(),
         live_identity=_live(**override),
+        # A record here declares an account scope, so the observation
+        # must carry the same one. These calls omitted it and relied
+        # on a missing scope SKIPPING the comparison — the fail-open
+        # arm the issue-level architect gate found; with it closed, a
+        # scope claim needs a knower.
+        account_scope_hash=_SCOPE,
     )
     assert not outcome.ok
     assert [d["reason"] for d in outcome.drifts] == [expected]
@@ -149,6 +164,12 @@ def test_an_unreadable_component_is_a_refusal_and_not_a_pass():
         grants=(_Grant(DIGEST),),
         registry=_registry(),
         live_identity=lambda component_id, _kind, _family=None: None,
+        # A record here declares an account scope, so the observation
+        # must carry the same one. These calls omitted it and relied
+        # on a missing scope SKIPPING the comparison — the fail-open
+        # arm the issue-level architect gate found; with it closed, a
+        # scope claim needs a knower.
+        account_scope_hash=_SCOPE,
     )
     assert not outcome.ok
     assert outcome.unavailable["subject"] == "operation"
@@ -162,6 +183,12 @@ def test_a_grant_whose_record_is_gone_is_unavailable_not_clean():
         grants=(_Grant("c" * 64),),
         registry=_registry(),
         live_identity=_live(),
+        # A record here declares an account scope, so the observation
+        # must carry the same one. These calls omitted it and relied
+        # on a missing scope SKIPPING the comparison — the fail-open
+        # arm the issue-level architect gate found; with it closed, a
+        # scope claim needs a knower.
+        account_scope_hash=_SCOPE,
     )
     assert not outcome.ok
     assert outcome.unavailable["subject"] == "operation_record"
@@ -209,6 +236,12 @@ def test_two_grants_over_one_component_read_it_once():
         grants=(_Grant(DIGEST), _Grant(DIGEST)),
         registry=_registry(),
         live_identity=counting,
+        # A record here declares an account scope, so the observation
+        # must carry the same one. These calls omitted it and relied
+        # on a missing scope SKIPPING the comparison — the fail-open
+        # arm the issue-level architect gate found; with it closed, a
+        # scope claim needs a knower.
+        account_scope_hash=_SCOPE,
     )
     assert outcome.ok
     assert sorted(calls) == ["conn-1", "op-1"]
@@ -222,6 +255,12 @@ def test_the_boundary_travels_with_the_outcome():
             registry=_registry(),
             live_identity=_live(),
             boundary=boundary,
+            # A record here declares an account scope, so the observation
+            # must carry the same one. These calls omitted it and relied
+            # on a missing scope SKIPPING the comparison — the fail-open
+            # arm the issue-level architect gate found; with it closed, a
+            # scope claim needs a knower.
+            account_scope_hash=_SCOPE,
         )
         assert outcome.boundary == boundary
 
@@ -249,6 +288,12 @@ def test_a_reason_shape_is_never_mistaken_for_an_identity():
             grants=(_Grant(DIGEST),),
             registry=_registry(),
             live_identity=lambda component_id, _kind, _family=None: {"reason": reason},
+            # A record here declares an account scope, so the observation
+            # must carry the same one. These calls omitted it and relied
+            # on a missing scope SKIPPING the comparison — the fail-open
+            # arm the issue-level architect gate found; with it closed, a
+            # scope claim needs a knower.
+            account_scope_hash=_SCOPE,
         )
         assert not outcome.ok, reason
         assert not outcome.drifts, "a reason shape was compared as if it were an identity"
@@ -284,7 +329,13 @@ def test_the_record_s_family_reaches_the_projection():
         )
 
     outcome = recheck_grant_identities(
-        grants=(_Grant(DIGEST),), registry=_FamiliedRegistry(), live_identity=reader
+        grants=(_Grant(DIGEST),), registry=_FamiliedRegistry(), live_identity=reader,
+        # A record here declares an account scope, so the observation
+        # must carry the same one. These calls omitted it and relied
+        # on a missing scope SKIPPING the comparison — the fail-open
+        # arm the issue-level architect gate found; with it closed, a
+        # scope claim needs a knower.
+        account_scope_hash=_SCOPE,
     )
     assert outcome.ok, (outcome.drifts, outcome.unavailable)
     assert seen, "the reader was never called"
@@ -326,6 +377,12 @@ def test_one_component_read_under_two_families_is_two_readings():
         grants=(_Grant("1" * 64), _Grant("2" * 64, contract_ref="$ref:C2")),
         registry=_Reg(),
         live_identity=reader,
+        # A record here declares an account scope, so the observation
+        # must carry the same one. These calls omitted it and relied
+        # on a missing scope SKIPPING the comparison — the fail-open
+        # arm the issue-level architect gate found; with it closed, a
+        # scope claim needs a knower.
+        account_scope_hash=_SCOPE,
     )
     families = {f for _c, _k, f in seen}
     assert families == {"rest", "database"}, (
@@ -366,6 +423,12 @@ def test_a_dynamic_path_needs_service_wide_coverage():
     outcome = recheck_grant_identities(
         grants=(_Grant(DIGEST, dynamic_path=True),),
         registry=registry, live_identity=_live(),
+        # A record here declares an account scope, so the observation
+        # must carry the same one. These calls omitted it and relied
+        # on a missing scope SKIPPING the comparison — the fail-open
+        # arm the issue-level architect gate found; with it closed, a
+        # scope claim needs a knower.
+        account_scope_hash=_SCOPE,
     )
     assert [d["reason"] for d in outcome.drifts] == ["route_coverage"]
 
@@ -379,6 +442,12 @@ def test_a_dynamic_path_needs_service_wide_coverage():
                     route_coverage=_ServiceWideCoverage())
         ]),
         live_identity=_live(),
+        # A record here declares an account scope, so the observation
+        # must carry the same one. These calls omitted it and relied
+        # on a missing scope SKIPPING the comparison — the fail-open
+        # arm the issue-level architect gate found; with it closed, a
+        # scope claim needs a knower.
+        account_scope_hash=_SCOPE,
     )
     assert ok.ok, (ok.drifts, ok.unavailable)
 
@@ -426,6 +495,12 @@ def test_a_static_record_authorises_only_the_routes_it_enumerates():
     covered = recheck_grant_identities(
         grants=(_Grant(DIGEST),), registry=_registry_covering(live_route),
         live_identity=_reader,
+        # A record here declares an account scope, so the observation
+        # must carry the same one. These calls omitted it and relied
+        # on a missing scope SKIPPING the comparison — the fail-open
+        # arm the issue-level architect gate found; with it closed, a
+        # scope claim needs a knower.
+        account_scope_hash=_SCOPE,
     )
     assert covered.ok, (covered.drifts, covered.unavailable)
 
@@ -434,6 +509,12 @@ def test_a_static_record_authorises_only_the_routes_it_enumerates():
     outcome = recheck_grant_identities(
         grants=(_Grant(DIGEST),), registry=_registry_covering(other),
         live_identity=_reader,
+        # A record here declares an account scope, so the observation
+        # must carry the same one. These calls omitted it and relied
+        # on a missing scope SKIPPING the comparison — the fail-open
+        # arm the issue-level architect gate found; with it closed, a
+        # scope claim needs a knower.
+        account_scope_hash=_SCOPE,
     )
     assert [d["reason"] for d in outcome.drifts] == ["route_coverage"]
 
@@ -445,6 +526,12 @@ def test_a_static_record_authorises_only_the_routes_it_enumerates():
             "version": 3 if k == "operation" else 5,
             "config_digest": OP_CFG if k == "operation" else CONN_CFG,
         },
+        # A record here declares an account scope, so the observation
+        # must carry the same one. These calls omitted it and relied
+        # on a missing scope SKIPPING the comparison — the fail-open
+        # arm the issue-level architect gate found; with it closed, a
+        # scope claim needs a knower.
+        account_scope_hash=_SCOPE,
     )
     assert [d["reason"] for d in blind.drifts] == ["route_coverage"]
     assert blind.drifts[0]["observed"] == "uncomputable"
@@ -466,6 +553,12 @@ def test_two_records_sharing_a_digest_and_contract_are_refused_not_resolved():
         grants=(_Grant(DIGEST),),
         registry=_Registry([twin, twin]),
         live_identity=_live(),
+        # A record here declares an account scope, so the observation
+        # must carry the same one. These calls omitted it and relied
+        # on a missing scope SKIPPING the comparison — the fail-open
+        # arm the issue-level architect gate found; with it closed, a
+        # scope claim needs a knower.
+        account_scope_hash=_SCOPE,
     )
     assert not outcome.ok
     assert outcome.unavailable["reason"] == "ambiguous_record"
@@ -487,6 +580,12 @@ def test_a_soft_deleted_component_is_not_a_live_component():
                 __import__("boomi_mcp.connector_replay.recheck", fromlist=["x"])
                 .live_identity_reader(None, read_component_xml=lambda *a, **kw: _f)(c, k, f)
             ),
+            # A record here declares an account scope, so the observation
+            # must carry the same one. These calls omitted it and relied
+            # on a missing scope SKIPPING the comparison — the fail-open
+            # arm the issue-level architect gate found; with it closed, a
+            # scope claim needs a knower.
+            account_scope_hash=_SCOPE,
         )
         assert not outcome.ok, label
         assert outcome.unavailable["reason"] == "component_deleted", label

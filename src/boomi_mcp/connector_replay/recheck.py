@@ -244,8 +244,15 @@ def recheck_grant_identities(
         # forbids extra fields and has none, so every real static grant was refused
         # and only a fake grant that invented the field passed.
 
-        if account_scope_hash is not None:
-            recorded_scope = getattr(record, "account_scope_hash", None)
+        # AN ACCOUNT-BOUND RECORD REQUIRES AN OBSERVED SCOPE. This ran only when
+        # one had been derived, so a boundary that could not read the account
+        # skipped the comparison entirely and the recheck passed — the same
+        # fail-open ordering the minter had, at the layer that exists to catch
+        # what the minter missed. A record naming an account scope is claiming
+        # WHICH account it was observed in, and an unknown account cannot satisfy
+        # that claim.
+        recorded_scope = getattr(record, "account_scope_hash", None)
+        if recorded_scope is not None or account_scope_hash is not None:
             if recorded_scope != account_scope_hash:
                 drifts.append(
                     {

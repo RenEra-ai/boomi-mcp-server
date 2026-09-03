@@ -245,8 +245,11 @@ ARCHITECT_ROW_PATHS = {
 #: is archived without one rather than with a guess.
 def architect_verdict_from_artifact(run_dir: Path, attestation: dict):
     """The verdict a collected architect round carries, or None."""
-    if attestation.get("parsedVerdict"):
-        return attestation["parsedVerdict"]
+    # STRIPPED, because `not "\n"` is False and a whitespace-only verdict would
+    # otherwise satisfy this the way it once satisfied the check this replaced.
+    attested = attestation.get("parsedVerdict")
+    if isinstance(attested, str) and attested.strip():
+        return attested
     artifact = run_dir / "review.md"
     if not artifact.is_file():
         return None
@@ -1235,6 +1238,13 @@ def main() -> int:
                 and (not isinstance(_dig(attestation, path), str)
                      or not _dig(attestation, path).strip())
             )
+            # THE VERDICT MUST COME FROM SOMEWHERE — the attestation when the
+            # collector sourced one, otherwise the artifact it binds. Only the
+            # SOURCE is relaxed, never the requirement: exempting the field
+            # outright would let a round with no verdict anywhere archive
+            # silently, which is a weaker contract than the one it replaced.
+            if not architect_verdict_from_artifact(durable, attestation or {}):
+                unresolved = sorted(unresolved + ["verdict"])
             if unresolved:
                 if not _remove_confirmed(durable):
                     print(f"  warning: {durable} could not be confirmed removed; the next run will refuse it.", file=sys.stderr)

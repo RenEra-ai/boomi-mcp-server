@@ -383,3 +383,41 @@ def walk_keys(value, path="$"):
     elif isinstance(value, (list, tuple)):
         for index, item in enumerate(value):
             yield from walk_keys(item, f"{path}[{index}]")
+
+
+#: The account the archived PATCH capture was taken in, and therefore the account
+#: its operation record is scoped to. A witness for the evidenced path must run
+#: as a client that REPORTS this account: the record names an account scope, and
+#: a scope claim can only be satisfied by knowing which account you are in.
+#:
+#: Read from the capture's own derivation record rather than typed here, so a
+#: re-capture in another account cannot leave this constant quietly wrong.
+def capture_account_id():
+    """The account id the archived operation record was minted against."""
+    import json
+    import pathlib
+
+    derivation = (pathlib.Path(__file__).resolve().parents[1]
+                  / "docs/architecture/evidence/issue-155/captures"
+                  / "cap155-e7-patch-operation-record/record_derivation.json")
+    return json.loads(derivation.read_text(encoding="utf-8"))[
+        "account_scope_hash"]["account_id"]
+
+
+def evidenced_account_client():
+    """A fake client that REPORTS the capture's account, as the SDK client does.
+
+    A bare `MagicMock()` answers every attribute with another Mock, so the
+    account reader — which requires a non-empty `str` — finds none. Every witness
+    for the evidenced path used one, which meant they all ran through the arm
+    where a missing account skipped the scope check instead of failing it. The
+    issue-level architect gate found that fail-open ordering, and these witnesses
+    were the reason it stayed invisible: they proved the path worked in the one
+    configuration where the check did not run.
+    """
+    from unittest.mock import MagicMock
+
+    client = MagicMock()
+    client._base_url_account_id = capture_account_id()
+    client.account_id = capture_account_id()
+    return client

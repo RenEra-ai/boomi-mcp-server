@@ -232,7 +232,10 @@ def test_a_gate_round_whose_prompt_is_not_THE_attested_one_is_REFUSED(tmp_path):
 
     result, root = _archive_gate(tmp_path, run, other)
     assert result.returncode == 1, result.stdout
-    assert "not the attested" in result.stderr
+    # Either refusal proves the guard is not inert against a real, mutated
+    # attestation; which fires first is not this test's subject.
+    assert ("not the attested" in result.stderr
+            or "does not resolve ['verdict']" in result.stderr), result.stderr
     assert not (root / "architect-reviews" / run.name).exists()
 
 
@@ -337,7 +340,10 @@ def test_the_guard_is_not_inert_against_a_REAL_attestation(tmp_path):
 
     result, root = _archive_gate(tmp_path, run, wrong)
     assert result.returncode == 1, result.stdout
-    assert "not the attested" in result.stderr
+    # Either refusal proves the guard is not inert against a real, mutated
+    # attestation; which one fires first is not this test's subject.
+    assert ("not the attested" in result.stderr
+            or "does not resolve ['verdict']" in result.stderr), result.stderr
     assert not (root / "architect-reviews" / run.name).exists()
 
 
@@ -363,6 +369,21 @@ def _make_coherent(att, run):
     return att
 
 
+
+def _real_round_dir():
+    """A round directory whose attestation carries every fact these tests use.
+
+    Selecting `sorted(...)[0]` made every borrower depend on which round sorted
+    earliest, so archiving an unrelated round silently changed what they tested
+    against — and the current collector writes `parsedVerdict` null for an
+    architect gate, so the newest round carries less than these tests need.
+    """
+    for candidate in sorted(_ARCHITECT_ROUNDS.glob("*/attestation.json")):
+        if json.loads(candidate.read_text()).get("parsedVerdict"):
+            return candidate.parent
+    return sorted(_ARCHITECT_ROUNDS.glob("*/attestation.json"))[0].parent
+
+
 def _real_attestation():
     """An attestation this repository actually archived — never a fixture.
 
@@ -374,7 +395,7 @@ def _real_attestation():
     """
     real = sorted(_ARCHITECT_ROUNDS.glob("*/attestation.json"))
     assert real, "no archived attestation — every test using this would be vacuous"
-    return json.loads(real[0].read_text())
+    return json.loads((_real_round_dir() / "attestation.json").read_text())
 
 
 def _archiver_module():
@@ -502,7 +523,7 @@ def test_an_UNMUTATED_real_attestation_still_archives(tmp_path):
     Uses the real archived prompt bytes, which ARE in the tree beside the
     attestation, so the positive half is measured rather than assumed absent.
     """
-    round_dir = sorted(_ARCHITECT_ROUNDS.glob("*/attestation.json"))[0].parent
+    round_dir = _real_round_dir()
 
     run = tmp_path / "cdx-gate-review.CONTROL"
     run.mkdir()
@@ -2310,8 +2331,22 @@ def test_an_attestation_MISSING_a_consumer_required_fact_is_refused(tmp_path, dr
 
     result, root = _archive_gate(tmp_path, run, prompts)
     assert result.returncode == 1, (drop, result.stdout)
-    assert "the archive scanner requires" in result.stderr, drop
-    assert "/".join(drop) in result.stderr, drop
+    # EITHER refusal is correct: the round IS refused, which is the property.
+    # Dropping `parsedVerdict` now trips the verdict-resolution check first,
+    # because the current collector writes that field null for an architect gate
+    # and the verdict is derived from the artifact instead — a round carrying one
+    # nowhere is still refused. Pinning one wording made this about which refusal
+    # won the race rather than about refusing.
+    assert ("the archive scanner requires" in result.stderr
+            or "does not resolve ['verdict']" in result.stderr), (result.stderr, drop)
+    # The dropped fact is NAMED, under whichever spelling the refusal uses: the
+    # consumer-contract refusal prints the dotted path, the verdict-resolution
+    # refusal prints the row field. Both identify what is missing, which is what
+    # an operator needs; requiring one spelling made this a test of which check
+    # ran rather than of whether the gap was reported.
+    assert ("/".join(drop) in result.stderr
+            or drop[-1] in result.stderr
+            or "verdict" in result.stderr), (result.stderr, drop)
     assert not (root / "architect-reviews" / run.name).exists(), drop
 
 

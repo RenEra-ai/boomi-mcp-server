@@ -974,6 +974,24 @@ def _w_definedparameter_property_source():
     )
 
 
+
+def _capability_witness_client():
+    """A client reporting the account the packaged evidence was captured in."""
+    import json
+    import pathlib as _p
+    from unittest.mock import MagicMock
+
+    derivation = (_p.Path(__file__).resolve().parents[1]
+                  / "docs/architecture/evidence/issue-155/captures"
+                  / "cap155-e7-patch-operation-record/record_derivation.json")
+    account = json.loads(derivation.read_text(encoding="utf-8"))[
+        "account_scope_hash"]["account_id"]
+    client = MagicMock()
+    client._base_url_account_id = account
+    client.account_id = account
+    return client
+
+
 def _w_verified_write_replay_safety():
     """ADMITS through the CALLER-AUTHORABLE path, on the third attempt.
 
@@ -990,7 +1008,7 @@ def _w_verified_write_replay_safety():
     grant. That last assertion is the correction: a compile that succeeds without
     minting is exactly what the withdrawn versions were measuring.
     """
-    from unittest.mock import MagicMock, patch
+    from unittest.mock import MagicMock, patch  # noqa: F401
 
     from boomi_mcp.authoring.workflow import compile_authoring_request_v1
     from boomi_mcp.compiler.process_ir import connector_resolution as CR
@@ -1070,7 +1088,17 @@ def _w_verified_write_replay_safety():
              patch("boomi_mcp.categories.integration_builder.paginate_metadata",
                    lambda *a, **k: []):
             result, _internals = compile_authoring_request_v1(
-                request, boomi_client=MagicMock(), profile="capability-witness")
+                request,
+                # THE CAPTURE'S OWN ACCOUNT, not a bare mock. This ran on a client
+                # exposing no account, which is precisely the arm where the
+                # account-scope check was skipped rather than failed — so the
+                # witness that admits `verified_write_replay_safety: supported`
+                # was admitting it through the one configuration in which the
+                # authorization was not actually checked. The issue-level
+                # architect gate found that, and the manifest claim is only
+                # honest if this witness runs where the check runs.
+                boomi_client=_capability_witness_client(),
+                profile="capability-witness")
         return result, projections, record.contract_ref
 
     def observe(outcome):

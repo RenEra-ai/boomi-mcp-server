@@ -14,6 +14,26 @@ Every negative beside it is what keeps that from being a rubber stamp.
 
 from __future__ import annotations
 
+_TESTS_ROOT_FOR_CLIENT = __import__('pathlib').Path(__file__).resolve().parent
+
+
+def _evidenced_client():
+    """A client that REPORTS the capture's account — see `evidenced_account_client`.
+
+    Every witness here used a bare `MagicMock()`, whose account attribute is a
+    Mock rather than a string, so the account reader found none and the scope
+    check was skipped rather than failed. That is the fail-open arm the
+    issue-level architect gate found, and these witnesses are why it stayed
+    invisible: they proved the evidenced path in the one configuration where the
+    check did not run.
+    """
+    import sys
+    sys.path.insert(0, str(_TESTS_ROOT_FOR_CLIENT))
+    from _m12_11_support import evidenced_account_client
+
+    return evidenced_account_client()
+
+
 import sys
 from pathlib import Path
 
@@ -515,12 +535,12 @@ def test_the_compile_route_can_place_a_record_for_a_component_the_author_names()
         }
 
     with patch("boomi_mcp.categories.components._shared.component_get_xml", _get_xml):
-        readings = live_readings_for_declared_components(MagicMock(), named)
+        readings = live_readings_for_declared_components(_evidenced_client(), named)
         # A PLAN THAT NAMES NOTHING READS NOTHING — the cost invariant, asserted
         # beside the positive so it cannot quietly regress.
         before = len(reads)
         creates = [_Component("NEW", None, "connector-action", REST_FAMILY)]
-        assert live_readings_for_declared_components(MagicMock(), creates) == {}
+        assert live_readings_for_declared_components(_evidenced_client(), creates) == {}
         assert len(reads) == before, "a create-only plan reached the platform"
 
     # STRINGS, which is the identity model's contract: the platform reports an
@@ -608,7 +628,7 @@ def test_the_public_compile_entry_reads_a_named_component_and_stringifies_it():
          patch("boomi_mcp.categories.integration_builder.paginate_metadata",
                lambda *a, **k: []):
         result, _internals = compile_authoring_request_v1(
-            request, boomi_client=MagicMock(), profile="qa")
+            request, boomi_client=_evidenced_client(), profile="qa")
 
     assert result is not None
     assert sorted(reads) == sorted(
@@ -712,7 +732,7 @@ def test_an_authored_reference_only_reuse_compiles_a_retried_evidenced_write():
          patch("boomi_mcp.categories.integration_builder.paginate_metadata",
                lambda *a, **k: []):
         result, _internals = compile_authoring_request_v1(
-            request, boomi_client=MagicMock(), profile="qa")
+            request, boomi_client=_evidenced_client(), profile="qa")
 
     assert result is not None, "the evidenced retried write did not compile"
     # EVERY projection, not just the first. The materialization plan recompiles
@@ -834,7 +854,7 @@ def test_the_evidenced_write_survives_the_wet_apply_route_not_only_compile():
         # the same fakes, because a reference-only reuse reads the account.
         payload = request.model_dump(mode="json")
         compiled = build_integration_action(
-            MagicMock(), "qa", "compile",
+            _evidenced_client(), "qa", "compile",
             config={"authoring_request": payload},
         )
         assert compiled.get("_success") is True, compiled
@@ -843,7 +863,7 @@ def test_the_evidenced_write_survives_the_wet_apply_route_not_only_compile():
         payload["expected_compile_hash"] = binding["compile_hash"]
 
         result = build_integration_action(
-            MagicMock(), "qa", "apply",
+            _evidenced_client(), "qa", "apply",
             config={"authoring_request": payload, "dry_run": False},
         )
 

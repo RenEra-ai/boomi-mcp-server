@@ -12,6 +12,26 @@ These tests supply the case the archive lacks.
 
 from __future__ import annotations
 
+_TESTS_ROOT_FOR_CLIENT = __import__('pathlib').Path(__file__).resolve().parent
+
+
+def _evidenced_client():
+    """A client that REPORTS the capture's account — see `evidenced_account_client`.
+
+    Every witness here used a bare `MagicMock()`, whose account attribute is a
+    Mock rather than a string, so the account reader found none and the scope
+    check was skipped rather than failed. That is the fail-open arm the
+    issue-level architect gate found, and these witnesses are why it stayed
+    invisible: they proved the evidenced path in the one configuration where the
+    check did not run.
+    """
+    import sys
+    sys.path.insert(0, str(_TESTS_ROOT_FOR_CLIENT))
+    from _m12_11_support import evidenced_account_client
+
+    return evidenced_account_client()
+
+
 import ast
 import contextlib
 import json
@@ -1327,6 +1347,8 @@ _UNROWED = {"DC-155-C": 2, "DC-155-I": 1}
 #: the reason. Frozen so the set cannot grow silently: a row that names a class is an
 #: instance of it unless it appears here.
 _NOT_AN_INSTANCE = {
+    "ARCH-155-r12-03a": "a REVISION supplying the disposition the original left "
+    "pending, not a second defect — the class row counts the original once",
     "CDX-155-r182-02a": "a REVISION replacing two dispositions with one, not a second "
     "defect — the class row counts the original once",
     "SELF-155-r119-01a": "a REVISION correcting an evidence citation, not a second defect "
@@ -1389,6 +1411,12 @@ _NOT_AN_INSTANCE = {
 }
 
 _CLASS_NAMED_IN_PROSE = [
+    # Recorded when the issue-level architect gate's findings were first written:
+    # a raw finding is filed at reconciliation, and its defect class is assigned
+    # THEN, so the row as first committed says so in prose rather than naming an
+    # id. Its class is supplied by the revision that carries its disposition —
+    # `ARCH-155-r12-03a` — and the class row counts the original once.
+    "ARCH-155-r12-03",
     "CDX-155-r22-06",
     "CDX-155-r23-01",
     "CDX-155-r27-01",
@@ -5960,13 +5988,13 @@ def test_every_recompiling_consumer_on_the_evidenced_route_gets_the_grants():
 
         payload = request.model_dump(mode="json")
         compiled = build_integration_action(
-            MagicMock(), "qa", "compile", config={"authoring_request": payload})
+            _evidenced_client(), "qa", "compile", config={"authoring_request": payload})
         assert compiled.get("_success") is True, compiled
         binding = compiled["authoring_result"]["revision_binding"]
         payload["expected_capability_revision"] = binding["capability_revision"]
         payload["expected_compile_hash"] = binding["compile_hash"]
         applied = build_integration_action(
-            MagicMock(), "qa", "apply",
+            _evidenced_client(), "qa", "apply",
             config={"authoring_request": payload, "dry_run": False})
 
     assert applied.get("_success") is True, applied
@@ -6232,7 +6260,7 @@ def test_each_authored_root_is_projected_for_its_own_process():
              patch("boomi_mcp.categories.integration_builder.component_get_xml", _get_xml), \
              patch.object(CR, "project_grants_for_root", _recording_projection):
             return build_integration_action(
-                MagicMock(), "qa", action,
+                _evidenced_client(), "qa", action,
                 config=dict({"authoring_request": payload}, **(config_extra or {})))
 
     payload = two_root.model_dump(mode="json")

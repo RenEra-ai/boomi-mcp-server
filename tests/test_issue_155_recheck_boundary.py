@@ -181,7 +181,15 @@ class _Record:
     # all, which is how this fixture stopped exercising the recheck the moment the
     # lookup was corrected.
     contract_ref = "$ref:CONTRACT"
-    account_scope_hash = "a" * 64
+    # NO ACCOUNT CLAIM. This read as a literal hash, which made the record claim
+    # an account no client in this harness is ever in — invisible while a missing
+    # account SKIPPED the scope comparison instead of failing it. With that arm
+    # closed, a record that names a scope must be matched by a client that knows
+    # its account, and this harness deliberately does not model one: its subject
+    # is the identity recheck, not account binding. A record making no account
+    # claim is exactly the case the rule permits, and the packaged production
+    # record — which does carry a scope — is still enforced.
+    account_scope_hash = None
     #: Service-wide, because these cells drive a call whose route this harness does
     #: not name — and a static record authorises only the routes it enumerates.
     route_coverage = type("_ServiceWide", (), {"kind": "service_wide"})()

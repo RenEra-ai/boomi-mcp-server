@@ -975,8 +975,18 @@ def _registry_corroborates(
             getattr(record, "connection_identity", None), connection_observed
         ):
             continue
-        if account_id and getattr(record, "account_scope_hash", None):
-            if not _account_matches(record.account_scope_hash, account_id):
+        # AN ACCOUNT-BOUND RECORD REQUIRES AN ACCOUNT, and a missing one refuses.
+        # This read `if account_id and record.account_scope_hash`, which made a
+        # MISSING account skip the comparison rather than fail it: matching
+        # account granted, foreign account refused, and no account granted — the
+        # one ordering an authorization check must never have. The plan is
+        # explicit that no actual account identity means no grant, and a record
+        # that names an account scope is making a claim about WHICH account it
+        # was observed in; nothing can satisfy that claim when the account is
+        # unknown.
+        scope = getattr(record, "account_scope_hash", None)
+        if scope:
+            if not account_id or not _account_matches(scope, account_id):
                 continue
         return True
     return False
