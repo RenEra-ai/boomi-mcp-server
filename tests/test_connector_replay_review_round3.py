@@ -1323,6 +1323,12 @@ _EXPECTED_CLASS_COUNTS = {
     # one instance, and a floor that locks in an over-count is as wrong as one that
     # lets a real instance vanish.
     "DC-155-T": 1,  # OVERCOUNT-CORRECTED-FROM-2-TO-1
+    # Minted at the issue-level architect gate, where one reviewer-grouped finding
+    # carried three defects sharing one pair: a fact the boundary established and
+    # the record it produces then dropped. Counted as ONE row because that is what
+    # the ledger holds; the structural fix fired on arrival rather than on a second
+    # instance, which is what a class-level finding is for.
+    "DC-155-U": 1,
     # Minted when two findings already recorded under two unrelated classes turned
     # out to share one pair: a hand-model of what git itself reports, against git.
     "DC-155-S": 3,
@@ -1347,6 +1353,12 @@ _UNROWED = {"DC-155-C": 2, "DC-155-I": 1}
 #: the reason. Frozen so the set cannot grow silently: a row that names a class is an
 #: instance of it unless it appears here.
 _NOT_AN_INSTANCE = {
+    "CDX-155-r73-01a": "a REVISION applying the correction the original escalated "
+    "when a spent slice-B window forbade it — same defect, now fixed at a gate "
+    "whose checkpoint window is fresh; the class row counts the original once",
+    "CDX-155-r73-02a": "a REVISION applying the correction the original escalated "
+    "when a spent slice-B window forbade it — same defect, now fixed at a gate "
+    "whose checkpoint window is fresh; the class row counts the original once",
     "ARCH-155-r12-01a": "a REVISION supplying the disposition the original left "
     "pending, not a second defect — the class row counts the original once",
     "ARCH-155-r12-02a": "a REVISION supplying the disposition the original left "
@@ -3022,6 +3034,36 @@ def _wave_evidence_violation(ledger_text, archive_dir):
             leaves[".".join(path)] = node
 
     _walk(attested, [])
+
+    # WHAT A WAVE SUMMARY MUST CARRY TO BE EVIDENCE AT ALL. The walk above derives
+    # everything from what the archive attests, which is right for checking the
+    # values and useless for checking that any exist: an archive holding only a
+    # status, a SHA and an exit code produced no leaves, satisfied every loop
+    # below, and was accepted. That is a guard that passes hardest when the
+    # evidence is thinnest.
+    #
+    # A CLOSED CONTRACT, pinned in both directions by
+    # `test_the_wave_contract_matches_every_archived_summary` below: this
+    # declaration is refused if a committed summary stops carrying one of these,
+    # and a summary is refused if it omits one. So the list cannot quietly drift
+    # from what the gate actually archives, which is the failure mode that would
+    # make declaring it worse than deriving it.
+    for required, kind in _REQUIRED_WAVE_EVIDENCE.items():
+        if required not in leaves:
+            return (f"cited archive {named.group(1)} carries no {required}, so it "
+                    f"attests nothing about that arm")
+        value = leaves[required]
+        if kind == "count":
+            # A STRING COUNT IS NOT A COUNT. The type test below skips non-integers,
+            # so `"passed": "11430"` sailed through every value check — and the
+            # derivation that removed a hand-listed enumeration one round earlier
+            # is what removed the type constraint with it.
+            if isinstance(value, bool) or not isinstance(value, int):
+                return (f"cited archive {named.group(1)} records {required} as "
+                        f"{value!r}, which is not a count")
+        elif not isinstance(value, bool):
+            return (f"cited archive {named.group(1)} records {required} as "
+                    f"{value!r}, which is not a yes-or-no")
     #: Counts a PASSING wave may legitimately record as zero. Everything else it
     #: counts is work it claims to have done, and zero of that verifies nothing —
     #: including an arm the row quotes in WORDS, which no digit comparison can see.
@@ -3032,19 +3074,77 @@ def _wave_evidence_violation(ledger_text, archive_dir):
         if (isinstance(value, int) and not isinstance(value, bool)
                 and value == 0 and path.rsplit(".", 1)[-1] not in may_be_zero):
             return f"cited archive {named.group(1)} attests {path} is zero"
+    # ONE SPELLING FOR BOTH SIDES. The row writes prose — "plan-fingerprint
+    # cases", "74 goldens" — while the archive writes identifiers. Comparing them
+    # raw meant neither pattern located the count for `plan_fingerprint_cases`
+    # (the row hyphenates) or for `goldens.active` (the row names the parent, not
+    # the leaf), so an archive recording three cases satisfied a row claiming two:
+    # not because the values agreed, but because the search found nothing and
+    # nothing was read as agreement.
+    flat = re.sub(r"[\s_-]+", " ", latest).lower()
+
+    def _quoted(path):
+        """The count the row quotes for this metric, or None if it quotes none.
+
+        Tries the leaf first and the parent second — a row says "74 goldens"
+        where the archive says `goldens.active`, and both name the same arm.
+        """
+        parts = path.replace("_", " ").split(".")
+        leaf = parts[-1].lower()
+        # THE ROW'S WORDING IS NOT THE IDENTIFIER'S. A row writes "the
+        # plan-fingerprint seam across 2 cases" for `plan_fingerprint_cases`, so
+        # the words the identifier joins are separated in the prose and the full
+        # term matches nothing. The trailing noun is what the count actually sits
+        # in front of, so it is tried too — after the full term, so a row that
+        # does spell the whole name is still read by its most specific form.
+        terms = [leaf]
+        if " " in leaf:
+            terms.append(leaf.rsplit(" ", 1)[-1])
+        if len(parts) > 1:
+            terms.append(parts[-2].lower())
+        # STRICT FORM FIRST, ACROSS BOTH TERMS, before the loose form is tried at
+        # all. Interleaving them let the loose pattern on the leaf win over the
+        # strict pattern on the parent: for "74 active goldens", the leaf `active`
+        # matched loosely against a number further down the row while the parent
+        # `goldens` had the count sitting right in front of it. A looser reading of
+        # a worse term is not a better answer.
+        for pattern in (r"(\d[\d,]*)\s+(?:active\s+)?{0}", r"{0}\D{{0,40}}?(\d[\d,]*)"):
+            for term in terms:
+                hit = re.search(pattern.format(re.escape(term)), flat)
+                if hit:
+                    return int(hit.group(1).replace(",", ""))
+        return None
+
     for path, value in sorted(leaves.items()):
         if isinstance(value, bool) or not isinstance(value, int):
             continue
-        word = path.rsplit(".", 1)[-1]
-        if word in ("exit_code", "skip_cap"):
+        if path.rsplit(".", 1)[-1] in ("exit_code", "skip_cap"):
             continue
-        quoted = re.search(r"(\d[\d,]*)\s+(?:active\s+)?" + re.escape(word), latest)
-        if quoted is None:
-            quoted = re.search(re.escape(word.replace("_", " ")) + r"\D{0,40}?(\d[\d,]*)", latest)
-        if quoted and int(quoted.group(1).replace(",", "")) != value:
-            return (f"the row quotes {quoted.group(1)} for {path} but "
+        quoted = _quoted(path)
+        if quoted is not None and quoted != value:
+            return (f"the row quotes {quoted} for {path} but "
                     f"{named.group(1)} attests {value}")
+        # A REQUIRED ARM MUST BE QUOTED. For the declared set, "the row says
+        # nothing about it" is the fail-open this whole comparison exists to
+        # close — the row is what a reader believes, and an arm it never states
+        # is an arm nobody checked.
+        if quoted is None and path in _REQUIRED_WAVE_EVIDENCE:
+            return (f"the row quotes no figure for {path}, which "
+                    f"{named.group(1)} attests as {value}")
     return None
+
+
+#: The arms a composite wave gate runs, and therefore the figures a summary must
+#: carry for the row citing it to mean anything. `count` must be a real integer;
+#: the rest must be booleans a passing run sets true.
+_REQUIRED_WAVE_EVIDENCE = {
+    "suite.passed": "count",
+    "suite.skipped": "count",
+    "goldens.active": "count",
+    "goldens.deterministic": "flag",
+    "goldens.byte_exact": "flag",
+    "plan_fingerprint_cases": "count",
+}
 
 
 _PASSING_WAVE = {
@@ -3055,7 +3155,7 @@ _PASSING_WAVE = {
 }
 _ROW = ("| L4 composite wave gate, slice B | 1 / 1 | x | `CLOSE-CLEAN` | W = `{sha}`{cite}. Arms: the non-KB "
         "suite green at 11,037 passed and 18 skipped; 74 active goldens rendered twice and byte-exact; the "
-        "plan-fingerprint seam across two cases |")
+        "plan-fingerprint seam across 2 cases |")
 
 
 @pytest.mark.parametrize(
@@ -3076,7 +3176,7 @@ _ROW = ("| L4 composite wave gate, slice B | 1 / 1 | x | `CLOSE-CLEAN` | W = `{s
          "cited archive ok records exit_code 1"),
         ("abc1234", ", archived `wave-gate/ok`",
          {"suite": {"passed": 1, "skipped": 18, "skip_cap": 30}},
-         "the row quotes 11,037 for suite.passed but ok attests 1"),
+         "the row quotes 11037 for suite.passed but ok attests 1"),
         ("abc1234", ", archived `wave-gate/ok`",
          {"goldens": {"active": 9, "deterministic": True, "byte_exact": True}},
          "the row quotes 74 for goldens.active but ok attests 9"),
@@ -6417,3 +6517,158 @@ def test_an_operation_record_cannot_authorise_a_replay_its_capture_never_saw():
             "replay nobody saw" % (observation,)
         )
         assert "capture observed" in (refusal or ""), refusal
+
+
+def test_a_summary_that_attests_nothing_is_refused(tmp_path):
+    """The fail-open the derivation opened, closed and graded.
+
+    Deriving the checks from what the archive attests is right for the values and
+    silent about their existence: an archive holding only a status, a SHA and an
+    exit code produced no leaves, so every loop was vacuous and the row was
+    accepted. Each arm is dropped individually — dropping them all at once would
+    pass on the first check and prove nothing about the others.
+    """
+    import json
+
+    archive = tmp_path / "wave-gate"
+    (archive / "ok").mkdir(parents=True)
+    row = _ROW.format(sha="abc1234", cite=", archived `wave-gate/ok`")
+
+    bare = {k: _PASSING_WAVE[k] for k in ("wave_sha", "status", "verdict", "exit_code")}
+    (archive / "ok" / "summary.json").write_text(json.dumps(bare))
+    assert "attests nothing about that arm" in (_wave_evidence_violation(row, archive) or "")
+
+    for arm in _REQUIRED_WAVE_EVIDENCE:
+        missing = json.loads(json.dumps(_PASSING_WAVE))
+        node, leaf = missing, arm.split(".")
+        for step in leaf[:-1]:
+            node = node[step]
+        del node[leaf[-1]]
+        (archive / "ok" / "summary.json").write_text(json.dumps(missing))
+        assert _wave_evidence_violation(row, archive) == (
+            f"cited archive ok carries no {arm}, so it attests nothing about that arm"
+        ), arm
+
+
+def test_a_count_written_as_text_is_not_a_count(tmp_path):
+    """The type constraint the same derivation removed.
+
+    `"passed": "11430"` is skipped by an `isinstance(..., int)` test, so a string
+    count sailed through every value check — including the zero test, which is the
+    one that would otherwise have caught a summary claiming no work.
+    """
+    import json
+
+    archive = tmp_path / "wave-gate"
+    (archive / "ok").mkdir(parents=True)
+    row = _ROW.format(sha="abc1234", cite=", archived `wave-gate/ok`")
+
+    stringly = json.loads(json.dumps(_PASSING_WAVE))
+    stringly["suite"]["passed"] = "11037"
+    (archive / "ok" / "summary.json").write_text(json.dumps(stringly))
+    assert _wave_evidence_violation(row, archive) == (
+        "cited archive ok records suite.passed as '11037', which is not a count"
+    )
+
+    # ...and the flags, from the other direction: a yes-or-no recorded as a word
+    # is not a yes-or-no, and the truth test would have read any non-empty string
+    # as agreement.
+    wordy = json.loads(json.dumps(_PASSING_WAVE))
+    wordy["goldens"]["deterministic"] = "yes"
+    (archive / "ok" / "summary.json").write_text(json.dumps(wordy))
+    assert _wave_evidence_violation(row, archive) == (
+        "cited archive ok records goldens.deterministic as 'yes', "
+        "which is not a yes-or-no"
+    )
+
+
+def test_a_row_that_states_no_figure_for_a_required_arm_is_refused(tmp_path):
+    """The second fail-open: a comparison that finds nothing and reads it as agreement.
+
+    For the row's actual wording neither pattern located the fingerprint count —
+    the row hyphenates and separates the words the identifier joins — so an
+    archive recording three cases satisfied a row claiming two. Not because the
+    figures agreed, but because the search failed and failure was silence.
+    """
+    import json
+
+    archive = tmp_path / "wave-gate"
+    (archive / "ok").mkdir(parents=True)
+    (archive / "ok" / "summary.json").write_text(json.dumps(_PASSING_WAVE))
+
+    # A count spelled as a WORD is exactly the shape that used to slip through.
+    worded = _ROW.replace("across 2 cases", "across two cases")
+    assert _wave_evidence_violation(
+        worded.format(sha="abc1234", cite=", archived `wave-gate/ok`"), archive
+    ) == (
+        "the row quotes no figure for plan_fingerprint_cases, "
+        "which ok attests as 2"
+    )
+
+    # ...and the row wording that DOES state it is still read correctly, so the
+    # rule refuses silence rather than refusing prose.
+    assert _wave_evidence_violation(
+        _ROW.format(sha="abc1234", cite=", archived `wave-gate/ok`"), archive
+    ) is None
+
+
+def test_the_wave_contract_matches_every_archived_summary():
+    """The pin that keeps the declared contract from drifting out of the archive.
+
+    A declared list is only better than a derived one while it still describes
+    what is actually archived. Every PASSING wave summary in the structured form
+    must carry every declared arm, so a gate that stops emitting one breaks this
+    rather than quietly making the guard check less.
+
+    Two shapes are excluded, and by a property rather than by name. A refused run
+    carries no arms because it ran none — demanding them would require a failure
+    to report work it never did. And the earliest passing summaries record their
+    arms as PROSE (`"suite": "10659 passed, 17 skipped"`) rather than as objects;
+    they predate the structured form, they are frozen evidence, and rewriting
+    them to satisfy a later contract would be editing the record to fit the
+    check. Their count is asserted so the exclusion stays visible instead of
+    silently absorbing a new non-conforming archive.
+    """
+    archive = _CAPTURES.parent / "wave-gate"
+    summaries = sorted(archive.glob("*/summary.json"))
+    assert summaries, "no archived wave summaries, so this pin proves nothing"
+
+    legacy, refused, checked = [], [], 0
+    for path in summaries:
+        attested = json.loads(path.read_text())
+        # THE PRE-STRUCTURED FORM records its arms as prose and predates the
+        # `verdict` field entirely, so it is recognised by either mark rather than
+        # by name — a name list would need editing every time one is added, which
+        # is how a silent exclusion starts.
+        if isinstance(attested.get("suite"), str) or "verdict" not in attested:
+            legacy.append(path.parent.name)
+            continue
+        if attested.get("status") != "completed" or attested.get("verdict") != "pass":
+            refused.append(path.parent.name)
+            continue
+        if not isinstance(attested.get("suite"), dict):
+            legacy.append(path.parent.name)
+            continue
+        checked += 1
+        for arm in _REQUIRED_WAVE_EVIDENCE:
+            node, missing = attested, False
+            for step in arm.split("."):
+                if not isinstance(node, dict) or step not in node:
+                    missing = True
+                    break
+                node = node[step]
+            assert not missing, (
+                f"{path.parent.name} carries no {arm}, so the declared wave "
+                f"contract no longer describes what is archived"
+            )
+
+    # EVERY SUMMARY IS ACCOUNTED FOR, and each exclusion is counted rather than
+    # merely allowed: a new archive that conforms to nothing would otherwise
+    # simply not be checked, which is the failure this whole guard is about.
+    assert checked + len(legacy) + len(refused) == len(summaries)
+    assert checked == 37, f"{checked} structured passing summaries checked"
+    assert len(refused) == 2, f"refused runs carry no arms by right: {refused}"
+    assert len(legacy) == 2, (
+        f"the pre-structured summaries were {legacy}; a NEW archive in a "
+        f"non-conforming shape must be a decision, not a silent exclusion"
+    )
