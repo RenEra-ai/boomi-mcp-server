@@ -380,9 +380,19 @@ def recheck_grant_identities(
                 "connection_config_digest": getattr(
                     getattr(record, "connection_identity", None), "config_digest", None
                 ),
-                # The KIND only. A static coverage carries the routes it covers,
-                # and a route is a path — the shape this record must not carry.
+                # THE KIND AND THE DIGESTS. The kind alone was recorded on the
+                # stated ground that "a static coverage carries the routes it
+                # covers, and a route is a path" — which is false about this
+                # model: it carries `route_digests`, which are versioned hashes,
+                # not paths. The reasoning was right about paths and wrong about
+                # what the field holds, and the cost was that an auditor could
+                # read that SOME static coverage authorised a write and never
+                # which route it covered — the registry rotates, and the record is
+                # then unreconstructable. This module computes and COMPARES the
+                # live route digest a few lines above; recording what it compared
+                # is the whole point of a durable binding.
                 "route_coverage_kind": getattr(coverage, "kind", None),
+                "route_digests": tuple(getattr(coverage, "route_digests", ()) or ()),
                 "capture_digest": getattr(capture, "capture_digest", None)
                 or getattr(capture, "digest", None),
                 # SERVICE-WIDE COVERAGE HAS ITS OWN CAPTURE, and its digest can

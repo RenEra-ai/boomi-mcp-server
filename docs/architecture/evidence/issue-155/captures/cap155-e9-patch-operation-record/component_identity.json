@@ -1,0 +1,37 @@
+{
+  "note": "the record's identity claim is only worth what the account says AFTERWARDS; a version that moved during the capture would mean the pair the record cites is not the pair the executions ran against",
+  "operation": {
+    "component_id": "485f3b01-fba5-4850-8281-2fc19decefb7",
+    "version_before_capture": "2",
+    "version_after_capture": "2",
+    "name_after_capture": "_QA_FIXTURE_155_PATCH_client",
+    "readback_sha256_before": "a085b8d28067f8f9d03d9d17a8ed6a43e591466106003f1d706ed2e9bff329b1",
+    "readback_sha256_after": "a085b8d28067f8f9d03d9d17a8ed6a43e591466106003f1d706ed2e9bff329b1",
+    "modifiedDate": "2026-09-03T06:26:51Z",
+    "deleted": "false",
+    "currentVersion": "true",
+    "version_unchanged": true,
+    "bytes_unchanged": true
+  },
+  "connection": {
+    "component_id": "2fe488e4-3169-4529-9515-d854570c8ffc",
+    "version_before_capture": "3",
+    "version_after_capture": "3",
+    "name_after_capture": "Sandbox CDS Mock REST (no-auth)",
+    "readback_sha256_before": "a1d3dc900fef7fdb5ba6c822b13a744fe13f4de33c8840fe318ad478a19ff536",
+    "readback_sha256_after": "a1d3dc900fef7fdb5ba6c822b13a744fe13f4de33c8840fe318ad478a19ff536",
+    "modifiedDate": "2026-09-03T05:10:49Z",
+    "deleted": "false",
+    "currentVersion": "true",
+    "version_unchanged": true,
+    "bytes_unchanged": true
+  },
+  "durable": {
+    "operation": "485f3b01-fba5-4850-8281-2fc19decefb7",
+    "connection": "2fe488e4-3169-4529-9515-d854570c8ffc"
+  },
+  "scaffolding_deleted": {
+    "op_src": "e4745093-184f-41dd-a97a-c7e33896af3b",
+    "process": "f630b002-47f3-4273-9389-c83d9e0fc363"
+  }
+}

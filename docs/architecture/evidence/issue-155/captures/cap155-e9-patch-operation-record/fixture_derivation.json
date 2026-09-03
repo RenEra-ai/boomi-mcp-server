@@ -1,0 +1,135 @@
+{
+  "note": "every component was created by POSTing BANKED, proven-operable component XML; the builder under test authored nothing here",
+  "durable_operation": {
+    "component_id": "485f3b01-fba5-4850-8281-2fc19decefb7",
+    "name": "_QA_FIXTURE_155_PATCH_client",
+    "created_this_run": false,
+    "durable": true,
+    "banked_source": "cap155-e5-patch-attested/component_op_tgt.xml",
+    "banked_sha256": "dab74c75a11f1cebc694f0c26808038095891366fc8c79c04c5260e73b3f2276",
+    "created_xml_sha256": null,
+    "substitutions": {
+      "note": "not re-created this run"
+    },
+    "version_before_capture": "2",
+    "readback_sha256_before": "a085b8d28067f8f9d03d9d17a8ed6a43e591466106003f1d706ed2e9bff329b1",
+    "persisted_name": "_QA_FIXTURE_155_PATCH_client",
+    "persisted_verb": "PATCH",
+    "banked_path": "/admin/cdscm/api/v1/clients/41172938-b9bd-4495-b411-9851f5ac7b00",
+    "persisted_path": "/admin/cdscm/api/v1/clients/41172938-b9bd-4495-b411-9851f5ac7b00-drift",
+    "path_bytes_unedited": false,
+    "route_source": "LIVE readback of the adopted durable fixture; the banked bytes were not used this run and are not the account's route",
+    "op_tgt_path_used": "/admin/cdscm/api/v1/clients/41172938-b9bd-4495-b411-9851f5ac7b00-drift"
+  },
+  "durable_connection": {
+    "component_id": "2fe488e4-3169-4529-9515-d854570c8ffc",
+    "version_before_capture": "3",
+    "persisted_name": "Sandbox CDS Mock REST (no-auth)",
+    "readback_sha256_before": "a1d3dc900fef7fdb5ba6c822b13a744fe13f4de33c8840fe318ad478a19ff536",
+    "url": "http://host.docker.internal:8081",
+    "created_this_run": false,
+    "durable": true
+  },
+  "ops": {
+    "op_src": {
+      "component_id": "e4745093-184f-41dd-a97a-c7e33896af3b",
+      "name": "_TEST_155E7_src_GET_20260903195709",
+      "banked_source": "cap155-e5-patch-attested/component_op_src.xml",
+      "banked_sha256": "539286b99fb24f8e6d6e421b0a08b2d3e8c9559a5ca16a9d243fc3ac4dc1da7d",
+      "created_xml_sha256": "955b464c64d27c319e6c8d4367d5c07a5e015eff15317336135d81ffa6f00b30",
+      "readback_sha256": "64f25e7a68d34a6b14f21e4be1baf8f288f32a7c9fadcb168588580be6250e0a",
+      "substitutions": {
+        "old_name": "_TEST_155E5_src_GET_20260827202224",
+        "new_name": "_TEST_155E7_src_GET_20260903195709",
+        "id_remap": {},
+        "root_attrs_stripped": [
+          "componentId",
+          "version",
+          "createdDate",
+          "createdBy",
+          "modifiedDate",
+          "modifiedBy",
+          "deleted",
+          "currentVersion",
+          "branchName",
+          "branchId",
+          "folderFullPath",
+          "folderId",
+          "folderName"
+        ]
+      },
+      "banked_path": "/admin/cdscm/api/v1/clients/1ccd7554-7f2e-4e05-83ac-194d20b16b2d",
+      "persisted_path": "/admin/cdscm/api/v1/clients/1ccd7554-7f2e-4e05-83ac-194d20b16b2d",
+      "path_bytes_unedited": true,
+      "persisted_verb": "GET"
+    }
+  },
+  "process": {
+    "component_id": "f630b002-47f3-4273-9389-c83d9e0fc363",
+    "name": "_TEST_155E7_proc_PATCH_20260903195709",
+    "banked_source": "cap155-e5-patch-attested/component_process.xml",
+    "banked_sha256": "6f111b6a0cb25f5f1884223a54c0a3afd160cd98fcfc18d637a683533daffca2",
+    "created_xml_sha256": "511b53d306d9097339e90d20fc2958e5276ea1f777db84c3f9f0a49a7395f299",
+    "readback_sha256": "c7518860a80c5f3507c2658c45ee291cfa819e9d8e0f3f21d3dd05727433e91c",
+    "substitutions": {
+      "old_name": "_TEST_155E5_proc_PATCH_20260827202224",
+      "new_name": "_TEST_155E7_proc_PATCH_20260903195709",
+      "id_remap": {
+        "fcf75daa-6b4f-4a4f-9b63-af6bf49fd692": "e4745093-184f-41dd-a97a-c7e33896af3b",
+        "428246b5-832c-43ff-a707-600870d62b4a": "485f3b01-fba5-4850-8281-2fc19decefb7",
+        "c4281346-83e9-4026-856d-ede718ec68a0": "2fe488e4-3169-4529-9515-d854570c8ffc"
+      },
+      "root_attrs_stripped": [
+        "componentId",
+        "version",
+        "createdDate",
+        "createdBy",
+        "modifiedDate",
+        "modifiedBy",
+        "deleted",
+        "currentVersion",
+        "branchName",
+        "branchId",
+        "folderFullPath",
+        "folderId",
+        "folderName"
+      ]
+    },
+    "operation_ids_in_readback": [
+      "485f3b01-fba5-4850-8281-2fc19decefb7",
+      "e4745093-184f-41dd-a97a-c7e33896af3b"
+    ],
+    "connection_ids_in_readback": [
+      "2fe488e4-3169-4529-9515-d854570c8ffc"
+    ],
+    "send_action_types_in_readback": [
+      "GET",
+      "PATCH"
+    ]
+  },
+  "counterparty_seed": {
+    "note": "the counterparty accepts a caller-supplied `key`, so the resources were re-seeded at the EXACT keys the banked operation XML already points at; no path byte was edited",
+    "pre_clear": {
+      "tpl": {
+        "key": "1ccd7554-7f2e-4e05-83ac-194d20b16b2d",
+        "pre_clear_delete_status": 404,
+        "readback_before_seed": 404
+      },
+      "tgt": {
+        "key": "41172938-b9bd-4495-b411-9851f5ac7b00-drift",
+        "pre_clear_delete_status": 404,
+        "readback_before_seed": 404
+      }
+    },
+    "operation_path": "/admin/cdscm/api/v1/clients/41172938-b9bd-4495-b411-9851f5ac7b00-drift",
+    "attribution_path": "/admin/cdscm/api/v1/clients/41172938-b9bd-4495-b411-9851f5ac7b00-drift",
+    "readback_target_path": "/admin/cdscm/api/v1/clients/41172938-b9bd-4495-b411-9851f5ac7b00-drift",
+    "template_path": "/admin/cdscm/api/v1/clients/1ccd7554-7f2e-4e05-83ac-194d20b16b2d",
+    "control_path": "/admin/cdscm/api/v1/clients/eb13eddf-8b6e-4140-a618-2fe3ed34f964",
+    "seed": {
+      "tpl": "1ccd7554-7f2e-4e05-83ac-194d20b16b2d",
+      "tgt": "41172938-b9bd-4495-b411-9851f5ac7b00-drift",
+      "ctl": "eb13eddf-8b6e-4140-a618-2fe3ed34f964"
+    }
+  }
+}

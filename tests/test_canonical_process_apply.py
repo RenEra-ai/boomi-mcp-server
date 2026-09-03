@@ -631,3 +631,25 @@ def test_the_attestation_records_what_the_boundary_compared():
     assert bound.connection_config_digest == "ComponentConfigDigestV1:" + ("e" * 64)
     assert bound.process_root_ref == "$ref:ROOT"
     assert bound.connection_ref == "$ref:conn"
+
+
+def test_the_binding_records_which_route_authorised_the_write():
+    """The kind alone could not say WHICH route, and the registry rotates.
+
+    Recording only the coverage kind was justified on the ground that a static
+    coverage "enumerates the routes it covers, and a route is a path". The model
+    enumerates `route_digests` — versioned one-way hashes — so the reasoning was
+    right about paths and wrong about the field it described. The recheck
+    computes and compares the live route digest; a durable binding that omits
+    what was compared cannot be reconstructed once the row it rested on changes.
+    """
+    digests = ("RouteDigestV1:" + "f" * 64,)
+    att = _attest([_binding(route_coverage_kind="static_path", route_digests=digests)])
+    bound = att.replay_evidence_bindings[0]
+    assert tuple(bound.route_digests) == digests
+    assert bound.route_coverage_kind == "static_path"
+
+    # A coverage that enumerates nothing records nothing — service-wide coverage
+    # has no route list, and inventing an empty one as a value would be a claim.
+    plain = _attest([_binding()])
+    assert tuple(plain.replay_evidence_bindings[0].route_digests) == ()

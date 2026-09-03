@@ -455,6 +455,7 @@ def build_mutation_attestation(
                 operation_config_digest=_field(g, "operation_config_digest"),
                 connection_config_digest=_field(g, "connection_config_digest"),
                 route_coverage_kind=_field(g, "route_coverage_kind"),
+                route_digests=tuple(_field(g, "route_digests") or ()),
                 capture_digest=_field(g, "capture_digest"),
                 route_capture_digest=_field(g, "route_capture_digest"),
             )

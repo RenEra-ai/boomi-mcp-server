@@ -5838,6 +5838,7 @@ def test_every_recompiling_consumer_on_the_evidenced_route_gets_the_grants():
     the runtime authority the structural rule asks for: `process_root_ref` and
     `idempotency_grants` on the object, not a model of how it got there.
     """
+    from _m12_11_support import ingested_operation_capture
     import importlib
     from unittest.mock import MagicMock, patch
 
@@ -5871,7 +5872,7 @@ def test_every_recompiling_consumer_on_the_evidenced_route_gets_the_grants():
         unit.envelope.component_key for unit in request.intent.units)
     captures = (_TESTS_ROOT.parent
                 / "docs/architecture/evidence/issue-155/captures"
-                / "cap155-e7-patch-operation-record")
+                / ingested_operation_capture())
     operation_xml = (captures / "component_op_tgt.xml").read_text(encoding="utf-8")
     connection_xml = (captures / "component_connection.xml").read_text(encoding="utf-8")
 
@@ -6317,6 +6318,8 @@ def test_each_authored_root_is_projected_for_its_own_process():
     two_root = request.model_copy(update={"intent": request.intent.model_copy(
         update={"units": (first, second)})})
 
+    from _m12_11_support import ingested_operation_capture
+
     def _fingerprint(ir):
         return json.dumps(ir.model_dump(mode="json"), sort_keys=True)
 
@@ -6329,7 +6332,7 @@ def test_each_authored_root_is_projected_for_its_own_process():
 
     captures = (_TESTS_ROOT.parent
                 / "docs/architecture/evidence/issue-155/captures"
-                / "cap155-e7-patch-operation-record")
+                / ingested_operation_capture())
     operation_xml = (captures / "component_op_tgt.xml").read_text(encoding="utf-8")
     connection_xml = (captures / "component_connection.xml").read_text(encoding="utf-8")
     submitted = {}
@@ -6721,3 +6724,53 @@ def test_the_wave_contract_matches_every_archived_summary():
         f"the pre-structured summaries were {legacy}; a NEW archive in a "
         f"non-conforming shape must be a decision, not a silent exclusion"
     )
+
+
+def test_a_replay_claim_needs_the_artifact_that_observes_replay():
+    """The architect's own probe, closed — and graded past a confound.
+
+    A replay observation states what a SECOND identical execution did to the
+    counterparty. Only an endpoint readback observes that; an execution record
+    reports that a call completed, not what it left behind. The validator
+    demanded the readback for a state EFFECT and left the replay beside it
+    unguarded, so a record could name execution-side sources only, claim a replay
+    left the effect unchanged, be re-digested through the published minter so
+    every other check agreed, and mint a grant.
+
+    THE CONFOUND, which live QA surfaced before it could fool this test: the
+    effect rule runs first and `state_unchanged_after_replay` demands the
+    readback on its own. A probe using that effect grades the OLD guard and reads
+    as a pass, which would make this rule look enforced while being inert. So the
+    probe uses `read_only`, the one effect the older rule does not gate — which
+    is also exactly the shape the architect's probe used.
+    """
+    import json
+
+    from boomi_mcp.connector_replay.models import ClosedCaptureObservationsV1
+    from boomi_mcp.connector_replay.registry import load_registry
+
+    base = load_registry().operation_records[0].capture.summary.model_dump(mode="json")
+    # Sorted, or the sources validator refuses first and confounds the result.
+    without_readback = tuple(sorted(
+        s for s in base["sources"] if s != "endpoint_readback"))
+    assert without_readback, "the packaged record names no other source"
+
+    for replay in ("same_effect", "same_result", "duplicate_effect",
+                   "conflict_without_second_effect"):
+        payload = dict(base, effect="read_only", replay=replay,
+                       sources=without_readback)
+        with pytest.raises(Exception) as raised:
+            ClosedCaptureObservationsV1.model_validate(payload)
+        message = str(raised.value)
+        assert "replay" in message and "endpoint readback" in message, (
+            "refused by some other rule, so this proves nothing about the replay "
+            "requirement: %s" % message[:200]
+        )
+
+    # NOT-EXERCISED claims nothing about a second execution, so it needs nothing.
+    ClosedCaptureObservationsV1.model_validate(
+        dict(base, effect="read_only", replay="not_exercised",
+             sources=without_readback))
+
+    # ...and the packaged record itself, which names the readback, still loads.
+    assert load_registry().operation_records

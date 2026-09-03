@@ -3655,7 +3655,7 @@ def test_the_live_reader_keeps_the_path_it_read():
 
     from pathlib import Path
 
-    root = Path(__file__).resolve().parents[1] / _CAPTURES / "cap155-e8-patch-operation-record"
+    root = Path(__file__).resolve().parents[1] / _CAPTURES / "cap155-e9-patch-operation-record"
     xml = (root / "component_op_tgt.xml").read_text()
     # The COUNTERPARTY's own log, which recorded the route the execution
     # actually called. Independent of the component XML the reader parses, so
@@ -3688,7 +3688,7 @@ def _captured_operation_xml():
 
     return (
         Path(__file__).resolve().parents[1] / _CAPTURES
-        / "cap155-e8-patch-operation-record" / "component_op_tgt.xml"
+        / "cap155-e9-patch-operation-record" / "component_op_tgt.xml"
     ).read_text()
 
 
@@ -4403,3 +4403,91 @@ def test_a_declaration_free_conflict_does_not_claim_a_declaration_disagreed():
     assert "no declaration can resolve this" in (raised.value.remediation or "").lower()
     # ...and it points at the document that actually holds the surplus route.
     assert "the component in the account" in (raised.value.remediation or "")
+
+
+def test_the_plan_surface_compares_the_declared_route_against_the_account():
+    """The planning surface compares too, measured where a caller stands.
+
+    This node exists because a recorded LIMIT went stale without anybody
+    noticing. The limit said `plan` performs no declared-versus-live comparison
+    at all, and it was TRUE when written. A later correction moved the
+    comparison down into snapshot construction, which the planning surface also
+    calls — so plan started comparing, and the limit, the ledger row citing it
+    and a source comment restating it all outlived the behaviour they described.
+
+    A claim about a public surface is graded at that surface. Every earlier node
+    for this comparison drives `assert_declared_matches_resolved` directly, and
+    an internal helper agreeing with itself is exactly what said nothing in a
+    previous issue. So this one drives `plan_authoring_request_v1` and reads the
+    verdict off the returned plan, with the agreeing control beside it: without
+    the control a plan that refused everything would pass this test.
+    """
+    import json
+    import sys
+    from pathlib import Path
+    from unittest.mock import patch
+
+    from boomi_mcp.authoring.workflow import plan_authoring_request_v1
+    from boomi_mcp.connector_replay.registry import load_registry
+
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from _m12_11_support import (  # noqa: E402
+        APPLIABLE_CONN,
+        appliable_op_matching_the_capture,
+        appliable_process_ir_request,
+        evidenced_account_client,
+        ingested_operation_capture,
+    )
+
+    captures = (Path(__file__).resolve().parents[1]
+                / "docs/architecture/evidence/issue-155/captures"
+                / ingested_operation_capture())
+    operation_xml = (captures / "component_op_tgt.xml").read_text(encoding="utf-8")
+    connection_xml = (captures / "component_connection.xml").read_text(encoding="utf-8")
+    record = load_registry().operation_records[0]
+    operation, connection = record.operation_identity, record.connection_identity
+
+    def _get_xml(_client, component_id, *_a, **_k):
+        is_operation = component_id == operation.component_id
+        return {
+            "component_id": component_id,
+            "type": "connector-settings",
+            "version": operation.version if is_operation else connection.version,
+            "xml": operation_xml if is_operation else connection_xml,
+        }
+
+    def _plan(declared_path):
+        declared = appliable_op_matching_the_capture()
+        declared["config"]["path"] = declared_path
+        request = appliable_process_ir_request(components=(
+            dict(APPLIABLE_CONN, component_id=connection.component_id,
+                 action="create",
+                 config=dict(APPLIABLE_CONN["config"], reference_only=True)),
+            dict(declared, component_id=operation.component_id, action="create",
+                 config=dict(declared["config"], reference_only=True,
+                             method="PATCH")),
+        ))
+        with patch("boomi_mcp.categories.components._shared.component_get_xml",
+                   _get_xml), \
+             patch("boomi_mcp.categories.integration_builder.paginate_metadata",
+                   lambda *a, **k: []):
+            result, _internals = plan_authoring_request_v1(
+                request, boomi_client=evidenced_account_client(), profile="qa")
+        return result
+
+    stored = appliable_op_matching_the_capture()["config"]["path"]
+    agreeing = _plan(stored)
+    assert agreeing.validation_report.is_valid, (
+        "the control did not plan valid, so a refusal below proves nothing about "
+        "the comparison"
+    )
+
+    disagreeing = _plan("/admin/cdscm/api/v1/clients/a-route-nothing-stores")
+    assert not disagreeing.validation_report.is_valid, (
+        "the planning surface accepted a declaration the account contradicts"
+    )
+    assert "CONNECTOR_REPLAY_IDENTITY_MISMATCH" in json.dumps(
+        disagreeing.model_dump(mode="json")), (
+        "plan refused, but not for the identity comparison — some other rule "
+        "fired and this node would be grading it instead"
+    )

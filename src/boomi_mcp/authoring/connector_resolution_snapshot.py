@@ -960,13 +960,20 @@ def build_connector_resolution_snapshot(
             # apply — a preview that disagrees with the write it previews, which
             # is an asymmetry this repository has been caught by before.
             #
-            # SAID SMALLER THAN IT WAS FIRST WRITTEN, because live QA measured
-            # the larger claim false: this comment named "the typed plan and
-            # compile route", and `plan` performs no declared-versus-live
-            # comparison AT ALL — not path, not action, not family, identically
-            # before and after this change. That gap is pre-existing and is
-            # recorded as its own finding rather than described away here; what
-            # this call fixes is compile, and the comment now says only that.
+            # THIS COMMENT HAS BEEN WRONG IN BOTH DIRECTIONS, so it now states
+            # only what a probe at the public boundary measures. It first claimed
+            # "the typed plan and compile route"; live QA measured that false and
+            # it was narrowed to compile alone. Narrowing it was right THEN and is
+            # wrong NOW, because the correction that followed moved the comparison
+            # down into snapshot construction — which the planning surface also
+            # calls, with the client, reading the named live components. So `plan`
+            # compares too, and the narrowed comment outlived the behaviour it
+            # described. Measured at the public boundary, not inferred from the
+            # call graph: a declaration whose path disagrees with the account
+            # returns an invalid plan carrying
+            # `CONNECTOR_REPLAY_IDENTITY_MISMATCH`, and the agreeing control plans
+            # valid. A test pins both arms so the next reader is not left grading
+            # a comment against the code again.
             assert_declared_matches_resolved(
                 snapshot, declared, declared_paths_from_components(components)
             )

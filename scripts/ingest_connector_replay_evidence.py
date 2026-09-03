@@ -63,7 +63,7 @@ ACTIONS = {
 # five values, and BOTH configuration digests are among the ones that did not
 # move: that is the credential-only version advance this issue documents,
 # observed rather than argued.
-OPERATION_RECORD_CAPTURES = ("cap155-e8-patch-operation-record",)
+OPERATION_RECORD_CAPTURES = ("cap155-e9-patch-operation-record",)
 
 
 def main() -> int:

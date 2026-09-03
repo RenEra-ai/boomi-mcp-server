@@ -590,3 +590,50 @@ def test_a_soft_deleted_component_is_not_a_live_component():
         assert not outcome.ok, label
         assert outcome.unavailable["reason"] == "component_deleted", label
         assert "DELETED" in outcome.unavailable["detail"], label
+
+
+def test_the_resolved_binding_carries_the_route_digests_it_compared():
+    """What the recheck compares must reach the record it produces."""
+    from boomi_mcp.connector_replay.recheck import recheck_grant_identities
+
+    class _Coverage:
+        kind = "static_path"
+        route_digests = ("RouteDigestV1:" + "a" * 64,)
+
+    class _Identity:
+        component_id = "op-1"
+        version = 1
+        config_digest = "ComponentConfigDigestV1:" + "b" * 64
+
+    class _Record:
+        contract_ref = "$ref:C"
+        operation_ref = "$ref:op"
+        record_digest = "c" * 64
+        account_scope_hash = None
+        operation_identity = _Identity()
+        connection_identity = _Identity()
+        route_coverage = _Coverage()
+        capture = None
+        family = "rest"
+        action = "PATCH"
+
+    class _Grant:
+        contract_ref = "$ref:C"
+        operation_ref = "$ref:op"
+        call_source_path = "/body/steps/0"
+        record_digest = "c" * 64
+        process_root_ref = "$ref:ROOT"
+        connection_ref = "$ref:conn"
+        dynamic_path = False
+
+    class _Registry:
+        operation_records = (_Record(),)
+
+    outcome = recheck_grant_identities(
+        grants=[_Grant()], registry=_Registry(),
+        live_identity=lambda cid, kind, family=None: {
+            "version": 1, "config_digest": "ComponentConfigDigestV1:" + "b" * 64},
+        account_scope_hash=None,
+    )
+    assert outcome.bindings, "no binding was resolved, so this asserts nothing"
+    assert tuple(outcome.bindings[0]["route_digests"]) == _Coverage.route_digests

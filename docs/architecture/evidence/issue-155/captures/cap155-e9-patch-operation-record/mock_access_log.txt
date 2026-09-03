@@ -1,0 +1,14 @@
+INFO:     192.168.65.1:63530 - "GET /admin/cdscm/api/v1/clients/eb13eddf-8b6e-4140-a618-2fe3ed34f964 HTTP/1.1" 200 OK
+INFO:     192.168.65.1:30207 - "GET /admin/cdscm/api/v1/clients/41172938-b9bd-4495-b411-9851f5ac7b00-drift HTTP/1.1" 200 OK
+INFO:     192.168.65.1:49718 - "GET /admin/cdscm/api/v1/clients/eb13eddf-8b6e-4140-a618-2fe3ed34f964 HTTP/1.1" 200 OK
+INFO:     192.168.65.1:45698 - "GET /admin/cdscm/api/v1/clients/1ccd7554-7f2e-4e05-83ac-194d20b16b2d HTTP/1.1" 200 OK
+INFO:     192.168.65.1:42596 - "GET /admin/cdscm/api/v1/clients/1ccd7554-7f2e-4e05-83ac-194d20b16b2d HTTP/1.1" 200 OK
+INFO:     192.168.65.1:36731 - "PATCH /admin/cdscm/api/v1/clients/41172938-b9bd-4495-b411-9851f5ac7b00-drift HTTP/1.1" 200 OK
+INFO:     192.168.65.1:40807 - "GET /admin/cdscm/api/v1/clients/41172938-b9bd-4495-b411-9851f5ac7b00-drift HTTP/1.1" 200 OK
+INFO:     192.168.65.1:34788 - "GET /admin/cdscm/api/v1/clients/eb13eddf-8b6e-4140-a618-2fe3ed34f964 HTTP/1.1" 200 OK
+INFO:     192.168.65.1:16069 - "GET /admin/cdscm/api/v1/clients/1ccd7554-7f2e-4e05-83ac-194d20b16b2d HTTP/1.1" 200 OK
+INFO:     192.168.65.1:22276 - "GET /admin/cdscm/api/v1/clients/1ccd7554-7f2e-4e05-83ac-194d20b16b2d HTTP/1.1" 200 OK
+INFO:     192.168.65.1:44103 - "PATCH /admin/cdscm/api/v1/clients/41172938-b9bd-4495-b411-9851f5ac7b00-drift HTTP/1.1" 200 OK
+INFO:     192.168.65.1:22039 - "GET /admin/cdscm/api/v1/clients/41172938-b9bd-4495-b411-9851f5ac7b00-drift HTTP/1.1" 200 OK
+INFO:     192.168.65.1:30350 - "GET /admin/cdscm/api/v1/clients/eb13eddf-8b6e-4140-a618-2fe3ed34f964 HTTP/1.1" 200 OK
+INFO:     192.168.65.1:33297 - "GET /admin/cdscm/api/v1/clients/1ccd7554-7f2e-4e05-83ac-194d20b16b2d HTTP/1.1" 200 OK

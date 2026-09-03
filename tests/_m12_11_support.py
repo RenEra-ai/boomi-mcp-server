@@ -1,3 +1,4 @@
+import pathlib
 """Shared fixtures for the #146 (M12.11) authoring-surface tests.
 
 Not a ``test_*`` module, so pytest does not collect it. There is no
@@ -399,7 +400,7 @@ def capture_account_id():
 
     derivation = (pathlib.Path(__file__).resolve().parents[1]
                   / "docs/architecture/evidence/issue-155/captures"
-                  / "cap155-e7-patch-operation-record/record_derivation.json")
+                  / ingested_operation_capture() / "record_derivation.json")
     return json.loads(derivation.read_text(encoding="utf-8"))[
         "account_scope_hash"]["account_id"]
 
@@ -421,3 +422,55 @@ def evidenced_account_client():
     client._base_url_account_id = capture_account_id()
     client.account_id = capture_account_id()
     return client
+
+
+def ingested_operation_capture() -> str:
+    """The capture directory the PACKAGED registry was built from.
+
+    Read from the ingest script's own constant rather than written here. Seven
+    call sites named `cap155-e7-…` as a literal and went on passing through the
+    `e8` re-capture purely because that capture's operation XML happened not to
+    have changed — so the fixtures were serving a component the shipped record no
+    longer described, and nothing said so. The `e9` re-capture moved the operation
+    config digest and they all failed at once, which is the good outcome of a bad
+    arrangement: a literal that is right by coincidence fails late and together.
+    """
+    import re
+
+    text = (pathlib.Path(__file__).resolve().parents[1]
+            / "scripts" / "ingest_connector_replay_evidence.py").read_text()
+    found = re.search(r'OPERATION_RECORD_CAPTURES = \(\s*"([^"]+)"', text)
+    assert found, "the ingest script no longer declares its capture set"
+    return found.group(1)
+
+
+def appliable_op_matching_the_capture() -> dict:
+    """``APPLIABLE_OP`` with the route and verb the CAPTURED component stores.
+
+    The declared config hard-codes a route, which was harmless while the
+    declaration was never compared to the account. It is compared now, so a
+    fixture that serves the captured operation's XML and declares a different
+    route is asserting something false and is refused — correctly.
+
+    Derived from the capture's own bytes rather than restated, so a re-capture
+    that moves the stored route (a drift arm leaves one behind) carries the
+    fixtures with it instead of stranding them on a value nothing serves.
+    """
+    import copy
+    import re
+
+    captures = (pathlib.Path(__file__).resolve().parents[1]
+                / "docs/architecture/evidence/issue-155/captures"
+                / ingested_operation_capture())
+    xml = (captures / "component_op_tgt.xml").read_text(encoding="utf-8")
+    op = copy.deepcopy(APPLIABLE_OP)
+    path = re.search(r'<field id="path"[^>]*value="([^"]*)"', xml)
+    if path:
+        op["config"]["path"] = path.group(1)
+    # THE VERB IS DELIBERATELY NOT OVERRIDDEN. The declared method drives which
+    # capability the fixture is exercising, and the comparison that made the route
+    # matter treats family and action as the caller's own assertion about a
+    # component it names — an assertion these fixtures make on purpose and which
+    # the surrounding tests are about. Only the ROUTE is taken from the account,
+    # because only the route was hard-coded to a value nothing serves.
+    return op

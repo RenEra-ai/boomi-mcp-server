@@ -1,0 +1,66 @@
+{
+  "_success": true,
+  "status_code": 200,
+  "method": "POST",
+  "endpoint": "ExecutionConnector/query",
+  "url": "https://api.boomi.com/api/rest/v1/trainingglebbochkarov-16926N/ExecutionConnector/query",
+  "profile": "renera",
+  "data": {
+    "@type": "QueryResult",
+    "result": [
+      {
+        "@type": "ExecutionConnector",
+        "id": "RVhFQ19DT05OZmFsc2U6cmV0dXJuOnJldHVybjpzaGFwZTQ6ZXhlY3V0aW9uLTNmZTI1OWRkLWQ3MTQtNGQ0Zi1iZGVmLWFjYWJhZTdmNDllOS0yMDI2LjA5LjAz",
+        "executionId": "execution-3fe259dd-d714-4d4f-bdef-acabae7f49e9-2026.09.03",
+        "executionConnector": "shape4",
+        "connectorType": "return",
+        "actionType": "return",
+        "errorCount": 0,
+        "successCount": 1,
+        "size": 308,
+        "isStartShape": false,
+        "recordType": "return"
+      },
+      {
+        "@type": "ExecutionConnector",
+        "id": "RVhFQ19DT05OZmFsc2U6RVhFQ1VURToyZmU0ODhlNC0zMTY5LTQ1MjktOTUxNS1kODU0NTcwYzhmZmM6NDg1ZjNiMDEtZmJhNS00ODUwLTgyODEtMmZjMTlkZWNlZmI3OmV4ZWN1dGlvbi0zZmUyNTlkZC1kNzE0LTRkNGYtYmRlZi1hY2FiYWU3ZjQ5ZTktMjAyNi4wOS4wMw",
+        "executionId": "execution-3fe259dd-d714-4d4f-bdef-acabae7f49e9-2026.09.03",
+        "executionConnector": "_QA_FIXTURE_155_PATCH_client",
+        "connectorType": "officialboomi-X3979C-rest-prod",
+        "actionType": "EXECUTE",
+        "errorCount": 0,
+        "successCount": 1,
+        "size": 308,
+        "isStartShape": false,
+        "recordType": "connector"
+      },
+      {
+        "@type": "ExecutionConnector",
+        "id": "RVhFQ19DT05OZmFsc2U6RVhFQ1VURToyZmU0ODhlNC0zMTY5LTQ1MjktOTUxNS1kODU0NTcwYzhmZmM6ZTQ3NDUwOTMtMTg0Zi00MWRkLWE5N2EtYzdlMzM4OTZhZjNiOmV4ZWN1dGlvbi0zZmUyNTlkZC1kNzE0LTRkNGYtYmRlZi1hY2FiYWU3ZjQ5ZTktMjAyNi4wOS4wMw",
+        "executionId": "execution-3fe259dd-d714-4d4f-bdef-acabae7f49e9-2026.09.03",
+        "executionConnector": "_TEST_155E7_src_GET_20260903195709",
+        "connectorType": "officialboomi-X3979C-rest-prod",
+        "actionType": "EXECUTE",
+        "errorCount": 0,
+        "successCount": 1,
+        "size": 302,
+        "isStartShape": false,
+        "recordType": "connector"
+      },
+      {
+        "@type": "ExecutionConnector",
+        "id": "RVhFQ19DT05OdHJ1ZTpub2RhdGE6c2hhcGUxOjpleGVjdXRpb24tM2ZlMjU5ZGQtZDcxNC00ZDRmLWJkZWYtYWNhYmFlN2Y0OWU5LTIwMjYuMDkuMDM",
+        "executionId": "execution-3fe259dd-d714-4d4f-bdef-acabae7f49e9-2026.09.03",
+        "executionConnector": "Start",
+        "connectorType": "nodata",
+        "actionType": "nodata",
+        "errorCount": 0,
+        "successCount": 1,
+        "size": 0,
+        "isStartShape": true,
+        "recordType": "nodata"
+      }
+    ],
+    "numberOfResults": 4
+  }
+}

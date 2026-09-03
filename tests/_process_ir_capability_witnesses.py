@@ -983,7 +983,7 @@ def _capability_witness_client():
 
     derivation = (_p.Path(__file__).resolve().parents[1]
                   / "docs/architecture/evidence/issue-155/captures"
-                  / "cap155-e8-patch-operation-record/record_derivation.json")
+                  / "cap155-e9-patch-operation-record/record_derivation.json")
     account = json.loads(derivation.read_text(encoding="utf-8"))[
         "account_scope_hash"]["account_id"]
     client = MagicMock()
@@ -1017,6 +1017,7 @@ def _w_verified_write_replay_safety():
     from _m12_11_support import (
         APPLIABLE_CONN,
         APPLIABLE_OP,
+        appliable_op_matching_the_capture,
         ProcessAuthoringUnitV1,
         ProcessComponentEnvelopeV1,
         appliable_process_ir_request,
@@ -1028,7 +1029,7 @@ def _w_verified_write_replay_safety():
     captures = (
         pathlib.Path(__file__).resolve().parents[1]
         / "docs/architecture/evidence/issue-155/captures"
-        / "cap155-e8-patch-operation-record"
+        / "cap155-e9-patch-operation-record"
     )
 
     def run():
@@ -1071,12 +1072,10 @@ def _w_verified_write_replay_safety():
                 dict(APPLIABLE_CONN, component_id=connection.component_id,
                      action="create",
                      config=dict(APPLIABLE_CONN["config"], reference_only=True)),
-                dict(APPLIABLE_OP, component_id=operation.component_id,
-                     action="create",
-                     config=dict(APPLIABLE_OP["config"], reference_only=True,
-                                 method="PATCH",
-                                 path="/admin/cdscm/api/v1/clients/"
-                                      "41172938-b9bd-4495-b411-9851f5ac7b00")),
+                dict(appliable_op_matching_the_capture(),
+                     component_id=operation.component_id, action="create",
+                     config=dict(appliable_op_matching_the_capture()["config"],
+                                 reference_only=True, method="PATCH")),
                 dict(APPLIABLE_OP, key="getop", name="M12.15 get", action="create",
                      config=dict(APPLIABLE_OP["config"],
                                  component_name="M12.15 get")),

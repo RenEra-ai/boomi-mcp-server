@@ -1,0 +1,20 @@
+{
+  "gcr_id": "R0VOX0NPTk5fUkVDX2V4ZWN1dGlvbi1jYTliNjZmNi0wNGM1LTRkNjYtODAzYy04ODUzOTc0YThkYTgtMjAyNi4wOS4wMzpjb25uZWN0b3ItYTZjODc0NWQtZjUwYS00ZTQ1LWEzNGQtZDVlMWIyZjg0OTU3",
+  "operationName": "_QA_FIXTURE_155_PATCH_client",
+  "actionType": "EXECUTE",
+  "status": "SUCCESS",
+  "size": 308,
+  "documentIndex": 0,
+  "download_response": {
+    "_success": true,
+    "generic_connector_record_id": "R0VOX0NPTk5fUkVDX2V4ZWN1dGlvbi1jYTliNjZmNi0wNGM1LTRkNjYtODAzYy04ODUzOTc0YThkYTgtMjAyNi4wOS4wMzpjb25uZWN0b3ItYTZjODc0NWQtZjUwYS00ZTQ1LWEzNGQtZDVlMWIyZjg0OTU3",
+    "download_url": "https://platform.boomi.com/account/trainingglebbochkarov-16926N/api/download/ConnectorDocument-ab3f5e28-5a34-4155-9624-8ce3490ebfe6",
+    "status_code": 202,
+    "message": "Beginning download.",
+    "_downloaded": true,
+    "content": "{\"clientId\":\"_E7_TPL_20260903195709\",\"name\":\"E7 Template (PATCH body source)\",\"status\":\"ACTIVE\",\"key\":\"41172938-b9bd-4495-b411-9851f5ac7b00-drift\",\"createdOn\":\"2026-09-03T19:57:14.187Z\",\"createdBy\":\"integration\",\"modifiedOn\":\"2026-09-03T19:57:30.368Z\",\"modifiedBy\":\"integration\",\"e7Marker\":\"double-attested\"}",
+    "content_type": "text/*; charset=UTF-8",
+    "size_bytes": 308
+  },
+  "content": null
+}

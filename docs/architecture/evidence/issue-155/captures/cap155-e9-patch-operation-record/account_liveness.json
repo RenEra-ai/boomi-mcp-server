@@ -1,0 +1,30 @@
+{
+  "_redaction_note": "identity fields removed at capture time; only liveness-bearing fields kept",
+  "account": {
+    "account_id": "trainingglebbochkarov-16926N",
+    "expiration_date": "2026-10-27T05:00:00Z",
+    "over_deployed": false,
+    "status": "active"
+  },
+  "licensing": {
+    "standard": {
+      "purchased": 3,
+      "used": 0
+    },
+    "standard_test": {
+      "purchased": 3,
+      "used": 1
+    }
+  },
+  "runtimes": [],
+  "tools_called": [
+    "boomi_account_info",
+    "manage_runtimes",
+    "execute_process",
+    "invoke_boomi_api",
+    "monitor_platform",
+    "manage_component",
+    "manage_deployment",
+    "query_components"
+  ]
+}

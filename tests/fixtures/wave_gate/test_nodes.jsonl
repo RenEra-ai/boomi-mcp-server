@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 11504, "minimum_collected": 11504, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 11508, "minimum_collected": 11508, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -11549,3 +11549,7 @@
 {"kind": "test", "id": "pytest-011548", "node_id": "tests/test_issue_155_recheck_boundary.py::test_a_mutation_uncertain_push_retains_the_accounting_it_owes", "state": "active"}
 {"kind": "test", "id": "pytest-011549", "node_id": "tests/test_issue_155_contract_projection.py::test_one_process_root_can_mint_two_grants", "state": "active"}
 {"kind": "test", "id": "pytest-011550", "node_id": "tests/test_issue_155_discovery.py::test_a_relocatable_table_keeps_its_own_grants_and_only_its_own", "state": "active"}
+{"kind": "test", "id": "pytest-011551", "node_id": "tests/test_canonical_process_apply.py::test_the_binding_records_which_route_authorised_the_write", "state": "active"}
+{"kind": "test", "id": "pytest-011552", "node_id": "tests/test_connector_replay_review_round3.py::test_a_replay_claim_needs_the_artifact_that_observes_replay", "state": "active"}
+{"kind": "test", "id": "pytest-011553", "node_id": "tests/test_issue_155_recheck.py::test_the_resolved_binding_carries_the_route_digests_it_compared", "state": "active"}
+{"kind": "test", "id": "pytest-011554", "node_id": "tests/test_issue_155_identity_projection.py::test_the_plan_surface_compares_the_declared_route_against_the_account", "state": "active"}

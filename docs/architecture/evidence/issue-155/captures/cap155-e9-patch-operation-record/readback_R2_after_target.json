@@ -1,0 +1,20 @@
+{
+  "utc": "2026-09-03T19:58:01.433001+00:00",
+  "path": "/admin/cdscm/api/v1/clients/41172938-b9bd-4495-b411-9851f5ac7b00-drift",
+  "status": 200,
+  "sha256": "832525ac8d4d4c001dc1f33f77060e5dc55d8f6654e56ccdf8e054ed22917f92",
+  "bytes": 308,
+  "body": {
+    "clientId": "_E7_TPL_20260903195709",
+    "name": "E7 Template (PATCH body source)",
+    "status": "ACTIVE",
+    "key": "41172938-b9bd-4495-b411-9851f5ac7b00-drift",
+    "createdOn": "2026-09-03T19:57:14.187Z",
+    "createdBy": "integration",
+    "modifiedOn": "2026-09-03T19:57:46.535Z",
+    "modifiedBy": "integration",
+    "e7Marker": "double-attested"
+  },
+  "label": "target R2_after",
+  "business_sha256": "1261974f893316096b0c6b3cfd8f560c276b865eb09a66f30cf74e90caca30d3"
+}

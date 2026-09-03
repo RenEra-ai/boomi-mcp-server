@@ -1,0 +1,124 @@
+{
+  "verb": "PATCH",
+  "scenario": "cap155-e9-patch-operation-record",
+  "account_id": "trainingglebbochkarov-16926N",
+  "route": "banked cap155-e5-patch-attested operation + process XML, re-created verbatim (identity+folder attrs stripped, root name= substituted, operation/connection refs remapped; path bytes UNEDITED). The PATCH operation is a DURABLE account fixture, reused unchanged.",
+  "executions": [
+    {
+      "label": "run1",
+      "execution_id": "execution-ca9b66f6-04c5-4d66-803c-8853974a8da8-2026.09.03",
+      "status": "COMPLETE",
+      "inbound": 1,
+      "outbound": 2
+    },
+    {
+      "label": "run2_identical_replay",
+      "execution_id": "execution-3fe259dd-d714-4d4f-bdef-acabae7f49e9-2026.09.03",
+      "status": "COMPLETE",
+      "inbound": 1,
+      "outbound": 2
+    }
+  ],
+  "counterparty_requests": [
+    {
+      "execution_label": "run1",
+      "execution_id": "execution-ca9b66f6-04c5-4d66-803c-8853974a8da8-2026.09.03",
+      "stamp": "2026-09-03T19:57:30.376242000Z",
+      "request": "INFO:     192.168.65.1:36731 - \"PATCH /admin/cdscm/api/v1/clients/41172938-b9bd-4495-b411-9851f5ac7b00-drift HTTP/1.1\" 200 OK",
+      "http_status": "200",
+      "reason": "OK"
+    },
+    {
+      "execution_label": "run2_identical_replay",
+      "execution_id": "execution-3fe259dd-d714-4d4f-bdef-acabae7f49e9-2026.09.03",
+      "stamp": "2026-09-03T19:57:46.543314966Z",
+      "request": "INFO:     192.168.65.1:44103 - \"PATCH /admin/cdscm/api/v1/clients/41172938-b9bd-4495-b411-9851f5ac7b00-drift HTTP/1.1\" 200 OK",
+      "http_status": "200",
+      "reason": "OK"
+    }
+  ],
+  "attribution_is_unambiguous": true,
+  "log_covers_both_executions": true,
+  "window_overlaps": [],
+  "state": {
+    "state_key": "readback HTTP status + sha256 of body with ['modifiedOn', 'modifiedBy', 'timestamp'] stripped",
+    "run1_status": "COMPLETE",
+    "run2_status": "COMPLETE",
+    "both_executions_reported_success": true,
+    "target_status_R0_R1_R2": [
+      200,
+      200,
+      200
+    ],
+    "target_business_R0_R1_R2": [
+      "affaf282ca56",
+      "1261974f8933",
+      "1261974f8933"
+    ],
+    "first_write_changed_business_state": true,
+    "resource_state_converged_R1_R2": true,
+    "full_state_identical_R1_R2": false,
+    "modifiedOn_R0": "2026-09-03T19:57:14.187Z",
+    "modifiedOn_R1": "2026-09-03T19:57:30.368Z",
+    "modifiedOn_R2": "2026-09-03T19:57:46.535Z",
+    "modifiedOn_moved_R1_to_R2": true,
+    "createdOn_stable_R1_to_R2": true,
+    "CONTROL_untouched_R0_R1_R2": true,
+    "control_sha256": "6d74d6d801bab603020acf79527706bc285a87560289127868a7f18563152c28",
+    "body_source_stable_across_runs": true
+  },
+  "platform_discrimination": {
+    "counterparty_statuses": [
+      "200",
+      "200"
+    ],
+    "send_stage_rows": [
+      "_QA_FIXTURE_155_PATCH_client"
+    ],
+    "discriminating_diffs": {
+      "gcr": {
+        "_TEST_155E7_src_GET_20260903195709": {
+          "actionType": [
+            "EXECUTE",
+            null
+          ],
+          "connectionName": [
+            "Sandbox CDS Mock REST (no-auth)",
+            null
+          ],
+          "connectorType": [
+            "officialboomi-X3979C-rest-prod",
+            null
+          ],
+          "documentIndex": [
+            0,
+            null
+          ],
+          "operationName": [
+            "_TEST_155E7_src_GET_20260903195709",
+            null
+          ],
+          "size": [
+            302,
+            null
+          ],
+          "status": [
+            "SUCCESS",
+            null
+          ]
+        }
+      },
+      "connector_rows": {}
+    }
+  },
+  "clock_skew_control": {
+    "host_before": "2026-09-03T19:57:20.546406+00:00",
+    "host_after": "2026-09-03T19:57:20.562249+00:00",
+    "container_stamps": [
+      "2026-09-03T19:57:20.504521759Z"
+    ],
+    "round_trip_ms": 15.843,
+    "last_stamp": "2026-09-03T19:57:20.504521759Z",
+    "stamp_within_host_bracket": false
+  }
+}

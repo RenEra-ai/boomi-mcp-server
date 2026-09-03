@@ -1,0 +1,70 @@
+[
+  {
+    "label": "run1",
+    "utc": "2026-09-03T19:57:40.865152+00:00",
+    "execute": {
+      "_success": true,
+      "request_id": "executionrecord-f65d7488-87e8-49d0-8f84-4bb2cb3a482f",
+      "process_id": "f630b002-47f3-4273-9389-c83d9e0fc363",
+      "environment_id": "b173ce8a-2d7f-41e3-9d3f-06e45d5b0de9",
+      "atom_id": "a40a3313-1537-47c4-91c7-573a703537c7",
+      "execution_result": {
+        "poll_status": "COMPLETED",
+        "elapsed_seconds": 13.9,
+        "poll_count": 7,
+        "execution_id": "execution-ca9b66f6-04c5-4d66-803c-8853974a8da8-2026.09.03",
+        "status": "COMPLETE",
+        "process_name": "_TEST_155E7_proc_PATCH_20260903195709",
+        "atom_name": "renera-local-atom",
+        "execution_time": "2026-09-03T19:57:29Z",
+        "execution_duration": 1174,
+        "inbound_document_count": 1,
+        "outbound_document_count": 2,
+        "inbound_error_document_count": 0,
+        "error": null
+      },
+      "execution_id": "execution-ca9b66f6-04c5-4d66-803c-8853974a8da8-2026.09.03"
+    },
+    "execution_id": "execution-ca9b66f6-04c5-4d66-803c-8853974a8da8-2026.09.03",
+    "window_start": "2026-09-03T19:57:22.560852+00:00",
+    "window_end": "2026-09-03T19:57:36.859932+00:00",
+    "status": "COMPLETE",
+    "inbound": 1,
+    "outbound": 2,
+    "error": null
+  },
+  {
+    "label": "run2_identical_replay",
+    "utc": "2026-09-03T19:58:01.413740+00:00",
+    "execute": {
+      "_success": true,
+      "request_id": "executionrecord-1604e0c4-5b5d-41fd-8d20-28d7ecf39cd3",
+      "process_id": "f630b002-47f3-4273-9389-c83d9e0fc363",
+      "environment_id": "b173ce8a-2d7f-41e3-9d3f-06e45d5b0de9",
+      "atom_id": "a40a3313-1537-47c4-91c7-573a703537c7",
+      "execution_result": {
+        "poll_status": "COMPLETED",
+        "elapsed_seconds": 16.2,
+        "poll_count": 8,
+        "execution_id": "execution-3fe259dd-d714-4d4f-bdef-acabae7f49e9-2026.09.03",
+        "status": "COMPLETE",
+        "process_name": "_TEST_155E7_proc_PATCH_20260903195709",
+        "atom_name": "renera-local-atom",
+        "execution_time": "2026-09-03T19:57:46Z",
+        "execution_duration": 754,
+        "inbound_document_count": 1,
+        "outbound_document_count": 2,
+        "inbound_error_document_count": 0,
+        "error": null
+      },
+      "execution_id": "execution-3fe259dd-d714-4d4f-bdef-acabae7f49e9-2026.09.03"
+    },
+    "execution_id": "execution-3fe259dd-d714-4d4f-bdef-acabae7f49e9-2026.09.03",
+    "window_start": "2026-09-03T19:57:40.896976+00:00",
+    "window_end": "2026-09-03T19:57:57.408698+00:00",
+    "status": "COMPLETE",
+    "inbound": 1,
+    "outbound": 2,
+    "error": null
+  }
+]

@@ -915,9 +915,15 @@ class ConnectorReplayEvidenceBindingAttestationV1(_AuthoringModel):
     connection_config_digest: Optional[str] = Field(
         default=None, pattern=r"^ComponentConfigDigestV1:[0-9a-f]{64}$"
     )
-    #: The KIND only. A static coverage enumerates the routes it covers, and a
-    #: route is a path — the one shape this record must never carry.
+    #: The KIND, and the digests the coverage actually enumerates. The kind alone
+    #: left an auditor able to read that SOME static coverage authorised a write
+    #: and never which route it covered — and once the registry rotates, nothing
+    #: can reconstruct it. Recording only the kind was justified on the ground
+    #: that a coverage "enumerates the routes it covers, and a route is a path";
+    #: the model enumerates `route_digests`, which are versioned one-way hashes,
+    #: so the reasoning was right about paths and wrong about the field.
     route_coverage_kind: Optional[NonEmptyString] = None
+    route_digests: tuple = ()
     capture_digest: Optional[str] = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     #: Service-wide coverage carries its OWN capture, and its digest can differ
     #: from the operation record's. Kept separately so the attestation can still

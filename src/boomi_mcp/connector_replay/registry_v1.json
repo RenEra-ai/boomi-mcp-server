@@ -236,8 +236,8 @@
    "account_scope_hash": "636bee2908a4c701926ca07c280703374adaef0eb8cdab907d2222267f75e0e2",
    "operation_identity": {
     "component_id": "485f3b01-fba5-4850-8281-2fc19decefb7",
-    "version": 1,
-    "config_digest": "ComponentConfigDigestV1:f17536a5c40b38f45ac096040d6b02db2623805881b7245bb052d652350eadc4"
+    "version": 2,
+    "config_digest": "ComponentConfigDigestV1:302b826e3b53b4a87a61fc0f6e5b28602923448f822883d006d21b3ea6fdf10c"
    },
    "connection_identity": {
     "component_id": "2fe488e4-3169-4529-9515-d854570c8ffc",
@@ -247,12 +247,12 @@
    "route_coverage": {
     "kind": "static_path",
     "route_digests": [
-     "RouteDigestV1:51ebcac8a02d2e9c5bb65963b8df6e3efde01fbba0a73fcfdf7b30e9bca5fdef"
+     "RouteDigestV1:02340f6fb83da9affd9819a1ea0a633373fdf91b0dcca533df446314a9109d46"
     ]
    },
    "capture": {
-    "execution_id": "execution-3663904b-b15c-43da-8970-2098154a02cb-2026.09.03",
-    "captured_at": "2026-09-03T05:56:40Z",
+    "execution_id": "execution-ca9b66f6-04c5-4d66-803c-8853974a8da8-2026.09.03",
+    "captured_at": "2026-09-03T19:57:29Z",
     "account_scope_hash": "636bee2908a4c701926ca07c280703374adaef0eb8cdab907d2222267f75e0e2",
     "summary": {
      "placement": "downstream",
@@ -267,9 +267,9 @@
       "execution_record"
      ]
     },
-    "capture_digest": "8e0bbd3e447b5e1eb82349c1db51c6f5e82da255b94716895eb40b9ecba5e2cb"
+    "capture_digest": "7b5dac1b83c5ebf7a949521465cfe09aff04314b7de00ee2146aff587a74daf5"
    },
-   "record_digest": "7c950c06cf1f3cce09f6d494cee70058d7f6e42467a43901e909834fd35d5ea5"
+   "record_digest": "e662c9e40ac8f568206afdd4e056a30b32ab04235876905c27986a247726a598"
   }
  ],
  "projection_allowlists": [

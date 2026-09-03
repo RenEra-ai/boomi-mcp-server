@@ -528,6 +528,26 @@ class ClosedCaptureObservationsV1(ReplayRegistryModel):
                 "The platform reports an execution complete even when the "
                 "counterparty refused the request"
             )
+        # ...AND A REPLAY CLAIM NEEDS ONE FOR THE SAME REASON. This validator
+        # covered the effect and left the replay observation beside it unguarded,
+        # though every replay value except "not exercised" is a statement about
+        # what a SECOND identical execution did to the counterparty — the same
+        # kind of fact, observable by the same single artifact. The gap was
+        # reachable: an operation record could name execution-side sources only,
+        # claim that a replay left the effect unchanged, be re-digested through
+        # the published minter so every other check agreed, and mint a grant.
+        # Provenance-shaped authorization is not evidence, and the source list is
+        # where that distinction lives.
+        if (
+            self.replay is not ReplayObservationV1.NOT_EXERCISED
+            and EvidenceSourceV1.ENDPOINT_READBACK not in self.sources
+        ):
+            raise ValueError(
+                f"replay {self.replay.value!r} states what a second identical "
+                "execution did to the counterparty, and only an endpoint readback "
+                "observes that. An execution record reports that a call completed, "
+                "not what it left behind"
+            )
         return self
 
 

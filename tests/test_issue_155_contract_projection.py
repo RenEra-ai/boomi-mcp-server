@@ -486,6 +486,7 @@ def test_the_compile_route_can_place_a_record_for_a_component_the_author_names()
     deferred-live-read decision intact for every plan that creates its
     components.
     """
+    from _m12_11_support import ingested_operation_capture
     from unittest.mock import MagicMock
 
     from boomi_mcp.authoring.connector_resolution_snapshot import (
@@ -521,7 +522,7 @@ def test_the_compile_route_can_place_a_record_for_a_component_the_author_names()
     # produces.
     captures = (Path(__file__).resolve().parents[1]
                 / "docs/architecture/evidence/issue-155/captures"
-                / "cap155-e7-patch-operation-record")
+                / ingested_operation_capture())
     operation_xml = (captures / "component_op_tgt.xml").read_text(encoding="utf-8")
     connection_xml = (captures / "component_connection.xml").read_text(encoding="utf-8")
 
@@ -606,6 +607,7 @@ def test_the_public_compile_entry_reads_a_named_component_and_stringifies_it():
     from _m12_11_support import (  # noqa: E402
         APPLIABLE_CONN,
         APPLIABLE_OP,
+        appliable_op_matching_the_capture,
         appliable_process_ir_request,
     )
 
@@ -622,7 +624,7 @@ def test_the_public_compile_entry_reads_a_named_component_and_stringifies_it():
 
     request = appliable_process_ir_request(components=(
         dict(APPLIABLE_CONN, component_id=connection.component_id, action="update"),
-        dict(APPLIABLE_OP, component_id=operation.component_id, action="update"),
+        dict(appliable_op_matching_the_capture(), component_id=operation.component_id, action="update"),
     ))
     with patch("boomi_mcp.categories.components._shared.component_get_xml", _get_xml), \
          patch("boomi_mcp.categories.integration_builder.paginate_metadata",
@@ -653,6 +655,7 @@ def test_an_authored_reference_only_reuse_compiles_a_retried_evidenced_write():
     `key_reference` naming the packaged contract — the thing that refused for
     want of evidence at every earlier point in this slice.
     """
+    from _m12_11_support import ingested_operation_capture
     from unittest.mock import MagicMock
 
     from boomi_mcp.authoring.workflow import compile_authoring_request_v1
@@ -663,6 +666,7 @@ def test_an_authored_reference_only_reuse_compiles_a_retried_evidenced_write():
     from _m12_11_support import (  # noqa: E402
         APPLIABLE_CONN,
         APPLIABLE_OP,
+        appliable_op_matching_the_capture,
         ProcessAuthoringUnitV1,
         ProcessComponentEnvelopeV1,
         appliable_process_ir_request,
@@ -674,7 +678,7 @@ def test_an_authored_reference_only_reuse_compiles_a_retried_evidenced_write():
     operation, connection = record.operation_identity, record.connection_identity
     captures = (Path(__file__).resolve().parents[1]
                 / "docs/architecture/evidence/issue-155/captures"
-                / "cap155-e7-patch-operation-record")
+                / ingested_operation_capture())
     operation_xml = (captures / "component_op_tgt.xml").read_text(encoding="utf-8")
     connection_xml = (captures / "component_connection.xml").read_text(encoding="utf-8")
 
@@ -717,11 +721,9 @@ def test_an_authored_reference_only_reuse_compiles_a_retried_evidenced_write():
             dict(APPLIABLE_CONN, component_id=connection.component_id,
                  action="create",
                  config=dict(APPLIABLE_CONN["config"], reference_only=True)),
-            dict(APPLIABLE_OP, component_id=operation.component_id, action="create",
-                 config=dict(APPLIABLE_OP["config"], reference_only=True,
-                             method="PATCH",
-                             path="/admin/cdscm/api/v1/clients/"
-                                  "41172938-b9bd-4495-b411-9851f5ac7b00")),
+            dict(appliable_op_matching_the_capture(), component_id=operation.component_id, action="create",
+                 config=dict(appliable_op_matching_the_capture()["config"], reference_only=True,
+                             method="PATCH")),
             dict(APPLIABLE_OP, key="getop", name="M12.15 get", action="create",
                  config=dict(APPLIABLE_OP["config"], component_name="M12.15 get")),
         ),
@@ -757,6 +759,7 @@ def _evidenced_reference_only_request():
     from _m12_11_support import (  # noqa: E402
         APPLIABLE_CONN,
         APPLIABLE_OP,
+        appliable_op_matching_the_capture,
         ProcessAuthoringUnitV1,
         ProcessComponentEnvelopeV1,
         appliable_process_ir_request,
@@ -782,11 +785,9 @@ def _evidenced_reference_only_request():
             dict(APPLIABLE_CONN, component_id=connection.component_id,
                  action="create",
                  config=dict(APPLIABLE_CONN["config"], reference_only=True)),
-            dict(APPLIABLE_OP, component_id=operation.component_id, action="create",
-                 config=dict(APPLIABLE_OP["config"], reference_only=True,
-                             method="PATCH",
-                             path="/admin/cdscm/api/v1/clients/"
-                                  "41172938-b9bd-4495-b411-9851f5ac7b00")),
+            dict(appliable_op_matching_the_capture(), component_id=operation.component_id, action="create",
+                 config=dict(appliable_op_matching_the_capture()["config"], reference_only=True,
+                             method="PATCH")),
             dict(APPLIABLE_OP, key="getop", name="M12.15 get", action="create",
                  config=dict(APPLIABLE_OP["config"], component_name="M12.15 get")),
         ),
@@ -806,6 +807,7 @@ def test_the_evidenced_write_survives_the_wet_apply_route_not_only_compile():
     entry with `dry_run` false and lets the write happen against a faked
     network, instead of asserting on a helper.
     """
+    from _m12_11_support import ingested_operation_capture
     import json
     from unittest.mock import MagicMock, patch
 
@@ -814,7 +816,7 @@ def test_the_evidenced_write_survives_the_wet_apply_route_not_only_compile():
     record, operation, connection, request = _evidenced_reference_only_request()
     captures = (Path(__file__).resolve().parents[1]
                 / "docs/architecture/evidence/issue-155/captures"
-                / "cap155-e7-patch-operation-record")
+                / ingested_operation_capture())
     operation_xml = (captures / "component_op_tgt.xml").read_text(encoding="utf-8")
     connection_xml = (captures / "component_connection.xml").read_text(encoding="utf-8")
 
@@ -892,6 +894,7 @@ def test_an_unreadable_live_component_refuses_rather_than_trusting_the_caller():
     consulted and failing to answer, which this module already refuses when the
     FETCH fails; it now refuses when the fetch succeeds and the bytes do not.
     """
+    from _m12_11_support import ingested_operation_capture
     import pathlib
     from unittest.mock import patch
 
@@ -906,6 +909,7 @@ def test_an_unreadable_live_component_refuses_rather_than_trusting_the_caller():
     from _m12_11_support import (  # noqa: E402
         APPLIABLE_CONN,
         APPLIABLE_OP,
+        appliable_op_matching_the_capture,
         ProcessAuthoringUnitV1,
         ProcessComponentEnvelopeV1,
         appliable_process_ir_request,
@@ -925,7 +929,7 @@ def test_an_unreadable_live_component_refuses_rather_than_trusting_the_caller():
     operation, connection = record.operation_identity, record.connection_identity
     captures = (Path(__file__).resolve().parents[1]
                 / "docs/architecture/evidence/issue-155/captures"
-                / "cap155-e7-patch-operation-record")
+                / ingested_operation_capture())
     connection_xml = (captures / "component_connection.xml").read_text(encoding="utf-8")
 
     # DECLARED GET over a component the account actually holds as a PATCH, inside
@@ -941,8 +945,8 @@ def test_an_unreadable_live_component_refuses_rather_than_trusting_the_caller():
         components=(
             dict(APPLIABLE_CONN, component_id=connection.component_id, action="create",
                  config=dict(APPLIABLE_CONN["config"], reference_only=True)),
-            dict(APPLIABLE_OP, component_id=operation.component_id, action="create",
-                 config=dict(APPLIABLE_OP["config"], reference_only=True, method="GET")),
+            dict(appliable_op_matching_the_capture(), component_id=operation.component_id, action="create",
+                 config=dict(appliable_op_matching_the_capture()["config"], reference_only=True, method="GET")),
             dict(APPLIABLE_OP, key="getop", name="G",
                  config=dict(APPLIABLE_OP["config"], component_name="G")),
         ),

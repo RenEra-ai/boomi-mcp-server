@@ -1,0 +1,41 @@
+{
+  "method": "parsed-datetime window attribution",
+  "verb": "PATCH",
+  "target_path": "/admin/cdscm/api/v1/clients/41172938-b9bd-4495-b411-9851f5ac7b00-drift",
+  "readback_path": "/admin/cdscm/api/v1/clients/41172938-b9bd-4495-b411-9851f5ac7b00-drift",
+  "executions": 2,
+  "logged_requests_of_verb_on_target": 2,
+  "window_overlaps": [],
+  "attributed": [
+    {
+      "execution_label": "run1",
+      "ts": "2026-09-03T19:57:30.376242000Z",
+      "method": "PATCH",
+      "path": "/admin/cdscm/api/v1/clients/41172938-b9bd-4495-b411-9851f5ac7b00-drift",
+      "status": "200",
+      "reason": "OK",
+      "line": "2026-09-03T19:57:30.376242000Z INFO:     192.168.65.1:36731 - \"PATCH /admin/cdscm/api/v1/clients/41172938-b9bd-4495-b411-9851f5ac7b00-drift HTTP/1.1\" 200 OK",
+      "plain": "INFO:     192.168.65.1:36731 - \"PATCH /admin/cdscm/api/v1/clients/41172938-b9bd-4495-b411-9851f5ac7b00-drift HTTP/1.1\" 200 OK",
+      "execution_id": "execution-ca9b66f6-04c5-4d66-803c-8853974a8da8-2026.09.03"
+    },
+    {
+      "execution_label": "run2_identical_replay",
+      "ts": "2026-09-03T19:57:46.543314966Z",
+      "method": "PATCH",
+      "path": "/admin/cdscm/api/v1/clients/41172938-b9bd-4495-b411-9851f5ac7b00-drift",
+      "status": "200",
+      "reason": "OK",
+      "line": "2026-09-03T19:57:46.543314966Z INFO:     192.168.65.1:44103 - \"PATCH /admin/cdscm/api/v1/clients/41172938-b9bd-4495-b411-9851f5ac7b00-drift HTTP/1.1\" 200 OK",
+      "plain": "INFO:     192.168.65.1:44103 - \"PATCH /admin/cdscm/api/v1/clients/41172938-b9bd-4495-b411-9851f5ac7b00-drift HTTP/1.1\" 200 OK",
+      "execution_id": "execution-3fe259dd-d714-4d4f-bdef-acabae7f49e9-2026.09.03"
+    }
+  ],
+  "unattributed": [],
+  "per_execution_counts": {
+    "run1": 1,
+    "run2_identical_replay": 1
+  },
+  "exactly_one_request_per_execution": true,
+  "log_covers_both_executions": true,
+  "agrees_with_string_comparison_pass": true
+}

@@ -1,0 +1,19 @@
+{
+  "utc": "2026-09-03T19:58:01.436786+00:00",
+  "path": "/admin/cdscm/api/v1/clients/eb13eddf-8b6e-4140-a618-2fe3ed34f964",
+  "status": 200,
+  "sha256": "6d74d6d801bab603020acf79527706bc285a87560289127868a7f18563152c28",
+  "bytes": 263,
+  "body": {
+    "clientId": "_E7_CTL_20260903195709",
+    "name": "E7 Untouched Control",
+    "status": "PENDING",
+    "key": "eb13eddf-8b6e-4140-a618-2fe3ed34f964",
+    "createdOn": "2026-09-03T19:57:14.199Z",
+    "createdBy": "integration",
+    "modifiedOn": "2026-09-03T19:57:14.199Z",
+    "modifiedBy": "integration"
+  },
+  "label": "control R2_after",
+  "business_sha256": "5a02ae2208de432a99ec3fc8b1c603c837aeaba29e2ea8e3a106d67f964233b0"
+}
