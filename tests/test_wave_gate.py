@@ -5964,6 +5964,16 @@ def test_audit_ledger_attestations_have_durable_matching_evidence():
         "architect-reviews/cdx-gate-review.GPK3M5": "failed",
         # failed run, replaced by cdx-review.Kkf8n6 over the same scope
         "commit-reviews/cdx-review.kXfU2v": "failed",
+        # #155 L2 issue-level round 8: the turn ended `status:"failed"` with
+        # "Reviewer failed to output a response" after ZERO elapsed minutes — not
+        # a wedge, not a timeout, and nothing to interrupt: the `review` call
+        # returned running and the turn came back terminal and empty almost
+        # immediately. Collected `--outcome failed`, so no `last-reviewed-sha`
+        # was written and the re-run reviews the SAME delta rather than
+        # inheriting a shrunken scope. Not an evaluation: it produced no
+        # decision-bearing result, so it neither consumes a checkpoint window nor
+        # counts toward the loop's trend.
+        "commit-reviews/cdx-review.vZRYC4": "failed",
         # #153 L2 round 26: STUCK — 58 events, then 18 minutes of total silence.
         # Aborted with `interrupt` and collected `failed`, so no
         # `last-reviewed-sha` was written and the next round re-reviews the SAME
