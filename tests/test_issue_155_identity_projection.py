@@ -4069,3 +4069,78 @@ def test_the_normalizer_is_the_only_place_a_path_is_trimmed():
     # ...and it is still a real comparison, not a trim that swallows everything.
     with pytest.raises(ConnectorIdentityError):
         _compare(_live_op(path="/Orders/42"), {"op_patch": "  /orders/42  "})
+
+
+def test_a_component_storing_two_routes_is_refused_rather_than_marked():
+    """The branch that did nothing, replaced by the one the finding also offered.
+
+    The reviewer's options were "mark this state unavailable OR reject the
+    conflicting fields". Marking it was measured INERT by live QA: an ambiguous
+    component still accepted an unrelated declared path, byte-for-byte as at the
+    baseline, because nothing distinguishes `unavailable` from `static` on the
+    paths that consume it. The branch existed and changed no served behaviour.
+
+    So the refusal is the fix. It is a property of the COMPONENT rather than of
+    any declaration — a component storing two routes cannot serve one, so there
+    is nothing a caller could declare that would be checkable against it, and it
+    refuses whether or not a path was declared. Genuine unreadability keeps its
+    silence: this is the case where the account WAS read and contradicts itself.
+    """
+    import re
+
+    from boomi_mcp.authoring.connector_resolution_snapshot import (
+        ConnectorIdentityError,
+        TrustedConnectorResolutionSnapshotV1,
+        assert_declared_matches_resolved,
+        live_identity_from_component_xml,
+    )
+
+    xml = _captured_operation_xml()
+    field = re.search(r'<field id="path"[^>]*/>', xml).group(0)
+    ambiguous = live_identity_from_component_xml(
+        "op_patch", xml.replace(field, field + field.replace('value="', 'value="/other', 1), 1)
+    )
+    assert ambiguous.route_conflicting is True, ambiguous
+
+    snapshot = TrustedConnectorResolutionSnapshotV1(identities=(ambiguous,))
+    for label, paths in (("a declared path", {"op_patch": "/anything"}), ("no declaration", {})):
+        with pytest.raises(ConnectorIdentityError) as raised:
+            assert_declared_matches_resolved(snapshot, {"op_patch": ("http", "PATCH")}, paths)
+        assert raised.value.field == "path", label
+        # The values stay redacted here too — a stored route can carry a token.
+        assert "/other" not in str(raised.value), label
+
+    # CONTROL: one stored route, and the same document is fine.
+    single = live_identity_from_component_xml("op_patch", xml)
+    assert not single.route_conflicting
+    assert assert_declared_matches_resolved(
+        TrustedConnectorResolutionSnapshotV1(identities=(single,)),
+        {"op_patch": ("http", "PATCH")}, {},
+    ) is not None
+
+
+def test_every_identity_refusal_names_the_field_it_is_about():
+    """A machine reader had only an English sentence to go on.
+
+    Live QA measured the served refusal for a path mismatch: `field` empty, no
+    evidence, no cause codes, no contract entry id — and the generic remediation
+    it inherited told the caller to correct the family and the action, the two
+    fields that were RIGHT. A caller following it literally edits what is already
+    correct.
+    """
+    from boomi_mcp.authoring.connector_resolution_snapshot import (
+        ConnectorIdentityError,
+        TrustedConnectorResolutionSnapshotV1,
+        assert_declared_matches_resolved,
+    )
+
+    snapshot = TrustedConnectorResolutionSnapshotV1(identities=(_live_op(path="/a"),))
+    for declared, paths, expected in (
+        (("http", "PATCH"), {"op_patch": "/b"}, "path"),
+        (("http", "DELETE"), {}, "action"),
+    ):
+        with pytest.raises(ConnectorIdentityError) as raised:
+            assert_declared_matches_resolved(snapshot, {"op_patch": declared}, paths)
+        assert raised.value.field == expected, (declared, raised.value.field)
+        # ...and on the OUTER exception, which is the one every surface renders.
+        assert raised.value.failures[0].field == expected

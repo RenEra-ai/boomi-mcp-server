@@ -58,10 +58,19 @@ class ConnectorIdentityError(Exception):
         component_key: str,
         failures: "Tuple[ConnectorIdentityError, ...]" = (),
         partial: "Optional[TrustedConnectorResolutionSnapshotV1]" = None,
+        field: "Optional[str]" = None,
     ) -> None:
         super().__init__(message)
         self.code = code
         self.component_key = component_key
+        #: WHICH DECLARED FIELD disagreed, as a token rather than as English. Live
+        #: QA measured the gap this closes: a path mismatch served `field: ""`,
+        #: no evidence, no cause codes and no contract entry id, so the only
+        #: statement of what was wrong sat inside a sentence — and the generic
+        #: remediation it inherited told the caller to correct the family and the
+        #: action, which are the two fields that were right. A caller following
+        #: it literally edits what is already correct.
+        self.field = field
         #: EVERY component that failed, not just the first. A surface whose
         #: contract is to report everything wrong at once cannot honour it if the
         #: builder stops at the first bad component — and the surface that
@@ -116,6 +125,11 @@ class ResolvedConnectorComponentIdentityV1(_SnapshotModel):
     path: Optional[str] = None
     #: ``"static"`` | ``"dynamic"`` | ``"unavailable"`` — see the projection.
     route_state: str = "unavailable"
+    #: Whether the account stores MORE THAN ONE distinct non-blank route for this
+    #: component. Its own field because it is not a degree of unreadability: a
+    #: route we could not find is silence, and a route that contradicts itself is
+    #: a component that cannot serve one.
+    route_conflicting: Optional[bool] = None
     #: Whether the document carried a BLANK operation type beside anything else.
     #: Separate from ``action_contradicted`` because the two rungs that read this
     #: model want opposite things: the rung that REFUSES caller bytes treats a
@@ -565,6 +579,18 @@ def live_identity_from_component_xml(
     # component this reader cannot describe with one value — recording either
     # would be inventing the answer the ambiguity denies.
     stored_paths = {(value or "").strip() for value in path_fields}
+    #: TWO DIFFERENT STORED PATHS is a property of the COMPONENT, not of any
+    #: declaration about it — the component cannot serve one route, so there is
+    #: nothing a caller could declare that would be checkable against it. Recorded
+    #: as its own fact rather than folded into `route_state`: live QA measured
+    #: that marking such a component `unavailable` changed no served behaviour at
+    #: all, because nothing distinguishes `unavailable` from `static` on the paths
+    #: that consume it — the branch existed and did nothing. Genuine
+    #: unreadability keeps its silence; this is the case where we CAN read and
+    #: what we read contradicts itself.
+    route_conflicting = bool(path_fields) and len(
+        {p for p in stored_paths if p}
+    ) > 1
     live_path = (
         stored_paths.pop() if route_state == "static" and len(stored_paths) == 1
         else None
@@ -575,6 +601,7 @@ def live_identity_from_component_xml(
         family=family,
         action=action,
         route_state=route_state,
+        route_conflicting=route_conflicting or None,
         path=live_path or None,
         source="live",
         authority="live_readback_xml",
@@ -892,12 +919,19 @@ def build_connector_resolution_snapshot(
     if declared:
         try:
             # THE PATHS TOO, derived here from the components this function is
-            # already resolving. Without them the typed plan and compile route
-            # compared family and action and skipped the path, so a declaration
-            # naming a path the account does not store compiled CLEAN and was
-            # refused only at wet apply — a preview that disagrees with the write
-            # it previews, which is the asymmetry this repository has been caught
-            # by before and in this same direction.
+            # already resolving. Without them the COMPILE route compared family
+            # and action and skipped the path, so a declaration naming a path the
+            # account does not store compiled CLEAN and was refused only at wet
+            # apply — a preview that disagrees with the write it previews, which
+            # is an asymmetry this repository has been caught by before.
+            #
+            # SAID SMALLER THAN IT WAS FIRST WRITTEN, because live QA measured
+            # the larger claim false: this comment named "the typed plan and
+            # compile route", and `plan` performs no declared-versus-live
+            # comparison AT ALL — not path, not action, not family, identically
+            # before and after this change. That gap is pre-existing and is
+            # recorded as its own finding rather than described away here; what
+            # this call fixes is compile, and the comment now says only that.
             assert_declared_matches_resolved(
                 snapshot, declared, declared_paths_from_components(components)
             )
@@ -996,6 +1030,25 @@ def assert_declared_matches_resolved(
         # path that differs from the account's compiled clean, the live path
         # executed, and the served envelope echoed the caller's own value back,
         # so the one value shown was the one that would not be used.
+        # A CONTRADICTORY STORED ROUTE REFUSES, whatever was declared. The
+        # comparison's usual posture — "I could not tell" is not evidence a
+        # declaration is wrong — does not apply here, because this is not a
+        # failure to read: the account was read, and it holds two different routes
+        # for one component. No declaration can be checked against that, and a
+        # process reusing it would call whichever the platform picks. Refusing at
+        # the write boundary is the only answer that is not a guess.
+        if identity.route_conflicting:
+            mismatches.append(ConnectorIdentityError(
+                CONNECTOR_REPLAY_IDENTITY_MISMATCH,
+                (
+                    "component {0!r} is stored with more than one route, so it "
+                    "cannot serve a single one and no declaration can be checked "
+                    "against it. Remove the surplus path from the component."
+                ).format(key),
+                component_key=key,
+                field="path",
+            ))
+            continue
         declared_path = (declared_paths or {}).get(key)
         live_path = identity.path if identity.route_state == "static" else None
         # CASE FOLDING IS PER FIELD, because the fields are not the same kind of
@@ -1065,12 +1118,17 @@ def assert_declared_matches_resolved(
                         mine if show else "<redacted>",
                     ),
                     component_key=key,
+                    field=label,
                 ))
     if mismatches:
         first = mismatches[0]
+        # THE FIELD TRAVELS WITH THE CODE. Every surface that renders one of these
+        # reads the outer exception, so a field carried only on the inner one is a
+        # field nothing serves — which is the defect this attribute was added to
+        # close, reproduced one layer out.
         raise ConnectorIdentityError(
             first.code, str(first), component_key=first.component_key,
-            failures=tuple(mismatches),
+            failures=tuple(mismatches), field=first.field,
         )
     return dict(declared)
 

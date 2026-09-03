@@ -2512,11 +2512,19 @@ def test_a_verdict_outside_the_protocol_enum_is_not_a_verdict(tmp_path):
         (run / "review.md").write_text("findings\n\nVERDICT: %s\n" % bogus)
         assert architect_verdict_from_artifact(run, {}) is None, bogus
 
-    # The attestation branch is untouched: that value came from the collector's
-    # own parser under the shared rule, and this function is not a second opinion
-    # on it.
-    (run / "review.md").write_text("findings\n\nVERDICT: BANANA\n")
+    # BOTH branches are bound by the enum. An earlier version exempted the
+    # attestation on the reasoning that the collector had already parsed it —
+    # but the collector's shared rule can yield `UNCLEAR`, which the gate prompt
+    # does not define, and a constraint applied to one of two paths producing the
+    # same field constrains neither.
+    (run / "review.md").write_text("findings\n\nVERDICT: NO ISSUES\n")
     assert architect_verdict_from_artifact(run, {"parsedVerdict": "NO ISSUES"}) == "NO ISSUES"
+    for bogus in ("UNCLEAR", "BANANA", "no issues", ""):
+        # Falls through to the artifact, which here carries a valid one...
+        assert architect_verdict_from_artifact(run, {"parsedVerdict": bogus}) == "NO ISSUES", bogus
+    # ...and when neither source is well-formed, there is no verdict at all.
+    (run / "review.md").write_text("findings\n\nVERDICT: BANANA\n")
+    assert architect_verdict_from_artifact(run, {"parsedVerdict": "UNCLEAR"}) is None
 
 
 def test_an_undecodable_artifact_yields_no_verdict_rather_than_raising(tmp_path):

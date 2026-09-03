@@ -254,9 +254,17 @@ def architect_verdict_from_artifact(run_dir: Path, attestation: dict):
     # STRIPPED, because `not "\n"` is False and a whitespace-only verdict would
     # otherwise satisfy this the way it once satisfied the check this replaced.
     attested = attestation.get("parsedVerdict")
-    if isinstance(attested, str) and attested.strip():
+    if isinstance(attested, str) and attested.strip() in ARCHITECT_VERDICTS:
         # The collector's own parser produced this one, under the shared rule.
-        return attested
+        return attested.strip()
+    # THE ENUM IS THE PROTOCOL, so it binds BOTH sources. The first version
+    # exempted this branch on the reasoning that the collector had already parsed
+    # it — but the collector's shared rule can also yield `UNCLEAR`, which is not
+    # one of the two verdicts the gate prompt defines, and any other string it
+    # returned would have been archived verbatim. A constraint applied to one of
+    # two paths that produce the same field is a constraint on neither. Falling
+    # through rather than refusing outright: the artifact may still carry a
+    # well-formed verdict when the collector could not parse one.
     artifact = run_dir / "review.md"
     if not artifact.is_file():
         return None
