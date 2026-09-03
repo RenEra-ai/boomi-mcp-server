@@ -232,6 +232,31 @@ ARCHITECT_ROW_PATHS = {
     "verdict": ("parsedVerdict",),
 }
 
+#: THE COLLECTOR STOPPED SOURCING A VERDICT FOR ARCHITECT ROUNDS. It parses one
+#: only for a `review` gate and writes an explicit null for an `architect` one,
+#: so a round collected by the installed runtime carries the key with no value
+#: while seven older archives here carry a populated one. Requiring a value the
+#: producer no longer emits would refuse every future architect round.
+#:
+#: The verdict is DERIVED from the artifact instead, and only from its own final
+#: line — the same one shared rule the collector applies, over bytes the
+#: attestation already binds by sha256. Nothing here is typed by hand: an
+#: artifact whose last non-empty line is not a verdict yields none, and the round
+#: is archived without one rather than with a guess.
+def architect_verdict_from_artifact(run_dir: Path, attestation: dict):
+    """The verdict a collected architect round carries, or None."""
+    if attestation.get("parsedVerdict"):
+        return attestation["parsedVerdict"]
+    artifact = run_dir / "review.md"
+    if not artifact.is_file():
+        return None
+    lines = [l.strip() for l in artifact.read_text(encoding="utf-8").splitlines()]
+    for line in reversed(lines):
+        if not line:
+            continue
+        return line[len("VERDICT:"):].strip() if line.startswith("VERDICT:") else None
+    return None
+
 #: The attestation `gate-attest` writes carries no reviewed SHA under any
 #: spelling — checked against a real one, whose top-level keys are schema,
 #: gateProtocol, gate, collectedAt, start, prompt, turn, artifact, inputPlan,
@@ -319,6 +344,10 @@ def derive_row(kind: str, run_dir: Path, durable: Path, rel_root: Path,
         refusal = read_json(durable, "refusal.json")
         row.update({name: _dig(attestation, path)
                     for name, path in ARCHITECT_ROW_PATHS.items()})
+        if not row.get("verdict"):
+            # DERIVED from the artifact, because the installed collector no
+            # longer sources one for this gate. See the note above the helper.
+            row["verdict"] = architect_verdict_from_artifact(durable, attestation or {})
         row["reviewed_sha"] = ARCHITECT_ROUND_RECORDS_NO_REVIEWED_SHA
         if status_override:
             row["status"] = status_override
@@ -731,7 +760,10 @@ READ_JSON_BY_KIND = {
 CONSUMER_REQUIRES = {
     "architect-review": {
         "attestation.json": (
-            ("teardown",), ("turn", "status"), ("parsedVerdict",),
+            # `parsedVerdict` is NOT required here any more: the installed
+            # collector writes it null for an architect gate, and the verdict is
+            # derived from the artifact the attestation binds instead.
+            ("teardown",), ("turn", "status"),
             ("artifact", "path"), ("artifact", "sha256"),
             ("start", "threadId"), ("prompt", "actualSha256"),
         ),
@@ -1190,10 +1222,18 @@ def main() -> int:
             # so the membership test succeeds and `_discard` does run; it then
             # raises in the refusal message, where it is not subscriptable. Only
             # the first leaves debris. Both are refused here instead.
+            # `verdict` is EXEMPT from this resolution check, and only it. The
+            # installed collector writes `parsedVerdict` null for an architect
+            # gate — it parses one only for a `review` gate — so demanding a
+            # string here would refuse every round the current runtime produces.
+            # It is derived from the artifact instead, over bytes the attestation
+            # binds by sha256; if that derivation also finds none, the round is
+            # archived without a verdict rather than with an invented one.
             unresolved = sorted(
                 name for name, path in ARCHITECT_ROW_PATHS.items()
-                if not isinstance(_dig(attestation, path), str)
-                or not _dig(attestation, path).strip()
+                if name != "verdict"
+                and (not isinstance(_dig(attestation, path), str)
+                     or not _dig(attestation, path).strip())
             )
             if unresolved:
                 if not _remove_confirmed(durable):

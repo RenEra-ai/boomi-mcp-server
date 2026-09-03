@@ -1,0 +1,12 @@
+Approvals are unavailable in this read-only review session, and no tool call you
+make will be granted. Do not wait for one and do not ask for permission.
+
+Produce the §6 architect implementation review NOW, as plain text, from what you
+have already read. Judge issue #155 against the design plan you were given:
+plan conformance slice by slice, whether the replay-evidence chain is sound end to
+end or merely long, whether the capability flip is honest against the one positive
+row that supports it, what the next issue inherits and regrets, and what you would
+refuse to sign off for closing.
+
+END your response with a verdict on its own final line: exactly
+'VERDICT: NO ISSUES' or 'VERDICT: ISSUES FOUND'.

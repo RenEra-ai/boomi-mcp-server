@@ -6249,7 +6249,29 @@ def test_audit_ledger_attestations_have_durable_matching_evidence():
                     att = json.loads((run_dir / "attestation.json").read_text())
                     assert att["teardown"] == "confirmed", where
                     assert att["turn"]["status"] == "completed", where
-                    assert att.get("parsedVerdict"), where
+                    # THE VERDICT, from whichever party actually sources it. The
+                    # collector parses one only for a `review` gate and writes an
+                    # explicit null for an `architect` one, so seven older
+                    # architect archives here carry a value and every round the
+                    # installed runtime produces carries none. Demanding it from
+                    # the attestation alone would refuse a correctly collected,
+                    # fully attested round — a gate blocking correct work, which
+                    # is the worse failure. The fallback reads the FINAL line of
+                    # the artifact the attestation binds by sha256, so it is the
+                    # same bytes and nothing is typed by hand.
+                    verdict = att.get("parsedVerdict")
+                    if not verdict:
+                        artifact = run_dir / "review.md"
+                        if artifact.is_file():
+                            for line in reversed(
+                                [l.strip() for l in
+                                 artifact.read_text(encoding="utf-8").splitlines()]
+                            ):
+                                if line:
+                                    if line.startswith("VERDICT:"):
+                                        verdict = line[len("VERDICT:"):].strip()
+                                    break
+                    assert verdict, where
                     # BIND attestation to THIS run's identity: its artifact must
                     # BE this run's review.md (normalized exact path — a `..`
                     # traversal that merely starts with the source prefix must
@@ -6272,8 +6294,13 @@ def test_audit_ledger_attestations_have_durable_matching_evidence():
                     assert att_thread == start_thread, (
                         where + ": attestation thread != archived start.json"
                     )
-                    assert row.get("verdict") == att["parsedVerdict"], (
-                        where + ": row verdict != attested parsedVerdict"
+                    # Against whichever source actually carries it — the
+                    # attestation when the collector sourced one, otherwise the
+                    # artifact it binds. The row must never DISAGREE with the
+                    # attested verdict; it may only supply one the attestation
+                    # left null, and only by reading the same bytes.
+                    assert row.get("verdict") == verdict, (
+                        where + ": row verdict != the verdict its evidence carries"
                     )
                     assert _sha256(run_dir / "review.md") == att["artifact"]["sha256"], (
                         where + ": review.md does not match its attestation"
