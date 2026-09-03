@@ -11491,49 +11491,48 @@
 {"kind": "test", "id": "pytest-011490", "node_id": "tests/test_issue_155_contract_projection.py::test_the_public_compile_entry_reads_a_named_component_and_stringifies_it", "state": "active"}
 {"kind": "test", "id": "pytest-011491", "node_id": "tests/test_issue_155_contract_projection.py::test_an_authored_reference_only_reuse_compiles_a_retried_evidenced_write", "state": "active"}
 {"kind": "test", "id": "pytest-011492", "node_id": "tests/test_issue_155_contract_projection.py::test_the_evidenced_write_survives_the_wet_apply_route_not_only_compile", "state": "active"}
-{"kind": "test", "id": "pytest-011493", "node_id": "tests/test_issue_155_contract_projection.py::test_an_unreadable_live_component_refuses_rather_than_trusting_the_caller", "state": "active"}
-{"kind": "test", "id": "pytest-011494", "node_id": "tests/test_connector_replay_review_round3.py::test_an_operation_record_cannot_authorise_a_replay_its_capture_never_saw", "state": "active"}
+{"kind": "test", "id": "pytest-011493", "node_id": "tests/test_archive_gate_round.py::test_a_verdict_outside_the_protocol_enum_is_not_a_verdict", "state": "active"}
+{"kind": "test", "id": "pytest-011494", "node_id": "tests/test_archive_gate_round.py::test_an_undecodable_artifact_yields_no_verdict_rather_than_raising", "state": "active"}
 {"kind": "test", "id": "pytest-011495", "node_id": "tests/test_canonical_process_apply.py::test_one_consumed_grant_is_attested_once", "state": "active"}
 {"kind": "test", "id": "pytest-011496", "node_id": "tests/test_canonical_process_apply.py::test_the_binding_order_is_the_key_the_contract_names", "state": "active"}
 {"kind": "test", "id": "pytest-011497", "node_id": "tests/test_canonical_process_apply.py::test_a_binding_from_another_account_refuses_rather_than_being_attested", "state": "active"}
 {"kind": "test", "id": "pytest-011498", "node_id": "tests/test_canonical_process_apply.py::test_the_attestation_records_what_the_boundary_compared", "state": "active"}
 {"kind": "test", "id": "pytest-011499", "node_id": "tests/test_connector_replay_review_round3.py::test_the_wave_evidence_rule_admits_only_a_supported_row[abc1234-, archived `wave-gate/ok`-attested7-the row quotes 11037 for suite.passed but ok attests 1]", "state": "active"}
-{"kind": "test", "id": "pytest-011500", "node_id": "tests/test_connector_replay_review_round3.py::test_a_summary_that_attests_nothing_is_refused", "state": "active"}
-{"kind": "test", "id": "pytest-011501", "node_id": "tests/test_connector_replay_review_round3.py::test_a_count_written_as_text_is_not_a_count", "state": "active"}
-{"kind": "test", "id": "pytest-011502", "node_id": "tests/test_connector_replay_review_round3.py::test_a_row_that_states_no_figure_for_a_required_arm_is_refused", "state": "active"}
-{"kind": "test", "id": "pytest-011503", "node_id": "tests/test_connector_replay_review_round3.py::test_the_wave_contract_matches_every_archived_summary", "state": "active"}
-{"kind": "test", "id": "pytest-011504", "node_id": "tests/test_issue_155_contract_projection.py::test_a_minted_grant_names_its_root_and_its_connection", "state": "active"}
-{"kind": "test", "id": "pytest-011505", "node_id": "tests/test_issue_155_contract_projection.py::test_the_relocatable_compile_cannot_be_the_evidence_gate", "state": "active"}
-{"kind": "test", "id": "pytest-011506", "node_id": "tests/test_issue_155_discovery.py::test_an_empty_list_says_whether_evidence_exists_at_another_version[connection-moved]", "state": "active"}
-{"kind": "test", "id": "pytest-011507", "node_id": "tests/test_issue_155_discovery.py::test_an_empty_list_says_whether_evidence_exists_at_another_version[operation-moved]", "state": "active"}
-{"kind": "test", "id": "pytest-011508", "node_id": "tests/test_issue_155_discovery.py::test_an_empty_list_says_whether_evidence_exists_at_another_version[both-moved]", "state": "active"}
-{"kind": "test", "id": "pytest-011509", "node_id": "tests/test_issue_155_discovery.py::test_never_captured_and_captured_but_moved_are_distinguishable", "state": "active"}
-{"kind": "test", "id": "pytest-011510", "node_id": "tests/test_issue_155_discovery.py::test_a_usable_record_is_a_candidate_and_never_a_superseded_row", "state": "active"}
-{"kind": "test", "id": "pytest-011511", "node_id": "tests/test_issue_155_discovery.py::test_the_superseded_projection_is_CLOSED_and_leaks_nothing", "state": "active"}
-{"kind": "test", "id": "pytest-011512", "node_id": "tests/test_issue_155_identity_projection.py::test_a_declared_path_the_account_does_not_store_is_refused", "state": "active"}
-{"kind": "test", "id": "pytest-011513", "node_id": "tests/test_issue_155_identity_projection.py::test_an_unsettled_path_is_silence_and_never_a_mismatch[no path declared-identity_over0-paths0]", "state": "active"}
-{"kind": "test", "id": "pytest-011514", "node_id": "tests/test_issue_155_identity_projection.py::test_an_unsettled_path_is_silence_and_never_a_mismatch[blank declared path-identity_over1-paths1]", "state": "active"}
-{"kind": "test", "id": "pytest-011515", "node_id": "tests/test_issue_155_identity_projection.py::test_an_unsettled_path_is_silence_and_never_a_mismatch[dynamic route-identity_over2-paths2]", "state": "active"}
-{"kind": "test", "id": "pytest-011516", "node_id": "tests/test_issue_155_identity_projection.py::test_an_unsettled_path_is_silence_and_never_a_mismatch[unreadable route-identity_over3-paths3]", "state": "active"}
-{"kind": "test", "id": "pytest-011517", "node_id": "tests/test_issue_155_identity_projection.py::test_the_live_reader_keeps_the_path_it_read", "state": "active"}
-{"kind": "test", "id": "pytest-011518", "node_id": "tests/test_issue_155_recheck_boundary.py::test_a_drift_inside_the_materialization_window_refuses_before_the_write", "state": "active"}
-{"kind": "test", "id": "pytest-011519", "node_id": "tests/test_issue_155_recheck_boundary.py::test_a_mutation_uncertain_push_retains_the_accounting_it_owes", "state": "active"}
-{"kind": "test", "id": "pytest-011520", "node_id": "tests/test_archive_gate_round.py::test_a_verdict_outside_the_protocol_enum_is_not_a_verdict", "state": "active"}
-{"kind": "test", "id": "pytest-011521", "node_id": "tests/test_archive_gate_round.py::test_an_undecodable_artifact_yields_no_verdict_rather_than_raising", "state": "active"}
-{"kind": "test", "id": "pytest-011522", "node_id": "tests/test_issue_155_identity_projection.py::test_an_ambiguous_live_route_is_unreadable_and_never_settled[one stored path-None-static-True]", "state": "active"}
-{"kind": "test", "id": "pytest-011523", "node_id": "tests/test_issue_155_identity_projection.py::test_an_ambiguous_live_route_is_unreadable_and_never_settled[the same path twice-same-static-True]", "state": "active"}
-{"kind": "test", "id": "pytest-011524", "node_id": "tests/test_issue_155_identity_projection.py::test_an_ambiguous_live_route_is_unreadable_and_never_settled[two different paths-other-unavailable-False]", "state": "active"}
-{"kind": "test", "id": "pytest-011525", "node_id": "tests/test_issue_155_identity_projection.py::test_a_path_is_compared_case_sensitively_and_a_verb_is_not", "state": "active"}
-{"kind": "test", "id": "pytest-011526", "node_id": "tests/test_issue_155_identity_projection.py::test_a_path_mismatch_names_the_field_and_never_the_value", "state": "active"}
-{"kind": "test", "id": "pytest-011527", "node_id": "tests/test_issue_155_identity_projection.py::test_paths_are_compared_by_the_equivalence_the_route_digest_uses[/items/a%2Fb-/items/a%2fb-True]", "state": "active"}
-{"kind": "test", "id": "pytest-011528", "node_id": "tests/test_issue_155_identity_projection.py::test_paths_are_compared_by_the_equivalence_the_route_digest_uses[/a/./b-/a/b-True]", "state": "tombstone"}
+{"kind": "test", "id": "pytest-011500", "node_id": "tests/test_connector_replay_review_round3.py::test_an_operation_record_cannot_authorise_a_replay_its_capture_never_saw", "state": "active"}
+{"kind": "test", "id": "pytest-011501", "node_id": "tests/test_connector_replay_review_round3.py::test_a_summary_that_attests_nothing_is_refused", "state": "active"}
+{"kind": "test", "id": "pytest-011502", "node_id": "tests/test_connector_replay_review_round3.py::test_a_count_written_as_text_is_not_a_count", "state": "active"}
+{"kind": "test", "id": "pytest-011503", "node_id": "tests/test_connector_replay_review_round3.py::test_a_row_that_states_no_figure_for_a_required_arm_is_refused", "state": "active"}
+{"kind": "test", "id": "pytest-011504", "node_id": "tests/test_connector_replay_review_round3.py::test_the_wave_contract_matches_every_archived_summary", "state": "active"}
+{"kind": "test", "id": "pytest-011505", "node_id": "tests/test_issue_155_contract_projection.py::test_an_unreadable_live_component_refuses_rather_than_trusting_the_caller", "state": "active"}
+{"kind": "test", "id": "pytest-011506", "node_id": "tests/test_issue_155_contract_projection.py::test_a_minted_grant_names_its_root_and_its_connection", "state": "active"}
+{"kind": "test", "id": "pytest-011507", "node_id": "tests/test_issue_155_contract_projection.py::test_the_relocatable_compile_cannot_be_the_evidence_gate", "state": "active"}
+{"kind": "test", "id": "pytest-011508", "node_id": "tests/test_issue_155_discovery.py::test_an_empty_list_says_whether_evidence_exists_at_another_version[connection-moved]", "state": "active"}
+{"kind": "test", "id": "pytest-011509", "node_id": "tests/test_issue_155_discovery.py::test_an_empty_list_says_whether_evidence_exists_at_another_version[operation-moved]", "state": "active"}
+{"kind": "test", "id": "pytest-011510", "node_id": "tests/test_issue_155_discovery.py::test_an_empty_list_says_whether_evidence_exists_at_another_version[both-moved]", "state": "active"}
+{"kind": "test", "id": "pytest-011511", "node_id": "tests/test_issue_155_discovery.py::test_never_captured_and_captured_but_moved_are_distinguishable", "state": "active"}
+{"kind": "test", "id": "pytest-011512", "node_id": "tests/test_issue_155_discovery.py::test_a_usable_record_is_a_candidate_and_never_a_superseded_row", "state": "active"}
+{"kind": "test", "id": "pytest-011513", "node_id": "tests/test_issue_155_discovery.py::test_the_superseded_projection_is_CLOSED_and_leaks_nothing", "state": "active"}
+{"kind": "test", "id": "pytest-011514", "node_id": "tests/test_issue_155_identity_projection.py::test_a_declared_path_the_account_does_not_store_is_refused", "state": "active"}
+{"kind": "test", "id": "pytest-011515", "node_id": "tests/test_issue_155_identity_projection.py::test_an_unsettled_path_is_silence_and_never_a_mismatch[no path declared-identity_over0-paths0]", "state": "active"}
+{"kind": "test", "id": "pytest-011516", "node_id": "tests/test_issue_155_identity_projection.py::test_an_unsettled_path_is_silence_and_never_a_mismatch[blank declared path-identity_over1-paths1]", "state": "active"}
+{"kind": "test", "id": "pytest-011517", "node_id": "tests/test_issue_155_identity_projection.py::test_an_unsettled_path_is_silence_and_never_a_mismatch[dynamic route-identity_over2-paths2]", "state": "active"}
+{"kind": "test", "id": "pytest-011518", "node_id": "tests/test_issue_155_identity_projection.py::test_an_unsettled_path_is_silence_and_never_a_mismatch[unreadable route-identity_over3-paths3]", "state": "active"}
+{"kind": "test", "id": "pytest-011519", "node_id": "tests/test_issue_155_identity_projection.py::test_the_live_reader_keeps_the_path_it_read", "state": "active"}
+{"kind": "test", "id": "pytest-011520", "node_id": "tests/test_issue_155_identity_projection.py::test_an_ambiguous_live_route_is_unreadable_and_never_settled[one stored path-None-static-True]", "state": "active"}
+{"kind": "test", "id": "pytest-011521", "node_id": "tests/test_issue_155_identity_projection.py::test_an_ambiguous_live_route_is_unreadable_and_never_settled[the same path twice-same-static-True]", "state": "active"}
+{"kind": "test", "id": "pytest-011522", "node_id": "tests/test_issue_155_identity_projection.py::test_an_ambiguous_live_route_is_unreadable_and_never_settled[two different paths-other-unavailable-False]", "state": "active"}
+{"kind": "test", "id": "pytest-011523", "node_id": "tests/test_issue_155_identity_projection.py::test_a_path_is_compared_case_sensitively_and_a_verb_is_not", "state": "active"}
+{"kind": "test", "id": "pytest-011524", "node_id": "tests/test_issue_155_identity_projection.py::test_a_path_mismatch_names_the_field_and_never_the_value", "state": "active"}
+{"kind": "test", "id": "pytest-011525", "node_id": "tests/test_issue_155_identity_projection.py::test_paths_are_compared_by_the_equivalence_the_route_digest_uses[/items/a%2Fb-/items/a%2fb-True]", "state": "active"}
+{"kind": "test", "id": "pytest-011526", "node_id": "tests/test_issue_155_identity_projection.py::test_paths_are_compared_by_the_equivalence_the_route_digest_uses[/a/./b-/a/b-False]", "state": "active"}
+{"kind": "test", "id": "pytest-011527", "node_id": "tests/test_issue_155_identity_projection.py::test_paths_are_compared_by_the_equivalence_the_route_digest_uses[/../admin-/admin-False]", "state": "active"}
+{"kind": "test", "id": "pytest-011528", "node_id": "tests/test_issue_155_identity_projection.py::test_paths_are_compared_by_the_equivalence_the_route_digest_uses[/secret?/../x-/x-False]", "state": "active"}
 {"kind": "test", "id": "pytest-011529", "node_id": "tests/test_issue_155_identity_projection.py::test_paths_are_compared_by_the_equivalence_the_route_digest_uses[/Orders/42-/orders/42-False]", "state": "active"}
 {"kind": "test", "id": "pytest-011530", "node_id": "tests/test_issue_155_identity_projection.py::test_paths_are_compared_by_the_equivalence_the_route_digest_uses[/items/a%2Fb-/items/a%2Fc-False]", "state": "active"}
-{"kind": "test", "id": "pytest-011531", "node_id": "tests/test_issue_155_identity_projection.py::test_paths_are_compared_by_the_equivalence_the_route_digest_uses[/a/./b-/a/b-False]", "state": "active"}
-{"kind": "test", "id": "pytest-011532", "node_id": "tests/test_issue_155_identity_projection.py::test_paths_are_compared_by_the_equivalence_the_route_digest_uses[/../admin-/admin-False]", "state": "active"}
-{"kind": "test", "id": "pytest-011533", "node_id": "tests/test_issue_155_identity_projection.py::test_paths_are_compared_by_the_equivalence_the_route_digest_uses[/secret?/../x-/x-False]", "state": "active"}
-{"kind": "test", "id": "pytest-011534", "node_id": "tests/test_issue_155_identity_projection.py::test_the_path_equivalence_moves_the_published_revision", "state": "active"}
-{"kind": "test", "id": "pytest-011535", "node_id": "tests/test_issue_155_identity_projection.py::test_the_revision_oracle_covers_both_normalization_arms", "state": "active"}
-{"kind": "test", "id": "pytest-011536", "node_id": "tests/test_issue_155_identity_projection.py::test_the_revision_oracle_derives_its_casing_per_nibble", "state": "active"}
-{"kind": "test", "id": "pytest-011537", "node_id": "tests/test_issue_155_identity_projection.py::test_a_refusing_probe_does_not_blind_the_revision_oracle", "state": "active"}
-{"kind": "test", "id": "pytest-011538", "node_id": "tests/test_issue_155_identity_projection.py::test_the_normalizer_is_the_only_place_a_path_is_trimmed", "state": "active"}
+{"kind": "test", "id": "pytest-011531", "node_id": "tests/test_issue_155_identity_projection.py::test_the_path_equivalence_moves_the_published_revision", "state": "active"}
+{"kind": "test", "id": "pytest-011532", "node_id": "tests/test_issue_155_identity_projection.py::test_the_revision_oracle_covers_both_normalization_arms", "state": "active"}
+{"kind": "test", "id": "pytest-011533", "node_id": "tests/test_issue_155_identity_projection.py::test_the_revision_oracle_derives_its_casing_per_nibble", "state": "active"}
+{"kind": "test", "id": "pytest-011534", "node_id": "tests/test_issue_155_identity_projection.py::test_a_refusing_probe_does_not_blind_the_revision_oracle", "state": "active"}
+{"kind": "test", "id": "pytest-011535", "node_id": "tests/test_issue_155_identity_projection.py::test_the_normalizer_is_the_only_place_a_path_is_trimmed", "state": "active"}
+{"kind": "test", "id": "pytest-011536", "node_id": "tests/test_issue_155_recheck_boundary.py::test_a_drift_inside_the_materialization_window_refuses_before_the_write", "state": "active"}
+{"kind": "test", "id": "pytest-011537", "node_id": "tests/test_issue_155_recheck_boundary.py::test_a_mutation_uncertain_push_retains_the_accounting_it_owes", "state": "active"}
