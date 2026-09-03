@@ -767,11 +767,46 @@ def _percent_probe_domain() -> tuple:
     the cost of the honest version is nothing, and the sampled version was only
     ever cheaper to write.
     """
-    return tuple(
-        "/%{0:02X}".format(byte) for byte in range(256)
-    ) + tuple(
-        "/%{0:02x}".format(byte) for byte in range(256)
-    )
+    # PER NIBBLE, not per escape. Generating an upper and a lower spelling treats
+    # the case as a property of the pair, and it is a property of each digit: an
+    # octet whose two nibbles are both alphabetic has FOUR valid spellings, and a
+    # normalization that regressed to accepting only uniformly-cased pairs would
+    # leave every uniformly-cased probe — and the revision with them — unchanged
+    # while a stored `/%AF` and a declared `/%Af` stopped matching. This is the
+    # same defect as the sampled vocabulary it replaced, one dimension in: the
+    # domain was derived over the octets and then sampled over the casings.
+    seen, probes = set(), []
+    for byte in range(256):
+        for spelling in (
+            "{0:02X}".format(byte),
+            "{0:02x}".format(byte),
+            "{0:02X}".format(byte)[0] + "{0:02x}".format(byte)[1],
+            "{0:02x}".format(byte)[0] + "{0:02X}".format(byte)[1],
+        ):
+            if spelling in seen:
+                # A digit with no case — every octet whose nibbles are both
+                # numeric — collapses to one spelling rather than four.
+                continue
+            seen.add(spelling)
+            probes.append("/%" + spelling)
+    # ...AND THE OTHER BRANCH. The escape pattern matches a percent followed by
+    # exactly two hex digits; everything else falls through untouched, and that
+    # fall-through is a decision this function makes just as much as the rewrite
+    # is. A change that started rejecting or repairing a malformed escape, or that
+    # stopped trimming, would move behaviour with every well-formed probe
+    # unchanged — which is the shape of the last three findings against this
+    # oracle, each one a dimension derived on one axis and sampled on the next.
+    probes.extend((
+        "/%",        # a percent with nothing after it
+        "/%2",       # one hex digit — a truncated escape
+        "/%ZZ",      # two non-hex digits
+        "/%2G",      # one hex digit and one not
+        "/%%41",     # an escape whose percent is itself escaped
+        "  /a  ",    # the surrounding whitespace this function strips
+        "/a b",      # an unencoded space, which it does not touch
+        "",          # the empty path
+    ))
+    return tuple(probes)
 
 
 #: The distinctions `comparable_path` is required to draw. The structural cases are

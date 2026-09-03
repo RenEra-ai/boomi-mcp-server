@@ -3931,3 +3931,58 @@ def test_the_revision_oracle_covers_both_normalization_arms():
         "dropping the unreserved decoding left the compiler revision unmoved, so "
         "a build validated under the old normalization reports as current"
     )
+
+
+def test_the_revision_oracle_derives_its_casing_per_nibble():
+    """Two spellings treats case as a property of the pair; it is per digit.
+
+    An octet whose nibbles are both alphabetic has FOUR valid spellings. A
+    normalization regressing to accept only uniformly-cased pairs would leave
+    every uniformly-cased probe — and the revision with them — unchanged, while a
+    stored `/%AF` and a declared `/%Af` stopped matching.
+
+    This was the third finding in a row against this same oracle, and each was
+    the same defect one dimension further in: no projection, then a projection
+    that sampled the escapes, then one derived over the octets and sampled over
+    the casings.
+    """
+    import re
+    from unittest.mock import patch
+
+    import boomi_mcp.connector_replay.digests as digests
+    from boomi_mcp.authoring.contract import (
+        get_authoring_revisions,
+        reset_manifest_cache,
+    )
+
+    outputs = dict(digests.path_equivalence_behaviour())
+    for spelling in ("/%AF", "/%Af", "/%aF", "/%af"):
+        assert spelling in outputs, spelling
+    assert len({outputs[s] for s in ("/%AF", "/%Af", "/%aF", "/%af")}) == 1
+
+    # ...and the fall-through branch, which is a decision too.
+    for malformed in ("/%", "/%2", "/%ZZ", "/%2G"):
+        assert malformed in outputs, malformed
+
+    reset_manifest_cache()
+    before = get_authoring_revisions()["compiler_revision"]
+
+    _real = digests._normalize_percent_encoding
+
+    def _only_uniform_case(path):
+        def replace(match):
+            raw = match.group(1)
+            if raw != raw.upper() and raw != raw.lower():
+                return "%" + raw
+            return _real("%" + raw)
+        return digests._PCT.sub(replace, path)
+
+    with patch.object(digests, "_normalize_percent_encoding", _only_uniform_case):
+        reset_manifest_cache()
+        after = get_authoring_revisions()["compiler_revision"]
+    reset_manifest_cache()
+
+    assert after != before, (
+        "a normalization accepting only uniformly-cased escapes left the compiler "
+        "revision unmoved, so mixed-case spellings could stop matching silently"
+    )
