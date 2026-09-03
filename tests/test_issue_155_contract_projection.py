@@ -1017,16 +1017,30 @@ def test_a_minted_grant_names_its_root_and_its_connection():
 
 
 def test_the_relocatable_compile_cannot_be_the_evidence_gate():
-    """Why the materialization compile does not enforce the per-call grant rule.
+    """WITHDRAWN REFUTATION, replaced by the behaviour it wrongly defended.
 
-    The issue-level architect gate read this as drift: the same conditional table
-    refuses when projected-but-grantless and compiles when rootless-and-grantless,
-    against a plan clause that requires a per-call grant unconditionally. The
-    three measurements below are the refutation, and they are a TEST rather than
-    a comment because the comment that stood here was itself wrong for four
-    rounds and nobody had run it.
+    THE NAME IS NOW WRONG AND IS KEPT ANYWAY, which is worth explaining because
+    it looks like carelessness. Test identities are rows in an append-only,
+    positionally-contiguous manifest: a row cannot be deleted without renumbering
+    every row after it, and a row that is born and retired inside one
+    baseline-to-head range cannot be tombstoned either — the wave gate refuses a
+    tombstone for an identity that never existed at the base. This test was added
+    inside this very range, so renaming it manufactures exactly that
+    unexpressible row. The name stays; the docstring below is where the meaning
+    lives, and a later slice whose baseline includes this test can rename it
+    freely.
 
-    They also record what would break if someone "fixed" it by keeping the root.
+    This test previously argued that the materialization compile could not judge
+    per-call evidence, and it argued that from a table built by DELETING the
+    grants from a projected one — then described the result as what production
+    supplies. The architect gate traced the real caller: the typed path projects
+    a root and mints its grants, and hands THAT table to materialization, which
+    was clearing both. So the clearing switched the requirement off on exactly
+    the compile that produces the bytes, and my measurement had manufactured the
+    state that made it look unavoidable.
+
+    The isolation the clearing provided is kept at its own level: a grant records
+    the root it was minted for, and the index admits only this root's own.
     """
     from boomi_mcp.authoring.process_materialization import placeholder_backed_symbols
     from boomi_mcp.compiler.process_ir.semantic_validation.pipeline import (
@@ -1035,51 +1049,67 @@ def test_the_relocatable_compile_cannot_be_the_evidence_gate():
 
     doc = _doc({"kind": "key_reference", "contract_ref": _CONTRACT})
 
-    # 0. THE CORROBORATED STATE: root projected, one grant, compiles clean.
-    #    Every arm below is this table with one thing changed, so the comparison
-    #    is over a single variable rather than over two different fixtures.
     projected = project_grants_for_root(
         doc, _symbols(), process_root_ref="$ref:ROOT",
         registry=_Registry(_record()), snapshot=_snapshot(),
     )
-    assert projected.process_root_ref is not None
     assert len(projected.idempotency_grants) == 1
     assert not validate_process_ir(doc, projected).errors
 
-    # 1. KEEP THE ROOT, DROP THE GRANTS — the counterfactual. This is what the
-    #    read-only compile phase actually holds: it projects a root and mints
-    #    nothing, because no live evidence has been resolved there. The per-call
-    #    check activates on any table whose root is set, so this refuses.
-    kept_root = projected.model_copy(update={"idempotency_grants": ()})
-    assert "PROCESS_IR_SEMANTIC_IDEMPOTENCY_EVIDENCE_MISSING" in [
-        e.code for e in validate_process_ir(doc, kept_root).errors
-    ], (
-        "keeping the root no longer refuses a grantless conditional retry, so "
-        "clearing it is no longer load-bearing and this refutation is stale"
-    )
-
-    # 2. CLEARING BOTH IS WHAT MAKES THE RELOCATABLE COMPILE PASS. Without it,
-    #    arm 1 would apply to every materialization — refusing every legitimate
-    #    conditionally-idempotent retry at plan time, on a compile that cannot
-    #    consult evidence because the artifact it produces must stay
-    #    account-independent.
+    # THE RELOCATABLE TABLE KEEPS BOTH, so the compile that emits the bytes is
+    # held to the same rule as the one that wrote the report.
     relocatable = placeholder_backed_symbols(projected)
-    assert relocatable.process_root_ref is None
-    assert not relocatable.idempotency_grants
+    assert relocatable.process_root_ref == "$ref:ROOT"
+    assert len(relocatable.idempotency_grants) == 1
     assert not validate_process_ir(doc, relocatable).errors
 
-    # 3. THE MECHANISM THE OLD COMMENT GAVE IS FALSE. It said projecting here
-    #    would "compare a record's real component id against `id-KEY`
-    #    placeholders, corroborate nothing". Corroboration resolves ids through
-    #    the trusted snapshot, so placeholder-backed symbols mint perfectly well.
-    #    Recorded because a rationale nobody executes is how the wrong reason
-    #    survives a rewrite of the right code.
-    minted = project_grants_for_root(
-        doc, placeholder_backed_symbols(_symbols()), process_root_ref="$ref:ROOT",
+    # ...and the requirement is genuinely armed there: drop the grant and the
+    # same relocatable table refuses, which is what the clearing had prevented.
+    grantless = relocatable.model_copy(update={"idempotency_grants": ()})
+    assert "PROCESS_IR_SEMANTIC_IDEMPOTENCY_EVIDENCE_MISSING" in [
+        e.code for e in validate_process_ir(doc, grantless).errors
+    ]
+
+def test_one_process_root_can_mint_two_grants():
+    """The recorded one-binding ceiling was FALSE, and this is the shape that
+    disproves it.
+
+    A live-QA round enumerated the structural rules and concluded the surface
+    admits one evidenced connector call per process root, so the attestation's
+    sort and deduplicate key could never be exercised. That enumeration covered
+    the connector scope and missed the process scope: it constrains only the
+    FIRST step of its try body — which must be the call that produces the
+    documents — and says nothing about what follows. As the sole root step, with a
+    producer first, it accepts further evidenced calls and the minter visits every
+    one of them.
+
+    Two grants in one root means two bindings in ONE attestation list, so the key
+    is publicly reachable and the limit recorded against it is void.
+    """
+    import copy
+
+    from boomi_mcp.models.process_ir import ProcessIRV1
+
+    body = _doc({"kind": "key_reference", "contract_ref": _CONTRACT}).model_dump(mode="json")
+    root = body["body"]["steps"]
+    try_catch = [s for s in root if s.get("kind") == "try_catch"][0]
+    producer = [s for s in root if s.get("kind") == "connector_call"]
+    write = try_catch["try_body"]["steps"][0]
+
+    try_catch["scope"] = "process"
+    try_catch["retry"] = {"count": 2, "source_replay_policy": "allow_duplicates"}
+    try_catch["try_body"]["steps"] = (
+        ([copy.deepcopy(producer[0])] if producer else [])
+        + [copy.deepcopy(write), copy.deepcopy(write)]
+    )
+    body["body"]["steps"] = [try_catch]
+
+    table = project_grants_for_root(
+        ProcessIRV1.model_validate(body), _symbols(), process_root_ref="$ref:ROOT",
         registry=_Registry(_record()), snapshot=_snapshot(),
     )
-    assert minted.idempotency_grants, (
-        "placeholders defeated corroboration after all — if this ever fails, the "
-        "comment at process_materialization.py was right and this test is the "
-        "thing that is wrong"
-    )
+    assert len(table.idempotency_grants) == 2, [
+        g.call_source_path for g in table.idempotency_grants
+    ]
+    # DISTINCT call sites, so the sort key has something to order.
+    assert len({g.call_source_path for g in table.idempotency_grants}) == 2

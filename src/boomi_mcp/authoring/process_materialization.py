@@ -557,17 +557,27 @@ def placeholder_backed_symbols(symbols):
         ),
     )
 
-    # CLEARED, explicitly. Rebinding preserves every field it is not told to
-    # change, so a table that had been projected for one root carried its
-    # `process_root_ref` and its grants into this relocatable one — which made a
-    # compile that documents itself as unprojected treat grant checking as
-    # ACTIVE, and let a grant minted for a different root satisfy this one
-    # whenever contract, operation and source path happened to match. A
-    # relocatable table describes no account, so it can hold no account-bound
-    # grant.
-    return relocatable.model_copy(
-        update={"process_root_ref": None, "idempotency_grants": ()}
-    )
+    # THE ROOT AND ITS GRANTS ARE CARRIED, and this is a reversal of what stood
+    # here. They were CLEARED, on the reasoning that a relocatable table describes
+    # no account so it can hold no account-bound grant — and the effect was that
+    # the compile which produces the bytes ran with the per-call evidence
+    # requirement switched off, because that requirement activates only on a
+    # rooted table. The production typed path projects a root and mints its grants
+    # BEFORE handing the table here, so this clearing was disabling the check on
+    # exactly the input it was written to protect.
+    #
+    # The hazard the clearing addressed was real and is closed at its own level: a
+    # grant minted for one root could satisfy a call in another when the contract,
+    # operation and source path coincided. Grants now record the root they were
+    # minted for and the index filters on it, so isolation no longer depends on
+    # throwing the evidence away.
+    #
+    # Account independence is unaffected, and that is checkable rather than
+    # asserted: the symbol table is not among the fields the plan fingerprint
+    # covers — `covered_plan_fields()` walks the envelope, the IR, the emission
+    # plan, the symbol SLOTS, the execution profile, the policies and the
+    # revisions, none of which reads a grant.
+    return relocatable
 
 
 def derive_symbol_slots(

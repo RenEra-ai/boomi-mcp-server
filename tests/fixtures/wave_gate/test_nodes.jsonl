@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 11503, "minimum_collected": 11503, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 11504, "minimum_collected": 11504, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -11203,7 +11203,7 @@
 {"kind": "test", "id": "pytest-011202", "node_id": "tests/test_issue_155_discovery.py::test_EVERY_compile_sink_projects_a_root", "state": "active"}
 {"kind": "test", "id": "pytest-011203", "node_id": "tests/test_issue_155_discovery.py::test_an_unlowerable_root_still_projects_with_zero_grants", "state": "active"}
 {"kind": "test", "id": "pytest-011204", "node_id": "tests/test_issue_155_discovery.py::test_the_projection_actually_LOWERS_rather_than_failing_silently", "state": "active"}
-{"kind": "test", "id": "pytest-011205", "node_id": "tests/test_issue_155_discovery.py::test_a_relocatable_table_carries_no_account_bound_grant", "state": "active"}
+{"kind": "test", "id": "pytest-011205", "node_id": "tests/test_issue_155_discovery.py::test_a_relocatable_table_carries_no_account_bound_grant", "state": "tombstone"}
 {"kind": "test", "id": "pytest-011206", "node_id": "tests/test_issue_155_discovery.py::test_the_dry_emit_does_not_enforce_grants_and_the_wet_apply_does", "state": "active"}
 {"kind": "test", "id": "pytest-011207", "node_id": "tests/test_issue_155_discovery.py::test_the_grant_wiring_never_defaults_a_load_bearing_argument", "state": "active"}
 {"kind": "test", "id": "pytest-011208", "node_id": "tests/test_issue_155_identity_projection.py::test_a_static_rest_config_is_mintable", "state": "active"}
@@ -11547,3 +11547,5 @@
 {"kind": "test", "id": "pytest-011546", "node_id": "tests/test_issue_155_identity_projection.py::test_a_declaration_free_conflict_does_not_claim_a_declaration_disagreed", "state": "active"}
 {"kind": "test", "id": "pytest-011547", "node_id": "tests/test_issue_155_recheck_boundary.py::test_a_drift_inside_the_materialization_window_refuses_before_the_write", "state": "active"}
 {"kind": "test", "id": "pytest-011548", "node_id": "tests/test_issue_155_recheck_boundary.py::test_a_mutation_uncertain_push_retains_the_accounting_it_owes", "state": "active"}
+{"kind": "test", "id": "pytest-011549", "node_id": "tests/test_issue_155_contract_projection.py::test_one_process_root_can_mint_two_grants", "state": "active"}
+{"kind": "test", "id": "pytest-011550", "node_id": "tests/test_issue_155_discovery.py::test_a_relocatable_table_keeps_its_own_grants_and_only_its_own", "state": "active"}

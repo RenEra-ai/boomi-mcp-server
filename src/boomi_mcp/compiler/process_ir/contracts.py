@@ -431,9 +431,31 @@ class SymbolTableV1(_CompilerModel):
     def build_grant_index(self) -> dict:
         """Build a (contract_ref, operation_ref, call_source_path) -> grant index.
 
+        ONLY THE GRANTS MINTED FOR THIS TABLE'S ROOT. A grant records the root it
+        was minted for, and root isolation is what stops a grant minted for one
+        process satisfying a call in another whenever the contract, the operation
+        and the source path happen to coincide. That isolation used to be
+        enforced by CLEARING the grants whenever a table was rebound — which also
+        cleared them on the relocatable table the materialization compile uses,
+        so the compile that produces the bytes ran with the per-call requirement
+        switched off entirely. Filtering by the root each grant names keeps the
+        isolation and lets the requirement stay on.
+
+        THE MATCH IS EXACT, including against a grant that names no root at all.
+        Admitting a root-less grant as a compatibility allowance would reopen the
+        hole this filter exists to close — a grant nobody can attribute to this
+        root is precisely the one that must not satisfy its calls — and nothing
+        legitimate is lost, because the minter records the root on every grant it
+        creates. Fail closed: an unattributable grant is not evidence about this
+        process.
+
         Not cached, for the reasons spelled out on :meth:`build_index`.
         """
-        return {grant.key: grant for grant in self.idempotency_grants}
+        return {
+            grant.key: grant
+            for grant in self.idempotency_grants
+            if grant.process_root_ref == self.process_root_ref
+        }
 
     @classmethod
     def rebinding(cls, source, symbols) -> "SymbolTableV1":

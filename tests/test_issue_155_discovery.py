@@ -620,15 +620,21 @@ def test_the_projection_actually_LOWERS_rather_than_failing_silently():
     )
 
 
-def test_a_relocatable_table_carries_no_account_bound_grant():
-    """Rebinding preserves what it is not told to change.
+def test_a_relocatable_table_keeps_its_own_grants_and_only_its_own():
+    """The isolation, moved from CLEARING the evidence to filtering it.
 
-    A table projected for one root carried its root reference AND its grants
-    into the relocatable table, so a compile documented as unprojected treated
-    grant checking as ACTIVE — and a grant minted for a DIFFERENT root satisfied
-    this one whenever contract, operation and source path happened to match.
-    A relocatable table describes no account, so it can hold no account-bound
-    grant.
+    The hazard is unchanged and real: a grant minted for one root must never
+    satisfy a call in another when the contract, the operation and the source
+    path happen to coincide. It used to be closed by clearing the root and the
+    grants whenever a table was rebound — and the cost of that was discovered by
+    the architect gate: the production typed path projects a root and mints its
+    grants BEFORE handing the table to materialization, so the clearing switched
+    the per-call evidence requirement off on exactly the compile that produces the
+    bytes. The requirement activates only on a rooted table.
+
+    Grants now record the root they were minted for and the index filters on it,
+    so a foreign grant is invisible to the lookup while this root's own grants
+    survive rebinding and keep the check armed.
     """
     from boomi_mcp.authoring.process_materialization import placeholder_backed_symbols
     from boomi_mcp.compiler.process_ir.contracts import (
@@ -644,12 +650,35 @@ def test_a_relocatable_table_carries_no_account_bound_grant():
                 operation_ref="$ref:OP",
                 call_source_path="/body/steps/0",
                 record_digest="a" * 64,
+                process_root_ref="$ref:SOME_OTHER_ROOT",
             ),
         ),
     )
     relocatable = placeholder_backed_symbols(projected)
-    assert relocatable.process_root_ref is None, "an inherited root survived rebinding"
-    assert relocatable.idempotency_grants == (), "an inherited grant survived rebinding"
+    # The root and the grant SURVIVE, so the requirement stays armed...
+    assert relocatable.process_root_ref == "$ref:SOME_OTHER_ROOT"
+    assert len(relocatable.idempotency_grants) == 1
+
+    # ...and a grant minted for ANOTHER root is invisible to the lookup, which is
+    # the property the clearing was protecting.
+    foreign = relocatable.model_copy(update={"process_root_ref": "$ref:THIS_ROOT"})
+    assert foreign.build_grant_index() == {}, (
+        "a grant minted for a different root is visible to this root's lookup"
+    )
+    assert relocatable.build_grant_index(), (
+        "a table cannot see its OWN grants, so the requirement can never be met"
+    )
+
+    # ...and a grant that names NO root is not attributable to any, so it is not
+    # evidence about this process either. Admitting it as a compatibility
+    # allowance would reopen the hole the filter exists to close.
+    rootless = relocatable.model_copy(update={
+        "idempotency_grants": tuple(
+            g.model_copy(update={"process_root_ref": None})
+            for g in relocatable.idempotency_grants
+        )
+    })
+    assert rootless.build_grant_index() == {}
 
 
 def test_the_dry_emit_does_not_enforce_grants_and_the_wet_apply_does():
