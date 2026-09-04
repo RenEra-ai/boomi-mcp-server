@@ -6803,55 +6803,6 @@ def test_a_replay_claim_needs_the_artifact_that_observes_replay():
 _TIP_FORM = "correction on the tip"
 
 
-def _affected_sha_rows():
-    """Every ledger row that cites a review, read from the RIGHT.
-
-    Left-anchored indexing is wrong for this table: at least one row carries a
-    literal `|` inside a cell, which shifts every column after it, and reading
-    the tier where the SHA should be found no backticked commit and silently
-    classified the row as the tip form. Counting from the right is stable because
-    the trailing columns are fixed.
-
-    Returns `(row_id, reviewed_sha, sha_cell)` and RAISES on a row it cannot
-    read, rather than skipping it — a checker that drops what it cannot parse
-    reports the population it managed to read, not the one it claims to cover.
-    """
-    import re
-    from pathlib import Path
-
-    ledger = (Path(__file__).resolve().parents[1]
-              / "docs/architecture/ISSUE_155_AUDIT_LEDGER.md")
-    reviewed = re.compile(r"reviewed `([0-9a-f]{7,40})`")
-    rows = []
-    for line in ledger.read_text(encoding="utf-8").splitlines():
-        if not line.startswith("| ") or line.count("|") < 10:
-            continue
-        parts = line.split("|")
-        row_id = parts[1].strip()
-        if not row_id or row_id.startswith("-") or " " in row_id:
-            continue
-        gate_cell, summary_cell, sha_cell = parts[2], parts[3], parts[-3].strip()
-        # A REVISION inherits its affected SHA from the finding it revises, while
-        # its gate cell names the review that PROMPTED the revision — a later
-        # tree. Comparing those two is a category error, and the guard caught its
-        # own author making it. Detected by the declared "Revision of" summary,
-        # which is a property the row states, rather than by guessing from the
-        # shape of an identifier.
-        if (gate_cell.strip().startswith("Revision of")
-                or summary_cell.strip().startswith("Revision of")):
-            continue
-        found = reviewed.search(gate_cell)
-        if not found:
-            continue
-        if sha_cell != _TIP_FORM and not re.search(r"`[0-9a-f]{7,40}`", sha_cell):
-            raise AssertionError(
-                f"{row_id}: affected-SHA cell is neither the exact tip form nor a "
-                f"backticked commit, so nothing can be checked about it: {sha_cell!r}"
-            )
-        rows.append((row_id, found.group(1), sha_cell))
-    return rows
-
-
 def affected_sha_cell_deviates(reviewed_sha: str, sha_cell: str) -> bool:
     """Whether a cell fails the convention. ONE definition, used by both nodes.
 
@@ -6870,34 +6821,119 @@ def affected_sha_cell_deviates(reviewed_sha: str, sha_cell: str) -> bool:
                    for s in named)
 
 
+def _superseded_row_ids(ledger_text: str) -> frozenset:
+    """Every row the SUPERSESSION MAP declares to be a revision.
+
+    The authority, rather than a prose prefix. The first version of this guard
+    tested `startswith("Revision of")` and silently missed every row spelled
+    "Second revision of" — two exist — so rows its own contract excluded were
+    compared and counted anyway. The map is where a revision is DECLARED, and a
+    revision that is not declared there is a different defect, caught elsewhere.
+    """
+    import re
+
+    # THE RECORD'S OWN VIEW, not its raw bytes. A fenced illustration is not a
+    # row, and every other reader of this file already goes through
+    # `_unfenced_lines`; reading raw here would let an example inside a code
+    # block declare a revision that does not exist.
+    unfenced = "\n".join(_unfenced_lines(ledger_text))
+    return frozenset(
+        re.findall(r"`([A-Z]+-155-[A-Za-z0-9-]+) → [A-Z]+-155-[A-Za-z0-9-]+`", unfenced)
+    )
+
+
+def _partition_affected_sha_rows():
+    """Every finding row, sorted into exactly three buckets.
+
+    A FLOOR was the wrong shape: a fixed number lets rows disappear silently up
+    to the margin, and the margin grows with every appended row. Partitioning
+    cannot: each row lands in exactly one bucket, and the buckets must account
+    for every row parsed, so a parser regression shows up as rows in none of
+    them rather than as a count that still clears a threshold.
+    """
+    import re
+    from pathlib import Path
+
+    ledger_path = (Path(__file__).resolve().parents[1]
+                   / "docs/architecture/ISSUE_155_AUDIT_LEDGER.md")
+    raw = ledger_path.read_text(encoding="utf-8")
+    revisions = _superseded_row_ids(raw)
+    ledger_text = "\n".join(_unfenced_lines(raw))
+    reviewed = re.compile(r"reviewed `([0-9a-f]{7,40})`")
+
+    checked, declared_revisions, no_review, all_rows = [], [], [], []
+    for line in ledger_text.splitlines():
+        if not line.startswith("| ") or line.count("|") < 10:
+            continue
+        parts = line.split("|")
+        row_id = parts[1].strip()
+        if not row_id or row_id.startswith("-") or " " in row_id:
+            continue
+        all_rows.append(row_id)
+        if row_id in revisions:
+            declared_revisions.append(row_id)
+            continue
+        found = reviewed.search(parts[2])
+        if not found:
+            no_review.append(row_id)
+            continue
+        sha_cell = parts[-3].strip()
+        if sha_cell != _TIP_FORM and not re.search(r"`[0-9a-f]{7,40}`", sha_cell):
+            raise AssertionError(
+                f"{row_id}: affected-SHA cell is neither the exact tip form nor a "
+                f"backticked commit, so nothing can be checked about it: {sha_cell!r}"
+            )
+        checked.append((row_id, found.group(1), sha_cell))
+    return all_rows, checked, declared_revisions, no_review
+
+
 def test_the_affected_sha_cell_names_the_tree_the_defect_affected():
     """The column is the AFFECTED sha — the tree with the defect, not the fix.
 
-    Measured across this ledger: of the rows that cite a review and name a
-    literal SHA, the overwhelming majority name the reviewed SHA and none names
-    anything else. That follows from the column's own name — a finding affects
-    the tree it was found in, and the disposition beside it says what happened
-    afterwards.
+    Measured across this ledger: of the non-revision rows that cite a review and
+    name a literal SHA, every one names the reviewed SHA. That follows from the
+    column's own name — a finding affects the tree it was found in, and the
+    disposition beside it says what happened afterwards.
 
-    This guard exists because I broke that convention twice in one arc while
-    "correcting" it toward a reviewer's reading, then wrote a first version of
-    this very test encoding the inverted rule — which flagged hundreds of
-    conforming rows and is how the convention got measured rather than assumed.
+    The guard exists because I broke that convention twice while "correcting" it
+    toward a reviewer's reading, and its first version encoded the inverted rule
+    and flagged hundreds of conforming rows — which is how the convention was
+    measured rather than assumed.
     """
-    rows = _affected_sha_rows()
-    # A FLOOR, not "at least one". A parser regression that silently dropped the
-    # population would otherwise leave this green while checking almost nothing.
-    assert len(rows) >= 460, (
-        f"only {len(rows)} reviewed rows parsed; the population this guard claims "
-        "to cover is far larger, so the parser has regressed"
+    all_rows, checked, revisions, no_review = _partition_affected_sha_rows()
+    assert all_rows, "no ledger rows parsed; this guard would be inert"
+    # EVERY row accounted for. Not a threshold — a partition, so a row cannot go
+    # missing without the arithmetic failing.
+    assert len(checked) + len(revisions) + len(no_review) == len(all_rows), (
+        f"{len(all_rows)} rows parsed but "
+        f"{len(checked) + len(revisions) + len(no_review)} classified; rows are "
+        "being dropped between the parse and the buckets"
     )
-    deviating = [(rid, sha, cell) for rid, sha, cell in rows
+    assert checked, "no rows reached the comparison; the guard would be inert"
+
+    deviating = [(rid, sha, cell) for rid, sha, cell in checked
                  if affected_sha_cell_deviates(sha, cell)]
     assert not deviating, (
         "these rows name a SHA cell that does not include the tree their own gate "
         "cell says was reviewed, against the convention every other row follows: "
         + "; ".join(f"{r} (reviewed {s}) -> {c}" for r, s, c in deviating)
     )
+
+
+def test_every_declared_revision_is_excluded_by_the_declaring_authority():
+    """The exclusion comes from the supersession map, not from prose.
+
+    Two rows are spelled "Second revision of", which a prefix test misses. They
+    must still be excluded, because a revision inherits its affected SHA from the
+    finding it revises while its gate cell names the later review that prompted
+    it — comparing those is a category error.
+    """
+    _all, checked, revisions, _none = _partition_affected_sha_rows()
+    assert {"CDX-155-r110-01b", "EVAL-155-13b"} <= set(revisions), (
+        "the ordinal-spelled revisions are not excluded, so the authority is "
+        "still being approximated by prose"
+    )
+    assert not ({"CDX-155-r110-01b", "EVAL-155-13b"} & {r for r, _s, _c in checked})
 
 
 def test_the_affected_sha_checker_is_not_vacuous():
