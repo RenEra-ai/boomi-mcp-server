@@ -7969,7 +7969,15 @@ def _closing_row_without_covering_evidence(ledger_text, archive_dir):
         # billed to, so one canonical identity must CONTAIN the other from the start.
         # That still separates this record's ten L2 scopes from one another, which a
         # bare `L2` never did, and its eight L4 scopes likewise.
+        # AN ABSENT IDENTITY MATCHES NOTHING. The empty string is a prefix of every
+        # string, so a round recording no loop at all satisfied every scoped
+        # checkpoint — a containment test failing open on the one input that carries
+        # no information. Both sides must actually name a loop.
         got = identity(round_loop)
+        if not got or not want:
+            why.append(f"{name} records no loop identity" if not got
+                       else "the checkpoint names no loop identity")
+            continue
         if not (got.startswith(want) or want.startswith(got)):
             why.append(f"{name} was billed to {round_loop.strip() or 'no loop'!r}")
             continue
@@ -8141,6 +8149,15 @@ def test_the_closing_evidence_rule_can_actually_fail(tmp_path):
                  + "| L2 Stage-2 Codex commit review, issue-level | 2 / 2 | `2222222` | "
                    "`DEFER-STANDARD-AND-CLOSE` — **WITHDRAWN** | taken back |\n")
     assert _closing_row_without_covering_evidence(withdrawn, tmp_path) is None
+
+    # AN ARCHIVE RECORDING NO LOOP AT ALL satisfies nothing: the empty string is a
+    # prefix of every string, so the one input carrying no information was the one
+    # input that matched everything.
+    (tmp_path / "index.jsonl").write_text(json.dumps(
+        {"durable_dir": "commit-reviews/c1", "status": "completed"}) + "\n")
+    assert check("`1111111`, archived `commit-reviews/c1`") == (
+        "the latest closing checkpoint names 1111111 and no cited evidence of its own "
+        "loop covers it: ['commit-reviews/c1 records no loop identity']")
 
     # An archive nobody can find is not evidence.
     assert check("`1111111`, archived `commit-reviews/gone`") == (
