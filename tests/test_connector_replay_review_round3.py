@@ -6837,8 +6837,18 @@ def _superseded_row_ids(ledger_text: str) -> frozenset:
     # `_unfenced_lines`; reading raw here would let an example inside a code
     # block declare a revision that does not exist.
     unfenced = "\n".join(_unfenced_lines(ledger_text))
+    # THE BOUNDED MAP BLOCK, not the whole document. A mapping-shaped string
+    # quoted anywhere else — inside a finding's own rationale, say — would
+    # otherwise satisfy this authority and silently exempt its left-hand row from
+    # SHA validation. `tests/test_wave_gate.py` already bounds the identical scan
+    # for the identical reason; this reuses that shape rather than inventing a
+    # second reading of the same block.
+    block = re.search(r"\*\*Supersession map\*\*(.+?)(?:\n\n|\n\*|\Z)", unfenced, re.S)
+    if block is None:
+        return frozenset()
     return frozenset(
-        re.findall(r"`([A-Z]+-155-[A-Za-z0-9-]+) → [A-Z]+-155-[A-Za-z0-9-]+`", unfenced)
+        re.findall(r"`([A-Z]+-155-[A-Za-z0-9-]+) → [A-Z]+-155-[A-Za-z0-9-]+`",
+                   block.group(1))
     )
 
 
@@ -6863,12 +6873,19 @@ def _partition_affected_sha_rows():
 
     checked, declared_revisions, no_review, all_rows = [], [], [], []
     for line in ledger_text.splitlines():
-        if not line.startswith("| ") or line.count("|") < 10:
+        # NINE pipes, not ten. Ten excluded the capture rows, which carry one
+        # column fewer — ten real rows the independent parse sees and this loop
+        # was silently dropping, which is exactly the omission this guard claims
+        # to prevent. Right-anchored indexing already lands on the SHA for all
+        # three row widths in this file, so only the gate was wrong.
+        if not line.startswith("| ") or line.count("|") < 9:
             continue
         parts = line.split("|")
         row_id = parts[1].strip()
         if not row_id or row_id.startswith("-") or " " in row_id:
             continue
+        if row_id.startswith("DC-155-"):
+            continue                      # the defect-class table, not a finding
         all_rows.append(row_id)
         if row_id in revisions:
             declared_revisions.append(row_id)
@@ -6900,15 +6917,31 @@ def test_the_affected_sha_cell_names_the_tree_the_defect_affected():
     and flagged hundreds of conforming rows — which is how the convention was
     measured rather than assumed.
     """
+    import re
+    from pathlib import Path
+
     all_rows, checked, revisions, no_review = _partition_affected_sha_rows()
     assert all_rows, "no ledger rows parsed; this guard would be inert"
-    # EVERY row accounted for. Not a threshold — a partition, so a row cannot go
-    # missing without the arithmetic failing.
-    assert len(checked) + len(revisions) + len(no_review) == len(all_rows), (
-        f"{len(all_rows)} rows parsed but "
-        f"{len(checked) + len(revisions) + len(no_review)} classified; rows are "
-        "being dropped between the parse and the buckets"
+
+    # INDEPENDENTLY DERIVED, by a different parse of the same file. The previous
+    # version compared the buckets against a total the same loop had built, which
+    # is an identity: every accepted row was appended to the total and then to
+    # exactly one bucket, and a row rejected earlier shrank both sides together.
+    # It could not fail, so it could not detect the omission it was written to
+    # detect — the same vacuity this guard exists to prevent, inside the guard.
+    ledger = (Path(__file__).resolve().parents[1]
+              / "docs/architecture/ISSUE_155_AUDIT_LEDGER.md").read_text(encoding="utf-8")
+    independent = {rid for rid in re.findall(
+        r"^\| ([A-Z]+-155-[A-Za-z0-9-]+) \|",
+        "\n".join(_unfenced_lines(ledger)), re.M)
+        if not rid.startswith("DC-155-")}   # the class table is not a finding table
+    assert independent, "the independent parse found nothing; it cannot witness anything"
+    missing = independent - set(all_rows)
+    assert not missing, (
+        f"{len(missing)} finding row(s) the independent parse sees never reached the "
+        f"partition, so they escape SHA validation entirely: {sorted(missing)[:6]}"
     )
+    assert len(checked) + len(revisions) + len(no_review) == len(all_rows)
     assert checked, "no rows reached the comparison; the guard would be inert"
 
     deviating = [(rid, sha, cell) for rid, sha, cell in checked
