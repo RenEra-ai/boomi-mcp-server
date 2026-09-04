@@ -1356,6 +1356,10 @@ _UNROWED = {"DC-155-C": 2, "DC-155-I": 1}
 #: the reason. Frozen so the set cannot grow silently: a row that names a class is an
 #: instance of it unless it appears here.
 _NOT_AN_INSTANCE = {
+    "CDX-155-r45-01c": "a REVISION withdrawing a retier the corrected severity rule "
+    "does not support — one finding, counted at the original",
+    "QA-155-r66-03c": "a REVISION withdrawing a retier the corrected severity rule "
+    "does not support — one finding, counted at the original",
     "CDX-155-r45-01b": "a REVISION correcting a DERIVED TIER that read only one of the "
     "severity rule's two disjuncts — one finding, counted at the original",
     "CDX-155-r94-02a": "a REVISION correcting a DERIVED TIER that read only one of the "
@@ -7449,7 +7453,16 @@ def _tier_derivation_offenders(ledger_text):
     #: the class half exactly as hand-checked as it had always been, which is how
     #: nineteen standing rows came to sit in a critical-anchor class while deriving
     #: standard. A rule with two disjuncts is not enforced by a guard that reads one.
-    critical_classes = re.compile(r"secrets/security|data loss|mutation accounting", re.I)
+    #: The three classes the rule names, matched against the cell's LEADING value(s)
+    #: rather than anywhere in it. An unanchored search read a row whose class reads
+    #: "runtime behavior (CORRECTED from mutation accounting)" as mutation accounting —
+    #: promoting a row on the strength of the note recording that it is NOT that class.
+    CRITICAL_CLASSES = {"secrets/security", "data loss", "mutation accounting"}
+
+    def critical_class(cell):
+        head = re.split(r"[(—]", cell, 1)[0]
+        return any(part.strip().lower() in CRITICAL_CLASSES
+                   for part in re.split(r"[;,]", head))
     #: A tier the row itself lowered THROUGH the sanctioned path. A severity-specific
     #: technical refutation is the one way a source-critical label becomes standard,
     #: and it is recorded as the disposition, so it is read from there rather than
@@ -7590,7 +7603,12 @@ def _tier_derivation_offenders(ledger_text):
             # graded against THIS row's source label, because a raw label is immutable
             # and a successor cannot lower it by simply writing a smaller one.
             cells, stand = rows[rid], rows[end]
-            label, blocking = cells[4].strip(), cells[5].strip()
+            # THE LABEL FROM THE ORIGINAL, THE CLASS FROM THE ROW THAT STANDS. A raw
+            # source label is immutable, so a successor cannot lower it; a blocking
+            # CLASS is a derived assignment the record may correct, so reading it from
+            # the predecessor made a corrected-away class permanent and promoted rows
+            # whose effective class is no longer critical at all.
+            label, blocking = cells[4].strip(), stand[5].strip()
             tier, disposition = stand[7].strip(), stand[9].strip()
         else:
             cells = rows[rid]
@@ -7599,7 +7617,7 @@ def _tier_derivation_offenders(ledger_text):
             label, blocking = cells[4].strip(), cells[5].strip()
             tier, disposition = cells[7].strip(), cells[9].strip()
         # EITHER DISJUNCT of the severity rule brings a row under it.
-        if not (critical_labels.search(label) or critical_classes.search(blocking)):
+        if not (critical_labels.search(label) or critical_class(blocking)):
             continue
         if refuted.search(disposition) or refuted.search(tier):
             continue
