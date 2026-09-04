@@ -1368,9 +1368,6 @@ _NOT_AN_INSTANCE = {
     "records the row as bookkeeping, which is where the decision now lives",
     "CDX-155-r235-01a": "a REVISION correcting an affected-SHA cell — one finding, "
     "counted at the original",
-    "CDX-155-r234-02a": "a BOOKKEEPING row correcting where an instance was FILED, "
-    "not a further occurrence — its own class cell now says so, so every "
-    "row-derived consumer agrees rather than only this one",
     "CDX-155-r233-01": "the SUPERSEDED original of a class reclassification — the "
     "one finding is counted at the revision, under the class it actually belongs to",
     "SELF-155-r126-01b": "a REVISION closing a critical row on live measurement — one "
