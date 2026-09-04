@@ -19,7 +19,8 @@ from typing import Final
 
 from .registry import ReplayRegistry, load_registry
 
-__all__ = ["REPORT_RELATIVE_PATH", "parse", "render", "write_report"]
+__all__ = ["REPORT_RELATIVE_PATH", "parse", "projection_category_fingerprint",
+           "render", "write_report"]
 
 #: Where the tracked report lives, relative to the repository root.
 REPORT_RELATIVE_PATH: Final[str] = "docs/evidence/connector-replay-captures.md"
@@ -36,6 +37,42 @@ _PREAMBLE: Final[tuple[str, ...]] = (
     "An action with no row is `unverified`, and `unverified` refuses a retry. That is",
     "the safe direction: a registry that failed to load, or loaded empty, denies.",
 )
+
+
+def projection_category_fingerprint(members) -> str:
+    """A stable fingerprint over a projection category's ORDERED members.
+
+    The members themselves are NOT served, and that is a deliberate limit rather
+    than an oversight. A REST connection's excluded fields are named `password`,
+    `username`, and its included elements carry `accesstokenendpoint` — so
+    rendering the members verbatim publishes exactly the tokens the report's
+    credential scan forbids. Weakening a secrets guard to publish more text is the
+    wrong trade, and the requirement it would buy is narrower than the members:
+    what must not happen is a change to the digest's domain that leaves the served
+    text unmoved. A fingerprint over the ordered members moves on any addition,
+    removal, replacement OR reordering, which is that requirement met exactly.
+    """
+    import hashlib
+
+    joined = "\x00".join(members).encode()
+    return hashlib.sha256(joined).hexdigest()[:16]
+
+
+def _projection_categories(model: type) -> tuple[str, ...]:
+    """The projection's member categories, read from the model that defines them.
+
+    Derived rather than listed: a projection allowlist's categories ARE its
+    tuple-typed fields, and a hand-written list here would keep rendering the same
+    categories after the model gained one — publishing a domain narrower than the
+    one the digest is actually computed over, which is the failure this section
+    exists to prevent.
+    """
+    import typing
+
+    return tuple(
+        name for name, field in model.model_fields.items()
+        if typing.get_origin(field.annotation) is tuple
+    )
 
 
 def render(registry: ReplayRegistry | None = None) -> str:
@@ -130,24 +167,30 @@ def render(registry: ReplayRegistry | None = None) -> str:
     lines += ["", "## Component projection allowlists", ""]
     if reg.projection_allowlists:
         lines += [
-            "| family | component kind | projection | included | excluded |",
-            "| --- | --- | --- | --- | --- |",
+            "| family | component kind | projection | category | members "
+            "| fingerprint |",
+            "| --- | --- | --- | --- | --- | --- |",
         ]
         for spec in sorted(reg.projection_allowlists,
                            key=lambda s: (s.family, s.component_kind,
                                           s.projection_version)):
-            # COUNTS, not the members. The members are long, unstable in width and
-            # already byte-pinned in the packaged registry; what a reader needs
-            # from the served text is that a projection is CLOSED and how wide it
-            # is. A count that moves is a projection that moved.
-            included = (len(spec.included_attributes) + len(spec.included_value_fields)
-                        + len(spec.included_property_fields) + len(spec.included_elements)
-                        + len(spec.included_scope_attributes))
-            excluded = len(spec.excluded_fields) + len(spec.excluded_scope_attributes)
-            lines.append(
-                f"| {spec.family} | `{spec.component_kind}` "
-                f"| v{spec.projection_version} | {included} | {excluded} |"
-            )
+            # THE MEMBERS, not a width. Counts were the first shape here and they
+            # are LOSSY in the one direction that matters: a member replaced or
+            # moved leaves the totals equal, so the rendered bytes and the parsed
+            # view are identical while the digest's domain has changed. A report
+            # whose whole purpose in this section is to state that domain cannot
+            # summarise it.
+            #
+            # The categories are DERIVED from the model's own tuple-typed fields,
+            # never listed here — a hand-list is the defect class this issue has
+            # recorded most, and it would silently omit a category the model gains.
+            for name in _projection_categories(type(spec)):
+                members = tuple(getattr(spec, name))
+                lines.append(
+                    f"| {spec.family} | `{spec.component_kind}` "
+                    f"| v{spec.projection_version} | {name} | {len(members)} "
+                    f"| `{projection_category_fingerprint(members)}` |"
+                )
     else:
         lines.append(
             "No projection allowlist is packaged, so no configuration digest can "
@@ -260,18 +303,28 @@ def parse(text: str) -> dict:
         elif current == "Component projection allowlists":
             if cells[0] == "family":
                 continue
-            if len(cells) != 5:
-                raise ValueError(f"projection row is not five columns: {line!r}")
+            if len(cells) != 6:
+                raise ValueError(f"projection row is not six columns: {line!r}")
             if not cells[2].startswith("v") or not cells[2][1:].isdigit():
                 raise ValueError(f"projection version is not a version: {line!r}")
-            if not (cells[3].isdigit() and cells[4].isdigit()):
-                raise ValueError(f"projection width is not a count: {line!r}")
+            if not cells[3]:
+                raise ValueError(f"projection row names no category: {line!r}")
+            if not cells[4].isdigit():
+                raise ValueError(f"projection member count is not a count: {line!r}")
+            # THE FINGERPRINT READ BACK, so a comparison against the registry has
+            # something to compare that a same-width edit cannot satisfy. Shape is
+            # checked here: an unreadable fingerprint is a row whose domain nobody
+            # can verify, which is the state this column exists to end.
+            fingerprint = cells[5].strip("`")
+            if not re.fullmatch(r"[0-9a-f]{16}", fingerprint):
+                raise ValueError(f"projection fingerprint is malformed: {line!r}")
             sections["projection_allowlists"].append({
                 "family": cells[0],
                 "component_kind": cells[1].strip("`"),
                 "projection_version": int(cells[2][1:]),
-                "included": int(cells[3]),
-                "excluded": int(cells[4]),
+                "category": cells[3],
+                "members": int(cells[4]),
+                "fingerprint": fingerprint,
             })
     # EVERY REQUIRED HEADING, or the report is not one. Succeeding on an empty
     # document meant a missing section and an empty section were the same result,

@@ -41,7 +41,23 @@ the safe direction: a registry that failed to load, or loaded empty, denies.
 
 ## Component projection allowlists
 
-| family | component kind | projection | included | excluded |
-| --- | --- | --- | --- | --- |
-| rest | `connection` | v4 | 19 | 36 |
-| rest | `operation` | v4 | 30 | 1 |
+| family | component kind | projection | category | members | fingerprint |
+| --- | --- | --- | --- | --- | --- |
+| rest | `connection` | v4 | included_attributes | 0 | `e3b0c44298fc1c14` |
+| rest | `connection` | v4 | included_value_fields | 1 | `28e5ebabd9d8f6e2` |
+| rest | `connection` | v4 | included_property_fields | 0 | `e3b0c44298fc1c14` |
+| rest | `connection` | v4 | excluded_fields | 31 | `d3885e6fb7404eb4` |
+| rest | `connection` | v4 | included_elements | 17 | `22d68e9094d97c69` |
+| rest | `connection` | v4 | included_scope_attributes | 1 | `905fe83d9dcb6dea` |
+| rest | `connection` | v4 | excluded_scope_attributes | 5 | `3c399868931eb5e1` |
+| rest | `connection` | v4 | qname_aware_tags | 0 | `e3b0c44298fc1c14` |
+| rest | `connection` | v4 | qname_aware_attrs | 0 | `e3b0c44298fc1c14` |
+| rest | `operation` | v4 | included_attributes | 1 | `eb3bbdd320c82c65` |
+| rest | `operation` | v4 | included_value_fields | 2 | `7ae5bfdf9d4e5d6d` |
+| rest | `operation` | v4 | included_property_fields | 2 | `a51413d4d4bae1be` |
+| rest | `operation` | v4 | excluded_fields | 0 | `e3b0c44298fc1c14` |
+| rest | `operation` | v4 | included_elements | 16 | `a4dbfa8985903e35` |
+| rest | `operation` | v4 | included_scope_attributes | 9 | `8e5d174f7ebbbb5b` |
+| rest | `operation` | v4 | excluded_scope_attributes | 1 | `707393cc3642e0ab` |
+| rest | `operation` | v4 | qname_aware_tags | 0 | `e3b0c44298fc1c14` |
+| rest | `operation` | v4 | qname_aware_attrs | 0 | `e3b0c44298fc1c14` |

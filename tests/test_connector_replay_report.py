@@ -167,22 +167,38 @@ def test_the_report_publishes_the_terms_its_citations_name():
         assert served[0]["key_scope"] == spec.key_scope.value
         assert served[0]["duplicate_guarantee"] == spec.duplicate_guarantee.value
 
-    assert len(read["projection_allowlists"]) == len(reg.projection_allowlists)
+    # THE MEMBERSHIP, compared through a fingerprint the registry recomputes.
+    # Widths alone were the first shape and are lossy exactly where it matters: a
+    # member replaced or moved leaves the totals equal, so the served bytes and
+    # this comparison would both pass while the digest's domain had changed. The
+    # members themselves are not served — a REST connection's excluded fields are
+    # named `password` and `username`, which the credential scan forbids — so the
+    # fingerprint carries the equality the names would have carried.
+    from boomi_mcp.connector_replay.report import (
+        _projection_categories, projection_category_fingerprint)
+
+    served = {}
+    for row in read["projection_allowlists"]:
+        key = (row["family"], row["component_kind"], row["projection_version"])
+        served.setdefault(key, {})[row["category"]] = (row["members"],
+                                                       row["fingerprint"])
+    assert len(served) == len(reg.projection_allowlists)
+
     for spec in reg.projection_allowlists:
-        served = [r for r in read["projection_allowlists"]
-                  if r["family"] == spec.family
-                  and r["component_kind"] == spec.component_kind
-                  and r["projection_version"] == spec.projection_version]
-        assert len(served) == 1, f"{spec.component_kind} is not served exactly once"
-        # The WIDTH is derived from the projection's own members, so a projection
-        # that gains or loses a field changes the served text. A hand-written
-        # number here would state a width the projection had at some past moment.
-        assert served[0]["included"] == (
-            len(spec.included_attributes) + len(spec.included_value_fields)
-            + len(spec.included_property_fields) + len(spec.included_elements)
-            + len(spec.included_scope_attributes))
-        assert served[0]["excluded"] == (
-            len(spec.excluded_fields) + len(spec.excluded_scope_attributes))
+        key = (spec.family, spec.component_kind, spec.projection_version)
+        assert key in served, f"{key} is not served"
+        categories = _projection_categories(type(spec))
+        # EVERY category the model defines, so one the model gains is one the
+        # report must state rather than one it can quietly omit.
+        assert set(served[key]) == set(categories), (
+            f"{key} serves {sorted(served[key])}, model defines {sorted(categories)}"
+        )
+        for name in categories:
+            members = tuple(getattr(spec, name))
+            assert served[key][name] == (
+                len(members), projection_category_fingerprint(members)), (
+                f"{key} category {name} does not match the registry"
+            )
 
 
 def test_a_report_missing_the_new_sections_is_refused():
@@ -206,3 +222,63 @@ def test_a_report_missing_the_new_sections_is_refused():
                 stripped.append(line)
         with pytest.raises(ValueError):
             parse("\n".join(stripped))
+
+
+def test_a_same_width_projection_change_is_visible_in_the_served_text():
+    """THE NON-VACUITY WITNESS for the fingerprint column.
+
+    The first shape of this section rendered aggregate counts. A member REPLACED —
+    the digest's domain changed, its size unchanged — produced byte-identical text
+    and an identical parse, so the served contract could drift from the projection
+    it describes while every check passed. Both mutations counts cannot see are
+    constructed here, and the rendered bytes must move for each.
+    """
+    from boomi_mcp.connector_replay.registry import load_registry
+    from boomi_mcp.connector_replay.report import render
+
+    reg = load_registry()
+    spec = next(s for s in reg.projection_allowlists if len(s.included_value_fields) > 1)
+    before = render(reg)
+
+    def with_members(members):
+        swapped = spec.model_copy(update={"included_value_fields": members})
+        assert len(members) == len(spec.included_value_fields), "width must not move"
+
+        class _Swapped:
+            vocabulary = reg.vocabulary
+            evidence_records = reg.evidence_records
+            operation_records = reg.operation_records
+            semantics_definitions = reg.semantics_definitions
+            projection_allowlists = tuple(
+                swapped if s is spec else s for s in reg.projection_allowlists
+            )
+
+        return render(_Swapped())
+
+    replaced = ("__a_member_that_was_not_there__",) + tuple(
+        spec.included_value_fields[1:])
+    assert with_members(replaced) != before, (
+        "a REPLACED projection member left the served text unchanged"
+    )
+    # REORDERING too: the digest is taken over an ordered projection, so a moved
+    # member is a moved domain even though the set is identical.
+    reordered = tuple(reversed(spec.included_value_fields))
+    if reordered != tuple(spec.included_value_fields):
+        assert with_members(reordered) != before, (
+            "a REORDERED projection left the served text unchanged"
+        )
+
+
+def test_the_report_still_publishes_no_credential_shaped_token():
+    """The fingerprint exists so this guard never has to be weakened.
+
+    Rendering the members verbatim would publish `password`, `username` and
+    `accesstokenendpoint` — three of the needles this report is scanned for. The
+    equality the members would have carried is carried by the fingerprint instead,
+    so the served text states the domain without naming its fields.
+    """
+    from boomi_mcp.connector_replay.report import render
+
+    text = render().lower()
+    for needle in ("password", "secret", "token", "credential://", "api_key", "@"):
+        assert needle not in text, f"the rendered report contains {needle!r}"
