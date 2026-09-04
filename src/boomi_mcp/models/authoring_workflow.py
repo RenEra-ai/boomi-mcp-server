@@ -923,7 +923,33 @@ class ConnectorReplayEvidenceBindingAttestationV1(_AuthoringModel):
     #: the model enumerates `route_digests`, which are versioned one-way hashes,
     #: so the reasoning was right about paths and wrong about the field.
     route_coverage_kind: Optional[NonEmptyString] = None
-    route_digests: tuple = ()
+    route_digests: tuple[str, ...] = ()
+
+    @field_validator("route_digests")
+    @classmethod
+    def _route_digests_are_versioned_sorted_and_unique(
+        cls, value: tuple[str, ...]
+    ) -> tuple[str, ...]:
+        """The same shape the registry's own coverage model enforces.
+
+        This was a bare `tuple`, so the DURABLE mutation-accounting record
+        accepted arbitrary item types, malformed strings and duplicates — and
+        published an empty `items` schema, telling a consumer nothing about what
+        it carries. The registry refuses exactly these values on the way in;
+        publishing them unconstrained on the way out means a malformed route
+        identity can be recorded as a valid account of what authorised a write.
+        """
+        bad = [d for d in value
+               if not isinstance(d, str)
+               or not re.fullmatch(r"RouteDigestV1:[0-9a-f]{64}", d)]
+        if bad:
+            raise ValueError(f"not RouteDigestV1 values: {bad!r}")
+        if len(set(value)) != len(value):
+            raise ValueError("duplicate route digests claim more coverage than held")
+        if list(value) != sorted(value):
+            raise ValueError(
+                "route digests must be sorted, so one coverage set has one form")
+        return value
     capture_digest: Optional[str] = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     #: Service-wide coverage carries its OWN capture, and its digest can differ
     #: from the operation record's. Kept separately so the attestation can still

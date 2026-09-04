@@ -4579,7 +4579,14 @@ def test_compile_serves_the_failure_s_own_field_and_remediation():
     assert "family and action" not in served.remediation, (
         "told the caller to correct the two fields that were right"
     )
-    assert json.dumps(served.model_dump(mode="json")).count("a-route-nothing-stores") == 0 or True
+    # The declared path must not be echoed back in the served diagnostic. This
+    # line carried a trailing `or True`, which made it unconditional — it would
+    # have stayed green through a path-value disclosure, which is the one thing
+    # it exists to catch.
+    assert "a-route-nothing-stores" not in json.dumps(served.model_dump(mode="json")), (
+        "the diagnostic echoes the caller's declared path, which the refusal "
+        "redacts on purpose"
+    )
 
 
 def test_the_account_rung_needs_live_xml_and_says_so():

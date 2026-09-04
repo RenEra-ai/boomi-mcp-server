@@ -259,6 +259,8 @@ def _refuse_unresolvable_records(vocabulary, evidence, operation_records, semant
     #: reference is built from. Assembled beside `families` from the same
     #: mappings, so the two cannot disagree about which actions a family has.
     identifiers: dict[tuple[str, str], tuple[str, str]] = {}
+    #: The inverse, so a collision is caught from whichever side arrives.
+    minted: dict[tuple[str, str], tuple[str, str]] = {}
     for entry in vocabulary:
         families.setdefault(entry.family, set()).update(entry.recognised_actions)
         for raw_action, action_id in entry.action_ids:
@@ -273,7 +275,21 @@ def _refuse_unresolvable_records(vocabulary, evidence, operation_records, semant
                     f"vocabulary maps {key!r} to two different identifier pairs; "
                     "a raw action with two identifiers means one contract has two "
                     "references, and a set of references stops being a set")
+            # AND THE REVERSE, which the forward check cannot see. Two rows can
+            # share a portable family, map DIFFERENT raw actions, and land on the
+            # same identifier pair — different dictionary keys, so nothing above
+            # fires, and both raw actions derive one canonical reference. That is
+            # the direction that actually loses information: injectivity is a
+            # property of the mapping, and checking only that each input has one
+            # output is the half that never collides.
+            if minted.get(pair, key) != key:
+                raise RegistryInvalid(
+                    f"vocabulary maps {key!r} and {minted[pair]!r} to the same "
+                    f"identifier pair {pair!r}; two raw actions deriving one "
+                    "contract reference means evidence for one is served for the "
+                    "other, which the mapping exists to prevent")
             identifiers[key] = pair
+            minted[pair] = key
     # A SET would silently accept two CONTRADICTORY definitions for one id and
     # revision — they differ, so both survive, and which one interprets a record
     # then depends on iteration order.
@@ -323,11 +339,21 @@ def _refuse_unresolvable_records(vocabulary, evidence, operation_records, semant
                 "which the vocabulary records no grammar-safe identifier, so its "
                 "contract reference cannot be derived or checked. A vocabulary "
                 "entry that recognises an action must map it")
-        expected = authored_contract_ref(
-            *identifiers[(record.family, record.action)],
-            record.semantics_id,
-            record.semantics_revision,
-        )
+        try:
+            expected = authored_contract_ref(
+                *identifiers[(record.family, record.action)],
+                record.semantics_id,
+                record.semantics_revision,
+            )
+        except ValueError as unbuildable:
+            # THE CONSTRUCTOR REFUSES PARTS THE GRAMMAR REJECTS, and a record may
+            # carry them: the model constrains the semantics id to a non-empty
+            # string, not to the grammar's alphabet. A raw ValueError escaping
+            # here is not the refusal this family promises, and the discovery
+            # surface that translates the named code never sees it.
+            raise RegistryInvalid(
+                f"operation record {record.family}/{record.action} cannot derive "
+                f"its own contract reference: {unbuildable}") from unbuildable
         if record.contract_ref != expected:
             raise RegistryInvalid(
                 f"operation record names itself {record.contract_ref!r}, but its "

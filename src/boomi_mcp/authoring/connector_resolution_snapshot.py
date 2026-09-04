@@ -300,7 +300,13 @@ def rest_route_decision(path_fields, *, modelled: bool, resolved_enough: bool):
     # component holding a blank path AND two distinct routes was reported as
     # merely dynamic — and the conflict refusal it should have triggered was
     # bypassed by supplying the very binding the blank path asks for.
-    routes = {comparable_path(v) for v in (x.strip() for x in path_fields) if v}
+    # `(value or "")`, as the blank check below already does. A `<field id="path"/>`
+    # with no value attribute reads as None, and stripping it raised an
+    # AttributeError that escaped as a generic internal failure instead of the
+    # unreadable-route classification this function exists to make. The next
+    # statement was already null-safe, which is the tell: the same input was
+    # known to be possible one line further down.
+    routes = {comparable_path(v) for v in ((x or "").strip() for x in path_fields) if v}
     conflicting = len(routes) > 1
 
     if any((value or "").strip() == "" for value in path_fields):
@@ -1230,23 +1236,36 @@ def assert_declared_matches_resolved(
     # serves this verbatim, so it is contract text and not a note.
     _declared_mismatches = [m for m in mismatches if m.remediation is None]
     if _declared_mismatches:
-        _fields = sorted({m.field for m in _declared_mismatches if m.field})
-        _identity = snapshot.lookup(_declared_mismatches[0].component_key)
-        _where = (
-            "the XML this request submits"
-            if getattr(_identity, "authority", None) == "submitted_xml"
-            else "the account"
-        )
-        _text = (
-            "The declaration disagrees with {0} on {1}. Correct {2} to what the "
-            "component resolves to.".format(
-                _where,
-                " and ".join(repr(f) for f in _fields),
-                "those fields" if len(_fields) > 1 else "that field",
-            )
-        )
+        # PER COMPONENT, not once for all of them. The fields were unioned across
+        # every failure and the authority was read off the FIRST component, then
+        # the one sentence was assigned to all — so a caller with mismatches on
+        # two components was told, on each diagnostic, to correct fields that may
+        # already match there, and was pointed at the account for an identity
+        # actually read from their own submitted XML. This is served contract
+        # text, so a sentence that names the wrong field or the wrong document is
+        # a defect and not a wording preference. Grouped by component, which is
+        # the unit each diagnostic is about.
+        _by_component: dict = {}
         for m in _declared_mismatches:
-            m.remediation = _text
+            _by_component.setdefault(m.component_key, []).append(m)
+        for _component_key, _group in _by_component.items():
+            _fields = sorted({m.field for m in _group if m.field})
+            _identity = snapshot.lookup(_component_key)
+            _where = (
+                "the XML this request submits"
+                if getattr(_identity, "authority", None) == "submitted_xml"
+                else "the account"
+            )
+            _text = (
+                "The declaration disagrees with {0} on {1}. Correct {2} to what "
+                "the component resolves to.".format(
+                    _where,
+                    " and ".join(repr(f) for f in _fields),
+                    "those fields" if len(_fields) > 1 else "that field",
+                )
+            )
+            for m in _group:
+                m.remediation = _text
 
     if mismatches:
         first = mismatches[0]

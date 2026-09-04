@@ -917,6 +917,25 @@ def _compiler_revision_payload() -> dict:
             ],
         ),
         (
+            # THE RAW-TO-IDENTIFIER MAPPINGS, which the canonical reference is
+            # BUILT from. Fingerprinting the semantics definitions alone left a
+            # legal registry update — remapping an action identifier and updating
+            # the operation record to match — moving every published contract
+            # reference while this digest stood still. A deployment upgraded
+            # across that change reports its provenance as matching one that
+            # resolves references differently, which is the exact drift the
+            # revision exists to make visible. Only the identifier-bearing fields
+            # are taken: this row is about how a reference is DERIVED, and folding
+            # in unrelated vocabulary facts would move the digest for changes that
+            # cannot alter a single reference.
+            "connector_replay_vocabulary_identifiers",
+            lambda: sorted(
+                [entry.platform_connector_type, entry.family_id,
+                 [list(pair) for pair in entry.action_ids]]
+                for entry in _replay_registry().vocabulary
+            ),
+        ),
+        (
             "state_visibility",
             lambda: [
                 dict(row)

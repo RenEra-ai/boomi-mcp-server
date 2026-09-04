@@ -306,7 +306,13 @@ def validate_error_handling(
         node_id
         for region in regions
         if region.retry_count != 0
-        for node_id in tuple(region.try_node_ids) + tuple(region.catch_node_ids)
+        # TRY NODES ONLY, because the regional pass below iterates try nodes only.
+        # Counting catch nodes as covered made them covered by NOBODY: a catch
+        # body runs once, so its retry rules do not apply, but a reference
+        # attached to a call there must still RESOLVE, and a dangling one
+        # compiled clean. This set exists to name what the other pass grades, so
+        # it must mirror that pass exactly rather than approximate it.
+        for node_id in tuple(region.try_node_ids)
     }
     for node_id, binding in sorted(binding_by_node.items()):
         if node_id in in_a_graded_region:

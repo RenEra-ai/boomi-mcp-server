@@ -263,3 +263,119 @@ def test_no_behaviour_authority_is_silently_unavailable_in_the_shipped_build():
         "these behaviour authorities failed to load, so the served revision no "
         f"longer varies with them: {unavailable}"
     )
+
+
+def test_the_identifier_mapping_is_injective_in_both_directions():
+    """Two raw actions must not derive one reference, across rows as well as within.
+
+    The forward check — one raw action mapped to two identifiers — is the half
+    that cannot lose information. The reverse loses it: two rows sharing a
+    portable family can map DIFFERENT raw actions onto the same identifier, their
+    dictionary keys differ so nothing fires, and both derive one canonical
+    reference. Evidence recorded for one action is then served for the other.
+    """
+    from boomi_mcp.connector_replay.registry import RegistryInvalid, _parse
+
+    payload = json.loads(
+        (_ROOT / "src/boomi_mcp/connector_replay/registry_v1.json").read_text("utf-8"))
+    base = dict(payload["vocabulary"][0])
+    # A family the packaged row does not use, so its own mappings cannot be the
+    # thing that refuses and make this probe pass for the wrong reason.
+    rows = [dict(base, platform_connector_type=f"vendor-{n}", family="zeta",
+                 recognised_actions=[raw], action_ids=[[raw, "same"]], safe_actions=[])
+            for n, raw in (("a", "AAA"), ("b", "BBB"))]
+    with pytest.raises(RegistryInvalid, match="same identifier pair"):
+        _parse(dict(payload, vocabulary=payload["vocabulary"] + rows))
+
+    # CONTROL: distinct identifiers on the same family are fine.
+    ok = [dict(r, action_ids=[[r["recognised_actions"][0],
+                               r["recognised_actions"][0].lower()]]) for r in rows]
+    _parse(dict(payload, vocabulary=payload["vocabulary"] + ok))
+
+
+def test_a_record_that_cannot_derive_its_own_name_refuses_by_name():
+    """The constructor refuses parts the grammar rejects; the loader must translate.
+
+    The model constrains `semantics_id` to a non-empty string, not to the
+    grammar's alphabet, so a packaged record can carry one the constructor
+    refuses. A raw ValueError escaping the loader is not the refusal this family
+    promises, and the discovery surface that maps the named code never sees it.
+    """
+    from boomi_mcp.connector_replay.registry import RegistryInvalid, _parse
+
+    payload = json.loads(
+        (_ROOT / "src/boomi_mcp/connector_replay/registry_v1.json").read_text("utf-8"))
+    payload["operation_records"][0]["semantics_id"] = "Not-Grammar-Safe"
+    with pytest.raises(RegistryInvalid, match="cannot derive its own contract reference"):
+        _parse(payload)
+
+
+def test_the_revision_moves_when_an_action_identifier_is_remapped():
+    """The reference is BUILT from these mappings, so the fingerprint must cover them.
+
+    Fingerprinting only the semantics definitions left a legal registry update —
+    remapping an identifier and updating the operation record to match — moving
+    every published contract reference while the revision stood still. Two
+    deployments resolving references differently would report as compatible.
+    """
+    from unittest.mock import patch
+
+    from boomi_mcp.authoring import contract as contract_module
+
+    baseline = contract_module._compiler_revision()
+    registry = contract_module._replay_registry()
+
+    class _Remapped:
+        vocabulary = tuple(
+            type(entry).model_construct(
+                **{**entry.__dict__,
+                   "action_ids": tuple((raw, ident + "x")
+                                       for raw, ident in entry.action_ids)})
+            for entry in registry.vocabulary)
+        semantics_definitions = registry.semantics_definitions
+        evidence_records = registry.evidence_records
+        operation_records = registry.operation_records
+
+    assert _Remapped.vocabulary[0].action_ids != registry.vocabulary[0].action_ids, (
+        "the remap did not apply, so this proves nothing"
+    )
+    with patch.object(contract_module, "_replay_registry", lambda: _Remapped):
+        moved = contract_module._compiler_revision()
+    assert moved != baseline, (
+        "remapping an action identifier changed every derived contract reference "
+        "and the served revision did not move"
+    )
+
+
+def test_the_served_attestation_constrains_its_route_digests():
+    """A durable mutation record must not accept a malformed route identity.
+
+    The registry refuses these values on the way in; publishing them
+    unconstrained on the way out lets a malformed identity be recorded as a valid
+    account of what authorised a write.
+    """
+    from boomi_mcp.models.authoring_workflow import (
+        ConnectorReplayEvidenceBindingAttestationV1 as Binding,
+    )
+
+    required = {}
+    for name, field in Binding.model_fields.items():
+        if not field.is_required():
+            continue
+        if "config" in name and "digest" in name:
+            required[name] = "ComponentConfigDigestV1:" + "a" * 64
+        elif "digest" in name:
+            required[name] = "a" * 64
+        else:
+            required[name] = "x"
+    good, other = "RouteDigestV1:" + "a" * 64, "RouteDigestV1:" + "b" * 64
+
+    for label, digests in (("malformed", ["not-a-digest"]),
+                           ("wrong type", [42]),
+                           ("duplicate", [good, good]),
+                           ("unsorted", [other, good])):
+        with pytest.raises(Exception):
+            Binding.model_validate(dict(required, route_digests=digests))
+
+    accepted = Binding.model_validate(dict(required, route_digests=[good, other]))
+    assert accepted.route_digests == (good, other)
