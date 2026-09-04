@@ -282,3 +282,27 @@ def test_the_report_still_publishes_no_credential_shaped_token():
     text = render().lower()
     for needle in ("password", "secret", "token", "credential://", "api_key", "@"):
         assert needle not in text, f"the rendered report contains {needle!r}"
+
+
+def test_the_projection_fingerprint_separates_members_a_delimiter_cannot():
+    """THE NON-VACUITY WITNESS for encoding the members injectively.
+
+    The first encoding joined members on NUL. Nothing forbids NUL inside a member,
+    so two different projections — differing in WHICH field they admit — collapsed
+    to the same bytes at the same width, and the fingerprint that exists to expose
+    a same-width change hid one. Constructed here directly.
+    """
+    from boomi_mcp.connector_replay.report import projection_category_fingerprint
+
+    left = ("path\x00junk", "followRedirects")
+    right = ("path", "junk\x00followRedirects")
+    assert len(left) == len(right)
+    assert "\x00".join(left) == "\x00".join(right), "the collision must be real"
+    assert projection_category_fingerprint(left) != projection_category_fingerprint(right)
+
+    # And the ordinary properties still hold: order matters, content matters, and
+    # the same members give the same answer.
+    a, b = ("x", "y"), ("y", "x")
+    assert projection_category_fingerprint(a) != projection_category_fingerprint(b)
+    assert projection_category_fingerprint(a) == projection_category_fingerprint(("x", "y"))
+    assert projection_category_fingerprint(()) != projection_category_fingerprint(("",))

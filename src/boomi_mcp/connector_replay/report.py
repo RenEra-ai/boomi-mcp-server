@@ -53,9 +53,18 @@ def projection_category_fingerprint(members) -> str:
     removal, replacement OR reordering, which is that requirement met exactly.
     """
     import hashlib
+    import json
 
-    joined = "\x00".join(members).encode()
-    return hashlib.sha256(joined).hexdigest()[:16]
+    # CANONICAL JSON, not a delimiter join. A separator-joined stream is injective
+    # only if the separator cannot occur inside a member, and nothing forbids it
+    # here: with a NUL join, `("path\0junk", "followRedirects")` and
+    # `("path", "junk\0followRedirects")` produce the same bytes at the same
+    # width, so the projection could switch which real field it admits while the
+    # served row stood still — the exact drift this fingerprint exists to expose,
+    # reintroduced by its own encoding. JSON escapes control characters and quotes
+    # the members, so the mapping from member tuple to bytes is one-to-one.
+    joined = json.dumps(list(members), separators=(",", ":"), ensure_ascii=True)
+    return hashlib.sha256(joined.encode()).hexdigest()[:16]
 
 
 def _projection_categories(model: type) -> tuple[str, ...]:
