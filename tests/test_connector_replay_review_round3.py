@@ -1356,6 +1356,46 @@ _UNROWED = {"DC-155-C": 2, "DC-155-I": 1}
 #: the reason. Frozen so the set cannot grow silently: a row that names a class is an
 #: instance of it unless it appears here.
 _NOT_AN_INSTANCE = {
+    "CDX-155-r210-01b": "a REVISION correcting the BLOCKING CLASS of a verification-surface "
+    "finding recorded as machine-served — one finding, counted at the original",
+    "CDX-155-r210-02a": "a REVISION correcting the BLOCKING CLASS of a verification-surface "
+    "finding recorded as machine-served — one finding, counted at the original",
+    "CDX-155-r210-03a": "a REVISION correcting the BLOCKING CLASS of a verification-surface "
+    "finding recorded as machine-served — one finding, counted at the original",
+    "CDX-155-r210-04a": "a REVISION correcting the BLOCKING CLASS of a verification-surface "
+    "finding recorded as machine-served — one finding, counted at the original",
+    "CDX-155-r210-05a": "a REVISION correcting the BLOCKING CLASS of a verification-surface "
+    "finding recorded as machine-served — one finding, counted at the original",
+    "CDX-155-r211-01a": "a REVISION correcting the BLOCKING CLASS of a verification-surface "
+    "finding recorded as machine-served — one finding, counted at the original",
+    "CDX-155-r211-02a": "a REVISION correcting the BLOCKING CLASS of a verification-surface "
+    "finding recorded as machine-served — one finding, counted at the original",
+    "CDX-155-r211-03a": "a REVISION correcting the BLOCKING CLASS of a verification-surface "
+    "finding recorded as machine-served — one finding, counted at the original",
+    "CDX-155-r211-04a": "a REVISION correcting the BLOCKING CLASS of a verification-surface "
+    "finding recorded as machine-served — one finding, counted at the original",
+    "CDX-155-r212-01a": "a REVISION correcting the BLOCKING CLASS of a verification-surface "
+    "finding recorded as machine-served — one finding, counted at the original",
+    "CDX-155-r212-02a": "a REVISION correcting the BLOCKING CLASS of a verification-surface "
+    "finding recorded as machine-served — one finding, counted at the original",
+    "CDX-155-r212-03a": "a REVISION correcting the BLOCKING CLASS of a verification-surface "
+    "finding recorded as machine-served — one finding, counted at the original",
+    "CDX-155-r213-01a": "a REVISION correcting the BLOCKING CLASS of a verification-surface "
+    "finding recorded as machine-served — one finding, counted at the original",
+    "CDX-155-r213-02a": "a REVISION correcting the BLOCKING CLASS of a verification-surface "
+    "finding recorded as machine-served — one finding, counted at the original",
+    "CDX-155-r213-03a": "a REVISION correcting the BLOCKING CLASS of a verification-surface "
+    "finding recorded as machine-served — one finding, counted at the original",
+    "CDX-155-r213-04a": "a REVISION correcting the BLOCKING CLASS of a verification-surface "
+    "finding recorded as machine-served — one finding, counted at the original",
+    "CDX-155-r214-01a": "a REVISION correcting the BLOCKING CLASS of a verification-surface "
+    "finding recorded as machine-served — one finding, counted at the original",
+    "CDX-155-r214-02a": "a REVISION correcting the BLOCKING CLASS of a verification-surface "
+    "finding recorded as machine-served — one finding, counted at the original",
+    "CDX-155-r214-03a": "a REVISION correcting the BLOCKING CLASS of a verification-surface "
+    "finding recorded as machine-served — one finding, counted at the original",
+    "CDX-155-r214-04a": "a REVISION correcting the BLOCKING CLASS of a verification-surface "
+    "finding recorded as machine-served — one finding, counted at the original",
     "QA-155-r61-02a": "a REVISION correcting a DERIVED TIER that read only the first disjunct of the severity rule — one finding, counted at "
     "the original",
     "QA-155-r64-03a": "a REVISION correcting a DERIVED TIER that read only the first disjunct of the severity rule — one finding, counted at "
@@ -3186,15 +3226,23 @@ def _wave_evidence_violation(ledger_text, archive_dir):
     # its scope: the slice-F checkpoint mentions the issue-level gate in its prose, so
     # the whole-line read returned `issue-level` for a slice-F row and would reject
     # that row's own valid evidence. Scope is a field; a field is read from its cell.
+    # A NON-STRING LOOP IDENTITY IS MALFORMED EVIDENCE. Stringifying first meant a
+    # record whose identity was an object still matched — `{"scope": "slice B"}`
+    # renders a string containing `slice B` — so a malformed archive validated against
+    # a well-formed checkpoint. This function is validating a producer's output, not
+    # trusting it.
+    raw_loop = record.get("logical_loop")
+    if not isinstance(raw_loop, str):
+        return (f"cited archive {named.group(1)} records a loop identity that is not "
+                f"a string: {type(raw_loop).__name__}")
     row_scope = _loop_scope(latest.split("|")[1])
-    round_scope = _loop_scope(str(record.get("logical_loop", "")))
+    round_scope = _loop_scope(raw_loop)
     # AN UNRECOGNISED SCOPE IS A VIOLATION, not a value to compare. Two scopes this
     # extractor cannot read both came back as "no scope" and compared EQUAL, so a
     # checkpoint spelled one way could be satisfied by a round spelled another
     # entirely — a fail-open hiding inside an equality test.
     for who, scope, text in (("checkpoint row", row_scope, latest.split("|")[1]),
-                             ("cited archive", round_scope,
-                              str(record.get("logical_loop", "")))):
+                             ("cited archive", round_scope, raw_loop)):
         if scope is None:
             return (f"the {who} names a loop scope this rule cannot read: "
                     f"{text.strip()[:60]!r}")
@@ -7290,6 +7338,32 @@ def test_a_loop_scope_this_rule_cannot_read_is_refused(tmp_path):
         "'L4 (composite wave gate, wave two)'")
 
 
+def test_a_loop_identity_that_is_not_a_string_is_malformed_evidence(tmp_path):
+    """Stringifying a producer's field is trusting it, not validating it.
+
+    THE NON-VACUITY WITNESS: an object rendered to text still CONTAINS the scope name,
+    so a malformed record matched a well-formed checkpoint. The rule reads archived
+    evidence, so a field of the wrong type is a defect in that evidence.
+    """
+    import hashlib
+    import json
+
+    archive = tmp_path / "wave-gate"
+    (archive / "ok").mkdir(parents=True)
+    body = json.dumps(_PASSING_WAVE)
+    (archive / "ok" / "summary.json").write_text(body)
+    (archive / "ok" / "round.json").write_text(json.dumps({
+        "files": {"wave-gate/ok/summary.json": hashlib.sha256(body.encode()).hexdigest()},
+        "verdict": "pass", "status": "completed", "durable_dir": "wave-gate/ok",
+        "wave_sha": _PASSING_WAVE["wave_sha"],
+        # Renders as a string containing `slice B`, which is exactly why it used to pass.
+        "logical_loop": {"scope": "slice B"},
+    }))
+    row = _wave_ledger(_ROW.format(sha="abc1234", cite=", archived `wave-gate/ok`"))
+    assert _wave_evidence_violation(row, archive) == (
+        "cited archive ok records a loop identity that is not a string: dict")
+
+
 def test_an_issue_level_loop_owes_its_checkpoints_like_any_other(tmp_path):
     """A loop whose scope is not a slice letter is still a loop.
 
@@ -7394,9 +7468,12 @@ def _tier_derivation_offenders(ledger_text):
     expected = ("ID", "Source gate", "Verbatim summary", "Original label",
                 "Blocking class", "Defect class", "Derived tier", "SHA/delta",
                 "Disposition")
-    head = next((l for l in _unfenced_lines(ledger_text)
-                 if l.startswith("|") and l.split("|")[1].strip() == "ID"), None)
-    if head is not None:
+    # EVERY table the row parser walks, not just the first one it finds. That parser
+    # reads all ID-headed tables, so validating one header left any later table free to
+    # order its columns differently while these offsets kept reading position four as
+    # the source label.
+    for head in (l for l in _unfenced_lines(ledger_text)
+                 if l.startswith("|") and l.split("|")[1].strip() == "ID"):
         got = [c.strip() for c in head.split("|")[1:-1]]
         if len(got) != len(expected) or not all(
                 g.startswith(e) for g, e in zip(got, expected)):
@@ -7437,28 +7514,69 @@ def _tier_derivation_offenders(ledger_text):
     # Column-count damage as such is already owned by the malformed-row guard, and
     # reporting every such row here would restate that rule and bury this one's own
     # findings under eleven pre-existing rows it has nothing to say about.
-    # SUPERSESSION APPLIES HERE TOO. A malformed historical row corrected by a valid
-    # revision was reported before the map was ever consulted, so the record could not
-    # be made green by the one move the workflow allows — retain the original, append
-    # the correction. A rule that cannot be satisfied by the sanctioned repair is a
-    # rule that gets worked around.
-    offenders = [(rid, "<malformed row carrying a severity label>",
-                  " ".join(c.strip() for c in cells)[:60])
-                 for rid, cells in malformed
-                 if not (rid in superseded and superseded[rid] in rows)
-                 and any(re.fullmatch(r"(P0|P1|Critical|High)", c.strip(), re.I)
-                         for c in cells)]
-    for rid in sorted(rows):
-        # SUPPRESSED ONLY BY A ROW THAT IS ACTUALLY THERE. The map named an older id
-        # and this hid it without checking the newer one had been parsed, so a
-        # revision the parser never saw would silently exempt its own original and
-        # neither row would be graded. Both endpoints resolve through the same parser
-        # before the map is allowed to hide anything.
-        if rid in superseded and superseded[rid] in rows:
+    def standing(rid):
+        """The row that finally stands for `rid`, following the WHOLE chain.
+
+        Checking only the immediate successor stopped one link in: a chain A → B → C
+        left A reported whenever B was itself unusable, and — the worse direction — a
+        malformed A could be laundered by a successor carrying a lesser label, because
+        the successor was consulted for its existence and never for what it said. The
+        chain is walked to its end, with a seen-set so a cyclic map cannot hang the
+        rule, and `None` means nothing standing was found.
+        """
+        seen, here = set(), rid
+        while here in superseded and here not in seen:
+            seen.add(here)
+            here = superseded[here]
+        return here if here in rows else None
+
+    # SUPERSESSION APPLIES TO MALFORMED ROWS TOO, and to the whole chain. A malformed
+    # historical row corrected by a valid revision was reported before the map was
+    # consulted at all, so the record could not be made green by the one move the
+    # workflow allows — retain the original, append the correction. A rule that cannot
+    # be satisfied by the sanctioned repair is a rule that gets worked around.
+    #
+    # THE SOURCE LABEL IS THE PREDECESSOR'S, ALWAYS. A raw source label is immutable,
+    # so a chain is graded on the label the ORIGINAL row carries and the tier the
+    # STANDING row derives. Reading both from the successor let a `P1` row be laundered
+    # by a successor that simply called itself `P2`, which is the immutability rule
+    # being deleted by the mechanism written to honour it.
+    offenders = []
+    for rid, cells in malformed:
+        if not any(re.fullmatch(r"(P0|P1|Critical|High)", c.strip(), re.I)
+                   for c in cells):
             continue
-        cells = rows[rid]
-        # The parser guarantees the column count, so these positions are the table's.
-        label, tier, disposition = cells[4].strip(), cells[7].strip(), cells[9].strip()
+        end = standing(rid)
+        if end is None:
+            offenders.append((rid, "<malformed row carrying a severity label>",
+                              " ".join(c.strip() for c in cells)[:60]))
+            continue
+        label = next(c.strip() for c in cells
+                     if re.fullmatch(r"(P0|P1|Critical|High)", c.strip(), re.I))
+        tier, disposition = rows[end][7].strip(), rows[end][9].strip()
+        if not (refuted.search(disposition) or refuted.search(tier)):
+            token = re.match(r"[*_\s]*(critical|standard|n/a)\b", tier, re.I)
+            if token is None or token.group(1).lower() != "critical":
+                offenders.append((end, label, tier[:60]))
+    for rid in sorted(rows):
+        # SUPPRESSED ONLY BY A ROW THAT IS ACTUALLY THERE, at the END of the chain.
+        # The map named an older id and this hid it without checking the newer one had
+        # been parsed, so a revision the parser never saw would silently exempt its own
+        # original and neither row would be graded.
+        end = standing(rid) if rid in superseded else None
+        if end is not None:
+            # The predecessor is answered for by the row that stands, and that row is
+            # graded against THIS row's source label, because a raw label is immutable
+            # and a successor cannot lower it by simply writing a smaller one.
+            cells, stand = rows[rid], rows[end]
+            label = cells[4].strip()
+            tier, disposition = stand[7].strip(), stand[9].strip()
+        else:
+            cells = rows[rid]
+            # The parser guarantees the column count, so these positions are the
+            # table's own.
+            label, tier, disposition = (cells[4].strip(), cells[7].strip(),
+                                        cells[9].strip())
         if not critical_labels.search(label):
             continue
         if refuted.search(disposition) or refuted.search(tier):
@@ -7471,8 +7589,21 @@ def _tier_derivation_offenders(ledger_text):
         # can parse cannot support the record's no-critical-residue claim.
         token = re.match(r"[*_\s]*(critical|standard|n/a)\b", tier, re.I)
         if token is None or token.group(1).lower() != "critical":
-            offenders.append((rid, label[:40], tier[:60]))
-    return offenders
+            # The STANDING row is what the record is asked to correct, so a chain is
+            # named once by its end rather than once per link — otherwise a predecessor
+            # and its own successor are reported as two separate failures of one row.
+            offenders.append((end or rid, label[:40], tier[:60]))
+
+    # ONE ENTRY PER ROW THE RECORD MUST CHANGE, first mention kept: a chain reaches
+    # this list once through its predecessor and again on its own account, and the
+    # same id twice reads as two defects where the record has one.
+    seen, unique = set(), []
+    for entry in offenders:
+        if entry[0] in seen:
+            continue
+        seen.add(entry[0])
+        unique.append(entry)
+    return unique
 
 
 def test_a_source_label_derives_its_tier_and_is_not_read_around():
@@ -7626,3 +7757,37 @@ def test_the_tier_derivation_can_actually_fail():
     # sentinel — which owns the "no rows at all" case — is not what answers here.
     alone = ledger(short, row("CDX-155-r1-01", "P2", "standard — anchor", "fixed"))
     assert [r for r, _, _ in _tier_derivation_offenders(alone)] == ["CDX-155-r2-01"]
+
+    # A SOURCE LABEL CANNOT BE LAUNDERED BY A SUCCESSOR. The raw label is immutable, so
+    # a chain is graded on the ORIGINAL row's label and the STANDING row's tier; taking
+    # both from the successor let a `P1` predecessor be answered by a revision that
+    # simply called itself `P2`, deleting the immutability rule through the mechanism
+    # written to honour it.
+    laundered = (row("CDX-155-r3-01", "P1", "standard — original", "fixed"),
+                 row("CDX-155-r3-01a", "P2", "standard — relabelled", "fixed"))
+    assert offenders(*laundered,
+                     supersessions=(("CDX-155-r3-01a", "CDX-155-r3-01"),)) == [
+        "CDX-155-r3-01a"]
+
+    # THE WHOLE CHAIN, not one link. A → B → C where only C stands: checking the
+    # immediate successor alone reported A whenever B was itself unusable.
+    three = (row("CDX-155-r4-01", "P1", "standard — original", "fixed"),
+             row("CDX-155-r4-01b", "P1", "**critical** — corrected", "fixed"))
+    assert not offenders(*three, supersessions=(("CDX-155-r4-01a", "CDX-155-r4-01"),
+                                                ("CDX-155-r4-01b", "CDX-155-r4-01a")))
+
+    # A CYCLIC MAP terminates rather than hanging the rule.
+    cyc = (row("CDX-155-r5-01", "P1", "standard", "fixed"),
+           row("CDX-155-r5-01a", "P1", "standard", "fixed"))
+    assert offenders(*cyc, supersessions=(("CDX-155-r5-01a", "CDX-155-r5-01"),
+                                          ("CDX-155-r5-01", "CDX-155-r5-01a")))
+
+    # A SECOND finding table with a different column order is refused, not read by
+    # position: the row parser walks every ID-headed table, so validating only the
+    # first left later rows graded through the wrong offsets.
+    second = (ledger(row("CDX-155-r1-01", "P2", "standard — anchor", "fixed"))
+              + "\n" + HEAD.replace("Original label | Blocking class",
+                                    "Blocking class | Original label", 1)
+              + row("CDX-155-r6-01", "P1", "standard", "fixed") + "\n")
+    assert [r for r, _, _ in _tier_derivation_offenders(second)] == [
+        "<the finding table's columns are not in the order this rule reads>"]
