@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 11538, "minimum_collected": 11538, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 11540, "minimum_collected": 11540, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -11583,3 +11583,5 @@
 {"kind": "test", "id": "pytest-011582", "node_id": "tests/test_issue_155_contract_id_grammar.py::test_the_revision_moves_when_an_action_identifier_is_remapped", "state": "active"}
 {"kind": "test", "id": "pytest-011583", "node_id": "tests/test_issue_155_contract_id_grammar.py::test_the_served_attestation_constrains_its_route_digests", "state": "active"}
 {"kind": "test", "id": "pytest-011584", "node_id": "tests/test_issue_155_contract_id_grammar.py::test_the_published_route_digest_rule_and_the_enforced_one_agree", "state": "active"}
+{"kind": "test", "id": "pytest-011585", "node_id": "tests/test_connector_replay_review_round3.py::test_the_affected_sha_cell_names_the_tree_the_defect_affected", "state": "active"}
+{"kind": "test", "id": "pytest-011586", "node_id": "tests/test_connector_replay_review_round3.py::test_the_affected_sha_guard_is_not_vacuous", "state": "active"}

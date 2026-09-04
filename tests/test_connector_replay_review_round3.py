@@ -6795,3 +6795,73 @@ def test_a_replay_claim_needs_the_artifact_that_observes_replay():
 
     # ...and the packaged record itself, which names the readback, still loads.
     assert load_registry().operation_records
+
+
+def test_the_affected_sha_cell_names_the_tree_the_defect_affected():
+    """The column is the AFFECTED sha — the tree with the defect, not the fix.
+
+    Measured across this ledger: of the rows that cite a review and name a
+    literal SHA, 493 name the reviewed SHA and none names anything else. That is
+    the convention, and it follows from the column's own name — a finding affects
+    the tree it was found in, and the disposition beside it says what happened to
+    it afterwards.
+
+    This guard exists because I broke that convention twice in one arc while
+    trying to "correct" it: a reviewer read the column as "where the fix landed",
+    objected that the fix was not in that tree, and I rewrote two rows into a
+    delta form no other row uses — then rewrote one again. The measurement is
+    what settles it, and this pins the measurement so the next reading of the
+    column has to argue with 493 rows rather than with me.
+    """
+    import re
+    from pathlib import Path
+
+    ledger = (Path(__file__).resolve().parents[1]
+              / "docs/architecture/ISSUE_155_AUDIT_LEDGER.md")
+    reviewed = re.compile(r"reviewed `([0-9a-f]{7,40})`")
+
+    conforming, deviating = 0, []
+    for line in ledger.read_text(encoding="utf-8").splitlines():
+        parts = line.split("|")
+        if len(parts) < 11 or not parts[1].strip():
+            continue
+        found = reviewed.search(parts[2])
+        if not found:
+            continue
+        named = re.findall(r"`([0-9a-f]{7,40})`", parts[8])
+        if not named:
+            continue                      # the tip form names nothing; also correct
+        read_sha = found.group(1)
+        if any(s.startswith(read_sha) or read_sha.startswith(s) for s in named):
+            conforming += 1
+        else:
+            deviating.append((parts[1].strip(), read_sha, parts[8].strip()))
+
+    assert conforming, "no conforming rows parsed; this guard would be inert"
+    assert not deviating, (
+        "these rows name a SHA cell that does not include the tree their own gate "
+        "cell says was reviewed, against the convention every other row follows: "
+        + "; ".join(f"{r} (reviewed {s}) -> {c}" for r, s, c in deviating)
+    )
+
+
+def test_the_affected_sha_guard_is_not_vacuous():
+    """It must reject the delta form I wrote, and accept the conventional one."""
+    import re
+
+    reviewed = re.compile(r"reviewed `([0-9a-f]{7,40})`")
+
+    def deviates(gate_cell, sha_cell):
+        found = reviewed.search(gate_cell)
+        named = re.findall(r"`([0-9a-f]{7,40})`", sha_cell)
+        if not found or not named:
+            return False
+        r = found.group(1)
+        return not any(s.startswith(r) or r.startswith(s) for s in named)
+
+    gate = "Stage-2 Codex commit review, run `cdx-review.X`, reviewed `323151f`"
+    assert not deviates(gate, " `323151f` "), "the conventional form is flagged"
+    assert not deviates(gate, " correction on the tip "), "the tip form is flagged"
+    assert deviates(gate, " `59af3e1`..`5d169f9` "), (
+        "the delta form that names neither the reviewed tree is not caught"
+    )
