@@ -2625,3 +2625,95 @@ def test_the_archiver_stages_what_its_manifest_names(tmp_path):
     assert any(l.startswith("A ") and "evidence" in l for l in out.splitlines()), (
         f"nothing under the evidence root was staged: {out!r}"
     )
+
+
+def _repo_with_index(tmp_path):
+    """A real checkout with the evidence root seeded, ready to archive into."""
+    import subprocess
+
+    repo = tmp_path / "repo"
+    (repo / "docs" / "architecture" / "evidence" / "issue-999").mkdir(parents=True)
+    (repo / "docs" / "architecture" / "evidence" / "issue-999" / "index.jsonl").write_text(
+        json.dumps({"generated_at": "x", "issue": 999, "schema_version": 1,
+                    "source_tip": "abc"}) + "\n")
+    for args in (["init", "-q"], ["config", "user.email", "t@t"],
+                 ["config", "user.name", "t"]):
+        subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True)
+    (repo / "seed").write_text("seed\n")
+    subprocess.run(["git", "-C", str(repo), "add", "-A"], check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(repo), "commit", "-qm", "seed"], check=True,
+                   capture_output=True)
+    return repo
+
+
+def _staging_run(tmp_path, name="run"):
+    run = tmp_path / name
+    run.mkdir()
+    (run / "wave.log").write_text("wave_gate: ok\n")
+    (run / "summary.json").write_text('{"status": "completed", "verdict": "pass"}\n')
+    (run / "wave-sha").write_text("a" * 40 + "\n")
+    return run
+
+
+def test_an_ignored_manifest_path_is_refused_not_silently_skipped(tmp_path):
+    """A directory add succeeds while skipping an ignored child. The manifest names it.
+
+    THE NON-VACUITY WITNESS for verifying each path individually. `git add <dir>`
+    returns 0 having quietly not staged an ignored file, so staging "succeeded"
+    while the manifest asserted a file the index did not carry — which is the exact
+    `listed-but-untracked` failure this staging step exists to prevent, surviving
+    inside the step meant to prevent it.
+    """
+    import subprocess
+
+    repo = _repo_with_index(tmp_path)
+    (repo / ".gitignore").write_text("*.sqlite\n")
+    subprocess.run(["git", "-C", str(repo), "add", "-A"], check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(repo), "commit", "-qm", "ignore"], check=True,
+                   capture_output=True)
+
+    run = _staging_run(tmp_path)
+    (run / "capture.sqlite").write_text("payload\n")
+
+    result, root = _archive(tmp_path, run, kind="wave-gate",
+                            extra=("--wave-sha", "a" * 40, "--status", "completed",
+                                   "--accept-new"))
+    if result.returncode == 0:
+        # If the run's file never entered the manifest there is nothing to prove;
+        # the guard only owns paths the manifest actually names.
+        listed = (root / "SHA256SUMS").read_text()
+        assert "capture.sqlite" not in listed, (
+            "the manifest names an ignored path and staging still reported success"
+        )
+    else:
+        assert "the index does not carry" in result.stderr, result.stderr
+        # AND THE TRANSACTION UNWOUND: the retry contract must still hold.
+        assert not (root / "wave-gate").exists() or not any(
+            (root / "wave-gate").iterdir()), (
+            "a staging failure left the archive published"
+        )
+
+
+def test_a_probe_failure_is_not_read_as_a_scratch_directory(tmp_path):
+    """An unreadable repository is unknown, not "no repository".
+
+    THE NON-VACUITY WITNESS for failing closed on the probe. The first version took
+    any non-zero probe as "not a checkout" and returned SUCCESS with the archive
+    unstaged — so a real worktree whose metadata git refuses would have published a
+    manifest naming files no index carried, and said it was fine.
+    """
+    import shutil
+
+    repo = _repo_with_index(tmp_path)
+    # A `.git` that EXISTS and cannot be understood — an invalid gitfile. The probe
+    # then fails for a reason that is not "there is no repository here", which is
+    # precisely the case the first version read as a scratch directory.
+    shutil.rmtree(repo / ".git")
+    (repo / ".git").write_text("gitdir: \n")
+
+    result, _root = _archive(tmp_path, _staging_run(tmp_path), kind="wave-gate",
+                             extra=("--wave-sha", "a" * 40, "--status", "completed"))
+    assert result.returncode == 1, result.stdout
+    assert "could not be probed" in result.stderr or "rolled back" in result.stderr, (
+        result.stderr
+    )

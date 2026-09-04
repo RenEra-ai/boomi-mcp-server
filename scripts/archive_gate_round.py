@@ -955,6 +955,77 @@ UNSOURCEABLE_BY_KIND = {
 }
 
 
+def _manifest_paths(root: Path) -> list[Path]:
+    """Every path the checksum manifest names, as absolute paths."""
+    sums = root / "SHA256SUMS"
+    if not sums.is_file():
+        return []
+    out = []
+    for line in sums.read_text().splitlines():
+        if not line.strip():
+            continue
+        _digest, _, rel = line.partition("  ")
+        if rel:
+            out.append(root / rel)
+    return [sums, *out]
+
+
+def _stage_archive(repo: Path, root: Path, listed_paths) -> str:
+    """Stage the archive, and PROVE every manifest path reached the index.
+
+    The manifest names files, and the scanners compare it against the GIT INDEX —
+    so a write that leaves any named path unstaged publishes an assertion the
+    checkout cannot support. Three things went wrong in the first version of this
+    and each is answered here.
+
+    A directory-form `git add` returns 0 while silently skipping an IGNORED child,
+    so success said nothing about the file the manifest actually names: the paths
+    are verified individually afterwards, and `--force` is deliberately NOT used —
+    an ignored file inside an archive is a decision for the caller who accepted it,
+    not something this script should quietly override.
+
+    A probe failure is not a scratch directory. `--repo` may point at a real
+    worktree whose metadata is unreadable or whose ownership git refuses, and
+    treating that like "no repository here" reported success with the archive
+    unstaged. Only git's own "not a repository" answer takes the no-index branch.
+
+    The pathspec is repository-RELATIVE, because `git -C repo` resolves it from
+    inside the repository: an absolute `--repo` made the absolute path work by
+    accident, and a relative one aimed at a nested directory that does not exist.
+    """
+    probe = subprocess.run(
+        ["git", "-C", str(repo), "rev-parse", "--is-inside-work-tree"],
+        capture_output=True, text=True)
+    if probe.returncode != 0:
+        if "not a git repository" in probe.stderr.lower():
+            return " (no git index here, so there is no manifest/index pair to keep)"
+        raise OSError(
+            "the repository could not be probed, so whether this archive reached "
+            f"an index is unknown: {probe.stderr.strip()}")
+    if probe.stdout.strip() != "true":
+        return " (no git index here, so there is no manifest/index pair to keep)"
+
+    rel_root = root.resolve().relative_to(repo.resolve())
+    staged = subprocess.run(
+        ["git", "-C", str(repo), "add", "--", str(rel_root)],
+        capture_output=True, text=True)
+    if staged.returncode != 0:
+        raise OSError(f"staging {rel_root} failed: {staged.stderr.strip()}")
+
+    wanted = [str(p.resolve().relative_to(repo.resolve())) for p in listed_paths]
+    if wanted:
+        check = subprocess.run(
+            ["git", "-C", str(repo), "ls-files", "--error-unmatch", "--", *wanted],
+            capture_output=True, text=True)
+        if check.returncode != 0:
+            raise OSError(
+                "the manifest names paths the index does not carry — a directory "
+                "add skips ignored children while still succeeding: "
+                f"{check.stderr.strip()}")
+    return (f" and STAGED {rel_root} — the scanners compare SHA256SUMS against the "
+            "GIT INDEX, so the write and the staging happen together or not at all")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--issue", required=True)
@@ -1352,6 +1423,14 @@ def main() -> int:
                 json.dumps(row, sort_keys=True, indent=1) + "\n")
 
         listed = write_sums(root)
+
+        # STAGED INSIDE THE TRANSACTION. Staging after the `try` published the
+        # directory, the index row and the manifest and then returned 1 without
+        # rollback, so the identical retry was refused for a destination that
+        # already existed — the retry contract this script's own test pins,
+        # broken by the step added to protect a different invariant. A failure
+        # here now raises and unwinds with everything else.
+        staged_note = _stage_archive(repo, root, listed_paths=_manifest_paths(root))
     except BaseException as failure:
         # The rollback is itself a mutation and can itself fail — a read-only
         # index is the case that proved it, where restoring needed exactly the
@@ -1407,28 +1486,7 @@ def main() -> int:
     # proving it. A warning that must be obeyed every time to keep an invariant is
     # the invariant unenforced; the writer that creates the inconsistency is the
     # one that can end it, atomically, in the same step.
-    # ...where there IS an index. The archiver is also run against scratch
-    # directories that are not checkouts, and there the invariant does not exist:
-    # nothing compares a manifest to an index that is absent. Asked, not assumed —
-    # a failed `git add` inside a real repository is still a hard error.
-    inside = subprocess.run(
-        ["git", "-C", str(repo), "rev-parse", "--is-inside-work-tree"],
-        capture_output=True, text=True)
-    if inside.returncode == 0 and inside.stdout.strip() == "true":
-        staged = subprocess.run(
-            ["git", "-C", str(repo), "add", "--", str(root)],
-            capture_output=True, text=True)
-        if staged.returncode != 0:
-            print("archived, but STAGING FAILED — the manifest now names files the "
-                  f"index does not carry: {staged.stderr.strip()}\n"
-                  f"Run: git add {(root).relative_to(repo)}", file=sys.stderr)
-            return 1
-        note = (f" and STAGED {(root).relative_to(repo)} — the scanners compare "
-                "SHA256SUMS against the GIT INDEX, so the write and the staging "
-                "happen together or not at all")
-    else:
-        note = " (no git index here, so there is no manifest/index pair to keep)"
-    print(f"archived {len(copied)} file(s) to {durable.relative_to(repo)}{note}.")
+    print(f"archived {len(copied)} file(s) to {durable.relative_to(repo)}{staged_note}.")
     return 0
 
 
