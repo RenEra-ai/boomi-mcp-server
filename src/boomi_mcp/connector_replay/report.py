@@ -63,8 +63,16 @@ def projection_category_fingerprint(members) -> str:
     # served row stood still — the exact drift this fingerprint exists to expose,
     # reintroduced by its own encoding. JSON escapes control characters and quotes
     # the members, so the mapping from member tuple to bytes is one-to-one.
-    joined = json.dumps(list(members), separators=(",", ":"), ensure_ascii=True)
-    return hashlib.sha256(joined.encode()).hexdigest()[:16]
+    # CODE POINTS PRESERVED, not escaped. `ensure_ascii=True` was the second
+    # encoding here and is injective over ASCII and no further: a member holding
+    # the single scalar U+1F600 and a member holding the two lone surrogates
+    # U+D83D U+DE00 are DIFFERENT Python strings that `json.dumps` escapes to the
+    # same `"\ud83d\ude00"`. Constructed and confirmed rather than reasoned about.
+    # Emitting the characters and encoding with `surrogatepass` keeps every code
+    # point distinct — including lone surrogates, which this model accepts and
+    # plain UTF-8 refuses to encode at all.
+    joined = json.dumps(list(members), separators=(",", ":"), ensure_ascii=False)
+    return hashlib.sha256(joined.encode("utf-8", "surrogatepass")).hexdigest()[:16]
 
 
 def _projection_categories(model: type) -> tuple[str, ...]:

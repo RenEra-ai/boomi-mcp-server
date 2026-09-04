@@ -300,6 +300,17 @@ def test_the_projection_fingerprint_separates_members_a_delimiter_cannot():
     assert "\x00".join(left) == "\x00".join(right), "the collision must be real"
     assert projection_category_fingerprint(left) != projection_category_fingerprint(right)
 
+    # A SURROGATE PAIR IS NOT ITS SCALAR. The second encoding escaped to ASCII,
+    # which collapses the single code point U+1F600 onto the two lone surrogates
+    # U+D83D U+DE00 — different strings, identical escape. This model accepts both.
+    scalar = (chr(0x1F600),)
+    pair = (chr(0xD83D) + chr(0xDE00),)
+    assert scalar != pair and len(scalar[0]) == 1 and len(pair[0]) == 2
+    import json as _json
+    assert (_json.dumps(list(scalar), ensure_ascii=True)
+            == _json.dumps(list(pair), ensure_ascii=True)), "the collision must be real"
+    assert projection_category_fingerprint(scalar) != projection_category_fingerprint(pair)
+
     # And the ordinary properties still hold: order matters, content matters, and
     # the same members give the same answer.
     a, b = ("x", "y"), ("y", "x")
