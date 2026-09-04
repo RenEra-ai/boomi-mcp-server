@@ -7822,23 +7822,57 @@ def _closing_row_without_covering_evidence(ledger_text, archive_dir):
     import json
     import re
 
-    rows = [r for r in (_checkpoint_rows(ledger_text) or [])
-            if "`CLOSE-CLEAN`" in r or "AND-CLOSE`" in r]
-    if not rows:
+    #: THE OUTCOMES THAT END A LOOP, read from the OUTCOME CELL and nowhere else.
+    #: Matching the whole row let a `CONTINUE` whose rationale quotes `CLOSE-CLEAN`
+    #: be taken for the closing row — and hide the real one — while the two deferral
+    #: outcomes, which also end a loop, were skipped because only one spelling was
+    #: searched for. Both halves are the same mistake: reading a field from prose.
+    ENDING = ("CLOSE-CLEAN", "DEFER-STANDARD-AND-CLOSE", "DEFER-STANDARD-AND-PROCEED")
+
+    closing = []
+    for row in (_checkpoint_rows(ledger_text) or []):
+        cells = row.split("|")
+        if len(cells) < 6:
+            continue
+        if any(o in cells[4] for o in ENDING):
+            closing.append(cells)
+    if not closing:
         return None
-    latest = rows[-1]
-    shas = re.findall(r"`([0-9a-f]{7,40})`", latest)
+    # The LAST such row is the standing one: revisions are appended, never edited in
+    # place, so a superseded closing row is always followed by the row that replaces it.
+    cells = closing[-1]
+    loop, sha_cell, rationale = cells[1].strip(), cells[3], cells[5]
+
+    # THE SHA COLUMN, not the row. Collecting every backticked SHA meant a rationale
+    # mentioning a reviewed ANCESTOR — which these rationales routinely do, since they
+    # explain what moved since the last gate — satisfied a row whose own tree was never
+    # reviewed. That is the close-on-parent defect this rule exists to refuse, reading
+    # the parent out of the sentence that named it.
+    shas = re.findall(r"`([0-9a-f]{7,40})`", sha_cell)
     if not shas:
-        return "the latest closing checkpoint names no SHA"
-    cited = re.findall(r"`((?:commit-reviews|wave-gate)/[A-Za-z0-9._-]+)`", latest)
+        return "the latest closing checkpoint names no SHA in its SHA column"
+    cited = re.findall(r"`((?:commit-reviews|wave-gate)/[A-Za-z0-9._-]+)`",
+                       sha_cell + rationale)
     if not cited:
         return "the latest closing checkpoint cites no archived evidence"
 
-    #: Where each kind of archived round records the tree it ran against. Read from
-    #: the round's own files, never from the row that cites it — a row confirming
-    #: itself is the shape this whole class keeps taking.
     root = Path(archive_dir)
-    seen = []
+    #: Which loop each archived round was billed to. Commit-review rounds record it in
+    #: the archive index; wave rounds record it in their own round file.
+    billed = {}
+    index = root / "index.jsonl"
+    if index.is_file():
+        for raw in index.read_text().splitlines():
+            if not raw.strip():
+                continue
+            try:
+                entry = json.loads(raw)
+            except ValueError:
+                continue
+            billed[str(entry.get("durable_dir", ""))] = str(entry.get("logical_loop", ""))
+
+    tag = re.match(r"(L\d)", loop)
+    covered, why = [], []
     for name in cited:
         d = root / name
         if not d.is_dir():
@@ -7846,23 +7880,42 @@ def _closing_row_without_covering_evidence(ledger_text, archive_dir):
         if name.startswith("wave-gate/"):
             summary = d / "summary.json"
             if not summary.is_file():
-                return f"cited archive {name} carries no summary"
-            seen.append(str(json.loads(summary.read_text()).get("wave_sha", "")))
+                why.append(f"{name} carries no summary")
+                continue
+            attested = json.loads(summary.read_text())
+            round_loop = str(json.loads((d / "round.json").read_text()).get(
+                "logical_loop", "")) if (d / "round.json").is_file() else ""
+            # A PASS, not merely a run.
+            if attested.get("status") != "completed" or attested.get("verdict") != "pass":
+                why.append(f"{name} is not a passing run")
+                continue
+            recorded = str(attested.get("wave_sha", ""))
         else:
-            head = d / "start-head"
-            if not head.is_file():
-                return f"cited archive {name} records no reviewed tree"
-            seen.append(head.read_text().strip())
+            # COMPLETION, NOT COMMENCEMENT. `start-head` is written when the review is
+            # STARTED, so reading it counted a failed or abandoned round as coverage —
+            # and this record holds exactly such an archive, carrying a failed phase, a
+            # start head, and no reviewed SHA at all. The collector writes
+            # `last-reviewed-sha` only on a completed round and `teardown` only once the
+            # daemon is proven gone, so those two are what a covered tree is read from.
+            reviewed, teardown = d / "last-reviewed-sha", d / "teardown"
+            if not (reviewed.is_file() and teardown.is_file()):
+                why.append(f"{name} records no completed, torn-down round")
+                continue
+            round_loop = billed.get(name, "")
+            recorded = reviewed.read_text().strip()
+        # THE CHECKPOINT'S OWN LOOP. A wave pass cannot discharge a commit-review
+        # closure and a review billed elsewhere cannot either: loops are distinct gates,
+        # so evidence from one says nothing about whether the other ever ran.
+        if tag and not round_loop.startswith(tag.group(1)):
+            why.append(f"{name} was billed to {round_loop.split('(')[0].strip() or 'no loop'}")
+            continue
+        covered.append(recorded)
 
-    # The row's own SHA must be one the cited evidence actually ran against. A closing
-    # decision whose evidence names only an ANCESTOR is the defect precisely: the
-    # gates covered the tree before the correction, and the row closes over the tree
-    # after it.
     for sha in shas:
-        if any(recorded.startswith(sha) for recorded in seen if recorded):
+        if any(r.startswith(sha) for r in covered if r):
             return None
-    return (f"the latest closing checkpoint names {shas[0]} but its cited evidence "
-            f"ran against {sorted({r[:7] for r in seen if r})}")
+    return (f"the latest closing checkpoint names {shas[0]} and no cited evidence of "
+            f"its own loop covers it: {sorted(why) or sorted({r[:7] for r in covered})}")
 
 
 def test_a_closing_checkpoint_cites_evidence_for_the_tree_it_closes():
@@ -7880,45 +7933,93 @@ def test_a_closing_checkpoint_cites_evidence_for_the_tree_it_closes():
 
 
 def test_the_closing_evidence_rule_can_actually_fail(tmp_path):
-    """THE NON-VACUITY WITNESS: the historical shape must be refused.
+    """THE NON-VACUITY WITNESS: every shape a procedure failed to prevent.
 
-    Each case below is a closing row that a procedure was supposed to prevent and
-    did not — a decision recorded while its gates still named the parent tree, and a
-    decision citing an archive that is not in the checkout at all.
+    The first version of this rule was written to make the ordering axis executable
+    and reproduced, inside itself, three defects this record already carries: reading
+    a field out of prose, trusting a marker written before the work rather than after
+    it, and accepting evidence from a loop other than the one owed. Each has an arm.
     """
     import json
 
-    archive = tmp_path
-    (archive / "wave-gate" / "w1").mkdir(parents=True)
-    (archive / "wave-gate" / "w1" / "summary.json").write_text(
-        json.dumps({"wave_sha": "1111111aaaa"}))
-    (archive / "commit-reviews" / "c1").mkdir(parents=True)
-    (archive / "commit-reviews" / "c1" / "start-head").write_text("1111111aaaa\n")
+    (tmp_path / "wave-gate" / "w1").mkdir(parents=True)
+    (tmp_path / "wave-gate" / "w1" / "summary.json").write_text(json.dumps(
+        {"wave_sha": "1111111aaaa", "status": "completed", "verdict": "pass"}))
+    (tmp_path / "wave-gate" / "w1" / "round.json").write_text(json.dumps(
+        {"logical_loop": "L4 (composite wave gate, issue-level)"}))
+    for name, done in (("c1", True), ("cfailed", False)):
+        d = tmp_path / "commit-reviews" / name
+        d.mkdir(parents=True)
+        # Both rounds record a START. Only the completed one records a reviewed tree
+        # and a confirmed teardown — which is the whole difference the rule reads.
+        (d / "start-head").write_text("1111111aaaa\n")
+        if done:
+            (d / "last-reviewed-sha").write_text("1111111aaaa\n")
+            (d / "teardown").write_text("confirmed stopped\n")
+        else:
+            (d / "phase").write_text("failed\n")
+    (tmp_path / "index.jsonl").write_text("\n".join(json.dumps(r) for r in (
+        {"durable_dir": "commit-reviews/c1",
+         "logical_loop": "L2 (Stage-2 Codex commit review, issue-level)"},
+        {"durable_dir": "commit-reviews/cfailed",
+         "logical_loop": "L2 (Stage-2 Codex commit review, issue-level)"},
+    )) + "\n")
 
     header = ("| Loop | Evaluation (window / cumulative) | SHA (+dirty) | Outcome | Rationale |\n"
               "| --- | --- | --- | --- | --- |\n")
 
-    def ledger(sha, cite):
-        return header + (f"| L2 Stage-2 Codex commit review, issue-level | 1 / 1 | `{sha}` | "
-                         f"`CLOSE-CLEAN` | closed, {cite} |\n")
+    def ledger(sha_cell, outcome="`CLOSE-CLEAN`", rationale="closed", loop=None):
+        return header + (f"| {loop or 'L2 Stage-2 Codex commit review, issue-level'} | "
+                         f"1 / 1 | {sha_cell} | {outcome} | {rationale} |\n")
 
-    # THE HISTORICAL SHAPE: the decision names the tree the correction produced while
-    # its evidence still names the parent.
-    assert _closing_row_without_covering_evidence(
-        ledger("2222222", "archived `wave-gate/w1`"), archive) == (
-        "the latest closing checkpoint names 2222222 but its cited evidence ran "
-        "against ['1111111']")
+    def check(*a, **kw):
+        return _closing_row_without_covering_evidence(ledger(*a, **kw), tmp_path)
+
+    GOOD = "`1111111`, archived `commit-reviews/c1`"
+
+    # The control: a completed review of this loop, naming this tree.
+    assert check(GOOD) is None
+
+    # THE HISTORICAL SHAPE — the decision names the corrected tree while its evidence
+    # names the parent.
+    assert check("`2222222`, archived `commit-reviews/c1`") == (
+        "the latest closing checkpoint names 2222222 and no cited evidence of its own "
+        "loop covers it: ['1111111']")
+
+    # A START MARKER IS NOT COMPLETION. This round began on the right tree and failed;
+    # the record holds exactly such an archive.
+    assert check("`1111111`, archived `commit-reviews/cfailed`") == (
+        "the latest closing checkpoint names 1111111 and no cited evidence of its own "
+        "loop covers it: ['commit-reviews/cfailed records no completed, torn-down round']")
+
+    # ANOTHER LOOP'S GATE DISCHARGES NOTHING. A wave pass on the same tree cannot
+    # stand in for the commit review an L2 checkpoint owes — an earlier version of
+    # this witness asserted precisely that as a POSITIVE case.
+    assert check("`1111111`, archived `wave-gate/w1`") == (
+        "the latest closing checkpoint names 1111111 and no cited evidence of its own "
+        "loop covers it: ['wave-gate/w1 was billed to L4']")
+    # ...and the same archive DOES discharge an L4 checkpoint.
+    assert check("`1111111`, archived `wave-gate/w1`",
+                 loop="L4 composite wave gate, issue-level") is None
+
+    # THE SHA COMES FROM ITS OWN COLUMN. A rationale naming the reviewed ancestor —
+    # which these rationales routinely do — must not satisfy a row whose tree was
+    # never reviewed.
+    assert check("`2222222`, archived `commit-reviews/c1`",
+                 rationale="the delta since `1111111`") == (
+        "the latest closing checkpoint names 2222222 and no cited evidence of its own "
+        "loop covers it: ['1111111']")
+
+    # THE OUTCOME COMES FROM ITS OWN CELL. A `CONTINUE` whose rationale quotes the
+    # closing outcome is not a closing row, and must not displace the real one.
+    assert check("`2222222`", outcome="`CONTINUE`",
+                 rationale="not yet `CLOSE-CLEAN`") is None
+    # BOTH deferral outcomes end a loop and are checked like a close.
+    for ending in ("`DEFER-STANDARD-AND-CLOSE`", "`DEFER-STANDARD-AND-PROCEED`"):
+        assert check("`2222222`, archived `commit-reviews/c1`", outcome=ending), ending
+
     # An archive nobody can find is not evidence.
-    assert _closing_row_without_covering_evidence(
-        ledger("1111111", "archived `wave-gate/gone`"), archive) == (
-        "cited archive wave-gate/gone is absent from the checkout")
-    assert _closing_row_without_covering_evidence(
-        ledger("1111111", "closed on judgement"), archive) == (
+    assert check("`1111111`, archived `commit-reviews/gone`") == (
+        "cited archive commit-reviews/gone is absent from the checkout")
+    assert check("`1111111`, closed on judgement") == (
         "the latest closing checkpoint cites no archived evidence")
-    # Both kinds of round record the tree they ran against, and either may support it.
-    for cite in ("archived `wave-gate/w1`", "archived `commit-reviews/c1`"):
-        assert _closing_row_without_covering_evidence(ledger("1111111", cite), archive) is None
-    # A NON-closing row is not this rule's business, so an open decision ahead of its
-    # evidence is left to the checkpoint rules that own it.
-    assert _closing_row_without_covering_evidence(
-        header + "| L2 x | 1 / 1 | `2222222` | `CONTINUE` | still working |\n", archive) is None

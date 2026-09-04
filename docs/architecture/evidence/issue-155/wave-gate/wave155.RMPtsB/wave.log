@@ -1,0 +1,9 @@
+71bfa15cba094f4791418a167aa62da10b3c7122
+SKIPPED [8] tests/test_sync_pipeline_adapter_cutover.py:721: chain rejected upstream: SYNC_PIPELINE_CONFIG_INVALID
+SKIPPED [2] tests/test_system_topology_models.py:154: identity is supplied by a binding; covered by the bound tests
+11539 passed, 19 skipped, 18 warnings in 941.78s (0:15:41)
+wave_gate: non-KB suite green (11539 passed, 19 skipped, cap 30)
+wave_gate: 74 active goldens deterministic and byte-exact
+wave_gate: plan fingerprint checked:2 case(s)
+
+[exited with code 0]

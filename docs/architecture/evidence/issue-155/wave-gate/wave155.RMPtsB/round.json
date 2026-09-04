@@ -1,0 +1,13 @@
+{
+ "collector": "wave_gate",
+ "durable_dir": "wave-gate/wave155.RMPtsB",
+ "files": {
+  "wave-gate/wave155.RMPtsB/summary.json": "987e2fe3cbb1607b9d2a9d08c9970d5a47f47f588bac4b2fa220db712037601e",
+  "wave-gate/wave155.RMPtsB/wave.log": "1a0c885b42c997ce1dc6c59f480bbcff20fefbd762bcb214c32299073ea90359"
+ },
+ "logical_loop": "L4 (composite wave gate, issue-level)",
+ "source_run_dir": "/tmp/wave155.RMPtsB",
+ "status": "completed",
+ "verdict": "pass",
+ "wave_sha": "71bfa15cba094f4791418a167aa62da10b3c7122"
+}
