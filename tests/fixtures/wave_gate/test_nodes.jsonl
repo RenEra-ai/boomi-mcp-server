@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 11552, "minimum_collected": 11552, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 11554, "minimum_collected": 11554, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -11597,3 +11597,5 @@
 {"kind": "test", "id": "pytest-011596", "node_id": "tests/test_connector_replay_review_round3.py::test_a_wave_row_is_checked_whatever_its_scope_is_called", "state": "active"}
 {"kind": "test", "id": "pytest-011597", "node_id": "tests/test_connector_replay_review_round3.py::test_a_wave_summary_nothing_produced_is_not_evidence", "state": "active"}
 {"kind": "test", "id": "pytest-011598", "node_id": "tests/test_connector_replay_review_round3.py::test_an_issue_level_loop_owes_its_checkpoints_like_any_other", "state": "active"}
+{"kind": "test", "id": "pytest-011599", "node_id": "tests/test_connector_replay_review_round3.py::test_a_source_label_derives_its_tier_and_is_not_read_around", "state": "active"}
+{"kind": "test", "id": "pytest-011600", "node_id": "tests/test_connector_replay_review_round3.py::test_the_tier_derivation_can_actually_fail", "state": "active"}

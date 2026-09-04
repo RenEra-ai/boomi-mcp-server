@@ -1356,6 +1356,18 @@ _UNROWED = {"DC-155-C": 2, "DC-155-I": 1}
 #: the reason. Frozen so the set cannot grow silently: a row that names a class is an
 #: instance of it unless it appears here.
 _NOT_AN_INSTANCE = {
+    "QA-155-r61-02a": "a REVISION correcting a DERIVED TIER that read only the first disjunct of the severity rule — one finding, counted at "
+    "the original",
+    "QA-155-r64-03a": "a REVISION correcting a DERIVED TIER that read only the first disjunct of the severity rule — one finding, counted at "
+    "the original",
+    "CDX-155-r210-01a": "a REVISION correcting a DERIVED TIER that read only the first disjunct of the severity rule — one finding, counted at "
+    "the original",
+    "CDX-155-r204-02a": "a REVISION naming, in the record's own vocabulary, the severity refutation its original argued without marking — one finding, counted at "
+    "the original",
+    "QA-155-r196-01a": "a REVISION naming, in the record's own vocabulary, the severity refutation its original argued without marking — one finding, counted at "
+    "the original",
+    "QA-155-r72-01a": "a REVISION naming, in the record's own vocabulary, the severity refutation its original argued without marking — one finding, counted at "
+    "the original",
     "CDX-155-r197-09b": "a REVISION carrying the structural answer for the "
     "affected-SHA class — one finding, counted at the original",
     "CDX-155-r197-06b": "a REVISION correcting an affected-SHA cell — one finding, "
@@ -3007,6 +3019,20 @@ def test_the_repository_guard_refuses_a_report_whose_tree_moved_after_the_gate(t
     assert "src/drift.py" in violation
 
 
+#: The checkpoint table's own header. A wave row is recognised by MEMBERSHIP in this
+#: table, so a fixture handing over a bare row is not modelling the record — it is
+#: modelling a document the rule correctly declines to read.
+_CHECKPOINT_HEADER = (
+    "| Loop | Evaluation (window / cumulative) | SHA (+dirty) | Outcome | Rationale |\n"
+    "| --- | --- | --- | --- | --- |\n"
+)
+
+
+def _wave_ledger(*rows):
+    """A ledger holding `rows` inside a well-formed checkpoint table."""
+    return _CHECKPOINT_HEADER + "\n".join(rows) + "\n"
+
+
 def _archived_summary(directory, payload, verdict="pass"):
     """Write `summary.json` the way the archiver does — BOUND by its round record.
 
@@ -3030,6 +3056,10 @@ def _archived_summary(directory, payload, verdict="pass"):
         },
         "status": "completed",
         "verdict": verdict,
+        # The archiver records the tree the run was made on, from its own run
+        # directory. Taking it from the payload keeps the fixture's round and its
+        # summary describing ONE run, which is what the identity check reads.
+        "wave_sha": payload.get("wave_sha"),
     }))
 
 
@@ -3048,19 +3078,20 @@ def _wave_evidence_violation(ledger_text, archive_dir):
     import json
     import re
 
-    # DERIVED, not pinned. This read `slice B` literally, so once slices C and D
-    # opened their own wave loops the guard kept re-verifying a landed slice's last
-    # row while the CURRENT gate — the one closure actually rests on — was checked
-    # by nothing. Its own docstring said "the CURRENT gate", and the pin made that
-    # false. The slice letter is data in the row; it is not the guard's to hardcode.
-    # NO SCOPE ENUMERATION AT ALL — third time. First the pattern pinned `slice B`;
-    # then it listed `slice [A-Z]|issue-level`, which still dropped this ledger's
-    # `ISSUE-level correction arc` spelling and let `rows[-1]` silently re-verify an
-    # older row while the CURRENT gate went unchecked. Widening the list a third time
-    # would reproduce the defect on the fourth spelling: a whitelist of scope names is
-    # a hand-model of a field whose authority is the row itself. Every L4 wave row
-    # matches, whatever its scope reads, and the LAST one is the one closure rests on.
-    rows = re.findall(r"^\| L4 composite wave gate[ ,|].*$", ledger_text, re.M)
+    # NO SCOPE ENUMERATION, AND A BOUNDED SEARCH — the two halves of one rule, and
+    # each was got wrong on its own first. The pattern pinned `slice B`; then it
+    # listed `slice [A-Z]|issue-level`, which still dropped this ledger's
+    # `ISSUE-level correction arc` spelling and let `rows[-1]` re-verify an older row
+    # while the CURRENT gate went unchecked. Dropping the whitelist fixed that and
+    # broke the other side: unbounded, the pattern also matched a PROSE final-tree
+    # row further down the record, so the latest row was again an old one. A
+    # whitelist of scope spellings is a hand-model of a field whose authority is the
+    # row; the boundary that IS authoritative is membership in the checkpoint table,
+    # which `_checkpoint_rows` decides structurally. So: every L4 wave row in that
+    # table, whatever its scope reads, and the LAST of them is the one closure rests
+    # on.
+    rows = [r for r in (_checkpoint_rows(ledger_text) or [])
+            if re.match(r"^\| L4 composite wave gate[ ,|]", r)]
     if not rows:
         return "no wave row"
     latest = rows[-1]
@@ -3073,6 +3104,11 @@ def _wave_evidence_violation(ledger_text, archive_dir):
     summary = archive_dir / named.group(1) / "summary.json"
     if not summary.is_file():
         return f"cited archive {named.group(1)} is absent from the checkout"
+    attested = json.loads(summary.read_text())
+    recorded = attested.get("wave_sha", "")
+    if not recorded.startswith(sha.group(1)):
+        return (f"cited archive {named.group(1)} attests {recorded[:7]}, "
+                f"not the {sha.group(1)} the row names")
     # THE SUMMARY MUST BE AN OUTPUT OF THE ROUND, not a file beside it. Everything
     # below trusts `summary.json`, and nothing checked that the round record had ever
     # seen it: a summary hand-written into an archived directory after the fact
@@ -3089,22 +3125,35 @@ def _wave_evidence_violation(ledger_text, archive_dir):
         record = json.loads(record_path.read_text())
     except ValueError:
         return f"cited archive {named.group(1)} has an unreadable round record"
-    listed = [v for k, v in (record.get("files") or {}).items()
-              if k.rsplit("/", 1)[-1] == "summary.json"]
-    if not listed:
+    # THE EXACT KEY, not a basename match: the archiver writes each file under its
+    # full archive-relative path, so matching the tail alone would accept a DIFFERENT
+    # round's summary — listed under that round's directory — whenever the digests
+    # agree.
+    key = f"wave-gate/{named.group(1)}/summary.json"
+    listed = (record.get("files") or {}).get(key)
+    if listed is None:
         return (f"cited archive {named.group(1)} does not bind its summary — the "
-                f"round record lists no summary.json")
-    if listed[0] != hashlib.sha256(summary.read_bytes()).hexdigest():
+                f"round record lists no {key}")
+    if listed != hashlib.sha256(summary.read_bytes()).hexdigest():
         return (f"cited archive {named.group(1)} binds a summary.json whose digest "
                 f"does not match the file in the checkout")
-    if record.get("verdict") != "pass":
-        return (f"cited archive {named.group(1)} records the round verdict "
-                f"{record.get('verdict')!r}, not a pass")
-    attested = json.loads(summary.read_text())
-    recorded = attested.get("wave_sha", "")
-    if not recorded.startswith(sha.group(1)):
-        return (f"cited archive {named.group(1)} attests {recorded[:7]}, "
-                f"not the {sha.group(1)} the row names")
+    # THE WHOLE IDENTITY, because any one field can be made to agree while the round
+    # is a different one. `--status` is a CALLER override on the archiver, so a
+    # refused run can be archived beside a summary that still reads `pass`; and a
+    # record naming another directory or another tree is not this row's evidence at
+    # all, however cleanly it passes on its own terms.
+    for field, want, saying in (("verdict", "pass", "the round verdict"),
+                                ("status", "completed", "the round status")):
+        if record.get(field) != want:
+            return (f"cited archive {named.group(1)} records {saying} "
+                    f"{record.get(field)!r}, not {want!r}")
+    if record.get("durable_dir") not in (None, key.rsplit("/", 1)[0]):
+        return (f"cited archive {named.group(1)} carries a round record for "
+                f"{record.get('durable_dir')!r}")
+    if str(record.get("wave_sha") or "") != str(attested.get("wave_sha") or ""):
+        return (f"cited archive {named.group(1)} records a round on "
+                f"{str(record.get('wave_sha'))[:7]!r} beside a summary for "
+                f"{str(attested.get('wave_sha'))[:7]!r}")
     # The archive must SUPPORT the row, not merely share its SHA. Checking identity
     # alone accepted an archive recording a failed verdict, a nonzero exit code, or
     # counts contradicting the arms the row quotes — so the guard proved that evidence
@@ -3309,7 +3358,7 @@ def test_the_wave_evidence_rule_admits_only_a_supported_row(tmp_path, sha, cite,
 
     archive = tmp_path / "wave-gate"
     _archived_summary(archive / "ok", {**_PASSING_WAVE, **attested})
-    assert _wave_evidence_violation(_ROW.format(sha=sha, cite=cite), archive) == expected
+    assert _wave_evidence_violation(_wave_ledger(_ROW.format(sha=sha, cite=cite)), archive) == expected
 
 
 def _coverage_violations(ledger_text, archive_dir):
@@ -6676,7 +6725,7 @@ def test_a_summary_that_attests_nothing_is_refused(tmp_path):
 
     archive = tmp_path / "wave-gate"
     (archive / "ok").mkdir(parents=True)
-    row = _ROW.format(sha="abc1234", cite=", archived `wave-gate/ok`")
+    row = _wave_ledger(_ROW.format(sha="abc1234", cite=", archived `wave-gate/ok`"))
 
     bare = {k: _PASSING_WAVE[k] for k in ("wave_sha", "status", "verdict", "exit_code")}
     _archived_summary(archive / "ok", bare)
@@ -6705,7 +6754,7 @@ def test_a_count_written_as_text_is_not_a_count(tmp_path):
 
     archive = tmp_path / "wave-gate"
     (archive / "ok").mkdir(parents=True)
-    row = _ROW.format(sha="abc1234", cite=", archived `wave-gate/ok`")
+    row = _wave_ledger(_ROW.format(sha="abc1234", cite=", archived `wave-gate/ok`"))
 
     stringly = json.loads(json.dumps(_PASSING_WAVE))
     stringly["suite"]["passed"] = "11037"
@@ -6743,7 +6792,8 @@ def test_a_row_that_states_no_figure_for_a_required_arm_is_refused(tmp_path):
     # A count spelled as a WORD is exactly the shape that used to slip through.
     worded = _ROW.replace("across 2 cases", "across two cases")
     assert _wave_evidence_violation(
-        worded.format(sha="abc1234", cite=", archived `wave-gate/ok`"), archive
+        _wave_ledger(worded.format(sha="abc1234", cite=", archived `wave-gate/ok`")),
+        archive
     ) == (
         "the row quotes no figure for plan_fingerprint_cases, "
         "which ok attests as 2"
@@ -6752,7 +6802,8 @@ def test_a_row_that_states_no_figure_for_a_required_arm_is_refused(tmp_path):
     # ...and the row wording that DOES state it is still read correctly, so the
     # rule refuses silence rather than refusing prose.
     assert _wave_evidence_violation(
-        _ROW.format(sha="abc1234", cite=", archived `wave-gate/ok`"), archive
+        _wave_ledger(_ROW.format(sha="abc1234", cite=", archived `wave-gate/ok`")),
+        archive
     ) is None
 
 
@@ -7100,7 +7151,7 @@ def test_a_wave_row_is_checked_whatever_its_scope_is_called(tmp_path):
         later = earlier.replace("L4 composite wave gate, slice B",
                                 f"L4 composite wave gate, {scope}", 1)
         later = later.replace("wave-gate/ok", "wave-gate/never-archived")
-        assert _wave_evidence_violation(f"{earlier}\n{later}", archive) == (
+        assert _wave_evidence_violation(_wave_ledger(earlier, later), archive) == (
             "cited archive never-archived is absent from the checkout"), scope
 
 
@@ -7117,7 +7168,7 @@ def test_a_wave_summary_nothing_produced_is_not_evidence(tmp_path):
     import hashlib
     import json
 
-    row = _ROW.format(sha="abc1234", cite=", archived `wave-gate/ok`")
+    row = _wave_ledger(_ROW.format(sha="abc1234", cite=", archived `wave-gate/ok`"))
     body = json.dumps(_PASSING_WAVE)
 
     def archive_with(record):
@@ -7129,7 +7180,9 @@ def test_a_wave_summary_nothing_produced_is_not_evidence(tmp_path):
         return root
 
     digest = hashlib.sha256(body.encode()).hexdigest()
-    bound = {"files": {"wave-gate/ok/summary.json": digest}, "verdict": "pass"}
+    bound = {"files": {"wave-gate/ok/summary.json": digest}, "verdict": "pass",
+             "status": "completed", "durable_dir": "wave-gate/ok",
+             "wave_sha": _PASSING_WAVE["wave_sha"]}
 
     # No record at all — the directory exists and the summary reads as a pass.
     assert _wave_evidence_violation(row, archive_with(
@@ -7141,9 +7194,10 @@ def test_a_wave_summary_nothing_produced_is_not_evidence(tmp_path):
     # the summary beside it says `pass`.
     assert _wave_evidence_violation(row, archive_with({
         "case": "unbound",
-        "round": json.dumps({"files": {"wave-gate/ok/wave.log": digest}, "verdict": None}),
+        "round": json.dumps({**bound, "files": {"wave-gate/ok/wave.log": digest},
+                             "verdict": None}),
     })) == ("cited archive ok does not bind its summary — the round record lists no "
-            "summary.json")
+            "wave-gate/ok/summary.json")
     # Bound, but to different bytes than the checkout holds.
     assert _wave_evidence_violation(row, archive_with({
         "case": "stale", "round": json.dumps({**bound, "files": {
@@ -7153,7 +7207,25 @@ def test_a_wave_summary_nothing_produced_is_not_evidence(tmp_path):
     # Bound to the right bytes, but the round itself did not derive a pass.
     assert _wave_evidence_violation(row, archive_with({
         "case": "not-a-pass", "round": json.dumps({**bound, "verdict": None}),
-    })) == "cited archive ok records the round verdict None, not a pass"
+    })) == "cited archive ok records the round verdict None, not 'pass'"
+
+    # A round the archiver was TOLD was failed, carrying a summary that still reads
+    # `pass` — the `--status` override makes this constructible, so the record's own
+    # status is checked and not inferred from the summary beside it.
+    assert _wave_evidence_violation(row, archive_with({
+        "case": "failed-round", "round": json.dumps({**bound, "status": "failed"}),
+    })) == "cited archive ok records the round status 'failed', not 'completed'"
+
+    # A record for a DIFFERENT round, listing this round's summary under its own path.
+    assert _wave_evidence_violation(row, archive_with({
+        "case": "foreign", "round": json.dumps({**bound, "durable_dir": "wave-gate/other"}),
+    })) == "cited archive ok carries a round record for 'wave-gate/other'"
+
+    # A record and a summary describing DIFFERENT trees.
+    assert _wave_evidence_violation(row, archive_with({
+        "case": "split-tree", "round": json.dumps({**bound, "wave_sha": "9" * 40}),
+    })) == ("cited archive ok records a round on '9999999' beside a summary for "
+            "'abc1234'")
     # The control: the same summary, bound the way the archiver binds it.
     assert _wave_evidence_violation(row, archive_with(
         {"case": "ok", "round": json.dumps(bound)})) is None
@@ -7199,3 +7271,143 @@ def test_an_issue_level_loop_owes_its_checkpoints_like_any_other(tmp_path):
     assert _missing_checkpoint_violation(answered, "", wave_dir=root) == (
         "loop L4 of slice E has 3 collected evaluations, so a recorded decision "
         "through 3 is owed; the record covers 0")
+
+
+def _tier_derivation_offenders(ledger_text):
+    """Rows whose EFFECTIVE derived tier contradicts their own source label.
+
+    The severity rule has two disjuncts, and the second is unconditional: a finding is
+    critical if it lands in a critical blocking class, OR if its source gate labelled
+    it P0/P1/Critical/High. Reading only the first disjunct — treating the class as
+    the whole rule — puts `standard` beside a `P1` label, and the record's checkpoint
+    trends and its no-critical-residue claim are computed from that cell.
+
+    This was found once and corrected across eight rows; the correction was applied to
+    the instances and no invariant was written, so the misreading recurred three more
+    times. The rule is a hand-model of published policy, and its authority is the
+    policy text, so the model is replaced by a derivation over every row.
+
+    SUPERSEDED ROWS ARE EXEMPT BY CONSTRUCTION, not by an exemption list: a frozen row
+    states what was believed when it was written, and correcting one means appending a
+    revision. Only the LATEST revision of an id is effective, and only it is checked.
+    """
+    import re
+
+    #: The labels the rule names, matched as whole words so a summary that merely
+    #: contains the word "high" is not a severity label.
+    critical_labels = re.compile(r"\b(P0|P1|Critical|High)\b", re.I)
+    #: A tier the row itself lowered THROUGH the sanctioned path. A severity-specific
+    #: technical refutation is the one way a source-critical label becomes standard,
+    #: and it is recorded as the disposition, so it is read from there rather than
+    #: inferred from prose.
+    #: THE RECORD'S OWN VOCABULARY for the one sanctioned way down, and only it. The
+    #: rule permits a source-critical label to derive standard on a documented
+    #: severity-specific technical refutation, so the marker is read rather than
+    #: inferred: matching the ARGUMENT instead would make any sufficiently confident
+    #: sentence a refutation, which is the enumeration defect wearing prose.
+    refuted = re.compile(
+        r"\bseverity-refuted\b|\bfinding-refuted\b|\bseverity refutation\b", re.I)
+
+    #: FINDING rows only. The defect-class table shares the id shape but is a
+    #: different table with different columns, and reading it here would grade a
+    #: class description as though it were a severity derivation.
+    finding_id = re.compile(r"^\| ((?:QA|CDX|ARCH|SELF|EVAL)-155-[A-Za-z0-9-]+) \|")
+
+    rows = {}
+    for line in _unfenced_lines(ledger_text):
+        m = finding_id.match(line)
+        if not m:
+            continue
+        cells = [c.strip() for c in line.split(" | ")]
+        if len(cells) < 9:
+            continue
+        rows[m.group(1)] = cells
+
+    # THE EFFECTIVE ROW of each finding: `X`, `Xa`, `Xb` … are one finding, and the
+    # last suffix present is the one the record stands behind.
+    effective = {}
+    for rid in rows:
+        base = re.sub(r"(?<=\d)[a-z]+$", "", rid)
+        if len(rid) > len(effective.get(base, "")):
+            effective[base] = rid
+
+    offenders = []
+    for rid in sorted(effective.values()):
+        cells = rows[rid]
+        label, tier, disposition = cells[3], cells[6], cells[-1]
+        if not critical_labels.search(label):
+            continue
+        if refuted.search(disposition) or refuted.search(tier):
+            continue
+        # THE LEADING TOKEN, not a substring. Every tier cell states its tier first
+        # and then argues for it, and the argument routinely NAMES the other tiers —
+        # the historical cells literally read "not P0/P1/Critical/High" — so a
+        # substring test finds the word `critical` in exactly the rows that got the
+        # derivation wrong. Unreadable is an offence, not an exemption: a tier nobody
+        # can parse cannot support the record's no-critical-residue claim.
+        token = re.match(r"[*_\s]*(critical|standard|n/a)\b", tier, re.I)
+        if token is None or token.group(1).lower() != "critical":
+            offenders.append((rid, label[:40], tier[:60]))
+    return offenders
+
+
+def test_a_source_label_derives_its_tier_and_is_not_read_around():
+    """A P0/P1/Critical/High source label derives Critical, whatever the class says.
+
+    THE STRUCTURAL FIX for a misreading this record made eleven times across four
+    rounds. Every earlier correction rewrote the offending cells; none of them made
+    the rule checkable, so the twelfth was only a matter of time. The record's
+    no-critical-residue claim is derived from this cell, so a cell that can drift from
+    the policy is a claim that can be false while every gate is green.
+    """
+    ledger = Path(__file__).resolve().parents[1] / (
+        "docs/architecture/ISSUE_155_AUDIT_LEDGER.md")
+    offenders = _tier_derivation_offenders(ledger.read_text())
+    assert not offenders, (
+        "these rows carry a source label the severity rule makes Critical while "
+        "deriving a lesser tier, and record no severity refutation: "
+        + "; ".join(f"{r} (label {l!r} -> tier {t!r})" for r, l, t in offenders)
+    )
+
+
+def test_the_tier_derivation_can_actually_fail():
+    """THE NON-VACUITY WITNESS: the rule above must refuse the shape it exists for.
+
+    A guard over a record that already satisfies it proves nothing — this file has
+    recorded that failure repeatedly — so the exact historical shape is constructed
+    here and must be refused, together with each of the three ways a row legitimately
+    carries a lesser tier.
+    """
+    def ledger(label, tier, disposition):
+        return (
+            "| ID | Source | Verbatim summary | Original label | Blocking class | "
+            "Defect class | Derived tier (anchor inline) | SHA/delta | Disposition |\n"
+            "| --- | --- | --- | --- | --- | --- | --- | --- | --- |\n"
+            f"| CDX-155-r1-01 | gate | s | {label} | machine-served schemas/contracts | "
+            f"DC-155-C | {tier} | `abc1234` | {disposition} |\n"
+        )
+
+    # THE HISTORICAL SHAPE, verbatim in structure: a P1 label, a non-critical class,
+    # and a tier that read the class as though it were the whole rule.
+    offenders = _tier_derivation_offenders(ledger(
+        "P1", "standard — anchor: source gate labelled it P1, not P0/P1/Critical/High",
+        "fixed"))
+    assert [r for r, _, _ in offenders] == ["CDX-155-r1-01"], offenders
+
+    for label in ("P0", "P1", "Critical", "High"):
+        assert _tier_derivation_offenders(ledger(label, "standard", "fixed")), label
+
+    # The three legitimate shapes, none of which may be reported.
+    assert not _tier_derivation_offenders(ledger("P1", "**critical** — anchor", "fixed"))
+    assert not _tier_derivation_offenders(ledger("P2", "standard — anchor", "fixed"))
+    assert not _tier_derivation_offenders(ledger(
+        "P1", "standard — lowered on a documented severity refutation",
+        "severity-refuted: the reviewer's severity premise was measured false"))
+
+    # AND A FROZEN ORIGINAL IS NOT AN OFFENDER once its revision corrects the tier —
+    # the record is append-only, so the old cell stays and the new one governs.
+    both = (ledger("P1", "standard — anchor", "fixed").rstrip("\n") + "\n"
+            + "| CDX-155-r1-01a | revision | (original retained) s | P1 | "
+              "machine-served schemas/contracts | DC-155-C | **critical** — corrected | "
+              "`abc1234` | fixed |\n")
+    assert not _tier_derivation_offenders(both), _tier_derivation_offenders(both)
