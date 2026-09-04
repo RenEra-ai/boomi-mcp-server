@@ -872,17 +872,27 @@ _COVERAGE_SCHEMA_RULES: tuple = (
                "required": ["route_coverage_kind"]},
         "then": {"properties": {"route_digests": {"maxItems": 0}}},
     },
+    # NO KIND MEANS NO EVIDENCE. Both rules above fire only when the kind is
+    # PRESENT, so a binding carrying route digests and omitting the kind slipped
+    # between them — the schema accepted what the runtime refuses, which is the
+    # drift the encoding exists to close, surviving inside the encoding. The
+    # differential's probes missed it for the same reason: they varied the kind
+    # and never varied the evidence while omitting the kind.
+    {
+        "if": {"not": {"required": ["route_coverage_kind"]}},
+        "then": {"properties": {"route_digests": {"maxItems": 0},
+                                "route_capture_digest": {"type": "null"}}},
+    },
+    {
+        "if": {"properties": {"route_coverage_kind": {"type": "null"}},
+               "required": ["route_coverage_kind"]},
+        "then": {"properties": {"route_digests": {"maxItems": 0},
+                                "route_capture_digest": {"type": "null"}}},
+    },
 )
 
 
 class ConnectorReplayEvidenceBindingAttestationV1(_AuthoringModel):
-    # The coverage rules reach the SERVED schema here, so a client validating
-    # against it and the server enforcing the model accept the same records.
-    model_config = ConfigDict(
-        extra="forbid", frozen=True,
-        json_schema_extra={"allOf": list(_COVERAGE_SCHEMA_RULES)},
-    )
-
     """One evidence-bound call, recorded as part of what a mutation actually did.
 
     A grant authorises a retry of ONE CALL against ONE operation record. When the
@@ -902,6 +912,18 @@ class ConnectorReplayEvidenceBindingAttestationV1(_AuthoringModel):
     credential-only version advance was ruled out. That is the one case the
     digests exist to catch.
     """
+
+    # AFTER the docstring, not before it. Python only treats a string literal as
+    # `__doc__` when it is the FIRST statement in the class body, so putting this
+    # assignment above it silently set `__doc__` to None — and pydantic omits the
+    # description, so the served schema lost this model's caller-facing text
+    # while every test kept passing. The coverage rules reach the served schema
+    # here, so a client validating against it and the server enforcing the model
+    # accept the same records.
+    model_config = ConfigDict(
+        extra="forbid", frozen=True,
+        json_schema_extra={"allOf": list(_COVERAGE_SCHEMA_RULES)},
+    )
 
     contract_ref: NonEmptyString
     operation_ref: NonEmptyString

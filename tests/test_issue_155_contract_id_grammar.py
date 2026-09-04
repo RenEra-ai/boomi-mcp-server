@@ -550,6 +550,16 @@ def test_the_served_attestation_schema_and_the_model_agree_on_coverage():
             required, route_coverage_kind="service_wide", route_digests=[good]),
         "no coverage at all": dict(required),
         "an undefined kind": dict(required, route_coverage_kind="whatever"),
+        # THE EVIDENCE-WITHOUT-A-KIND CASES, which the first version of this
+        # probe set omitted — it varied the KIND and never varied the evidence
+        # while leaving the kind out, so the one combination the encoded rules did
+        # not cover was also the one combination the differential did not probe.
+        # A differential is only as wide as its probes.
+        "digests with the kind omitted": dict(required, route_digests=[good]),
+        "digests with a null kind": dict(
+            required, route_digests=[good], route_coverage_kind=None),
+        "a capture with the kind omitted": dict(
+            required, route_capture_digest="b" * 64),
     }
 
     disagreed = []
@@ -572,3 +582,19 @@ def test_the_served_attestation_schema_and_the_model_agree_on_coverage():
     assert verdicts == {True, False}, (
         "the probes do not span the boundary, so agreement proves nothing"
     )
+
+
+def test_the_served_binding_model_keeps_its_description():
+    """A docstring is `__doc__` only when it is the FIRST statement.
+
+    Putting `model_config` above it made `__doc__` None, so pydantic omitted the
+    description and the served schema lost this model's caller-facing text — with
+    every test still passing, because nothing asserted the text was served.
+    """
+    from boomi_mcp.models.authoring_workflow import (
+        ConnectorReplayEvidenceBindingAttestationV1 as Binding,
+    )
+
+    description = Binding.model_json_schema().get("description")
+    assert description, "the served schema carries no description for this model"
+    assert "evidence-bound call" in description, description[:80]

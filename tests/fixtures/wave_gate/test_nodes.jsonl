@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 11547, "minimum_collected": 11547, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 11548, "minimum_collected": 11548, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -11593,3 +11593,4 @@
 {"kind": "test", "id": "pytest-011592", "node_id": "tests/test_issue_155_discovery.py::test_a_candidate_is_not_offered_when_the_live_configuration_has_moved", "state": "active"}
 {"kind": "test", "id": "pytest-011593", "node_id": "tests/test_issue_155_discovery.py::test_the_public_action_returns_a_candidate_over_real_component_xml", "state": "active"}
 {"kind": "test", "id": "pytest-011594", "node_id": "tests/test_issue_155_contract_id_grammar.py::test_the_served_attestation_schema_and_the_model_agree_on_coverage", "state": "active"}
+{"kind": "test", "id": "pytest-011595", "node_id": "tests/test_issue_155_contract_id_grammar.py::test_the_served_binding_model_keeps_its_description", "state": "active"}
