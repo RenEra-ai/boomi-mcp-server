@@ -6980,3 +6980,26 @@ def test_the_affected_sha_checker_is_not_vacuous():
         "an inexact tip marker must not be waved through as the tip form"
     )
     assert affected_sha_cell_deviates(reviewed, "")
+
+
+def test_the_affected_sha_guard_is_not_vacuous():
+    """The ledger-side half of the same non-vacuity claim.
+
+    Two nodes, deliberately: the checker-side node above drives the comparison
+    directly on synthetic cells, and this one proves the guard is exercised
+    against the REAL record — a checker that is correct on invented inputs and
+    never reaches the ledger would satisfy the first alone.
+
+    The two names both exist because the manifest records both identities, and a
+    node identity is not something to rename away once recorded: a row that names
+    a test nothing collects is the defect the manifest exists to surface.
+    """
+    all_rows, checked, revisions, no_review = _partition_affected_sha_rows()
+    assert checked, "no ledger row reached the comparison, so the guard is inert"
+    # The partition must be a real division of a real population, not three
+    # empty buckets agreeing with an empty total.
+    assert len(all_rows) > 500, len(all_rows)
+    assert revisions, "no revision was excluded, so the exclusion path is untested"
+    assert affected_sha_cell_deviates("323151f", "`59af3e1`..`5d169f9`"), (
+        "the checker driven here does not reject a cell naming neither tree"
+    )

@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 11548, "minimum_collected": 11548, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 11549, "minimum_collected": 11549, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -11498,99 +11498,99 @@
 {"kind": "test", "id": "pytest-011497", "node_id": "tests/test_canonical_process_apply.py::test_the_binding_order_is_the_key_the_contract_names", "state": "active"}
 {"kind": "test", "id": "pytest-011498", "node_id": "tests/test_canonical_process_apply.py::test_a_binding_from_another_account_refuses_rather_than_being_attested", "state": "active"}
 {"kind": "test", "id": "pytest-011499", "node_id": "tests/test_canonical_process_apply.py::test_the_attestation_records_what_the_boundary_compared", "state": "active"}
-{"kind": "test", "id": "pytest-011500", "node_id": "tests/test_connector_replay_review_round3.py::test_the_wave_evidence_rule_admits_only_a_supported_row[abc1234-, archived `wave-gate/ok`-attested7-the row quotes 11037 for suite.passed but ok attests 1]", "state": "active"}
-{"kind": "test", "id": "pytest-011501", "node_id": "tests/test_connector_replay_review_round3.py::test_an_operation_record_cannot_authorise_a_replay_its_capture_never_saw", "state": "active"}
-{"kind": "test", "id": "pytest-011502", "node_id": "tests/test_connector_replay_review_round3.py::test_a_summary_that_attests_nothing_is_refused", "state": "active"}
-{"kind": "test", "id": "pytest-011503", "node_id": "tests/test_connector_replay_review_round3.py::test_a_count_written_as_text_is_not_a_count", "state": "active"}
-{"kind": "test", "id": "pytest-011504", "node_id": "tests/test_connector_replay_review_round3.py::test_a_row_that_states_no_figure_for_a_required_arm_is_refused", "state": "active"}
-{"kind": "test", "id": "pytest-011505", "node_id": "tests/test_connector_replay_review_round3.py::test_the_wave_contract_matches_every_archived_summary", "state": "active"}
-{"kind": "test", "id": "pytest-011506", "node_id": "tests/test_issue_155_contract_projection.py::test_an_unreadable_live_component_refuses_rather_than_trusting_the_caller", "state": "active"}
-{"kind": "test", "id": "pytest-011507", "node_id": "tests/test_issue_155_contract_projection.py::test_a_minted_grant_names_its_root_and_its_connection", "state": "active"}
-{"kind": "test", "id": "pytest-011508", "node_id": "tests/test_issue_155_contract_projection.py::test_the_relocatable_compile_cannot_be_the_evidence_gate", "state": "active"}
-{"kind": "test", "id": "pytest-011509", "node_id": "tests/test_issue_155_discovery.py::test_an_empty_list_says_whether_evidence_exists_at_another_version[connection-moved]", "state": "active"}
-{"kind": "test", "id": "pytest-011510", "node_id": "tests/test_issue_155_discovery.py::test_an_empty_list_says_whether_evidence_exists_at_another_version[operation-moved]", "state": "active"}
-{"kind": "test", "id": "pytest-011511", "node_id": "tests/test_issue_155_discovery.py::test_an_empty_list_says_whether_evidence_exists_at_another_version[both-moved]", "state": "active"}
-{"kind": "test", "id": "pytest-011512", "node_id": "tests/test_issue_155_discovery.py::test_never_captured_and_captured_but_moved_are_distinguishable", "state": "active"}
-{"kind": "test", "id": "pytest-011513", "node_id": "tests/test_issue_155_discovery.py::test_a_usable_record_is_a_candidate_and_never_a_superseded_row", "state": "active"}
-{"kind": "test", "id": "pytest-011514", "node_id": "tests/test_issue_155_discovery.py::test_the_superseded_projection_is_CLOSED_and_leaks_nothing", "state": "active"}
-{"kind": "test", "id": "pytest-011515", "node_id": "tests/test_issue_155_identity_projection.py::test_a_declared_path_the_account_does_not_store_is_refused", "state": "active"}
-{"kind": "test", "id": "pytest-011516", "node_id": "tests/test_issue_155_identity_projection.py::test_an_unsettled_path_is_silence_and_never_a_mismatch[no path declared-identity_over0-paths0]", "state": "active"}
-{"kind": "test", "id": "pytest-011517", "node_id": "tests/test_issue_155_identity_projection.py::test_an_unsettled_path_is_silence_and_never_a_mismatch[blank declared path-identity_over1-paths1]", "state": "active"}
-{"kind": "test", "id": "pytest-011518", "node_id": "tests/test_issue_155_identity_projection.py::test_an_unsettled_path_is_silence_and_never_a_mismatch[dynamic route-identity_over2-paths2]", "state": "active"}
-{"kind": "test", "id": "pytest-011519", "node_id": "tests/test_issue_155_identity_projection.py::test_an_unsettled_path_is_silence_and_never_a_mismatch[unreadable route-identity_over3-paths3]", "state": "active"}
-{"kind": "test", "id": "pytest-011520", "node_id": "tests/test_issue_155_identity_projection.py::test_the_live_reader_keeps_the_path_it_read", "state": "active"}
-{"kind": "test", "id": "pytest-011521", "node_id": "tests/test_issue_155_identity_projection.py::test_an_ambiguous_live_route_is_unreadable_and_never_settled[one stored path-None-static-True]", "state": "active"}
-{"kind": "test", "id": "pytest-011522", "node_id": "tests/test_issue_155_identity_projection.py::test_an_ambiguous_live_route_is_unreadable_and_never_settled[the same path twice-same-static-True]", "state": "active"}
-{"kind": "test", "id": "pytest-011523", "node_id": "tests/test_issue_155_identity_projection.py::test_an_ambiguous_live_route_is_unreadable_and_never_settled[two different paths-other-unavailable-False]", "state": "active"}
-{"kind": "test", "id": "pytest-011524", "node_id": "tests/test_issue_155_identity_projection.py::test_a_path_is_compared_case_sensitively_and_a_verb_is_not", "state": "active"}
-{"kind": "test", "id": "pytest-011525", "node_id": "tests/test_issue_155_identity_projection.py::test_a_path_mismatch_names_the_field_and_never_the_value", "state": "active"}
-{"kind": "test", "id": "pytest-011526", "node_id": "tests/test_issue_155_identity_projection.py::test_paths_are_compared_by_the_equivalence_the_route_digest_uses[/items/a%2Fb-/items/a%2fb-True]", "state": "active"}
-{"kind": "test", "id": "pytest-011527", "node_id": "tests/test_issue_155_identity_projection.py::test_paths_are_compared_by_the_equivalence_the_route_digest_uses[/a/./b-/a/b-False]", "state": "active"}
-{"kind": "test", "id": "pytest-011528", "node_id": "tests/test_issue_155_identity_projection.py::test_paths_are_compared_by_the_equivalence_the_route_digest_uses[/../admin-/admin-False]", "state": "active"}
-{"kind": "test", "id": "pytest-011529", "node_id": "tests/test_issue_155_identity_projection.py::test_paths_are_compared_by_the_equivalence_the_route_digest_uses[/secret?/../x-/x-False]", "state": "active"}
-{"kind": "test", "id": "pytest-011530", "node_id": "tests/test_issue_155_identity_projection.py::test_paths_are_compared_by_the_equivalence_the_route_digest_uses[/Orders/42-/orders/42-False]", "state": "active"}
-{"kind": "test", "id": "pytest-011531", "node_id": "tests/test_issue_155_identity_projection.py::test_paths_are_compared_by_the_equivalence_the_route_digest_uses[/items/a%2Fb-/items/a%2Fc-False]", "state": "active"}
-{"kind": "test", "id": "pytest-011532", "node_id": "tests/test_issue_155_identity_projection.py::test_the_path_equivalence_moves_the_published_revision", "state": "active"}
-{"kind": "test", "id": "pytest-011533", "node_id": "tests/test_issue_155_identity_projection.py::test_the_revision_oracle_covers_both_normalization_arms", "state": "active"}
-{"kind": "test", "id": "pytest-011534", "node_id": "tests/test_issue_155_identity_projection.py::test_the_revision_oracle_derives_its_casing_per_nibble", "state": "active"}
-{"kind": "test", "id": "pytest-011535", "node_id": "tests/test_issue_155_identity_projection.py::test_a_refusing_probe_does_not_blind_the_revision_oracle", "state": "active"}
-{"kind": "test", "id": "pytest-011536", "node_id": "tests/test_issue_155_identity_projection.py::test_the_normalizer_is_the_only_place_a_path_is_trimmed", "state": "active"}
-{"kind": "test", "id": "pytest-011537", "node_id": "tests/test_issue_155_identity_projection.py::test_a_component_storing_two_routes_is_refused_rather_than_marked", "state": "active"}
-{"kind": "test", "id": "pytest-011538", "node_id": "tests/test_issue_155_identity_projection.py::test_every_identity_refusal_names_the_field_it_is_about", "state": "active"}
-{"kind": "test", "id": "pytest-011539", "node_id": "tests/test_issue_155_identity_projection.py::test_two_spellings_of_one_route_are_not_a_conflict", "state": "active"}
-{"kind": "test", "id": "pytest-011540", "node_id": "tests/test_issue_155_identity_projection.py::test_a_route_conflict_does_not_suppress_the_verb_check", "state": "active"}
-{"kind": "test", "id": "pytest-011541", "node_id": "tests/test_issue_155_identity_projection.py::test_a_conflicting_route_is_refused_with_no_declaration_at_all", "state": "active"}
-{"kind": "test", "id": "pytest-011542", "node_id": "tests/test_issue_155_identity_projection.py::test_the_served_refusal_names_the_field_that_disagreed", "state": "active"}
-{"kind": "test", "id": "pytest-011543", "node_id": "tests/test_issue_155_identity_projection.py::test_one_route_in_two_spellings_stays_comparable", "state": "active"}
-{"kind": "test", "id": "pytest-011544", "node_id": "tests/test_issue_155_identity_projection.py::test_the_route_decision_moves_the_published_revision", "state": "active"}
-{"kind": "test", "id": "pytest-011545", "node_id": "tests/test_issue_155_identity_projection.py::test_a_route_conflict_is_reported_once_per_component", "state": "active"}
-{"kind": "test", "id": "pytest-011546", "node_id": "tests/test_issue_155_identity_projection.py::test_a_declaration_free_conflict_does_not_claim_a_declaration_disagreed", "state": "active"}
-{"kind": "test", "id": "pytest-011547", "node_id": "tests/test_issue_155_recheck_boundary.py::test_a_drift_inside_the_materialization_window_refuses_before_the_write", "state": "active"}
-{"kind": "test", "id": "pytest-011548", "node_id": "tests/test_issue_155_recheck_boundary.py::test_a_mutation_uncertain_push_retains_the_accounting_it_owes", "state": "active"}
-{"kind": "test", "id": "pytest-011549", "node_id": "tests/test_issue_155_contract_projection.py::test_one_process_root_can_mint_two_grants", "state": "active"}
-{"kind": "test", "id": "pytest-011550", "node_id": "tests/test_issue_155_discovery.py::test_a_relocatable_table_keeps_its_own_grants_and_only_its_own", "state": "active"}
-{"kind": "test", "id": "pytest-011551", "node_id": "tests/test_canonical_process_apply.py::test_the_binding_records_which_route_authorised_the_write", "state": "active"}
-{"kind": "test", "id": "pytest-011552", "node_id": "tests/test_connector_replay_review_round3.py::test_a_replay_claim_needs_the_artifact_that_observes_replay", "state": "active"}
-{"kind": "test", "id": "pytest-011553", "node_id": "tests/test_issue_155_recheck.py::test_the_resolved_binding_carries_the_route_digests_it_compared", "state": "active"}
-{"kind": "test", "id": "pytest-011554", "node_id": "tests/test_issue_155_identity_projection.py::test_the_plan_surface_compares_the_declared_route_against_the_account", "state": "active"}
-{"kind": "test", "id": "pytest-011555", "node_id": "tests/test_issue_155_contract_id_grammar.py::test_the_grammar_is_the_one_the_issue_specifies", "state": "active"}
-{"kind": "test", "id": "pytest-011556", "node_id": "tests/test_issue_155_contract_id_grammar.py::test_the_grammar_refuses[$ref:rest.patch.cds_client.static_route.v1-the dotted form this replaced]", "state": "active"}
-{"kind": "test", "id": "pytest-011557", "node_id": "tests/test_issue_155_contract_id_grammar.py::test_the_grammar_refuses[$ref:icv1:REST:patch:sem:1-upper case is outside the alphabet]", "state": "active"}
-{"kind": "test", "id": "pytest-011558", "node_id": "tests/test_issue_155_contract_id_grammar.py::test_the_grammar_refuses[$ref:icv1:rest:patch:sem:0-revision zero]", "state": "active"}
-{"kind": "test", "id": "pytest-011559", "node_id": "tests/test_issue_155_contract_id_grammar.py::test_the_grammar_refuses[$ref:icv1:rest:patch:sem:01-a leading zero is a second spelling of one revision]", "state": "active"}
-{"kind": "test", "id": "pytest-011560", "node_id": "tests/test_issue_155_contract_id_grammar.py::test_the_grammar_refuses[$ref:icv1:rest:patch:sem:1\\n-a trailing newline, which a $-anchored rule admits]", "state": "active"}
-{"kind": "test", "id": "pytest-011561", "node_id": "tests/test_issue_155_contract_id_grammar.py::test_the_grammar_refuses[$ref:icv1:rest:patch:1-too few segments]", "state": "active"}
-{"kind": "test", "id": "pytest-011562", "node_id": "tests/test_issue_155_contract_id_grammar.py::test_the_grammar_refuses[$ref:icv1:rest:patch:sem:1:extra-too many segments]", "state": "active"}
-{"kind": "test", "id": "pytest-011563", "node_id": "tests/test_issue_155_contract_id_grammar.py::test_the_grammar_refuses[$ref:icv1:rest::sem:1-an empty segment]", "state": "active"}
-{"kind": "test", "id": "pytest-011564", "node_id": "tests/test_issue_155_contract_id_grammar.py::test_the_grammar_refuses[$ref:icv2:rest:patch:sem:1-a version tag this grammar does not define]", "state": "active"}
-{"kind": "test", "id": "pytest-011565", "node_id": "tests/test_issue_155_contract_id_grammar.py::test_the_grammar_refuses[icv1:rest:patch:sem:1-the bare id is not the authored form]", "state": "active"}
-{"kind": "test", "id": "pytest-011566", "node_id": "tests/test_issue_155_contract_id_grammar.py::test_the_grammar_refuses[$ref:icv1:rest:patch:sem-1:1-a hyphen is outside the alphabet]", "state": "active"}
-{"kind": "test", "id": "pytest-011567", "node_id": "tests/test_issue_155_contract_id_grammar.py::test_the_constructor_is_the_only_way_to_build_one", "state": "active"}
-{"kind": "test", "id": "pytest-011568", "node_id": "tests/test_issue_155_contract_id_grammar.py::test_the_action_identifier_map_is_total_and_injective", "state": "active"}
-{"kind": "test", "id": "pytest-011569", "node_id": "tests/test_issue_155_contract_id_grammar.py::test_the_packaged_record_is_named_by_its_own_derivation", "state": "active"}
-{"kind": "test", "id": "pytest-011570", "node_id": "tests/test_issue_155_contract_id_grammar.py::test_a_grammatical_but_wrong_name_is_refused_by_the_registry", "state": "active"}
-{"kind": "test", "id": "pytest-011571", "node_id": "tests/test_issue_155_contract_id_grammar.py::test_one_regex_is_shared_by_every_surface_that_handles_a_reference", "state": "active"}
-{"kind": "test", "id": "pytest-011572", "node_id": "tests/test_issue_155_identity_projection.py::test_compile_serves_the_failure_s_own_field_and_remediation", "state": "active"}
-{"kind": "test", "id": "pytest-011573", "node_id": "tests/test_issue_155_identity_projection.py::test_the_account_rung_needs_live_xml_and_says_so", "state": "active"}
-{"kind": "test", "id": "pytest-011574", "node_id": "tests/test_process_ir_error_handling.py::test_a_replay_declaration_is_graded_wherever_it_is_authored", "state": "active"}
-{"kind": "test", "id": "pytest-011575", "node_id": "tests/test_issue_155_contract_id_grammar.py::test_the_behaviour_record_spans_the_grammar_boundary", "state": "active"}
-{"kind": "test", "id": "pytest-011576", "node_id": "tests/test_issue_155_contract_id_grammar.py::test_the_served_pattern_and_the_enforced_check_agree_on_every_probe", "state": "active"}
-{"kind": "test", "id": "pytest-011577", "node_id": "tests/test_issue_155_contract_id_grammar.py::test_an_unmapped_action_refuses_by_name_rather_than_raising", "state": "active"}
-{"kind": "test", "id": "pytest-011578", "node_id": "tests/test_issue_155_contract_id_grammar.py::test_no_behaviour_authority_is_silently_unavailable_in_the_shipped_build", "state": "active"}
-{"kind": "test", "id": "pytest-011579", "node_id": "tests/test_issue_155_discovery.py::test_an_unreadable_registry_is_served_with_its_own_code", "state": "active"}
-{"kind": "test", "id": "pytest-011580", "node_id": "tests/test_issue_155_contract_id_grammar.py::test_the_identifier_mapping_is_injective_in_both_directions", "state": "active"}
-{"kind": "test", "id": "pytest-011581", "node_id": "tests/test_issue_155_contract_id_grammar.py::test_a_record_that_cannot_derive_its_own_name_refuses_by_name", "state": "active"}
-{"kind": "test", "id": "pytest-011582", "node_id": "tests/test_issue_155_contract_id_grammar.py::test_the_revision_moves_when_an_action_identifier_is_remapped", "state": "active"}
-{"kind": "test", "id": "pytest-011583", "node_id": "tests/test_issue_155_contract_id_grammar.py::test_the_served_attestation_constrains_its_route_digests", "state": "active"}
-{"kind": "test", "id": "pytest-011584", "node_id": "tests/test_issue_155_contract_id_grammar.py::test_the_published_route_digest_rule_and_the_enforced_one_agree", "state": "active"}
-{"kind": "test", "id": "pytest-011585", "node_id": "tests/test_connector_replay_review_round3.py::test_the_affected_sha_cell_names_the_tree_the_defect_affected", "state": "active"}
-{"kind": "test", "id": "pytest-011586", "node_id": "tests/test_connector_replay_review_round3.py::test_the_affected_sha_guard_is_not_vacuous", "state": "tombstone"}
-{"kind": "test", "id": "pytest-011587", "node_id": "tests/test_connector_replay_review_round3.py::test_the_affected_sha_checker_is_not_vacuous", "state": "active"}
-{"kind": "test", "id": "pytest-011588", "node_id": "tests/test_connector_replay_review_round3.py::test_every_declared_revision_is_excluded_by_the_declaring_authority", "state": "active"}
-{"kind": "test", "id": "pytest-011589", "node_id": "tests/test_connector_replay_report.py::test_the_report_parser_refuses_a_row_it_cannot_read", "state": "active"}
-{"kind": "test", "id": "pytest-011590", "node_id": "tests/test_connector_replay_report.py::test_the_served_report_states_what_the_registry_holds", "state": "active"}
-{"kind": "test", "id": "pytest-011591", "node_id": "tests/test_issue_155_contract_id_grammar.py::test_exactly_one_place_mints_a_grant", "state": "active"}
-{"kind": "test", "id": "pytest-011592", "node_id": "tests/test_issue_155_discovery.py::test_a_candidate_is_not_offered_when_the_live_configuration_has_moved", "state": "active"}
-{"kind": "test", "id": "pytest-011593", "node_id": "tests/test_issue_155_discovery.py::test_the_public_action_returns_a_candidate_over_real_component_xml", "state": "active"}
-{"kind": "test", "id": "pytest-011594", "node_id": "tests/test_issue_155_contract_id_grammar.py::test_the_served_attestation_schema_and_the_model_agree_on_coverage", "state": "active"}
-{"kind": "test", "id": "pytest-011595", "node_id": "tests/test_issue_155_contract_id_grammar.py::test_the_served_binding_model_keeps_its_description", "state": "active"}
+{"kind": "test", "id": "pytest-011500", "node_id": "tests/test_canonical_process_apply.py::test_the_binding_records_which_route_authorised_the_write", "state": "active"}
+{"kind": "test", "id": "pytest-011501", "node_id": "tests/test_connector_replay_report.py::test_the_served_report_states_what_the_registry_holds", "state": "active"}
+{"kind": "test", "id": "pytest-011502", "node_id": "tests/test_connector_replay_report.py::test_the_report_parser_refuses_a_row_it_cannot_read", "state": "active"}
+{"kind": "test", "id": "pytest-011503", "node_id": "tests/test_connector_replay_review_round3.py::test_the_wave_evidence_rule_admits_only_a_supported_row[abc1234-, archived `wave-gate/ok`-attested7-the row quotes 11037 for suite.passed but ok attests 1]", "state": "active"}
+{"kind": "test", "id": "pytest-011504", "node_id": "tests/test_connector_replay_review_round3.py::test_an_operation_record_cannot_authorise_a_replay_its_capture_never_saw", "state": "active"}
+{"kind": "test", "id": "pytest-011505", "node_id": "tests/test_connector_replay_review_round3.py::test_a_summary_that_attests_nothing_is_refused", "state": "active"}
+{"kind": "test", "id": "pytest-011506", "node_id": "tests/test_connector_replay_review_round3.py::test_a_count_written_as_text_is_not_a_count", "state": "active"}
+{"kind": "test", "id": "pytest-011507", "node_id": "tests/test_connector_replay_review_round3.py::test_a_row_that_states_no_figure_for_a_required_arm_is_refused", "state": "active"}
+{"kind": "test", "id": "pytest-011508", "node_id": "tests/test_connector_replay_review_round3.py::test_the_wave_contract_matches_every_archived_summary", "state": "active"}
+{"kind": "test", "id": "pytest-011509", "node_id": "tests/test_connector_replay_review_round3.py::test_a_replay_claim_needs_the_artifact_that_observes_replay", "state": "active"}
+{"kind": "test", "id": "pytest-011510", "node_id": "tests/test_connector_replay_review_round3.py::test_the_affected_sha_cell_names_the_tree_the_defect_affected", "state": "active"}
+{"kind": "test", "id": "pytest-011511", "node_id": "tests/test_connector_replay_review_round3.py::test_every_declared_revision_is_excluded_by_the_declaring_authority", "state": "active"}
+{"kind": "test", "id": "pytest-011512", "node_id": "tests/test_connector_replay_review_round3.py::test_the_affected_sha_checker_is_not_vacuous", "state": "active"}
+{"kind": "test", "id": "pytest-011513", "node_id": "tests/test_connector_replay_review_round3.py::test_the_affected_sha_guard_is_not_vacuous", "state": "active"}
+{"kind": "test", "id": "pytest-011514", "node_id": "tests/test_issue_155_contract_id_grammar.py::test_the_grammar_is_the_one_the_issue_specifies", "state": "active"}
+{"kind": "test", "id": "pytest-011515", "node_id": "tests/test_issue_155_contract_id_grammar.py::test_the_grammar_refuses[$ref:rest.patch.cds_client.static_route.v1-the dotted form this replaced]", "state": "active"}
+{"kind": "test", "id": "pytest-011516", "node_id": "tests/test_issue_155_contract_id_grammar.py::test_the_grammar_refuses[$ref:icv1:REST:patch:sem:1-upper case is outside the alphabet]", "state": "active"}
+{"kind": "test", "id": "pytest-011517", "node_id": "tests/test_issue_155_contract_id_grammar.py::test_the_grammar_refuses[$ref:icv1:rest:patch:sem:0-revision zero]", "state": "active"}
+{"kind": "test", "id": "pytest-011518", "node_id": "tests/test_issue_155_contract_id_grammar.py::test_the_grammar_refuses[$ref:icv1:rest:patch:sem:01-a leading zero is a second spelling of one revision]", "state": "active"}
+{"kind": "test", "id": "pytest-011519", "node_id": "tests/test_issue_155_contract_id_grammar.py::test_the_grammar_refuses[$ref:icv1:rest:patch:sem:1\\n-a trailing newline, which a $-anchored rule admits]", "state": "active"}
+{"kind": "test", "id": "pytest-011520", "node_id": "tests/test_issue_155_contract_id_grammar.py::test_the_grammar_refuses[$ref:icv1:rest:patch:1-too few segments]", "state": "active"}
+{"kind": "test", "id": "pytest-011521", "node_id": "tests/test_issue_155_contract_id_grammar.py::test_the_grammar_refuses[$ref:icv1:rest:patch:sem:1:extra-too many segments]", "state": "active"}
+{"kind": "test", "id": "pytest-011522", "node_id": "tests/test_issue_155_contract_id_grammar.py::test_the_grammar_refuses[$ref:icv1:rest::sem:1-an empty segment]", "state": "active"}
+{"kind": "test", "id": "pytest-011523", "node_id": "tests/test_issue_155_contract_id_grammar.py::test_the_grammar_refuses[$ref:icv2:rest:patch:sem:1-a version tag this grammar does not define]", "state": "active"}
+{"kind": "test", "id": "pytest-011524", "node_id": "tests/test_issue_155_contract_id_grammar.py::test_the_grammar_refuses[icv1:rest:patch:sem:1-the bare id is not the authored form]", "state": "active"}
+{"kind": "test", "id": "pytest-011525", "node_id": "tests/test_issue_155_contract_id_grammar.py::test_the_grammar_refuses[$ref:icv1:rest:patch:sem-1:1-a hyphen is outside the alphabet]", "state": "active"}
+{"kind": "test", "id": "pytest-011526", "node_id": "tests/test_issue_155_contract_id_grammar.py::test_the_constructor_is_the_only_way_to_build_one", "state": "active"}
+{"kind": "test", "id": "pytest-011527", "node_id": "tests/test_issue_155_contract_id_grammar.py::test_the_action_identifier_map_is_total_and_injective", "state": "active"}
+{"kind": "test", "id": "pytest-011528", "node_id": "tests/test_issue_155_contract_id_grammar.py::test_the_packaged_record_is_named_by_its_own_derivation", "state": "active"}
+{"kind": "test", "id": "pytest-011529", "node_id": "tests/test_issue_155_contract_id_grammar.py::test_a_grammatical_but_wrong_name_is_refused_by_the_registry", "state": "active"}
+{"kind": "test", "id": "pytest-011530", "node_id": "tests/test_issue_155_contract_id_grammar.py::test_one_regex_is_shared_by_every_surface_that_handles_a_reference", "state": "active"}
+{"kind": "test", "id": "pytest-011531", "node_id": "tests/test_issue_155_contract_id_grammar.py::test_the_behaviour_record_spans_the_grammar_boundary", "state": "active"}
+{"kind": "test", "id": "pytest-011532", "node_id": "tests/test_issue_155_contract_id_grammar.py::test_the_served_pattern_and_the_enforced_check_agree_on_every_probe", "state": "active"}
+{"kind": "test", "id": "pytest-011533", "node_id": "tests/test_issue_155_contract_id_grammar.py::test_an_unmapped_action_refuses_by_name_rather_than_raising", "state": "active"}
+{"kind": "test", "id": "pytest-011534", "node_id": "tests/test_issue_155_contract_id_grammar.py::test_no_behaviour_authority_is_silently_unavailable_in_the_shipped_build", "state": "active"}
+{"kind": "test", "id": "pytest-011535", "node_id": "tests/test_issue_155_contract_id_grammar.py::test_the_identifier_mapping_is_injective_in_both_directions", "state": "active"}
+{"kind": "test", "id": "pytest-011536", "node_id": "tests/test_issue_155_contract_id_grammar.py::test_a_record_that_cannot_derive_its_own_name_refuses_by_name", "state": "active"}
+{"kind": "test", "id": "pytest-011537", "node_id": "tests/test_issue_155_contract_id_grammar.py::test_the_revision_moves_when_an_action_identifier_is_remapped", "state": "active"}
+{"kind": "test", "id": "pytest-011538", "node_id": "tests/test_issue_155_contract_id_grammar.py::test_the_served_attestation_constrains_its_route_digests", "state": "active"}
+{"kind": "test", "id": "pytest-011539", "node_id": "tests/test_issue_155_contract_id_grammar.py::test_the_published_route_digest_rule_and_the_enforced_one_agree", "state": "active"}
+{"kind": "test", "id": "pytest-011540", "node_id": "tests/test_issue_155_contract_id_grammar.py::test_exactly_one_place_mints_a_grant", "state": "active"}
+{"kind": "test", "id": "pytest-011541", "node_id": "tests/test_issue_155_contract_id_grammar.py::test_the_served_attestation_schema_and_the_model_agree_on_coverage", "state": "active"}
+{"kind": "test", "id": "pytest-011542", "node_id": "tests/test_issue_155_contract_id_grammar.py::test_the_served_binding_model_keeps_its_description", "state": "active"}
+{"kind": "test", "id": "pytest-011543", "node_id": "tests/test_issue_155_contract_projection.py::test_an_unreadable_live_component_refuses_rather_than_trusting_the_caller", "state": "active"}
+{"kind": "test", "id": "pytest-011544", "node_id": "tests/test_issue_155_contract_projection.py::test_a_minted_grant_names_its_root_and_its_connection", "state": "active"}
+{"kind": "test", "id": "pytest-011545", "node_id": "tests/test_issue_155_contract_projection.py::test_the_relocatable_compile_cannot_be_the_evidence_gate", "state": "active"}
+{"kind": "test", "id": "pytest-011546", "node_id": "tests/test_issue_155_contract_projection.py::test_one_process_root_can_mint_two_grants", "state": "active"}
+{"kind": "test", "id": "pytest-011547", "node_id": "tests/test_issue_155_discovery.py::test_a_relocatable_table_keeps_its_own_grants_and_only_its_own", "state": "active"}
+{"kind": "test", "id": "pytest-011548", "node_id": "tests/test_issue_155_discovery.py::test_an_empty_list_says_whether_evidence_exists_at_another_version[connection-moved]", "state": "active"}
+{"kind": "test", "id": "pytest-011549", "node_id": "tests/test_issue_155_discovery.py::test_an_empty_list_says_whether_evidence_exists_at_another_version[operation-moved]", "state": "active"}
+{"kind": "test", "id": "pytest-011550", "node_id": "tests/test_issue_155_discovery.py::test_an_empty_list_says_whether_evidence_exists_at_another_version[both-moved]", "state": "active"}
+{"kind": "test", "id": "pytest-011551", "node_id": "tests/test_issue_155_discovery.py::test_never_captured_and_captured_but_moved_are_distinguishable", "state": "active"}
+{"kind": "test", "id": "pytest-011552", "node_id": "tests/test_issue_155_discovery.py::test_a_usable_record_is_a_candidate_and_never_a_superseded_row", "state": "active"}
+{"kind": "test", "id": "pytest-011553", "node_id": "tests/test_issue_155_discovery.py::test_the_superseded_projection_is_CLOSED_and_leaks_nothing", "state": "active"}
+{"kind": "test", "id": "pytest-011554", "node_id": "tests/test_issue_155_discovery.py::test_an_unreadable_registry_is_served_with_its_own_code", "state": "active"}
+{"kind": "test", "id": "pytest-011555", "node_id": "tests/test_issue_155_discovery.py::test_a_candidate_is_not_offered_when_the_live_configuration_has_moved", "state": "active"}
+{"kind": "test", "id": "pytest-011556", "node_id": "tests/test_issue_155_discovery.py::test_the_public_action_returns_a_candidate_over_real_component_xml", "state": "active"}
+{"kind": "test", "id": "pytest-011557", "node_id": "tests/test_issue_155_identity_projection.py::test_a_declared_path_the_account_does_not_store_is_refused", "state": "active"}
+{"kind": "test", "id": "pytest-011558", "node_id": "tests/test_issue_155_identity_projection.py::test_an_unsettled_path_is_silence_and_never_a_mismatch[no path declared-identity_over0-paths0]", "state": "active"}
+{"kind": "test", "id": "pytest-011559", "node_id": "tests/test_issue_155_identity_projection.py::test_an_unsettled_path_is_silence_and_never_a_mismatch[blank declared path-identity_over1-paths1]", "state": "active"}
+{"kind": "test", "id": "pytest-011560", "node_id": "tests/test_issue_155_identity_projection.py::test_an_unsettled_path_is_silence_and_never_a_mismatch[dynamic route-identity_over2-paths2]", "state": "active"}
+{"kind": "test", "id": "pytest-011561", "node_id": "tests/test_issue_155_identity_projection.py::test_an_unsettled_path_is_silence_and_never_a_mismatch[unreadable route-identity_over3-paths3]", "state": "active"}
+{"kind": "test", "id": "pytest-011562", "node_id": "tests/test_issue_155_identity_projection.py::test_the_live_reader_keeps_the_path_it_read", "state": "active"}
+{"kind": "test", "id": "pytest-011563", "node_id": "tests/test_issue_155_identity_projection.py::test_an_ambiguous_live_route_is_unreadable_and_never_settled[one stored path-None-static-True]", "state": "active"}
+{"kind": "test", "id": "pytest-011564", "node_id": "tests/test_issue_155_identity_projection.py::test_an_ambiguous_live_route_is_unreadable_and_never_settled[the same path twice-same-static-True]", "state": "active"}
+{"kind": "test", "id": "pytest-011565", "node_id": "tests/test_issue_155_identity_projection.py::test_an_ambiguous_live_route_is_unreadable_and_never_settled[two different paths-other-unavailable-False]", "state": "active"}
+{"kind": "test", "id": "pytest-011566", "node_id": "tests/test_issue_155_identity_projection.py::test_a_path_is_compared_case_sensitively_and_a_verb_is_not", "state": "active"}
+{"kind": "test", "id": "pytest-011567", "node_id": "tests/test_issue_155_identity_projection.py::test_a_path_mismatch_names_the_field_and_never_the_value", "state": "active"}
+{"kind": "test", "id": "pytest-011568", "node_id": "tests/test_issue_155_identity_projection.py::test_paths_are_compared_by_the_equivalence_the_route_digest_uses[/items/a%2Fb-/items/a%2fb-True]", "state": "active"}
+{"kind": "test", "id": "pytest-011569", "node_id": "tests/test_issue_155_identity_projection.py::test_paths_are_compared_by_the_equivalence_the_route_digest_uses[/a/./b-/a/b-False]", "state": "active"}
+{"kind": "test", "id": "pytest-011570", "node_id": "tests/test_issue_155_identity_projection.py::test_paths_are_compared_by_the_equivalence_the_route_digest_uses[/../admin-/admin-False]", "state": "active"}
+{"kind": "test", "id": "pytest-011571", "node_id": "tests/test_issue_155_identity_projection.py::test_paths_are_compared_by_the_equivalence_the_route_digest_uses[/secret?/../x-/x-False]", "state": "active"}
+{"kind": "test", "id": "pytest-011572", "node_id": "tests/test_issue_155_identity_projection.py::test_paths_are_compared_by_the_equivalence_the_route_digest_uses[/Orders/42-/orders/42-False]", "state": "active"}
+{"kind": "test", "id": "pytest-011573", "node_id": "tests/test_issue_155_identity_projection.py::test_paths_are_compared_by_the_equivalence_the_route_digest_uses[/items/a%2Fb-/items/a%2Fc-False]", "state": "active"}
+{"kind": "test", "id": "pytest-011574", "node_id": "tests/test_issue_155_identity_projection.py::test_the_path_equivalence_moves_the_published_revision", "state": "active"}
+{"kind": "test", "id": "pytest-011575", "node_id": "tests/test_issue_155_identity_projection.py::test_the_revision_oracle_covers_both_normalization_arms", "state": "active"}
+{"kind": "test", "id": "pytest-011576", "node_id": "tests/test_issue_155_identity_projection.py::test_the_revision_oracle_derives_its_casing_per_nibble", "state": "active"}
+{"kind": "test", "id": "pytest-011577", "node_id": "tests/test_issue_155_identity_projection.py::test_a_refusing_probe_does_not_blind_the_revision_oracle", "state": "active"}
+{"kind": "test", "id": "pytest-011578", "node_id": "tests/test_issue_155_identity_projection.py::test_the_normalizer_is_the_only_place_a_path_is_trimmed", "state": "active"}
+{"kind": "test", "id": "pytest-011579", "node_id": "tests/test_issue_155_identity_projection.py::test_a_component_storing_two_routes_is_refused_rather_than_marked", "state": "active"}
+{"kind": "test", "id": "pytest-011580", "node_id": "tests/test_issue_155_identity_projection.py::test_every_identity_refusal_names_the_field_it_is_about", "state": "active"}
+{"kind": "test", "id": "pytest-011581", "node_id": "tests/test_issue_155_identity_projection.py::test_two_spellings_of_one_route_are_not_a_conflict", "state": "active"}
+{"kind": "test", "id": "pytest-011582", "node_id": "tests/test_issue_155_identity_projection.py::test_a_route_conflict_does_not_suppress_the_verb_check", "state": "active"}
+{"kind": "test", "id": "pytest-011583", "node_id": "tests/test_issue_155_identity_projection.py::test_a_conflicting_route_is_refused_with_no_declaration_at_all", "state": "active"}
+{"kind": "test", "id": "pytest-011584", "node_id": "tests/test_issue_155_identity_projection.py::test_the_served_refusal_names_the_field_that_disagreed", "state": "active"}
+{"kind": "test", "id": "pytest-011585", "node_id": "tests/test_issue_155_identity_projection.py::test_one_route_in_two_spellings_stays_comparable", "state": "active"}
+{"kind": "test", "id": "pytest-011586", "node_id": "tests/test_issue_155_identity_projection.py::test_the_route_decision_moves_the_published_revision", "state": "active"}
+{"kind": "test", "id": "pytest-011587", "node_id": "tests/test_issue_155_identity_projection.py::test_a_route_conflict_is_reported_once_per_component", "state": "active"}
+{"kind": "test", "id": "pytest-011588", "node_id": "tests/test_issue_155_identity_projection.py::test_a_declaration_free_conflict_does_not_claim_a_declaration_disagreed", "state": "active"}
+{"kind": "test", "id": "pytest-011589", "node_id": "tests/test_issue_155_identity_projection.py::test_the_plan_surface_compares_the_declared_route_against_the_account", "state": "active"}
+{"kind": "test", "id": "pytest-011590", "node_id": "tests/test_issue_155_identity_projection.py::test_compile_serves_the_failure_s_own_field_and_remediation", "state": "active"}
+{"kind": "test", "id": "pytest-011591", "node_id": "tests/test_issue_155_identity_projection.py::test_the_account_rung_needs_live_xml_and_says_so", "state": "active"}
+{"kind": "test", "id": "pytest-011592", "node_id": "tests/test_issue_155_recheck.py::test_the_resolved_binding_carries_the_route_digests_it_compared", "state": "active"}
+{"kind": "test", "id": "pytest-011593", "node_id": "tests/test_issue_155_recheck_boundary.py::test_a_drift_inside_the_materialization_window_refuses_before_the_write", "state": "active"}
+{"kind": "test", "id": "pytest-011594", "node_id": "tests/test_issue_155_recheck_boundary.py::test_a_mutation_uncertain_push_retains_the_accounting_it_owes", "state": "active"}
+{"kind": "test", "id": "pytest-011595", "node_id": "tests/test_process_ir_error_handling.py::test_a_replay_declaration_is_graded_wherever_it_is_authored", "state": "active"}
