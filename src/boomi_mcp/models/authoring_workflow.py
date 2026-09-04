@@ -931,10 +931,25 @@ class ConnectorReplayEvidenceBindingAttestationV1(_AuthoringModel):
     #: this issue already fixed one layer down in the reference grammar, and it
     #: is a machine-served contract, so the shape belongs in the schema. The
     #: validator below stays for SORTEDNESS, which JSON Schema cannot express.
-    route_digests: tuple[
-        Annotated[str, StringConstraints(pattern=r"^RouteDigestV1:[0-9a-f]{64}$")],
-        ...,
-    ] = Field(default=(), json_schema_extra={"uniqueItems": True})
+    #: The PUBLISHED pattern ends in a negative lookahead, not `$`. Measured
+    #: against a real Draft 2020-12 validator, in this repository, before this
+    #: field existed: `$` matches before a final line terminator, so a
+    #: `$`-anchored rule ACCEPTS a value with a trailing newline that the runtime
+    #: then refuses. That is the drift this constraint exists to close, and the
+    #: first version of it used `$` and reintroduced the drift inside the fix.
+    #:
+    #: Published through `json_schema_extra` rather than a type constraint because
+    #: pydantic's regex engine has no lookahead — so the item shape is ENFORCED by
+    #: the validator below and PUBLISHED here, and a test asserts the two accept
+    #: the same strings rather than trusting that they do.
+    route_digests: tuple[str, ...] = Field(
+        default=(),
+        json_schema_extra={
+            "items": {"type": "string",
+                      "pattern": r"^RouteDigestV1:[0-9a-f]{64}(?![\s\S])"},
+            "uniqueItems": True,
+        },
+    )
 
     @field_validator("route_digests")
     @classmethod
@@ -950,8 +965,11 @@ class ConnectorReplayEvidenceBindingAttestationV1(_AuthoringModel):
         publishing them unconstrained on the way out means a malformed route
         identity can be recorded as a valid account of what authorised a write.
         """
-        # The value shape is carried by the item type above, so it reaches the
-        # published schema; this keeps the two properties the schema cannot say.
+        bad = [d for d in value
+               if not isinstance(d, str)
+               or not re.fullmatch(r"RouteDigestV1:[0-9a-f]{64}", d)]
+        if bad:
+            raise ValueError(f"not RouteDigestV1 values: {bad!r}")
         if len(set(value)) != len(value):
             raise ValueError("duplicate route digests claim more coverage than held")
         if list(value) != sorted(value):

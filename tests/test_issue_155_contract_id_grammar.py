@@ -379,3 +379,61 @@ def test_the_served_attestation_constrains_its_route_digests():
 
     accepted = Binding.model_validate(dict(required, route_digests=[good, other]))
     assert accepted.route_digests == (good, other)
+
+
+def test_the_published_route_digest_rule_and_the_enforced_one_agree():
+    """Two rules for one field, checked rather than assumed.
+
+    The shape is ENFORCED by a validator and PUBLISHED in the field's schema,
+    because pydantic's regex engine has no lookahead and the published rule needs
+    one. That split is exactly where drift lives, and it bit twice in this issue:
+    once in the reference grammar and again in the fix for it, both times because
+    a `$` anchor matches before a final line terminator in a Draft 2020-12
+    validator while the runtime's full match does not.
+
+    So the agreement is measured with a real validator over probes that span the
+    boundary, including the trailing-newline case that caused both.
+    """
+    jsonschema = pytest.importorskip("jsonschema")
+
+    from boomi_mcp.models.authoring_workflow import (
+        ConnectorReplayEvidenceBindingAttestationV1 as Binding,
+    )
+
+    published = Binding.model_json_schema()["properties"]["route_digests"]
+    assert published.get("uniqueItems") is True, published
+    item = jsonschema.Draft202012Validator(published["items"])
+
+    required = {}
+    for name, field in Binding.model_fields.items():
+        if not field.is_required():
+            continue
+        if "config" in name and "digest" in name:
+            required[name] = "ComponentConfigDigestV1:" + "a" * 64
+        elif "digest" in name:
+            required[name] = "a" * 64
+        else:
+            required[name] = "x"
+
+    good = "RouteDigestV1:" + "a" * 64
+    probes = [good, good + "\n", good + "\r\n", good.upper(), "RouteDigestV1:" + "a" * 63,
+              "RouteDigestV1:" + "a" * 65, "nope", "", "RouteDigestV1:" + "g" * 64]
+    disagreed = []
+    for probe in probes:
+        by_schema = item.is_valid(probe)
+        try:
+            Binding.model_validate(dict(required, route_digests=[probe]))
+            by_runtime = True
+        except Exception:
+            by_runtime = False
+        if by_schema != by_runtime:
+            disagreed.append((probe, by_schema, by_runtime))
+
+    assert not disagreed, (
+        "the published rule and the enforced rule disagree on these, so a client "
+        f"validating against the served schema is refused by the server: {disagreed}"
+    )
+    # Non-vacuity: the probe set must contain both verdicts, or agreement is free.
+    assert item.is_valid(good) and not item.is_valid(good + "\n"), (
+        "the probes do not span the boundary, so agreement proves nothing"
+    )

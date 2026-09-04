@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 11537, "minimum_collected": 11537, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 11538, "minimum_collected": 11538, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -11582,3 +11582,4 @@
 {"kind": "test", "id": "pytest-011581", "node_id": "tests/test_issue_155_contract_id_grammar.py::test_a_record_that_cannot_derive_its_own_name_refuses_by_name", "state": "active"}
 {"kind": "test", "id": "pytest-011582", "node_id": "tests/test_issue_155_contract_id_grammar.py::test_the_revision_moves_when_an_action_identifier_is_remapped", "state": "active"}
 {"kind": "test", "id": "pytest-011583", "node_id": "tests/test_issue_155_contract_id_grammar.py::test_the_served_attestation_constrains_its_route_digests", "state": "active"}
+{"kind": "test", "id": "pytest-011584", "node_id": "tests/test_issue_155_contract_id_grammar.py::test_the_published_route_digest_rule_and_the_enforced_one_agree", "state": "active"}
