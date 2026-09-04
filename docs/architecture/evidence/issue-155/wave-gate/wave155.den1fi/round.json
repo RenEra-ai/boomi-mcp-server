@@ -1,0 +1,13 @@
+{
+ "collector": "wave_gate",
+ "durable_dir": "wave-gate/wave155.den1fi",
+ "files": {
+  "wave-gate/wave155.den1fi/summary.json": "48ac0ce55ffec3fa8317c21b891cb0717899b663f29a5a3c1c11938000a77e56",
+  "wave-gate/wave155.den1fi/wave.log": "7d38bc427f065014758525a51b5d9bd2b9283096b326e7c5f3f0efe37aa06096"
+ },
+ "logical_loop": "L4 (composite wave gate, issue-level)",
+ "source_run_dir": "/tmp/wave155.den1fi",
+ "status": "completed",
+ "verdict": "pass",
+ "wave_sha": "1ead573da3204b66e0e083f056f576886f429168"
+}

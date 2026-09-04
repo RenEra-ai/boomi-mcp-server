@@ -3188,6 +3188,16 @@ def _wave_evidence_violation(ledger_text, archive_dir):
     # that row's own valid evidence. Scope is a field; a field is read from its cell.
     row_scope = _loop_scope(latest.split("|")[1])
     round_scope = _loop_scope(str(record.get("logical_loop", "")))
+    # AN UNRECOGNISED SCOPE IS A VIOLATION, not a value to compare. Two scopes this
+    # extractor cannot read both came back as "no scope" and compared EQUAL, so a
+    # checkpoint spelled one way could be satisfied by a round spelled another
+    # entirely — a fail-open hiding inside an equality test.
+    for who, scope, text in (("checkpoint row", row_scope, latest.split("|")[1]),
+                             ("cited archive", round_scope,
+                              str(record.get("logical_loop", "")))):
+        if scope is None:
+            return (f"the {who} names a loop scope this rule cannot read: "
+                    f"{text.strip()[:60]!r}")
     if row_scope != round_scope:
         return (f"cited archive {named.group(1)} records a {round_scope!r} round for "
                 f"a {row_scope!r} checkpoint")
@@ -7256,6 +7266,30 @@ def test_a_wave_summary_nothing_produced_is_not_evidence(tmp_path):
         {"case": "ok", "round": json.dumps(bound)})) is None
 
 
+def test_a_loop_scope_this_rule_cannot_read_is_refused(tmp_path):
+    """An unrecognised scope is a violation, never a value that compares equal.
+
+    THE NON-VACUITY WITNESS for the fail-open inside an equality test: two scopes the
+    extractor could not read both became "no scope" and matched each other, so a
+    checkpoint under one spelling could be satisfied by a round archived under a
+    different one entirely.
+    """
+    archive = tmp_path / "wave-gate"
+    _archived_summary(archive / "ok", _PASSING_WAVE,
+                      logical_loop="L4 (composite wave gate, wave two)")
+    unreadable = _ROW.format(sha="abc1234", cite=", archived `wave-gate/ok`").replace(
+        "L4 composite wave gate, slice B", "L4 composite wave gate, the closing arc", 1)
+    assert _wave_evidence_violation(_wave_ledger(unreadable), archive) == (
+        "the checkpoint row names a loop scope this rule cannot read: "
+        "'L4 composite wave gate, the closing arc'")
+
+    # A readable row against an unreadable ROUND is refused on the other side.
+    readable = _ROW.format(sha="abc1234", cite=", archived `wave-gate/ok`")
+    assert _wave_evidence_violation(_wave_ledger(readable), archive) == (
+        "the cited archive names a loop scope this rule cannot read: "
+        "'L4 (composite wave gate, wave two)'")
+
+
 def test_an_issue_level_loop_owes_its_checkpoints_like_any_other(tmp_path):
     """A loop whose scope is not a slice letter is still a loop.
 
@@ -7344,8 +7378,30 @@ def _tier_derivation_offenders(ledger_text):
     # local copy cost the last time: thirteen live rows fell into the gap between the
     # copy and the authority. A bolded id, which that parser normalises and a local
     # regex does not, would have been the next row to vanish from this rule.
+    import sys as _sys
+
+    _sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from test_wave_gate import _FINDING_ID_RE
+
     rows_list, malformed = _finding_table_rows(ledger_text)
     rows = dict(rows_list)
+
+    #: THE COLUMN ORDER THIS RULE READS BY POSITION, asserted rather than assumed.
+    #: The shared parser validates the column COUNT and not the order, so a reordered
+    #: nine-column table still parses and these offsets would then read the blocking
+    #: class as the source label — the severity rule silently reading the wrong cell.
+    #: Checking the header turns that misread into a refusal.
+    expected = ("ID", "Source gate", "Verbatim summary", "Original label",
+                "Blocking class", "Defect class", "Derived tier", "SHA/delta",
+                "Disposition")
+    head = next((l for l in _unfenced_lines(ledger_text)
+                 if l.startswith("|") and l.split("|")[1].strip() == "ID"), None)
+    if head is not None:
+        got = [c.strip() for c in head.split("|")[1:-1]]
+        if len(got) != len(expected) or not all(
+                g.startswith(e) for g, e in zip(got, expected)):
+            return [("<the finding table's columns are not in the order this rule "
+                     "reads>", " | ".join(expected), " | ".join(got))]
 
     # FAIL CLOSED ON AN EMPTY READ. Returning no offenders when no row was found meant
     # a renamed or recased table header silently disarmed the rule while its own test
@@ -7366,8 +7422,14 @@ def _tier_derivation_offenders(ledger_text):
             continue
         # The map writes each pair inside ONE backtick span — `newer → older` — not a
         # span per id.
+        # THE SHARED IDENTIFIER GRAMMAR, imported and never restated — the rule this
+        # file keeps a structural guard for. A local `[A-Z]+` prefix was narrower than
+        # the authority, which accepts `[A-Z][A-Za-z0-9]*`: a correction whose id used
+        # a mixed-case prefix would be seen by the row parser, missed by this one, and
+        # would then fail to supersede its own predecessor — a FALSE failure from the
+        # same drift that produced a false pass two rounds earlier.
         for newer, older in re.findall(
-                r"`([A-Z]+-155-[A-Za-z0-9-]+) → ([A-Z]+-155-[A-Za-z0-9-]+)`", line):
+                rf"`({_FINDING_ID_RE}) → ({_FINDING_ID_RE})`", line):
             superseded[older] = newer
 
     # A row the parser could not place is reported by THIS rule only when it could be
@@ -7375,11 +7437,17 @@ def _tier_derivation_offenders(ledger_text):
     # Column-count damage as such is already owned by the malformed-row guard, and
     # reporting every such row here would restate that rule and bury this one's own
     # findings under eleven pre-existing rows it has nothing to say about.
+    # SUPERSESSION APPLIES HERE TOO. A malformed historical row corrected by a valid
+    # revision was reported before the map was ever consulted, so the record could not
+    # be made green by the one move the workflow allows — retain the original, append
+    # the correction. A rule that cannot be satisfied by the sanctioned repair is a
+    # rule that gets worked around.
     offenders = [(rid, "<malformed row carrying a severity label>",
                   " ".join(c.strip() for c in cells)[:60])
                  for rid, cells in malformed
-                 if any(re.fullmatch(r"(P0|P1|Critical|High)", c.strip(), re.I)
-                        for c in cells)]
+                 if not (rid in superseded and superseded[rid] in rows)
+                 and any(re.fullmatch(r"(P0|P1|Critical|High)", c.strip(), re.I)
+                         for c in cells)]
     for rid in sorted(rows):
         # SUPPRESSED ONLY BY A ROW THAT IS ACTUALLY THERE. The map named an older id
         # and this hid it without checking the newer one had been parsed, so a
@@ -7529,3 +7597,32 @@ def test_the_tier_derivation_can_actually_fail():
     assert offenders(row("CDX-155-r1-01", "P1", "standard", "fixed"),
                      supersessions=(("CDX-155-r1-01a", "CDX-155-r1-01"),)) == [
         "CDX-155-r1-01"]
+
+    # A REORDERED TABLE IS REFUSED, not read by position anyway. The shared parser
+    # validates the column COUNT and not the order, so nine columns in the wrong order
+    # still parse and these offsets would read the blocking class as the source label.
+    swapped = ledger(row("CDX-155-r1-01", "P1", "standard", "fixed")).replace(
+        "Original label | Blocking class", "Blocking class | Original label", 1)
+    assert [r for r, _, _ in _tier_derivation_offenders(swapped)] == [
+        "<the finding table's columns are not in the order this rule reads>"]
+
+    # A MIXED-CASE PREFIX is accepted by the shared identifier grammar, so the map must
+    # accept it too: a correction the row parser sees and the map parser does not would
+    # fail to supersede its own predecessor and produce a FALSE failure.
+    mixed = (row("Qa-155-r1-01", "P1", "standard — original", "fixed"),
+             row("Qa-155-r1-01a", "P1", "**critical** — corrected", "fixed"))
+    assert not offenders(*mixed, supersessions=(("Qa-155-r1-01a", "Qa-155-r1-01"),))
+
+    # A MALFORMED PREDECESSOR corrected by a valid revision is not reported: the record
+    # can be repaired the one way the workflow allows, by retaining the original and
+    # appending the correction.
+    short = "| CDX-155-r2-01 | gate | s | P1 | class | DC-155-C | standard | `abc1234` |"
+    fixed_pair = ledger(short, row("CDX-155-r2-01a", "P1", "**critical** — corrected",
+                                   "fixed"),
+                        supersessions=(("CDX-155-r2-01a", "CDX-155-r2-01"),))
+    assert not _tier_derivation_offenders(fixed_pair), _tier_derivation_offenders(fixed_pair)
+    # ...and the same malformed row with NO standing correction still is. A
+    # well-formed row rides along so the table is readable and the fail-closed
+    # sentinel — which owns the "no rows at all" case — is not what answers here.
+    alone = ledger(short, row("CDX-155-r1-01", "P2", "standard — anchor", "fixed"))
+    assert [r for r, _, _ in _tier_derivation_offenders(alone)] == ["CDX-155-r2-01"]

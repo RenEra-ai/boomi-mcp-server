@@ -1,0 +1,11 @@
+1ead573da3204b66e0e083f056f576886f429168
+SKIPPED [1] tests/test_issue_155_recheck_boundary.py:672: the post-submission boundary was not reached on this fixture
+SKIPPED [6] tests/test_sync_pipeline_adapter_cutover.py:721: chain rejected upstream: SYNC_PIPELINE_CONTROL_FLOW_UNSUPPORTED
+SKIPPED [8] tests/test_sync_pipeline_adapter_cutover.py:721: chain rejected upstream: SYNC_PIPELINE_CONFIG_INVALID
+SKIPPED [2] tests/test_system_topology_models.py:154: identity is supplied by a binding; covered by the bound tests
+11535 passed, 19 skipped, 18 warnings in 933.35s (0:15:33)
+wave_gate: non-KB suite green (11535 passed, 19 skipped, cap 30)
+wave_gate: 74 active goldens deterministic and byte-exact
+wave_gate: plan fingerprint checked:2 case(s)
+
+[exited with code 0]
