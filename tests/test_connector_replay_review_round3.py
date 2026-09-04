@@ -1356,6 +1356,8 @@ _UNROWED = {"DC-155-C": 2, "DC-155-I": 1}
 #: the reason. Frozen so the set cannot grow silently: a row that names a class is an
 #: instance of it unless it appears here.
 _NOT_AN_INSTANCE = {
+    "CDX-155-r216-01a": "a REVISION replacing a procedural disposition with the "
+    "structural one the class was owed — one finding, counted at the original",
     "CDX-155-r210-01b": "a REVISION correcting the BLOCKING CLASS of a verification-surface "
     "finding recorded as machine-served — one finding, counted at the original",
     "CDX-155-r210-02a": "a REVISION correcting the BLOCKING CLASS of a verification-surface "
@@ -7791,3 +7793,132 @@ def test_the_tier_derivation_can_actually_fail():
               + row("CDX-155-r6-01", "P1", "standard", "fixed") + "\n")
     assert [r for r, _, _ in _tier_derivation_offenders(second)] == [
         "<the finding table's columns are not in the order this rule reads>"]
+
+
+def _closing_row_without_covering_evidence(ledger_text, archive_dir):
+    """Whether the LATEST closing checkpoint cites evidence naming the tree it closes.
+
+    THE ORDERING AXIS OF `DC-155-G`, MADE EXECUTABLE. That class was first answered
+    procedurally — write the checkpoint after the validation it governs — and the
+    procedure has now failed four times, most recently in the very row that corrected
+    the previous failure. A rule about WHEN a decision may be written cannot be
+    enforced by remembering to write it later; the second axis of the same class was
+    made executable for exactly this reason and has not recurred since.
+
+    So the ordering rule is restated as a property of the ARTIFACT rather than of the
+    author's sequence: a row that records a closing outcome must cite an archived round
+    that exists in the checkout and that names the SHA the row itself names. A decision
+    written ahead of its evidence cannot satisfy that, because the evidence is not there
+    yet — which is the difference between a procedure and an invariant.
+
+    SCOPED TO THE LATEST closing row, for the reason already recorded against this
+    class: twenty-two early rounds were never archived and their output no longer
+    exists. That is a limitation of the record, not a waiver, and it is why the rule
+    binds the row closure actually rests on.
+    """
+    # The record's own view — see `_unfenced_lines`. A fenced block is an
+    # illustration, not a row.
+    ledger_text = "\n".join(_unfenced_lines(ledger_text))
+    import json
+    import re
+
+    rows = [r for r in (_checkpoint_rows(ledger_text) or [])
+            if "`CLOSE-CLEAN`" in r or "AND-CLOSE`" in r]
+    if not rows:
+        return None
+    latest = rows[-1]
+    shas = re.findall(r"`([0-9a-f]{7,40})`", latest)
+    if not shas:
+        return "the latest closing checkpoint names no SHA"
+    cited = re.findall(r"`((?:commit-reviews|wave-gate)/[A-Za-z0-9._-]+)`", latest)
+    if not cited:
+        return "the latest closing checkpoint cites no archived evidence"
+
+    #: Where each kind of archived round records the tree it ran against. Read from
+    #: the round's own files, never from the row that cites it — a row confirming
+    #: itself is the shape this whole class keeps taking.
+    root = Path(archive_dir)
+    seen = []
+    for name in cited:
+        d = root / name
+        if not d.is_dir():
+            return f"cited archive {name} is absent from the checkout"
+        if name.startswith("wave-gate/"):
+            summary = d / "summary.json"
+            if not summary.is_file():
+                return f"cited archive {name} carries no summary"
+            seen.append(str(json.loads(summary.read_text()).get("wave_sha", "")))
+        else:
+            head = d / "start-head"
+            if not head.is_file():
+                return f"cited archive {name} records no reviewed tree"
+            seen.append(head.read_text().strip())
+
+    # The row's own SHA must be one the cited evidence actually ran against. A closing
+    # decision whose evidence names only an ANCESTOR is the defect precisely: the
+    # gates covered the tree before the correction, and the row closes over the tree
+    # after it.
+    for sha in shas:
+        if any(recorded.startswith(sha) for recorded in seen if recorded):
+            return None
+    return (f"the latest closing checkpoint names {shas[0]} but its cited evidence "
+            f"ran against {sorted({r[:7] for r in seen if r})}")
+
+
+def test_a_closing_checkpoint_cites_evidence_for_the_tree_it_closes():
+    """A closing decision must be supported by evidence naming that same tree.
+
+    The executable form of the ordering rule. Recorded against this record itself, so
+    a closing row written before its gates exist fails here rather than being caught,
+    one round later, by a reviewer reading the row's own rationale against its outcome.
+    """
+    root = Path(__file__).resolve().parents[1] / "docs/architecture"
+    violation = _closing_row_without_covering_evidence(
+        (root / "ISSUE_155_AUDIT_LEDGER.md").read_text(),
+        root / "evidence/issue-155")
+    assert violation is None, f"the closing checkpoint is not covered: {violation}"
+
+
+def test_the_closing_evidence_rule_can_actually_fail(tmp_path):
+    """THE NON-VACUITY WITNESS: the historical shape must be refused.
+
+    Each case below is a closing row that a procedure was supposed to prevent and
+    did not — a decision recorded while its gates still named the parent tree, and a
+    decision citing an archive that is not in the checkout at all.
+    """
+    import json
+
+    archive = tmp_path
+    (archive / "wave-gate" / "w1").mkdir(parents=True)
+    (archive / "wave-gate" / "w1" / "summary.json").write_text(
+        json.dumps({"wave_sha": "1111111aaaa"}))
+    (archive / "commit-reviews" / "c1").mkdir(parents=True)
+    (archive / "commit-reviews" / "c1" / "start-head").write_text("1111111aaaa\n")
+
+    header = ("| Loop | Evaluation (window / cumulative) | SHA (+dirty) | Outcome | Rationale |\n"
+              "| --- | --- | --- | --- | --- |\n")
+
+    def ledger(sha, cite):
+        return header + (f"| L2 Stage-2 Codex commit review, issue-level | 1 / 1 | `{sha}` | "
+                         f"`CLOSE-CLEAN` | closed, {cite} |\n")
+
+    # THE HISTORICAL SHAPE: the decision names the tree the correction produced while
+    # its evidence still names the parent.
+    assert _closing_row_without_covering_evidence(
+        ledger("2222222", "archived `wave-gate/w1`"), archive) == (
+        "the latest closing checkpoint names 2222222 but its cited evidence ran "
+        "against ['1111111']")
+    # An archive nobody can find is not evidence.
+    assert _closing_row_without_covering_evidence(
+        ledger("1111111", "archived `wave-gate/gone`"), archive) == (
+        "cited archive wave-gate/gone is absent from the checkout")
+    assert _closing_row_without_covering_evidence(
+        ledger("1111111", "closed on judgement"), archive) == (
+        "the latest closing checkpoint cites no archived evidence")
+    # Both kinds of round record the tree they ran against, and either may support it.
+    for cite in ("archived `wave-gate/w1`", "archived `commit-reviews/c1`"):
+        assert _closing_row_without_covering_evidence(ledger("1111111", cite), archive) is None
+    # A NON-closing row is not this rule's business, so an open decision ahead of its
+    # evidence is left to the checkpoint rules that own it.
+    assert _closing_row_without_covering_evidence(
+        header + "| L2 x | 1 / 1 | `2222222` | `CONTINUE` | still working |\n", archive) is None
