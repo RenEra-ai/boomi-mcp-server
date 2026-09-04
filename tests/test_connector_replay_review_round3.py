@@ -3182,7 +3182,11 @@ def _wave_evidence_violation(ledger_text, archive_dir):
     # issue-level closure backed by a slice's wave run reads as current and is not.
     # Both sides go through the SAME extractor, so neither can drift into a
     # vocabulary the other cannot read.
-    row_scope = _loop_scope(latest)
+    # THE LOOP CELL, not the whole row. Reading the line let a row's RATIONALE decide
+    # its scope: the slice-F checkpoint mentions the issue-level gate in its prose, so
+    # the whole-line read returned `issue-level` for a slice-F row and would reject
+    # that row's own valid evidence. Scope is a field; a field is read from its cell.
+    row_scope = _loop_scope(latest.split("|")[1])
     round_scope = _loop_scope(str(record.get("logical_loop", "")))
     if row_scope != round_scope:
         return (f"cited archive {named.group(1)} records a {round_scope!r} round for "
@@ -7329,71 +7333,64 @@ def _tier_derivation_offenders(ledger_text):
     refuted = re.compile(
         r"\bseverity-refuted\b|\bfinding-refuted\b|\bseverity refutation\b", re.I)
 
-    # FINDING rows are located by MEMBERSHIP in the finding table, not by a list of
-    # id prefixes. The prefix list already missed one: `WAVE-155-r1-01` is a real row
-    # of this record and no prefix admitted it, so a wave-gate finding could carry any
-    # tier at all and this rule would never see it — the enumeration defect, inside
-    # the guard written to end an enumeration defect. Membership also excludes the
-    # defect-class table for free, which the prefix list needed a separate rule for.
-    lines = _unfenced_lines(ledger_text)
-    header = lambda l: l.startswith("| ID | Source gate")
-    if not any(header(l) for l in lines):
-        return []
-    table = _table_rows(lines, header)
+    # The record's own view — see `_unfenced_lines`. A fenced block is an
+    # illustration, not a row.
+    ledger_text = "\n".join(_unfenced_lines(ledger_text))
 
-    # COLUMN POSITIONS ARE DERIVED FROM THE HEADER, not counted by hand. A row whose
-    # free text carries the separator shifts every later index, and this record has
-    # rows with one column fewer; a fixed index reads a different cell for those and
-    # grades the wrong text. Rows the header cannot place are handled below rather
-    # than skipped, because skipping is how a malformed row escapes the rule.
-    head = [c.strip() for c in next(l for l in lines if header(l)).split(" | ")]
-    where = {name: i for i, c in enumerate(head)
-             for name in ("label", "tier", "disposition")
-             if (name == "label" and c.startswith("Original label"))
-             or (name == "tier" and c.startswith("Derived tier"))
-             or (name == "disposition" and c.startswith("Disposition"))}
-    assert len(where) == 3, head
+    # ROWS COME FROM THE SHARED PARSER. Three separate hand-models sat here — a local
+    # id regex, hand-derived column indices, and a fallback for rows with the wrong
+    # column count — and `_finding_table_rows` already owns all three, importing the
+    # identifier grammar rather than restating it. Its own docstring records what a
+    # local copy cost the last time: thirteen live rows fell into the gap between the
+    # copy and the authority. A bolded id, which that parser normalises and a local
+    # regex does not, would have been the next row to vanish from this rule.
+    rows_list, malformed = _finding_table_rows(ledger_text)
+    rows = dict(rows_list)
 
-    rows = {}
-    for line in table:
-        m = re.match(r"^\| ([A-Z]+-155-[A-Za-z0-9-]+) \|", line)
-        if not m:
-            continue
-        rows[m.group(1)] = [c.strip() for c in line.split(" | ")]
+    # FAIL CLOSED ON AN EMPTY READ. Returning no offenders when no row was found meant
+    # a renamed or recased table header silently disarmed the rule while its own test
+    # went green — a guard that passes hardest when it can see least, which is the
+    # exact shape this file has recorded against other guards four times over.
+    if not rows:
+        return [("<the finding table could not be read>", "", "")]
 
-    # THE EFFECTIVE ROW comes from the DECLARED supersession chain, not from the
-    # shape of the id. Ranking by suffix length let `a` and `b` tie, so whichever
-    # appeared first in the file won: `ARCH-155-r10-03a` was selected over the `b`
-    # that supersedes it and moves its tier, and `CDX-155-r197-09a` over `09d`. The
-    # record publishes which row supersedes which; reading the id instead was a
-    # second model of a fact the document already states.
-    superseded = set()
-    for line in lines:
+    # THE EFFECTIVE ROW comes from the DECLARED supersession chain, not from the shape
+    # of the id. Ranking by suffix length let `a` and `b` tie, so whichever appeared
+    # first in the file won: `ARCH-155-r10-03a` was selected over the `b` that
+    # supersedes it and moves its tier, and `CDX-155-r197-09a` over `09d`. The record
+    # publishes which row supersedes which; reading the id was a second model of a
+    # fact the document already states.
+    superseded = {}
+    for line in _unfenced_lines(ledger_text):
         if not line.startswith("**Supersession map**"):
             continue
         # The map writes each pair inside ONE backtick span — `newer → older` — not a
         # span per id.
-        for _newer, older in re.findall(
+        for newer, older in re.findall(
                 r"`([A-Z]+-155-[A-Za-z0-9-]+) → ([A-Z]+-155-[A-Za-z0-9-]+)`", line):
-            superseded.add(older)
+            superseded[older] = newer
 
-    offenders = []
+    # A row the parser could not place is reported by THIS rule only when it could be
+    # hiding from it — that is, when some cell is a severity label standing alone.
+    # Column-count damage as such is already owned by the malformed-row guard, and
+    # reporting every such row here would restate that rule and bury this one's own
+    # findings under eleven pre-existing rows it has nothing to say about.
+    offenders = [(rid, "<malformed row carrying a severity label>",
+                  " ".join(c.strip() for c in cells)[:60])
+                 for rid, cells in malformed
+                 if any(re.fullmatch(r"(P0|P1|Critical|High)", c.strip(), re.I)
+                        for c in cells)]
     for rid in sorted(rows):
-        if rid in superseded:
+        # SUPPRESSED ONLY BY A ROW THAT IS ACTUALLY THERE. The map named an older id
+        # and this hid it without checking the newer one had been parsed, so a
+        # revision the parser never saw would silently exempt its own original and
+        # neither row would be graded. Both endpoints resolve through the same parser
+        # before the map is allowed to hide anything.
+        if rid in superseded and superseded[rid] in rows:
             continue
         cells = rows[rid]
-        # The header's positions when the row has the header's shape; otherwise the
-        # row is placed by content, and a severity label standing alone in any cell
-        # is enough to bring the row under the rule.
-        if len(cells) == len(head):
-            label, tier, disposition = (cells[where["label"]], cells[where["tier"]],
-                                        cells[where["disposition"]])
-        else:
-            standalone = [c for c in cells
-                          if re.fullmatch(r"(P0|P1|Critical|High)", c, re.I)]
-            if not standalone:
-                continue
-            label, tier, disposition = standalone[0], " ".join(cells), " ".join(cells)
+        # The parser guarantees the column count, so these positions are the table's.
+        label, tier, disposition = cells[4].strip(), cells[7].strip(), cells[9].strip()
         if not critical_labels.search(label):
             continue
         if refuted.search(disposition) or refuted.search(tier):
@@ -7501,9 +7498,34 @@ def test_the_tier_derivation_can_actually_fail():
     # A tier nobody can parse is an offence, not an exemption.
     assert offenders(row("CDX-155-r1-01", "P1", "see the note below", "fixed"))
 
-    # And the defect-class table is not graded as though it were a severity cell.
-    assert not _tier_derivation_offenders(
-        "| Class | Mechanism | Authority | Instances | Rule |\n"
+    # And the defect-class table is not graded as though it were a severity cell —
+    # tested BESIDE a real finding table, because a class table on its own now fails
+    # closed and would pass this arm for the wrong reason.
+    CLASS_TABLE = (
+        "\n| Class | Mechanism | Authority | Instances | Rule |\n"
         "| --- | --- | --- | --- | --- |\n"
-        "| DC-155-C | a hand-listed enumeration | the annotations | 2 (`CDX-155-r1-01`)"
-        " | High confidence, Critical to fix |\n")
+        "| DC-155-C | a hand-listed enumeration | the annotations | 2 "
+        "(`CDX-155-r1-01`) | High confidence, Critical to fix |\n"
+    )
+    assert not _tier_derivation_offenders(
+        ledger(row("CDX-155-r1-01", "P2", "standard — anchor", "fixed")) + CLASS_TABLE)
+
+    # FAIL CLOSED WHEN THE TABLE CANNOT BE READ. A renamed or recased header used to
+    # disarm the rule silently, and its test passed having graded nothing at all.
+    for text in ("", "no tables here at all\n", CLASS_TABLE):
+        assert _tier_derivation_offenders(text) == [
+            ("<the finding table could not be read>", "", "")], repr(text[:24])
+
+    # A BOLDED ID is one the shared parser normalises and a local regex did not. The
+    # standing revision below is bolded: if it were invisible to the rule, the map
+    # would still hide its original and neither row would be graded.
+    bolded = (row("CDX-155-r1-01", "P1", "standard — original", "fixed"),
+              row("**CDX-155-r1-01a**", "P1", "standard — still wrong", "fixed"))
+    assert offenders(*bolded, supersessions=(("CDX-155-r1-01a", "CDX-155-r1-01"),)) == [
+        "CDX-155-r1-01a"]
+
+    # AND A MAP ENTRY POINTING AT A ROW THAT IS NOT THERE hides nothing: the original
+    # is graded, rather than exempted by a revision no reader can find.
+    assert offenders(row("CDX-155-r1-01", "P1", "standard", "fixed"),
+                     supersessions=(("CDX-155-r1-01a", "CDX-155-r1-01"),)) == [
+        "CDX-155-r1-01"]
