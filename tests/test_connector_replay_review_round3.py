@@ -3027,7 +3027,14 @@ def _wave_evidence_violation(ledger_text, archive_dir):
     # row while the CURRENT gate — the one closure actually rests on — was checked
     # by nothing. Its own docstring said "the CURRENT gate", and the pin made that
     # false. The slice letter is data in the row; it is not the guard's to hardcode.
-    rows = re.findall(r"^\| L4 composite wave gate, slice [A-Z] \|.*$", ledger_text, re.M)
+    # `slice [A-Z]` OR `issue-level`. The scope name is data in the row, and the
+    # pattern named only one of the two forms this ledger uses — so an
+    # issue-level wave row was never checked at all, and the guard stayed green
+    # by re-verifying a landed slice's row instead. The same mistake the comment
+    # above records for the hardcoded slice letter, one scope wider.
+    rows = re.findall(
+        r"^\| L4 composite wave gate, (?:slice [A-Z]|issue-level) \|.*$",
+        ledger_text, re.M)
     if not rows:
         return "no wave row"
     latest = rows[-1]

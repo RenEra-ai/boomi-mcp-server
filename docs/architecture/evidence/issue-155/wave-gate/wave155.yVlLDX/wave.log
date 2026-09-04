@@ -1,0 +1,16 @@
+  See the `model_validator` docs (https://docs.pydantic.dev/latest/concepts/validators/#model-validators) for more details.
+    _assert_declared_shape(EvilDescriptor.model_construct(leaf=_DeclaredKeysOnlyLeaf()))
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+SKIPPED [1] tests/test_authoring_examples_policy.py:108: authoring_workflow_sequence_example.json carries no tool parameters
+SKIPPED [1] tests/test_connector_replay_review_round3.py:2870: this filesystem rejects non-UTF-8 filenames
+SKIPPED [1] tests/test_issue_155_recheck_boundary.py:672: the post-submission boundary was not reached on this fixture
+SKIPPED [6] tests/test_sync_pipeline_adapter_cutover.py:721: chain rejected upstream: SYNC_PIPELINE_CONTROL_FLOW_UNSUPPORTED
+SKIPPED [8] tests/test_sync_pipeline_adapter_cutover.py:721: chain rejected upstream: SYNC_PIPELINE_CONFIG_INVALID
+SKIPPED [2] tests/test_system_topology_models.py:154: identity is supplied by a binding; covered by the bound tests
+11530 passed, 19 skipped, 18 warnings in 962.50s (0:16:02)
+wave_gate: non-KB suite green (11530 passed, 19 skipped, cap 30)
+wave_gate: 74 active goldens deterministic and byte-exact
+wave_gate: plan fingerprint checked:2 case(s)
+
+[exited with code 0]
