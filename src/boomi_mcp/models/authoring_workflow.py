@@ -923,7 +923,18 @@ class ConnectorReplayEvidenceBindingAttestationV1(_AuthoringModel):
     #: the model enumerates `route_digests`, which are versioned one-way hashes,
     #: so the reasoning was right about paths and wrong about the field.
     route_coverage_kind: Optional[NonEmptyString] = None
-    route_digests: tuple[str, ...] = ()
+    #: PUBLISHED, not merely enforced. A `field_validator` does not reach JSON
+    #: Schema, so the advertised contract said "array of string" while
+    #: `model_validate` refused malformed and duplicate values — a caller
+    #: validating against the served schema was accepted by the schema and
+    #: refused by the server. That is the same published-versus-enforced drift
+    #: this issue already fixed one layer down in the reference grammar, and it
+    #: is a machine-served contract, so the shape belongs in the schema. The
+    #: validator below stays for SORTEDNESS, which JSON Schema cannot express.
+    route_digests: tuple[
+        Annotated[str, StringConstraints(pattern=r"^RouteDigestV1:[0-9a-f]{64}$")],
+        ...,
+    ] = Field(default=(), json_schema_extra={"uniqueItems": True})
 
     @field_validator("route_digests")
     @classmethod
@@ -939,11 +950,8 @@ class ConnectorReplayEvidenceBindingAttestationV1(_AuthoringModel):
         publishing them unconstrained on the way out means a malformed route
         identity can be recorded as a valid account of what authorised a write.
         """
-        bad = [d for d in value
-               if not isinstance(d, str)
-               or not re.fullmatch(r"RouteDigestV1:[0-9a-f]{64}", d)]
-        if bad:
-            raise ValueError(f"not RouteDigestV1 values: {bad!r}")
+        # The value shape is carried by the item type above, so it reaches the
+        # published schema; this keeps the two properties the schema cannot say.
         if len(set(value)) != len(value):
             raise ValueError("duplicate route digests claim more coverage than held")
         if list(value) != sorted(value):

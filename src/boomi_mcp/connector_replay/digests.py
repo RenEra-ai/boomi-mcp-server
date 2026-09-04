@@ -757,6 +757,16 @@ _ROUTE_DECISION_CASES: Final[dict] = {
     "unmodelled-family": ((("/a", "/b"), False, True)),
     "unresolved-identity": ((("/a",), True, False)),
     "no-path-field": (((), True, True)),
+    # A NULL path value is a DIFFERENT input from a blank one, and the function
+    # treats them the same only because it was taught to. The platform serves
+    # `<field id="path"/>` with no value attribute, which reads as null; that
+    # input used to raise, and correcting it changed behaviour while this oracle
+    # covered only the empty string — so reverting the correction would have left
+    # the compiler revision unmoved and let regressed behaviour claim the same
+    # provenance. Covered here so the revision can see it.
+    "null-only": (((None,), True, True)),
+    "null-plus-one-route": (((None, "/a"), True, True)),
+    "null-plus-two-routes": (((None, "/a", "/b"), True, True)),
     "blank-only": ((("",), True, True)),
     "blank-plus-one-route": ((("", "/a"), True, True)),
     "blank-plus-two-routes": ((("", "/a", "/b"), True, True)),
