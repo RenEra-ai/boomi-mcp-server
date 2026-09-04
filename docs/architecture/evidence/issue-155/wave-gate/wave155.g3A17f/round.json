@@ -1,0 +1,12 @@
+{
+ "collector": "wave_gate",
+ "durable_dir": "wave-gate/wave155.g3A17f",
+ "files": {
+  "wave-gate/wave155.g3A17f/wave.log": "162c6266cf5dcec0b646f79e8445ecbad010795bee4f960f1b10e83224ca083c"
+ },
+ "logical_loop": "L4 (composite wave gate, issue-level)",
+ "source_run_dir": "/tmp/wave155.g3A17f",
+ "status": "completed",
+ "verdict": null,
+ "wave_sha": "dfba315698e560004cf5b892e89d414ab0b74b71"
+}
