@@ -1422,6 +1422,8 @@ def main() -> int:
             (durable / "round.json").write_text(
                 json.dumps(row, sort_keys=True, indent=1) + "\n")
 
+        sums_path = root / "SHA256SUMS"
+        sums_before = sums_path.read_bytes() if sums_path.is_file() else None
         listed = write_sums(root)
 
         # STAGED INSIDE THE TRANSACTION. Staging after the `try` published the
@@ -1461,6 +1463,41 @@ def main() -> int:
                 undone.append("the round directory")
         except BaseException as restore_failure:
             unresolved.append(f"{durable} ({restore_failure})")
+        try:
+            # THE MANIFEST TOO. `write_sums` had already replaced it by the time a
+            # staging failure could raise, so restoring only the index row and the
+            # round directory left SHA256SUMS naming a round that no longer exists —
+            # a rollback that reports the archive is as it was while leaving it
+            # describing something it does not contain.
+            sums_now = locals().get("sums_before", None)
+            if sums_now is None:
+                if (root / "SHA256SUMS").is_file() and locals().get("sums_path"):
+                    (root / "SHA256SUMS").unlink()
+                    undone.append("the manifest this run created")
+            elif (root / "SHA256SUMS").read_bytes() != sums_now:
+                (root / "SHA256SUMS").write_bytes(sums_now)
+                undone.append("the manifest")
+        except BaseException as restore_failure:
+            unresolved.append(f"SHA256SUMS ({restore_failure})")
+        try:
+            # AND THE INDEX, if staging had already touched it. Re-adding the
+            # restored tree makes the index match the worktree again, which is what
+            # "as it was" has to mean once a `git add` may have run — otherwise the
+            # rollback leaves staged ghosts of files it just deleted, and a later
+            # commit would carry evidence this run withdrew.
+            probe = subprocess.run(
+                ["git", "-C", str(repo), "rev-parse", "--is-inside-work-tree"],
+                capture_output=True, text=True)
+            if probe.returncode == 0 and probe.stdout.strip() == "true":
+                resync = subprocess.run(
+                    ["git", "-C", str(repo), "add", "-A", "--",
+                     str(root.resolve().relative_to(repo.resolve()))],
+                    capture_output=True, text=True)
+                if resync.returncode != 0:
+                    raise OSError(resync.stderr.strip())
+                undone.append("the index, re-synced to the restored tree")
+        except BaseException as restore_failure:
+            unresolved.append(f"git index ({restore_failure})")
 
         print(f"archiving failed ({type(failure).__name__}: {failure}).",
               file=sys.stderr)

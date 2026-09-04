@@ -2658,40 +2658,51 @@ def _staging_run(tmp_path, name="run"):
 def test_an_ignored_manifest_path_is_refused_not_silently_skipped(tmp_path):
     """A directory add succeeds while skipping an ignored child. The manifest names it.
 
-    THE NON-VACUITY WITNESS for verifying each path individually. `git add <dir>`
-    returns 0 having quietly not staged an ignored file, so staging "succeeded"
-    while the manifest asserted a file the index did not carry — which is the exact
-    `listed-but-untracked` failure this staging step exists to prevent, surviving
-    inside the step meant to prevent it.
+    THE NON-VACUITY WITNESS for verifying each path individually — and the SECOND
+    attempt at it. The first ignored `capture.sqlite` and put that file in the run
+    directory, where a wave round never copies it: only `WAVE_GATE_FILES` are
+    copied, so the archive never contained the ignored path, the success branch was
+    always taken, and the test stayed green with the verification deleted. That is
+    a fixture that cannot exhibit the defect it names, written in the same batch as
+    a rule against exactly that, and it was caught by review rather than by me.
+
+    This ignores `*.log`, which for a wave round means `wave.log` — a file the
+    archiver DOES copy and the manifest DOES name. `git add <dir>` then returns 0
+    having skipped it, which is the state the per-path check exists to refuse.
     """
     import subprocess
 
     repo = _repo_with_index(tmp_path)
-    (repo / ".gitignore").write_text("*.sqlite\n")
+    (repo / ".gitignore").write_text("*.log\n")
     subprocess.run(["git", "-C", str(repo), "add", "-A"], check=True, capture_output=True)
     subprocess.run(["git", "-C", str(repo), "commit", "-qm", "ignore"], check=True,
                    capture_output=True)
 
     run = _staging_run(tmp_path)
-    (run / "capture.sqlite").write_text("payload\n")
-
     result, root = _archive(tmp_path, run, kind="wave-gate",
-                            extra=("--wave-sha", "a" * 40, "--status", "completed",
-                                   "--accept-new"))
-    if result.returncode == 0:
-        # If the run's file never entered the manifest there is nothing to prove;
-        # the guard only owns paths the manifest actually names.
-        listed = (root / "SHA256SUMS").read_text()
-        assert "capture.sqlite" not in listed, (
-            "the manifest names an ignored path and staging still reported success"
-        )
-    else:
-        assert "the index does not carry" in result.stderr, result.stderr
-        # AND THE TRANSACTION UNWOUND: the retry contract must still hold.
-        assert not (root / "wave-gate").exists() or not any(
-            (root / "wave-gate").iterdir()), (
-            "a staging failure left the archive published"
-        )
+                            extra=("--wave-sha", "a" * 40, "--status", "completed"))
+
+    # The manifest must actually name the ignored file, or this proves nothing.
+    # Asserted on the FAILURE path via the message, since a refused run rolls the
+    # manifest back — the copy list is what makes `wave.log` reach it.
+    assert result.returncode == 1, (
+        "an ignored path the manifest names was staged silently:\n" + result.stdout
+    )
+    assert "the index does not carry" in result.stderr, result.stderr
+
+    # AND THE TRANSACTION UNWOUND. The round directory is gone and the manifest no
+    # longer names it, so the identical command can be retried — the contract a
+    # post-transaction staging step had broken.
+    assert not (root / "wave-gate" / "run").exists(), "the archive was left published"
+    sums = root / "SHA256SUMS"
+    assert not sums.is_file() or "wave-gate/run" not in sums.read_text(), (
+        "the manifest still names the rolled-back round"
+    )
+    # ...and no staged ghost of the deleted files remains in the index.
+    staged = subprocess.run(
+        ["git", "-C", str(repo), "diff", "--cached", "--name-only"],
+        capture_output=True, text=True, check=True).stdout
+    assert "wave-gate/run" not in staged, f"rollback left staged ghosts: {staged!r}"
 
 
 def test_a_probe_failure_is_not_read_as_a_scratch_directory(tmp_path):
