@@ -1356,6 +1356,18 @@ _UNROWED = {"DC-155-C": 2, "DC-155-I": 1}
 #: the reason. Frozen so the set cannot grow silently: a row that names a class is an
 #: instance of it unless it appears here.
 _NOT_AN_INSTANCE = {
+    "CDX-155-r45-01b": "a REVISION correcting a DERIVED TIER that read only one of the "
+    "severity rule's two disjuncts — one finding, counted at the original",
+    "CDX-155-r94-02a": "a REVISION correcting a DERIVED TIER that read only one of the "
+    "severity rule's two disjuncts — one finding, counted at the original",
+    "QA-155-r24-05a": "a REVISION correcting a DERIVED TIER that read only one of the "
+    "severity rule's two disjuncts — one finding, counted at the original",
+    "QA-155-r65-03a": "a REVISION correcting a DERIVED TIER that read only one of the "
+    "severity rule's two disjuncts — one finding, counted at the original",
+    "QA-155-r66-03b": "a REVISION correcting a DERIVED TIER that read only one of the "
+    "severity rule's two disjuncts — one finding, counted at the original",
+    "SELF-155-r126-01a": "a REVISION correcting a DERIVED TIER that read only one of the "
+    "severity rule's two disjuncts — one finding, counted at the original",
     "CDX-155-r216-01a": "a REVISION replacing a procedural disposition with the "
     "structural one the class was owed — one finding, counted at the original",
     "CDX-155-r210-01b": "a REVISION correcting the BLOCKING CLASS of a verification-surface "
@@ -7431,6 +7443,13 @@ def _tier_derivation_offenders(ledger_text):
     #: The labels the rule names, matched as whole words so a summary that merely
     #: contains the word "high" is not a severity label.
     critical_labels = re.compile(r"\b(P0|P1|Critical|High)\b", re.I)
+    #: THE RULE'S OTHER DISJUNCT, which this guard did not read. The severity rule makes
+    #: a finding critical if its SOURCE LABEL is P0/P1/Critical/High **or** if it lands
+    #: in one of three blocking classes — and making only the label half executable left
+    #: the class half exactly as hand-checked as it had always been, which is how
+    #: nineteen standing rows came to sit in a critical-anchor class while deriving
+    #: standard. A rule with two disjuncts is not enforced by a guard that reads one.
+    critical_classes = re.compile(r"secrets/security|data loss|mutation accounting", re.I)
     #: A tier the row itself lowered THROUGH the sanctioned path. A severity-specific
     #: technical refutation is the one way a source-critical label becomes standard,
     #: and it is recorded as the disposition, so it is read from there rather than
@@ -7571,15 +7590,16 @@ def _tier_derivation_offenders(ledger_text):
             # graded against THIS row's source label, because a raw label is immutable
             # and a successor cannot lower it by simply writing a smaller one.
             cells, stand = rows[rid], rows[end]
-            label = cells[4].strip()
+            label, blocking = cells[4].strip(), cells[5].strip()
             tier, disposition = stand[7].strip(), stand[9].strip()
         else:
             cells = rows[rid]
             # The parser guarantees the column count, so these positions are the
             # table's own.
-            label, tier, disposition = (cells[4].strip(), cells[7].strip(),
-                                        cells[9].strip())
-        if not critical_labels.search(label):
+            label, blocking = cells[4].strip(), cells[5].strip()
+            tier, disposition = cells[7].strip(), cells[9].strip()
+        # EITHER DISJUNCT of the severity rule brings a row under it.
+        if not (critical_labels.search(label) or critical_classes.search(blocking)):
             continue
         if refuted.search(disposition) or refuted.search(tier):
             continue
