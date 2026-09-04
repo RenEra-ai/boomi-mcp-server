@@ -853,7 +853,36 @@ class ResolvedProcessPlacementV1(_AuthoringModel):
     folder_id: Optional[NonEmptyString] = None
 
 
+#: The coverage rules, as SCHEMA rather than as prose. A `$comment` is an
+#: annotation and constrains nothing, so publishing the rule that way left the
+#: served contract accepting records the runtime refuses — the fourth instance in
+#: this issue of a constraint written where it is enforced and not where it is
+#: read, and the first one committed inside the fix for the third. `if/then` at
+#: the object level is what a Draft 2020-12 validator actually evaluates.
+_COVERAGE_SCHEMA_RULES: tuple = (
+    {
+        "if": {"properties": {"route_coverage_kind": {"const": "static_path"}},
+               "required": ["route_coverage_kind"]},
+        "then": {"required": ["route_digests"],
+                 "properties": {"route_digests": {"minItems": 1},
+                                "route_capture_digest": {"type": "null"}}},
+    },
+    {
+        "if": {"properties": {"route_coverage_kind": {"const": "service_wide"}},
+               "required": ["route_coverage_kind"]},
+        "then": {"properties": {"route_digests": {"maxItems": 0}}},
+    },
+)
+
+
 class ConnectorReplayEvidenceBindingAttestationV1(_AuthoringModel):
+    # The coverage rules reach the SERVED schema here, so a client validating
+    # against it and the server enforcing the model accept the same records.
+    model_config = ConfigDict(
+        extra="forbid", frozen=True,
+        json_schema_extra={"allOf": list(_COVERAGE_SCHEMA_RULES)},
+    )
+
     """One evidence-bound call, recorded as part of what a mutation actually did.
 
     A grant authorises a retry of ONE CALL against ONE operation record. When the
@@ -929,15 +958,7 @@ class ConnectorReplayEvidenceBindingAttestationV1(_AuthoringModel):
     #: refused by the server. The enum closes the kind; the `allOf` below states
     #: the two exclusions the validator enforces, so the published contract and
     #: the enforced one accept the same records.
-    route_coverage_kind: Optional[Literal["static_path", "service_wide"]] = Field(
-        default=None,
-        json_schema_extra={
-            "$comment": (
-                "static_path requires route_digests and forbids "
-                "route_capture_digest; service_wide forbids route_digests."
-            )
-        },
-    )
+    route_coverage_kind: Optional[Literal["static_path", "service_wide"]] = None
     #: PUBLISHED, not merely enforced. A `field_validator` does not reach JSON
     #: Schema, so the advertised contract said "array of string" while
     #: `model_validate` refused malformed and duplicate values — a caller

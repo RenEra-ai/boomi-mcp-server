@@ -503,3 +503,72 @@ def test_exactly_one_place_mints_a_grant():
     assert len(contracts) <= 2, (
         f"a contract symbol is constructed in {len(contracts)} places: {contracts}"
     )
+
+
+def test_the_served_attestation_schema_and_the_model_agree_on_coverage():
+    """A differential over the coverage rules, which drifted four times.
+
+    Every previous version of this class of defect had the same shape: a
+    constraint written where it is ENFORCED (a validator) and not where it is
+    READ (the schema). The reference grammar, the route-digest value shape, the
+    coverage variants, and then a `$comment` that documented the coverage rules
+    instead of encoding them — the fourth committed inside the fix for the third.
+
+    A differential is the only check that catches the class, because each
+    individual constraint looks correct from whichever side you are standing on.
+    """
+    jsonschema = pytest.importorskip("jsonschema")
+
+    from boomi_mcp.models.authoring_workflow import (
+        ConnectorReplayEvidenceBindingAttestationV1 as Binding,
+    )
+
+    schema = Binding.model_json_schema()
+    validator = jsonschema.Draft202012Validator(schema)
+    required = {}
+    for name, field in Binding.model_fields.items():
+        if not field.is_required():
+            continue
+        if "config" in name and "digest" in name:
+            required[name] = "ComponentConfigDigestV1:" + "a" * 64
+        elif "digest" in name:
+            required[name] = "a" * 64
+        else:
+            required[name] = "x"
+
+    good = "RouteDigestV1:" + "a" * 64
+    probes = {
+        "static with its digest": dict(
+            required, route_coverage_kind="static_path", route_digests=[good]),
+        "static with no digest": dict(
+            required, route_coverage_kind="static_path"),
+        "static borrowing a service capture": dict(
+            required, route_coverage_kind="static_path",
+            route_digests=[good], route_capture_digest="b" * 64),
+        "service alone": dict(required, route_coverage_kind="service_wide"),
+        "service borrowing route digests": dict(
+            required, route_coverage_kind="service_wide", route_digests=[good]),
+        "no coverage at all": dict(required),
+        "an undefined kind": dict(required, route_coverage_kind="whatever"),
+    }
+
+    disagreed = []
+    for label, payload in probes.items():
+        by_schema = validator.is_valid(payload)
+        try:
+            Binding.model_validate(payload)
+            by_runtime = True
+        except Exception:
+            by_runtime = False
+        if by_schema != by_runtime:
+            disagreed.append((label, by_schema, by_runtime))
+
+    assert not disagreed, (
+        "the published schema and the enforced model disagree on these, so a "
+        f"client validating against the contract is refused by the server: {disagreed}"
+    )
+    # NON-VACUITY: the probes must produce both verdicts, or agreement is free.
+    verdicts = {validator.is_valid(p) for p in probes.values()}
+    assert verdicts == {True, False}, (
+        "the probes do not span the boundary, so agreement proves nothing"
+    )
