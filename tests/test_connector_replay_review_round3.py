@@ -1360,6 +1360,8 @@ _UNROWED = {"DC-155-C": 2, "DC-155-I": 1}
 #: the reason. Frozen so the set cannot grow silently: a row that names a class is an
 #: instance of it unless it appears here.
 _NOT_AN_INSTANCE = {
+    "SELF-155-r126-01b": "a REVISION closing a critical row on live measurement — one "
+    "finding, counted at the original",
     "CDX-155-r226-02": "the SUPERSEDED original of a class reclassification — the "
     "one finding is counted at the revision, under the class it actually belongs to",
     "CDX-155-r225-03": "the SUPERSEDED original of a class reclassification — the "
