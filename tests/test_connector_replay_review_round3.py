@@ -1305,7 +1305,7 @@ _EXPECTED_CLASS_COUNTS = {
     # A NEW (mechanism, authority) pair, minted rather than folded into a letter
     # whose authority is unrelated — see the class row for why that matters to
     # recurrence accounting.
-    "DC-155-W": 4,
+    "DC-155-W": 3,  # OVERCOUNT-CORRECTED-FROM-4-TO-3
     "DC-155-A": 0,
     "DC-155-B": 1,
     "DC-155-C": 13,
@@ -1360,6 +1360,8 @@ _UNROWED = {"DC-155-C": 2, "DC-155-I": 1}
 #: the reason. Frozen so the set cannot grow silently: a row that names a class is an
 #: instance of it unless it appears here.
 _NOT_AN_INSTANCE = {
+    "CDX-155-r225-03": "the SUPERSEDED original of a class reclassification — the "
+    "one finding is counted at the revision, under the class it actually belongs to",
     "CDX-155-r224-04a": "a REVISION correcting a count inside a disposition — one "
     "finding, counted at the original",
     "CDX-155-r223-03": "the SUPERSEDED original of a class reclassification — the one "
