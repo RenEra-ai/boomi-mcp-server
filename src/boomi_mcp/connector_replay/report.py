@@ -117,12 +117,16 @@ def parse(text: str) -> dict:
     """
     import re
 
-    sections: dict = {"vocabulary": [], "operation_records": []}
+    required_headings = {"Connector vocabulary", "Observed actions",
+                         "Operation contract records"}
+    sections: dict = {"vocabulary": [], "observed_actions": [], "operation_records": []}
+    seen_headings: set = set()
     current = None
     for line in text.splitlines():
         heading = re.match(r"^## (.+?)\s*$", line)
         if heading:
             current = heading.group(1)
+            seen_headings.add(current)
             continue
         if not line.startswith("|") or set(line) <= set("| -"):
             continue
@@ -136,6 +140,20 @@ def parse(text: str) -> dict:
                 "platform_connector_type": cells[0].strip("`"),
                 "family": cells[1],
                 "action_source": cells[2],
+            })
+        elif current == "Observed actions":
+            # PARSED, not skipped. Every row under this heading was silently
+            # ignored, so a renderer that dropped or corrupted the evidence table
+            # still satisfied a round-trip check — the section that says what was
+            # actually observed, unread by the thing verifying the report.
+            if cells[0] in ("family", "connector family"):
+                continue
+            if len(cells) < 3:
+                raise ValueError(f"observed-actions row is too narrow: {line!r}")
+            sections["observed_actions"].append({
+                "family": cells[0].strip("`"),
+                "action": cells[1].strip("`"),
+                "rest": [c.strip("`") for c in cells[2:]],
             })
         elif current == "Operation contract records":
             if cells[0] == "contract reference":
@@ -151,6 +169,12 @@ def parse(text: str) -> dict:
                 "semantics_id": cells[3],
                 "semantics_revision": int(cells[4]),
             })
+    # EVERY REQUIRED HEADING, or the report is not one. Succeeding on an empty
+    # document meant a missing section and an empty section were the same result,
+    # which is the failure this parser exists to make visible.
+    absent = sorted(required_headings - seen_headings)
+    if absent:
+        raise ValueError(f"the report is missing required sections: {absent}")
     return sections
 
 

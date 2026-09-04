@@ -532,8 +532,19 @@ def _binding(**over):
         "operation_config_digest": "ComponentConfigDigestV1:" + ("d" * 64),
         "connection_config_digest": "ComponentConfigDigestV1:" + ("e" * 64),
         "route_coverage_kind": "service_wide",
+        # A service-wide claim is identified by the capture that observed the
+        # service, exactly as a static claim is identified by its route digests.
+        # The producer maps it from the coverage; a fixture that omits it builds a
+        # record claiming a service nothing observed.
+        "route_capture_digest": "f" * 64,
     }
     base.update(over)
+    # The two coverage variants do not borrow each other's evidence, so a fixture
+    # overridden to static coverage must not keep the service-wide capture the
+    # base carries. Dropped here rather than in every caller, so a test that
+    # changes the kind gets a coherent record without having to know this.
+    if base.get("route_coverage_kind") == "static_path":
+        base.pop("route_capture_digest", None)
     return base
 
 

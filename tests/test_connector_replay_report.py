@@ -84,16 +84,35 @@ def test_the_served_report_states_what_the_registry_holds():
     registry = load_registry()
     served = parse(render(registry))
 
-    assert {row["contract_ref"] for row in served["operation_records"]} == {
-        record.contract_ref for record in registry.operation_records
-    }, "the report and the registry disagree about which contracts are packaged"
-    assert {row["platform_connector_type"] for row in served["vocabulary"]} == {
-        entry.platform_connector_type for entry in registry.vocabulary
-    }, "the report and the registry disagree about the connector vocabulary"
+    # WHOLE ROWS, SORTED — not a set of one field. A single-field set comparison
+    # passes with the family, action, semantics or revision corrupted, and it
+    # COLLAPSES multiplicity: one abstract contract may now be recorded for
+    # several accounts, so a set keyed on the reference hides a row the renderer
+    # dropped. Sorted lists compare the values and the count together.
+    assert sorted(
+        (r["contract_ref"], r["family"], r["action"], r["semantics_id"],
+         r["semantics_revision"]) for r in served["operation_records"]
+    ) == sorted(
+        (r.contract_ref, r.family, r.action, r.semantics_id, r.semantics_revision)
+        for r in registry.operation_records
+    ), "the report and the registry disagree about the packaged contract records"
 
-    # NON-VACUITY: the registry must actually hold rows, or the equalities above
-    # are two empty sets agreeing with each other.
-    assert registry.operation_records and registry.vocabulary
+    assert sorted(
+        (v["platform_connector_type"], v["family"], v["action_source"])
+        for v in served["vocabulary"]
+    ) == sorted(
+        (v.platform_connector_type, v.family, v.action_source.value)
+        for v in registry.vocabulary
+    ), "the report and the registry disagree about the connector vocabulary"
+
+    # The evidence section too, which the parser used to skip entirely.
+    assert sorted((row["family"], row["action"]) for row in served["observed_actions"]) \
+        == sorted((row.family, row.action) for row in registry.evidence_records), \
+        "the report and the registry disagree about what was observed"
+
+    # NON-VACUITY: every compared collection must be non-empty, or the equalities
+    # above are pairs of empty lists agreeing with each other.
+    assert registry.operation_records and registry.vocabulary and registry.evidence_records
 
 
 def test_the_report_parser_refuses_a_row_it_cannot_read():

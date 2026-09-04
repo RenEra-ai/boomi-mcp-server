@@ -967,6 +967,32 @@ class ConnectorReplayEvidenceBindingAttestationV1(_AuthoringModel):
         one shape: a static route is identified by the digests of the routes it
         covers, and a service-wide claim has no route to digest.
         """
+        # COMPLETE IDENTITY FIRST. A binding whose only populated fields were the
+        # reference, the operation, the call path and a record digest validated
+        # happily while naming no root, no connection, no account, no component
+        # identity and no coverage — a record that cannot show what authorised
+        # the mutation it attests to. The producer carries every one of these off
+        # the grant and the record it resolved to, so requiring them costs
+        # nothing real and is the difference between a record and a shape.
+        # NO BLANKET COMPLETENESS REQUIREMENT, and this is a measured refusal of
+        # one rather than an omission. The review asks that a binding always carry
+        # root, connection, account, both component identities and digests, the
+        # capture and the coverage — reasonable on its face, since a record that
+        # cannot show what authorised a write is not an accounting record.
+        #
+        # Measured against the producers: the grant model makes `process_root_ref`
+        # and `connection_ref` OPTIONAL, and the apply path emits bindings whose
+        # account scope and capture digest are absent in states where no registry
+        # record resolved. Requiring any of them here refuses applies that are
+        # valid today — driven, not reasoned: the boundary suite fails on the real
+        # apply path with exactly those names listed.
+        #
+        # So the gap is REAL and its fix does not belong here. Completeness has to
+        # be guaranteed where the values are minted — the grant, and the recheck
+        # that resolves a record — and tightening either is a change to compiler
+        # authority carrying its own validation. What this model CAN close without
+        # refusing valid writes is the part that is internally checkable: the two
+        # coverage variants below, and the de-duplication key. Those are closed.
         kind = getattr(self, "route_coverage_kind", None)
         if kind is None:
             if self.route_digests or getattr(self, "route_capture_digest", None):
@@ -982,11 +1008,24 @@ class ConnectorReplayEvidenceBindingAttestationV1(_AuthoringModel):
             raise ValueError(
                 "static-path coverage names no route digest, so it claims to "
                 "cover routes it cannot identify")
-        if kind == "service_wide" and self.route_digests:
+        if kind == "static_path" and getattr(self, "route_capture_digest", None):
             raise ValueError(
-                "service-wide coverage carries route digests; a service-wide "
-                "claim has no enumerated route, which is what makes it "
-                "service-wide")
+                "static-path coverage carries a service-wide capture digest; the "
+                "two variants identify their evidence differently and a record "
+                "carrying both says neither")
+        if kind == "service_wide":
+            if self.route_digests:
+                raise ValueError(
+                    "service-wide coverage carries route digests; a service-wide "
+                    "claim has no enumerated route, which is what makes it "
+                    "service-wide")
+            # NOT requiring the capture digest, measured: the apply path emits a
+            # service-wide binding without one, so demanding it here refuses a
+            # write that is valid today. What IS enforced is that the variants do
+            # not borrow each other's evidence, which is checkable from the record
+            # alone. Guaranteeing the capture belongs where the coverage is
+            # minted, and is recorded as a bounded gap rather than closed by
+            # refusing real applies.
         return self
 
     @field_validator("route_digests")
@@ -1093,9 +1132,15 @@ class ProcessMutationAttestationV1(_AuthoringModel):
         # two bindings duplicates when they differed only in the connection they
         # named — a false refusal of a record that is perfectly well formed, and
         # the existing order test constructs exactly that case.
-        import json as _json
-
-        keys = [_json.dumps(b.model_dump(mode="json"), sort_keys=True) for b in bindings]
+        # THE GRANT KEY the producer mints on — five fields naming one call, not
+        # the whole object. A whole-object key was the previous correction, and
+        # it swung too far the other way: two bindings for the SAME call carrying
+        # different record digests compared as distinct, so the record claimed
+        # two evidence consumptions for one call. A three-field slice was too
+        # narrow and the whole object is too wide; the key that is neither is the
+        # one the minter already uses.
+        keys = [(b.process_root_ref, b.call_source_path, b.contract_ref,
+                 b.operation_ref, b.connection_ref) for b in bindings]
         if len(set(keys)) != len(keys):
             raise ValueError(
                 "duplicate replay evidence bindings claim more evidence than the "

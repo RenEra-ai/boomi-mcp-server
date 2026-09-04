@@ -39,6 +39,12 @@ CANDIDATE_FIELDS: tuple = (
     "connection_version",
     "record_digest",
     "route_coverage_kind",
+    # Added with the values themselves: this tuple is the CLOSED shape, so a
+    # field the projection emits and this does not name is a silent growth of a
+    # served contract, which is what the closure exists to prevent.
+    "operation_config_digest",
+    "connection_config_digest",
+    "route_digests",
 )
 
 #: Everything a SUPERSEDED row may carry. Closed for the same reason
@@ -89,6 +95,18 @@ def _candidate(record: Any) -> Dict[str, Any]:
         "semantics_id": record.semantics_id,
         "semantics_revision": record.semantics_revision,
         "account_scope_hash": record.account_scope_hash,
+        # THE CONFIGURATION DIGESTS AND THE CONCRETE COVERAGE, not merely the
+        # coverage KIND. A caller was told which contract might apply and given
+        # nothing to check the match against: the digests identify the exact
+        # component configuration the record was minted for, and the coverage
+        # digests identify the routes it covers. Both are one-way hashes, so
+        # neither discloses configuration; withholding them made the candidate
+        # unverifiable rather than safe.
+        "operation_config_digest": getattr(
+            record.operation_identity, "config_digest", None),
+        "connection_config_digest": getattr(
+            record.connection_identity, "config_digest", None),
+        "route_digests": list(getattr(coverage, "route_digests", ()) or ()),
         "operation_component_id": record.operation_identity.component_id,
         "operation_version": record.operation_identity.version,
         "connection_component_id": record.connection_identity.component_id,
@@ -113,6 +131,7 @@ def idempotency_contract_candidates(
     connection_component_id: str,
     live_identity: Callable[[str], Optional[Mapping[str, Any]]],
     registry: Any = None,
+    account_scope_hash: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Candidates for the named pair, or an explicit unavailability.
 
@@ -170,6 +189,19 @@ def idempotency_contract_candidates(
     candidates: List[Dict[str, Any]] = []
     superseded: List[Dict[str, Any]] = []
     for record in registry.operation_records:
+        # THE ACTIVE ACCOUNT FIRST, when the caller can name one. One abstract
+        # contract may now be recorded for several accounts — that is what makes
+        # the two-account differential expressible — so a registry can hold rows
+        # whose component identities coincide while their accounts do not, and
+        # without this filter the first row read wins regardless of whose account
+        # is being asked about. Skipped rather than refused when the caller names
+        # no account: a caller who cannot say which account they are in has not
+        # claimed the wrong one.
+        if (
+            account_scope_hash is not None
+            and record.account_scope_hash != account_scope_hash
+        ):
+            continue
         # Identity is the PAIR of component and version, on both sides. Matching
         # ids alone offered a record minted against version 2 while the envelope
         # reported the account at version 9 — a candidate that does not describe

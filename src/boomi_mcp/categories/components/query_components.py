@@ -523,8 +523,16 @@ def query_components_action(
                         identity["config_digest"] = component_config_digest_v1(
                             xml, kind=kind
                         )
-                    except Exception:      # noqa: BLE001 — absent, never guessed
-                        pass
+                    except Exception:      # noqa: BLE001
+                        # PRESENT BUT UNDIGESTIBLE IS UNAVAILABLE, not silent.
+                        # Swallowing this returned an identity carrying id and
+                        # version with no digest, and discovery reads a missing
+                        # digest as "not compared" — so a component whose XML this
+                        # build cannot project would have matched a stale record
+                        # on id and version alone. Absence of XML is a different
+                        # case and still yields a partial identity; absence of a
+                        # digest for XML we HAVE is a failure to read the account.
+                        return None
                 return identity
 
             # THE REGISTRY'S REFUSAL KEEPS ITS CODE. `RegistryInvalid` carries a
@@ -543,10 +551,25 @@ def query_components_action(
             from ...connector_replay.registry import RegistryInvalid
 
             try:
+                # THE ACCOUNT THIS CALL IS IN, so a record bound to another one
+                # cannot be offered as a candidate here. Derived from the client
+                # rather than taken from the caller: the account is a fact about
+                # the connection, not a parameter a request may assert.
+                scope = None
+                try:
+                    from ....connector_replay.digests import account_scope_hash
+                    from ...integration_builder import _client_account_id
+
+                    account_id = _client_account_id(boomi_client)
+                    if account_id:
+                        scope = account_scope_hash(account_id)
+                except Exception:      # noqa: BLE001 — unknown, never guessed
+                    scope = None
                 return idempotency_contract_candidates(
                     operation_component_id=config.get("operation_component_id"),
                     connection_component_id=config.get("connection_component_id"),
                     live_identity=_live_identity,
+                    account_scope_hash=scope,
                 )
             except RegistryInvalid as invalid:
                 return {

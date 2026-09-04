@@ -77,8 +77,13 @@ def test_the_served_candidate_field_set_is_CLOSED():
     from boomi_mcp.connector_replay.discovery import _candidate
 
     class _Identity:
-        def __init__(self, cid, version):
+        # The config digest travels with the identity on the real model, and the
+        # candidate now serves it, so the fake carries one too — a fake that is
+        # narrower than the model it stands for tests a shape nothing produces.
+        def __init__(self, cid, version, config_digest=None):
             self.component_id, self.version = cid, version
+            self.config_digest = config_digest or (
+                "ComponentConfigDigestV1:" + "0" * 64)
 
     class _Coverage:
         # `kind` is declared and pattern-pinned on BOTH real coverage models, and
