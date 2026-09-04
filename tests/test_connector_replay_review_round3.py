@@ -6797,21 +6797,24 @@ def test_a_replay_claim_needs_the_artifact_that_observes_replay():
     assert load_registry().operation_records
 
 
-def test_the_affected_sha_cell_names_the_tree_the_defect_affected():
-    """The column is the AFFECTED sha — the tree with the defect, not the fix.
+#: The one spelling an affected-SHA cell may use when it names no commit.
+#: EXACT, not a prefix or a substring: "treat anything without a backticked SHA as
+#: the tip form" is how a malformed cell passes as a conforming one.
+_TIP_FORM = "correction on the tip"
 
-    Measured across this ledger: of the rows that cite a review and name a
-    literal SHA, 493 name the reviewed SHA and none names anything else. That is
-    the convention, and it follows from the column's own name — a finding affects
-    the tree it was found in, and the disposition beside it says what happened to
-    it afterwards.
 
-    This guard exists because I broke that convention twice in one arc while
-    trying to "correct" it: a reviewer read the column as "where the fix landed",
-    objected that the fix was not in that tree, and I rewrote two rows into a
-    delta form no other row uses — then rewrote one again. The measurement is
-    what settles it, and this pins the measurement so the next reading of the
-    column has to argue with 493 rows rather than with me.
+def _affected_sha_rows():
+    """Every ledger row that cites a review, read from the RIGHT.
+
+    Left-anchored indexing is wrong for this table: at least one row carries a
+    literal `|` inside a cell, which shifts every column after it, and reading
+    the tier where the SHA should be found no backticked commit and silently
+    classified the row as the tip form. Counting from the right is stable because
+    the trailing columns are fixed.
+
+    Returns `(row_id, reviewed_sha, sha_cell)` and RAISES on a row it cannot
+    read, rather than skipping it — a checker that drops what it cannot parse
+    reports the population it managed to read, not the one it claims to cover.
     """
     import re
     from pathlib import Path
@@ -6819,25 +6822,77 @@ def test_the_affected_sha_cell_names_the_tree_the_defect_affected():
     ledger = (Path(__file__).resolve().parents[1]
               / "docs/architecture/ISSUE_155_AUDIT_LEDGER.md")
     reviewed = re.compile(r"reviewed `([0-9a-f]{7,40})`")
-
-    conforming, deviating = 0, []
+    rows = []
     for line in ledger.read_text(encoding="utf-8").splitlines():
-        parts = line.split("|")
-        if len(parts) < 11 or not parts[1].strip():
+        if not line.startswith("| ") or line.count("|") < 10:
             continue
-        found = reviewed.search(parts[2])
+        parts = line.split("|")
+        row_id = parts[1].strip()
+        if not row_id or row_id.startswith("-") or " " in row_id:
+            continue
+        gate_cell, summary_cell, sha_cell = parts[2], parts[3], parts[-3].strip()
+        # A REVISION inherits its affected SHA from the finding it revises, while
+        # its gate cell names the review that PROMPTED the revision — a later
+        # tree. Comparing those two is a category error, and the guard caught its
+        # own author making it. Detected by the declared "Revision of" summary,
+        # which is a property the row states, rather than by guessing from the
+        # shape of an identifier.
+        if (gate_cell.strip().startswith("Revision of")
+                or summary_cell.strip().startswith("Revision of")):
+            continue
+        found = reviewed.search(gate_cell)
         if not found:
             continue
-        named = re.findall(r"`([0-9a-f]{7,40})`", parts[8])
-        if not named:
-            continue                      # the tip form names nothing; also correct
-        read_sha = found.group(1)
-        if any(s.startswith(read_sha) or read_sha.startswith(s) for s in named):
-            conforming += 1
-        else:
-            deviating.append((parts[1].strip(), read_sha, parts[8].strip()))
+        if sha_cell != _TIP_FORM and not re.search(r"`[0-9a-f]{7,40}`", sha_cell):
+            raise AssertionError(
+                f"{row_id}: affected-SHA cell is neither the exact tip form nor a "
+                f"backticked commit, so nothing can be checked about it: {sha_cell!r}"
+            )
+        rows.append((row_id, found.group(1), sha_cell))
+    return rows
 
-    assert conforming, "no conforming rows parsed; this guard would be inert"
+
+def affected_sha_cell_deviates(reviewed_sha: str, sha_cell: str) -> bool:
+    """Whether a cell fails the convention. ONE definition, used by both nodes.
+
+    The non-vacuity node used to carry its own copy of this comparison, so
+    deleting the real check left both tests green — a control that cannot fail
+    when the thing it controls is removed is not a control.
+    """
+    import re
+
+    if sha_cell == _TIP_FORM:
+        return False
+    named = re.findall(r"`([0-9a-f]{7,40})`", sha_cell)
+    if not named:
+        return True
+    return not any(s.startswith(reviewed_sha) or reviewed_sha.startswith(s)
+                   for s in named)
+
+
+def test_the_affected_sha_cell_names_the_tree_the_defect_affected():
+    """The column is the AFFECTED sha — the tree with the defect, not the fix.
+
+    Measured across this ledger: of the rows that cite a review and name a
+    literal SHA, the overwhelming majority name the reviewed SHA and none names
+    anything else. That follows from the column's own name — a finding affects
+    the tree it was found in, and the disposition beside it says what happened
+    afterwards.
+
+    This guard exists because I broke that convention twice in one arc while
+    "correcting" it toward a reviewer's reading, then wrote a first version of
+    this very test encoding the inverted rule — which flagged hundreds of
+    conforming rows and is how the convention got measured rather than assumed.
+    """
+    rows = _affected_sha_rows()
+    # A FLOOR, not "at least one". A parser regression that silently dropped the
+    # population would otherwise leave this green while checking almost nothing.
+    assert len(rows) >= 460, (
+        f"only {len(rows)} reviewed rows parsed; the population this guard claims "
+        "to cover is far larger, so the parser has regressed"
+    )
+    deviating = [(rid, sha, cell) for rid, sha, cell in rows
+                 if affected_sha_cell_deviates(sha, cell)]
     assert not deviating, (
         "these rows name a SHA cell that does not include the tree their own gate "
         "cell says was reviewed, against the convention every other row follows: "
@@ -6845,23 +6900,14 @@ def test_the_affected_sha_cell_names_the_tree_the_defect_affected():
     )
 
 
-def test_the_affected_sha_guard_is_not_vacuous():
-    """It must reject the delta form I wrote, and accept the conventional one."""
-    import re
-
-    reviewed = re.compile(r"reviewed `([0-9a-f]{7,40})`")
-
-    def deviates(gate_cell, sha_cell):
-        found = reviewed.search(gate_cell)
-        named = re.findall(r"`([0-9a-f]{7,40})`", sha_cell)
-        if not found or not named:
-            return False
-        r = found.group(1)
-        return not any(s.startswith(r) or r.startswith(s) for s in named)
-
-    gate = "Stage-2 Codex commit review, run `cdx-review.X`, reviewed `323151f`"
-    assert not deviates(gate, " `323151f` "), "the conventional form is flagged"
-    assert not deviates(gate, " correction on the tip "), "the tip form is flagged"
-    assert deviates(gate, " `59af3e1`..`5d169f9` "), (
-        "the delta form that names neither the reviewed tree is not caught"
+def test_the_affected_sha_checker_is_not_vacuous():
+    """Drives the SAME checker the ledger node uses, on both verdicts."""
+    reviewed = "323151f"
+    assert not affected_sha_cell_deviates(reviewed, "`323151f`")
+    assert not affected_sha_cell_deviates(reviewed, _TIP_FORM)
+    assert not affected_sha_cell_deviates(reviewed, "`c31a2f0`..`323151f`")
+    assert affected_sha_cell_deviates(reviewed, "`59af3e1`..`5d169f9`")
+    assert affected_sha_cell_deviates(reviewed, "on the tip"), (
+        "an inexact tip marker must not be waved through as the tip form"
     )
+    assert affected_sha_cell_deviates(reviewed, "")

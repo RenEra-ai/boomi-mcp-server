@@ -11584,4 +11584,5 @@
 {"kind": "test", "id": "pytest-011583", "node_id": "tests/test_issue_155_contract_id_grammar.py::test_the_served_attestation_constrains_its_route_digests", "state": "active"}
 {"kind": "test", "id": "pytest-011584", "node_id": "tests/test_issue_155_contract_id_grammar.py::test_the_published_route_digest_rule_and_the_enforced_one_agree", "state": "active"}
 {"kind": "test", "id": "pytest-011585", "node_id": "tests/test_connector_replay_review_round3.py::test_the_affected_sha_cell_names_the_tree_the_defect_affected", "state": "active"}
-{"kind": "test", "id": "pytest-011586", "node_id": "tests/test_connector_replay_review_round3.py::test_the_affected_sha_guard_is_not_vacuous", "state": "active"}
+{"kind": "test", "id": "pytest-011586", "node_id": "tests/test_connector_replay_review_round3.py::test_the_affected_sha_guard_is_not_vacuous", "state": "tombstone"}
+{"kind": "test", "id": "pytest-011587", "node_id": "tests/test_connector_replay_review_round3.py::test_the_affected_sha_checker_is_not_vacuous", "state": "active"}
