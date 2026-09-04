@@ -294,13 +294,22 @@ def validate_error_handling(
     # evidence binding. So minting never depended on the retry; only the check
     # did. This makes the two agree — the same missing evidence is named in both
     # positions — rather than teaching the envelope a second way to say nothing.
-    in_a_region = {
+    # ONLY THE REGIONS THAT WILL ACTUALLY GRADE THEIR NODES. The loop below
+    # `continue`s on a retry count of zero — correctly, since retrying nothing
+    # violates neither source isolation nor replay safety — so treating every
+    # region as covered left a declaration inside a retry-zero region graded by
+    # NEITHER path. Live QA measured it one position over from the gap this pass
+    # was added to close: the unrecorded operation minted nothing and said
+    # nothing, which is the same silence, and "graded wherever it is authored"
+    # was false the moment it was written.
+    in_a_graded_region = {
         node_id
         for region in regions
+        if region.retry_count != 0
         for node_id in tuple(region.try_node_ids) + tuple(region.catch_node_ids)
     }
     for node_id, binding in sorted(binding_by_node.items()):
-        if node_id in in_a_region:
+        if node_id in in_a_graded_region:
             continue  # graded below, in its region, with the retry rules too
         _require_resolvable(
             _authored_evidence(cfg, node_id), contracts, binding, node_id

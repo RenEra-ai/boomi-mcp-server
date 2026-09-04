@@ -265,7 +265,37 @@ def is_authored_contract_ref(value: object) -> bool:
 #: string had not moved. These probes exercise the discriminating shapes, so a
 #: change to HOW the pattern is applied moves the revision even when the pattern
 #: itself does not.
+#: The probes whose verdicts ARE the served behaviour record. They must SPAN the
+#: grammar's boundary, and the reason is a measured failure rather than a
+#: preference: when the grammar tightened, every probe here began to reject, so
+#: the record became "rejected" nine times over and any widening that did not
+#: happen to admit one of these nine exact strings left the served fingerprint
+#: unchanged. A witness that only ever records refusals cannot notice a surface
+#: growing more permissive, which is the one direction that matters.
+#:
+#: So the set now carries ACCEPTING probes and, beside them, near misses that
+#: each fail for ONE reason. A widening has to leave every one of those reasons
+#: intact to go unnoticed, which no plausible loosening of a five-segment grammar
+#: does. The originals are kept: they still reject, and dropping them would erase
+#: the record of what the older grammar refused.
 AUTHORED_CONTRACT_REF_PROBES: Final[tuple] = (
+    # Accepted — the canonical form, minimal and with a multi-digit revision.
+    "$ref:icv1:rest:patch:sem:1",
+    "$ref:icv1:a:b:c:10",
+    "$ref:icv1:a_b:c_d:e_f:2",
+    # Near misses, one broken rule each.
+    "$ref:icv1:REST:patch:sem:1",      # alphabet: upper case
+    "$ref:icv1:rest:patch:sem:0",      # revision: zero
+    "$ref:icv1:rest:patch:sem:01",     # revision: leading zero
+    "$ref:icv1:rest:patch:sem:1\n",    # trailing newline a `$` anchor would admit
+    "$ref:icv1:rest:patch:sem",        # too few segments
+    "$ref:icv1:rest:patch:sem:1:x",    # too many segments
+    "$ref:icv1:rest::sem:1",           # empty segment
+    "$ref:icv1:rest:patch:se-m:1",     # alphabet: hyphen
+    "$ref:icv2:rest:patch:sem:1",      # a version tag this grammar does not define
+    "icv1:rest:patch:sem:1",           # the bare id, not the authored form
+    # The older grammar's probes, kept: they still reject, and they record what
+    # the surface refused before the tightening.
     "$ref:OK",
     "$ref:a.b-c_d",
     "$ref:ABC\n",
@@ -278,9 +308,32 @@ AUTHORED_CONTRACT_REF_PROBES: Final[tuple] = (
 )
 
 
+def served_pattern_admits(value: object) -> bool:
+    """Whether the SERVED pattern admits ``value``, as a schema validator reads it.
+
+    `re.match`, deliberately, because that is what a JSON Schema ``pattern``
+    means: the rule is anchored by the pattern's own text, not by the caller. The
+    enforced check uses `fullmatch`, which supplies an anchor the pattern may not
+    have — so the two answer differently exactly when the pattern's anchoring is
+    wrong, which is the drift nobody could see. A `$`-anchored rule admits a
+    trailing newline to every client validating against the served schema while
+    the enforced check keeps rejecting it, and the caller is refused for sending
+    what the published contract told them was valid.
+    """
+    return isinstance(value, str) and re.match(AUTHORED_CONTRACT_REF_PATTERN, value) is not None
+
+
 def authored_contract_ref_behaviour() -> tuple:
-    """The grammar's verdict on each probe, as fingerprintable data."""
+    """Each probe's verdict from BOTH the enforced check and the served pattern.
+
+    Both, because they are two different rules that must agree, and recording
+    only the enforced one made the served rule unfingerprintable: a regression in
+    the published pattern's anchoring moved nothing here, so the capability
+    revision did not move either, and a client could be handed a contract the
+    server does not honour.
+    """
     return tuple(
-        (probe, is_authored_contract_ref(probe)) for probe in AUTHORED_CONTRACT_REF_PROBES
+        (probe, is_authored_contract_ref(probe), served_pattern_admits(probe))
+        for probe in AUTHORED_CONTRACT_REF_PROBES
     )
 

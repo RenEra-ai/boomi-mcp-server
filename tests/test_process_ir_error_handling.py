@@ -2308,6 +2308,23 @@ def test_a_replay_declaration_is_graded_wherever_it_is_authored():
     # the refusal below could be about the shape rather than the declaration.
     _compile(_bare_call(), _symbols())
 
+    # INSIDE A RETRY-ZERO REGION — graded by neither path until live QA found it
+    # one position over from the gap this test was added to close. The region loop
+    # skips a zero retry count (correctly: retrying nothing violates nothing), and
+    # the out-of-region pass used to treat every region as covered.
+    with pytest.raises(ProcessIRCompileError) as in_retry_zero:
+        _compile(
+            _connector_scope(
+                retry={"count": 0},
+                protected=unverified,
+                idempotency={"kind": "key_reference", "contract_ref": dangling},
+            ),
+            _symbols(),
+        )
+    assert any(d.code == PROCESS_IR_SEMANTIC_IDEMPOTENCY_EVIDENCE_MISSING
+               for d in in_retry_zero.value.diagnostics), [
+        d.code for d in in_retry_zero.value.diagnostics]
+
     # OUTSIDE any try/catch — the position that used to pass in silence.
     with pytest.raises(ProcessIRCompileError) as raised:
         _compile(

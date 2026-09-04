@@ -313,6 +313,16 @@ def _refuse_unresolvable_records(vocabulary, evidence, operation_records, semant
         # structured: it would pass the grammar while naming a family, an action
         # or a revision the record does not actually describe, and every consumer
         # downstream resolves by that name.
+        # NAMED, NOT A KeyError. `action_ids` defaults to empty — the model
+        # permits a vocabulary entry that records no identifiers — so this lookup
+        # could miss, and a bare KeyError escaping a registry loader tells a
+        # caller nothing and is not the refusal this family promises.
+        if (record.family, record.action) not in identifiers:
+            raise RegistryInvalid(
+                f"operation record names {record.family}/{record.action}, for "
+                "which the vocabulary records no grammar-safe identifier, so its "
+                "contract reference cannot be derived or checked. A vocabulary "
+                "entry that recognises an action must map it")
         expected = authored_contract_ref(
             *identifiers[(record.family, record.action)],
             record.semantics_id,

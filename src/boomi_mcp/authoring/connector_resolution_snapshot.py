@@ -951,10 +951,16 @@ def build_connector_resolution_snapshot(
         #
         # Recorded rather than closed by widening the read, because the widening
         # would buy nothing: a reuse writes nothing to the component it reuses,
-        # and any request that adds a process root re-enables the live read and
-        # refuses. So the gap admits no bad write — what it admitted was a
-        # comment claiming a coverage the code does not have, which is the defect
-        # being fixed here.
+        # and a request that adds a process root re-enables the live read, so
+        # COMPILE and APPLY refuse. `plan` does not — measured, and stated here
+        # rather than rounded off, because the comment this replaced was wrong in
+        # exactly this direction and a replacement that overstates by a little is
+        # the same defect wearing a correction's clothes. Planning mutates
+        # nothing, so what it admits is a preview, not a write.
+        #
+        # So the gap admits no bad write — what it admitted was a comment
+        # claiming a coverage the code does not have, which is the defect fixed
+        # here.
         if _identity.component_key in (declared or {}):
             continue
         if getattr(_identity, "route_conflicting", None):

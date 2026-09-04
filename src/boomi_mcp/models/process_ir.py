@@ -679,9 +679,24 @@ def _validate_contract_ref(value: str) -> str:
     if not is_authored_contract_ref(value):
         raise PydanticCustomError(
             "process_ir_reference_idempotency_contract_invalid_format",
-            "idempotency contract reference must be an exact '$ref:KEY' token "
-            "carrying a single key segment — a literal id, a free-form assertion, "
-            "or a further-structured value is not evidence",
+            # SERVED TEXT, kept true. This described the grammar it was written
+            # for — "a single key segment", and a further-structured value
+            # refused — and the canonical form is now the ONLY legal one, so the
+            # sentence told a caller that the correct answer was the wrong one.
+            # It names the shape and defers the exact rule to the pattern the
+            # schema serves, rather than carrying a second copy to go stale.
+            # Angle-bracket placeholders avoided here for the same reason the
+            # served remediation avoids them, even though the guard does not
+            # scan this string: a shape written with brackets is one a caller
+            # can copy literally, and this message is read by the same callers.
+            "idempotency contract reference must be the '$ref:' token followed "
+            "by a canonical contract identifier: the literal 'icv1' and four "
+            "colon-separated segments — family, action, semantics and revision "
+            "— the first three lower-case letters, digits or underscore and the "
+            "revision a positive integer without a leading zero, as in "
+            "'$ref:icv1:rest:patch:resource_identity_upsert_static_route_same_effect:1'. "
+            "A literal component id, a free-form assertion, or an identifier in "
+            "any other shape is not evidence",
         )
     return value
 
@@ -3063,9 +3078,25 @@ _REMEDIATION = {
         "Use an exact '$ref:KEY' token (non-empty, whitespace-free key) or a literal component id."
     ),
     PROCESS_IR_REFERENCE_IDEMPOTENCY_CONTRACT_INVALID_FORMAT: (
-        "Use an exact '$ref:KEY' token whose key is a single segment of letters, "
-        "digits, '_', '.' or '-'. A literal component id, a free-form assertion, "
-        "or a further-structured value is not idempotency evidence."
+        # SERVED REMEDIATION, and the third copy of a sentence the grammar change
+        # falsified. It described a single-segment key and refused "a further
+        # structured value" — which is now the only legal form, so a caller who
+        # followed this remediation exactly would be refused again. Named here in
+        # full because this is the sentence the one-call remediation route hands
+        # back; the exact rule stays with the pattern the schema serves.
+        # NO ANGLE-BRACKET PLACEHOLDERS. A served-text guard forbids them, and it
+        # is right to: this string is read by an LLM caller, and a shape written
+        # with brackets is one a caller can copy literally. The rule is stated in
+        # words and shown by a concrete example instead.
+        "Use the '$ref:' token followed by a canonical contract identifier made "
+        "of the literal 'icv1' and four colon-separated segments — family, "
+        "action, semantics and revision — where the first three are lower-case "
+        "letters, digits or '_', and the revision is a positive integer with no "
+        "leading zero. For example "
+        "'$ref:icv1:rest:patch:resource_identity_upsert_static_route_same_effect:1'. "
+        "A literal component id, a free-form assertion, or an identifier in any "
+        "other shape is not idempotency evidence. The exact pattern is served by "
+        "get_schema_template(schema_name='ProcessIRV1')."
     ),
     PROCESS_IR_CAPABILITY_UNSUPPORTED: (
         "The referenced construct is capability-gated or unsupported in ProcessIR v1. "

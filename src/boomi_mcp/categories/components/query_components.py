@@ -505,11 +505,38 @@ def query_components_action(
                     return None
                 return {"component_id": component_id, "version": version}
 
-            return idempotency_contract_candidates(
-                operation_component_id=config.get("operation_component_id"),
-                connection_component_id=config.get("connection_component_id"),
-                live_identity=_live_identity,
-            )
+            # THE REGISTRY'S REFUSAL KEEPS ITS CODE. `RegistryInvalid` carries a
+            # registered error code, and the generic handler below serves only a
+            # message and a class name — so a caller was told the action failed
+            # with no machine-readable way to tell "this build's packaged
+            # evidence is unreadable" from any other failure, which is the one
+            # distinction that changes what they should do next.
+            #
+            # Caught HERE rather than by teaching the generic envelope to read a
+            # code off any exception: that envelope is repeated across two dozen
+            # modules and this slice consumes it rather than owning it, so
+            # rewriting all of them late in this issue would be a large,
+            # unrelated change. The narrow catch closes it on the surface this
+            # slice does own.
+            from ...connector_replay.registry import RegistryInvalid
+
+            try:
+                return idempotency_contract_candidates(
+                    operation_component_id=config.get("operation_component_id"),
+                    connection_component_id=config.get("connection_component_id"),
+                    live_identity=_live_identity,
+                )
+            except RegistryInvalid as invalid:
+                return {
+                    "_success": False,
+                    "error": str(invalid),
+                    "error_code": RegistryInvalid.code,
+                    "hint": "The packaged replay-evidence registry could not be "
+                            "read by this build, so no replay decision can be "
+                            "made from it. This is a build defect, not a request "
+                            "defect — retrying with different arguments will not "
+                            "change it.",
+                }
 
         else:
             return {

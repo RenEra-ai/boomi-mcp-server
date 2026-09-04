@@ -403,10 +403,18 @@ def test_changing_HOW_the_grammar_matches_moves_the_revision():
         def authored_contract_ref_behaviour():
             # Exactly what a `match`-instead-of-fullmatch implementation answers:
             # the trailing-newline probes flip to accepted.
-            return tuple(
-                (probe, True if probe.rstrip("\r\n") != probe else verdict)
-                for probe, verdict in ids.authored_contract_ref_behaviour()
-            )
+            #
+            # THREE values per probe, not two. The record grew a served-pattern
+            # verdict beside the enforced one, and this shim went on unpacking
+            # pairs — so it stopped producing a mutant at all and the test passed
+            # by asserting nothing. Unpacked by position with a starred tail so
+            # the next field to arrive cannot repeat that quietly.
+            flipped = []
+            for probe, enforced, *rest in ids.authored_contract_ref_behaviour():
+                if probe.rstrip("\r\n") != probe:
+                    enforced = True
+                flipped.append((probe, enforced, *rest))
+            return tuple(flipped)
 
     original = contract_module._replay_ids
     contract_module._replay_ids = lambda: _ShimIds
@@ -896,3 +904,36 @@ def test_the_superseded_projection_is_CLOSED_and_leaks_nothing():
     assert "record_digest" not in repr(row), (
         "a superseded row names evidence a caller must not act on"
     )
+
+
+def test_an_unreadable_registry_is_served_with_its_own_code():
+    """A build defect must be machine-distinguishable from a request defect.
+
+    `RegistryInvalid` carries a registered error code, and the generic tool
+    envelope serves only a message and a class name — so a caller learned that
+    the action failed with no way to tell "this build's packaged evidence is
+    unreadable" from a bad argument. Those call for opposite responses: one is
+    retryable with different input, the other is not retryable at all.
+
+    Driven through the public action, not the raising helper, because the defect
+    was in what the ACTION serves rather than in what the registry raises.
+    """
+    from unittest.mock import MagicMock, patch
+
+    from boomi_mcp.categories.components import query_components as qc
+    from boomi_mcp.connector_replay.registry import RegistryInvalid
+
+    from boomi_mcp.connector_replay import discovery as discovery_module
+
+    with patch.object(discovery_module, "idempotency_contract_candidates",
+                      side_effect=RegistryInvalid("packaged registry is unreadable")):
+        served = qc.query_components_action(
+            MagicMock(), "qa", "idempotency_contract_candidates",
+            config={"operation_component_id": "op",
+                    "connection_component_id": "conn"},
+        )
+
+    assert served["_success"] is False
+    assert served["error_code"] == "CONNECTOR_REPLAY_REGISTRY_INVALID", served
+    assert "not retryable" in served.get("hint", "").lower() or \
+           "will not change it" in served.get("hint", "")

@@ -172,3 +172,94 @@ def test_one_regex_is_shared_by_every_surface_that_handles_a_reference():
         assert "[A-Za-z0-9_.-]" not in text, (
             f"{label} ({relative}) carries a second, laxer reference pattern"
         )
+
+
+def test_the_behaviour_record_spans_the_grammar_boundary():
+    """A witness that only records refusals cannot see a surface grow permissive.
+
+    When the grammar tightened, every probe in the served behaviour record began
+    to reject. The record became "rejected" twenty-odd times over, so any widening
+    that did not happen to admit one of those exact strings left the fingerprint —
+    and therefore the served capability revision — unchanged. Live QA measured two
+    such mutants. The set now carries accepting probes and near misses that each
+    break one rule.
+    """
+    from boomi_mcp.connector_replay.ids import authored_contract_ref_behaviour
+
+    record = authored_contract_ref_behaviour()
+    accepted = [probe for probe, enforced, _served in record if enforced]
+    rejected = [probe for probe, enforced, _served in record if not enforced]
+    assert accepted, (
+        "the behaviour record admits nothing, so it cannot notice the grammar "
+        "being loosened — which is the only direction that matters"
+    )
+    assert rejected, "the record refuses nothing, so it pins no boundary at all"
+
+
+def test_the_served_pattern_and_the_enforced_check_agree_on_every_probe():
+    """Two rules, one contract — and the disagreement is invisible by default.
+
+    The enforced check uses `fullmatch`, which supplies an anchor the pattern may
+    not have; a schema validator reads the pattern's own anchoring. So a served
+    rule ending in `$` admits a trailing newline to every client validating
+    against the schema while the enforced check keeps rejecting it, and a caller
+    is refused for sending exactly what the published contract called valid.
+
+    Nothing checked this until a mutation sweep found the `$`-anchor regression
+    passing unnoticed, which is why the record now carries both verdicts.
+    """
+    from boomi_mcp.connector_replay.ids import authored_contract_ref_behaviour
+
+    diverged = [
+        probe for probe, enforced, served in authored_contract_ref_behaviour()
+        if enforced != served
+    ]
+    assert not diverged, (
+        "the served pattern and the enforced check disagree on these, so a client "
+        f"validating against the published rule is refused by the server: {diverged}"
+    )
+
+
+def test_an_unmapped_action_refuses_by_name_rather_than_raising():
+    """`action_ids` may be empty, so the derivation lookup can miss.
+
+    A bare KeyError escaping a registry loader tells a caller nothing and is not
+    the refusal this error family promises. Reachable because the model permits a
+    vocabulary entry that records no identifiers.
+    """
+    from boomi_mcp.connector_replay.registry import RegistryInvalid, _parse
+
+    payload = json.loads(
+        (_ROOT / "src/boomi_mcp/connector_replay/registry_v1.json").read_text("utf-8"))
+    assert payload["vocabulary"][0]["action_ids"], "the probe starts from a mapped entry"
+    payload["vocabulary"][0]["action_ids"] = []
+    with pytest.raises(RegistryInvalid, match="no grammar-safe identifier"):
+        _parse(payload)
+
+
+def test_no_behaviour_authority_is_silently_unavailable_in_the_shipped_build():
+    """A row that fails to load degrades to a FIXED string, and stops tracking.
+
+    Each behaviour authority in the compiler revision loads under its own guard,
+    and a failure records the literal "unavailable". Honest as a degraded state,
+    dangerous as a steady one: "unavailable" does not vary, so once a row breaks
+    every later change to that authority produces the SAME fingerprint and the
+    revision quietly stops covering it — a stronger version of the drift the
+    revision exists to detect.
+
+    Measured, not hypothetical. Adding a third verdict to the grammar's behaviour
+    record left this row unpacking pairs from triples; it raised, degraded to
+    "unavailable", and every revision-comparing test kept passing — including the
+    one written to prove a grammar change moves the revision, because both sides
+    were equally unavailable. Nothing asserted the rows LOAD.
+    """
+    from boomi_mcp.authoring.contract import _compiler_revision_payload
+
+    payload = _compiler_revision_payload()
+    assert payload, "the revision payload is empty; this guard would be inert"
+    unavailable = sorted(key for key, value in payload.items()
+                         if value == "unavailable")
+    assert not unavailable, (
+        "these behaviour authorities failed to load, so the served revision no "
+        f"longer varies with them: {unavailable}"
+    )

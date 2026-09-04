@@ -805,7 +805,7 @@ def build_authoring_contract_manifest() -> Mapping[str, Any]:
     return frozen
 
 
-def _compiler_revision() -> str:
+def _compiler_revision_payload() -> dict:
     """Fingerprint of the compiler + validator + recipe capability contracts.
 
     All three are already-published contracts, so this moves when BEHAVIOR moves.
@@ -885,9 +885,16 @@ def _compiler_revision() -> str:
                 # probe carries — admitting "/", say — would leave every verdict
                 # unchanged while both parsing and the served schema had moved.
                 "pattern": _replay_ids().AUTHORED_CONTRACT_REF_PATTERN,
+                # EVERY verdict the record carries, by position. It listed two
+                # per probe while the record grew a third — the served pattern's
+                # own answer beside the enforced one — and unpacking pairs from
+                # triples raised inside this lambda, which the revision builder
+                # absorbs. So the row stopped contributing at all and the
+                # fingerprint went quiet about the grammar entirely, which is a
+                # worse version of the drift this row exists to catch.
                 "probes": [
-                    [probe, verdict]
-                    for probe, verdict in _replay_ids().authored_contract_ref_behaviour()
+                    list(entry)
+                    for entry in _replay_ids().authored_contract_ref_behaviour()
                 ],
             },
         ),
@@ -965,7 +972,20 @@ def _compiler_revision() -> str:
             payload[key] = loader()
         except Exception:  # noqa: BLE001
             payload[key] = "unavailable"
-    return sha256_fingerprint(payload)
+    return payload
+
+
+def _compiler_revision() -> str:
+    """Fingerprint of the compiler + validator + recipe capability contracts.
+
+    Split from the payload it fingerprints so the payload can be INSPECTED. Each
+    behaviour authority loads under its own guard and degrades to the literal
+    "unavailable" when it raises — a fixed value, so a broken row yields a stable
+    digest and the revision silently stops varying with that authority. From the
+    digest alone that is indistinguishable from nothing having changed, which is
+    how a row that had stopped loading survived a full suite.
+    """
+    return sha256_fingerprint(_compiler_revision_payload())
 
 
 def _replay_ids():
