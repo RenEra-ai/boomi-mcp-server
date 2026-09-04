@@ -322,7 +322,12 @@ def _vocab_only():
             "operation_records": [], "evidence_records": [],
             "vocabulary": [{"platform_connector_type": "t", "family": "rest",
                             "action_source": "operation_component",
-                            "recognised_actions": ["GET"], "safe_actions": ["GET"]}]}
+                            "recognised_actions": ["GET"], "safe_actions": ["GET"],
+                            # A vocabulary that recognises an action must MAP it:
+                            # the registry derives every contract reference from
+                            # these identifiers, so an entry without them cannot
+                            # name the action it claims to recognise.
+                            "action_ids": [["GET", "get"]]}]}
 
 
 def _a_row(**over):

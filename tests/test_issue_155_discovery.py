@@ -937,3 +937,62 @@ def test_an_unreadable_registry_is_served_with_its_own_code():
     assert served["error_code"] == "CONNECTOR_REPLAY_REGISTRY_INVALID", served
     assert "not retryable" in served.get("hint", "").lower() or \
            "will not change it" in served.get("hint", "")
+
+
+def test_a_candidate_is_not_offered_when_the_live_configuration_has_moved():
+    """Equal versions do not mean equal configuration.
+
+    A Boomi version advances on any update, so matching on id and version alone
+    returned a candidate for a component whose CONFIGURATION had changed
+    underneath the record — the architect gate's probe supplied matching
+    ids/versions with deliberately foreign digests and still got the production
+    candidate back. The digest is compared when the reader can supply one.
+    """
+    from boomi_mcp.connector_replay.discovery import idempotency_contract_candidates
+    from boomi_mcp.connector_replay.registry import load_registry
+
+    record = load_registry().operation_records[0]
+    operation, connection = record.operation_identity, record.connection_identity
+
+    def _live(**digests):
+        def reader(component_id):
+            recorded = operation if component_id == operation.component_id else connection
+            label = "operation" if component_id == operation.component_id else "connection"
+            identity = {"component_id": component_id, "version": recorded.version}
+            if label in digests:
+                identity["config_digest"] = digests[label]
+            return identity
+        return reader
+
+    # CONTROL FIRST: agreeing digests still offer the candidate, so a refusal
+    # below is about the disagreement and not about the digest being present.
+    agreeing = idempotency_contract_candidates(
+        operation_component_id=operation.component_id,
+        connection_component_id=connection.component_id,
+        live_identity=_live(operation=operation.config_digest,
+                            connection=connection.config_digest),
+    )
+    assert agreeing["candidates"], "the control offered nothing; nothing below means anything"
+
+    moved = idempotency_contract_candidates(
+        operation_component_id=operation.component_id,
+        connection_component_id=connection.component_id,
+        live_identity=_live(operation="ComponentConfigDigestV1:" + "f" * 64,
+                            connection=connection.config_digest),
+    )
+    assert not moved["candidates"], (
+        "a candidate was offered for a component whose live configuration "
+        "disagrees with the record"
+    )
+
+    # And absence is not disagreement: a reader that supplies no digest has not
+    # contradicted the record, so the candidate stands.
+    silent = idempotency_contract_candidates(
+        operation_component_id=operation.component_id,
+        connection_component_id=connection.component_id,
+        live_identity=_live(),
+    )
+    assert silent["candidates"], (
+        "a reader that could not digest the component was treated as disagreeing "
+        "with it, which empties the list for every unprojectable component"
+    )

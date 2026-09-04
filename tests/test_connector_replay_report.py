@@ -67,3 +67,42 @@ def test_no_credential_material_in_the_report():
     text = _REPORT.read_text().lower()
     for needle in ("password", "secret", "token", "credential://", "api_key", "@"):
         assert needle not in text, "the published report contains {0!r}".format(needle)
+
+
+def test_the_served_report_states_what_the_registry_holds():
+    """Parsed back and compared to the REGISTRY, not to the renderer.
+
+    The existing checks assert the tracked file equals `render()`, which is true
+    whatever `render()` says — a renderer that omitted a whole section would keep
+    them green, and one did: the report called itself complete while never
+    publishing the packaged operation records, the rows that actually authorise a
+    retry. Parsing the served text gives something to compare against the facts.
+    """
+    from boomi_mcp.connector_replay.registry import load_registry
+    from boomi_mcp.connector_replay.report import parse, render
+
+    registry = load_registry()
+    served = parse(render(registry))
+
+    assert {row["contract_ref"] for row in served["operation_records"]} == {
+        record.contract_ref for record in registry.operation_records
+    }, "the report and the registry disagree about which contracts are packaged"
+    assert {row["platform_connector_type"] for row in served["vocabulary"]} == {
+        entry.platform_connector_type for entry in registry.vocabulary
+    }, "the report and the registry disagree about the connector vocabulary"
+
+    # NON-VACUITY: the registry must actually hold rows, or the equalities above
+    # are two empty sets agreeing with each other.
+    assert registry.operation_records and registry.vocabulary
+
+
+def test_the_report_parser_refuses_a_row_it_cannot_read():
+    """A partial view of a report is how a missing section becomes an empty one."""
+    import pytest
+
+    from boomi_mcp.connector_replay.report import parse
+
+    with pytest.raises(ValueError, match="five columns"):
+        parse("## Operation contract records\n\n| a | b |\n")
+    with pytest.raises(ValueError, match="not an integer"):
+        parse("## Operation contract records\n\n| `r` | rest | GET | sem | many |\n")

@@ -156,11 +156,19 @@ def test_one_regex_is_shared_by_every_surface_that_handles_a_reference():
     surfaces can agree on every value tested and still be two independent
     copies — and the copy is the defect. Each must NAME the constant.
     """
+    # THE SURFACES THE ISSUE NAMES, all of them. The docstring said "every
+    # surface" and the dict listed four, omitting the compile-time grant check and
+    # the discovery surface — so a copy of the grammar could have appeared in
+    # either without this node noticing, which is the drift it exists to prevent.
+    # Enumerated from the acceptance criteria rather than from what was
+    # convenient to check.
     surfaces = {
         "authoring validator": "src/boomi_mcp/models/process_ir.py",
         "compiler symbol": "src/boomi_mcp/compiler/process_ir/contracts.py",
         "registry record": "src/boomi_mcp/connector_replay/models.py",
         "registry mint": "src/boomi_mcp/connector_replay/registry.py",
+        "compile-time grant check": "src/boomi_mcp/compiler/process_ir/error_handling.py",
+        "discovery surface": "src/boomi_mcp/connector_replay/discovery.py",
     }
     for label, relative in surfaces.items():
         text = (_ROOT / relative).read_text("utf-8")
@@ -233,8 +241,14 @@ def test_an_unmapped_action_refuses_by_name_rather_than_raising():
         (_ROOT / "src/boomi_mcp/connector_replay/registry_v1.json").read_text("utf-8"))
     assert payload["vocabulary"][0]["action_ids"], "the probe starts from a mapped entry"
     payload["vocabulary"][0]["action_ids"] = []
-    with pytest.raises(RegistryInvalid, match="no grammar-safe identifier"):
+    # Refused at LOAD, by name. The message moved when the model learned that an
+    # empty map is not a default but a vocabulary recognising actions it cannot
+    # name; what matters to this node is that the failure is the registry's own
+    # refusal carrying a reason, not a bare lookup error, wherever it is raised.
+    with pytest.raises(RegistryInvalid) as refused:
         _parse(payload)
+    assert "maps none of them" in str(refused.value) or \
+           "no grammar-safe identifier" in str(refused.value), str(refused.value)[:160]
 
 
 def test_no_behaviour_authority_is_silently_unavailable_in_the_shipped_build():
@@ -368,6 +382,11 @@ def test_the_served_attestation_constrains_its_route_digests():
             required[name] = "a" * 64
         else:
             required[name] = "x"
+    # The coverage KIND travels with the digests now: a record carrying route
+    # evidence and no kind says nothing about how to read it, and the model
+    # refuses it. These nodes are about the digest SHAPE, so they declare the
+    # kind that makes the shape meaningful rather than probing the new rule.
+    required["route_coverage_kind"] = "static_path"
     good, other = "RouteDigestV1:" + "a" * 64, "RouteDigestV1:" + "b" * 64
 
     for label, digests in (("malformed", ["not-a-digest"]),
@@ -415,6 +434,9 @@ def test_the_published_route_digest_rule_and_the_enforced_one_agree():
         else:
             required[name] = "x"
 
+    # The coverage kind travels with the digests: a record carrying route evidence
+    # and no kind says nothing about how to read it, and the model refuses it.
+    required["route_coverage_kind"] = "static_path"
     good = "RouteDigestV1:" + "a" * 64
     probes = [good, good + "\n", good + "\r\n", good.upper(), "RouteDigestV1:" + "a" * 63,
               "RouteDigestV1:" + "a" * 65, "nope", "", "RouteDigestV1:" + "g" * 64]
@@ -436,4 +458,48 @@ def test_the_published_route_digest_rule_and_the_enforced_one_agree():
     # Non-vacuity: the probe set must contain both verdicts, or agreement is free.
     assert item.is_valid(good) and not item.is_valid(good + "\n"), (
         "the probes do not span the boundary, so agreement proves nothing"
+    )
+
+
+def test_exactly_one_place_mints_a_grant():
+    """The plan's sole-minter property, pinned where it actually holds.
+
+    The plan asks that `build_symbol_table` be the sole minter. It is not: grants
+    are minted in the compiler module that owns call-path lowering and binding
+    resolution, and `build_symbol_table` remains symbol-only. The architect gate
+    recorded that as a plan-topology gap and found no public bypass.
+
+    What the requirement is FOR is that minting not be scattered — several
+    minters is how two callers mint different grants for one call and neither is
+    wrong. That property holds, and this pins it: one construction site for a
+    grant, one for a contract symbol beside its own class. If a second appears,
+    the topology has drifted in the direction the plan was guarding against,
+    whichever module it appears in.
+
+    Derived by reading the sources rather than by calling anything, because the
+    property is about how many places EXIST, which no amount of calling shows.
+    """
+    import re
+    from pathlib import Path
+
+    src = Path(__file__).resolve().parents[1] / "src"
+    sites: dict = {}
+    for path in src.rglob("*.py"):
+        text = path.read_text(encoding="utf-8")
+        for symbol in ("IdempotencyGrantSymbolV1", "IdempotencyContractSymbolV1"):
+            # `class Name(` is a DEFINITION, not a construction site. Counting it
+            # made the guard report two minters where there is one — a false
+            # positive in a guard about counting, found by running it.
+            for match in re.finditer(rf"(?<!class )\b{symbol}\(", text):
+                line = text[:match.start()].count("\n") + 1
+                sites.setdefault(symbol, []).append(f"{path.relative_to(src)}:{line}")
+
+    grants = sites.get("IdempotencyGrantSymbolV1", [])
+    assert len(grants) == 1, (
+        f"a grant is minted in {len(grants)} places, so two callers can mint "
+        f"different grants for one call: {grants}"
+    )
+    contracts = sites.get("IdempotencyContractSymbolV1", [])
+    assert len(contracts) <= 2, (
+        f"a contract symbol is constructed in {len(contracts)} places: {contracts}"
     )

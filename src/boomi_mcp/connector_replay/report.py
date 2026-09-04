@@ -19,7 +19,7 @@ from typing import Final
 
 from .registry import ReplayRegistry, load_registry
 
-__all__ = ["REPORT_RELATIVE_PATH", "render", "write_report"]
+__all__ = ["REPORT_RELATIVE_PATH", "parse", "render", "write_report"]
 
 #: Where the tracked report lives, relative to the repository root.
 REPORT_RELATIVE_PATH: Final[str] = "docs/evidence/connector-replay-captures.md"
@@ -76,8 +76,82 @@ def render(registry: ReplayRegistry | None = None) -> str:
             "The operative consequence is that every write currently refuses a retry.",
         ]
 
+    # THE PACKAGED OPERATION RECORDS, which the report called itself complete
+    # without ever publishing. A reader was told what the class-level evidence
+    # says and not which specific operations carry a contract — the rows that
+    # actually authorise a retry.
+    lines += ["", "## Operation contract records", ""]
+    if reg.operation_records:
+        lines += [
+            "| contract reference | family | action | semantics | revision |",
+            "| --- | --- | --- | --- | --- |",
+        ]
+        for record in sorted(reg.operation_records, key=lambda r: r.contract_ref):
+            lines.append(
+                f"| `{record.contract_ref}` | {record.family} | {record.action} "
+                f"| {record.semantics_id} | {record.semantics_revision} |"
+            )
+    else:
+        lines.append(
+            "No operation contract record is packaged, so no specific operation "
+            "can authorise a retry."
+        )
+
     lines.append("")
     return "\n".join(lines)
+
+
+def parse(text: str) -> dict:
+    """Read a rendered report back into the facts it states, or refuse.
+
+    STRICT, and the strictness is the point. A renderer with no inverse can drift
+    from the registry it claims to describe and nothing notices, because the only
+    check available is that the file equals the renderer's own output — which is
+    true no matter what the renderer says. Parsing the served text back gives a
+    test something to compare AGAINST the registry rather than against the
+    renderer.
+
+    Refuses rather than skipping: a row this cannot read is a row a reader cannot
+    read either, and returning a partial view of a report is how a missing
+    section becomes an empty one.
+    """
+    import re
+
+    sections: dict = {"vocabulary": [], "operation_records": []}
+    current = None
+    for line in text.splitlines():
+        heading = re.match(r"^## (.+?)\s*$", line)
+        if heading:
+            current = heading.group(1)
+            continue
+        if not line.startswith("|") or set(line) <= set("| -"):
+            continue
+        cells = [c.strip() for c in line.strip().strip("|").split("|")]
+        if current == "Connector vocabulary":
+            if cells[0] == "platform connector type":
+                continue
+            if len(cells) != 3:
+                raise ValueError(f"vocabulary row is not three columns: {line!r}")
+            sections["vocabulary"].append({
+                "platform_connector_type": cells[0].strip("`"),
+                "family": cells[1],
+                "action_source": cells[2],
+            })
+        elif current == "Operation contract records":
+            if cells[0] == "contract reference":
+                continue
+            if len(cells) != 5:
+                raise ValueError(f"operation-record row is not five columns: {line!r}")
+            if not cells[4].isdigit():
+                raise ValueError(f"revision is not an integer: {line!r}")
+            sections["operation_records"].append({
+                "contract_ref": cells[0].strip("`"),
+                "family": cells[1],
+                "action": cells[2],
+                "semantics_id": cells[3],
+                "semantics_revision": int(cells[4]),
+            })
+    return sections
 
 
 def write_report(repo_root: Path) -> Path:

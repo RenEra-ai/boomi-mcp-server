@@ -100,6 +100,7 @@ def test_the_execution_sentinels_are_present_in_real_data_and_are_refused():
                 platform_connector_type=sentinel, family="rest",
                 action_source=ActionSourceV1.OPERATION_COMPONENT,
                 recognised_actions=("GET",),
+                action_ids=(("GET", "get"),),
             )
 
 
@@ -110,6 +111,7 @@ def test_a_genuine_connector_type_maps():
         platform_connector_type=genuine[0], family="rest",
         action_source=ActionSourceV1.OPERATION_COMPONENT,
         recognised_actions=("GET", "HEAD"),
+        action_ids=(("GET", "get"), ("HEAD", "head")),
     )
     assert m.family == "rest"
 
@@ -138,6 +140,10 @@ def test_the_action_may_not_be_sourced_from_the_execution_record():
         ConnectorVocabularyMappingV1(
             platform_connector_type="officialboomi-X3979C-rest-prod", family="rest",
             action_source=ActionSourceV1.EXECUTION_RECORD, recognised_actions=("GET",),
+            # Mapped, so this reaches the rule it is about. An unmapped entry is
+            # refused earlier now, and the earlier refusal would have masked the
+            # one under test — a probe graded by the wrong guard.
+            action_ids=(("GET", "get"),),
         )
     assert "one generic action" in str(err.value)
 

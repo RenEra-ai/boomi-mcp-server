@@ -951,6 +951,44 @@ class ConnectorReplayEvidenceBindingAttestationV1(_AuthoringModel):
         },
     )
 
+    @model_validator(mode="after")
+    def _the_coverage_it_claims_is_the_coverage_it_carries(self):
+        """A durable record must not describe evidence that cannot exist.
+
+        The fields were individually well-formed and jointly meaningless: this
+        model accepted `static_path` carrying no route digest, `service_wide`
+        carrying route digests, a coverage kind it does not define, and digests
+        with no kind at all. Each is a shape the producer never emits, which is
+        exactly why nothing caught them — but this is the DURABLE mutation
+        record, and a record whose validity depends on its only writer staying
+        correct is not an accounting control.
+
+        Discriminated on the kind, because the two coverages are not variants of
+        one shape: a static route is identified by the digests of the routes it
+        covers, and a service-wide claim has no route to digest.
+        """
+        kind = getattr(self, "route_coverage_kind", None)
+        if kind is None:
+            if self.route_digests or getattr(self, "route_capture_digest", None):
+                raise ValueError(
+                    "route evidence is present with no coverage kind, so nothing "
+                    "says how to read it")
+            return self
+        if kind not in ("static_path", "service_wide"):
+            raise ValueError(
+                f"route coverage kind {kind!r} is not one this record defines; "
+                "the closed set is 'static_path' and 'service_wide'")
+        if kind == "static_path" and not self.route_digests:
+            raise ValueError(
+                "static-path coverage names no route digest, so it claims to "
+                "cover routes it cannot identify")
+        if kind == "service_wide" and self.route_digests:
+            raise ValueError(
+                "service-wide coverage carries route digests; a service-wide "
+                "claim has no enumerated route, which is what makes it "
+                "service-wide")
+        return self
+
     @field_validator("route_digests")
     @classmethod
     def _route_digests_are_versioned_sorted_and_unique(
@@ -1023,6 +1061,46 @@ class ProcessMutationAttestationV1(_AuthoringModel):
     #: is not a record you can compare.
     replay_evidence_bindings: Tuple[ConnectorReplayEvidenceBindingAttestationV1, ...] = ()
 
+
+    @model_validator(mode="after")
+    def _bindings_agree_with_the_record_that_carries_them(
+        self,
+    ) -> "ProcessMutationAttestationV1":
+        """The binding list is a set, and it is ordered.
+
+        De-duplicated here rather than trusted: the docstring beside the field
+        already promises byte-identical attestations for two applies of the same
+        plan, and a promise a model does not enforce holds only until the first
+        caller that does not know about it.
+
+        ORDER is deliberately NOT asserted here. The producer sorts by a key the
+        apply boundary owns, and re-deriving that key in the model would be a
+        second copy of it — the defect this issue has spent its length removing.
+        The order property is pinned where the key lives.
+        """
+        # NO ACCOUNT-EQUALITY CHECK, and that is a measured decision rather than
+        # an omission. The two scopes are different one-way hashes of the same
+        # account under different domains: the attestation's is the authoring
+        # scope fingerprint and is `sha256:`-prefixed, the binding's is the replay
+        # account hash and is bare hex — their own field patterns cannot both
+        # match one value. Requiring equality would refuse every real attestation.
+        # What DOES bind a binding to this account is the recheck, which compares
+        # the record's recorded scope against the live client's before the write.
+        bindings = self.replay_evidence_bindings
+        if not bindings:
+            return self
+        # The WHOLE binding, not a three-field slice of it. A narrower key called
+        # two bindings duplicates when they differed only in the connection they
+        # named — a false refusal of a record that is perfectly well formed, and
+        # the existing order test constructs exactly that case.
+        import json as _json
+
+        keys = [_json.dumps(b.model_dump(mode="json"), sort_keys=True) for b in bindings]
+        if len(set(keys)) != len(keys):
+            raise ValueError(
+                "duplicate replay evidence bindings claim more evidence than the "
+                "record holds")
+        return self
 
     @model_validator(mode="after")
     def _targeting_matches_the_action(self) -> "ProcessMutationAttestationV1":

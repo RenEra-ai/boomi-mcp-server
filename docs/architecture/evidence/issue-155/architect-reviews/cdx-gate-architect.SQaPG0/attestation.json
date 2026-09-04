@@ -1,0 +1,34 @@
+{
+  "schema": 1,
+  "gateProtocol": 2,
+  "gate": "architect",
+  "collectedAt": "2026-09-04T06:22:38.041Z",
+  "start": {
+    "threadId": "01a06b02-f34b-73c1-80a0-dffc9d0f3ea9",
+    "pid": 3540,
+    "socket": "/Users/gleb/.codex-drive/d-3539-mtmjrihi.sock",
+    "cwd": "/Users/gleb/Documents/Projects/Renera/boomi-mcp-server",
+    "private": true
+  },
+  "prompt": {
+    "allowedSha256": [
+      "ccf14c8a8562ee97ab671f5da1c26b06d314e5852ade0c25ebab70255e49529b",
+      "ecaebe81e33b6877828966b4259b14f452fa1449a013eb6b4d5d8e0d11ea80e5"
+    ],
+    "actualSha256": "ccf14c8a8562ee97ab671f5da1c26b06d314e5852ade0c25ebab70255e49529b",
+    "path": "/tmp/cdx-gate-prompts.RsCrF1/prompt",
+    "verified": true
+  },
+  "turn": {
+    "status": "completed",
+    "kind": "plan",
+    "turnToken": 1,
+    "messageSha256": "b9403c8155b72f8457ba2c27ec034b3c6451a812dad433dbb8fcd5d080491f2f"
+  },
+  "artifact": {
+    "path": "/tmp/cdx-gate-architect.SQaPG0/review.md",
+    "sha256": "b9403c8155b72f8457ba2c27ec034b3c6451a812dad433dbb8fcd5d080491f2f"
+  },
+  "parsedVerdict": null,
+  "teardown": "confirmed"
+}

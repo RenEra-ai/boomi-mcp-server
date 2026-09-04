@@ -26,3 +26,9 @@ the safe direction: a registry that failed to load, or loaded empty, denies.
 | rest | POST | write | conditionally_idempotent | 2 | `80e530d635db` |
 | rest | PUT | write | conditionally_idempotent | 2 | `a065632cfbf9` |
 | rest | TRACE | read | unverified | 1 | `0c62c0fb6ca3` |
+
+## Operation contract records
+
+| contract reference | family | action | semantics | revision |
+| --- | --- | --- | --- | --- |
+| `$ref:icv1:rest:patch:resource_identity_upsert_static_route_same_effect:1` | rest | PATCH | resource_identity_upsert_static_route_same_effect | 1 |

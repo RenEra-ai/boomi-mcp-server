@@ -445,6 +445,18 @@ def _authored_evidence(cfg: SemanticCfgV1, node_id: str) -> Optional[Any]:
 def _require_resolvable(evidence, contracts, binding, node_id: str) -> None:
     if evidence is None or evidence.kind != "key_reference":
         return
+    # THE ONE SHARED GRAMMAR, consumed here too. Without it a malformed reference
+    # simply MISSED the lookup below and was reported as evidence that does not
+    # exist — the same code a well-formed reference to an unrecorded operation
+    # gets, so a caller could not tell "you typed it wrong" from "there is no
+    # evidence". The import is function-local because this package must not
+    # eagerly import the replay layer; a guard test pins that.
+    from ...connector_replay.ids import is_authored_contract_ref
+
+    if evidence.contract_ref is not None and not is_authored_contract_ref(
+        evidence.contract_ref
+    ):
+        raise _evidence_missing(binding, node_id)
     # Resolved by the PAIR the index is keyed on, so "exists" and "covers this
     # operation" are one lookup rather than a fetch followed by a comparison the
     # next edit can forget.

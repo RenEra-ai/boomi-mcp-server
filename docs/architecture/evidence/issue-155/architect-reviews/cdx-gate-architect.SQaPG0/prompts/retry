@@ -1,0 +1,7 @@
+Approvals are unavailable in this read-only planning session, and no tool will be granted. Do not ask for one, do not propose a plan of action, and do not wait for confirmation.
+
+Emit the FULL review NOW as plain text: every concrete issue you found in the implementation-versus-plan comparison for issue #155, each with its file:line, and the dispositions you judged wrong.
+
+If you found nothing, say so explicitly and briefly.
+
+END with a verdict on its OWN FINAL LINE: exactly `VERDICT: NO ISSUES` or `VERDICT: ISSUES FOUND`.

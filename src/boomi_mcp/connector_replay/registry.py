@@ -296,10 +296,16 @@ def _refuse_unresolvable_records(vocabulary, evidence, operation_records, semant
     published: dict[tuple[str, int], object] = {}
     for definition in semantics:
         key = (definition.semantics_id, definition.revision)
-        if key in published and published[key] != definition:
+        if key in published:
+            # EXACTLY ONE, whether or not the copies agree. The rule read
+            # "contradictory duplicates are refused", which leaves a citation
+            # resolving to a SET that happens to have one member — and the next
+            # edit to either copy turns that into the contradiction this check was
+            # written for, silently, because both copies were already accepted.
             raise RegistryInvalid(
-                f"two different semantics definitions for {key!r}; a record citing "
-                "it would be interpreted differently depending on which is read")
+                f"semantics {key!r} is defined more than once; a citation must "
+                "resolve to exactly one definition, and identical copies are how "
+                "two definitions become different ones later")
         published[key] = definition
 
     for row in evidence:
@@ -312,7 +318,7 @@ def _refuse_unresolvable_records(vocabulary, evidence, operation_records, semant
                 f"evidence row {row.family}/{row.action} names an action the "
                 f"{row.family!r} vocabulary does not recognise")
 
-    seen: set[str] = set()
+    seen: set[tuple] = set()
     for record in operation_records:
         if record.family not in families:
             raise RegistryInvalid(
@@ -420,16 +426,26 @@ def _refuse_unresolvable_records(vocabulary, evidence, operation_records, semant
             raise RegistryInvalid(
                 f"operation record {record.contract_ref} is bound to one account "
                 "while its capture was taken in another")
-        # Keyed on the CONTRACT REFERENCE alone. Including family and action let
-        # one reference occur under several actions, so a single contract could
-        # carry conflicting verdicts and the reference would no longer identify
-        # anything.
-        if record.contract_ref in seen:
+        # Keyed on the reference AND THE ACCOUNT. Family and action are excluded
+        # deliberately: including them let one reference occur under several
+        # actions, so a single contract could carry conflicting verdicts and the
+        # reference would no longer identify anything.
+        #
+        # The account belongs in the key because the reference is ACCOUNT-
+        # INDEPENDENT by construction — that independence is what lets a
+        # relocatable artifact carry one — while a record is account-BOUND. Keying
+        # on the reference alone therefore made one abstract contract expressible
+        # for exactly one account, so the two-account differential the plan asks
+        # for could not be packaged at all: the second record was refused purely
+        # for agreeing with the first about which contract it implements, which is
+        # the one thing both records are supposed to agree about.
+        _identity = (record.contract_ref, record.account_scope_hash)
+        if _identity in seen:
             raise RegistryInvalid(
                 f"contract reference {record.contract_ref!r} appears on more than "
                 "one operation record; a reference that identifies several records "
                 "identifies none of them")
-        seen.add(record.contract_ref)
+        seen.add(_identity)
 
 
 @lru_cache(maxsize=1)

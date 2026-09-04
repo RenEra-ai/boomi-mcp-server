@@ -60,7 +60,25 @@ CANDIDATE_AUTHORITY = "non_authoritative_candidate"
 
 
 def _candidate(record: Any) -> Dict[str, Any]:
-    """Project ONE operation record into the closed candidate shape."""
+    """Project ONE operation record into the closed candidate shape.
+
+    The reference is graded by the ONE shared grammar on the way out. This
+    surface SERVES a reference to a caller who will author it back, so a
+    malformed one here becomes a request that is refused at the door for a reason
+    the caller cannot connect to what they were handed. The registry already
+    refuses such a record on load, which makes this a belt on a brace — and that
+    is the point: the acceptance criteria name this as one of the surfaces the
+    single validator is consumed by, so it consumes it rather than relying on
+    another layer having done so.
+    """
+    from .ids import is_authored_contract_ref
+
+    if not is_authored_contract_ref(record.contract_ref):
+        raise ValueError(
+            f"operation record names {record.contract_ref!r}, which is not a "
+            "well-formed contract reference; serving it would hand a caller a "
+            "reference their own authoring surface refuses"
+        )
     coverage = getattr(record, "route_coverage", None)
     return {
         "authority": CANDIDATE_AUTHORITY,
@@ -172,6 +190,20 @@ def idempotency_contract_candidates(
         connection_moved = (
             record.connection_identity.version != identities["connection"]["version"]
         )
+        # THE CONFIGURATION, when the reader could supply it. A version advances
+        # on any update including ones the digest excludes, so equal versions do
+        # not mean equal configuration — and a candidate was returned for a
+        # component whose configuration had moved underneath it. Compared only
+        # when present: a reader that cannot digest a component has not disagreed
+        # with the record, and treating silence as disagreement would empty the
+        # candidate list for every component this build cannot project.
+        for label, recorded in (("operation", record.operation_identity),
+                                ("connection", record.connection_identity)):
+            live_digest = identities[label].get("config_digest")
+            if live_digest is not None and live_digest != recorded.config_digest:
+                operation_moved = operation_moved or label == "operation"
+                connection_moved = connection_moved or label == "connection"
+
         if operation_moved or connection_moved:
             # A Boomi component version advances on ANY update, including one
             # confined to fields the configuration digest deliberately excludes —

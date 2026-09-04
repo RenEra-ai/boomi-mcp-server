@@ -503,7 +503,29 @@ def query_components_action(
                 version = component.get("version")
                 if version is None:
                     return None
-                return {"component_id": component_id, "version": version}
+                # THE CONFIGURATION DIGEST TOO, when the fetched XML allows one.
+                # Id and version alone let a candidate be returned for components
+                # whose CONFIGURATION had moved — a version advances on any
+                # update, so equal versions do not mean equal configuration, and
+                # the matcher had nothing else to compare. Absent rather than
+                # invented when the component cannot be digested: the matcher
+                # treats a missing digest as "not compared", never as "agreed".
+                identity = {"component_id": component_id, "version": version}
+                xml = component.get("xml") or fetched.get("xml")
+                kind = ("operation" if str(component.get("type", "")).strip()
+                        == "connector-action" else "connection")
+                if isinstance(xml, str) and xml.strip():
+                    try:
+                        from ....connector_replay.digests import (
+                            component_config_digest_v1,
+                        )
+
+                        identity["config_digest"] = component_config_digest_v1(
+                            xml, kind=kind
+                        )
+                    except Exception:      # noqa: BLE001 — absent, never guessed
+                        pass
+                return identity
 
             # THE REGISTRY'S REFUSAL KEEPS ITS CODE. `RegistryInvalid` carries a
             # registered error code, and the generic handler below serves only a

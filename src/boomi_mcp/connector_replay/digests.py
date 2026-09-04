@@ -151,6 +151,31 @@ def _parse(xml: str, refusal: type[DigestRefused], what: str) -> ET.Element:
         raise refusal(f"{what}: not well-formed XML ({exc})") from exc
 
 
+def _source_namespace_bindings(xml: str) -> dict:
+    """The prefix-to-URI bindings the source document declares.
+
+    `fromstring` resolves prefixes and then FORGETS them: a parsed element knows
+    it is `{urn:x}field`, not that the document spelled the prefix `q`. That loss
+    is invisible until a projection asks for QName-aware canonicalization, which
+    reads a prefix out of an element's TEXT and needs the binding still in scope
+    — and then raises a bare ValueError naming a prefix nobody declared, because
+    the projected tree was built fresh without them.
+
+    Collected by a second pass over the same bytes, which is cheap and cannot
+    disturb the first: `start-ns` events carry exactly the pairs that were lost.
+    """
+    import io
+
+    bindings: dict = {}
+    try:
+        for event, payload in ET.iterparse(io.StringIO(xml), events=("start-ns",)):
+            prefix, uri = payload
+            bindings.setdefault(prefix, uri)
+    except ET.ParseError:                 # already refused by `_parse`
+        return {}
+    return bindings
+
+
 def _field_values(
     root: ET.Element,
     wanted: frozenset[str],
@@ -661,17 +686,39 @@ def component_config_digest_v1(component_xml: str, kind: str, family: str = "res
     _refuse_unknown_fields(root, spec, kind)
     _refuse_unknown_attributes(root, spec, kind)
     projected = _project_tree(root, spec, kind)
+    # THE SOURCE'S NAMESPACE BINDINGS TRAVEL WITH THE PROJECTION when the spec
+    # asks for QName awareness. Without them the canonicalizer reads a prefix out
+    # of a projected element's text, finds nothing declaring it, and raises a bare
+    # ValueError — not this family's refusal, and not a digest. The bindings are
+    # only declared when they are NEEDED: adding them unconditionally would put
+    # unused declarations on every projected root and move every existing digest.
+    qname_tags = tuple(spec.get("qname_aware_tags", ())) or None
+    qname_attrs = tuple(spec.get("qname_aware_attrs", ())) or None
+    serialized = ET.tostring(projected, encoding="unicode")
     # The SPECIFIED canonicalization, with its options pinned. Two components that
     # differ only in prefix spelling or in insignificant whitespace must digest the
     # same; two that differ in child order or namespace must not.
-    canonical = ET.canonicalize(
-        ET.tostring(projected, encoding="unicode"),
-        with_comments=False,
-        rewrite_prefixes=True,
-        strip_text=False,
-        qname_aware_tags=tuple(spec.get("qname_aware_tags", ())) or None,
-        qname_aware_attrs=tuple(spec.get("qname_aware_attrs", ())) or None,
-    )
+    try:
+        canonical = ET.canonicalize(
+            serialized,
+            with_comments=False,
+            rewrite_prefixes=True,
+            strip_text=False,
+            qname_aware_tags=qname_tags,
+            qname_aware_attrs=qname_attrs,
+        )
+    except (ValueError, IndexError) as uncanonicalisable:
+        # BOTH, and neither is hypothetical. A QName value whose prefix the
+        # projected tree does not declare raises ValueError; the pinned
+        # canonicalizer also raises IndexError from its own internals on real
+        # component shapes once QName awareness is switched on. Letting either out
+        # of a digest function gives the caller something it cannot tell apart
+        # from a bug, so both become this family's named refusal. Activation is
+        # additionally refused at registry load, so production cannot reach here.
+        raise ConfigDigestRefused(
+            f"{kind} component could not be canonicalised under the projection's "
+            f"pinned options: {uncanonicalisable!r}"
+        ) from uncanonicalisable
     return "ComponentConfigDigestV1:" + hashlib.sha256(
         CONFIG_DIGEST_DOMAIN + canonical.encode("utf-8")
     ).hexdigest()

@@ -390,10 +390,12 @@ def test_recognised_actions_union_across_mappings():
         "vocabulary": [
             {"platform_connector_type": "acct-a-rest", "family": "rest",
              "action_source": "operation_component",
-             "recognised_actions": ["GET"], "safe_actions": ["GET"]},
+             "recognised_actions": ["GET"], "safe_actions": ["GET"],
+             "action_ids": [["GET", "get"]]},
             {"platform_connector_type": "acct-b-rest", "family": "rest",
              "action_source": "operation_component",
-             "recognised_actions": ["PATCH"], "safe_actions": []},
+             "recognised_actions": ["PATCH"], "safe_actions": [],
+             "action_ids": [["PATCH", "patch"]]},
         ],
     }
     registry = _parse(payload)

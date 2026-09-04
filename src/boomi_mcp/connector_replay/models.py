@@ -214,7 +214,17 @@ class ConnectorVocabularyMappingV1(ReplayRegistryModel):
         does not recognise, which is a mapping to nothing.
         """
         if not self.action_ids:
-            return self
+            # AN EMPTY MAP IS NOT A DEFAULT, it is a vocabulary that recognises
+            # actions it cannot name. The registry derives every contract
+            # reference from these identifiers, so a mapping-free entry cannot
+            # produce a reference for any action it claims to recognise — and the
+            # totality rule was returning early on exactly that state, which made
+            # "total" mean "total over whatever happens to be listed".
+            raise ValueError(
+                "the vocabulary recognises "
+                f"{sorted(self.recognised_actions)} and maps none of them to a "
+                "grammar-safe identifier, so no contract reference can be derived "
+                "for any of them")
         mapped = {raw for raw, _ in self.action_ids}
         recognised = set(self.recognised_actions)
         if mapped != recognised:
@@ -565,8 +575,37 @@ class ComponentProjectionAllowlistV1(ReplayRegistryModel):
     excluded_scope_attributes: tuple[str, ...] = ()
     #: Names whose VALUES are qualified names, so canonicalisation must resolve
     #: their prefixes rather than compare them textually.
+    #: BOTH MUST BE EMPTY, and the model refuses a registry that sets them.
+    #:
+    #: The plan asks for QName-aware canonicalisation, and these fields are how a
+    #: registry would ask for it. Measured on the pinned canonicaliser: switching
+    #: it on makes a real component raise from inside the standard library's own
+    #: canonicalisation — an IndexError out of its whitespace bookkeeping — and a
+    #: QName value whose prefix the projected tree does not carry raises a bare
+    #: ValueError, because building a fresh tree drops the source's prefix
+    #: bindings. Neither is a digest, and a digest function that raises something
+    #: its callers cannot classify is worse than one that refuses.
+    #:
+    #: So the capability is REFUSED rather than half-offered: a registry that
+    #: enables it is rejected at load, where the whole vocabulary is in view,
+    #: instead of failing later at one component. The digest path also converts
+    #: both raises into this family's refusal, so nothing raw escapes either way.
+    #: This is a recorded gap against the plan, not a closed one — see the ledger.
     qname_aware_tags: tuple[str, ...] = ()
     qname_aware_attrs: tuple[str, ...] = ()
+
+    @model_validator(mode="after")
+    def _qname_awareness_is_not_deliverable(self) -> "ComponentProjectionAllowlistV1":
+        enabled = tuple(self.qname_aware_tags) + tuple(self.qname_aware_attrs)
+        if enabled:
+            raise ValueError(
+                "QName-aware canonicalisation is requested by this projection "
+                f"({sorted(set(enabled))}) and is not deliverable with the pinned "
+                "canonicaliser: enabling it raises from inside the canonicaliser "
+                "itself on real component shapes. The projection is refused rather "
+                "than computing a digest under an option that does not work"
+            )
+        return self
 
 
 class ClosedCaptureObservationsV1(ReplayRegistryModel):

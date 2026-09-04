@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 11541, "minimum_collected": 11541, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 11545, "minimum_collected": 11545, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -11587,3 +11587,7 @@
 {"kind": "test", "id": "pytest-011586", "node_id": "tests/test_connector_replay_review_round3.py::test_the_affected_sha_guard_is_not_vacuous", "state": "tombstone"}
 {"kind": "test", "id": "pytest-011587", "node_id": "tests/test_connector_replay_review_round3.py::test_the_affected_sha_checker_is_not_vacuous", "state": "active"}
 {"kind": "test", "id": "pytest-011588", "node_id": "tests/test_connector_replay_review_round3.py::test_every_declared_revision_is_excluded_by_the_declaring_authority", "state": "active"}
+{"kind": "test", "id": "pytest-011589", "node_id": "tests/test_connector_replay_report.py::test_the_report_parser_refuses_a_row_it_cannot_read", "state": "active"}
+{"kind": "test", "id": "pytest-011590", "node_id": "tests/test_connector_replay_report.py::test_the_served_report_states_what_the_registry_holds", "state": "active"}
+{"kind": "test", "id": "pytest-011591", "node_id": "tests/test_issue_155_contract_id_grammar.py::test_exactly_one_place_mints_a_grant", "state": "active"}
+{"kind": "test", "id": "pytest-011592", "node_id": "tests/test_issue_155_discovery.py::test_a_candidate_is_not_offered_when_the_live_configuration_has_moved", "state": "active"}
