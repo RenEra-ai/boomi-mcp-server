@@ -2573,3 +2573,55 @@ def test_the_index_row_carries_the_validated_verdict_not_the_raw_one(tmp_path):
     (run / "review.md").write_text("findings\n\nVERDICT: BANANA\n")
     assert module.architect_verdict_from_artifact(
         run, {"parsedVerdict": "UNCLEAR"}) is None
+
+
+def test_the_archiver_stages_what_its_manifest_names(tmp_path):
+    """A write that creates a manifest/index mismatch must not leave it behind.
+
+    THE NON-VACUITY WITNESS for staging atomically. The archiver used to print a
+    NEXT line asking the caller to stage what it had just written, while its own
+    `SHA256SUMS` already NAMED those files — so any caller who read the line and
+    did something else left the checkout asserting evidence it did not carry, and a
+    fresh clone failed proving it. That is not hypothetical: it happened, and the
+    review that caught it is `CDX-155-r235-01`.
+
+    A warning that must be obeyed every time to hold an invariant is the invariant
+    unenforced. Here the writer that creates the inconsistency ends it in the same
+    step, and this asserts the files are in the INDEX rather than merely on disk.
+    """
+    import subprocess
+
+    repo = tmp_path / "repo"
+    (repo / "docs" / "architecture" / "evidence" / "issue-999").mkdir(parents=True)
+    (repo / "docs" / "architecture" / "evidence" / "issue-999" / "index.jsonl").write_text(
+        json.dumps({"generated_at": "x", "issue": 999, "schema_version": 1,
+                    "source_tip": "abc"}) + "\n")
+    for args in (["init", "-q"], ["config", "user.email", "t@t"],
+                 ["config", "user.name", "t"]):
+        subprocess.run(["git", "-C", str(repo), *args], check=True,
+                       capture_output=True)
+    (repo / "seed").write_text("seed\n")
+    subprocess.run(["git", "-C", str(repo), "add", "-A"], check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(repo), "commit", "-qm", "seed"], check=True,
+                   capture_output=True)
+
+    run = tmp_path / "run"
+    run.mkdir()
+    (run / "wave.log").write_text("wave_gate: ok\n")
+    (run / "summary.json").write_text('{"status": "completed", "verdict": "pass"}\n')
+    (run / "wave-sha").write_text("a" * 40 + "\n")
+
+    result, _root = _archive(tmp_path, run, kind="wave-gate",
+                             extra=("--wave-sha", "a" * 40, "--status", "completed"))
+    assert result.returncode == 0, result.stderr
+
+    # THE INDEX, not the worktree. `git status --porcelain` marks an unstaged new
+    # file `??`; a staged one is `A `. The manifest names these files, so anything
+    # other than staged is the state this test exists to refuse.
+    out = subprocess.run(["git", "-C", str(repo), "status", "--porcelain"],
+                         capture_output=True, text=True, check=True).stdout
+    untracked = [l for l in out.splitlines() if l.startswith("??")]
+    assert not untracked, f"the archiver left files its manifest names unstaged: {untracked}"
+    assert any(l.startswith("A ") and "evidence" in l for l in out.splitlines()), (
+        f"nothing under the evidence root was staged: {out!r}"
+    )

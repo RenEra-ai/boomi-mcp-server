@@ -1394,16 +1394,41 @@ def main() -> int:
               "The archive is as it was; fix the cause and run the same command "
               "again.", file=sys.stderr)
         return 1
-    print(f"archived {len(copied)} file(s) to {durable.relative_to(repo)}")
     for name in accepted:
         print(f"  ACCEPTED into the manifest, not produced by this round: {name}")
     print(f"  status={row['status']} reviewed_sha={row.get('reviewed_sha')}")
     print("  {0}; SHA256SUMS lists {1} files".format(
         "index row appended" if indexed else "recorded in round.json, NOT indexed "
         "(a wave-gate run has no collector attestation to index)", listed))
-    print(f"\nNEXT: git add {(root).relative_to(repo)} — the scanners compare "
-          f"SHA256SUMS against the GIT INDEX, so an unstaged file fails as "
-          f"listed-but-untracked.")
+    # STAGED HERE, not asked for. This printed a NEXT line telling the caller to
+    # stage what it had just written, and the archive's own manifest names those
+    # files — so the moment a caller read the line and did something else, the
+    # checkout asserted evidence it did not contain and a fresh clone failed
+    # proving it. A warning that must be obeyed every time to keep an invariant is
+    # the invariant unenforced; the writer that creates the inconsistency is the
+    # one that can end it, atomically, in the same step.
+    # ...where there IS an index. The archiver is also run against scratch
+    # directories that are not checkouts, and there the invariant does not exist:
+    # nothing compares a manifest to an index that is absent. Asked, not assumed —
+    # a failed `git add` inside a real repository is still a hard error.
+    inside = subprocess.run(
+        ["git", "-C", str(repo), "rev-parse", "--is-inside-work-tree"],
+        capture_output=True, text=True)
+    if inside.returncode == 0 and inside.stdout.strip() == "true":
+        staged = subprocess.run(
+            ["git", "-C", str(repo), "add", "--", str(root)],
+            capture_output=True, text=True)
+        if staged.returncode != 0:
+            print("archived, but STAGING FAILED — the manifest now names files the "
+                  f"index does not carry: {staged.stderr.strip()}\n"
+                  f"Run: git add {(root).relative_to(repo)}", file=sys.stderr)
+            return 1
+        note = (f" and STAGED {(root).relative_to(repo)} — the scanners compare "
+                "SHA256SUMS against the GIT INDEX, so the write and the staging "
+                "happen together or not at all")
+    else:
+        note = " (no git index here, so there is no manifest/index pair to keep)"
+    print(f"archived {len(copied)} file(s) to {durable.relative_to(repo)}{note}.")
     return 0
 
 

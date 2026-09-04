@@ -1364,9 +1364,9 @@ _UNROWED = {"DC-155-C": 2, "DC-155-I": 1}
 #: the reason. Frozen so the set cannot grow silently: a row that names a class is an
 #: instance of it unless it appears here.
 _NOT_AN_INSTANCE = {
-    "CDX-155-r234-02": "a BOOKKEEPING row correcting where an instance was FILED, "
-    "not a further occurrence of the mechanism — counting it would report a third "
-    "serialization collision the record does not have",
+    "CDX-155-r234-02a": "a BOOKKEEPING row correcting where an instance was FILED, "
+    "not a further occurrence — its own class cell now says so, so every "
+    "row-derived consumer agrees rather than only this one",
     "CDX-155-r233-01": "the SUPERSEDED original of a class reclassification — the "
     "one finding is counted at the revision, under the class it actually belongs to",
     "SELF-155-r126-01b": "a REVISION closing a critical row on live measurement — one "
