@@ -3033,7 +3033,28 @@ def _wave_ledger(*rows):
     return _CHECKPOINT_HEADER + "\n".join(rows) + "\n"
 
 
-def _archived_summary(directory, payload, verdict="pass"):
+#: THE SCOPE HALF OF A LOOP IDENTITY, read the same way on both sides.
+#:
+#: This billed only `slice ([A-F])`, so every issue-level loop was invisible to a
+#: rule written to police loop identity: its evaluations were never counted, no
+#: interval was ever owed, and deleting an issue-level checkpoint row left the
+#: audit green. The workflow's loop identity is "gate purpose/authority plus
+#: slice-or-wave scope" — the issue-level arc is a scope, not an absence of one.
+#:
+#: ONE extractor for the archive side and the ledger side. Billing a scope the row
+#: parser could not read would make its checkpoints unrecordable — a rule nothing
+#: can satisfy — so the two sides cannot be allowed to drift apart.
+def _loop_scope(text):
+    import re
+
+    if re.search(r"issue-level", text, re.I):
+        return "issue-level"
+    m = re.search(r"slice ([A-F])", text)
+    return m.group(1) if m else None
+
+
+def _archived_summary(directory, payload, verdict="pass",
+                      logical_loop="L4 (composite wave gate, slice B)"):
     """Write `summary.json` the way the archiver does — BOUND by its round record.
 
     The fixtures wrote a bare `summary.json` into a directory, which is precisely the
@@ -3060,6 +3081,9 @@ def _archived_summary(directory, payload, verdict="pass"):
         # directory. Taking it from the payload keeps the fixture's round and its
         # summary describing ONE run, which is what the identity check reads.
         "wave_sha": payload.get("wave_sha"),
+        # The loop this round belonged to. Scope is half of a loop identity, so a
+        # fixture that omits it is not modelling an archived round.
+        "logical_loop": logical_loop,
     }))
 
 
@@ -3147,9 +3171,22 @@ def _wave_evidence_violation(ledger_text, archive_dir):
         if record.get(field) != want:
             return (f"cited archive {named.group(1)} records {saying} "
                     f"{record.get(field)!r}, not {want!r}")
-    if record.get("durable_dir") not in (None, key.rsplit("/", 1)[0]):
+    # REQUIRED, not tolerated. Every one of the archived wave rounds carries this
+    # field, so accepting its absence bought compatibility with nothing and left a
+    # malformed record indistinguishable from a well-formed one.
+    if record.get("durable_dir") != key.rsplit("/", 1)[0]:
         return (f"cited archive {named.group(1)} carries a round record for "
                 f"{record.get('durable_dir')!r}")
+    # AND THE SAME LOOP. Scope is half of a loop identity, so a round archived under
+    # one scope is not evidence for a checkpoint recorded under another — an
+    # issue-level closure backed by a slice's wave run reads as current and is not.
+    # Both sides go through the SAME extractor, so neither can drift into a
+    # vocabulary the other cannot read.
+    row_scope = _loop_scope(latest)
+    round_scope = _loop_scope(str(record.get("logical_loop", "")))
+    if row_scope != round_scope:
+        return (f"cited archive {named.group(1)} records a {round_scope!r} round for "
+                f"a {row_scope!r} checkpoint")
     if str(record.get("wave_sha") or "") != str(attested.get("wave_sha") or ""):
         return (f"cited archive {named.group(1)} records a round on "
                 f"{str(record.get('wave_sha'))[:7]!r} beside a summary for "
@@ -4288,23 +4325,6 @@ def _missing_checkpoint_violation(ledger_text, index_text, slice_letter=None,
     import re
 
     slices, billed = set(), {}
-
-    #: THE SCOPE HALF OF A LOOP IDENTITY, read the same way on both sides.
-    #:
-    #: This billed only `slice ([A-F])`, so every issue-level loop was invisible to a
-    #: rule written to police loop identity: its evaluations were never counted, no
-    #: interval was ever owed, and deleting an issue-level checkpoint row left the
-    #: audit green. The workflow's loop identity is "gate purpose/authority plus
-    #: slice-or-wave scope" — the issue-level arc is a scope, not an absence of one.
-    #:
-    #: ONE extractor for the archive side and the ledger side. Billing a scope the row
-    #: parser could not read would make its checkpoints unrecordable — a rule nothing
-    #: can satisfy — so the two sides cannot be allowed to drift apart.
-    def _loop_scope(text):
-        if re.search(r"issue-level", text, re.I):
-            return "issue-level"
-        m = re.search(r"slice ([A-F])", text)
-        return m.group(1) if m else None
 
     def note(loop_text):
         tag = re.match(r"(L\d)", loop_text)
@@ -7182,7 +7202,8 @@ def test_a_wave_summary_nothing_produced_is_not_evidence(tmp_path):
     digest = hashlib.sha256(body.encode()).hexdigest()
     bound = {"files": {"wave-gate/ok/summary.json": digest}, "verdict": "pass",
              "status": "completed", "durable_dir": "wave-gate/ok",
-             "wave_sha": _PASSING_WAVE["wave_sha"]}
+             "wave_sha": _PASSING_WAVE["wave_sha"],
+             "logical_loop": "L4 (composite wave gate, slice B)"}
 
     # No record at all — the directory exists and the summary reads as a pass.
     assert _wave_evidence_violation(row, archive_with(
@@ -7308,33 +7329,71 @@ def _tier_derivation_offenders(ledger_text):
     refuted = re.compile(
         r"\bseverity-refuted\b|\bfinding-refuted\b|\bseverity refutation\b", re.I)
 
-    #: FINDING rows only. The defect-class table shares the id shape but is a
-    #: different table with different columns, and reading it here would grade a
-    #: class description as though it were a severity derivation.
-    finding_id = re.compile(r"^\| ((?:QA|CDX|ARCH|SELF|EVAL)-155-[A-Za-z0-9-]+) \|")
+    # FINDING rows are located by MEMBERSHIP in the finding table, not by a list of
+    # id prefixes. The prefix list already missed one: `WAVE-155-r1-01` is a real row
+    # of this record and no prefix admitted it, so a wave-gate finding could carry any
+    # tier at all and this rule would never see it — the enumeration defect, inside
+    # the guard written to end an enumeration defect. Membership also excludes the
+    # defect-class table for free, which the prefix list needed a separate rule for.
+    lines = _unfenced_lines(ledger_text)
+    header = lambda l: l.startswith("| ID | Source gate")
+    if not any(header(l) for l in lines):
+        return []
+    table = _table_rows(lines, header)
+
+    # COLUMN POSITIONS ARE DERIVED FROM THE HEADER, not counted by hand. A row whose
+    # free text carries the separator shifts every later index, and this record has
+    # rows with one column fewer; a fixed index reads a different cell for those and
+    # grades the wrong text. Rows the header cannot place are handled below rather
+    # than skipped, because skipping is how a malformed row escapes the rule.
+    head = [c.strip() for c in next(l for l in lines if header(l)).split(" | ")]
+    where = {name: i for i, c in enumerate(head)
+             for name in ("label", "tier", "disposition")
+             if (name == "label" and c.startswith("Original label"))
+             or (name == "tier" and c.startswith("Derived tier"))
+             or (name == "disposition" and c.startswith("Disposition"))}
+    assert len(where) == 3, head
 
     rows = {}
-    for line in _unfenced_lines(ledger_text):
-        m = finding_id.match(line)
+    for line in table:
+        m = re.match(r"^\| ([A-Z]+-155-[A-Za-z0-9-]+) \|", line)
         if not m:
             continue
-        cells = [c.strip() for c in line.split(" | ")]
-        if len(cells) < 9:
-            continue
-        rows[m.group(1)] = cells
+        rows[m.group(1)] = [c.strip() for c in line.split(" | ")]
 
-    # THE EFFECTIVE ROW of each finding: `X`, `Xa`, `Xb` … are one finding, and the
-    # last suffix present is the one the record stands behind.
-    effective = {}
-    for rid in rows:
-        base = re.sub(r"(?<=\d)[a-z]+$", "", rid)
-        if len(rid) > len(effective.get(base, "")):
-            effective[base] = rid
+    # THE EFFECTIVE ROW comes from the DECLARED supersession chain, not from the
+    # shape of the id. Ranking by suffix length let `a` and `b` tie, so whichever
+    # appeared first in the file won: `ARCH-155-r10-03a` was selected over the `b`
+    # that supersedes it and moves its tier, and `CDX-155-r197-09a` over `09d`. The
+    # record publishes which row supersedes which; reading the id instead was a
+    # second model of a fact the document already states.
+    superseded = set()
+    for line in lines:
+        if not line.startswith("**Supersession map**"):
+            continue
+        # The map writes each pair inside ONE backtick span — `newer → older` — not a
+        # span per id.
+        for _newer, older in re.findall(
+                r"`([A-Z]+-155-[A-Za-z0-9-]+) → ([A-Z]+-155-[A-Za-z0-9-]+)`", line):
+            superseded.add(older)
 
     offenders = []
-    for rid in sorted(effective.values()):
+    for rid in sorted(rows):
+        if rid in superseded:
+            continue
         cells = rows[rid]
-        label, tier, disposition = cells[3], cells[6], cells[-1]
+        # The header's positions when the row has the header's shape; otherwise the
+        # row is placed by content, and a severity label standing alone in any cell
+        # is enough to bring the row under the rule.
+        if len(cells) == len(head):
+            label, tier, disposition = (cells[where["label"]], cells[where["tier"]],
+                                        cells[where["disposition"]])
+        else:
+            standalone = [c for c in cells
+                          if re.fullmatch(r"(P0|P1|Critical|High)", c, re.I)]
+            if not standalone:
+                continue
+            label, tier, disposition = standalone[0], " ".join(cells), " ".join(cells)
         if not critical_labels.search(label):
             continue
         if refuted.search(disposition) or refuted.search(tier):
@@ -7374,40 +7433,77 @@ def test_the_tier_derivation_can_actually_fail():
     """THE NON-VACUITY WITNESS: the rule above must refuse the shape it exists for.
 
     A guard over a record that already satisfies it proves nothing — this file has
-    recorded that failure repeatedly — so the exact historical shape is constructed
-    here and must be refused, together with each of the three ways a row legitimately
-    carries a lesser tier.
+    recorded that failure repeatedly — so the historical shapes are constructed here
+    and must be refused, together with every way a row legitimately carries a lesser
+    tier. The later arms pin the two holes a review found in the first version of this
+    rule: an id-shaped supersession ranking that could not order `a` against `b`, and
+    a hand-listed set of id prefixes that omitted a prefix the record actually uses.
     """
-    def ledger(label, tier, disposition):
-        return (
-            "| ID | Source | Verbatim summary | Original label | Blocking class | "
-            "Defect class | Derived tier (anchor inline) | SHA/delta | Disposition |\n"
-            "| --- | --- | --- | --- | --- | --- | --- | --- | --- |\n"
-            f"| CDX-155-r1-01 | gate | s | {label} | machine-served schemas/contracts | "
-            f"DC-155-C | {tier} | `abc1234` | {disposition} |\n"
-        )
+    HEAD = (
+        "| ID | Source gate + run dir + attestation | Verbatim summary | "
+        "Original label | Blocking class | Defect class | "
+        "Derived tier (anchor inline) | SHA/delta | Disposition |\n"
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- |\n"
+    )
+
+    def row(rid, label, tier, disposition):
+        return (f"| {rid} | gate | s | {label} | machine-served schemas/contracts | "
+                f"DC-155-C | {tier} | `abc1234` | {disposition} |")
+
+    def ledger(*rows, supersessions=()):
+        body = HEAD + "\n".join(rows) + "\n"
+        if supersessions:
+            body += "\n**Supersession map** — " + ", ".join(
+                f"`{n} → {o}`" for n, o in supersessions) + "\n"
+        return body
+
+    def offenders(*args, **kw):
+        return [r for r, _, _ in _tier_derivation_offenders(ledger(*args, **kw))]
 
     # THE HISTORICAL SHAPE, verbatim in structure: a P1 label, a non-critical class,
     # and a tier that read the class as though it were the whole rule.
-    offenders = _tier_derivation_offenders(ledger(
-        "P1", "standard — anchor: source gate labelled it P1, not P0/P1/Critical/High",
-        "fixed"))
-    assert [r for r, _, _ in offenders] == ["CDX-155-r1-01"], offenders
+    assert offenders(row(
+        "CDX-155-r1-01", "P1",
+        "standard — anchor: source gate labelled it P1, not P0/P1/Critical/High",
+        "fixed")) == ["CDX-155-r1-01"]
 
     for label in ("P0", "P1", "Critical", "High"):
-        assert _tier_derivation_offenders(ledger(label, "standard", "fixed")), label
+        assert offenders(row("CDX-155-r1-01", label, "standard", "fixed")), label
 
     # The three legitimate shapes, none of which may be reported.
-    assert not _tier_derivation_offenders(ledger("P1", "**critical** — anchor", "fixed"))
-    assert not _tier_derivation_offenders(ledger("P2", "standard — anchor", "fixed"))
-    assert not _tier_derivation_offenders(ledger(
-        "P1", "standard — lowered on a documented severity refutation",
+    assert not offenders(row("CDX-155-r1-01", "P1", "**critical** — anchor", "fixed"))
+    assert not offenders(row("CDX-155-r1-01", "P2", "standard — anchor", "fixed"))
+    assert not offenders(row(
+        "CDX-155-r1-01", "P1", "standard — lowered on a documented severity refutation",
         "severity-refuted: the reviewer's severity premise was measured false"))
 
-    # AND A FROZEN ORIGINAL IS NOT AN OFFENDER once its revision corrects the tier —
-    # the record is append-only, so the old cell stays and the new one governs.
-    both = (ledger("P1", "standard — anchor", "fixed").rstrip("\n") + "\n"
-            + "| CDX-155-r1-01a | revision | (original retained) s | P1 | "
-              "machine-served schemas/contracts | DC-155-C | **critical** — corrected | "
-              "`abc1234` | fixed |\n")
-    assert not _tier_derivation_offenders(both), _tier_derivation_offenders(both)
+    # SUPERSESSION IS READ FROM THE MAP. `a` and `b` are the same length, so an
+    # id-shaped ranking cannot order them and took whichever came first: here the
+    # standing `b` corrects the tier and the superseded `a` does not, and reading the
+    # ids instead of the map reports the row the record has already withdrawn.
+    chain = (row("CDX-155-r1-01", "P1", "standard — original", "fixed"),
+             row("CDX-155-r1-01a", "P1", "standard — first revision", "fixed"),
+             row("CDX-155-r1-01b", "P1", "**critical** — corrected", "fixed"))
+    superseded = (("CDX-155-r1-01b", "CDX-155-r1-01a"),
+                  ("CDX-155-r1-01a", "CDX-155-r1-01"))
+    assert not offenders(*chain, supersessions=superseded)
+    # ...and the same chain with the STANDING row uncorrected is still caught, so the
+    # map cannot be used to excuse a row rather than to locate it.
+    broken = chain[:2] + (row("CDX-155-r1-01b", "P1", "standard — still wrong", "fixed"),)
+    assert offenders(*broken, supersessions=superseded) == ["CDX-155-r1-01b"]
+
+    # EVERY PREFIX THE RECORD USES, because membership decides and no list does. The
+    # prefix list that this replaced admitted five and the record already had six.
+    for prefix in ("QA", "CDX", "ARCH", "SELF", "EVAL", "WAVE"):
+        rid = f"{prefix}-155-r1-01"
+        assert offenders(row(rid, "P1", "standard", "fixed")) == [rid], prefix
+
+    # A tier nobody can parse is an offence, not an exemption.
+    assert offenders(row("CDX-155-r1-01", "P1", "see the note below", "fixed"))
+
+    # And the defect-class table is not graded as though it were a severity cell.
+    assert not _tier_derivation_offenders(
+        "| Class | Mechanism | Authority | Instances | Rule |\n"
+        "| --- | --- | --- | --- | --- |\n"
+        "| DC-155-C | a hand-listed enumeration | the annotations | 2 (`CDX-155-r1-01`)"
+        " | High confidence, Critical to fix |\n")

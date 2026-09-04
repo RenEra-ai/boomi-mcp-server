@@ -1,0 +1,13 @@
+{
+ "collector": "wave_gate",
+ "durable_dir": "wave-gate/wave155.YnlEOL",
+ "files": {
+  "wave-gate/wave155.YnlEOL/summary.json": "d7e62f5c9e2b05b28a8b6b27b8c8ef42d12d45e31d244771288b5c7bae89cdc7",
+  "wave-gate/wave155.YnlEOL/wave.log": "2400696a15357f3b4e3f38dd39d7412e8fc9316a5ccbb2f6a8bac695d0d20f85"
+ },
+ "logical_loop": "L4 (composite wave gate, issue-level)",
+ "source_run_dir": "/tmp/wave155.YnlEOL",
+ "status": "completed",
+ "verdict": "pass",
+ "wave_sha": "080e28fa08608071de0bb70675ae5739ce4fcaf3"
+}
