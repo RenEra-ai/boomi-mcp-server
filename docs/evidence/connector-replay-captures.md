@@ -32,3 +32,16 @@ the safe direction: a registry that failed to load, or loaded empty, denies.
 | contract reference | family | action | semantics | revision |
 | --- | --- | --- | --- | --- |
 | `$ref:icv1:rest:patch:resource_identity_upsert_static_route_same_effect:1` | rest | PATCH | resource_identity_upsert_static_route_same_effect | 1 |
+
+## Contract key semantics
+
+| semantics | revision | mechanism | key scope | duplicate guarantee |
+| --- | --- | --- | --- | --- |
+| `resource_identity_upsert_static_route_same_effect` | 1 | resource_identity_upsert | static_route | same_effect |
+
+## Component projection allowlists
+
+| family | component kind | projection | included | excluded |
+| --- | --- | --- | --- | --- |
+| rest | `connection` | v4 | 19 | 36 |
+| rest | `operation` | v4 | 30 | 1 |

@@ -134,3 +134,75 @@ def test_the_report_parser_refuses_a_row_it_cannot_read():
         parse("## Operation contract records\n\n| a | b |\n")
     with pytest.raises(ValueError, match="not an integer"):
         parse("## Operation contract records\n\n| `r` | rest | GET | sem | many |\n")
+
+
+def test_the_report_publishes_the_terms_its_citations_name():
+    """Every collection the registry holds is stated, not just the ones cited.
+
+    `ARCH-155-r8-08` recorded that the tracked report rendered neither the key
+    semantics definitions nor the projection allowlists. Both are the TERMS of
+    claims the report already made: an operation record cites a semantics id and
+    revision, and a configuration digest decides "unchanged" over a closed
+    projection. Publishing the citation while withholding the definition asked a
+    reader to trust a contract whose text was not served.
+
+    Derived from the registry rather than pinned to strings, so a collection that
+    grows a member is a report that must state it.
+    """
+    from boomi_mcp.connector_replay.registry import load_registry
+    from boomi_mcp.connector_replay.report import parse, render
+
+    reg = load_registry()
+    read = parse(render(reg))
+
+    assert len(read["semantics_definitions"]) == len(reg.semantics_definitions)
+    for spec in reg.semantics_definitions:
+        served = [r for r in read["semantics_definitions"]
+                  if r["semantics_id"] == spec.semantics_id
+                  and r["revision"] == spec.revision]
+        assert len(served) == 1, f"{spec.semantics_id} is not served exactly once"
+        # THE TERMS, each one. A row naming the definition and omitting what it
+        # means would satisfy a count and publish nothing a reader can act on.
+        assert served[0]["mechanism"] == spec.mechanism.value
+        assert served[0]["key_scope"] == spec.key_scope.value
+        assert served[0]["duplicate_guarantee"] == spec.duplicate_guarantee.value
+
+    assert len(read["projection_allowlists"]) == len(reg.projection_allowlists)
+    for spec in reg.projection_allowlists:
+        served = [r for r in read["projection_allowlists"]
+                  if r["family"] == spec.family
+                  and r["component_kind"] == spec.component_kind
+                  and r["projection_version"] == spec.projection_version]
+        assert len(served) == 1, f"{spec.component_kind} is not served exactly once"
+        # The WIDTH is derived from the projection's own members, so a projection
+        # that gains or loses a field changes the served text. A hand-written
+        # number here would state a width the projection had at some past moment.
+        assert served[0]["included"] == (
+            len(spec.included_attributes) + len(spec.included_value_fields)
+            + len(spec.included_property_fields) + len(spec.included_elements)
+            + len(spec.included_scope_attributes))
+        assert served[0]["excluded"] == (
+            len(spec.excluded_fields) + len(spec.excluded_scope_attributes))
+
+
+def test_a_report_missing_the_new_sections_is_refused():
+    """THE NON-VACUITY WITNESS: the parser must refuse what it used to accept.
+
+    Before this change a report with no semantics and no projection section was a
+    valid report — which is exactly how the omission survived. Each heading is
+    removed in turn from a rendered report and the parse must fail.
+    """
+    import pytest
+
+    from boomi_mcp.connector_replay.report import parse, render
+
+    text = render()
+    for heading in ("Contract key semantics", "Component projection allowlists"):
+        stripped, dropping = [], False
+        for line in text.splitlines():
+            if line.startswith("## "):
+                dropping = line == f"## {heading}"
+            if not dropping:
+                stripped.append(line)
+        with pytest.raises(ValueError):
+            parse("\n".join(stripped))

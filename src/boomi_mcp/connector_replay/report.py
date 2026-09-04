@@ -97,6 +97,63 @@ def render(registry: ReplayRegistry | None = None) -> str:
             "can authorise a retry."
         )
 
+    # THE KEY SEMANTICS EACH CONTRACT CITES. An operation record names a
+    # semantics id and a revision; without the definitions a reader is told
+    # which contract applies and not what it MEANS — the mechanism, the scope a
+    # key is unique within, and what a duplicate is guaranteed to do. Those are
+    # the terms on which a retry is safe, so publishing the citation without the
+    # definition published the reference and withheld the contract.
+    lines += ["", "## Contract key semantics", ""]
+    if reg.semantics_definitions:
+        lines += [
+            "| semantics | revision | mechanism | key scope | duplicate guarantee |",
+            "| --- | --- | --- | --- | --- |",
+        ]
+        for spec in sorted(reg.semantics_definitions,
+                           key=lambda s: (s.semantics_id, s.revision)):
+            lines.append(
+                f"| `{spec.semantics_id}` | {spec.revision} | {spec.mechanism.value} "
+                f"| {spec.key_scope.value} | {spec.duplicate_guarantee.value} |"
+            )
+    else:
+        lines.append(
+            "No key semantics are defined, so no contract reference can be resolved "
+            "to the terms it names."
+        )
+
+    # THE PROJECTION EACH DIGEST IS TAKEN OVER. A configuration digest decides
+    # whether the component a capture describes is still the component in front
+    # of us, and it is computed over a CLOSED projection: what that projection
+    # includes and excludes is the whole meaning of "unchanged". A report that
+    # published the digests' verdicts while withholding their domain asked the
+    # reader to trust a comparison whose terms were not stated.
+    lines += ["", "## Component projection allowlists", ""]
+    if reg.projection_allowlists:
+        lines += [
+            "| family | component kind | projection | included | excluded |",
+            "| --- | --- | --- | --- | --- |",
+        ]
+        for spec in sorted(reg.projection_allowlists,
+                           key=lambda s: (s.family, s.component_kind,
+                                          s.projection_version)):
+            # COUNTS, not the members. The members are long, unstable in width and
+            # already byte-pinned in the packaged registry; what a reader needs
+            # from the served text is that a projection is CLOSED and how wide it
+            # is. A count that moves is a projection that moved.
+            included = (len(spec.included_attributes) + len(spec.included_value_fields)
+                        + len(spec.included_property_fields) + len(spec.included_elements)
+                        + len(spec.included_scope_attributes))
+            excluded = len(spec.excluded_fields) + len(spec.excluded_scope_attributes)
+            lines.append(
+                f"| {spec.family} | `{spec.component_kind}` "
+                f"| v{spec.projection_version} | {included} | {excluded} |"
+            )
+    else:
+        lines.append(
+            "No projection allowlist is packaged, so no configuration digest can "
+            "state the domain it was taken over."
+        )
+
     lines.append("")
     return "\n".join(lines)
 
@@ -118,8 +175,10 @@ def parse(text: str) -> dict:
     import re
 
     required_headings = {"Connector vocabulary", "Observed actions",
-                         "Operation contract records"}
-    sections: dict = {"vocabulary": [], "observed_actions": [], "operation_records": []}
+                         "Operation contract records", "Contract key semantics",
+                         "Component projection allowlists"}
+    sections: dict = {"vocabulary": [], "observed_actions": [], "operation_records": [],
+                      "semantics_definitions": [], "projection_allowlists": []}
     seen_headings: set = set()
     current = None
     for line in text.splitlines():
@@ -179,6 +238,40 @@ def parse(text: str) -> dict:
                 "action": cells[2],
                 "semantics_id": cells[3],
                 "semantics_revision": int(cells[4]),
+            })
+        elif current == "Contract key semantics":
+            if cells[0] == "semantics":
+                continue
+            # EXACTLY FIVE, NAMED, for the same reason the observed-actions row is:
+            # the mechanism, the scope and the duplicate guarantee ARE the contract,
+            # so carrying them as an unread remainder would let the terms of a retry
+            # drift while a round-trip check kept passing.
+            if len(cells) != 5:
+                raise ValueError(f"semantics row is not five columns: {line!r}")
+            if not cells[1].isdigit():
+                raise ValueError(f"semantics revision is not an integer: {line!r}")
+            sections["semantics_definitions"].append({
+                "semantics_id": cells[0].strip("`"),
+                "revision": int(cells[1]),
+                "mechanism": cells[2],
+                "key_scope": cells[3],
+                "duplicate_guarantee": cells[4],
+            })
+        elif current == "Component projection allowlists":
+            if cells[0] == "family":
+                continue
+            if len(cells) != 5:
+                raise ValueError(f"projection row is not five columns: {line!r}")
+            if not cells[2].startswith("v") or not cells[2][1:].isdigit():
+                raise ValueError(f"projection version is not a version: {line!r}")
+            if not (cells[3].isdigit() and cells[4].isdigit()):
+                raise ValueError(f"projection width is not a count: {line!r}")
+            sections["projection_allowlists"].append({
+                "family": cells[0],
+                "component_kind": cells[1].strip("`"),
+                "projection_version": int(cells[2][1:]),
+                "included": int(cells[3]),
+                "excluded": int(cells[4]),
             })
     # EVERY REQUIRED HEADING, or the report is not one. Succeeding on an empty
     # document meant a missing section and an empty section were the same result,
