@@ -45,6 +45,7 @@ CANDIDATE_FIELDS: tuple = (
     "operation_config_digest",
     "connection_config_digest",
     "route_digests",
+    "route_capture_digest",
 )
 
 #: Everything a SUPERSEDED row may carry. Closed for the same reason
@@ -107,6 +108,18 @@ def _candidate(record: Any) -> Dict[str, Any]:
         "connection_config_digest": getattr(
             record.connection_identity, "config_digest", None),
         "route_digests": list(getattr(coverage, "route_digests", ()) or ()),
+        # THE SERVICE-WIDE VARIANT'S IDENTITY, which the route digests cannot
+        # carry: that variant deliberately has no enumerated route, so a
+        # dynamic-route candidate was served with an empty digest list and no
+        # replacement — the coverage it matched on, omitted. The capture DIGEST
+        # only, never the capture content: it identifies the observation without
+        # disclosing it.
+        "route_capture_digest": (
+            getattr(getattr(coverage, "service_wide_capture", None),
+                    "capture_digest", None)
+            or getattr(getattr(coverage, "service_wide_capture", None),
+                       "digest", None)
+        ),
         "operation_component_id": record.operation_identity.component_id,
         "operation_version": record.operation_identity.version,
         "connection_component_id": record.connection_identity.component_id,

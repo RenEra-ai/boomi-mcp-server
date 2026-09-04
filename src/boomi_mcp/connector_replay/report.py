@@ -148,12 +148,23 @@ def parse(text: str) -> dict:
             # actually observed, unread by the thing verifying the report.
             if cells[0] in ("family", "connector family"):
                 continue
-            if len(cells) < 3:
-                raise ValueError(f"observed-actions row is too narrow: {line!r}")
+            # EXACTLY SIX, NAMED. "At least three, remainder opaque" meant the
+            # side effect, the retry safety, the execution count and the capture
+            # could each be corrupted or truncated while a round-trip check still
+            # passed — the four fields that say what was actually observed,
+            # carried as an unread blob.
+            if len(cells) != 6:
+                raise ValueError(
+                    f"observed-actions row is not six columns: {line!r}")
+            if not cells[4].isdigit():
+                raise ValueError(f"execution count is not an integer: {line!r}")
             sections["observed_actions"].append({
                 "family": cells[0].strip("`"),
                 "action": cells[1].strip("`"),
-                "rest": [c.strip("`") for c in cells[2:]],
+                "side_effect": cells[2].strip("`"),
+                "retry_safety": cells[3].strip("`"),
+                "executions": int(cells[4]),
+                "capture": cells[5].strip("`"),
             })
         elif current == "Operation contract records":
             if cells[0] == "contract reference":

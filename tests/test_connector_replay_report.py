@@ -105,10 +105,19 @@ def test_the_served_report_states_what_the_registry_holds():
         for v in registry.vocabulary
     ), "the report and the registry disagree about the connector vocabulary"
 
-    # The evidence section too, which the parser used to skip entirely.
-    assert sorted((row["family"], row["action"]) for row in served["observed_actions"]) \
-        == sorted((row.family, row.action) for row in registry.evidence_records), \
-        "the report and the registry disagree about what was observed"
+    # The evidence section, ALL SIX fields. Comparing family and action alone let
+    # the side effect, the retry safety, the execution count and the capture be
+    # corrupted or truncated while this stayed green — and those four are what
+    # the section exists to state.
+    assert sorted(
+        (r["family"], r["action"], r["side_effect"], r["retry_safety"],
+         r["executions"], r["capture"])
+        for r in served["observed_actions"]
+    ) == sorted(
+        (r.family, r.action, r.side_effect.value, r.retry_safety.value,
+         len(r.execution_ids), r.capture_digest[:12])
+        for r in registry.evidence_records
+    ), "the report and the registry disagree about what was observed"
 
     # NON-VACUITY: every compared collection must be non-empty, or the equalities
     # above are pairs of empty lists agreeing with each other.

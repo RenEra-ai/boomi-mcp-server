@@ -516,7 +516,15 @@ def query_components_action(
                         == "connector-action" else "connection")
                 if isinstance(xml, str) and xml.strip():
                     try:
-                        from ....connector_replay.digests import (
+                        # THREE dots, not four: this module is
+                        # `boomi_mcp.categories.components.query_components`, so
+                        # four rises above the top-level package and raises
+                        # ImportError. The fail-closed handler below then turned
+                        # that into identity-unavailable for EVERY request — a
+                        # broken import wearing the disguise of a safe refusal,
+                        # which is the hazard of catching a broad exception around
+                        # an import.
+                        from ...connector_replay.digests import (
                             component_config_digest_v1,
                         )
 
@@ -557,8 +565,8 @@ def query_components_action(
                 # the connection, not a parameter a request may assert.
                 scope = None
                 try:
-                    from ....connector_replay.digests import account_scope_hash
-                    from ...integration_builder import _client_account_id
+                    from ...connector_replay.digests import account_scope_hash
+                    from ..integration_builder import _client_account_id
 
                     account_id = _client_account_id(boomi_client)
                     if account_id:

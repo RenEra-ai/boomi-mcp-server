@@ -1001,3 +1001,51 @@ def test_a_candidate_is_not_offered_when_the_live_configuration_has_moved():
         "a reader that could not digest the component was treated as disagreeing "
         "with it, which empties the list for every unprojectable component"
     )
+
+
+def test_the_public_action_returns_a_candidate_over_real_component_xml():
+    """The action driven end to end, which nothing did until it broke.
+
+    A wrong relative import — four dots where three reach the package — raised
+    ImportError inside a handler that converts any exception into
+    identity-unavailable, so EVERY public candidate request failed while every
+    focused test kept passing: they exercise the discovery function directly and
+    inject their own reader, so none of them imports what the action imports.
+
+    A fail-closed handler around an import is where a broken module hides as a
+    safe refusal, so this drives the action itself over real captured XML.
+    """
+    import pathlib
+    from unittest.mock import MagicMock, patch
+
+    from boomi_mcp.categories.components import query_components as qc
+    from boomi_mcp.connector_replay.registry import load_registry
+
+    record = load_registry().operation_records[0]
+    operation, connection = record.operation_identity, record.connection_identity
+    captures = (pathlib.Path(__file__).resolve().parents[1]
+                / "docs/architecture/evidence/issue-155/captures"
+                / "cap155-e9-patch-operation-record")
+    xml = {operation.component_id: (captures / "component_op_tgt.xml").read_text(),
+           connection.component_id: (captures / "component_connection.xml").read_text()}
+
+    def _fetch(_client, _profile, component_id, *_a, **_k):
+        is_operation = component_id == operation.component_id
+        return {"_success": True, "component": {
+            "version": operation.version if is_operation else connection.version,
+            "type": "connector-action" if is_operation else "connector-settings",
+            "xml": xml[component_id], "deleted": False}}
+
+    with patch.object(qc, "get_component", _fetch):
+        served = qc.query_components_action(
+            MagicMock(), "qa", "idempotency_contract_candidates",
+            config={"operation_component_id": operation.component_id,
+                    "connection_component_id": connection.component_id})
+
+    assert served.get("error_code") is None, served
+    assert len(served.get("candidates", [])) == 1, served
+    candidate = served["candidates"][0]
+    assert candidate["contract_ref"] == record.contract_ref
+    # The digests the candidate now carries, so the caller can check the match.
+    assert candidate["operation_config_digest"] == operation.config_digest
+    assert candidate["connection_config_digest"] == connection.config_digest

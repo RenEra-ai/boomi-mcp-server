@@ -922,7 +922,22 @@ class ConnectorReplayEvidenceBindingAttestationV1(_AuthoringModel):
     #: that a coverage "enumerates the routes it covers, and a route is a path";
     #: the model enumerates `route_digests`, which are versioned one-way hashes,
     #: so the reasoning was right about paths and wrong about the field.
-    route_coverage_kind: Optional[NonEmptyString] = None
+    #: PUBLISHED as a closed set, and the mutual exclusion published beside it.
+    #: The variant rules live in a model validator, which JSON Schema never sees —
+    #: so a client validating against the served schema could build a static
+    #: binding carrying a service-wide capture, be told it was valid, and be
+    #: refused by the server. The enum closes the kind; the `allOf` below states
+    #: the two exclusions the validator enforces, so the published contract and
+    #: the enforced one accept the same records.
+    route_coverage_kind: Optional[Literal["static_path", "service_wide"]] = Field(
+        default=None,
+        json_schema_extra={
+            "$comment": (
+                "static_path requires route_digests and forbids "
+                "route_capture_digest; service_wide forbids route_digests."
+            )
+        },
+    )
     #: PUBLISHED, not merely enforced. A `field_validator` does not reach JSON
     #: Schema, so the advertised contract said "array of string" while
     #: `model_validate` refused malformed and duplicate values — a caller
