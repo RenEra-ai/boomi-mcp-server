@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 11562, "minimum_collected": 11562, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 11563, "minimum_collected": 11563, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -11607,3 +11607,4 @@
 {"kind": "test", "id": "pytest-011606", "node_id": "tests/test_connector_replay_report.py::test_a_report_missing_the_new_sections_is_refused", "state": "active"}
 {"kind": "test", "id": "pytest-011607", "node_id": "tests/test_connector_replay_report.py::test_a_same_width_projection_change_is_visible_in_the_served_text", "state": "active"}
 {"kind": "test", "id": "pytest-011608", "node_id": "tests/test_connector_replay_report.py::test_the_report_still_publishes_no_credential_shaped_token", "state": "active"}
+{"kind": "test", "id": "pytest-011609", "node_id": "tests/test_connector_replay_review_round3.py::test_a_wave_run_that_returned_no_verdict_is_not_the_checkpoint", "state": "active"}

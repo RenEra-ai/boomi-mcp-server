@@ -3190,7 +3190,21 @@ def _wave_evidence_violation(ledger_text, archive_dir):
             if re.match(r"^\| L4 composite wave gate[ ,|]", r)]
     if not rows:
         return "no wave row"
-    latest = rows[-1]
+    # THE LATEST ROW THAT REPORTS A VERDICT. A wave run can end without one — a
+    # refused manifest, a red suite, or a gate whose worktree moved under it — and
+    # this record has carried such rows from the beginning. They survived only by
+    # never being LAST: the moment one was, this rule demanded a `W` from a row
+    # that correctly has none, and refused the tree for the record's own shape.
+    #
+    # A run with no verdict is not a checkpoint to reverify; it leaves the loop
+    # OPEN, which the checkpoint rules own and which its row records as
+    # `CONTINUE`. Staleness is not admitted by skipping it, because the CLOSING
+    # rule separately requires a closing checkpoint's evidence to name the tree it
+    # closes — and a run that returned no verdict can never satisfy that.
+    verdicted = [r for r in rows if re.search(r"W = `[0-9a-f]{7,40}`", r)]
+    if not verdicted:
+        return "no wave row reports a verdict"
+    latest = verdicted[-1]
     sha = re.search(r"W = `([0-9a-f]{7,40})`", latest)
     if not sha:
         return "the latest wave row names no SHA"
@@ -8277,3 +8291,39 @@ def test_the_closing_evidence_rule_can_actually_fail(tmp_path):
         "cited archive commit-reviews/gone is absent from the checkout")
     assert check("`1111111`, closed on judgement") == (
         "the latest closing checkpoint cites no archived evidence")
+
+
+def test_a_wave_run_that_returned_no_verdict_is_not_the_checkpoint(tmp_path):
+    """A refused or voided run leaves the loop open; it is not evidence to reverify.
+
+    THE NON-VACUITY WITNESS for selecting the latest VERDICTED row. This record has
+    carried failed wave rows from the start — they name no `W`, correctly, because
+    no tree passed — and they survived only by never being last. The moment one was
+    last, this rule demanded a `W` from a row that has none and refused the tree for
+    the shape of its own ledger rather than for anything about the tree.
+
+    Skipping such a row does not admit stale evidence: the CLOSING rule separately
+    requires a closing checkpoint to cite evidence naming the tree it closes, and a
+    run that returned no verdict cannot satisfy it. That separation is the point —
+    this rule answers "can the latest checkpoint be reverified", not "is the loop
+    closed".
+    """
+    archive = tmp_path / "wave-gate"
+    _archived_summary(archive / "ok", _PASSING_WAVE)
+    passing = _ROW.format(sha="abc1234", cite=", archived `wave-gate/ok`")
+    refused = ("| L4 composite wave gate, slice B | 2 / 2 | `deadbee`, FAILED | `CONTINUE` "
+               "| the gate refused the node manifest |")
+
+    # The passing row alone is reverifiable.
+    assert _wave_evidence_violation(_wave_ledger(passing), archive) is None
+    # A verdictless row AFTER it does not make the record unreadable...
+    assert _wave_evidence_violation(_wave_ledger(passing, refused), archive) is None
+    # ...and it does not become the checkpoint either: corrupting the passing row's
+    # evidence must still be caught THROUGH the trailing refusal.
+    broken = passing.replace("wave-gate/ok", "wave-gate/gone")
+    assert _wave_evidence_violation(_wave_ledger(broken, refused), archive) == (
+        "cited archive gone is absent from the checkout")
+    # A record whose ONLY wave rows returned no verdict has nothing to reverify,
+    # and says so rather than silently passing.
+    assert _wave_evidence_violation(_wave_ledger(refused), archive) == (
+        "no wave row reports a verdict")
