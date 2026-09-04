@@ -2,11 +2,12 @@
  "collector": "wave_gate",
  "durable_dir": "wave-gate/wave155.yVlLDX",
  "files": {
+  "wave-gate/wave155.yVlLDX/summary.json": "04a1daf4f0b97e1ad10336085cbab7a01b6b190a8c033d4085c5880727f23554",
   "wave-gate/wave155.yVlLDX/wave.log": "03573ca762e44cd9f9c08ff8285d1f41b201e7af28a6f891c8af4a0875d31a5b"
  },
  "logical_loop": "L4 (composite wave gate, issue-level)",
- "source_run_dir": "/tmp/wave155.yVlLDX",
+ "source_run_dir": "/tmp/rewave.zmcOc7",
  "status": "completed",
- "verdict": null,
+ "verdict": "pass",
  "wave_sha": "b570061cd3c88732934b85aa323ce2711eb5357e"
 }

@@ -3007,6 +3007,32 @@ def test_the_repository_guard_refuses_a_report_whose_tree_moved_after_the_gate(t
     assert "src/drift.py" in violation
 
 
+def _archived_summary(directory, payload, verdict="pass"):
+    """Write `summary.json` the way the archiver does — BOUND by its round record.
+
+    The fixtures wrote a bare `summary.json` into a directory, which is precisely the
+    shape the binding rule now refuses: a summary nothing produced. Writing the record
+    here keeps every case exercising the arm it means to exercise instead of tripping
+    the binding check first, and keeps the fixture honest about what an archive is.
+    """
+    import hashlib
+    import json
+
+    directory.mkdir(parents=True, exist_ok=True)
+    body = json.dumps(payload)
+    (directory / "summary.json").write_text(body)
+    (directory / "round.json").write_text(json.dumps({
+        "collector": "wave_gate",
+        "durable_dir": f"wave-gate/{directory.name}",
+        "files": {
+            f"wave-gate/{directory.name}/summary.json":
+                hashlib.sha256(body.encode()).hexdigest(),
+        },
+        "status": "completed",
+        "verdict": verdict,
+    }))
+
+
 def _wave_evidence_violation(ledger_text, archive_dir):
     """Whether the LATEST wave checkpoint can be reverified from the repository.
 
@@ -3027,14 +3053,14 @@ def _wave_evidence_violation(ledger_text, archive_dir):
     # row while the CURRENT gate — the one closure actually rests on — was checked
     # by nothing. Its own docstring said "the CURRENT gate", and the pin made that
     # false. The slice letter is data in the row; it is not the guard's to hardcode.
-    # `slice [A-Z]` OR `issue-level`. The scope name is data in the row, and the
-    # pattern named only one of the two forms this ledger uses — so an
-    # issue-level wave row was never checked at all, and the guard stayed green
-    # by re-verifying a landed slice's row instead. The same mistake the comment
-    # above records for the hardcoded slice letter, one scope wider.
-    rows = re.findall(
-        r"^\| L4 composite wave gate, (?:slice [A-Z]|issue-level) \|.*$",
-        ledger_text, re.M)
+    # NO SCOPE ENUMERATION AT ALL — third time. First the pattern pinned `slice B`;
+    # then it listed `slice [A-Z]|issue-level`, which still dropped this ledger's
+    # `ISSUE-level correction arc` spelling and let `rows[-1]` silently re-verify an
+    # older row while the CURRENT gate went unchecked. Widening the list a third time
+    # would reproduce the defect on the fourth spelling: a whitelist of scope names is
+    # a hand-model of a field whose authority is the row itself. Every L4 wave row
+    # matches, whatever its scope reads, and the LAST one is the one closure rests on.
+    rows = re.findall(r"^\| L4 composite wave gate[ ,|].*$", ledger_text, re.M)
     if not rows:
         return "no wave row"
     latest = rows[-1]
@@ -3047,6 +3073,33 @@ def _wave_evidence_violation(ledger_text, archive_dir):
     summary = archive_dir / named.group(1) / "summary.json"
     if not summary.is_file():
         return f"cited archive {named.group(1)} is absent from the checkout"
+    # THE SUMMARY MUST BE AN OUTPUT OF THE ROUND, not a file beside it. Everything
+    # below trusts `summary.json`, and nothing checked that the round record had ever
+    # seen it: a summary hand-written into an archived directory after the fact
+    # satisfied every value test here while `round.json` listed only `wave.log` and
+    # derived a null verdict — the archive attesting one thing and the guard reading
+    # another, in the same directory. The archiver hashes each copied file into
+    # `files` and derives `verdict` from the summary (`scripts/archive_gate_round.py`),
+    # so a bound summary is exactly one the round produced.
+    import hashlib
+    record_path = archive_dir / named.group(1) / "round.json"
+    if not record_path.is_file():
+        return f"cited archive {named.group(1)} carries no round record"
+    try:
+        record = json.loads(record_path.read_text())
+    except ValueError:
+        return f"cited archive {named.group(1)} has an unreadable round record"
+    listed = [v for k, v in (record.get("files") or {}).items()
+              if k.rsplit("/", 1)[-1] == "summary.json"]
+    if not listed:
+        return (f"cited archive {named.group(1)} does not bind its summary — the "
+                f"round record lists no summary.json")
+    if listed[0] != hashlib.sha256(summary.read_bytes()).hexdigest():
+        return (f"cited archive {named.group(1)} binds a summary.json whose digest "
+                f"does not match the file in the checkout")
+    if record.get("verdict") != "pass":
+        return (f"cited archive {named.group(1)} records the round verdict "
+                f"{record.get('verdict')!r}, not a pass")
     attested = json.loads(summary.read_text())
     recorded = attested.get("wave_sha", "")
     if not recorded.startswith(sha.group(1)):
@@ -3255,8 +3308,7 @@ def test_the_wave_evidence_rule_admits_only_a_supported_row(tmp_path, sha, cite,
     import json
 
     archive = tmp_path / "wave-gate"
-    (archive / "ok").mkdir(parents=True)
-    (archive / "ok" / "summary.json").write_text(json.dumps({**_PASSING_WAVE, **attested}))
+    _archived_summary(archive / "ok", {**_PASSING_WAVE, **attested})
     assert _wave_evidence_violation(_ROW.format(sha=sha, cite=cite), archive) == expected
 
 
@@ -4188,13 +4240,29 @@ def _missing_checkpoint_violation(ledger_text, index_text, slice_letter=None,
 
     slices, billed = set(), {}
 
+    #: THE SCOPE HALF OF A LOOP IDENTITY, read the same way on both sides.
+    #:
+    #: This billed only `slice ([A-F])`, so every issue-level loop was invisible to a
+    #: rule written to police loop identity: its evaluations were never counted, no
+    #: interval was ever owed, and deleting an issue-level checkpoint row left the
+    #: audit green. The workflow's loop identity is "gate purpose/authority plus
+    #: slice-or-wave scope" — the issue-level arc is a scope, not an absence of one.
+    #:
+    #: ONE extractor for the archive side and the ledger side. Billing a scope the row
+    #: parser could not read would make its checkpoints unrecordable — a rule nothing
+    #: can satisfy — so the two sides cannot be allowed to drift apart.
+    def _loop_scope(text):
+        if re.search(r"issue-level", text, re.I):
+            return "issue-level"
+        m = re.search(r"slice ([A-F])", text)
+        return m.group(1) if m else None
+
     def note(loop_text):
         tag = re.match(r"(L\d)", loop_text)
-        here = re.search(r"slice ([A-F])", loop_text)
+        here = _loop_scope(loop_text)
         if tag and here:
-            slices.add(here.group(1))
-            billed[(here.group(1), tag.group(1))] = billed.get(
-                (here.group(1), tag.group(1)), 0) + 1
+            slices.add(here)
+            billed[(here, tag.group(1))] = billed.get((here, tag.group(1)), 0) + 1
 
     for raw in index_text.splitlines():
         if not raw.strip():
@@ -4243,10 +4311,10 @@ def _missing_checkpoint_violation(ledger_text, index_text, slice_letter=None,
             continue
         m = re.match(r"\s*(\d+)\s*/\s*(\d+)", cells[2])
         tag = re.match(r"\s*(L\d)", cells[1].strip().strip("*").strip("`"))
-        here = re.search(r"slice ([A-F])", cells[1])
+        here = _loop_scope(cells[1])
         if not (m and tag and here):
             continue
-        key = (here.group(1), tag.group(1))
+        key = (here, tag.group(1))
         target = gapped if "GAP-RECORDED" in cells[4] else decided
         target[key] = max(target.get(key, 0), int(m.group(2)))
 
@@ -4276,7 +4344,8 @@ def _missing_checkpoint_violation(ledger_text, index_text, slice_letter=None,
         if here in landed:
             covers = max(covers, gapped.get((here, loop), 0))
         if covers < owed:
-            return (f"loop {loop} of slice {here} has {count} collected evaluations, "
+            return (f"loop {loop} of {here if here == 'issue-level' else f'slice {here}'} "
+                    f"has {count} collected evaluations, "
                     f"so a recorded decision through {owed} is owed; the record covers "
                     f"{covers}")
     return None
@@ -6610,7 +6679,7 @@ def test_a_summary_that_attests_nothing_is_refused(tmp_path):
     row = _ROW.format(sha="abc1234", cite=", archived `wave-gate/ok`")
 
     bare = {k: _PASSING_WAVE[k] for k in ("wave_sha", "status", "verdict", "exit_code")}
-    (archive / "ok" / "summary.json").write_text(json.dumps(bare))
+    _archived_summary(archive / "ok", bare)
     assert "attests nothing about that arm" in (_wave_evidence_violation(row, archive) or "")
 
     for arm in _REQUIRED_WAVE_EVIDENCE:
@@ -6619,7 +6688,7 @@ def test_a_summary_that_attests_nothing_is_refused(tmp_path):
         for step in leaf[:-1]:
             node = node[step]
         del node[leaf[-1]]
-        (archive / "ok" / "summary.json").write_text(json.dumps(missing))
+        _archived_summary(archive / "ok", missing)
         assert _wave_evidence_violation(row, archive) == (
             f"cited archive ok carries no {arm}, so it attests nothing about that arm"
         ), arm
@@ -6640,7 +6709,7 @@ def test_a_count_written_as_text_is_not_a_count(tmp_path):
 
     stringly = json.loads(json.dumps(_PASSING_WAVE))
     stringly["suite"]["passed"] = "11037"
-    (archive / "ok" / "summary.json").write_text(json.dumps(stringly))
+    _archived_summary(archive / "ok", stringly)
     assert _wave_evidence_violation(row, archive) == (
         "cited archive ok records suite.passed as '11037', which is not a count"
     )
@@ -6650,7 +6719,7 @@ def test_a_count_written_as_text_is_not_a_count(tmp_path):
     # as agreement.
     wordy = json.loads(json.dumps(_PASSING_WAVE))
     wordy["goldens"]["deterministic"] = "yes"
-    (archive / "ok" / "summary.json").write_text(json.dumps(wordy))
+    _archived_summary(archive / "ok", wordy)
     assert _wave_evidence_violation(row, archive) == (
         "cited archive ok records goldens.deterministic as 'yes', "
         "which is not a yes-or-no"
@@ -6669,7 +6738,7 @@ def test_a_row_that_states_no_figure_for_a_required_arm_is_refused(tmp_path):
 
     archive = tmp_path / "wave-gate"
     (archive / "ok").mkdir(parents=True)
-    (archive / "ok" / "summary.json").write_text(json.dumps(_PASSING_WAVE))
+    _archived_summary(archive / "ok", _PASSING_WAVE)
 
     # A count spelled as a WORD is exactly the shape that used to slip through.
     worded = _ROW.replace("across 2 cases", "across two cases")
@@ -7010,3 +7079,123 @@ def test_the_affected_sha_guard_is_not_vacuous():
     assert affected_sha_cell_deviates("323151f", "`59af3e1`..`5d169f9`"), (
         "the checker driven here does not reject a cell naming neither tree"
     )
+
+
+def test_a_wave_row_is_checked_whatever_its_scope_is_called(tmp_path):
+    """No spelling of the scope may drop the latest row out of the wave rule.
+
+    THE NON-VACUITY WITNESS for removing the scope whitelist. The pattern listed
+    `slice [A-Z]|issue-level`, and this ledger's own `ISSUE-level correction arc` row
+    matched neither — so `rows[-1]` selected an OLDER row, the guard verified evidence
+    closure did not rest on, and a latest row citing an archive that does not exist
+    returned no violation at all. The construction below is exactly that: a passing
+    row with real evidence, followed by a later row under a scope name the whitelist
+    never listed, citing nothing that exists. The old pattern returns None here.
+    """
+    archive = tmp_path / "wave-gate"
+    _archived_summary(archive / "ok", _PASSING_WAVE)
+    earlier = _ROW.format(sha="abc1234", cite=", archived `wave-gate/ok`")
+
+    for scope in ("ISSUE-level correction arc", "the closing arc", "wave 2"):
+        later = earlier.replace("L4 composite wave gate, slice B",
+                                f"L4 composite wave gate, {scope}", 1)
+        later = later.replace("wave-gate/ok", "wave-gate/never-archived")
+        assert _wave_evidence_violation(f"{earlier}\n{later}", archive) == (
+            "cited archive never-archived is absent from the checkout"), scope
+
+
+def test_a_wave_summary_nothing_produced_is_not_evidence(tmp_path):
+    """The summary must be an OUTPUT of the archived round, not a file beside it.
+
+    THE NON-VACUITY WITNESS for the binding rule. Every value check in the wave rule
+    reads `summary.json`; none of them could tell a summary the archiver wrote from
+    one hand-placed into the directory afterwards — which is the shape that actually
+    occurred, with `round.json` listing only the log and deriving a null verdict while
+    the guard beside it read a confident `pass`. Each case below carries a perfectly
+    valid summary and differs only in what the round record says about it.
+    """
+    import hashlib
+    import json
+
+    row = _ROW.format(sha="abc1234", cite=", archived `wave-gate/ok`")
+    body = json.dumps(_PASSING_WAVE)
+
+    def archive_with(record):
+        root = tmp_path / record["case"] / "wave-gate"
+        (root / "ok").mkdir(parents=True)
+        (root / "ok" / "summary.json").write_text(body)
+        if record.get("round") is not None:
+            (root / "ok" / "round.json").write_text(record["round"])
+        return root
+
+    digest = hashlib.sha256(body.encode()).hexdigest()
+    bound = {"files": {"wave-gate/ok/summary.json": digest}, "verdict": "pass"}
+
+    # No record at all — the directory exists and the summary reads as a pass.
+    assert _wave_evidence_violation(row, archive_with(
+        {"case": "no-record", "round": None})) == "cited archive ok carries no round record"
+    assert _wave_evidence_violation(row, archive_with(
+        {"case": "unreadable", "round": "{not json"})) == (
+        "cited archive ok has an unreadable round record")
+    # THE OBSERVED SHAPE: the round lists only its log and derives no verdict, while
+    # the summary beside it says `pass`.
+    assert _wave_evidence_violation(row, archive_with({
+        "case": "unbound",
+        "round": json.dumps({"files": {"wave-gate/ok/wave.log": digest}, "verdict": None}),
+    })) == ("cited archive ok does not bind its summary — the round record lists no "
+            "summary.json")
+    # Bound, but to different bytes than the checkout holds.
+    assert _wave_evidence_violation(row, archive_with({
+        "case": "stale", "round": json.dumps({**bound, "files": {
+            "wave-gate/ok/summary.json": "0" * 64}}),
+    })) == ("cited archive ok binds a summary.json whose digest does not match the "
+            "file in the checkout")
+    # Bound to the right bytes, but the round itself did not derive a pass.
+    assert _wave_evidence_violation(row, archive_with({
+        "case": "not-a-pass", "round": json.dumps({**bound, "verdict": None}),
+    })) == "cited archive ok records the round verdict None, not a pass"
+    # The control: the same summary, bound the way the archiver binds it.
+    assert _wave_evidence_violation(row, archive_with(
+        {"case": "ok", "round": json.dumps(bound)})) is None
+
+
+def test_an_issue_level_loop_owes_its_checkpoints_like_any_other(tmp_path):
+    """A loop whose scope is not a slice letter is still a loop.
+
+    THE NON-VACUITY WITNESS for billing issue-level loops. The parser required
+    `slice ([A-F])` on both sides, so an issue-level loop was billed zero evaluations,
+    owed no interval, and its checkpoint rows could be deleted with the audit still
+    green — the rule policing loop identity could not see one of the two scopes this
+    record uses. The archive below holds three completed issue-level rounds and the
+    ledger answers for none of them; under the old parser this returned None.
+    """
+    import json
+
+    root = tmp_path / "wave-gate"
+    root.mkdir()
+    for i in range(3):
+        d = root / f"wave{i}"
+        d.mkdir()
+        (d / "round.json").write_text(json.dumps({
+            "logical_loop": "L4 (composite wave gate, issue-level)", "status": "completed"}))
+
+    header = ("| Loop | Evaluation (window / cumulative) | SHA (+dirty) | Outcome | Rationale |\n"
+              "| --- | --- | --- | --- | --- |\n")
+    unanswered = header + "| L4 composite wave gate, slice D | 3 / 3 | x | `CONTINUE` | r |\n"
+    assert _missing_checkpoint_violation(unanswered, "", wave_dir=root) == (
+        "loop L4 of issue-level has 3 collected evaluations, so a recorded decision "
+        "through 3 is owed; the record covers 0")
+
+    # A slice row cannot answer for an issue-level loop, and vice versa: the scope is
+    # half of the loop identity, not decoration on it.
+    answered = header + "| L4 composite wave gate, issue-level | 3 / 3 | x | `CONTINUE` | r |\n"
+    assert _missing_checkpoint_violation(answered, "", wave_dir=root) is None
+
+    # AND THE OTHER DIRECTION, so the extractor cannot be satisfied by matching
+    # everything: an issue-level row does not answer for a slice's loop.
+    for d in root.iterdir():
+        (d / "round.json").write_text(json.dumps({
+            "logical_loop": "L4 (composite wave gate, slice E)", "status": "completed"}))
+    assert _missing_checkpoint_violation(answered, "", wave_dir=root) == (
+        "loop L4 of slice E has 3 collected evaluations, so a recorded decision "
+        "through 3 is owed; the record covers 0")

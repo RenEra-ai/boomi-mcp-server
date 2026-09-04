@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 11549, "minimum_collected": 11549, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 11552, "minimum_collected": 11552, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -11594,3 +11594,6 @@
 {"kind": "test", "id": "pytest-011593", "node_id": "tests/test_issue_155_recheck_boundary.py::test_a_drift_inside_the_materialization_window_refuses_before_the_write", "state": "active"}
 {"kind": "test", "id": "pytest-011594", "node_id": "tests/test_issue_155_recheck_boundary.py::test_a_mutation_uncertain_push_retains_the_accounting_it_owes", "state": "active"}
 {"kind": "test", "id": "pytest-011595", "node_id": "tests/test_process_ir_error_handling.py::test_a_replay_declaration_is_graded_wherever_it_is_authored", "state": "active"}
+{"kind": "test", "id": "pytest-011596", "node_id": "tests/test_connector_replay_review_round3.py::test_a_wave_row_is_checked_whatever_its_scope_is_called", "state": "active"}
+{"kind": "test", "id": "pytest-011597", "node_id": "tests/test_connector_replay_review_round3.py::test_a_wave_summary_nothing_produced_is_not_evidence", "state": "active"}
+{"kind": "test", "id": "pytest-011598", "node_id": "tests/test_connector_replay_review_round3.py::test_an_issue_level_loop_owes_its_checkpoints_like_any_other", "state": "active"}
