@@ -1,0 +1,13 @@
+{
+ "collector": "wave_gate",
+ "durable_dir": "wave-gate/wave155.6L3Od3",
+ "files": {
+  "wave-gate/wave155.6L3Od3/summary.json": "ccb8730ffbcc2043add9cd84e9143df8be2f236c488b1e60d9a8bf446bf9f46f",
+  "wave-gate/wave155.6L3Od3/wave.log": "e8b18cfb078b7157361fed79e43bfd0d70d860720475c41d5cec1ee839c5136b"
+ },
+ "logical_loop": "L4 (composite wave gate, issue-level)",
+ "source_run_dir": "/tmp/wave155.6L3Od3",
+ "status": "completed",
+ "verdict": "pass",
+ "wave_sha": "a356570c2e2032adab05f90606e8d931fa18ec13"
+}

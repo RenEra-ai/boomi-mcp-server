@@ -7819,6 +7819,7 @@ def _closing_row_without_covering_evidence(ledger_text, archive_dir):
     # The record's own view — see `_unfenced_lines`. A fenced block is an
     # illustration, not a row.
     ledger_text = "\n".join(_unfenced_lines(ledger_text))
+    import hashlib
     import json
     import re
 
@@ -7834,7 +7835,14 @@ def _closing_row_without_covering_evidence(ledger_text, archive_dir):
         cells = row.split("|")
         if len(cells) < 6:
             continue
-        if any(o in cells[4] for o in ENDING):
+        outcome = cells[4]
+        # A WITHDRAWN close is not a close. Two such rows already exist in this record,
+        # and matching the outcome token alone would let the newest of them displace the
+        # decision that actually stands — or make a decision the record explicitly took
+        # back look current.
+        if re.search(r"WITHDRAWN|SUPERSED", outcome, re.I):
+            continue
+        if any(o in outcome for o in ENDING):
             closing.append(cells)
     if not closing:
         return None
@@ -7851,6 +7859,15 @@ def _closing_row_without_covering_evidence(ledger_text, archive_dir):
     shas = re.findall(r"`([0-9a-f]{7,40})`", sha_cell)
     if not shas:
         return "the latest closing checkpoint names no SHA in its SHA column"
+    # ONE closing tree. Accepting any token in the cell recreated the close-on-parent
+    # defect inside the designated column: a cell naming an unreviewed tip AND a
+    # reviewed ancestor passed on the ancestor. A row closes over exactly one tree, so
+    # a cell naming two is ambiguous rather than generous.
+    distinct = {s for s in shas}
+    if len(distinct) > 1 and not all(
+            a.startswith(b) or b.startswith(a) for a in distinct for b in distinct):
+        return (f"the latest closing checkpoint names more than one tree in its SHA "
+                f"column: {sorted(distinct)}")
     cited = re.findall(r"`((?:commit-reviews|wave-gate)/[A-Za-z0-9._-]+)`",
                        sha_cell + rationale)
     if not cited:
@@ -7859,7 +7876,7 @@ def _closing_row_without_covering_evidence(ledger_text, archive_dir):
     root = Path(archive_dir)
     #: Which loop each archived round was billed to. Commit-review rounds record it in
     #: the archive index; wave rounds record it in their own round file.
-    billed = {}
+    billed, billed_status = {}, {}
     index = root / "index.jsonl"
     if index.is_file():
         for raw in index.read_text().splitlines():
@@ -7870,8 +7887,16 @@ def _closing_row_without_covering_evidence(ledger_text, archive_dir):
             except ValueError:
                 continue
             billed[str(entry.get("durable_dir", ""))] = str(entry.get("logical_loop", ""))
+            billed_status[str(entry.get("durable_dir", ""))] = entry.get("status")
 
-    tag = re.match(r"(L\d)", loop)
+    #: A LOOP IDENTITY IS PURPOSE PLUS SCOPE, and this record holds ten distinct L2
+    #: scopes and eight L4 ones — so comparing the number alone let one loop's gate
+    #: discharge another's, which is the same substitution the number was added to
+    #: prevent. Compared canonically, because the record spells one scope two ways.
+    def identity(text):
+        return re.sub(r"[^a-z0-9]+", "", text.lower())
+
+    want = identity(loop)
     covered, why = [], []
     for name in cited:
         d = root / name
@@ -7882,14 +7907,32 @@ def _closing_row_without_covering_evidence(ledger_text, archive_dir):
             if not summary.is_file():
                 why.append(f"{name} carries no summary")
                 continue
+            # THE ROUND RECORD IS THE AUTHORITY, and `_wave_evidence_violation`
+            # already says why: a summary is evidence only when the round that
+            # produced it binds and hashes it. Reading the summary here and the
+            # round only for its loop reintroduced, in a second rule, the exact
+            # unbound-summary defect the first one exists to refuse.
+            record_path = d / "round.json"
+            if not record_path.is_file():
+                why.append(f"{name} carries no round record")
+                continue
+            record = json.loads(record_path.read_text())
+            round_loop = str(record.get("logical_loop", ""))
+            key = f"{name}/summary.json"
+            listed = (record.get("files") or {}).get(key)
+            if listed != hashlib.sha256(summary.read_bytes()).hexdigest():
+                why.append(f"{name} does not bind its summary")
+                continue
             attested = json.loads(summary.read_text())
-            round_loop = str(json.loads((d / "round.json").read_text()).get(
-                "logical_loop", "")) if (d / "round.json").is_file() else ""
-            # A PASS, not merely a run.
-            if attested.get("status") != "completed" or attested.get("verdict") != "pass":
+            if (record.get("status") != "completed" or record.get("verdict") != "pass"
+                    or attested.get("status") != "completed"
+                    or attested.get("verdict") != "pass"):
                 why.append(f"{name} is not a passing run")
                 continue
-            recorded = str(attested.get("wave_sha", ""))
+            recorded = str(record.get("wave_sha", ""))
+            if recorded != str(attested.get("wave_sha", "")):
+                why.append(f"{name} records a round and a summary for different trees")
+                continue
         else:
             # COMPLETION, NOT COMMENCEMENT. `start-head` is written when the review is
             # STARTED, so reading it counted a failed or abandoned round as coverage —
@@ -7897,17 +7940,38 @@ def _closing_row_without_covering_evidence(ledger_text, archive_dir):
             # start head, and no reviewed SHA at all. The collector writes
             # `last-reviewed-sha` only on a completed round and `teardown` only once the
             # daemon is proven gone, so those two are what a covered tree is read from.
+            # COMPLETION AS THE COLLECTOR DEFINES IT, not as two filenames. The
+            # recovery reader counts a round complete only when `last-reviewed-sha` is
+            # a regular file whose content EQUALS the recorded `start-head`, and the
+            # collector writes `teardown` only once the daemon is proven gone — so a
+            # stale or placeholder sidecar beside a failed index row is not a
+            # completed round, however present the files are.
             reviewed, teardown = d / "last-reviewed-sha", d / "teardown"
-            if not (reviewed.is_file() and teardown.is_file()):
+            head = d / "start-head"
+            if not (reviewed.is_file() and teardown.is_file() and head.is_file()):
                 why.append(f"{name} records no completed, torn-down round")
                 continue
-            round_loop = billed.get(name, "")
             recorded = reviewed.read_text().strip()
+            if recorded != head.read_text().strip():
+                why.append(f"{name} reviewed a tree other than the one it started on")
+                continue
+            if teardown.read_text().strip() != "confirmed stopped":
+                why.append(f"{name} has no confirmed teardown")
+                continue
+            round_loop = billed.get(name, "")
+            if str(billed_status.get(name, "")) != "completed":
+                why.append(f"{name} is indexed as {billed_status.get(name) or 'unknown'}")
+                continue
         # THE CHECKPOINT'S OWN LOOP. A wave pass cannot discharge a commit-review
         # closure and a review billed elsewhere cannot either: loops are distinct gates,
         # so evidence from one says nothing about whether the other ever ran.
-        if tag and not round_loop.startswith(tag.group(1)):
-            why.append(f"{name} was billed to {round_loop.split('(')[0].strip() or 'no loop'}")
+        # The row names the loop; the archive names the loop AND the delta it was
+        # billed to, so one canonical identity must CONTAIN the other from the start.
+        # That still separates this record's ten L2 scopes from one another, which a
+        # bare `L2` never did, and its eight L4 scopes likewise.
+        got = identity(round_loop)
+        if not (got.startswith(want) or want.startswith(got)):
+            why.append(f"{name} was billed to {round_loop.strip() or 'no loop'!r}")
             continue
         covered.append(recorded)
 
@@ -7942,11 +8006,22 @@ def test_the_closing_evidence_rule_can_actually_fail(tmp_path):
     """
     import json
 
-    (tmp_path / "wave-gate" / "w1").mkdir(parents=True)
-    (tmp_path / "wave-gate" / "w1" / "summary.json").write_text(json.dumps(
-        {"wave_sha": "1111111aaaa", "status": "completed", "verdict": "pass"}))
-    (tmp_path / "wave-gate" / "w1" / "round.json").write_text(json.dumps(
-        {"logical_loop": "L4 (composite wave gate, issue-level)"}))
+    import hashlib
+
+    wave_body = json.dumps({"wave_sha": "1111111aaaa", "status": "completed",
+                            "verdict": "pass"})
+    for wave in ("w1", "wunbound"):
+        d = tmp_path / "wave-gate" / wave
+        d.mkdir(parents=True)
+        (d / "summary.json").write_text(wave_body)
+        record = {"logical_loop": "L4 (composite wave gate, issue-level)",
+                  "status": "completed", "verdict": "pass", "wave_sha": "1111111aaaa"}
+        if wave == "w1":
+            # BOUND the way the archiver binds it; the other is the shape the wave
+            # rule already refuses, kept here so this rule refuses it too.
+            record["files"] = {"wave-gate/w1/summary.json":
+                               hashlib.sha256(wave_body.encode()).hexdigest()}
+        (d / "round.json").write_text(json.dumps(record))
     for name, done in (("c1", True), ("cfailed", False)):
         d = tmp_path / "commit-reviews" / name
         d.mkdir(parents=True)
@@ -7959,11 +8034,20 @@ def test_the_closing_evidence_rule_can_actually_fail(tmp_path):
         else:
             (d / "phase").write_text("failed\n")
     (tmp_path / "index.jsonl").write_text("\n".join(json.dumps(r) for r in (
-        {"durable_dir": "commit-reviews/c1",
+        {"durable_dir": "commit-reviews/c1", "status": "completed",
          "logical_loop": "L2 (Stage-2 Codex commit review, issue-level)"},
-        {"durable_dir": "commit-reviews/cfailed",
+        {"durable_dir": "commit-reviews/cfailed", "status": "failed",
+         "logical_loop": "L2 (Stage-2 Codex commit review, issue-level)"},
+        # A round whose SIDECARS look complete while the index records a failure —
+        # the shape that made file presence an unsafe reading of completion.
+        {"durable_dir": "commit-reviews/cstale", "status": "failed",
          "logical_loop": "L2 (Stage-2 Codex commit review, issue-level)"},
     )) + "\n")
+    stale = tmp_path / "commit-reviews" / "cstale"
+    stale.mkdir(parents=True)
+    for n, v in (("start-head", "1111111aaaa"), ("last-reviewed-sha", "1111111aaaa"),
+                 ("teardown", "confirmed stopped")):
+        (stale / n).write_text(v + "\n")
 
     header = ("| Loop | Evaluation (window / cumulative) | SHA (+dirty) | Outcome | Rationale |\n"
               "| --- | --- | --- | --- | --- |\n")
@@ -7997,7 +8081,8 @@ def test_the_closing_evidence_rule_can_actually_fail(tmp_path):
     # this witness asserted precisely that as a POSITIVE case.
     assert check("`1111111`, archived `wave-gate/w1`") == (
         "the latest closing checkpoint names 1111111 and no cited evidence of its own "
-        "loop covers it: ['wave-gate/w1 was billed to L4']")
+        'loop covers it: ["wave-gate/w1 was billed to \'L4 (composite wave gate, '
+        "issue-level)'\"]")
     # ...and the same archive DOES discharge an L4 checkpoint.
     assert check("`1111111`, archived `wave-gate/w1`",
                  loop="L4 composite wave gate, issue-level") is None
@@ -8017,6 +8102,45 @@ def test_the_closing_evidence_rule_can_actually_fail(tmp_path):
     # BOTH deferral outcomes end a loop and are checked like a close.
     for ending in ("`DEFER-STANDARD-AND-CLOSE`", "`DEFER-STANDARD-AND-PROCEED`"):
         assert check("`2222222`, archived `commit-reviews/c1`", outcome=ending), ending
+
+    # SIDECARS THAT LOOK COMPLETE BESIDE AN INDEX THAT SAYS FAILED. Every file the
+    # earlier rule read is present and well-formed; only the round's own recorded
+    # status says otherwise, and it is the one that decides.
+    assert check("`1111111`, archived `commit-reviews/cstale`") == (
+        "the latest closing checkpoint names 1111111 and no cited evidence of its own "
+        "loop covers it: ['commit-reviews/cstale is indexed as failed']")
+
+    # A REVIEWED TREE THAT IS NOT THE ONE THE ROUND STARTED ON is not a completed
+    # round either — the recovery reader defines completion as those two agreeing.
+    (tmp_path / "commit-reviews" / "c1" / "last-reviewed-sha").write_text("3333333cccc\n")
+    assert "reviewed a tree other than the one it started on" in check(
+        "`1111111`, archived `commit-reviews/c1`")
+    (tmp_path / "commit-reviews" / "c1" / "last-reviewed-sha").write_text("1111111aaaa\n")
+
+    # A TEARDOWN THAT WAS NEVER CONFIRMED leaves the round unaccounted for.
+    (tmp_path / "commit-reviews" / "c1" / "teardown").write_text("maybe\n")
+    assert "has no confirmed teardown" in check("`1111111`, archived `commit-reviews/c1`")
+    (tmp_path / "commit-reviews" / "c1" / "teardown").write_text("confirmed stopped\n")
+
+    # A WAVE SUMMARY THE ROUND DOES NOT BIND is not evidence here either — the same
+    # rule the wave check makes, rather than a second weaker copy of it.
+    assert "does not bind its summary" in check(
+        "`1111111`, archived `wave-gate/wunbound`",
+        loop="L4 composite wave gate, issue-level")
+
+    # A CELL NAMING TWO TREES is ambiguous, not satisfied by whichever one has
+    # evidence — the close-on-parent defect moved inside the designated column.
+    assert check("`deadbee` based on `1111111`, archived `commit-reviews/c1`") == (
+        "the latest closing checkpoint names more than one tree in its SHA column: "
+        "['1111111', 'deadbee']")
+
+    # A WITHDRAWN close does not displace the decision that stands.
+    withdrawn = (header
+                 + "| L2 Stage-2 Codex commit review, issue-level | 1 / 1 | "
+                   "`1111111`, archived `commit-reviews/c1` | `CLOSE-CLEAN` | stands |\n"
+                 + "| L2 Stage-2 Codex commit review, issue-level | 2 / 2 | `2222222` | "
+                   "`DEFER-STANDARD-AND-CLOSE` — **WITHDRAWN** | taken back |\n")
+    assert _closing_row_without_covering_evidence(withdrawn, tmp_path) is None
 
     # An archive nobody can find is not evidence.
     assert check("`1111111`, archived `commit-reviews/gone`") == (
