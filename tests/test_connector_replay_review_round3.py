@@ -1302,6 +1302,10 @@ def test_a_shared_readback_delta_is_read_per_run(tmp_path):
 #: is added, with the count it has at that moment; existing entries stay as written.
 #: `test_the_recorded_floors_never_move_down` now enforces exactly that.
 _EXPECTED_CLASS_COUNTS = {
+    # A NEW (mechanism, authority) pair, minted rather than folded into a letter
+    # whose authority is unrelated — see the class row for why that matters to
+    # recurrence accounting.
+    "DC-155-W": 3,
     "DC-155-A": 0,
     "DC-155-B": 1,
     "DC-155-C": 13,
@@ -1356,6 +1360,8 @@ _UNROWED = {"DC-155-C": 2, "DC-155-I": 1}
 #: the reason. Frozen so the set cannot grow silently: a row that names a class is an
 #: instance of it unless it appears here.
 _NOT_AN_INSTANCE = {
+    "CDX-155-r223-03": "the SUPERSEDED original of a class reclassification — the one "
+    "finding is counted at the revision, which is where the corrected class lives",
     "CDX-155-r45-01c": "a REVISION withdrawing a retier the corrected severity rule "
     "does not support — one finding, counted at the original",
     "QA-155-r66-03c": "a REVISION withdrawing a retier the corrected severity rule "
@@ -7461,8 +7467,25 @@ def _tier_derivation_offenders(ledger_text):
 
     def critical_class(cell):
         head = re.split(r"[(—]", cell, 1)[0]
+        # The record separates compound classes with a middle dot, which is the
+        # separator the project's own class list uses; splitting only on the ASCII
+        # punctuation left the second half of such a cell unread.
         return any(part.strip().lower() in CRITICAL_CLASSES
-                   for part in re.split(r"[;,]", head))
+                   for part in re.split(r"[;,·]", head))
+
+    #: A revision may say its class is UNCHANGED — an established convention in this
+    #: record, used by eight standing rows. Reading the terminal cell literally then
+    #: discards an ancestor's class, and an ancestor of one of those rows is classed
+    #: `data loss`: a critical anchor silently dropped by the rule meant to enforce it.
+    #: The effective class is the last one any row in the chain actually STATES.
+    UNCHANGED = re.compile(r"^(unchanged|as above|same)\b", re.I)
+
+    def effective_class(chain):
+        for cells in reversed(chain):
+            cell = cells[5].strip()
+            if cell and not UNCHANGED.match(cell):
+                return cell
+        return ""
     #: A tier the row itself lowered THROUGH the sanctioned path. A severity-specific
     #: technical refutation is the one way a source-critical label becomes standard,
     #: and it is recorded as the disposition, so it is read from there rather than
@@ -7608,7 +7631,17 @@ def _tier_derivation_offenders(ledger_text):
             # CLASS is a derived assignment the record may correct, so reading it from
             # the predecessor made a corrected-away class permanent and promoted rows
             # whose effective class is no longer critical at all.
-            label, blocking = cells[4].strip(), stand[5].strip()
+            # THE LABEL FROM THE ORIGINAL, THE CLASS FROM THE CHAIN. A raw source
+            # label is immutable; a blocking class is a derived assignment the record
+            # may correct, and a revision may decline to restate it.
+            walk, here = [], rid
+            seen = set()
+            while here and here not in seen:
+                seen.add(here)
+                if here in rows:
+                    walk.append(rows[here])
+                here = superseded.get(here)
+            label, blocking = cells[4].strip(), effective_class(walk)
             tier, disposition = stand[7].strip(), stand[9].strip()
         else:
             cells = rows[rid]
@@ -7736,6 +7769,40 @@ def test_the_tier_derivation_can_actually_fail():
 
     # A tier nobody can parse is an offence, not an exemption.
     assert offenders(row("CDX-155-r1-01", "P1", "see the note below", "fixed"))
+
+    # THE CLASS DISJUNCT: a critical blocking class promotes a row whatever its label.
+    def classed(rid, label, cls, tier, disposition="fixed"):
+        return (f"| {rid} | gate | s | {label} | {cls} | DC-155-C | {tier} | `abc1234` | "
+                f"{disposition} |")
+
+    def offenders_of(*rows, supersessions=()):
+        body = HEAD + "\n".join(rows) + "\n"
+        if supersessions:
+            body += "\n**Supersession map** — " + ", ".join(
+                f"`{n} → {o}`" for n, o in supersessions) + "\n"
+        return [r for r, _, _ in _tier_derivation_offenders(body)]
+
+    for cls in ("mutation accounting", "data loss", "secrets/security"):
+        assert offenders_of(classed("CDX-155-r7-01", "Low", cls, "standard")) == [
+            "CDX-155-r7-01"], cls
+    # A COMPOUND class separated by the middle dot the project's own list uses.
+    assert offenders_of(classed(
+        "CDX-155-r7-01", "Low", "runtime behavior · data loss", "standard")) == [
+        "CDX-155-r7-01"]
+    # The note recording that a class was corrected AWAY is not that class.
+    assert not offenders_of(classed(
+        "CDX-155-r7-01", "Low", "runtime behavior (CORRECTED from mutation accounting)",
+        "standard"))
+    # A REVISION MAY DECLINE TO RESTATE ITS CLASS, and the ancestor's still governs.
+    assert offenders_of(
+        classed("CDX-155-r7-01", "Low", "data loss", "standard"),
+        classed("CDX-155-r7-01a", "Low", "unchanged", "standard"),
+        supersessions=(("CDX-155-r7-01a", "CDX-155-r7-01"),)) == ["CDX-155-r7-01a"]
+    # ...and a class the chain CORRECTS away is not resurrected from the predecessor.
+    assert not offenders_of(
+        classed("CDX-155-r7-01", "P2", "mutation accounting", "standard"),
+        classed("CDX-155-r7-01a", "P2", "none — reclassified on measurement", "standard"),
+        supersessions=(("CDX-155-r7-01a", "CDX-155-r7-01"),))
 
     # And the defect-class table is not graded as though it were a severity cell —
     # tested BESIDE a real finding table, because a class table on its own now fails
