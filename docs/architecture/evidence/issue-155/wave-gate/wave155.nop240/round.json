@@ -1,0 +1,13 @@
+{
+ "collector": "wave_gate",
+ "durable_dir": "wave-gate/wave155.nop240",
+ "files": {
+  "wave-gate/wave155.nop240/summary.json": "bf572f7de920d509161b4979bce38abbca21b33b69519c4792bf985274777c89",
+  "wave-gate/wave155.nop240/wave.log": "14d5327035a0a3dc3536fe790389931027d9eae8c4f233effd736ad2fee6e866"
+ },
+ "logical_loop": "L4 (composite wave gate, issue-level)",
+ "source_run_dir": "/tmp/wave155.nop240",
+ "status": "completed",
+ "verdict": "pass",
+ "wave_sha": "df00dc397465384012237d10be66f457f508f997"
+}
