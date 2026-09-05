@@ -955,6 +955,12 @@ UNSOURCEABLE_BY_KIND = {
 }
 
 
+#: "The prior bytes were never captured" — distinct from "there were none". Mapping
+#: both to None let a failed snapshot be restored as an absence, which deletes the
+#: very file the rollback exists to preserve.
+_UNCAPTURED = object()
+
+
 def _manifest_paths(root: Path) -> list[Path]:
     """Every path the checksum manifest names, as absolute paths."""
     sums = root / "SHA256SUMS"
@@ -970,7 +976,7 @@ def _manifest_paths(root: Path) -> list[Path]:
     return [sums, *out]
 
 
-def _stage_archive(repo: Path, root: Path, listed_paths) -> str:
+def _stage_archive(repo: Path, root: Path, listed_paths, touched=None) -> str:
     """Stage the archive, and PROVE every manifest path reached the index.
 
     The manifest names files, and the scanners compare it against the GIT INDEX —
@@ -1006,6 +1012,10 @@ def _stage_archive(repo: Path, root: Path, listed_paths) -> str:
         return " (no git index here, so there is no manifest/index pair to keep)"
 
     rel_root = root.resolve().relative_to(repo.resolve())
+    if touched is not None:
+        # RECORDED BEFORE THE MUTATION, so the rollback knows what THIS invocation
+        # added rather than re-deriving it from a worktree that has since changed.
+        touched.append(str(rel_root))
     staged = subprocess.run(
         ["git", "-C", str(repo), "add", "--", str(rel_root)],
         capture_output=True, text=True)
@@ -1423,6 +1433,11 @@ def main() -> int:
                 json.dumps(row, sort_keys=True, indent=1) + "\n")
 
         sums_path = root / "SHA256SUMS"
+        # A DISTINCT SENTINEL for "not captured". Using None for both "no manifest
+        # existed" and "the snapshot raised" let a transient read error be restored
+        # as an ABSENCE — the handler would see the original still on disk, delete
+        # it, and report a successful rollback having destroyed the only manifest.
+        sums_before = _UNCAPTURED
         sums_before = sums_path.read_bytes() if sums_path.is_file() else None
         listed = write_sums(root)
 
@@ -1432,7 +1447,9 @@ def main() -> int:
         # already existed — the retry contract this script's own test pins,
         # broken by the step added to protect a different invariant. A failure
         # here now raises and unwinds with everything else.
-        staged_note = _stage_archive(repo, root, listed_paths=_manifest_paths(root))
+        staging_touched_index = []
+        staged_note = _stage_archive(repo, root, listed_paths=_manifest_paths(root),
+                                     touched=staging_touched_index)
     except BaseException as failure:
         # The rollback is itself a mutation and can itself fail — a read-only
         # index is the case that proved it, where restoring needed exactly the
@@ -1469,35 +1486,57 @@ def main() -> int:
             # round directory left SHA256SUMS naming a round that no longer exists —
             # a rollback that reports the archive is as it was while leaving it
             # describing something it does not contain.
-            sums_now = locals().get("sums_before", None)
-            if sums_now is None:
-                if (root / "SHA256SUMS").is_file() and locals().get("sums_path"):
+            sums_now = locals().get("sums_before", _UNCAPTURED)
+            if sums_now is _UNCAPTURED:
+                # NOT captured — which also means NOT rewritten, because the
+                # snapshot is taken immediately before `write_sums` and nothing
+                # between them touches the file. So the manifest is already as it
+                # was and the only correct action is none. What this branch must
+                # never do is treat the missing snapshot as "there was no manifest"
+                # and delete the original, which is the shape the sentinel exists
+                # to keep apart from a genuine absence.
+                pass
+            elif sums_now is None:
+                if (root / "SHA256SUMS").is_file():
                     (root / "SHA256SUMS").unlink()
                     undone.append("the manifest this run created")
             elif (root / "SHA256SUMS").read_bytes() != sums_now:
-                (root / "SHA256SUMS").write_bytes(sums_now)
+                # ATOMICALLY, for the reason `write_sums` already writes atomically:
+                # the faults that reach this handler are exactly the ones that can
+                # strike again mid-write, and a truncated restore destroys the only
+                # complete manifest there is.
+                tmp = (root / "SHA256SUMS").with_suffix(".rollback")
+                tmp.write_bytes(sums_now)
+                os.replace(tmp, root / "SHA256SUMS")
                 undone.append("the manifest")
         except BaseException as restore_failure:
             unresolved.append(f"SHA256SUMS ({restore_failure})")
-        try:
-            # AND THE INDEX, if staging had already touched it. Re-adding the
-            # restored tree makes the index match the worktree again, which is what
-            # "as it was" has to mean once a `git add` may have run — otherwise the
-            # rollback leaves staged ghosts of files it just deleted, and a later
-            # commit would carry evidence this run withdrew.
-            probe = subprocess.run(
-                ["git", "-C", str(repo), "rev-parse", "--is-inside-work-tree"],
-                capture_output=True, text=True)
-            if probe.returncode == 0 and probe.stdout.strip() == "true":
-                resync = subprocess.run(
-                    ["git", "-C", str(repo), "add", "-A", "--",
-                     str(root.resolve().relative_to(repo.resolve()))],
+        # ONLY IF STAGING ACTUALLY RAN, and only over what it staged. An
+        # unconditional `git add -A` stages every pre-existing worktree change under
+        # the root even when no index mutation needed undoing — which, in the
+        # accepting flow, stages an external capture while restoring a manifest that
+        # does not list it: tracked-but-unlisted, produced by the rollback itself.
+        if locals().get("staging_touched_index"):
+            try:
+                probe = subprocess.run(
+                    ["git", "-C", str(repo), "rev-parse", "--is-inside-work-tree"],
                     capture_output=True, text=True)
-                if resync.returncode != 0:
-                    raise OSError(resync.stderr.strip())
-                undone.append("the index, re-synced to the restored tree")
-        except BaseException as restore_failure:
-            unresolved.append(f"git index ({restore_failure})")
+                if probe.returncode != 0 or probe.stdout.strip() != "true":
+                    # Staging HAS run, so the index may hold entries this run added.
+                    # A probe that cannot answer leaves that UNKNOWN, and unknown is
+                    # reported rather than silently skipped.
+                    raise OSError(
+                        "the repository could not be probed after staging had run, "
+                        f"so the index state is unknown: {probe.stderr.strip()}")
+                for path in staging_touched_index:
+                    reset = subprocess.run(
+                        ["git", "-C", str(repo), "restore", "--staged", "--", path],
+                        capture_output=True, text=True)
+                    if reset.returncode != 0 and "did not match" not in reset.stderr:
+                        raise OSError(reset.stderr.strip())
+                undone.append("the index entries this run staged")
+            except BaseException as restore_failure:
+                unresolved.append(f"git index ({restore_failure})")
 
         print(f"archiving failed ({type(failure).__name__}: {failure}).",
               file=sys.stderr)
