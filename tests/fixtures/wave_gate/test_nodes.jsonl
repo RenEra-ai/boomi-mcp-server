@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 11568, "minimum_collected": 11568, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 11569, "minimum_collected": 11569, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -11613,3 +11613,4 @@
 {"kind": "test", "id": "pytest-011612", "node_id": "tests/test_archive_gate_round.py::test_an_ignored_manifest_path_is_refused_not_silently_skipped", "state": "active"}
 {"kind": "test", "id": "pytest-011613", "node_id": "tests/test_archive_gate_round.py::test_a_probe_failure_is_not_read_as_a_scratch_directory", "state": "active"}
 {"kind": "test", "id": "pytest-011614", "node_id": "tests/test_archive_gate_round.py::test_a_rollback_preserves_index_entries_it_did_not_make", "state": "active"}
+{"kind": "test", "id": "pytest-011615", "node_id": "tests/test_archive_gate_round.py::test_a_rollback_does_not_destroy_an_archive_file_named_like_its_temp", "state": "active"}

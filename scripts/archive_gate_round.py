@@ -1017,8 +1017,12 @@ def _stage_archive(repo: Path, root: Path, listed_paths, touched=None) -> str:
         # Resetting the subtree to HEAD instead discards staged entries this run
         # never made — a previous archive staged and not yet committed is the
         # ordinary case — and calls that "as it was".
+        # `-v` carries the extended flags in its tag letter — assume-unchanged,
+        # skip-worktree, intent-to-add — which `-s` alone silently drops. A restore
+        # that recreates entries from `-s` clears them while reporting an exact
+        # restore, so the snapshot has to carry what the comparison will check.
         before = subprocess.run(
-            ["git", "-C", str(repo), "ls-files", "-s", "--", str(rel_root)],
+            ["git", "-C", str(repo), "ls-files", "-s", "-v", "--", str(rel_root)],
             capture_output=True, text=True)
         if before.returncode != 0:
             raise OSError(
@@ -1523,6 +1527,14 @@ def main() -> int:
                 try:
                     with os.fdopen(fd, "wb") as handle:
                         handle.write(sums_now)
+                    # `mkstemp` creates 0600 and `os.replace` keeps it, so a restore
+                    # would leave the shared manifest unreadable to another UID
+                    # while reporting the archive unchanged. The prior mode is put
+                    # back before the swap.
+                    try:
+                        os.chmod(tmp_name, (root / "SHA256SUMS").stat().st_mode & 0o7777)
+                    except FileNotFoundError:
+                        pass
                     os.replace(tmp_name, root / "SHA256SUMS")
                 except BaseException:
                     Path(tmp_name).unlink(missing_ok=True)
@@ -1549,26 +1561,51 @@ def main() -> int:
                         f"so the index state is unknown: {probe.stderr.strip()}")
                 for path, before_lines in staging_touched_index:
                     # Clear whatever this run left indexed under the subtree...
+                    # NUL-DELIMITED, so the names are git's raw bytes rather than
+                    # its display spelling. With `core.quotePath` on — the default —
+                    # a non-ASCII round name comes back C-quoted, and feeding that
+                    # spelling back to `update-index` names a path that does not
+                    # exist, leaving the entries this rollback exists to remove.
                     now = subprocess.run(
-                        ["git", "-C", str(repo), "ls-files", "--", path],
-                        capture_output=True, text=True)
+                        ["git", "-C", str(repo), "ls-files", "-z", "--", path],
+                        capture_output=True)
                     if now.returncode != 0:
-                        raise OSError(now.stderr.strip())
-                    for entry in now.stdout.splitlines():
-                        if entry.strip():
-                            drop = subprocess.run(
-                                ["git", "-C", str(repo), "update-index",
-                                 "--force-remove", "--", entry],
-                                capture_output=True, text=True)
-                            if drop.returncode != 0:
-                                raise OSError(drop.stderr.strip())
+                        raise OSError(now.stderr.decode("utf-8", "surrogateescape").strip())
+                    entries = [e for e in now.stdout.split(b"\0") if e]
+                    if entries:
+                        drop = subprocess.run(
+                            ["git", "-C", str(repo), "update-index", "--force-remove",
+                             "-z", "--stdin"],
+                            input=b"\0".join(entries) + b"\0", capture_output=True)
+                        if drop.returncode != 0:
+                            raise OSError(
+                                drop.stderr.decode("utf-8", "surrogateescape").strip())
                     # ...and put back exactly what was there before, byte for byte.
                     if before_lines.strip():
+                        # `-v` prefixes each line with a tag letter; `--index-info`
+                        # wants the bare `mode sha stage\tpath` form.
+                        feed = "".join(
+                            line[2:] + "\n" for line in before_lines.splitlines()
+                            if line.strip())
                         restore = subprocess.run(
                             ["git", "-C", str(repo), "update-index", "--index-info"],
-                            input=before_lines, capture_output=True, text=True)
+                            input=feed, capture_output=True, text=True)
                         if restore.returncode != 0:
                             raise OSError(restore.stderr.strip())
+                    # VERIFIED, not asserted. Recreating entries from a listing
+                    # cannot carry back extended flags, so the restore is compared
+                    # against the snapshot and a difference is reported as
+                    # unresolved rather than described as exact.
+                    after = subprocess.run(
+                        ["git", "-C", str(repo), "ls-files", "-s", "-v", "--", path],
+                        capture_output=True, text=True)
+                    if after.returncode != 0:
+                        raise OSError(after.stderr.strip())
+                    if after.stdout != before_lines:
+                        raise OSError(
+                            "the index could not be restored exactly — extended "
+                            "entry flags are not carried by a listing, so any that "
+                            "were set are now cleared")
                 undone.append("the index, restored to its exact pre-run state")
             except BaseException as restore_failure:
                 unresolved.append(f"git index ({restore_failure})")

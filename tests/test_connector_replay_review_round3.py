@@ -1302,6 +1302,9 @@ def test_a_shared_readback_delta_is_read_per_run(tmp_path):
 #: is added, with the count it has at that moment; existing entries stay as written.
 #: `test_the_recorded_floors_never_move_down` now enforces exactly that.
 _EXPECTED_CLASS_COUNTS = {
+    # A NEW (mechanism, authority) pair: state restored from a listing that
+    # cannot represent all of it. See the class row.
+    "DC-155-Y": 4,
     # A NEW (mechanism, authority) pair: a non-injective serialization
     # standing in for an identity. See the class row for why it is not the
     # identifier-shape class it was first filed under.
@@ -1364,6 +1367,10 @@ _UNROWED = {"DC-155-C": 2, "DC-155-I": 1}
 #: the reason. Frozen so the set cannot grow silently: a row that names a class is an
 #: instance of it unless it appears here.
 _NOT_AN_INSTANCE = {
+    "CDX-155-r243-01": "the SUPERSEDED original of a class reclassification — the "
+    "one finding is counted at the revision, under the class it belongs to",
+    "CDX-155-r243-02": "the SUPERSEDED original of a class reclassification — the "
+    "one finding is counted at the revision, under the class it belongs to",
     "CDX-155-r239-01a": "a REVISION correcting an affected-SHA cell — one finding, "
     "counted at the original",
     "CDX-155-r239-02a": "a REVISION correcting an affected-SHA cell — one finding, "

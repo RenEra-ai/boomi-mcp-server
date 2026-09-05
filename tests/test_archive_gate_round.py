@@ -2777,3 +2777,47 @@ def test_a_rollback_preserves_index_entries_it_did_not_make(tmp_path):
         "the rollback changed index entries it did not make:\n"
         f"  before: {staged_before!r}\n  after:  {staged_after!r}"
     )
+
+
+def test_a_rollback_does_not_destroy_an_archive_file_named_like_its_temp(tmp_path):
+    """The rollback's temporary must not collide with an accounted archive file.
+
+    THE NON-VACUITY WITNESS for the collision-proof temporary — and I had recorded
+    this fix as UNGRADED, claiming a fault had to be injected. It does not: the
+    archive's own filename rules permit `SHA256SUMS.rollback`, so the collision is
+    reachable by placing that file and triggering an ordinary staging failure. The
+    reviewer pointed that out, and being wrong about what could be tested is how a
+    fix ships unmeasured.
+    """
+    import subprocess
+
+    repo = _repo_with_index(tmp_path)
+    (repo / ".gitignore").write_text("*.log\n")
+    subprocess.run(["git", "-C", str(repo), "add", "-A"], check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(repo), "commit", "-qm", "ignore"], check=True,
+                   capture_output=True)
+
+    # An archive that succeeds, so a manifest exists to be restored later...
+    ok, root = _archive(tmp_path, _commit_review_run(tmp_path, name="cdx-review.FIRST01"),
+                        kind="commit-review")
+    assert ok.returncode == 0, ok.stderr
+
+    # ...and a file occupying the name a fixed temporary would have used.
+    decoy = root / "SHA256SUMS.rollback"
+    decoy.write_text("evidence that must survive\n")
+    ok2, _ = _archive(tmp_path, _commit_review_run(tmp_path, name="cdx-review.SECOND1"),
+                      kind="commit-review", extra=("--accept-new",))
+    assert ok2.returncode == 0, ok2.stderr
+    assert "SHA256SUMS.rollback" in (root / "SHA256SUMS").read_text(), (
+        "the decoy must be accounted for, or this proves nothing"
+    )
+
+    # A staging failure now drives the manifest restore.
+    result, _ = _archive(tmp_path, _staging_run(tmp_path), kind="wave-gate",
+                         extra=("--wave-sha", "a" * 40, "--status", "completed"))
+    assert result.returncode == 1, result.stdout
+
+    assert decoy.is_file(), "the rollback destroyed an accounted archive file"
+    assert decoy.read_text() == "evidence that must survive\n", (
+        f"the rollback overwrote an accounted archive file: {decoy.read_text()!r}"
+    )
