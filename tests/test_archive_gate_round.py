@@ -9,6 +9,7 @@ Run with PYTHONPATH=src (the editable-install .pth is stale):
     PYTHONPATH=src .venv/bin/python -m pytest tests/test_archive_gate_round.py
 """
 
+import os
 import json
 import shutil
 import subprocess
@@ -2821,3 +2822,101 @@ def test_a_rollback_does_not_destroy_an_archive_file_named_like_its_temp(tmp_pat
     assert decoy.read_text() == "evidence that must survive\n", (
         f"the rollback overwrote an accounted archive file: {decoy.read_text()!r}"
     )
+
+
+def test_an_intent_to_add_entry_is_refused_before_the_index_is_touched(tmp_path):
+    """A listing cannot represent `add -N`, so the run refuses rather than model it.
+
+    THE NON-VACUITY WITNESS for the structural fix, and the third instance of one
+    class: state restored from a listing that cannot represent all of it. The
+    snapshot is `ls-files -s -v`, whose tag letter DOES carry assume-unchanged and
+    skip-worktree — but an intent-to-add entry renders as a plain `H 100644 <empty
+    blob> 0` row, indistinguishable from an ordinary staged file. A rollback would
+    recreate it as a genuinely staged empty blob, and the before/after strings —
+    the only thing the exact-restore claim rests on — would still compare equal.
+
+    Carrying one more flag by hand would be the same defect one level up, so the
+    fix removes the possibility instead: an index the rollback could not put back
+    is refused BEFORE anything is staged. Hand-run against the mutant (the
+    porcelain probe deleted): the archive proceeds, the staging failure rolls back,
+    the `add -N` entry comes back as a staged empty blob, and the run still reports
+    the index restored to its exact pre-run state.
+    """
+    import subprocess
+
+    repo = _repo_with_index(tmp_path)
+    (repo / ".gitignore").write_text("*.log\n")
+    subprocess.run(["git", "-C", str(repo), "add", "-A"], check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(repo), "commit", "-qm", "ignore"], check=True,
+                   capture_output=True)
+
+    # THE STATE HAS TO BE REACHABLE, and my first two attempts at this fixture were
+    # not: preflight refuses an archive holding files no manifest accounts for, so
+    # a loose `add -N` file dies before staging and the branch under test never
+    # runs. Build it through a successful archive instead — one that writes the
+    # manifest and stages its own files — and then put ONE of those accounted files
+    # into the index as intent-to-add, which is exactly what `git add --patch`
+    # leaves behind.
+    first, root = _archive(tmp_path, _commit_review_run(tmp_path, name="cdx-review.INTENT1"),
+                           kind="commit-review")
+    assert first.returncode == 0, first.stderr
+    accounted = root / "commit-reviews" / "cdx-review.INTENT1" / "review.json"
+    assert accounted.is_file()
+    subprocess.run(["git", "-C", str(repo), "rm", "--cached", "-q", "--", str(accounted)],
+                   check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(repo), "add", "-N", "--", str(accounted)],
+                   check=True, capture_output=True)
+
+    before = subprocess.run(
+        ["git", "-C", str(repo), "status", "--porcelain=v2", "--", str(root)],
+        capture_output=True, text=True, check=True).stdout
+    assert " 000000 " in before, "the fixture must actually hold an intent-to-add entry"
+
+    result, _root = _archive(tmp_path, _commit_review_run(tmp_path, name="cdx-review.INTENT2"),
+                             kind="commit-review")
+    assert result.returncode == 1, result.stdout
+    assert "intent-to-add" in (result.stdout + result.stderr), (
+        "the refusal must name what it refused:\n" + result.stdout + result.stderr)
+
+    after = subprocess.run(
+        ["git", "-C", str(repo), "status", "--porcelain=v2", "--", str(root)],
+        capture_output=True, text=True, check=True).stdout
+    assert after == before, (
+        "refusing to stage must leave the index untouched:\n"
+        f"  before: {before!r}\n  after:  {after!r}")
+
+
+def test_a_rollback_restores_the_manifest_mode_it_found(tmp_path):
+    """The mode is snapshotted beside the bytes, not read back after the replace.
+
+    THE NON-VACUITY WITNESS for the mode capture. `write_sums` writes atomically,
+    so by the time a rollback runs the manifest on disk is a NEW file carrying the
+    default mode — reading `SHA256SUMS.stat()` there reads the replacement, and a
+    0640 manifest comes back at whatever the umask gave while the rollback reports
+    the archive unchanged. Hand-run against the mutant (the mode read moved back
+    after `write_sums`): the restored manifest is 0644, not 0640, and the run still
+    prints that the archive is as it was.
+    """
+    import subprocess
+
+    repo = _repo_with_index(tmp_path)
+    (repo / ".gitignore").write_text("*.log\n")
+    subprocess.run(["git", "-C", str(repo), "add", "-A"], check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(repo), "commit", "-qm", "ignore"], check=True,
+                   capture_output=True)
+
+    first = _commit_review_run(tmp_path, name="cdx-review.MODE001")
+    ok, root = _archive(tmp_path, first, kind="commit-review")
+    assert ok.returncode == 0, ok.stderr
+
+    sums = root / "SHA256SUMS"
+    os.chmod(sums, 0o640)
+    assert sums.stat().st_mode & 0o7777 == 0o640
+
+    # A wave round whose `wave.log` is ignored: staging fails, the rollback runs.
+    result, _root = _archive(tmp_path, _staging_run(tmp_path), kind="wave-gate",
+                             extra=("--wave-sha", "b" * 40, "--status", "completed"))
+    assert result.returncode == 1, result.stdout
+    assert sums.stat().st_mode & 0o7777 == 0o640, (
+        "the rollback replaced the manifest's mode with the temporary's: "
+        f"{oct(sums.stat().st_mode & 0o7777)}")

@@ -976,6 +976,59 @@ def _manifest_paths(root: Path) -> list[Path]:
     return [sums, *out]
 
 
+def _refuse_unrestorable_index(repo: Path, rel_root: Path, listing: str) -> None:
+    """Refuse to stage over index state the rollback could not put back.
+
+    Two listings, two blind spots, one rule. `ls-files -s -v` names extended
+    flags in its tag letter but renders an intent-to-add entry as an ordinary
+    `H` row; `status --porcelain=v2` reports intent-to-add as a zero INDEX mode
+    (field 5) but is not what the snapshot is taken from. An entry only either
+    listing marks is one `update-index --index-info` cannot recreate, so the run
+    stops here — before the mutation — rather than discovering it during a
+    rollback that has already lost the information it would need to check.
+    """
+    stray = sorted(
+        line[2:].split("\t", 1)[-1]
+        for line in listing.splitlines()
+        if line.strip() and line[:1] != "H")
+    if stray:
+        raise OSError(
+            "the index carries entries with extended flags that a listing cannot "
+            "restore (assume-unchanged, skip-worktree or unmerged), so this "
+            f"archive will not stage over them: {', '.join(stray)}")
+
+    status = subprocess.run(
+        ["git", "-C", str(repo), "status", "--porcelain=v2", "-z", "--", str(rel_root)],
+        capture_output=True)
+    if status.returncode != 0:
+        raise OSError(
+            "the index could not be checked for intent-to-add entries before "
+            f"staging: {status.stderr.decode('utf-8', 'surrogateescape').strip()}")
+    chunks = [c for c in status.stdout.split(b"\0") if c]
+    intent, skip_next = [], False
+    for chunk in chunks:
+        if skip_next:
+            # A `2 ` (renamed) record spells its origPath in the NEXT chunk.
+            skip_next = False
+            continue
+        if chunk[:2] == b"2 ":
+            skip_next = True
+        if chunk[:2] != b"1 " and chunk[:2] != b"2 ":
+            continue
+        fields = chunk.split(b" ", 8)
+        # `1 <XY> <sub> <mH> <mI> <mW> <hH> <hI> <path>` — a zero INDEX mode is
+        # git's own marker for an entry recorded by `add -N`.
+        if len(fields) > 8 and fields[4] == b"000000":
+            intent.append(fields[8].split(b"\t", 1)[0]
+                          .decode("utf-8", "surrogateescape"))
+    if intent:
+        raise OSError(
+            "the index carries intent-to-add entries, which a listing records as "
+            "ordinary rows — a rollback would silently convert them to staged "
+            "blobs and report an exact restore, so this archive will not stage "
+            f"over them: {', '.join(sorted(intent))}")
+
+
 def _stage_archive(repo: Path, root: Path, listed_paths, touched=None) -> str:
     """Stage the archive, and PROVE every manifest path reached the index.
 
@@ -1017,16 +1070,26 @@ def _stage_archive(repo: Path, root: Path, listed_paths, touched=None) -> str:
         # Resetting the subtree to HEAD instead discards staged entries this run
         # never made — a previous archive staged and not yet committed is the
         # ordinary case — and calls that "as it was".
-        # `-v` carries the extended flags in its tag letter — assume-unchanged,
-        # skip-worktree, intent-to-add — which `-s` alone silently drops. A restore
-        # that recreates entries from `-s` clears them while reporting an exact
-        # restore, so the snapshot has to carry what the comparison will check.
+        # `-v` prefixes a tag letter, and the tag is the ONLY thing separating an
+        # ordinary cached entry from one carrying state `--index-info` cannot set
+        # back. It does not, however, carry every such state: an `add -N` entry
+        # renders as a plain `H 100644 <empty blob> 0` row (measured), so a restore
+        # would recreate it as a genuinely staged empty blob and the before/after
+        # strings would still compare equal — an exact-restore claim over a real
+        # difference.
+        #
+        # Carrying one more flag by hand is the same shape one level up: the
+        # listing is a MODEL of the index, and every model has an unmodelled
+        # region. So the rollback stops modelling and the run refuses instead —
+        # if the pre-run index holds anything the restore cannot reproduce, this
+        # archive never mutates the index at all, and nothing needs undoing.
         before = subprocess.run(
             ["git", "-C", str(repo), "ls-files", "-s", "-v", "--", str(rel_root)],
             capture_output=True, text=True)
         if before.returncode != 0:
             raise OSError(
                 f"the index could not be read before staging: {before.stderr.strip()}")
+        _refuse_unrestorable_index(repo, rel_root, before.stdout)
         touched.append((str(rel_root), before.stdout))
     staged = subprocess.run(
         ["git", "-C", str(repo), "add", "--", str(rel_root)],
@@ -1451,6 +1514,14 @@ def main() -> int:
         # it, and report a successful rollback having destroyed the only manifest.
         sums_before = _UNCAPTURED
         sums_before = sums_path.read_bytes() if sums_path.is_file() else None
+        # THE MODE TRAVELS WITH THE BYTES. `write_sums` writes atomically, which
+        # means it REPLACES the file: reading the mode during a rollback reads the
+        # replacement's default, not the mode the archive had. A 0444 or 0640
+        # manifest would come back world-writable-by-umask while the rollback
+        # reported the archive unchanged. Snapshot it here, beside the bytes it
+        # belongs to.
+        sums_mode_before = (sums_path.stat().st_mode & 0o7777
+                            if sums_path.is_file() else None)
         listed = write_sums(root)
 
         # STAGED INSIDE THE TRANSACTION. Staging after the `try` published the
@@ -1531,10 +1602,9 @@ def main() -> int:
                     # would leave the shared manifest unreadable to another UID
                     # while reporting the archive unchanged. The prior mode is put
                     # back before the swap.
-                    try:
-                        os.chmod(tmp_name, (root / "SHA256SUMS").stat().st_mode & 0o7777)
-                    except FileNotFoundError:
-                        pass
+                    mode_now = locals().get("sums_mode_before", _UNCAPTURED)
+                    if mode_now is not _UNCAPTURED and mode_now is not None:
+                        os.chmod(tmp_name, mode_now)
                     os.replace(tmp_name, root / "SHA256SUMS")
                 except BaseException:
                     Path(tmp_name).unlink(missing_ok=True)
