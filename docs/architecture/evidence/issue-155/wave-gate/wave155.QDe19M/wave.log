@@ -1,0 +1,8 @@
+gate on 22a2a258f02b, worktree        0
+SKIPPED [2] tests/test_system_topology_models.py:154: identity is supplied by a binding; covered by the bound tests
+11548 passed, 19 skipped, 18 warnings in 938.41s (0:15:38)
+wave_gate: non-KB suite green (11548 passed, 19 skipped, cap 30)
+wave_gate: 74 active goldens deterministic and byte-exact
+wave_gate: plan fingerprint checked:2 case(s)
+
+[exited with code 0]
