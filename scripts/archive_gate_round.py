@@ -1013,9 +1013,17 @@ def _stage_archive(repo: Path, root: Path, listed_paths, touched=None) -> str:
 
     rel_root = root.resolve().relative_to(repo.resolve())
     if touched is not None:
-        # RECORDED BEFORE THE MUTATION, so the rollback knows what THIS invocation
-        # added rather than re-deriving it from a worktree that has since changed.
-        touched.append(str(rel_root))
+        # THE EXACT PRE-RUN INDEX for this subtree, recorded before the mutation.
+        # Resetting the subtree to HEAD instead discards staged entries this run
+        # never made — a previous archive staged and not yet committed is the
+        # ordinary case — and calls that "as it was".
+        before = subprocess.run(
+            ["git", "-C", str(repo), "ls-files", "-s", "--", str(rel_root)],
+            capture_output=True, text=True)
+        if before.returncode != 0:
+            raise OSError(
+                f"the index could not be read before staging: {before.stderr.strip()}")
+        touched.append((str(rel_root), before.stdout))
     staged = subprocess.run(
         ["git", "-C", str(repo), "add", "--", str(rel_root)],
         capture_output=True, text=True)
@@ -1505,9 +1513,20 @@ def main() -> int:
                 # the faults that reach this handler are exactly the ones that can
                 # strike again mid-write, and a truncated restore destroys the only
                 # complete manifest there is.
-                tmp = (root / "SHA256SUMS").with_suffix(".rollback")
-                tmp.write_bytes(sums_now)
-                os.replace(tmp, root / "SHA256SUMS")
+                # A COLLISION-PROOF temporary, created exclusively. A fixed
+                # `.rollback` name is a name an accounted archive file may already
+                # hold — the filename validator permits it — and this path would
+                # then truncate that file with the manifest and rename it away:
+                # evidence destroyed by the step that exists to preserve evidence.
+                import tempfile
+                fd, tmp_name = tempfile.mkstemp(dir=str(root), prefix=".sums-rollback")
+                try:
+                    with os.fdopen(fd, "wb") as handle:
+                        handle.write(sums_now)
+                    os.replace(tmp_name, root / "SHA256SUMS")
+                except BaseException:
+                    Path(tmp_name).unlink(missing_ok=True)
+                    raise
                 undone.append("the manifest")
         except BaseException as restore_failure:
             unresolved.append(f"SHA256SUMS ({restore_failure})")
@@ -1528,13 +1547,29 @@ def main() -> int:
                     raise OSError(
                         "the repository could not be probed after staging had run, "
                         f"so the index state is unknown: {probe.stderr.strip()}")
-                for path in staging_touched_index:
-                    reset = subprocess.run(
-                        ["git", "-C", str(repo), "restore", "--staged", "--", path],
+                for path, before_lines in staging_touched_index:
+                    # Clear whatever this run left indexed under the subtree...
+                    now = subprocess.run(
+                        ["git", "-C", str(repo), "ls-files", "--", path],
                         capture_output=True, text=True)
-                    if reset.returncode != 0 and "did not match" not in reset.stderr:
-                        raise OSError(reset.stderr.strip())
-                undone.append("the index entries this run staged")
+                    if now.returncode != 0:
+                        raise OSError(now.stderr.strip())
+                    for entry in now.stdout.splitlines():
+                        if entry.strip():
+                            drop = subprocess.run(
+                                ["git", "-C", str(repo), "update-index",
+                                 "--force-remove", "--", entry],
+                                capture_output=True, text=True)
+                            if drop.returncode != 0:
+                                raise OSError(drop.stderr.strip())
+                    # ...and put back exactly what was there before, byte for byte.
+                    if before_lines.strip():
+                        restore = subprocess.run(
+                            ["git", "-C", str(repo), "update-index", "--index-info"],
+                            input=before_lines, capture_output=True, text=True)
+                        if restore.returncode != 0:
+                            raise OSError(restore.stderr.strip())
+                undone.append("the index, restored to its exact pre-run state")
             except BaseException as restore_failure:
                 unresolved.append(f"git index ({restore_failure})")
 

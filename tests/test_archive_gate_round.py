@@ -2728,3 +2728,52 @@ def test_a_probe_failure_is_not_read_as_a_scratch_directory(tmp_path):
     assert "could not be probed" in result.stderr or "rolled back" in result.stderr, (
         result.stderr
     )
+
+
+def test_a_rollback_preserves_index_entries_it_did_not_make(tmp_path):
+    """The rollback restores the pre-run index, not the subtree at HEAD.
+
+    THE NON-VACUITY WITNESS for exact index restoration — and the second attempt.
+    The first staged a loose file into the evidence root and never reached the
+    rollback at all: preflight refuses an archive holding files no manifest names,
+    so the run died before staging and the branch under test never executed. It
+    passed with the fix mutated out, which is what a fixture that cannot exhibit
+    the defect always does.
+
+    This builds the real state instead: a SUCCESSFUL archive stages its own files
+    and is deliberately left uncommitted — the ordinary condition of this repository
+    mid-session — and a second archive then fails during staging. Resetting the
+    subtree to HEAD would discard the first archive's entries while reporting "the
+    archive is as it was"; restoring the exact pre-run index keeps them.
+    """
+    import subprocess
+
+    repo = _repo_with_index(tmp_path)
+    (repo / ".gitignore").write_text("*.log\n")
+    subprocess.run(["git", "-C", str(repo), "add", "-A"], check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(repo), "commit", "-qm", "ignore"], check=True,
+                   capture_output=True)
+
+    # A first archive that SUCCEEDS and stages itself. A commit-review round carries
+    # no `.log`, so nothing is ignored and staging completes.
+    first = _commit_review_run(tmp_path, name="cdx-review.FIRST01")
+    ok, _root = _archive(tmp_path, first, kind="commit-review")
+    assert ok.returncode == 0, ok.stderr
+    staged_before = subprocess.run(
+        ["git", "-C", str(repo), "diff", "--cached", "--name-only"],
+        capture_output=True, text=True, check=True).stdout
+    assert staged_before.strip(), "the first archive must leave entries staged"
+
+    # ...then a wave round whose `wave.log` is ignored, so staging fails after the
+    # add and the rollback runs with a non-empty pre-run index to preserve.
+    result, _root = _archive(tmp_path, _staging_run(tmp_path), kind="wave-gate",
+                             extra=("--wave-sha", "a" * 40, "--status", "completed"))
+    assert result.returncode == 1, result.stdout
+
+    staged_after = subprocess.run(
+        ["git", "-C", str(repo), "diff", "--cached", "--name-only"],
+        capture_output=True, text=True, check=True).stdout
+    assert staged_after == staged_before, (
+        "the rollback changed index entries it did not make:\n"
+        f"  before: {staged_before!r}\n  after:  {staged_after!r}"
+    )
