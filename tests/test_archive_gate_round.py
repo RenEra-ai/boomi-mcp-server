@@ -2824,23 +2824,23 @@ def test_a_rollback_does_not_destroy_an_archive_file_named_like_its_temp(tmp_pat
     )
 
 
-def test_an_intent_to_add_entry_is_refused_before_the_index_is_touched(tmp_path):
-    """A listing cannot represent `add -N`, so the run refuses rather than model it.
+def test_a_rollback_restores_index_state_no_listing_can_express(tmp_path):
+    """Intent-to-add and skip-worktree survive a rollback, because it copies the file.
 
-    THE NON-VACUITY WITNESS for the structural fix, and the third instance of one
-    class: state restored from a listing that cannot represent all of it. The
-    snapshot is `ls-files -s -v`, whose tag letter DOES carry assume-unchanged and
-    skip-worktree — but an intent-to-add entry renders as a plain `H 100644 <empty
-    blob> 0` row, indistinguishable from an ordinary staged file. A rollback would
-    recreate it as a genuinely staged empty blob, and the before/after strings —
-    the only thing the exact-restore claim rests on — would still compare equal.
+    THE NON-VACUITY WITNESS for the structural fix, and the third form this test has
+    taken — each form matching the fix it was written against, and each fix a fuller
+    MODEL of the git index than the last. Recreating entries from `ls-files -s` lost
+    the extended flags; adding `-v` still rendered an `add -N` entry as an ordinary
+    `H` row; refusing what those listings could not express rejected a staged
+    DELETION, whose zero index mode looks identical to the intent bit in porcelain v2,
+    and still missed fsmonitor-valid, which neither listing carries.
 
-    Carrying one more flag by hand would be the same defect one level up, so the
-    fix removes the possibility instead: an index the rollback could not put back
-    is refused BEFORE anything is staged. Hand-run against the mutant (the
-    porcelain probe deleted): the archive proceeds, the staging failure rolls back,
-    the `add -N` entry comes back as a staged empty blob, and the run still reports
-    the index restored to its exact pre-run state.
+    So the fix stopped modelling: `.git/index` is copied byte for byte and put back.
+    This asserts the property that ends the class — state the listings cannot express
+    SURVIVES — using the two such states that can be created portably. Hand-run
+    against the mutant (the copy replaced by the previous `ls-files -s -v` snapshot
+    and `--index-info` restore): the intent-to-add entry comes back as a staged empty
+    blob and the skip-worktree bit is cleared, both under an exact-restore claim.
     """
     import subprocess
 
@@ -2850,39 +2850,47 @@ def test_an_intent_to_add_entry_is_refused_before_the_index_is_touched(tmp_path)
     subprocess.run(["git", "-C", str(repo), "commit", "-qm", "ignore"], check=True,
                    capture_output=True)
 
-    # THE STATE HAS TO BE REACHABLE, and my first two attempts at this fixture were
-    # not: preflight refuses an archive holding files no manifest accounts for, so
-    # a loose `add -N` file dies before staging and the branch under test never
-    # runs. Build it through a successful archive instead — one that writes the
-    # manifest and stages its own files — and then put ONE of those accounted files
-    # into the index as intent-to-add, which is exactly what `git add --patch`
-    # leaves behind.
-    first, root = _archive(tmp_path, _commit_review_run(tmp_path, name="cdx-review.INTENT1"),
+    # Build the state through a SUCCESSFUL archive: preflight refuses an archive
+    # holding files no manifest accounts for, so a loose file dies before staging and
+    # the branch under test never runs. Two earlier drafts of this fixture did exactly
+    # that and passed with the fix mutated out.
+    first, root = _archive(tmp_path, _commit_review_run(tmp_path, name="cdx-review.KEEP001"),
                            kind="commit-review")
     assert first.returncode == 0, first.stderr
-    accounted = root / "commit-reviews" / "cdx-review.INTENT1" / "review.json"
+    accounted = root / "commit-reviews" / "cdx-review.KEEP001" / "review.json"
     assert accounted.is_file()
+    other = next(f for f in sorted(accounted.parent.iterdir())
+                 if f.is_file() and f != accounted)
+
+    # `git add --patch` leaves an intent-to-add entry behind; skip-worktree is what a
+    # sparse checkout sets. Neither is expressible in the listing the old code used.
     subprocess.run(["git", "-C", str(repo), "rm", "--cached", "-q", "--", str(accounted)],
                    check=True, capture_output=True)
     subprocess.run(["git", "-C", str(repo), "add", "-N", "--", str(accounted)],
                    check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(repo), "update-index", "--skip-worktree", "--",
+                    str(other)], check=True, capture_output=True)
 
-    before = subprocess.run(
-        ["git", "-C", str(repo), "status", "--porcelain=v2", "--", str(root)],
-        capture_output=True, text=True, check=True).stdout
-    assert " 000000 " in before, "the fixture must actually hold an intent-to-add entry"
+    def index_state():
+        return subprocess.run(
+            ["git", "-C", str(repo), "ls-files", "-s", "-v", "--", str(root)],
+            capture_output=True, text=True, check=True).stdout, subprocess.run(
+            ["git", "-C", str(repo), "status", "--porcelain=v2", "--", str(root)],
+            capture_output=True, text=True, check=True).stdout
 
-    result, _root = _archive(tmp_path, _commit_review_run(tmp_path, name="cdx-review.INTENT2"),
-                             kind="commit-review")
+    before = index_state()
+    assert " 000000 " in before[1], "the fixture must hold an intent-to-add entry"
+    assert any(l[:1] == "S" for l in before[0].splitlines()), (
+        "the fixture must hold a skip-worktree entry")
+
+    # A wave round whose `wave.log` is ignored: staging fails, the rollback runs.
+    result, _root = _archive(tmp_path, _staging_run(tmp_path), kind="wave-gate",
+                             extra=("--wave-sha", "c" * 40, "--status", "completed"))
     assert result.returncode == 1, result.stdout
-    assert "intent-to-add" in (result.stdout + result.stderr), (
-        "the refusal must name what it refused:\n" + result.stdout + result.stderr)
 
-    after = subprocess.run(
-        ["git", "-C", str(repo), "status", "--porcelain=v2", "--", str(root)],
-        capture_output=True, text=True, check=True).stdout
+    after = index_state()
     assert after == before, (
-        "refusing to stage must leave the index untouched:\n"
+        "the rollback did not put back index state the listings cannot express:\n"
         f"  before: {before!r}\n  after:  {after!r}")
 
 

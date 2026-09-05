@@ -976,57 +976,49 @@ def _manifest_paths(root: Path) -> list[Path]:
     return [sums, *out]
 
 
-def _refuse_unrestorable_index(repo: Path, rel_root: Path, listing: str) -> None:
-    """Refuse to stage over index state the rollback could not put back.
+def _snapshot_index_file(repo: Path) -> tuple[Path, bytes] | None:
+    """Copy `.git/index` verbatim, so the rollback needs no model of it.
 
-    Two listings, two blind spots, one rule. `ls-files -s -v` names extended
-    flags in its tag letter but renders an intent-to-add entry as an ordinary
-    `H` row; `status --porcelain=v2` reports intent-to-add as a zero INDEX mode
-    (field 5) but is not what the snapshot is taken from. An entry only either
-    listing marks is one `update-index --index-info` cannot recreate, so the run
-    stops here — before the mutation — rather than discovering it during a
-    rollback that has already lost the information it would need to check.
+    THE THIRD ANSWER TO ONE CLASS, and the first that ends it. The first attempt
+    recreated entries from `git ls-files -s`; the second added `-v` for the extended
+    flag tags; the third refused any state those two listings could not express. Each
+    was a fuller MODEL of the index, and each round found another thing the model did
+    not hold — intent-to-add renders as an ordinary `H` row, a staged deletion shows
+    the same zero index mode the intent bit does (so the refusal rejected a state that
+    restores perfectly), and fsmonitor-valid is carried by neither listing.
+
+    There is no reason to model a file that can simply be copied. The index IS the
+    authority for its own contents; a byte copy holds every entry, every extended
+    flag, every extension and the stat cache, including whatever a future git version
+    adds. The unmodelled region is what kept producing findings, so this removes the
+    model rather than widening it.
+
+    Returns the temporary's path and the bytes it holds, or None where there is no
+    index to snapshot (a scratch directory that is not a repository).
     """
-    stray = sorted(
-        line[2:].split("\t", 1)[-1]
-        for line in listing.splitlines()
-        if line.strip() and line[:1] != "H")
-    if stray:
+    probe = subprocess.run(
+        ["git", "-C", str(repo), "rev-parse", "--git-dir"],
+        capture_output=True, text=True)
+    if probe.returncode != 0:
+        if "not a git repository" in probe.stderr.lower():
+            return None
         raise OSError(
-            "the index carries entries with extended flags that a listing cannot "
-            "restore (assume-unchanged, skip-worktree or unmerged), so this "
-            f"archive will not stage over them: {', '.join(stray)}")
-
-    status = subprocess.run(
-        ["git", "-C", str(repo), "status", "--porcelain=v2", "-z", "--", str(rel_root)],
-        capture_output=True)
-    if status.returncode != 0:
-        raise OSError(
-            "the index could not be checked for intent-to-add entries before "
-            f"staging: {status.stderr.decode('utf-8', 'surrogateescape').strip()}")
-    chunks = [c for c in status.stdout.split(b"\0") if c]
-    intent, skip_next = [], False
-    for chunk in chunks:
-        if skip_next:
-            # A `2 ` (renamed) record spells its origPath in the NEXT chunk.
-            skip_next = False
-            continue
-        if chunk[:2] == b"2 ":
-            skip_next = True
-        if chunk[:2] != b"1 " and chunk[:2] != b"2 ":
-            continue
-        fields = chunk.split(b" ", 8)
-        # `1 <XY> <sub> <mH> <mI> <mW> <hH> <hI> <path>` — a zero INDEX mode is
-        # git's own marker for an entry recorded by `add -N`.
-        if len(fields) > 8 and fields[4] == b"000000":
-            intent.append(fields[8].split(b"\t", 1)[0]
-                          .decode("utf-8", "surrogateescape"))
-    if intent:
-        raise OSError(
-            "the index carries intent-to-add entries, which a listing records as "
-            "ordinary rows — a rollback would silently convert them to staged "
-            "blobs and report an exact restore, so this archive will not stage "
-            f"over them: {', '.join(sorted(intent))}")
+            "the repository could not be probed, so whether this archive reached "
+            f"an index is unknown: {probe.stderr.strip()}")
+    git_dir = Path(probe.stdout.strip())
+    if not git_dir.is_absolute():
+        git_dir = repo / git_dir
+    index = git_dir / "index"
+    if not index.is_file():
+        # A repository with no index yet (nothing ever staged). Staging creates one;
+        # the rollback deletes it, which is the exact pre-run state.
+        return (index, b"")
+    import tempfile
+    fd, tmp = tempfile.mkstemp(dir=str(git_dir), prefix=".index-archive-rollback")
+    payload = index.read_bytes()
+    with os.fdopen(fd, "wb") as handle:
+        handle.write(payload)
+    return (Path(tmp), payload)
 
 
 def _stage_archive(repo: Path, root: Path, listed_paths, touched=None) -> str:
@@ -1066,31 +1058,12 @@ def _stage_archive(repo: Path, root: Path, listed_paths, touched=None) -> str:
 
     rel_root = root.resolve().relative_to(repo.resolve())
     if touched is not None:
-        # THE EXACT PRE-RUN INDEX for this subtree, recorded before the mutation.
-        # Resetting the subtree to HEAD instead discards staged entries this run
-        # never made — a previous archive staged and not yet committed is the
-        # ordinary case — and calls that "as it was".
-        # `-v` prefixes a tag letter, and the tag is the ONLY thing separating an
-        # ordinary cached entry from one carrying state `--index-info` cannot set
-        # back. It does not, however, carry every such state: an `add -N` entry
-        # renders as a plain `H 100644 <empty blob> 0` row (measured), so a restore
-        # would recreate it as a genuinely staged empty blob and the before/after
-        # strings would still compare equal — an exact-restore claim over a real
-        # difference.
-        #
-        # Carrying one more flag by hand is the same shape one level up: the
-        # listing is a MODEL of the index, and every model has an unmodelled
-        # region. So the rollback stops modelling and the run refuses instead —
-        # if the pre-run index holds anything the restore cannot reproduce, this
-        # archive never mutates the index at all, and nothing needs undoing.
-        before = subprocess.run(
-            ["git", "-C", str(repo), "ls-files", "-s", "-v", "--", str(rel_root)],
-            capture_output=True, text=True)
-        if before.returncode != 0:
-            raise OSError(
-                f"the index could not be read before staging: {before.stderr.strip()}")
-        _refuse_unrestorable_index(repo, rel_root, before.stdout)
-        touched.append((str(rel_root), before.stdout))
+        # THE EXACT PRE-RUN INDEX, captured as the file it is. Resetting the subtree
+        # to HEAD instead discards staged entries this run never made — a previous
+        # archive staged and not yet committed is the ordinary case — and calls that
+        # "as it was". See `_snapshot_index_file` for why this is a copy and not a
+        # listing.
+        touched.append(_snapshot_index_file(repo))
     staged = subprocess.run(
         ["git", "-C", str(repo), "add", "--", str(rel_root)],
         capture_output=True, text=True)
@@ -1629,53 +1602,24 @@ def main() -> int:
                     raise OSError(
                         "the repository could not be probed after staging had run, "
                         f"so the index state is unknown: {probe.stderr.strip()}")
-                for path, before_lines in staging_touched_index:
-                    # Clear whatever this run left indexed under the subtree...
-                    # NUL-DELIMITED, so the names are git's raw bytes rather than
-                    # its display spelling. With `core.quotePath` on — the default —
-                    # a non-ASCII round name comes back C-quoted, and feeding that
-                    # spelling back to `update-index` names a path that does not
-                    # exist, leaving the entries this rollback exists to remove.
-                    now = subprocess.run(
-                        ["git", "-C", str(repo), "ls-files", "-z", "--", path],
-                        capture_output=True)
-                    if now.returncode != 0:
-                        raise OSError(now.stderr.decode("utf-8", "surrogateescape").strip())
-                    entries = [e for e in now.stdout.split(b"\0") if e]
-                    if entries:
-                        drop = subprocess.run(
-                            ["git", "-C", str(repo), "update-index", "--force-remove",
-                             "-z", "--stdin"],
-                            input=b"\0".join(entries) + b"\0", capture_output=True)
-                        if drop.returncode != 0:
-                            raise OSError(
-                                drop.stderr.decode("utf-8", "surrogateescape").strip())
-                    # ...and put back exactly what was there before, byte for byte.
-                    if before_lines.strip():
-                        # `-v` prefixes each line with a tag letter; `--index-info`
-                        # wants the bare `mode sha stage\tpath` form.
-                        feed = "".join(
-                            line[2:] + "\n" for line in before_lines.splitlines()
-                            if line.strip())
-                        restore = subprocess.run(
-                            ["git", "-C", str(repo), "update-index", "--index-info"],
-                            input=feed, capture_output=True, text=True)
-                        if restore.returncode != 0:
-                            raise OSError(restore.stderr.strip())
-                    # VERIFIED, not asserted. Recreating entries from a listing
-                    # cannot carry back extended flags, so the restore is compared
-                    # against the snapshot and a difference is reported as
-                    # unresolved rather than described as exact.
-                    after = subprocess.run(
-                        ["git", "-C", str(repo), "ls-files", "-s", "-v", "--", path],
-                        capture_output=True, text=True)
-                    if after.returncode != 0:
-                        raise OSError(after.stderr.strip())
-                    if after.stdout != before_lines:
+                for snapshot in staging_touched_index:
+                    if snapshot is None:
+                        continue
+                    tmp, payload = snapshot
+                    if payload == b"":
+                        # There was no index before this run; staging made one.
+                        Path(tmp).unlink(missing_ok=True)
+                        continue
+                    index = tmp.parent / "index"
+                    # ATOMIC, and the temporary already sits in the same directory so
+                    # the replace cannot cross a filesystem.
+                    os.replace(tmp, index)
+                    # VERIFIED, not asserted — the whole point of copying the file is
+                    # that the check can be exact.
+                    if index.read_bytes() != payload:
                         raise OSError(
-                            "the index could not be restored exactly — extended "
-                            "entry flags are not carried by a listing, so any that "
-                            "were set are now cleared")
+                            "the index file was restored but does not match the "
+                            "bytes captured before staging")
                 undone.append("the index, restored to its exact pre-run state")
             except BaseException as restore_failure:
                 unresolved.append(f"git index ({restore_failure})")
