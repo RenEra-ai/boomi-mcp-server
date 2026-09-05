@@ -1765,6 +1765,12 @@ def _error_taxonomy_codes():
 
 _LEDGER_NON_DIAGNOSTIC_TOKENS = frozenset({
     "BLIND",
+    # GIT ENVIRONMENT VARIABLES, named because the archiver's index snapshot has to
+    # follow the index git actually uses rather than a hand-built path. They are
+    # git's names, not this project's diagnostics, and the set does not grow with the
+    # work: there are only these two on the index path.
+    "GIT_DIR",
+    "GIT_INDEX_FILE",
     "BOOTSTRAP",
     "CONTINUE",
     "DIAGNOSTIC_CODES",

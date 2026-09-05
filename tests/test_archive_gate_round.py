@@ -23,7 +23,7 @@ _SCRIPT = _REPO / "scripts" / "archive_gate_round.py"
 _ARCHITECT_ROUNDS = _REPO / "docs/architecture/evidence/issue-155/architect-reviews"
 
 
-def _archive(tmp_path, run_dir, kind, extra=()):
+def _archive(tmp_path, run_dir, kind, extra=(), env=None):
     root = tmp_path / "repo" / "docs" / "architecture" / "evidence" / "issue-999"
     root.mkdir(parents=True, exist_ok=True)
     index = root / "index.jsonl"
@@ -35,7 +35,7 @@ def _archive(tmp_path, run_dir, kind, extra=()):
         [sys.executable, str(_SCRIPT), "--issue", "999", "--kind", kind,
          "--run-dir", str(run_dir), "--logical-loop", "L", "--repo",
          str(tmp_path / "repo"), *extra],
-        capture_output=True, text=True,
+        capture_output=True, text=True, env=env,
     )
     return result, root
 
@@ -2928,3 +2928,119 @@ def test_a_rollback_restores_the_manifest_mode_it_found(tmp_path):
     assert sums.stat().st_mode & 0o7777 == 0o640, (
         "the rollback replaced the manifest's mode with the temporary's: "
         f"{oct(sums.stat().st_mode & 0o7777)}")
+
+
+def test_a_successful_archive_leaves_no_index_copy_behind(tmp_path):
+    """The rollback snapshot has no consumer once the archive succeeds.
+
+    Only the failure path ever read these copies, so every successful round left a
+    full `.git/index` copy in the git directory — in the directory the scanners read,
+    written by the tool whose whole purpose is to leave the tree accountable. Hand-run
+    against the mutant (the discard call on the success path removed): a
+    `.index-archive-rollback*` file survives every archive and accumulates per round.
+    """
+    import subprocess
+
+    repo = _repo_with_index(tmp_path)
+    git_dir = repo / ".git"
+    for name in ("cdx-review.CLEAN01", "cdx-review.CLEAN02"):
+        result, _root = _archive(tmp_path, _commit_review_run(tmp_path, name=name),
+                                 kind="commit-review")
+        assert result.returncode == 0, result.stderr
+    leaked = sorted(p.name for p in git_dir.glob(".index-archive-rollback*"))
+    assert not leaked, f"successful archives left index copies behind: {leaked}"
+
+
+def test_a_rollback_restores_the_index_mode_and_its_shared_sidecar(tmp_path):
+    """Mode and split-index sidecars are part of the state, so they are copied too.
+
+    TWO CASES THE FIRST COPY MISSED, both found by asking what `.git/index` actually
+    is rather than assuming. `mkstemp` creates 0600 and `os.replace` keeps it, so the
+    restore installed a private index over a shared repository's 0644 one — the exact
+    defect just fixed for `SHA256SUMS`, committed again one file over. And under
+    `core.splitIndex` most entries live in a `sharedindex.*` file that `git add` can
+    replace and expire, so restoring the main index alone can leave it naming a file
+    that is gone.
+
+    Hand-run against the mutants: with the `os.chmod` removed the index comes back
+    0600 under an exact-restore claim; with the sidecar sweep removed the sidecar's
+    bytes are not restored.
+    """
+    import subprocess
+
+    repo = _repo_with_index(tmp_path)
+    (repo / ".gitignore").write_text("*.log\n")
+    subprocess.run(["git", "-C", str(repo), "add", "-A"], check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(repo), "commit", "-qm", "ignore"], check=True,
+                   capture_output=True)
+    subprocess.run(["git", "-C", str(repo), "update-index", "--split-index"],
+                   check=True, capture_output=True)
+    # Forces every index write to mint a NEW shared index, which is what makes the
+    # sidecar arm non-vacuous: without it the staging `git add` reuses the existing
+    # sidecar and the assertion holds whether or not the code covers them.
+    subprocess.run(["git", "-C", str(repo), "config", "splitIndex.maxPercentChange", "0"],
+                   check=True, capture_output=True)
+
+    first, _root = _archive(tmp_path, _commit_review_run(tmp_path, name="cdx-review.MODE900"),
+                            kind="commit-review")
+    assert first.returncode == 0, first.stderr
+
+    index = repo / ".git" / "index"
+    os.chmod(index, 0o640)
+    shared = sorted((repo / ".git").glob("sharedindex.*"))
+    assert shared, "the fixture must actually be a split index"
+    before_mode = index.stat().st_mode & 0o7777
+    before_shared = {p.name: p.read_bytes() for p in shared}
+
+    result, _root = _archive(tmp_path, _staging_run(tmp_path), kind="wave-gate",
+                             extra=("--wave-sha", "d" * 40, "--status", "completed"))
+    assert result.returncode == 1, result.stdout
+
+    assert index.stat().st_mode & 0o7777 == before_mode, (
+        "the rollback installed the temporary's mode over the index: "
+        f"{oct(index.stat().st_mode & 0o7777)}")
+    after_shared = {p.name: p.read_bytes()
+                    for p in sorted((repo / ".git").glob("sharedindex.*"))}
+    assert after_shared == before_shared, (
+        "the shared-index sidecars are not as they were before the run:\n"
+        f"  before: {sorted(before_shared)}\n  after:  {sorted(after_shared)}")
+
+
+def test_the_snapshot_follows_the_index_git_actually_uses(tmp_path):
+    """`GIT_INDEX_FILE` redirects the index, so the path comes from git, not from us.
+
+    The first copy hand-built `$GIT_DIR/index`. When `GIT_INDEX_FILE` is set every git
+    command the archiver runs reads and writes somewhere else, so a rollback would
+    restore an untouched default index and report an exact restore while the effective
+    one stayed mutated.
+
+    THE FIRST FORM OF THIS TEST ASSERTED WHAT `git rev-parse` RETURNS, which tests git
+    and not this script — it passed with the path rebuilt as `git_dir / "index"`. This
+    one runs the ARCHIVER under the variable and checks the file that actually moved.
+    Hand-run against that same mutant: the alternate index keeps the staged entry the
+    failed run added, because the rollback put back a default index nothing had touched.
+    """
+    import subprocess
+
+    repo = _repo_with_index(tmp_path)
+    (repo / ".gitignore").write_text("*.log\n")
+    subprocess.run(["git", "-C", str(repo), "add", "-A"], check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(repo), "commit", "-qm", "ignore"], check=True,
+                   capture_output=True)
+
+    alt = tmp_path / "alternate.index"
+    env = {**os.environ, "GIT_INDEX_FILE": str(alt)}
+    subprocess.run(["git", "-C", str(repo), "add", "-A"], check=True,
+                   capture_output=True, env=env)
+    assert alt.is_file(), "the fixture must actually have an alternate index"
+    before = alt.read_bytes()
+
+    # A wave round whose `wave.log` is ignored: staging fails, the rollback runs — and
+    # every git call it makes, including the failing `git add`, uses the alternate.
+    result, _root = _archive(tmp_path, _staging_run(tmp_path), kind="wave-gate",
+                             extra=("--wave-sha", "e" * 40, "--status", "completed"),
+                             env=env)
+    assert result.returncode == 1, result.stdout
+    assert alt.read_bytes() == before, (
+        "the effective index was mutated and not restored — the snapshot followed "
+        "$GIT_DIR/index instead of the index git was actually using")

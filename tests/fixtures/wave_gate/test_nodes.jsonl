@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 11571, "minimum_collected": 11571, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 11574, "minimum_collected": 11574, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -11616,3 +11616,6 @@
 {"kind": "test", "id": "pytest-011615", "node_id": "tests/test_archive_gate_round.py::test_a_rollback_does_not_destroy_an_archive_file_named_like_its_temp", "state": "active"}
 {"kind": "test", "id": "pytest-011616", "node_id": "tests/test_archive_gate_round.py::test_a_rollback_restores_index_state_no_listing_can_express", "state": "active"}
 {"kind": "test", "id": "pytest-011617", "node_id": "tests/test_archive_gate_round.py::test_a_rollback_restores_the_manifest_mode_it_found", "state": "active"}
+{"kind": "test", "id": "pytest-011618", "node_id": "tests/test_archive_gate_round.py::test_a_successful_archive_leaves_no_index_copy_behind", "state": "active"}
+{"kind": "test", "id": "pytest-011619", "node_id": "tests/test_archive_gate_round.py::test_a_rollback_restores_the_index_mode_and_its_shared_sidecar", "state": "active"}
+{"kind": "test", "id": "pytest-011620", "node_id": "tests/test_archive_gate_round.py::test_the_snapshot_follows_the_index_git_actually_uses", "state": "active"}

@@ -1308,10 +1308,12 @@ _EXPECTED_CLASS_COUNTS = {
     # SPLIT OUT of DC-155-Y at CDX-155-r247-03: it had been recorded as a union of
     # pairs, and a union of pairs is not a pair. Each floor is its own membership.
     "DC-155-Z": 1,
-    "DC-155-AA": 2,
+    "DC-155-AA": 3,
     # MINTED AT ONE, deliberately: an in-place edit of a committed row destroys the
     # evidence of the belief it overwrote, so a second instance would be invisible.
     "DC-155-AB": 1,
+    # A resource acquired on every path and released on only one. Minted at one.
+    "DC-155-AC": 1,
     # A NEW (mechanism, authority) pair: a non-injective serialization
     # standing in for an identity. See the class row for why it is not the
     # identifier-shape class it was first filed under.
@@ -1374,6 +1376,21 @@ _UNROWED = {"DC-155-C": 2, "DC-155-I": 1}
 #: the reason. Frozen so the set cannot grow silently: a row that names a class is an
 #: instance of it unless it appears here.
 _NOT_AN_INSTANCE = {
+    "CDX-155-r249-01": "the SUPERSEDED original of a locator correction — counted "
+    "at CDX-155-r249-01a",
+    "CDX-155-r249-02": "the SUPERSEDED original of a locator correction — counted "
+    "at CDX-155-r249-02a",
+    "CDX-155-r249-03": "the SUPERSEDED original of a locator correction — counted "
+    "at CDX-155-r249-03a",
+    "CDX-155-r249-04": "the SUPERSEDED original of a locator correction — counted "
+    "at CDX-155-r249-04a",
+    "CDX-155-r249-05": "the SUPERSEDED original of a locator correction — counted "
+    "at CDX-155-r249-05a",
+    "CDX-155-r249-06": "the SUPERSEDED original of a locator correction — counted "
+    "at CDX-155-r249-06a",
+    "CDX-155-r249-07": "the SUPERSEDED original of a locator correction — counted "
+    "at CDX-155-r249-07a",
+
     "CDX-155-r247-01": "the SUPERSEDED original of an affected-state correction — "
     "counted at CDX-155-r247-01a",
     "CDX-155-r247-02": "the SUPERSEDED original of an affected-state correction — "

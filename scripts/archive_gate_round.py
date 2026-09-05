@@ -976,28 +976,37 @@ def _manifest_paths(root: Path) -> list[Path]:
     return [sums, *out]
 
 
-def _snapshot_index_file(repo: Path) -> tuple[Path, bytes] | None:
-    """Copy `.git/index` verbatim, so the rollback needs no model of it.
+def _snapshot_index_file(repo: Path):
+    """Copy every file holding index state, verbatim, so no model is needed.
 
     THE THIRD ANSWER TO ONE CLASS, and the first that ends it. The first attempt
     recreated entries from `git ls-files -s`; the second added `-v` for the extended
     flag tags; the third refused any state those two listings could not express. Each
     was a fuller MODEL of the index, and each round found another thing the model did
     not hold — intent-to-add renders as an ordinary `H` row, a staged deletion shows
-    the same zero index mode the intent bit does (so the refusal rejected a state that
-    restores perfectly), and fsmonitor-valid is carried by neither listing.
+    the same zero index mode the intent bit does, and fsmonitor-valid is carried by
+    neither listing. A file that can be copied never needed a model.
 
-    There is no reason to model a file that can simply be copied. The index IS the
-    authority for its own contents; a byte copy holds every entry, every extended
-    flag, every extension and the stat cache, including whatever a future git version
-    adds. The unmodelled region is what kept producing findings, so this removes the
-    model rather than widening it.
+    WHICH files, though, is itself a question with an authority, and the first version
+    of this function answered it by hand — `$GIT_DIR/index` — which is wrong twice
+    over. `GIT_INDEX_FILE` redirects the index the later commands actually write, and
+    `core.splitIndex` keeps most entries in a `sharedindex.*` sidecar that `git add`
+    may replace. So the path comes from `git rev-parse --git-path index` (git's own
+    answer to where its index is, `GIT_INDEX_FILE` included) and the sidecars are
+    swept from the git directory. Copying a handful of files is cheap; being wrong
+    about which ones is not.
 
-    Returns the temporary's path and the bytes it holds, or None where there is no
-    index to snapshot (a scratch directory that is not a repository).
+    Returns (entries, git_dir, sidecars_before). Each entry is
+    (target, temporary, payload, mode); a temporary of None marks a target that did
+    not exist, whose restoration is deletion. `sidecars_before` is the pre-run set of
+    shared-index names, because staging can ADD one and a rollback that only puts back
+    the files it copied would leave that addition standing while reporting the tree as
+    it was. (Measured: git writes a new sidecar but does NOT expire the old one
+    immediately, so the failure mode here is a leftover file rather than a main index
+    pointing at something deleted.)
     """
     probe = subprocess.run(
-        ["git", "-C", str(repo), "rev-parse", "--git-dir"],
+        ["git", "-C", str(repo), "rev-parse", "--git-path", "index", "--git-dir"],
         capture_output=True, text=True)
     if probe.returncode != 0:
         if "not a git repository" in probe.stderr.lower():
@@ -1005,20 +1014,57 @@ def _snapshot_index_file(repo: Path) -> tuple[Path, bytes] | None:
         raise OSError(
             "the repository could not be probed, so whether this archive reached "
             f"an index is unknown: {probe.stderr.strip()}")
-    git_dir = Path(probe.stdout.strip())
+    parts = probe.stdout.split("\n")
+    index = Path(parts[0].strip())
+    git_dir = Path(parts[1].strip())
+    if not index.is_absolute():
+        index = repo / index
     if not git_dir.is_absolute():
         git_dir = repo / git_dir
-    index = git_dir / "index"
-    if not index.is_file():
-        # A repository with no index yet (nothing ever staged). Staging creates one;
-        # the rollback deletes it, which is the exact pre-run state.
-        return (index, b"")
+
+    targets = [index]
+    # A shared index the main index may point at. `git add` can write a new one and
+    # expire the old, so restoring only the main index could leave it naming a file
+    # that no longer exists.
+    targets.extend(sorted(git_dir.glob("sharedindex.*")))
+
     import tempfile
-    fd, tmp = tempfile.mkstemp(dir=str(git_dir), prefix=".index-archive-rollback")
-    payload = index.read_bytes()
-    with os.fdopen(fd, "wb") as handle:
-        handle.write(payload)
-    return (Path(tmp), payload)
+    saved = []
+    try:
+        for target in targets:
+            if not target.is_file():
+                saved.append((target, None, b"", None))
+                continue
+            payload = target.read_bytes()
+            mode = target.stat().st_mode & 0o7777
+            fd, tmp = tempfile.mkstemp(dir=str(target.parent),
+                                       prefix=".index-archive-rollback")
+            with os.fdopen(fd, "wb") as handle:
+                handle.write(payload)
+            # `mkstemp` creates 0600 and `os.replace` KEEPS it, so a restore would
+            # install a private index over a shared repository's 0644 one and report
+            # the archive unchanged. The same defect as the manifest's, one file over.
+            os.chmod(tmp, mode)
+            saved.append((target, Path(tmp), payload, mode))
+    except BaseException:
+        _discard_index_snapshot((saved, git_dir, ()))
+        raise
+    return (saved, git_dir, frozenset(p.name for p in git_dir.glob("sharedindex.*")))
+
+
+def _discard_index_snapshot(saved) -> None:
+    """Drop the copies once the run no longer needs them.
+
+    Only the rollback consumed these, so a SUCCESSFUL archive left a full index copy
+    in the git directory every round. They are the archive's own droppings, and the
+    scanners read that directory.
+    """
+    if not saved:
+        return
+    for entry in saved[0]:
+        tmp = entry[1]
+        if tmp is not None:
+            Path(tmp).unlink(missing_ok=True)
 
 
 def _stage_archive(repo: Path, root: Path, listed_paths, touched=None) -> str:
@@ -1506,6 +1552,13 @@ def main() -> int:
         staging_touched_index = []
         staged_note = _stage_archive(repo, root, listed_paths=_manifest_paths(root),
                                      touched=staging_touched_index)
+        # THE ARCHIVE SUCCEEDED, so the copies have no consumer left. Only the
+        # rollback ever read them, so every successful round used to leave a full
+        # index copy in the git directory — the archiver's own droppings, in the
+        # directory the scanners read.
+        for saved in staging_touched_index:
+            _discard_index_snapshot(saved)
+        staging_touched_index = []
     except BaseException as failure:
         # The rollback is itself a mutation and can itself fail — a read-only
         # index is the case that proved it, where restoring needed exactly the
@@ -1602,24 +1655,32 @@ def main() -> int:
                     raise OSError(
                         "the repository could not be probed after staging had run, "
                         f"so the index state is unknown: {probe.stderr.strip()}")
-                for snapshot in staging_touched_index:
-                    if snapshot is None:
+                for saved in staging_touched_index:
+                    if not saved:
                         continue
-                    tmp, payload = snapshot
-                    if payload == b"":
-                        # There was no index before this run; staging made one.
-                        Path(tmp).unlink(missing_ok=True)
-                        continue
-                    index = tmp.parent / "index"
-                    # ATOMIC, and the temporary already sits in the same directory so
-                    # the replace cannot cross a filesystem.
-                    os.replace(tmp, index)
-                    # VERIFIED, not asserted — the whole point of copying the file is
-                    # that the check can be exact.
-                    if index.read_bytes() != payload:
-                        raise OSError(
-                            "the index file was restored but does not match the "
-                            "bytes captured before staging")
+                    entries, git_dir, sidecars_before = saved
+                    # A shared index this run ADDED is a mutation like any other.
+                    for extra in sorted(git_dir.glob("sharedindex.*")):
+                        if extra.name not in sidecars_before:
+                            extra.unlink(missing_ok=True)
+                    for target, tmp, payload, mode in entries:
+                        if tmp is None:
+                            # It did not exist before this run; staging made it.
+                            Path(target).unlink(missing_ok=True)
+                            continue
+                        # ATOMIC, and the temporary already sits in the target's own
+                        # directory so the replace cannot cross a filesystem.
+                        os.replace(tmp, target)
+                        # VERIFIED, not asserted — the whole point of copying the file
+                        # is that the check can be exact, bytes AND mode.
+                        if target.read_bytes() != payload:
+                            raise OSError(
+                                f"{target.name} was restored but does not match the "
+                                "bytes captured before staging")
+                        if target.stat().st_mode & 0o7777 != mode:
+                            raise OSError(
+                                f"{target.name} was restored but its mode is "
+                                f"{oct(target.stat().st_mode & 0o7777)}, not {oct(mode)}")
                 undone.append("the index, restored to its exact pre-run state")
             except BaseException as restore_failure:
                 unresolved.append(f"git index ({restore_failure})")
