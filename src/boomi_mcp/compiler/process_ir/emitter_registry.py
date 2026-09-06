@@ -636,6 +636,11 @@ def _pre_notify(inp) -> Optional[str]:
     # second copy of it. So the check is made explicitly instead.
     if inp.level not in NOTIFY_LEVELS:
         return "notify level is outside the platform vocabulary"
+    # TYPE FIRST. A `model_construct`-ed input skips validation entirely, so the
+    # field may hold anything — and `None.strip()` raised a raw AttributeError
+    # out of the preflight instead of the refusal this hook exists to return.
+    if not isinstance(inp.message_template, str):
+        return "notify message_template is not a string"
     if not inp.message_template.strip():
         return "notify message_template is blank"
     if CAUGHT_ERROR_PROPERTY_ID not in inp.message_template:

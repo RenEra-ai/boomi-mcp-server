@@ -635,9 +635,9 @@ _NODE_FACTS: Mapping[str, Mapping[str, Any]] = {
         ),
         _ORDERING: (
             "Both paths terminate independently. Nothing may follow a try_catch "
-            "except another connector-scoped handler in a serialized chain, "
-            "which the preceding handler reaches by ending its protected path in "
-            "continue.",
+            "except another connector-scoped handler in a serialized chain — "
+            "optionally with one map_ref between the two — which the preceding "
+            "handler reaches by ending its protected path in continue.",
             "Retry over an action classified non_idempotent or unverified is "
             "refused outright, whatever evidence is attached.",
             "Typed idempotency evidence only discharges the obligation on an "

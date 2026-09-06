@@ -736,6 +736,18 @@ def _cardinality_error(message: str) -> PydanticCustomError:
     return PydanticCustomError("process_ir_schema_invalid_cardinality", message)  # noqa: EM101
 
 
+def _schema_invalid_error(message: str) -> PydanticCustomError:
+    """A field VALUE that does not satisfy its own contract.
+
+    Distinct from `_cardinality_error`, whose code means "list bound or
+    step-ordering rule violated". A notify template that is blank, omits the
+    caught-error token, or would defeat the binding is none of those — nothing
+    about a list or an ordering is wrong — so it serves the schema-invalid
+    identity the plan's mapping table names.
+    """
+    return PydanticCustomError("process_ir_schema_invalid", message)  # noqa: EM101
+
+
 def _capability_error(message: str) -> PydanticCustomError:
     return PydanticCustomError("process_ir_capability_unsupported", message)  # noqa: EM101
 
@@ -1611,6 +1623,32 @@ class ExceptionNodeV1(_ProcessIRBase):
         return self
 
 
+def _template_defeats_caught_error_binding(template: str) -> bool:
+    """Would this notify template stop the caught error binding?
+
+    TWO shapes, and the first cut of this rule caught only the second:
+
+    * a body the emission escaper reads as JSON is wrapped in single quotes
+      whole — by its own docstring, "so its braces are not read as {N} variable
+      placeholders" — which also encloses the ``{1}`` substituted for the
+      caught-error token, so the platform renders it as literal text and the
+      message carries no error. A JSON ARRAY does this with no brace anywhere:
+      ``["<token>"]`` emits ``'["{1}"]'`` (measured), which a brace ban misses;
+    * any other brace run reaches the pattern unescaped, where ``{id}`` is not a
+      valid argument.
+
+    The JSON test is deliberately spelled here rather than imported from the
+    legacy renderer: models may not import the emitter layer, and this is the
+    AUTHORING rule — a template that cannot carry the caught error — not a
+    restatement of how emission escapes one. It is written to be no narrower
+    than the escaper's own test (leading ``{`` or ``[`` after stripping), so a
+    template it admits is one the escaper leaves alone.
+    """
+    if "{" in template or "}" in template:
+        return True
+    return template.strip()[:1] in ("[",)
+
+
 class ContinueNodeV1(_ProcessIRBase):
     """The protected path of a NON-FINAL connector-scoped handler.
 
@@ -1685,9 +1723,9 @@ class NotifyNodeV1(_ProcessIRBase):
         # canonical path serves the canonical schema family — the same choice
         # ExceptionNodeV1 already makes for the identical template rule.
         if not self.message_template.strip():
-            raise _cardinality_error("message_template must be a non-blank string")
+            raise _schema_invalid_error("message_template must be a non-blank string")
         if CAUGHT_ERROR_PROPERTY_ID not in self.message_template:
-            raise _cardinality_error(
+            raise _schema_invalid_error(
                 "message_template must reference the caught-error property token "
                 "{0} so the emitted message carries the caught error".format(
                     CAUGHT_ERROR_PROPERTY_ID
@@ -1708,12 +1746,12 @@ class NotifyNodeV1(_ProcessIRBase):
         # fail-closed reading: a template that cannot carry the caught error is
         # exactly what the token rule above forbids, and admitting one would let a
         # caller satisfy that rule and still log a failure without the failure.
-        if "{" in self.message_template or "}" in self.message_template:
-            raise _cardinality_error(
-                "message_template may not contain a brace — the emitted message is "
-                "a parameter pattern, and an authored brace either malforms it or "
-                "forces the whole body to be quoted, which stops the caught error "
-                "binding at all"
+        if _template_defeats_caught_error_binding(self.message_template):
+            raise _schema_invalid_error(
+                "message_template must be plain text — a body the platform reads "
+                "as a JSON object or array is quoted whole, which turns the "
+                "caught-error parameter into literal text, and a brace elsewhere "
+                "malforms the parameter pattern"
             )
         return self
 
@@ -2763,9 +2801,19 @@ def _is_serialized_region_chain(steps: List[Any]) -> bool:
     kinds = [getattr(step, "kind", None) for step in steps]
     if kinds.count("try_catch") < 2:
         return False
-    if set(kinds) - {"try_catch", "map_ref"}:
+    if kinds[-1] != "try_catch":
         return False
-    return kinds[0] == "try_catch" and kinds[-1] == "try_catch"
+    # A root PREFIX before the first handler is legal and stays legal. Requiring
+    # the chain to begin AT a handler was an unjustified narrowing: `[call,
+    # handler]` is the pre-existing connector-scope shape and `[handler,
+    # handler]` is the chain, so `[call, handler, handler]` is both halves
+    # composed — and refusing it served an orphan-continuation diagnostic that
+    # described neither. The prefix is whatever precedes the FIRST handler; the
+    # handler suffix from there on must be `handler (map_ref? handler)*`.
+    first = kinds.index("try_catch")
+    if set(kinds[first:]) - {"try_catch", "map_ref"}:
+        return False
+    return True
 
 
 def _check_no_orphan_continue(steps: List[Any]) -> None:
@@ -2786,10 +2834,22 @@ def _check_serialized_region_chain(steps: List[Any]) -> None:
     """The chain's own grammar. Every rule here is a refusal a caller can act on."""
     kinds = [getattr(step, "kind", None) for step in steps]
 
+    # The PREFIX before the first handler carries the pre-existing root
+    # vocabulary and nothing more: linear steps and the connector calls that
+    # produce the documents. Checked explicitly rather than inherited, because
+    # this branch returns before the connector_call-sequence rules below run.
+    first = kinds.index("try_catch")
+    for index, kind in enumerate(kinds[:first]):
+        if kind not in _ROOT_LINEAR_KINDS and kind != "connector_call":
+            raise _capability_error(
+                "a serialized try_catch chain may be preceded only by "
+                "connector_call and linear steps (step {0})".format(index)
+            )
+
     # A map must SEPARATE two handlers — never doubled, never trailing. The
     # captured graph puts exactly one between the guards, and a map with no
     # following handler would have no consumer for its destination profile.
-    for i, kind in enumerate(kinds):
+    for i, kind in enumerate(kinds[first:], start=first):
         if kind != "map_ref":
             continue
         if i == 0 or kinds[i - 1] != "try_catch" or kinds[i + 1] != "try_catch":
@@ -3564,6 +3624,7 @@ _CUSTOM_ERROR_CODES = {
     "process_ir_semantic_recovery_process_call_invalid": (
         PROCESS_IR_SEMANTIC_RECOVERY_PROCESS_CALL_INVALID
     ),
+    "process_ir_schema_invalid": PROCESS_IR_SCHEMA_INVALID,
     # #175
     "process_ir_capability_process_call_return_path_binding_unsupported": (
         PROCESS_IR_CAPABILITY_PROCESS_CALL_RETURN_PATH_BINDING_UNSUPPORTED
@@ -3795,7 +3856,15 @@ def _translate_pydantic_error(error: Mapping[str, Any]) -> ProcessIRDiagnostic:
             if (
                 tag == "process_call"
                 and loc[-2:-1] == ("steps",)
-                and innermost in ("legs", "true_arm")
+                # #156 added `catch_body` to this set for the same reason the
+                # first two are here: the slot now ADMITS a process_call (in its
+                # terminal), so a call authored in `steps` is a caller who chose
+                # the wrong SLOT, not a caller who chose a kind the body refuses.
+                # Serving the body-placement code there told them the kind was
+                # inadmissible, which is no longer true and pointed at no fix.
+                # A Decision FALSE arm and the TRY body still admit no call in
+                # any slot, so they keep the body-placement code.
+                and innermost in ("legs", "true_arm", "catch_body")
             ):
                 return _diagnostic(
                     PROCESS_IR_CAPABILITY_PROCESS_CALL_RETURN_PATH_BINDING_UNSUPPORTED,

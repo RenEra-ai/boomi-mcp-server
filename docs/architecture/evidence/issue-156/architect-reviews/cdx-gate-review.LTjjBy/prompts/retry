@@ -1,0 +1,13 @@
+Approvals are unavailable in this read-only review session — there is no human to approve anything,
+no command will be executed on your behalf, and nothing you request will be granted. Do not ask a
+question, do not request approval, and do not propose next steps to confirm.
+
+Emit your FULL implementation-vs-plan review as plain text NOW, complete in one shot:
+- whether the implementation realizes the design plan;
+- a judgement on EACH of the seven declared departures (sound / not sound, and why);
+- the specific items called out for judgement: the ContinueNodeV1 grammar shape, the two invariant
+  changes against "updated, never weakened", the recovery-call contract, and anything the plan
+  required that is missing;
+- concrete findings with file and line where you have them.
+
+END with a verdict on its OWN FINAL line: exactly 'VERDICT: NO ISSUES' or 'VERDICT: ISSUES FOUND'.

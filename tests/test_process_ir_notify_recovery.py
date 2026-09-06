@@ -1111,3 +1111,146 @@ def test_the_continuation_remediation_covers_the_rules_that_serve_it():
     text = _REMEDIATION[PROCESS_IR_SEMANTIC_CONTROL_CONTINUATION_UNSUPPORTED]
     assert "continue" in text
     assert "try_catch" in text or "handler" in text
+
+
+_DLQ_MAP = "88888888-8888-8888-8888-888888888888"
+
+#: The canonical authoring of `golden-000005` — the connector-scoped DOUBLE guard.
+#:
+#: Region 1 protects the DB read and ends its protected path in `continue`; the
+#: map sits between the handlers; region 2 protects the REST write with
+#: retryCount=2 and terminates. Both recovery legs are notify -> DLQ cache ->
+#: stop. This is the shape that needs `ContinueNodeV1` at all: region 1's
+#: protected path has no closing shape in the frozen bytes, it flows into
+#: `shape4 map` and on to `shape5 catcherrors`.
+_CHAIN_DLQ_DOCUMENT = {
+    "version": "1",
+    "body": {
+        "kind": "sequence",
+        "steps": [
+            {
+                "kind": "try_catch", "scope": "connector", "retry": {"count": 0},
+                "try_body": {
+                    "steps": [{"kind": "connector_call", "operation_ref": "$ref:DBOP",
+                               "action": "read", "label": "DB extract"}],
+                    "terminal": {"kind": "continue"},
+                },
+                "catch_body": {
+                    "steps": [
+                        {"kind": "notify", "level": "ERROR",
+                         "message_template": "Integration catch path failed. Caught error: "
+                                             + CAUGHT_ERROR_PROPERTY_ID},
+                        {"kind": "cache_put", "cache_ref": "$ref:CACHE",
+                         "label": "Route caught errors to DLQ cache"},
+                    ],
+                    "terminal": {"kind": "stop"},
+                },
+            },
+            {"kind": "map_ref", "map_ref": "$ref:MAP"},
+            {
+                "kind": "try_catch", "scope": "connector", "retry": {"count": 2},
+                "try_body": {
+                    "steps": [{"kind": "connector_call", "operation_ref": "$ref:RESTOP",
+                               "action": "write", "label": "REST send"}],
+                    "terminal": dict(_STOP),
+                },
+                "catch_body": {
+                    "steps": [
+                        {"kind": "notify", "level": "ERROR",
+                         "message_template": "Integration catch path failed. Caught error: "
+                                             + CAUGHT_ERROR_PROPERTY_ID},
+                        {"kind": "cache_put", "cache_ref": "$ref:CACHE",
+                         "label": "Route caught errors to DLQ cache"},
+                    ],
+                    "terminal": dict(_STOP),
+                },
+            },
+        ],
+    },
+}
+
+
+def _chain_symbols():
+    from boomi_mcp.compiler.process_ir import connector_capabilities as CC
+    from boomi_mcp.compiler.process_ir.contracts import (
+        ComponentSymbolV1,
+        SymbolTableV1,
+    )
+
+    return SymbolTableV1(symbols=_dlq_symbols().symbols + (
+        ComponentSymbolV1(
+            ref="$ref:MAP", component_id=_DLQ_MAP, component_type="transform.map",
+            input_profile_ref="$ref:DBP", output_profile_ref="$ref:RESTP",
+        ),
+    ))
+
+
+def test_the_connector_scoped_double_guard_golden_is_reproduced_from_canonical_ir():
+    """#156's OTHER headline acceptance criterion, for `golden-000005`.
+
+    The sibling test pins `golden-000059`, the single process-scoped handler.
+    This one pins the double guard, which is the whole reason `ContinueNodeV1`
+    exists — and it had NO permanent pin until the architect review asked for it:
+    the byte equality was measured by hand mid-implementation and never written
+    down, so every later change to region derivation, connector resolution and
+    the plan invariants ran without it.
+
+    The whole `<shapes>` section, byte for byte: main spine 1-7 (start,
+    catcherrors, DB read, map, catcherrors retryCount=2, REST write, stop) then
+    the two recovery blocks 8-10 and 11-13 on the catch row, including both
+    catcherrors' labelled Try/Catch dragpoints.
+    """
+    import re
+
+    from boomi_mcp.compiler.process_ir import lowering
+    from boomi_mcp.compiler.process_ir.emitter_registry import emit_process
+
+    symbols = _chain_symbols()
+    ir = parse_process_ir_v1(_CHAIN_DLQ_DOCUMENT)
+    plan = lowering.lower_cfg_to_emission_plan(
+        lowering.lower_process_ir_to_cfg(ir), symbols
+    )
+    emitted = emit_process(plan, symbols).process_xml
+
+    frozen = (GOLDEN / "connector_scoped_trycatch_notify_dlq_document_cache.xml").read_text()
+    expected = re.search(r"<shapes>.*</shapes>", frozen, re.S).group(0)
+    assert re.search(r"<shapes>.*</shapes>", emitted, re.S).group(0) == expected
+
+
+def test_the_recovery_golden_matches_the_archived_live_capture():
+    """The new golden is LIVE-ANCHORED, and this is what makes that checkable.
+
+    `golden-000075` was produced by the canonical compiler, so on its own it
+    proves only self-consistency. The archived B2 capture was produced by the
+    FROZEN legacy builder before this slice's lowering existed, stored by the
+    platform, deployed and executed with the recovery child observed running —
+    so agreement between the two is what carries the operability claim onto the
+    canonical surface.
+
+    Component ids, connector families, actions and userlabels are blinded: the
+    capture ran against real `renera` components while the golden uses the
+    corpus's deterministic placeholders. What is compared is the graph — shape
+    types, order, geometry, wiring, and the processcall's own attributes.
+    """
+    import re
+
+    capture = (
+        _ROOT / "docs" / "architecture" / "evidence" / "issue-156" / "captures"
+        / "oracle-graphs" / "B2_shapes.xml"
+    )
+    if not capture.is_file():  # pragma: no cover - the archive is committed
+        pytest.skip("live capture archive is absent")
+
+    def blinded(text):
+        shapes = re.search(r"<shapes>.*</shapes>", text, re.S).group(0)
+        shapes = re.sub(r'(connectionId|operationId|processId)="[^"]*"', r'\1="ID"', shapes)
+        shapes = re.sub(r'connectorType="[^"]*"', 'connectorType="T"', shapes)
+        shapes = re.sub(r'actionType="[^"]*"', 'actionType="A"', shapes)
+        return re.sub(r'userlabel="[^"]*"', 'userlabel="L"', shapes)
+
+    golden = (GOLDEN / "scoped_try_catch_notify_terminal_process_call.xml").read_text()
+    assert blinded(golden) == blinded(capture.read_text())
+
+    # ...and the attributes the capture exists to pin are NOT blinded away.
+    assert 'abort="true"' in golden and 'wait="true"' in golden
+    assert "<dragpoints/>" in golden  # terminal: no successor, no synthetic Stop

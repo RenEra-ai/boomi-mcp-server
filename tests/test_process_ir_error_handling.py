@@ -1251,9 +1251,24 @@ def test_a_bad_idempotency_tag_is_not_reported_as_a_body_slot_failure():
 def test_a_genuinely_unknown_node_kind_in_a_try_body_is_still_a_body_failure():
     # The paired positive: excluding `idempotency` must not disable the body-slot
     # remapping for real body slots.
+    #
+    # #156 changed the WITNESS, not the property. This used to author a
+    # `process_call`, which was inadmissible in a catch body in every slot — so
+    # the body-placement code was its true diagnosis. The catch body now admits a
+    # call in its TERMINAL, which makes a call in `steps` a wrong-SLOT error that
+    # correctly serves the connected-call identity instead. A `branch` is the
+    # replacement because it remains inadmissible in a catch body in ANY slot,
+    # which is what this control needs; using a kind the body now admits would
+    # have quietly turned it into a test of the other rule.
     doc = _connector_scope()
     doc["body"]["steps"][-1]["catch_body"]["steps"] = [
-        {"kind": "process_call", "process_ref": "$ref:SUB"}
+        {
+            "kind": "branch",
+            "legs": [
+                {"steps": [{"kind": "message", "text": "a"}], "terminal": {"kind": "stop"}},
+                {"steps": [{"kind": "message", "text": "b"}], "terminal": {"kind": "stop"}},
+            ],
+        }
     ]
     codes = _parse_codes(doc)
     assert codes[0][0] == "PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY"

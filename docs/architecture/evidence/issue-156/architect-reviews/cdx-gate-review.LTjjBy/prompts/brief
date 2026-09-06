@@ -1,0 +1,76 @@
+You are the ARCHITECT reviewing an IMPLEMENTATION against the design plan you produced.
+
+REPO: /Users/gleb/Documents/Projects/Renera/boomi-mcp-server, branch `codex/issue-156`.
+DELTA UNDER REVIEW: `git diff b07babeb3752d337ffa307c4c486e181e703a2c2..HEAD` (HEAD = ae03d1d).
+Read the code. Run tests if you want them; the full non-KB suite is GREEN
+(11627 passed, 19 skipped, 0 failed) — do not re-run the whole suite.
+  PYTHONPATH=src PYTHONDONTWRITEBYTECODE=1 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 BOOMI_LOCAL=true \
+  BOOMI_DOCS_ENABLED=false BOOMI_GOTCHAS_ENABLED=false .venv/bin/python -m pytest <target> -q -p no:cacheprovider
+
+YOUR QUESTION is narrow and specific: does the implementation REALIZE THE DESIGN PLAN reproduced
+verbatim below? Not "is the code good" — a separate Codex commit review already judged the code on
+its own merits across three rounds and closed clean. Judge fidelity to the plan, and the soundness
+of every place the implementation departed from it.
+
+CHANGED FILES (src only; tests, fixtures, docs and evidence also changed):
+  src/boomi_mcp/models/process_ir.py                      (+385)
+  src/boomi_mcp/models/process_ir_tokens.py               (new)
+  src/boomi_mcp/compiler/process_ir/invariants.py         (+104)
+  src/boomi_mcp/compiler/process_ir/lowering.py           (+83)
+  src/boomi_mcp/compiler/process_ir/body_capabilities.py  (+89)
+  src/boomi_mcp/compiler/process_ir/contracts.py          (+55)
+  src/boomi_mcp/compiler/process_ir/emitter_registry.py   (+57)
+  src/boomi_mcp/compiler/process_ir/error_handling.py     (+32)
+  src/boomi_mcp/compiler/process_ir/connector_resolution.py (+35)
+  src/boomi_mcp/compiler/process_ir/diagnostics.py        (+5)
+  src/boomi_mcp/authoring/process_ir_projection.py        (+93)
+  src/boomi_mcp/authoring/process_ir_effects.py           (+7)
+  src/boomi_mcp/errors.py                                 (+20)
+  src/boomi_mcp/kb/design_doctrine.py                     (+11)
+  src/boomi_mcp/categories/components/builders/process_emitters/rendering.py (+12)
+  src/boomi_mcp/categories/components/builders/process_flow_builder.py       (+6)
+
+DELIBERATE DEPARTURES FROM YOUR PLAN — declared up front so you can judge them rather than
+discover them and read them as drift. For each, say whether the departure is sound, and if not,
+what the plan's version would have required:
+
+1. S22 REVERSED. Your plan retired `PROCESS_NOTIFY_CONFIG_INVALID` as "an advertised identity with
+   no canonical producer". It HAS live producers in `process_flow_builder.py` and is pinned by 14
+   assertions across four test files; it is absent from `ERROR_TAXONOMY` because it is a LEGACY
+   builder code, not a canonical one. It was KEPT on the legacy path; only the canonical path uses
+   the taxonomy codes from your mapping table.
+2. REGION BOUNDING drawn on a different axis than your plan. Your plan (and the later commit
+   review) said to bound protected-region derivation "at the next sibling handler". That was
+   implemented, and then MEASURED UNSAFE: because `continue` means the protected path continues
+   into the next handler, bounding at the handler also excluded that handler's PROTECTED body, so
+   a retried region stopped grading writes it really does re-run — a non-idempotent DB Send was
+   ACCEPTED one handler downstream of a retry=2 region while the identical Send inside it was
+   refused. The boundary is now drawn on the SUCCESS/FAILURE split instead: the protected walk
+   follows every edge except a `catch` edge. This keeps your intent (a region must not grade a
+   later handler's recovery-only write) while closing the safety hole the handler-axis version
+   opened. Both directions are pinned by tests.
+3. `validation_policy.py` NOT edited. Your plan said to add the new semantic code to its "closed
+   diagnostic universe"; that module is a legacy-adapter exemption registry with no such universe,
+   and a new code is non-demotable by absence.
+4. `lower_cfg_to_emission_plan` and `finalize_edges` NOT edited. Your plan asked for main-spine-first
+   ordering work there; both already produce the required order once CFG node order is right.
+5. `_walk_controls` NOT reworked. Its `try_catch` early return stays correct for the ancestor half;
+   the recovery exemption is enforced at the `body_capabilities` enforcement point only.
+6. `effects.py` got no Notify dispatch arms — `_replay_hazard` falls through to None, so Notify is
+   neutral without code (verified: `_reads_of`/`_writes_of` both return `()`).
+7. ADDED beyond the plan: `_DISCRIMINATOR_TAGS` entries; a brace ban on `notify.message_template`
+   (the emission escaper quote-wraps a JSON body, which puts the substituted `{1}` inside quotes so
+   the caught error is never bound — measured); `_as_compile_error`, translating the SHARED chain
+   grammar's PydanticCustomError into a compile diagnostic over a closed code set.
+
+WHAT I MOST WANT JUDGED
+- Is the `ContinueNodeV1` grammar the right shape for the capability, or does it admit/refuse
+  something the plan's serialized-region design intended otherwise?
+- Are the two invariant changes (`_check_control_depth` counting active nesting;
+  `_check_region_containment` permitting one authorized escape and REQUIRING a declaring handler to
+  reach one) faithful to "updated, never weakened"?
+- Is the recovery-call contract (`notify`-only prefix, both flags required BY VALUE) what the plan's
+  evidence-backed exception intended?
+- Anything the plan required that is MISSING.
+
+END with a verdict on its OWN FINAL line: exactly 'VERDICT: NO ISSUES' or 'VERDICT: ISSUES FOUND'.

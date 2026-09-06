@@ -706,6 +706,13 @@ def check_cfg_invariants(cfg: SemanticCfgV1) -> None:
                     # path terminates, always, and a catch leaking into the main
                     # flow is precisely the defect this check was written for.
                     allow_continuation=continues,
+                    # Derived from the declaring handler's own authored position,
+                    # so the rule cannot be satisfied by a different sibling.
+                    successor_index=(
+                        int(_ROOT_STEP_PATH.match(node.source_path).group(1)) + 1
+                        if continues and _ROOT_STEP_PATH.match(node.source_path)
+                        else -1
+                    ),
                 )
                 # BOTH DIRECTIONS. `success_mode` buys this handler a relaxation,
                 # and a permission with no matching obligation is not a check —
@@ -785,7 +792,7 @@ def check_cfg_invariants(cfg: SemanticCfgV1) -> None:
 #: to is a SIBLING at root; anything carrying a further `/try_body/`,
 #: `/catch_body/`, `/legs/` or `/arms/` segment is inside some other body, and a
 #: path into another body is the cross-wiring this check exists to refuse.
-_ROOT_STEP_PATH = re.compile(r"^/body/steps/\d+$")
+_ROOT_STEP_PATH = re.compile(r"^/body/steps/(\d+)$")
 
 #: What a continuing protected region may hand off TO. The captured double-guard
 #: chain hands off either straight to the next handler or through one map between
@@ -802,6 +809,7 @@ def _check_region_containment(
     code: str = PROCESS_IR_SEMANTIC_AMBIGUOUS_FLOW,
     message: str = "a control path escapes its own leg/arm provenance region",
     allow_continuation: bool = False,
+    successor_index: int = -1,
 ) -> int:
     """Every node reached through a control edge must live UNDER its leg/arm.
 
@@ -837,11 +845,21 @@ def _check_region_containment(
             # recursing: those nodes belong to the next region and are covered by
             # that region's own containment check, so following them would make
             # every later region's nodes read as escapes from this one.
+            match = _ROOT_STEP_PATH.match(path)
             if (
                 allow_continuation
-                and _ROOT_STEP_PATH.match(path)
+                and match
                 and by_id[current].semantic.semantic_kind
                 in _CONTINUATION_TARGET_KINDS
+                # THE EXACT SUCCESSOR, not merely "some root-level handler or
+                # map". Accepting any of them let a consistently-rewired chain
+                # execute its authored siblings out of order — 0 -> 2 -> 1 — with
+                # every node still inside SOME region and every check still
+                # agreeing. `continue` says the flow goes on to the NEXT region,
+                # so the escape has to land on the next authored step and nothing
+                # else; if that step is the permitted separator map, the walk
+                # collects it and the map's own successor is checked the same way.
+                and int(match.group(1)) == successor_index
             ):
                 escapes += 1
                 continue
@@ -989,6 +1007,46 @@ def check_emission_plan_invariants(
             "",
             "the emission plan has no nodes",
         )
+
+    # --- #156: the recovery hand-off, checked against the CONTRACT ----------
+    #
+    # INDEPENDENT of the CFG, deliberately. Every other plan check here asks
+    # "does the plan agree with the CFG it was lowered from", which is exactly
+    # the question a lowering defect answers YES to: mutate the semantic and the
+    # plan follows, and the comparison sees two consistent artifacts. MEASURED —
+    # a CFG carrying `abort_on_error=False` on a recovery call, with a plan
+    # lowered from it, passed both checkers and emitted `abort="false"`, which is
+    # the silent flip the contract forbids ("a validation-visible refusal, never
+    # a silent flip").
+    #
+    # So this reads the EMITTED input against the rule itself, not against the
+    # CFG. The rule has no CFG counterpart to agree with: both flags are true on
+    # a recovery call, always.
+    for node in nodes:
+        emitter_input = node.emitter_input
+        if getattr(emitter_input, "emitter_kind", None) != "processcall":
+            continue
+        cfg_node_id = getattr(node, "cfg_node_id", None)
+        if cfg_node_id is None or cfg_node_id not in catch_cfg_node_ids:
+            continue
+        path = node.source_path or ""
+        if emitter_input.wait is not True or emitter_input.abort is not True:
+            raise _fail(
+                PROCESS_IR_COMPILE_EMISSION_PLAN_INVALID,
+                _PLAN_PHASE,
+                path,
+                "a recovery process_call must emit wait and abort true",
+            )
+        # ...and it ends the path. A successor, or a synthetic Stop wired after
+        # it, would be a shape the platform does not honour for a call whose
+        # child declares no return documents.
+        if node.outgoing:
+            raise _fail(
+                PROCESS_IR_COMPILE_EMISSION_PLAN_INVALID,
+                _PLAN_PHASE,
+                path,
+                "a recovery process_call must have no outgoing transition",
+            )
 
     # --- shape identities and ordering -------------------------------------
     for index, node in enumerate(nodes, start=1):

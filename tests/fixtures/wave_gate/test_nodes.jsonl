@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 11646, "minimum_collected": 11646, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 11648, "minimum_collected": 11648, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -11693,3 +11693,5 @@
 {"kind": "test", "id": "pytest-011692", "node_id": "tests/test_process_ir_notify_recovery.py::test_an_unbraced_notify_template_still_binds_the_caught_error", "state": "active"}
 {"kind": "test", "id": "pytest-011693", "node_id": "tests/test_process_ir_notify_recovery.py::test_the_chain_rule_codes_are_served_by_the_compiler", "state": "active"}
 {"kind": "test", "id": "pytest-011694", "node_id": "tests/test_process_ir_notify_recovery.py::test_the_continuation_remediation_covers_the_rules_that_serve_it", "state": "active"}
+{"kind": "test", "id": "pytest-011695", "node_id": "tests/test_process_ir_notify_recovery.py::test_the_connector_scoped_double_guard_golden_is_reproduced_from_canonical_ir", "state": "active"}
+{"kind": "test", "id": "pytest-011696", "node_id": "tests/test_process_ir_notify_recovery.py::test_the_recovery_golden_matches_the_archived_live_capture", "state": "active"}
