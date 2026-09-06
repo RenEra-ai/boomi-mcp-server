@@ -1,0 +1,111 @@
+{
+  "cell": {
+    "cell": "B1",
+    "root": "procB",
+    "process_id": "15285b48-f0fc-4fe8-b093-cd664c150252",
+    "started_utc": "2026-09-06T07:05:00.905048+00:00",
+    "note": "catch -> notify -> processcall(childB); child runs once",
+    "execution_id": "execution-4603f4a7-e2f4-4604-bfa5-f38ef7876c53-2026.09.06",
+    "execution_status": "COMPLETE",
+    "wait_status": "COMPLETE",
+    "inbound_error_documents": 0,
+    "counterparty_counts": {
+      "src": 0,
+      "c1": 0,
+      "c2": 0,
+      "cb": 1,
+      "fail": 0,
+      "abf": 1
+    },
+    "counterparty_lines": {
+      "src": [],
+      "c1": [],
+      "c2": [],
+      "cb": [
+        "2026-09-06T07:05:01.475435464Z INFO:     192.168.65.1:26543 - \"GET /admin/refdata/api/v1/rdcds/offices?qa=QA156D0906065703-cb HTTP/1.1\" 200 OK"
+      ],
+      "fail": [],
+      "abf": [
+        "2026-09-06T07:05:01.426627922Z INFO:     192.168.65.1:18811 - \"GET /__QA156D__/QA156D0906065703/abfail HTTP/1.1\" 404 Not Found"
+      ]
+    },
+    "subprocess_records": [],
+    "notify_log_lines": [
+      "tLoading Process Model _TEST_156D_QA156D0906065703 procB notify recovery call",
+      "tExecuting Process _TEST_156D_QA156D0906065703 procB notify recovery call",
+      "tExecuting Process _TEST_156D_QA156D0906065703 procB notify recovery call (Continuation f_0)",
+      "t_TEST_156D_QA156D0906065703 conn: officialboomi-X3979C-rest-prod Connector; _TEST_156D_QA156D0906065703 op_abf",
+      "t_TEST_156D_QA156D0906065703 conn: officialboomi-X3979C-rest-prod Connector; _TEST_156D_QA156D0906065703 op_abf",
+      "t_TEST_156D_QA156D0906065703 procB notify recovery call (Continuation f_0) encountered 1 document error(s)",
+      "tCatch path notification: QA156D B caught: [404] Not Found",
+      "tExecuting process '_TEST_156D_QA156D0906065703 childB"
+    ],
+    "window_size": 2
+  },
+  "execute": {
+    "_success": true,
+    "request_id": "executionrecord-62605c43-55d5-49ab-a2f5-dcccf527c2c7",
+    "process_id": "15285b48-f0fc-4fe8-b093-cd664c150252",
+    "environment_id": null,
+    "atom_id": "a40a3313-1537-47c4-91c7-573a703537c7",
+    "execution_result": {
+      "poll_status": "COMPLETED",
+      "elapsed_seconds": 11.7,
+      "poll_count": 6,
+      "execution_id": "execution-4603f4a7-e2f4-4604-bfa5-f38ef7876c53-2026.09.06",
+      "status": "COMPLETE",
+      "process_name": "_TEST_156D_QA156D0906065703 procB notify recovery call",
+      "atom_name": "renera-local-atom",
+      "execution_time": "2026-09-06T07:05:01Z",
+      "execution_duration": 116,
+      "inbound_document_count": 1,
+      "outbound_document_count": 0,
+      "inbound_error_document_count": 0,
+      "error": null
+    },
+    "execution_id": "execution-4603f4a7-e2f4-4604-bfa5-f38ef7876c53-2026.09.06"
+  },
+  "execution_record": {
+    "@type": "ExecutionRecord",
+    "executionId": "execution-4603f4a7-e2f4-4604-bfa5-f38ef7876c53-2026.09.06",
+    "account": "trainingglebbochkarov-16926N",
+    "executionTime": "2026-09-06T07:05:01Z",
+    "status": "COMPLETE",
+    "executionType": "exec_manual",
+    "processName": "_TEST_156D_QA156D0906065703 procB notify recovery call",
+    "processId": "15285b48-f0fc-4fe8-b093-cd664c150252",
+    "atomName": "renera-local-atom",
+    "atomId": "a40a3313-1537-47c4-91c7-573a703537c7",
+    "inboundDocumentCount": 1,
+    "inboundErrorDocumentCount": 0,
+    "outboundDocumentCount": 0,
+    "executionDuration": [
+      "Long",
+      116
+    ],
+    "inboundDocumentSize": [
+      "Long",
+      0
+    ],
+    "outboundDocumentSize": [
+      "Long",
+      0
+    ],
+    "recordedDate": "2026-09-06T07:05:01Z"
+  },
+  "logs": {
+    "_success": true,
+    "status_code": 202,
+    "message": "Beginning download.",
+    "download_url": "https://platform.boomi.com/account/trainingglebbochkarov-16926N/api/download/ProcessLog-cbb4e8e4-a266-499b-beea-1d62517dce67",
+    "_downloaded": true,
+    "files": {
+      "ProcessLog_16188955954591397896.log": "2026-09-06T07:05:01Z\tFINE\tinitializing...\t\tLoading Process Model _TEST_156D_QA156D0906065703 procB notify recovery call\n2026-09-06T07:05:01Z\tINFO\tinitializing...\t\tExecuting Process _TEST_156D_QA156D0906065703 procB notify recovery call\n2026-09-06T07:05:01Z\tINFO\tStart\tNoData\tExecuting Start Shape\n2026-09-06T07:05:01Z\tINFO\tStart\tNoData\t1 document(s) found for processing.\n2026-09-06T07:05:01Z\tINFO\tStart\tNoData\tShape executed successfully in 7 ms.\n2026-09-06T07:05:01Z\tINFO\tTry/Catch all errors (no retry) - route caught documents to the failure handler\t\tExecuting Try/Catch Shape with 1 document(s).\n2026-09-06T07:05:01Z\tINFO\tTry/Catch all errors (no retry) - route caught documents to the failure handler\t\tLaunching Try/Catch Shape fiber f_0 as execution-a03fd84d-6443-43ac-a349-f0c7ccb36c72-2026.09.06 with 1 document(s).\n2026-09-06T07:05:01Z\tINFO\tTry/Catch all errors (no retry) - route caught documents to the failure handler\t\tCompleted Try/Catch initial execution (shape2)\n2026-09-06T07:05:01Z\tINFO\tinitializing...\t\tExecuting Process _TEST_156D_QA156D0906065703 procB notify recovery call (Continuation f_0)\n2026-09-06T07:05:01Z\tINFO\tTry/Catch all errors (no retry) - route caught documents to the failure handler\t\tExecuting Try/Catch Shape continuation as f_0 with 1 document(s).\n2026-09-06T07:05:01Z\tINFO\tTry/Catch all errors (no retry) - route caught documents to the failure handler\t\tShape executed successfully in 1 ms.\n2026-09-06T07:05:01Z\tINFO\tConnector\t_TEST_156D_QA156D0906065703 conn: officialboomi-X3979C-rest-prod Connector; _TEST_156D_QA156D0906065703 op_abf\tExecuting Connector Shape with 1 document(s).\n2026-09-06T07:05:01Z\tINFO\tConnector\t_TEST_156D_QA156D0906065703 conn: officialboomi-X3979C-rest-prod Connector; _TEST_156D_QA156D0906065703 op_abf\tShape executed with errors in 17 ms.\n2026-09-06T07:05:01Z\tINFO\tStop\tcontinuing process\tExecuting Stop Shape with 1 document(s).\n2026-09-06T07:05:01Z\tINFO\tStop\tcontinuing process\tShape executed successfully in 0 ms.\n2026-09-06T07:05:01Z\tWARNING\tcleanup...\t\t_TEST_156D_QA156D0906065703 procB notify recovery call (Continuation f_0) encountered 1 document error(s)\n2026-09-06T07:05:01Z\tINFO\tcleanup...\t\tProcess execution completed normally.\n2026-09-06T07:05:01Z\tWARNING\tTry/Catch all errors (no retry) - route caught documents to the failure handler\t\tTry/Catch Shape sending 1 document(s) down error path\n2026-09-06T07:05:01Z\tINFO\tTry/Catch all errors (no retry) - route caught documents to the failure handler\t\tShape executed successfully in 5 ms.\n2026-09-06T07:05:01Z\tINFO\tNotify caught error to the process log\t\tExecuting Notify Shape with 1 document(s).\n2026-09-06T07:05:01Z\tSEVERE\tNotify caught error to the process log\t\tCatch path notification: QA156D B caught: [404] Not Found\n2026-09-06T07:05:01Z\tINFO\tNotify caught error to the process log\t\tShape executed successfully in 1 ms.\n2026-09-06T07:05:01Z\tINFO\tRecovery hand-off childB\tstandalone start data, no return data\tExecuting Process Call Shape with 1 document(s).\n2026-09-06T07:05:01Z\tINFO\tRecovery hand-off childB\tstandalone start data, no return data\tExecuting process '_TEST_156D_QA156D0906065703 childB\n2026-09-06T07:05:01Z\tINFO\tRecovery hand-off childB\tstandalone start data, no return data\tShape executed successfully in 0 ms.\n2026-09-06T07:05:01Z\tINFO\tcleanup...\t\tProcess execution completed normally.\n"
+    }
+  },
+  "subprocess_records": [],
+  "counterparty_window": [
+    "2026-09-06T07:05:01.426627922Z INFO:     192.168.65.1:18811 - \"GET /__QA156D__/QA156D0906065703/abfail HTTP/1.1\" 404 Not Found",
+    "2026-09-06T07:05:01.475435464Z INFO:     192.168.65.1:26543 - \"GET /admin/refdata/api/v1/rdcds/offices?qa=QA156D0906065703-cb HTTP/1.1\" 200 OK"
+  ]
+}

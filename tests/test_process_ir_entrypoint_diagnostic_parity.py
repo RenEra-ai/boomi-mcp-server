@@ -74,6 +74,7 @@ from boomi_mcp.models.process_ir import (  # noqa: E402
     process_ir_v1_node_kinds,
     process_ir_v1_parse_diagnostic_specs,
 )
+from boomi_mcp.models.process_ir_tokens import CAUGHT_ERROR_PROPERTY_ID
 
 from _process_ir_entrypoint_differential import (  # noqa: E402
     GrammarBoundary,
@@ -156,11 +157,20 @@ def _atom(kind):
         "connector_call": {"operation_ref": _REF},
         # The `{1}` placeholder is REQUIRED by the model's own validator.
         "exception": {"message_template": "boom {1}"},
+        # #156 T4. Both fields are required, and the template must carry the
+        # caught-error token — IMPORTED from the one authority rather than
+        # retyped, so this atom cannot drift from what the validator demands.
+        "notify": {
+            "level": "ERROR",
+            "message_template": "boom {0}".format(CAUGHT_ERROR_PROPERTY_ID),
+        },
         "flow_control": {"for_each_count": 1},
         "map_ref": {"map_ref": _REF},
         "message": {"text": "m"},
         "process_call": {"process_ref": _REF},
         "return_documents": {},
+        # #156 T5. A pure structural terminal: no fields at all, and no shape.
+        "continue": {},
         "stop": {},
         "set_ddp": {
             "name": "n",

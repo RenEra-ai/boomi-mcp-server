@@ -1,0 +1,214 @@
+{
+  "issue": 156,
+  "kind": "pre-implementation live oracle capture",
+  "nonce": "ORC1560906034913",
+  "account_id": "trainingglebbochkarov-16926N",
+  "baseline_sha": "b07babeb3752d337ffa307c4c486e181e703a2c2",
+  "generated_utc": "2026-09-06T03:59:50.217131+00:00",
+  "components": {
+    "B1": "14cee5ce-35d8-4788-9bc8-c98fed0f3acf",
+    "B2": "babbcf52-324f-4169-9e81-ab8fc98a9284",
+    "ABORT": "ed7c75a9-e953-42fa-b624-0018e40b1e0a",
+    "child_ok": "9a266c4b-adf8-4444-811a-7d876511d431",
+    "child_bad": "43a6a5e6-5c77-4c58-a83e-6fa543fafb0c"
+  },
+  "fixtures": {
+    "nonce": "ORC1560906034913",
+    "utc": "2026-09-06T03:49:13.588861+00:00",
+    "account": "trainingglebbochkarov-16926N",
+    "freeze": "b07babeb3752/dirty:5fb57803c292/956ae1d25935",
+    "db_profile_id": "a9f02127-07bd-40c9-a81c-0a3a699c9e20",
+    "db_op_id": "cacbde23-8bbf-4ba4-8595-356c53e423e5",
+    "paths": {
+      "parent_target": "/__ORACLE156__/ORC1560906034913/parent-target",
+      "child_ran": "/__ORACLE156__/ORC1560906034913/child-ran",
+      "child_fail": "/__ORACLE156__/ORC1560906034913/child-fail"
+    },
+    "rest_parent_target_op": "f58b2b52-886f-4c65-b3c6-02808ed946a2",
+    "rest_child_ran_op": "484c8f3e-6ab4-4148-85c5-092d7cd63334",
+    "rest_child_fail_op": "d31c73bc-ff96-467d-ba1d-348a40af2868"
+  },
+  "marks": {
+    "parent_target": "/__ORACLE156__/ORC1560906034913/parent-target",
+    "child_ran": "/__ORACLE156__/ORC1560906034913/child-ran",
+    "child_fail": "/__ORACLE156__/ORC1560906034913/child-fail"
+  },
+  "cells": [
+    {
+      "cell": "C1",
+      "label": "SUCCESS_CONTROL_B1",
+      "process_id": "14cee5ce-35d8-4788-9bc8-c98fed0f3acf",
+      "started_utc": "2026-09-06T03:54:20.763803+00:00",
+      "request_id": "executionrecord-fa36b3ab-e132-4528-9083-173764efb704",
+      "wait_status": "COMPLETE",
+      "execution_id": "execution-2619521f-a041-4aff-a0aa-8525d6ebed8b-2026.09.06",
+      "execution_status": "COMPLETE",
+      "counterparty_parent_target_hits": 1,
+      "counterparty_child_ran_hits": 0,
+      "counterparty_child_fail_hits": 0,
+      "counterparty_lines": [
+        "INFO:     192.168.65.1:58871 - \"POST /__ORACLE156__/ORC1560906034913/parent-target HTTP/1.1\" 404 Not Found"
+      ],
+      "expect_note": "try leg SUCCEEDS -> child must NOT run",
+      "execution_message": null,
+      "inbound_docs": 1,
+      "inbound_error_docs": 0,
+      "log_has_error_path": false,
+      "log_has_notify": false,
+      "log_has_process_call": false,
+      "log_child_named": null
+    },
+    {
+      "cell": "C2",
+      "label": "SUCCESS_CONTROL_B2",
+      "process_id": "babbcf52-324f-4169-9e81-ab8fc98a9284",
+      "started_utc": "2026-09-06T03:54:51.069282+00:00",
+      "request_id": "executionrecord-2c694ddd-fb14-491f-9859-b0fa77399615",
+      "wait_status": "COMPLETE",
+      "execution_id": "execution-0c816b39-7565-483d-9ec3-8b6e5c55cb8c-2026.09.06",
+      "execution_status": "COMPLETE",
+      "counterparty_parent_target_hits": 1,
+      "counterparty_child_ran_hits": 0,
+      "counterparty_child_fail_hits": 0,
+      "counterparty_lines": [
+        "INFO:     192.168.65.1:59554 - \"POST /__ORACLE156__/ORC1560906034913/parent-target HTTP/1.1\" 404 Not Found"
+      ],
+      "expect_note": "try leg SUCCEEDS (notify variant) -> child must NOT run",
+      "execution_message": null,
+      "inbound_docs": 1,
+      "inbound_error_docs": 0,
+      "log_has_error_path": false,
+      "log_has_notify": false,
+      "log_has_process_call": false,
+      "log_child_named": null
+    },
+    {
+      "cell": "C3",
+      "label": "FAILURE_B1",
+      "process_id": "14cee5ce-35d8-4788-9bc8-c98fed0f3acf",
+      "started_utc": "2026-09-06T03:55:14.182965+00:00",
+      "request_id": "executionrecord-569d0f53-af29-4e28-b825-c5e0aa0d891a",
+      "wait_status": "COMPLETE",
+      "execution_id": "execution-27ac752f-ab9b-4d1c-b108-57c24eb83d16-2026.09.06",
+      "execution_status": "COMPLETE",
+      "counterparty_parent_target_hits": 0,
+      "counterparty_child_ran_hits": 1,
+      "counterparty_child_fail_hits": 0,
+      "counterparty_lines": [
+        "INFO:     192.168.65.1:52567 - \"POST /__ORACLE156__/ORC1560906034913/child-ran HTTP/1.1\" 404 Not Found"
+      ],
+      "expect_note": "DB Get FAILS -> catcherrors -> processcall -> child RUNS",
+      "execution_message": null,
+      "inbound_docs": 1,
+      "inbound_error_docs": 0,
+      "log_has_error_path": true,
+      "log_has_notify": false,
+      "log_has_process_call": true,
+      "log_child_named": "_TEST_156_child_ok_ORC1560906034913"
+    },
+    {
+      "cell": "C4",
+      "label": "FAILURE_B2",
+      "process_id": "babbcf52-324f-4169-9e81-ab8fc98a9284",
+      "started_utc": "2026-09-06T03:55:36.151539+00:00",
+      "request_id": "executionrecord-e73e1385-3148-42a6-9580-cad526d9e9c3",
+      "wait_status": "COMPLETE",
+      "execution_id": "execution-05d55c71-3a20-404b-9e13-1e7e5169137b-2026.09.06",
+      "execution_status": "COMPLETE",
+      "counterparty_parent_target_hits": 0,
+      "counterparty_child_ran_hits": 1,
+      "counterparty_child_fail_hits": 0,
+      "counterparty_lines": [
+        "INFO:     192.168.65.1:20497 - \"POST /__ORACLE156__/ORC1560906034913/child-ran HTTP/1.1\" 404 Not Found"
+      ],
+      "expect_note": "DB Get FAILS -> catcherrors -> notify -> processcall -> child RUNS",
+      "execution_message": null,
+      "inbound_docs": 1,
+      "inbound_error_docs": 0,
+      "log_has_error_path": true,
+      "log_has_notify": true,
+      "log_has_process_call": true,
+      "log_child_named": "_TEST_156_child_ok_ORC1560906034913"
+    },
+    {
+      "cell": "C5",
+      "label": "ABORT_CONTROL",
+      "process_id": "ed7c75a9-e953-42fa-b624-0018e40b1e0a",
+      "started_utc": "2026-09-06T03:56:02.739888+00:00",
+      "request_id": "executionrecord-53742f92-2813-4644-92f2-d176558de209",
+      "wait_status": "ERROR",
+      "execution_id": "execution-0f8a664d-9f35-4767-ac0c-04cddec1b509-2026.09.06",
+      "execution_status": "ERROR",
+      "counterparty_parent_target_hits": 0,
+      "counterparty_child_ran_hits": 0,
+      "counterparty_child_fail_hits": 1,
+      "counterparty_lines": [
+        "INFO:     192.168.65.1:46147 - \"POST /__ORACLE156__/ORC1560906034913/child-fail HTTP/1.1\" 404 Not Found"
+      ],
+      "expect_note": "child itself FAILS; wait=true abort=true -> what does parent report",
+      "execution_message": "Child Synchronous Process Call: _TEST_156_child_bad_ORC1560906034913 [execution-0f8a664d-9f35-4767-ac0c-04cddec1b509-2026.09.06(shape6)] call ended in error: com.boomi.process.ProcessException: [404] Not Found; Caused by: [404] Not Found",
+      "inbound_docs": 1,
+      "inbound_error_docs": 1,
+      "log_has_error_path": true,
+      "log_has_notify": false,
+      "log_has_process_call": true,
+      "log_child_named": "_TEST_156_child_bad_ORC1560906034913"
+    },
+    {
+      "cell": "C6",
+      "label": "RESTORE_CHECK_B1",
+      "process_id": "14cee5ce-35d8-4788-9bc8-c98fed0f3acf",
+      "started_utc": "2026-09-06T03:56:44.728335+00:00",
+      "request_id": "executionrecord-59cdc346-999b-44db-99f6-b35f366a41ed",
+      "wait_status": "COMPLETE",
+      "execution_id": "execution-ca117324-2739-42a9-acf7-63cfef0ca7b0-2026.09.06",
+      "execution_status": "COMPLETE",
+      "counterparty_parent_target_hits": 1,
+      "counterparty_child_ran_hits": 0,
+      "counterparty_child_fail_hits": 0,
+      "counterparty_lines": [
+        "INFO:     192.168.65.1:45572 - \"POST /__ORACLE156__/ORC1560906034913/parent-target HTTP/1.1\" 404 Not Found"
+      ],
+      "expect_note": "MSSQL back -> must reproduce C1 (proves the switch, not decay)",
+      "execution_message": null,
+      "inbound_docs": 1,
+      "inbound_error_docs": 0,
+      "log_has_error_path": false,
+      "log_has_notify": false,
+      "log_has_process_call": false,
+      "log_child_named": null
+    }
+  ],
+  "stored_vs_emitted": [
+    {
+      "label": "B1",
+      "emitted_shapes_sha256": "ce3b1552569a24338c4306959197fed509e21ae34235ba0436fe6aabc439849a",
+      "stored_shapes_sha256": "ce3b1552569a24338c4306959197fed509e21ae34235ba0436fe6aabc439849a",
+      "equal": true
+    },
+    {
+      "label": "B2",
+      "emitted_shapes_sha256": "4fe932d9651832070c7cd0e5925ed9f28fbf86404721bdfccb38a4588b244b2b",
+      "stored_shapes_sha256": "4fe932d9651832070c7cd0e5925ed9f28fbf86404721bdfccb38a4588b244b2b",
+      "equal": true
+    },
+    {
+      "label": "ABORT",
+      "emitted_shapes_sha256": "2b6b818993f2b655d694b4a630e30d660bc6b80ca0075a7986eeb2749e2d1fe1",
+      "stored_shapes_sha256": "2b6b818993f2b655d694b4a630e30d660bc6b80ca0075a7986eeb2749e2d1fe1",
+      "equal": true
+    },
+    {
+      "label": "child_ok",
+      "emitted_shapes_sha256": "c37b5f3636734e4336abdde84c5910f7198e5482833a73be4ea93c8f94ce52ba",
+      "stored_shapes_sha256": "c37b5f3636734e4336abdde84c5910f7198e5482833a73be4ea93c8f94ce52ba",
+      "equal": true
+    },
+    {
+      "label": "child_bad",
+      "emitted_shapes_sha256": "f84d83bb884681bca5c65d39dee6d1d9a4cd8053f2cc8b2cfde9edb394e27bcf",
+      "stored_shapes_sha256": "f84d83bb884681bca5c65d39dee6d1d9a4cd8053f2cc8b2cfde9edb394e27bcf",
+      "equal": true
+    }
+  ]
+}

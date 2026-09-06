@@ -1763,6 +1763,45 @@ def _error_taxonomy_codes():
     return frozenset(importlib.import_module("boomi_mcp.errors").ERROR_TAXONOMY)
 
 
+def _served_builder_error_codes():
+    """Every SERVED legacy-builder error code, read from its own authority.
+
+    A THIRD family, and the reason it needs deriving is the same one the
+    taxonomy's docstring gives. `ProcessFlowBuilder` serves codes like
+    `PROCESS_NOTIFY_CONFIG_INVALID` that a caller really can receive and that
+    `get_schema_template` really does advertise — but they are deliberately NOT
+    members of `ERROR_TAXONOMY`: none of the 36 is, and the two sets do not
+    intersect at all. So until #156 no ledger could name any of them, and a slice
+    whose whole job is to decide the fate of one had no way to write the decision
+    down.
+
+    The alternative was one hand-list entry, which is precisely the twenty-first
+    hand-copy `_error_taxonomy_codes` exists to stop making. Asked, not
+    remembered: a code retired from the served template stops being allowlisted
+    on its own.
+    """
+    import importlib
+
+    served = importlib.import_module(
+        "boomi_mcp.categories.meta_tools"
+    )._PROCESS_FLOW_PROTOCOLS
+
+    def _walk(node, out):
+        if isinstance(node, dict):
+            code = node.get("error_code")
+            if isinstance(code, str):
+                out.add(code)
+            for value in node.values():
+                _walk(value, out)
+        elif isinstance(node, (list, tuple)):
+            for value in node:
+                _walk(value, out)
+
+    found = set()
+    _walk(served, found)
+    return frozenset(found)
+
+
 _LEDGER_NON_DIAGNOSTIC_TOKENS = frozenset({
     "BLIND",
     # GIT ENVIRONMENT VARIABLES, named because the archiver's index snapshot has to
@@ -2553,7 +2592,12 @@ def test_diagnostic_codes_named_in_the_audit_ledger_exist():
             # or ordinary prose would flood this.
             if "_" in tok and sum(c.isupper() for c in tok) >= 4:
                 out.add(tok)
-        return out - _LEDGER_NON_DIAGNOSTIC_TOKENS - _error_taxonomy_codes()
+        return (
+            out
+            - _LEDGER_NON_DIAGNOSTIC_TOKENS
+            - _error_taxonomy_codes()
+            - _served_builder_error_codes()
+        )
 
     # The two forms are scanned SEPARATELY, not merged, so each can be asserted on
     # its own. Merging them made the fenced-coverage assertion vacuous: the codes it
@@ -2601,6 +2645,18 @@ def test_diagnostic_codes_named_in_the_audit_ledger_exist():
     assert _taxonomy & gate.DIAGNOSTIC_CODES == set(), sorted(
         _taxonomy & gate.DIAGNOSTIC_CODES
     )
+    # #156: the served legacy-builder family, on the same terms as the taxonomy —
+    # it may not shadow a gate diagnostic either, and it must not be vacuously
+    # empty, which would silently return the scanner to refusing every builder
+    # code a ledger names. It is a DISJOINT family from the taxonomy (measured:
+    # zero intersection), so a code moving between the two is visible here.
+    _builder_codes = _served_builder_error_codes()
+    assert _builder_codes & gate.DIAGNOSTIC_CODES == set(), sorted(
+        _builder_codes & gate.DIAGNOSTIC_CODES
+    )
+    assert _builder_codes & _taxonomy == set(), sorted(_builder_codes & _taxonomy)
+    assert len(_builder_codes) > 20, len(_builder_codes)
+    assert "PROCESS_NOTIFY_CONFIG_INVALID" in _builder_codes
     # ...and the derivation is not vacuously empty, which would silently turn the
     # allowlist back into whatever the hand-list still happens to contain.
     assert len(_taxonomy) > 100, len(_taxonomy)
@@ -2798,7 +2854,11 @@ def test_diagnostic_codes_named_in_the_audit_ledger_exist():
     for path in all_ledgers:
         text = path.read_text(encoding="utf-8")
         unknown_here = (
-            named_codes(text) - gate.DIAGNOSTIC_CODES - derived_stems - _taxonomy
+            named_codes(text)
+            - gate.DIAGNOSTIC_CODES
+            - derived_stems
+            - _taxonomy
+            - _builder_codes
         )
         assert unknown_here == set(), (
             "{0} names diagnostic codes the gate cannot emit: {1}".format(

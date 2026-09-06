@@ -1,0 +1,12 @@
+[
+  {
+    "scenario": "stage1-r1",
+    "file": "p10_levels.json",
+    "utc": "2026-09-06T07:25:43.994872+00:00",
+    "account_id": "trainingglebbochkarov-16926N",
+    "sha256": "9e425934e72da44f10df2828a9198e2a583cde1a8ea41e84e87d67f00c6ab24a",
+    "byte_length": 864,
+    "archive_path": "docs/architecture/evidence/issue-156/captures/stage1-r1/p10_levels.json",
+    "claim": "the authored notify level reaches the platform's stored bytes unchanged for all three vocabulary members"
+  }
+]

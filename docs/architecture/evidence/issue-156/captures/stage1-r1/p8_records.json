@@ -1,0 +1,13 @@
+[
+  {
+    "scenario": "stage1-r1",
+    "file": "p8_subprocess_records.json",
+    "utc": "2026-09-06T07:08:40.764766+00:00",
+    "account_id": "trainingglebbochkarov-16926N",
+    "sha256": "ae7ff3e2d2558f26297ee0c497fd522766649e69ffe8ad84366d7d46c593b471",
+    "byte_length": 1720,
+    "archive_path": "docs/architecture/evidence/issue-156/captures/stage1-r1/p8_subprocess_records.json",
+    "claim": "recovery children get their own executionType=sub_process ExecutionRecord; childD1 has ZERO rows while its sibling childD2 has two in the same run set \u2014 the negative's in-run positive control",
+    "channel": "Boomi ExecutionRecord query by processId"
+  }
+]

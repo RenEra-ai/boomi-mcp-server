@@ -1,0 +1,25 @@
+[
+  {
+    "scenario": "stage1-r1",
+    "file": "p2_plan_apply.json",
+    "utc": "2026-09-06T06:58:09.182627+00:00",
+    "account_id": "trainingglebbochkarov-16926N",
+    "sha256": "37079c0e9087fb9b05586f6b4f5e1986893d065d65d0a72a962cfdd396440137",
+    "byte_length": 22346,
+    "archive_path": "docs/architecture/evidence/issue-156/captures/stage1-r1/p2_plan_apply.json",
+    "phase": "plan",
+    "nonce": "QA156D0906065703",
+    "provenance": "build_integration(action='plan') via the typed process_ir authoring route"
+  },
+  {
+    "scenario": "stage1-r1",
+    "file": "p2_apply.json",
+    "utc": "2026-09-06T07:01:42.242486+00:00",
+    "account_id": "trainingglebbochkarov-16926N",
+    "sha256": "371a4dabbeecebf3d4b1164aad4837a3fe8c2dea3bb2b721a038014db7239d9f",
+    "byte_length": 28693,
+    "archive_path": "docs/architecture/evidence/issue-156/captures/stage1-r1/p2_apply.json",
+    "phase": "apply",
+    "nonce": "QA156D0906065703"
+  }
+]

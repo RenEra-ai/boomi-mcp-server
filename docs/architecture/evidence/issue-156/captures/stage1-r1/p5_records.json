@@ -1,0 +1,64 @@
+[
+  {
+    "scenario": "stage1-r1",
+    "file": "p5_A1_procA.json",
+    "utc": "2026-09-06T07:04:59.403918+00:00",
+    "account_id": "trainingglebbochkarov-16926N",
+    "sha256": "a730503699a537e498d3dd57034d0276be269f92de69f657e2e016654407587b",
+    "byte_length": 7038,
+    "archive_path": "docs/architecture/evidence/issue-156/captures/stage1-r1/p5_A1_procA.json",
+    "cell": "A1",
+    "root_key": "procA",
+    "nonce": "QA156D0906065703",
+    "counterparty": "cds-mock request log (docker logs -t --since <mark>)"
+  },
+  {
+    "scenario": "stage1-r1",
+    "file": "p5_B1_procB.json",
+    "utc": "2026-09-06T07:05:41.089222+00:00",
+    "account_id": "trainingglebbochkarov-16926N",
+    "sha256": "289592ff7556977636ac0a63670e04a6d891bd699302cb918f72acb2b009f2a1",
+    "byte_length": 7737,
+    "archive_path": "docs/architecture/evidence/issue-156/captures/stage1-r1/p5_B1_procB.json",
+    "cell": "B1",
+    "root_key": "procB",
+    "nonce": "QA156D0906065703",
+    "counterparty": "cds-mock request log (docker logs -t --since <mark>)"
+  },
+  {
+    "scenario": "stage1-r1",
+    "file": "p5_D1_procD.json",
+    "utc": "2026-09-06T07:06:22.771005+00:00",
+    "account_id": "trainingglebbochkarov-16926N",
+    "sha256": "bf5d504af4f6802f776dfb2269d8a5eef4f6f9cad5db39c25b92be3ad73014be",
+    "byte_length": 14222,
+    "archive_path": "docs/architecture/evidence/issue-156/captures/stage1-r1/p5_D1_procD.json",
+    "cell": "D1",
+    "root_key": "procD",
+    "nonce": "QA156D0906065703",
+    "counterparty": "cds-mock request log (docker logs -t --since <mark>)"
+  },
+  {
+    "scenario": "stage1-r1",
+    "file": "p5_D2_procD.json",
+    "utc": "2026-09-06T07:07:02.180668+00:00",
+    "account_id": "trainingglebbochkarov-16926N",
+    "sha256": "4f39bd4c8e75e37a04a06279a87a5876c3bc1f69fa8b202b16edc0a1b2bfa0dd",
+    "byte_length": 14190,
+    "archive_path": "docs/architecture/evidence/issue-156/captures/stage1-r1/p5_D2_procD.json",
+    "cell": "D2",
+    "root_key": "procD",
+    "nonce": "QA156D0906065703",
+    "counterparty": "cds-mock request log (docker logs -t --since <mark>)"
+  },
+  {
+    "scenario": "stage1-r1",
+    "file": "p5_runtime_summary.json",
+    "utc": "2026-09-06T07:07:02.301032+00:00",
+    "account_id": "trainingglebbochkarov-16926N",
+    "sha256": "87ae73582d678f264c2b33b5724edc4aeaaf9d2224971cce429803cc0d2cf991",
+    "byte_length": 11672,
+    "archive_path": "docs/architecture/evidence/issue-156/captures/stage1-r1/p5_runtime_summary.json",
+    "kind": "runtime cell summary"
+  }
+]

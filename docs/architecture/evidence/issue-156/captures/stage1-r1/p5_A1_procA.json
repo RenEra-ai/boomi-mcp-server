@@ -1,0 +1,107 @@
+{
+  "cell": {
+    "cell": "A1",
+    "root": "procA",
+    "process_id": "f9c4e798-8068-4ccd-b36a-90c0a14fd3b2",
+    "started_utc": "2026-09-06T07:04:15.085169+00:00",
+    "note": "catch -> notify -> stop; notify must bind the real error",
+    "execution_id": "execution-baec5a28-f739-4d10-bf6b-945003da2812-2026.09.06",
+    "execution_status": "COMPLETE",
+    "wait_status": "COMPLETE",
+    "inbound_error_documents": 0,
+    "counterparty_counts": {
+      "src": 0,
+      "c1": 0,
+      "c2": 0,
+      "cb": 0,
+      "fail": 0,
+      "abf": 1
+    },
+    "counterparty_lines": {
+      "src": [],
+      "c1": [],
+      "c2": [],
+      "cb": [],
+      "fail": [],
+      "abf": [
+        "2026-09-06T07:04:17.942320222Z INFO:     192.168.65.1:36974 - \"GET /__QA156D__/QA156D0906065703/abfail HTTP/1.1\" 404 Not Found"
+      ]
+    },
+    "subprocess_records": [],
+    "notify_log_lines": [
+      "tLoading Process Model _TEST_156D_QA156D0906065703 procA notify stop",
+      "tExecuting Process _TEST_156D_QA156D0906065703 procA notify stop",
+      "tExecuting Process _TEST_156D_QA156D0906065703 procA notify stop (Continuation f_0)",
+      "t_TEST_156D_QA156D0906065703 conn: officialboomi-X3979C-rest-prod Connector; _TEST_156D_QA156D0906065703 op_abf",
+      "t_TEST_156D_QA156D0906065703 conn: officialboomi-X3979C-rest-prod Connector; _TEST_156D_QA156D0906065703 op_abf",
+      "t_TEST_156D_QA156D0906065703 procA notify stop (Continuation f_0) encountered 1 document error(s)",
+      "tCatch path notification: QA156D A caught: [404] Not Found"
+    ],
+    "window_size": 1
+  },
+  "execute": {
+    "_success": true,
+    "request_id": "executionrecord-76b22f67-1d1c-4284-9d2b-b4501d81e26a",
+    "process_id": "f9c4e798-8068-4ccd-b36a-90c0a14fd3b2",
+    "environment_id": null,
+    "atom_id": "a40a3313-1537-47c4-91c7-573a703537c7",
+    "execution_result": {
+      "poll_status": "COMPLETED",
+      "elapsed_seconds": 11.7,
+      "poll_count": 6,
+      "execution_id": "execution-baec5a28-f739-4d10-bf6b-945003da2812-2026.09.06",
+      "status": "COMPLETE",
+      "process_name": "_TEST_156D_QA156D0906065703 procA notify stop",
+      "atom_name": "renera-local-atom",
+      "execution_time": "2026-09-06T07:04:17Z",
+      "execution_duration": 140,
+      "inbound_document_count": 1,
+      "outbound_document_count": 0,
+      "inbound_error_document_count": 0,
+      "error": null
+    },
+    "execution_id": "execution-baec5a28-f739-4d10-bf6b-945003da2812-2026.09.06"
+  },
+  "execution_record": {
+    "@type": "ExecutionRecord",
+    "executionId": "execution-baec5a28-f739-4d10-bf6b-945003da2812-2026.09.06",
+    "account": "trainingglebbochkarov-16926N",
+    "executionTime": "2026-09-06T07:04:17Z",
+    "status": "COMPLETE",
+    "executionType": "exec_manual",
+    "processName": "_TEST_156D_QA156D0906065703 procA notify stop",
+    "processId": "f9c4e798-8068-4ccd-b36a-90c0a14fd3b2",
+    "atomName": "renera-local-atom",
+    "atomId": "a40a3313-1537-47c4-91c7-573a703537c7",
+    "inboundDocumentCount": 1,
+    "inboundErrorDocumentCount": 0,
+    "outboundDocumentCount": 0,
+    "executionDuration": [
+      "Long",
+      140
+    ],
+    "inboundDocumentSize": [
+      "Long",
+      0
+    ],
+    "outboundDocumentSize": [
+      "Long",
+      0
+    ],
+    "recordedDate": "2026-09-06T07:04:17Z"
+  },
+  "logs": {
+    "_success": true,
+    "status_code": 202,
+    "message": "Beginning download.",
+    "download_url": "https://platform.boomi.com/account/trainingglebbochkarov-16926N/api/download/ProcessLog-4b1f3ed8-6099-4baf-ab3d-80708f675346",
+    "_downloaded": true,
+    "files": {
+      "ProcessLog_12006160064034400029.log": "2026-09-06T07:04:17Z\tFINE\tinitializing...\t\tLoading Process Model _TEST_156D_QA156D0906065703 procA notify stop\n2026-09-06T07:04:17Z\tINFO\tinitializing...\t\tExecuting Process _TEST_156D_QA156D0906065703 procA notify stop\n2026-09-06T07:04:17Z\tINFO\tStart\tNoData\tExecuting Start Shape\n2026-09-06T07:04:17Z\tINFO\tStart\tNoData\t1 document(s) found for processing.\n2026-09-06T07:04:17Z\tINFO\tStart\tNoData\tShape executed successfully in 17 ms.\n2026-09-06T07:04:17Z\tINFO\tTry/Catch all errors (no retry) - route caught documents to the failure handler\t\tExecuting Try/Catch Shape with 1 document(s).\n2026-09-06T07:04:17Z\tINFO\tTry/Catch all errors (no retry) - route caught documents to the failure handler\t\tLaunching Try/Catch Shape fiber f_0 as execution-c6925c66-240f-48b5-86b4-852d8299abc2-2026.09.06 with 1 document(s).\n2026-09-06T07:04:17Z\tINFO\tTry/Catch all errors (no retry) - route caught documents to the failure handler\t\tCompleted Try/Catch initial execution (shape2)\n2026-09-06T07:04:17Z\tINFO\tinitializing...\t\tExecuting Process _TEST_156D_QA156D0906065703 procA notify stop (Continuation f_0)\n2026-09-06T07:04:17Z\tINFO\tTry/Catch all errors (no retry) - route caught documents to the failure handler\t\tExecuting Try/Catch Shape continuation as f_0 with 1 document(s).\n2026-09-06T07:04:17Z\tINFO\tTry/Catch all errors (no retry) - route caught documents to the failure handler\t\tShape executed successfully in 2 ms.\n2026-09-06T07:04:17Z\tINFO\tConnector\t_TEST_156D_QA156D0906065703 conn: officialboomi-X3979C-rest-prod Connector; _TEST_156D_QA156D0906065703 op_abf\tExecuting Connector Shape with 1 document(s).\n2026-09-06T07:04:17Z\tINFO\tConnector\t_TEST_156D_QA156D0906065703 conn: officialboomi-X3979C-rest-prod Connector; _TEST_156D_QA156D0906065703 op_abf\tShape executed with errors in 50 ms.\n2026-09-06T07:04:17Z\tINFO\tStop\tcontinuing process\tExecuting Stop Shape with 1 document(s).\n2026-09-06T07:04:17Z\tINFO\tStop\tcontinuing process\tShape executed successfully in 0 ms.\n2026-09-06T07:04:17Z\tWARNING\tcleanup...\t\t_TEST_156D_QA156D0906065703 procA notify stop (Continuation f_0) encountered 1 document error(s)\n2026-09-06T07:04:17Z\tINFO\tcleanup...\t\tProcess execution completed normally.\n2026-09-06T07:04:17Z\tWARNING\tTry/Catch all errors (no retry) - route caught documents to the failure handler\t\tTry/Catch Shape sending 1 document(s) down error path\n2026-09-06T07:04:17Z\tINFO\tTry/Catch all errors (no retry) - route caught documents to the failure handler\t\tShape executed successfully in 11 ms.\n2026-09-06T07:04:17Z\tINFO\tNotify caught error to the process log\t\tExecuting Notify Shape with 1 document(s).\n2026-09-06T07:04:17Z\tSEVERE\tNotify caught error to the process log\t\tCatch path notification: QA156D A caught: [404] Not Found\n2026-09-06T07:04:17Z\tINFO\tNotify caught error to the process log\t\tShape executed successfully in 2 ms.\n2026-09-06T07:04:17Z\tINFO\tStop\tcontinuing process\tExecuting Stop Shape with 1 document(s).\n2026-09-06T07:04:17Z\tINFO\tStop\tcontinuing process\tShape executed successfully in 1 ms.\n2026-09-06T07:04:17Z\tINFO\tcleanup...\t\tProcess execution completed normally.\n"
+    }
+  },
+  "subprocess_records": [],
+  "counterparty_window": [
+    "2026-09-06T07:04:17.942320222Z INFO:     192.168.65.1:36974 - \"GET /__QA156D__/QA156D0906065703/abfail HTTP/1.1\" 404 Not Found"
+  ]
+}

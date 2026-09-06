@@ -1,0 +1,731 @@
+{
+  "_success": true,
+  "build_id": "b47b7013-0e69-416a-8c0c-737ba109e1dd",
+  "message": "Applied integration '_TEST_156D_QA156D0906065703' with 13 steps.",
+  "execution_order": [
+    "conn",
+    "op_abf",
+    "op_c1",
+    "childD1",
+    "op_c2",
+    "childD2",
+    "op_cb",
+    "childB",
+    "op_fail",
+    "op_src",
+    "procA",
+    "procB",
+    "procD"
+  ],
+  "results": {
+    "conn": {
+      "status": "created",
+      "component_id": "b24ef0d5-ea3d-4450-822c-5dae9675cf5d",
+      "type": "connector-settings",
+      "name": "_TEST_156D_QA156D0906065703 conn",
+      "result": {
+        "_success": true,
+        "message": "Created officialboomi-X3979C-rest-prod connector '_TEST_156D_QA156D0906065703 conn'",
+        "component_id": "b24ef0d5-ea3d-4450-822c-5dae9675cf5d",
+        "name": "_TEST_156D_QA156D0906065703 conn",
+        "type": "connector-settings",
+        "sub_type": "officialboomi-X3979C-rest-prod",
+        "profile": "renera"
+      }
+    },
+    "op_abf": {
+      "status": "created",
+      "component_id": "7a7eb72c-a15b-45af-b453-7d7edc430d2c",
+      "type": "connector-action",
+      "name": "_TEST_156D_QA156D0906065703 op_abf",
+      "result": {
+        "_success": true,
+        "message": "Created officialboomi-X3979C-rest-prod execute operation '_TEST_156D_QA156D0906065703 op_abf'",
+        "component_id": "7a7eb72c-a15b-45af-b453-7d7edc430d2c",
+        "name": "_TEST_156D_QA156D0906065703 op_abf",
+        "type": "connector-action",
+        "sub_type": "officialboomi-X3979C-rest-prod",
+        "profile": "renera"
+      }
+    },
+    "op_c1": {
+      "status": "created",
+      "component_id": "fa52947d-2ad5-47a1-995f-50ed63126934",
+      "type": "connector-action",
+      "name": "_TEST_156D_QA156D0906065703 op_c1",
+      "result": {
+        "_success": true,
+        "message": "Created officialboomi-X3979C-rest-prod execute operation '_TEST_156D_QA156D0906065703 op_c1'",
+        "component_id": "fa52947d-2ad5-47a1-995f-50ed63126934",
+        "name": "_TEST_156D_QA156D0906065703 op_c1",
+        "type": "connector-action",
+        "sub_type": "officialboomi-X3979C-rest-prod",
+        "profile": "renera"
+      }
+    },
+    "childD1": {
+      "type": "process",
+      "name": "_TEST_156D_QA156D0906065703 childD1",
+      "requested_name": "_TEST_156D_QA156D0906065703 childD1",
+      "applied_name_verified": true,
+      "status": "created",
+      "component_id": "7dcaebf3-3ca8-4cf2-9124-1024bacc48d7",
+      "result": {
+        "_success": true,
+        "message": "Created component '_TEST_156D_QA156D0906065703 childD1'",
+        "component_id": "7dcaebf3-3ca8-4cf2-9124-1024bacc48d7",
+        "name": "_TEST_156D_QA156D0906065703 childD1",
+        "type": "process",
+        "profile": "renera"
+      },
+      "_success": true
+    },
+    "op_c2": {
+      "status": "created",
+      "component_id": "3c0adad6-d0d7-47cc-8815-9b0f53fad7c5",
+      "type": "connector-action",
+      "name": "_TEST_156D_QA156D0906065703 op_c2",
+      "result": {
+        "_success": true,
+        "message": "Created officialboomi-X3979C-rest-prod execute operation '_TEST_156D_QA156D0906065703 op_c2'",
+        "component_id": "3c0adad6-d0d7-47cc-8815-9b0f53fad7c5",
+        "name": "_TEST_156D_QA156D0906065703 op_c2",
+        "type": "connector-action",
+        "sub_type": "officialboomi-X3979C-rest-prod",
+        "profile": "renera"
+      }
+    },
+    "childD2": {
+      "type": "process",
+      "name": "_TEST_156D_QA156D0906065703 childD2",
+      "requested_name": "_TEST_156D_QA156D0906065703 childD2",
+      "applied_name_verified": true,
+      "status": "created",
+      "component_id": "463e3ee8-1048-45db-8ed6-43f2ba2c042a",
+      "result": {
+        "_success": true,
+        "message": "Created component '_TEST_156D_QA156D0906065703 childD2'",
+        "component_id": "463e3ee8-1048-45db-8ed6-43f2ba2c042a",
+        "name": "_TEST_156D_QA156D0906065703 childD2",
+        "type": "process",
+        "profile": "renera"
+      },
+      "_success": true
+    },
+    "op_cb": {
+      "status": "created",
+      "component_id": "1faf9dc2-12e8-4aa6-984e-fce9bfb4d666",
+      "type": "connector-action",
+      "name": "_TEST_156D_QA156D0906065703 op_cb",
+      "result": {
+        "_success": true,
+        "message": "Created officialboomi-X3979C-rest-prod execute operation '_TEST_156D_QA156D0906065703 op_cb'",
+        "component_id": "1faf9dc2-12e8-4aa6-984e-fce9bfb4d666",
+        "name": "_TEST_156D_QA156D0906065703 op_cb",
+        "type": "connector-action",
+        "sub_type": "officialboomi-X3979C-rest-prod",
+        "profile": "renera"
+      }
+    },
+    "childB": {
+      "type": "process",
+      "name": "_TEST_156D_QA156D0906065703 childB",
+      "requested_name": "_TEST_156D_QA156D0906065703 childB",
+      "applied_name_verified": true,
+      "status": "created",
+      "component_id": "0e3bf314-2565-4d64-a07b-eb4263f53231",
+      "result": {
+        "_success": true,
+        "message": "Created component '_TEST_156D_QA156D0906065703 childB'",
+        "component_id": "0e3bf314-2565-4d64-a07b-eb4263f53231",
+        "name": "_TEST_156D_QA156D0906065703 childB",
+        "type": "process",
+        "profile": "renera"
+      },
+      "_success": true
+    },
+    "op_fail": {
+      "status": "created",
+      "component_id": "6aa13d4c-f249-4594-b936-221360a97781",
+      "type": "connector-action",
+      "name": "_TEST_156D_QA156D0906065703 op_fail",
+      "result": {
+        "_success": true,
+        "message": "Created officialboomi-X3979C-rest-prod execute operation '_TEST_156D_QA156D0906065703 op_fail'",
+        "component_id": "6aa13d4c-f249-4594-b936-221360a97781",
+        "name": "_TEST_156D_QA156D0906065703 op_fail",
+        "type": "connector-action",
+        "sub_type": "officialboomi-X3979C-rest-prod",
+        "profile": "renera"
+      }
+    },
+    "op_src": {
+      "status": "created",
+      "component_id": "d40c972b-e04a-4b69-943b-fe17982bae09",
+      "type": "connector-action",
+      "name": "_TEST_156D_QA156D0906065703 op_src",
+      "result": {
+        "_success": true,
+        "message": "Created officialboomi-X3979C-rest-prod execute operation '_TEST_156D_QA156D0906065703 op_src'",
+        "component_id": "d40c972b-e04a-4b69-943b-fe17982bae09",
+        "name": "_TEST_156D_QA156D0906065703 op_src",
+        "type": "connector-action",
+        "sub_type": "officialboomi-X3979C-rest-prod",
+        "profile": "renera"
+      }
+    },
+    "procA": {
+      "type": "process",
+      "name": "_TEST_156D_QA156D0906065703 procA notify stop",
+      "requested_name": "_TEST_156D_QA156D0906065703 procA notify stop",
+      "applied_name_verified": true,
+      "status": "created",
+      "component_id": "f9c4e798-8068-4ccd-b36a-90c0a14fd3b2",
+      "result": {
+        "_success": true,
+        "message": "Created component '_TEST_156D_QA156D0906065703 procA notify stop'",
+        "component_id": "f9c4e798-8068-4ccd-b36a-90c0a14fd3b2",
+        "name": "_TEST_156D_QA156D0906065703 procA notify stop",
+        "type": "process",
+        "profile": "renera"
+      },
+      "_success": true
+    },
+    "procB": {
+      "type": "process",
+      "name": "_TEST_156D_QA156D0906065703 procB notify recovery call",
+      "requested_name": "_TEST_156D_QA156D0906065703 procB notify recovery call",
+      "applied_name_verified": true,
+      "status": "created",
+      "component_id": "15285b48-f0fc-4fe8-b093-cd664c150252",
+      "result": {
+        "_success": true,
+        "message": "Created component '_TEST_156D_QA156D0906065703 procB notify recovery call'",
+        "component_id": "15285b48-f0fc-4fe8-b093-cd664c150252",
+        "name": "_TEST_156D_QA156D0906065703 procB notify recovery call",
+        "type": "process",
+        "profile": "renera"
+      },
+      "_success": true
+    },
+    "procD": {
+      "type": "process",
+      "name": "_TEST_156D_QA156D0906065703 procD serialized regions",
+      "requested_name": "_TEST_156D_QA156D0906065703 procD serialized regions",
+      "applied_name_verified": true,
+      "status": "created",
+      "component_id": "a6526452-8ff1-417b-a74a-e0749693c1a6",
+      "result": {
+        "_success": true,
+        "message": "Created component '_TEST_156D_QA156D0906065703 procD serialized regions'",
+        "component_id": "a6526452-8ff1-417b-a74a-e0749693c1a6",
+        "name": "_TEST_156D_QA156D0906065703 procD serialized regions",
+        "type": "process",
+        "profile": "renera"
+      },
+      "_success": true
+    }
+  },
+  "process_mutations": [
+    {
+      "component_key": "childD1",
+      "plan_fingerprint": "sha256:94bb80fead8b1ad145dd3b9170248cc73acd9a7b67ff45ae1c8875fa1e858097",
+      "account_scope_hash": "sha256:6954b1d6f63195b7adf853c3552fbba26f389b0cd2384a370e2379f224f4e2d8",
+      "action": "create",
+      "target_component_id": null,
+      "result_component_id": "7dcaebf3-3ca8-4cf2-9124-1024bacc48d7",
+      "resolved_placement": {
+        "folder_name": null,
+        "folder_id": null
+      },
+      "submitted_xml_digest": "sha256:746ae0e9b3acf7b4c1f1da55b33d872018797ba5db50eae7b145681e79a5c97f",
+      "replay_evidence_bindings": []
+    },
+    {
+      "component_key": "childD2",
+      "plan_fingerprint": "sha256:8c988aab4f2f4704c15b440005665c22bdaf65c8b65c0737ece7e6301d398f56",
+      "account_scope_hash": "sha256:6954b1d6f63195b7adf853c3552fbba26f389b0cd2384a370e2379f224f4e2d8",
+      "action": "create",
+      "target_component_id": null,
+      "result_component_id": "463e3ee8-1048-45db-8ed6-43f2ba2c042a",
+      "resolved_placement": {
+        "folder_name": null,
+        "folder_id": null
+      },
+      "submitted_xml_digest": "sha256:5a59f8bdd3fa6da0a61ad6d72ed9573e582847ce0d050a3c07d9d13c1bab6388",
+      "replay_evidence_bindings": []
+    },
+    {
+      "component_key": "childB",
+      "plan_fingerprint": "sha256:aca1e08fff79019d4e249c4515f7c988364eb7526c74ce53b6a0dbf78a958f1d",
+      "account_scope_hash": "sha256:6954b1d6f63195b7adf853c3552fbba26f389b0cd2384a370e2379f224f4e2d8",
+      "action": "create",
+      "target_component_id": null,
+      "result_component_id": "0e3bf314-2565-4d64-a07b-eb4263f53231",
+      "resolved_placement": {
+        "folder_name": null,
+        "folder_id": null
+      },
+      "submitted_xml_digest": "sha256:a3dfaa2d5d77dc5a065d9fc3a10be0103abb488c2a4fb238f5255c5fa145015d",
+      "replay_evidence_bindings": []
+    },
+    {
+      "component_key": "procA",
+      "plan_fingerprint": "sha256:cc57c121ac0eb55352258f4b49b7d783ba8321f7ff1bdb25e7ac908e14b223f8",
+      "account_scope_hash": "sha256:6954b1d6f63195b7adf853c3552fbba26f389b0cd2384a370e2379f224f4e2d8",
+      "action": "create",
+      "target_component_id": null,
+      "result_component_id": "f9c4e798-8068-4ccd-b36a-90c0a14fd3b2",
+      "resolved_placement": {
+        "folder_name": null,
+        "folder_id": null
+      },
+      "submitted_xml_digest": "sha256:587a831109749890f9432e1f19f05ad8752a93a37de13834df0e682244b10684",
+      "replay_evidence_bindings": []
+    },
+    {
+      "component_key": "procB",
+      "plan_fingerprint": "sha256:a36278d07abaabc84c5f0a7e04b22cede0f108fb0f5e66e1d097ed32b655cc25",
+      "account_scope_hash": "sha256:6954b1d6f63195b7adf853c3552fbba26f389b0cd2384a370e2379f224f4e2d8",
+      "action": "create",
+      "target_component_id": null,
+      "result_component_id": "15285b48-f0fc-4fe8-b093-cd664c150252",
+      "resolved_placement": {
+        "folder_name": null,
+        "folder_id": null
+      },
+      "submitted_xml_digest": "sha256:5d3e404dcabf94ecef63ede9bc1a52a38266681e71f42f9df4a1de947bedb2e7",
+      "replay_evidence_bindings": []
+    },
+    {
+      "component_key": "procD",
+      "plan_fingerprint": "sha256:2757c3b450e8c9ad4fd29a7c7009e1bdedcf11231b041e78b1fc0eb74847c64f",
+      "account_scope_hash": "sha256:6954b1d6f63195b7adf853c3552fbba26f389b0cd2384a370e2379f224f4e2d8",
+      "action": "create",
+      "target_component_id": null,
+      "result_component_id": "a6526452-8ff1-417b-a74a-e0749693c1a6",
+      "resolved_placement": {
+        "folder_name": null,
+        "folder_id": null
+      },
+      "submitted_xml_digest": "sha256:f16b3194f8ca4cd162848f833ad9ec9372f6325778f0dee73ebc71f68f3a109f",
+      "replay_evidence_bindings": []
+    }
+  ],
+  "process_readbacks": [
+    {
+      "component_key": "childD1",
+      "component_id": "7dcaebf3-3ca8-4cf2-9124-1024bacc48d7",
+      "digest": "sha256:5487be2712265661fb9b801b8731622d41a93606f6e0a2e83e325436fa5860f7"
+    },
+    {
+      "component_key": "childD2",
+      "component_id": "463e3ee8-1048-45db-8ed6-43f2ba2c042a",
+      "digest": "sha256:4f15c18836d6e5dbd3f3935040282342632edd444ceac168b2b13d676d9843c2"
+    },
+    {
+      "component_key": "childB",
+      "component_id": "0e3bf314-2565-4d64-a07b-eb4263f53231",
+      "digest": "sha256:4ddc4fbe2e0db5978f0115c99008fe0e4be896197c1a07b4297c3bc78fff6240"
+    },
+    {
+      "component_key": "procA",
+      "component_id": "f9c4e798-8068-4ccd-b36a-90c0a14fd3b2",
+      "digest": "sha256:fff9817a1e8366a6047b145af31ff8f76f285499dc5fac80e2a3ff88a5399f2b"
+    },
+    {
+      "component_key": "procB",
+      "component_id": "15285b48-f0fc-4fe8-b093-cd664c150252",
+      "digest": "sha256:51b76de1c68d20fa1dc9d25d8035eb910cc9789904711c0d3549c80a71891f5c"
+    },
+    {
+      "component_key": "procD",
+      "component_id": "a6526452-8ff1-417b-a74a-e0749693c1a6",
+      "digest": "sha256:e9ef02922cb21a47ba215fd382a6cfe669e2513761aa88a8ed1e9907b4c3a33a"
+    }
+  ],
+  "mutation_performed": true,
+  "authoring_provenance": {
+    "contract_version": "2",
+    "revision_binding": {
+      "contract_version": "2",
+      "schema_revision": "sha256:43afe45e1422fdfa7379d448a34e2adb0c4f1a5961595769904b2c4ed5ede98b",
+      "capability_revision": "sha256:5e600c61ea244fe1f6266c1a137c4be9f341d597e53648339efafa7467555984",
+      "compiler_revision": "sha256:b2f2d6282b670afc360363e525673bedce254584727efeb447cb46e1bae6d5f0",
+      "account_scope_hash": "sha256:6954b1d6f63195b7adf853c3552fbba26f389b0cd2384a370e2379f224f4e2d8",
+      "semantic_hash": "sha256:b0eedc9a4df4fb11f56db56c9ccbc1193af17f1a7105c5fb1cb758e49fd41fa1",
+      "plan_hash": "sha256:b2001309a0371ba32bb7ad227636c2c00115aa2ef075aa1eed6a32af471b3d96",
+      "compile_hash": "sha256:5e4cebd9a903f911a49602b9dd9f617fae1cdea02f4da278b6d94818c6a30993"
+    },
+    "artifact_fingerprints": [
+      {
+        "component_key": "childB",
+        "component_type": "process",
+        "artifact_kind": "process_component_materialization_plan",
+        "artifact_version": "1",
+        "byte_length": 2799,
+        "digest": "sha256:aca1e08fff79019d4e249c4515f7c988364eb7526c74ce53b6a0dbf78a958f1d"
+      },
+      {
+        "component_key": "childB",
+        "component_type": "process",
+        "artifact_kind": "process_ir_emission_plan",
+        "artifact_version": "1",
+        "byte_length": 1237,
+        "digest": "sha256:ec8e03da09266ce4627c865c7491b989140eb23e4b863a5645732ac43e279723"
+      },
+      {
+        "component_key": "childB",
+        "component_type": "process",
+        "artifact_kind": "process_ir_normalized",
+        "artifact_version": "1",
+        "byte_length": 189,
+        "digest": "sha256:d6ec2e027d002293c496ca4644724e14983a3032d8cb7d4f34d2ab3ed86d3151"
+      },
+      {
+        "component_key": "childD1",
+        "component_type": "process",
+        "artifact_kind": "process_component_materialization_plan",
+        "artifact_version": "1",
+        "byte_length": 2801,
+        "digest": "sha256:94bb80fead8b1ad145dd3b9170248cc73acd9a7b67ff45ae1c8875fa1e858097"
+      },
+      {
+        "component_key": "childD1",
+        "component_type": "process",
+        "artifact_kind": "process_ir_emission_plan",
+        "artifact_version": "1",
+        "byte_length": 1237,
+        "digest": "sha256:ac00d08f8edb8a2317f1a1439dfb9c3f40a1896e7aa70b8e24b7fb0a25f81bdf"
+      },
+      {
+        "component_key": "childD1",
+        "component_type": "process",
+        "artifact_kind": "process_ir_normalized",
+        "artifact_version": "1",
+        "byte_length": 189,
+        "digest": "sha256:a3091bb7243805b4b6ef20e137862e8613658b1aa9cb3ed945f1cb8c2fee12ee"
+      },
+      {
+        "component_key": "childD2",
+        "component_type": "process",
+        "artifact_kind": "process_component_materialization_plan",
+        "artifact_version": "1",
+        "byte_length": 2801,
+        "digest": "sha256:8c988aab4f2f4704c15b440005665c22bdaf65c8b65c0737ece7e6301d398f56"
+      },
+      {
+        "component_key": "childD2",
+        "component_type": "process",
+        "artifact_kind": "process_ir_emission_plan",
+        "artifact_version": "1",
+        "byte_length": 1237,
+        "digest": "sha256:be8f24fe6fc9a97e5ea971293d0a57541e505d35a9a48204bf61c01db3025f12"
+      },
+      {
+        "component_key": "childD2",
+        "component_type": "process",
+        "artifact_kind": "process_ir_normalized",
+        "artifact_version": "1",
+        "byte_length": 189,
+        "digest": "sha256:1ee55d486e1b30ff25cd38280d7fd850a987e8be9a0cf86cc7897ebf875de177"
+      },
+      {
+        "component_key": "procA",
+        "component_type": "process",
+        "artifact_kind": "process_component_materialization_plan",
+        "artifact_version": "1",
+        "byte_length": 4435,
+        "digest": "sha256:cc57c121ac0eb55352258f4b49b7d783ba8321f7ff1bdb25e7ac908e14b223f8"
+      },
+      {
+        "component_key": "procA",
+        "component_type": "process",
+        "artifact_kind": "process_ir_emission_plan",
+        "artifact_version": "1",
+        "byte_length": 2586,
+        "digest": "sha256:8aee391d2b3c1cc9c06b10cc0978ff847482017c2ee58819e47bd11d8b3395dc"
+      },
+      {
+        "component_key": "procA",
+        "component_type": "process",
+        "artifact_kind": "process_ir_normalized",
+        "artifact_version": "1",
+        "byte_length": 447,
+        "digest": "sha256:ce7653274f1c9a7b24ba4c2db08850ee923e4370cb556582d800c4ed4915005c"
+      },
+      {
+        "component_key": "procB",
+        "component_type": "process",
+        "artifact_kind": "process_component_materialization_plan",
+        "artifact_version": "1",
+        "byte_length": 4766,
+        "digest": "sha256:a36278d07abaabc84c5f0a7e04b22cede0f108fb0f5e66e1d097ed32b655cc25"
+      },
+      {
+        "component_key": "procB",
+        "component_type": "process",
+        "artifact_kind": "process_ir_emission_plan",
+        "artifact_version": "1",
+        "byte_length": 2665,
+        "digest": "sha256:b0ad2e08f932b62bf33e9693eb2d4bf017a66715f3bff1ca4960f7a07ccd8d50"
+      },
+      {
+        "component_key": "procB",
+        "component_type": "process",
+        "artifact_kind": "process_ir_normalized",
+        "artifact_version": "1",
+        "byte_length": 552,
+        "digest": "sha256:f4114fb60e4b3c2bb25550b3d58e5b8f0ad03cbfe029ced0e8632739daadb937"
+      },
+      {
+        "component_key": "procD",
+        "component_type": "process",
+        "artifact_kind": "process_component_materialization_plan",
+        "artifact_version": "1",
+        "byte_length": 7630,
+        "digest": "sha256:2757c3b450e8c9ad4fd29a7c7009e1bdedcf11231b041e78b1fc0eb74847c64f"
+      },
+      {
+        "component_key": "procD",
+        "component_type": "process",
+        "artifact_kind": "process_ir_emission_plan",
+        "artifact_version": "1",
+        "byte_length": 4642,
+        "digest": "sha256:c15dbab2e141f28b3cc69f04abde9381748d9a501310cbb653c143508b058468"
+      },
+      {
+        "component_key": "procD",
+        "component_type": "process",
+        "artifact_kind": "process_ir_normalized",
+        "artifact_version": "1",
+        "byte_length": 1151,
+        "digest": "sha256:8154682cfb93f571a4870ea49561c12408928863850fa8fa7ce9a86c16ca4a3c"
+      }
+    ],
+    "resolved_references": [
+      {
+        "ref": "$ref:childB",
+        "component_type": "process",
+        "resolved": true,
+        "component_id": null,
+        "version_marker": null
+      },
+      {
+        "ref": "$ref:childD1",
+        "component_type": "process",
+        "resolved": true,
+        "component_id": null,
+        "version_marker": null
+      },
+      {
+        "ref": "$ref:childD2",
+        "component_type": "process",
+        "resolved": true,
+        "component_id": null,
+        "version_marker": null
+      },
+      {
+        "ref": "$ref:conn",
+        "component_type": "connector-settings",
+        "resolved": true,
+        "component_id": null,
+        "version_marker": null
+      },
+      {
+        "ref": "$ref:op_abf",
+        "component_type": "connector-action",
+        "resolved": true,
+        "component_id": null,
+        "version_marker": null
+      },
+      {
+        "ref": "$ref:op_c1",
+        "component_type": "connector-action",
+        "resolved": true,
+        "component_id": null,
+        "version_marker": null
+      },
+      {
+        "ref": "$ref:op_c2",
+        "component_type": "connector-action",
+        "resolved": true,
+        "component_id": null,
+        "version_marker": null
+      },
+      {
+        "ref": "$ref:op_cb",
+        "component_type": "connector-action",
+        "resolved": true,
+        "component_id": null,
+        "version_marker": null
+      },
+      {
+        "ref": "$ref:op_fail",
+        "component_type": "connector-action",
+        "resolved": true,
+        "component_id": null,
+        "version_marker": null
+      },
+      {
+        "ref": "$ref:op_src",
+        "component_type": "connector-action",
+        "resolved": true,
+        "component_id": null,
+        "version_marker": null
+      },
+      {
+        "ref": "$ref:procA",
+        "component_type": "process",
+        "resolved": true,
+        "component_id": null,
+        "version_marker": null
+      },
+      {
+        "ref": "$ref:procB",
+        "component_type": "process",
+        "resolved": true,
+        "component_id": null,
+        "version_marker": null
+      },
+      {
+        "ref": "$ref:procD",
+        "component_type": "process",
+        "resolved": true,
+        "component_id": null,
+        "version_marker": null
+      }
+    ],
+    "live_comparison": null,
+    "process_mutations": [
+      {
+        "component_key": "childD1",
+        "plan_fingerprint": "sha256:94bb80fead8b1ad145dd3b9170248cc73acd9a7b67ff45ae1c8875fa1e858097",
+        "account_scope_hash": "sha256:6954b1d6f63195b7adf853c3552fbba26f389b0cd2384a370e2379f224f4e2d8",
+        "action": "create",
+        "target_component_id": null,
+        "result_component_id": "7dcaebf3-3ca8-4cf2-9124-1024bacc48d7",
+        "resolved_placement": {
+          "folder_name": null,
+          "folder_id": null
+        },
+        "submitted_xml_digest": "sha256:746ae0e9b3acf7b4c1f1da55b33d872018797ba5db50eae7b145681e79a5c97f",
+        "replay_evidence_bindings": []
+      },
+      {
+        "component_key": "childD2",
+        "plan_fingerprint": "sha256:8c988aab4f2f4704c15b440005665c22bdaf65c8b65c0737ece7e6301d398f56",
+        "account_scope_hash": "sha256:6954b1d6f63195b7adf853c3552fbba26f389b0cd2384a370e2379f224f4e2d8",
+        "action": "create",
+        "target_component_id": null,
+        "result_component_id": "463e3ee8-1048-45db-8ed6-43f2ba2c042a",
+        "resolved_placement": {
+          "folder_name": null,
+          "folder_id": null
+        },
+        "submitted_xml_digest": "sha256:5a59f8bdd3fa6da0a61ad6d72ed9573e582847ce0d050a3c07d9d13c1bab6388",
+        "replay_evidence_bindings": []
+      },
+      {
+        "component_key": "childB",
+        "plan_fingerprint": "sha256:aca1e08fff79019d4e249c4515f7c988364eb7526c74ce53b6a0dbf78a958f1d",
+        "account_scope_hash": "sha256:6954b1d6f63195b7adf853c3552fbba26f389b0cd2384a370e2379f224f4e2d8",
+        "action": "create",
+        "target_component_id": null,
+        "result_component_id": "0e3bf314-2565-4d64-a07b-eb4263f53231",
+        "resolved_placement": {
+          "folder_name": null,
+          "folder_id": null
+        },
+        "submitted_xml_digest": "sha256:a3dfaa2d5d77dc5a065d9fc3a10be0103abb488c2a4fb238f5255c5fa145015d",
+        "replay_evidence_bindings": []
+      },
+      {
+        "component_key": "procA",
+        "plan_fingerprint": "sha256:cc57c121ac0eb55352258f4b49b7d783ba8321f7ff1bdb25e7ac908e14b223f8",
+        "account_scope_hash": "sha256:6954b1d6f63195b7adf853c3552fbba26f389b0cd2384a370e2379f224f4e2d8",
+        "action": "create",
+        "target_component_id": null,
+        "result_component_id": "f9c4e798-8068-4ccd-b36a-90c0a14fd3b2",
+        "resolved_placement": {
+          "folder_name": null,
+          "folder_id": null
+        },
+        "submitted_xml_digest": "sha256:587a831109749890f9432e1f19f05ad8752a93a37de13834df0e682244b10684",
+        "replay_evidence_bindings": []
+      },
+      {
+        "component_key": "procB",
+        "plan_fingerprint": "sha256:a36278d07abaabc84c5f0a7e04b22cede0f108fb0f5e66e1d097ed32b655cc25",
+        "account_scope_hash": "sha256:6954b1d6f63195b7adf853c3552fbba26f389b0cd2384a370e2379f224f4e2d8",
+        "action": "create",
+        "target_component_id": null,
+        "result_component_id": "15285b48-f0fc-4fe8-b093-cd664c150252",
+        "resolved_placement": {
+          "folder_name": null,
+          "folder_id": null
+        },
+        "submitted_xml_digest": "sha256:5d3e404dcabf94ecef63ede9bc1a52a38266681e71f42f9df4a1de947bedb2e7",
+        "replay_evidence_bindings": []
+      },
+      {
+        "component_key": "procD",
+        "plan_fingerprint": "sha256:2757c3b450e8c9ad4fd29a7c7009e1bdedcf11231b041e78b1fc0eb74847c64f",
+        "account_scope_hash": "sha256:6954b1d6f63195b7adf853c3552fbba26f389b0cd2384a370e2379f224f4e2d8",
+        "action": "create",
+        "target_component_id": null,
+        "result_component_id": "a6526452-8ff1-417b-a74a-e0749693c1a6",
+        "resolved_placement": {
+          "folder_name": null,
+          "folder_id": null
+        },
+        "submitted_xml_digest": "sha256:f16b3194f8ca4cd162848f833ad9ec9372f6325778f0dee73ebc71f68f3a109f",
+        "replay_evidence_bindings": []
+      }
+    ],
+    "process_readbacks": [
+      {
+        "component_key": "childD1",
+        "component_id": "7dcaebf3-3ca8-4cf2-9124-1024bacc48d7",
+        "digest": "sha256:5487be2712265661fb9b801b8731622d41a93606f6e0a2e83e325436fa5860f7"
+      },
+      {
+        "component_key": "childD2",
+        "component_id": "463e3ee8-1048-45db-8ed6-43f2ba2c042a",
+        "digest": "sha256:4f15c18836d6e5dbd3f3935040282342632edd444ceac168b2b13d676d9843c2"
+      },
+      {
+        "component_key": "childB",
+        "component_id": "0e3bf314-2565-4d64-a07b-eb4263f53231",
+        "digest": "sha256:4ddc4fbe2e0db5978f0115c99008fe0e4be896197c1a07b4297c3bc78fff6240"
+      },
+      {
+        "component_key": "procA",
+        "component_id": "f9c4e798-8068-4ccd-b36a-90c0a14fd3b2",
+        "digest": "sha256:fff9817a1e8366a6047b145af31ff8f76f285499dc5fac80e2a3ff88a5399f2b"
+      },
+      {
+        "component_key": "procB",
+        "component_id": "15285b48-f0fc-4fe8-b093-cd664c150252",
+        "digest": "sha256:51b76de1c68d20fa1dc9d25d8035eb910cc9789904711c0d3549c80a71891f5c"
+      },
+      {
+        "component_key": "procD",
+        "component_id": "a6526452-8ff1-417b-a74a-e0749693c1a6",
+        "digest": "sha256:e9ef02922cb21a47ba215fd382a6cfe669e2513761aa88a8ed1e9907b4c3a33a"
+      }
+    ]
+  },
+  "warnings": [
+    "[FOLDER_REQUIRED_ON_CREATE] Component 'conn' is created with no folder_id or folder_name and would land in the account root. Set a resolved folder so components are organized, never at root.",
+    "[FOLDER_REQUIRED_ON_CREATE] Component 'op_src' is created with no folder_id or folder_name and would land in the account root. Set a resolved folder so components are organized, never at root.",
+    "[FOLDER_REQUIRED_ON_CREATE] Component 'op_fail' is created with no folder_id or folder_name and would land in the account root. Set a resolved folder so components are organized, never at root.",
+    "[FOLDER_REQUIRED_ON_CREATE] Component 'op_abf' is created with no folder_id or folder_name and would land in the account root. Set a resolved folder so components are organized, never at root.",
+    "[FOLDER_REQUIRED_ON_CREATE] Component 'op_c1' is created with no folder_id or folder_name and would land in the account root. Set a resolved folder so components are organized, never at root.",
+    "[FOLDER_REQUIRED_ON_CREATE] Component 'op_c2' is created with no folder_id or folder_name and would land in the account root. Set a resolved folder so components are organized, never at root.",
+    "[FOLDER_REQUIRED_ON_CREATE] Component 'op_cb' is created with no folder_id or folder_name and would land in the account root. Set a resolved folder so components are organized, never at root."
+  ],
+  "action": "apply",
+  "mutation_status": "performed",
+  "profile": "renera"
+}

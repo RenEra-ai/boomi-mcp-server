@@ -1,0 +1,12 @@
+[
+  {
+    "scenario": "provision",
+    "file": "provision_state.json",
+    "utc": "2026-09-06T03:49:15.163798+00:00",
+    "account_id": "trainingglebbochkarov-16926N",
+    "sha256": "ac922191515720e3d7871b195b81537e66765b28eb5fcf553ac64c4354c8734b",
+    "byte_length": 703,
+    "archive_path": "docs/architecture/evidence/issue-156/captures/provision/provision_state.json",
+    "provenance": "created by 156-p1-provision.py via public manage_component raw-XML create; shapes live-captured from account components SCRATCH DB Read Profile / _TEST_155C_R45_DBOP / _QA_FIXTURE_155_G1_src_GET"
+  }
+]

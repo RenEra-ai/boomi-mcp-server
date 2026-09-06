@@ -411,7 +411,7 @@ def test_direct_process_ir_planning_needs_no_archetype():
 def test_direct_planning_returns_bounded_constructs_gaps_and_a_query():
     payload = meta_tools.plan_integration_design_action(authoring_mode="process_ir")
     constructs = payload["supported_process_ir_constructs"]
-    assert len(constructs) == 21
+    assert len(constructs) == 23  # #156 added the notify and continue entries
     for construct in constructs:
         assert construct["contract_entry_id"].startswith("node.")
     gaps = payload["process_ir_capability_gaps"]

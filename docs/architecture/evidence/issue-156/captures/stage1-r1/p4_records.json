@@ -1,0 +1,35 @@
+[
+  {
+    "scenario": "stage1-r1",
+    "file": "p4_deploy_procA.json",
+    "utc": "2026-09-06T07:03:08.507300+00:00",
+    "account_id": "trainingglebbochkarov-16926N",
+    "sha256": "0aa90fd4877a67946ebd3591c81c06b6272f3fdea53b9627a5859c78356200f4",
+    "byte_length": 1046,
+    "archive_path": "docs/architecture/evidence/issue-156/captures/stage1-r1/p4_deploy_procA.json",
+    "phase": "deploy",
+    "root_key": "procA"
+  },
+  {
+    "scenario": "stage1-r1",
+    "file": "p4_deploy_procB.json",
+    "utc": "2026-09-06T07:03:11.124918+00:00",
+    "account_id": "trainingglebbochkarov-16926N",
+    "sha256": "447b16e549fb9671ab80fc6c08d66a916ba33ea36522dabfb149e0e742cb1cdb",
+    "byte_length": 1046,
+    "archive_path": "docs/architecture/evidence/issue-156/captures/stage1-r1/p4_deploy_procB.json",
+    "phase": "deploy",
+    "root_key": "procB"
+  },
+  {
+    "scenario": "stage1-r1",
+    "file": "p4_deploy_procD.json",
+    "utc": "2026-09-06T07:03:13.314468+00:00",
+    "account_id": "trainingglebbochkarov-16926N",
+    "sha256": "44e1ccfbb6114c29b2f23d056a2e46bfc33173633b07ea94c7133a96c22533d3",
+    "byte_length": 1046,
+    "archive_path": "docs/architecture/evidence/issue-156/captures/stage1-r1/p4_deploy_procD.json",
+    "phase": "deploy",
+    "root_key": "procD"
+  }
+]

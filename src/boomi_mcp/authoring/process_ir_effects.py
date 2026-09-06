@@ -656,6 +656,13 @@ INSPECTABLE_CHILD_KINDS = frozenset({
     "exception",
     "flow_control",
     "message",
+    # #156: notify. INSPECTABLE for exactly the reason `connector` is — it does
+    # I/O, and I/O is not state. MEASURED against the lineage authority rather
+    # than argued: `_reads_of` and `_writes_of` both return `()` for a notify
+    # semantic, and `_replay_hazard` returns None, so it cannot change either
+    # state answer or a replay verdict. The caught-error property it binds is a
+    # platform-managed tracked value, not a DDP/DPP the walk models.
+    "notify",
     "return_documents",
     "set_property",
     "stop",

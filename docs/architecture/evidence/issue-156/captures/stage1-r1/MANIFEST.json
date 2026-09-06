@@ -1,0 +1,193 @@
+{
+  "scenario_set": "issue-156 Stage-1 QA r1",
+  "utc": "2026-09-06T07:33:23.507792+00:00",
+  "account_id": "trainingglebbochkarov-16926N",
+  "environment_id": "b173ce8a-2d7f-41e3-9d3f-06e45d5b0de9",
+  "atom_id": "a40a3313-1537-47c4-91c7-573a703537c7",
+  "code_under_test": "branch codex/issue-156, uncommitted working tree over baseline b07babeb3752d337ffa307c4c486e181e703a2c2",
+  "freeze_stamp": "b07babeb3752/dirty:8f9e24d12302/39ef6aea5fef",
+  "provenance": {
+    "p2_*": "build_integration plan/compile/apply through the typed process_ir authoring route (public MCP tool boundary)",
+    "*_stored.xml": "GET /Component/<id> accept=xml \u2014 the PLATFORM's own readback; createdBy/modifiedBy and credential fields redacted",
+    "p4_deploy_*": "manage_deployment create_package + deploy",
+    "p5_*": "execute_process + ExecutionRecord + monitor_platform execution_logs + the cds-mock counterparty request log (docker logs -t --since <mark>)",
+    "p6_*": "build_integration compile/apply of the COMMITTED ProcessIR fixtures, compared to the committed goldens with identities blinded",
+    "p7_*": "retry-count attribution control (authored retry 0 / 1 / 2)",
+    "p8_*": "ExecutionRecord query by processId \u2014 the third, independent attribution channel",
+    "p10_*": "notify level matrix in stored platform bytes",
+    "p12_*": "bounded cleanup: only rows the apply reported status=created"
+  },
+  "counterparty": "cds-mock (FastAPI) request log; a hit is written by the counterparty, not echoed by Boomi",
+  "files": [
+    {
+      "file": "childB_stored.xml",
+      "bytes": 1817,
+      "sha256": "79340a72b04a1337a0b547db6c431396b3b9e10c9a4323bf6c50678d80573cb7"
+    },
+    {
+      "file": "childD1_stored.xml",
+      "bytes": 1818,
+      "sha256": "0ca3763cb7fc1042d9f59f98fda527f068f946c49cd22cc99130aba0a041b335"
+    },
+    {
+      "file": "childD2_stored.xml",
+      "bytes": 1818,
+      "sha256": "22ea0c93ee1312ae8156ef5b73981443e17cc5f4c5ceb72426c35b89d804241e"
+    },
+    {
+      "file": "p10_levels.json",
+      "bytes": 864,
+      "sha256": "9e425934e72da44f10df2828a9198e2a583cde1a8ea41e84e87d67f00c6ab24a"
+    },
+    {
+      "file": "p10_records.json",
+      "bytes": 489,
+      "sha256": "82619375d7979f66310dcbfd81bc0e121b7500d54e5db97bca703526838832a5"
+    },
+    {
+      "file": "p12_cleanup.json",
+      "bytes": 5530,
+      "sha256": "26bc4a6c4f1d9b7d2d3a43858ffb41646d20eec41177fc1582b22051e07a71f6"
+    },
+    {
+      "file": "p12_records.json",
+      "bytes": 402,
+      "sha256": "2e9b17134df3927184a2d8a2290b9b4263ccd969367224ba597ea0815f65f400"
+    },
+    {
+      "file": "p2_apply.json",
+      "bytes": 28693,
+      "sha256": "371a4dabbeecebf3d4b1164aad4837a3fe8c2dea3bb2b721a038014db7239d9f"
+    },
+    {
+      "file": "p2_plan_apply.json",
+      "bytes": 22346,
+      "sha256": "37079c0e9087fb9b05586f6b4f5e1986893d065d65d0a72a962cfdd396440137"
+    },
+    {
+      "file": "p2_plan_plan.json",
+      "bytes": 22346,
+      "sha256": "a64a987c05b7614aae357f7a914c912eda4982de1d86adeb1167791b683bfeb1"
+    },
+    {
+      "file": "p2_records.json",
+      "bytes": 944,
+      "sha256": "89795f90aa45b0fe97e04fa5f63e52fbf25b1f548472da931e137e8a6eb1131c"
+    },
+    {
+      "file": "p3_records.json",
+      "bytes": 3539,
+      "sha256": "7f0d355cfd913791272ffcab35b80e925624e81cfaf70b5fe3a3bdc4553f9fda"
+    },
+    {
+      "file": "p4_deploy_procA.json",
+      "bytes": 1046,
+      "sha256": "613c66df14f2712de6724d4152efc835b9e59089c57472e14df6f872f87def45"
+    },
+    {
+      "file": "p4_deploy_procB.json",
+      "bytes": 1046,
+      "sha256": "e034a3696288ec1138784301370e814cf9f618c845bbca98dad3f34bdd2ad2a9"
+    },
+    {
+      "file": "p4_deploy_procD.json",
+      "bytes": 1046,
+      "sha256": "1d1e33bc2368fc47e5dfbea6fd297e6f83042dd8f88795316462fdb8b22ee6b8"
+    },
+    {
+      "file": "p4_records.json",
+      "bytes": 1277,
+      "sha256": "31a77dea1f91aafba73b29201a7813454b2220d213b8f20ecf51c3760b92489f"
+    },
+    {
+      "file": "p5_A1_procA.json",
+      "bytes": 7038,
+      "sha256": "a730503699a537e498d3dd57034d0276be269f92de69f657e2e016654407587b"
+    },
+    {
+      "file": "p5_B1_procB.json",
+      "bytes": 7737,
+      "sha256": "289592ff7556977636ac0a63670e04a6d891bd699302cb918f72acb2b009f2a1"
+    },
+    {
+      "file": "p5_D1_procD.json",
+      "bytes": 14222,
+      "sha256": "bf5d504af4f6802f776dfb2269d8a5eef4f6f9cad5db39c25b92be3ad73014be"
+    },
+    {
+      "file": "p5_D2_procD.json",
+      "bytes": 14190,
+      "sha256": "4f39bd4c8e75e37a04a06279a87a5876c3bc1f69fa8b202b16edc0a1b2bfa0dd"
+    },
+    {
+      "file": "p5_records.json",
+      "bytes": 2508,
+      "sha256": "ff0c1da5db124a38f6f94488de8205c5cd094f422f01ed9ee602173a81c95a90"
+    },
+    {
+      "file": "p5_runtime_summary.json",
+      "bytes": 11672,
+      "sha256": "87ae73582d678f264c2b33b5724edc4aeaaf9d2224971cce429803cc0d2cf991"
+    },
+    {
+      "file": "p6_records.json",
+      "bytes": 688,
+      "sha256": "d7f0b054f5bce904827bb73677118b2df37137af4e82924c1216582c73279b79"
+    },
+    {
+      "file": "p6_scoped_try_catch_notify_terminal_process_call_emitted.xml",
+      "bytes": 3932,
+      "sha256": "09c63182fbc3514dada98e58488ef2f93fbff5e5eb857088dce29ff6e53003ed"
+    },
+    {
+      "file": "p6_serialized_connector_regions_notify_dlq_emitted.xml",
+      "bytes": 5266,
+      "sha256": "91df44d8ce29251ccc2c23783dc58eb1a780004fd0a60868009d7f2b1d6c52a5"
+    },
+    {
+      "file": "p7_apply.json",
+      "bytes": 34693,
+      "sha256": "ecbff6664dac80b99105f59f3f79a28c1c0af495a0e3ca56ec78a293af52a4a5"
+    },
+    {
+      "file": "p7_cell_r0.json",
+      "bytes": 3091,
+      "sha256": "dc259ee765bfd24d0fd8afad5edf8506313a40329ceeead83c84fcdef29a797b"
+    },
+    {
+      "file": "p7_cell_r1.json",
+      "bytes": 3367,
+      "sha256": "bad56fe6b1a45f4328441914c7c1554dbbefe5f3f62491e3522fa5a43d3ac410"
+    },
+    {
+      "file": "p7_records.json",
+      "bytes": 1298,
+      "sha256": "98369d4d809ac879997b3c0dda5c8f0f3b8188a48631fc4b4313ec7499c3ab42"
+    },
+    {
+      "file": "p8_records.json",
+      "bytes": 663,
+      "sha256": "82266eab4ae9e00516722b70850fdfe62f65164b3f6791267b480dd78a408db0"
+    },
+    {
+      "file": "p8_subprocess_records.json",
+      "bytes": 1720,
+      "sha256": "ae7ff3e2d2558f26297ee0c497fd522766649e69ffe8ad84366d7d46c593b471"
+    },
+    {
+      "file": "procA_stored.xml",
+      "bytes": 3170,
+      "sha256": "5fe6df7838e698208b594b5a99d04ec09bc65023f193f7902fbf44a17c5a775d"
+    },
+    {
+      "file": "procB_stored.xml",
+      "bytes": 3335,
+      "sha256": "56ed982d7729fc1b0eddb2d835f38e110657f6c3d0db359e995da6038032643c"
+    },
+    {
+      "file": "procD_stored.xml",
+      "bytes": 5377,
+      "sha256": "f59c1b21df5029f9862a914f7cfbada69f84839994694372f4d35f074474fcb6"
+    }
+  ]
+}

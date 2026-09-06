@@ -63,6 +63,8 @@ from .contracts import (
     EmissionTransitionV1,
     ExceptionInputV1,
     ExceptionSemanticV1,
+    NotifyInputV1,
+    NotifySemanticV1,
     IdempotencyEvidenceSemanticV1,
     FlowControlInputV1,
     FlowControlSemanticV1,
@@ -349,6 +351,13 @@ def _semantic_for(node: Any, *, routed: bool = False, entry: bool = False) -> An
             scope=node.scope,
             retry_count=node.retry_count,
             source_replay_policy=node.source_replay_policy,
+            # #156: copied from the authored try terminal, so the invariants have
+            # evidence a continuation was AUTHORISED rather than merely observed.
+            success_mode=(
+                "continue"
+                if getattr(node.try_body.terminal, "kind", None) == "continue"
+                else "terminal"
+            ),
             label=label,
         )
     if kind == "branch":
@@ -366,6 +375,12 @@ def _semantic_for(node: Any, *, routed: bool = False, entry: bool = False) -> An
             title=node.title,
             stop_single_document=node.stop_single_document,
             parameter_source=node.parameter_source,
+        )
+    if kind == "notify":
+        # No `label`: Notify's userlabel is fixed by the renderer, so the model
+        # authors none and there is nothing to carry.
+        return NotifySemanticV1(
+            level=node.level, message_template=node.message_template
         )
     if kind == "stop":
         return StopSemanticV1()
@@ -554,17 +569,25 @@ def _path_binding_semantic(binding: Any) -> Any:
     )
 
 
-def _lower_try_catch_children(
+def _lower_try_catch_protected(
     builder: _CfgBuilder, node: Any, tc_node_id: str, tc_path: str
-) -> None:
-    """Try subtree first, then Catch — the legacy allocation order (#142).
+) -> Optional[str]:
+    """Lower the PROTECTED path only, and say whether the flow continues past it.
 
-    Both edges are registered BEFORE their subtree is walked, using the
-    next-ordinal trick ``_lower_branch_children`` already uses: the first node of
-    the run about to be lowered is predictable, so the edge can name it up front.
-    Allocating the whole Try run before the Catch run is what makes the emitted
-    shape ordinals match the shipped Try/Catch goldens, and it also keeps the
-    graph forward-only (the catch subtree is entirely later than the try one).
+    Returns the node the next root step must attach to when the try body ends in
+    ``continue``, and ``None`` when it reaches a real terminal.
+
+    The try edge is registered BEFORE the subtree is walked, using the
+    next-ordinal trick ``_lower_branch_children`` also uses: the first node of the
+    run about to be lowered is predictable, so the edge can name it up front.
+
+    #156 SPLIT this from the catch half. Lowering a handler's catch body
+    immediately after its try body was correct while a Try/Catch terminated the
+    flow — the graph had nowhere else to go. In a serialized chain it is wrong:
+    the captured double-guard allocates the WHOLE main spine first (start,
+    handler, connector, map, handler, connector, stop) and only then the two
+    recovery legs, so an inline catch would put the first recovery shape in the
+    middle of the main path and every later ordinal would shift.
     """
     try_path = _join(tc_path, "try_body")
     builder.add_edge(
@@ -575,10 +598,27 @@ def _lower_try_catch_children(
         try_path,
     )
     last = _lower_linear_run(builder, node.try_body.steps, try_path, None)
+    if getattr(node.try_body.terminal, "kind", None) == "continue":
+        # `continue` emits NOTHING — no CFG node, no semantic, no shape. It is a
+        # statement about the path, and the continuation edge is drawn by the
+        # caller from this node to whatever comes next.
+        return last
     _lower_terminal(
         builder, node.try_body.terminal, _join(try_path, "terminal"), last, routed=False
     )
+    return None
 
+
+def _lower_try_catch_catch(
+    builder: _CfgBuilder, node: Any, tc_node_id: str, tc_path: str
+) -> None:
+    """Lower one handler's RECOVERY path, at drain time.
+
+    The catch edge is registered here rather than beside the try edge, and that is
+    safe because ``finalize_edges`` sorts by ``(source ordinal, local ordinal)``:
+    this edge carries local ordinal 2 and its handler's try edge carries 1, so the
+    canonical edge order is unchanged no matter when the two were appended.
+    """
     catch_path = _join(tc_path, "catch_body")
     builder.add_edge(
         tc_node_id,
@@ -666,6 +706,10 @@ def lower_process_ir_to_cfg(ir: ProcessIRV1) -> SemanticCfgV1:
     )
 
     previous: Optional[str] = None
+    #: Handlers whose recovery path is lowered after the main spine, in AUTHORED
+    #: order. Order matters for byte parity: the double-guard capture allocates
+    #: catch block 1 immediately after the main path and catch block 2 after that.
+    deferred_catches: List[Tuple[str, Any, str]] = []
     for index, step in enumerate(steps):
         path = _join(base, "steps", index)
         kind = step.kind
@@ -690,8 +734,14 @@ def lower_process_ir_to_cfg(ir: ProcessIRV1) -> SemanticCfgV1:
             node_id = builder.add_node(_semantic_for(step), path)
             if previous is not None:
                 builder.add_edge(previous, node_id, "ordering", 1, path)
-            _lower_try_catch_children(builder, step, node_id, path)
-            previous = None
+            # #156: protected path now, recovery path after the whole main spine.
+            # `previous` is the continuation node when the try body ends in
+            # `continue`, and None otherwise — so a chain links handler N's last
+            # protected node to handler N+1 (or to the map between them) exactly
+            # as any ordinary step would, and a terminating handler still ends the
+            # spine.
+            previous = _lower_try_catch_protected(builder, step, node_id, path)
+            deferred_catches.append((node_id, step, path))
             continue
 
         # A root ``target`` is followed by an AUTHORED stop, so it is not itself
@@ -705,6 +755,11 @@ def lower_process_ir_to_cfg(ir: ProcessIRV1) -> SemanticCfgV1:
                 previous, node_id, _sequential_edge_kind(builder, node_id), 1, path
             )
         previous = node_id
+
+    # Drain AFTER the main spine is complete, so every recovery block sits later
+    # than every main-path node and the graph stays forward-only.
+    for node_id, step, path in deferred_catches:
+        _lower_try_catch_catch(builder, step, node_id, path)
 
     exit_ids = tuple(node.node_id for node in builder.nodes if node.exit_role)
     return SemanticCfgV1(
@@ -1072,6 +1127,10 @@ def _emitter_input_for(node: CfgNodeV1, symbols: Mapping[str, Any]) -> Any:
             stop_single_document=semantic.stop_single_document,
             parameter_source=semantic.parameter_source,
             binding=_exception_binding(semantic.parameter_source),
+        )
+    if kind == "notify":
+        return NotifyInputV1(
+            level=semantic.level, message_template=semantic.message_template
         )
     if kind == "stop":
         return StopInputV1()

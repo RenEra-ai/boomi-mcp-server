@@ -1,0 +1,683 @@
+{
+  "_success": true,
+  "action": "plan",
+  "mutation_performed": false,
+  "integration_spec": {
+    "version": "1.0",
+    "name": "_TEST_156D_QA156D0906065703",
+    "mode": "lift_shift",
+    "components": [
+      {
+        "key": "conn",
+        "type": "connector-settings",
+        "action": "create",
+        "name": "_TEST_156D_QA156D0906065703 conn",
+        "component_id": null,
+        "config": {
+          "connector_type": "rest",
+          "component_name": "_TEST_156D_QA156D0906065703 conn",
+          "base_url": "http://host.docker.internal:8081",
+          "auth": "NONE"
+        },
+        "depends_on": []
+      },
+      {
+        "key": "op_src",
+        "type": "connector-action",
+        "action": "create",
+        "name": "_TEST_156D_QA156D0906065703 op_src",
+        "component_id": null,
+        "config": {
+          "connector_type": "rest",
+          "operation_mode": "execute",
+          "component_name": "_TEST_156D_QA156D0906065703 op_src",
+          "connection_ref_key": "conn",
+          "method": "GET",
+          "path": "/admin/refdata/api/v1/rdcds/offices?qa=QA156D0906065703-src",
+          "return_application_errors": true
+        },
+        "depends_on": [
+          "conn"
+        ]
+      },
+      {
+        "key": "op_fail",
+        "type": "connector-action",
+        "action": "create",
+        "name": "_TEST_156D_QA156D0906065703 op_fail",
+        "component_id": null,
+        "config": {
+          "connector_type": "rest",
+          "operation_mode": "execute",
+          "component_name": "_TEST_156D_QA156D0906065703 op_fail",
+          "connection_ref_key": "conn",
+          "method": "GET",
+          "path": "/__QA156D__/QA156D0906065703/r2fail",
+          "return_application_errors": false
+        },
+        "depends_on": [
+          "conn"
+        ]
+      },
+      {
+        "key": "op_abf",
+        "type": "connector-action",
+        "action": "create",
+        "name": "_TEST_156D_QA156D0906065703 op_abf",
+        "component_id": null,
+        "config": {
+          "connector_type": "rest",
+          "operation_mode": "execute",
+          "component_name": "_TEST_156D_QA156D0906065703 op_abf",
+          "connection_ref_key": "conn",
+          "method": "GET",
+          "path": "/__QA156D__/QA156D0906065703/abfail",
+          "return_application_errors": false
+        },
+        "depends_on": [
+          "conn"
+        ]
+      },
+      {
+        "key": "op_c1",
+        "type": "connector-action",
+        "action": "create",
+        "name": "_TEST_156D_QA156D0906065703 op_c1",
+        "component_id": null,
+        "config": {
+          "connector_type": "rest",
+          "operation_mode": "execute",
+          "component_name": "_TEST_156D_QA156D0906065703 op_c1",
+          "connection_ref_key": "conn",
+          "method": "GET",
+          "path": "/admin/refdata/api/v1/rdcds/offices?qa=QA156D0906065703-c1",
+          "return_application_errors": true
+        },
+        "depends_on": [
+          "conn"
+        ]
+      },
+      {
+        "key": "op_c2",
+        "type": "connector-action",
+        "action": "create",
+        "name": "_TEST_156D_QA156D0906065703 op_c2",
+        "component_id": null,
+        "config": {
+          "connector_type": "rest",
+          "operation_mode": "execute",
+          "component_name": "_TEST_156D_QA156D0906065703 op_c2",
+          "connection_ref_key": "conn",
+          "method": "GET",
+          "path": "/admin/refdata/api/v1/rdcds/offices?qa=QA156D0906065703-c2",
+          "return_application_errors": true
+        },
+        "depends_on": [
+          "conn"
+        ]
+      },
+      {
+        "key": "op_cb",
+        "type": "connector-action",
+        "action": "create",
+        "name": "_TEST_156D_QA156D0906065703 op_cb",
+        "component_id": null,
+        "config": {
+          "connector_type": "rest",
+          "operation_mode": "execute",
+          "component_name": "_TEST_156D_QA156D0906065703 op_cb",
+          "connection_ref_key": "conn",
+          "method": "GET",
+          "path": "/admin/refdata/api/v1/rdcds/offices?qa=QA156D0906065703-cb",
+          "return_application_errors": true
+        },
+        "depends_on": [
+          "conn"
+        ]
+      }
+    ],
+    "processes": [],
+    "goals": [],
+    "endpoints": [],
+    "flows": [],
+    "naming": {},
+    "folders": {},
+    "runtime": {},
+    "validation_rules": {},
+    "profile_indexes_by_component_id": null,
+    "pipeline": null
+  },
+  "authoring_result": {
+    "contract_version": "2",
+    "revision_binding": {
+      "contract_version": "2",
+      "schema_revision": "sha256:43afe45e1422fdfa7379d448a34e2adb0c4f1a5961595769904b2c4ed5ede98b",
+      "capability_revision": "sha256:5e600c61ea244fe1f6266c1a137c4be9f341d597e53648339efafa7467555984",
+      "compiler_revision": "sha256:b2f2d6282b670afc360363e525673bedce254584727efeb447cb46e1bae6d5f0",
+      "account_scope_hash": "sha256:6954b1d6f63195b7adf853c3552fbba26f389b0cd2384a370e2379f224f4e2d8",
+      "semantic_hash": "sha256:b0eedc9a4df4fb11f56db56c9ccbc1193af17f1a7105c5fb1cb758e49fd41fa1",
+      "plan_hash": "sha256:b2001309a0371ba32bb7ad227636c2c00115aa2ef075aa1eed6a32af471b3d96",
+      "compile_hash": null
+    },
+    "mutation_performed": false,
+    "integration_spec_preview": {
+      "version": "1.0",
+      "name": "_TEST_156D_QA156D0906065703",
+      "mode": "lift_shift",
+      "components": [
+        {
+          "key": "conn",
+          "type": "connector-settings",
+          "action": "create",
+          "name": "_TEST_156D_QA156D0906065703 conn",
+          "component_id": null,
+          "config": {
+            "connector_type": "rest",
+            "component_name": "_TEST_156D_QA156D0906065703 conn",
+            "base_url": "http://host.docker.internal:8081",
+            "auth": "NONE"
+          },
+          "depends_on": []
+        },
+        {
+          "key": "op_src",
+          "type": "connector-action",
+          "action": "create",
+          "name": "_TEST_156D_QA156D0906065703 op_src",
+          "component_id": null,
+          "config": {
+            "connector_type": "rest",
+            "operation_mode": "execute",
+            "component_name": "_TEST_156D_QA156D0906065703 op_src",
+            "connection_ref_key": "conn",
+            "method": "GET",
+            "path": "/admin/refdata/api/v1/rdcds/offices?qa=QA156D0906065703-src",
+            "return_application_errors": true
+          },
+          "depends_on": [
+            "conn"
+          ]
+        },
+        {
+          "key": "op_fail",
+          "type": "connector-action",
+          "action": "create",
+          "name": "_TEST_156D_QA156D0906065703 op_fail",
+          "component_id": null,
+          "config": {
+            "connector_type": "rest",
+            "operation_mode": "execute",
+            "component_name": "_TEST_156D_QA156D0906065703 op_fail",
+            "connection_ref_key": "conn",
+            "method": "GET",
+            "path": "/__QA156D__/QA156D0906065703/r2fail",
+            "return_application_errors": false
+          },
+          "depends_on": [
+            "conn"
+          ]
+        },
+        {
+          "key": "op_abf",
+          "type": "connector-action",
+          "action": "create",
+          "name": "_TEST_156D_QA156D0906065703 op_abf",
+          "component_id": null,
+          "config": {
+            "connector_type": "rest",
+            "operation_mode": "execute",
+            "component_name": "_TEST_156D_QA156D0906065703 op_abf",
+            "connection_ref_key": "conn",
+            "method": "GET",
+            "path": "/__QA156D__/QA156D0906065703/abfail",
+            "return_application_errors": false
+          },
+          "depends_on": [
+            "conn"
+          ]
+        },
+        {
+          "key": "op_c1",
+          "type": "connector-action",
+          "action": "create",
+          "name": "_TEST_156D_QA156D0906065703 op_c1",
+          "component_id": null,
+          "config": {
+            "connector_type": "rest",
+            "operation_mode": "execute",
+            "component_name": "_TEST_156D_QA156D0906065703 op_c1",
+            "connection_ref_key": "conn",
+            "method": "GET",
+            "path": "/admin/refdata/api/v1/rdcds/offices?qa=QA156D0906065703-c1",
+            "return_application_errors": true
+          },
+          "depends_on": [
+            "conn"
+          ]
+        },
+        {
+          "key": "op_c2",
+          "type": "connector-action",
+          "action": "create",
+          "name": "_TEST_156D_QA156D0906065703 op_c2",
+          "component_id": null,
+          "config": {
+            "connector_type": "rest",
+            "operation_mode": "execute",
+            "component_name": "_TEST_156D_QA156D0906065703 op_c2",
+            "connection_ref_key": "conn",
+            "method": "GET",
+            "path": "/admin/refdata/api/v1/rdcds/offices?qa=QA156D0906065703-c2",
+            "return_application_errors": true
+          },
+          "depends_on": [
+            "conn"
+          ]
+        },
+        {
+          "key": "op_cb",
+          "type": "connector-action",
+          "action": "create",
+          "name": "_TEST_156D_QA156D0906065703 op_cb",
+          "component_id": null,
+          "config": {
+            "connector_type": "rest",
+            "operation_mode": "execute",
+            "component_name": "_TEST_156D_QA156D0906065703 op_cb",
+            "connection_ref_key": "conn",
+            "method": "GET",
+            "path": "/admin/refdata/api/v1/rdcds/offices?qa=QA156D0906065703-cb",
+            "return_application_errors": true
+          },
+          "depends_on": [
+            "conn"
+          ]
+        }
+      ],
+      "processes": [],
+      "goals": [],
+      "endpoints": [],
+      "flows": [],
+      "naming": {},
+      "folders": {},
+      "runtime": {},
+      "validation_rules": {},
+      "profile_indexes_by_component_id": null,
+      "pipeline": null
+    },
+    "pipeline_stages": [],
+    "process_cfg": [],
+    "component_dependencies": [
+      {
+        "component_key": "childB",
+        "depends_on": "conn"
+      },
+      {
+        "component_key": "childB",
+        "depends_on": "op_cb"
+      },
+      {
+        "component_key": "childD1",
+        "depends_on": "conn"
+      },
+      {
+        "component_key": "childD1",
+        "depends_on": "op_c1"
+      },
+      {
+        "component_key": "childD2",
+        "depends_on": "conn"
+      },
+      {
+        "component_key": "childD2",
+        "depends_on": "op_c2"
+      },
+      {
+        "component_key": "op_abf",
+        "depends_on": "conn"
+      },
+      {
+        "component_key": "op_c1",
+        "depends_on": "conn"
+      },
+      {
+        "component_key": "op_c2",
+        "depends_on": "conn"
+      },
+      {
+        "component_key": "op_cb",
+        "depends_on": "conn"
+      },
+      {
+        "component_key": "op_fail",
+        "depends_on": "conn"
+      },
+      {
+        "component_key": "op_src",
+        "depends_on": "conn"
+      },
+      {
+        "component_key": "procA",
+        "depends_on": "conn"
+      },
+      {
+        "component_key": "procA",
+        "depends_on": "op_abf"
+      },
+      {
+        "component_key": "procB",
+        "depends_on": "childB"
+      },
+      {
+        "component_key": "procB",
+        "depends_on": "conn"
+      },
+      {
+        "component_key": "procB",
+        "depends_on": "op_abf"
+      },
+      {
+        "component_key": "procD",
+        "depends_on": "childD1"
+      },
+      {
+        "component_key": "procD",
+        "depends_on": "childD2"
+      },
+      {
+        "component_key": "procD",
+        "depends_on": "conn"
+      },
+      {
+        "component_key": "procD",
+        "depends_on": "op_fail"
+      },
+      {
+        "component_key": "procD",
+        "depends_on": "op_src"
+      }
+    ],
+    "topology_relations": [],
+    "resolved_references": [
+      {
+        "ref": "$ref:childB",
+        "component_type": "process",
+        "resolved": true,
+        "component_id": null,
+        "version_marker": null
+      },
+      {
+        "ref": "$ref:childD1",
+        "component_type": "process",
+        "resolved": true,
+        "component_id": null,
+        "version_marker": null
+      },
+      {
+        "ref": "$ref:childD2",
+        "component_type": "process",
+        "resolved": true,
+        "component_id": null,
+        "version_marker": null
+      },
+      {
+        "ref": "$ref:conn",
+        "component_type": "connector-settings",
+        "resolved": true,
+        "component_id": null,
+        "version_marker": null
+      },
+      {
+        "ref": "$ref:op_abf",
+        "component_type": "connector-action",
+        "resolved": true,
+        "component_id": null,
+        "version_marker": null
+      },
+      {
+        "ref": "$ref:op_c1",
+        "component_type": "connector-action",
+        "resolved": true,
+        "component_id": null,
+        "version_marker": null
+      },
+      {
+        "ref": "$ref:op_c2",
+        "component_type": "connector-action",
+        "resolved": true,
+        "component_id": null,
+        "version_marker": null
+      },
+      {
+        "ref": "$ref:op_cb",
+        "component_type": "connector-action",
+        "resolved": true,
+        "component_id": null,
+        "version_marker": null
+      },
+      {
+        "ref": "$ref:op_fail",
+        "component_type": "connector-action",
+        "resolved": true,
+        "component_id": null,
+        "version_marker": null
+      },
+      {
+        "ref": "$ref:op_src",
+        "component_type": "connector-action",
+        "resolved": true,
+        "component_id": null,
+        "version_marker": null
+      },
+      {
+        "ref": "$ref:procA",
+        "component_type": "process",
+        "resolved": true,
+        "component_id": null,
+        "version_marker": null
+      },
+      {
+        "ref": "$ref:procB",
+        "component_type": "process",
+        "resolved": true,
+        "component_id": null,
+        "version_marker": null
+      },
+      {
+        "ref": "$ref:procD",
+        "component_type": "process",
+        "resolved": true,
+        "component_id": null,
+        "version_marker": null
+      }
+    ],
+    "validation_report": {
+      "is_valid": true,
+      "error_count": 0,
+      "warning_count": 10,
+      "advisory_count": 0,
+      "codes": [
+        "LEGACY_PLAN_WARNING",
+        "PROCESS_IR_SEMANTIC_LINEAGE_EFFECT_UNKNOWN"
+      ]
+    },
+    "errors": [],
+    "warnings": [
+      {
+        "code": "AUTHORING_COMPILE_BLOCKED",
+        "severity": "warning",
+        "path": "",
+        "subject_kind": "component_plan",
+        "subject_id": "",
+        "message": "[FOLDER_REQUIRED_ON_CREATE] Component 'conn' is created with no folder_id or folder_name and would land in the account root. Set a resolved folder so components are organized, never at root.",
+        "remediation": "Review the component-plan lint before applying.",
+        "cause_codes": [
+          "LEGACY_PLAN_WARNING"
+        ],
+        "node_identity": "",
+        "evidence": [],
+        "authoring_contract_entry_ids": []
+      },
+      {
+        "code": "AUTHORING_COMPILE_BLOCKED",
+        "severity": "warning",
+        "path": "",
+        "subject_kind": "component_plan",
+        "subject_id": "",
+        "message": "[FOLDER_REQUIRED_ON_CREATE] Component 'op_abf' is created with no folder_id or folder_name and would land in the account root. Set a resolved folder so components are organized, never at root.",
+        "remediation": "Review the component-plan lint before applying.",
+        "cause_codes": [
+          "LEGACY_PLAN_WARNING"
+        ],
+        "node_identity": "",
+        "evidence": [],
+        "authoring_contract_entry_ids": []
+      },
+      {
+        "code": "AUTHORING_COMPILE_BLOCKED",
+        "severity": "warning",
+        "path": "",
+        "subject_kind": "component_plan",
+        "subject_id": "",
+        "message": "[FOLDER_REQUIRED_ON_CREATE] Component 'op_c1' is created with no folder_id or folder_name and would land in the account root. Set a resolved folder so components are organized, never at root.",
+        "remediation": "Review the component-plan lint before applying.",
+        "cause_codes": [
+          "LEGACY_PLAN_WARNING"
+        ],
+        "node_identity": "",
+        "evidence": [],
+        "authoring_contract_entry_ids": []
+      },
+      {
+        "code": "AUTHORING_COMPILE_BLOCKED",
+        "severity": "warning",
+        "path": "",
+        "subject_kind": "component_plan",
+        "subject_id": "",
+        "message": "[FOLDER_REQUIRED_ON_CREATE] Component 'op_c2' is created with no folder_id or folder_name and would land in the account root. Set a resolved folder so components are organized, never at root.",
+        "remediation": "Review the component-plan lint before applying.",
+        "cause_codes": [
+          "LEGACY_PLAN_WARNING"
+        ],
+        "node_identity": "",
+        "evidence": [],
+        "authoring_contract_entry_ids": []
+      },
+      {
+        "code": "AUTHORING_COMPILE_BLOCKED",
+        "severity": "warning",
+        "path": "",
+        "subject_kind": "component_plan",
+        "subject_id": "",
+        "message": "[FOLDER_REQUIRED_ON_CREATE] Component 'op_cb' is created with no folder_id or folder_name and would land in the account root. Set a resolved folder so components are organized, never at root.",
+        "remediation": "Review the component-plan lint before applying.",
+        "cause_codes": [
+          "LEGACY_PLAN_WARNING"
+        ],
+        "node_identity": "",
+        "evidence": [],
+        "authoring_contract_entry_ids": []
+      },
+      {
+        "code": "AUTHORING_COMPILE_BLOCKED",
+        "severity": "warning",
+        "path": "",
+        "subject_kind": "component_plan",
+        "subject_id": "",
+        "message": "[FOLDER_REQUIRED_ON_CREATE] Component 'op_fail' is created with no folder_id or folder_name and would land in the account root. Set a resolved folder so components are organized, never at root.",
+        "remediation": "Review the component-plan lint before applying.",
+        "cause_codes": [
+          "LEGACY_PLAN_WARNING"
+        ],
+        "node_identity": "",
+        "evidence": [],
+        "authoring_contract_entry_ids": []
+      },
+      {
+        "code": "AUTHORING_COMPILE_BLOCKED",
+        "severity": "warning",
+        "path": "",
+        "subject_kind": "component_plan",
+        "subject_id": "",
+        "message": "[FOLDER_REQUIRED_ON_CREATE] Component 'op_src' is created with no folder_id or folder_name and would land in the account root. Set a resolved folder so components are organized, never at root.",
+        "remediation": "Review the component-plan lint before applying.",
+        "cause_codes": [
+          "LEGACY_PLAN_WARNING"
+        ],
+        "node_identity": "",
+        "evidence": [],
+        "authoring_contract_entry_ids": []
+      },
+      {
+        "code": "AUTHORING_COMPILE_BLOCKED",
+        "severity": "warning",
+        "path": "/body/steps/0/catch_body/terminal",
+        "subject_kind": "process",
+        "subject_id": "procB",
+        "message": "a map or script has no typed effect contract, so its state effects are unknown",
+        "remediation": "Declare a typed effect contract for this map or script, or set the state explicitly with a property step. A declaration alone is not enough: its CONTENT must be backed by a server-side authority \u2014 inspection of the resolved map or child process, or a vetted script registry entry \u2014 and a declaration with no such backing is inert. An undeclared or inert effect never establishes state.",
+        "cause_codes": [
+          "PROCESS_IR_SEMANTIC_LINEAGE_EFFECT_UNKNOWN"
+        ],
+        "node_identity": "/body/steps/0/catch_body/terminal",
+        "evidence": [
+          {
+            "key": "effect_kind",
+            "value": "subprocess"
+          }
+        ],
+        "authoring_contract_entry_ids": [
+          "diagnostic.process_ir_semantic_lineage_effect_unknown"
+        ]
+      },
+      {
+        "code": "AUTHORING_COMPILE_BLOCKED",
+        "severity": "warning",
+        "path": "/body/steps/0/catch_body/terminal",
+        "subject_kind": "process",
+        "subject_id": "procD",
+        "message": "a map or script has no typed effect contract, so its state effects are unknown",
+        "remediation": "Declare a typed effect contract for this map or script, or set the state explicitly with a property step. A declaration alone is not enough: its CONTENT must be backed by a server-side authority \u2014 inspection of the resolved map or child process, or a vetted script registry entry \u2014 and a declaration with no such backing is inert. An undeclared or inert effect never establishes state.",
+        "cause_codes": [
+          "PROCESS_IR_SEMANTIC_LINEAGE_EFFECT_UNKNOWN"
+        ],
+        "node_identity": "/body/steps/0/catch_body/terminal",
+        "evidence": [
+          {
+            "key": "effect_kind",
+            "value": "subprocess"
+          }
+        ],
+        "authoring_contract_entry_ids": [
+          "diagnostic.process_ir_semantic_lineage_effect_unknown"
+        ]
+      },
+      {
+        "code": "AUTHORING_COMPILE_BLOCKED",
+        "severity": "warning",
+        "path": "/body/steps/1/catch_body/terminal",
+        "subject_kind": "process",
+        "subject_id": "procD",
+        "message": "a map or script has no typed effect contract, so its state effects are unknown",
+        "remediation": "Declare a typed effect contract for this map or script, or set the state explicitly with a property step. A declaration alone is not enough: its CONTENT must be backed by a server-side authority \u2014 inspection of the resolved map or child process, or a vetted script registry entry \u2014 and a declaration with no such backing is inert. An undeclared or inert effect never establishes state.",
+        "cause_codes": [
+          "PROCESS_IR_SEMANTIC_LINEAGE_EFFECT_UNKNOWN"
+        ],
+        "node_identity": "/body/steps/1/catch_body/terminal",
+        "evidence": [
+          {
+            "key": "effect_kind",
+            "value": "subprocess"
+          }
+        ],
+        "authoring_contract_entry_ids": [
+          "diagnostic.process_ir_semantic_lineage_effect_unknown"
+        ]
+      }
+    ],
+    "capability_gaps": [],
+    "required_decisions": [],
+    "phase": "plan"
+  },
+  "profile": "renera"
+}

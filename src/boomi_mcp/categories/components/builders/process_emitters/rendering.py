@@ -31,6 +31,9 @@ import json
 from dataclasses import dataclass
 from typing import Dict, Optional, Tuple
 
+from .....models.process_ir_tokens import (
+    CAUGHT_ERROR_PROPERTY_ID as _CAUGHT_ERROR_PROPERTY_ID,
+)
 from ..connector_builder import WSS_SUBTYPE, _escape_xml
 
 # ---------------------------------------------------------------------------
@@ -60,7 +63,14 @@ _DOCCACHE_RETRIEVE_EMPTY_BEHAVIORS = frozenset({"stopprocess"})
 _DOCCACHE_RETRIEVE_DEFAULT_EMPTY_BEHAVIOR = "stopprocess"
 
 # Issue #89 Notify / #108 Exception caught-error track binding token.
-_NOTIFY_CAUGHT_ERROR_TOKEN = "meta.base.catcherrorsmessage"
+#
+# #156: IMPORTED, not respelled. This module, the compiler contracts and the
+# canonical ``NotifyNodeV1`` validator all need the same platform token, and
+# three independent literals agreeing by inspection is the duplicate-authority
+# defect class. ``models.process_ir_tokens`` imports nothing, so taking it from
+# there closes no cycle. The private alias is kept because it is this module's
+# established name and the builder imports it back from here.
+_NOTIFY_CAUGHT_ERROR_TOKEN = _CAUGHT_ERROR_PROPERTY_ID
 
 # ---------------------------------------------------------------------------
 # Visual layout. Geometry is decorative only — process correctness is driven by

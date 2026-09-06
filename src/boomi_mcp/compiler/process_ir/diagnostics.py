@@ -28,6 +28,7 @@ from ...errors import (
     PROCESS_IR_CAPABILITY_PROCESS_CALL_RETURN_PATH_BINDING_UNSUPPORTED,
     PROCESS_IR_COMPILE_ERROR_REGION_INVALID,
     PROCESS_IR_SEMANTIC_CATCH_UNTERMINATED,
+    PROCESS_IR_SEMANTIC_RECOVERY_PROCESS_CALL_INVALID,
     PROCESS_IR_SEMANTIC_IDEMPOTENCY_EVIDENCE_MISSING,
     PROCESS_IR_SEMANTIC_RETRY_NON_IDEMPOTENT_WRITE,
     PROCESS_IR_SEMANTIC_RETRY_SOURCE_REEXECUTION,
@@ -265,6 +266,9 @@ _REMEDIATION = {
         "End the catch body with a stop, an exception, or a staging cache write. "
         "Every caught document must reach a terminal."
     ),
+    PROCESS_IR_SEMANTIC_RECOVERY_PROCESS_CALL_INVALID: (
+        "Author the recovery call with wait=true and abort_on_error=true. abort_on_error defaults to false, so it must be written explicitly: the parent has to observe a failed hand-off rather than complete over it."
+    ),
     PROCESS_IR_COMPILE_ERROR_REGION_INVALID: (
         "This is a compiler defect: a derived Try/Catch error region was "
         "structurally invalid — please report it with the authored path."
@@ -331,6 +335,7 @@ _MESSAGES = {
         "required typed idempotency evidence is absent, of the wrong kind, or unresolved"
     ),
     PROCESS_IR_SEMANTIC_CATCH_UNTERMINATED: "the catch body does not reach a terminal",
+    PROCESS_IR_SEMANTIC_RECOVERY_PROCESS_CALL_INVALID: "a recovery process_call is not authored wait=true and abort_on_error=true",
     PROCESS_IR_COMPILE_ERROR_REGION_INVALID: (
         "a derived Try/Catch error region is structurally invalid"
     ),

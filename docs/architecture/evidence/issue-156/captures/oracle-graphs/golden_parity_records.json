@@ -1,0 +1,14 @@
+[
+  {
+    "scenario": "oracle-graphs",
+    "file": "golden_parity.json",
+    "utc": "2026-09-06T03:54:56.197525+00:00",
+    "account_id": "trainingglebbochkarov-16926N",
+    "sha256": "428f625e38df48056f38263b34ece1abb0c0f50ced47c95436651ab11c5ca8bc",
+    "byte_length": 702,
+    "archive_path": "docs/architecture/evidence/issue-156/captures/oracle-graphs/golden_parity.json",
+    "golden": "tests/fixtures/golden_xml/try_catch_dlq_error_subprocess.xml",
+    "golden_sha256": "b0ce512506e94f3528333974582972da1b653bed4c856b65d16ea7dfd81ed18c",
+    "note": "identity-blinded comparison: UUIDs, component name, folderName, userlabel normalised; every other byte compared verbatim"
+  }
+]

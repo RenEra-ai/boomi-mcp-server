@@ -688,7 +688,12 @@ def check_cfg_invariants(cfg: SemanticCfgV1) -> None:
                         "a try_catch edge targets a node outside its own body",
                         node.node_id,
                     )
-                _check_region_containment(
+                continues = (
+                    body == "try_body"
+                    and getattr(node.semantic, "success_mode", "terminal")
+                    == "continue"
+                )
+                escapes = _check_region_containment(
                     edge,
                     prefix,
                     by_id,
@@ -696,7 +701,33 @@ def check_cfg_invariants(cfg: SemanticCfgV1) -> None:
                     node,
                     PROCESS_IR_COMPILE_ERROR_REGION_INVALID,
                     "a try_catch path escapes its own body provenance region",
+                    # Only the PROTECTED edge of a handler whose authored terminal
+                    # was `continue`. The recovery edge is never exempt: a catch
+                    # path terminates, always, and a catch leaking into the main
+                    # flow is precisely the defect this check was written for.
+                    allow_continuation=continues,
                 )
+                # BOTH DIRECTIONS. `success_mode` buys this handler a relaxation,
+                # and a permission with no matching obligation is not a check —
+                # MEASURED: forging "continue" onto a handler that actually
+                # terminates was, in the first version of this rule, completely
+                # inert. It silently widened that handler's containment and
+                # nothing objected, which is the #149 lesson (a derived gate must
+                # assert its own non-vacuity) arriving one slice later.
+                #
+                # So the flag must be EARNED: a handler that claims to continue
+                # has to actually reach the next region. The reverse direction is
+                # already closed above — with `allow_continuation` false, any
+                # escape at all is a failure.
+                if continues and escapes == 0:
+                    raise _fail(
+                        PROCESS_IR_COMPILE_ERROR_REGION_INVALID,
+                        _SEMANTIC_PHASE,
+                        node.source_path,
+                        "a try_catch declares a continuing protected path but "
+                        "reaches no following region",
+                        node.node_id,
+                    )
             continue
 
         if len(successors) != 1:
@@ -748,6 +779,20 @@ def check_cfg_invariants(cfg: SemanticCfgV1) -> None:
             )
 
 
+#: A ROOT step path and nothing deeper: `/body/steps/<n>` exactly.
+#:
+#: The discriminator for an authorised continuation. A node one region hands off
+#: to is a SIBLING at root; anything carrying a further `/try_body/`,
+#: `/catch_body/`, `/legs/` or `/arms/` segment is inside some other body, and a
+#: path into another body is the cross-wiring this check exists to refuse.
+_ROOT_STEP_PATH = re.compile(r"^/body/steps/\d+$")
+
+#: What a continuing protected region may hand off TO. The captured double-guard
+#: chain hands off either straight to the next handler or through one map between
+#: them; nothing else is attested, so nothing else is admitted.
+_CONTINUATION_TARGET_KINDS = frozenset({"map", "try_catch"})
+
+
 def _check_region_containment(
     edge,
     prefix,
@@ -756,7 +801,8 @@ def _check_region_containment(
     node,
     code: str = PROCESS_IR_SEMANTIC_AMBIGUOUS_FLOW,
     message: str = "a control path escapes its own leg/arm provenance region",
-) -> None:
+    allow_continuation: bool = False,
+) -> int:
     """Every node reached through a control edge must live UNDER its leg/arm.
 
     The per-node rules already bind an edge's FIRST target to its own region.
@@ -775,16 +821,34 @@ def _check_region_containment(
     prevent one layer up.
     """
     seen = set()
+    escapes = 0
     stack = [edge.target_node_id]
     while stack:
         current = stack.pop()
         if current in seen:
             continue
         seen.add(current)
-        if not by_id[current].source_path.startswith(prefix):
+        path = by_id[current].source_path
+        if not path.startswith(prefix):
+            # #156: the ONE authorised escape. A continuing handler's protected
+            # path leaves its own body by construction — that is what `continue`
+            # means — and it may leave only to a ROOT-level map or handler, which
+            # is where the next region begins. The walk STOPS here rather than
+            # recursing: those nodes belong to the next region and are covered by
+            # that region's own containment check, so following them would make
+            # every later region's nodes read as escapes from this one.
+            if (
+                allow_continuation
+                and _ROOT_STEP_PATH.match(path)
+                and by_id[current].semantic.semantic_kind
+                in _CONTINUATION_TARGET_KINDS
+            ):
+                escapes += 1
+                continue
             raise _fail(code, _SEMANTIC_PHASE, node.source_path, message, node.node_id)
         for out in outbound[current]:
             stack.append(out.target_node_id)
+    return escapes
 
 
 def _check_every_control_path_terminates(nodes, by_id, outbound) -> None:
@@ -855,9 +919,11 @@ def _check_control_depth(nodes, by_id, outbound, entry_node_id: str) -> None:
         current = stack.pop()
         node = by_id[current]
         here = depth[current]
-        if node.semantic.semantic_kind in _CONTROL_KINDS:
-            here += 1
-            if here > PROCESS_IR_V1_MAX_CONTROL_DEPTH:
+        kind = node.semantic.semantic_kind
+        entered = here
+        if kind in _CONTROL_KINDS:
+            entered = here + 1
+            if entered > PROCESS_IR_V1_MAX_CONTROL_DEPTH:
                 raise _fail(
                     PROCESS_IR_SEMANTIC_NESTING_LIMIT,
                     _SEMANTIC_PHASE,
@@ -865,8 +931,32 @@ def _check_control_depth(nodes, by_id, outbound, entry_node_id: str) -> None:
                     "control nesting exceeds the ProcessIR v1 depth bound",
                     node.node_id,
                 )
+        # #156. ACTIVE nesting, not "control nodes seen along the way".
+        #
+        # The old propagation gave every successor the incremented depth, which
+        # is right for a control node that CONTAINS what follows it and wrong for
+        # one the flow merely passes through. A serialized region chain is the
+        # second shape: its handlers are siblings at root, and the captured
+        # graph renders them as sequential shapes on one row. Accumulating made
+        # three of them read as depth three — MEASURED: two sequential handlers
+        # sat exactly on the bound and three were refused, for nesting that does
+        # not exist.
+        #
+        # A CONTINUING handler's protected path is a continuation of the path the
+        # handler sits on, so it keeps the handler's own depth; its recovery path
+        # is a genuine fork the handler owns, so that still descends. Every other
+        # control node is unchanged, and `success_mode` is the AUTHORED fact, so
+        # a lowering defect cannot manufacture the exemption for a handler that
+        # actually terminates.
+        continues = (
+            kind == "try_catch"
+            and getattr(node.semantic, "success_mode", "terminal") == "continue"
+        )
         for edge in outbound[current]:
-            depth[edge.target_node_id] = here
+            if continues and edge.kind == "ordering":
+                depth[edge.target_node_id] = here
+            else:
+                depth[edge.target_node_id] = entered
             stack.append(edge.target_node_id)
 
 

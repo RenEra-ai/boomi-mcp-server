@@ -70,10 +70,13 @@ from ...errors import (
     PROCESS_IR_CAPABILITY_ERROR_SCOPE_UNSUPPORTED,
     PROCESS_IR_CAPABILITY_UNSUPPORTED,
     PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY,
+    PROCESS_IR_SEMANTIC_RECOVERY_PROCESS_CALL_INVALID,
     PROCESS_IR_CAPABILITY_PROCESS_CALL_RETURN_PATH_BINDING_UNSUPPORTED,
     PROCESS_IR_SEMANTIC_CATCH_UNTERMINATED,
     PROCESS_IR_SEMANTIC_NESTING_LIMIT,
 )
+from pydantic_core import PydanticCustomError
+
 from ...models.process_ir import (
     _CONNECTOR_KINDS,
     PLACEMENT_CONNECTOR_MIXING,
@@ -86,6 +89,11 @@ from ...models.process_ir import (
     ProcessIRV1,
     TryCatchCatchBodyV1,
     TryCatchTryBodyV1,
+    PLACEMENT_RECOVERY_FLAGS,
+    _CUSTOM_ERROR_CODES,
+    _check_no_orphan_continue,
+    _check_serialized_region_chain,
+    _is_serialized_region_chain,
     process_call_placement_verdict,
     process_call_root_verdict,
 )
@@ -399,7 +407,14 @@ def _walk_body(
     # true diagnosis and must win, exactly as it does for the return-path reasons.
     verdict = (
         process_call_placement_verdict(
-            steps, terminal, context=PROCESS_CALL_PLACEMENT_CONTEXT_LABELS[context]
+            steps,
+            terminal,
+            context=PROCESS_CALL_PLACEMENT_CONTEXT_LABELS[context],
+            # #156 T5: the catch body is the recovery leg. Derived from the body
+            # CONTEXT, never passed in by a caller — a `recovery` flag a caller
+            # could set would be an authored capability grant, and the whole point
+            # is that the exemption belongs to one slot the evidence covers.
+            recovery=(context == CATCH_BODY),
         )
         if is_allowed(context, TERMINAL_SLOT, "process_call")
         else None
@@ -409,6 +424,13 @@ def _walk_body(
         if reason == PLACEMENT_CONNECTOR_MIXING:
             raise raise_compile_error(
                 PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY,
+                _SEMANTIC_PHASE,
+                _join(path, *at),
+                message=message,
+            )
+        if reason == PLACEMENT_RECOVERY_FLAGS:
+            raise raise_compile_error(
+                PROCESS_IR_SEMANTIC_RECOVERY_PROCESS_CALL_INVALID,
                 _SEMANTIC_PHASE,
                 _join(path, *at),
                 message=message,
@@ -581,15 +603,57 @@ def _walk_try_catch(
         connector_above,
         process_call_above,
     )
+    # #156 T5. The recovery leg does NOT inherit connector ancestry.
+    #
+    # The mixing rule exists because a call and a connector on the SAME
+    # root-to-leaf path was never attested, and a Process Call ends its path — so
+    # a connector upstream of a call is a shape v1 cannot emit. A catch leg is
+    # not that path. It is the fork the protected path takes when it FAILS: the
+    # upstream connector already ran, and its documents are exactly what the
+    # recovery hand-off is being given. Issue-156's live capture runs precisely
+    # this graph (connector -> catcherrors -> notify -> processcall) and executes
+    # green, with the child observed running once per caught document.
+    #
+    # Narrow on purpose, in three ways. Only `connector_above` is cleared, and
+    # only for this leg: `process_call_above` still travels, the try leg below is
+    # unchanged, and a connector INSIDE this catch body is still refused — that
+    # is the body-local mixing verdict, which does not read `connector_above` at
+    # all. So the exemption covers ancestry the recovery path cannot avoid, and
+    # nothing a caller could author inside it.
     _walk_body(
         list(catch_body.steps),
         catch_body.terminal,
         CATCH_BODY,
         _join(path, "catch_body"),
         depth,
-        connector_above,
+        False,
         process_call_above,
     )
+
+
+def _as_compile_error(check, steps) -> None:
+    """Run a SHARED model rule and re-raise its refusal as a compile diagnostic.
+
+    The chain rules are deliberately shared with `models.process_ir` — one
+    grammar, rendered by both entry points, which is the whole discipline of this
+    module. But they raise `PydanticCustomError`, because that is what a model
+    validator raises, and a caller who reached the compiler with a mutated model
+    never went through pydantic: it would surface a raw validator exception
+    instead of a `ProcessIRCompileError` carrying a code and a pointer.
+
+    So the RULE is shared and the RENDERING is translated. The code comes from
+    the model's own `_CUSTOM_ERROR_CODES` table rather than a second mapping
+    here — a hand-copy would be the duplicate-authority defect one layer down.
+    """
+    try:
+        check(steps)
+    except PydanticCustomError as exc:
+        code = _CUSTOM_ERROR_CODES.get(exc.type)
+        if code is None:  # pragma: no cover - an unmapped rule is a repo defect
+            raise
+        raise raise_compile_error(
+            code, _SEMANTIC_PHASE, "/body", message=str(exc)
+        ) from None
 
 
 def _check_try_catch_placement(ir: ProcessIRV1) -> None:
@@ -601,6 +665,27 @@ def _check_try_catch_placement(ir: ProcessIRV1) -> None:
     """
     steps = list(ir.body.steps)
     kinds = [getattr(step, "kind", None) for step in steps]
+
+    # #156 T5. A serialized region chain is checked by its own grammar and then
+    # returns — the per-handler rules below all assume a SINGLE handler in final
+    # position, so running them over a chain refuses every handler but the last.
+    #
+    # This mirrors `_is_serialized_region_chain` / `_check_serialized_region_chain`
+    # in the model. The duplication is the point, exactly as it is for every other
+    # rule in this module: `ProcessIRV1` is exported and mutable, so a caller can
+    # parse a legal chain, mutate it, and hand the model straight to
+    # `compile_process_ir_v1`. MEASURED during this slice — with the model rule
+    # written and this one not, the parser accepted the chain and the compiler
+    # refused it with an error-scope diagnostic, which is precisely the
+    # two-entry-point divergence #178 exists to remove.
+    if _is_serialized_region_chain(steps):
+        _as_compile_error(_check_serialized_region_chain, steps)
+        return
+
+    # ...and outside a chain a `continue` protected terminal is an orphan. The
+    # mutable-model half of the same rule the parser now applies.
+    _as_compile_error(_check_no_orphan_continue, steps)
+
     for index, step in enumerate(steps):
         if kinds[index] != "try_catch":
             continue

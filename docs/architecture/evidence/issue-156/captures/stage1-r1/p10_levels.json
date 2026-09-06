@@ -1,0 +1,30 @@
+{
+  "apply_success": true,
+  "created": {
+    "conn": "b24ef0d5-ea3d-4450-822c-5dae9675cf5d",
+    "op": "47412a3b-d206-4a47-a1b4-580adaa85b4d",
+    "p_ERROR": "0eb0e8bf-0574-409f-9bdc-7a74561bead8",
+    "p_INFO": "12585be9-034f-4606-afbb-ca5424b6e6e8",
+    "p_WARNING": "9e73339f-8675-43db-bd75-d81fa5390e49"
+  },
+  "rows": {
+    "INFO": {
+      "component_id": "12585be9-034f-4606-afbb-ca5424b6e6e8",
+      "stored_level": "INFO",
+      "stored_message": "lvl INFO: {1}",
+      "match": true
+    },
+    "WARNING": {
+      "component_id": "9e73339f-8675-43db-bd75-d81fa5390e49",
+      "stored_level": "WARNING",
+      "stored_message": "lvl WARNING: {1}",
+      "match": true
+    },
+    "ERROR": {
+      "component_id": "0eb0e8bf-0574-409f-9bdc-7a74561bead8",
+      "stored_level": "ERROR",
+      "stored_message": "lvl ERROR: {1}",
+      "match": true
+    }
+  }
+}

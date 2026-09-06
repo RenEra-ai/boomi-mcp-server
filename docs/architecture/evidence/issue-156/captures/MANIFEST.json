@@ -1,0 +1,280 @@
+{
+  "issue": 156,
+  "kind": "pre-implementation live oracle capture",
+  "account_id": "trainingglebbochkarov-16926N",
+  "baseline_sha": "b07babeb3752d337ffa307c4c486e181e703a2c2",
+  "generated_utc": "2026-09-06T04:00:29.516217+00:00",
+  "artifact_count": 45,
+  "artifacts": [
+    {
+      "file": "docs/architecture/evidence/issue-156/captures/provision/provision_state.json",
+      "sha256": "ac922191515720e3d7871b195b81537e66765b28eb5fcf553ac64c4354c8734b",
+      "bytes": 703,
+      "redacted": false
+    },
+    {
+      "file": "docs/architecture/evidence/issue-156/captures/provision/records.json",
+      "sha256": "f71f18bd4bd0b70f984077d647b9f196aac227949eb8443bcfa61cf43dcbc6f9",
+      "bytes": 594,
+      "redacted": false
+    },
+    {
+      "file": "docs/architecture/evidence/issue-156/captures/oracle-graphs/ABORT_apply.json",
+      "sha256": "a3e3d3ad732a18e0e2a52d7501a668ea996231fa94e094d7bec6b6226267f013",
+      "bytes": 943,
+      "redacted": false
+    },
+    {
+      "file": "docs/architecture/evidence/issue-156/captures/oracle-graphs/ABORT_emitted.xml",
+      "sha256": "af8ecf397c22fc2b11aee83395398d10af5d0cae750dc5df3c4204c5b9677308",
+      "bytes": 2848,
+      "redacted": false
+    },
+    {
+      "file": "docs/architecture/evidence/issue-156/captures/oracle-graphs/ABORT_plan.json",
+      "sha256": "7298213aa1c6454126a2594caf79fa27c4456bb3dd6ea38e8bb419ba5f78e319",
+      "bytes": 2131,
+      "redacted": false
+    },
+    {
+      "file": "docs/architecture/evidence/issue-156/captures/oracle-graphs/ABORT_shapes.xml",
+      "sha256": "2b6b818993f2b655d694b4a630e30d660bc6b80ca0075a7986eeb2749e2d1fe1",
+      "bytes": 2292,
+      "redacted": false
+    },
+    {
+      "file": "docs/architecture/evidence/issue-156/captures/oracle-graphs/ABORT_stored.xml",
+      "sha256": "9b6e9ba14ca49a597b6b6dde52487502d4042936763cea5905c7f25e66135a6d",
+      "bytes": 3172,
+      "redacted": false
+    },
+    {
+      "file": "docs/architecture/evidence/issue-156/captures/oracle-graphs/B1_apply.json",
+      "sha256": "752b4bd746ca0450d3f6a25fab0d59eb450da5651fda73947ea4e4f71e0ffa3f",
+      "bytes": 931,
+      "redacted": false
+    },
+    {
+      "file": "docs/architecture/evidence/issue-156/captures/oracle-graphs/B1_emitted.xml",
+      "sha256": "334ee7d420f94f03de967878f0e91602ed12b97e805fa3b446676ee600afa5b7",
+      "bytes": 2845,
+      "redacted": false
+    },
+    {
+      "file": "docs/architecture/evidence/issue-156/captures/oracle-graphs/B1_plan.json",
+      "sha256": "cdd5e93cbd38d366c78ed41d559a35c103985e08ed8fb42285169ab8740ad526",
+      "bytes": 2122,
+      "redacted": false
+    },
+    {
+      "file": "docs/architecture/evidence/issue-156/captures/oracle-graphs/B1_shapes.xml",
+      "sha256": "ce3b1552569a24338c4306959197fed509e21ae34235ba0436fe6aabc439849a",
+      "bytes": 2292,
+      "redacted": false
+    },
+    {
+      "file": "docs/architecture/evidence/issue-156/captures/oracle-graphs/B1_stored.xml",
+      "sha256": "cadfddc5ea37bb829b26ce75b19d2b88c41aba5b402c5dbbb2142d8e5f25b72d",
+      "bytes": 3169,
+      "redacted": false
+    },
+    {
+      "file": "docs/architecture/evidence/issue-156/captures/oracle-graphs/B2_apply.json",
+      "sha256": "3882712f602c62cf3c120e7981edade3d1be9bef9cfc5e2934daa6faaf40900c",
+      "bytes": 931,
+      "redacted": false
+    },
+    {
+      "file": "docs/architecture/evidence/issue-156/captures/oracle-graphs/B2_emitted.xml",
+      "sha256": "76aa45dcd96e17518076b33d5f788e5aff5d402169f038c34e57907dcff9baef",
+      "bytes": 3564,
+      "redacted": false
+    },
+    {
+      "file": "docs/architecture/evidence/issue-156/captures/oracle-graphs/B2_plan.json",
+      "sha256": "25bcf6caccdcae91f781d01e636c4ff5f9d5da53154f5796dad1e920fb5c9d99",
+      "bytes": 2309,
+      "redacted": false
+    },
+    {
+      "file": "docs/architecture/evidence/issue-156/captures/oracle-graphs/B2_shapes.xml",
+      "sha256": "4fe932d9651832070c7cd0e5925ed9f28fbf86404721bdfccb38a4588b244b2b",
+      "bytes": 3011,
+      "redacted": false
+    },
+    {
+      "file": "docs/architecture/evidence/issue-156/captures/oracle-graphs/B2_stored.xml",
+      "sha256": "b39f8b58b0df9a870fadd6606379cfc92a5dc91b77a8f9ca75bd34d856185835",
+      "bytes": 3888,
+      "redacted": false
+    },
+    {
+      "file": "docs/architecture/evidence/issue-156/captures/oracle-graphs/child_bad_apply.json",
+      "sha256": "9e8c03c221d7763edeb48a5a19bd36f43806d8698ed9341f8b0287d64ab0599e",
+      "bytes": 1176,
+      "redacted": false
+    },
+    {
+      "file": "docs/architecture/evidence/issue-156/captures/oracle-graphs/child_bad_emitted.xml",
+      "sha256": "e2b7924f761c35cea9fdc4460a1d318731ae30aba984fdbe01c1a911d59ee36e",
+      "bytes": 2031,
+      "redacted": false
+    },
+    {
+      "file": "docs/architecture/evidence/issue-156/captures/oracle-graphs/child_bad_plan.json",
+      "sha256": "97ced5f39f227aaaac010ca91fcf916a5c9302d05b96c83886e528c2b32b8197",
+      "bytes": 2488,
+      "redacted": false
+    },
+    {
+      "file": "docs/architecture/evidence/issue-156/captures/oracle-graphs/child_bad_shapes.xml",
+      "sha256": "f84d83bb884681bca5c65d39dee6d1d9a4cd8053f2cc8b2cfde9edb394e27bcf",
+      "bytes": 1471,
+      "redacted": false
+    },
+    {
+      "file": "docs/architecture/evidence/issue-156/captures/oracle-graphs/child_bad_stored.xml",
+      "sha256": "a1a44125536a0f434c4b7655ce721886389753131a0e7051b0f47325e2a72d53",
+      "bytes": 2355,
+      "redacted": false
+    },
+    {
+      "file": "docs/architecture/evidence/issue-156/captures/oracle-graphs/child_ok_apply.json",
+      "sha256": "28018c92de1255e6f69c2ee22111df81de625bd13c654e1191d58079ed16ad6c",
+      "bytes": 1172,
+      "redacted": false
+    },
+    {
+      "file": "docs/architecture/evidence/issue-156/captures/oracle-graphs/child_ok_emitted.xml",
+      "sha256": "41adcf3d41e50d976d88c4ad7855cdda09b3d44507bc87b5cc69e34dd7462456",
+      "bytes": 2030,
+      "redacted": false
+    },
+    {
+      "file": "docs/architecture/evidence/issue-156/captures/oracle-graphs/child_ok_plan.json",
+      "sha256": "d8e485b739ec300fd84c66276ee08f56eeb7707d15a24e0dcd4009fb7a8d7c34",
+      "bytes": 2485,
+      "redacted": false
+    },
+    {
+      "file": "docs/architecture/evidence/issue-156/captures/oracle-graphs/child_ok_shapes.xml",
+      "sha256": "c37b5f3636734e4336abdde84c5910f7198e5482833a73be4ea93c8f94ce52ba",
+      "bytes": 1471,
+      "redacted": false
+    },
+    {
+      "file": "docs/architecture/evidence/issue-156/captures/oracle-graphs/child_ok_stored.xml",
+      "sha256": "c28ec3bf4ab87eab4158d2ff859c838d617221dc3aeedf49337549046bfd2ede",
+      "bytes": 2354,
+      "redacted": false
+    },
+    {
+      "file": "docs/architecture/evidence/issue-156/captures/oracle-graphs/golden_parity.json",
+      "sha256": "428f625e38df48056f38263b34ece1abb0c0f50ced47c95436651ab11c5ca8bc",
+      "bytes": 702,
+      "redacted": false
+    },
+    {
+      "file": "docs/architecture/evidence/issue-156/captures/oracle-graphs/golden_parity_records.json",
+      "sha256": "e12e8c15495b809fa0f3854b56ba2c150fc63087e7969793895bec0485d863a7",
+      "bytes": 685,
+      "redacted": false
+    },
+    {
+      "file": "docs/architecture/evidence/issue-156/captures/oracle-graphs/pristine_baseline_ab.json",
+      "sha256": "955337750dadba473e39fa8e4885ad6563554d6cf07c864bbd35d7398a684bba",
+      "bytes": 1845,
+      "redacted": false
+    },
+    {
+      "file": "docs/architecture/evidence/issue-156/captures/oracle-graphs/records.json",
+      "sha256": "b05534ded05ccc4d1b8876bf43ea81990ffa1cdaacefcdc5cc6be8630ab02822",
+      "bytes": 13217,
+      "redacted": false
+    },
+    {
+      "file": "docs/architecture/evidence/issue-156/captures/oracle-graphs/refusal_catch_exception_plan.json",
+      "sha256": "ddceb5175c04f9728b97a2c94f01464df28d29a4abc6f5ea872610f41dd9e7fe",
+      "bytes": 3050,
+      "redacted": false
+    },
+    {
+      "file": "docs/architecture/evidence/issue-156/captures/deploy/ABORT_deploy.json",
+      "sha256": "094aa9d26ccec8b4eeb02fed44426b29d54ba66f73e0c4a7bb5bcd606a307bee",
+      "bytes": 1087,
+      "redacted": true
+    },
+    {
+      "file": "docs/architecture/evidence/issue-156/captures/deploy/B1_deploy.json",
+      "sha256": "f7a1255d9edb65c0ee61b30867834dfe02cc56b3aa41d7b324ffcb2631a349bf",
+      "bytes": 1081,
+      "redacted": true
+    },
+    {
+      "file": "docs/architecture/evidence/issue-156/captures/deploy/B2_deploy.json",
+      "sha256": "acf509d2ae592e53741e373f173bd6786675e9f8578beeeba6edca8ae56e95d2",
+      "bytes": 1081,
+      "redacted": true
+    },
+    {
+      "file": "docs/architecture/evidence/issue-156/captures/deploy/records.json",
+      "sha256": "b7d4846b845b1d169d1d9191820cda444b096fd37e91911820c9fd995418bac6",
+      "bytes": 1325,
+      "redacted": false
+    },
+    {
+      "file": "docs/architecture/evidence/issue-156/captures/runtime/C1_SUCCESS_CONTROL_B1.json",
+      "sha256": "db6edec0d46acc3383ae60dae0c831160f8b6bed451bde086c995501b029cae8",
+      "bytes": 5444,
+      "redacted": false
+    },
+    {
+      "file": "docs/architecture/evidence/issue-156/captures/runtime/C2_SUCCESS_CONTROL_B2.json",
+      "sha256": "102d3428465093bbfe9f29fa15fd504f1524443b6cc5c76f71a3f2b4dfd9bd9a",
+      "bytes": 5463,
+      "redacted": false
+    },
+    {
+      "file": "docs/architecture/evidence/issue-156/captures/runtime/C3_FAILURE_B1.json",
+      "sha256": "3663c6fb660759b1518f578741c9d607cd061b1ce009467d07a2545bc32edfb5",
+      "bytes": 13657,
+      "redacted": false
+    },
+    {
+      "file": "docs/architecture/evidence/issue-156/captures/runtime/C4_FAILURE_B2.json",
+      "sha256": "6959f3bc22c6733411d23ee3076bd2c0593350b01328f333e5835bc83ffef3bb",
+      "bytes": 14358,
+      "redacted": false
+    },
+    {
+      "file": "docs/architecture/evidence/issue-156/captures/runtime/C5_ABORT_CONTROL.json",
+      "sha256": "b6758d515087936e6d680b1cc0afecec9168b6ae16c4c71cf0461fc1f56026ea",
+      "bytes": 14496,
+      "redacted": false
+    },
+    {
+      "file": "docs/architecture/evidence/issue-156/captures/runtime/C6_RESTORE_CHECK_B1.json",
+      "sha256": "dba84f8ff582b9b1ed1f465b7aff9b6e7ab5aa52e788e91410c843108dc126af",
+      "bytes": 5464,
+      "redacted": false
+    },
+    {
+      "file": "docs/architecture/evidence/issue-156/captures/runtime/child_subprocess_execution_records.json",
+      "sha256": "621d391b458e69829a1400029b8d391b104afbd1943519ea3d977f64dbf32d04",
+      "bytes": 1535,
+      "redacted": false
+    },
+    {
+      "file": "docs/architecture/evidence/issue-156/captures/runtime/records.json",
+      "sha256": "6fb21bd30ff5654b84965137e35f42630d4de108db91e78bb16f81f5beec4c66",
+      "bytes": 425,
+      "redacted": false
+    },
+    {
+      "file": "docs/architecture/evidence/issue-156/captures/runtime/runtime_summary.json",
+      "sha256": "51c9a85445f7c6a57233beadd1fa77519a10e53d388100525ca94001364ef440",
+      "bytes": 9147,
+      "redacted": false
+    }
+  ]
+}

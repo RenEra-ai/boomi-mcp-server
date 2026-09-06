@@ -384,6 +384,9 @@ Published as the immutable `PROCESS_IR_V1_CAPABILITIES` manifest (not an authore
 | `scoped_try_catch` — the §3c `try_catch` node, both verified scopes | **supported** | #142 (shipped) |
 | `bounded_retry` — `retry.count` 0–5 | **supported** | #142 (shipped) |
 | `typed_idempotency_evidence` — the §3c evidence union | **supported** | #142 (shipped) |
+| `catch_notify` — a `notify` step on a Try/Catch recovery path | **supported** | #156 (shipped) |
+| `recovery_process_call` — a terminal `process_call` on a recovery path, `wait`/`abort_on_error` both true | **supported** | #156 (shipped) |
+| `serialized_connector_regions` — connector-scoped handlers in sequence, each non-final one ending its protected path in `continue` | **supported** | #156 (shipped) |
 | `catch_error_type_lists` — catching named error types/codes | **unsupported (permanent)** | #142 — no wire representation exists (capture §G2) |
 | `retry_backoff_authoring` — authoring the retry wait schedule | **unsupported (permanent)** | #142 — platform-owned, no wire field (capture §G1) |
 | `queue_topology` — creating queues / Event Streams objects | **unsupported** | #142 — out of scope; zero live queue components (capture §G5) |

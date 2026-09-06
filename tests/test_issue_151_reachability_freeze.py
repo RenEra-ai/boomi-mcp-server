@@ -82,6 +82,7 @@ from boomi_mcp.models.process_ir import (  # noqa: E402
     LinearNodeV1,
     ProcessNodeV1,
     TryCatchBodyStepV1,
+    CatchBodyStepV1,
     _kinds_of,
     parse_process_ir_v1,
 )
@@ -470,8 +471,10 @@ def test_the_direct_process_ir_corpus_covers_the_closed_step_kind_union():
         "'sequence' is a container discriminator; if it became a node kind the "
         "container carve-out below would start hiding a real member"
     )
+    # #156 added `CatchBodyStepV1`; it is pinned here with the rest, so the one
+    # alias that carries a kind the others do not cannot go unchecked.
     for alias in (LinearNodeV1, BranchLegStepV1, DecisionTrueArmStepV1,
-                  DecisionFalseArmStepV1, TryCatchBodyStepV1):
+                  DecisionFalseArmStepV1, TryCatchBodyStepV1, CatchBodyStepV1):
         assert set(_kinds_of(alias)) <= union, (
             "%s carries a kind outside ProcessNodeV1" % alias)
 

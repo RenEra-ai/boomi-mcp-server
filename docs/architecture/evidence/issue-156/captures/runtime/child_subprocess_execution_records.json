@@ -1,0 +1,42 @@
+{
+  "claim": "the recovery child gets its OWN ExecutionRecord with executionType=sub_process; row counts match the cells exactly (child_ok twice = C3+C4, child_bad once = C5), which is a third attribution channel independent of the counterparty log and the parent process log",
+  "utc": "2026-09-06T04:00:20.102151+00:00",
+  "children": {
+    "child_ok": {
+      "component_id": "9a266c4b-adf8-4444-811a-7d876511d431",
+      "row_count": 2,
+      "rows": [
+        {
+          "executionId": "execution-0034e9ec-ed81-460b-b3d6-aa4ec2eabc9a-2026.09.06",
+          "status": "COMPLETE",
+          "executionType": "sub_process",
+          "executionTime": "2026-09-06T03:55:15Z",
+          "inboundDocumentCount": 1,
+          "inboundErrorDocumentCount": 0
+        },
+        {
+          "executionId": "execution-7506096e-22ca-4b1e-9e20-5f4ec933e1da-2026.09.06",
+          "status": "COMPLETE",
+          "executionType": "sub_process",
+          "executionTime": "2026-09-06T03:55:37Z",
+          "inboundDocumentCount": 1,
+          "inboundErrorDocumentCount": 0
+        }
+      ]
+    },
+    "child_bad": {
+      "component_id": "43a6a5e6-5c77-4c58-a83e-6fa543fafb0c",
+      "row_count": 1,
+      "rows": [
+        {
+          "executionId": "execution-daa51bec-e6fe-4250-9c73-d53f2a344c21-2026.09.06",
+          "status": "ERROR",
+          "executionType": "sub_process",
+          "executionTime": "2026-09-06T03:56:04Z",
+          "inboundDocumentCount": 1,
+          "inboundErrorDocumentCount": 1
+        }
+      ]
+    }
+  }
+}

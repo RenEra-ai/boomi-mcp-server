@@ -1,0 +1,12 @@
+[
+  {
+    "scenario": "stage1-r1",
+    "file": "p12_cleanup.json",
+    "utc": "2026-09-06T07:32:03.662757+00:00",
+    "account_id": "trainingglebbochkarov-16926N",
+    "sha256": "26bc4a6c4f1d9b7d2d3a43858ffb41646d20eec41177fc1582b22051e07a71f6",
+    "byte_length": 5530,
+    "archive_path": "docs/architecture/evidence/issue-156/captures/stage1-r1/p12_cleanup.json",
+    "kind": "bounded cleanup"
+  }
+]

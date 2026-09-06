@@ -1,0 +1,29 @@
+{
+  "_success": true,
+  "build_id": "1ae9192b-a78a-4611-b6d5-44aaac158ca6",
+  "message": "Applied integration '_TEST_156_child_ok_ORC1560906034913' with 1 steps.",
+  "execution_order": [
+    "proc"
+  ],
+  "results": {
+    "proc": {
+      "status": "created",
+      "component_id": "9a266c4b-adf8-4444-811a-7d876511d431",
+      "type": "process",
+      "name": "_TEST_156_child_ok_ORC1560906034913",
+      "result": {
+        "_success": true,
+        "message": "Created component '_TEST_156_child_ok_ORC1560906034913'",
+        "component_id": "9a266c4b-adf8-4444-811a-7d876511d431",
+        "name": "_TEST_156_child_ok_ORC1560906034913",
+        "type": "process",
+        "profile": "renera"
+      }
+    }
+  },
+  "warnings": [
+    "Process component(s) ['proc'] model no error handling. Consult get_schema_template(schema_name='design_pattern:try_catch_placement') and get_schema_template(schema_name='design_pattern:error_routing_and_dlq').",
+    "[FOLDER_REQUIRED_ON_CREATE] Component 'proc' is created with no folder_id or folder_name and would land in the account root. Set a resolved folder so components are organized, never at root."
+  ],
+  "profile": "renera"
+}

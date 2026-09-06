@@ -1,0 +1,36 @@
+[
+  {
+    "scenario": "stage1-r1",
+    "file": "p7_apply.json",
+    "utc": "2026-09-06T07:22:05.037299+00:00",
+    "account_id": "trainingglebbochkarov-16926N",
+    "sha256": "6624d1286ca001c434e362a33764fc03544a56cd8bb872ba892d28e1f10dee8b",
+    "byte_length": 34693,
+    "archive_path": "docs/architecture/evidence/issue-156/captures/stage1-r1/p7_apply.json",
+    "phase": "apply",
+    "nonce": "QA156D0906065703",
+    "kind": "retry attribution control"
+  },
+  {
+    "scenario": "stage1-r1",
+    "file": "p7_cell_r0.json",
+    "utc": "2026-09-06T07:22:51.582751+00:00",
+    "account_id": "trainingglebbochkarov-16926N",
+    "sha256": "dc259ee765bfd24d0fd8afad5edf8506313a40329ceeead83c84fcdef29a797b",
+    "byte_length": 3091,
+    "archive_path": "docs/architecture/evidence/issue-156/captures/stage1-r1/p7_cell_r0.json",
+    "cell": "r0",
+    "nonce": "QA156D0906065703"
+  },
+  {
+    "scenario": "stage1-r1",
+    "file": "p7_cell_r1.json",
+    "utc": "2026-09-06T07:23:42.397841+00:00",
+    "account_id": "trainingglebbochkarov-16926N",
+    "sha256": "bad56fe6b1a45f4328441914c7c1554dbbefe5f3f62491e3522fa5a43d3ac410",
+    "byte_length": 3367,
+    "archive_path": "docs/architecture/evidence/issue-156/captures/stage1-r1/p7_cell_r1.json",
+    "cell": "r1",
+    "nonce": "QA156D0906065703"
+  }
+]

@@ -1,0 +1,32 @@
+{
+  "package": {
+    "_success": true,
+    "package": {
+      "package_id": "16726a23-b655-4075-a7d7-aec186165157",
+      "component_id": "15285b48-f0fc-4fe8-b093-cd664c150252",
+      "component_type": "process",
+      "package_version": "1.0.0",
+      "component_version": 1,
+      "branch_name": "main",
+      "notes": "#156 stage1 r1 procB",
+      "created_by": "<redacted-user>",
+      "created_date": "2026-09-06T07:03:09Z"
+    },
+    "hint": "Use action='deploy' with the returned package_id to deploy to an environment."
+  },
+  "deploy": {
+    "_success": true,
+    "deployment": {
+      "deployment_id": "cb76a2fb-bf57-408e-938f-0a79b1512c5a",
+      "package_id": "16726a23-b655-4075-a7d7-aec186165157",
+      "component_id": "15285b48-f0fc-4fe8-b093-cd664c150252",
+      "component_type": "process",
+      "environment_id": "b173ce8a-2d7f-41e3-9d3f-06e45d5b0de9",
+      "package_version": "1.0.0",
+      "deployed_date": "2026-09-06T07:03:09Z",
+      "deployed_by": "<redacted-user>",
+      "active": true,
+      "version": 1
+    }
+  }
+}

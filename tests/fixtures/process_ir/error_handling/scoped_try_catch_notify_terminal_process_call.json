@@ -1,0 +1,46 @@
+{
+  "body": {
+    "kind": "sequence",
+    "steps": [
+      {
+        "catch_body": {
+          "steps": [
+            {
+              "kind": "notify",
+              "level": "ERROR",
+              "message_template": "Integration catch path failed. Caught error: meta.base.catcherrorsmessage"
+            }
+          ],
+          "terminal": {
+            "abort_on_error": true,
+            "kind": "process_call",
+            "label": "Route caught errors to error subprocess",
+            "process_ref": "$ref:SUBPROC",
+            "wait": true
+          }
+        },
+        "kind": "try_catch",
+        "retry": {
+          "count": 0
+        },
+        "scope": "process",
+        "try_body": {
+          "steps": [
+            {
+              "kind": "connector_call",
+              "operation_ref": "$ref:GETOP"
+            },
+            {
+              "kind": "connector_call",
+              "operation_ref": "$ref:PATCHOP"
+            }
+          ],
+          "terminal": {
+            "kind": "stop"
+          }
+        }
+      }
+    ]
+  },
+  "version": "1"
+}

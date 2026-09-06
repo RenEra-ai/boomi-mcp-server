@@ -1,0 +1,75 @@
+{
+  "_success": true,
+  "integration_spec": {
+    "version": "1.0",
+    "name": "_TEST_156_ABORT_ORC1560906034913",
+    "mode": "lift_shift",
+    "components": [
+      {
+        "key": "proc",
+        "type": "process",
+        "action": "create",
+        "name": "_TEST_156_ABORT_ORC1560906034913",
+        "component_id": null,
+        "config": {
+          "process_kind": "database_to_api_sync",
+          "source": {
+            "connector_type": "database",
+            "connection_id": "9a2e06c1-e4ac-42b3-9db2-31991f9113fd",
+            "operation_id": "cacbde23-8bbf-4ba4-8595-356c53e423e5",
+            "action_type": "Get",
+            "label": "DB extract"
+          },
+          "transform": {
+            "mode": "passthrough"
+          },
+          "target": {
+            "connector_type": "rest",
+            "connection_id": "2fe488e4-3169-4529-9515-d854570c8ffc",
+            "operation_id": "f58b2b52-886f-4c65-b3c6-02808ed946a2",
+            "action_type": "POST",
+            "label": "REST send"
+          },
+          "reliability": {
+            "retry_count": 0,
+            "dlq": {
+              "mode": "error_subprocess_ref",
+              "process_id": "43a6a5e6-5c77-4c58-a83e-6fa543fafb0c"
+            }
+          }
+        },
+        "depends_on": []
+      }
+    ],
+    "processes": [],
+    "goals": [],
+    "endpoints": [],
+    "flows": [],
+    "naming": {},
+    "folders": {},
+    "runtime": {},
+    "validation_rules": {},
+    "profile_indexes_by_component_id": null,
+    "pipeline": null
+  },
+  "conflict_policy": "reuse",
+  "execution_order": [
+    "proc"
+  ],
+  "steps": [
+    {
+      "key": "proc",
+      "type": "process",
+      "declared_action": "create",
+      "planned_action": "create",
+      "name": "_TEST_156_ABORT_ORC1560906034913",
+      "depends_on": [],
+      "existing_component_id": null,
+      "route": "process_flow_xml"
+    }
+  ],
+  "warnings": [
+    "[FOLDER_REQUIRED_ON_CREATE] Component 'proc' is created with no folder_id or folder_name and would land in the account root. Set a resolved folder so components are organized, never at root."
+  ],
+  "profile": "renera"
+}

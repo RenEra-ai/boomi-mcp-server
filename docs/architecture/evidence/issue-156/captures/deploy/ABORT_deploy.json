@@ -1,0 +1,33 @@
+{
+  "package": {
+    "_success": true,
+    "package": {
+      "package_id": "1ba133f9-34ce-40f9-9884-e873855c9691",
+      "component_id": "ed7c75a9-e953-42fa-b624-0018e40b1e0a",
+      "component_type": "process",
+      "package_version": "1.0.0906035203",
+      "component_version": 1,
+      "branch_name": "main",
+      "notes": "#156 oracle ABORT",
+      "created_by": "<redacted>",
+      "created_date": "2026-09-06T03:52:09Z"
+    },
+    "hint": "Use action='deploy' with the returned package_id to deploy to an environment."
+  },
+  "deploy": {
+    "_success": true,
+    "deployment": {
+      "deployment_id": "891637de-dc34-4bef-bd14-fde35cb331ea",
+      "package_id": "1ba133f9-34ce-40f9-9884-e873855c9691",
+      "component_id": "ed7c75a9-e953-42fa-b624-0018e40b1e0a",
+      "component_type": "process",
+      "environment_id": "b173ce8a-2d7f-41e3-9d3f-06e45d5b0de9",
+      "package_version": "1.0.0906035203",
+      "deployed_date": "2026-09-06T03:52:09Z",
+      "deployed_by": "<redacted>",
+      "active": true,
+      "version": 1,
+      "notes": "#156 oracle ABORT"
+    }
+  }
+}

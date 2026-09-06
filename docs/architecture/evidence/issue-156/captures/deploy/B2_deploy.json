@@ -1,0 +1,33 @@
+{
+  "package": {
+    "_success": true,
+    "package": {
+      "package_id": "c257ade0-bd33-4990-9ff6-cd004f676b59",
+      "component_id": "babbcf52-324f-4169-9e81-ab8fc98a9284",
+      "component_type": "process",
+      "package_version": "1.0.0906035203",
+      "component_version": 1,
+      "branch_name": "main",
+      "notes": "#156 oracle B2",
+      "created_by": "<redacted>",
+      "created_date": "2026-09-06T03:52:06Z"
+    },
+    "hint": "Use action='deploy' with the returned package_id to deploy to an environment."
+  },
+  "deploy": {
+    "_success": true,
+    "deployment": {
+      "deployment_id": "c6efe7b8-8ddb-4c53-88bc-cfc04192a81f",
+      "package_id": "c257ade0-bd33-4990-9ff6-cd004f676b59",
+      "component_id": "babbcf52-324f-4169-9e81-ab8fc98a9284",
+      "component_type": "process",
+      "environment_id": "b173ce8a-2d7f-41e3-9d3f-06e45d5b0de9",
+      "package_version": "1.0.0906035203",
+      "deployed_date": "2026-09-06T03:52:07Z",
+      "deployed_by": "<redacted>",
+      "active": true,
+      "version": 1,
+      "notes": "#156 oracle B2"
+    }
+  }
+}

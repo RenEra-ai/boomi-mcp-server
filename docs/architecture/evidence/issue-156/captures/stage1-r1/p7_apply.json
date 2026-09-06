@@ -1,0 +1,780 @@
+{
+  "_success": true,
+  "build_id": "5c038708-81bc-47d7-acb7-7a818ffc8e29",
+  "message": "Applied integration '_TEST_156D_QA156D0906065703_RC2' with 15 steps.",
+  "execution_order": [
+    "conn",
+    "op_r0_c1",
+    "child_r0_1",
+    "op_r0_c2",
+    "child_r0_2",
+    "op_r0_fail",
+    "op_r0_src",
+    "op_r1_c1",
+    "child_r1_1",
+    "op_r1_c2",
+    "child_r1_2",
+    "op_r1_fail",
+    "op_r1_src",
+    "proc_r0",
+    "proc_r1"
+  ],
+  "results": {
+    "conn": {
+      "status": "updated",
+      "component_id": "b24ef0d5-ea3d-4450-822c-5dae9675cf5d",
+      "type": "connector-settings",
+      "name": "_TEST_156D_QA156D0906065703 conn",
+      "result": {
+        "write_attempted": true,
+        "_success": true,
+        "message": "Updated component 'b24ef0d5-ea3d-4450-822c-5dae9675cf5d' via read-merge-write (policy: connector-settings/officialboomi-X3979C-rest-prod).",
+        "component_id": "b24ef0d5-ea3d-4450-822c-5dae9675cf5d",
+        "profile": "renera",
+        "update_mode": "read_merge_write",
+        "preserves_unknown_xml": true,
+        "submitted_xml": "<ns0:Component xmlns:ns0=\"http://api.platform.boomi.com/\" folderFullPath=\"root\" componentId=\"b24ef0d5-ea3d-4450-822c-5dae9675cf5d\" version=\"1\" name=\"_TEST_156D_QA156D0906065703 conn\" type=\"connector-settings\" subType=\"officialboomi-X3979C-rest-prod\" createdDate=\"2026-09-06T07:01:32Z\" createdBy=\"<redacted-user>\" modifiedDate=\"2026-09-06T07:01:32Z\" modifiedBy=\"<redacted-user>\" deleted=\"false\" currentVersion=\"true\" folderName=\"root\" folderId=\"Rjo4ODAxNjk0\" branchName=\"main\" branchId=\"Qjo1OTQ0NDE\"><ns0:encryptedValues /><ns0:description /><ns0:object><GenericConnectionConfig><field id=\"url\" type=\"string\" value=\"http://host.docker.internal:8081\" />\n            <field id=\"auth\" type=\"string\" value=\"NONE\" />\n            <field id=\"username\" type=\"string\" value=\"\" />\n            <field id=\"password\" type=\"password\" value=\"\" />\n            <field id=\"domain\" type=\"string\" value=\"\" />\n            <field id=\"workstation\" type=\"string\" value=\"\" />\n            <field id=\"customAuthCredentials\" type=\"password\" value=\"\" />\n            <field id=\"preemptive\" type=\"boolean\" value=\"\" />\n            <field id=\"awsAccessKey\" type=\"string\" value=\"\" />\n            <field id=\"awsSecretKey\" type=\"password\" value=\"\" />\n            <field id=\"awsService\" type=\"string\" value=\"\" />\n            <field id=\"customAwsService\" type=\"string\" value=\"\" />\n            <field id=\"awsRegion\" type=\"string\" value=\"\" />\n            <field id=\"customAwsRegion\" type=\"string\" value=\"\" />\n            <field id=\"awsProfileArn\" type=\"string\" value=\"\" />\n            <field id=\"awsRoleArn\" type=\"string\" value=\"\" />\n            <field id=\"awsTrustAnchorArn\" type=\"string\" value=\"\" />\n            <field id=\"awsRolesAnywhereRegion\" type=\"string\" value=\"\" />\n            <field id=\"awsRolesAnywhereCustomRegion\" type=\"string\" value=\"\" />\n            <field id=\"awsSessionName\" type=\"string\" value=\"\" />\n            <field id=\"awsDuration\" type=\"integer\" value=\"\" />\n            <field id=\"awsPublicCertificate\" type=\"publiccertificate\" value=\"\" />\n            <field id=\"awsPrivateKey\" type=\"privatecertificate\" value=\"\" />\n            <field id=\"oauthContext\" type=\"oauth\">\n                <OAuth2Config grantType=\"code\">\n                    <credentials clientId=\"\" />\n                    <authorizationTokenEndpoint url=\"\"><sslOptions /></authorizationTokenEndpoint>\n                    <authorizationParameters />\n                    <accessTokenEndpoint url=\"\"><sslOptions /></accessTokenEndpoint>\n                    <accessTokenParameters />\n                    <scope />\n                    <jwtParameters><expiration>0</expiration></jwtParameters>\n                </OAuth2Config>\n            </field>\n            <field id=\"privateCertificate\" type=\"privatecertificate\" />\n            <field id=\"publicCertificate\" type=\"publiccertificate\" />\n            <field id=\"connectTimeout\" type=\"integer\" value=\"-1\" />\n            <field id=\"readTimeout\" type=\"integer\" value=\"-1\" />\n            <field id=\"cookieScope\" type=\"string\" value=\"GLOBAL\" />\n            <field id=\"enableConnectionPooling\" type=\"boolean\" value=\"false\" />\n            <field id=\"maxTotal\" type=\"integer\" value=\"\" />\n            <field id=\"idleTimeout\" type=\"integer\" value=\"\" />\n        </GenericConnectionConfig></ns0:object><ns0:GlobalVariableReferences /></ns0:Component>",
+        "submitted_xml_digest": "sha256:2c262d66ced0adf12283148739268964a3dcf034665a06105f6fee32b43a268e"
+      }
+    },
+    "op_r0_c1": {
+      "status": "created",
+      "component_id": "e0249a0f-9ab5-48f4-b0bc-acc9f4a80381",
+      "type": "connector-action",
+      "name": "_TEST_156D_QA156D0906065703_RC2 op_r0_c1",
+      "result": {
+        "_success": true,
+        "message": "Created officialboomi-X3979C-rest-prod execute operation '_TEST_156D_QA156D0906065703_RC2 op_r0_c1'",
+        "component_id": "e0249a0f-9ab5-48f4-b0bc-acc9f4a80381",
+        "name": "_TEST_156D_QA156D0906065703_RC2 op_r0_c1",
+        "type": "connector-action",
+        "sub_type": "officialboomi-X3979C-rest-prod",
+        "profile": "renera"
+      }
+    },
+    "child_r0_1": {
+      "type": "process",
+      "name": "_TEST_156D_QA156D0906065703_RC2 r0 child1",
+      "requested_name": "_TEST_156D_QA156D0906065703_RC2 r0 child1",
+      "applied_name_verified": true,
+      "status": "created",
+      "component_id": "c318f303-1cc2-41e8-8e25-cea44d4133fc",
+      "result": {
+        "_success": true,
+        "message": "Created component '_TEST_156D_QA156D0906065703_RC2 r0 child1'",
+        "component_id": "c318f303-1cc2-41e8-8e25-cea44d4133fc",
+        "name": "_TEST_156D_QA156D0906065703_RC2 r0 child1",
+        "type": "process",
+        "profile": "renera"
+      },
+      "_success": true
+    },
+    "op_r0_c2": {
+      "status": "created",
+      "component_id": "89d9ffb2-77bd-4e60-b435-32cf3ad22db2",
+      "type": "connector-action",
+      "name": "_TEST_156D_QA156D0906065703_RC2 op_r0_c2",
+      "result": {
+        "_success": true,
+        "message": "Created officialboomi-X3979C-rest-prod execute operation '_TEST_156D_QA156D0906065703_RC2 op_r0_c2'",
+        "component_id": "89d9ffb2-77bd-4e60-b435-32cf3ad22db2",
+        "name": "_TEST_156D_QA156D0906065703_RC2 op_r0_c2",
+        "type": "connector-action",
+        "sub_type": "officialboomi-X3979C-rest-prod",
+        "profile": "renera"
+      }
+    },
+    "child_r0_2": {
+      "type": "process",
+      "name": "_TEST_156D_QA156D0906065703_RC2 r0 child2",
+      "requested_name": "_TEST_156D_QA156D0906065703_RC2 r0 child2",
+      "applied_name_verified": true,
+      "status": "created",
+      "component_id": "59aa3128-beb7-4105-ad07-7ca727072a76",
+      "result": {
+        "_success": true,
+        "message": "Created component '_TEST_156D_QA156D0906065703_RC2 r0 child2'",
+        "component_id": "59aa3128-beb7-4105-ad07-7ca727072a76",
+        "name": "_TEST_156D_QA156D0906065703_RC2 r0 child2",
+        "type": "process",
+        "profile": "renera"
+      },
+      "_success": true
+    },
+    "op_r0_fail": {
+      "status": "created",
+      "component_id": "ce7da283-7b41-41d6-872a-0cc7fba19a3e",
+      "type": "connector-action",
+      "name": "_TEST_156D_QA156D0906065703_RC2 op_r0_fail",
+      "result": {
+        "_success": true,
+        "message": "Created officialboomi-X3979C-rest-prod execute operation '_TEST_156D_QA156D0906065703_RC2 op_r0_fail'",
+        "component_id": "ce7da283-7b41-41d6-872a-0cc7fba19a3e",
+        "name": "_TEST_156D_QA156D0906065703_RC2 op_r0_fail",
+        "type": "connector-action",
+        "sub_type": "officialboomi-X3979C-rest-prod",
+        "profile": "renera"
+      }
+    },
+    "op_r0_src": {
+      "status": "created",
+      "component_id": "edf6ab24-b5fc-44e5-ae44-9bb1992960ac",
+      "type": "connector-action",
+      "name": "_TEST_156D_QA156D0906065703_RC2 op_r0_src",
+      "result": {
+        "_success": true,
+        "message": "Created officialboomi-X3979C-rest-prod execute operation '_TEST_156D_QA156D0906065703_RC2 op_r0_src'",
+        "component_id": "edf6ab24-b5fc-44e5-ae44-9bb1992960ac",
+        "name": "_TEST_156D_QA156D0906065703_RC2 op_r0_src",
+        "type": "connector-action",
+        "sub_type": "officialboomi-X3979C-rest-prod",
+        "profile": "renera"
+      }
+    },
+    "op_r1_c1": {
+      "status": "created",
+      "component_id": "187617b6-83ea-42b3-b6ac-c900994e3b45",
+      "type": "connector-action",
+      "name": "_TEST_156D_QA156D0906065703_RC2 op_r1_c1",
+      "result": {
+        "_success": true,
+        "message": "Created officialboomi-X3979C-rest-prod execute operation '_TEST_156D_QA156D0906065703_RC2 op_r1_c1'",
+        "component_id": "187617b6-83ea-42b3-b6ac-c900994e3b45",
+        "name": "_TEST_156D_QA156D0906065703_RC2 op_r1_c1",
+        "type": "connector-action",
+        "sub_type": "officialboomi-X3979C-rest-prod",
+        "profile": "renera"
+      }
+    },
+    "child_r1_1": {
+      "type": "process",
+      "name": "_TEST_156D_QA156D0906065703_RC2 r1 child1",
+      "requested_name": "_TEST_156D_QA156D0906065703_RC2 r1 child1",
+      "applied_name_verified": true,
+      "status": "created",
+      "component_id": "d48afd77-c822-430d-88d4-7fc28b6314ec",
+      "result": {
+        "_success": true,
+        "message": "Created component '_TEST_156D_QA156D0906065703_RC2 r1 child1'",
+        "component_id": "d48afd77-c822-430d-88d4-7fc28b6314ec",
+        "name": "_TEST_156D_QA156D0906065703_RC2 r1 child1",
+        "type": "process",
+        "profile": "renera"
+      },
+      "_success": true
+    },
+    "op_r1_c2": {
+      "status": "created",
+      "component_id": "760834c7-ee6e-402c-98ef-d47905badf22",
+      "type": "connector-action",
+      "name": "_TEST_156D_QA156D0906065703_RC2 op_r1_c2",
+      "result": {
+        "_success": true,
+        "message": "Created officialboomi-X3979C-rest-prod execute operation '_TEST_156D_QA156D0906065703_RC2 op_r1_c2'",
+        "component_id": "760834c7-ee6e-402c-98ef-d47905badf22",
+        "name": "_TEST_156D_QA156D0906065703_RC2 op_r1_c2",
+        "type": "connector-action",
+        "sub_type": "officialboomi-X3979C-rest-prod",
+        "profile": "renera"
+      }
+    },
+    "child_r1_2": {
+      "type": "process",
+      "name": "_TEST_156D_QA156D0906065703_RC2 r1 child2",
+      "requested_name": "_TEST_156D_QA156D0906065703_RC2 r1 child2",
+      "applied_name_verified": true,
+      "status": "created",
+      "component_id": "77aaebd0-d94e-408d-b2bf-958508e905e3",
+      "result": {
+        "_success": true,
+        "message": "Created component '_TEST_156D_QA156D0906065703_RC2 r1 child2'",
+        "component_id": "77aaebd0-d94e-408d-b2bf-958508e905e3",
+        "name": "_TEST_156D_QA156D0906065703_RC2 r1 child2",
+        "type": "process",
+        "profile": "renera"
+      },
+      "_success": true
+    },
+    "op_r1_fail": {
+      "status": "created",
+      "component_id": "50f2c667-514e-47a9-aee7-686963bea7ae",
+      "type": "connector-action",
+      "name": "_TEST_156D_QA156D0906065703_RC2 op_r1_fail",
+      "result": {
+        "_success": true,
+        "message": "Created officialboomi-X3979C-rest-prod execute operation '_TEST_156D_QA156D0906065703_RC2 op_r1_fail'",
+        "component_id": "50f2c667-514e-47a9-aee7-686963bea7ae",
+        "name": "_TEST_156D_QA156D0906065703_RC2 op_r1_fail",
+        "type": "connector-action",
+        "sub_type": "officialboomi-X3979C-rest-prod",
+        "profile": "renera"
+      }
+    },
+    "op_r1_src": {
+      "status": "created",
+      "component_id": "4b06ea65-2114-4e86-a613-ddfdd4b39f8f",
+      "type": "connector-action",
+      "name": "_TEST_156D_QA156D0906065703_RC2 op_r1_src",
+      "result": {
+        "_success": true,
+        "message": "Created officialboomi-X3979C-rest-prod execute operation '_TEST_156D_QA156D0906065703_RC2 op_r1_src'",
+        "component_id": "4b06ea65-2114-4e86-a613-ddfdd4b39f8f",
+        "name": "_TEST_156D_QA156D0906065703_RC2 op_r1_src",
+        "type": "connector-action",
+        "sub_type": "officialboomi-X3979C-rest-prod",
+        "profile": "renera"
+      }
+    },
+    "proc_r0": {
+      "type": "process",
+      "name": "_TEST_156D_QA156D0906065703_RC2 r0 chain",
+      "requested_name": "_TEST_156D_QA156D0906065703_RC2 r0 chain",
+      "applied_name_verified": true,
+      "status": "created",
+      "component_id": "74e08d7f-fefe-4dfa-b83d-924abbd99045",
+      "result": {
+        "_success": true,
+        "message": "Created component '_TEST_156D_QA156D0906065703_RC2 r0 chain'",
+        "component_id": "74e08d7f-fefe-4dfa-b83d-924abbd99045",
+        "name": "_TEST_156D_QA156D0906065703_RC2 r0 chain",
+        "type": "process",
+        "profile": "renera"
+      },
+      "_success": true
+    },
+    "proc_r1": {
+      "type": "process",
+      "name": "_TEST_156D_QA156D0906065703_RC2 r1 chain",
+      "requested_name": "_TEST_156D_QA156D0906065703_RC2 r1 chain",
+      "applied_name_verified": true,
+      "status": "created",
+      "component_id": "69253b41-47dd-4313-a9c2-0ed51fe5ba77",
+      "result": {
+        "_success": true,
+        "message": "Created component '_TEST_156D_QA156D0906065703_RC2 r1 chain'",
+        "component_id": "69253b41-47dd-4313-a9c2-0ed51fe5ba77",
+        "name": "_TEST_156D_QA156D0906065703_RC2 r1 chain",
+        "type": "process",
+        "profile": "renera"
+      },
+      "_success": true
+    }
+  },
+  "process_mutations": [
+    {
+      "component_key": "child_r0_1",
+      "plan_fingerprint": "sha256:6a172ec4ffb4829d74e39dc7aea293dbd0b696a9d771640945638b60e64c8097",
+      "account_scope_hash": "sha256:6954b1d6f63195b7adf853c3552fbba26f389b0cd2384a370e2379f224f4e2d8",
+      "action": "create",
+      "target_component_id": null,
+      "result_component_id": "c318f303-1cc2-41e8-8e25-cea44d4133fc",
+      "resolved_placement": {
+        "folder_name": null,
+        "folder_id": null
+      },
+      "submitted_xml_digest": "sha256:29a1e12a4e760018a577c3fa41d318086fc22b89b6becb4ffbf964294e438058",
+      "replay_evidence_bindings": []
+    },
+    {
+      "component_key": "child_r0_2",
+      "plan_fingerprint": "sha256:c93c4a5f18a1117467dce51b94519f91caf7bcd27ab427320c4a0550864cff23",
+      "account_scope_hash": "sha256:6954b1d6f63195b7adf853c3552fbba26f389b0cd2384a370e2379f224f4e2d8",
+      "action": "create",
+      "target_component_id": null,
+      "result_component_id": "59aa3128-beb7-4105-ad07-7ca727072a76",
+      "resolved_placement": {
+        "folder_name": null,
+        "folder_id": null
+      },
+      "submitted_xml_digest": "sha256:6289c037c3940dc6fa8a6a369a34f5424868f494da42992ff215cbc96f91e211",
+      "replay_evidence_bindings": []
+    },
+    {
+      "component_key": "child_r1_1",
+      "plan_fingerprint": "sha256:8eda37fae0220112f3a259ddd1885bcd0ed7387679ef559abc73e4543231b3da",
+      "account_scope_hash": "sha256:6954b1d6f63195b7adf853c3552fbba26f389b0cd2384a370e2379f224f4e2d8",
+      "action": "create",
+      "target_component_id": null,
+      "result_component_id": "d48afd77-c822-430d-88d4-7fc28b6314ec",
+      "resolved_placement": {
+        "folder_name": null,
+        "folder_id": null
+      },
+      "submitted_xml_digest": "sha256:075a5102e1d8f3bad7df8eae5f0d137183e2cdbb153bbba5aed6268adde81fc5",
+      "replay_evidence_bindings": []
+    },
+    {
+      "component_key": "child_r1_2",
+      "plan_fingerprint": "sha256:27b98f61a5f3a1c8136789eded72edcad0c75f950663248750f83d3fe2a98392",
+      "account_scope_hash": "sha256:6954b1d6f63195b7adf853c3552fbba26f389b0cd2384a370e2379f224f4e2d8",
+      "action": "create",
+      "target_component_id": null,
+      "result_component_id": "77aaebd0-d94e-408d-b2bf-958508e905e3",
+      "resolved_placement": {
+        "folder_name": null,
+        "folder_id": null
+      },
+      "submitted_xml_digest": "sha256:0860d388b21c4f4e6ef7d1c74e1a43894e0763cb1da752685875d523b606d608",
+      "replay_evidence_bindings": []
+    },
+    {
+      "component_key": "proc_r0",
+      "plan_fingerprint": "sha256:9db3590d59038c6f66720cad4047d9eaf3df07b9043ca8359165230bc6016017",
+      "account_scope_hash": "sha256:6954b1d6f63195b7adf853c3552fbba26f389b0cd2384a370e2379f224f4e2d8",
+      "action": "create",
+      "target_component_id": null,
+      "result_component_id": "74e08d7f-fefe-4dfa-b83d-924abbd99045",
+      "resolved_placement": {
+        "folder_name": null,
+        "folder_id": null
+      },
+      "submitted_xml_digest": "sha256:fe7991e84e5e31ce9862c3a53efb6f434d33c356ecff491b2ee3b1c17c502968",
+      "replay_evidence_bindings": []
+    },
+    {
+      "component_key": "proc_r1",
+      "plan_fingerprint": "sha256:9ab24f3e1a78c6c3cff13f2810299fa3d9997d5e388ea51bb87a7e43ddbaf348",
+      "account_scope_hash": "sha256:6954b1d6f63195b7adf853c3552fbba26f389b0cd2384a370e2379f224f4e2d8",
+      "action": "create",
+      "target_component_id": null,
+      "result_component_id": "69253b41-47dd-4313-a9c2-0ed51fe5ba77",
+      "resolved_placement": {
+        "folder_name": null,
+        "folder_id": null
+      },
+      "submitted_xml_digest": "sha256:9b3323b850953c640b6e056fc4c63b2296b6694296cb69b6576c8b349ea95d75",
+      "replay_evidence_bindings": []
+    }
+  ],
+  "process_readbacks": [
+    {
+      "component_key": "child_r0_1",
+      "component_id": "c318f303-1cc2-41e8-8e25-cea44d4133fc",
+      "digest": "sha256:85f11a59b19f6cb75aabfaab36d665b6745c016dced7540c2e5ac9443c33277d"
+    },
+    {
+      "component_key": "child_r0_2",
+      "component_id": "59aa3128-beb7-4105-ad07-7ca727072a76",
+      "digest": "sha256:48cab31bdb71d4e83e9a40962034a90900ac5db6e9b5da8ec0cf9b1d5ad66cc8"
+    },
+    {
+      "component_key": "child_r1_1",
+      "component_id": "d48afd77-c822-430d-88d4-7fc28b6314ec",
+      "digest": "sha256:8ecb3cf6b2e1bb9c5673cb6da1dad52f8adc3a849c20ed747811097bff94fcda"
+    },
+    {
+      "component_key": "child_r1_2",
+      "component_id": "77aaebd0-d94e-408d-b2bf-958508e905e3",
+      "digest": "sha256:232383c411afbee1d5df68fe49a3d7d6eab383c180e1da6932051255fde3e27e"
+    },
+    {
+      "component_key": "proc_r0",
+      "component_id": "74e08d7f-fefe-4dfa-b83d-924abbd99045",
+      "digest": "sha256:208fa842c2f072b944ad9ae067c2f1a82dda15b4cc40bf70418354afeae98a66"
+    },
+    {
+      "component_key": "proc_r1",
+      "component_id": "69253b41-47dd-4313-a9c2-0ed51fe5ba77",
+      "digest": "sha256:7f7064a7700da292e1fd21a0606c5dda4a0d624beec72047e5780b72662bc8b5"
+    }
+  ],
+  "mutation_performed": true,
+  "authoring_provenance": {
+    "contract_version": "2",
+    "revision_binding": {
+      "contract_version": "2",
+      "schema_revision": "sha256:43afe45e1422fdfa7379d448a34e2adb0c4f1a5961595769904b2c4ed5ede98b",
+      "capability_revision": "sha256:5e600c61ea244fe1f6266c1a137c4be9f341d597e53648339efafa7467555984",
+      "compiler_revision": "sha256:b2f2d6282b670afc360363e525673bedce254584727efeb447cb46e1bae6d5f0",
+      "account_scope_hash": "sha256:6954b1d6f63195b7adf853c3552fbba26f389b0cd2384a370e2379f224f4e2d8",
+      "semantic_hash": "sha256:31f518f1590600ca167cbf114beaeb0882a2d7336ff67780b832b58c296973db",
+      "plan_hash": "sha256:c0680cf041fe36806871caf1987b221c714ee53ec0658b7f492a721091e1c0cc",
+      "compile_hash": "sha256:3ea414a9cfcc610d995e53a6e3c2fe6113a60db79aa36fd3bf4f697687dc883a"
+    },
+    "artifact_fingerprints": [
+      {
+        "component_key": "child_r0_1",
+        "component_type": "process",
+        "artifact_kind": "process_component_materialization_plan",
+        "artifact_version": "1",
+        "byte_length": 2823,
+        "digest": "sha256:6a172ec4ffb4829d74e39dc7aea293dbd0b696a9d771640945638b60e64c8097"
+      },
+      {
+        "component_key": "child_r0_1",
+        "component_type": "process",
+        "artifact_kind": "process_ir_emission_plan",
+        "artifact_version": "1",
+        "byte_length": 1240,
+        "digest": "sha256:c61daf97677e3492731a4bc961a11fe94713d49eebcfaabe1c4b602bc50e4a09"
+      },
+      {
+        "component_key": "child_r0_1",
+        "component_type": "process",
+        "artifact_kind": "process_ir_normalized",
+        "artifact_version": "1",
+        "byte_length": 192,
+        "digest": "sha256:7e61cc2eddb6a80a51064435d50368fcb54a501867c6940e80ba6723fb16bf7e"
+      },
+      {
+        "component_key": "child_r0_2",
+        "component_type": "process",
+        "artifact_kind": "process_component_materialization_plan",
+        "artifact_version": "1",
+        "byte_length": 2823,
+        "digest": "sha256:c93c4a5f18a1117467dce51b94519f91caf7bcd27ab427320c4a0550864cff23"
+      },
+      {
+        "component_key": "child_r0_2",
+        "component_type": "process",
+        "artifact_kind": "process_ir_emission_plan",
+        "artifact_version": "1",
+        "byte_length": 1240,
+        "digest": "sha256:44003117bb863170cf7d06ddbdec061ed7636057053ee049795677c03a2e5fb1"
+      },
+      {
+        "component_key": "child_r0_2",
+        "component_type": "process",
+        "artifact_kind": "process_ir_normalized",
+        "artifact_version": "1",
+        "byte_length": 192,
+        "digest": "sha256:48839fd907b36e712c1e4b4776e7e444f107fed1e8bf572d37c0412a16df2d0b"
+      },
+      {
+        "component_key": "child_r1_1",
+        "component_type": "process",
+        "artifact_kind": "process_component_materialization_plan",
+        "artifact_version": "1",
+        "byte_length": 2823,
+        "digest": "sha256:8eda37fae0220112f3a259ddd1885bcd0ed7387679ef559abc73e4543231b3da"
+      },
+      {
+        "component_key": "child_r1_1",
+        "component_type": "process",
+        "artifact_kind": "process_ir_emission_plan",
+        "artifact_version": "1",
+        "byte_length": 1240,
+        "digest": "sha256:f319005ebcdc6abbdfe3f11d18affba47135e1655188a52c2d52752295d31103"
+      },
+      {
+        "component_key": "child_r1_1",
+        "component_type": "process",
+        "artifact_kind": "process_ir_normalized",
+        "artifact_version": "1",
+        "byte_length": 192,
+        "digest": "sha256:40be2cfce3b1b4d9c803f10e61d4b9715b93e6e1134a60954068222966a3669d"
+      },
+      {
+        "component_key": "child_r1_2",
+        "component_type": "process",
+        "artifact_kind": "process_component_materialization_plan",
+        "artifact_version": "1",
+        "byte_length": 2823,
+        "digest": "sha256:27b98f61a5f3a1c8136789eded72edcad0c75f950663248750f83d3fe2a98392"
+      },
+      {
+        "component_key": "child_r1_2",
+        "component_type": "process",
+        "artifact_kind": "process_ir_emission_plan",
+        "artifact_version": "1",
+        "byte_length": 1240,
+        "digest": "sha256:cbf5453adb3d8e19639a6eba17cd988ceabb0344ccbd89d1ffad4a40db722a2d"
+      },
+      {
+        "component_key": "child_r1_2",
+        "component_type": "process",
+        "artifact_kind": "process_ir_normalized",
+        "artifact_version": "1",
+        "byte_length": 192,
+        "digest": "sha256:17e83367d4368bd0cb1f76b0414426d45fb5270291d6d12c0c2212b44f6a8833"
+      },
+      {
+        "component_key": "proc_r0",
+        "component_type": "process",
+        "artifact_kind": "process_component_materialization_plan",
+        "artifact_version": "1",
+        "byte_length": 7577,
+        "digest": "sha256:9db3590d59038c6f66720cad4047d9eaf3df07b9043ca8359165230bc6016017"
+      },
+      {
+        "component_key": "proc_r0",
+        "component_type": "process",
+        "artifact_kind": "process_ir_emission_plan",
+        "artifact_version": "1",
+        "byte_length": 4608,
+        "digest": "sha256:b71087a85e2ea4a95a7177031ceacb7c40712d7f7a03268bb7bcaaa277dda916"
+      },
+      {
+        "component_key": "proc_r0",
+        "component_type": "process",
+        "artifact_kind": "process_ir_normalized",
+        "artifact_version": "1",
+        "byte_length": 1117,
+        "digest": "sha256:255574e61cab58ed19f46082d27642a5cd5c340a014466838405cdf29931fbd4"
+      },
+      {
+        "component_key": "proc_r1",
+        "component_type": "process",
+        "artifact_kind": "process_component_materialization_plan",
+        "artifact_version": "1",
+        "byte_length": 7577,
+        "digest": "sha256:9ab24f3e1a78c6c3cff13f2810299fa3d9997d5e388ea51bb87a7e43ddbaf348"
+      },
+      {
+        "component_key": "proc_r1",
+        "component_type": "process",
+        "artifact_kind": "process_ir_emission_plan",
+        "artifact_version": "1",
+        "byte_length": 4608,
+        "digest": "sha256:f7b44d52fbb3ff9a40cc9dec667e8ebe0c9f250762aae604c51285dce1552bdb"
+      },
+      {
+        "component_key": "proc_r1",
+        "component_type": "process",
+        "artifact_kind": "process_ir_normalized",
+        "artifact_version": "1",
+        "byte_length": 1117,
+        "digest": "sha256:2e19679cdddfd8daf56e235ec5741ba88f9c564d837d34e178757bb259a90dce"
+      }
+    ],
+    "resolved_references": [
+      {
+        "ref": "$ref:child_r0_1",
+        "component_type": "process",
+        "resolved": true,
+        "component_id": null,
+        "version_marker": null
+      },
+      {
+        "ref": "$ref:child_r0_2",
+        "component_type": "process",
+        "resolved": true,
+        "component_id": null,
+        "version_marker": null
+      },
+      {
+        "ref": "$ref:child_r1_1",
+        "component_type": "process",
+        "resolved": true,
+        "component_id": null,
+        "version_marker": null
+      },
+      {
+        "ref": "$ref:child_r1_2",
+        "component_type": "process",
+        "resolved": true,
+        "component_id": null,
+        "version_marker": null
+      },
+      {
+        "ref": "$ref:conn",
+        "component_type": "connector-settings",
+        "resolved": true,
+        "component_id": "b24ef0d5-ea3d-4450-822c-5dae9675cf5d",
+        "version_marker": "1"
+      },
+      {
+        "ref": "$ref:op_r0_c1",
+        "component_type": "connector-action",
+        "resolved": true,
+        "component_id": null,
+        "version_marker": null
+      },
+      {
+        "ref": "$ref:op_r0_c2",
+        "component_type": "connector-action",
+        "resolved": true,
+        "component_id": null,
+        "version_marker": null
+      },
+      {
+        "ref": "$ref:op_r0_fail",
+        "component_type": "connector-action",
+        "resolved": true,
+        "component_id": null,
+        "version_marker": null
+      },
+      {
+        "ref": "$ref:op_r0_src",
+        "component_type": "connector-action",
+        "resolved": true,
+        "component_id": null,
+        "version_marker": null
+      },
+      {
+        "ref": "$ref:op_r1_c1",
+        "component_type": "connector-action",
+        "resolved": true,
+        "component_id": null,
+        "version_marker": null
+      },
+      {
+        "ref": "$ref:op_r1_c2",
+        "component_type": "connector-action",
+        "resolved": true,
+        "component_id": null,
+        "version_marker": null
+      },
+      {
+        "ref": "$ref:op_r1_fail",
+        "component_type": "connector-action",
+        "resolved": true,
+        "component_id": null,
+        "version_marker": null
+      },
+      {
+        "ref": "$ref:op_r1_src",
+        "component_type": "connector-action",
+        "resolved": true,
+        "component_id": null,
+        "version_marker": null
+      },
+      {
+        "ref": "$ref:proc_r0",
+        "component_type": "process",
+        "resolved": true,
+        "component_id": null,
+        "version_marker": null
+      },
+      {
+        "ref": "$ref:proc_r1",
+        "component_type": "process",
+        "resolved": true,
+        "component_id": null,
+        "version_marker": null
+      }
+    ],
+    "live_comparison": null,
+    "process_mutations": [
+      {
+        "component_key": "child_r0_1",
+        "plan_fingerprint": "sha256:6a172ec4ffb4829d74e39dc7aea293dbd0b696a9d771640945638b60e64c8097",
+        "account_scope_hash": "sha256:6954b1d6f63195b7adf853c3552fbba26f389b0cd2384a370e2379f224f4e2d8",
+        "action": "create",
+        "target_component_id": null,
+        "result_component_id": "c318f303-1cc2-41e8-8e25-cea44d4133fc",
+        "resolved_placement": {
+          "folder_name": null,
+          "folder_id": null
+        },
+        "submitted_xml_digest": "sha256:29a1e12a4e760018a577c3fa41d318086fc22b89b6becb4ffbf964294e438058",
+        "replay_evidence_bindings": []
+      },
+      {
+        "component_key": "child_r0_2",
+        "plan_fingerprint": "sha256:c93c4a5f18a1117467dce51b94519f91caf7bcd27ab427320c4a0550864cff23",
+        "account_scope_hash": "sha256:6954b1d6f63195b7adf853c3552fbba26f389b0cd2384a370e2379f224f4e2d8",
+        "action": "create",
+        "target_component_id": null,
+        "result_component_id": "59aa3128-beb7-4105-ad07-7ca727072a76",
+        "resolved_placement": {
+          "folder_name": null,
+          "folder_id": null
+        },
+        "submitted_xml_digest": "sha256:6289c037c3940dc6fa8a6a369a34f5424868f494da42992ff215cbc96f91e211",
+        "replay_evidence_bindings": []
+      },
+      {
+        "component_key": "child_r1_1",
+        "plan_fingerprint": "sha256:8eda37fae0220112f3a259ddd1885bcd0ed7387679ef559abc73e4543231b3da",
+        "account_scope_hash": "sha256:6954b1d6f63195b7adf853c3552fbba26f389b0cd2384a370e2379f224f4e2d8",
+        "action": "create",
+        "target_component_id": null,
+        "result_component_id": "d48afd77-c822-430d-88d4-7fc28b6314ec",
+        "resolved_placement": {
+          "folder_name": null,
+          "folder_id": null
+        },
+        "submitted_xml_digest": "sha256:075a5102e1d8f3bad7df8eae5f0d137183e2cdbb153bbba5aed6268adde81fc5",
+        "replay_evidence_bindings": []
+      },
+      {
+        "component_key": "child_r1_2",
+        "plan_fingerprint": "sha256:27b98f61a5f3a1c8136789eded72edcad0c75f950663248750f83d3fe2a98392",
+        "account_scope_hash": "sha256:6954b1d6f63195b7adf853c3552fbba26f389b0cd2384a370e2379f224f4e2d8",
+        "action": "create",
+        "target_component_id": null,
+        "result_component_id": "77aaebd0-d94e-408d-b2bf-958508e905e3",
+        "resolved_placement": {
+          "folder_name": null,
+          "folder_id": null
+        },
+        "submitted_xml_digest": "sha256:0860d388b21c4f4e6ef7d1c74e1a43894e0763cb1da752685875d523b606d608",
+        "replay_evidence_bindings": []
+      },
+      {
+        "component_key": "proc_r0",
+        "plan_fingerprint": "sha256:9db3590d59038c6f66720cad4047d9eaf3df07b9043ca8359165230bc6016017",
+        "account_scope_hash": "sha256:6954b1d6f63195b7adf853c3552fbba26f389b0cd2384a370e2379f224f4e2d8",
+        "action": "create",
+        "target_component_id": null,
+        "result_component_id": "74e08d7f-fefe-4dfa-b83d-924abbd99045",
+        "resolved_placement": {
+          "folder_name": null,
+          "folder_id": null
+        },
+        "submitted_xml_digest": "sha256:fe7991e84e5e31ce9862c3a53efb6f434d33c356ecff491b2ee3b1c17c502968",
+        "replay_evidence_bindings": []
+      },
+      {
+        "component_key": "proc_r1",
+        "plan_fingerprint": "sha256:9ab24f3e1a78c6c3cff13f2810299fa3d9997d5e388ea51bb87a7e43ddbaf348",
+        "account_scope_hash": "sha256:6954b1d6f63195b7adf853c3552fbba26f389b0cd2384a370e2379f224f4e2d8",
+        "action": "create",
+        "target_component_id": null,
+        "result_component_id": "69253b41-47dd-4313-a9c2-0ed51fe5ba77",
+        "resolved_placement": {
+          "folder_name": null,
+          "folder_id": null
+        },
+        "submitted_xml_digest": "sha256:9b3323b850953c640b6e056fc4c63b2296b6694296cb69b6576c8b349ea95d75",
+        "replay_evidence_bindings": []
+      }
+    ],
+    "process_readbacks": [
+      {
+        "component_key": "child_r0_1",
+        "component_id": "c318f303-1cc2-41e8-8e25-cea44d4133fc",
+        "digest": "sha256:85f11a59b19f6cb75aabfaab36d665b6745c016dced7540c2e5ac9443c33277d"
+      },
+      {
+        "component_key": "child_r0_2",
+        "component_id": "59aa3128-beb7-4105-ad07-7ca727072a76",
+        "digest": "sha256:48cab31bdb71d4e83e9a40962034a90900ac5db6e9b5da8ec0cf9b1d5ad66cc8"
+      },
+      {
+        "component_key": "child_r1_1",
+        "component_id": "d48afd77-c822-430d-88d4-7fc28b6314ec",
+        "digest": "sha256:8ecb3cf6b2e1bb9c5673cb6da1dad52f8adc3a849c20ed747811097bff94fcda"
+      },
+      {
+        "component_key": "child_r1_2",
+        "component_id": "77aaebd0-d94e-408d-b2bf-958508e905e3",
+        "digest": "sha256:232383c411afbee1d5df68fe49a3d7d6eab383c180e1da6932051255fde3e27e"
+      },
+      {
+        "component_key": "proc_r0",
+        "component_id": "74e08d7f-fefe-4dfa-b83d-924abbd99045",
+        "digest": "sha256:208fa842c2f072b944ad9ae067c2f1a82dda15b4cc40bf70418354afeae98a66"
+      },
+      {
+        "component_key": "proc_r1",
+        "component_id": "69253b41-47dd-4313-a9c2-0ed51fe5ba77",
+        "digest": "sha256:7f7064a7700da292e1fd21a0606c5dda4a0d624beec72047e5780b72662bc8b5"
+      }
+    ]
+  },
+  "warnings": [
+    "[FOLDER_REQUIRED_ON_CREATE] Component 'op_r0_src' is created with no folder_id or folder_name and would land in the account root. Set a resolved folder so components are organized, never at root.",
+    "[FOLDER_REQUIRED_ON_CREATE] Component 'op_r0_fail' is created with no folder_id or folder_name and would land in the account root. Set a resolved folder so components are organized, never at root.",
+    "[FOLDER_REQUIRED_ON_CREATE] Component 'op_r0_c1' is created with no folder_id or folder_name and would land in the account root. Set a resolved folder so components are organized, never at root.",
+    "[FOLDER_REQUIRED_ON_CREATE] Component 'op_r0_c2' is created with no folder_id or folder_name and would land in the account root. Set a resolved folder so components are organized, never at root.",
+    "[FOLDER_REQUIRED_ON_CREATE] Component 'op_r1_src' is created with no folder_id or folder_name and would land in the account root. Set a resolved folder so components are organized, never at root.",
+    "[FOLDER_REQUIRED_ON_CREATE] Component 'op_r1_fail' is created with no folder_id or folder_name and would land in the account root. Set a resolved folder so components are organized, never at root.",
+    "[FOLDER_REQUIRED_ON_CREATE] Component 'op_r1_c1' is created with no folder_id or folder_name and would land in the account root. Set a resolved folder so components are organized, never at root.",
+    "[FOLDER_REQUIRED_ON_CREATE] Component 'op_r1_c2' is created with no folder_id or folder_name and would land in the account root. Set a resolved folder so components are organized, never at root."
+  ],
+  "action": "apply",
+  "mutation_status": "performed",
+  "profile": "renera"
+}

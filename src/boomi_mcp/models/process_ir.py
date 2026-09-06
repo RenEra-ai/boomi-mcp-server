@@ -97,9 +97,11 @@ from ..errors import (
     PROCESS_IR_SCHEMA_UNKNOWN_NODE,
     PROCESS_IR_SCHEMA_VERSION_UNSUPPORTED,
     PROCESS_IR_SEMANTIC_CATCH_UNTERMINATED,
+    PROCESS_IR_SEMANTIC_RECOVERY_PROCESS_CALL_INVALID,
     PROCESS_IR_SEMANTIC_CONTROL_CONTINUATION_UNSUPPORTED,
     PROCESS_IR_SEMANTIC_NESTING_LIMIT,
 )
+from .process_ir_tokens import CAUGHT_ERROR_PROPERTY_ID, NOTIFY_LEVELS
 
 PROCESS_IR_VERSION = "1"
 
@@ -795,6 +797,23 @@ def _error_scope_error(message: str) -> PydanticCustomError:
     """#142: an unknown error scope, or a known scope in an unverified placement."""
     return PydanticCustomError(  # noqa: EM101
         "process_ir_capability_error_scope_unsupported", message
+    )
+
+
+def _recovery_process_call_error(
+    message: str, *, at: Tuple[Any, ...] = ()
+) -> PydanticCustomError:
+    """#156 T5: a recovery-leg process_call whose flags are not both true.
+
+    Distinct from `_return_path_binding_error`, which says the PLACEMENT is
+    unsupported and points at #176. Here the placement is supported and
+    evidenced; what is wrong is the authored values. Serving the return-path code
+    would tell a caller to wait for a feature when the fix is one field.
+    """
+    return PydanticCustomError(  # noqa: EM101
+        "process_ir_semantic_recovery_process_call_invalid",
+        message,
+        {"offending_path": tuple(at)} if at else None,
     )
 
 
@@ -1592,6 +1611,89 @@ class ExceptionNodeV1(_ProcessIRBase):
         return self
 
 
+class ContinueNodeV1(_ProcessIRBase):
+    """The protected path of a NON-FINAL connector-scoped handler.
+
+    A structural terminal that emits NOTHING. It occupies the try body's terminal
+    slot to say "this protected region succeeded; the flow goes on to the next
+    handler" — and it exists because the platform's own shape graph has no closing
+    shape there. In the legacy double-guard capture the first handler's protected
+    path runs `connector -> map -> the next catcherrors` with no terminal shape
+    between them, so every existing terminal is wrong for the position: `stop`
+    and `return_documents` each EMIT a shape, and putting one there would add a
+    shape the platform never renders.
+
+    It is not a "no-op" and not an alternative spelling of `stop`. `stop` ends a
+    document's path; `continue` asserts the opposite — that the path continues —
+    and the two are never interchangeable. Lowering therefore produces no CFG
+    node, no semantic, no emitter input and no registry key for it: the
+    continuation edge it authorises is drawn from the protected subtree's last
+    real node to the next handler.
+
+    Admitted ONLY as a non-final connector-scoped try terminal. A `continue` at
+    root, in a catch body, on a process-scoped handler, or on the LAST handler of
+    a chain is refused — the last one especially, because a chain that continues
+    off its own end has no path to continue onto.
+    """
+
+    kind: Literal["continue"]
+
+
+class NotifyNodeV1(_ProcessIRBase):
+    """Log the caught error to the process log, on a recovery path.
+
+    Notify writes one message to the platform's own execution log. It is not a
+    delivery channel: there is no recipient, no address, no subject and no
+    transport, and none of those are fields this version withholds — the shape
+    the platform verifies carries a level, a message, and a binding to the
+    caught error, and nothing else.
+
+    ``message_template`` must reference the caught-error property by its token
+    (:data:`~boomi_mcp.models.process_ir_tokens.CAUGHT_ERROR_PROPERTY_ID`). That
+    is not decoration: the emitted message always carries a parameter bound to
+    that property, so a template that never mentions it declares a parameter it
+    never uses, and logs a failure without the failure. The token may appear more
+    than once; every occurrence binds the same caught error.
+
+    Admitted ONLY on a recovery path — see :data:`TryCatchCatchBodyStepV1`. A
+    caught error is the only thing this node has to say, and outside a catch body
+    there is none.
+    """
+
+    kind: Literal["notify"]
+    level: Literal[NOTIFY_LEVELS] = Field(
+        ...,
+        description="Platform log level for the emitted message",
+    )
+    message_template: str = Field(
+        ...,
+        min_length=1,
+        description=(
+            "Message text; must reference the caught-error property token so the "
+            "logged message carries the error"
+        ),
+    )
+
+    @model_validator(mode="after")
+    def _notify_rules(self) -> "NotifyNodeV1":
+        # Same two checks the legacy validator makes, in the same order, so a
+        # graph legal on one surface is legal on the other. The CODE differs by
+        # layer and that is deliberate (#156 S22): the legacy builder keeps
+        # PROCESS_NOTIFY_CONFIG_INVALID, its own published contract, and the
+        # canonical path serves the canonical schema family — the same choice
+        # ExceptionNodeV1 already makes for the identical template rule.
+        if not self.message_template.strip():
+            raise _cardinality_error("message_template must be a non-blank string")
+        if CAUGHT_ERROR_PROPERTY_ID not in self.message_template:
+            raise _cardinality_error(
+                "message_template must reference the caught-error property token "
+                "{0} so the emitted message carries the caught error".format(
+                    CAUGHT_ERROR_PROPERTY_ID
+                )
+            )
+        return self
+
+
 # The ROOT/legacy linear vocabulary. Deliberately UNCHANGED by #141: it is what a
 # root ``SequenceNodeV1`` admits between its endpoints, and widening it would
 # change legacy sequences. The richer control-body vocabularies below are
@@ -1759,7 +1861,7 @@ def _check_trailing_cache_put(
 
 
 def _check_process_call_terminal_form(
-    steps: List[Any], terminal: Any, *, context: str
+    steps: List[Any], terminal: Any, *, context: str, recovery: bool = False
 ) -> None:
     """ProcessCall TERMINAL FORM (#141 PATH MODE, amended by #175).
 
@@ -1784,12 +1886,16 @@ def _check_process_call_terminal_form(
     path — and ``body_capabilities`` re-derives both from the compiler side, so a
     mutated model that never re-ran this validator is still refused.
     """
-    verdict = process_call_placement_verdict(steps, terminal, context=context)
+    verdict = process_call_placement_verdict(
+        steps, terminal, context=context, recovery=recovery
+    )
     if verdict is None:
         return
     reason, at, message = verdict
     if reason == PLACEMENT_CONNECTOR_MIXING:
         raise _body_kind_error(message, at=at)
+    if reason == PLACEMENT_RECOVERY_FLAGS:
+        raise _recovery_process_call_error(message, at=at)
     raise _return_path_binding_error(message, at=at)
 
 
@@ -1806,6 +1912,11 @@ PROCESS_CALL_STEP_FORM_MESSAGE = (
 PLACEMENT_CONNECTOR_MIXING = "connector_mixing"
 PLACEMENT_STEP_FORM = "step_form"
 PLACEMENT_PREFIX = "prefix"
+#: #156 T5: a recovery-leg call whose synchronous/abort flags are not both true.
+#: A placement reason rather than a separate check, so it travels through the ONE
+#: verdict both entry points render — a second checker beside the verdict is the
+#: shape #175 spent four rounds removing.
+PLACEMENT_RECOVERY_FLAGS = "recovery_flags"
 
 #: The human label each body context contributes to a placement message, keyed by
 #: the compiler's body-context name. ONE table: the message text is authored here,
@@ -1883,7 +1994,7 @@ def process_call_root_verdict(kinds):
 
 
 def process_call_placement_verdict(
-    steps: List[Any], terminal: Any, *, context: str
+    steps: List[Any], terminal: Any, *, context: str, recovery: bool = False
 ) -> Optional[Tuple[str, Tuple[Any, ...], str]]:
     """THE authority on how a body's ``process_call`` placement is diagnosed.
 
@@ -1956,7 +2067,7 @@ def process_call_placement_verdict(
             "step — a connector runs upstream in this {0} (step {1}; "
             "process_call_connector_mixing is gated)".format(context, connector_index),
         )
-    if steps:
+    if steps and not recovery:
         return (
             PLACEMENT_PREFIX,
             ("terminal",),
@@ -1964,6 +2075,49 @@ def process_call_placement_verdict(
             "child returns no documents ends the path it is on, and a prefix before "
             "it is not attested".format(context),
         )
+    if recovery:
+        # #156 T5. The recovery leg is the ONE place a prefix is attested, and
+        # only the notify prefix: the live capture (issue-156 B2) runs
+        # `catcherrors -> notify -> processcall` with the call terminal and no
+        # trailing Stop. Every other kind stays refused under the SAME reason and
+        # pointer as before, so widening the slot did not widen the rule — it
+        # named one exception the evidence covers.
+        offending = next(
+            (i for i, step in enumerate(steps)
+             if getattr(step, "kind", None) != "notify"),
+            None,
+        )
+        if offending is not None:
+            return (
+                PLACEMENT_PREFIX,
+                ("steps", offending),
+                "a process_call {0} terminal admits only notify steps before it — "
+                "a recovery hand-off may log the caught error first, and nothing "
+                "else is attested ahead of the call (step {1})".format(
+                    context, offending
+                ),
+            )
+        # BY VALUE, never by `model_fields_set`: a defaulted `abort_on_error`
+        # survives a dump/reparse identically to an authored one, so a presence
+        # rule would reject the document's own round trip. `wait` may rest on its
+        # True default; `abort_on_error` defaults to False — the standalone
+        # wrapper's default — and on this leg that default is REFUSED rather than
+        # silently rewritten, which is the whole point of the rule.
+        if getattr(terminal, "wait", None) is not True:
+            return (
+                PLACEMENT_RECOVERY_FLAGS,
+                ("terminal", "wait"),
+                "a recovery process_call must run synchronously — author "
+                "wait=true so the parent observes the hand-off",
+            )
+        if getattr(terminal, "abort_on_error", None) is not True:
+            return (
+                PLACEMENT_RECOVERY_FLAGS,
+                ("terminal", "abort_on_error"),
+                "a recovery process_call must author abort_on_error=true — the "
+                "model default is false, and a recovery hand-off that fails "
+                "silently is not a recovery",
+            )
     return None
 
 
@@ -2244,8 +2398,34 @@ del _model
 # and is unaffected by the collapse.
 TryCatchBodyStepV1 = ControlBodyStepV1
 
-#: The exact kind set of :data:`TryCatchBodyStepV1`, shared by both bodies.
+#: The exact kind set of :data:`TryCatchBodyStepV1`, the PROTECTED body's.
 TRY_CATCH_BODY_KINDS: Tuple[str, ...] = _kinds_of(TryCatchBodyStepV1)
+
+# #156 T4. The RECOVERY body's step vocabulary: the shared control-body one, plus
+# ``notify``.
+#
+# The shared union above is deliberately NOT widened. Doing so would admit Notify
+# in the try body, both Branch legs and both Decision arms as a side effect —
+# five placements with no evidence behind them — because #154 collapsed all of
+# those onto one alias precisely so that a kind added there reaches all of them.
+# That property is the reason the collapse was correct and the reason it cannot
+# carry this kind: Notify's whole content is a caught error, and only the
+# recovery path has one.
+#
+# COMPOSED from the same members tuple, never respelled. This is the same
+# discipline `ControlBodyStepV1` itself follows: a linear kind added to
+# ``_LINEAR_MEMBERS`` reaches this union by construction, so the catch body
+# cannot silently fall behind the shared vocabulary the way the pre-#154
+# hand-copy did. A test asserts both directions — that these kinds are exactly
+# the shared kinds plus ``notify`` — so neither a missing linear kind nor an
+# extra smuggled one is writable.
+CatchBodyStepV1 = Annotated[
+    Union[_LINEAR_MEMBERS + (ConnectorCallNodeV1, NotifyNodeV1)],
+    Field(discriminator="kind"),
+]
+
+#: The exact kind set of :data:`CatchBodyStepV1`.
+CATCH_BODY_KINDS: Tuple[str, ...] = _kinds_of(CatchBodyStepV1)
 
 
 #: What a caller accepts when a retried region replays its own document producer.
@@ -2312,7 +2492,8 @@ class TryCatchTryBodyV1(_ProcessIRBase):
 
     steps: List[TryCatchBodyStepV1] = Field(..., min_length=1)
     terminal: Annotated[
-        Union[StopNodeV1, ReturnDocumentsNodeV1], Field(discriminator="kind")
+        Union[StopNodeV1, ReturnDocumentsNodeV1, ContinueNodeV1],
+        Field(discriminator="kind"),
     ]
 
     @model_validator(mode="after")
@@ -2341,9 +2522,9 @@ class TryCatchCatchBodyV1(_ProcessIRBase):
     ``stop`` with no work at all is rejected: it recovers nothing.
     """
 
-    steps: List[TryCatchBodyStepV1] = Field(default_factory=list)
+    steps: List[CatchBodyStepV1] = Field(default_factory=list)
     terminal: Annotated[
-        Union[StopNodeV1, ExceptionNodeV1, CachePutNodeV1],
+        Union[StopNodeV1, ExceptionNodeV1, CachePutNodeV1, ProcessCallNodeV1],
         Field(discriminator="kind"),
     ]
 
@@ -2365,6 +2546,16 @@ class TryCatchCatchBodyV1(_ProcessIRBase):
             ),
         )
         _check_stop_terminal_has_work(self.steps, self.terminal, context="catch body")
+        # #156 T5. The recovery hand-off: a caught document handed to another
+        # process. RECOVERY=TRUE is what admits a `notify` prefix before the
+        # call and exempts the call from connector ancestry OUTSIDE this body —
+        # both scoped here, so no other body gains either.
+        _check_process_call_terminal_form(
+            self.steps,
+            self.terminal,
+            context=PROCESS_CALL_PLACEMENT_CONTEXT_LABELS["catch_body"],
+            recovery=True,
+        )
         return self
 
 
@@ -2489,11 +2680,23 @@ ProcessNodeV1 = Annotated[
         DecisionNodeV1,
         TryCatchNodeV1,
         ExceptionNodeV1,
+        NotifyNodeV1,
+        ContinueNodeV1,
         StopNodeV1,
         ReturnDocumentsNodeV1,
     ],
     Field(discriminator="kind"),
 ]
+
+# ``notify`` is a member here and admitted NOWHERE at root. Membership in this
+# union is what makes a kind DISCOVERABLE — it is what ``_NODE_KIND_TAGS``,
+# ``process_ir_v1_node_kinds`` and therefore the served schema and projection are
+# derived from — and discovery is not permission. The placement authority is the
+# body unions, and every root branch below refuses ``notify`` on its own terms:
+# the connector_call branch by the ``_ROOT_LINEAR_KINDS`` allowlist, the legacy
+# source/target branch by its own, and a lone ``[notify]`` by having no matching
+# root form at all. ``try_catch`` sets the same precedent — a member of this
+# union that no root position admits except the two its own rules define.
 
 # ``try_catch`` is deliberately ABSENT here: this set widens the LEGACY
 # source/target flow's terminal vocabulary, and #142 adds no legacy dialect. A
@@ -2506,6 +2709,91 @@ _ROOT_CONTROL_TERMINAL_KINDS = frozenset({"branch", "decision", "exception"})
 #: class ADR-001 §6 exists to remove. A linear kind added to ``LinearNodeV1`` now
 #: reaches the root sequence automatically instead of silently lacking a row.
 _ROOT_LINEAR_KINDS = frozenset(LINEAR_BODY_KINDS)
+
+
+def _is_serialized_region_chain(steps: List[Any]) -> bool:
+    """Does this root have the SHAPE of a serialized connector-region chain?
+
+    Recognition only — legality is `_check_serialized_region_chain`'s job, and
+    keeping them apart is deliberate: a payload that merely LOOKS like a chain
+    must reach the checker and be told what is wrong with it, not fall through to
+    a generic refusal that describes a different grammar.
+
+    The shape is: two or more `try_catch` steps, everything between them a single
+    optional `map_ref`, and nothing else. Requiring TWO is what makes this branch
+    unreachable for every pre-#156 document — a lone handler keeps the
+    sole-root-step and connector-terminal rules it always had.
+    """
+    kinds = [getattr(step, "kind", None) for step in steps]
+    if kinds.count("try_catch") < 2:
+        return False
+    if set(kinds) - {"try_catch", "map_ref"}:
+        return False
+    return kinds[0] == "try_catch" and kinds[-1] == "try_catch"
+
+
+def _check_no_orphan_continue(steps: List[Any]) -> None:
+    """A `continue` protected terminal outside a serialized chain."""
+    for index, step in enumerate(steps):
+        if getattr(step, "kind", None) != "try_catch":
+            continue
+        if getattr(step.try_body.terminal, "kind", None) == "continue":
+            raise _continuation_error(
+                "a try_catch may end its protected path in continue only when "
+                "another connector-scoped handler follows it — this one has no "
+                "next region, so the documents would reach no terminal "
+                "(step {0})".format(index)
+            )
+
+
+def _check_serialized_region_chain(steps: List[Any]) -> None:
+    """The chain's own grammar. Every rule here is a refusal a caller can act on."""
+    kinds = [getattr(step, "kind", None) for step in steps]
+
+    # A map must SEPARATE two handlers — never doubled, never trailing. The
+    # captured graph puts exactly one between the guards, and a map with no
+    # following handler would have no consumer for its destination profile.
+    for i, kind in enumerate(kinds):
+        if kind != "map_ref":
+            continue
+        if i == 0 or kinds[i - 1] != "try_catch" or kinds[i + 1] != "try_catch":
+            raise _cardinality_error(
+                "a map_ref between serialized try_catch regions must sit "
+                "immediately between two handlers (step {0})".format(i)
+            )
+
+    handlers = [(i, step) for i, step in enumerate(steps) if step.kind == "try_catch"]
+    for position, (index, handler) in enumerate(handlers):
+        is_final = position == len(handlers) - 1
+        # EVERY handler in a chain is connector-scoped. A process scope owns the
+        # whole flow and is the sole root step by its own rule, so it can neither
+        # follow nor precede anything.
+        if handler.scope != "connector":
+            raise _error_scope_error(
+                "every try_catch in a serialized region chain must be "
+                "connector-scoped — a process scope is the sole root step "
+                "(step {0})".format(index)
+            )
+        terminal_kind = getattr(handler.try_body.terminal, "kind", None)
+        if is_final:
+            if terminal_kind == "continue":
+                raise _continuation_error(
+                    "the last try_catch in a chain may not continue — there is no "
+                    "following handler for its protected path to reach "
+                    "(step {0})".format(index)
+                )
+        elif terminal_kind != "continue":
+            # The load-bearing half. A non-final handler ending in a REAL
+            # terminal emits that shape and then, on the wire, nothing reaches
+            # the next handler at all — a silently truncated flow rather than a
+            # refused one.
+            raise _continuation_error(
+                "a try_catch followed by another handler must end its protected "
+                "path in continue, not {0} — a real terminal would end the flow "
+                "before the next region runs (step {1})".format(
+                    terminal_kind, index
+                )
+            )
 
 
 class SequenceNodeV1(_ProcessIRBase):
@@ -2539,6 +2827,38 @@ class SequenceNodeV1(_ProcessIRBase):
     def _sequence_rules(self) -> "SequenceNodeV1":
         kinds = [step.kind for step in self.steps]
 
+        # #156 T5. SERIALIZED CONNECTOR REGIONS, matched exactly and checked
+        # FIRST — ahead of every exact-match branch below, all of which return
+        # early and would otherwise let a chain (or a misplaced `continue`) past
+        # without ever consulting this grammar.
+        #
+        # The chain is `handler (map_ref? handler)*`: every handler connector-
+        # scoped, every non-final protected path ending in `continue`, the final
+        # one ending in a real terminal. That is the legacy double-guard shape,
+        # whose captured graph runs `catcherrors -> connector -> map ->
+        # catcherrors -> connector -> stop` with the two recovery legs forking off
+        # and terminating independently.
+        #
+        # `_is_serialized_region_chain` requires at least TWO handlers, so no
+        # single-handler payload reaches this branch and every pre-#156 document
+        # keeps its old verdict.
+        if _is_serialized_region_chain(self.steps):
+            _check_serialized_region_chain(self.steps)
+            return self
+
+        # ...and OUTSIDE a chain, a `continue` protected terminal is an orphan:
+        # it asserts the flow reaches a following handler, and there is none.
+        #
+        # Checked here rather than left to the loop below because the two
+        # exact-match branches that follow — the control-only try_catch root, and
+        # the connector_call sequence ending in a handler — both `return self`
+        # without ever inspecting a try TERMINAL. MEASURED (Stage-1 QA
+        # QA-156-r1-02, then reproduced): both shapes PARSED, and only a later
+        # compiler check refused them, on an unterminated-path code that
+        # describes a graph defect rather than the authoring mistake. That is the
+        # parser/compiler divergence this slice closed everywhere else.
+        _check_no_orphan_continue(self.steps)
+
         # CONTROL-ONLY root (#141), checked FIRST and matched EXACTLY so no
         # existing payload can reach it: every pre-#141 root either starts with
         # `source`/`connector_call`/`process_call` or has more than one step, and
@@ -2567,6 +2887,15 @@ class SequenceNodeV1(_ProcessIRBase):
         for i, kind in enumerate(kinds):
             if kind == "source" and i != 0:
                 raise _cardinality_error("source may appear only as the first step")
+            # A `continue` outside the chain above has no next handler to continue
+            # onto. Checked here rather than by omission from a union, because it
+            # IS a member of the try-terminal union — the position is what decides
+            # it, and a caller who wrote one deserves to be told that.
+            if kind == "continue":
+                raise _continuation_error(
+                    "continue is not a root step — it terminates the protected "
+                    "path of a non-final connector-scoped try_catch"
+                )
 
         # A control node anywhere but the final position is a CONTINUATION
         # request (#141). Reported with its own capability code rather than the
@@ -2853,6 +3182,20 @@ PROCESS_IR_V1_CAPABILITIES: Mapping[str, str] = MappingProxyType(
         "continuation_after_branch_or_decision": "gated",  # #141 — terminal fan-out only
         "rich_branch_decision_bodies": "supported",  # #141
         "scoped_try_catch": "supported",  # #142
+        # #156 M12.18. Notify on the recovery path, the terminal recovery
+        # hand-off, and serialized connector regions.
+        #
+        # `recovery_process_call` is SUPPORTED while `process_call_connector_mixing`
+        # stays gated above, and the two are consistent: the mixing rule is about
+        # a call and a connector on one root-to-leaf SUCCESS path. A catch leg is
+        # the fork taken when that path fails, the upstream connector has already
+        # run, and its documents are exactly what the hand-off receives. Live
+        # capture (issue-156) executed the graph with the child running once per
+        # caught document, a success control showing no child run, and an abort
+        # control turning the parent ERROR on child failure.
+        "catch_notify": "supported",  # #156
+        "recovery_process_call": "supported",  # #156 — terminal, wait+abort true
+        "serialized_connector_regions": "supported",  # #156
         "bounded_retry": "supported",  # #142 — 0-5, the platform's own bound
         "typed_idempotency_evidence": "supported",  # #142
         # #142 M12.7. Three UNSUPPORTED rows below mean "never", not "not yet" —
@@ -3013,6 +3356,8 @@ _DISCRIMINATOR_TAGS = frozenset(
         "verified_action",
         "key_reference",
         "exception",
+        "notify",
+        "continue",
         "stop",
         "return_documents",
         "static",
@@ -3145,6 +3490,9 @@ _REMEDIATION = {
         "End the catch body with a stop, an exception, or a staging cache_put — "
         "every caught document must reach a terminal."
     ),
+    PROCESS_IR_SEMANTIC_RECOVERY_PROCESS_CALL_INVALID: (
+        "Author the recovery call with wait=true and abort_on_error=true. abort_on_error defaults to false, so it must be written explicitly: the parent has to observe a failed hand-off rather than complete over it."
+    ),
 }
 
 _CUSTOM_ERROR_CODES = {
@@ -3169,6 +3517,10 @@ _CUSTOM_ERROR_CODES = {
         PROCESS_IR_CAPABILITY_ERROR_SCOPE_UNSUPPORTED
     ),
     "process_ir_semantic_catch_unterminated": PROCESS_IR_SEMANTIC_CATCH_UNTERMINATED,
+    # #156
+    "process_ir_semantic_recovery_process_call_invalid": (
+        PROCESS_IR_SEMANTIC_RECOVERY_PROCESS_CALL_INVALID
+    ),
     # #175
     "process_ir_capability_process_call_return_path_binding_unsupported": (
         PROCESS_IR_CAPABILITY_PROCESS_CALL_RETURN_PATH_BINDING_UNSUPPORTED
@@ -3199,6 +3551,7 @@ _MESSAGES = {
         "unsupported error scope or error-scope placement"
     ),
     PROCESS_IR_SEMANTIC_CATCH_UNTERMINATED: "the catch body does not reach a terminal",
+    PROCESS_IR_SEMANTIC_RECOVERY_PROCESS_CALL_INVALID: "a recovery process_call is not authored wait=true and abort_on_error=true",
     PROCESS_IR_CAPABILITY_PROCESS_CALL_RETURN_PATH_BINDING_UNSUPPORTED: (
         "a process call may not be followed by another node in ProcessIR v1"
     ),

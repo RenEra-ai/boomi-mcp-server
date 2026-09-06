@@ -529,7 +529,12 @@ def _union_kinds(alias):
         # #154 brought the Try/Catch bodies under the same pin. They were the
         # slots that had DRIFTED while unpinned.
         (bodycaps.TRY_BODY, bodycaps.STEP_SLOT, "TryCatchBodyStepV1"),
-        (bodycaps.CATCH_BODY, bodycaps.STEP_SLOT, "TryCatchBodyStepV1"),
+        # #156 T4: the catch body is the ONE body with its own step alias, and
+        # the pin is what keeps it honest — `CatchBodyStepV1` is composed from
+        # the shared members plus `notify`, so a shared-vocabulary kind that
+        # failed to reach it, or a second kind smuggled in beside `notify`,
+        # fails here.
+        (bodycaps.CATCH_BODY, bodycaps.STEP_SLOT, "CatchBodyStepV1"),
     ],
 )
 def test_registry_step_rows_match_the_model_unions(context, slot, alias_name):
@@ -587,12 +592,28 @@ _SHIPPED_MATRIX_V1 = {
     },
     # #154 item 2: the legacy builder wraps a Return Documents terminal inside
     # its process-scoped Try/Catch, so the protected path may end on one.
-    (bodycaps.TRY_BODY, bodycaps.TERMINAL_SLOT): {"stop", "return_documents"},
+    # #156 T5 added `continue` HERE only: the no-emission terminal of a
+    # non-final connector-scoped handler. It is not admitted in any catch or
+    # control-body slot — a recovery path always terminates.
+    (bodycaps.TRY_BODY, bodycaps.TERMINAL_SLOT): {
+        "stop", "return_documents", "continue",
+    },
+    # #156 T4 widened THIS row and no other with `notify`. If a review sees
+    # `notify` appear in any of the four rows above, the shared union was widened
+    # instead of the catch-specific one.
     (bodycaps.CATCH_BODY, bodycaps.STEP_SLOT): {
         "cache_get", "cache_put", "cache_remove", "connector_call", "data_process",
-        "document_cache_retrieve", "flow_control", "map_ref", "message", "set_ddp", "set_dpp",
+        "document_cache_retrieve", "flow_control", "map_ref", "message", "notify",
+        "set_ddp", "set_dpp",
     },
-    (bodycaps.CATCH_BODY, bodycaps.TERMINAL_SLOT): {"stop", "exception", "cache_put"},
+    # #156 T5 added `process_call` HERE and nowhere else: the recovery hand-off,
+    # terminal, with only a notify prefix admitted before it and both
+    # wait/abort_on_error required true. The other three terminal rows are
+    # untouched — a `process_call` appearing in one of them would mean the
+    # recovery exemption leaked out of the catch leg.
+    (bodycaps.CATCH_BODY, bodycaps.TERMINAL_SLOT): {
+        "stop", "exception", "cache_put", "process_call",
+    },
 }
 
 

@@ -547,16 +547,24 @@ _NODE_FACTS: Mapping[str, Mapping[str, Any]] = {
         _ORDERING: (
             "A process call may not share a root-to-leaf path with a connector "
             "call while that combination is capability-gated; sibling paths are "
-            "independent and do not count as sharing.",
+            "independent and do not count as sharing. A catch body is the one "
+            "exception: a recovery call is not blocked by a connector that ran "
+            "upstream of the handler, because that connector's documents are "
+            "what the recovery receives.",
             "Nothing may follow a process call. Author it as the terminal of its "
-            "path, with no steps before it in that body and no stop after it; a "
-            "root sequence containing a call holds that call and nothing else.",
+            "path, with no stop after it; a root sequence containing a call holds "
+            "that call and nothing else. Steps before it in the same body are "
+            "refused everywhere except a catch body, which admits notify steps "
+            "ahead of the call.",
+            "On a catch body terminal a call must be authored wait=true and "
+            "abort_on_error=true. abort_on_error defaults to false, so it has to "
+            "be written explicitly; the default is refused, never rewritten.",
             "To run several children, give each its own path — separate branch "
             "paths, or separate wrappers — rather than chaining calls.",
         ),
         _DOCS: ("required", "documents", "per_document"),
         _CAPS: ("process_call_connector_mixing", "terminal_process_call",
-                "process_call_return_path_binding"),
+                "process_call_return_path_binding", "recovery_process_call"),
         _STAGES: ("author", "repair"),
     },
     "branch": {
@@ -623,7 +631,10 @@ _NODE_FACTS: Mapping[str, Mapping[str, Any]] = {
             "Retry count is 0-5, the platform's own bound."
         ),
         _ORDERING: (
-            "Both paths terminate independently; nothing may follow a try_catch.",
+            "Both paths terminate independently. Nothing may follow a try_catch "
+            "except another connector-scoped handler in a serialized chain, "
+            "which the preceding handler reaches by ending its protected path in "
+            "continue.",
             "Retry over an action classified non_idempotent or unverified is "
             "refused outright, whatever evidence is attached.",
             "Typed idempotency evidence only discharges the obligation on an "
@@ -635,6 +646,8 @@ _NODE_FACTS: Mapping[str, Mapping[str, Any]] = {
             "scoped_try_catch",
             "bounded_retry",
             "typed_idempotency_evidence",
+            "catch_notify",
+            "serialized_connector_regions",
             "nested_try_catch",
             "catch_error_type_lists",
             "retry_backoff_authoring",
@@ -659,6 +672,50 @@ _NODE_FACTS: Mapping[str, Mapping[str, Any]] = {
         ),
         _ORDERING: ("An exception terminates its path; nothing may follow it.",),
         _DOCS: ("required", "none", "per_document"),
+        _STAGES: ("author",),
+    },
+    # #156 T5. Continue is STRUCTURAL: it emits no shape at all, which is the
+    # whole reason it exists — the platform's own graph has no closing shape on a
+    # continuing protected path, so every terminal that emits one is wrong there.
+    "continue": {
+        "category": "terminal",
+        "title": "Continue",
+        "summary": (
+            "Ends the protected path of a try_catch that is followed by another "
+            "handler, without ending the flow: the documents go on to the next "
+            "region. It emits no shape of its own."
+        ),
+        _ORDERING: (
+            "Continue is not a stop. A stop ends the document's path; continue "
+            "asserts the opposite, that the path carries on into the next region.",
+            "Only a handler that is followed by another handler may continue — "
+            "the last one in a chain must reach a real terminal.",
+        ),
+        _DOCS: ("required", "documents", "per_document"),
+        _STAGES: ("author",),
+    },
+    # #156 T4. No sentence here names a placement slot: where Notify may appear
+    # is decided by BODY_CAPABILITIES_V1 and served by `_derived_placement_fact`,
+    # and a hand-written "catch body only" would be a second copy of that fact —
+    # the exact drift `_assert_no_hand_written_placement_claim` exists to refuse.
+    "notify": {
+        "category": "reliability",
+        "title": "Notify",
+        "summary": (
+            "Writes one message to the process execution log, tagged with a "
+            "level. The message template must reference the caught-error "
+            "property token so the logged line carries the error that was "
+            "caught; the token may appear more than once."
+        ),
+        _ORDERING: (
+            "Notify logs and continues — it is a step, not a terminal, and the "
+            "path goes on to whatever follows it.",
+            "It reports an error; it does not handle one. Staging the document, "
+            "throwing, or handing it to another process are separate steps.",
+            "There is no recipient, address, subject or transport: this writes to "
+            "the platform's own execution log, not to a notification channel.",
+        ),
+        _DOCS: ("required", "documents", "per_document"),
         _STAGES: ("author",),
     },
     "stop": {
@@ -972,9 +1029,26 @@ def _derived_placement_fact(
 #: placement statement is the derived one, which every node entry carries; these
 #: are advisory prose that merely happen to name a slot.
 _REVIEWED_PLACEMENT_PROSE: Mapping[str, Tuple[str, ...]] = MappingProxyType({
-    # structuring advice; names no admission
+    # #156. Three sentences naming the catch body, each compared to
+    # BODY_CAPABILITIES_V1 and to the rules that render it:
+    #   * the mixing exemption — `_walk_try_catch` clears `connector_above` for
+    #     the CATCH traversal only; every other body still inherits it, and
+    #     `test_the_recovery_exemption_does_not_leak_to_a_non_recovery_body`
+    #     holds a Branch leg with EMPTY steps (so no prefix rule can pre-empt the
+    #     ancestry check) and requires the refusal;
+    #   * the notify prefix — `process_call_placement_verdict(..., recovery=True)`
+    #     admits a prefix of `notify` steps and returns PLACEMENT_PREFIX naming
+    #     the first step that is anything else;
+    #   * the flag rule — the same verdict returns PLACEMENT_RECOVERY_FLAGS by
+    #     VALUE, so a defaulted `abort_on_error=False` is refused identically to
+    #     an authored one.
+    # Matrix rows: `(catch_body, terminal)` admits `process_call`; the branch-leg
+    # and decision-arm terminal rows are unchanged by this slice.
     "process_call": (
         'To run several children, give each its own path — separate branch paths, or separate wrappers — rather than chaining calls.',
+        "A process call may not share a root-to-leaf path with a connector call while that combination is capability-gated; sibling paths are independent and do not count as sharing. A catch body is the one exception: a recovery call is not blocked by a connector that ran upstream of the handler, because that connector's documents are what the recovery receives.",
+        'Nothing may follow a process call. Author it as the terminal of its path, with no stop after it; a root sequence containing a call holds that call and nothing else. Steps before it in the same body are refused everywhere except a catch body, which admits notify steps ahead of the call.',
+        'On a catch body terminal a call must be authored wait=true and abort_on_error=true. abort_on_error defaults to false, so it has to be written explicitly; the default is refused, never rewritten.',
     ),
     # state-ordering semantics; names no admission
     "set_dpp": (

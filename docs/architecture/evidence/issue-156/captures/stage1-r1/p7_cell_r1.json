@@ -1,0 +1,81 @@
+{
+  "cell": {
+    "variant": "r1",
+    "authored_retry_count": 1,
+    "process_id": "69253b41-47dd-4313-a9c2-0ed51fe5ba77",
+    "execution_id": "execution-3c0017fa-4d09-49a8-a373-3647eb19b7fd-2026.09.06",
+    "execution_status": "COMPLETE",
+    "counterparty_counts": {
+      "r1_src": 1,
+      "r1_fail": 2,
+      "r1_c1": 0,
+      "r1_c2": 1
+    },
+    "expected_fail_requests": 2,
+    "observed_fail_requests": 2,
+    "lines": [
+      "2026-09-06T07:23:02.841889090Z INFO:     192.168.65.1:54806 - \"GET /admin/refdata/api/v1/rdcds/offices?qa=QA156D0906065703-r1src HTTP/1.1\" 200 OK",
+      "2026-09-06T07:23:02.858966298Z INFO:     192.168.65.1:29330 - \"GET /__QA156D__/QA156D0906065703/r1fail HTTP/1.1\" 404 Not Found",
+      "2026-09-06T07:23:02.880256631Z INFO:     192.168.65.1:19544 - \"GET /__QA156D__/QA156D0906065703/r1fail HTTP/1.1\" 404 Not Found",
+      "2026-09-06T07:23:02.950806715Z INFO:     192.168.65.1:56792 - \"GET /admin/refdata/api/v1/rdcds/offices?qa=QA156D0906065703-r1c2 HTTP/1.1\" 200 OK"
+    ],
+    "verdict": "PASS"
+  },
+  "execute": {
+    "_success": true,
+    "request_id": "executionrecord-afa2f11f-f472-4eaa-8f44-aa97cb8f4d00",
+    "process_id": "69253b41-47dd-4313-a9c2-0ed51fe5ba77",
+    "environment_id": null,
+    "atom_id": "a40a3313-1537-47c4-91c7-573a703537c7",
+    "execution_result": {
+      "poll_status": "COMPLETED",
+      "elapsed_seconds": 16.3,
+      "poll_count": 8,
+      "execution_id": "execution-3c0017fa-4d09-49a8-a373-3647eb19b7fd-2026.09.06",
+      "status": "COMPLETE",
+      "process_name": "_TEST_156D_QA156D0906065703_RC2 r1 chain",
+      "atom_name": "renera-local-atom",
+      "execution_time": "2026-09-06T07:23:02Z",
+      "execution_duration": 146,
+      "inbound_document_count": 1,
+      "outbound_document_count": 1,
+      "inbound_error_document_count": 0,
+      "error": null
+    },
+    "execution_id": "execution-3c0017fa-4d09-49a8-a373-3647eb19b7fd-2026.09.06"
+  },
+  "execution_record": {
+    "@type": "ExecutionRecord",
+    "executionId": "execution-3c0017fa-4d09-49a8-a373-3647eb19b7fd-2026.09.06",
+    "account": "trainingglebbochkarov-16926N",
+    "executionTime": "2026-09-06T07:23:02Z",
+    "status": "COMPLETE",
+    "executionType": "exec_manual",
+    "processName": "_TEST_156D_QA156D0906065703_RC2 r1 chain",
+    "processId": "69253b41-47dd-4313-a9c2-0ed51fe5ba77",
+    "atomName": "renera-local-atom",
+    "atomId": "a40a3313-1537-47c4-91c7-573a703537c7",
+    "inboundDocumentCount": 1,
+    "inboundErrorDocumentCount": 0,
+    "outboundDocumentCount": 1,
+    "executionDuration": [
+      "Long",
+      146
+    ],
+    "inboundDocumentSize": [
+      "Long",
+      0
+    ],
+    "outboundDocumentSize": [
+      "Long",
+      6937
+    ],
+    "recordedDate": "2026-09-06T07:23:02Z"
+  },
+  "window": [
+    "2026-09-06T07:23:02.841889090Z INFO:     192.168.65.1:54806 - \"GET /admin/refdata/api/v1/rdcds/offices?qa=QA156D0906065703-r1src HTTP/1.1\" 200 OK",
+    "2026-09-06T07:23:02.858966298Z INFO:     192.168.65.1:29330 - \"GET /__QA156D__/QA156D0906065703/r1fail HTTP/1.1\" 404 Not Found",
+    "2026-09-06T07:23:02.880256631Z INFO:     192.168.65.1:19544 - \"GET /__QA156D__/QA156D0906065703/r1fail HTTP/1.1\" 404 Not Found",
+    "2026-09-06T07:23:02.950806715Z INFO:     192.168.65.1:56792 - \"GET /admin/refdata/api/v1/rdcds/offices?qa=QA156D0906065703-r1c2 HTTP/1.1\" 200 OK"
+  ]
+}

@@ -1,0 +1,120 @@
+{
+  "cell": {
+    "cell": "D1",
+    "root": "procD",
+    "process_id": "a6526452-8ff1-417b-a74a-e0749693c1a6",
+    "started_utc": "2026-09-06T07:05:42.599396+00:00",
+    "note": "serialized regions; fail ONLY the second connector",
+    "execution_id": "execution-f295aa2a-64ae-497c-a940-333308472c09-2026.09.06",
+    "execution_status": "COMPLETE",
+    "wait_status": "INPROCESS",
+    "inbound_error_documents": 0,
+    "counterparty_counts": {
+      "src": 1,
+      "c1": 0,
+      "c2": 1,
+      "cb": 0,
+      "fail": 3,
+      "abf": 0
+    },
+    "counterparty_lines": {
+      "src": [
+        "2026-09-06T07:05:44.032791970Z INFO:     192.168.65.1:22187 - \"GET /admin/refdata/api/v1/rdcds/offices?qa=QA156D0906065703-src HTTP/1.1\" 200 OK"
+      ],
+      "c1": [],
+      "c2": [
+        "2026-09-06T07:05:57.232900712Z INFO:     192.168.65.1:29751 - \"GET /admin/refdata/api/v1/rdcds/offices?qa=QA156D0906065703-c2 HTTP/1.1\" 200 OK"
+      ],
+      "cb": [],
+      "fail": [
+        "2026-09-06T07:05:44.051190845Z INFO:     192.168.65.1:35303 - \"GET /__QA156D__/QA156D0906065703/r2fail HTTP/1.1\" 404 Not Found",
+        "2026-09-06T07:05:44.065688262Z INFO:     192.168.65.1:57541 - \"GET /__QA156D__/QA156D0906065703/r2fail HTTP/1.1\" 404 Not Found",
+        "2026-09-06T07:05:57.193549254Z INFO:     192.168.65.1:30812 - \"GET /__QA156D__/QA156D0906065703/r2fail HTTP/1.1\" 404 Not Found"
+      ],
+      "abf": []
+    },
+    "subprocess_records": [],
+    "notify_log_lines": [
+      "tExecuting Process _TEST_156D_QA156D0906065703 procD serialized regions",
+      "tLoading Process Model _TEST_156D_QA156D0906065703 procD serialized regions (Continuation f_0)",
+      "tExecuting Process _TEST_156D_QA156D0906065703 procD serialized regions (Continuation f_0)",
+      "t_TEST_156D_QA156D0906065703 conn: officialboomi-X3979C-rest-prod Connector; _TEST_156D_QA156D0906065703 op_src",
+      "t_TEST_156D_QA156D0906065703 conn: officialboomi-X3979C-rest-prod Connector; _TEST_156D_QA156D0906065703 op_src",
+      "tExecuting Process _TEST_156D_QA156D0906065703 procD serialized regions (Continuation f_0_0)",
+      "t_TEST_156D_QA156D0906065703 conn: officialboomi-X3979C-rest-prod Connector; _TEST_156D_QA156D0906065703 op_fail",
+      "t_TEST_156D_QA156D0906065703 conn: officialboomi-X3979C-rest-prod Connector; _TEST_156D_QA156D0906065703 op_fail",
+      "t_TEST_156D_QA156D0906065703 procD serialized regions (Continuation f_0_0) encountered 1 document error(s)",
+      "tExecuting Process _TEST_156D_QA156D0906065703 procD serialized regions (Continuation f_0_1)"
+    ],
+    "window_size": 5
+  },
+  "execute": {
+    "_success": true,
+    "request_id": "executionrecord-1851e8d3-6d6e-498d-acdf-387011fc2c23",
+    "process_id": "a6526452-8ff1-417b-a74a-e0749693c1a6",
+    "environment_id": null,
+    "atom_id": "a40a3313-1537-47c4-91c7-573a703537c7",
+    "execution_result": {
+      "poll_status": "COMPLETED",
+      "elapsed_seconds": 11.6,
+      "poll_count": 6,
+      "execution_id": "execution-f295aa2a-64ae-497c-a940-333308472c09-2026.09.06",
+      "status": "INPROCESS",
+      "process_name": "_TEST_156D_QA156D0906065703 procD serialized regions",
+      "atom_name": "renera-local-atom",
+      "execution_time": "2026-09-06T07:05:43Z",
+      "execution_duration": 0,
+      "inbound_document_count": 1,
+      "outbound_document_count": 0,
+      "inbound_error_document_count": 0,
+      "error": null
+    },
+    "execution_id": "execution-f295aa2a-64ae-497c-a940-333308472c09-2026.09.06"
+  },
+  "execution_record": {
+    "@type": "ExecutionRecord",
+    "executionId": "execution-f295aa2a-64ae-497c-a940-333308472c09-2026.09.06",
+    "account": "trainingglebbochkarov-16926N",
+    "executionTime": "2026-09-06T07:05:43Z",
+    "status": "COMPLETE",
+    "executionType": "exec_manual",
+    "processName": "_TEST_156D_QA156D0906065703 procD serialized regions",
+    "processId": "a6526452-8ff1-417b-a74a-e0749693c1a6",
+    "atomName": "renera-local-atom",
+    "atomId": "a40a3313-1537-47c4-91c7-573a703537c7",
+    "inboundDocumentCount": 1,
+    "inboundErrorDocumentCount": 0,
+    "outboundDocumentCount": 1,
+    "executionDuration": [
+      "Long",
+      13257
+    ],
+    "inboundDocumentSize": [
+      "Long",
+      0
+    ],
+    "outboundDocumentSize": [
+      "Long",
+      6937
+    ],
+    "recordedDate": "2026-09-06T07:05:57Z"
+  },
+  "logs": {
+    "_success": true,
+    "status_code": 202,
+    "message": "Beginning download.",
+    "download_url": "https://platform.boomi.com/account/trainingglebbochkarov-16926N/api/download/ProcessLog-19139593-d4ba-4e77-81ac-7eff280f4a29",
+    "_downloaded": true,
+    "files": {
+      "ProcessLog_18043741534548496091.log": "2026-09-06T07:05:44Z\tINFO\tinitializing...\t\tExecuting Process _TEST_156D_QA156D0906065703 procD serialized regions\n2026-09-06T07:05:44Z\tINFO\tStart\tNoData\tExecuting Start Shape\n2026-09-06T07:05:44Z\tINFO\tStart\tNoData\t1 document(s) found for processing.\n2026-09-06T07:05:44Z\tINFO\tStart\tNoData\tShape executed successfully in 3 ms.\n2026-09-06T07:05:44Z\tINFO\tTry/Catch all errors (no retry) - route caught documents to the failure handler\t\tExecuting Try/Catch Shape with 1 document(s).\n2026-09-06T07:05:44Z\tINFO\tTry/Catch all errors (no retry) - route caught documents to the failure handler\t\tLaunching Try/Catch Shape fiber f_0 as execution-aa5c48f5-1166-4534-b705-6f3613d6bc12-2026.09.06 with 1 document(s).\n2026-09-06T07:05:57Z\tINFO\tTry/Catch all errors (no retry) - route caught documents to the failure handler\t\tCompleted Try/Catch initial execution (shape2)\n2026-09-06T07:05:44Z\tFINE\tinitializing...\t\tLoading Process Model _TEST_156D_QA156D0906065703 procD serialized regions (Continuation f_0)\n2026-09-06T07:05:44Z\tINFO\tinitializing...\t\tExecuting Process _TEST_156D_QA156D0906065703 procD serialized regions (Continuation f_0)\n2026-09-06T07:05:44Z\tINFO\tTry/Catch all errors (no retry) - route caught documents to the failure handler\t\tExecuting Try/Catch Shape continuation as f_0 with 1 document(s).\n2026-09-06T07:05:44Z\tINFO\tTry/Catch all errors (no retry) - route caught documents to the failure handler\t\tShape executed successfully in 1 ms.\n2026-09-06T07:05:44Z\tINFO\tConnector\t_TEST_156D_QA156D0906065703 conn: officialboomi-X3979C-rest-prod Connector; _TEST_156D_QA156D0906065703 op_src\tExecuting Connector Shape with 1 document(s).\n2026-09-06T07:05:44Z\tINFO\tConnector\t_TEST_156D_QA156D0906065703 conn: officialboomi-X3979C-rest-prod Connector; _TEST_156D_QA156D0906065703 op_src\tShape executed successfully in 9 ms.\n2026-09-06T07:05:44Z\tINFO\tTry/Catch all errors (retry 2) - route caught documents to the failure handler\t\tExecuting Try/Catch Shape with 1 document(s).\n2026-09-06T07:05:44Z\tINFO\tTry/Catch all errors (retry 2) - route caught documents to the failure handler\t\tLaunching Try/Catch Shape fiber f_0_0 as execution-a36e5513-b901-4432-886d-7c874a74b787-2026.09.06 with 1 document(s).\n2026-09-06T07:05:44Z\tINFO\tTry/Catch all errors (retry 2) - route caught documents to the failure handler\t\tCompleted Try/Catch initial execution (shape4)\n2026-09-06T07:05:44Z\tINFO\tinitializing...\t\tExecuting Process _TEST_156D_QA156D0906065703 procD serialized regions (Continuation f_0_0)\n2026-09-06T07:05:44Z\tINFO\tTry/Catch all errors (retry 2) - route caught documents to the failure handler\t\tExecuting Try/Catch Shape continuation as f_0_0 with 1 document(s).\n2026-09-06T07:05:44Z\tINFO\tTry/Catch all errors (retry 2) - route caught documents to the failure handler\t\tShape executed successfully in 6 ms.\n2026-09-06T07:05:44Z\tINFO\tConnector\t_TEST_156D_QA156D0906065703 conn: officialboomi-X3979C-rest-prod Connector; _TEST_156D_QA156D0906065703 op_fail\tExecuting Connector Shape with 1 document(s).\n2026-09-06T07:05:44Z\tINFO\tConnector\t_TEST_156D_QA156D0906065703 conn: officialboomi-X3979C-rest-prod Connector; _TEST_156D_QA156D0906065703 op_fail\tShape executed with errors in 9 ms.\n2026-09-06T07:05:44Z\tINFO\tStop\tcontinuing process\tExecuting Stop Shape with 1 document(s).\n2026-09-06T07:05:44Z\tINFO\tStop\tcontinuing process\tShape executed successfully in 0 ms.\n2026-09-06T07:05:44Z\tWARNING\tcleanup...\t\t_TEST_156D_QA156D0906065703 procD serialized regions (Continuation f_0_0) encountered 1 document error(s)\n2026-09-06T07:05:44Z\tINFO\tcleanup...\t\tProcess execution completed normally.\n2026-09-06T07:05:44Z\tINFO\tTry/Catch all errors (retry 2) - route caught documents to the failure handler\t\tExecuting Try/Catch Shape (retry 1) with 1 document(s).\n2026-09-06T07:05:44Z\tINFO\tTry/Catch all errors (retry 2) - route caught documents to the failure handler\t\tLaunching Try/Catch Shape fiber f_0_1 as execution-c1fb02bc-8baa-4110-b1e6-d6442fdc1caa-2026.09.06 with 1 document(s).\n2026-09-06T07:05:44Z\tINFO\tTry/Catch all errors (retry 2) - route caught documents to the failure handler\t\tCompleted Try/Catch Retry 1(shape4)\n2026-09-06T07:05:44Z\tINFO\tinitializing...\t\tExecuting Process _TEST_156D_QA156D0906065703 procD serialized regions (Continuation f_0_1)\n2026-09-06T07:05:44Z\tINFO\tTry/Catch all errors (retry 2) - route caught documents to the failure handler\t\tExecuting Try/Catch Shape continuation as f_0_1 with 1 document(s).\n2026-09-06T07:05:44Z\tINFO\tTry/Catch all errors (retry 2) - route caught documents to the failure handler\t\tShape executed successfully in 0 ms.\n2026-09-06T07:05:44Z\tINFO\tConnector\t_TEST_156D_QA156D0906065703 conn: officialboomi-X3979C-rest-prod Connector; _TEST_156D_QA156D0906065703 op_fail\tExecuting Connector Shape with 1 document(s).\n2026-09-06T07:05:44Z\tINFO\tConnector\t_TEST_156D_QA156D0906065703 conn: officialboomi-X3979C-rest-prod Connector; _TEST_156D_QA156D0906065703 op_fail\tShape executed with errors in 10 ms.\n2026-09-06T07:05:44Z\tINFO\tStop\tcontinuing process\tExecuting Stop Shape with 1 document(s).\n2026-09-06T07:05:44Z\tINFO\tStop\tcontinuing process\tShape executed successfully in 1 ms.\n2026-09-06T07:05:44Z\tWARNING\tcleanup...\t\t_TEST_156D_QA156D0906065703 procD serialized regions (Continuation f_0_1) encountered 1 document error(s)\n2026-09-06T07:05:44Z\tINFO\tcleanup...\t\tProcess execution completed normally.\n2026-09-06T07:05:57Z\tINFO\tTry/Catch all errors (retry 2) - route caught documents to the failure handler\t\tExecuting Try/Catch Shape (retry 2) with 1 document(s).\n2026-09-06T07:05:57Z\tINFO\tTry/Catch all errors (retry 2) - route caught documents to the failure handler\t\tLaunching Try/Catch Shape fiber f_0_2 as execution-163531c5-7e55-4f89-a29a-9698b9921eb8-2026.09.06 with 1 document(s).\n2026-09-06T07:05:57Z\tINFO\tTry/Catch all errors (retry 2) - route caught documents to the failure handler\t\tCompleted Try/Catch Retry 2(shape4)\n2026-09-06T07:05:57Z\tINFO\tinitializing...\t\tExecuting Process _TEST_156D_QA156D0906065703 procD serialized regions (Continuation f_0_2)\n2026-09-06T07:05:57Z\tINFO\tTry/Catch all errors (retry 2) - route caught documents to the failure handler\t\tExecuting Try/Catch Shape continuation as f_0_2 with 1 document(s).\n2026-09-06T07:05:57Z\tINFO\tTry/Catch all errors (retry 2) - route caught documents to the failure handler\t\tShape executed successfully in 4 ms.\n2026-09-06T07:05:57Z\tINFO\tConnector\t_TEST_156D_QA156D0906065703 conn: officialboomi-X3979C-rest-prod Connector; _TEST_156D_QA156D0906065703 op_fail\tExecuting Connector Shape with 1 document(s).\n2026-09-06T07:05:57Z\tINFO\tConnector\t_TEST_156D_QA156D0906065703 conn: officialboomi-X3979C-rest-prod Connector; _TEST_156D_QA156D0906065703 op_fail\tShape executed with errors in 21 ms.\n2026-09-06T07:05:57Z\tINFO\tStop\tcontinuing process\tExecuting Stop Shape with 1 document(s).\n2026-09-06T07:05:57Z\tINFO\tStop\tcontinuing process\tShape executed successfully in 0 ms.\n2026-09-06T07:05:57Z\tWARNING\tcleanup...\t\t_TEST_156D_QA156D0906065703 procD serialized regions (Continuation f_0_2) encountered 1 document error(s)\n2026-09-06T07:05:57Z\tINFO\tcleanup...\t\tProcess execution completed normally.\n2026-09-06T07:05:57Z\tWARNING\tTry/Catch all errors (retry 2) - route caught documents to the failure handler\t\tTry/Catch Shape sending 1 document(s) down error path\n2026-09-06T07:05:57Z\tINFO\tTry/Catch all errors (retry 2) - route caught documents to the failure handler\t\tShape executed successfully in 13101 ms.\n2026-09-06T07:05:57Z\tINFO\tNotify caught error to the process log\t\tExecuting Notify Shape with 1 document(s).\n2026-09-06T07:05:57Z\tSEVERE\tNotify caught error to the process log\t\tCatch path notification: QA156D D2 caught: [404] Not Found\n2026-09-06T07:05:57Z\tINFO\tNotify caught error to the process log\t\tShape executed successfully in 2 ms.\n2026-09-06T07:05:57Z\tINFO\tRecovery hand-off childD2\tstandalone start data, no return data\tExecuting Process Call Shape with 1 document(s).\n2026-09-06T07:05:57Z\tINFO\tRecovery hand-off childD2\tstandalone start data, no return data\tExecuting process '_TEST_156D_QA156D0906065703 childD2\n2026-09-06T07:05:57Z\tINFO\tRecovery hand-off childD2\tstandalone start data, no return data\tShape executed successfully in 0 ms.\n2026-09-06T07:05:57Z\tINFO\tcleanup...\t\tProcess execution completed normally.\n2026-09-06T07:05:57Z\tINFO\tTry/Catch all errors (no retry) - route caught documents to the failure handler\t\tShape executed successfully in 5 ms.\n2026-09-06T07:05:57Z\tINFO\tcleanup...\t\tProcess execution completed normally.\n"
+    }
+  },
+  "subprocess_records": [],
+  "counterparty_window": [
+    "2026-09-06T07:05:44.032791970Z INFO:     192.168.65.1:22187 - \"GET /admin/refdata/api/v1/rdcds/offices?qa=QA156D0906065703-src HTTP/1.1\" 200 OK",
+    "2026-09-06T07:05:44.051190845Z INFO:     192.168.65.1:35303 - \"GET /__QA156D__/QA156D0906065703/r2fail HTTP/1.1\" 404 Not Found",
+    "2026-09-06T07:05:44.065688262Z INFO:     192.168.65.1:57541 - \"GET /__QA156D__/QA156D0906065703/r2fail HTTP/1.1\" 404 Not Found",
+    "2026-09-06T07:05:57.193549254Z INFO:     192.168.65.1:30812 - \"GET /__QA156D__/QA156D0906065703/r2fail HTTP/1.1\" 404 Not Found",
+    "2026-09-06T07:05:57.232900712Z INFO:     192.168.65.1:29751 - \"GET /admin/refdata/api/v1/rdcds/offices?qa=QA156D0906065703-c2 HTTP/1.1\" 200 OK"
+  ]
+}

@@ -54,11 +54,11 @@ takes **only** a typed `EmitterInputV1` member and an `EmitterContext` (the plan
 it declared it needs) — never a raw `IntegrationSpecV1`/`PipelineSpec`/legacy builder config, and no
 facility to mutate anything (guarded by `test_process_emitter_registry.py`).
 
-## 3. The closed manifest — 18 keys, 17 model classes
+## 3. The closed manifest — 19 keys, 18 model classes
 
 Registry completeness is validated at import against
 `TypeAdapter(EmitterInputV1).json_schema()`'s discriminator mapping (`_validate_coverage`). The 17
-model classes yield 18 discriminator keys because `ConnectorActionInputV1` accepts both
+model classes yield 19 discriminator keys because `ConnectorActionInputV1` accepts both
 `connectoraction_source` and `connectoraction_target` — the two keys share one connector renderer.
 
 | Registry key | Input model | Boomi shape | Outgoing | Required symbols |
@@ -130,7 +130,7 @@ caught exception text is ever interpolated.
 | Legacy behavior | Why not registered | Owner |
 |---|---|---|
 | `_emit_start_listen` (WSS Listen start) | WSS metadata fused into the Start shape; no current input kind | #140 |
-| `_emit_notify` | absent from current ProcessIR | #142 |
+| `_emit_notify` | `notify` (#156 M12.18) | #142, transferred #156 |
 | connector `dynamic_path` form | absent from `ConnectorActionInputV1` | #139/#140 |
 | catch-row ProcessCall variants | legacy compositions sharing registered serializers | #142 |
 | listener/process options, overrides, component envelope | artifact metadata, not plan nodes | #139 |
@@ -160,7 +160,7 @@ Byte parity is the hard gate. Two layers of oracle:
 duplicate-key rejection, unknown/missing emitter, missing and wrong-type symbols, duplicate
 component ids with one compatible alias, cardinality, whole-plan preflight (a bad later node blocks
 ALL rendering), determinism, symbol-order and registry-order invariance, renderer-exception →
-`PROCESS_IR_COMPILE_INTERNAL`, the absence of `emit_fragment`/`start_listen`/`notify`/`route`
+`PROCESS_IR_COMPILE_INTERNAL`, the absence of `emit_fragment`/`start_listen`/`route`
 (and, since #142, the PRESENCE of `catcherrors`), and the AST/import isolation guard.
 
 ## 8. #140 M12.5 — ConnectorCall adds NO registry key

@@ -1,0 +1,12 @@
+[
+  {
+    "scenario": "runtime",
+    "file": "runtime_summary.json",
+    "utc": "2026-09-06T03:59:50.217499+00:00",
+    "account_id": "trainingglebbochkarov-16926N",
+    "sha256": "51c9a85445f7c6a57233beadd1fa77519a10e53d388100525ca94001364ef440",
+    "byte_length": 9147,
+    "archive_path": "docs/architecture/evidence/issue-156/captures/runtime/runtime_summary.json",
+    "kind": "reconstructed runtime cell summary"
+  }
+]

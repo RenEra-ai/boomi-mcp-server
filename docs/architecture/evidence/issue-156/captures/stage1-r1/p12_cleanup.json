@@ -1,0 +1,198 @@
+{
+  "freeze": "b07babeb3752/dirty:8f9e24d12302/39ef6aea5fef",
+  "utc": "2026-09-06T07:31:46.676233+00:00",
+  "undeployed": [
+    {
+      "variant": "r0",
+      "deployment_id": "dead8400-0e44-44b6-9eca-1aa8abb7001a",
+      "success": true,
+      "error": null
+    },
+    {
+      "variant": "r1",
+      "deployment_id": "5365883e-4ce6-4403-ba58-6ee6c335f0bd",
+      "success": true,
+      "error": null
+    }
+  ],
+  "packages_deleted": [
+    {
+      "package_id": "9a5218ae-b46b-44fc-96f3-17e1744c1d28",
+      "success": true,
+      "error": null
+    },
+    {
+      "package_id": "de07cd51-9679-4edd-95eb-81c4c324987b",
+      "success": true,
+      "error": null
+    },
+    {
+      "package_id": "21fc4e38-d345-4e9d-a5ba-3743342533e4",
+      "success": true,
+      "error": null
+    },
+    {
+      "package_id": "a9d2f87e-4437-40a9-9346-792689716a17",
+      "success": true,
+      "error": null
+    }
+  ],
+  "deleted": [
+    {
+      "key": "child_r0_1",
+      "component_id": "c318f303-1cc2-41e8-8e25-cea44d4133fc",
+      "name": "_TEST_156D_QA156D0906065703_RC2 r0 child1",
+      "success": true,
+      "error": null
+    },
+    {
+      "key": "child_r0_2",
+      "component_id": "59aa3128-beb7-4105-ad07-7ca727072a76",
+      "name": "_TEST_156D_QA156D0906065703_RC2 r0 child2",
+      "success": true,
+      "error": null
+    },
+    {
+      "key": "child_r1_1",
+      "component_id": "d48afd77-c822-430d-88d4-7fc28b6314ec",
+      "name": "_TEST_156D_QA156D0906065703_RC2 r1 child1",
+      "success": true,
+      "error": null
+    },
+    {
+      "key": "child_r1_2",
+      "component_id": "77aaebd0-d94e-408d-b2bf-958508e905e3",
+      "name": "_TEST_156D_QA156D0906065703_RC2 r1 child2",
+      "success": true,
+      "error": null
+    },
+    {
+      "key": "proc_r0",
+      "component_id": "74e08d7f-fefe-4dfa-b83d-924abbd99045",
+      "name": "_TEST_156D_QA156D0906065703_RC2 r0 chain",
+      "success": true,
+      "error": null
+    },
+    {
+      "key": "proc_r1",
+      "component_id": "69253b41-47dd-4313-a9c2-0ed51fe5ba77",
+      "name": "_TEST_156D_QA156D0906065703_RC2 r1 chain",
+      "success": true,
+      "error": null
+    },
+    {
+      "key": "golden_scoped_try_catch_notify_terminal_process_call",
+      "component_id": "81171932-4499-45b7-9222-1019dc5db1ea",
+      "name": "scoped_try_catch_notify_terminal_process_call",
+      "success": true,
+      "error": null
+    },
+    {
+      "key": "golden_serialized_connector_regions_notify_dlq",
+      "component_id": "6f6707bb-0ea7-42b0-81dc-00a2511addf3",
+      "name": "serialized_connector_regions_notify_dlq",
+      "success": true,
+      "error": null
+    },
+    {
+      "key": "op_r0_c1",
+      "component_id": "e0249a0f-9ab5-48f4-b0bc-acc9f4a80381",
+      "name": "_TEST_156D_QA156D0906065703_RC2 op_r0_c1",
+      "success": true,
+      "error": null
+    },
+    {
+      "key": "op_r0_c2",
+      "component_id": "89d9ffb2-77bd-4e60-b435-32cf3ad22db2",
+      "name": "_TEST_156D_QA156D0906065703_RC2 op_r0_c2",
+      "success": true,
+      "error": null
+    },
+    {
+      "key": "op_r0_fail",
+      "component_id": "ce7da283-7b41-41d6-872a-0cc7fba19a3e",
+      "name": "_TEST_156D_QA156D0906065703_RC2 op_r0_fail",
+      "success": true,
+      "error": null
+    },
+    {
+      "key": "op_r0_src",
+      "component_id": "edf6ab24-b5fc-44e5-ae44-9bb1992960ac",
+      "name": "_TEST_156D_QA156D0906065703_RC2 op_r0_src",
+      "success": true,
+      "error": null
+    },
+    {
+      "key": "op_r1_c1",
+      "component_id": "187617b6-83ea-42b3-b6ac-c900994e3b45",
+      "name": "_TEST_156D_QA156D0906065703_RC2 op_r1_c1",
+      "success": true,
+      "error": null
+    },
+    {
+      "key": "op_r1_c2",
+      "component_id": "760834c7-ee6e-402c-98ef-d47905badf22",
+      "name": "_TEST_156D_QA156D0906065703_RC2 op_r1_c2",
+      "success": true,
+      "error": null
+    },
+    {
+      "key": "op_r1_fail",
+      "component_id": "50f2c667-514e-47a9-aee7-686963bea7ae",
+      "name": "_TEST_156D_QA156D0906065703_RC2 op_r1_fail",
+      "success": true,
+      "error": null
+    },
+    {
+      "key": "op_r1_src",
+      "component_id": "4b06ea65-2114-4e86-a613-ddfdd4b39f8f",
+      "name": "_TEST_156D_QA156D0906065703_RC2 op_r1_src",
+      "success": true,
+      "error": null
+    },
+    {
+      "key": "lvl_op",
+      "component_id": "47412a3b-d206-4a47-a1b4-580adaa85b4d",
+      "name": "op",
+      "success": true,
+      "error": null
+    },
+    {
+      "key": "lvl_p_ERROR",
+      "component_id": "0eb0e8bf-0574-409f-9bdc-7a74561bead8",
+      "name": "p_ERROR",
+      "success": true,
+      "error": null
+    },
+    {
+      "key": "lvl_p_INFO",
+      "component_id": "12585be9-034f-4606-afbb-ca5424b6e6e8",
+      "name": "p_INFO",
+      "success": true,
+      "error": null
+    },
+    {
+      "key": "lvl_p_WARNING",
+      "component_id": "9e73339f-8675-43db-bd75-d81fa5390e49",
+      "name": "p_WARNING",
+      "success": true,
+      "error": null
+    }
+  ],
+  "kept": [
+    "0e3bf314-2565-4d64-a07b-eb4263f53231",
+    "15285b48-f0fc-4fe8-b093-cd664c150252",
+    "1faf9dc2-12e8-4aa6-984e-fce9bfb4d666",
+    "3c0adad6-d0d7-47cc-8815-9b0f53fad7c5",
+    "463e3ee8-1048-45db-8ed6-43f2ba2c042a",
+    "6aa13d4c-f249-4594-b936-221360a97781",
+    "7a7eb72c-a15b-45af-b453-7d7edc430d2c",
+    "7dcaebf3-3ca8-4cf2-9124-1024bacc48d7",
+    "a6526452-8ff1-417b-a74a-e0749693c1a6",
+    "b24ef0d5-ea3d-4450-822c-5dae9675cf5d",
+    "d40c972b-e04a-4b69-943b-fe17982bae09",
+    "f9c4e798-8068-4ccd-b36a-90c0a14fd3b2",
+    "fa52947d-2ad5-47a1-995f-50ed63126934"
+  ],
+  "failures": []
+}

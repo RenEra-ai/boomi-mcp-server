@@ -1,0 +1,26 @@
+[
+  {
+    "label": "B1 vs frozen golden",
+    "equal_blinded": false,
+    "a": {
+      "name": "try_catch_dlq_error_subprocess.xml",
+      "sha256": "b0ce512506e94f3528333974582972da1b653bed4c856b65d16ea7dfd81ed18c"
+    },
+    "b": {
+      "name": "B1_emitted.xml",
+      "sha256": "334ee7d420f94f03de967878f0e91602ed12b97e805fa3b446676ee600afa5b7"
+    }
+  },
+  {
+    "label": "B2 vs B1 (notify delta)",
+    "equal_blinded": false,
+    "a": {
+      "name": "B1_emitted.xml",
+      "sha256": "334ee7d420f94f03de967878f0e91602ed12b97e805fa3b446676ee600afa5b7"
+    },
+    "b": {
+      "name": "B2_emitted.xml",
+      "sha256": "76aa45dcd96e17518076b33d5f788e5aff5d402169f038c34e57907dcff9baef"
+    }
+  }
+]

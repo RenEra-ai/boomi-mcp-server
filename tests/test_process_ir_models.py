@@ -1203,6 +1203,16 @@ def test_schema_closed_discriminated_union():
         "data_process", "cache_put", "document_cache_retrieve", "cache_get",
         "cache_remove", "set_ddp", "set_dpp", "process_call", "branch", "decision",
         "try_catch",  # #142
+        # #156 T4. Membership here is DISCOVERY, not permission: this union is
+        # what the served schema and the projection are derived from, and every
+        # root branch refuses `notify` on its own terms. `try_catch` is in the
+        # same position — reachable in this mapping, admitted at root only by the
+        # two placements its own rules define.
+        "notify",
+        # #156 T5. Same discovery-not-permission rule: `continue` is admitted
+        # ONLY as a non-final connector-scoped try terminal, and refused at root
+        # by `_sequence_rules` on its own terms.
+        "continue",
         "exception", "stop", "return_documents",
     }
 
@@ -1405,12 +1415,20 @@ def test_capability_manifest_immutable_and_complete():
         if state == "supported"
     ) == [
         "bounded_retry",
+        # #156. `catch_notify` and `recovery_process_call` are the recovery-path
+        # pair, and `serialized_connector_regions` the chain. Note the deliberate
+        # coexistence with `process_call_connector_mixing: gated` above: the
+        # mixing rule governs a SUCCESS path, and a catch leg is the fork taken
+        # when that path fails.
+        "catch_notify",
         "connector_call_in_control_body",
         "dynamic_path",
         "generalized_connector_call",
         "mixed_connector_execution",
+        "recovery_process_call",
         "rich_branch_decision_bodies",
         "scoped_try_catch",
+        "serialized_connector_regions",
         "source_replay_policy",
         "terminal_process_call",
         "typed_idempotency_evidence",
@@ -1432,7 +1450,7 @@ def test_every_process_ir_def_has_a_non_empty_description():
     guess at or discover by failing a compile.
     """
     defs = process_ir_v1_json_schema()["$defs"]
-    assert len(defs) == 40
+    assert len(defs) == 42  # #156 added NotifyNodeV1 and ContinueNodeV1
     undescribed = sorted(name for name, body in defs.items() if not body.get("description"))
     assert undescribed == []
 

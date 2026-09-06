@@ -1,0 +1,84 @@
+{
+  "cell": {
+    "cell": "C4",
+    "label": "FAILURE_B2",
+    "process_id": "babbcf52-324f-4169-9e81-ab8fc98a9284",
+    "started_utc": "2026-09-06T03:55:36.151539+00:00",
+    "request_id": "executionrecord-e73e1385-3148-42a6-9580-cad526d9e9c3",
+    "wait_status": "COMPLETE",
+    "execution_id": "execution-05d55c71-3a20-404b-9e13-1e7e5169137b-2026.09.06",
+    "execution_status": "COMPLETE",
+    "counterparty_parent_target_hits": 0,
+    "counterparty_child_ran_hits": 1,
+    "counterparty_child_fail_hits": 0,
+    "counterparty_lines": [
+      "INFO:     192.168.65.1:20497 - \"POST /__ORACLE156__/ORC1560906034913/child-ran HTTP/1.1\" 404 Not Found"
+    ],
+    "expect_note": "DB Get FAILS -> catcherrors -> notify -> processcall -> child RUNS"
+  },
+  "execute": {
+    "_success": true,
+    "request_id": "executionrecord-e73e1385-3148-42a6-9580-cad526d9e9c3",
+    "process_id": "babbcf52-324f-4169-9e81-ab8fc98a9284",
+    "environment_id": null,
+    "atom_id": "a40a3313-1537-47c4-91c7-573a703537c7",
+    "execution_result": {
+      "poll_status": "COMPLETED",
+      "elapsed_seconds": 14.0,
+      "poll_count": 7,
+      "execution_id": "execution-05d55c71-3a20-404b-9e13-1e7e5169137b-2026.09.06",
+      "status": "COMPLETE",
+      "process_name": "_TEST_156_B2_ORC1560906034913",
+      "atom_name": "renera-local-atom",
+      "execution_time": "2026-09-06T03:55:37Z",
+      "execution_duration": 112,
+      "inbound_document_count": 1,
+      "outbound_document_count": 0,
+      "inbound_error_document_count": 0,
+      "error": null
+    },
+    "execution_id": "execution-05d55c71-3a20-404b-9e13-1e7e5169137b-2026.09.06"
+  },
+  "execution_record": {
+    "@type": "ExecutionRecord",
+    "executionId": "execution-05d55c71-3a20-404b-9e13-1e7e5169137b-2026.09.06",
+    "account": "trainingglebbochkarov-16926N",
+    "executionTime": "2026-09-06T03:55:37Z",
+    "status": "COMPLETE",
+    "executionType": "exec_manual",
+    "processName": "_TEST_156_B2_ORC1560906034913",
+    "processId": "babbcf52-324f-4169-9e81-ab8fc98a9284",
+    "atomName": "renera-local-atom",
+    "atomId": "a40a3313-1537-47c4-91c7-573a703537c7",
+    "inboundDocumentCount": 1,
+    "inboundErrorDocumentCount": 0,
+    "outboundDocumentCount": 0,
+    "executionDuration": [
+      "Long",
+      112
+    ],
+    "inboundDocumentSize": [
+      "Long",
+      0
+    ],
+    "outboundDocumentSize": [
+      "Long",
+      0
+    ],
+    "recordedDate": "2026-09-06T03:55:37Z"
+  },
+  "logs": {
+    "_success": true,
+    "status_code": 202,
+    "message": "Beginning download.",
+    "download_url": "https://platform.boomi.com/account/trainingglebbochkarov-16926N/api/download/ProcessLog-f238f502-9a3b-470b-8090-727e160d07b1",
+    "_downloaded": true,
+    "files": {
+      "ProcessLog_18338223064519480048.log": "2026-09-06T03:55:37Z\tFINE\tinitializing...\t\tLoading Process Model _TEST_156_B2_ORC1560906034913\n2026-09-06T03:55:37Z\tINFO\tinitializing...\t\tExecuting Process _TEST_156_B2_ORC1560906034913\n2026-09-06T03:55:37Z\tINFO\tStart\tNoData\tExecuting Start Shape\n2026-09-06T03:55:37Z\tINFO\tStart\tNoData\t1 document(s) found for processing.\n2026-09-06T03:55:37Z\tINFO\tStart\tNoData\tShape executed successfully in 7 ms.\n2026-09-06T03:55:37Z\tINFO\tTry/Catch all errors (no retry) - route caught documents to the failure handler\t\tExecuting Try/Catch Shape with 1 document(s).\n2026-09-06T03:55:37Z\tINFO\tTry/Catch all errors (no retry) - route caught documents to the failure handler\t\tLaunching Try/Catch Shape fiber f_0 as execution-778b1568-bcad-4241-875f-f52cf4f96ca4-2026.09.06 with 1 document(s).\n2026-09-06T03:55:37Z\tINFO\tTry/Catch all errors (no retry) - route caught documents to the failure handler\t\tCompleted Try/Catch initial execution (shape2)\n2026-09-06T03:55:37Z\tFINE\tinitializing...\t\tLoading Process Model _TEST_156_B2_ORC1560906034913 (Continuation f_0)\n2026-09-06T03:55:37Z\tINFO\tinitializing...\t\tExecuting Process _TEST_156_B2_ORC1560906034913 (Continuation f_0)\n2026-09-06T03:55:37Z\tINFO\tTry/Catch all errors (no retry) - route caught documents to the failure handler\t\tExecuting Try/Catch Shape continuation as f_0 with 1 document(s).\n2026-09-06T03:55:37Z\tINFO\tTry/Catch all errors (no retry) - route caught documents to the failure handler\t\tShape executed successfully in 1 ms.\n2026-09-06T03:55:37Z\tINFO\tDB extract\tSandbox MSSQL Expert (jtds): database Connector; _TEST_156_dbget_ORC1560906034913\tExecuting Connector Shape with 1 document(s).\n2026-09-06T03:55:37Z\tFINE\tDB extract\tSandbox MSSQL Expert (jtds): database Connector; _TEST_156_dbget_ORC1560906034913\tLoading Database Connection and Operation settings and establishing connection.\n2026-09-06T03:55:37Z\tFINE\tDB extract\tSandbox MSSQL Expert (jtds): database Connector; _TEST_156_dbget_ORC1560906034913\tClosing Database connector.\n2026-09-06T03:55:37Z\tSEVERE\tDB extract\tSandbox MSSQL Expert (jtds): database Connector; _TEST_156_dbget_ORC1560906034913\tUnexpected error executing process: com.boomi.connector.ConnectorException: Error retrieving db data: Network error IOException: Connection refused (Connection refused)\ncom.boomi.connector.ConnectorException: Error retrieving db data: Network error IOException: Connection refused (Connection refused)\n\tat com.boomi.connector.database.DatabaseGet.get(DatabaseGet.java:105)\n\tat com.boomi.connector.database.DatabaseGet.get(DatabaseGet.java:93)\n\tat com.boomi.connector.custom.CustomGetConnectorAction.invoke(CustomGetConnectorAction.java:49)\n\tat com.boomi.connector.base.BaseConnectorAction.invokeBase(BaseConnectorAction.java:415)\n\tat com.boomi.connector.base.BaseConnectorAction.invokeWithReadStore(BaseConnectorAction.java:311)\n\tat com.boomi.connector.base.BaseConnectorAction.invoke(BaseConnectorAction.java:283)\n\tat java.base/jdk.internal.reflect.NativeMethodAccessorImpl.invoke0(Native Method)\n\tat java.base/jdk.internal.reflect.NativeMethodAccessorImpl.invoke(NativeMethodAccessorImpl.java:62)\n\tat java.base/jdk.internal.reflect.DelegatingMethodAccessorImpl.invoke(DelegatingMethodAccessorImpl.java:43)\n\tat java.base/java.lang.reflect.Method.invoke(Method.java:566)\n\tat com.boomi.util.ClassUtil$InvokerWithClassLoader.invoke(ClassUtil.java:369)\n\tat com.sun.proxy.$Proxy38.invoke(Unknown Source)\n\tat com.boomi.process.shape.ConnectorShapeHandler.execute(ConnectorShapeHandler.java:321)\n\tat com.boomi.process.shape.ConnectorShape.execute(ConnectorShape.java:176)\n\tat com.boomi.process.graph.ProcessShape.lambda$executeShape$0(ProcessShape.java:589)\n\tat com.boomi.container.config.telemetry.BaseTelemetryEngine.lambda$withSpan$4(BaseTelemetryEngine.java:196)\n\tat com.boomi.container.config.telemetry.BaseTelemetryEngine.withSpan(BaseTelemetryEngine.java:243)\n\tat com.boomi.container.config.telemetry.BaseTelemetryEngine.withSpan(BaseTelemetryEngine.java:195)\n\tat com.boomi.container.config.telemetry.BaseTelemetryEngine.withSpan(BaseTelemetryEngine.java:177)\n\tat com.boomi.process.graph.ProcessShape.startSpan(ProcessShape.java:622)\n\tat com.boomi.process.graph.ProcessShape.executeShape(ProcessShape.java:587)\n\tat com.boomi.process.graph.ProcessGraph.executeShape(ProcessGraph.java:521)\n\tat com.boomi.process.graph.ProcessGraph.executeNextShapes(ProcessGraph.java:617)\n\tat com.boomi.process.graph.ProcessGraph.execute(ProcessGraph.java:317)\n\tat com.boomi.process.ProcessExecution.call(ProcessExecution.java:861)\n\tat com.boomi.execution.ExecutionTask.lambda$call$0(ExecutionTask.java:1001)\n\tat com.boomi.container.config.telemetry.BaseTelemetryEngine.withSpan(BaseTelemetryEngine.java:243)\n\tat com.boomi.container.config.telemetry.BaseTelemetryEngine.withSpan(BaseTelemetryEngine.java:218)\n\tat com.boomi.execution.ExecutionTask.startSpan(ExecutionTask.java:1066)\n\tat com.boomi.execution.ExecutionTask.call(ExecutionTask.java:1001)\n\tat com.boomi.execution.ExecutionTask.call(ExecutionTask.java:59)\n\tat com.boomi.util.concurrent.CancellableFutureTask.run(CancellableFutureTask.java:158)\n\tat com.boomi.execution.NestedExecutionForker$NestedSynchronousExecutionFuture.runSynchronous(NestedExecutionForker.java:208)\n\tat com.boomi.execution.NestedExecutionForker$NestedSynchronousExecutionFuture.get(NestedExecutionForker.java:176)\n\tat com.boomi.execution.NestedExecutionForker$NestedSynchronousExecutionFuture.get(NestedExecutionForker.java:155)\n\tat com.boomi.execution.ExecutionTask.getChildResult(ExecutionTask.java:1370)\n\tat com.boomi.execution.ExecutionTask.getChildResult(ExecutionTask.java:1356)\n\tat com.boomi.process.shape.ChildInvokerShape.getChildResult(ChildInvokerShape.java:41)\n\tat com.boomi.process.shape.CatchErrorsShape.executeInitial(CatchErrorsShape.java:250)\n\tat com.boomi.process.shape.BaseFiberShape.execute(BaseFiberShape.java:75)\n\tat com.boomi.process.shape.CatchErrorsShape.execute(CatchErrorsShape.java:123)\n\tat com.boomi.process.graph.ProcessShape.lambda$executeShape$0(ProcessShape.java:589)\n\tat com.boomi.container.config.telemetry.BaseTelemetryEngine.lambda$withSpan$4(BaseTelemetryEngine.java:196)\n\tat com.boomi.container.config.telemetry.BaseTelemetryEngine.withSpan(BaseTelemetryEngine.java:243)\n\tat com.boomi.container.config.telemetry.BaseTelemetryEngine.withSpan(BaseTelemetryEngine.java:195)\n\tat com.boomi.container.config.telemetry.BaseTelemetryEngine.withSpan(BaseTelemetryEngine.java:177)\n\tat com.boomi.process.graph.ProcessShape.startSpan(ProcessShape.java:622)\n\tat com.boomi.process.graph.ProcessShape.executeShape(ProcessShape.java:587)\n\tat com.boomi.process.graph.ProcessGraph.executeShape(ProcessGraph.java:521)\n\tat com.boomi.process.graph.ProcessGraph.executeNextShapes(ProcessGraph.java:617)\n\tat com.boomi.process.graph.ProcessGraph.execute(ProcessGraph.java:317)\n\tat com.boomi.process.ProcessExecution.call(ProcessExecution.java:861)\n\tat com.boomi.execution.ExecutionTask.lambda$call$0(ExecutionTask.java:1001)\n\tat com.boomi.container.config.telemetry.BaseTelemetryEngine.withSpan(BaseTelemetryEngine.java:243)\n\tat com.boomi.container.config.telemetry.BaseTelemetryEngine.withSpan(BaseTelemetryEngine.java:218)\n\tat com.boomi.execution.ExecutionTask.startSpan(ExecutionTask.java:1066)\n\tat com.boomi.execution.ExecutionTask.call(ExecutionTask.java:1001)\n\tat com.boomi.execution.ExecutionTask.call(ExecutionTask.java:59)\n\tat com.boomi.util.concurrent.CancellableFutureTask.run(CancellableFutureTask.java:158)\n\tat java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1128)\n\tat java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:628)\n\tat java.base/java.lang.Thread.run(Thread.java:829)\nCaused by: java.sql.SQLException: Network error IOException: Connection refused (Connection refused)\n\tat net.sourceforge.jtds.jdbc.ConnectionJDBC2.<init>(ConnectionJDBC2.java:372)\n\tat net.sourceforge.jtds.jdbc.ConnectionJDBC3.<init>(ConnectionJDBC3.java:50)\n\tat net.sourceforge.jtds.jdbc.Driver.connect(Driver.java:178)\n\tat com.boomi.connector.database.pool.DatabaseConnectionManager.getSoloConnection(DatabaseConnectionManager.java:137)\n\tat com.boomi.connector.database.pool.DatabaseConnectionManager.getConnection(DatabaseConnectionManager.java:89)\n\tat com.boomi.connector.database.DatabaseGet.setup(DatabaseGet.java:189)\n\tat com.boomi.connector.database.DatabaseGet.get(DatabaseGet.java:100)\n\t... 61 more\nCaused by: java.net.ConnectException: Connection refused (Connection refused)\n\tat java.base/java.net.PlainSocketImpl.socketConnect(Native Method)\n\tat java.base/java.net.AbstractPlainSocketImpl.doConnect(AbstractPlainSocketImpl.java:412)\n\tat java.base/java.net.AbstractPlainSocketImpl.connectToAddress(AbstractPlainSocketImpl.java:255)\n\tat java.base/java.net.AbstractPlainSocketImpl.connect(AbstractPlainSocketImpl.java:237)\n\tat java.base/java.net.SocksSocketImpl.connect(SocksSocketImpl.java:392)\n\tat java.base/java.net.Socket.connect(Socket.java:609)\n\tat java.base/jdk.internal.reflect.NativeMethodAccessorImpl.invoke0(Native Method)\n\tat java.base/jdk.internal.reflect.NativeMethodAccessorImpl.invoke(NativeMethodAccessorImpl.java:62)\n\tat java.base/jdk.internal.reflect.DelegatingMethodAccessorImpl.invoke(DelegatingMethodAccessorImpl.java:43)\n\tat java.base/java.lang.reflect.Method.invoke(Method.java:566)\n\tat net.sourceforge.jtds.jdbc.SharedSocket.createSocketForJDBC3(SharedSocket.java:289)\n\tat net.sourceforge.jtds.jdbc.SharedSocket.<init>(SharedSocket.java:250)\n\tat net.sourceforge.jtds.jdbc.ConnectionJDBC2.<init>(ConnectionJDBC2.java:297)\n\t... 67 more\n\n2026-09-06T03:55:37Z\tINFO\tcleanup...\t\tErrors occurred in process.\n2026-09-06T03:55:37Z\tWARNING\tTry/Catch all errors (no retry) - route caught documents to the failure handler\t\tTry/Catch Shape sending 1 document(s) down error path\n2026-09-06T03:55:37Z\tINFO\tTry/Catch all errors (no retry) - route caught documents to the failure handler\t\tShape executed successfully in 14 ms.\n2026-09-06T03:55:37Z\tINFO\tNotify caught error to the process log\t\tExecuting Notify Shape with 1 document(s).\n2026-09-06T03:55:37Z\tSEVERE\tNotify caught error to the process log\t\tCatch path notification: Integration catch path failed. Caught error: Error retrieving db data: Network error IOException: Connection refused (Connection refused); Caused by: Network error IOException: Connection refused (Connection refused); Caused by: Connection refused (Connection refused)\n2026-09-06T03:55:37Z\tINFO\tNotify caught error to the process log\t\tShape executed successfully in 6 ms.\n2026-09-06T03:55:37Z\tINFO\tRoute caught errors to error subprocess\tstandalone start data, no return data\tExecuting Process Call Shape with 1 document(s).\n2026-09-06T03:55:37Z\tINFO\tRoute caught errors to error subprocess\tstandalone start data, no return data\tExecuting process '_TEST_156_child_ok_ORC1560906034913\n2026-09-06T03:55:37Z\tINFO\tRoute caught errors to error subprocess\tstandalone start data, no return data\tShape executed successfully in 1 ms.\n2026-09-06T03:55:37Z\tINFO\tcleanup...\t\tProcess execution completed normally.\n"
+    }
+  },
+  "counterparty_window": [
+    "INFO:     192.168.65.1:31912 - \"GET /admin/cdscm/api/v1/clients HTTP/1.1\" 200 OK",
+    "INFO:     192.168.65.1:20497 - \"POST /__ORACLE156__/ORC1560906034913/child-ran HTTP/1.1\" 404 Not Found"
+  ]
+}

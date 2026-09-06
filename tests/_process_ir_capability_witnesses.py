@@ -87,14 +87,42 @@ PROVENANCE_FROZEN_FIXTURE = "frozen fixture"
 PROVENANCE_INLINE_ADMISSION = "inline admission document (no frozen fixture exists)"
 PROVENANCE_INLINE_REFUSAL = "inline refusal document"
 PROVENANCE_SYNTHETIC_CFG = "synthetic CFG (not authorable)"
+#: #156. A fixture written DURING the slice whose SHAPE was taken from something
+#: causally independent of the code under test: a golden frozen long before the
+#: slice, or a graph captured live from the frozen legacy builder, deployed and
+#: executed before the canonical lowering existed.
+#:
+#: A fourth kind rather than a reuse of `PROVENANCE_FROZEN_FIXTURE`, because the
+#: FILE is new and claiming otherwise would be false — the inventory above is
+#: explicitly "documents frozen before the step-0 baseline", and #156's are not.
+#: It is also not `PROVENANCE_INLINE_ADMISSION`, which asserts the weaker "no
+#: frozen fixture exists". What makes these admissible is that the shape was not
+#: learned from the implementation: the notify/recovery anchor reproduces a live
+#: capture byte-for-byte with ids blinded, and the chain anchor reproduces
+#: `golden-000005`, frozen in the repository since before this slice.
+PROVENANCE_LIVE_ANCHORED = "live-anchored fixture"
 PROVENANCE_KINDS = frozenset(
     {
         PROVENANCE_FROZEN_FIXTURE,
         PROVENANCE_INLINE_ADMISSION,
         PROVENANCE_INLINE_REFUSAL,
         PROVENANCE_SYNTHETIC_CFG,
+        PROVENANCE_LIVE_ANCHORED,
     }
 )
+
+#: What each live-anchored fixture's shape was taken FROM. The evidence, named,
+#: so the claim is checkable rather than asserted.
+LIVE_ANCHOR_PROVENANCE = {
+    "error_handling/scoped_try_catch_notify_terminal_process_call.json": (
+        "docs/architecture/evidence/issue-156/captures/oracle-graphs/B2_shapes.xml "
+        "(legacy builder at b07babe, deployed and executed on renera 2026-09-06)"
+    ),
+    "error_handling/serialized_connector_regions_notify_dlq.json": (
+        "tests/fixtures/golden_xml/"
+        "connector_scoped_trycatch_notify_dlq_document_cache.xml (golden-000005)"
+    ),
+}
 
 
 @dataclass(frozen=True)
@@ -206,7 +234,7 @@ def compiled_digests():
 
 
 def _fixture(relative):
-    assert relative in FIXTURE_PROVENANCE, relative
+    assert relative in FIXTURE_PROVENANCE or relative in LIVE_ANCHOR_PROVENANCE, relative
     document = json.loads((_FIXTURES / relative).read_text(encoding="utf-8"))
     _LOADED_FIXTURES[relative] = _digest(document)
     return document
@@ -543,6 +571,114 @@ def _w_scoped_try_catch():
         "scoped_try_catch",
         "admits",
         PROVENANCE_FROZEN_FIXTURE + " " + relative + " (" + FIXTURE_PROVENANCE[relative] + ")",
+        run,
+        observe,
+    )
+
+
+_RECOVERY_ANCHOR = "error_handling/scoped_try_catch_notify_terminal_process_call.json"
+_CHAIN_ANCHOR = "error_handling/serialized_connector_regions_notify_dlq.json"
+
+
+def _w_catch_notify():
+    def run():
+        return _compiles(_fixture(_RECOVERY_ANCHOR), error_symbols())
+
+    def observe(result):
+        cfg, plan = result
+        # It reaches EMISSION, not merely the CFG: a capability the manifest
+        # advertises is one the compiler emits.
+        assert "notify" in _emitter_kinds(plan), _emitter_kinds(plan)
+        # ...and it is on the RECOVERY path. A notify emitted anywhere else would
+        # satisfy a bare kind check while contradicting the capability's name.
+        notify_nodes = [
+            node for node in cfg.nodes
+            if node.semantic.semantic_kind == "notify"
+        ]
+        assert notify_nodes, "no notify node in the CFG"
+        assert all("/catch_body/" in n.source_path for n in notify_nodes), (
+            [n.source_path for n in notify_nodes]
+        )
+
+    return CapabilityWitness(
+        "catch_notify",
+        "admits",
+        PROVENANCE_LIVE_ANCHORED + " " + _RECOVERY_ANCHOR
+        + " (" + LIVE_ANCHOR_PROVENANCE[_RECOVERY_ANCHOR] + ")",
+        run,
+        observe,
+    )
+
+
+def _w_recovery_process_call():
+    def run():
+        return _compiles(_fixture(_RECOVERY_ANCHOR), error_symbols())
+
+    def observe(result):
+        cfg, plan = result
+        calls = [
+            node for node in plan.nodes
+            if node.emitter_input.emitter_kind == "processcall"
+        ]
+        assert len(calls) == 1, _emitter_kinds(plan)
+        call = calls[0]
+        # The two flags are the capability. Emitted values, not authored ones:
+        # lowering copies them, and a lowering that rewrote either would still
+        # produce a document that parsed.
+        # The EMITTER input's field is `abort`, the wire spelling — the authored
+        # model calls it `abort_on_error`. Asserting the wire side is deliberate:
+        # it is what reaches the XML as abort="true", and a lowering that dropped
+        # the authored value on the way would still leave the model correct.
+        assert call.emitter_input.wait is True, call.emitter_input
+        assert call.emitter_input.abort is True, call.emitter_input
+        # TERMINAL: nothing follows it, and no synthetic Stop was added.
+        assert call.outgoing == (), call.outgoing
+        by_cfg = {n.node_id: n for n in cfg.nodes}
+        assert "/catch_body/terminal" in by_cfg[call.cfg_node_id].source_path
+
+    return CapabilityWitness(
+        "recovery_process_call",
+        "admits",
+        PROVENANCE_LIVE_ANCHORED + " " + _RECOVERY_ANCHOR
+        + " (" + LIVE_ANCHOR_PROVENANCE[_RECOVERY_ANCHOR] + ")",
+        run,
+        observe,
+    )
+
+
+def _w_serialized_connector_regions():
+    def run():
+        return _compiles(_fixture(_CHAIN_ANCHOR), error_symbols())
+
+    def observe(result):
+        cfg, plan = result
+        handlers = [
+            node for node in cfg.nodes
+            if node.semantic.semantic_kind == "try_catch"
+        ]
+        assert len(handlers) == 2, len(handlers)
+        modes = [h.semantic.success_mode for h in handlers]
+        # Exactly one continuation, and it is the FIRST handler — a chain whose
+        # last region continued would have nowhere to go, and one where neither
+        # continued would not be a chain at all.
+        assert modes == ["continue", "terminal"], modes
+        # Both handlers reach emission as real shapes.
+        assert _emitter_kinds(plan).count("catcherrors") == 2, _emitter_kinds(plan)
+        # `continue` itself emits NOTHING: no shape, no plan node.
+        assert all(
+            "/try_body/terminal" not in cfg_node.source_path
+            or cfg_node.semantic.semantic_kind != "continue"
+            for cfg_node in cfg.nodes
+        )
+        assert not any(
+            node.emitter_input.emitter_kind == "continue" for node in plan.nodes
+        )
+
+    return CapabilityWitness(
+        "serialized_connector_regions",
+        "admits",
+        PROVENANCE_LIVE_ANCHORED + " " + _CHAIN_ANCHOR
+        + " (" + LIVE_ANCHOR_PROVENANCE[_CHAIN_ANCHOR] + ")",
         run,
         observe,
     )
@@ -1308,6 +1444,9 @@ _ENTRIES: Tuple[object, ...] = (
     _w_terminal_process_call(),
     _w_rich_branch_decision_bodies(),
     _w_scoped_try_catch(),
+    _w_catch_notify(),
+    _w_recovery_process_call(),
+    _w_serialized_connector_regions(),
     _w_bounded_retry(),
     _w_typed_idempotency_evidence(),
     _w_process_call_connector_mixing(),

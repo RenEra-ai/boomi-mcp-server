@@ -1,0 +1,57 @@
+{
+  "nonce": "QA156D0906065703",
+  "freeze": "b07babeb3752/dirty:8f9e24d12302/39ef6aea5fef",
+  "utc": "2026-09-06T07:08:39.791030+00:00",
+  "children": {
+    "childB": {
+      "component_id": "0e3bf314-2565-4d64-a07b-eb4263f53231",
+      "expected_rows": 1,
+      "row_count": 1,
+      "rows": [
+        {
+          "executionId": "execution-9bab65e0-846f-4b33-8c3a-87892822c68d-2026.09.06",
+          "status": "COMPLETE",
+          "executionType": "sub_process",
+          "executionTime": "2026-09-06T07:05:01Z",
+          "inboundDocumentCount": 1,
+          "inboundErrorDocumentCount": 0
+        }
+      ],
+      "verdict": "PASS",
+      "all_sub_process": true
+    },
+    "childD1": {
+      "component_id": "7dcaebf3-3ca8-4cf2-9124-1024bacc48d7",
+      "expected_rows": 0,
+      "row_count": 0,
+      "rows": [],
+      "verdict": "PASS",
+      "all_sub_process": true
+    },
+    "childD2": {
+      "component_id": "463e3ee8-1048-45db-8ed6-43f2ba2c042a",
+      "expected_rows": 2,
+      "row_count": 2,
+      "rows": [
+        {
+          "executionId": "execution-4c2394e6-9f9d-4e39-9d44-a136ab3035b6-2026.09.06",
+          "status": "COMPLETE",
+          "executionType": "sub_process",
+          "executionTime": "2026-09-06T07:05:57Z",
+          "inboundDocumentCount": 1,
+          "inboundErrorDocumentCount": 0
+        },
+        {
+          "executionId": "execution-3ba39783-d129-4b8b-968e-940a153d90dc-2026.09.06",
+          "status": "COMPLETE",
+          "executionType": "sub_process",
+          "executionTime": "2026-09-06T07:06:37Z",
+          "inboundDocumentCount": 1,
+          "inboundErrorDocumentCount": 0
+        }
+      ],
+      "verdict": "PASS",
+      "all_sub_process": true
+    }
+  }
+}

@@ -104,10 +104,10 @@ def _map_symbols(component_id="MAP", component_type="transform.map"):
 
 
 def test_registry_covers_discriminator_exactly():
-    # 17 model classes, 18 discriminator keys (connector source + target share a
-    # model). #142 added ``catcherrors``.
+    # 18 model classes, 19 discriminator keys (connector source + target share a
+    # model). #142 added ``catcherrors``; #156 added ``notify``.
     assert R.registry_keys() == R.discriminator_keys()
-    assert len(R.registry_keys()) == 18
+    assert len(R.registry_keys()) == 19
 
 
 def test_connector_roles_share_one_renderer():
@@ -138,16 +138,23 @@ def test_registration_for_unknown_kind_is_none():
 
 
 def test_non_ir_shapes_are_absent_from_the_registry():
-    # emit_fragment stays out of the canonical path; listener-start, notify and
-    # route are legacy-only / verifier-only, never registry kinds.
+    # emit_fragment stays out of the canonical path; listener-start and route are
+    # legacy-only / verifier-only, never registry kinds.
     #
     # ``catcherrors`` was in this set until #142 and is deliberately no longer:
     # scoped Try/Catch is now a compiled ProcessIR construct, so the shape has a
     # registry key. The renderer it drives is unchanged and shared with the
     # legacy adapters, which is why no existing golden moved.
-    for absent in ("emit_fragment", "start_listen", "notify", "route"):
+    #
+    # ``notify`` left this set the same way in #156, and for the same reason: it
+    # is now a compiled recovery-path construct with the nineteenth registry key,
+    # driving the SAME `render_notify` the legacy caller drives. `start_listen`
+    # and `route` stay — #158 owns listener entry, and route has no IR construct
+    # at all.
+    for absent in ("emit_fragment", "start_listen", "route"):
         assert absent not in R.registry_keys()
     assert "catcherrors" in R.registry_keys()
+    assert "notify" in R.registry_keys()
 
 
 # ---------------------------------------------------------------------------

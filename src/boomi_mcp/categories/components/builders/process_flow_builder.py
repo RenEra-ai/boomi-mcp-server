@@ -49,6 +49,7 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 from pydantic import ValidationError
 
 from ....models.cache_property_models import PROPERTY_SOURCE_FIELD_CONTRACT
+from ....models.process_ir_tokens import NOTIFY_LEVELS
 from ....models.pipeline_models import PipelineSpec, StageSpec
 from ._process_preservation import PROCESS_PRESERVATION_POLICY
 from ..process_component_materializer import (
@@ -390,7 +391,10 @@ _MAX_RETRY_COUNT = 5
 # docs list "Information, Warning, or Error"; the live notify shape emits the
 # token "INFO"). The catch-path Notify is log-only (no platform email event),
 # so email/SMS channels are out of scope and any extra config key is rejected.
-_SUPPORTED_NOTIFY_LEVELS = frozenset({"INFO", "WARNING", "ERROR"})
+# #156: DERIVED from the one platform authority, not respelled. The canonical
+# ``NotifyNodeV1.level`` reads the same tuple, so the legacy validator and the
+# typed model cannot disagree about what Boomi accepts.
+_SUPPORTED_NOTIFY_LEVELS = frozenset(NOTIFY_LEVELS)
 _CATCH_NOTIFY_ALLOWED_KEYS = frozenset({"level", "message_template"})
 # The runtime property holding the caught Try/Catch error message. Boomi binds
 # it via a numbered placeholder + a notify track parameter (verified live), not

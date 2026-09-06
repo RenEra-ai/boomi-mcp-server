@@ -203,6 +203,13 @@ PROCESS_IR_SEMANTIC_IDEMPOTENCY_EVIDENCE_MISSING = (
     "PROCESS_IR_SEMANTIC_IDEMPOTENCY_EVIDENCE_MISSING"
 )
 PROCESS_IR_SEMANTIC_CATCH_UNTERMINATED = "PROCESS_IR_SEMANTIC_CATCH_UNTERMINATED"
+# #156 T5: a recovery-leg process_call whose synchronous/abort flags are not
+# both true. Its OWN identity, not a reuse of the return-path code: that one
+# says the placement is unsupported and points at #176, while this says the
+# placement is supported and the authored values are wrong.
+PROCESS_IR_SEMANTIC_RECOVERY_PROCESS_CALL_INVALID = (
+    "PROCESS_IR_SEMANTIC_RECOVERY_PROCESS_CALL_INVALID"
+)
 PROCESS_IR_COMPILE_ERROR_REGION_INVALID = "PROCESS_IR_COMPILE_ERROR_REGION_INVALID"
 
 # --- ProcessIR unified semantic validation (M12.8 / issue #143; ADR-001 §7) ---
@@ -1365,6 +1372,19 @@ ERROR_TAXONOMY: Dict[str, ErrorCodeSpec] = {
                 "absent, of the wrong kind, or does not resolve to its operation."
             ),
             owner="#142",
+        ),
+        ErrorCodeSpec(
+            code=PROCESS_IR_SEMANTIC_RECOVERY_PROCESS_CALL_INVALID,
+            category="process_ir",
+            retryable=False,
+            summary=(
+                "A Try/Catch recovery path hands the caught document to another "
+                "process, but the call is not authored wait=true and "
+                "abort_on_error=true. Both are required: the parent must observe "
+                "the hand-off, and a recovery that fails silently is not a "
+                "recovery."
+            ),
+            owner="#156",
         ),
         ErrorCodeSpec(
             code=PROCESS_IR_SEMANTIC_CATCH_UNTERMINATED,

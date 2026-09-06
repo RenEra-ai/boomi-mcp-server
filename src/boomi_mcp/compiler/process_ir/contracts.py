@@ -816,6 +816,23 @@ class ExceptionSemanticV1(_CompilerModel):
     parameter_source: str = "caught_error"
 
 
+class NotifySemanticV1(_CompilerModel):
+    """#156 T4. A caught-error log line on a recovery path.
+
+    ``message_template`` is carried RAW — exactly as authored, with the
+    caught-error property token still in it. Neither the MessageFormat escape nor
+    the token substitution happens here: both are emission concerns and both live
+    at the emitter boundary, which is where ``ExceptionSemanticV1`` already leaves
+    its own template. Escaping in the CFG would double-escape any consumer that
+    re-rendered from the semantic, and would put wire vocabulary in a layer whose
+    whole contract is that it holds none.
+    """
+
+    semantic_kind: Literal["notify"] = "notify"
+    level: str
+    message_template: str
+
+
 class TryCatchSemanticV1(_CompilerModel):
     """A scoped error handler (#142).
 
@@ -836,6 +853,13 @@ class TryCatchSemanticV1(_CompilerModel):
     # can read it. Normalised like ``retry_count``: an absent authored retry
     # arrives as the default, so the guard has one value to reason about.
     source_replay_policy: Literal["forbid", "allow_duplicates"] = "forbid"
+    # #156 T5: does this handler's PROTECTED path continue to the next handler,
+    # or does it terminate? Copied from the authored try terminal, never inferred
+    # from the graph — which is the point. The invariants below verify the graph
+    # AGAINST this, so a lowering defect that invented a continuation edge for a
+    # terminating handler is caught rather than rationalised. Defaults to
+    # "terminal", so every semantic any pre-#156 caller constructs is unchanged.
+    success_mode: Literal["terminal", "continue"] = "terminal"
     label: Optional[str] = None
 
 
@@ -866,6 +890,7 @@ CfgSemanticV1 = Annotated[
         DecisionSemanticV1,
         TryCatchSemanticV1,
         ExceptionSemanticV1,
+        NotifySemanticV1,
         StopSemanticV1,
         ReturnDocumentsSemanticV1,
     ],
@@ -1162,8 +1187,17 @@ class CatchErrorsInputV1(_CompilerModel):
 # Wire binding for an Exception's parameter source, resolved by the compiler so
 # #138 only has to serialise it (``_emit_exception_parameters``, builder :6164).
 # ``caught_error`` binds the fixed Try/Catch message token.
-CAUGHT_ERROR_PROPERTY_ID = "meta.base.catcherrorsmessage"
-CAUGHT_ERROR_PROPERTY_NAME = "Base - Try/Catch Message"
+#
+# #156 moved the two literals to ``models.process_ir_tokens`` and re-exports them
+# here. The models need the same fact (``NotifyNodeV1`` validates that a message
+# template carries the token) and cannot import the compiler, so a third
+# hand-copy was the alternative. Re-exported rather than relocated so every
+# existing ``from .contracts import CAUGHT_ERROR_PROPERTY_ID`` keeps working —
+# the name is part of this module's published surface.
+from ...models.process_ir_tokens import (  # noqa: E402  (re-export)
+    CAUGHT_ERROR_PROPERTY_ID,
+    CAUGHT_ERROR_PROPERTY_NAME,
+)
 
 
 class _NoExceptionBindingV1(_CompilerModel):
@@ -1193,6 +1227,22 @@ ExceptionBindingV1 = Annotated[
     ],
     Field(discriminator="binding"),
 ]
+
+
+class NotifyInputV1(_CompilerModel):
+    """#156 T4. The Notify emitter's bound input.
+
+    ``message_template`` is still RAW here. The escape-THEN-substitute transform
+    that turns it into wire text belongs to the emitter, next to the renderer that
+    XML-escapes the result — the same three-stage split ``ExceptionInputV1``
+    already uses. Doing it earlier would bake MessageFormat vocabulary into a
+    layer that has none, and would make the plan's own JSON a half-escaped
+    artifact that no longer round-trips to what the caller authored.
+    """
+
+    emitter_kind: Literal["notify"] = "notify"
+    level: str
+    message_template: str
 
 
 class ExceptionInputV1(_CompilerModel):
@@ -1233,6 +1283,7 @@ EmitterInputV1 = Annotated[
         DecisionInputV1,
         CatchErrorsInputV1,
         ExceptionInputV1,
+        NotifyInputV1,
         StopInputV1,
         ReturnDocumentsInputV1,
     ],

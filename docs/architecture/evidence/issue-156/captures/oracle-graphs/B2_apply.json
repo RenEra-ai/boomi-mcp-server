@@ -1,0 +1,28 @@
+{
+  "_success": true,
+  "build_id": "cbf284c0-b7f3-4e38-960b-33be0305a380",
+  "message": "Applied integration '_TEST_156_B2_ORC1560906034913' with 1 steps.",
+  "execution_order": [
+    "proc"
+  ],
+  "results": {
+    "proc": {
+      "status": "created",
+      "component_id": "babbcf52-324f-4169-9e81-ab8fc98a9284",
+      "type": "process",
+      "name": "_TEST_156_B2_ORC1560906034913",
+      "result": {
+        "_success": true,
+        "message": "Created component '_TEST_156_B2_ORC1560906034913'",
+        "component_id": "babbcf52-324f-4169-9e81-ab8fc98a9284",
+        "name": "_TEST_156_B2_ORC1560906034913",
+        "type": "process",
+        "profile": "renera"
+      }
+    }
+  },
+  "warnings": [
+    "[FOLDER_REQUIRED_ON_CREATE] Component 'proc' is created with no folder_id or folder_name and would land in the account root. Set a resolved folder so components are organized, never at root."
+  ],
+  "profile": "renera"
+}

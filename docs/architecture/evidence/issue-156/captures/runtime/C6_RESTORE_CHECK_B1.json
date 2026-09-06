@@ -1,0 +1,83 @@
+{
+  "cell": {
+    "cell": "C6",
+    "label": "RESTORE_CHECK_B1",
+    "process_id": "14cee5ce-35d8-4788-9bc8-c98fed0f3acf",
+    "started_utc": "2026-09-06T03:56:44.728335+00:00",
+    "request_id": "executionrecord-59cdc346-999b-44db-99f6-b35f366a41ed",
+    "wait_status": "COMPLETE",
+    "execution_id": "execution-ca117324-2739-42a9-acf7-63cfef0ca7b0-2026.09.06",
+    "execution_status": "COMPLETE",
+    "counterparty_parent_target_hits": 1,
+    "counterparty_child_ran_hits": 0,
+    "counterparty_child_fail_hits": 0,
+    "counterparty_lines": [
+      "INFO:     192.168.65.1:45572 - \"POST /__ORACLE156__/ORC1560906034913/parent-target HTTP/1.1\" 404 Not Found"
+    ],
+    "expect_note": "MSSQL back -> must reproduce C1 (proves the switch, not decay)"
+  },
+  "execute": {
+    "_success": true,
+    "request_id": "executionrecord-59cdc346-999b-44db-99f6-b35f366a41ed",
+    "process_id": "14cee5ce-35d8-4788-9bc8-c98fed0f3acf",
+    "environment_id": null,
+    "atom_id": "a40a3313-1537-47c4-91c7-573a703537c7",
+    "execution_result": {
+      "poll_status": "COMPLETED",
+      "elapsed_seconds": 6.9,
+      "poll_count": 4,
+      "execution_id": "execution-ca117324-2739-42a9-acf7-63cfef0ca7b0-2026.09.06",
+      "status": "COMPLETE",
+      "process_name": "_TEST_156_B1_ORC1560906034913",
+      "atom_name": "renera-local-atom",
+      "execution_time": "2026-09-06T03:56:45Z",
+      "execution_duration": 73,
+      "inbound_document_count": 1,
+      "outbound_document_count": 2,
+      "inbound_error_document_count": 0,
+      "error": null
+    },
+    "execution_id": "execution-ca117324-2739-42a9-acf7-63cfef0ca7b0-2026.09.06"
+  },
+  "execution_record": {
+    "@type": "ExecutionRecord",
+    "executionId": "execution-ca117324-2739-42a9-acf7-63cfef0ca7b0-2026.09.06",
+    "account": "trainingglebbochkarov-16926N",
+    "executionTime": "2026-09-06T03:56:45Z",
+    "status": "COMPLETE",
+    "executionType": "exec_manual",
+    "processName": "_TEST_156_B1_ORC1560906034913",
+    "processId": "14cee5ce-35d8-4788-9bc8-c98fed0f3acf",
+    "atomName": "renera-local-atom",
+    "atomId": "a40a3313-1537-47c4-91c7-573a703537c7",
+    "inboundDocumentCount": 1,
+    "inboundErrorDocumentCount": 0,
+    "outboundDocumentCount": 2,
+    "executionDuration": [
+      "Long",
+      73
+    ],
+    "inboundDocumentSize": [
+      "Long",
+      0
+    ],
+    "outboundDocumentSize": [
+      "Long",
+      264
+    ],
+    "recordedDate": "2026-09-06T03:56:45Z"
+  },
+  "logs": {
+    "_success": true,
+    "status_code": 202,
+    "message": "Beginning download.",
+    "download_url": "https://platform.boomi.com/account/trainingglebbochkarov-16926N/api/download/ProcessLog-204b890b-b164-4293-8033-9d3c1db0f8b2",
+    "_downloaded": true,
+    "files": {
+      "ProcessLog_1668722605041687875.log": "2026-09-06T03:56:45Z\tINFO\tinitializing...\t\tExecuting Process _TEST_156_B1_ORC1560906034913\n2026-09-06T03:56:45Z\tINFO\tStart\tNoData\tExecuting Start Shape\n2026-09-06T03:56:45Z\tINFO\tStart\tNoData\t1 document(s) found for processing.\n2026-09-06T03:56:45Z\tINFO\tStart\tNoData\tShape executed successfully in 3 ms.\n2026-09-06T03:56:45Z\tINFO\tTry/Catch all errors (no retry) - route caught documents to the failure handler\t\tExecuting Try/Catch Shape with 1 document(s).\n2026-09-06T03:56:45Z\tINFO\tTry/Catch all errors (no retry) - route caught documents to the failure handler\t\tLaunching Try/Catch Shape fiber f_0 as execution-27edd723-6763-4605-a787-7f32592333bb-2026.09.06 with 1 document(s).\n2026-09-06T03:56:45Z\tINFO\tTry/Catch all errors (no retry) - route caught documents to the failure handler\t\tCompleted Try/Catch initial execution (shape2)\n2026-09-06T03:56:45Z\tINFO\tinitializing...\t\tExecuting Process _TEST_156_B1_ORC1560906034913 (Continuation f_0)\n2026-09-06T03:56:45Z\tINFO\tTry/Catch all errors (no retry) - route caught documents to the failure handler\t\tExecuting Try/Catch Shape continuation as f_0 with 1 document(s).\n2026-09-06T03:56:45Z\tINFO\tTry/Catch all errors (no retry) - route caught documents to the failure handler\t\tShape executed successfully in 0 ms.\n2026-09-06T03:56:45Z\tINFO\tDB extract\tSandbox MSSQL Expert (jtds): database Connector; _TEST_156_dbget_ORC1560906034913\tExecuting Connector Shape with 1 document(s).\n2026-09-06T03:56:45Z\tINFO\tDB extract\tSandbox MSSQL Expert (jtds): database Connector; _TEST_156_dbget_ORC1560906034913\tShape executed successfully in 29 ms.\n2026-09-06T03:56:45Z\tINFO\tREST send\tSandbox CDS Mock REST (no-auth): officialboomi-X3979C-rest-prod Connector; _TEST_156_ptarget_ORC1560906034913\tExecuting Connector Shape with 1 document(s).\n2026-09-06T03:56:45Z\tINFO\tREST send\tSandbox CDS Mock REST (no-auth): officialboomi-X3979C-rest-prod Connector; _TEST_156_ptarget_ORC1560906034913\tShape executed successfully in 7 ms.\n2026-09-06T03:56:45Z\tINFO\tStop\tcontinuing process\tExecuting Stop Shape with 1 document(s).\n2026-09-06T03:56:45Z\tINFO\tStop\tcontinuing process\tShape executed successfully in 0 ms.\n2026-09-06T03:56:45Z\tINFO\tcleanup...\t\tProcess execution completed normally.\n2026-09-06T03:56:45Z\tINFO\tTry/Catch all errors (no retry) - route caught documents to the failure handler\t\tShape executed successfully in 4 ms.\n2026-09-06T03:56:45Z\tINFO\tcleanup...\t\tProcess execution completed normally.\n"
+    }
+  },
+  "counterparty_window": [
+    "INFO:     192.168.65.1:45572 - \"POST /__ORACLE156__/ORC1560906034913/parent-target HTTP/1.1\" 404 Not Found"
+  ]
+}

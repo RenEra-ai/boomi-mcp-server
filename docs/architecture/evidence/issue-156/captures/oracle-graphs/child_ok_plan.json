@@ -1,0 +1,82 @@
+{
+  "_success": true,
+  "integration_spec": {
+    "version": "1.0",
+    "name": "_TEST_156_child_ok_ORC1560906034913",
+    "mode": "lift_shift",
+    "components": [
+      {
+        "key": "proc",
+        "type": "process",
+        "action": "create",
+        "name": "_TEST_156_child_ok_ORC1560906034913",
+        "component_id": null,
+        "config": {
+          "process_kind": "sync_pipeline",
+          "pipeline": {
+            "stages": [
+              {
+                "key": "s_fetch",
+                "kind": "fetch",
+                "config": {
+                  "primitive": "rest_fetch",
+                  "connection_id": "2fe488e4-3169-4529-9515-d854570c8ffc",
+                  "operation_id": "2afa5324-5bd6-4dfb-94a4-e015e53cf4b4",
+                  "action_type": "GET"
+                }
+              },
+              {
+                "key": "s_send",
+                "kind": "send",
+                "config": {
+                  "primitive": "rest_send",
+                  "connection_id": "2fe488e4-3169-4529-9515-d854570c8ffc",
+                  "operation_id": "484c8f3e-6ab4-4148-85c5-092d7cd63334",
+                  "action_type": "POST"
+                }
+              }
+            ],
+            "dependencies": [
+              {
+                "from_stage": "s_fetch",
+                "to_stage": "s_send"
+              }
+            ]
+          }
+        },
+        "depends_on": []
+      }
+    ],
+    "processes": [],
+    "goals": [],
+    "endpoints": [],
+    "flows": [],
+    "naming": {},
+    "folders": {},
+    "runtime": {},
+    "validation_rules": {},
+    "profile_indexes_by_component_id": null,
+    "pipeline": null
+  },
+  "conflict_policy": "reuse",
+  "execution_order": [
+    "proc"
+  ],
+  "steps": [
+    {
+      "key": "proc",
+      "type": "process",
+      "declared_action": "create",
+      "planned_action": "create",
+      "name": "_TEST_156_child_ok_ORC1560906034913",
+      "depends_on": [],
+      "existing_component_id": null,
+      "route": "process_flow_xml"
+    }
+  ],
+  "warnings": [
+    "Process component(s) ['proc'] model no error handling. Consult get_schema_template(schema_name='design_pattern:try_catch_placement') and get_schema_template(schema_name='design_pattern:error_routing_and_dlq').",
+    "[FOLDER_REQUIRED_ON_CREATE] Component 'proc' is created with no folder_id or folder_name and would land in the account root. Set a resolved folder so components are organized, never at root."
+  ],
+  "profile": "renera"
+}

@@ -1,0 +1,38 @@
+{
+  "baseline_extract": "/private/tmp/claude-501/-Users-gleb-Documents-Projects-Renera-boomi-mcp-server/70fd220b-f674-4b26-9985-8eebeead1424/scratchpad/base156",
+  "emitter_module": "/private/tmp/claude-501/-Users-gleb-Documents-Projects-Renera-boomi-mcp-server/70fd220b-f674-4b26-9985-8eebeead1424/scratchpad/base156/src/boomi_mcp/categories/components/builders/process_flow_builder.py",
+  "all_equal": true,
+  "cases": [
+    {
+      "label": "B1",
+      "pristine_sha256": "334ee7d420f94f03de967878f0e91602ed12b97e805fa3b446676ee600afa5b7",
+      "archived_sha256": "334ee7d420f94f03de967878f0e91602ed12b97e805fa3b446676ee600afa5b7",
+      "equal": true
+    },
+    {
+      "label": "B2",
+      "pristine_sha256": "76aa45dcd96e17518076b33d5f788e5aff5d402169f038c34e57907dcff9baef",
+      "archived_sha256": "76aa45dcd96e17518076b33d5f788e5aff5d402169f038c34e57907dcff9baef",
+      "equal": true
+    },
+    {
+      "label": "ABORT",
+      "pristine_sha256": "af8ecf397c22fc2b11aee83395398d10af5d0cae750dc5df3c4204c5b9677308",
+      "archived_sha256": "af8ecf397c22fc2b11aee83395398d10af5d0cae750dc5df3c4204c5b9677308",
+      "equal": true
+    },
+    {
+      "label": "child_ok",
+      "pristine_sha256": "41adcf3d41e50d976d88c4ad7855cdda09b3d44507bc87b5cc69e34dd7462456",
+      "archived_sha256": "41adcf3d41e50d976d88c4ad7855cdda09b3d44507bc87b5cc69e34dd7462456",
+      "equal": true
+    },
+    {
+      "label": "child_bad",
+      "pristine_sha256": "e2b7924f761c35cea9fdc4460a1d318731ae30aba984fdbe01c1a911d59ee36e",
+      "archived_sha256": "e2b7924f761c35cea9fdc4460a1d318731ae30aba984fdbe01c1a911d59ee36e",
+      "equal": true
+    }
+  ],
+  "claim": "archived oracle XML == output of the baseline b07babe emitter, re-derived from a pristine git-archive extraction AFTER the #156 implementation had begun modifying src/ in the working tree"
+}

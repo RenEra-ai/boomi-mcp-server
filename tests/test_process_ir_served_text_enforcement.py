@@ -69,6 +69,23 @@ from boomi_mcp.models.process_ir import (  # noqa: E402
 #: in review; a reader that guesses is a cost paid in silent coverage loss.
 PINNED_DELEGATION_SITES = {
     (
+        "src/boomi_mcp/compiler/process_ir/body_capabilities.py",
+        "raise_compile_error",
+        "Name(id='code', ctx=Load())",
+    ): (
+        1,
+        "#156 `_as_compile_error`, re-raising a SHARED model rule's refusal as a "
+        "compile diagnostic. The chain grammar is deliberately one rule rendered by "
+        "both entry points, so the compiler side has a `PydanticCustomError` in hand "
+        "and reads its canonical code out of the model's own `_CUSTOM_ERROR_CODES`. "
+        "The code is therefore a variable by construction: hand-listing the three "
+        "codes here would be a second copy of that table, which is the exact "
+        "duplicate-authority defect the shared rule exists to avoid. Every code it "
+        "can serve is a member of that table and is served by the PARSER's message "
+        "and remediation registries, which `test_every_emittable_process_ir_code_"
+        "has_complete_served_text` covers on the parser arm.",
+    ),
+    (
         "src/boomi_mcp/compiler/process_ir/diagnostics.py",
         "CompilerDiagnostic",
         "Name(id='code', ctx=Load())",

@@ -197,7 +197,9 @@ def test_every_witness_records_its_fixture_provenance():
     """
     from _process_ir_capability_witnesses import (
         FIXTURE_PROVENANCE,
+        LIVE_ANCHOR_PROVENANCE,
         PROVENANCE_FROZEN_FIXTURE,
+        PROVENANCE_LIVE_ANCHORED,
         PROVENANCE_INLINE_ADMISSION,
         PROVENANCE_INLINE_REFUSAL,
         PROVENANCE_KINDS,
@@ -215,7 +217,16 @@ def test_every_witness_records_its_fixture_provenance():
     # even make the frozen-count floor look stronger. Provenance is now checked against the
     # witness's own MODE and, for a frozen claim, against the real fixture inventory.
     _ALLOWED_BY_KIND = {
-        "admits": {PROVENANCE_FROZEN_FIXTURE, PROVENANCE_INLINE_ADMISSION},
+        # #156 added PROVENANCE_LIVE_ANCHORED to the admission set: a fixture
+        # written this slice whose SHAPE came from a live capture or a
+        # pre-existing frozen golden. It is checked below like a frozen fixture —
+        # the named anchor must exist and the run must actually have loaded it —
+        # so the label cannot be worn by a document nobody read.
+        "admits": {
+            PROVENANCE_FROZEN_FIXTURE,
+            PROVENANCE_INLINE_ADMISSION,
+            PROVENANCE_LIVE_ANCHORED,
+        },
         "refuses": {
             PROVENANCE_FROZEN_FIXTURE,
             PROVENANCE_INLINE_REFUSAL,
@@ -237,8 +248,13 @@ def test_every_witness_records_its_fixture_provenance():
         if kind not in _ALLOWED_BY_KIND[entry.kind]:
             bad.append((key, "provenance not allowed for a %r witness" % entry.kind, kind))
             continue
-        if kind is PROVENANCE_FROZEN_FIXTURE:
-            named = [rel for rel in FIXTURE_PROVENANCE if rel in entry.provenance]
+        if kind in (PROVENANCE_FROZEN_FIXTURE, PROVENANCE_LIVE_ANCHORED):
+            inventory = (
+                FIXTURE_PROVENANCE
+                if kind is PROVENANCE_FROZEN_FIXTURE
+                else LIVE_ANCHOR_PROVENANCE
+            )
+            named = [rel for rel in inventory if rel in entry.provenance]
             if not named:
                 bad.append((key, "claims a frozen fixture not in the inventory", entry.provenance))
                 continue

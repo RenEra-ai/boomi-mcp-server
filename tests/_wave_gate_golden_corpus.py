@@ -1114,6 +1114,17 @@ def error_symbols(*extra, contracts=()):
     rest = CC.REST_FAMILY
     db = CC.DATABASE_FAMILY
     base = (
+        # #156: the recovery child a catch leg may hand documents to. Part of the
+        # BASE set rather than an per-case extra, because #151's reachability
+        # freeze compiles every committed error-handling specimen with exactly
+        # this table — a symbol supplied only at one call site would leave the
+        # recovery anchor unresolvable there. An unreferenced symbol resolves
+        # nothing, so no existing golden moves.
+        ComponentSymbolV1(
+            ref="$ref:SUBPROC",
+            component_id="66666666-6666-6666-6666-666666666666",
+            component_type="process",
+        ),
         ComponentSymbolV1(
             ref="$ref:GETOP",
             component_id="op-get",
@@ -1452,6 +1463,32 @@ def _issue180_effect_case(case):
             id_registry=registry,
             symbols=symbols,
         )
+    return render
+
+
+def _recovery_case(anchor):
+    """#156 T5: a catcherrors leg that hands the caught document to a subprocess.
+
+    LIVE-ANCHORED. The shape is not inferred from the compiler — it was captured
+    on the disposable `renera` account from the FROZEN legacy builder before this
+    slice's lowering existed, deployed, and executed: the protected step was
+    forced to fail, the recovery child ran once carrying its run nonce, a success
+    control showed the child did NOT run, and an abort control showed a failing
+    child turning the PARENT to ERROR under `wait=true`/`abort=true`. The archive
+    is `docs/architecture/evidence/issue-156/captures/`, and
+    `test_process_ir_notify_recovery.py` pins this graph's emitted shapes against
+    that capture with component ids blinded.
+    """
+    def render():
+        from boomi_mcp.compiler.process_ir.emitter_registry import emit_process
+
+        doc = json.loads(
+            (_HERE / "fixtures" / "process_ir" / "error_handling" / (anchor + ".json"))
+            .read_text(encoding="utf-8")
+        )
+        symbols = error_symbols()
+        _cfg, plan = error_compile(doc, symbols)
+        return emit_process(plan, symbols).process_xml
     return render
 
 
@@ -1825,6 +1862,8 @@ def _build_registry():
         "process_ir_rich:branch_process_call": ("process-xml-v1", _rich_case("branch_process_call.json")),
         # H — ProcessIR error-handling anchors
         "process_ir_error:process_retry0_exception": ("process-xml-v1", _error_case("scoped_try_catch_process_retry0_exception")),
+        "process_ir_error:notify_terminal_process_call": ("process-xml-v1", _recovery_case("scoped_try_catch_notify_terminal_process_call")),
+        "process_ir_error:serialized_connector_regions": ("process-xml-v1", _error_case("serialized_connector_regions_notify_dlq")),
         "process_ir_error:connector_read_retry5_cache_catch": ("process-xml-v1", _error_case("scoped_try_catch_connector_read_retry5_cache_catch")),
         "process_ir_error:connector_read_to_connector_catch": ("process-xml-v1", _error_case("scoped_try_catch_connector_read_to_connector_catch")),
         # H2 — #154 M12.16 grammar widenings

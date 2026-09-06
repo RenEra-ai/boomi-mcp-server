@@ -1,0 +1,35 @@
+[
+  {
+    "scenario": "deploy",
+    "file": "B1_deploy.json",
+    "utc": "2026-09-06T03:52:06.066735+00:00",
+    "account_id": "trainingglebbochkarov-16926N",
+    "sha256": "1e82ffe0eb07f5818507ccda00ed20596dc848e582e06da4938724785e043a9d",
+    "byte_length": 1091,
+    "archive_path": "docs/architecture/evidence/issue-156/captures/deploy/B1_deploy.json",
+    "label": "B1",
+    "component_id": "14cee5ce-35d8-4788-9bc8-c98fed0f3acf"
+  },
+  {
+    "scenario": "deploy",
+    "file": "B2_deploy.json",
+    "utc": "2026-09-06T03:52:08.567217+00:00",
+    "account_id": "trainingglebbochkarov-16926N",
+    "sha256": "2b15ab0c6134a3ac087be4f5d92b3a48a690b485e7c385b0f32449f4ca498bc5",
+    "byte_length": 1091,
+    "archive_path": "docs/architecture/evidence/issue-156/captures/deploy/B2_deploy.json",
+    "label": "B2",
+    "component_id": "babbcf52-324f-4169-9e81-ab8fc98a9284"
+  },
+  {
+    "scenario": "deploy",
+    "file": "ABORT_deploy.json",
+    "utc": "2026-09-06T03:52:10.799758+00:00",
+    "account_id": "trainingglebbochkarov-16926N",
+    "sha256": "23ae36d1cae1e57cc4e6adddb605838c94899d0836aa58eb0c017857d95fc6ac",
+    "byte_length": 1097,
+    "archive_path": "docs/architecture/evidence/issue-156/captures/deploy/ABORT_deploy.json",
+    "label": "ABORT",
+    "component_id": "ed7c75a9-e953-42fa-b624-0018e40b1e0a"
+  }
+]

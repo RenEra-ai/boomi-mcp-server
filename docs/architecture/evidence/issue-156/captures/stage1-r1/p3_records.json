@@ -1,0 +1,80 @@
+[
+  {
+    "scenario": "stage1-r1",
+    "file": "procA_stored.xml",
+    "utc": "2026-09-06T07:02:24.984276+00:00",
+    "account_id": "trainingglebbochkarov-16926N",
+    "sha256": "5fe6df7838e698208b594b5a99d04ec09bc65023f193f7902fbf44a17c5a775d",
+    "byte_length": 3170,
+    "archive_path": "docs/architecture/evidence/issue-156/captures/stage1-r1/procA_stored.xml",
+    "provenance": "GET /Component/<id> accept=xml (platform readback of a CANONICAL ProcessIR apply)",
+    "component_id": "f9c4e798-8068-4ccd-b36a-90c0a14fd3b2",
+    "root_key": "procA",
+    "component_version": "1"
+  },
+  {
+    "scenario": "stage1-r1",
+    "file": "procB_stored.xml",
+    "utc": "2026-09-06T07:02:25.208300+00:00",
+    "account_id": "trainingglebbochkarov-16926N",
+    "sha256": "56ed982d7729fc1b0eddb2d835f38e110657f6c3d0db359e995da6038032643c",
+    "byte_length": 3335,
+    "archive_path": "docs/architecture/evidence/issue-156/captures/stage1-r1/procB_stored.xml",
+    "provenance": "GET /Component/<id> accept=xml (platform readback of a CANONICAL ProcessIR apply)",
+    "component_id": "15285b48-f0fc-4fe8-b093-cd664c150252",
+    "root_key": "procB",
+    "component_version": "1"
+  },
+  {
+    "scenario": "stage1-r1",
+    "file": "procD_stored.xml",
+    "utc": "2026-09-06T07:02:25.417980+00:00",
+    "account_id": "trainingglebbochkarov-16926N",
+    "sha256": "f59c1b21df5029f9862a914f7cfbada69f84839994694372f4d35f074474fcb6",
+    "byte_length": 5377,
+    "archive_path": "docs/architecture/evidence/issue-156/captures/stage1-r1/procD_stored.xml",
+    "provenance": "GET /Component/<id> accept=xml (platform readback of a CANONICAL ProcessIR apply)",
+    "component_id": "a6526452-8ff1-417b-a74a-e0749693c1a6",
+    "root_key": "procD",
+    "component_version": "1"
+  },
+  {
+    "scenario": "stage1-r1",
+    "file": "childB_stored.xml",
+    "utc": "2026-09-06T07:02:25.644807+00:00",
+    "account_id": "trainingglebbochkarov-16926N",
+    "sha256": "79340a72b04a1337a0b547db6c431396b3b9e10c9a4323bf6c50678d80573cb7",
+    "byte_length": 1817,
+    "archive_path": "docs/architecture/evidence/issue-156/captures/stage1-r1/childB_stored.xml",
+    "provenance": "GET /Component/<id> accept=xml (platform readback of a CANONICAL ProcessIR apply)",
+    "component_id": "0e3bf314-2565-4d64-a07b-eb4263f53231",
+    "root_key": "childB",
+    "component_version": "1"
+  },
+  {
+    "scenario": "stage1-r1",
+    "file": "childD1_stored.xml",
+    "utc": "2026-09-06T07:02:25.848270+00:00",
+    "account_id": "trainingglebbochkarov-16926N",
+    "sha256": "0ca3763cb7fc1042d9f59f98fda527f068f946c49cd22cc99130aba0a041b335",
+    "byte_length": 1818,
+    "archive_path": "docs/architecture/evidence/issue-156/captures/stage1-r1/childD1_stored.xml",
+    "provenance": "GET /Component/<id> accept=xml (platform readback of a CANONICAL ProcessIR apply)",
+    "component_id": "7dcaebf3-3ca8-4cf2-9124-1024bacc48d7",
+    "root_key": "childD1",
+    "component_version": "1"
+  },
+  {
+    "scenario": "stage1-r1",
+    "file": "childD2_stored.xml",
+    "utc": "2026-09-06T07:02:26.049734+00:00",
+    "account_id": "trainingglebbochkarov-16926N",
+    "sha256": "22ea0c93ee1312ae8156ef5b73981443e17cc5f4c5ceb72426c35b89d804241e",
+    "byte_length": 1818,
+    "archive_path": "docs/architecture/evidence/issue-156/captures/stage1-r1/childD2_stored.xml",
+    "provenance": "GET /Component/<id> accept=xml (platform readback of a CANONICAL ProcessIR apply)",
+    "component_id": "463e3ee8-1048-45db-8ed6-43f2ba2c042a",
+    "root_key": "childD2",
+    "component_version": "1"
+  }
+]

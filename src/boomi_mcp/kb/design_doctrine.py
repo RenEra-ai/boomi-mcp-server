@@ -429,10 +429,13 @@ _ENTRIES: List[Dict[str, Any]] = [
             "A Notify step at the head of the catch path logs the "
             "platform-provided caught-error message to the process log at a "
             "chosen level, before the caught documents route to the failure "
-            "handler. The builder emits this today on a wired catch leg "
-            "(notify, then dead-letter route). Heavier email/alert delivery "
-            "stays a reusable asynchronous notification subprocess invoked off "
-            "the catch leg; run-level summary and audit outputs are separate. "
+            "handler. Both the legacy builder and the canonical ProcessIR path "
+            "emit this on a wired catch leg (notify, then dead-letter route or "
+            "a recovery subprocess). A recovery subprocess invoked from the "
+            "catch leg runs SYNCHRONOUSLY and aborts the parent on failure — a "
+            "fire-and-forget hand-off would let the parent complete over a "
+            "failed recovery, which is measured platform behaviour, not a "
+            "preference. Run-level summary and audit outputs are separate. "
             "Split run-level logging from per-subprocess logging."
         ),
         "when_to_use": (

@@ -55,6 +55,7 @@ from ...errors import (
     PROCESS_IR_COMPILE_VERIFIER_FAILED,
     PROCESS_IR_COMPILE_XML_INVALID,
 )
+from ...models.process_ir_tokens import CAUGHT_ERROR_PROPERTY_ID, NOTIFY_LEVELS
 from .contracts import (
     BranchInputV1,
     CatchErrorsInputV1,
@@ -68,6 +69,7 @@ from .contracts import (
     EmissionPlanV1,
     EmitterInputV1,
     ExceptionInputV1,
+    NotifyInputV1,
     FlowControlInputV1,
     MapInputV1,
     MessageInputV1,
@@ -440,6 +442,35 @@ def _emit_exception(inp, ctx):
     )
 
 
+def _emit_notify(inp, ctx):
+    # Escape the authored template for MessageFormat FIRST, then substitute the
+    # caught-error token with the `{1}` positional parameter. Transcribed from the
+    # legacy caller (`process_emitters/legacy.py:_emit_notify`), which stays in
+    # place as the differential oracle. XML escaping is a third stage and belongs
+    # to `render_notify`.
+    #
+    # The order is kept for PARITY, not because it is observably load-bearing —
+    # MEASURED, because the first version of this comment claimed the reverse
+    # order "silently corrupts the binding" and that was simply false. Over
+    # 200,000 generated templates the two orders produced identical output, and
+    # the reason is structural: `_escape_message_format_text` doubles apostrophes
+    # and quote-wraps a body that is VALID JSON, the token carries no apostrophe,
+    # and neither the token nor `{1}` can flip `_looks_like_json` (it requires the
+    # whole body to parse, which a bare `{1}` never does).
+    #
+    # So the argument for this order is the oracle, not a defect it avoids: the
+    # escaper is legacy-owned and may one day treat `{N}` placeholders specially,
+    # and escape-first is the order the golden bytes were produced under. A test
+    # pins canonical output against `legacy._emit_notify` for the same graph, so
+    # if that equivalence ever stops holding it fails there rather than here.
+    message = rendering._escape_message_format_text(inp.message_template).replace(
+        CAUGHT_ERROR_PROPERTY_ID, "{1}"
+    )
+    return rendering.render_notify(
+        _shape_context(ctx.node), level=inp.level, message=message
+    )
+
+
 def _emit_stop(inp, ctx):
     return rendering.render_stop(_shape_context(ctx.node), continue_=inp.continue_)
 
@@ -596,6 +627,22 @@ def _pre_catcherrors(inp) -> Optional[str]:
     return None
 
 
+def _pre_notify(inp) -> Optional[str]:
+    # The parser already refuses both of these, so this guards the OTHER entry
+    # point: an input built with `model_construct`, or a mutated plan handed
+    # straight to emission. `NotifyInputV1` is deliberately typed with a plain
+    # `str` level rather than the model's Literal — the compiler layer carries
+    # what lowering resolved, and re-declaring the vocabulary here would be a
+    # second copy of it. So the check is made explicitly instead.
+    if inp.level not in NOTIFY_LEVELS:
+        return "notify level is outside the platform vocabulary"
+    if not inp.message_template.strip():
+        return "notify message_template is blank"
+    if CAUGHT_ERROR_PROPERTY_ID not in inp.message_template:
+        return "notify message_template does not reference the caught-error property"
+    return None
+
+
 def _pre_exception(inp) -> Optional[str]:
     # The resolved ``binding`` and the legacy ``parameter_source`` must agree — the
     # legacy emitter derives the exParameters form from parameter_source, so an
@@ -610,8 +657,9 @@ def _pre_exception(inp) -> Optional[str]:
 
 
 # ---------------------------------------------------------------------------
-# Default registrations (18 discriminator keys; 17 model classes — the connector
-# source/target keys share one renderer). #142 added ``catcherrors``.
+# Default registrations (19 discriminator keys; 18 model classes — the connector
+# source/target keys share one renderer). #142 added ``catcherrors``; #156 added
+# ``notify``.
 # ---------------------------------------------------------------------------
 
 _REGISTRATIONS: Tuple[EmitterRegistration, ...] = (
@@ -637,6 +685,11 @@ _REGISTRATIONS: Tuple[EmitterRegistration, ...] = (
     EmitterRegistration("decision", DecisionInputV1, "decision", CAPABILITY_PROCESS_IR_V1, EXACT_TWO, _no_requirements, _emit_decision, _pre_decision),
     EmitterRegistration("catcherrors", CatchErrorsInputV1, "catcherrors", CAPABILITY_PROCESS_IR_V1, EXACT_TWO, _no_requirements, _emit_catcherrors, _pre_catcherrors),
     EmitterRegistration("exception", ExceptionInputV1, "exception", CAPABILITY_PROCESS_IR_V1, EXACT_ZERO, _no_requirements, _emit_exception, _pre_exception),
+    # #156 T4, the NINETEENTH key. `EXACT_ONE`: Notify logs and continues, so it
+    # is an ordinary linear step on the recovery path, not a terminal. It needs no
+    # symbols — the caught-error binding is a fixed platform property, not an
+    # authored reference.
+    EmitterRegistration("notify", NotifyInputV1, "notify", CAPABILITY_PROCESS_IR_V1, EXACT_ONE, _no_requirements, _emit_notify, _pre_notify),
     EmitterRegistration("stop", StopInputV1, "stop", CAPABILITY_PROCESS_IR_V1, EXACT_ZERO, _no_requirements, _emit_stop),
     EmitterRegistration("returndocuments", ReturnDocumentsInputV1, "returndocuments", CAPABILITY_PROCESS_IR_V1, EXACT_ZERO, _no_requirements, _emit_returndocuments),
 )

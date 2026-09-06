@@ -1,0 +1,263 @@
+{
+  "nonce": "QA156D0906065703",
+  "freeze": "b07babeb3752/dirty:8f9e24d12302/39ef6aea5fef",
+  "utc": "2026-09-06T07:07:02.300682+00:00",
+  "marks": {
+    "src": "/admin/refdata/api/v1/rdcds/offices?qa=QA156D0906065703-src",
+    "c1": "/admin/refdata/api/v1/rdcds/offices?qa=QA156D0906065703-c1",
+    "c2": "/admin/refdata/api/v1/rdcds/offices?qa=QA156D0906065703-c2",
+    "cb": "/admin/refdata/api/v1/rdcds/offices?qa=QA156D0906065703-cb",
+    "fail": "/__QA156D__/QA156D0906065703/r2fail",
+    "abf": "/__QA156D__/QA156D0906065703/abfail"
+  },
+  "created": {
+    "conn": {
+      "component_id": "b24ef0d5-ea3d-4450-822c-5dae9675cf5d",
+      "status": "created",
+      "name": "_TEST_156D_QA156D0906065703 conn"
+    },
+    "op_abf": {
+      "component_id": "7a7eb72c-a15b-45af-b453-7d7edc430d2c",
+      "status": "created",
+      "name": "_TEST_156D_QA156D0906065703 op_abf"
+    },
+    "op_c1": {
+      "component_id": "fa52947d-2ad5-47a1-995f-50ed63126934",
+      "status": "created",
+      "name": "_TEST_156D_QA156D0906065703 op_c1"
+    },
+    "childD1": {
+      "component_id": "7dcaebf3-3ca8-4cf2-9124-1024bacc48d7",
+      "status": "created",
+      "name": "_TEST_156D_QA156D0906065703 childD1"
+    },
+    "op_c2": {
+      "component_id": "3c0adad6-d0d7-47cc-8815-9b0f53fad7c5",
+      "status": "created",
+      "name": "_TEST_156D_QA156D0906065703 op_c2"
+    },
+    "childD2": {
+      "component_id": "463e3ee8-1048-45db-8ed6-43f2ba2c042a",
+      "status": "created",
+      "name": "_TEST_156D_QA156D0906065703 childD2"
+    },
+    "op_cb": {
+      "component_id": "1faf9dc2-12e8-4aa6-984e-fce9bfb4d666",
+      "status": "created",
+      "name": "_TEST_156D_QA156D0906065703 op_cb"
+    },
+    "childB": {
+      "component_id": "0e3bf314-2565-4d64-a07b-eb4263f53231",
+      "status": "created",
+      "name": "_TEST_156D_QA156D0906065703 childB"
+    },
+    "op_fail": {
+      "component_id": "6aa13d4c-f249-4594-b936-221360a97781",
+      "status": "created",
+      "name": "_TEST_156D_QA156D0906065703 op_fail"
+    },
+    "op_src": {
+      "component_id": "d40c972b-e04a-4b69-943b-fe17982bae09",
+      "status": "created",
+      "name": "_TEST_156D_QA156D0906065703 op_src"
+    },
+    "procA": {
+      "component_id": "f9c4e798-8068-4ccd-b36a-90c0a14fd3b2",
+      "status": "created",
+      "name": "_TEST_156D_QA156D0906065703 procA notify stop"
+    },
+    "procB": {
+      "component_id": "15285b48-f0fc-4fe8-b093-cd664c150252",
+      "status": "created",
+      "name": "_TEST_156D_QA156D0906065703 procB notify recovery call"
+    },
+    "procD": {
+      "component_id": "a6526452-8ff1-417b-a74a-e0749693c1a6",
+      "status": "created",
+      "name": "_TEST_156D_QA156D0906065703 procD serialized regions"
+    }
+  },
+  "cells": [
+    {
+      "cell": "A1",
+      "root": "procA",
+      "process_id": "f9c4e798-8068-4ccd-b36a-90c0a14fd3b2",
+      "started_utc": "2026-09-06T07:04:15.085169+00:00",
+      "note": "catch -> notify -> stop; notify must bind the real error",
+      "execution_id": "execution-baec5a28-f739-4d10-bf6b-945003da2812-2026.09.06",
+      "execution_status": "COMPLETE",
+      "wait_status": "COMPLETE",
+      "inbound_error_documents": 0,
+      "counterparty_counts": {
+        "src": 0,
+        "c1": 0,
+        "c2": 0,
+        "cb": 0,
+        "fail": 0,
+        "abf": 1
+      },
+      "counterparty_lines": {
+        "src": [],
+        "c1": [],
+        "c2": [],
+        "cb": [],
+        "fail": [],
+        "abf": [
+          "2026-09-06T07:04:17.942320222Z INFO:     192.168.65.1:36974 - \"GET /__QA156D__/QA156D0906065703/abfail HTTP/1.1\" 404 Not Found"
+        ]
+      },
+      "subprocess_records": [],
+      "notify_log_lines": [
+        "tLoading Process Model _TEST_156D_QA156D0906065703 procA notify stop",
+        "tExecuting Process _TEST_156D_QA156D0906065703 procA notify stop",
+        "tExecuting Process _TEST_156D_QA156D0906065703 procA notify stop (Continuation f_0)",
+        "t_TEST_156D_QA156D0906065703 conn: officialboomi-X3979C-rest-prod Connector; _TEST_156D_QA156D0906065703 op_abf",
+        "t_TEST_156D_QA156D0906065703 conn: officialboomi-X3979C-rest-prod Connector; _TEST_156D_QA156D0906065703 op_abf",
+        "t_TEST_156D_QA156D0906065703 procA notify stop (Continuation f_0) encountered 1 document error(s)",
+        "tCatch path notification: QA156D A caught: [404] Not Found"
+      ],
+      "window_size": 1
+    },
+    {
+      "cell": "B1",
+      "root": "procB",
+      "process_id": "15285b48-f0fc-4fe8-b093-cd664c150252",
+      "started_utc": "2026-09-06T07:05:00.905048+00:00",
+      "note": "catch -> notify -> processcall(childB); child runs once",
+      "execution_id": "execution-4603f4a7-e2f4-4604-bfa5-f38ef7876c53-2026.09.06",
+      "execution_status": "COMPLETE",
+      "wait_status": "COMPLETE",
+      "inbound_error_documents": 0,
+      "counterparty_counts": {
+        "src": 0,
+        "c1": 0,
+        "c2": 0,
+        "cb": 1,
+        "fail": 0,
+        "abf": 1
+      },
+      "counterparty_lines": {
+        "src": [],
+        "c1": [],
+        "c2": [],
+        "cb": [
+          "2026-09-06T07:05:01.475435464Z INFO:     192.168.65.1:26543 - \"GET /admin/refdata/api/v1/rdcds/offices?qa=QA156D0906065703-cb HTTP/1.1\" 200 OK"
+        ],
+        "fail": [],
+        "abf": [
+          "2026-09-06T07:05:01.426627922Z INFO:     192.168.65.1:18811 - \"GET /__QA156D__/QA156D0906065703/abfail HTTP/1.1\" 404 Not Found"
+        ]
+      },
+      "subprocess_records": [],
+      "notify_log_lines": [
+        "tLoading Process Model _TEST_156D_QA156D0906065703 procB notify recovery call",
+        "tExecuting Process _TEST_156D_QA156D0906065703 procB notify recovery call",
+        "tExecuting Process _TEST_156D_QA156D0906065703 procB notify recovery call (Continuation f_0)",
+        "t_TEST_156D_QA156D0906065703 conn: officialboomi-X3979C-rest-prod Connector; _TEST_156D_QA156D0906065703 op_abf",
+        "t_TEST_156D_QA156D0906065703 conn: officialboomi-X3979C-rest-prod Connector; _TEST_156D_QA156D0906065703 op_abf",
+        "t_TEST_156D_QA156D0906065703 procB notify recovery call (Continuation f_0) encountered 1 document error(s)",
+        "tCatch path notification: QA156D B caught: [404] Not Found",
+        "tExecuting process '_TEST_156D_QA156D0906065703 childB"
+      ],
+      "window_size": 2
+    },
+    {
+      "cell": "D1",
+      "root": "procD",
+      "process_id": "a6526452-8ff1-417b-a74a-e0749693c1a6",
+      "started_utc": "2026-09-06T07:05:42.599396+00:00",
+      "note": "serialized regions; fail ONLY the second connector",
+      "execution_id": "execution-f295aa2a-64ae-497c-a940-333308472c09-2026.09.06",
+      "execution_status": "COMPLETE",
+      "wait_status": "INPROCESS",
+      "inbound_error_documents": 0,
+      "counterparty_counts": {
+        "src": 1,
+        "c1": 0,
+        "c2": 1,
+        "cb": 0,
+        "fail": 3,
+        "abf": 0
+      },
+      "counterparty_lines": {
+        "src": [
+          "2026-09-06T07:05:44.032791970Z INFO:     192.168.65.1:22187 - \"GET /admin/refdata/api/v1/rdcds/offices?qa=QA156D0906065703-src HTTP/1.1\" 200 OK"
+        ],
+        "c1": [],
+        "c2": [
+          "2026-09-06T07:05:57.232900712Z INFO:     192.168.65.1:29751 - \"GET /admin/refdata/api/v1/rdcds/offices?qa=QA156D0906065703-c2 HTTP/1.1\" 200 OK"
+        ],
+        "cb": [],
+        "fail": [
+          "2026-09-06T07:05:44.051190845Z INFO:     192.168.65.1:35303 - \"GET /__QA156D__/QA156D0906065703/r2fail HTTP/1.1\" 404 Not Found",
+          "2026-09-06T07:05:44.065688262Z INFO:     192.168.65.1:57541 - \"GET /__QA156D__/QA156D0906065703/r2fail HTTP/1.1\" 404 Not Found",
+          "2026-09-06T07:05:57.193549254Z INFO:     192.168.65.1:30812 - \"GET /__QA156D__/QA156D0906065703/r2fail HTTP/1.1\" 404 Not Found"
+        ],
+        "abf": []
+      },
+      "subprocess_records": [],
+      "notify_log_lines": [
+        "tExecuting Process _TEST_156D_QA156D0906065703 procD serialized regions",
+        "tLoading Process Model _TEST_156D_QA156D0906065703 procD serialized regions (Continuation f_0)",
+        "tExecuting Process _TEST_156D_QA156D0906065703 procD serialized regions (Continuation f_0)",
+        "t_TEST_156D_QA156D0906065703 conn: officialboomi-X3979C-rest-prod Connector; _TEST_156D_QA156D0906065703 op_src",
+        "t_TEST_156D_QA156D0906065703 conn: officialboomi-X3979C-rest-prod Connector; _TEST_156D_QA156D0906065703 op_src",
+        "tExecuting Process _TEST_156D_QA156D0906065703 procD serialized regions (Continuation f_0_0)",
+        "t_TEST_156D_QA156D0906065703 conn: officialboomi-X3979C-rest-prod Connector; _TEST_156D_QA156D0906065703 op_fail",
+        "t_TEST_156D_QA156D0906065703 conn: officialboomi-X3979C-rest-prod Connector; _TEST_156D_QA156D0906065703 op_fail",
+        "t_TEST_156D_QA156D0906065703 procD serialized regions (Continuation f_0_0) encountered 1 document error(s)",
+        "tExecuting Process _TEST_156D_QA156D0906065703 procD serialized regions (Continuation f_0_1)"
+      ],
+      "window_size": 5
+    },
+    {
+      "cell": "D2",
+      "root": "procD",
+      "process_id": "a6526452-8ff1-417b-a74a-e0749693c1a6",
+      "started_utc": "2026-09-06T07:06:24.271765+00:00",
+      "note": "repeat for determinism",
+      "execution_id": "execution-7f0adaa0-07bf-403d-bf8d-a9e190a63a10-2026.09.06",
+      "execution_status": "COMPLETE",
+      "wait_status": "INPROCESS",
+      "inbound_error_documents": 0,
+      "counterparty_counts": {
+        "src": 1,
+        "c1": 0,
+        "c2": 1,
+        "cb": 0,
+        "fail": 3,
+        "abf": 0
+      },
+      "counterparty_lines": {
+        "src": [
+          "2026-09-06T07:06:24.863335419Z INFO:     192.168.65.1:62622 - \"GET /admin/refdata/api/v1/rdcds/offices?qa=QA156D0906065703-src HTTP/1.1\" 200 OK"
+        ],
+        "c1": [],
+        "c2": [
+          "2026-09-06T07:06:37.903810009Z INFO:     192.168.65.1:55915 - \"GET /admin/refdata/api/v1/rdcds/offices?qa=QA156D0906065703-c2 HTTP/1.1\" 200 OK"
+        ],
+        "cb": [],
+        "fail": [
+          "2026-09-06T07:06:24.875082127Z INFO:     192.168.65.1:43900 - \"GET /__QA156D__/QA156D0906065703/r2fail HTTP/1.1\" 404 Not Found",
+          "2026-09-06T07:06:24.893943377Z INFO:     192.168.65.1:29525 - \"GET /__QA156D__/QA156D0906065703/r2fail HTTP/1.1\" 404 Not Found",
+          "2026-09-06T07:06:37.874763800Z INFO:     192.168.65.1:54683 - \"GET /__QA156D__/QA156D0906065703/r2fail HTTP/1.1\" 404 Not Found"
+        ],
+        "abf": []
+      },
+      "subprocess_records": [],
+      "notify_log_lines": [
+        "tExecuting Process _TEST_156D_QA156D0906065703 procD serialized regions",
+        "tLoading Process Model _TEST_156D_QA156D0906065703 procD serialized regions (Continuation f_0)",
+        "tExecuting Process _TEST_156D_QA156D0906065703 procD serialized regions (Continuation f_0)",
+        "t_TEST_156D_QA156D0906065703 conn: officialboomi-X3979C-rest-prod Connector; _TEST_156D_QA156D0906065703 op_src",
+        "t_TEST_156D_QA156D0906065703 conn: officialboomi-X3979C-rest-prod Connector; _TEST_156D_QA156D0906065703 op_src",
+        "tExecuting Process _TEST_156D_QA156D0906065703 procD serialized regions (Continuation f_0_0)",
+        "t_TEST_156D_QA156D0906065703 conn: officialboomi-X3979C-rest-prod Connector; _TEST_156D_QA156D0906065703 op_fail",
+        "t_TEST_156D_QA156D0906065703 conn: officialboomi-X3979C-rest-prod Connector; _TEST_156D_QA156D0906065703 op_fail",
+        "t_TEST_156D_QA156D0906065703 procD serialized regions (Continuation f_0_0) encountered 1 document error(s)",
+        "tExecuting Process _TEST_156D_QA156D0906065703 procD serialized regions (Continuation f_0_1)"
+      ],
+      "window_size": 5
+    }
+  ]
+}
