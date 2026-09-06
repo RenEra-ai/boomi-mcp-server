@@ -11624,83 +11624,79 @@
 {"kind": "test", "id": "pytest-011623", "node_id": "tests/test_process_ir_notify_recovery.py::test_canonical_notify_equals_the_legacy_emitter_for_the_same_graph[INFO-Integration catch path failed. Caught error: meta.base.catcherrorsmessage]", "state": "active"}
 {"kind": "test", "id": "pytest-011624", "node_id": "tests/test_process_ir_notify_recovery.py::test_canonical_notify_equals_the_legacy_emitter_for_the_same_graph[INFO-it's broken: meta.base.catcherrorsmessage]", "state": "active"}
 {"kind": "test", "id": "pytest-011625", "node_id": "tests/test_process_ir_notify_recovery.py::test_canonical_notify_equals_the_legacy_emitter_for_the_same_graph[INFO-<a> & \"b\" caught meta.base.catcherrorsmessage]", "state": "active"}
-{"kind": "test", "id": "pytest-011626", "node_id": "tests/test_process_ir_notify_recovery.py::test_canonical_notify_equals_the_legacy_emitter_for_the_same_graph[INFO-{\"error\": \"meta.base.catcherrorsmessage\"}]", "state": "tombstone"}
-{"kind": "test", "id": "pytest-011627", "node_id": "tests/test_process_ir_notify_recovery.py::test_canonical_notify_equals_the_legacy_emitter_for_the_same_graph[INFO-meta.base.catcherrorsmessage and again meta.base.catcherrorsmessage]", "state": "active"}
-{"kind": "test", "id": "pytest-011628", "node_id": "tests/test_process_ir_notify_recovery.py::test_canonical_notify_equals_the_legacy_emitter_for_the_same_graph[INFO-meta.base.catcherrorsmessage]", "state": "active"}
-{"kind": "test", "id": "pytest-011629", "node_id": "tests/test_process_ir_notify_recovery.py::test_canonical_notify_equals_the_legacy_emitter_for_the_same_graph[WARNING-Integration catch path failed. Caught error: meta.base.catcherrorsmessage]", "state": "active"}
-{"kind": "test", "id": "pytest-011630", "node_id": "tests/test_process_ir_notify_recovery.py::test_canonical_notify_equals_the_legacy_emitter_for_the_same_graph[WARNING-it's broken: meta.base.catcherrorsmessage]", "state": "active"}
-{"kind": "test", "id": "pytest-011631", "node_id": "tests/test_process_ir_notify_recovery.py::test_canonical_notify_equals_the_legacy_emitter_for_the_same_graph[WARNING-<a> & \"b\" caught meta.base.catcherrorsmessage]", "state": "active"}
-{"kind": "test", "id": "pytest-011632", "node_id": "tests/test_process_ir_notify_recovery.py::test_canonical_notify_equals_the_legacy_emitter_for_the_same_graph[WARNING-{\"error\": \"meta.base.catcherrorsmessage\"}]", "state": "tombstone"}
-{"kind": "test", "id": "pytest-011633", "node_id": "tests/test_process_ir_notify_recovery.py::test_canonical_notify_equals_the_legacy_emitter_for_the_same_graph[WARNING-meta.base.catcherrorsmessage and again meta.base.catcherrorsmessage]", "state": "active"}
-{"kind": "test", "id": "pytest-011634", "node_id": "tests/test_process_ir_notify_recovery.py::test_canonical_notify_equals_the_legacy_emitter_for_the_same_graph[WARNING-meta.base.catcherrorsmessage]", "state": "active"}
-{"kind": "test", "id": "pytest-011635", "node_id": "tests/test_process_ir_notify_recovery.py::test_canonical_notify_equals_the_legacy_emitter_for_the_same_graph[ERROR-Integration catch path failed. Caught error: meta.base.catcherrorsmessage]", "state": "active"}
-{"kind": "test", "id": "pytest-011636", "node_id": "tests/test_process_ir_notify_recovery.py::test_canonical_notify_equals_the_legacy_emitter_for_the_same_graph[ERROR-it's broken: meta.base.catcherrorsmessage]", "state": "active"}
-{"kind": "test", "id": "pytest-011637", "node_id": "tests/test_process_ir_notify_recovery.py::test_canonical_notify_equals_the_legacy_emitter_for_the_same_graph[ERROR-<a> & \"b\" caught meta.base.catcherrorsmessage]", "state": "active"}
-{"kind": "test", "id": "pytest-011638", "node_id": "tests/test_process_ir_notify_recovery.py::test_canonical_notify_equals_the_legacy_emitter_for_the_same_graph[ERROR-{\"error\": \"meta.base.catcherrorsmessage\"}]", "state": "tombstone"}
-{"kind": "test", "id": "pytest-011639", "node_id": "tests/test_process_ir_notify_recovery.py::test_canonical_notify_equals_the_legacy_emitter_for_the_same_graph[ERROR-meta.base.catcherrorsmessage and again meta.base.catcherrorsmessage]", "state": "active"}
-{"kind": "test", "id": "pytest-011640", "node_id": "tests/test_process_ir_notify_recovery.py::test_canonical_notify_equals_the_legacy_emitter_for_the_same_graph[ERROR-meta.base.catcherrorsmessage]", "state": "active"}
-{"kind": "test", "id": "pytest-011641", "node_id": "tests/test_process_ir_notify_recovery.py::test_notify_reproduces_the_shipped_golden_shape_bytes", "state": "active"}
-{"kind": "test", "id": "pytest-011642", "node_id": "tests/test_process_ir_notify_recovery.py::test_escape_then_substitute_and_the_reverse_agree_today", "state": "active"}
-{"kind": "test", "id": "pytest-011643", "node_id": "tests/test_process_ir_notify_recovery.py::test_notify_is_admitted_on_the_recovery_path", "state": "active"}
-{"kind": "test", "id": "pytest-011644", "node_id": "tests/test_process_ir_notify_recovery.py::test_notify_is_refused_everywhere_else[document0-try body]", "state": "active"}
-{"kind": "test", "id": "pytest-011645", "node_id": "tests/test_process_ir_notify_recovery.py::test_notify_is_refused_everywhere_else[document1-root sequence]", "state": "active"}
-{"kind": "test", "id": "pytest-011646", "node_id": "tests/test_process_ir_notify_recovery.py::test_notify_is_refused_everywhere_else[document2-branch leg]", "state": "active"}
-{"kind": "test", "id": "pytest-011647", "node_id": "tests/test_process_ir_notify_recovery.py::test_notify_is_refused_everywhere_else[document3-decision true arm]", "state": "active"}
-{"kind": "test", "id": "pytest-011648", "node_id": "tests/test_process_ir_notify_recovery.py::test_a_notify_template_must_carry_the_caught_error_token[no token here at all]", "state": "active"}
-{"kind": "test", "id": "pytest-011649", "node_id": "tests/test_process_ir_notify_recovery.py::test_a_notify_template_must_carry_the_caught_error_token[   ]", "state": "active"}
-{"kind": "test", "id": "pytest-011650", "node_id": "tests/test_process_ir_notify_recovery.py::test_a_notify_template_must_carry_the_caught_error_token[]", "state": "active"}
-{"kind": "test", "id": "pytest-011651", "node_id": "tests/test_process_ir_notify_recovery.py::test_a_notify_level_outside_the_platform_vocabulary_is_refused", "state": "active"}
-{"kind": "test", "id": "pytest-011652", "node_id": "tests/test_process_ir_notify_recovery.py::test_the_emitter_preflight_refuses_an_input_the_parser_never_produced[FATAL-caught meta.base.catcherrorsmessage]", "state": "active"}
-{"kind": "test", "id": "pytest-011653", "node_id": "tests/test_process_ir_notify_recovery.py::test_the_emitter_preflight_refuses_an_input_the_parser_never_produced[ERROR-   ]", "state": "active"}
-{"kind": "test", "id": "pytest-011654", "node_id": "tests/test_process_ir_notify_recovery.py::test_the_emitter_preflight_refuses_an_input_the_parser_never_produced[ERROR-no token]", "state": "active"}
-{"kind": "test", "id": "pytest-011655", "node_id": "tests/test_process_ir_notify_recovery.py::test_the_emitter_preflight_accepts_every_legal_input", "state": "active"}
-{"kind": "test", "id": "pytest-011656", "node_id": "tests/test_process_ir_notify_recovery.py::test_a_recovery_hand_off_is_admitted_on_the_catch_terminal[catch_steps0-bare terminal call]", "state": "active"}
-{"kind": "test", "id": "pytest-011657", "node_id": "tests/test_process_ir_notify_recovery.py::test_a_recovery_hand_off_is_admitted_on_the_catch_terminal[catch_steps1-notify then call]", "state": "active"}
-{"kind": "test", "id": "pytest-011658", "node_id": "tests/test_process_ir_notify_recovery.py::test_a_recovery_hand_off_is_admitted_on_the_catch_terminal[catch_steps2-two notifies then call]", "state": "active"}
-{"kind": "test", "id": "pytest-011659", "node_id": "tests/test_process_ir_notify_recovery.py::test_a_recovery_call_must_author_both_flags_true[terminal0-abort_on_error]", "state": "active"}
-{"kind": "test", "id": "pytest-011660", "node_id": "tests/test_process_ir_notify_recovery.py::test_a_recovery_call_must_author_both_flags_true[terminal1-abort_on_error]", "state": "active"}
-{"kind": "test", "id": "pytest-011661", "node_id": "tests/test_process_ir_notify_recovery.py::test_a_recovery_call_must_author_both_flags_true[terminal2-wait]", "state": "active"}
-{"kind": "test", "id": "pytest-011662", "node_id": "tests/test_process_ir_notify_recovery.py::test_the_compiler_serves_the_same_identity_for_a_mutated_recovery_call", "state": "active"}
-{"kind": "test", "id": "pytest-011663", "node_id": "tests/test_process_ir_notify_recovery.py::test_only_a_notify_prefix_is_admitted_before_a_recovery_call[prefix0-message]", "state": "active"}
-{"kind": "test", "id": "pytest-011664", "node_id": "tests/test_process_ir_notify_recovery.py::test_only_a_notify_prefix_is_admitted_before_a_recovery_call[prefix1-set_dpp]", "state": "active"}
-{"kind": "test", "id": "pytest-011665", "node_id": "tests/test_process_ir_notify_recovery.py::test_only_a_notify_prefix_is_admitted_before_a_recovery_call[prefix2-notify then message]", "state": "active"}
-{"kind": "test", "id": "pytest-011666", "node_id": "tests/test_process_ir_notify_recovery.py::test_a_connector_inside_the_catch_body_still_blocks_the_recovery_call", "state": "active"}
-{"kind": "test", "id": "pytest-011667", "node_id": "tests/test_process_ir_notify_recovery.py::test_the_recovery_exemption_does_not_leak_to_a_non_recovery_body", "state": "active"}
-{"kind": "test", "id": "pytest-011668", "node_id": "tests/test_process_ir_notify_recovery.py::test_a_connector_upstream_of_the_handler_admits_the_recovery_call", "state": "active"}
-{"kind": "test", "id": "pytest-011669", "node_id": "tests/test_process_ir_notify_recovery.py::test_the_notify_dlq_golden_is_reproduced_from_canonical_ir", "state": "active"}
-{"kind": "test", "id": "pytest-011670", "node_id": "tests/test_process_ir_notify_recovery.py::test_the_canonical_notify_dlq_graph_agrees_with_the_legacy_builder", "state": "active"}
-{"kind": "test", "id": "pytest-011671", "node_id": "tests/test_process_ir_rich_control_bodies.py::test_registry_step_rows_match_the_model_unions[catch_body-step-CatchBodyStepV1]", "state": "active"}
-{"kind": "test", "id": "pytest-011672", "node_id": "tests/test_wave_gate_goldens.py::test_golden_manifest_row[golden-000075]", "state": "active"}
-{"kind": "test", "id": "pytest-011673", "node_id": "tests/test_wave_gate_goldens.py::test_golden_manifest_row[golden-000076]", "state": "active"}
-{"kind": "test", "id": "pytest-011674", "node_id": "tests/test_process_ir_notify_recovery.py::test_a_serialized_region_chain_compiles_at_any_length[2]", "state": "active"}
-{"kind": "test", "id": "pytest-011675", "node_id": "tests/test_process_ir_notify_recovery.py::test_a_serialized_region_chain_compiles_at_any_length[3]", "state": "active"}
-{"kind": "test", "id": "pytest-011676", "node_id": "tests/test_process_ir_notify_recovery.py::test_a_serialized_region_chain_compiles_at_any_length[5]", "state": "active"}
-{"kind": "test", "id": "pytest-011677", "node_id": "tests/test_process_ir_notify_recovery.py::test_an_orphan_continue_is_refused[steps0-lone process handler]", "state": "active"}
-{"kind": "test", "id": "pytest-011678", "node_id": "tests/test_process_ir_notify_recovery.py::test_an_orphan_continue_is_refused[steps1-lone connector handler]", "state": "active"}
-{"kind": "test", "id": "pytest-011679", "node_id": "tests/test_process_ir_notify_recovery.py::test_an_orphan_continue_is_refused[steps2-connector_call then a lone handler]", "state": "active"}
-{"kind": "test", "id": "pytest-011680", "node_id": "tests/test_process_ir_notify_recovery.py::test_an_orphan_continue_is_refused[steps3-chain whose LAST handler continues]", "state": "active"}
-{"kind": "test", "id": "pytest-011681", "node_id": "tests/test_process_ir_notify_recovery.py::test_an_orphan_continue_is_refused[steps4-chain whose FIRST handler terminates]", "state": "active"}
-{"kind": "test", "id": "pytest-011682", "node_id": "tests/test_process_ir_notify_recovery.py::test_the_compiler_refuses_an_orphan_continue_on_a_mutated_model", "state": "active"}
-{"kind": "test", "id": "pytest-011683", "node_id": "tests/test_process_ir_notify_recovery.py::test_a_map_separated_chain_compiles_through_the_public_pipeline", "state": "active"}
-{"kind": "test", "id": "pytest-011684", "node_id": "tests/test_process_ir_notify_recovery.py::test_a_chain_bounds_each_protected_region_at_the_next_handler", "state": "tombstone"}
-{"kind": "test", "id": "pytest-011685", "node_id": "tests/test_process_ir_notify_recovery.py::test_an_intervening_map_belongs_to_the_preceding_protected_region", "state": "active"}
-{"kind": "test", "id": "pytest-011686", "node_id": "tests/test_process_ir_notify_recovery.py::test_a_chain_region_grades_the_success_path_and_no_other_recovery_path", "state": "active"}
-{"kind": "test", "id": "pytest-011687", "node_id": "tests/test_process_ir_notify_recovery.py::test_a_retried_region_grades_a_write_in_a_later_handler_it_re_runs", "state": "active"}
-{"kind": "test", "id": "pytest-011688", "node_id": "tests/test_process_ir_notify_recovery.py::test_a_retried_region_does_not_grade_a_later_recovery_only_write", "state": "active"}
-{"kind": "test", "id": "pytest-011689", "node_id": "tests/test_process_ir_notify_recovery.py::test_a_braced_notify_template_is_refused[{\"error\": \"meta.base.catcherrorsmessage\"}-JSON body]", "state": "active"}
-{"kind": "test", "id": "pytest-011690", "node_id": "tests/test_process_ir_notify_recovery.py::test_a_braced_notify_template_is_refused[order {id} failed: meta.base.catcherrorsmessage-brace run]", "state": "active"}
-{"kind": "test", "id": "pytest-011691", "node_id": "tests/test_process_ir_notify_recovery.py::test_a_braced_notify_template_is_refused[meta.base.catcherrorsmessage }-stray close brace]", "state": "active"}
-{"kind": "test", "id": "pytest-011692", "node_id": "tests/test_process_ir_notify_recovery.py::test_an_unbraced_notify_template_still_binds_the_caught_error", "state": "active"}
-{"kind": "test", "id": "pytest-011693", "node_id": "tests/test_process_ir_notify_recovery.py::test_the_chain_rule_codes_are_served_by_the_compiler", "state": "active"}
-{"kind": "test", "id": "pytest-011694", "node_id": "tests/test_process_ir_notify_recovery.py::test_the_continuation_remediation_covers_the_rules_that_serve_it", "state": "active"}
-{"kind": "test", "id": "pytest-011695", "node_id": "tests/test_process_ir_notify_recovery.py::test_the_connector_scoped_double_guard_golden_is_reproduced_from_canonical_ir", "state": "active"}
-{"kind": "test", "id": "pytest-011696", "node_id": "tests/test_process_ir_notify_recovery.py::test_the_recovery_golden_matches_the_archived_live_capture", "state": "active"}
-{"kind": "test", "id": "pytest-011697", "node_id": "tests/test_process_ir_notify_recovery.py::test_canonical_notify_equals_the_legacy_emitter_for_the_same_graph[INFO-[ERROR] caught meta.base.catcherrorsmessage]", "state": "active"}
-{"kind": "test", "id": "pytest-011698", "node_id": "tests/test_process_ir_notify_recovery.py::test_canonical_notify_equals_the_legacy_emitter_for_the_same_graph[WARNING-[ERROR] caught meta.base.catcherrorsmessage]", "state": "active"}
-{"kind": "test", "id": "pytest-011699", "node_id": "tests/test_process_ir_notify_recovery.py::test_canonical_notify_equals_the_legacy_emitter_for_the_same_graph[ERROR-[ERROR] caught meta.base.catcherrorsmessage]", "state": "active"}
-{"kind": "test", "id": "pytest-011700", "node_id": "tests/test_process_ir_notify_recovery.py::test_the_notify_goldens_cannot_take_the_canonical_corpus_route_yet", "state": "active"}
-{"kind": "test", "id": "pytest-011701", "node_id": "tests/test_process_ir_error_handling.py::test_a_recovery_path_cannot_read_state_its_own_failed_try_wrote", "state": "active"}
-{"kind": "test", "id": "pytest-011702", "node_id": "tests/test_process_ir_error_handling.py::test_a_chain_grants_evidence_per_call_and_not_across_siblings", "state": "active"}
-{"kind": "test", "id": "pytest-011703", "node_id": "tests/test_process_ir_error_handling.py::test_a_recovery_request_reaches_materialization_with_its_child_reference", "state": "active"}
-{"kind": "test", "id": "pytest-011704", "node_id": "tests/test_process_ir_error_handling.py::test_revoking_the_evidence_after_planning_refuses_the_next_compile", "state": "active"}
-{"kind": "test", "id": "pytest-011705", "node_id": "tests/test_process_ir_error_handling.py::test_a_chain_relocates_across_account_bindings_unchanged", "state": "active"}
+{"kind": "test", "id": "pytest-011626", "node_id": "tests/test_process_ir_notify_recovery.py::test_canonical_notify_equals_the_legacy_emitter_for_the_same_graph[INFO-meta.base.catcherrorsmessage and again meta.base.catcherrorsmessage]", "state": "active"}
+{"kind": "test", "id": "pytest-011627", "node_id": "tests/test_process_ir_notify_recovery.py::test_canonical_notify_equals_the_legacy_emitter_for_the_same_graph[INFO-meta.base.catcherrorsmessage]", "state": "active"}
+{"kind": "test", "id": "pytest-011628", "node_id": "tests/test_process_ir_notify_recovery.py::test_canonical_notify_equals_the_legacy_emitter_for_the_same_graph[WARNING-Integration catch path failed. Caught error: meta.base.catcherrorsmessage]", "state": "active"}
+{"kind": "test", "id": "pytest-011629", "node_id": "tests/test_process_ir_notify_recovery.py::test_canonical_notify_equals_the_legacy_emitter_for_the_same_graph[WARNING-it's broken: meta.base.catcherrorsmessage]", "state": "active"}
+{"kind": "test", "id": "pytest-011630", "node_id": "tests/test_process_ir_notify_recovery.py::test_canonical_notify_equals_the_legacy_emitter_for_the_same_graph[WARNING-<a> & \"b\" caught meta.base.catcherrorsmessage]", "state": "active"}
+{"kind": "test", "id": "pytest-011631", "node_id": "tests/test_process_ir_notify_recovery.py::test_canonical_notify_equals_the_legacy_emitter_for_the_same_graph[WARNING-meta.base.catcherrorsmessage and again meta.base.catcherrorsmessage]", "state": "active"}
+{"kind": "test", "id": "pytest-011632", "node_id": "tests/test_process_ir_notify_recovery.py::test_canonical_notify_equals_the_legacy_emitter_for_the_same_graph[WARNING-meta.base.catcherrorsmessage]", "state": "active"}
+{"kind": "test", "id": "pytest-011633", "node_id": "tests/test_process_ir_notify_recovery.py::test_canonical_notify_equals_the_legacy_emitter_for_the_same_graph[ERROR-Integration catch path failed. Caught error: meta.base.catcherrorsmessage]", "state": "active"}
+{"kind": "test", "id": "pytest-011634", "node_id": "tests/test_process_ir_notify_recovery.py::test_canonical_notify_equals_the_legacy_emitter_for_the_same_graph[ERROR-it's broken: meta.base.catcherrorsmessage]", "state": "active"}
+{"kind": "test", "id": "pytest-011635", "node_id": "tests/test_process_ir_notify_recovery.py::test_canonical_notify_equals_the_legacy_emitter_for_the_same_graph[ERROR-<a> & \"b\" caught meta.base.catcherrorsmessage]", "state": "active"}
+{"kind": "test", "id": "pytest-011636", "node_id": "tests/test_process_ir_notify_recovery.py::test_canonical_notify_equals_the_legacy_emitter_for_the_same_graph[ERROR-meta.base.catcherrorsmessage and again meta.base.catcherrorsmessage]", "state": "active"}
+{"kind": "test", "id": "pytest-011637", "node_id": "tests/test_process_ir_notify_recovery.py::test_canonical_notify_equals_the_legacy_emitter_for_the_same_graph[ERROR-meta.base.catcherrorsmessage]", "state": "active"}
+{"kind": "test", "id": "pytest-011638", "node_id": "tests/test_process_ir_notify_recovery.py::test_notify_reproduces_the_shipped_golden_shape_bytes", "state": "active"}
+{"kind": "test", "id": "pytest-011639", "node_id": "tests/test_process_ir_notify_recovery.py::test_escape_then_substitute_and_the_reverse_agree_today", "state": "active"}
+{"kind": "test", "id": "pytest-011640", "node_id": "tests/test_process_ir_notify_recovery.py::test_notify_is_admitted_on_the_recovery_path", "state": "active"}
+{"kind": "test", "id": "pytest-011641", "node_id": "tests/test_process_ir_notify_recovery.py::test_notify_is_refused_everywhere_else[document0-try body]", "state": "active"}
+{"kind": "test", "id": "pytest-011642", "node_id": "tests/test_process_ir_notify_recovery.py::test_notify_is_refused_everywhere_else[document1-root sequence]", "state": "active"}
+{"kind": "test", "id": "pytest-011643", "node_id": "tests/test_process_ir_notify_recovery.py::test_notify_is_refused_everywhere_else[document2-branch leg]", "state": "active"}
+{"kind": "test", "id": "pytest-011644", "node_id": "tests/test_process_ir_notify_recovery.py::test_notify_is_refused_everywhere_else[document3-decision true arm]", "state": "active"}
+{"kind": "test", "id": "pytest-011645", "node_id": "tests/test_process_ir_notify_recovery.py::test_a_notify_template_must_carry_the_caught_error_token[no token here at all]", "state": "active"}
+{"kind": "test", "id": "pytest-011646", "node_id": "tests/test_process_ir_notify_recovery.py::test_a_notify_template_must_carry_the_caught_error_token[   ]", "state": "active"}
+{"kind": "test", "id": "pytest-011647", "node_id": "tests/test_process_ir_notify_recovery.py::test_a_notify_template_must_carry_the_caught_error_token[]", "state": "active"}
+{"kind": "test", "id": "pytest-011648", "node_id": "tests/test_process_ir_notify_recovery.py::test_a_notify_level_outside_the_platform_vocabulary_is_refused", "state": "active"}
+{"kind": "test", "id": "pytest-011649", "node_id": "tests/test_process_ir_notify_recovery.py::test_the_emitter_preflight_refuses_an_input_the_parser_never_produced[FATAL-caught meta.base.catcherrorsmessage]", "state": "active"}
+{"kind": "test", "id": "pytest-011650", "node_id": "tests/test_process_ir_notify_recovery.py::test_the_emitter_preflight_refuses_an_input_the_parser_never_produced[ERROR-   ]", "state": "active"}
+{"kind": "test", "id": "pytest-011651", "node_id": "tests/test_process_ir_notify_recovery.py::test_the_emitter_preflight_refuses_an_input_the_parser_never_produced[ERROR-no token]", "state": "active"}
+{"kind": "test", "id": "pytest-011652", "node_id": "tests/test_process_ir_notify_recovery.py::test_the_emitter_preflight_accepts_every_legal_input", "state": "active"}
+{"kind": "test", "id": "pytest-011653", "node_id": "tests/test_process_ir_notify_recovery.py::test_a_recovery_hand_off_is_admitted_on_the_catch_terminal[catch_steps0-bare terminal call]", "state": "active"}
+{"kind": "test", "id": "pytest-011654", "node_id": "tests/test_process_ir_notify_recovery.py::test_a_recovery_hand_off_is_admitted_on_the_catch_terminal[catch_steps1-notify then call]", "state": "active"}
+{"kind": "test", "id": "pytest-011655", "node_id": "tests/test_process_ir_notify_recovery.py::test_a_recovery_hand_off_is_admitted_on_the_catch_terminal[catch_steps2-two notifies then call]", "state": "active"}
+{"kind": "test", "id": "pytest-011656", "node_id": "tests/test_process_ir_notify_recovery.py::test_a_recovery_call_must_author_both_flags_true[terminal0-abort_on_error]", "state": "active"}
+{"kind": "test", "id": "pytest-011657", "node_id": "tests/test_process_ir_notify_recovery.py::test_a_recovery_call_must_author_both_flags_true[terminal1-abort_on_error]", "state": "active"}
+{"kind": "test", "id": "pytest-011658", "node_id": "tests/test_process_ir_notify_recovery.py::test_a_recovery_call_must_author_both_flags_true[terminal2-wait]", "state": "active"}
+{"kind": "test", "id": "pytest-011659", "node_id": "tests/test_process_ir_notify_recovery.py::test_the_compiler_serves_the_same_identity_for_a_mutated_recovery_call", "state": "active"}
+{"kind": "test", "id": "pytest-011660", "node_id": "tests/test_process_ir_notify_recovery.py::test_only_a_notify_prefix_is_admitted_before_a_recovery_call[prefix0-message]", "state": "active"}
+{"kind": "test", "id": "pytest-011661", "node_id": "tests/test_process_ir_notify_recovery.py::test_only_a_notify_prefix_is_admitted_before_a_recovery_call[prefix1-set_dpp]", "state": "active"}
+{"kind": "test", "id": "pytest-011662", "node_id": "tests/test_process_ir_notify_recovery.py::test_only_a_notify_prefix_is_admitted_before_a_recovery_call[prefix2-notify then message]", "state": "active"}
+{"kind": "test", "id": "pytest-011663", "node_id": "tests/test_process_ir_notify_recovery.py::test_a_connector_inside_the_catch_body_still_blocks_the_recovery_call", "state": "active"}
+{"kind": "test", "id": "pytest-011664", "node_id": "tests/test_process_ir_notify_recovery.py::test_the_recovery_exemption_does_not_leak_to_a_non_recovery_body", "state": "active"}
+{"kind": "test", "id": "pytest-011665", "node_id": "tests/test_process_ir_notify_recovery.py::test_a_connector_upstream_of_the_handler_admits_the_recovery_call", "state": "active"}
+{"kind": "test", "id": "pytest-011666", "node_id": "tests/test_process_ir_notify_recovery.py::test_the_notify_dlq_golden_is_reproduced_from_canonical_ir", "state": "active"}
+{"kind": "test", "id": "pytest-011667", "node_id": "tests/test_process_ir_notify_recovery.py::test_the_canonical_notify_dlq_graph_agrees_with_the_legacy_builder", "state": "active"}
+{"kind": "test", "id": "pytest-011668", "node_id": "tests/test_process_ir_rich_control_bodies.py::test_registry_step_rows_match_the_model_unions[catch_body-step-CatchBodyStepV1]", "state": "active"}
+{"kind": "test", "id": "pytest-011669", "node_id": "tests/test_wave_gate_goldens.py::test_golden_manifest_row[golden-000075]", "state": "active"}
+{"kind": "test", "id": "pytest-011670", "node_id": "tests/test_wave_gate_goldens.py::test_golden_manifest_row[golden-000076]", "state": "active"}
+{"kind": "test", "id": "pytest-011671", "node_id": "tests/test_process_ir_notify_recovery.py::test_a_serialized_region_chain_compiles_at_any_length[2]", "state": "active"}
+{"kind": "test", "id": "pytest-011672", "node_id": "tests/test_process_ir_notify_recovery.py::test_a_serialized_region_chain_compiles_at_any_length[3]", "state": "active"}
+{"kind": "test", "id": "pytest-011673", "node_id": "tests/test_process_ir_notify_recovery.py::test_a_serialized_region_chain_compiles_at_any_length[5]", "state": "active"}
+{"kind": "test", "id": "pytest-011674", "node_id": "tests/test_process_ir_notify_recovery.py::test_an_orphan_continue_is_refused[steps0-lone process handler]", "state": "active"}
+{"kind": "test", "id": "pytest-011675", "node_id": "tests/test_process_ir_notify_recovery.py::test_an_orphan_continue_is_refused[steps1-lone connector handler]", "state": "active"}
+{"kind": "test", "id": "pytest-011676", "node_id": "tests/test_process_ir_notify_recovery.py::test_an_orphan_continue_is_refused[steps2-connector_call then a lone handler]", "state": "active"}
+{"kind": "test", "id": "pytest-011677", "node_id": "tests/test_process_ir_notify_recovery.py::test_an_orphan_continue_is_refused[steps3-chain whose LAST handler continues]", "state": "active"}
+{"kind": "test", "id": "pytest-011678", "node_id": "tests/test_process_ir_notify_recovery.py::test_an_orphan_continue_is_refused[steps4-chain whose FIRST handler terminates]", "state": "active"}
+{"kind": "test", "id": "pytest-011679", "node_id": "tests/test_process_ir_notify_recovery.py::test_the_compiler_refuses_an_orphan_continue_on_a_mutated_model", "state": "active"}
+{"kind": "test", "id": "pytest-011680", "node_id": "tests/test_process_ir_notify_recovery.py::test_a_map_separated_chain_compiles_through_the_public_pipeline", "state": "active"}
+{"kind": "test", "id": "pytest-011681", "node_id": "tests/test_process_ir_notify_recovery.py::test_an_intervening_map_belongs_to_the_preceding_protected_region", "state": "active"}
+{"kind": "test", "id": "pytest-011682", "node_id": "tests/test_process_ir_notify_recovery.py::test_a_chain_region_grades_the_success_path_and_no_other_recovery_path", "state": "active"}
+{"kind": "test", "id": "pytest-011683", "node_id": "tests/test_process_ir_notify_recovery.py::test_a_retried_region_grades_a_write_in_a_later_handler_it_re_runs", "state": "active"}
+{"kind": "test", "id": "pytest-011684", "node_id": "tests/test_process_ir_notify_recovery.py::test_a_retried_region_does_not_grade_a_later_recovery_only_write", "state": "active"}
+{"kind": "test", "id": "pytest-011685", "node_id": "tests/test_process_ir_notify_recovery.py::test_a_braced_notify_template_is_refused[{\"error\": \"meta.base.catcherrorsmessage\"}-JSON body]", "state": "active"}
+{"kind": "test", "id": "pytest-011686", "node_id": "tests/test_process_ir_notify_recovery.py::test_a_braced_notify_template_is_refused[order {id} failed: meta.base.catcherrorsmessage-brace run]", "state": "active"}
+{"kind": "test", "id": "pytest-011687", "node_id": "tests/test_process_ir_notify_recovery.py::test_a_braced_notify_template_is_refused[meta.base.catcherrorsmessage }-stray close brace]", "state": "active"}
+{"kind": "test", "id": "pytest-011688", "node_id": "tests/test_process_ir_notify_recovery.py::test_an_unbraced_notify_template_still_binds_the_caught_error", "state": "active"}
+{"kind": "test", "id": "pytest-011689", "node_id": "tests/test_process_ir_notify_recovery.py::test_the_chain_rule_codes_are_served_by_the_compiler", "state": "active"}
+{"kind": "test", "id": "pytest-011690", "node_id": "tests/test_process_ir_notify_recovery.py::test_the_continuation_remediation_covers_the_rules_that_serve_it", "state": "active"}
+{"kind": "test", "id": "pytest-011691", "node_id": "tests/test_process_ir_notify_recovery.py::test_the_connector_scoped_double_guard_golden_is_reproduced_from_canonical_ir", "state": "active"}
+{"kind": "test", "id": "pytest-011692", "node_id": "tests/test_process_ir_notify_recovery.py::test_the_recovery_golden_matches_the_archived_live_capture", "state": "active"}
+{"kind": "test", "id": "pytest-011693", "node_id": "tests/test_process_ir_notify_recovery.py::test_canonical_notify_equals_the_legacy_emitter_for_the_same_graph[INFO-[ERROR] caught meta.base.catcherrorsmessage]", "state": "active"}
+{"kind": "test", "id": "pytest-011694", "node_id": "tests/test_process_ir_notify_recovery.py::test_canonical_notify_equals_the_legacy_emitter_for_the_same_graph[WARNING-[ERROR] caught meta.base.catcherrorsmessage]", "state": "active"}
+{"kind": "test", "id": "pytest-011695", "node_id": "tests/test_process_ir_notify_recovery.py::test_canonical_notify_equals_the_legacy_emitter_for_the_same_graph[ERROR-[ERROR] caught meta.base.catcherrorsmessage]", "state": "active"}
+{"kind": "test", "id": "pytest-011696", "node_id": "tests/test_process_ir_notify_recovery.py::test_the_notify_goldens_cannot_take_the_canonical_corpus_route_yet", "state": "active"}
+{"kind": "test", "id": "pytest-011697", "node_id": "tests/test_process_ir_error_handling.py::test_a_recovery_path_cannot_read_state_its_own_failed_try_wrote", "state": "active"}
+{"kind": "test", "id": "pytest-011698", "node_id": "tests/test_process_ir_error_handling.py::test_a_chain_grants_evidence_per_call_and_not_across_siblings", "state": "active"}
+{"kind": "test", "id": "pytest-011699", "node_id": "tests/test_process_ir_error_handling.py::test_a_recovery_request_reaches_materialization_with_its_child_reference", "state": "active"}
+{"kind": "test", "id": "pytest-011700", "node_id": "tests/test_process_ir_error_handling.py::test_revoking_the_evidence_after_planning_refuses_the_next_compile", "state": "active"}
+{"kind": "test", "id": "pytest-011701", "node_id": "tests/test_process_ir_error_handling.py::test_a_chain_relocates_across_account_bindings_unchanged", "state": "active"}
