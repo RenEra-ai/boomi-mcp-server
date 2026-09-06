@@ -2567,11 +2567,19 @@ class TryCatchNodeV1(_ProcessIRBase):
 
     * ``process`` is the sole root step, and its protected path begins with the
       call that produces the flow's documents;
-    * ``connector`` is the terminal step of a call sequence, and protects exactly
-      one downstream call plus the property steps that prepare it.
+    * ``connector`` protects exactly one call plus the property steps that
+      prepare it, in either of two positions: the terminal step of a call
+      sequence, or a member of a SERIALIZED CHAIN of connector-scoped handlers.
 
-    Nothing may follow a Try/Catch: both paths terminate independently and there
-    is no join.
+    In a chain the handlers are siblings at the root, the FIRST one protects the
+    producing call itself (so no call precedes it), an optional map may sit
+    between two handlers, and every handler but the last ends its protected path
+    in ``continue`` — the terminal that says the documents go on to the next
+    region rather than ending here. The last handler ends on a real terminal.
+
+    Nothing else may follow a Try/Catch: apart from the next handler of such a
+    chain, both paths terminate independently and there is no join. A recovery
+    path always terminates.
 
     Retry is bounded and additionally CONSTRAINED BY SAFETY, not just by range.
     A positive count is rejected when the protected region would re-run the

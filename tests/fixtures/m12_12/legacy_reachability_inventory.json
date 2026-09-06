@@ -7302,7 +7302,7 @@
       },
       "producer": "meta_tools.list_capabilities_action()",
       "selector": "authoring_contract",
-      "sha256": "664a8d7e917edfeca37807571c1bd7cecba631eb420cc9240609dc6e0b97da54",
+      "sha256": "4d7f63da1eba08aa2802704d84e4018a639e425f2fcdb47a3a624b653bbd99d8",
       "surface_class": "SS-CAPABILITY-CATALOG",
       "value": {
         "actions": [
@@ -7407,11 +7407,11 @@
           }
         ],
         "capability_comparison": {
-          "actual_capability_revision": "sha256:0f102ee6888cdcee8337b4a3be84f9de907d5812832389c3b44400bb92b7a3ea",
+          "actual_capability_revision": "sha256:39d3e5152b9cea421e4e557341a4c4e48c988ce0269d911bb13181644e90be9b",
           "status": "not_requested"
         },
-        "capability_revision": "sha256:0f102ee6888cdcee8337b4a3be84f9de907d5812832389c3b44400bb92b7a3ea",
-        "compiler_revision": "sha256:a9b3244b3670fdbe2ecfbd395f7fa66b4fc71c267a1bc49137f84e1fd7f6d413",
+        "capability_revision": "sha256:39d3e5152b9cea421e4e557341a4c4e48c988ce0269d911bb13181644e90be9b",
+        "compiler_revision": "sha256:bd6a525abee4bc87c36b6f0b6466f257f7adfc652732903f9791767f17294d39",
         "contract_version": "2",
         "intent_kinds": [
           "integration_spec",
@@ -7655,7 +7655,7 @@
           "schema_version": "1",
           "source_version": "0.1.0"
         },
-        "schema_revision": "sha256:43afe45e1422fdfa7379d448a34e2adb0c4f1a5961595769904b2c4ed5ede98b",
+        "schema_revision": "sha256:0609ff6d623073a67ea396bb7fe37a541d6b0b0de5c8d5ed1d01c2ac0b7e81fc",
         "schemas": [
           {
             "owned_by_authoring_contract": true,
@@ -7667,21 +7667,21 @@
           {
             "owned_by_authoring_contract": true,
             "provenance": "runtime_schema_registry",
-            "schema_hash": "sha256:91c27f6bbc58d23b9d0686b6193ab4de9e23742b5ae99eb59ef2116fa1355b3d",
+            "schema_hash": "sha256:e9ff7c5f594d8f1aea8d2e1d666b1e135c0cd8a7e8e70780efb311db0290ae37",
             "schema_version": "2",
             "selector": "AuthoringCompileResultV1"
           },
           {
             "owned_by_authoring_contract": true,
             "provenance": "runtime_schema_registry",
-            "schema_hash": "sha256:30ab6cc7d72d7da5305b8abaf9efc2499657dc26a0e0e95713c98cb03fec45b9",
+            "schema_hash": "sha256:9ce0b17fbedf8834a7f5f2ea0fce64523415f7447f442d9418ae7d7ddfa3cdc3",
             "schema_version": "2",
             "selector": "AuthoringPlanResultV1"
           },
           {
             "owned_by_authoring_contract": true,
             "provenance": "runtime_schema_registry",
-            "schema_hash": "sha256:cda0060b63bfbb28af0802e5daf2b7bf0533072a1bf9e20555a3d8b02db0ecf6",
+            "schema_hash": "sha256:156bbf44e5e83960eaced74d9fcc52dd9b5f8c6a1551c57f84e40d37af9bdb07",
             "schema_version": "2",
             "selector": "AuthoringRequestV1"
           },
@@ -7695,13 +7695,13 @@
           {
             "owned_by_authoring_contract": false,
             "provenance": "runtime_schema_registry",
-            "schema_hash": "sha256:e9826dbdd3d29468afe384d3fcc311992148fa836e0a3b233083de28e9cb534b",
+            "schema_hash": "sha256:b3f06e9395d69cbb6207ed43055f062dcec83a866798a9da2e029e328f768402",
             "selector": "IntegrationSpecV1"
           },
           {
             "owned_by_authoring_contract": true,
             "provenance": "runtime_schema_registry",
-            "schema_hash": "sha256:bc0205cf9f36b6060adaae30f6e29b1245d2d4ac808044e7c9f034c65f15f445",
+            "schema_hash": "sha256:291b85bce1aad75e8da6d031a523d0bea75dece7083d88c0f17e285dc89bd7a1",
             "schema_version": "1",
             "selector": "ProcessIRV1"
           },
@@ -7770,7 +7770,7 @@
           {
             "owned_by_authoring_contract": false,
             "provenance": "runtime_schema_registry",
-            "schema_hash": "sha256:223209f17e1f261235a1b0bad2313a4f6dbc094fae3ebf6c3f52c2a4b13cbb1d",
+            "schema_hash": "sha256:059cb09f4a425196ea16c113ad63b788a3a06b1ce5a3e2018eabdfe0082c1fa3",
             "selector": "recipe_contributions"
           },
           {
@@ -13861,14 +13861,14 @@
     },
     {
       "artifact_id": "SS-SCHEMA-TEMPLATES:schema_name=AuthoringCompileResultV1",
-      "canonical_length": 87514,
+      "canonical_length": 88057,
       "legacy_excerpt": {
         "json_schema.$defs.IntegrationComponentSpec.properties.config.description": "Type-specific configuration payload. For type='process', config.process_kind selects a structured process-flow builder (e.g. 'database_to_api_sync' or 'wrapper_subprocess' — issue #25) and is REQUIRED for any authoring action that emits or rebuilds process XML (create / create_clone / update): such a process without process_kind is rejected at plan time with PROCESS_KIND_REQUIRED (legacy freeform JSON-to-XML process authoring has been removed). A reference-only reuse of an existing process (no XML emitted) may omit it. Use manage_component for an explicit raw process XML escape hatch.",
         "json_schema.$defs.IntegrationSpecV1.properties.processes.description": "Issue #153 M12.15 — canonical process roots authored as ProcessIR. Each entry is one ProcessAuthoringUnitV1: exactly one ProcessComponentEnvelopeV1 plus exactly one ProcessIRV1 root. These are compiled by the canonical chain and materialized by the neutral ProcessComponentMaterializer — they resolve NO legacy process_kind. 'components' remains the home of supporting components and of reference-only existing processes. 'components' and 'processes' share ONE key namespace: a key used by a component and by a process envelope is a duplicate, and all four depends_on directions (component->component, component->process, process->component, process->process) enter one topological order with one cycle check. A TUPLE, per the plan's field type: pydantic coerces list input, so the wire shape is an ordinary JSON array and no caller sends anything different — but unlike this model's legacy List siblings, mutating the collection itself is unrepresentable. Per-element immutability lives on the frozen ProcessAuthoringUnitV1 entries."
       },
       "producer": "meta_tools.get_schema_template_action(...)",
       "selector": "schema_name=AuthoringCompileResultV1",
-      "sha256": "cc23ec8dcc1e047801e12d530fb4f3525189a4397359ca04c82bf5cd62849539",
+      "sha256": "7a25eb15326b301477e31d741513681f07a7326c88c62ebd727188e1287b6ef4",
       "surface_class": "SS-SCHEMA-TEMPLATES",
       "value": {
         "_success": true,
@@ -16869,7 +16869,7 @@
             },
             "TryCatchNodeV1": {
               "additionalProperties": false,
-              "description": "Scoped error handling with bounded retry (#142, M12.7).\n\nPlacement is part of the contract, because scope is not a free-form label —\neach value names a placement the compiler has a verified shape for:\n\n* ``process`` is the sole root step, and its protected path begins with the\n  call that produces the flow's documents;\n* ``connector`` is the terminal step of a call sequence, and protects exactly\n  one downstream call plus the property steps that prepare it.\n\nNothing may follow a Try/Catch: both paths terminate independently and there\nis no join.\n\nRetry is bounded and additionally CONSTRAINED BY SAFETY, not just by range.\nA positive count is rejected when the protected region would re-run the\nflow's document source — UNLESS ``retry.source_replay_policy`` is set to\n``allow_duplicates``, which is how a caller states that re-reading the\nsource is acceptable for this process and lifts that one refusal. It is\nalso rejected when a retried call writes without registry-backed replay\nsafety, and that refusal has no such escape. Those checks run before\nanything is emitted.",
+              "description": "Scoped error handling with bounded retry (#142, M12.7).\n\nPlacement is part of the contract, because scope is not a free-form label —\neach value names a placement the compiler has a verified shape for:\n\n* ``process`` is the sole root step, and its protected path begins with the\n  call that produces the flow's documents;\n* ``connector`` protects exactly one call plus the property steps that\n  prepare it, in either of two positions: the terminal step of a call\n  sequence, or a member of a SERIALIZED CHAIN of connector-scoped handlers.\n\nIn a chain the handlers are siblings at the root, the FIRST one protects the\nproducing call itself (so no call precedes it), an optional map may sit\nbetween two handlers, and every handler but the last ends its protected path\nin ``continue`` — the terminal that says the documents go on to the next\nregion rather than ending here. The last handler ends on a real terminal.\n\nNothing else may follow a Try/Catch: apart from the next handler of such a\nchain, both paths terminate independently and there is no join. A recovery\npath always terminates.\n\nRetry is bounded and additionally CONSTRAINED BY SAFETY, not just by range.\nA positive count is rejected when the protected region would re-run the\nflow's document source — UNLESS ``retry.source_replay_policy`` is set to\n``allow_duplicates``, which is how a caller states that re-reading the\nsource is acceptable for this process and lifts that one refusal. It is\nalso rejected when a retried call writes without registry-backed replay\nsafety, and that refusal has no such escape. Those checks run before\nanything is emitted.",
               "properties": {
                 "catch_body": {
                   "$ref": "#/$defs/TryCatchCatchBodyV1"
@@ -17208,12 +17208,12 @@
         "raw_xml_exposed": false,
         "read_only": true,
         "revision_binding": {
-          "capability_revision": "sha256:0f102ee6888cdcee8337b4a3be84f9de907d5812832389c3b44400bb92b7a3ea",
-          "compiler_revision": "sha256:a9b3244b3670fdbe2ecfbd395f7fa66b4fc71c267a1bc49137f84e1fd7f6d413",
+          "capability_revision": "sha256:39d3e5152b9cea421e4e557341a4c4e48c988ce0269d911bb13181644e90be9b",
+          "compiler_revision": "sha256:bd6a525abee4bc87c36b6f0b6466f257f7adfc652732903f9791767f17294d39",
           "contract_version": "2",
-          "schema_revision": "sha256:43afe45e1422fdfa7379d448a34e2adb0c4f1a5961595769904b2c4ed5ede98b"
+          "schema_revision": "sha256:0609ff6d623073a67ea396bb7fe37a541d6b0b0de5c8d5ed1d01c2ac0b7e81fc"
         },
-        "schema_hash": "sha256:91c27f6bbc58d23b9d0686b6193ab4de9e23742b5ae99eb59ef2116fa1355b3d",
+        "schema_hash": "sha256:e9ff7c5f594d8f1aea8d2e1d666b1e135c0cd8a7e8e70780efb311db0290ae37",
         "schema_name": "AuthoringCompileResultV1",
         "schema_version": "2",
         "surface": "MCP authoring contract (issue #146 M12.11)"
@@ -17222,14 +17222,14 @@
     },
     {
       "artifact_id": "SS-SCHEMA-TEMPLATES:schema_name=AuthoringPlanResultV1",
-      "canonical_length": 86188,
+      "canonical_length": 86731,
       "legacy_excerpt": {
         "json_schema.$defs.IntegrationComponentSpec.properties.config.description": "Type-specific configuration payload. For type='process', config.process_kind selects a structured process-flow builder (e.g. 'database_to_api_sync' or 'wrapper_subprocess' — issue #25) and is REQUIRED for any authoring action that emits or rebuilds process XML (create / create_clone / update): such a process without process_kind is rejected at plan time with PROCESS_KIND_REQUIRED (legacy freeform JSON-to-XML process authoring has been removed). A reference-only reuse of an existing process (no XML emitted) may omit it. Use manage_component for an explicit raw process XML escape hatch.",
         "json_schema.$defs.IntegrationSpecV1.properties.processes.description": "Issue #153 M12.15 — canonical process roots authored as ProcessIR. Each entry is one ProcessAuthoringUnitV1: exactly one ProcessComponentEnvelopeV1 plus exactly one ProcessIRV1 root. These are compiled by the canonical chain and materialized by the neutral ProcessComponentMaterializer — they resolve NO legacy process_kind. 'components' remains the home of supporting components and of reference-only existing processes. 'components' and 'processes' share ONE key namespace: a key used by a component and by a process envelope is a duplicate, and all four depends_on directions (component->component, component->process, process->component, process->process) enter one topological order with one cycle check. A TUPLE, per the plan's field type: pydantic coerces list input, so the wire shape is an ordinary JSON array and no caller sends anything different — but unlike this model's legacy List siblings, mutating the collection itself is unrepresentable. Per-element immutability lives on the frozen ProcessAuthoringUnitV1 entries."
       },
       "producer": "meta_tools.get_schema_template_action(...)",
       "selector": "schema_name=AuthoringPlanResultV1",
-      "sha256": "9a2a8b263c9b9ae4af10d320989a89e7de264fdc1ba2f21cd3214e0d189f44bc",
+      "sha256": "4ccd7dfe7a30d582cd2991ce9cc49e64cbf27d5612890bb6c1b59a42783e379c",
       "surface_class": "SS-SCHEMA-TEMPLATES",
       "value": {
         "_success": true,
@@ -20181,7 +20181,7 @@
             },
             "TryCatchNodeV1": {
               "additionalProperties": false,
-              "description": "Scoped error handling with bounded retry (#142, M12.7).\n\nPlacement is part of the contract, because scope is not a free-form label —\neach value names a placement the compiler has a verified shape for:\n\n* ``process`` is the sole root step, and its protected path begins with the\n  call that produces the flow's documents;\n* ``connector`` is the terminal step of a call sequence, and protects exactly\n  one downstream call plus the property steps that prepare it.\n\nNothing may follow a Try/Catch: both paths terminate independently and there\nis no join.\n\nRetry is bounded and additionally CONSTRAINED BY SAFETY, not just by range.\nA positive count is rejected when the protected region would re-run the\nflow's document source — UNLESS ``retry.source_replay_policy`` is set to\n``allow_duplicates``, which is how a caller states that re-reading the\nsource is acceptable for this process and lifts that one refusal. It is\nalso rejected when a retried call writes without registry-backed replay\nsafety, and that refusal has no such escape. Those checks run before\nanything is emitted.",
+              "description": "Scoped error handling with bounded retry (#142, M12.7).\n\nPlacement is part of the contract, because scope is not a free-form label —\neach value names a placement the compiler has a verified shape for:\n\n* ``process`` is the sole root step, and its protected path begins with the\n  call that produces the flow's documents;\n* ``connector`` protects exactly one call plus the property steps that\n  prepare it, in either of two positions: the terminal step of a call\n  sequence, or a member of a SERIALIZED CHAIN of connector-scoped handlers.\n\nIn a chain the handlers are siblings at the root, the FIRST one protects the\nproducing call itself (so no call precedes it), an optional map may sit\nbetween two handlers, and every handler but the last ends its protected path\nin ``continue`` — the terminal that says the documents go on to the next\nregion rather than ending here. The last handler ends on a real terminal.\n\nNothing else may follow a Try/Catch: apart from the next handler of such a\nchain, both paths terminate independently and there is no join. A recovery\npath always terminates.\n\nRetry is bounded and additionally CONSTRAINED BY SAFETY, not just by range.\nA positive count is rejected when the protected region would re-run the\nflow's document source — UNLESS ``retry.source_replay_policy`` is set to\n``allow_duplicates``, which is how a caller states that re-reading the\nsource is acceptable for this process and lifts that one refusal. It is\nalso rejected when a retried call writes without registry-backed replay\nsafety, and that refusal has no such escape. Those checks run before\nanything is emitted.",
               "properties": {
                 "catch_body": {
                   "$ref": "#/$defs/TryCatchCatchBodyV1"
@@ -20499,12 +20499,12 @@
         "raw_xml_exposed": false,
         "read_only": true,
         "revision_binding": {
-          "capability_revision": "sha256:0f102ee6888cdcee8337b4a3be84f9de907d5812832389c3b44400bb92b7a3ea",
-          "compiler_revision": "sha256:a9b3244b3670fdbe2ecfbd395f7fa66b4fc71c267a1bc49137f84e1fd7f6d413",
+          "capability_revision": "sha256:39d3e5152b9cea421e4e557341a4c4e48c988ce0269d911bb13181644e90be9b",
+          "compiler_revision": "sha256:bd6a525abee4bc87c36b6f0b6466f257f7adfc652732903f9791767f17294d39",
           "contract_version": "2",
-          "schema_revision": "sha256:43afe45e1422fdfa7379d448a34e2adb0c4f1a5961595769904b2c4ed5ede98b"
+          "schema_revision": "sha256:0609ff6d623073a67ea396bb7fe37a541d6b0b0de5c8d5ed1d01c2ac0b7e81fc"
         },
-        "schema_hash": "sha256:30ab6cc7d72d7da5305b8abaf9efc2499657dc26a0e0e95713c98cb03fec45b9",
+        "schema_hash": "sha256:9ce0b17fbedf8834a7f5f2ea0fce64523415f7447f442d9418ae7d7ddfa3cdc3",
         "schema_name": "AuthoringPlanResultV1",
         "schema_version": "2",
         "surface": "MCP authoring contract (issue #146 M12.11)"
@@ -20513,7 +20513,7 @@
     },
     {
       "artifact_id": "SS-SCHEMA-TEMPLATES:schema_name=AuthoringRequestV1",
-      "canonical_length": 103980,
+      "canonical_length": 104523,
       "legacy_excerpt": {
         "json_schema.$defs.IntegrationComponentSpec.properties.config.description": "Type-specific configuration payload. For type='process', config.process_kind selects a structured process-flow builder (e.g. 'database_to_api_sync' or 'wrapper_subprocess' — issue #25) and is REQUIRED for any authoring action that emits or rebuilds process XML (create / create_clone / update): such a process without process_kind is rejected at plan time with PROCESS_KIND_REQUIRED (legacy freeform JSON-to-XML process authoring has been removed). A reference-only reuse of an existing process (no XML emitted) may omit it. Use manage_component for an explicit raw process XML escape hatch.",
         "json_schema.$defs.IntegrationSpecV1.properties.processes.description": "Issue #153 M12.15 — canonical process roots authored as ProcessIR. Each entry is one ProcessAuthoringUnitV1: exactly one ProcessComponentEnvelopeV1 plus exactly one ProcessIRV1 root. These are compiled by the canonical chain and materialized by the neutral ProcessComponentMaterializer — they resolve NO legacy process_kind. 'components' remains the home of supporting components and of reference-only existing processes. 'components' and 'processes' share ONE key namespace: a key used by a component and by a process envelope is a duplicate, and all four depends_on directions (component->component, component->process, process->component, process->process) enter one topological order with one cycle check. A TUPLE, per the plan's field type: pydantic coerces list input, so the wire shape is an ordinary JSON array and no caller sends anything different — but unlike this model's legacy List siblings, mutating the collection itself is unrepresentable. Per-element immutability lives on the frozen ProcessAuthoringUnitV1 entries.",
@@ -20521,7 +20521,7 @@
       },
       "producer": "meta_tools.get_schema_template_action(...)",
       "selector": "schema_name=AuthoringRequestV1",
-      "sha256": "80169772730986321422d0b32976338ce2ddaab754c619f235d08736c8541a9e",
+      "sha256": "27f4336e449f0aa25ca28f54fb6d28d4996201a1cb503ee5d722cfc2e7826081",
       "surface_class": "SS-SCHEMA-TEMPLATES",
       "value": {
         "_success": true,
@@ -24089,7 +24089,7 @@
             },
             "TryCatchNodeV1": {
               "additionalProperties": false,
-              "description": "Scoped error handling with bounded retry (#142, M12.7).\n\nPlacement is part of the contract, because scope is not a free-form label —\neach value names a placement the compiler has a verified shape for:\n\n* ``process`` is the sole root step, and its protected path begins with the\n  call that produces the flow's documents;\n* ``connector`` is the terminal step of a call sequence, and protects exactly\n  one downstream call plus the property steps that prepare it.\n\nNothing may follow a Try/Catch: both paths terminate independently and there\nis no join.\n\nRetry is bounded and additionally CONSTRAINED BY SAFETY, not just by range.\nA positive count is rejected when the protected region would re-run the\nflow's document source — UNLESS ``retry.source_replay_policy`` is set to\n``allow_duplicates``, which is how a caller states that re-reading the\nsource is acceptable for this process and lifts that one refusal. It is\nalso rejected when a retried call writes without registry-backed replay\nsafety, and that refusal has no such escape. Those checks run before\nanything is emitted.",
+              "description": "Scoped error handling with bounded retry (#142, M12.7).\n\nPlacement is part of the contract, because scope is not a free-form label —\neach value names a placement the compiler has a verified shape for:\n\n* ``process`` is the sole root step, and its protected path begins with the\n  call that produces the flow's documents;\n* ``connector`` protects exactly one call plus the property steps that\n  prepare it, in either of two positions: the terminal step of a call\n  sequence, or a member of a SERIALIZED CHAIN of connector-scoped handlers.\n\nIn a chain the handlers are siblings at the root, the FIRST one protects the\nproducing call itself (so no call precedes it), an optional map may sit\nbetween two handlers, and every handler but the last ends its protected path\nin ``continue`` — the terminal that says the documents go on to the next\nregion rather than ending here. The last handler ends on a real terminal.\n\nNothing else may follow a Try/Catch: apart from the next handler of such a\nchain, both paths terminate independently and there is no join. A recovery\npath always terminates.\n\nRetry is bounded and additionally CONSTRAINED BY SAFETY, not just by range.\nA positive count is rejected when the protected region would re-run the\nflow's document source — UNLESS ``retry.source_replay_policy`` is set to\n``allow_duplicates``, which is how a caller states that re-reading the\nsource is acceptable for this process and lifts that one refusal. It is\nalso rejected when a retried call writes without registry-backed replay\nsafety, and that refusal has no such escape. Those checks run before\nanything is emitted.",
               "properties": {
                 "catch_body": {
                   "$ref": "#/$defs/TryCatchCatchBodyV1"
@@ -24362,12 +24362,12 @@
         "raw_xml_exposed": false,
         "read_only": true,
         "revision_binding": {
-          "capability_revision": "sha256:0f102ee6888cdcee8337b4a3be84f9de907d5812832389c3b44400bb92b7a3ea",
-          "compiler_revision": "sha256:a9b3244b3670fdbe2ecfbd395f7fa66b4fc71c267a1bc49137f84e1fd7f6d413",
+          "capability_revision": "sha256:39d3e5152b9cea421e4e557341a4c4e48c988ce0269d911bb13181644e90be9b",
+          "compiler_revision": "sha256:bd6a525abee4bc87c36b6f0b6466f257f7adfc652732903f9791767f17294d39",
           "contract_version": "2",
-          "schema_revision": "sha256:43afe45e1422fdfa7379d448a34e2adb0c4f1a5961595769904b2c4ed5ede98b"
+          "schema_revision": "sha256:0609ff6d623073a67ea396bb7fe37a541d6b0b0de5c8d5ed1d01c2ac0b7e81fc"
         },
-        "schema_hash": "sha256:cda0060b63bfbb28af0802e5daf2b7bf0533072a1bf9e20555a3d8b02db0ecf6",
+        "schema_hash": "sha256:156bbf44e5e83960eaced74d9fcc52dd9b5f8c6a1551c57f84e40d37af9bdb07",
         "schema_name": "AuthoringRequestV1",
         "schema_version": "2",
         "surface": "MCP authoring contract (issue #146 M12.11)"
@@ -24376,14 +24376,14 @@
     },
     {
       "artifact_id": "SS-SCHEMA-TEMPLATES:schema_name=IntegrationSpecV1",
-      "canonical_length": 75626,
+      "canonical_length": 76169,
       "legacy_excerpt": {
         "json_schema.$defs.IntegrationComponentSpec.properties.config.description": "Type-specific configuration payload. For type='process', config.process_kind selects a structured process-flow builder (e.g. 'database_to_api_sync' or 'wrapper_subprocess' — issue #25) and is REQUIRED for any authoring action that emits or rebuilds process XML (create / create_clone / update): such a process without process_kind is rejected at plan time with PROCESS_KIND_REQUIRED (legacy freeform JSON-to-XML process authoring has been removed). A reference-only reuse of an existing process (no XML emitted) may omit it. Use manage_component for an explicit raw process XML escape hatch.",
         "json_schema.properties.processes.description": "Issue #153 M12.15 — canonical process roots authored as ProcessIR. Each entry is one ProcessAuthoringUnitV1: exactly one ProcessComponentEnvelopeV1 plus exactly one ProcessIRV1 root. These are compiled by the canonical chain and materialized by the neutral ProcessComponentMaterializer — they resolve NO legacy process_kind. 'components' remains the home of supporting components and of reference-only existing processes. 'components' and 'processes' share ONE key namespace: a key used by a component and by a process envelope is a duplicate, and all four depends_on directions (component->component, component->process, process->component, process->process) enter one topological order with one cycle check. A TUPLE, per the plan's field type: pydantic coerces list input, so the wire shape is an ordinary JSON array and no caller sends anything different — but unlike this model's legacy List siblings, mutating the collection itself is unrepresentable. Per-element immutability lives on the frozen ProcessAuthoringUnitV1 entries."
       },
       "producer": "meta_tools.get_schema_template_action(...)",
       "selector": "schema_name=IntegrationSpecV1",
-      "sha256": "689d9626eb1aac4b83eb0da378b1fa636d894018984cf8afd961117002d3e0df",
+      "sha256": "c6824d20d55b6269525b48795966214c2ca2b863ab958206399a957f36c3aec8",
       "surface_class": "SS-SCHEMA-TEMPLATES",
       "value": {
         "_success": true,
@@ -26785,7 +26785,7 @@
             },
             "TryCatchNodeV1": {
               "additionalProperties": false,
-              "description": "Scoped error handling with bounded retry (#142, M12.7).\n\nPlacement is part of the contract, because scope is not a free-form label —\neach value names a placement the compiler has a verified shape for:\n\n* ``process`` is the sole root step, and its protected path begins with the\n  call that produces the flow's documents;\n* ``connector`` is the terminal step of a call sequence, and protects exactly\n  one downstream call plus the property steps that prepare it.\n\nNothing may follow a Try/Catch: both paths terminate independently and there\nis no join.\n\nRetry is bounded and additionally CONSTRAINED BY SAFETY, not just by range.\nA positive count is rejected when the protected region would re-run the\nflow's document source — UNLESS ``retry.source_replay_policy`` is set to\n``allow_duplicates``, which is how a caller states that re-reading the\nsource is acceptable for this process and lifts that one refusal. It is\nalso rejected when a retried call writes without registry-backed replay\nsafety, and that refusal has no such escape. Those checks run before\nanything is emitted.",
+              "description": "Scoped error handling with bounded retry (#142, M12.7).\n\nPlacement is part of the contract, because scope is not a free-form label —\neach value names a placement the compiler has a verified shape for:\n\n* ``process`` is the sole root step, and its protected path begins with the\n  call that produces the flow's documents;\n* ``connector`` protects exactly one call plus the property steps that\n  prepare it, in either of two positions: the terminal step of a call\n  sequence, or a member of a SERIALIZED CHAIN of connector-scoped handlers.\n\nIn a chain the handlers are siblings at the root, the FIRST one protects the\nproducing call itself (so no call precedes it), an optional map may sit\nbetween two handlers, and every handler but the last ends its protected path\nin ``continue`` — the terminal that says the documents go on to the next\nregion rather than ending here. The last handler ends on a real terminal.\n\nNothing else may follow a Try/Catch: apart from the next handler of such a\nchain, both paths terminate independently and there is no join. A recovery\npath always terminates.\n\nRetry is bounded and additionally CONSTRAINED BY SAFETY, not just by range.\nA positive count is rejected when the protected region would re-run the\nflow's document source — UNLESS ``retry.source_replay_policy`` is set to\n``allow_duplicates``, which is how a caller states that re-reading the\nsource is acceptable for this process and lifts that one refusal. It is\nalso rejected when a retried call writes without registry-backed replay\nsafety, and that refusal has no such escape. Those checks run before\nanything is emitted.",
               "properties": {
                 "catch_body": {
                   "$ref": "#/$defs/TryCatchCatchBodyV1"
@@ -34380,13 +34380,13 @@
     },
     {
       "artifact_id": "SS-SCHEMA-TEMPLATES:schema_name=recipe_contributions",
-      "canonical_length": 91493,
+      "canonical_length": 92036,
       "legacy_excerpt": {
         "authoring_note": "These are the ONLY values a registered recipe may return. They carry opaque references and closed enumerations — never configuration, credentials, headers, SQL, raw XML, executable code, JSON pointers, or caller-authored graph edges. Recipe output is validated exactly as direct ProcessIR/topology/component authoring and cannot be exempted."
       },
       "producer": "meta_tools.get_schema_template_action(...)",
       "selector": "schema_name=recipe_contributions",
-      "sha256": "980629690f12aded708755be9cd7587dc073fbf0f3dc3222a951e77642e2009d",
+      "sha256": "c4405fc8f2b0808089a7e39886b97feb396dca4662773889a46c011a3152a7f9",
       "surface_class": "SS-SCHEMA-TEMPLATES",
       "value": {
         "_success": true,
@@ -37641,7 +37641,7 @@
             },
             "TryCatchNodeV1": {
               "additionalProperties": false,
-              "description": "Scoped error handling with bounded retry (#142, M12.7).\n\nPlacement is part of the contract, because scope is not a free-form label —\neach value names a placement the compiler has a verified shape for:\n\n* ``process`` is the sole root step, and its protected path begins with the\n  call that produces the flow's documents;\n* ``connector`` is the terminal step of a call sequence, and protects exactly\n  one downstream call plus the property steps that prepare it.\n\nNothing may follow a Try/Catch: both paths terminate independently and there\nis no join.\n\nRetry is bounded and additionally CONSTRAINED BY SAFETY, not just by range.\nA positive count is rejected when the protected region would re-run the\nflow's document source — UNLESS ``retry.source_replay_policy`` is set to\n``allow_duplicates``, which is how a caller states that re-reading the\nsource is acceptable for this process and lifts that one refusal. It is\nalso rejected when a retried call writes without registry-backed replay\nsafety, and that refusal has no such escape. Those checks run before\nanything is emitted.",
+              "description": "Scoped error handling with bounded retry (#142, M12.7).\n\nPlacement is part of the contract, because scope is not a free-form label —\neach value names a placement the compiler has a verified shape for:\n\n* ``process`` is the sole root step, and its protected path begins with the\n  call that produces the flow's documents;\n* ``connector`` protects exactly one call plus the property steps that\n  prepare it, in either of two positions: the terminal step of a call\n  sequence, or a member of a SERIALIZED CHAIN of connector-scoped handlers.\n\nIn a chain the handlers are siblings at the root, the FIRST one protects the\nproducing call itself (so no call precedes it), an optional map may sit\nbetween two handlers, and every handler but the last ends its protected path\nin ``continue`` — the terminal that says the documents go on to the next\nregion rather than ending here. The last handler ends on a real terminal.\n\nNothing else may follow a Try/Catch: apart from the next handler of such a\nchain, both paths terminate independently and there is no join. A recovery\npath always terminates.\n\nRetry is bounded and additionally CONSTRAINED BY SAFETY, not just by range.\nA positive count is rejected when the protected region would re-run the\nflow's document source — UNLESS ``retry.source_replay_policy`` is set to\n``allow_duplicates``, which is how a caller states that re-reading the\nsource is acceptable for this process and lifts that one refusal. It is\nalso rejected when a retried call writes without registry-backed replay\nsafety, and that refusal has no such escape. Those checks run before\nanything is emitted.",
               "properties": {
                 "catch_body": {
                   "$ref": "#/$defs/TryCatchCatchBodyV1"
@@ -38110,7 +38110,7 @@
       "legacy_excerpt": {},
       "producer": "meta_tools.get_schema_template_action(...) [all axes]",
       "selector": "walked_surface_digest",
-      "sha256": "9fe4afee1a23aedaff768c0eb7d9c199198c09ffe48326976f38a36501e04198",
+      "sha256": "05756e06a668e3346a92ef049106945ad87b0b034cca2c0d5acefe3effc849e8",
       "surface_class": "SS-SCHEMA-TEMPLATES",
       "value": {
         "resource_type=component": "55ba0a46f10742a5bfa269767c7ba040532f5d7900c7e56953f8e57469ceecf3",
@@ -38392,14 +38392,14 @@
         "resource_type=trading_partner|operation=update|standard=rosettanet": "83537ac74be6088a4607997d0e200d76ec7c6367c900aa9923e823d610dd27e1",
         "resource_type=trading_partner|operation=update|standard=tradacoms": "83537ac74be6088a4607997d0e200d76ec7c6367c900aa9923e823d610dd27e1",
         "resource_type=trading_partner|operation=update|standard=x12": "83537ac74be6088a4607997d0e200d76ec7c6367c900aa9923e823d610dd27e1",
-        "schema_name=AuthoringBuildProvenanceV1": "0437f25f62ea51db270e6ad670f0802bdef26d8075514d0fe26ff2c5d72f30c0",
-        "schema_name=AuthoringCompileResultV1": "cc23ec8dcc1e047801e12d530fb4f3525189a4397359ca04c82bf5cd62849539",
-        "schema_name=AuthoringPlanResultV1": "9a2a8b263c9b9ae4af10d320989a89e7de264fdc1ba2f21cd3214e0d189f44bc",
-        "schema_name=AuthoringRequestV1": "80169772730986321422d0b32976338ce2ddaab754c619f235d08736c8541a9e",
-        "schema_name=AuthoringRevisionBindingV1": "809ed81ac67dca675db4ee7188b216d27e6ffa04dbac506dd8f23d2ff214c0f6",
-        "schema_name=IntegrationSpecV1": "689d9626eb1aac4b83eb0da378b1fa636d894018984cf8afd961117002d3e0df",
-        "schema_name=ProcessIRV1": "96b049cf47b0de3be4ed566aaac2cfc9e154d752df6a6536d4e1e361ac5d1a46",
-        "schema_name=SystemTopologySpecV1": "f261c33e6c851b03b1aaad1278a9e95d7197b3b54a28eebbfed7fb861d0ec7e8",
+        "schema_name=AuthoringBuildProvenanceV1": "2d4a954baf45a6f5b222b9517d70dfcd89de9f4a50d023e576527f96779a5e49",
+        "schema_name=AuthoringCompileResultV1": "7a25eb15326b301477e31d741513681f07a7326c88c62ebd727188e1287b6ef4",
+        "schema_name=AuthoringPlanResultV1": "4ccd7dfe7a30d582cd2991ce9cc49e64cbf27d5612890bb6c1b59a42783e379c",
+        "schema_name=AuthoringRequestV1": "27f4336e449f0aa25ca28f54fb6d28d4996201a1cb503ee5d722cfc2e7826081",
+        "schema_name=AuthoringRevisionBindingV1": "59fae3da0e0c42ace565549508135eb90b800d05bf101314a86a1f8bdbab375b",
+        "schema_name=IntegrationSpecV1": "c6824d20d55b6269525b48795966214c2ca2b863ab958206399a957f36c3aec8",
+        "schema_name=ProcessIRV1": "fac5f32ca517fd3e5f7619c30ffb508a7b1270010ed74cb1b4aa9406d3eaf5b4",
+        "schema_name=SystemTopologySpecV1": "21c9c9e9a56021128c8da4afe1856d1dac88412fb860aff5d8b47cd4c5fba89a",
         "schema_name=account_governance": "d0773b315a5b59bad4bbb0021a2468e5cb4d3a85c4dbac216a887f0194a2ecdc",
         "schema_name=api_service": "c7be12ec5b2c503bd54088bd2c7b00adfa435e3f3fc9610bae0b91117657911b",
         "schema_name=archetype:api_to_api_sync": "7e4653429bdfc56d53ecb1c07fb7f477e11c2180c3afdfad94566cab1ca716e7",
@@ -38408,7 +38408,7 @@
         "schema_name=archetype:http_listener_to_db": "b21d41d870324ce66e872957fa09126dc641354753a0d7681d14d3489f7dcf3f",
         "schema_name=archetype:http_listener_to_rest": "cdd6c9c6fb51cd8afda5c7245a2ef37548939610c1c5235cd9abe1ed9deac3d9",
         "schema_name=archetype:stub_minimal_integration": "28f1d13a8568cea1df47bb1b361708d17e490204c7425787999e80df63f4b0fc",
-        "schema_name=authoring_workflow": "96376195f1471899bf19844475accbd5e0ddd992dc74ca8ed54e49a275efe81f",
+        "schema_name=authoring_workflow": "3517d3f9a2e5b0eef0a3ec8e11a52990decd9e887776356cd0267d3982e9dc58",
         "schema_name=cache_property_authoring": "484017df545d247be99c71ef4be4edf8d47013e565a6e05119c357699229ed6f",
         "schema_name=compose_archetypes": "ec23808a15913ec8ce1d6e510ff941952be25b006a42128216b891d05f1a9d7f",
         "schema_name=design_doctrine": "458e7385ec9ad21c5d8f1d319a1db3252c9c1e017640967bfdc9714c38bb38b5",
@@ -38471,7 +38471,7 @@
         "schema_name=governance_pattern:support_folder_isolation_and_privacy": "4f0b206e14ad2f2272b03dfc8c9575dbcc3d454d28894a42602a9cca546de2ed",
         "schema_name=governance_pattern:tools_utilities_folder_non_integration": "50ddcf761e63e68f305271b4f079d8a7effd9b750726a8be784c2c52993c2cbc",
         "schema_name=governance_pattern:tracked_field_naming_generic_and_unique": "42ae3917d1ddb0f23a9dd0e9083a9106a3ed6c18bc06e740a1c07014830204d1",
-        "schema_name=process_ir_authoring": "df5eb6d03dc1ed4fbf1513d3a3d629996ed8bac6e9d976e74bd0e9174d30d1a7",
+        "schema_name=process_ir_authoring": "d1f57f8e6f46c75d5d2bda71137440b4cf1737bc6dd77a351a11651cd350d672",
         "schema_name=process_property": "43c9cf66e73fb39b6f1625d00a9a01f876005bfa94b34fb99cb14e0deebe699b",
         "schema_name=recipe:boomi.adapter.api_to_api_sync@1.0.0": "8dfc0a6d446a4120a35d80648ffe364801554be443a94ce813a85f67559f630f",
         "schema_name=recipe:boomi.adapter.api_to_database_sync@1.0.0": "27970e874b5a038b4bba51efbfe091ff2cb434ea0bf270f5796ec350d808e15c",
@@ -38481,11 +38481,11 @@
         "schema_name=recipe:boomi.archetype.api_to_database_sync@0.1.0": "0dad04f52a9a0e2e0afd1282ce3ddac4f115237a714f6cb45be9c5200d743943",
         "schema_name=recipe:boomi.compose.db_rest_fanout@1.0.0": "b9ea187fe32485613b2783ca8f6c062f77aa9f87feb831c28f06d57f15137598",
         "schema_name=recipe:boomi.constraint.inbound_validate@1.0.0": "28bee5da0db917789d285df4dc3af86b4de4fc8ef44fa3ad84911976b9cb001d",
-        "schema_name=recipe_contributions": "980629690f12aded708755be9cd7587dc073fbf0f3dc3222a951e77642e2009d",
+        "schema_name=recipe_contributions": "c4405fc8f2b0808089a7e39886b97feb396dca4662773889a46c011a3152a7f9",
         "schema_name=recipe_registry": "5820e84e8f518bf0c6394bff4a2beae99fbf764dd459680dc891a1e7cc971a5b",
         "schema_name=script_dataprocess": "86d6cac0e593188c5c6a253e684097dadda0a6c3c331a1d71672c827133af143",
         "schema_name=script_mapping": "165e78ea08d24f54221f6da5973cbe20c7747d1a37f9fde496a42876b594e029",
-        "schema_name=validation_report": "c26c9aedcda556d7ef99e3d189ece2eba79b04aff0e5335e78fe8ce30cc5c2ac",
+        "schema_name=validation_report": "94015c05ee616a7eaeda21e3edc7cc8eca1ea6ac81e5abddc670139bfa06a923",
         "schema_name=workflow:build_and_verify_http_listener": "bf6ab2e405f375735cd6aaed29da0dbc6b717909dc1c184ba8dbe341f2b95800",
         "schema_name=workflow:build_integration_from_description": "72a20b29bbaf7a0ce39e06fb8514e13831968332bc5d0373d7f100bd7a943be0",
         "schema_name=workflow:compose_multi_target_integration": "6b04f2d192bcaf817a983a1aefda2f2f7b9674ce1c996737137c7ce8d6b932e0",

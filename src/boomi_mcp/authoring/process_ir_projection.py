@@ -626,8 +626,11 @@ _NODE_FACTS: Mapping[str, Mapping[str, Any]] = {
         "category": "reliability",
         "title": "Try/Catch with bounded retry",
         "summary": (
-            "A scoped error handler. A process scope must be the sole root step; "
-            "a connector scope must follow the call that produced the documents. "
+            "A scoped error handler. A process scope must be the sole root step. "
+            "A connector scope either follows the call that produced the "
+            "documents, or opens a serialized chain of connector-scoped handlers "
+            "— in a chain the first handler protects the producing call itself, "
+            "and each non-final handler ends its protected path in continue. "
             "Retry count is 0-5, the platform's own bound."
         ),
         _ORDERING: (

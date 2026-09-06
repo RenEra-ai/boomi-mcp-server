@@ -122,8 +122,22 @@ def _collect_subtree(
     *,
     path: str,
     limit: int,
+    stop_at: FrozenSet[str] = frozenset(),
 ) -> Tuple[str, ...]:
     """Every node reachable from ``start_node_id``, inclusive.
+
+    ``stop_at`` bounds the walk: a node in that set is not collected and is not
+    descended through. #156 needs it because a serialized chain's protected path
+    does not END at the handler — it CONTINUES into the next one, so an unbounded
+    walk from handler N's try edge reaches every later handler and, through their
+    catch edges, every later recovery body too.
+
+    That is not a cosmetic over-collection. ``validate_error_handling`` grades a
+    region's retry safety over exactly this set, so an unbounded region makes a
+    retried handler answer for writes on a LATER handler's recovery path —
+    measured: a three-handler chain with retries [0, 1, 0] whose last catch stages
+    to a cache reported ``PROCESS_IR_SEMANTIC_RETRY_EFFECT_UNSAFE`` against a
+    write that region never retries.
 
     ``limit`` (the CFG's node count) bounds the walk. ``check_cfg_invariants``
     has already proven the graph is an acyclic tree before this runs, so the
@@ -136,6 +150,9 @@ def _collect_subtree(
     stack = [start_node_id]
     while stack:
         node_id = stack.pop()
+        if node_id in stop_at:
+            # The next region begins here. Not collected, not descended.
+            continue
         if node_id in seen_set:
             # A tree has no re-entry. Reaching one means the region overlaps
             # itself, which the caller reports as a structural defect.
@@ -172,6 +189,11 @@ def derive_error_regions(cfg: SemanticCfgV1) -> Tuple[ErrorRegionV1, ...]:
         if source is None or source.semantic.semantic_kind != "try_catch":
             raise _region_defect(edge.provenance_path, edge.source_node_id)
 
+    #: Every handler in the graph. Used as the protected-region boundary below.
+    handler_ids = frozenset(
+        n.node_id for n in cfg.nodes if n.semantic.semantic_kind == "try_catch"
+    )
+
     regions: List[ErrorRegionV1] = []
     for node in cfg.nodes:
         if node.semantic.semantic_kind != "try_catch":
@@ -191,7 +213,15 @@ def derive_error_regions(cfg: SemanticCfgV1) -> Tuple[ErrorRegionV1, ...]:
             raise _region_defect(node.source_path, node.node_id)
 
         try_ids = _collect_subtree(
-            try_edge.target_node_id, outgoing, path=node.source_path, limit=limit
+            try_edge.target_node_id,
+            outgoing,
+            path=node.source_path,
+            limit=limit,
+            # Every OTHER handler bounds this one. A chain's regions are siblings,
+            # so handler N's protected region ends where handler N+1 begins —
+            # and the boundary is derived from the graph's own handler nodes, not
+            # from an authored region id, so a caller cannot move it.
+            stop_at=handler_ids - {node.node_id},
         )
         catch_ids = _collect_subtree(
             catch_edge.target_node_id, outgoing, path=node.source_path, limit=limit

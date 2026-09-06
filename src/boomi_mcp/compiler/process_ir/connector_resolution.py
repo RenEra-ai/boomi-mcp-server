@@ -347,6 +347,17 @@ _MAP_PAIRING_TRANSPARENT = frozenset(
     {"connector_call", "branch", "decision", "try_catch"}
 )
 
+#: Kinds a PENDING map may cross before the call that answers it.
+#:
+#: Deliberately narrower than `_MAP_PAIRING_TRANSPARENT`. That set answers "does
+#: this node still leave the upstream call feeding the map"; this one answers
+#: "may the map's consumer still be further down the path". Only `try_catch`
+#: qualifies (#156): a chain's map is answered by the call inside the next
+#: handler's protected body. `branch`/`decision` are NOT here — `[call, map,
+#: branch]` has been refused since #141 and no evidence widens it, and a map
+#: whose consumer sat in one leg but not another would have no single answer.
+_MAP_CONSUMER_TRANSPARENT = frozenset({"connector_call", "try_catch"})
+
 
 class _PathState:
     """Document state carried down ONE root-to-leaf path.
@@ -495,7 +506,21 @@ def _walk_paths(cfg: SemanticCfgV1, index, binding_by_node) -> None:
         # mapA and validated only mapB, and a map followed by a terminal was
         # dropped unchecked. Either way the compiler would have claimed to verify
         # profiles it never compared.
-        if state.pending_map is not None and kind != "connector_call":
+        # #156: a `try_catch` is pure control flow for this rule, exactly as it
+        # already is for `_MAP_PAIRING_TRANSPARENT` above. In a serialized region
+        # chain the map sits BETWEEN two handlers, so the call that answers it is
+        # the one inside the next handler's protected body — one node further
+        # down the try edge, not the handler itself. Refusing here made the
+        # advertised `handler(continue) -> map_ref -> handler(stop)` shape
+        # uncompilable through the public pipeline even with matching profiles
+        # (measured: PROCESS_IR_SEMANTIC_PROFILE_MISMATCH), which is the very
+        # shape `golden-000005` encodes.
+        #
+        # The obligation is CARRIED, not dropped: it still has to be answered by
+        # a connector call, and any other kind on the way still fails here. A
+        # handler with no call in its protected body cannot occur — the
+        # connector-scope rule requires exactly one.
+        if state.pending_map is not None and kind not in _MAP_CONSUMER_TRANSPARENT:
             _profile_failure(
                 "{0}/map_ref".format(state.pending_map.source_path),
                 state.pending_map.node_id,
@@ -637,6 +662,14 @@ def _walk_paths(cfg: SemanticCfgV1, index, binding_by_node) -> None:
                 child.saw_call = True
                 if child.producer is None:
                     child.producer = node
+                # #156: the recovery path does NOT inherit the successful path's
+                # pending map. That obligation belongs to the protected call the
+                # map feeds; a caught document reaches this fork without passing
+                # through the map at all, so carrying it here would demand the
+                # catch leg answer for a pairing it is not part of — and would
+                # then blame the map for a defect on a different path.
+                child.pending_map = None
+                child.map_upstream = None
             stack.append((edge.target_node_id, child))
 
 

@@ -816,3 +816,126 @@ def test_the_compiler_refuses_an_orphan_continue_on_a_mutated_model():
     with pytest.raises(ProcessIRCompileError) as excinfo:
         validate_body_capabilities(ir)
     assert "PROCESS_IR_SEMANTIC_CONTROL_CONTINUATION_UNSUPPORTED" in str(excinfo.value)
+
+
+def test_a_map_separated_chain_compiles_through_the_public_pipeline():
+    """Stage-2 CDX-156-r1-01. The byte goldens were NOT enough.
+
+    `test_the_notify_dlq_golden_is_reproduced_from_canonical_ir` and its chain
+    sibling call `lower_process_ir_to_cfg` + `emit_process` directly, so they
+    prove the EMITTER. `compile_process_ir_v1` additionally runs connector
+    resolution — and that walk refused any non-call while a map pairing was
+    pending, so the `handler(continue) -> map_ref -> handler(stop)` shape that
+    `golden-000005` encodes could not be built through the public path at all,
+    with matching profiles, while its bytes matched perfectly.
+
+    A golden that only the emitter can produce is not a shipped capability.
+    """
+    from boomi_mcp.compiler.process_ir.contracts import ComponentSymbolV1
+    from boomi_mcp.compiler.process_ir.pipeline import compile_process_ir_v1
+
+    import _wave_gate_golden_corpus as corpus
+
+    def document(map_ref):
+        catch = {
+            "steps": [dict(_NOTIFY)],
+            "terminal": {"kind": "cache_put", "cache_ref": "$ref:CACHE",
+                         "label": "Route caught errors to DLQ cache"},
+        }
+        return _doc([
+            {"kind": "try_catch", "scope": "connector", "retry": {"count": 0},
+             "try_body": {"steps": [{"kind": "connector_call",
+                                     "operation_ref": "$ref:GETOP"}],
+                          "terminal": {"kind": "continue"}},
+             "catch_body": catch},
+            {"kind": "map_ref", "map_ref": map_ref},
+            {"kind": "try_catch", "scope": "connector", "retry": {"count": 0},
+             "try_body": {"steps": [{"kind": "connector_call",
+                                     "operation_ref": "$ref:PATCHOP"}],
+                          "terminal": dict(_STOP)},
+             "catch_body": catch},
+        ])
+
+    def symbols(target_profile):
+        return corpus.error_symbols(
+            ComponentSymbolV1(
+                ref="$ref:MAP", component_id="m1", component_type="transform.map",
+                input_profile_ref="$ref:P1", output_profile_ref=target_profile,
+            )
+        )
+
+    # GETOP produces P1; the map takes P1 and must hand PATCHOP the P1 it consumes.
+    compile_process_ir_v1(parse_process_ir_v1(document("$ref:MAP")), symbols("$ref:P1"))
+
+    # THE CONTROL. Carrying the pairing across the handler must not stop it being
+    # CHECKED there — a map whose target does not match the protected call's
+    # request profile is still refused, at the map's own pointer.
+    from boomi_mcp.compiler.process_ir.diagnostics import ProcessIRCompileError
+
+    with pytest.raises(ProcessIRCompileError) as excinfo:
+        compile_process_ir_v1(
+            parse_process_ir_v1(document("$ref:MAP")), symbols("$ref:P2")
+        )
+    assert "PROCESS_IR_SEMANTIC_PROFILE_MISMATCH" in str(excinfo.value)
+    assert "/body/steps/1/map_ref" in str(excinfo.value)
+
+
+def test_a_chain_bounds_each_protected_region_at_the_next_handler():
+    """Stage-2 CDX-156-r1-02.
+
+    `derive_error_regions` walked the protected edge with an UNBOUNDED subtree
+    collection. In a chain that path continues into every later handler, so
+    region 1 absorbed the other handlers AND their catch bodies — and
+    `validate_error_handling` grades retry safety over exactly that set, so a
+    retried region answered for writes on a later handler's recovery path. The
+    reviewer's repro: three handlers, retries [0, 1, 0], the last catch staging to
+    a cache, reported RETRY_EFFECT_UNSAFE against a write nothing retries.
+    """
+    from boomi_mcp.compiler.process_ir import lowering
+    from boomi_mcp.compiler.process_ir.error_handling import derive_error_regions
+
+    handlers = [
+        _handler("$ref:OP0", dict(_CONTINUE)),
+        _handler("$ref:OP1", dict(_CONTINUE)),
+        _handler("$ref:OP2", dict(_STOP)),
+    ]
+    cfg = lowering.lower_process_ir_to_cfg(parse_process_ir_v1(_doc(handlers)))
+    by_id = {node.node_id: node for node in cfg.nodes}
+    regions = derive_error_regions(cfg)
+    assert len(regions) == 3
+
+    for index, region in enumerate(regions):
+        own = "/body/steps/{0}/".format(index)
+        for node_id in region.try_node_ids:
+            assert by_id[node_id].source_path.startswith(own + "try_body"), (
+                index, by_id[node_id].source_path
+            )
+        for node_id in region.catch_node_ids:
+            assert by_id[node_id].source_path.startswith(own + "catch_body"), (
+                index, by_id[node_id].source_path
+            )
+
+
+def test_an_intervening_map_belongs_to_the_preceding_protected_region():
+    """The boundary rule the architect specified and live QA measured.
+
+    A map between two handlers sits on the FIRST one's protected path — the
+    documents it transforms are the ones that handler produced — so it is graded
+    with that region's retries, not the next one's. Stated as a test because it
+    is a semantic choice the bytes cannot express: `golden-000005` looks the same
+    either way.
+    """
+    from boomi_mcp.compiler.process_ir import lowering
+    from boomi_mcp.compiler.process_ir.error_handling import derive_error_regions
+
+    document = _doc([
+        _handler("$ref:OP0", dict(_CONTINUE)),
+        {"kind": "map_ref", "map_ref": "$ref:MAP"},
+        _handler("$ref:OP1", dict(_STOP)),
+    ])
+    cfg = lowering.lower_process_ir_to_cfg(parse_process_ir_v1(document))
+    by_id = {node.node_id: node for node in cfg.nodes}
+    first, second = derive_error_regions(cfg)
+
+    assert "/body/steps/1" in {by_id[n].source_path for n in first.try_node_ids}
+    assert "/body/steps/1" not in {by_id[n].source_path for n in second.try_node_ids}
