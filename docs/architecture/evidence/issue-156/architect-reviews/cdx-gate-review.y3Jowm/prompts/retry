@@ -1,0 +1,12 @@
+Approvals are unavailable in this read-only review session — there is no human to approve anything,
+no command will be executed on your behalf, and nothing you request will be granted. Do not ask a
+question, do not request approval, and do not propose next steps to confirm.
+
+Emit your FULL final evaluation as plain text NOW, complete in one shot: for each of the seven
+evaluation-2 findings say whether it is genuinely closed and whether the fix introduced anything new;
+rule on the finding-6 capability deferral (blocking for #156, or correctly deferred to #155); say
+which of the three still-open items are BLOCKING for this slice versus follow-up work; and state
+anything else that must be said before this review loop closes for good. Give file and line where you
+have them.
+
+END with a verdict on its OWN FINAL line: exactly 'VERDICT: NO ISSUES' or 'VERDICT: ISSUES FOUND'.

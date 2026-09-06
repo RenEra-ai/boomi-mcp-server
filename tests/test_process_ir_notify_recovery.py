@@ -623,7 +623,7 @@ _NOTIFY_DLQ_DOCUMENT = {
                         {"kind": "connector_call", "operation_ref": "$ref:DBOP",
                          "action": "get", "label": "DB extract"},
                         {"kind": "connector_call", "operation_ref": "$ref:RESTOP",
-                         "action": "send", "label": "REST send"},
+                         "label": "REST send"},
                     ],
                     "terminal": {"kind": "stop"},
                 },
@@ -1157,7 +1157,7 @@ _CHAIN_DLQ_DOCUMENT = {
                 "kind": "try_catch", "scope": "connector", "retry": {"count": 2},
                 "try_body": {
                     "steps": [{"kind": "connector_call", "operation_ref": "$ref:RESTOP",
-                               "action": "send", "label": "REST send"}],
+                               "label": "REST send"}],
                     "terminal": dict(_STOP),
                 },
                 "catch_body": {
@@ -1300,15 +1300,25 @@ def test_the_notify_goldens_cannot_take_the_canonical_corpus_route_yet():
     )
 
     # ...and the refusal is real, not inferred from the table.
-    import _wave_gate_golden_corpus as corpus
     from boomi_mcp.compiler.process_ir.diagnostics import ProcessIRCompileError
     from boomi_mcp.compiler.process_ir.pipeline import compile_process_ir_v1
 
+    # A REAL POST operation, with the `action` ASSERTION OMITTED. The first
+    # version of this witness authored `action: "post"` against a PATCH
+    # operation, which exercises the assertion-mismatch refusal — a different
+    # mechanism that happens to share this code. `action` is an optional
+    # assertion of the operation's authoritative action, so omitting it leaves
+    # only the capability question, and the POINTER separates the two: the gap
+    # lands on `/operation_ref`, a mismatch on `/action`.
     document = _doc([
-        {"kind": "connector_call", "operation_ref": "$ref:GETOP", "action": "get"},
-        {"kind": "connector_call", "operation_ref": "$ref:PATCHOP", "action": "post"},
+        {"kind": "connector_call", "operation_ref": "$ref:DBOP", "action": "get"},
+        {"kind": "connector_call", "operation_ref": "$ref:RESTOP"},
         dict(_STOP),
     ])
     with pytest.raises(ProcessIRCompileError) as excinfo:
-        compile_process_ir_v1(parse_process_ir_v1(document), corpus.error_symbols())
-    assert "PROCESS_IR_CAPABILITY_CONNECTOR_ACTION_UNSUPPORTED" in str(excinfo.value)
+        compile_process_ir_v1(parse_process_ir_v1(document), _dlq_symbols())
+    codes = {(d.code, d.path) for d in excinfo.value.diagnostics}
+    assert (
+        "PROCESS_IR_CAPABILITY_CONNECTOR_ACTION_UNSUPPORTED",
+        "/body/steps/1/operation_ref",
+    ) in codes, codes

@@ -14,6 +14,8 @@ import pathlib
 
 import types
 
+import copy
+
 import pytest
 
 from boomi_mcp.compiler.process_ir import connector_capabilities as CC
@@ -2350,3 +2352,268 @@ def test_a_replay_declaration_is_graded_wherever_it_is_authored():
     assert any(d.code == PROCESS_IR_SEMANTIC_IDEMPOTENCY_EVIDENCE_MISSING
                for d in raised.value.diagnostics), [
         d.code for d in raised.value.diagnostics]
+
+
+# ---------------------------------------------------------------------------
+# #156 architect evaluation 3: the blocking validation of the newly admitted
+# graph forms. Four finite cases, enumerated by that review.
+# ---------------------------------------------------------------------------
+
+_NOTIFY_TOKEN = "meta.base.catcherrorsmessage"
+_CHAIN_NOTIFY = {
+    "kind": "notify", "level": "ERROR",
+    "message_template": "caught " + _NOTIFY_TOKEN,
+}
+
+
+def _chain(*, handlers, retry=None, catch_steps=None, catch_terminal=None):
+    """A serialized connector-region chain: N-1 continuing handlers, then one that stops."""
+    out = []
+    for index, op in enumerate(handlers):
+        last = index == len(handlers) - 1
+        node = {
+            "kind": "try_catch",
+            "scope": "connector",
+            "try_body": {
+                "steps": [{"kind": "connector_call", "operation_ref": op}],
+                "terminal": {"kind": "stop"} if last else {"kind": "continue"},
+            },
+            "catch_body": {
+                "steps": list(catch_steps) if catch_steps is not None else [dict(_CHAIN_NOTIFY)],
+                "terminal": dict(catch_terminal) if catch_terminal else {"kind": "stop"},
+            },
+        }
+        if retry is not None and index == len(handlers) - 1:
+            node["retry"] = dict(retry)
+        out.append(node)
+    return _doc(out)
+
+
+def _dpp_write(name):
+    return {"kind": "set_dpp", "name": name,
+            "source_values": [{"value_type": "static", "value": "v"}]}
+
+
+def _dpp_read(name, into):
+    """A step that READS `name`. A catch body admits no control node, so the read
+    is a property source rather than a Decision operand."""
+    return {"kind": "set_dpp", "name": into,
+            "source_values": [{"value_type": "dpp", "property_name": name}]}
+
+
+def test_a_recovery_path_cannot_read_state_its_own_failed_try_wrote():
+    """Case 1. A catch body runs BECAUSE the protected path failed, so a write
+    that path performed cannot be assumed to have happened.
+
+    The lineage walk forks the catch from SCOPE ENTRY, which is what makes this
+    true; this pins it for the newly admitted recovery shapes rather than
+    trusting the fork to keep behaving. The CONTROL is the same read satisfied
+    from scope entry — without it the test would pass even if a catch body could
+    read nothing at all.
+    """
+    # CONTROL: written before the handler, so the recovery path may read it.
+    ok = _doc([
+        _dpp_write("scoped"),
+        {"kind": "connector_call", "operation_ref": "$ref:GETOP"},
+        {
+            "kind": "try_catch", "scope": "connector",
+            "try_body": {"steps": [{"kind": "connector_call", "operation_ref": "$ref:GETOP2"}],
+                         "terminal": {"kind": "stop"}},
+            "catch_body": {"steps": [dict(_CHAIN_NOTIFY), _dpp_read("scoped", "echo")],
+                           "terminal": {"kind": "stop"}},
+        },
+    ])
+    _compile(ok, _symbols())
+
+    # The defect shape: the catch reads a property only the TRY body wrote.
+    # PROCESS scope, because a connector-scoped try body must END on the call it
+    # protects and so cannot carry a write after it — the write has to be
+    # downstream of the failure point for this to be the case under test.
+    bad = _doc([
+        {
+            "kind": "try_catch", "scope": "process",
+            "try_body": {
+                "steps": [{"kind": "connector_call", "operation_ref": "$ref:GETOP"},
+                          _dpp_write("only_on_success")],
+                "terminal": {"kind": "stop"},
+            },
+            "catch_body": {
+                "steps": [dict(_CHAIN_NOTIFY), _dpp_read("only_on_success", "echo")],
+                "terminal": {"kind": "stop"},
+            },
+        },
+    ])
+    with pytest.raises((ProcessIRCompileError, ProcessIRValidationError)):
+        _compile(bad, _symbols())
+
+
+def test_a_chain_grants_evidence_per_call_and_not_across_siblings(monkeypatch):
+    """Case 2. A replay grant is minted for ONE authored call path.
+
+    A chain multiplies the places an operation appears, so this pins that the
+    grant does not travel: the minted table compiles, and the same table with the
+    grant's call path moved to the sibling handler does not. Both directions,
+    because a grant check that refused everything would pass the negative alone.
+    """
+    from boomi_mcp.compiler.process_ir.connector_resolution import mint_idempotency_grants
+    from boomi_mcp.compiler.process_ir.contracts import IdempotencyGrantSymbolV1
+
+    _synthetic_capabilities(monkeypatch, (REST, "PATCH", "conditionally_idempotent"))
+    symbols = _symbols(
+        contracts=[
+            IdempotencyContractSymbolV1(
+                ref="$ref:icv1:rest:patch:c:1", operation_ref="$ref:PATCHOP",
+                record_digest="c" * 64,
+            )
+        ]
+    )
+    doc = _chain(handlers=["$ref:GETOP", "$ref:PATCHOP"], retry={"count": 1})
+    doc["body"]["steps"][1]["try_body"]["steps"][0]["idempotency"] = {
+        "kind": "key_reference", "contract_ref": "$ref:icv1:rest:patch:c:1",
+    }
+
+    cfg, _plan = _compile(doc, symbols)
+    minted = mint_idempotency_grants(
+        cfg, symbols, process_root_ref="$ref:ROOT",
+        registry=_complete_record("c" * 64),
+    )
+    assert minted.idempotency_grants, "nothing minted — the rest of this is vacuous"
+    _compile(doc, minted)  # the minted table covers THIS call
+
+    granted = minted.idempotency_grants[0]
+    for moved, label in (
+        (granted.model_copy(update={"call_source_path": "/body/steps/0/try_body/steps/0"}),
+         "sibling handler"),
+        (granted.model_copy(update={"operation_ref": "$ref:GETOP2"}), "another operation"),
+        (granted.model_copy(update={"call_source_path": "/body/steps/99/elsewhere"}),
+         "a path off this root"),
+    ):
+        transplanted = minted.model_copy(update={"idempotency_grants": (moved,)})
+        with pytest.raises(ProcessIRCompileError) as excinfo:
+            _compile(doc, transplanted)
+        assert (
+            excinfo.value.diagnostics[0].code
+            == PROCESS_IR_SEMANTIC_IDEMPOTENCY_EVIDENCE_MISSING
+        ), label
+
+
+def _materialize(doc, symbols, *, component_id=None, folder_id=None):
+    """Drive the PUBLIC materialization path for a document."""
+    from boomi_mcp.authoring import process_materialization as pm
+    from boomi_mcp.authoring.contract import get_authoring_revisions
+    from boomi_mcp.compiler.process_ir.emitter_registry import emitter_revision
+    from boomi_mcp.models.process_component import ProcessComponentEnvelopeV1
+    from boomi_mcp.models.process_ir import parse_process_ir_v1
+
+    envelope = ProcessComponentEnvelopeV1(
+        component_key="proc", name="P",
+        action="update" if component_id else "create",
+        **({"component_id": component_id} if component_id else {}),
+    )
+    kwargs = dict(
+        envelope=envelope,
+        process_ir=parse_process_ir_v1(copy.deepcopy(doc)),
+        symbols=symbols,
+        conflict_policy="reuse",
+        compiler_revision=get_authoring_revisions()["compiler_revision"],
+        emitter_revision=emitter_revision(),
+        materializer_revision="sha256:" + "a" * 64,
+    )
+    if folder_id:
+        kwargs["resolved_folder_id"] = folder_id
+    return pm.build_materialization_plan(**kwargs)
+
+
+def test_a_recovery_request_reaches_materialization_with_its_child_reference():
+    """Case 3, first half. A recovery hand-off is not only compilable — it must
+    survive the public planning path with the called child still referenced and
+    its dependency order intact."""
+    # `$ref:SUBPROC` is part of the corpus's BASE symbol set (#156 added it so
+    # every committed error-handling specimen resolves), so it is not re-supplied
+    # here — doing so is a duplicate-reference error.
+    symbols = _symbols()
+    doc = _doc([
+        {
+            "kind": "try_catch", "scope": "process",
+            "try_body": {"steps": [{"kind": "connector_call", "operation_ref": "$ref:GETOP"}],
+                         "terminal": {"kind": "stop"}},
+            "catch_body": {
+                "steps": [dict(_CHAIN_NOTIFY)],
+                "terminal": {"kind": "process_call", "process_ref": "$ref:SUBPROC",
+                             "wait": True, "abort_on_error": True},
+            },
+        },
+    ])
+    plan = _materialize(doc, symbols)
+    # The plan's repr redacts every value by design, so the assertion reads the
+    # canonical emission JSON — which is also what the fingerprint covers.
+    emitted = plan.emission_plan_canonical_json
+    assert '"emitter_kind":"processcall"' in emitted, emitted[:200]
+    # ...and the hand-off keeps the two flags the contract requires.
+    assert '"wait":true' in emitted and '"abort":true' in emitted, emitted[:200]
+    # The child's ACCOUNT-SCOPED id must NOT be here: the plan is relocatable by
+    # design and binds ids at apply time. Asserting its presence was the first
+    # version of this test and it contradicted the property it was checking.
+    assert "66666666-6666-6666-6666-666666666666" not in emitted
+    # What must survive is the REFERENCE, carried on the preserved IR.
+    assert "$ref:SUBPROC" in plan.process_ir.model_dump_json()
+
+
+def test_revoking_the_evidence_after_planning_refuses_the_next_compile(monkeypatch):
+    """Case 3, second half. Evidence is not consumed once and trusted forever.
+
+    A retried write compiles while its grant is present, and the SAME document
+    with the grant withdrawn is refused — which is what stops a plan built under
+    evidence from being applied after that evidence goes away.
+    """
+    from boomi_mcp.compiler.process_ir.connector_resolution import mint_idempotency_grants
+
+    _synthetic_capabilities(monkeypatch, (REST, "PATCH", "conditionally_idempotent"))
+    symbols = _symbols(
+        contracts=[
+            IdempotencyContractSymbolV1(
+                ref="$ref:icv1:rest:patch:c:1", operation_ref="$ref:PATCHOP",
+                record_digest="c" * 64,
+            )
+        ]
+    )
+    doc = _chain(handlers=["$ref:GETOP", "$ref:PATCHOP"], retry={"count": 1})
+    doc["body"]["steps"][1]["try_body"]["steps"][0]["idempotency"] = {
+        "kind": "key_reference", "contract_ref": "$ref:icv1:rest:patch:c:1",
+    }
+    cfg, _plan = _compile(doc, symbols)
+    minted = mint_idempotency_grants(
+        cfg, symbols, process_root_ref="$ref:ROOT",
+        registry=_complete_record("c" * 64),
+    )
+    _compile(doc, minted)  # with evidence: fine
+
+    revoked = minted.model_copy(update={"idempotency_grants": ()})
+    with pytest.raises(ProcessIRCompileError) as excinfo:
+        _compile(doc, revoked)
+    assert (
+        excinfo.value.diagnostics[0].code
+        == PROCESS_IR_SEMANTIC_IDEMPOTENCY_EVIDENCE_MISSING
+    )
+
+
+def test_a_chain_relocates_across_account_bindings_unchanged():
+    """Case 4. The chain and recovery forms must carry the relocatability the
+    whole materialization design rests on: two accounts authoring the same
+    process produce identical relocatable material, and no account-scoped id
+    leaks into it."""
+    from boomi_mcp.authoring import process_materialization as pm
+
+    doc = _chain(handlers=["$ref:GETOP", "$ref:GETOP2"])
+    a = pm.process_plan_fingerprint(
+        _materialize(doc, _symbols(), component_id="ACCOUNT-A-COMPONENT",
+                     folder_id="ACCOUNT-A-FOLDER")
+    )
+    b = pm.process_plan_fingerprint(
+        _materialize(doc, _symbols(), component_id="ACCOUNT-B-COMPONENT",
+                     folder_id="ACCOUNT-B-FOLDER")
+    )
+    assert a[0] == b[0] and a[1] == b[1]
+    for bound in (b"ACCOUNT-A-COMPONENT", b"ACCOUNT-B-COMPONENT",
+                  b"ACCOUNT-A-FOLDER", b"ACCOUNT-B-FOLDER"):
+        assert bound not in a[1]

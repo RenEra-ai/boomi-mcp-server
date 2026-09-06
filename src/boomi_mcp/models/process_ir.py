@@ -2945,6 +2945,23 @@ class SequenceNodeV1(_ProcessIRBase):
     def _sequence_rules(self) -> "SequenceNodeV1":
         kinds = [step.kind for step in self.steps]
 
+        # #156 S22, and it must come before EVERY branch below — including the
+        # chain branch immediately following, which returns early. Architect
+        # evaluation 3 measured the consequence of placing it after:
+        # `[call, notify, handler(continue), handler(stop)]` served the generic
+        # `PROCESS_IR_CAPABILITY_UNSUPPORTED` at `/body` while the identical root
+        # without the chain served the contracted identity at `/body/steps/1`.
+        # `notify` is admitted in exactly one slot and its served contract names
+        # ONE identity for every refusal outside it, so no root shape may reach a
+        # different one.
+        for i, kind in enumerate(kinds):
+            if kind == "notify":
+                raise _body_kind_error(
+                    "notify is admitted only as a catch-body step — it reports a "
+                    "caught error, and a root sequence has none",
+                    at=("steps", i),
+                )
+
         # #156 T5. SERIALIZED CONNECTOR REGIONS, matched exactly and checked
         # FIRST — ahead of every exact-match branch below, all of which return
         # early and would otherwise let a chain (or a misplaced `continue`) past
@@ -3001,23 +3018,6 @@ class SequenceNodeV1(_ProcessIRBase):
                     "connector scope protects a downstream call and must follow one"
                 )
             return self
-
-        # #156 S22. `notify` is admitted in exactly one slot, and the mapping
-        # table names ONE identity for every refusal outside it. Checked here,
-        # explicitly, ahead of the generic root rules: those serve
-        # `PROCESS_IR_CAPABILITY_UNSUPPORTED`, which is the right answer for a
-        # kind the root vocabulary predates, and the wrong one for a kind whose
-        # served contract says where it may appear. Architect evaluation 2
-        # rejected the argument that the generic rule should stand — this node is
-        # new in this slice, so there is no pre-slice root diagnostic to preserve,
-        # and handling it here changes no other kind's refusal.
-        for i, kind in enumerate(kinds):
-            if kind == "notify":
-                raise _body_kind_error(
-                    "notify is admitted only as a catch-body step — it reports a "
-                    "caught error, and a root sequence has none",
-                    at=("steps", i),
-                )
 
         for i, kind in enumerate(kinds):
             if kind == "source" and i != 0:

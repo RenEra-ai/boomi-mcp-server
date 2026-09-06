@@ -1,0 +1,86 @@
+You are the ARCHITECT. This is EVALUATION 3 — the LAST, by the owner cap in
+`docs/architecture/COMPLETION_WORKFLOW_RULES.md`. The loop ends after this round regardless of
+outcome: any correction it demands is applied, validated by a Stage-2 commit review over the
+correction delta, and the slice closes on that. So this is the round to say anything that must be
+said, and to be explicit about what is genuinely blocking versus what is advisory.
+
+REPO: /Users/gleb/Documents/Projects/Renera/boomi-mcp-server, branch `codex/issue-156`, HEAD `f7b3687`.
+SCOPE: the fix delta answering evaluation 2 — `git diff 48d7ea0..HEAD`. Review the FIX.
+Full non-KB suite GREEN at HEAD: 11630 passed, 19 skipped, 0 failed. Do not re-run it.
+  PYTHONPATH=src PYTHONDONTWRITEBYTECODE=1 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 BOOMI_LOCAL=true \
+  BOOMI_DOCS_ENABLED=false BOOMI_GOTCHAS_ENABLED=false .venv/bin/python -m pytest <target> -q -p no:cacheprovider
+
+HOW YOUR EVALUATION-2 FINDINGS WERE ANSWERED. Two of the seven were REGRESSIONS I had introduced in
+the evaluation-1 fixes; both are named as such.
+
+1. CONTINUE GRAMMAR / CACHE BYPASS — FIXED. Reproduced exactly as you described:
+   `[call, cache_put, call, handler(stop)]` refused, the identical prefix + a two-handler chain
+   ACCEPTED, because the chain branch returns before `_sequence_rules` reaches the Add-to-Cache
+   consume rule. `_check_serialized_region_chain` now re-runs
+   `_check_cache_put_followed_by_read(steps, context="sequence steps")` over the whole root.
+   A widened grammar must not narrow what the grammar it widened still enforces.
+
+2. MAP HANDOFF CONTAINMENT — FIXED. A handler escape still ends the walk (the next region owns what
+   follows) but a separator MAP no longer does: the walk continues through it with the successor
+   requirement advanced by one, so the handoff must land on the next AUTHORED handler. Verified: a
+   mapped three-handler chain passes; the first map rewired to hand off to the last handler is
+   refused with `PROCESS_IR_SEMANTIC_AMBIGUOUS_FLOW`. My evaluation-1 comment claimed this was
+   already handled and it was not.
+
+3. INDEPENDENT ORDERING — FIXED, closing the half I had left open. `check_emission_plan_invariants`
+   now derives the expected layout from AUTHORED provenance rather than from the CFG: recovery nodes
+   must start after the last main-path ordinal, their owning handler index (parsed from
+   `/body/steps/<n>/catch_body/`) must be non-decreasing, and each owner's block must be contiguous.
+   Verified: swapped catch blocks refused; the unmutated control passes. A handler's authored index
+   is a fact about the DOCUMENT, so a lowering that reordered blocks cannot also move the yardstick.
+
+4. NOTIFY TEMPLATES — BOTH HALVES FIXED, the second a regression I introduced. The predicate now
+   mirrors the escaper's own test exactly (leading `{`/`[` AND parses as an object/array), so
+   `[ERROR] caught <token>` is authorable again while JSON objects and arrays are refused; it is
+   exported and the emitter preflight applies the SAME predicate, so the binding rule holds at both
+   boundaries. The legal-template fixture list was corrected too — it still carried a JSON body that
+   is no longer authorable, which would have made the differential test assert on an illegal input.
+
+5. ROOT NOTIFY — FIXED; my refutation is WITHDRAWN. Your rebuttal was right: `notify` is new in this
+   slice, so there is no pre-slice root diagnostic to preserve, and handling it explicitly changes no
+   other kind's refusal. Root `notify` now serves `PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY`
+   with a step-precise pointer; a misplaced `source` still gets its generic refusal.
+
+6. GOLDEN CORPUS MIGRATION — REFUTED ON NEW EVIDENCE, and my ORIGINAL argument is withdrawn.
+   You correctly dismantled my first reason (that migrating would make the goldens photographs of the
+   code under test — the frozen bytes stay frozen either way, so the canonical route does add
+   normalize/compile/late-bind/materialize/full-envelope coverage the shapes tests lack).
+   I then attempted the migration. It is blocked by a CAPABILITY, not by effort: both goldens drive a
+   REST **POST** target, and the connector-call capability registry lists only `get` and `patch` for
+   the REST family, so the graph is not authorable as a canonical `connector_call` chain and
+   `compile_process_ir_v1` refuses it at `PROCESS_IR_CAPABILITY_CONNECTOR_ACTION_UNSUPPORTED` before
+   any envelope is built. The issue text puts connector capability rows OUT of scope for #156 and
+   assigns them to #155. Pinned by `test_the_notify_goldens_cannot_take_the_canonical_corpus_route_yet`,
+   which asserts the registry contents and the refusal, and FAILS the day a REST write intent is
+   registered so the migration is picked up rather than forgotten.
+   JUDGE THIS. If you hold that #156 should add the REST capability row itself, say so plainly and I
+   will treat it as blocking; if you hold the deferral is right, say that too so it is on the record.
+
+7. SERVED MAP ORDERING — you closed this in evaluation 2; unchanged.
+
+ALSO FIXED, found while attempting 6: the slice's own byte-parity documents authored
+`action: "read"`/`"write"`, which are not members of the connector-call vocabulary. They passed only
+because the shapes path (lowering + emit) never runs the capability check. Corrected to `get`/`send`.
+
+STILL OPEN from your earlier lists, and I want your judgement on whether each is blocking for THIS
+slice or belongs to a follow-up:
+  * the architecture narrative in `docs/architecture/PROCESS_IR_V1.md` beyond the capability table
+    and the Try/Catch body descriptions already updated;
+  * the specified recovery/chain state, grant-isolation, revoked-evidence and relocation regressions;
+  * re-homing Notify's XML/doctrine witnesses off the legacy-owned tests.
+Note the catch union IS derived from the shared union (`_LINEAR_MEMBERS + (ConnectorCallNodeV1,
+NotifyNodeV1)`) and pinned bidirectionally by `test_registry_step_rows_match_the_model_unions` and a
+membership assertion in `test_process_ir_notify_recovery.py`.
+
+WHAT I WANT FROM THIS FINAL EVALUATION
+- Is each of the seven genuinely closed, and did any fix introduce a new defect?
+- Is the finding-6 deferral sound, or must #156 add the capability row?
+- Of the three open items above, which (if any) are BLOCKING for this slice?
+- Anything else that must be said before this loop closes.
+
+END with a verdict on its OWN FINAL line: exactly 'VERDICT: NO ISSUES' or 'VERDICT: ISSUES FOUND'.

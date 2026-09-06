@@ -212,7 +212,27 @@ must not visually imply convergence.
 
 `try_catch` protects a region of the flow and routes a failed document to a recovery path. It is
 authored as `{scope, try_body, catch_body, retry?}`; both bodies are `steps` + one `terminal`, and
-both terminate independently — there is no join and **nothing may follow a `try_catch`**.
+both terminate independently — there is no join.
+
+**#156 amended what may follow one.** A connector-scoped handler may be followed by another
+connector-scoped handler, forming a SERIALIZED REGION CHAIN: `handler (map_ref? handler)*`, optionally
+preceded by the ordinary root prefix of connector calls and linear steps. Every handler but the last
+ends its protected path in `continue` — a terminal that emits no shape and states that the documents
+go on to the next region rather than ending here; the last handler ends on a real terminal. A
+`continue` anywhere else (on the last handler, on a lone handler, or as a root step) has no next
+region to reach and is refused. Outside such a chain the original rule stands: nothing may follow a
+`try_catch`, and a recovery path always terminates.
+
+The chain is the shape the legacy double-guard capture emits — `catcherrors → connector → map →
+catcherrors → connector → stop`, with both recovery legs forking off and terminating independently —
+and it is what makes `connector_scoped_trycatch_notify_dlq_document_cache.xml` reproducible from
+canonical IR: that graph's first protected path has no closing shape at all.
+
+**Recovery vocabulary (#156).** A catch body additionally admits `notify` as a step — one line to the
+platform's execution log, carrying the caught error — and `process_call` as its TERMINAL, handing the
+caught document to a recovery process. A recovery call must be authored `wait=true` and
+`abort_on_error=true`: `abort_on_error` defaults to false, so it is written explicitly, and the
+default is refused rather than silently rewritten. Only `notify` steps may precede the call.
 
 **Placement is part of the contract.** `scope` is not a free-form label: each value names a topology
 the compiler has a verified emitter shape for.
