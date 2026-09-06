@@ -74,8 +74,6 @@ from ...errors import (
     PROCESS_IR_CAPABILITY_PROCESS_CALL_RETURN_PATH_BINDING_UNSUPPORTED,
     PROCESS_IR_SEMANTIC_CATCH_UNTERMINATED,
     PROCESS_IR_SEMANTIC_NESTING_LIMIT,
-    PROCESS_IR_SEMANTIC_CONTROL_CONTINUATION_UNSUPPORTED,
-    PROCESS_IR_SCHEMA_INVALID_CARDINALITY,
 )
 from pydantic_core import PydanticCustomError
 
@@ -99,7 +97,7 @@ from ...models.process_ir import (
     process_call_placement_verdict,
     process_call_root_verdict,
 )
-from .diagnostics import raise_compile_error
+from .diagnostics import _MESSAGES, _REMEDIATION, raise_compile_error
 
 _SEMANTIC_PHASE = "semantic_lowering"
 
@@ -633,16 +631,30 @@ def _walk_try_catch(
     )
 
 
-#: The codes the SHARED chain rules can raise, and therefore the only ones
-#: `_as_compile_error` may translate. Asserted against this module's served
-#: tables by `test_the_chain_rule_codes_are_served_by_the_compiler`, so widening
-#: the shared rules without serving the new code fails a test rather than
-#: reaching a caller as a diagnostic with no text.
-_CHAIN_RULE_CODES = frozenset({
-    PROCESS_IR_SEMANTIC_CONTROL_CONTINUATION_UNSUPPORTED,
-    PROCESS_IR_CAPABILITY_ERROR_SCOPE_UNSUPPORTED,
-    PROCESS_IR_SCHEMA_INVALID_CARDINALITY,
-})
+def _translatable_chain_rule_code(exc_type):
+    """The compile code for a shared rule's refusal, or None when this layer has
+    no served text for it.
+
+    Derived from the SERVED TABLES, which are the authority on what this layer
+    can say. The first shape was a hand-listed set of "the codes the shared
+    chain rules can raise", and it failed OPEN in the way an aggregate-a-set
+    guard always does: its test asserted that every LISTED code has text, and
+    never that the list covered what the rules actually raise. Measured twice —
+    the chain grammar's prefix vocabulary refusal was already outside the list
+    when the list was written, and the never-admitted-kind table added a second
+    one — and in both cases a mutated model at a public compiler entry point
+    surfaced a raw `PydanticCustomError` instead of a served diagnostic.
+
+    Reading the tables instead inverts the failure: a shared rule that gains a
+    refusal is translated automatically when this layer can render its code, and
+    is still re-raised — loudly, never dressed up — when it cannot.
+    """
+    code = _CUSTOM_ERROR_CODES.get(exc_type)
+    if code is None:
+        return None
+    if not _MESSAGES.get(code) or not _REMEDIATION.get(code):
+        return None
+    return code
 
 
 def _as_compile_error(check, steps) -> None:
@@ -662,17 +674,18 @@ def _as_compile_error(check, steps) -> None:
     try:
         check(steps)
     except PydanticCustomError as exc:
-        code = _CUSTOM_ERROR_CODES.get(exc.type)
-        # CLOSED, not a blanket lookup. `_CUSTOM_ERROR_CODES` maps eleven codes,
-        # and three of them have no entry in the COMPILER's own message and
-        # remediation tables — so a blanket translation could serve a compile
-        # diagnostic this layer has no served text for. The shared chain rules
-        # raise exactly the three below; anything else is a repo defect and is
-        # re-raised rather than dressed up as a served diagnostic.
-        if code is None or code not in _CHAIN_RULE_CODES:  # pragma: no cover
+        code = _translatable_chain_rule_code(exc.type)
+        if code is None:
             raise
+        # ...and the POINTER travels with the refusal, not just the code. A
+        # shared rule that located its defect at a step (`at=`) puts that
+        # position in the error context, and pydantic passes it through
+        # untouched; hard-coding `/body` here would make the two entry points
+        # agree on the code and disagree on where to look, which is exactly the
+        # half-divergence #178 exists to remove.
+        offending = (exc.context or {}).get("offending_path") or ()
         raise raise_compile_error(
-            code, _SEMANTIC_PHASE, "/body", message=str(exc)
+            code, _SEMANTIC_PHASE, _join("/body", *offending), message=str(exc)
         ) from None
 
 

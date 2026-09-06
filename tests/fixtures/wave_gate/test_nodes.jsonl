@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 11654, "minimum_collected": 11654, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 11661, "minimum_collected": 11661, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -11700,3 +11700,10 @@
 {"kind": "test", "id": "pytest-011699", "node_id": "tests/test_process_ir_error_handling.py::test_a_recovery_request_reaches_materialization_with_its_child_reference", "state": "active"}
 {"kind": "test", "id": "pytest-011700", "node_id": "tests/test_process_ir_error_handling.py::test_revoking_the_evidence_after_planning_refuses_the_next_compile", "state": "active"}
 {"kind": "test", "id": "pytest-011701", "node_id": "tests/test_process_ir_error_handling.py::test_a_chain_relocates_across_account_bindings_unchanged", "state": "active"}
+{"kind": "test", "id": "pytest-011702", "node_id": "tests/test_process_ir_notify_recovery.py::test_the_never_admitted_root_kinds_are_derived_from_the_root_union", "state": "active"}
+{"kind": "test", "id": "pytest-011703", "node_id": "tests/test_process_ir_notify_recovery.py::test_a_never_admitted_root_kind_serves_one_identity_chain_or_not[notify]", "state": "active"}
+{"kind": "test", "id": "pytest-011704", "node_id": "tests/test_process_ir_notify_recovery.py::test_a_never_admitted_root_kind_serves_one_identity_chain_or_not[continue]", "state": "active"}
+{"kind": "test", "id": "pytest-011705", "node_id": "tests/test_process_ir_notify_recovery.py::test_the_chain_grammar_consults_the_table_itself", "state": "active"}
+{"kind": "test", "id": "pytest-011706", "node_id": "tests/test_process_ir_notify_recovery.py::test_the_compiler_serves_the_table_for_a_mutated_chain", "state": "active"}
+{"kind": "test", "id": "pytest-011707", "node_id": "tests/test_process_ir_notify_recovery.py::test_a_mutated_chain_prefix_reaches_the_compiler_as_a_served_diagnostic[never-admitted-kind]", "state": "active"}
+{"kind": "test", "id": "pytest-011708", "node_id": "tests/test_process_ir_notify_recovery.py::test_a_mutated_chain_prefix_reaches_the_compiler_as_a_served_diagnostic[prefix-vocabulary]", "state": "active"}

@@ -824,6 +824,130 @@ def test_the_compiler_refuses_an_orphan_continue_on_a_mutated_model():
     assert "PROCESS_IR_SEMANTIC_CONTROL_CONTINUATION_UNSUPPORTED" in str(excinfo.value)
 
 
+# ---------------------------------------------------------------------------
+# The structural fix: ONE identity per never-admitted root kind
+# ---------------------------------------------------------------------------
+
+
+def test_the_never_admitted_root_kinds_are_derived_from_the_root_union():
+    """The coverage claim, taken from the authority rather than asserted.
+
+    The table is only trustworthy if it was checked against the WHOLE root
+    vocabulary — a hand-written membership list is the same hand-model one level
+    up. So the union itself supplies the candidates, and every member is
+    accounted for: two carry a refusal, and each of the other twenty is legal in
+    some root shape (a source/target endpoint, a linear step, a call, a control
+    node or a terminal), so its verdict belongs to that shape's own grammar.
+
+    `process_call` is the interesting non-member: the exact singleton IS a legal
+    root, and its own root authority deliberately yields when a control node is
+    present — so inside a chain the vocabulary refusal is the answer that
+    authority already prescribes, not a second identity for one mistake.
+    """
+    import typing
+
+    from boomi_mcp.models import process_ir as model
+
+    union = typing.get_type_hints(model.SequenceNodeV1)["steps"]
+    members = typing.get_args(typing.get_args(union)[0])
+    kinds = set()
+    for member in members:
+        annotation = member.model_fields["kind"].annotation
+        kinds.update(typing.get_args(annotation))
+    assert len(kinds) == len(members), sorted(kinds)
+
+    never = {k for k in kinds if model._root_kind_never_admitted(k, 0) is not None}
+    assert never == {"notify", "continue"}, sorted(never)
+
+
+@pytest.mark.parametrize(
+    "kind,step",
+    [("notify", _NOTIFY), ("continue", _CONTINUE)],
+    ids=["notify", "continue"],
+)
+def test_a_never_admitted_root_kind_serves_one_identity_chain_or_not(kind, step):
+    """Architect evaluation 3 measured this for `notify` and I fixed `notify`.
+
+    The mechanism was a rule placed after a branch that returns early, and
+    hoisting one rule left `continue` with exactly the same split: the ordinary
+    root served its contracted continuation refusal, the identical prefix
+    followed by a chain served the chain's generic vocabulary refusal. Two
+    instances of one mechanism, so the placement is replaced by a table both the
+    ordinary grammar and the chain grammar consult.
+
+    Asserted on the POINTER as well as the code, because a shared code with a
+    different pointer is the divergence #178 exists to remove.
+    """
+    plain = _doc([dict(_CONN), dict(step), dict(_STOP)])
+    chained = _doc(
+        [
+            dict(_CONN),
+            dict(step),
+            _handler("$ref:OP0", dict(_CONTINUE)),
+            _handler("$ref:OP1", dict(_STOP)),
+        ]
+    )
+
+    served = []
+    for document in (plain, chained):
+        with pytest.raises(ProcessIRValidationError) as excinfo:
+            parse_process_ir_v1(document)
+        diagnostic = excinfo.value.diagnostics[0]
+        served.append((diagnostic.code, diagnostic.path))
+
+    assert served[0] == served[1], served
+    # ...and the identity is the contracted one, not merely a shared one: a test
+    # that only compared the two halves would pass if BOTH regressed to generic.
+    assert served[0][0] != "PROCESS_IR_CAPABILITY_UNSUPPORTED", served
+
+
+def test_the_chain_grammar_consults_the_table_itself():
+    """The COMPILER reaches the chain grammar through this helper alone.
+
+    `validate_body_capabilities` calls `_check_serialized_region_chain` directly,
+    so a rule written beside the caller in `_sequence_rules` would cover the
+    parser and leave the compiler serving something else — the two-entry-point
+    divergence again. Calling the helper on a raw step list proves the rule
+    travels with the grammar rather than with one of its callers.
+    """
+    from boomi_mcp.models import process_ir as model
+
+    ir = parse_process_ir_v1(
+        _doc([_handler("$ref:OP0", dict(_CONTINUE)), _handler("$ref:OP1", dict(_STOP))])
+    )
+    steps = list(ir.body.steps)
+    model._check_serialized_region_chain(steps)  # the control: intact, it passes
+
+    with pytest.raises(Exception) as excinfo:
+        model._check_serialized_region_chain(
+            [model.ContinueNodeV1(kind="continue")] + steps
+        )
+    assert "continue is not a root step" in str(excinfo.value)
+
+
+def test_the_compiler_serves_the_table_for_a_mutated_chain():
+    """The mutable-model half, through the public compiler entry point."""
+    from boomi_mcp.compiler.process_ir.body_capabilities import (
+        validate_body_capabilities,
+    )
+    from boomi_mcp.compiler.process_ir.diagnostics import ProcessIRCompileError
+    from boomi_mcp.models.process_ir import ContinueNodeV1
+
+    ir = parse_process_ir_v1(
+        _doc([_handler("$ref:OP0", dict(_CONTINUE)), _handler("$ref:OP1", dict(_STOP))])
+    )
+    validate_body_capabilities(ir)  # the control
+
+    object.__setattr__(
+        ir.body, "steps", [ContinueNodeV1(kind="continue")] + list(ir.body.steps)
+    )
+    with pytest.raises(ProcessIRCompileError) as excinfo:
+        validate_body_capabilities(ir)
+    assert (
+        "PROCESS_IR_SEMANTIC_CONTROL_CONTINUATION_UNSUPPORTED" in str(excinfo.value)
+    ), str(excinfo.value)
+
+
 def test_a_map_separated_chain_compiles_through_the_public_pipeline():
     """Stage-2 CDX-156-r1-01. The byte goldens were NOT enough.
 
@@ -1089,22 +1213,100 @@ def test_an_unbraced_notify_template_still_binds_the_caught_error():
 
 def test_the_chain_rule_codes_are_served_by_the_compiler():
     """`_as_compile_error` translates a SHARED model rule into a compile
-    diagnostic, so every code it can serve needs text in the COMPILER's tables —
-    not just the model's.
+    diagnostic, so it may only serve codes this layer has text for.
 
-    A blanket lookup over `_CUSTOM_ERROR_CODES` was the first shape and it could
-    serve three codes this layer has no text for. The set is closed instead, and
-    this is the test that keeps it honest: widening the shared rules without
-    serving the new code fails here rather than reaching a caller as a diagnostic
-    with an empty message.
+    A hand-listed set of "the codes the shared chain rules can raise" was the
+    first shape, and its test asserted the wrong direction: that every LISTED
+    code has text, never that the list covered what the rules actually raise.
+    That fails OPEN, and it did — twice.
+
+    Both directions are asserted here, because a predicate that translated
+    everything would satisfy a one-directional check just as happily.
     """
     from boomi_mcp.compiler.process_ir import diagnostics as compiler_diagnostics
-    from boomi_mcp.compiler.process_ir.body_capabilities import _CHAIN_RULE_CODES
+    from boomi_mcp.compiler.process_ir.body_capabilities import (
+        _translatable_chain_rule_code,
+    )
+    from boomi_mcp.models.process_ir import _CUSTOM_ERROR_CODES
 
-    assert _CHAIN_RULE_CODES, "the closed set is empty — the guard would be vacuous"
-    for code in sorted(_CHAIN_RULE_CODES):
-        assert compiler_diagnostics._MESSAGES.get(code), code
-        assert compiler_diagnostics._REMEDIATION.get(code), code
+    def served(code):
+        return bool(compiler_diagnostics._MESSAGES.get(code)) and bool(
+            compiler_diagnostics._REMEDIATION.get(code)
+        )
+
+    translatable = {t for t, c in _CUSTOM_ERROR_CODES.items() if served(c)}
+    unserved = {t for t, c in _CUSTOM_ERROR_CODES.items() if not served(c)}
+    assert translatable, "no code is translatable — the guard would be vacuous"
+    assert unserved, (
+        "every model code now has compiler text, so the REFUSING half of this "
+        "predicate is untested — pick a different control or retire it"
+    )
+
+    for exc_type in sorted(translatable):
+        assert _translatable_chain_rule_code(exc_type) == _CUSTOM_ERROR_CODES[exc_type]
+    for exc_type in sorted(unserved):
+        assert _translatable_chain_rule_code(exc_type) is None, exc_type
+    assert _translatable_chain_rule_code("not_a_model_error_type") is None
+
+
+def _never_admitted_notify():
+    return NotifyNodeV1(
+        kind="notify",
+        level="ERROR",
+        message_template="caught " + CAUGHT_ERROR_PROPERTY_ID,
+    )
+
+
+def _out_of_vocabulary_stop():
+    from boomi_mcp.models.process_ir import StopNodeV1
+
+    return StopNodeV1(kind="stop")
+
+
+@pytest.mark.parametrize(
+    "make,code,path",
+    [
+        (
+            _never_admitted_notify,
+            "PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY",
+            "/body/steps/0",
+        ),
+        (_out_of_vocabulary_stop, "PROCESS_IR_CAPABILITY_UNSUPPORTED", "/body"),
+    ],
+    ids=["never-admitted-kind", "prefix-vocabulary"],
+)
+def test_a_mutated_chain_prefix_reaches_the_compiler_as_a_served_diagnostic(
+    make, code, path
+):
+    """The two measured instances, at the public compiler entry point.
+
+    Both refusals live in the shared chain grammar and neither was in the old
+    closed set, so both surfaced a raw `PydanticCustomError` — an exception with
+    no code and no pointer — to a caller who handed the compiler a mutated model.
+    The prefix-vocabulary one predates the never-admitted-kind table, which is
+    why a set enumerating "what the rules raise today" was never going to hold.
+    """
+    from boomi_mcp.compiler.process_ir.body_capabilities import (
+        validate_body_capabilities,
+    )
+    from boomi_mcp.compiler.process_ir.diagnostics import ProcessIRCompileError
+
+    document = _doc(
+        [_handler("$ref:OP0", dict(_CONTINUE)), _handler("$ref:OP1", dict(_STOP))]
+    )
+    validate_body_capabilities(parse_process_ir_v1(document))  # the control
+
+    mutated = parse_process_ir_v1(document)
+    object.__setattr__(mutated.body, "steps", [make()] + list(mutated.body.steps))
+    with pytest.raises(ProcessIRCompileError) as excinfo:
+        validate_body_capabilities(mutated)
+    served = excinfo.value.diagnostics[0]
+    assert served.code == code, str(excinfo.value)
+    # The pointer too. A rule that located its defect at a step must not lose
+    # that position crossing into the compiler: the parser answers
+    # `/body/steps/N` for the same mistake, and a shared code with a different
+    # pointer is half a divergence, not agreement.
+    assert served.path == path, served.path
 
 
 def test_the_continuation_remediation_covers_the_rules_that_serve_it():

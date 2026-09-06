@@ -2830,6 +2830,47 @@ def _is_serialized_region_chain(steps: List[Any]) -> bool:
     return True
 
 
+#: Root-step kinds that NO legal root sequence may contain, in ANY shape. The
+#: table is the authority; nothing re-decides it per branch.
+#:
+#: It exists because the alternative was measured twice in this slice. `notify`
+#: was checked after the chain branch, so `[call, notify, handler, handler]`
+#: served the generic root refusal while the identical root without the chain
+#: served the contracted one (architect evaluation 3). Hoisting that one rule
+#: fixed that one kind and left `continue` with exactly the same split — a second
+#: instance of one mechanism, which is this repo's trigger for replacing the
+#: placement with an invariant rather than patching the instance.
+#:
+#: The invariant: a kind here is refused BEFORE any branch may return, and the
+#: chain grammar consults the same table for its prefix, so no root shape can
+#: reach a different identity for the same mistake. A kind is a member only if
+#: no legal root may contain it anywhere. `process_call` is deliberately NOT a
+#: member — the exact singleton IS a legal root — and its own root authority
+#: yields to the control-continuation rule when a handler is present, so the
+#: chain's vocabulary refusal is the answer that authority already prescribes.
+def _root_kind_never_admitted(kind: Any, index: int):
+    """The refusal `kind` carries wherever it appears in a root sequence."""
+    if kind == "notify":
+        return _body_kind_error(
+            "notify is admitted only as a catch-body step — it reports a "
+            "caught error, and a root sequence has none",
+            at=("steps", index),
+        )
+    if kind == "continue":
+        return _continuation_error(
+            "continue is not a root step — it terminates the protected "
+            "path of a non-final connector-scoped try_catch"
+        )
+    return None
+
+
+def _check_root_kinds_never_admitted(steps: List[Any]) -> None:
+    for index, step in enumerate(steps):
+        error = _root_kind_never_admitted(getattr(step, "kind", None), index)
+        if error is not None:
+            raise error
+
+
 def _check_no_orphan_continue(steps: List[Any]) -> None:
     """A `continue` protected terminal outside a serialized chain."""
     for index, step in enumerate(steps):
@@ -2847,6 +2888,13 @@ def _check_no_orphan_continue(steps: List[Any]) -> None:
 def _check_serialized_region_chain(steps: List[Any]) -> None:
     """The chain's own grammar. Every rule here is a refusal a caller can act on."""
     kinds = [getattr(step, "kind", None) for step in steps]
+
+    # The never-admitted kinds FIRST, from the shared table above, so a prefix
+    # mistake gets its contracted identity here exactly as it does on every other
+    # root shape. Placed inside this function rather than beside its caller so the
+    # COMPILER mirror — which reaches this grammar through the same helper —
+    # inherits it too, instead of needing the rule written a third time.
+    _check_root_kinds_never_admitted(steps)
 
     # The PREFIX before the first handler carries the pre-existing root
     # vocabulary and nothing more: linear steps and the connector calls that
@@ -2945,22 +2993,15 @@ class SequenceNodeV1(_ProcessIRBase):
     def _sequence_rules(self) -> "SequenceNodeV1":
         kinds = [step.kind for step in self.steps]
 
-        # #156 S22, and it must come before EVERY branch below — including the
-        # chain branch immediately following, which returns early. Architect
-        # evaluation 3 measured the consequence of placing it after:
-        # `[call, notify, handler(continue), handler(stop)]` served the generic
+        # The kinds no legal root may contain, from the shared table, BEFORE every
+        # branch below — all of which return early. Architect evaluation 3
+        # measured what placing this after them costs: `[call, notify,
+        # handler(continue), handler(stop)]` served the generic
         # `PROCESS_IR_CAPABILITY_UNSUPPORTED` at `/body` while the identical root
         # without the chain served the contracted identity at `/body/steps/1`.
-        # `notify` is admitted in exactly one slot and its served contract names
-        # ONE identity for every refusal outside it, so no root shape may reach a
-        # different one.
-        for i, kind in enumerate(kinds):
-            if kind == "notify":
-                raise _body_kind_error(
-                    "notify is admitted only as a catch-body step — it reports a "
-                    "caught error, and a root sequence has none",
-                    at=("steps", i),
-                )
+        # The table, not this call site, is what keeps the next such rule from
+        # landing below a branch again.
+        _check_root_kinds_never_admitted(self.steps)
 
         # #156 T5. SERIALIZED CONNECTOR REGIONS, matched exactly and checked
         # FIRST — ahead of every exact-match branch below, all of which return
@@ -3022,15 +3063,6 @@ class SequenceNodeV1(_ProcessIRBase):
         for i, kind in enumerate(kinds):
             if kind == "source" and i != 0:
                 raise _cardinality_error("source may appear only as the first step")
-            # A `continue` outside the chain above has no next handler to continue
-            # onto. Checked here rather than by omission from a union, because it
-            # IS a member of the try-terminal union — the position is what decides
-            # it, and a caller who wrote one deserves to be told that.
-            if kind == "continue":
-                raise _continuation_error(
-                    "continue is not a root step — it terminates the protected "
-                    "path of a non-final connector-scoped try_catch"
-                )
 
         # A control node anywhere but the final position is a CONTINUATION
         # request (#141). Reported with its own capability code rather than the
