@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 11638, "minimum_collected": 11638, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 11646, "minimum_collected": 11646, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -11682,5 +11682,14 @@
 {"kind": "test", "id": "pytest-011681", "node_id": "tests/test_process_ir_notify_recovery.py::test_an_orphan_continue_is_refused[steps4-chain whose FIRST handler terminates]", "state": "active"}
 {"kind": "test", "id": "pytest-011682", "node_id": "tests/test_process_ir_notify_recovery.py::test_the_compiler_refuses_an_orphan_continue_on_a_mutated_model", "state": "active"}
 {"kind": "test", "id": "pytest-011683", "node_id": "tests/test_process_ir_notify_recovery.py::test_a_map_separated_chain_compiles_through_the_public_pipeline", "state": "active"}
-{"kind": "test", "id": "pytest-011684", "node_id": "tests/test_process_ir_notify_recovery.py::test_a_chain_bounds_each_protected_region_at_the_next_handler", "state": "active"}
+{"kind": "test", "id": "pytest-011684", "node_id": "tests/test_process_ir_notify_recovery.py::test_a_chain_bounds_each_protected_region_at_the_next_handler", "state": "tombstone"}
 {"kind": "test", "id": "pytest-011685", "node_id": "tests/test_process_ir_notify_recovery.py::test_an_intervening_map_belongs_to_the_preceding_protected_region", "state": "active"}
+{"kind": "test", "id": "pytest-011686", "node_id": "tests/test_process_ir_notify_recovery.py::test_a_chain_region_grades_the_success_path_and_no_other_recovery_path", "state": "active"}
+{"kind": "test", "id": "pytest-011687", "node_id": "tests/test_process_ir_notify_recovery.py::test_a_retried_region_grades_a_write_in_a_later_handler_it_re_runs", "state": "active"}
+{"kind": "test", "id": "pytest-011688", "node_id": "tests/test_process_ir_notify_recovery.py::test_a_retried_region_does_not_grade_a_later_recovery_only_write", "state": "active"}
+{"kind": "test", "id": "pytest-011689", "node_id": "tests/test_process_ir_notify_recovery.py::test_a_braced_notify_template_is_refused[{\"error\": \"meta.base.catcherrorsmessage\"}-JSON body]", "state": "active"}
+{"kind": "test", "id": "pytest-011690", "node_id": "tests/test_process_ir_notify_recovery.py::test_a_braced_notify_template_is_refused[order {id} failed: meta.base.catcherrorsmessage-brace run]", "state": "active"}
+{"kind": "test", "id": "pytest-011691", "node_id": "tests/test_process_ir_notify_recovery.py::test_a_braced_notify_template_is_refused[meta.base.catcherrorsmessage }-stray close brace]", "state": "active"}
+{"kind": "test", "id": "pytest-011692", "node_id": "tests/test_process_ir_notify_recovery.py::test_an_unbraced_notify_template_still_binds_the_caught_error", "state": "active"}
+{"kind": "test", "id": "pytest-011693", "node_id": "tests/test_process_ir_notify_recovery.py::test_the_chain_rule_codes_are_served_by_the_compiler", "state": "active"}
+{"kind": "test", "id": "pytest-011694", "node_id": "tests/test_process_ir_notify_recovery.py::test_the_continuation_remediation_covers_the_rules_that_serve_it", "state": "active"}

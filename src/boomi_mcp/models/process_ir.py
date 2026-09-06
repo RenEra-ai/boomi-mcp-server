@@ -1648,12 +1648,14 @@ class NotifyNodeV1(_ProcessIRBase):
     the platform verifies carries a level, a message, and a binding to the
     caught error, and nothing else.
 
-    ``message_template`` must reference the caught-error property by its token
-    (:data:`~boomi_mcp.models.process_ir_tokens.CAUGHT_ERROR_PROPERTY_ID`). That
-    is not decoration: the emitted message always carries a parameter bound to
-    that property, so a template that never mentions it declares a parameter it
-    never uses, and logs a failure without the failure. The token may appear more
-    than once; every occurrence binds the same caught error.
+    ``message_template`` must reference the caught-error property by its token,
+    the literal text ``meta.base.catcherrorsmessage``. That is not decoration: the
+    emitted message always carries a parameter bound to that property, so a
+    template that never mentions it declares a parameter it never uses, and logs a
+    failure without the failure. The token may appear more than once; every
+    occurrence binds the same caught error. The template may not contain a brace —
+    the emitted message is a parameter pattern, and an authored brace stops the
+    caught error binding.
 
     Admitted ONLY on a recovery path — see :data:`TryCatchCatchBodyStepV1`. A
     caught error is the only thing this node has to say, and outside a catch body
@@ -1690,6 +1692,28 @@ class NotifyNodeV1(_ProcessIRBase):
                 "{0} so the emitted message carries the caught error".format(
                     CAUGHT_ERROR_PROPERTY_ID
                 )
+            )
+        # An authored brace defeats the binding this validator exists to require,
+        # in BOTH directions, and neither is visible in the emitted bytes:
+        #
+        #   * a JSON-shaped body is quote-wrapped by the emission escaper "so its
+        #     braces are not read as {N} placeholders" — which also encloses the
+        #     {1} substituted for the token, so the platform renders it as the
+        #     literal text "{1}" and the message carries no error at all;
+        #   * any other brace run (`order {id} failed`) is passed through
+        #     unescaped into a MessageFormat pattern, where `{id}` is not a valid
+        #     argument.
+        #
+        # Both were MEASURED on the shipped escaper. Refusing the brace is the
+        # fail-closed reading: a template that cannot carry the caught error is
+        # exactly what the token rule above forbids, and admitting one would let a
+        # caller satisfy that rule and still log a failure without the failure.
+        if "{" in self.message_template or "}" in self.message_template:
+            raise _cardinality_error(
+                "message_template may not contain a brace — the emitted message is "
+                "a parameter pattern, and an authored brace either malforms it or "
+                "forces the whole body to be quoted, which stops the caught error "
+                "binding at all"
             )
         return self
 
@@ -2483,8 +2507,10 @@ ErrorScopeV1 = Literal["process", "connector"]
 class TryCatchTryBodyV1(_ProcessIRBase):
     """The protected path.
 
-    Terminates on a plain ``stop``, or on ``return_documents`` when the protected
-    flow is a subprocess that hands its results back to its caller. An
+    Terminates on a plain ``stop``, on ``return_documents`` when the protected
+    flow is a subprocess that hands its results back to its caller, or on
+    ``continue`` when another connector-scoped handler follows this one and the
+    documents go on to it. An
     ``exception`` here would be caught by this very scope's own recovery path, and
     no evidence covers that loop; a staging ``cache_put`` terminal is a
     recovery-path shape, not a success one.
@@ -2515,8 +2541,10 @@ class TryCatchCatchBodyV1(_ProcessIRBase):
 
     MANDATORY and MUST terminate: a caught document that reaches no terminal is
     a document the process silently drops. The terminal set is the recovery
-    vocabulary — stop the document, raise it as an explicit failure, or stage it
-    for a downstream handler.
+    vocabulary — stop the document, raise it as an explicit failure, stage it for
+    a downstream handler, or hand it to a recovery process with a process_call
+    (which must be authored to wait for that process and to abort on its
+    failure).
 
     Steps may be empty (a bare terminal is a meaningful recovery), but a bare
     ``stop`` with no work at all is rejected: it recovers nothing.
@@ -3462,8 +3490,13 @@ _REMEDIATION = {
         "A Branch must declare between 2 and 25 legs (the platform's documented bound)."
     ),
     PROCESS_IR_SEMANTIC_CONTROL_CONTINUATION_UNSUPPORTED: (
-        "Move the steps that followed the branch/decision into every leg or arm — "
-        "ProcessIR v1 emits no continuation after a control node."
+        "After a branch or decision, move the steps that followed it into every "
+        "leg or arm — ProcessIR v1 emits no continuation after a control node. "
+        "After a try_catch the same holds, with one exception: connector-scoped "
+        "handlers may run in sequence, and a handler that is followed by another "
+        "one ends its protected path in continue instead of a terminal. A "
+        "continue anywhere else — on the last handler, on a lone handler, or as a "
+        "root step — has no next region to reach and is refused."
     ),
     PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY: (
         "Use a node kind this body slot admits. The admitted set for each slot is "
@@ -3490,12 +3523,14 @@ _REMEDIATION = {
     ),
     PROCESS_IR_CAPABILITY_ERROR_SCOPE_UNSUPPORTED: (
         "Use a supported error scope in its verified placement: a process scope as "
-        "the sole root step, or a connector scope as the last step of a "
-        "connector-call sequence. See "
+        "the sole root step, a connector scope as the last step of a "
+        "connector-call sequence, or connector scopes throughout a serialized "
+        "chain of handlers. See "
         "get_schema_template(schema_name='process_ir_authoring', node_kind='try_catch')."
     ),
     PROCESS_IR_SEMANTIC_CATCH_UNTERMINATED: (
-        "End the catch body with a stop, an exception, or a staging cache_put — "
+        "End the catch body with a stop, an exception, a staging cache_put, or a "
+        "process_call that hands the caught document to a recovery process — "
         "every caught document must reach a terminal."
     ),
     PROCESS_IR_SEMANTIC_RECOVERY_PROCESS_CALL_INVALID: (

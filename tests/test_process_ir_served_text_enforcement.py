@@ -215,6 +215,19 @@ COMPILER_REGISTERED_PARSE_CODES = frozenset(
     {
         "PROCESS_IR_SCHEMA_BRANCH_CARDINALITY",
         "PROCESS_IR_SEMANTIC_CONTROL_CONTINUATION_UNSUPPORTED",
+        # #156. The third, and it arrives the same way: the serialized-chain
+        # grammar is ONE rule shared by the parser and `body_capabilities`, and
+        # the compiler renders it through `_as_compile_error`. Its map-separator
+        # rule raises the parser's cardinality code, so a caller handing a mutated
+        # model straight to `compile_process_ir_v1` receives that code FROM the
+        # compile path and needs the compiler's text for it.
+        #
+        # Registered per-code, not by admitting the parser family: the two
+        # reference-format codes are also in `_CUSTOM_ERROR_CODES` and are NOT
+        # reachable this way, which is why `_as_compile_error` translates a closed
+        # set (`body_capabilities._CHAIN_RULE_CODES`) rather than doing a blanket
+        # lookup.
+        "PROCESS_IR_SCHEMA_INVALID_CARDINALITY",
     }
 )
 

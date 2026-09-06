@@ -61,6 +61,7 @@ from ...errors import (
     PROCESS_IR_SEMANTIC_MISSING_TERMINAL,
     PROCESS_IR_SEMANTIC_PROFILE_MISMATCH,
     PROCESS_IR_SEMANTIC_UNREACHABLE,
+    PROCESS_IR_SCHEMA_INVALID_CARDINALITY,
 )
 
 CompilerPhase = Literal[
@@ -263,8 +264,13 @@ _REMEDIATION = {
         "voided by a version advance; that surface is what tells the two apart."
     ),
     PROCESS_IR_SEMANTIC_CATCH_UNTERMINATED: (
-        "End the catch body with a stop, an exception, or a staging cache write. "
+        "End the catch body with a stop, an exception, a staging cache write, or a "
+        "process_call that hands the caught document to a recovery process. "
         "Every caught document must reach a terminal."
+    ),
+    PROCESS_IR_SCHEMA_INVALID_CARDINALITY: (
+        "Check the step counts and ordering against the node's own rules — a list "
+        "bound or a required neighbour is not satisfied."
     ),
     PROCESS_IR_SEMANTIC_RECOVERY_PROCESS_CALL_INVALID: (
         "Author the recovery call with wait=true and abort_on_error=true. abort_on_error defaults to false, so it must be written explicitly: the parent has to observe a failed hand-off rather than complete over it."
@@ -335,6 +341,11 @@ _MESSAGES = {
         "required typed idempotency evidence is absent, of the wrong kind, or unresolved"
     ),
     PROCESS_IR_SEMANTIC_CATCH_UNTERMINATED: "the catch body does not reach a terminal",
+    # #156: reachable from the compiler since the shared serialized-chain grammar
+    # is rendered here too (a doubled map between handlers on a mutated model).
+    PROCESS_IR_SCHEMA_INVALID_CARDINALITY: (
+        "list bound or step-ordering rule violated"
+    ),
     PROCESS_IR_SEMANTIC_RECOVERY_PROCESS_CALL_INVALID: "a recovery process_call is not authored wait=true and abort_on_error=true",
     PROCESS_IR_COMPILE_ERROR_REGION_INVALID: (
         "a derived Try/Catch error region is structurally invalid"

@@ -153,6 +153,15 @@ collected) plus `SHA256SUMS` covering every captured artifact, all tracked in gi
 archive is reproducible from a fresh clone rather than only present in this worktree.
 Paths below are relative to that root.
 
+Index authority, because the archive now holds three independent bodies of evidence:
+`SHA256SUMS` (every file, hash-verified against the git index) and `index.jsonl` (one row per
+collected gate round) are the authoritative indexes of the WHOLE archive. `captures/MANIFEST.json`
+is narrower by design — it is the pre-implementation oracle run's own manifest and enumerates only
+that run's 45 artifacts. It is not an incomplete index of `captures/`; `captures/stage1-r1/` is a
+separate engagement with its own `MANIFEST.json`, and `commit-reviews/` holds the collector-written
+Codex rounds. Recorded because a reader meeting `captures/MANIFEST.json` first could reasonably
+misread its scope (raised by the QA agent at the close of the oracle engagement).
+
 | Capture | Provenance source | Artifacts | Runtime proof | Status |
 | --- | --- | --- | --- | --- |
 | B1 `catcherrors → processcall` | frozen legacy builder at `b07babe`, re-emitted from a pristine `git archive` extraction and byte-identical | `captures/oracle-graphs/B1_*` | see C1–C6 below | **SATISFIED** |

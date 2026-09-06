@@ -880,16 +880,26 @@ def test_a_map_separated_chain_compiles_through_the_public_pipeline():
     assert "/body/steps/1/map_ref" in str(excinfo.value)
 
 
-def test_a_chain_bounds_each_protected_region_at_the_next_handler():
-    """Stage-2 CDX-156-r1-02.
+def test_a_chain_region_grades_the_success_path_and_no_other_recovery_path():
+    """Stage-2 CDX-156-r1-02, then re-cut by the adversarial audit.
 
-    `derive_error_regions` walked the protected edge with an UNBOUNDED subtree
-    collection. In a chain that path continues into every later handler, so
-    region 1 absorbed the other handlers AND their catch bodies — and
-    `validate_error_handling` grades retry safety over exactly that set, so a
-    retried region answered for writes on a later handler's recovery path. The
-    reviewer's repro: three handlers, retries [0, 1, 0], the last catch staging to
-    a cache, reported RETRY_EFFECT_UNSAFE against a write nothing retries.
+    `derive_error_regions` originally walked the protected edge with an UNBOUNDED
+    subtree collection, so region N absorbed every later handler AND their catch
+    bodies — and `validate_error_handling` / `collect_retry_effect_findings` grade
+    a region over exactly that set, so a retried region answered for writes on a
+    later handler's RECOVERY path.
+
+    The first fix bounded the walk AT the next handler. That over-corrected into
+    the dangerous direction: `continue` means the protected path CONTINUES into
+    the next handler, so region N really does re-run handler N+1's protected
+    call, and excluding it stopped the retry checks from grading a write they
+    should refuse (measured: a non-idempotent DB Send accepted one handler
+    downstream of a retried region while the identical Send inside it was
+    refused).
+
+    So the boundary is drawn on the SUCCESS/FAILURE split, not on handler
+    identity: the protected walk follows every edge except a `catch` edge. Both
+    directions are asserted here, because each was a real defect.
     """
     from boomi_mcp.compiler.process_ir import lowering
     from boomi_mcp.compiler.process_ir.error_handling import derive_error_regions
@@ -905,15 +915,88 @@ def test_a_chain_bounds_each_protected_region_at_the_next_handler():
     assert len(regions) == 3
 
     for index, region in enumerate(regions):
-        own = "/body/steps/{0}/".format(index)
-        for node_id in region.try_node_ids:
-            assert by_id[node_id].source_path.startswith(own + "try_body"), (
-                index, by_id[node_id].source_path
+        protected = {by_id[n].source_path for n in region.try_node_ids}
+        # FORWARD: every later handler's protected body IS graded — the flow
+        # continues there and a retry re-runs it.
+        for later in range(index, 3):
+            assert "/body/steps/{0}/try_body/steps/0".format(later) in protected, (
+                index, later, sorted(protected)
             )
-        for node_id in region.catch_node_ids:
-            assert by_id[node_id].source_path.startswith(own + "catch_body"), (
-                index, by_id[node_id].source_path
-            )
+        # NOT BACKWARD: an earlier handler's protected body ran before this
+        # region was entered.
+        for earlier in range(0, index):
+            assert "/body/steps/{0}/try_body/steps/0".format(earlier) not in protected
+
+        # NO recovery path but its own appears in the protected set, at any index.
+        assert not [p for p in protected if "/catch_body/" in p], sorted(protected)
+        own = "/body/steps/{0}/catch_body".format(index)
+        assert all(
+            by_id[n].source_path.startswith(own) for n in region.catch_node_ids
+        ), sorted(by_id[n].source_path for n in region.catch_node_ids)
+
+
+def test_a_retried_region_grades_a_write_in_a_later_handler_it_re_runs():
+    """The safety direction, with the control that makes it non-vacuous.
+
+    A non-idempotent write one handler DOWNSTREAM of a retried region is re-run
+    by that region's retry, so it must be refused exactly as the identical write
+    inside the region is. The control is the same chain with no retry anywhere:
+    it must compile, or this test would pass simply because the shape never
+    compiles.
+    """
+    import _wave_gate_golden_corpus as corpus
+    from boomi_mcp.compiler.process_ir.diagnostics import ProcessIRCompileError
+    from boomi_mcp.compiler.process_ir.pipeline import compile_process_ir_v1
+
+    rethrow = {"kind": "exception", "message_template": "rethrow {1}"}
+
+    def chain(retry):
+        return _doc([
+            _handler("$ref:GETOP", dict(_CONTINUE)),
+            _handler("$ref:GETOP2", dict(_CONTINUE), retry=retry),
+            {
+                "kind": "try_catch", "scope": "connector", "retry": {"count": 0},
+                "try_body": {
+                    "steps": [{"kind": "connector_call", "operation_ref": "$ref:DBSEND"}],
+                    "terminal": dict(_STOP),
+                },
+                "catch_body": {"steps": [dict(_NOTIFY)], "terminal": rethrow},
+            },
+        ])
+
+    symbols = corpus.error_symbols()
+    compile_process_ir_v1(parse_process_ir_v1(chain(0)), symbols)  # control
+
+    with pytest.raises(ProcessIRCompileError) as excinfo:
+        compile_process_ir_v1(parse_process_ir_v1(chain(2)), symbols)
+    codes = {d.code for d in excinfo.value.diagnostics}
+    assert "PROCESS_IR_SEMANTIC_RETRY_NON_IDEMPOTENT_WRITE" in codes, codes
+
+
+def test_a_retried_region_does_not_grade_a_later_recovery_only_write():
+    """The other direction, which is what Stage-2 raised: a write that only a
+    LATER handler's recovery path performs is never re-run by this region's
+    retry, so grading it is a false refusal."""
+    import _wave_gate_golden_corpus as corpus
+    from boomi_mcp.compiler.process_ir.pipeline import compile_process_ir_v1
+
+    staged = {"kind": "cache_put", "cache_ref": "$ref:CACHE", "label": "L"}
+    document = _doc([
+        _handler("$ref:GETOP", dict(_CONTINUE)),
+        _handler("$ref:GETOP2", dict(_CONTINUE), retry=1),
+        {
+            "kind": "try_catch", "scope": "connector", "retry": {"count": 0},
+            "try_body": {
+                "steps": [{"kind": "connector_call", "operation_ref": "$ref:GETOP"}],
+                "terminal": dict(_STOP),
+            },
+            # The staging write is on the RECOVERY path only. A read-only
+            # protected body is deliberate: a write here would be a legitimate
+            # refusal and would mask the thing under test.
+            "catch_body": {"steps": [dict(_NOTIFY)], "terminal": staged},
+        },
+    ])
+    compile_process_ir_v1(parse_process_ir_v1(document), corpus.error_symbols())
 
 
 def test_an_intervening_map_belongs_to_the_preceding_protected_region():
@@ -939,3 +1022,92 @@ def test_an_intervening_map_belongs_to_the_preceding_protected_region():
 
     assert "/body/steps/1" in {by_id[n].source_path for n in first.try_node_ids}
     assert "/body/steps/1" not in {by_id[n].source_path for n in second.try_node_ids}
+
+
+# ---------------------------------------------------------------------------
+# Adversarial-audit findings
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "template,label",
+    [
+        ('{{"error": "{0}"}}'.format(CAUGHT_ERROR_PROPERTY_ID), "JSON body"),
+        ("order {{id}} failed: {0}".format(CAUGHT_ERROR_PROPERTY_ID), "brace run"),
+        ("{0} }}".format(CAUGHT_ERROR_PROPERTY_ID), "stray close brace"),
+    ],
+)
+def test_a_braced_notify_template_is_refused(template, label):
+    """A brace defeats the binding the token rule exists to require.
+
+    MEASURED on the shipped escaper, both directions:
+      `{"e":"<token>"}`      -> `'{"e":"{1}"}'`  — the whole body is quote-wrapped
+                                so the substituted {1} is LITERAL and the message
+                                carries no error at all;
+      `order {id} failed: …` -> passed through unescaped, so `{id}` reaches a
+                                MessageFormat pattern as an invalid argument.
+
+    Either way a caller can satisfy "the template references the caught error"
+    and still log a failure without the failure — which is exactly the outcome
+    `NotifyNodeV1`'s own validator promises to exclude, so it is refused at
+    authoring rather than emitted.
+    """
+    with pytest.raises(ProcessIRValidationError):
+        parse_process_ir_v1(
+            _doc([_try_catch(catch_steps=[
+                {"kind": "notify", "level": "ERROR", "message_template": template}
+            ])])
+        )
+
+
+def test_an_unbraced_notify_template_still_binds_the_caught_error():
+    """The control. A rule that refused every template would pass the test above
+    and emit nothing, so the shipped golden's own text must still compile — and
+    the emitted message must carry {1} OUTSIDE any quoting."""
+    import re
+
+    from boomi_mcp.compiler.process_ir import lowering
+    from boomi_mcp.compiler.process_ir.emitter_registry import emit_process
+
+    symbols = _dlq_symbols()
+    ir = parse_process_ir_v1(_NOTIFY_DLQ_DOCUMENT)
+    plan = lowering.lower_cfg_to_emission_plan(
+        lowering.lower_process_ir_to_cfg(ir), symbols
+    )
+    message = re.search(
+        r"<notifyMessage>(.*?)</notifyMessage>", emit_process(plan, symbols).process_xml
+    ).group(1)
+    assert message.endswith("{1}"), message
+    assert not message.startswith("&apos;"), message
+
+
+def test_the_chain_rule_codes_are_served_by_the_compiler():
+    """`_as_compile_error` translates a SHARED model rule into a compile
+    diagnostic, so every code it can serve needs text in the COMPILER's tables —
+    not just the model's.
+
+    A blanket lookup over `_CUSTOM_ERROR_CODES` was the first shape and it could
+    serve three codes this layer has no text for. The set is closed instead, and
+    this is the test that keeps it honest: widening the shared rules without
+    serving the new code fails here rather than reaching a caller as a diagnostic
+    with an empty message.
+    """
+    from boomi_mcp.compiler.process_ir import diagnostics as compiler_diagnostics
+    from boomi_mcp.compiler.process_ir.body_capabilities import _CHAIN_RULE_CODES
+
+    assert _CHAIN_RULE_CODES, "the closed set is empty — the guard would be vacuous"
+    for code in sorted(_CHAIN_RULE_CODES):
+        assert compiler_diagnostics._MESSAGES.get(code), code
+        assert compiler_diagnostics._REMEDIATION.get(code), code
+
+
+def test_the_continuation_remediation_covers_the_rules_that_serve_it():
+    """#156 added four refusals that serve CONTROL_CONTINUATION_UNSUPPORTED, whose
+    remediation was written for #141 and told the caller to move steps into legs
+    or arms — advice that is meaningless for a misplaced `continue`."""
+    from boomi_mcp.models.process_ir import _REMEDIATION
+    from boomi_mcp.errors import PROCESS_IR_SEMANTIC_CONTROL_CONTINUATION_UNSUPPORTED
+
+    text = _REMEDIATION[PROCESS_IR_SEMANTIC_CONTROL_CONTINUATION_UNSUPPORTED]
+    assert "continue" in text
+    assert "try_catch" in text or "handler" in text

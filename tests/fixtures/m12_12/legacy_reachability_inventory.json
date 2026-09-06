@@ -7302,7 +7302,7 @@
       },
       "producer": "meta_tools.list_capabilities_action()",
       "selector": "authoring_contract",
-      "sha256": "4d7f63da1eba08aa2802704d84e4018a639e425f2fcdb47a3a624b653bbd99d8",
+      "sha256": "9249763917b51761b5b330bd6e37cb8ab8153847d95dec2be8643dbaef025f4d",
       "surface_class": "SS-CAPABILITY-CATALOG",
       "value": {
         "actions": [
@@ -7407,11 +7407,11 @@
           }
         ],
         "capability_comparison": {
-          "actual_capability_revision": "sha256:39d3e5152b9cea421e4e557341a4c4e48c988ce0269d911bb13181644e90be9b",
+          "actual_capability_revision": "sha256:16bdac31dda96c2b7a978c4d4362c705530d5b13b7a1a671a4fd276d83e9c14d",
           "status": "not_requested"
         },
-        "capability_revision": "sha256:39d3e5152b9cea421e4e557341a4c4e48c988ce0269d911bb13181644e90be9b",
-        "compiler_revision": "sha256:bd6a525abee4bc87c36b6f0b6466f257f7adfc652732903f9791767f17294d39",
+        "capability_revision": "sha256:16bdac31dda96c2b7a978c4d4362c705530d5b13b7a1a671a4fd276d83e9c14d",
+        "compiler_revision": "sha256:ae263e349b8075c59269be231d6060cd99d9a334ba0f8426b89e7984ae4c0746",
         "contract_version": "2",
         "intent_kinds": [
           "integration_spec",
@@ -7655,7 +7655,7 @@
           "schema_version": "1",
           "source_version": "0.1.0"
         },
-        "schema_revision": "sha256:0609ff6d623073a67ea396bb7fe37a541d6b0b0de5c8d5ed1d01c2ac0b7e81fc",
+        "schema_revision": "sha256:9d334ee65cc5f0e62037565b646be7bfee463867427bd34b995fb53b4ba68466",
         "schemas": [
           {
             "owned_by_authoring_contract": true,
@@ -7667,21 +7667,21 @@
           {
             "owned_by_authoring_contract": true,
             "provenance": "runtime_schema_registry",
-            "schema_hash": "sha256:e9ff7c5f594d8f1aea8d2e1d666b1e135c0cd8a7e8e70780efb311db0290ae37",
+            "schema_hash": "sha256:f5c2ff0f40c490cf4a52d55d145fd66cde363bd7d2802b2ce4b87c0456e45488",
             "schema_version": "2",
             "selector": "AuthoringCompileResultV1"
           },
           {
             "owned_by_authoring_contract": true,
             "provenance": "runtime_schema_registry",
-            "schema_hash": "sha256:9ce0b17fbedf8834a7f5f2ea0fce64523415f7447f442d9418ae7d7ddfa3cdc3",
+            "schema_hash": "sha256:952690b87a2b9866181a921783182debbf818a3a8d0ce456155425f2eb91d507",
             "schema_version": "2",
             "selector": "AuthoringPlanResultV1"
           },
           {
             "owned_by_authoring_contract": true,
             "provenance": "runtime_schema_registry",
-            "schema_hash": "sha256:156bbf44e5e83960eaced74d9fcc52dd9b5f8c6a1551c57f84e40d37af9bdb07",
+            "schema_hash": "sha256:405c09f4c157308c94ed085991c7c023ab74775958fc5b5e290c335e614a7dbd",
             "schema_version": "2",
             "selector": "AuthoringRequestV1"
           },
@@ -7695,13 +7695,13 @@
           {
             "owned_by_authoring_contract": false,
             "provenance": "runtime_schema_registry",
-            "schema_hash": "sha256:b3f06e9395d69cbb6207ed43055f062dcec83a866798a9da2e029e328f768402",
+            "schema_hash": "sha256:c30da4457a77ff3448eda3c33c1b6942b5d4f6c7f5de6a786a4771bad16f4ffe",
             "selector": "IntegrationSpecV1"
           },
           {
             "owned_by_authoring_contract": true,
             "provenance": "runtime_schema_registry",
-            "schema_hash": "sha256:291b85bce1aad75e8da6d031a523d0bea75dece7083d88c0f17e285dc89bd7a1",
+            "schema_hash": "sha256:a46cc243ad0abf2680924cf6c0e0f75b0ca113c0c1ef55cfac282c085bb84aec",
             "schema_version": "1",
             "selector": "ProcessIRV1"
           },
@@ -7770,7 +7770,7 @@
           {
             "owned_by_authoring_contract": false,
             "provenance": "runtime_schema_registry",
-            "schema_hash": "sha256:059cb09f4a425196ea16c113ad63b788a3a06b1ce5a3e2018eabdfe0082c1fa3",
+            "schema_hash": "sha256:c8a8426061702a7de13064b0ccf748af7ccacc50948e9858209c028f75195930",
             "selector": "recipe_contributions"
           },
           {
@@ -13861,14 +13861,14 @@
     },
     {
       "artifact_id": "SS-SCHEMA-TEMPLATES:schema_name=AuthoringCompileResultV1",
-      "canonical_length": 88057,
+      "canonical_length": 88411,
       "legacy_excerpt": {
         "json_schema.$defs.IntegrationComponentSpec.properties.config.description": "Type-specific configuration payload. For type='process', config.process_kind selects a structured process-flow builder (e.g. 'database_to_api_sync' or 'wrapper_subprocess' — issue #25) and is REQUIRED for any authoring action that emits or rebuilds process XML (create / create_clone / update): such a process without process_kind is rejected at plan time with PROCESS_KIND_REQUIRED (legacy freeform JSON-to-XML process authoring has been removed). A reference-only reuse of an existing process (no XML emitted) may omit it. Use manage_component for an explicit raw process XML escape hatch.",
         "json_schema.$defs.IntegrationSpecV1.properties.processes.description": "Issue #153 M12.15 — canonical process roots authored as ProcessIR. Each entry is one ProcessAuthoringUnitV1: exactly one ProcessComponentEnvelopeV1 plus exactly one ProcessIRV1 root. These are compiled by the canonical chain and materialized by the neutral ProcessComponentMaterializer — they resolve NO legacy process_kind. 'components' remains the home of supporting components and of reference-only existing processes. 'components' and 'processes' share ONE key namespace: a key used by a component and by a process envelope is a duplicate, and all four depends_on directions (component->component, component->process, process->component, process->process) enter one topological order with one cycle check. A TUPLE, per the plan's field type: pydantic coerces list input, so the wire shape is an ordinary JSON array and no caller sends anything different — but unlike this model's legacy List siblings, mutating the collection itself is unrepresentable. Per-element immutability lives on the frozen ProcessAuthoringUnitV1 entries."
       },
       "producer": "meta_tools.get_schema_template_action(...)",
       "selector": "schema_name=AuthoringCompileResultV1",
-      "sha256": "7a25eb15326b301477e31d741513681f07a7326c88c62ebd727188e1287b6ef4",
+      "sha256": "102ab555b1771ebce3fe207ae73aa3bf94a652079ffe25b75311b7246c927f01",
       "surface_class": "SS-SCHEMA-TEMPLATES",
       "value": {
         "_success": true,
@@ -15484,7 +15484,7 @@
             },
             "NotifyNodeV1": {
               "additionalProperties": false,
-              "description": "Log the caught error to the process log, on a recovery path.\n\nNotify writes one message to the platform's own execution log. It is not a\ndelivery channel: there is no recipient, no address, no subject and no\ntransport, and none of those are fields this version withholds — the shape\nthe platform verifies carries a level, a message, and a binding to the\ncaught error, and nothing else.\n\n``message_template`` must reference the caught-error property by its token\n(:data:`~boomi_mcp.models.process_ir_tokens.CAUGHT_ERROR_PROPERTY_ID`). That\nis not decoration: the emitted message always carries a parameter bound to\nthat property, so a template that never mentions it declares a parameter it\nnever uses, and logs a failure without the failure. The token may appear more\nthan once; every occurrence binds the same caught error.\n\nAdmitted ONLY on a recovery path — see :data:`TryCatchCatchBodyStepV1`. A\ncaught error is the only thing this node has to say, and outside a catch body\nthere is none.",
+              "description": "Log the caught error to the process log, on a recovery path.\n\nNotify writes one message to the platform's own execution log. It is not a\ndelivery channel: there is no recipient, no address, no subject and no\ntransport, and none of those are fields this version withholds — the shape\nthe platform verifies carries a level, a message, and a binding to the\ncaught error, and nothing else.\n\n``message_template`` must reference the caught-error property by its token,\nthe literal text ``meta.base.catcherrorsmessage``. That is not decoration: the\nemitted message always carries a parameter bound to that property, so a\ntemplate that never mentions it declares a parameter it never uses, and logs a\nfailure without the failure. The token may appear more than once; every\noccurrence binds the same caught error. The template may not contain a brace —\nthe emitted message is a parameter pattern, and an authored brace stops the\ncaught error binding.\n\nAdmitted ONLY on a recovery path — see :data:`TryCatchCatchBodyStepV1`. A\ncaught error is the only thing this node has to say, and outside a catch body\nthere is none.",
               "properties": {
                 "kind": {
                   "const": "notify",
@@ -16771,7 +16771,7 @@
             },
             "TryCatchCatchBodyV1": {
               "additionalProperties": false,
-              "description": "The recovery path for a caught document.\n\nMANDATORY and MUST terminate: a caught document that reaches no terminal is\na document the process silently drops. The terminal set is the recovery\nvocabulary — stop the document, raise it as an explicit failure, or stage it\nfor a downstream handler.\n\nSteps may be empty (a bare terminal is a meaningful recovery), but a bare\n``stop`` with no work at all is rejected: it recovers nothing.",
+              "description": "The recovery path for a caught document.\n\nMANDATORY and MUST terminate: a caught document that reaches no terminal is\na document the process silently drops. The terminal set is the recovery\nvocabulary — stop the document, raise it as an explicit failure, stage it for\na downstream handler, or hand it to a recovery process with a process_call\n(which must be authored to wait for that process and to abort on its\nfailure).\n\nSteps may be empty (a bare terminal is a meaningful recovery), but a bare\n``stop`` with no work at all is rejected: it recovers nothing.",
               "properties": {
                 "steps": {
                   "items": {
@@ -16925,7 +16925,7 @@
             },
             "TryCatchTryBodyV1": {
               "additionalProperties": false,
-              "description": "The protected path.\n\nTerminates on a plain ``stop``, or on ``return_documents`` when the protected\nflow is a subprocess that hands its results back to its caller. An\n``exception`` here would be caught by this very scope's own recovery path, and\nno evidence covers that loop; a staging ``cache_put`` terminal is a\nrecovery-path shape, not a success one.",
+              "description": "The protected path.\n\nTerminates on a plain ``stop``, on ``return_documents`` when the protected\nflow is a subprocess that hands its results back to its caller, or on\n``continue`` when another connector-scoped handler follows this one and the\ndocuments go on to it. An\n``exception`` here would be caught by this very scope's own recovery path, and\nno evidence covers that loop; a staging ``cache_put`` terminal is a\nrecovery-path shape, not a success one.",
               "properties": {
                 "steps": {
                   "items": {
@@ -17208,12 +17208,12 @@
         "raw_xml_exposed": false,
         "read_only": true,
         "revision_binding": {
-          "capability_revision": "sha256:39d3e5152b9cea421e4e557341a4c4e48c988ce0269d911bb13181644e90be9b",
-          "compiler_revision": "sha256:bd6a525abee4bc87c36b6f0b6466f257f7adfc652732903f9791767f17294d39",
+          "capability_revision": "sha256:16bdac31dda96c2b7a978c4d4362c705530d5b13b7a1a671a4fd276d83e9c14d",
+          "compiler_revision": "sha256:ae263e349b8075c59269be231d6060cd99d9a334ba0f8426b89e7984ae4c0746",
           "contract_version": "2",
-          "schema_revision": "sha256:0609ff6d623073a67ea396bb7fe37a541d6b0b0de5c8d5ed1d01c2ac0b7e81fc"
+          "schema_revision": "sha256:9d334ee65cc5f0e62037565b646be7bfee463867427bd34b995fb53b4ba68466"
         },
-        "schema_hash": "sha256:e9ff7c5f594d8f1aea8d2e1d666b1e135c0cd8a7e8e70780efb311db0290ae37",
+        "schema_hash": "sha256:f5c2ff0f40c490cf4a52d55d145fd66cde363bd7d2802b2ce4b87c0456e45488",
         "schema_name": "AuthoringCompileResultV1",
         "schema_version": "2",
         "surface": "MCP authoring contract (issue #146 M12.11)"
@@ -17222,14 +17222,14 @@
     },
     {
       "artifact_id": "SS-SCHEMA-TEMPLATES:schema_name=AuthoringPlanResultV1",
-      "canonical_length": 86731,
+      "canonical_length": 87085,
       "legacy_excerpt": {
         "json_schema.$defs.IntegrationComponentSpec.properties.config.description": "Type-specific configuration payload. For type='process', config.process_kind selects a structured process-flow builder (e.g. 'database_to_api_sync' or 'wrapper_subprocess' — issue #25) and is REQUIRED for any authoring action that emits or rebuilds process XML (create / create_clone / update): such a process without process_kind is rejected at plan time with PROCESS_KIND_REQUIRED (legacy freeform JSON-to-XML process authoring has been removed). A reference-only reuse of an existing process (no XML emitted) may omit it. Use manage_component for an explicit raw process XML escape hatch.",
         "json_schema.$defs.IntegrationSpecV1.properties.processes.description": "Issue #153 M12.15 — canonical process roots authored as ProcessIR. Each entry is one ProcessAuthoringUnitV1: exactly one ProcessComponentEnvelopeV1 plus exactly one ProcessIRV1 root. These are compiled by the canonical chain and materialized by the neutral ProcessComponentMaterializer — they resolve NO legacy process_kind. 'components' remains the home of supporting components and of reference-only existing processes. 'components' and 'processes' share ONE key namespace: a key used by a component and by a process envelope is a duplicate, and all four depends_on directions (component->component, component->process, process->component, process->process) enter one topological order with one cycle check. A TUPLE, per the plan's field type: pydantic coerces list input, so the wire shape is an ordinary JSON array and no caller sends anything different — but unlike this model's legacy List siblings, mutating the collection itself is unrepresentable. Per-element immutability lives on the frozen ProcessAuthoringUnitV1 entries."
       },
       "producer": "meta_tools.get_schema_template_action(...)",
       "selector": "schema_name=AuthoringPlanResultV1",
-      "sha256": "4ccd7dfe7a30d582cd2991ce9cc49e64cbf27d5612890bb6c1b59a42783e379c",
+      "sha256": "c35735a85cc8279dc4008d10981b86a485ebd935c3ced5b27b5937ba170aa0d3",
       "surface_class": "SS-SCHEMA-TEMPLATES",
       "value": {
         "_success": true,
@@ -18796,7 +18796,7 @@
             },
             "NotifyNodeV1": {
               "additionalProperties": false,
-              "description": "Log the caught error to the process log, on a recovery path.\n\nNotify writes one message to the platform's own execution log. It is not a\ndelivery channel: there is no recipient, no address, no subject and no\ntransport, and none of those are fields this version withholds — the shape\nthe platform verifies carries a level, a message, and a binding to the\ncaught error, and nothing else.\n\n``message_template`` must reference the caught-error property by its token\n(:data:`~boomi_mcp.models.process_ir_tokens.CAUGHT_ERROR_PROPERTY_ID`). That\nis not decoration: the emitted message always carries a parameter bound to\nthat property, so a template that never mentions it declares a parameter it\nnever uses, and logs a failure without the failure. The token may appear more\nthan once; every occurrence binds the same caught error.\n\nAdmitted ONLY on a recovery path — see :data:`TryCatchCatchBodyStepV1`. A\ncaught error is the only thing this node has to say, and outside a catch body\nthere is none.",
+              "description": "Log the caught error to the process log, on a recovery path.\n\nNotify writes one message to the platform's own execution log. It is not a\ndelivery channel: there is no recipient, no address, no subject and no\ntransport, and none of those are fields this version withholds — the shape\nthe platform verifies carries a level, a message, and a binding to the\ncaught error, and nothing else.\n\n``message_template`` must reference the caught-error property by its token,\nthe literal text ``meta.base.catcherrorsmessage``. That is not decoration: the\nemitted message always carries a parameter bound to that property, so a\ntemplate that never mentions it declares a parameter it never uses, and logs a\nfailure without the failure. The token may appear more than once; every\noccurrence binds the same caught error. The template may not contain a brace —\nthe emitted message is a parameter pattern, and an authored brace stops the\ncaught error binding.\n\nAdmitted ONLY on a recovery path — see :data:`TryCatchCatchBodyStepV1`. A\ncaught error is the only thing this node has to say, and outside a catch body\nthere is none.",
               "properties": {
                 "kind": {
                   "const": "notify",
@@ -20083,7 +20083,7 @@
             },
             "TryCatchCatchBodyV1": {
               "additionalProperties": false,
-              "description": "The recovery path for a caught document.\n\nMANDATORY and MUST terminate: a caught document that reaches no terminal is\na document the process silently drops. The terminal set is the recovery\nvocabulary — stop the document, raise it as an explicit failure, or stage it\nfor a downstream handler.\n\nSteps may be empty (a bare terminal is a meaningful recovery), but a bare\n``stop`` with no work at all is rejected: it recovers nothing.",
+              "description": "The recovery path for a caught document.\n\nMANDATORY and MUST terminate: a caught document that reaches no terminal is\na document the process silently drops. The terminal set is the recovery\nvocabulary — stop the document, raise it as an explicit failure, stage it for\na downstream handler, or hand it to a recovery process with a process_call\n(which must be authored to wait for that process and to abort on its\nfailure).\n\nSteps may be empty (a bare terminal is a meaningful recovery), but a bare\n``stop`` with no work at all is rejected: it recovers nothing.",
               "properties": {
                 "steps": {
                   "items": {
@@ -20237,7 +20237,7 @@
             },
             "TryCatchTryBodyV1": {
               "additionalProperties": false,
-              "description": "The protected path.\n\nTerminates on a plain ``stop``, or on ``return_documents`` when the protected\nflow is a subprocess that hands its results back to its caller. An\n``exception`` here would be caught by this very scope's own recovery path, and\nno evidence covers that loop; a staging ``cache_put`` terminal is a\nrecovery-path shape, not a success one.",
+              "description": "The protected path.\n\nTerminates on a plain ``stop``, on ``return_documents`` when the protected\nflow is a subprocess that hands its results back to its caller, or on\n``continue`` when another connector-scoped handler follows this one and the\ndocuments go on to it. An\n``exception`` here would be caught by this very scope's own recovery path, and\nno evidence covers that loop; a staging ``cache_put`` terminal is a\nrecovery-path shape, not a success one.",
               "properties": {
                 "steps": {
                   "items": {
@@ -20499,12 +20499,12 @@
         "raw_xml_exposed": false,
         "read_only": true,
         "revision_binding": {
-          "capability_revision": "sha256:39d3e5152b9cea421e4e557341a4c4e48c988ce0269d911bb13181644e90be9b",
-          "compiler_revision": "sha256:bd6a525abee4bc87c36b6f0b6466f257f7adfc652732903f9791767f17294d39",
+          "capability_revision": "sha256:16bdac31dda96c2b7a978c4d4362c705530d5b13b7a1a671a4fd276d83e9c14d",
+          "compiler_revision": "sha256:ae263e349b8075c59269be231d6060cd99d9a334ba0f8426b89e7984ae4c0746",
           "contract_version": "2",
-          "schema_revision": "sha256:0609ff6d623073a67ea396bb7fe37a541d6b0b0de5c8d5ed1d01c2ac0b7e81fc"
+          "schema_revision": "sha256:9d334ee65cc5f0e62037565b646be7bfee463867427bd34b995fb53b4ba68466"
         },
-        "schema_hash": "sha256:9ce0b17fbedf8834a7f5f2ea0fce64523415f7447f442d9418ae7d7ddfa3cdc3",
+        "schema_hash": "sha256:952690b87a2b9866181a921783182debbf818a3a8d0ce456155425f2eb91d507",
         "schema_name": "AuthoringPlanResultV1",
         "schema_version": "2",
         "surface": "MCP authoring contract (issue #146 M12.11)"
@@ -20513,7 +20513,7 @@
     },
     {
       "artifact_id": "SS-SCHEMA-TEMPLATES:schema_name=AuthoringRequestV1",
-      "canonical_length": 104523,
+      "canonical_length": 104877,
       "legacy_excerpt": {
         "json_schema.$defs.IntegrationComponentSpec.properties.config.description": "Type-specific configuration payload. For type='process', config.process_kind selects a structured process-flow builder (e.g. 'database_to_api_sync' or 'wrapper_subprocess' — issue #25) and is REQUIRED for any authoring action that emits or rebuilds process XML (create / create_clone / update): such a process without process_kind is rejected at plan time with PROCESS_KIND_REQUIRED (legacy freeform JSON-to-XML process authoring has been removed). A reference-only reuse of an existing process (no XML emitted) may omit it. Use manage_component for an explicit raw process XML escape hatch.",
         "json_schema.$defs.IntegrationSpecV1.properties.processes.description": "Issue #153 M12.15 — canonical process roots authored as ProcessIR. Each entry is one ProcessAuthoringUnitV1: exactly one ProcessComponentEnvelopeV1 plus exactly one ProcessIRV1 root. These are compiled by the canonical chain and materialized by the neutral ProcessComponentMaterializer — they resolve NO legacy process_kind. 'components' remains the home of supporting components and of reference-only existing processes. 'components' and 'processes' share ONE key namespace: a key used by a component and by a process envelope is a duplicate, and all four depends_on directions (component->component, component->process, process->component, process->process) enter one topological order with one cycle check. A TUPLE, per the plan's field type: pydantic coerces list input, so the wire shape is an ordinary JSON array and no caller sends anything different — but unlike this model's legacy List siblings, mutating the collection itself is unrepresentable. Per-element immutability lives on the frozen ProcessAuthoringUnitV1 entries.",
@@ -20521,7 +20521,7 @@
       },
       "producer": "meta_tools.get_schema_template_action(...)",
       "selector": "schema_name=AuthoringRequestV1",
-      "sha256": "27f4336e449f0aa25ca28f54fb6d28d4996201a1cb503ee5d722cfc2e7826081",
+      "sha256": "5be92fdca00b0564accde50db01c3b1647e355f7a92e837b3a28804636bcc386",
       "surface_class": "SS-SCHEMA-TEMPLATES",
       "value": {
         "_success": true,
@@ -22207,7 +22207,7 @@
             },
             "NotifyNodeV1": {
               "additionalProperties": false,
-              "description": "Log the caught error to the process log, on a recovery path.\n\nNotify writes one message to the platform's own execution log. It is not a\ndelivery channel: there is no recipient, no address, no subject and no\ntransport, and none of those are fields this version withholds — the shape\nthe platform verifies carries a level, a message, and a binding to the\ncaught error, and nothing else.\n\n``message_template`` must reference the caught-error property by its token\n(:data:`~boomi_mcp.models.process_ir_tokens.CAUGHT_ERROR_PROPERTY_ID`). That\nis not decoration: the emitted message always carries a parameter bound to\nthat property, so a template that never mentions it declares a parameter it\nnever uses, and logs a failure without the failure. The token may appear more\nthan once; every occurrence binds the same caught error.\n\nAdmitted ONLY on a recovery path — see :data:`TryCatchCatchBodyStepV1`. A\ncaught error is the only thing this node has to say, and outside a catch body\nthere is none.",
+              "description": "Log the caught error to the process log, on a recovery path.\n\nNotify writes one message to the platform's own execution log. It is not a\ndelivery channel: there is no recipient, no address, no subject and no\ntransport, and none of those are fields this version withholds — the shape\nthe platform verifies carries a level, a message, and a binding to the\ncaught error, and nothing else.\n\n``message_template`` must reference the caught-error property by its token,\nthe literal text ``meta.base.catcherrorsmessage``. That is not decoration: the\nemitted message always carries a parameter bound to that property, so a\ntemplate that never mentions it declares a parameter it never uses, and logs a\nfailure without the failure. The token may appear more than once; every\noccurrence binds the same caught error. The template may not contain a brace —\nthe emitted message is a parameter pattern, and an authored brace stops the\ncaught error binding.\n\nAdmitted ONLY on a recovery path — see :data:`TryCatchCatchBodyStepV1`. A\ncaught error is the only thing this node has to say, and outside a catch body\nthere is none.",
               "properties": {
                 "kind": {
                   "const": "notify",
@@ -23991,7 +23991,7 @@
             },
             "TryCatchCatchBodyV1": {
               "additionalProperties": false,
-              "description": "The recovery path for a caught document.\n\nMANDATORY and MUST terminate: a caught document that reaches no terminal is\na document the process silently drops. The terminal set is the recovery\nvocabulary — stop the document, raise it as an explicit failure, or stage it\nfor a downstream handler.\n\nSteps may be empty (a bare terminal is a meaningful recovery), but a bare\n``stop`` with no work at all is rejected: it recovers nothing.",
+              "description": "The recovery path for a caught document.\n\nMANDATORY and MUST terminate: a caught document that reaches no terminal is\na document the process silently drops. The terminal set is the recovery\nvocabulary — stop the document, raise it as an explicit failure, stage it for\na downstream handler, or hand it to a recovery process with a process_call\n(which must be authored to wait for that process and to abort on its\nfailure).\n\nSteps may be empty (a bare terminal is a meaningful recovery), but a bare\n``stop`` with no work at all is rejected: it recovers nothing.",
               "properties": {
                 "steps": {
                   "items": {
@@ -24145,7 +24145,7 @@
             },
             "TryCatchTryBodyV1": {
               "additionalProperties": false,
-              "description": "The protected path.\n\nTerminates on a plain ``stop``, or on ``return_documents`` when the protected\nflow is a subprocess that hands its results back to its caller. An\n``exception`` here would be caught by this very scope's own recovery path, and\nno evidence covers that loop; a staging ``cache_put`` terminal is a\nrecovery-path shape, not a success one.",
+              "description": "The protected path.\n\nTerminates on a plain ``stop``, on ``return_documents`` when the protected\nflow is a subprocess that hands its results back to its caller, or on\n``continue`` when another connector-scoped handler follows this one and the\ndocuments go on to it. An\n``exception`` here would be caught by this very scope's own recovery path, and\nno evidence covers that loop; a staging ``cache_put`` terminal is a\nrecovery-path shape, not a success one.",
               "properties": {
                 "steps": {
                   "items": {
@@ -24362,12 +24362,12 @@
         "raw_xml_exposed": false,
         "read_only": true,
         "revision_binding": {
-          "capability_revision": "sha256:39d3e5152b9cea421e4e557341a4c4e48c988ce0269d911bb13181644e90be9b",
-          "compiler_revision": "sha256:bd6a525abee4bc87c36b6f0b6466f257f7adfc652732903f9791767f17294d39",
+          "capability_revision": "sha256:16bdac31dda96c2b7a978c4d4362c705530d5b13b7a1a671a4fd276d83e9c14d",
+          "compiler_revision": "sha256:ae263e349b8075c59269be231d6060cd99d9a334ba0f8426b89e7984ae4c0746",
           "contract_version": "2",
-          "schema_revision": "sha256:0609ff6d623073a67ea396bb7fe37a541d6b0b0de5c8d5ed1d01c2ac0b7e81fc"
+          "schema_revision": "sha256:9d334ee65cc5f0e62037565b646be7bfee463867427bd34b995fb53b4ba68466"
         },
-        "schema_hash": "sha256:156bbf44e5e83960eaced74d9fcc52dd9b5f8c6a1551c57f84e40d37af9bdb07",
+        "schema_hash": "sha256:405c09f4c157308c94ed085991c7c023ab74775958fc5b5e290c335e614a7dbd",
         "schema_name": "AuthoringRequestV1",
         "schema_version": "2",
         "surface": "MCP authoring contract (issue #146 M12.11)"
@@ -24376,14 +24376,14 @@
     },
     {
       "artifact_id": "SS-SCHEMA-TEMPLATES:schema_name=IntegrationSpecV1",
-      "canonical_length": 76169,
+      "canonical_length": 76523,
       "legacy_excerpt": {
         "json_schema.$defs.IntegrationComponentSpec.properties.config.description": "Type-specific configuration payload. For type='process', config.process_kind selects a structured process-flow builder (e.g. 'database_to_api_sync' or 'wrapper_subprocess' — issue #25) and is REQUIRED for any authoring action that emits or rebuilds process XML (create / create_clone / update): such a process without process_kind is rejected at plan time with PROCESS_KIND_REQUIRED (legacy freeform JSON-to-XML process authoring has been removed). A reference-only reuse of an existing process (no XML emitted) may omit it. Use manage_component for an explicit raw process XML escape hatch.",
         "json_schema.properties.processes.description": "Issue #153 M12.15 — canonical process roots authored as ProcessIR. Each entry is one ProcessAuthoringUnitV1: exactly one ProcessComponentEnvelopeV1 plus exactly one ProcessIRV1 root. These are compiled by the canonical chain and materialized by the neutral ProcessComponentMaterializer — they resolve NO legacy process_kind. 'components' remains the home of supporting components and of reference-only existing processes. 'components' and 'processes' share ONE key namespace: a key used by a component and by a process envelope is a duplicate, and all four depends_on directions (component->component, component->process, process->component, process->process) enter one topological order with one cycle check. A TUPLE, per the plan's field type: pydantic coerces list input, so the wire shape is an ordinary JSON array and no caller sends anything different — but unlike this model's legacy List siblings, mutating the collection itself is unrepresentable. Per-element immutability lives on the frozen ProcessAuthoringUnitV1 entries."
       },
       "producer": "meta_tools.get_schema_template_action(...)",
       "selector": "schema_name=IntegrationSpecV1",
-      "sha256": "c6824d20d55b6269525b48795966214c2ca2b863ab958206399a957f36c3aec8",
+      "sha256": "591e0f63bfc0754eea4a1e7de6527db7983615f98b1f6600291ea269a6a1ad83",
       "surface_class": "SS-SCHEMA-TEMPLATES",
       "value": {
         "_success": true,
@@ -25587,7 +25587,7 @@
             },
             "NotifyNodeV1": {
               "additionalProperties": false,
-              "description": "Log the caught error to the process log, on a recovery path.\n\nNotify writes one message to the platform's own execution log. It is not a\ndelivery channel: there is no recipient, no address, no subject and no\ntransport, and none of those are fields this version withholds — the shape\nthe platform verifies carries a level, a message, and a binding to the\ncaught error, and nothing else.\n\n``message_template`` must reference the caught-error property by its token\n(:data:`~boomi_mcp.models.process_ir_tokens.CAUGHT_ERROR_PROPERTY_ID`). That\nis not decoration: the emitted message always carries a parameter bound to\nthat property, so a template that never mentions it declares a parameter it\nnever uses, and logs a failure without the failure. The token may appear more\nthan once; every occurrence binds the same caught error.\n\nAdmitted ONLY on a recovery path — see :data:`TryCatchCatchBodyStepV1`. A\ncaught error is the only thing this node has to say, and outside a catch body\nthere is none.",
+              "description": "Log the caught error to the process log, on a recovery path.\n\nNotify writes one message to the platform's own execution log. It is not a\ndelivery channel: there is no recipient, no address, no subject and no\ntransport, and none of those are fields this version withholds — the shape\nthe platform verifies carries a level, a message, and a binding to the\ncaught error, and nothing else.\n\n``message_template`` must reference the caught-error property by its token,\nthe literal text ``meta.base.catcherrorsmessage``. That is not decoration: the\nemitted message always carries a parameter bound to that property, so a\ntemplate that never mentions it declares a parameter it never uses, and logs a\nfailure without the failure. The token may appear more than once; every\noccurrence binds the same caught error. The template may not contain a brace —\nthe emitted message is a parameter pattern, and an authored brace stops the\ncaught error binding.\n\nAdmitted ONLY on a recovery path — see :data:`TryCatchCatchBodyStepV1`. A\ncaught error is the only thing this node has to say, and outside a catch body\nthere is none.",
               "properties": {
                 "kind": {
                   "const": "notify",
@@ -26687,7 +26687,7 @@
             },
             "TryCatchCatchBodyV1": {
               "additionalProperties": false,
-              "description": "The recovery path for a caught document.\n\nMANDATORY and MUST terminate: a caught document that reaches no terminal is\na document the process silently drops. The terminal set is the recovery\nvocabulary — stop the document, raise it as an explicit failure, or stage it\nfor a downstream handler.\n\nSteps may be empty (a bare terminal is a meaningful recovery), but a bare\n``stop`` with no work at all is rejected: it recovers nothing.",
+              "description": "The recovery path for a caught document.\n\nMANDATORY and MUST terminate: a caught document that reaches no terminal is\na document the process silently drops. The terminal set is the recovery\nvocabulary — stop the document, raise it as an explicit failure, stage it for\na downstream handler, or hand it to a recovery process with a process_call\n(which must be authored to wait for that process and to abort on its\nfailure).\n\nSteps may be empty (a bare terminal is a meaningful recovery), but a bare\n``stop`` with no work at all is rejected: it recovers nothing.",
               "properties": {
                 "steps": {
                   "items": {
@@ -26841,7 +26841,7 @@
             },
             "TryCatchTryBodyV1": {
               "additionalProperties": false,
-              "description": "The protected path.\n\nTerminates on a plain ``stop``, or on ``return_documents`` when the protected\nflow is a subprocess that hands its results back to its caller. An\n``exception`` here would be caught by this very scope's own recovery path, and\nno evidence covers that loop; a staging ``cache_put`` terminal is a\nrecovery-path shape, not a success one.",
+              "description": "The protected path.\n\nTerminates on a plain ``stop``, on ``return_documents`` when the protected\nflow is a subprocess that hands its results back to its caller, or on\n``continue`` when another connector-scoped handler follows this one and the\ndocuments go on to it. An\n``exception`` here would be caught by this very scope's own recovery path, and\nno evidence covers that loop; a staging ``cache_put`` terminal is a\nrecovery-path shape, not a success one.",
               "properties": {
                 "steps": {
                   "items": {
@@ -34380,13 +34380,13 @@
     },
     {
       "artifact_id": "SS-SCHEMA-TEMPLATES:schema_name=recipe_contributions",
-      "canonical_length": 92036,
+      "canonical_length": 92390,
       "legacy_excerpt": {
         "authoring_note": "These are the ONLY values a registered recipe may return. They carry opaque references and closed enumerations — never configuration, credentials, headers, SQL, raw XML, executable code, JSON pointers, or caller-authored graph edges. Recipe output is validated exactly as direct ProcessIR/topology/component authoring and cannot be exempted."
       },
       "producer": "meta_tools.get_schema_template_action(...)",
       "selector": "schema_name=recipe_contributions",
-      "sha256": "c4405fc8f2b0808089a7e39886b97feb396dca4662773889a46c011a3152a7f9",
+      "sha256": "b4348c6a9a571fcfec4e82086af8c677ade18e46b0732556e74849749ba02856",
       "surface_class": "SS-SCHEMA-TEMPLATES",
       "value": {
         "_success": true,
@@ -36244,7 +36244,7 @@
             },
             "NotifyNodeV1": {
               "additionalProperties": false,
-              "description": "Log the caught error to the process log, on a recovery path.\n\nNotify writes one message to the platform's own execution log. It is not a\ndelivery channel: there is no recipient, no address, no subject and no\ntransport, and none of those are fields this version withholds — the shape\nthe platform verifies carries a level, a message, and a binding to the\ncaught error, and nothing else.\n\n``message_template`` must reference the caught-error property by its token\n(:data:`~boomi_mcp.models.process_ir_tokens.CAUGHT_ERROR_PROPERTY_ID`). That\nis not decoration: the emitted message always carries a parameter bound to\nthat property, so a template that never mentions it declares a parameter it\nnever uses, and logs a failure without the failure. The token may appear more\nthan once; every occurrence binds the same caught error.\n\nAdmitted ONLY on a recovery path — see :data:`TryCatchCatchBodyStepV1`. A\ncaught error is the only thing this node has to say, and outside a catch body\nthere is none.",
+              "description": "Log the caught error to the process log, on a recovery path.\n\nNotify writes one message to the platform's own execution log. It is not a\ndelivery channel: there is no recipient, no address, no subject and no\ntransport, and none of those are fields this version withholds — the shape\nthe platform verifies carries a level, a message, and a binding to the\ncaught error, and nothing else.\n\n``message_template`` must reference the caught-error property by its token,\nthe literal text ``meta.base.catcherrorsmessage``. That is not decoration: the\nemitted message always carries a parameter bound to that property, so a\ntemplate that never mentions it declares a parameter it never uses, and logs a\nfailure without the failure. The token may appear more than once; every\noccurrence binds the same caught error. The template may not contain a brace —\nthe emitted message is a parameter pattern, and an authored brace stops the\ncaught error binding.\n\nAdmitted ONLY on a recovery path — see :data:`TryCatchCatchBodyStepV1`. A\ncaught error is the only thing this node has to say, and outside a catch body\nthere is none.",
               "properties": {
                 "kind": {
                   "const": "notify",
@@ -37543,7 +37543,7 @@
             },
             "TryCatchCatchBodyV1": {
               "additionalProperties": false,
-              "description": "The recovery path for a caught document.\n\nMANDATORY and MUST terminate: a caught document that reaches no terminal is\na document the process silently drops. The terminal set is the recovery\nvocabulary — stop the document, raise it as an explicit failure, or stage it\nfor a downstream handler.\n\nSteps may be empty (a bare terminal is a meaningful recovery), but a bare\n``stop`` with no work at all is rejected: it recovers nothing.",
+              "description": "The recovery path for a caught document.\n\nMANDATORY and MUST terminate: a caught document that reaches no terminal is\na document the process silently drops. The terminal set is the recovery\nvocabulary — stop the document, raise it as an explicit failure, stage it for\na downstream handler, or hand it to a recovery process with a process_call\n(which must be authored to wait for that process and to abort on its\nfailure).\n\nSteps may be empty (a bare terminal is a meaningful recovery), but a bare\n``stop`` with no work at all is rejected: it recovers nothing.",
               "properties": {
                 "steps": {
                   "items": {
@@ -37697,7 +37697,7 @@
             },
             "TryCatchTryBodyV1": {
               "additionalProperties": false,
-              "description": "The protected path.\n\nTerminates on a plain ``stop``, or on ``return_documents`` when the protected\nflow is a subprocess that hands its results back to its caller. An\n``exception`` here would be caught by this very scope's own recovery path, and\nno evidence covers that loop; a staging ``cache_put`` terminal is a\nrecovery-path shape, not a success one.",
+              "description": "The protected path.\n\nTerminates on a plain ``stop``, on ``return_documents`` when the protected\nflow is a subprocess that hands its results back to its caller, or on\n``continue`` when another connector-scoped handler follows this one and the\ndocuments go on to it. An\n``exception`` here would be caught by this very scope's own recovery path, and\nno evidence covers that loop; a staging ``cache_put`` terminal is a\nrecovery-path shape, not a success one.",
               "properties": {
                 "steps": {
                   "items": {
@@ -38110,7 +38110,7 @@
       "legacy_excerpt": {},
       "producer": "meta_tools.get_schema_template_action(...) [all axes]",
       "selector": "walked_surface_digest",
-      "sha256": "05756e06a668e3346a92ef049106945ad87b0b034cca2c0d5acefe3effc849e8",
+      "sha256": "a5fa45679893d46d8ccd48740776d9fb772c50726479c0653d15476a7c156554",
       "surface_class": "SS-SCHEMA-TEMPLATES",
       "value": {
         "resource_type=component": "55ba0a46f10742a5bfa269767c7ba040532f5d7900c7e56953f8e57469ceecf3",
@@ -38392,14 +38392,14 @@
         "resource_type=trading_partner|operation=update|standard=rosettanet": "83537ac74be6088a4607997d0e200d76ec7c6367c900aa9923e823d610dd27e1",
         "resource_type=trading_partner|operation=update|standard=tradacoms": "83537ac74be6088a4607997d0e200d76ec7c6367c900aa9923e823d610dd27e1",
         "resource_type=trading_partner|operation=update|standard=x12": "83537ac74be6088a4607997d0e200d76ec7c6367c900aa9923e823d610dd27e1",
-        "schema_name=AuthoringBuildProvenanceV1": "2d4a954baf45a6f5b222b9517d70dfcd89de9f4a50d023e576527f96779a5e49",
-        "schema_name=AuthoringCompileResultV1": "7a25eb15326b301477e31d741513681f07a7326c88c62ebd727188e1287b6ef4",
-        "schema_name=AuthoringPlanResultV1": "4ccd7dfe7a30d582cd2991ce9cc49e64cbf27d5612890bb6c1b59a42783e379c",
-        "schema_name=AuthoringRequestV1": "27f4336e449f0aa25ca28f54fb6d28d4996201a1cb503ee5d722cfc2e7826081",
-        "schema_name=AuthoringRevisionBindingV1": "59fae3da0e0c42ace565549508135eb90b800d05bf101314a86a1f8bdbab375b",
-        "schema_name=IntegrationSpecV1": "c6824d20d55b6269525b48795966214c2ca2b863ab958206399a957f36c3aec8",
-        "schema_name=ProcessIRV1": "fac5f32ca517fd3e5f7619c30ffb508a7b1270010ed74cb1b4aa9406d3eaf5b4",
-        "schema_name=SystemTopologySpecV1": "21c9c9e9a56021128c8da4afe1856d1dac88412fb860aff5d8b47cd4c5fba89a",
+        "schema_name=AuthoringBuildProvenanceV1": "ec5389caa3174a74db68f4638db6b9bcd7676798873fe8738348b3c4afda9a5d",
+        "schema_name=AuthoringCompileResultV1": "102ab555b1771ebce3fe207ae73aa3bf94a652079ffe25b75311b7246c927f01",
+        "schema_name=AuthoringPlanResultV1": "c35735a85cc8279dc4008d10981b86a485ebd935c3ced5b27b5937ba170aa0d3",
+        "schema_name=AuthoringRequestV1": "5be92fdca00b0564accde50db01c3b1647e355f7a92e837b3a28804636bcc386",
+        "schema_name=AuthoringRevisionBindingV1": "3ddfc46beab128918085cac9f3193d4a6c6ebd8db842f77bfdeed70926ac4815",
+        "schema_name=IntegrationSpecV1": "591e0f63bfc0754eea4a1e7de6527db7983615f98b1f6600291ea269a6a1ad83",
+        "schema_name=ProcessIRV1": "814b2d86c6e32ded1f4a969ea14c6bd9ab61778102929730872476b86508088f",
+        "schema_name=SystemTopologySpecV1": "f914b43e2699d12424e26a4de985c07ec5ee7252f3baaebd0b399501dfcb50f3",
         "schema_name=account_governance": "d0773b315a5b59bad4bbb0021a2468e5cb4d3a85c4dbac216a887f0194a2ecdc",
         "schema_name=api_service": "c7be12ec5b2c503bd54088bd2c7b00adfa435e3f3fc9610bae0b91117657911b",
         "schema_name=archetype:api_to_api_sync": "7e4653429bdfc56d53ecb1c07fb7f477e11c2180c3afdfad94566cab1ca716e7",
@@ -38408,7 +38408,7 @@
         "schema_name=archetype:http_listener_to_db": "b21d41d870324ce66e872957fa09126dc641354753a0d7681d14d3489f7dcf3f",
         "schema_name=archetype:http_listener_to_rest": "cdd6c9c6fb51cd8afda5c7245a2ef37548939610c1c5235cd9abe1ed9deac3d9",
         "schema_name=archetype:stub_minimal_integration": "28f1d13a8568cea1df47bb1b361708d17e490204c7425787999e80df63f4b0fc",
-        "schema_name=authoring_workflow": "3517d3f9a2e5b0eef0a3ec8e11a52990decd9e887776356cd0267d3982e9dc58",
+        "schema_name=authoring_workflow": "b25afb284fc97761cf2106cb6f46256bed029022b27eb9ef91ca02043c8dd116",
         "schema_name=cache_property_authoring": "484017df545d247be99c71ef4be4edf8d47013e565a6e05119c357699229ed6f",
         "schema_name=compose_archetypes": "ec23808a15913ec8ce1d6e510ff941952be25b006a42128216b891d05f1a9d7f",
         "schema_name=design_doctrine": "458e7385ec9ad21c5d8f1d319a1db3252c9c1e017640967bfdc9714c38bb38b5",
@@ -38471,7 +38471,7 @@
         "schema_name=governance_pattern:support_folder_isolation_and_privacy": "4f0b206e14ad2f2272b03dfc8c9575dbcc3d454d28894a42602a9cca546de2ed",
         "schema_name=governance_pattern:tools_utilities_folder_non_integration": "50ddcf761e63e68f305271b4f079d8a7effd9b750726a8be784c2c52993c2cbc",
         "schema_name=governance_pattern:tracked_field_naming_generic_and_unique": "42ae3917d1ddb0f23a9dd0e9083a9106a3ed6c18bc06e740a1c07014830204d1",
-        "schema_name=process_ir_authoring": "d1f57f8e6f46c75d5d2bda71137440b4cf1737bc6dd77a351a11651cd350d672",
+        "schema_name=process_ir_authoring": "0de2d62b2e891b305ef70a00efa041ee23b79a9e58882e5148568d47cb36ea65",
         "schema_name=process_property": "43c9cf66e73fb39b6f1625d00a9a01f876005bfa94b34fb99cb14e0deebe699b",
         "schema_name=recipe:boomi.adapter.api_to_api_sync@1.0.0": "8dfc0a6d446a4120a35d80648ffe364801554be443a94ce813a85f67559f630f",
         "schema_name=recipe:boomi.adapter.api_to_database_sync@1.0.0": "27970e874b5a038b4bba51efbfe091ff2cb434ea0bf270f5796ec350d808e15c",
@@ -38481,11 +38481,11 @@
         "schema_name=recipe:boomi.archetype.api_to_database_sync@0.1.0": "0dad04f52a9a0e2e0afd1282ce3ddac4f115237a714f6cb45be9c5200d743943",
         "schema_name=recipe:boomi.compose.db_rest_fanout@1.0.0": "b9ea187fe32485613b2783ca8f6c062f77aa9f87feb831c28f06d57f15137598",
         "schema_name=recipe:boomi.constraint.inbound_validate@1.0.0": "28bee5da0db917789d285df4dc3af86b4de4fc8ef44fa3ad84911976b9cb001d",
-        "schema_name=recipe_contributions": "c4405fc8f2b0808089a7e39886b97feb396dca4662773889a46c011a3152a7f9",
+        "schema_name=recipe_contributions": "b4348c6a9a571fcfec4e82086af8c677ade18e46b0732556e74849749ba02856",
         "schema_name=recipe_registry": "5820e84e8f518bf0c6394bff4a2beae99fbf764dd459680dc891a1e7cc971a5b",
         "schema_name=script_dataprocess": "86d6cac0e593188c5c6a253e684097dadda0a6c3c331a1d71672c827133af143",
         "schema_name=script_mapping": "165e78ea08d24f54221f6da5973cbe20c7747d1a37f9fde496a42876b594e029",
-        "schema_name=validation_report": "94015c05ee616a7eaeda21e3edc7cc8eca1ea6ac81e5abddc670139bfa06a923",
+        "schema_name=validation_report": "a2da97c1c0c9229b6b97de386fc0fd0d7dcd93cf74a5737ce08af8aa8fc6fd23",
         "schema_name=workflow:build_and_verify_http_listener": "bf6ab2e405f375735cd6aaed29da0dbc6b717909dc1c184ba8dbe341f2b95800",
         "schema_name=workflow:build_integration_from_description": "72a20b29bbaf7a0ce39e06fb8514e13831968332bc5d0373d7f100bd7a943be0",
         "schema_name=workflow:compose_multi_target_integration": "6b04f2d192bcaf817a983a1aefda2f2f7b9674ce1c996737137c7ce8d6b932e0",

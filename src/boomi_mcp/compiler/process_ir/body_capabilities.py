@@ -74,6 +74,8 @@ from ...errors import (
     PROCESS_IR_CAPABILITY_PROCESS_CALL_RETURN_PATH_BINDING_UNSUPPORTED,
     PROCESS_IR_SEMANTIC_CATCH_UNTERMINATED,
     PROCESS_IR_SEMANTIC_NESTING_LIMIT,
+    PROCESS_IR_SEMANTIC_CONTROL_CONTINUATION_UNSUPPORTED,
+    PROCESS_IR_SCHEMA_INVALID_CARDINALITY,
 )
 from pydantic_core import PydanticCustomError
 
@@ -631,6 +633,18 @@ def _walk_try_catch(
     )
 
 
+#: The codes the SHARED chain rules can raise, and therefore the only ones
+#: `_as_compile_error` may translate. Asserted against this module's served
+#: tables by `test_the_chain_rule_codes_are_served_by_the_compiler`, so widening
+#: the shared rules without serving the new code fails a test rather than
+#: reaching a caller as a diagnostic with no text.
+_CHAIN_RULE_CODES = frozenset({
+    PROCESS_IR_SEMANTIC_CONTROL_CONTINUATION_UNSUPPORTED,
+    PROCESS_IR_CAPABILITY_ERROR_SCOPE_UNSUPPORTED,
+    PROCESS_IR_SCHEMA_INVALID_CARDINALITY,
+})
+
+
 def _as_compile_error(check, steps) -> None:
     """Run a SHARED model rule and re-raise its refusal as a compile diagnostic.
 
@@ -649,7 +663,13 @@ def _as_compile_error(check, steps) -> None:
         check(steps)
     except PydanticCustomError as exc:
         code = _CUSTOM_ERROR_CODES.get(exc.type)
-        if code is None:  # pragma: no cover - an unmapped rule is a repo defect
+        # CLOSED, not a blanket lookup. `_CUSTOM_ERROR_CODES` maps eleven codes,
+        # and three of them have no entry in the COMPILER's own message and
+        # remediation tables — so a blanket translation could serve a compile
+        # diagnostic this layer has no served text for. The shared chain rules
+        # raise exactly the three below; anything else is a repo defect and is
+        # re-raised rather than dressed up as a served diagnostic.
+        if code is None or code not in _CHAIN_RULE_CODES:  # pragma: no cover
             raise
         raise raise_compile_error(
             code, _SEMANTIC_PHASE, "/body", message=str(exc)

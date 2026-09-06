@@ -122,22 +122,31 @@ def _collect_subtree(
     *,
     path: str,
     limit: int,
-    stop_at: FrozenSet[str] = frozenset(),
+    traverse_catch: bool = True,
 ) -> Tuple[str, ...]:
     """Every node reachable from ``start_node_id``, inclusive.
 
-    ``stop_at`` bounds the walk: a node in that set is not collected and is not
-    descended through. #156 needs it because a serialized chain's protected path
-    does not END at the handler — it CONTINUES into the next one, so an unbounded
-    walk from handler N's try edge reaches every later handler and, through their
-    catch edges, every later recovery body too.
+    ``traverse_catch=False`` walks the SUCCESS path only: ``catch`` edges are not
+    followed, so the walk collects everything the documents actually flow through
+    and nothing that only a FAILURE reaches.
 
-    That is not a cosmetic over-collection. ``validate_error_handling`` grades a
-    region's retry safety over exactly this set, so an unbounded region makes a
-    retried handler answer for writes on a LATER handler's recovery path —
-    measured: a three-handler chain with retries [0, 1, 0] whose last catch stages
-    to a cache reported ``PROCESS_IR_SEMANTIC_RETRY_EFFECT_UNSAFE`` against a
-    write that region never retries.
+    #156 needs exactly that distinction, and getting it wrong is a safety defect
+    in one direction and a false refusal in the other. In a serialized chain the
+    protected path does not END at the handler — it CONTINUES into the next one —
+    so handler N's retry re-executes handler N+1's protected call, and both
+    ``validate_error_handling`` and ``collect_retry_effect_findings`` grade a
+    region over exactly this set:
+
+    * collect too MUCH (the unbounded walk) and a retried region answers for
+      writes on a LATER handler's RECOVERY path, which it never re-runs —
+      measured as a false ``PROCESS_IR_SEMANTIC_RETRY_EFFECT_UNSAFE`` on a
+      three-handler chain with retries [0, 1, 0];
+    * collect too LITTLE (stopping at the next handler, the first fix for that)
+      and a retried region stops grading the later PROTECTED calls it really does
+      re-run — measured as a non-idempotent DB Send ACCEPTED one handler
+      downstream of a retried region while the identical Send inside it is
+      refused. That direction is the dangerous one, so the rule is drawn on the
+      SUCCESS/FAILURE boundary rather than on handler identity.
 
     ``limit`` (the CFG's node count) bounds the walk. ``check_cfg_invariants``
     has already proven the graph is an acyclic tree before this runs, so the
@@ -150,9 +159,6 @@ def _collect_subtree(
     stack = [start_node_id]
     while stack:
         node_id = stack.pop()
-        if node_id in stop_at:
-            # The next region begins here. Not collected, not descended.
-            continue
         if node_id in seen_set:
             # A tree has no re-entry. Reaching one means the region overlaps
             # itself, which the caller reports as a structural defect.
@@ -162,6 +168,11 @@ def _collect_subtree(
         if len(seen) > limit:  # pragma: no cover - defect backstop
             raise _region_defect(path, node_id)
         for edge in outgoing.get(node_id, ()):
+            if not traverse_catch and edge.kind == "catch":
+                # A later handler's recovery path. Reached only when THAT handler
+                # fails, which this region's retry does not cause and does not
+                # re-run.
+                continue
             stack.append(edge.target_node_id)
     return tuple(seen)
 
@@ -189,11 +200,6 @@ def derive_error_regions(cfg: SemanticCfgV1) -> Tuple[ErrorRegionV1, ...]:
         if source is None or source.semantic.semantic_kind != "try_catch":
             raise _region_defect(edge.provenance_path, edge.source_node_id)
 
-    #: Every handler in the graph. Used as the protected-region boundary below.
-    handler_ids = frozenset(
-        n.node_id for n in cfg.nodes if n.semantic.semantic_kind == "try_catch"
-    )
-
     regions: List[ErrorRegionV1] = []
     for node in cfg.nodes:
         if node.semantic.semantic_kind != "try_catch":
@@ -217,11 +223,11 @@ def derive_error_regions(cfg: SemanticCfgV1) -> Tuple[ErrorRegionV1, ...]:
             outgoing,
             path=node.source_path,
             limit=limit,
-            # Every OTHER handler bounds this one. A chain's regions are siblings,
-            # so handler N's protected region ends where handler N+1 begins —
-            # and the boundary is derived from the graph's own handler nodes, not
-            # from an authored region id, so a caller cannot move it.
-            stop_at=handler_ids - {node.node_id},
+            # SUCCESS PATH ONLY. In a chain this legitimately runs on through
+            # later handlers' protected bodies — that is what `continue` means,
+            # and those calls really are re-executed when this region retries —
+            # but it never enters another handler's recovery path.
+            traverse_catch=False,
         )
         catch_ids = _collect_subtree(
             catch_edge.target_node_id, outgoing, path=node.source_path, limit=limit
