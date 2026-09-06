@@ -177,6 +177,7 @@ outcome and rationale.
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | 1 | L2 — Stage-2 repo commit review | window 3 / cumulative 3 | `5edf543` (clean) | 0 unresolved | 0 unresolved | new: none this round. Resolved this window: `emitter-proved-but-pipeline-unreachable`, `unbounded-region-derivation`, `stale-served-text`, `tier-derived-against-its-own-anchor`, `region-bounded-on-the-wrong-axis`, `binding-defeated-by-escaping`, `served-code-without-served-text`. Recurring: none | **CLOSE-CLEAN** | The third evaluation returned NO findings (`cdx-review.SWQTjh`, base `3fd32fd`, head `5edf543`, `STATUS: completed`, collector exit 0, teardown confirmed), so the checkpoint closes the loop normally rather than forcing a continue/defer decision. Trend across the window is monotone: round 1 raised 3 (1×P1, 2×P2), round 2 raised 1 (P2, record-only), round 3 raised 0; highest unrefuted severity fell P1 → P2 → none; affected-class breadth fell from three blocking classes to one to none. Every finding in the window is `fixed` and validated on the current tree — none deferred, none refuted-without-evidence, no critical residue. |
 | 2 | L3 — Architect implementation review | window 3 / cumulative 3 (the cap) | `3deba2b` (clean) | 0 unresolved | 0 unresolved blocking; 1 recorded accepted limitation | new this window: `widened-grammar-skips-its-own-guards`, `witness-invalidated-by-the-change`, `fixture-authored-outside-the-vocabulary`, `stale-authority-prose`, `witness-ownership-debt`. Resolved this window: `unjustified-narrowing`, `imprecise-escape-target`, `plan-checked-only-against-its-own-cfg`, `rule-cut-on-the-wrong-predicate`, `claim-measured-but-never-pinned`, `widened-grammar-skips-its-own-guards`. Recurring: `wrong-diagnostic-identity` (evaluations 1, 2 and 3 — discharged structurally, see the row below the table), `imprecise-escape-target` and `plan-checked-only-against-its-own-cfg` (each patched once, then closed on the reviewer's own repro) | **CLOSE-CLEAN** | The three-evaluation cap in `docs/architecture/COMPLETION_WORKFLOW_RULES.md` ends this loop on evaluation 3; the review itself said so ("This ends the architect loop … No fourth architect evaluation is required"). The cap's closure condition was met in full: the finite final batch was applied, its affected validation ran, and the Stage-2 commit review over the correction delta returned CLEAN. Trend across the window is improving on every recorded axis: evaluation 1 raised 7, evaluation 2 raised 6, evaluation 3 raised 4 of which 2 are outside every blocking class; highest unrefuted severity fell from Critical (twice, both mutation accounting) to Standard to Standard; four of the fourteen were regressions I introduced while fixing earlier ones and none of those recurred. Zero critical residue. The one standard blocking-class row not fixed is `ARCH-156-r2-06a`, reason class `blocked-by-mechanism`, enumerated and pinned by a self-invalidating witness but not yet attached to a filed issue — the section below states exactly what that leaves open, and it gates CLOSING the issue, not landing the work. |
+| 3 | L4 — Composite wave gate | window 3 / cumulative 3 | `ca2b051` (clean) | 0 unresolved | 0 unresolved | new: none — both earlier refusals were manifest and audit-record hygiene, not defect classes in the product. Resolved this window: `same-range-retirement-is-not-a-repair`. Recurring: none | **CLOSE-CLEAN** | The composite set is ONE evaluation, so its suite, manifest, determinism and fingerprint checks do not mint separate loops. Evaluation 1 refused on rows appended already tombstoned; evaluation 2 refused on an archived review round the ledger did not cite; evaluation 3 passes the whole set on the final tree. Both refusals were fixed rather than waived, and the correction applied between evaluations 2 and 3 belongs to L2, where it took its own QA and its own delta review before the entire wave set re-ran — so no earlier wave evidence is stale. Trend is monotone: two refusals, then none, with no product defect raised by this loop at any point. |
 
 Between rounds 2 and 3 an ADDITIONAL adversarial audit ran (six independent lenses over the
 `b07babe..HEAD` source diff, each finding refuted-by-default by three skeptics, plus a
@@ -235,6 +236,7 @@ record); the Notify `{1}` binds the real caught error at runtime; the platform l
 | Stage-1 QA — correction re-run | 2 | no report file (a clean run writes none); evidence in the agent's final report, instruments harvested to `.claude/agent-memory/boomi-qa-tester/harness/156-root-*.py` | working tree over `5939e866` | **PASS, 0 findings** — served identity agrees on code, pointer, message, remediation and contract-entry ids for both pairs; 36-row plan battery byte-identical with unmoved semantic and plan hashes; 48-cell blast-radius sweep moved 2 cells, both the same shape, no verdict flips; live A/B/D rig applied, deployed, executed and torn down on renera with `<shapes>` byte-identical to the r1 captures and every counterparty and sub-process execution cell identical; non-vacuity shown against two pre-fix trees | n/a |
 | Stage-1 QA — compiler-mirror darkness proof | 3 | no report file (a clean run writes none); instruments harvested to `.claude/agent-memory/boomi-qa-tester/harness/156-mirror-*.py` and `156-compiler-route-instrumentation.py` | working tree over `5939e866` | **PASS, 0 findings** — 36-row plan battery and 48-cell sweep both unmoved; the compiler arm proved unreachable four ways: single-caller closure to the pipeline's unconditional re-parse, instrumented route measurement (14 mirror calls over 5 public routes, every one on the re-parsed object, zero caller-owned), an exhaustive 27,868-document reachability fuzz over the root alphabet (333 parsed, 0 mirror raises), and a delta grading showing all 10 shared refusals translatable with parser/mirror agreement on code AND pointer for 7 of 7 shapes | n/a |
 | Stage-2 repo commit review | 5 | `commit-reviews/cdx-review.YM0rEW` | base `3deba2b` → head `6f1fc55`, clean tree | `completed`, collector exit 0; **no findings** — the complete unreviewed delta, so it covers the manifest commit `5939e86` as well as the structural correction | confirmed stopped |
+| Composite wave gate | 3 | `wave-gate/wave.B6jltI` | wave SHA `ca2b051`, clean tree, base `b07babe` | **PASS**, exit 0 captured directly to a file (no pipeline): full non-KB suite 11642 passed / 19 skipped against a cap of 30, 11661 required nodes, 76 active goldens rendered twice in isolated children and byte-compared, plan-fingerprint seam checked on 2 cases | n/a |
 
 Every row above is reproducible from the tracked archive: the run directory column names a path
 under `docs/architecture/evidence/issue-156/`, each is indexed in `index.jsonl` with its collector,
@@ -269,3 +271,43 @@ one this slice may LAND but may not CLOSE #156. The closing report carries the p
 verbatim and states the decision as a single step: file it and #156 closes, or rule that the residue
 does not earn an issue and #156 closes on that ruling recorded here instead. Nothing else in the
 slice is waiting on anything.
+
+## Closing report
+
+**Last validated tree.** `ca2b051` is the wave SHA — the last commit that changes anything the
+composite gate measures. The commits after it add this report and the gate's own archived evidence,
+which no gate reads as input. The landing SHA is re-validated in CI by the required non-KB check on
+the exact commit that is fast-forwarded onto the integration branch, so the final tree is covered by
+measurement rather than by the claim that documentation is harmless.
+
+**Suite and manifests on the final tree:** 11642 passed, 19 skipped, 0 failed against a skip cap of
+30; 11661 required nodes; 76 active goldens rendered twice in isolated children and byte-compared;
+plan-fingerprint seam checked on two cases.
+
+**Loops, in order, with their outcomes.**
+
+| Loop | Evaluations | Outcome |
+| --- | --- | --- |
+| L1 — Stage-1 QA | 3 (r1 scoped live, r2 correction re-run, r3 compiler-mirror darkness proof) | PASS each time; r2 and r3 raised zero findings and wrote no report by the agent's own clean-run rule |
+| L2 — Stage-2 repo commit review | 5 | rounds 1–3 closed at checkpoint 1 `CLOSE-CLEAN`; round 4 closed the architect cap; round 5 covered the structural correction and returned clean |
+| L3 — Architect implementation review | 3 (the cap) | checkpoint 2 `CLOSE-CLEAN`; the review itself ended the loop |
+| L4 — Composite wave gate | 3 | checkpoint 3 `CLOSE-CLEAN`; two refusals fixed, not waived |
+| L5 — Terminal correction loop | 0 | never opened: no final non-blocking batch mutated the tree on its own |
+
+The pre-implementation live oracle is evidence provisioning, not an evaluation, and debited no loop.
+The six-lens adversarial audit between L2 rounds 2 and 3 is recorded as evidence for the same reason:
+it is not a gate this repository defines, it minted no budget, and its findings carry ordinary
+dispositions. It is nonetheless why round 3 was clean — it found the mutation-accounting defect that
+round 1's own fix had introduced and that rounds 1–2 and live QA all missed.
+
+**Residue.** Zero unresolved critical findings: every row deriving Critical is `fixed` and validated
+on the current tree, none deferred and none closed over. One standard blocking-class row is deferred
+— `ARCH-156-r2-06a`, reason class `blocked-by-mechanism` — and it is the only thing between this
+slice and closure. Two rows are `not-validated` and say so plainly rather than counting as passes.
+
+**Why the issue LANDS but does not CLOSE.** The completion policy requires a deferred blocking-class
+row to name an already-filed, sequenced follow-up issue. This repository's standing rule is that only
+the owner authorises a filing — the body is prepared and surfaced, never filed and then reported as
+tracked. So the work lands and #156 stays open on exactly one decision, stated in full in the section
+above: file the prepared follow-up, or rule that the residue does not earn an issue and close on that
+ruling recorded here. Nothing else in the slice is waiting on anything.

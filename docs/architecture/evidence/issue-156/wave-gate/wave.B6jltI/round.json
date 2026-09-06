@@ -1,0 +1,15 @@
+{
+ "collector": "wave_gate",
+ "durable_dir": "wave-gate/wave.B6jltI",
+ "files": {
+  "wave-gate/wave.B6jltI/manifests.log": "6da53f9ff49dee60846343654ea9d4dea7cc142ac7bd3946c55eb7257e0137ad",
+  "wave-gate/wave.B6jltI/suite.log": "92def9336e732138979532de45c3e701f826f9360c36b9a72a7e036e9d59b646",
+  "wave-gate/wave.B6jltI/summary.json": "da254bfbe9174013bed8306ac99b2fcbd4457785e9617643dbb7583e1a30604f",
+  "wave-gate/wave.B6jltI/wave.log": "ffcc6d8d08801e023ce44765931bda155429d6509fe5e91747b9fb26cbf3ff3a"
+ },
+ "logical_loop": "L4 (composite wave gate, final tree)",
+ "source_run_dir": "/tmp/wave.B6jltI",
+ "status": "completed",
+ "verdict": "pass",
+ "wave_sha": "ca2b051ac79431d65f71907a07eec0ee96b03215"
+}
