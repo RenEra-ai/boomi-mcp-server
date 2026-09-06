@@ -1623,7 +1623,7 @@ class ExceptionNodeV1(_ProcessIRBase):
         return self
 
 
-def _template_defeats_caught_error_binding(template: str) -> bool:
+def template_defeats_caught_error_binding(template: str) -> bool:
     """Would this notify template stop the caught error binding?
 
     TWO shapes, and the first cut of this rule caught only the second:
@@ -1646,7 +1646,21 @@ def _template_defeats_caught_error_binding(template: str) -> bool:
     """
     if "{" in template or "}" in template:
         return True
-    return template.strip()[:1] in ("[",)
+    # The JSON test, spelled to match the escaper's own: a leading `{`/`[` is
+    # NECESSARY but not sufficient — the body must actually parse as an object or
+    # array. A cruder "starts with a bracket" rule refused ordinary text such as
+    # `[ERROR] caught <token>`, which the escaper leaves alone and which emits
+    # `[ERROR] caught {1}` correctly (measured). Over-refusing is not the safe
+    # direction here: it removes a legitimate authoring shape and tells the caller
+    # their template is unusable when it is not.
+    stripped = template.strip()
+    if stripped[:1] not in ("{", "["):
+        return False
+    try:
+        parsed = json.loads(stripped)
+    except (ValueError, TypeError):
+        return False
+    return isinstance(parsed, (dict, list))
 
 
 class ContinueNodeV1(_ProcessIRBase):
@@ -1746,7 +1760,7 @@ class NotifyNodeV1(_ProcessIRBase):
         # fail-closed reading: a template that cannot carry the caught error is
         # exactly what the token rule above forbids, and admitting one would let a
         # caller satisfy that rule and still log a failure without the failure.
-        if _template_defeats_caught_error_binding(self.message_template):
+        if template_defeats_caught_error_binding(self.message_template):
             raise _schema_invalid_error(
                 "message_template must be plain text — a body the platform reads "
                 "as a JSON object or array is quoted whole, which turns the "
@@ -2845,6 +2859,14 @@ def _check_serialized_region_chain(steps: List[Any]) -> None:
                 "a serialized try_catch chain may be preceded only by "
                 "connector_call and linear steps (step {0})".format(index)
             )
+    # ...and the prefix keeps every rule it had WITHOUT the chain. This branch
+    # returns before `_sequence_rules` reaches its own checks, so a rule not
+    # re-run here is a rule the chain silently switches off — measured:
+    # `[call, cache_put, call, handler]` was refused, and the identical prefix
+    # followed by a two-handler chain was accepted, because Add-to-Cache consumes
+    # the stream and nothing re-checked it. Widening a grammar must not narrow
+    # what the grammar it widened still enforces.
+    _check_cache_put_followed_by_read(steps, context="sequence steps")
 
     # A map must SEPARATE two handlers — never doubled, never trailing. The
     # captured graph puts exactly one between the guards, and a map with no
@@ -2979,6 +3001,23 @@ class SequenceNodeV1(_ProcessIRBase):
                     "connector scope protects a downstream call and must follow one"
                 )
             return self
+
+        # #156 S22. `notify` is admitted in exactly one slot, and the mapping
+        # table names ONE identity for every refusal outside it. Checked here,
+        # explicitly, ahead of the generic root rules: those serve
+        # `PROCESS_IR_CAPABILITY_UNSUPPORTED`, which is the right answer for a
+        # kind the root vocabulary predates, and the wrong one for a kind whose
+        # served contract says where it may appear. Architect evaluation 2
+        # rejected the argument that the generic rule should stand — this node is
+        # new in this slice, so there is no pre-slice root diagnostic to preserve,
+        # and handling it here changes no other kind's refusal.
+        for i, kind in enumerate(kinds):
+            if kind == "notify":
+                raise _body_kind_error(
+                    "notify is admitted only as a catch-body step — it reports a "
+                    "caught error, and a root sequence has none",
+                    at=("steps", i),
+                )
 
         for i, kind in enumerate(kinds):
             if kind == "source" and i != 0:

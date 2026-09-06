@@ -1,0 +1,87 @@
+You are the ARCHITECT. This is EVALUATION 2 of a hard cap of 3 (`docs/architecture/COMPLETION_WORKFLOW_RULES.md`).
+
+REPO: /Users/gleb/Documents/Projects/Renera/boomi-mcp-server, branch `codex/issue-156`, HEAD `48d7ea0`.
+SCOPE: the FIX DELTA answering your evaluation-1 findings —
+  `git diff ae03d1dc4e6c1a8ea0b1e8d40b7c04e5e4f3c9a0..HEAD`  (use `git log --oneline -3` to orient;
+  the previous review ran at `ae03d1d`). Review the FIX, not the whole slice again.
+The full non-KB suite is GREEN at HEAD: 11629 passed, 19 skipped, 0 failed. Do not re-run it.
+  PYTHONPATH=src PYTHONDONTWRITEBYTECODE=1 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 BOOMI_LOCAL=true \
+  BOOMI_DOCS_ENABLED=false BOOMI_GOTCHAS_ENABLED=false .venv/bin/python -m pytest <target> -q -p no:cacheprovider
+
+HOW EACH OF YOUR SEVEN FINDINGS WAS ANSWERED. Judge whether each is genuinely closed, and whether
+the fix introduced anything new. Every claim below was reproduced before it was fixed.
+
+1. CONTINUE GRAMMAR TOO RESTRICTIVE — FIXED. `_is_serialized_region_chain` no longer requires the
+   root to begin at a handler: the prefix is whatever precedes the first handler, and the handler
+   suffix must be `handler (map_ref? handler)*`. `_check_serialized_region_chain` validates the
+   prefix vocabulary explicitly (`connector_call` + `_ROOT_LINEAR_KINDS`) because that branch
+   returns before the connector_call-sequence rules run. Verified: `[call,handler,handler]` and
+   `[call,map,handler,handler]` now compile; `[call,handler]` (pre-existing) unchanged;
+   `[call,handler(stop),handler]` and a final `continue` still refused.
+
+2. CONTAINMENT DID NOT IDENTIFY THE SUCCESSOR — FIXED. `_check_region_containment` now requires the
+   escape to land on the declaring handler's own authored index + 1, derived from its `source_path`
+   via `_ROOT_STEP_PATH`, instead of accepting any root-level map or handler. I could not rebuild
+   your consistently-rewired 0->2->1 mutant — both attempts were caught incidentally by the
+   reachability invariant — but I did not treat that as a refutation: incidental capture by another
+   check is not this check being precise, and the finding was sound by inspection.
+
+3. INDEPENDENT EMISSION SAFEGUARDS MISSING — FIXED, and this was the most serious. Reproduced: a CFG
+   carrying `abort_on_error=False` on a recovery call, with a plan lowered FROM that CFG, passed both
+   checkers and emitted `abort="false"` — the silent flip the issue forbids. Root cause exactly as
+   you framed it: every plan check asks "does the plan agree with the CFG", which is the one question
+   a lowering defect answers yes to. `check_emission_plan_invariants` now reads the EMITTED input
+   against the contract itself — both flags true, no outgoing transition — with no CFG counterpart to
+   agree with. Both flags pinned by mutation with the unmutated control passing.
+   NOT done: independently deriving main-first/catch-block ORDER. Judge whether that half is still
+   required given the emitted-input check, or whether it remains a real gap.
+
+4. NOTIFY TEMPLATE — FIXED. My brace ban was cut on the wrong predicate: the hazard is the escaper's
+   JSON quote-wrapping, which a JSON ARRAY triggers with no brace at all (`["<token>"]` emits
+   `'["{1}"]'`). The rule is recut as "would this template defeat the binding" — leading `[` after
+   stripping, or any brace — spelled in the model rather than imported from the emitter layer, and
+   written to be no narrower than the escaper's own test. The preflight now type-checks before
+   `.strip()`, so `message_template=None` returns a refusal instead of raising AttributeError.
+
+5. DIAGNOSTIC MAPPINGS — TWO FIXED, ONE REFUTED.
+   Fixed: the notify template rules serve `PROCESS_IR_SCHEMA_INVALID` via a new `_schema_invalid_error`
+   (a template CONTENT rule is not a list bound or an ordering rule); and `_translate_pydantic_error`
+   gained `catch_body`, so a `process_call` in catch STEPS serves the connected-call identity like
+   every other call-capable body.
+   REFUTED — root `notify` serving `PROCESS_IR_CAPABILITY_UNSUPPORTED`: that refusal comes from the
+   pre-existing generic root rule ("a connector_call sequence may contain only connector_call and
+   linear steps") which every kind the root does not admit shares.
+   `PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY` names a body the root is not, and re-coding it
+   for `notify` alone would make its root refusal differ from every other inadmissible kind's. If you
+   still consider this wrong, say so and I will change it.
+
+6. GOLDEN MIGRATION — PARTLY FIXED, WITH A RECORDED DEVIATION.
+   Fixed, and you were right that it was missing: `golden-000005` had NO permanent byte-parity pin.
+   The equality was measured by hand mid-implementation and never written down, so every later change
+   to region derivation, connector resolution and the plan invariants ran without it. It is now
+   pinned (`test_the_connector_scoped_double_guard_golden_is_reproduced_from_canonical_ir`), and the
+   new `golden-000075` is asserted against the archived live B2 capture with ids/families/labels
+   blinded (`test_the_recovery_golden_matches_the_archived_live_capture`).
+   DEVIATION: the two corpus cases are NOT re-pointed to canonical rendering. Re-pointing them would
+   stop the legacy builder being exercised for those shapes, making the goldens photographs of the
+   code under test; today the corpus renders through the legacy ORACLE and a test asserts canonical
+   equality against it, which is a genuine differential. The acceptance criterion — both notify
+   goldens reproduced byte-identically from canonical IR — is met by those tests. Judge this
+   deviation: if you hold that the plan's migration is required anyway, say why the differential is
+   insufficient.
+
+7. SERVED ORDERING OMITTED THE MAP — FIXED; the try_catch ordering fact now names the optional single
+   `map_ref` between handlers.
+
+ALSO CHANGED, not from your findings: a pre-existing control test authored a `process_call` in a
+catch body to prove body-slot remapping. #156 made that kind admissible in the catch TERMINAL, so the
+witness silently became a test of the other rule; it now uses a `branch`, which remains inadmissible
+in a catch body in every slot.
+
+WHAT I WANT FROM THIS EVALUATION
+- Is each of the seven genuinely closed?
+- Did any fix introduce a new defect, or weaken an existing guard?
+- Are the two judgement calls (finding 5's refutation, finding 6's deviation) sound?
+- Anything the plan requires that is still missing.
+
+END with a verdict on its OWN FINAL line: exactly 'VERDICT: NO ISSUES' or 'VERDICT: ISSUES FOUND'.

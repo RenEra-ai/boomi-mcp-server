@@ -55,6 +55,7 @@ from ...errors import (
     PROCESS_IR_COMPILE_VERIFIER_FAILED,
     PROCESS_IR_COMPILE_XML_INVALID,
 )
+from ...models.process_ir import template_defeats_caught_error_binding
 from ...models.process_ir_tokens import CAUGHT_ERROR_PROPERTY_ID, NOTIFY_LEVELS
 from .contracts import (
     BranchInputV1,
@@ -645,6 +646,13 @@ def _pre_notify(inp) -> Optional[str]:
         return "notify message_template is blank"
     if CAUGHT_ERROR_PROPERTY_ID not in inp.message_template:
         return "notify message_template does not reference the caught-error property"
+    # The BINDING rule, not just the presence rule. A mutated input carrying a
+    # JSON body reaches emission with the token present and still emits a
+    # quote-wrapped `{1}` that binds nothing — the parser refuses it, and this
+    # boundary must refuse it too or the guard only covers the door it is not
+    # needed at.
+    if template_defeats_caught_error_binding(inp.message_template):
+        return "notify message_template would be quoted whole, unbinding the caught error"
     return None
 
 

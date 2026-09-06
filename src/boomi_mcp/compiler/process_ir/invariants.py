@@ -862,6 +862,19 @@ def _check_region_containment(
                 and int(match.group(1)) == successor_index
             ):
                 escapes += 1
+                # A HANDLER ends the walk: the next region owns everything past
+                # it. A separator MAP does not — it is still on this region's
+                # success path, and stopping here left ITS successor unchecked,
+                # so a mapped chain consistently rewired to run authored handlers
+                # 0 -> 4 -> 2 -> 6 passed with every node reachable. Keep walking
+                # through the map, with the successor requirement advanced to the
+                # step after it, so the handoff has to land on the next authored
+                # handler and not merely on a legal-looking one.
+                if by_id[current].semantic.semantic_kind == "map":
+                    successor_index += 1
+                    for out in outbound[current]:
+                        if out.kind != "catch":
+                            stack.append(out.target_node_id)
                 continue
             raise _fail(code, _SEMANTIC_PHASE, node.source_path, message, node.node_id)
         for out in outbound[current]:
@@ -1007,6 +1020,73 @@ def check_emission_plan_invariants(
             "",
             "the emission plan has no nodes",
         )
+
+    # --- #156: catch-block ALLOCATION, derived independently ----------------
+    #
+    # The plan required this and the emitted-flag check above does not supply it:
+    # flags say nothing about ORDER. Every other ordering check here compares the
+    # plan's order to the CFG's, so a consistently mutated pair agrees with
+    # itself — measured, a plan allocating catch1 before the second handler, and
+    # one with the two catch blocks swapped, both passed.
+    #
+    # So the expected layout is derived from the AUTHORED provenance rather than
+    # from the CFG's node order: the main spine first, then each handler's
+    # recovery block in authored handler order, each block contiguous. A handler's
+    # authored index is a fact about the document, not about the lowering, so a
+    # lowering that reordered blocks cannot also move the yardstick.
+    catch_nodes = [
+        node for node in nodes
+        if getattr(node, "cfg_node_id", None) in catch_cfg_node_ids
+    ]
+    if catch_nodes:
+        main_max = max(
+            (node.ordinal for node in nodes
+             if getattr(node, "cfg_node_id", None) not in catch_cfg_node_ids),
+            default=0,
+        )
+        if min(node.ordinal for node in catch_nodes) < main_max:
+            raise _fail(
+                PROCESS_IR_COMPILE_EMISSION_PLAN_INVALID,
+                _PLAN_PHASE,
+                catch_nodes[0].source_path or "",
+                "a recovery block is allocated before the end of the main path",
+            )
+
+        def _handler_index(node):
+            # `/body/steps/<n>/catch_body/...` — the authored handler that owns
+            # this recovery node.
+            match = re.match(r"^/body/steps/(\d+)/catch_body/", node.source_path or "")
+            return int(match.group(1)) if match else -1
+
+        owners = [_handler_index(node) for node in catch_nodes]
+        if -1 in owners:
+            raise _fail(
+                PROCESS_IR_COMPILE_EMISSION_PLAN_INVALID,
+                _PLAN_PHASE,
+                catch_nodes[owners.index(-1)].source_path or "",
+                "a recovery node carries no owning handler provenance",
+            )
+        # Blocks appear in authored handler order and each is contiguous: the
+        # owner sequence must be non-decreasing AND change owner at most once per
+        # distinct handler.
+        if owners != sorted(owners):
+            raise _fail(
+                PROCESS_IR_COMPILE_EMISSION_PLAN_INVALID,
+                _PLAN_PHASE,
+                catch_nodes[0].source_path or "",
+                "recovery blocks are not allocated in authored handler order",
+            )
+        seen_owners = []
+        for owner in owners:
+            if not seen_owners or seen_owners[-1] != owner:
+                seen_owners.append(owner)
+        if len(seen_owners) != len(set(seen_owners)):
+            raise _fail(
+                PROCESS_IR_COMPILE_EMISSION_PLAN_INVALID,
+                _PLAN_PHASE,
+                catch_nodes[0].source_path or "",
+                "a recovery block is not contiguous",
+            )
 
     # --- #156: the recovery hand-off, checked against the CONTRACT ----------
     #

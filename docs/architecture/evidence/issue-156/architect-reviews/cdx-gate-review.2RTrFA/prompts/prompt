@@ -1,0 +1,483 @@
+You are the ARCHITECT. This is EVALUATION 2 of a hard cap of 3 (`docs/architecture/COMPLETION_WORKFLOW_RULES.md`).
+
+REPO: /Users/gleb/Documents/Projects/Renera/boomi-mcp-server, branch `codex/issue-156`, HEAD `48d7ea0`.
+SCOPE: the FIX DELTA answering your evaluation-1 findings —
+  `git diff ae03d1dc4e6c1a8ea0b1e8d40b7c04e5e4f3c9a0..HEAD`  (use `git log --oneline -3` to orient;
+  the previous review ran at `ae03d1d`). Review the FIX, not the whole slice again.
+The full non-KB suite is GREEN at HEAD: 11629 passed, 19 skipped, 0 failed. Do not re-run it.
+  PYTHONPATH=src PYTHONDONTWRITEBYTECODE=1 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 BOOMI_LOCAL=true \
+  BOOMI_DOCS_ENABLED=false BOOMI_GOTCHAS_ENABLED=false .venv/bin/python -m pytest <target> -q -p no:cacheprovider
+
+HOW EACH OF YOUR SEVEN FINDINGS WAS ANSWERED. Judge whether each is genuinely closed, and whether
+the fix introduced anything new. Every claim below was reproduced before it was fixed.
+
+1. CONTINUE GRAMMAR TOO RESTRICTIVE — FIXED. `_is_serialized_region_chain` no longer requires the
+   root to begin at a handler: the prefix is whatever precedes the first handler, and the handler
+   suffix must be `handler (map_ref? handler)*`. `_check_serialized_region_chain` validates the
+   prefix vocabulary explicitly (`connector_call` + `_ROOT_LINEAR_KINDS`) because that branch
+   returns before the connector_call-sequence rules run. Verified: `[call,handler,handler]` and
+   `[call,map,handler,handler]` now compile; `[call,handler]` (pre-existing) unchanged;
+   `[call,handler(stop),handler]` and a final `continue` still refused.
+
+2. CONTAINMENT DID NOT IDENTIFY THE SUCCESSOR — FIXED. `_check_region_containment` now requires the
+   escape to land on the declaring handler's own authored index + 1, derived from its `source_path`
+   via `_ROOT_STEP_PATH`, instead of accepting any root-level map or handler. I could not rebuild
+   your consistently-rewired 0->2->1 mutant — both attempts were caught incidentally by the
+   reachability invariant — but I did not treat that as a refutation: incidental capture by another
+   check is not this check being precise, and the finding was sound by inspection.
+
+3. INDEPENDENT EMISSION SAFEGUARDS MISSING — FIXED, and this was the most serious. Reproduced: a CFG
+   carrying `abort_on_error=False` on a recovery call, with a plan lowered FROM that CFG, passed both
+   checkers and emitted `abort="false"` — the silent flip the issue forbids. Root cause exactly as
+   you framed it: every plan check asks "does the plan agree with the CFG", which is the one question
+   a lowering defect answers yes to. `check_emission_plan_invariants` now reads the EMITTED input
+   against the contract itself — both flags true, no outgoing transition — with no CFG counterpart to
+   agree with. Both flags pinned by mutation with the unmutated control passing.
+   NOT done: independently deriving main-first/catch-block ORDER. Judge whether that half is still
+   required given the emitted-input check, or whether it remains a real gap.
+
+4. NOTIFY TEMPLATE — FIXED. My brace ban was cut on the wrong predicate: the hazard is the escaper's
+   JSON quote-wrapping, which a JSON ARRAY triggers with no brace at all (`["<token>"]` emits
+   `'["{1}"]'`). The rule is recut as "would this template defeat the binding" — leading `[` after
+   stripping, or any brace — spelled in the model rather than imported from the emitter layer, and
+   written to be no narrower than the escaper's own test. The preflight now type-checks before
+   `.strip()`, so `message_template=None` returns a refusal instead of raising AttributeError.
+
+5. DIAGNOSTIC MAPPINGS — TWO FIXED, ONE REFUTED.
+   Fixed: the notify template rules serve `PROCESS_IR_SCHEMA_INVALID` via a new `_schema_invalid_error`
+   (a template CONTENT rule is not a list bound or an ordering rule); and `_translate_pydantic_error`
+   gained `catch_body`, so a `process_call` in catch STEPS serves the connected-call identity like
+   every other call-capable body.
+   REFUTED — root `notify` serving `PROCESS_IR_CAPABILITY_UNSUPPORTED`: that refusal comes from the
+   pre-existing generic root rule ("a connector_call sequence may contain only connector_call and
+   linear steps") which every kind the root does not admit shares.
+   `PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY` names a body the root is not, and re-coding it
+   for `notify` alone would make its root refusal differ from every other inadmissible kind's. If you
+   still consider this wrong, say so and I will change it.
+
+6. GOLDEN MIGRATION — PARTLY FIXED, WITH A RECORDED DEVIATION.
+   Fixed, and you were right that it was missing: `golden-000005` had NO permanent byte-parity pin.
+   The equality was measured by hand mid-implementation and never written down, so every later change
+   to region derivation, connector resolution and the plan invariants ran without it. It is now
+   pinned (`test_the_connector_scoped_double_guard_golden_is_reproduced_from_canonical_ir`), and the
+   new `golden-000075` is asserted against the archived live B2 capture with ids/families/labels
+   blinded (`test_the_recovery_golden_matches_the_archived_live_capture`).
+   DEVIATION: the two corpus cases are NOT re-pointed to canonical rendering. Re-pointing them would
+   stop the legacy builder being exercised for those shapes, making the goldens photographs of the
+   code under test; today the corpus renders through the legacy ORACLE and a test asserts canonical
+   equality against it, which is a genuine differential. The acceptance criterion — both notify
+   goldens reproduced byte-identically from canonical IR — is met by those tests. Judge this
+   deviation: if you hold that the plan's migration is required anyway, say why the differential is
+   insufficient.
+
+7. SERVED ORDERING OMITTED THE MAP — FIXED; the try_catch ordering fact now names the optional single
+   `map_ref` between handlers.
+
+ALSO CHANGED, not from your findings: a pre-existing control test authored a `process_call` in a
+catch body to prove body-slot remapping. #156 made that kind admissible in the catch TERMINAL, so the
+witness silently became a test of the other rule; it now uses a `branch`, which remains inadmissible
+in a catch body in every slot.
+
+WHAT I WANT FROM THIS EVALUATION
+- Is each of the seven genuinely closed?
+- Did any fix introduce a new defect, or weaken an existing guard?
+- Are the two judgement calls (finding 5's refutation, finding 6's deviation) sound?
+- Anything the plan requires that is still missing.
+
+END with a verdict on its OWN FINAL line: exactly 'VERDICT: NO ISSUES' or 'VERDICT: ISSUES FOUND'.
+
+
+=== ARCHITECT DESIGN PLAN (verbatim) ===
+# Issue #156 — Notify and terminal recovery subprocesses
+
+## 1. Change shape and implementation order
+
+Ground this implementation in checkout `b07babeb3752d337ffa307c4c486e181e703a2c2`, which was clean during inspection. Record the implementation’s actual starting SHA again before editing.
+
+This change adds catch-only Notify, terminal recovery Process Calls, and explicitly continued connector-scoped error regions. It preserves the existing replay-policy and evidence authorities.
+
+Implement in this order:
+
+1. **T4 — Notify:** model and body admission, frozen compiler contracts, canonical emitter registration, diagnostics, projection, and single-region legacy parity.
+2. **Independent live oracle:** capture and execute a reference catcherrors → Process Call graph on `renera`, with `wait="true"` and `abort="true"`, before implementing catch-call lowering.
+3. **T5 — recovery:** catch-terminal calls, the Notify-prefix exception, recovery-specific path mixing, explicit success continuation, bounded CFG regions, and deterministic catch-block allocation.
+4. **Integration:** reproduce the second Notify golden, exercise replay/evidence/materialization, regenerate derived artifacts, and complete the required validation gates.
+
+Keep #158 serialized after this issue merges. Do not transfer `error_subprocess_ref` into canonical authoring.
+
+## 2. Contract decisions
+
+### Catch-only Notify
+
+Add `NotifyNodeV1` with:
+
+- `kind="notify"`;
+- required `level`, exactly `"INFO"`, `"WARNING"`, or `"ERROR"`;
+- required nonblank `message_template` containing `meta.base.catcherrorsmessage`;
+- ordinary inherited node identity/label fields.
+
+Preserve the authored template bytes after validation. Repeated caught-error tokens are supported and all receive the existing substitution. Do not expose Notify title, event settings, delivery channels, or arbitrary binding configuration.
+
+`TryCatchBodyStepV1` currently aliases `ControlBodyStepV1`. Preserve that alias for protected steps. Derive a new `TryCatchCatchBodyStepV1` from the shared union’s actual members plus `NotifyNodeV1`; use it only for `TryCatchCatchBodyV1.steps`.
+
+Notify belongs to the global `ProcessNodeV1` vocabulary so schema/discriminator/reference discovery sees it. Global vocabulary membership does **not** confer placement permission: keep Notify out of `LinearNodeV1`, `_LINEAR_MEMBERS`, `_ROOT_LINEAR_KINDS`, and `ControlBodyStepV1`, and explicitly reject it at root and in every non-catch body.
+
+This follows the current distinction between node discovery and contextual admission in `models/process_ir.py`, including `_NODE_KIND_TAGS`, `SequenceNodeV1`, and the body annotations.
+
+### Terminal recovery Process Call
+
+Add `ProcessCallNodeV1` only to `TryCatchCatchBodyV1.terminal`.
+
+Extend the shared `process_call_placement_verdict()` with a stable internal recovery-context argument. Both the model validator and compiler body walker must invoke this same authority.
+
+The accepted recovery forms are:
+
+```text
+catch: process_call
+catch: notify → process_call
+catch: notify → notify → … → process_call
+```
+
+The call must be terminal. Every prefix step must be Notify. Message, Set DDP, connector, cache, and control prefixes remain refused. No successor, Return Documents binding, or trailing synthetic Stop is added.
+
+Preserve `PROCESS_IR_CAPABILITY_PROCESS_CALL_RETURN_PATH_BINDING_UNSUPPORTED` for calls authored as steps or followed by another shape. #176 remains the owner of connected calls; it is not a dependency for this terminal form.
+
+### Recovery-specific connector mixing
+
+The current `_walk_try_catch()` passes connector ancestry into both legs. Change only catch-entry handling:
+
+- Ignore inherited upstream/protected connector ancestry when checking a terminal recovery call.
+- Continue rejecting a connector **inside the same catch body** before that call.
+- Preserve ordinary root, try, Branch, and Decision ancestry checks.
+- Keep recovery context local to the catch traversal; it cannot authorize a sibling or later non-recovery call.
+
+The exemption concerns placement, not effect analysis. Recovery child symbol resolution, effect requirements, and state-read checks still run.
+
+### Required Process Call flags
+
+Keep `ProcessCallNodeV1` defaults unchanged:
+
+```text
+wait = True
+abort_on_error = False
+```
+
+On a recovery terminal, require the validated values to satisfy:
+
+```text
+wait is True
+abort_on_error is True
+```
+
+Check `wait` first, then `abort_on_error`. Report the offending field through a new nonretryable semantic identity:
+
+`PROCESS_IR_SEMANTIC_RECOVERY_PROCESS_CALL_INVALID`
+
+Omitting `abort_on_error` therefore produces a validation-visible refusal. Omitting `wait` remains valid. Validate values rather than `model_fields_set`, so serialization and reparsing preserve the rule.
+
+Lowering copies the two values unchanged. The resulting wire attributes are `wait="true"` and `abort="true"`.
+
+### Sequential connector regions
+
+Merely removing the “nothing follows Try/Catch” guard is unsafe: current try bodies end in actual Stop/Return Documents terminals, and lowering discards the continuation predecessor.
+
+Add **`ContinueNodeV1`**, an explicit structural terminal admitted only in the protected body of a nonfinal connector-scoped region. It emits neither a CFG node nor XML.
+
+Define the supported sequence as:
+
+```text
+connector region, try terminal Continue
+[optional existing Map step]
+connector region, try terminal Continue
+…
+connector region, try terminal Stop or Return Documents
+```
+
+Decisions:
+
+- Support arbitrary N regions, with tests covering at least three.
+- Only successful protected execution continues. Every catch remains terminal and join-free.
+- Preserve existing legal root prefixes.
+- Permit a source-protecting connector region at the beginning of such a chain; retain the refusal for a bare source-position connector-scope handler outside this chain.
+- Between continuing regions, admit only the Map separator needed for the existing golden, immediately before the next handler. Do not introduce arbitrary connector, Process Call, or control continuations.
+- A non-producing protected connector cannot Continue.
+- Reject Continue at root, in catches, Branch/Decision bodies, process scope, or a final/dangling region.
+- Process-scope Try/Catch remains the sole-root form. Nested handlers remain unsupported.
+- Never reinterpret an authored Stop as Continue.
+
+The double Notify golden requires this source-position extension and a Map between handlers. Its flattened main path is:
+
+```text
+Start1 → handler2 → source3 → map4 → handler5 → target6 → Stop7
+```
+
+A physical catcherrors region has no authored closing shape. Therefore a permitted intervening Map belongs conservatively to the preceding **effective CFG protected region**, even though its source path is outside that handler’s literal `try_body`. The next sibling handler is the boundary. Runtime QA must establish the retry-isolation assumption before this behavior ships.
+
+### Notify error identity — S22
+
+Choose **mapping to existing canonical taxonomy codes**, replacing the old identity at both producers and advertisements:
+
+| Condition | Code |
+|---|---|
+| Malformed Notify, invalid level, missing/blank/non-string template, missing caught-error token | `PROCESS_IR_SCHEMA_INVALID` |
+| Unknown configuration fields | `PROCESS_IR_SCHEMA_UNKNOWN_FIELD` |
+| Notify outside an admitted catch body, including the legacy unwired-catch refusal | `PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY` |
+
+Do not add a Notify-specific canonical error family. Remove `PROCESS_NOTIFY_CONFIG_INVALID` from active producers and served error advertisements; retain historical mentions only in historical records or explicit negative tests.
+
+This avoids an advertised identity with no canonical producer while preserving useful distinctions already owned by `ERROR_TAXONOMY`.
+
+## 3. File-by-file implementation
+
+Paths below are relative to the repository root.
+
+### Models and validation authority
+
+| File | Exact changes and reason |
+|---|---|
+| `src/boomi_mcp/models/process_ir_tokens.py` — new | Define import-safe caught-error token constants. Move the existing canonical `CAUGHT_ERROR_PROPERTY_ID` and `CAUGHT_ERROR_PROPERTY_NAME` values here; compiler contracts re-export them. Models must not import the compiler or legacy builder package. |
+| `src/boomi_mcp/models/process_ir.py` | Add `NotifyNodeV1`, `ContinueNodeV1`, and their global vocabulary/discriminator/export entries. Derive `TryCatchCatchBodyStepV1` from `ControlBodyStepV1`; change only catch `steps`. Add ProcessCall to catch terminals and Continue to protected terminals with enclosing-context validation. Keep other body unions unchanged. |
+| Same file | Extend `process_call_placement_verdict()` and `_check_process_call_terminal_form()` with the recovery context and flag verdict. Invoke them from `TryCatchCatchBodyV1._catch_body_rules()`. Preserve existing cache and terminal checks. |
+| Same file | Update `SequenceNodeV1._sequence_rules()` and Try/Catch placement validation for the explicit serialized-region grammar. Validate Continue has the required next sibling and optional Map separator; reject continuation after actual terminals. Update `_walk_controls()` so its previous assumption that Try/Catch cannot contain calls no longer skips required context handling. |
+| Same file | Update `_translate_pydantic_error()` so catch `steps` containing a ProcessCall receive the same connected-call refusal as other call-capable bodies. Register the recovery code in `_CUSTOM_ERROR_CODES`, `_MESSAGES`, and `_REMEDIATION`; use schema-invalid classification for malformed Notify text rather than Exception’s cardinality classification. Update stale terminal/placement docstrings and remediations. |
+| `src/boomi_mcp/compiler/process_ir/body_capabilities.py` | Let `BODY_SLOT_AUTHORITIES_V1` derive the changed catch rows from annotations; do not hand-maintain a parallel capability matrix. `_walk_body()` invokes the shared recovery placement/flag verdict. `_walk_try_catch()` resets inherited connector mixing only for its catch traversal. `_check_try_catch_placement()` enforces the same serialized grammar as the model. |
+| `src/boomi_mcp/errors.py` | Add `PROCESS_IR_SEMANTIC_RECOVERY_PROCESS_CALL_INVALID` and its `ERROR_TAXONOMY` entry, owned by #156 and nonretryable. Reuse existing canonical codes for Notify. |
+| `src/boomi_mcp/compiler/process_ir/diagnostics.py` | Add the recovery-call message and field-specific remediation. Preserve the existing connected-call identity and remediation toward #176. |
+| `src/boomi_mcp/compiler/process_ir/semantic_validation/validation_policy.py` | Include the new semantic code in the policy’s closed diagnostic universe. It must remain a blocking validation failure, not a demotable warning. This is the current path; the issue’s top-level `validation_policy.py` path is stale. |
+
+### Frozen contracts and emission
+
+| File | Exact changes and reason |
+|---|---|
+| `src/boomi_mcp/compiler/process_ir/contracts.py` | Add frozen `NotifySemanticV1(semantic_kind="notify", level, message_template)` to `CfgSemanticV1`, and `NotifyInputV1(emitter_kind="notify", level, message_template)` to `EmitterInputV1`, including exports. Both retain the raw template. |
+| Same file | Add `TryCatchSemanticV1.success_mode`, with `"terminal"`/`"continue"` values copied from authored syntax. This gives invariants evidence for authorized continuation without storing caller-authored region membership. Continue gets no CFG semantic or emitter input. Re-export the caught-error constants from the import-safe module. |
+| Same file | Preserve `CatchErrorsInputV1` as the XML-facing retry-count input. Preserve existing `TryCatchSemanticV1.source_replay_policy`; do not duplicate policy into an unrelated wire field. |
+| `src/boomi_mcp/compiler/process_ir/emitter_registry.py` | Add `_emit_notify`, `_pre_notify`, and the nineteenth registration: key `"notify"`, `NotifyInputV1`, shape type `"notify"`, `CAPABILITY_PROCESS_IR_V1`, `EXACT_ONE`, `_no_requirements`. `_pre_notify` validates malformed constructed inputs using `PROCESS_IR_COMPILE_EMITTER_INPUT_INVALID`. |
+| Same file | `_emit_notify` performs exactly `rendering._escape_message_format_text(inp.message_template).replace(CAUGHT_ERROR_PROPERTY_ID, "{1}")`, then calls `render_notify`. XML escaping remains inside the renderer. `emitter_revision()` updates through its existing derivation; do not hand-bump `_EMITTER_REVISION_WIRE_VERSION`. |
+| `src/boomi_mcp/categories/components/builders/process_emitters/rendering.py` | **No renderer changes.** Reuse `render_notify` unchanged, including fixed notification attributes, track binding, title, and XML escaping. Pin its existing caught-error literal against the canonical constant in tests. |
+| `src/boomi_mcp/categories/components/builders/process_emitters/legacy.py` | **No Notify emission changes.** Preserve `_emit_notify` as the independent legacy differential oracle, including escape-then-substitute order. |
+
+The issue’s request that “lowering preserves” escaping order is implemented end to end, not by moving escaping into lowering. `lowering.py` expressly describes pure passes that do not handle XML escaping; existing Exception emission already demonstrates the appropriate raw-input/emitter-boundary split.
+
+### CFG, region derivation, and invariants
+
+| File | Exact changes and reason |
+|---|---|
+| `src/boomi_mcp/compiler/process_ir/lowering.py` | Extend `_semantic_for()` and `_emitter_input_for()` for Notify and the handler success mode. Notify is an ordinary linear catch node, never an exit. Preserve ProcessCall flag copying and `_EXIT_KINDS["process_call"]`. |
+| Same file | Split `_lower_try_catch_children()` into protected-success lowering and deferred catch lowering. `lower_process_ir_to_cfg()` lowers the complete successful root spine first and queues catch bodies in authored handler order. Continue returns the preceding protected node as the continuation predecessor; real terminals clear it. Drain queued catches only after the main terminal. |
+| Same file | Preserve `_CfgBuilder.finalize_edges()` ordering: each handler’s ordering edge precedes its catch edge. `lower_cfg_to_emission_plan()` assigns Start, all main-path shapes, then complete catch blocks in handler order. Account for existing synthetic shape allocation without hardcoded handler counts. No Stop follows a terminal recovery call. |
+| `src/boomi_mcp/compiler/process_ir/error_handling.py` | Replace unbounded protected-region use of `_collect_subtree()` in `derive_error_regions()` with a bounded success traversal. Stop before the next sibling handler; include its preceding permitted Map separator in the earlier effective protected region. Derive each catch subtree independently. |
+| Same file | Extend transient `ErrorRegionV1` with derived continuation/boundary information. Require disjoint protected regions, disjoint catch regions, and no recovery membership in any protected region. Keep `catch_region_node_ids` derived from all catch memberships. No authored membership flags or region IDs become authority. |
+| Same file | Preserve `validate_error_handling()`, `_producers_upstream_of()`, and call-scoped grant lookup semantics. Apply retries/effect checks only to each bounded protected region. Default/explicit `"forbid"` still produces `PROCESS_IR_SEMANTIC_RETRY_SOURCE_REEXECUTION`; connector scope still rejects `"allow_duplicates"`. Source-protecting connector regions therefore cannot use positive retry. |
+| `src/boomi_mcp/compiler/process_ir/connector_resolution.py` | Update `_walk_paths()` so a pending Map may cross a sibling handler through its **try edge only**, retaining the source/target profile obligation until the actual connector consumer. The catch fork uses scope-entry profile state but does not inherit the pending successful-path Map obligation. Preserve profile mismatch and non-producing Send/cardinality refusals. Keep grant minting and root projection unchanged. |
+| `src/boomi_mcp/compiler/process_ir/invariants.py` | Update `check_cfg_invariants()` and `_check_region_containment()` to recognize exactly the authorized success exit from a continuing protected body. First try/catch targets must still belong to their own typed bodies; full catch containment remains strict. Reject early escapes, skipped separators, wrong sibling targets, catch-to-main edges, and cross-catch edges. |
+| Same file | Update `_check_control_depth()` to count active nesting, not sequential siblings. A third sibling remains depth one; genuine Branch/Decision nesting and nested-handler restrictions remain enforced. |
+| Same file | Strengthen `check_emission_plan_invariants()` to independently derive main-spine-first, handler-ordered catch blocks. Verify one-to-one CFG/plan coverage, complete semantic/input correspondence, exact IDs/ordinals, contiguous blocks, edge labels/order, and geometry. A catch recovery call must have true flags, no successor, and no synthetic Stop. Notify must belong to a derived catch region. |
+| Same file | Retain the existing error identities: `PROCESS_IR_COMPILE_ERROR_REGION_INVALID`, `PROCESS_IR_COMPILE_CONTROL_WIRING_INVALID`, `PROCESS_IR_COMPILE_EMISSION_PLAN_INVALID`, and `PROCESS_IR_COMPILE_NONDETERMINISTIC`. Preserve entry, reachability, acyclicity, forward-edge, no-join, and terminal invariants. |
+
+For the double golden, deterministic allocation must be:
+
+```text
+main:   shapes 1–7
+catch1: shapes 8–10
+catch2: shapes 11–13
+```
+
+For N handlers, each catch block begins immediately after the preceding complete allocation. Catch blocks retain legacy `CATCH_SHAPE_Y=456.0` and dragpoint y `464.0`; “N catch rows” does not mean introducing N different vertical positions.
+
+### Semantic effects and materialization
+
+| File | Exact changes or preservation requirement |
+|---|---|
+| `src/boomi_mcp/compiler/process_ir/semantic_validation/effects.py` | Preserve `collect_retry_effect_findings()` consuming `derive_error_regions()`. Add explicit neutral state-transfer handling for Notify where closed semantic dispatch requires it. Logging occurs on recovery paths and must not enter the protected retry set. Do not grant replay safety to recovery calls or surrounding writes. |
+| `src/boomi_mcp/compiler/process_ir/semantic_validation/lineage.py` | Preserve `_visit()` forking catch state from scope entry and forwarding successful state to later regions. Extend neutral step handling for Notify as needed by its closed dispatch. Retain ProcessCall’s abnormal-exit classification; waiting does not make it a parent continuation. |
+| `src/boomi_mcp/authoring/process_materialization.py` | Preserve `ProcessComponentMaterializationPlanV1.process_ir` and `canonical_plan_material()` fingerprinting the canonical IR, emission plan, and effect capabilities. The new syntax and flags flow through those existing serialized inputs; no duplicate policy fingerprint field is needed. |
+| `src/boomi_mcp/authoring/workflow.py` | Preserve `build_artifact_descriptors()` and apply-time evidence rechecks. Validate through integration tests that recovery child references, dependency order, and root-scoped effect/grant context survive every recompilation. No new authoring route or envelope format is introduced. |
+
+The issue’s fingerprint wording is inaccurate: `source_replay_policy` currently resides on `TryCatchSemanticV1`, not `CatchErrorsInputV1`. Canonical materialization already fingerprints the preserved IR. Extend regression coverage of that authority instead of adding a second one.
+
+### Published contracts, legacy identity, and re-homing
+
+| File | Exact changes and reason |
+|---|---|
+| `src/boomi_mcp/categories/components/builders/process_flow_builder.py` | Replace every `PROCESS_NOTIFY_CONFIG_INVALID` producer in `_validate_catch_notify()` and the direct `build()` bypass refusal with the selected canonical classifications. Preserve existing legacy normalization, field paths, and successful output bytes. |
+| `src/boomi_mcp/categories/meta_tools.py` | Replace the old supported-error row and corresponding served prose. Publish canonical Notify/Continue schemas and the recovery flag/prefix contract through the existing ProcessIR selectors. Keep legacy DLQ syntax confined to explicitly legacy surfaces. |
+| `src/boomi_mcp/authoring/process_ir_projection.py` | Add `_NODE_FACTS["notify"]` and structural Continue facts. Rewrite `_NODE_FACTS["process_call"]` and `["try_catch"]`, whose current blanket no-prefix/no-continuation statements become false. Keep placement rows derived from `body_placement_rows()` and model annotations. Update reviewed-prose tripwires without turning prose allowlists into authority. |
+| `src/boomi_mcp/kb/design_doctrine.py` | Retain `EMITTABLE_SHAPE_REGISTRY["notify"]` as true and back it with canonical registration/execution witnesses. Correct `notification_logging`’s canonical recovery guidance: its asynchronous catch-subprocess recommendation conflicts with required synchronous recovery calls. |
+| `docs/architecture/PROCESS_IR_V1.md` | Update vocabulary, catch admission, flags, terminal-prefix exception, Continue grammar, effective region boundaries, and replay-policy preservation. Exclude legacy DLQ syntax from canonical examples. |
+| `docs/architecture/PROCESS_EMITTER_REGISTRY_V1.md` | Update the 18-key count to 19, add Notify’s input/registration row, and remove claims that Notify is absent. Continue has no registration. |
+| `docs/architecture/ISSUE_156_AUDIT_LEDGER.md` — new | Record baseline, gate roster, assumptions, fixture provenance, live evidence, findings/defect classes, checkpoints, and final validation attestations. Use the tracked completion policy and existing ledger template. |
+
+Re-home only #156’s Notify-specific doctrine/XML witnesses. #151 already established the surrounding extraction and reachability inventory; do not duplicate that work.
+
+### Generated artifacts
+
+| File | Required treatment |
+|---|---|
+| `tests/fixtures/process_ir/process_ir_v1.schema.json` | Regenerate from the existing canonical model schema serializer after union changes. |
+| `tests/fixtures/authoring_contract/process_ir_authoring_v1.contract.json` | Regenerate from `process_ir_authoring_revision_payload()` using the existing sorted, compact, ASCII serialization exercised by contract-parity tests. |
+| `tests/fixtures/authoring_contract/process_ir_authoring_v1.schema.json` | Leave unchanged: this is the authoring page DTO schema, unless its actual serialized structure changes. |
+| `tests/fixtures/m12_12/legacy_reachability_inventory.json` and generated architecture inventory tables | Regenerate through `scripts/rebaseline_m12_12_inventory.py`; do not hand-edit digests or generated tables. |
+| `tests/fixtures/wave_gate/goldens.jsonl` and the existing pytest-node manifest | Preserve immutable existing IDs/anchors. Add the new recovery fixture and test inventory entries using existing manifest conventions. |
+
+## 4. Tests and non-vacuous controls
+
+### Model, compiler, and contract tests
+
+| File | Changes |
+|---|---|
+| `tests/test_process_ir_models.py` | Extend closed vocabulary/schema pins; validate Notify fields, catch-only admission, recovery flags, and Continue grammar. Include serialization round trips and explicit rejection of root Notify/Continue. |
+| `tests/test_process_ir_rich_control_bodies.py` | Update the catch alias pin and `_SHIPPED_MATRIX_V1`: Notify only in catch steps, ProcessCall only in catch terminals, Continue only in eligible try terminals. Preserve all unrelated rows. Independently assert catch-step members equal shared-step members plus Notify. |
+| `tests/test_process_ir_entrypoint_diagnostic_parity.py` | Extend `_atom()` for Notify and Continue; add valid recovery calls with authored abort true. Run parser/compiler differential cases, including mutated or `model_construct` inputs. #178’s compiler reparse must continue returning matching code and pointer. |
+| `tests/_process_ir_diagnostic_emissions.py` and `tests/test_error_taxonomy.py` | Add executable producer witnesses and taxonomy ownership for the recovery semantic code. Add Notify mapping witnesses without inventing unproduced identities. |
+| `tests/test_process_emitter_registry.py` | Remove Notify from absent keys; extend discriminator/registration equality and preflight tests. Assert `EXACT_ONE`, no symbol requirements, and malformed constructed-input refusal. |
+| `tests/test_process_ir_notify_recovery.py` — new | Concentrate Notify byte semantics, recovery prefix/flags, and canonical/legacy differential cases here. |
+
+Required placement pairs:
+
+- Catch Notify succeeds; the same Notify at root, in try, Branch, Decision, or a terminal slot fails.
+- Upstream/protected connector → catch Notify → terminal call succeeds.
+- The corresponding non-recovery connector → Branch/Decision call still fails.
+- Catch connector → call, Message → call, DDP → call, call-in-steps, and call → Stop fail.
+- A valid recovery sibling does not authorize an invalid ordinary sibling.
+- Omitted abort, explicit abort false, wait false, and both false fail at the correct field; default wait with explicit abort true succeeds.
+- Mutating either flag after model construction cannot bypass compiler validation.
+
+### CFG, replay, and materialization tests
+
+| File | Changes |
+|---|---|
+| `tests/test_process_ir_error_handling.py` | Replace blanket final-position assertions with explicit Continue-chain cases while retaining terminal/process-scope refusals. Test exact region membership for one, two, and three handlers, unequal catch lengths, permitted Map separators, source-entry chains, and dangling Continue. Preserve the complete #155 replay-policy matrix. |
+| `tests/test_process_ir_compiler_invariants.py` | Add mutations targeting bounded regions, ordering, continuation authorization, catch containment, flags, and terminal calls. Retain existing invariant cases. |
+| `tests/test_connector_call_mixed_flow.py` | Add valid source → Map → handler → consumer, wrong source/target profiles, catch scope-entry profiles, non-producing Continue, and pending-map leakage/loss controls. |
+| `tests/test_process_materialization_plan.py` and existing public authoring workflow tests | Exercise plan → compile → materialize dry-run for Notify recovery, double guards, and process-scope replay opt-in. Verify child reference resolution, dependency order, account relocation, and pre-mutation refusal. |
+| Existing effect/lineage tests | Prove a failed try’s state writes are absent from its catch, successful earlier-region state can reach a later region, and recovery activity never becomes retried protected work. |
+
+Each new invariant needs a valid baseline and a mutation that reaches that invariant:
+
+- **Bounded membership:** deliberately absorb region two or its catch into region one.
+- **Authorized continuation:** connect an earlier try step, actual Stop, or catch node to the next handler.
+- **Containment:** route a catch into another catch, main continuation, or sibling handler.
+- **Independent ordering:** interleave catches with the main path while updating both CFG and plan consistently. Comparing plan order only to CFG order must not let this pass.
+- **Ordinal allocation:** swap complete catch blocks, create an ordinal gap/duplicate, or alter block contiguity.
+- **Geometry:** alter catch shape or transition y.
+- **Depth:** three sibling regions pass; genuine excessive nesting still fails.
+- **Recovery semantics:** append Stop after the call, add an outgoing edge, alter wait/abort, or bind a different child ID.
+- **Notify emission:** reverse escape/substitute order, remove track binding, change level/message, or mutate registration/input type.
+- **Evidence isolation:** reuse a grant at another authored call path, operation, sibling region, or root; each unauthorized write must still fail.
+- **Apply-time authority:** stale/revoked evidence is refused by rechecking consumers before mutation.
+- **Fingerprint:** changing replay policy changes canonical plan material even when XML is unchanged; account-specific ID relocation does not change relocatable identity.
+
+### Existing goldens and coverage ownership
+
+The issue’s two Notify survivor fixtures are:
+
+1. `tests/fixtures/golden_xml/try_catch_notify_dlq_document_cache.xml` — `golden-000059`.
+2. `tests/fixtures/golden_xml/connector_scoped_trycatch_notify_dlq_document_cache.xml` — `golden-000005`.
+
+Freeze these bytes; do not regenerate them from the new compiler.
+
+For both, author canonical IR with the same references, labels, messages, retry counts, shape order, and envelope metadata. Compare:
+
+- exact `<configuration>` bytes against the legacy builder for the same graph;
+- complete emitted fixture bytes against the frozen file.
+
+Test apostrophes, XML metacharacters, JSON-looking templates, and repeated caught-error tokens. Preserve escape-then-substitute-then-XML-escape behavior exactly.
+
+Additional file changes:
+
+| File | Changes |
+|---|---|
+| `tests/_wave_gate_golden_corpus.py` | Move `_case_try_catch_notify_dlq_document_cache` and `_case_connector_scoped_trycatch_notify` to canonical materialization using the established `_canonical_envelope_case` pattern. Preserve `CASE_REGISTRY` keys and manifest IDs. Keep a separate legacy differential witness. |
+| `tests/test_builder_xml_invariants.py` | Re-home `notify_escaping_and_binding`, `test_inv_notify_quote_escaping_and_track_binding`, and the Notify portion of `display_null_prevention_attrs` to canonical/shared-renderer witnesses. Preserve invariant identities. |
+| `tests/test_doctrine_emitter_consistency.py` | Replace Notify’s legacy-only `_emit_full_catch_shapetypes()` witness with canonical compile/emit plus `registration_for("notify")`. Leave unrelated doctrine ownership intact. |
+| `tests/test_process_flow_builder_trycatch_dlq.py`, `tests/test_process_flow_builder.py`, `tests/test_integration_builder.py`, `tests/test_schema_template_process_flow.py` | Update legacy Notify error assertions to the selected canonical mappings; preserve successful legacy parity coverage. |
+| `tests/fixtures/golden_xml/catch_notify_terminal_process_call_live.xml` — new | Add the independently sourced, runtime-proven recovery fixture, its provenance record, canonical corpus renderer, and active manifest row. |
+| Existing authoring-contract, served-text, compiler-surface, and reachability tests | Update expected vocabulary/diagnostics and regenerated snapshots. Assert no legacy DLQ spelling appears in canonical schemas, projection entries, or canonical served examples. |
+
+There is a **third** Notify-named fixture, `try_catch_notify_dlq_document_cache_archetype.xml`, marked as #159’s transitional oracle. Preserve its coverage. Likewise, preserve `try_catch_dlq_error_subprocess.xml` as its existing legacy/deletion oracle; the new live golden is an additional fixture.
+
+For S22, execute every mapped failure through canonical parsing/public planning and the relevant legacy validation/bypass path. An injected advertisement of `PROCESS_NOTIFY_CONFIG_INVALID` must fail producer-coverage checking.
+
+## 5. Live evidence and completion gate
+
+`list_boomi_profiles()` confirmed `renera` exists. No new operability evidence was obtained in this read-only session; the subsequent inspection was interrupted. Existing stored components must not be treated as proof of execution.
+
+### Independent reference capture
+
+Before catch-call lowering is implemented, establish a reference on disposable `renera` using either:
+
+- a UI-authored parent and child; or
+- a frozen pre-implementation legacy oracle, subsequently demonstrated operable.
+
+The parent must contain a catcherrors recovery leg that invokes the child with:
+
+```xml
+wait="true" abort="true"
+```
+
+Capture both the direct catch-call form and the Notify → terminal-call composition, with no outgoing call connection or trailing Stop.
+
+Archive:
+
+- provenance method and pre-implementation source/hash;
+- parent and child component IDs, versions, full exported XML, and extracted configuration bytes;
+- exact called-process reference and call attributes;
+- runtime/environment and deployed package/version;
+- execution request IDs, execution records, relevant logs, and artifacts;
+- a unique run nonce linking the forced failure, catch notification, and child execution;
+- capture/extraction procedure and SHA-256 checksums.
+
+A component generated by the implementation under test and fetched back is not an independent oracle. Creation, retrieval, XML acceptance, UI visibility, or parent completion alone does not satisfy the gate.
+
+### Runtime proof
+
+Use an independently authored child with a nonce-marked observable log action and a terminal path.
+
+For the forced parent failure, require:
+
+1. execution evidence that the protected step failed;
+2. the caught-error Notify message, where present;
+3. a linked child execution or child process/shape log segment identifying the captured child version;
+4. the child’s nonce marker;
+5. parent/child terminal statuses.
+
+Run a successful protected-path control: the recovery child must not execute. Include a failing-child control demonstrating the parent observes the child failure with the captured synchronous/abort settings.
+
+For sequential regions, fail only the second connector and prove, in the same scoped QA engagement:
+
+- the source executes once;
+- the second connector executes its initial attempt plus configured retries;
+- the first recovery leg does not run;
+- the second recovery child runs once after retry exhaustion.
+
+This measurement gates the new region-boundary claim.
+
+### Required implementation validation
+
+Run affected model/compiler/emitter/invariant tests, public plan/materialization dry-runs, byte goldens, generated-artifact checks, and the full non-KB suite. Use the prescribed local invocation:
+
+```text
+PYTHONPATH=src .venv/bin/python -m pytest
+```
+
+Require the repository’s **Python 3.11 non-KB CI job**; a local interpreter run is not a substitute.
+
+Conduct one scoped initial `boomi-qa-tester` engagement through public MCP tools covering Notify, recovery invocation, acknowledged whole-process replay, and sequential-region isolation. Begin with profile discovery and pass `profile="renera"` to every account-scoped tool.
+
+Then commit the QA-validated tree and run the prescribed detached Codex review against the literal baseline. Every correction receives affected QA and a review covering its complete unreviewed delta. Record third-evaluation checkpoints, critical findings, and any properly filed/sequenced standard deferrals. The architect implementation review alone ends after its third evaluation; required correction validation and final-tree wave validation remain owed.
+
+Run the final wave gate with plan-fingerprint enforcement. Freeze the tree during validation and retain collector evidence proving the reviewed SHA and confirmed reviewer teardown.
+
+## 6. Risks and explicit resolutions
+
+- **The second Notify golden needs more than catch admission.** It requires a source-position connector guard, Map-to-connector resolution across a handler, and success continuation. Those are explicit changes above.
+- **Stop cannot double as continuation.** Continue is a new structural contract; it produces no twentieth emitter registration.
+- **Physical and lexical region boundaries differ around separators.** The permitted Map belongs to the preceding effective protected region. Keep its effects in retry analysis and require runtime isolation evidence.
+- **Golden XML proves bytes, not platform semantics.** The live gate must establish recovery child execution and sequential retry boundaries independently.
+- **Escaping belongs at emission.** Moving it into lowering would violate the existing compiler layering and risk double escaping.
+- **Replay policy is already owned by #155.** Preserve its semantics, call-path grants, root binding, and apply-time rechecks. A recovery path does not relax write-safety requirements.
+- **Notify admission must not leak through the shared union.** Global vocabulary discovery and body placement remain separate authorities with independent tests.
+- **Several issue paths and claims are stale.** Actual renderer paths include `categories/components/builders/`; validation policy lives under `semantic_validation/`; replay policy is fingerprinted through preserved IR rather than CatchErrors wire input.
+- **#151 re-homing is already established.** Migrate Notify’s surviving witnesses and manifests without duplicating the extraction or changing unrelated ownership.
+- **#176 remains separate.** Admit terminal calls only. No Return Documents binding, outgoing Process Call connection, or connected recovery continuation is implemented here.

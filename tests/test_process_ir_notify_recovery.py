@@ -92,15 +92,21 @@ def test_the_notify_level_vocabulary_has_exactly_one_authority():
 # Canonical vs legacy: the differential oracle
 # ---------------------------------------------------------------------------
 
-#: Templates chosen to exercise the escaper, not to look realistic: an
-#: apostrophe (doubled), XML metacharacters (escaped by the renderer), a
-#: JSON-shaped body (quote-wrapped by the escaper), and a repeated token (every
-#: occurrence binds).
+#: LEGAL templates chosen to exercise the escaper, not to look realistic: an
+#: apostrophe (doubled), XML metacharacters (escaped by the renderer), a leading
+#: bracket that is NOT JSON, and a repeated token (every occurrence binds).
+#:
+#: A JSON-shaped body used to sit here. It is now refused at both boundaries —
+#: the escaper quote-wraps it, which puts the substituted `{1}` inside the quotes
+#: and unbinds the caught error — so it belongs with the refusals, not here.
 _TEMPLATES = (
     "Integration catch path failed. Caught error: {0}".format(CAUGHT_ERROR_PROPERTY_ID),
     "it's broken: {0}".format(CAUGHT_ERROR_PROPERTY_ID),
     "<a> & \"b\" caught {0}".format(CAUGHT_ERROR_PROPERTY_ID),
-    '{{"error": "{0}"}}'.format(CAUGHT_ERROR_PROPERTY_ID),
+    # A LEADING BRACKET that is not JSON. The escaper leaves it alone and emits
+    # `[ERROR] caught {1}`, so it must stay authorable — an earlier version of
+    # the binding rule refused every leading `[` and took this with it.
+    "[ERROR] caught {0}".format(CAUGHT_ERROR_PROPERTY_ID),
     "{0} and again {0}".format(CAUGHT_ERROR_PROPERTY_ID),
     CAUGHT_ERROR_PROPERTY_ID,
 )
@@ -615,9 +621,9 @@ _NOTIFY_DLQ_DOCUMENT = {
                 "try_body": {
                     "steps": [
                         {"kind": "connector_call", "operation_ref": "$ref:DBOP",
-                         "action": "read", "label": "DB extract"},
+                         "action": "get", "label": "DB extract"},
                         {"kind": "connector_call", "operation_ref": "$ref:RESTOP",
-                         "action": "write", "label": "REST send"},
+                         "action": "send", "label": "REST send"},
                     ],
                     "terminal": {"kind": "stop"},
                 },
@@ -1132,7 +1138,7 @@ _CHAIN_DLQ_DOCUMENT = {
                 "kind": "try_catch", "scope": "connector", "retry": {"count": 0},
                 "try_body": {
                     "steps": [{"kind": "connector_call", "operation_ref": "$ref:DBOP",
-                               "action": "read", "label": "DB extract"}],
+                               "action": "get", "label": "DB extract"}],
                     "terminal": {"kind": "continue"},
                 },
                 "catch_body": {
@@ -1151,7 +1157,7 @@ _CHAIN_DLQ_DOCUMENT = {
                 "kind": "try_catch", "scope": "connector", "retry": {"count": 2},
                 "try_body": {
                     "steps": [{"kind": "connector_call", "operation_ref": "$ref:RESTOP",
-                               "action": "write", "label": "REST send"}],
+                               "action": "send", "label": "REST send"}],
                     "terminal": dict(_STOP),
                 },
                 "catch_body": {
@@ -1254,3 +1260,55 @@ def test_the_recovery_golden_matches_the_archived_live_capture():
     # ...and the attributes the capture exists to pin are NOT blinded away.
     assert 'abort="true"' in golden and 'wait="true"' in golden
     assert "<dragpoints/>" in golden  # terminal: no successor, no synthetic Stop
+
+
+def test_the_notify_goldens_cannot_take_the_canonical_corpus_route_yet():
+    """Why the two notify corpus cases still render through the legacy builder.
+
+    The architect asked for them to be re-pointed at `_canonical_envelope_case`,
+    and rejected — correctly — my first argument that doing so would make the
+    goldens photographs of the code under test: the frozen bytes stay frozen
+    either way, so the canonical route would genuinely add the normalize ->
+    compile -> late-bind -> materialize -> full-envelope coverage that the
+    shapes-level tests above do not have.
+
+    The blocker is not effort, it is a CAPABILITY the canonical surface does not
+    model. Both goldens drive a REST **POST** target, and
+    `CONNECTOR_CALL_CAPABILITIES_V1` registers only `get` and `patch` for the
+    REST family — so the graph is not authorable as a canonical `connector_call`
+    chain at all, and `compile_process_ir_v1` refuses it at
+    `PROCESS_IR_CAPABILITY_CONNECTOR_ACTION_UNSUPPORTED` before any envelope is
+    built. Connector capability rows are explicitly OUT of scope for #156 (the
+    issue assigns them to #155), so adding one to unblock a golden migration
+    would be this slice reaching into another's contract.
+
+    This test exists so the claim is checkable rather than asserted, and so it
+    FAILS the day a REST write intent is registered — at which point the
+    migration becomes possible and should be done.
+    """
+    from boomi_mcp.compiler.process_ir.connector_capabilities import (
+        CONNECTOR_CALL_CAPABILITIES_V1,
+        REST_FAMILY,
+    )
+
+    registered = {action for family, action in CONNECTOR_CALL_CAPABILITIES_V1
+                  if family == REST_FAMILY}
+    assert registered == {"get", "patch"}, (
+        "a REST write intent is now registered, so the notify goldens can take "
+        "the canonical corpus route — re-point them (issue #156 ARCH-156-r2-06): "
+        + repr(sorted(registered))
+    )
+
+    # ...and the refusal is real, not inferred from the table.
+    import _wave_gate_golden_corpus as corpus
+    from boomi_mcp.compiler.process_ir.diagnostics import ProcessIRCompileError
+    from boomi_mcp.compiler.process_ir.pipeline import compile_process_ir_v1
+
+    document = _doc([
+        {"kind": "connector_call", "operation_ref": "$ref:GETOP", "action": "get"},
+        {"kind": "connector_call", "operation_ref": "$ref:PATCHOP", "action": "post"},
+        dict(_STOP),
+    ])
+    with pytest.raises(ProcessIRCompileError) as excinfo:
+        compile_process_ir_v1(parse_process_ir_v1(document), corpus.error_symbols())
+    assert "PROCESS_IR_CAPABILITY_CONNECTOR_ACTION_UNSUPPORTED" in str(excinfo.value)
