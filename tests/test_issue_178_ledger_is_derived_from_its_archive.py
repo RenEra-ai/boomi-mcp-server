@@ -498,12 +498,70 @@ def test_no_ledger_names_an_in_repo_artifact_that_does_not_exist():
     assert offenders == {}, offenders
 
 
+#: The exemption set's own identity, pinned so that "FROZEN" is enforced rather
+#: than asserted in prose. Derived once by measurement from the four citations
+#: that did not resolve when the invariant landed; changing the set requires
+#: changing this constant, which is a deliberate and reviewable act rather than a
+#: silent line in a JSON file.
+#:
+#: This pin exists because the first version of this guard did NOT have it, and a
+#: reviewer broke it in one move: add a new dangling citation to a ledger, add
+#: that same path to the baseline, and all three tests passed. The freshness
+#: check below only ever looked in the other direction — that a baselined path is
+#: still missing — so new missing evidence could be grandfathered in silently.
+#: That is the same failure mode as an aggregate-a-set guard, one artifact along:
+#: a set that asserts a property of its members and never bounds its own size.
+_PATH_BASELINE_ENTRIES = 4
+_PATH_BASELINE_DIGEST = (
+    "331d35930a18e42ab090f92f449e8c97f5728c9129caad334ca7040ad7780700"
+)
+
+
+def _path_baseline_digest(mapping):
+    """A canonical digest of the exemption SET, not of the file.
+
+    Keyed and sorted, so a reordering is not a change; over the mapping alone, so
+    the file's explanatory comment stays editable prose. What it pins is exactly
+    the contract: which paths are excused, for which issue.
+    """
+    import hashlib
+
+    canonical = json.dumps(
+        {issue: sorted(paths) for issue, paths in sorted(mapping.items())},
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def test_the_path_citation_baseline_cannot_grow():
+    """FROZEN, enforced. The set is pinned by digest AND by count.
+
+    Both, deliberately: the digest is what makes the pin total, and the count is
+    what makes a failure legible — a reader who sees `5 != 4` knows immediately
+    that someone added an exemption, where a hash mismatch alone says only that
+    something moved.
+    """
+    baseline = json.loads(PATH_BASELINE.read_text())["unresolvable_by_issue"]
+    entries = sum(len(paths) for paths in baseline.values())
+    assert entries == _PATH_BASELINE_ENTRIES, (
+        "the frozen exemption set changed size ({0} != {1}). It may only SHRINK, "
+        "and only by making a citation resolve — never by excusing a new one. If "
+        "a citation genuinely became unresolvable, fix the citation or write the "
+        "artifact; do not add a row here.".format(entries, _PATH_BASELINE_ENTRIES)
+    )
+    assert _path_baseline_digest(baseline) == _PATH_BASELINE_DIGEST, (
+        "the frozen exemption set's CONTENTS changed while its size did not — an "
+        "exemption was swapped, which is a new exemption wearing an old one's "
+        "slot"
+    )
+
+
 def test_the_path_citation_baseline_is_frozen_minimal_and_still_accurate():
     """The baseline may not be padded, and may not outlive what it excuses.
 
-    Both directions, for the same reason as the citation baseline above: a
-    baseline listing paths that DO resolve is a licence to stop writing them, and
-    one that silently absorbed new entries would make the invariant decorative.
+    The companion direction to the freeze above: a baseline listing paths that DO
+    resolve is a licence to stop writing them.
     """
     baseline = json.loads(PATH_BASELINE.read_text())["unresolvable_by_issue"]
     assert baseline, "the frozen baseline is empty — the invariant above is untested"
