@@ -190,6 +190,7 @@ outcome and rationale.
 | 3 | L4 — Composite wave gate | window 3 / cumulative 3 | `ca2b051` (clean) | 0 unresolved | 0 unresolved | new: none — both earlier refusals were manifest and audit-record hygiene, not defect classes in the product. Resolved this window: `same-range-retirement-is-not-a-repair`. Recurring: none | **CLOSE-CLEAN** | The composite set is ONE evaluation, so its suite, manifest, determinism and fingerprint checks do not mint separate loops. Evaluation 1 refused on rows appended already tombstoned; evaluation 2 refused on an archived review round the ledger did not cite; evaluation 3 passes the whole set on the final tree. Both refusals were fixed rather than waived, and the correction applied between evaluations 2 and 3 belongs to L2, where it took its own QA and its own delta review before the entire wave set re-ran — so no earlier wave evidence is stale. Trend is monotone: two refusals, then none, with no product defect raised by this loop at any point. |
 | 4 | L6 — Owner-requested architect consultation | window 1 / cumulative 1 (roster addition recorded here) | `f1da5a6` + the current correction | 0 unresolved | 0 unresolved; 1 deferred row, narrowed | new: `overclaimed-served-text`, `placement-asserted-not-verified`. Recurring: `claim-measured-but-never-pinned` — THIRD instance, discharged structurally by the repo-wide ledger path-citation invariant, not patched again | **CONTINUE** | The gate raised three findings and one recommendation. All three findings are fixed in one batch; the recommendation is refuted on verified evidence. This is a fresh window, so no checkpoint was owed at the count — it is recorded because ADDING the loop is itself a checkpoint decision. `CONTINUE` rather than `CLOSE-CLEAN` because the batch mutates the tree and therefore owes its affected QA, a fix-only delta review and a full replay of the composite wave set BEFORE any closing decision; and because the one deferred row still has no placement, which is the owner's call and not a validation outcome. Trend: the consultation found real defects in what had already landed — including a false statement in the audit record itself — so the correct reading is that the previous close was premature on the RECORD, not that the loop is failing. |
 | 5 | L2 — Stage-2 repo commit review | window 3 / cumulative 6 | `9c86b50` (clean) | 0 unresolved | 0 unresolved | new this window: `artifact-exists-only-outside-the-index`, `guard-blind-to-the-shape-it-most-needs-to-see`, `frozen-set-that-is-not-frozen`. Resolved this window: all three, plus `claim-measured-but-never-pinned` (structurally) and `overclaimed-served-text`. Recurring: the unbounded-set FAMILY, third member — recorded as a family rather than three unrelated classes, because that is what makes the next instance recognisable | **CLOSE-CLEAN** | The checkpoint falls at evaluation 6, which carried one validated blocking finding (P2, machine-served contracts). Per the ordering rule the owed validation ran FIRST — the correction, its full suite, and evaluation 7 over the correction delta — and only then this decision. Evaluation 7 returned NO findings and independently re-derived the fix's own claim, so the loop closes normally rather than continuing. Trend across the window is improving and the improvement is real rather than arithmetic: round 5 raised none, round 6 raised one that a REVIEWER found by attacking a guard I had just written, round 7 raised none while confirming the repair. Zero critical residue; every finding in the window is fixed and validated on the current tree. |
+| 6 | L4 — Composite wave gate | window 1 / cumulative 4 | `5d0a4ab` (clean) | 0 unresolved | 0 unresolved | new: none. Resolved: none — this loop raised nothing | **CLOSE-CLEAN** | The REPLAY the wave rules require: the consultation's correction batch mutated golden-adjacent tests, so the ENTIRE composite set re-ran rather than the changed part, and no earlier wave evidence is carried forward. It passed on the first attempt at the final tree, unlike the original arc where two refusals had to be fixed first. Recorded as a fresh window because a correction re-opened the loop, not as a fourth strike against the old one. |
 
 Between rounds 2 and 3 an ADDITIONAL adversarial audit ran (six independent lenses over the
 `b07babe..HEAD` source diff, each finding refuted-by-default by three skeptics, plus a
@@ -251,6 +252,7 @@ record); the Notify `{1}` binds the real caught error at runtime; the platform l
 | Composite wave gate | 3 | `wave-gate/wave.B6jltI` | wave SHA `ca2b051`, clean tree, base `b07babe` | **PASS**, exit 0 captured directly to a file (no pipeline): full non-KB suite 11642 passed / 19 skipped against a cap of 30, 11661 required nodes, 76 active goldens rendered twice in isolated children and byte-compared, plan-fingerprint seam checked on 2 cases | n/a |
 | Stage-2 repo commit review | 6 | `commit-reviews/cdx-review.tPHvHl` | base `f1da5a6` → head `c8564c1`, clean tree | `completed`, collector exit 0; **1 finding (P2)**, reproduced and fixed — the frozen exemption set was not enforced as frozen | confirmed stopped |
 | Stage-2 repo commit review | 7 | `commit-reviews/cdx-review.GQz7Vs` | base `c8564c1` → head `9c86b50`, clean tree | `completed`, collector exit 0; **no findings** — and it independently re-derived the fix's own claim, reporting that the baseline pin rejects additions AND substitutions, which are the two mutants I hand-ran | confirmed stopped |
+| Composite wave gate | 4 (replay) | `wave-gate/wave.JVtqSY` | wave SHA `5d0a4ab`, clean tree, base `b07babe` | **PASS**, exit 0 captured directly to a file: full non-KB suite 11655 passed / 19 skipped against a cap of 30, 11674 required nodes, 76 active goldens rendered twice in isolated children and byte-compared, plan-fingerprint seam checked on 2 cases | n/a |
 
 Every row above is reproducible from the tracked archive: the run directory column names a path
 under `docs/architecture/evidence/issue-156/`, each is indexed in `index.jsonl` with its collector,
@@ -333,7 +335,12 @@ in full, so whichever is chosen is one action, not an authoring exercise.
 
 ## Closing report
 
-**Last validated tree.** `ca2b051` is the wave SHA — the last commit that changes anything the
+*(Superseded in part on 2026-09-07 by the owner-requested consultation and its correction batch.
+The paragraph below described the FIRST landing; the landing that stands is recorded at the end of
+this report. Both are kept, because a closing report that quietly re-points at a later tree stops
+being a record of what was validated when.)*
+
+**Last validated tree (first landing).** `ca2b051` is the wave SHA — the last commit that changes anything the
 composite gate measures. The commits after it add this report and the gate's own archived evidence,
 which no gate reads as input. The landing SHA is re-validated in CI by the required non-KB check on
 the exact commit that is fast-forwarded onto the integration branch, so the final tree is covered by
@@ -441,3 +448,42 @@ is an owner call and is best settled in the same pass.
 > - `test_the_notify_goldens_cannot_take_the_canonical_corpus_route_yet` is removed in the same pass —
 >   it exists only to fail when this work becomes possible, and its per-golden prerequisites are the
 >   checklist for doing it. Nothing else in the slice is waiting on anything.
+
+
+## Closing report — the landing that stands
+
+**Last validated tree.** `5d0a4ab` is the wave SHA of the replay, and the landing SHA is the commit
+that carries this section plus the replay's own archived evidence. As before, the landing SHA is
+re-validated in CI by the required non-KB check on the exact commit fast-forwarded onto the
+integration branch, so the final tree is covered by measurement.
+
+**Suite and manifests on the final tree:** 11655 passed, 19 skipped, 0 failed against a skip cap of
+30; 11674 required nodes; 76 active goldens rendered twice in isolated children and byte-compared;
+plan-fingerprint seam checked on two cases.
+
+**What the second arc changed.** An owner-requested architect consultation, its premises then
+verified by five falsification-first checks, found that the first landing had overstated one claim,
+understated one blocker, and asserted a document that did not exist. All three are corrected, and
+two further defects were found by the gates while correcting them — one by the QA agent attacking a
+guard I had just written, one by the reviewer attacking the guard I wrote to fix that. Loop tally
+for the second arc: L1 QA rounds 2-4, L2 rounds 4-7, L4 replay, plus L6 the consultation itself.
+
+| Loop | Evaluations (both arcs) | Outcome |
+| --- | --- | --- |
+| L1 — Stage-1 QA | 4 | PASS; rounds 2 and 3 clean, round 4 raised two findings, both fixed |
+| L2 — Stage-2 repo commit review | 7 | checkpoints 1 and 5, both `CLOSE-CLEAN`; rounds 3, 5, 7 clean |
+| L3 — Architect implementation review | 3 (the cap) | checkpoint 2 `CLOSE-CLEAN`; ended by the reviewer itself |
+| L4 — Composite wave gate | 4 | checkpoints 3 and 6, both `CLOSE-CLEAN` |
+| L5 — Terminal correction loop | 0 | never opened |
+| L6 — Owner-requested consultation | 1 | checkpoint 4 `CONTINUE`, then discharged by the batch above |
+
+**Residue.** Zero unresolved critical findings. One standard blocking-class row remains deferred —
+`ARCH-156-r2-06a`, reason class `blocked-by-mechanism`, now narrowed to the compile-gated corpus
+migration alone, with per-golden prerequisites measured and recorded. Three rows are `not-validated`
+or record a stated boundary rather than counting as passes.
+
+**Why the issue LANDS but still does not CLOSE.** Unchanged, and now better evidenced: the deferred
+row needs an already-filed, sequenced home, and only the owner authorises a filing. What DID change
+is that the decision is now cheap to act on — the enumeration is written out above, the residue is
+one route rather than a vague coverage gap, and #159 has been checked and found unsuitable as-is
+rather than cited on hope.

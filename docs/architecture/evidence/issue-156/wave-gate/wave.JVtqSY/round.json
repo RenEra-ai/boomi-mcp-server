@@ -1,0 +1,15 @@
+{
+ "collector": "wave_gate",
+ "durable_dir": "wave-gate/wave.JVtqSY",
+ "files": {
+  "wave-gate/wave.JVtqSY/manifests.log": "12fe85d444683401dad14c82b64bbc80d688b08d6487bb0e9038f81a762269ac",
+  "wave-gate/wave.JVtqSY/suite.log": "68ae4975c6f80663fcaef89b3b4b4965db4ff568dba4cd03c27ce747daec1792",
+  "wave-gate/wave.JVtqSY/summary.json": "674cb99d52fa79b1cb564856f0e781132e1df8b274d0107cb13075ff8271ba04",
+  "wave-gate/wave.JVtqSY/wave.log": "9a7576453df61a70744022b0e78a57fb11b03399b20d48aa9916e92b7a415992"
+ },
+ "logical_loop": "L4 (composite wave gate, replay after the consultation correction)",
+ "source_run_dir": "/tmp/wave.JVtqSY",
+ "status": "completed",
+ "verdict": "pass",
+ "wave_sha": "5d0a4ab88e56a199f7517d3edf5f995226b6fbbb"
+}
