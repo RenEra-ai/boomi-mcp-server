@@ -152,9 +152,14 @@ affected SHA/delta · disposition.
 | QA-156-r4-02 | "The citation invariant's extension allowlist misses the only genuine false citation in the tree — in #156's own ledger. It cites an architect-reviews run directory for the consultation (name elided — see below) which does not exist anywhere in the repo; the invariant does not see it because that suffix is not one of the eight listed extensions. Sized across the fourteen ledgers: 704 run-directory citations, of which exactly one resolves to nothing." | same | Medium | machine-served schemas/contracts | guard-blind-to-the-shape-it-most-needs-to-see | **Standard** | current delta | `fixed` on BOTH halves, because either alone would have been an instance patch. The false citation was mine and it was real: I cited an archive directory for the consultation that was never created, and could not be — the archive contract covers commit reviews, implementation-review turns and wave-gate runs, and it correctly REFUSED a plan-kind round rather than letting me file one under the wrong kind. The memo now cites where it actually lives. The guard was then widened to match archive run directories by SHAPE rather than by extension, and — the part the shape arm exposed — its resolver was taught to resolve DIRECTORIES: git tracks no directory of its own, so 335 correct run-directory citations across the ledgers had been resolving against nothing. NON-VACUITY: the exact citation the agent found was re-introduced as a mutant and now fails the guard. The offending path is NOT written out in this row, and that is the guard's contract rather than squeamishness: a backticked in-repo path is a CLAIM that the artifact exists, so quoting a defective citation in its own finding row would re-assert the very claim the row reports — the guard would fail on the record of its own success. Quote such a path unbackticked or describe it. |
 | SELF-156-r6-03 | The agent's own grading found one real mutant the new pins do not catch: a materializer that stopped honouring `description` changes no byte the pins compare, because they only ever pass its canonical empty value. The same holds for `extension_connections`. | recorded from the QA agent's adversarial grading, which classified every mutant BEFORE reading its result and discarded three no-ops wearing a mutant's clothes | n/a (self) | _(none — a stated boundary, not a defect)_ | pins-prove-less-than-they-appear-to | **Non-blocking** | current delta | `not-validated` as a defect, and recorded as the EXACT boundary of what the pins prove, which is the honest disposition. Three of the five envelope inputs are perturbed by the controls; the other two are only ever passed their canonical values, so a materializer that stopped honouring either would go unseen. The docstrings claim only what the controls establish — the name and the execution profile — so nothing served is false. Recorded because the agent volunteered it against its own result, and because the next person to widen these pins should start here. |
 | CDX-156-r6-01 | "The new citation guard does not enforce its promised frozen-baseline constraint. Newly missing artifacts can be exempted without any test failure. Adding a new dangling citation to a ledger and adding that path to the baseline passes all three new tests; I reproduced this with a fabricated report. This check establishes freshness, but never prevents the supposedly frozen baseline from growing, so new missing evidence can be silently grandfathered in." | Stage-2 repo Codex review, round 6, run dir `cdx-review.tPHvHl`, base `f1da5a6`, head `c8564c1` | P2 | machine-served schemas/contracts | frozen-set-that-is-not-frozen | **Standard** | current delta | `fixed` — CONFIRMED by reproducing the reviewer's exact move before touching anything: a fabricated citation plus a matching baseline row passed all three tests. The fix is a bidirectional pin — the exemption set is now frozen by DIGEST and by COUNT, so changing it requires changing a constant in the test, which is a deliberate reviewable act rather than a silent line in a JSON file. Both are asserted, not one: the digest makes the pin total, the count makes a failure legible. NON-VACUITY: two mutants hand-run — the reviewer's own attack now fails the freeze, and a same-size SWAP of one exemption for another fails it too, which the count alone would have missed. This is the third member of one family in this slice, and the family is worth naming: a set that asserts a property of its members and never bounds itself. It appeared as a hand-list that did not cover what it claimed, as a guard asserting every LISTED code has text rather than that the list covered the codes raised, and now as a set labelled FROZEN in prose with nothing enforcing it. Each time the words were true of the members and silent about the set. |
+| ARCH-156-r7-01 | "C cannot dissolve this validated blocking obligation by relabeling it. `fixed` is false; `finding-refuted` is unsupported; `severity-refuted` cannot erase a valid Standard blocking obligation merely because its remaining value is modest; `not-validated` is false. `deferred` remains the truthful disposition, requiring placement. Consequently, the ledger's assertion that C is already the cheapest legal path is incorrect." | owner-requested architect consultation, round 2 (memo at `.codex/plans/issue-156-placement.md`), attested `ok:true`; every claim below re-verified against the code and the live issue bodies before adoption | Standard | _(none — audit record, but it is ADVICE to the decision-maker)_ | false-legality-claim-in-the-record | **Standard** | current delta | `fixed` — CONFIRMED against the policy text and against my own sentence, which said in terms that outcome C "is the cheapest legal path". It is not a legal path at all as a disposition, and I had written that into the one section the owner would read before deciding. Corrected by walking the closed vocabulary explicitly, so a reader can check the reasoning rather than take a verdict. The consultation also supplied the form I had missed and which makes C legitimate: an explicit OWNER SCOPE DECISION withdrawing the requirement, recorded as that decision — never as technical evidence that the route exists or never mattered. Both prior precedents were checked and neither licenses the shortcut: #174's residue was classified non-blocking, and #180's enumerated work was implemented in its original slice. |
+| ARCH-156-r7-02 | "The prepared enumeration simultaneously promises preserved active IDs/case keys and a tombstone-plus-append transaction. Those promises conflict with the current manifest rules. Tombstoned cases and files must disappear; successor rows receive new identities." | owner-requested architect consultation, round 2 (memo at `.codex/plans/issue-156-placement.md`), attested `ok:true` | Standard | machine-served schemas/contracts | premise-unverified-behind-a-true-subclaim | **Standard** | current delta | `finding-refuted` — MEASURED, and the refutation is against my own first correction as much as against the finding. The finding's SUB-CLAIM is true: a tombstoned golden row does require its expected file deleted and its case absent from the registry, and `renderer` is an immutable payload field. Its PREMISE is false: no tombstone arises here, because both rows ALREADY carry `renderer: "process-component-v1"` — the identical renderer the existing canonical case `golden-000061` uses. `renderer` names the output shape, not the code path; the factory body decides the path. Re-pointing the two factories therefore changes no manifest field at all, and the original enumeration's promise to preserve registry keys and manifest ids was correct as written. MY OWN ERROR, recorded because it is the more useful half: I verified the sub-claim, found it true, and adopted the conclusion without checking whether a tombstone was required in the first place. A true fact was supporting a false conclusion and I confirmed the fact. The ledger's acceptance criteria were WORSE after my correction than before it, and stayed that way until a drafting critic re-derived the premise from the manifest rows. Verifying the citation a finding rests on is not the same as verifying the finding. |
+| ARCH-156-r7-03 | "D is technically reasonable, but 'one table row' understates its scope. POST becomes admissible to public compiler callers; the served capability projection and authoring-contract fingerprint change; `compiler_revision` changes. This is not confined to golden tests. I would not choose the half-D split." | owner-requested architect consultation, round 2 (memo at `.codex/plans/issue-156-placement.md`), attested `ok:true`; every claim below re-verified against the code and the live issue bodies before adoption | Standard | machine-served schemas/contracts | scope-understated-in-my-own-framing | **Standard** | current delta | `fixed` in the record: my framing of the ownership gap as "one table row" was accurate about the diff and misleading about the blast radius, and I had put that phrase in front of the decision twice. It is corrected to name what registering POST actually moves. The consultation also narrowed the OTHER half in my favour and I am recording that too, because it cuts against my own earlier caution: an independent probe compiled the double guard to byte-identical shapes after authored idempotency evidence and correct profile metadata, with NO production compiler change established — so `golden-000005` is three AUTHORING changes, not three compiler changes. |
+| SELF-156-r7-04 | The consultation withdrew its own earlier recommendation to cite #159 as already owning the residue, confirming the refutation recorded at `SELF-156-r6-02`. | owner-requested architect consultation, round 2 (memo at `.codex/plans/issue-156-placement.md`), attested `ok:true`; every claim below re-verified against the code and the live issue bodies before adoption | n/a (gate self-correction) | _(none)_ | recommendation-withdrawn-on-evidence | **Non-blocking** | current delta | `finding-refuted` stands, now agreed by the gate that made the claim. Recorded because it closes the loop honestly: the refutation was mine, made before acting, and the gate re-checked #159's body itself rather than deferring to me. Also verified in the same pass, and it changes the placement argument materially: #155's own description DID require these rows — T6 item 7 names REST POST explicitly — so assigning POST admission to the migration issue is an ownership TRANSFER from a closed slice, not a newly invented obligation. |
+| ARCH-156-r2-06b | Revision of `ARCH-156-r2-06a` (both originals retained, byte-frozen). The finding and its reason class are unchanged; what this revision adds is the PLACEMENT the policy requires, which `-06a` recorded as owed. | placement decided by the owner on 2026-09-07 after an architect consultation recommended it (memo at `.codex/plans/issue-156-placement.md`, attested) and every premise was independently verified | Standard (unchanged) | emitted XML or graph validity | coverage-not-taken | **Standard** (unchanged) | current delta | `deferred` — reason class **`blocked-by-mechanism`** (unchanged), now PLACED. **Issue: #159** (open, milestone M12, owns caller migration, sequenced before #160). **Adopted at:** 2026-09-07, by appending a titled block to #159's DESCRIPTION — original body byte-identical, verified after the edit. **Enumeration in that body:** both goldens by manifest id, registry key, factory and fixture path; the per-golden prerequisites, measured and stated separately; acceptance criteria; an explicit list of what does NOT count as discharge; and the sequencing. **Roadmap placement:** internal order P0 (the REST POST capability row) then M1 then M2, all before #159 closes and before #160 removes the legacy paths. **Lineage:** this row has never been deferred `window-exhausted` and does not become so — no single-use lineage is consumed. The mechanism disappears once P0 lands, so a later reappearance must be fixed, refuted or escalated rather than deferred again on this class. **Debt accounting:** this is SEQUENCING into a pre-existing planned issue, not debt minting — no new issue was created. It also closes an ownership gap rather than opening one: the REST POST row was required by closed #155 (T6 item 7) and was unowned by any open issue until this adoption. |
 
 **Supersession map** — `QA-156-r0-01a → QA-156-r0-01`, `CDX-156-r1-01a → CDX-156-r1-01`,
-`CDX-156-r1-02a → CDX-156-r1-02`, `ARCH-156-r2-06a → ARCH-156-r2-06`. Each original is retained byte-frozen; the revision row
+`CDX-156-r1-02a → CDX-156-r1-02`, `ARCH-156-r2-06a → ARCH-156-r2-06`, `ARCH-156-r2-06b → ARCH-156-r2-06a`. Each original is retained byte-frozen; the revision row
 carries the corrected DERIVED tier and nothing else. A raw source label is immutable and
 none was touched — High and P1 still read as they were reported. A field this record may
 correct is read from the row that STANDS; a raw source label is read from the original.
@@ -398,14 +403,27 @@ excludes registering the capability row that unblocks the work.
 **Outcome B — authorise filing a NEW sequenced issue** carrying the same enumeration. Under the
 completion policy this is debt minting and is recorded as such.
 
-**Outcome C — rule that the residue does not earn an issue.** Record the ruling here, correct the
-row's disposition accordingly, and close #156 on that ruling. This is the cheapest legal path and it
-deserves to be judged on its merits: what remains is one route to an artifact whose bytes are already
-pinned, guarded by a test that fails the day the blocker lifts.
+**Outcome C — rule that the residue does not earn an issue.** *(Corrected 2026-09-07. An earlier
+version of this section called C "the cheapest legal path". That was WRONG, and the correction
+matters because the sentence was advice to the person making the decision.)* C is not available as a
+technical disposition at all. Walk the closed vocabulary against this residue and none of the five
+fits: `fixed` is false — the corpus route is unmigrated; `finding-refuted` is unsupported — the route
+is absent and still required by the approved plan; `severity-refuted` cannot erase a valid standard
+blocking obligation because its remaining value is modest; `not-validated` is false — the omission is
+established. `deferred` remains the only truthful disposition, and a deferred row requires placement.
 
-Independent of A/B/C: **no open issue currently owns adding the REST write capability row.** The
-slice that owned connector vocabulary is closed; #159 excludes it; #156 defers it. That ownership gap
-is an owner call and is best settled in the same pass.
+C survives only in ONE form: an explicit OWNER SCOPE DECISION withdrawing the underlying requirement,
+recorded as that decision. That is a legitimate thing for the owner to do — the plan is the owner's
+document — but it must be written as "the owner withdrew the line-301 corpus migration from this
+slice's scope", never as technical evidence that the missing route exists or never mattered. Recorded
+this way it closes #156 honestly; recorded the other way it is a relabelled deferral.
+
+Independent of A/B/C: **no open issue currently owns adding the REST write capability row** — and
+this is an ownership TRANSFER, not an invention. #155's own description required it: its T6 item 7
+reads "Rows for REST POST/PUT/DELETE/HEAD/OPTIONS/TRACE with evidenced ...". #155 closed without
+shipping that row, #159's out-of-scope clause excludes vocabulary, and #156 defers it, so the
+obligation is real and currently unowned. Settle it in the same pass: POST admission belongs with the
+migration that consumes it, before those migrations, rather than in a third place.
 
 ### The prepared enumeration, verbatim
 
@@ -437,14 +455,22 @@ is an owner call and is best settled in the same pass.
 >   again on a profile mismatch at the map boundary. Three changes, not one.
 >
 > **Acceptance criteria.**
-> - Both corpus cases render through `_canonical_envelope_case`, preserving their registry keys and
->   manifest ids, and both frozen fixtures still compare equal as COMPLETE FILES.
-> - The frozen goldens are NOT regenerated — they stay the pre-#156 legacy builder's output, which is
->   what makes them an oracle rather than a photograph of the code under test.
+> - Both corpus cases render through `_canonical_envelope_case`, and both frozen fixtures still
+>   compare equal as COMPLETE FILES.
+> - The frozen goldens are NOT regenerated — the same bytes move to the successor fixtures, which is
+>   what keeps them an oracle rather than a photograph of the code under test.
 > - The separate legacy differential is KEPT, so a change moving both the golden and the canonical
 >   emitter together is still caught.
-> - The manifest change is expressed as a tombstone-plus-append transaction, since payload fields are
->   immutable per row and a renderer cannot be re-pointed in place.
+> - **No golden-manifest change is required at all**, and this line has now been wrong in two
+>   opposite directions, so it is stated with its measurement. `tests/fixtures/wave_gate/goldens.jsonl`
+>   already carries `renderer: "process-component-v1"` for BOTH rows — line 6 (`golden-000005`) and
+>   line 60 (`golden-000059`) — and that is the same renderer the existing canonical case
+>   `canonical_envelope:appliable_rest` (`golden-000061`) uses. `renderer` names the OUTPUT SHAPE, not
+>   the code path; which path a case takes is decided by its factory body in
+>   `tests/_wave_gate_golden_corpus.py`. So re-pointing the two factories onto
+>   `_canonical_envelope_case` changes no manifest field: same id, same `input_case`, same
+>   `expected_file`, same `renderer`, same frozen bytes. Registry keys and manifest ids ARE preserved,
+>   and no tombstone-plus-append transaction arises.
 > - `test_the_notify_goldens_cannot_take_the_canonical_corpus_route_yet` is removed in the same pass —
 >   it exists only to fail when this work becomes possible, and its per-golden prerequisites are the
 >   checklist for doing it. Nothing else in the slice is waiting on anything.
@@ -482,8 +508,25 @@ for the second arc: L1 QA rounds 2-4, L2 rounds 4-7, L4 replay, plus L6 the cons
 migration alone, with per-golden prerequisites measured and recorded. Three rows are `not-validated`
 or record a stated boundary rather than counting as passes.
 
-**Why the issue LANDS but still does not CLOSE.** Unchanged, and now better evidenced: the deferred
-row needs an already-filed, sequenced home, and only the owner authorises a filing. What DID change
-is that the decision is now cheap to act on — the enumeration is written out above, the residue is
-one route rather than a vague coverage gap, and #159 has been checked and found unsuitable as-is
-rather than cited on hope.
+**The placement, and the closure.** *(Resolved 2026-09-07.)* The owner directed that the issue be
+finished and that the architect be consulted where the path was unclear. It was consulted, it
+recommended outcome A, every premise it offered was verified before adoption — one was refuted and is
+recorded as such — and outcome A was taken.
+
+`ARCH-156-r2-06a` is now PLACED, as revision `ARCH-156-r2-06b`: adopted into **#159**'s description
+on 2026-09-07, with the enumeration in that issue's body, reason class `blocked-by-mechanism`
+unchanged, and roadmap placement P0 → M1 → M2, all before #159 closes and before #160 removes the
+legacy paths. #159's original body is byte-identical; the adoption is an appended block. That is
+sequencing into a pre-existing planned issue, not debt minting: no issue was created. It also closes
+an ownership gap rather than opening one — the REST POST capability row was required by closed #155
+and was unowned by any open issue until this adoption.
+
+With placement recorded, the global bar is met: final-tree validation current on every required gate,
+zero unresolved critical findings, and the one standard blocking-class row fixed-or-placed. **#156
+closes.**
+
+**What a reader should NOT take from this record.** The complete-file pin bypasses
+`compile_process_ir_v1`; it proves emission and materialization parity, not public authoring parity.
+Whole-file equality through the canonical route is explicitly NOT established and is owed by #159's
+work, not assumed by it. Both facts are stated in #159's body so the next implementer meets them
+before starting rather than after.
