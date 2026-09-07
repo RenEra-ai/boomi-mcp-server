@@ -1,0 +1,15 @@
+{
+ "collector": "wave_gate",
+ "durable_dir": "wave-gate/wave.Krhd8Z",
+ "files": {
+  "wave-gate/wave.Krhd8Z/manifests.log": "12fe85d444683401dad14c82b64bbc80d688b08d6487bb0e9038f81a762269ac",
+  "wave-gate/wave.Krhd8Z/suite.log": "e66587101047851799017284734cc686e0b4c1ec63bb4ddec739dfbd0509ea6d",
+  "wave-gate/wave.Krhd8Z/summary.json": "c08cc8157961ec897e9de27309d88591c830ff473d7bec7a5936963a1e4ef762",
+  "wave-gate/wave.Krhd8Z/wave.log": "137ec20ac5211508e8e1e605cd7ea0dff9d779fb7f296c31224130ad93576013"
+ },
+ "logical_loop": "L4 (composite wave gate, placement batch)",
+ "source_run_dir": "/tmp/wave.Krhd8Z",
+ "status": "completed",
+ "verdict": "pass",
+ "wave_sha": "823ad9f8b8aa40e14beb6df143d87e7e6e0cb767"
+}
