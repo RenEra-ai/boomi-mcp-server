@@ -373,3 +373,171 @@ def test_the_legacy_baseline_is_frozen_minimal_and_still_accurate():
     assert sum(len(v) for v in legacy.values()) == 73, {
         k: len(v) for k, v in legacy.items()
     }
+
+
+# ---------------------------------------------------------------------------
+# #156: a ledger that names an artifact is ASSERTING that artifact exists
+# ---------------------------------------------------------------------------
+
+PATH_BASELINE = (
+    _ROOT / "tests" / "fixtures" / "audit_ledger_path_citation_legacy_baseline.json"
+)
+
+#: A backticked, slash-bearing token with a known artifact extension. Deliberately
+#: narrow: prose mentions module names without slashes, and a bare word is not a
+#: claim that a file exists.
+#:
+#: A BACKTICKED path is read as a CLAIM that the artifact exists. That is the
+#: contract, and it has a consequence worth stating once: a finding row REPORTING
+#: a false citation must not write that path in backticks, or the record of the
+#: defect re-asserts it and this guard fails on its own success. Describe it, or
+#: quote it unbackticked.
+#:
+#: The extension list alone was NOT enough, and the gap was found by attacking
+#: this guard rather than by reading it: a gate RUN DIRECTORY is cited as
+#: `architect-reviews/cdx-gate-review.XXXXXX`, whose suffix is a random token and
+#: therefore matches no extension. Measured across the fourteen ledgers, 704 such
+#: citations exist and the guard was blind to every one — including the single
+#: genuinely false citation in the tree at the time, in this very slice's ledger,
+#: which named an archive directory that had never been created. So the archive
+#: sub-directories are matched by SHAPE instead, which is total over them: any
+#: slash-bearing backticked token whose first segment is one of the three the
+#: evidence archive defines.
+_ARCHIVE_SUBDIRS = ("architect-reviews", "commit-reviews", "wave-gate")
+
+_PATH_CITATION = re.compile(
+    r"`((?:{subdirs})/[A-Za-z0-9_.-]+"
+    r"|[A-Za-z0-9_][A-Za-z0-9_./-]*/[A-Za-z0-9_./-]+"
+    r"\.(?:py|md|xml|json|jsonl|toml|yml|yaml))`".format(
+        subdirs="|".join(_ARCHIVE_SUBDIRS)
+    )
+)
+
+
+def _tracked_path_suffixes():
+    """Every tracked path and every package-relative suffix of one.
+
+    Suffix resolution is the rule the ledgers ACTUALLY follow — they write
+    `models/process_ir.py`, not the full `src/boomi_mcp/...` path — so anything
+    stricter would flag a hundred correct citations and teach the next reader to
+    ignore this test.
+    """
+    import subprocess
+
+    out = subprocess.run(
+        ["git", "ls-files"], capture_output=True, text=True, cwd=_ROOT, check=True
+    )
+    suffixes = set()
+    for tracked in out.stdout.split():
+        parts = tracked.split("/")
+        # Every suffix of the FILE, and of each of its ancestor DIRECTORIES. The
+        # directories matter as much as the files: git tracks no directory of its
+        # own, so a citation to a gate run directory — which is how every ledger
+        # names a round — would resolve against nothing at all and the guard
+        # would flag 335 correct citations. Measured when this arm was added.
+        for end in range(len(parts), 0, -1):
+            for index in range(end):
+                suffixes.add("/".join(parts[index:end]))
+    return suffixes
+
+
+def _gitignored(paths):
+    """The subset of `paths` under a gitignored root.
+
+    A citation to `agents/reports/...` is not a false claim: those reports exist
+    on disk and are deliberately untracked. Excluding them BEFORE the baseline
+    applies is what keeps the baseline small enough to stay meaningful.
+    """
+    import subprocess
+
+    if not paths:
+        return set()
+    out = subprocess.run(
+        ["git", "check-ignore", "--stdin"],
+        input="\n".join(sorted(paths)),
+        capture_output=True,
+        text=True,
+        cwd=_ROOT,
+    )
+    return set(out.stdout.split())
+
+
+def _unresolvable_ledger_paths():
+    suffixes = _tracked_path_suffixes()
+    offenders = {}
+    for ledger in sorted((_ROOT / "docs" / "architecture").glob("ISSUE_*_AUDIT_LEDGER.md")):
+        issue = re.search(r"ISSUE_(\d+)_", ledger.name).group(1)
+        cited = set(_PATH_CITATION.findall(ledger.read_text(encoding="utf-8")))
+        missing = {path for path in cited if path not in suffixes}
+        missing -= _gitignored(missing)
+        if missing:
+            offenders[issue] = sorted(missing)
+    return offenders
+
+
+def test_no_ledger_names_an_in_repo_artifact_that_does_not_exist():
+    """The structural fix for `claim-measured-but-never-pinned`, one level up.
+
+    #156 raised that class twice inside the slice and instance-patched it twice.
+    The third instance was in the AUDIT RECORD itself: the closing report stated
+    it carried a prepared follow-up issue body verbatim, the deferral section
+    pointed forward to the closing report, and the closing report pointed back —
+    a circular cross-reference wrapped around a document that existed only in a
+    scratch file outside the repository. Nothing in the tree could tell.
+
+    So the enumeration ("I will remember to write what I promise") is replaced by
+    an invariant read from the authority: the git index. Every ledger, not just
+    #156's, and no exemption beyond a frozen baseline that cannot grow.
+    """
+    baseline = json.loads(PATH_BASELINE.read_text())["unresolvable_by_issue"]
+    offenders = {}
+    for issue, missing in _unresolvable_ledger_paths().items():
+        unexpected = [path for path in missing if path not in set(baseline.get(issue, ()))]
+        if unexpected:
+            offenders[issue] = unexpected
+    assert offenders == {}, offenders
+
+
+def test_the_path_citation_baseline_is_frozen_minimal_and_still_accurate():
+    """The baseline may not be padded, and may not outlive what it excuses.
+
+    Both directions, for the same reason as the citation baseline above: a
+    baseline listing paths that DO resolve is a licence to stop writing them, and
+    one that silently absorbed new entries would make the invariant decorative.
+    """
+    baseline = json.loads(PATH_BASELINE.read_text())["unresolvable_by_issue"]
+    assert baseline, "the frozen baseline is empty — the invariant above is untested"
+
+    measured = _unresolvable_ledger_paths()
+    for issue, paths in baseline.items():
+        assert paths, issue
+        still_missing = set(measured.get(issue, ()))
+        stale = [path for path in paths if path not in still_missing]
+        assert not stale, (
+            "these baselined citations now resolve, so the exemption outlived its "
+            "reason: {0}".format({issue: stale})
+        )
+
+
+def test_the_path_citation_scan_is_not_vacuous():
+    """A control, because a regex that matched nothing would pass everything.
+
+    Asserts the scan sees real citations, that a known-good one resolves, and
+    that a fabricated one does NOT — the last is what proves the resolver can
+    still say no after the suffix rule widened it.
+    """
+    suffixes = _tracked_path_suffixes()
+    ledger = _ROOT / "docs" / "architecture" / "ISSUE_156_AUDIT_LEDGER.md"
+    cited = set(_PATH_CITATION.findall(ledger.read_text(encoding="utf-8")))
+    assert len(cited) >= 5, sorted(cited)
+    assert "tests/test_process_ir_notify_recovery.py" in suffixes
+    assert "models/process_ir.py" in suffixes  # package-relative shorthand resolves
+    assert "docs/architecture/evidence/issue-156/no-such-file.md" not in suffixes
+
+    # ...and the run-directory shape, which no extension can match, is BOTH seen
+    # and resolvable. Seen: a real archived round is scanned out of the ledger.
+    # Resolvable: it resolves by suffix. Refused: a fabricated sibling does not.
+    run_dirs = {c for c in cited if c.split("/")[0] in _ARCHIVE_SUBDIRS}
+    assert run_dirs, "no run-directory citation was scanned — the shape arm is dead"
+    assert all(c in suffixes for c in run_dirs), sorted(run_dirs)
+    assert "architect-reviews/cdx-gate-review.notARealRun" not in suffixes

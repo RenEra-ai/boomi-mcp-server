@@ -741,13 +741,30 @@ def _case_try_catch_dlq_error_subprocess():
     )
 
 
+#: The ENVELOPE inputs for the two Notify survivor fixtures, named once.
+#:
+#: `name` and `folder_name` are the only envelope values that are NOT derivable
+#: from the IR document — the execution profile is derived, the option bytes come
+#: from it, and everything else is emitted. So they are the one place a
+#: complete-file byte comparison could quietly disagree with the corpus about
+#: what it is comparing against. #156's full-envelope pins read these constants
+#: rather than retyping the strings, which is the difference between a shared
+#: authority and the hand-copied-fact defect this repository's structural-fix
+#: rule exists to stop.
+NOTIFY_DLQ_GOLDEN_NAME = "TryCatch Notify DLQ Golden"
+CONNECTOR_SCOPE_NOTIFY_GOLDEN_NAME = "Connector Scope DLQ Golden"
+NOTIFY_GOLDEN_FOLDER_NAME = "Golden/Fixtures"
+
+
 def _case_try_catch_notify_dlq_document_cache():
     cfg = dlq_config(
         {"mode": "document_cache_ref", "document_cache_id": DLQ_CACHE_ID},
         catch_notify=copy.deepcopy(DLQ_CATCH_NOTIFY),
     )
     return _dlq_builder().build(
-        cfg, name="TryCatch Notify DLQ Golden", folder_name="Golden/Fixtures"
+        cfg,
+        name=NOTIFY_DLQ_GOLDEN_NAME,
+        folder_name=NOTIFY_GOLDEN_FOLDER_NAME,
     )
 
 
@@ -756,7 +773,9 @@ def _case_connector_scoped_trycatch_notify():
         retry_count=2, catch_notify=copy.deepcopy(DLQ_CATCH_NOTIFY)
     )
     return _dlq_builder().build(
-        cfg, name="Connector Scope DLQ Golden", folder_name="Golden/Fixtures"
+        cfg,
+        name=CONNECTOR_SCOPE_NOTIFY_GOLDEN_NAME,
+        folder_name=NOTIFY_GOLDEN_FOLDER_NAME,
     )
 
 

@@ -47,6 +47,8 @@ mint a loop mid-run; adding one is itself a recorded checkpoint decision.
 | 4 | Composite wave gate | `scripts/wave_gate.py` | full suite, golden manifest, determinism, wave-delta review, one live scenario per changed capability class |
 | 5 | Terminal correction loop | only if a final non-blocking batch mutates the tree | that batch |
 
+| 6 | Owner-requested architect consultation | `/codex-issue` §3 gate (`--gate architect`) | ADDED to the roster on 2026-09-07, after the slice had landed, by owner request. A gate not on the roster cannot mint a loop mid-run, so the addition is itself a recorded checkpoint decision (checkpoint 4 below) and this loop inherits the originating loop's cumulative history. It is NOT a fourth evaluation of loop 3: that loop's authority is implementation-versus-plan and it is closed by the three-evaluation cap. This one answers one closed question — where the deferred row goes — and its findings are dispositioned like any other gate's. |
+
 Pre-implementation live-oracle capture (architect plan §1 step 2 / §5) is **evidence provisioning**,
 not a QA evaluation: it runs at the baseline tree with no source change and debits no loop.
 
@@ -142,6 +144,13 @@ affected SHA/delta · disposition.
 | SELF-156-r5-04 | Retiring a test the slice itself had added, and renumbering the rows behind it, is refused twice over: the wave gate rejects a row appended already tombstoned, and the successor guard rejects the deletion-plus-repoint that removing it requires, because the committed manifest is already legal at the landing base and so the regeneration repairs nothing. | self-review, measured by running the manifest gate and the successor guard against the working tree | n/a (self) | _(none — test manifest, not a served surface)_ | same-range-retirement-is-not-a-repair | **Non-blocking** | current delta | `fixed` by not creating the situation: the rewritten witness KEPT its original node id instead of being renamed, so the manifest change is append-only — seven new rows, no tombstone, no repoint, floor 11661. Recorded because the kept name is now slightly narrower than what the test asserts, and that is a deliberate trade rather than an oversight: the node id is the manifest's identity and this repository will not repoint one to improve a name. |
 | QA-156-r3-01 | "`build_integration(action=\"plan\")` never reaches the compiler at all — instrumented, the private core is called zero times on all ten plan rows. Both A instruments drive `action=\"plan\"`, so their zero is expected and cannot by itself speak for a compiler-layer delta." | Stage-1 QA, round 3, recorded by the agent against its OWN evidence | n/a (agent self-correction) | _(none — scope of a probe, not a served surface)_ | probe-cannot-reach-the-layer-it-grades | **Non-blocking** | current delta | `fixed` in the record rather than the code: the finding is CORRECT and it invalidates the inference I would otherwise have drawn from part A. The compiler-layer claim rests entirely on part B, which reaches that layer directly. Recorded because a reader meeting two green instruments could reasonably read them as covering a layer they never execute — the same shape as this slice's earlier vacuous-guard defects, caught here by the agent grading its own probe instead of its result. |
 | QA-156-r3-02 | "The legacy builder's emission adapter I closed by call-graph reasoning only. It calls the public compile entry point with a caller-owned model, so it inherits the same unconditional re-parse — but I did not drive it live; I could not build a valid legacy spec to do so." | Stage-1 QA, round 3, recorded by the agent as an inconclusive cell | n/a (self-reported limit) | capability reachability | route-closed-by-argument-not-by-execution | **Non-blocking** | current delta | `not-validated`, stated as such rather than counted as a negative. What IS established is stronger than the missing cell: the mirror has exactly ONE caller, that caller is private, absent from the module's exported names, and reached only through three entry points that all re-parse first — so the property holds over ALL routes rather than over the routes anyone thought to drive, and this adapter calls the public entry point like any other caller. The agent's own rule for the gap is recorded with it: a route that fails its own parameter validation is an inconclusive cell, never a negative. |
+| ARCH-156-r4-01 | "Calling the acceptance criterion fully satisfied without qualification is too favorable: the approved plan explicitly requires matching envelope metadata and COMPLETE emitted fixture bytes, as well as migration through the canonical corpus route." | owner-requested architect consultation, attested `ok:true` (memo at `.codex/plans/issue-156-consultation.md`), then independently verified by five falsification-first checks | Standard | emitted XML or graph validity | claim-measured-but-never-pinned | **Standard** | current delta | `fixed` — CONFIRMED, and the shortfall was MEASURED rather than argued: the shapes section is 3180 of golden-000059's 3759 bytes and 5180 of golden-000005's 5759, so each comparison left 579 bytes unchecked — the component wrapper and all seven process-level attributes, exactly the envelope metadata the plan names. Both goldens now have a COMPLETE-FILE byte pin through emit + materialize, with four non-vacuity controls (the emitter's own output must NOT equal the golden; dropping a shape part must break it; a wrong name, profile or folder must break it; the profile must be DERIVED, not chosen). The plan's other golden bullet — configuration bytes against the legacy builder — was already discharged, because every configuration element lives inside the shapes section; the correction is scoped to what was actually missing. |
+| ARCH-156-r4-02 | "The witness docstring tells a future reader that when a REST write intent is registered the migration becomes possible and should be done." | owner-requested architect consultation, attested `ok:true` (memo at `.codex/plans/issue-156-consultation.md`), then independently verified by five falsification-first checks | Standard | machine-served schemas/contracts | overclaimed-served-text | **Standard** | current delta | `fixed` — CONFIRMED and MEASURED per golden against a synthetic capability row, which is what showed the claim is half true and therefore worse than plainly wrong: for the single-handler golden the row IS necessary and sufficient — it then compiles and emits shapes byte-equal to the frozen file — while the double guard is refused again on missing idempotency evidence, and once that is authored refused a third time on a profile mismatch at the map. The docstring now states both cases separately with their measured codes, records why the idempotency code is the one that appears (the default classification is upgraded from the packaged replay registry's observed verdict, so a reader expecting the fail-closed default will hunt the wrong diagnostic), corrects a loose reference to "two retries" when exactly one region is retried, and labels its own failure a trigger to RE-DECIDE rather than a certificate. This text is designated by this ledger as where a reader will be standing when it matters, so it is blocking, not prose residue. |
+| SELF-156-r6-01 | The closing report stated it "carries the prepared issue body verbatim"; it did not. The body existed only in a scratch file outside the repository, and the deferral section and the closing report pointed at each other in a circle around a document that was never written. | self-review prompted by the consultation, then confirmed by an independent read of the whole ledger | n/a (self) | _(none — audit record, not a served surface)_ | claim-measured-but-never-pinned | **Standard** (the audit record is not served to callers, but a false statement in it invalidates the closure it supports, so it is corrected to the same bar) | current delta | `fixed` STRUCTURALLY, as the THIRD instance of this pair requires. The body is now written out in full in the closing report rather than the sentence being deleted. SIBLING SWEEP over every cross-reference in this ledger asserting a durable artifact: all run directories, report paths and harness paths resolve. INVARIANT, because two instances had already been instance-patched inside this slice: a repo-wide test now asserts that every backticked in-repo path any audit ledger cites resolves against the GIT INDEX by path suffix — the rule the ledgers actually follow — with gitignored roots excluded first and a frozen baseline of four pre-existing dangling citations in three other slices' ledgers that cannot grow. NON-VACUITY: two mutants hand-run — a fabricated citation added to this ledger fails the invariant, and a baseline padded with a path that DOES resolve fails the freshness check. |
+| SELF-156-r6-02 | The consultation recommended citing issue #159 as the already-filed, sequenced home for the deferred row, on the grounds that it already requires resolving capability prerequisites. | verification of the consultation's own recommendation before acting on it | n/a (self) | _(none — a proposed disposition, not a defect)_ | placement-asserted-not-verified | **Non-blocking** | current delta | `finding-refuted` — the load-bearing word is "already", and it is false. Verified against the issue body: #159 is open, in the same milestone, owns caller migration, carries survivor-golden byte-identity criteria and is sequenced before #160 — but its body never names either of these two goldens, never mentions the corpus route, and its own out-of-scope clause excludes the very act that unblocks the work; its single notify reference is a different golden pair whose action is retirement, not migration. Citing it unedited would be paper compliance, not placement. Recorded because the recommendation came from a gate and was rejected on evidence rather than adopted — and because the alternative it displaced (minting a new issue) is the one this repository disfavours, so the choice between them is the owner's, not mine. |
+| QA-156-r4-01 | "The new ledger invariant's frozen baseline is untracked, so two of its three tests die on a clean checkout. `tests/fixtures/audit_ledger_path_citation_legacy_baseline.json` is not in the git index; the three new tests pass in your working tree only because the file exists there. And the shape is the same class the batch exists to close — defect 3 was a document that existed only outside the repository; here the new invariant's own frozen baseline exists only outside the git index." | Stage-1 QA, round 4 (darkness proof + adversarial grading of the new guards) | **High** | capability reachability | artifact-exists-only-outside-the-index | **Critical** (LABEL anchor: High) | current delta | `fixed` — CONFIRMED by the agent's own CI simulation, which is the part that made it undeniable: a worktree containing every tracked file plus the uncommitted edits and no untracked files fails both tests with `FileNotFoundError`. Not merely red, either — the node manifest already pins the three tests and raises the floor, so the failures are mandatory rather than skippable. The file is tracked now, and the same CI simulation re-run on the fixed tree passes 14 of 14. The irony is recorded rather than smoothed over: the invariant written to stop a document existing only outside the repository was itself relying on one. |
+| QA-156-r4-02 | "The citation invariant's extension allowlist misses the only genuine false citation in the tree — in #156's own ledger. It cites an architect-reviews run directory for the consultation (name elided — see below) which does not exist anywhere in the repo; the invariant does not see it because that suffix is not one of the eight listed extensions. Sized across the fourteen ledgers: 704 run-directory citations, of which exactly one resolves to nothing." | same | Medium | machine-served schemas/contracts | guard-blind-to-the-shape-it-most-needs-to-see | **Standard** | current delta | `fixed` on BOTH halves, because either alone would have been an instance patch. The false citation was mine and it was real: I cited an archive directory for the consultation that was never created, and could not be — the archive contract covers commit reviews, implementation-review turns and wave-gate runs, and it correctly REFUSED a plan-kind round rather than letting me file one under the wrong kind. The memo now cites where it actually lives. The guard was then widened to match archive run directories by SHAPE rather than by extension, and — the part the shape arm exposed — its resolver was taught to resolve DIRECTORIES: git tracks no directory of its own, so 335 correct run-directory citations across the ledgers had been resolving against nothing. NON-VACUITY: the exact citation the agent found was re-introduced as a mutant and now fails the guard. The offending path is NOT written out in this row, and that is the guard's contract rather than squeamishness: a backticked in-repo path is a CLAIM that the artifact exists, so quoting a defective citation in its own finding row would re-assert the very claim the row reports — the guard would fail on the record of its own success. Quote such a path unbackticked or describe it. |
+| SELF-156-r6-03 | The agent's own grading found one real mutant the new pins do not catch: a materializer that stopped honouring `description` changes no byte the pins compare, because they only ever pass its canonical empty value. The same holds for `extension_connections`. | recorded from the QA agent's adversarial grading, which classified every mutant BEFORE reading its result and discarded three no-ops wearing a mutant's clothes | n/a (self) | _(none — a stated boundary, not a defect)_ | pins-prove-less-than-they-appear-to | **Non-blocking** | current delta | `not-validated` as a defect, and recorded as the EXACT boundary of what the pins prove, which is the honest disposition. Three of the five envelope inputs are perturbed by the controls; the other two are only ever passed their canonical values, so a materializer that stopped honouring either would go unseen. The docstrings claim only what the controls establish — the name and the execution profile — so nothing served is false. Recorded because the agent volunteered it against its own result, and because the next person to widen these pins should start here. |
 
 **Supersession map** — `QA-156-r0-01a → QA-156-r0-01`, `CDX-156-r1-01a → CDX-156-r1-01`,
 `CDX-156-r1-02a → CDX-156-r1-02`, `ARCH-156-r2-06a → ARCH-156-r2-06`. Each original is retained byte-frozen; the revision row
@@ -178,6 +187,7 @@ outcome and rationale.
 | 1 | L2 — Stage-2 repo commit review | window 3 / cumulative 3 | `5edf543` (clean) | 0 unresolved | 0 unresolved | new: none this round. Resolved this window: `emitter-proved-but-pipeline-unreachable`, `unbounded-region-derivation`, `stale-served-text`, `tier-derived-against-its-own-anchor`, `region-bounded-on-the-wrong-axis`, `binding-defeated-by-escaping`, `served-code-without-served-text`. Recurring: none | **CLOSE-CLEAN** | The third evaluation returned NO findings (`cdx-review.SWQTjh`, base `3fd32fd`, head `5edf543`, `STATUS: completed`, collector exit 0, teardown confirmed), so the checkpoint closes the loop normally rather than forcing a continue/defer decision. Trend across the window is monotone: round 1 raised 3 (1×P1, 2×P2), round 2 raised 1 (P2, record-only), round 3 raised 0; highest unrefuted severity fell P1 → P2 → none; affected-class breadth fell from three blocking classes to one to none. Every finding in the window is `fixed` and validated on the current tree — none deferred, none refuted-without-evidence, no critical residue. |
 | 2 | L3 — Architect implementation review | window 3 / cumulative 3 (the cap) | `3deba2b` (clean) | 0 unresolved | 0 unresolved blocking; 1 recorded accepted limitation | new this window: `widened-grammar-skips-its-own-guards`, `witness-invalidated-by-the-change`, `fixture-authored-outside-the-vocabulary`, `stale-authority-prose`, `witness-ownership-debt`. Resolved this window: `unjustified-narrowing`, `imprecise-escape-target`, `plan-checked-only-against-its-own-cfg`, `rule-cut-on-the-wrong-predicate`, `claim-measured-but-never-pinned`, `widened-grammar-skips-its-own-guards`. Recurring: `wrong-diagnostic-identity` (evaluations 1, 2 and 3 — discharged structurally, see the row below the table), `imprecise-escape-target` and `plan-checked-only-against-its-own-cfg` (each patched once, then closed on the reviewer's own repro) | **CLOSE-CLEAN** | The three-evaluation cap in `docs/architecture/COMPLETION_WORKFLOW_RULES.md` ends this loop on evaluation 3; the review itself said so ("This ends the architect loop … No fourth architect evaluation is required"). The cap's closure condition was met in full: the finite final batch was applied, its affected validation ran, and the Stage-2 commit review over the correction delta returned CLEAN. Trend across the window is improving on every recorded axis: evaluation 1 raised 7, evaluation 2 raised 6, evaluation 3 raised 4 of which 2 are outside every blocking class; highest unrefuted severity fell from Critical (twice, both mutation accounting) to Standard to Standard; four of the fourteen were regressions I introduced while fixing earlier ones and none of those recurred. Zero critical residue. The one standard blocking-class row not fixed is `ARCH-156-r2-06a`, reason class `blocked-by-mechanism`, enumerated and pinned by a self-invalidating witness but not yet attached to a filed issue — the section below states exactly what that leaves open, and it gates CLOSING the issue, not landing the work. |
 | 3 | L4 — Composite wave gate | window 3 / cumulative 3 | `ca2b051` (clean) | 0 unresolved | 0 unresolved | new: none — both earlier refusals were manifest and audit-record hygiene, not defect classes in the product. Resolved this window: `same-range-retirement-is-not-a-repair`. Recurring: none | **CLOSE-CLEAN** | The composite set is ONE evaluation, so its suite, manifest, determinism and fingerprint checks do not mint separate loops. Evaluation 1 refused on rows appended already tombstoned; evaluation 2 refused on an archived review round the ledger did not cite; evaluation 3 passes the whole set on the final tree. Both refusals were fixed rather than waived, and the correction applied between evaluations 2 and 3 belongs to L2, where it took its own QA and its own delta review before the entire wave set re-ran — so no earlier wave evidence is stale. Trend is monotone: two refusals, then none, with no product defect raised by this loop at any point. |
+| 4 | L6 — Owner-requested architect consultation | window 1 / cumulative 1 (roster addition recorded here) | `f1da5a6` + the current correction | 0 unresolved | 0 unresolved; 1 deferred row, narrowed | new: `overclaimed-served-text`, `placement-asserted-not-verified`. Recurring: `claim-measured-but-never-pinned` — THIRD instance, discharged structurally by the repo-wide ledger path-citation invariant, not patched again | **CONTINUE** | The gate raised three findings and one recommendation. All three findings are fixed in one batch; the recommendation is refuted on verified evidence. This is a fresh window, so no checkpoint was owed at the count — it is recorded because ADDING the loop is itself a checkpoint decision. `CONTINUE` rather than `CLOSE-CLEAN` because the batch mutates the tree and therefore owes its affected QA, a fix-only delta review and a full replay of the composite wave set BEFORE any closing decision; and because the one deferred row still has no placement, which is the owner's call and not a validation outcome. Trend: the consultation found real defects in what had already landed — including a false statement in the audit record itself — so the correct reading is that the previous close was premature on the RECORD, not that the loop is failing. |
 
 Between rounds 2 and 3 an ADDITIONAL adversarial audit ran (six independent lenses over the
 `b07babe..HEAD` source diff, each finding refuted-by-default by three skeptics, plus a
@@ -245,32 +255,77 @@ that the archive does not hold, and no collected round is left uncited.
 
 ## The one deferred row, and the decision it is waiting on
 
-The two legacy notify goldens are reproduced byte-identically from canonical IR — the slice's
-headline acceptance criterion — through parse, lower and emit, compared against files frozen before
-the baseline. They are NOT additionally routed through the canonical corpus harness, which would add
-normalize, compile, late-bind, materialize and full-envelope coverage.
+*(Rewritten after an owner-requested architect consultation on 2026-09-07, whose factual premises
+were then independently verified by five falsification-first checks. Three statements in the previous
+version of this section were WRONG and are corrected below rather than quietly edited away: it
+overstated what had been achieved, understated what the blocker requires, and promised a document
+that did not exist. The consultation was a PLAN-kind gate turn, so it has no home in the review
+archive — that contract covers commit reviews, implementation-review turns and wave-gate runs, and it
+correctly refused a plan round. Its attested memo and attestation are at
+`.codex/plans/issue-156-consultation.md` and `.codex/plans/issue-156-consultation.attest.json`, which
+is where this repository keeps architect plans; both are under a gitignored root, exactly like the QA
+reports cited above, so the SUBSTANCE is carried in this section rather than left to the artifact.)*
 
-That route is blocked by a mechanism, not by time: both golden graphs drive a REST write target, and
-the canonical connector-call capability table registers only read and partial-update intents for the
-REST family, so the graph is not authorable as a canonical connector chain at all and public
-compilation refuses it before any envelope exists. Registering a connector capability row is
-explicitly out of scope for this slice — the issue assigns connector capability rows and their
-replay-safety evidence to the slice that owns them — so unblocking the migration here would mean
-reaching into another slice's closed contract.
+### What is now pinned, and what is genuinely left
 
-It is recorded where a reader will be standing when it matters: the docstring of the executable
-witness that pins it, which asserts the registered REST intents and reproduces the public refusal
-with its pointer, and which FAILS the day a REST write intent is registered. It therefore cannot be
-forgotten and does not depend on anyone remembering to read this file.
+The approved plan asks for two distinct things (`.codex/plans/issue-156.md`): prose lines 290-293 —
+author canonical IR with matching **envelope metadata** and compare **complete emitted fixture
+bytes** against the frozen file — and a table row at line 301 — move both corpus cases onto the
+`_canonical_envelope_case` pattern, which is the COMPILE-GATED route.
 
-What is NOT settled is where it goes. The completion policy requires a deferred blocking-class row
-to name an ALREADY-FILED, sequenced follow-up issue, and this repo's standing rule is that only the
-owner authorises a filing — I prepare the body and surface it, I never file and then report it as
-tracked. So this row has its reason class and its enumeration but no issue number, and until it has
-one this slice may LAND but may not CLOSE #156. The closing report carries the prepared issue body
-verbatim and states the decision as a single step: file it and #156 closes, or rule that the residue
-does not earn an issue and #156 closes on that ruling recorded here instead. Nothing else in the
-slice is waiting on anything.
+The first is now discharged. `test_the_notify_golden_reproduces_as_a_complete_file` reproduces both
+frozen goldens byte-for-byte as COMPLETE FILES, through the existing emitter and the existing
+process-component materializer, with no capability change, no operation rebinding and no golden
+regeneration. Four non-vacuity controls travel with it. The previous version of this section claimed
+the headline criterion was satisfied by the shapes-level comparison alone; measured, that comparison
+was leaving 579 bytes per golden unchecked — the component wrapper and all seven process-level
+attributes, which is exactly the envelope metadata line 290 names. That claim was too favourable and
+this correction is what makes it true.
+
+What is left is line 301 alone: passing through `compile_process_ir_v1`. The pinned route
+deliberately bypasses that gate, so the pin proves emission and materialization parity and proves
+nothing about public authoring parity. This sentence is load-bearing — without it the pin will later
+be misread as discharging the public-pipeline claim it does not cover.
+
+### What the blocker actually requires, per golden
+
+Both goldens drive a REST POST target and the canonical connector-call capability table registers
+only read and partial-update intents for that family, so public compilation refuses both. The gap is
+POST specifically, not REST writing generally: partial-update is already a registered write.
+
+The previous version said a registered REST write intent would make the migration possible. Measured
+against a synthetic capability row, that is true for ONE of the two:
+
+- the single process-scoped handler golden — the row is necessary and SUFFICIENT; it then compiles
+  and emits shapes byte-equal to the frozen file;
+- the double-guard golden — the row is necessary and NOT sufficient. It is then refused on missing
+  idempotency evidence for its retried region, and once that evidence is authored it is refused
+  again on a profile mismatch at the map boundary. Three changes, not one.
+
+The witness docstring carried the joint claim and has been corrected to state both cases separately,
+with the measured diagnostic codes and the non-obvious reason the idempotency code is the one that
+appears. Its failure is now labelled a trigger to RE-DECIDE, not a certificate that the migration is
+possible.
+
+### Where it goes — the open decision
+
+The completion policy requires a deferred blocking-class row to name an ALREADY-FILED, sequenced
+follow-up whose body carries the enumeration. This repo's standing rule is that only the owner
+authorises a filing. So the row has its reason class and its enumeration but no issue number, and
+until it has one this slice may LAND but may not CLOSE #156.
+
+Issue #159 was considered as the home and does NOT qualify as-is. It is open, in the same milestone,
+owns caller migration, carries survivor-golden byte-identity criteria and is sequenced before #160 —
+but its body never names either of these two goldens, never mentions the corpus route, and its own
+out-of-scope clause excludes the very act that unblocks the work. Its single notify reference is a
+different golden pair, and the action there is retirement, not migration. Citing it unedited would be
+paper compliance, not placement.
+
+There is also an ownership gap worth deciding at the same time: no open issue currently owns adding
+the REST write capability row, which is the single change that unblocks the simpler golden outright.
+
+The three legal outcomes are set out in the closing report with the prepared issue body written out
+in full, so whichever is chosen is one action, not an authoring exercise.
 
 ## Closing report
 
@@ -308,6 +363,77 @@ slice and closure. Two rows are `not-validated` and say so plainly rather than c
 **Why the issue LANDS but does not CLOSE.** The completion policy requires a deferred blocking-class
 row to name an already-filed, sequenced follow-up issue. This repository's standing rule is that only
 the owner authorises a filing — the body is prepared and surfaced, never filed and then reported as
-tracked. So the work lands and #156 stays open on exactly one decision, stated in full in the section
-above: file the prepared follow-up, or rule that the residue does not earn an issue and close on that
-ruling recorded here. Nothing else in the slice is waiting on anything.
+tracked. So the work lands and #156 stays open on exactly one decision, and the three legal outcomes
+are set out below with the text each one needs.
+
+**Correction, recorded rather than edited away.** An earlier version of this report stated that it
+"carries the prepared issue body verbatim". It did not: the body existed only in a scratch file
+outside the repository, and this report and the deferral section pointed at each other in a circle
+around a document that was never written. That is a false claim in a durable artifact — the same
+defect class this slice raised and fixed twice in code — and it is corrected here by writing the body
+out, not by deleting the sentence. The sibling sweep over every other cross-reference in this ledger
+that asserts a durable artifact found no second instance: every run directory, report path and
+harness path named in the gate-evidence table resolves, and the archive scanner already enforces that
+for the review rounds.
+
+### The owner decision, and the three legal outcomes
+
+**Outcome A — authorise an edit to issue #159's DESCRIPTION** (this repository puts issue updates in
+the description, never in comments), adding the enumeration below. #159 is otherwise a good home: it
+is open, in the same milestone, owns caller migration, carries survivor-golden byte-identity criteria
+and is sequenced before #160. The edit must also reconcile its out-of-scope clause, which as written
+excludes registering the capability row that unblocks the work.
+
+**Outcome B — authorise filing a NEW sequenced issue** carrying the same enumeration. Under the
+completion policy this is debt minting and is recorded as such.
+
+**Outcome C — rule that the residue does not earn an issue.** Record the ruling here, correct the
+row's disposition accordingly, and close #156 on that ruling. This is the cheapest legal path and it
+deserves to be judged on its merits: what remains is one route to an artifact whose bytes are already
+pinned, guarded by a test that fails the day the blocker lifts.
+
+Independent of A/B/C: **no open issue currently owns adding the REST write capability row.** The
+slice that owned connector vocabulary is closed; #159 excludes it; #156 defers it. That ownership gap
+is an owner call and is best settled in the same pass.
+
+### The prepared enumeration, verbatim
+
+> **Title:** M12 follow-up — route the two notify goldens through the canonical corpus envelope
+>
+> **Reason class:** `blocked-by-mechanism`. **Parent epic:** #134. **Milestone:** M12.
+> **Placement:** strictly after the change that registers a REST write intent in the canonical
+> connector-call capability table; blocks nothing.
+>
+> **Why this exists.** #156 pinned the two legacy notify goldens as COMPLETE FILES, byte-for-byte,
+> through parse → lower → emit → materialize
+> (`tests/test_process_ir_notify_recovery.py::test_the_notify_golden_reproduces_as_a_complete_file`).
+> That route bypasses `compile_process_ir_v1`. What is still owed is the plan's line-301 migration:
+> re-pointing the two corpus cases in `tests/_wave_gate_golden_corpus.py` onto the
+> `_canonical_envelope_case` pattern, which exercises normalization, public compilation and late
+> binding as well.
+>
+> **The two cases**, by manifest id and fixture:
+> 1. `golden-000059` — `tests/fixtures/golden_xml/try_catch_notify_dlq_document_cache.xml`,
+>    corpus case `_case_try_catch_notify_dlq_document_cache`.
+> 2. `golden-000005` — `tests/fixtures/golden_xml/connector_scoped_trycatch_notify_dlq_document_cache.xml`,
+>    corpus case `_case_connector_scoped_trycatch_notify`.
+>
+> **Prerequisites, measured per case — they are NOT the same.**
+> - `golden-000059`: a registered REST write intent is necessary and SUFFICIENT. With one it compiles
+>   and emits shapes byte-equal to the frozen file. Re-point it as soon as the row lands.
+> - `golden-000005`: the row is necessary and NOT sufficient. It is then refused on missing
+>   idempotency evidence for its retried region, and once that evidence is authored it is refused
+>   again on a profile mismatch at the map boundary. Three changes, not one.
+>
+> **Acceptance criteria.**
+> - Both corpus cases render through `_canonical_envelope_case`, preserving their registry keys and
+>   manifest ids, and both frozen fixtures still compare equal as COMPLETE FILES.
+> - The frozen goldens are NOT regenerated — they stay the pre-#156 legacy builder's output, which is
+>   what makes them an oracle rather than a photograph of the code under test.
+> - The separate legacy differential is KEPT, so a change moving both the golden and the canonical
+>   emitter together is still caught.
+> - The manifest change is expressed as a tombstone-plus-append transaction, since payload fields are
+>   immutable per row and a renderer cannot be re-pointed in place.
+> - `test_the_notify_goldens_cannot_take_the_canonical_corpus_route_yet` is removed in the same pass —
+>   it exists only to fail when this work becomes possible, and its per-golden prerequisites are the
+>   checklist for doing it. Nothing else in the slice is waiting on anything.

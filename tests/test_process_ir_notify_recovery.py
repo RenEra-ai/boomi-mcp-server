@@ -1425,6 +1425,227 @@ def test_the_connector_scoped_double_guard_golden_is_reproduced_from_canonical_i
     assert re.search(r"<shapes>.*</shapes>", emitted, re.S).group(0) == expected
 
 
+# ---------------------------------------------------------------------------
+# The COMPLETE file, not the shapes section
+# ---------------------------------------------------------------------------
+#
+# The two tests above compare the `<shapes>` section. The approved plan asks for
+# more than that: "author canonical IR with the same references, labels,
+# messages, retry counts, shape order, and ENVELOPE METADATA. Compare: ... 
+# complete emitted fixture bytes against the frozen file"
+# (`.codex/plans/issue-156.md:290-293`). MEASURED, when an owner-requested
+# architect consultation went looking: the shapes section is 3180 of the 3759
+# bytes of `golden-000059` and 5180 of the 5759 of `golden-000005`, so each
+# comparison was leaving 579 bytes unchecked — the `bns:Component` wrapper and
+# all seven process-level attributes, which is exactly the "envelope metadata"
+# the plan names.
+#
+# WHAT THIS ROUTE DOES AND DOES NOT PROVE, because the distinction is the whole
+# reason the deferred row stays deferred: it runs parse -> lower -> lower ->
+# emit -> materialize. It BYPASSES `compile_process_ir_v1`. It therefore proves
+# emission and materialization parity for the complete deployable envelope, and
+# it proves nothing about public authoring parity. The corpus migration the plan
+# also asks for (`tests/_wave_gate_golden_corpus.py`, the
+# `_canonical_envelope_case` pattern) is the compile-gated route, and it remains
+# blocked — see `test_the_notify_goldens_cannot_take_the_canonical_corpus_route_yet`.
+
+
+def _materialized_component(document, symbols, *, name):
+    """The canonical chain's complete deployable component XML for a document.
+
+    Every envelope input is DERIVED except `name` and `folder_name`, which are
+    not derivable from an IR document at all — those two come from the corpus
+    registry's own constants rather than being retyped here, so this test and
+    the corpus cannot drift into comparing different components while both stay
+    green.
+    """
+    import sys as _sys
+
+    from boomi_mcp.categories.components.process_component_materializer import (
+        ProcessComponentMaterializer,
+    )
+    from boomi_mcp.compiler.process_ir import lowering
+    from boomi_mcp.compiler.process_ir.emitter_registry import emit_process
+    from boomi_mcp.compiler.process_ir.execution_profile import (
+        derive_process_execution_profile,
+    )
+
+    _tests = str(_ROOT / "tests")
+    if _tests not in _sys.path:
+        _sys.path.insert(0, _tests)
+    import _wave_gate_golden_corpus as corpus
+
+    ir = parse_process_ir_v1(document)
+    cfg = lowering.lower_process_ir_to_cfg(ir)
+    plan = lowering.lower_cfg_to_emission_plan(cfg, symbols)
+    emitted = emit_process(plan, symbols)
+    return ProcessComponentMaterializer().materialize(
+        emitted.shape_xml_parts,
+        name=name,
+        execution_profile=derive_process_execution_profile(cfg, symbols),
+        description="",
+        folder_name=corpus.NOTIFY_GOLDEN_FOLDER_NAME,
+        extension_connections=(),
+    ), emitted
+
+
+def _notify_golden_cases():
+    import sys as _sys
+
+    _tests = str(_ROOT / "tests")
+    if _tests not in _sys.path:
+        _sys.path.insert(0, _tests)
+    import _wave_gate_golden_corpus as corpus
+
+    return {
+        "golden-000059": (
+            _NOTIFY_DLQ_DOCUMENT,
+            _dlq_symbols(),
+            corpus.NOTIFY_DLQ_GOLDEN_NAME,
+            "try_catch_notify_dlq_document_cache.xml",
+        ),
+        "golden-000005": (
+            _CHAIN_DLQ_DOCUMENT,
+            _chain_symbols(),
+            corpus.CONNECTOR_SCOPE_NOTIFY_GOLDEN_NAME,
+            "connector_scoped_trycatch_notify_dlq_document_cache.xml",
+        ),
+    }
+
+
+@pytest.mark.parametrize("case", ["golden-000059", "golden-000005"])
+def test_the_notify_golden_reproduces_as_a_complete_file(case):
+    """Plan line 293: COMPLETE emitted fixture bytes against the frozen file.
+
+    Not the shapes section, not a normalized comparison, not a subset — the
+    whole file, compared as bytes against the fixture frozen before this slice's
+    baseline. The goldens are NOT regenerated: they stay the legacy builder's
+    output, which is what makes them an oracle rather than a photograph of the
+    code under test.
+    """
+    document, symbols, name, filename = _notify_golden_cases()[case]
+    produced, _ = _materialized_component(document, symbols, name=name)
+    assert produced.encode("utf-8") == (GOLDEN / filename).read_bytes()
+
+
+@pytest.mark.parametrize("case", ["golden-000059", "golden-000005"])
+def test_the_complete_file_pin_is_not_satisfied_by_the_shapes_alone(case):
+    """Non-vacuity, direction 1: the materializer is LOAD-BEARING.
+
+    If the emitted process XML already equalled the frozen file, the pin above
+    would be asserting nothing about materialization and the envelope claim
+    would be hollow. It does not: the emitter's own output carries no
+    `bns:Component` wrapper and none of the process attributes.
+    """
+    document, symbols, name, filename = _notify_golden_cases()[case]
+    _, emitted = _materialized_component(document, symbols, name=name)
+    frozen = (GOLDEN / filename).read_bytes()
+    assert emitted.process_xml.encode("utf-8") != frozen
+    assert b"<bns:Component" in frozen
+    assert "<bns:Component" not in emitted.process_xml
+
+
+@pytest.mark.parametrize("case", ["golden-000059", "golden-000005"])
+def test_every_emitted_shape_part_reaches_the_complete_file(case):
+    """Non-vacuity, direction 2: every part is CONSUMED.
+
+    A materializer that silently dropped or truncated its input would still
+    satisfy a single equality if the golden happened to match what it kept.
+    Dropping the last shape part must break the match, for every golden.
+    """
+    from boomi_mcp.categories.components.process_component_materializer import (
+        ProcessComponentMaterializer,
+    )
+    from boomi_mcp.compiler.process_ir.execution_profile import (
+        derive_process_execution_profile,
+    )
+    from boomi_mcp.compiler.process_ir import lowering
+    from boomi_mcp.compiler.process_ir.emitter_registry import emit_process
+
+    document, symbols, name, filename = _notify_golden_cases()[case]
+    ir = parse_process_ir_v1(document)
+    cfg = lowering.lower_process_ir_to_cfg(ir)
+    emitted = emit_process(lowering.lower_cfg_to_emission_plan(cfg, symbols), symbols)
+    parts = list(emitted.shape_xml_parts)
+    assert len(parts) > 1, parts
+
+    import sys as _sys
+    _tests = str(_ROOT / "tests")
+    if _tests not in _sys.path:
+        _sys.path.insert(0, _tests)
+    import _wave_gate_golden_corpus as corpus
+
+    truncated = ProcessComponentMaterializer().materialize(
+        parts[:-1],
+        name=name,
+        execution_profile=derive_process_execution_profile(cfg, symbols),
+        description="",
+        folder_name=corpus.NOTIFY_GOLDEN_FOLDER_NAME,
+        extension_connections=(),
+    )
+    assert truncated.encode("utf-8") != (GOLDEN / filename).read_bytes()
+
+
+@pytest.mark.parametrize("case", ["golden-000059", "golden-000005"])
+def test_the_envelope_inputs_are_load_bearing(case):
+    """Non-vacuity, direction 3: the envelope metadata is really compared.
+
+    The name and the execution profile both reach the emitted bytes, so a pin
+    that passed under the wrong one would be comparing something other than the
+    fixture it names. Both are perturbed here, one at a time.
+    """
+    from boomi_mcp.categories.components.process_component_materializer import (
+        ProcessComponentMaterializer,
+    )
+    from boomi_mcp.compiler.process_ir import lowering
+    from boomi_mcp.compiler.process_ir.emitter_registry import emit_process
+
+    import sys as _sys
+    _tests = str(_ROOT / "tests")
+    if _tests not in _sys.path:
+        _sys.path.insert(0, _tests)
+    import _wave_gate_golden_corpus as corpus
+
+    document, symbols, name, filename = _notify_golden_cases()[case]
+    ir = parse_process_ir_v1(document)
+    cfg = lowering.lower_process_ir_to_cfg(ir)
+    parts = emit_process(
+        lowering.lower_cfg_to_emission_plan(cfg, symbols), symbols
+    ).shape_xml_parts
+    frozen = (GOLDEN / filename).read_bytes()
+
+    def materialize(**overrides):
+        kwargs = dict(
+            name=name, execution_profile="scheduled", description="",
+            folder_name=corpus.NOTIFY_GOLDEN_FOLDER_NAME, extension_connections=(),
+        )
+        kwargs.update(overrides)
+        return ProcessComponentMaterializer().materialize(parts, **kwargs)
+
+    assert materialize().encode("utf-8") == frozen  # the control
+    assert materialize(name=name + " (not the golden)").encode("utf-8") != frozen
+    assert materialize(execution_profile="listener").encode("utf-8") != frozen
+    assert materialize(folder_name=None).encode("utf-8") != frozen
+
+
+def test_the_execution_profile_in_the_pin_is_derived_not_chosen():
+    """...and the one envelope input that IS derivable is derived.
+
+    `scheduled` is not a literal anybody picked: the compiler's own profile
+    authority returns it for both documents. Pinning that here is what stops the
+    complete-file tests above from quietly becoming hand-set-envelope tests.
+    """
+    from boomi_mcp.compiler.process_ir import lowering
+    from boomi_mcp.compiler.process_ir.execution_profile import (
+        derive_process_execution_profile,
+    )
+
+    for name in ("golden-000059", "golden-000005"):
+        document, symbols, _n, _f = _notify_golden_cases()[name]
+        cfg = lowering.lower_process_ir_to_cfg(parse_process_ir_v1(document))
+        assert derive_process_execution_profile(cfg, symbols) == "scheduled", name
+
+
 def test_the_recovery_golden_matches_the_archived_live_capture():
     """The new golden is LIVE-ANCHORED, and this is what makes that checkable.
 
@@ -1470,23 +1691,53 @@ def test_the_notify_goldens_cannot_take_the_canonical_corpus_route_yet():
     The architect asked for them to be re-pointed at `_canonical_envelope_case`,
     and rejected — correctly — my first argument that doing so would make the
     goldens photographs of the code under test: the frozen bytes stay frozen
-    either way, so the canonical route would genuinely add the normalize ->
-    compile -> late-bind -> materialize -> full-envelope coverage that the
-    shapes-level tests above do not have.
+    either way, so the canonical route genuinely adds the normalize -> COMPILE ->
+    late-bind -> materialize coverage that the tests above do not have.
 
-    The blocker is not effort, it is a CAPABILITY the canonical surface does not
-    model. Both goldens drive a REST **POST** target, and
-    `CONNECTOR_CALL_CAPABILITIES_V1` registers only `get` and `patch` for the
-    REST family — so the graph is not authorable as a canonical `connector_call`
-    chain at all, and `compile_process_ir_v1` refuses it at
-    `PROCESS_IR_CAPABILITY_CONNECTOR_ACTION_UNSUPPORTED` before any envelope is
-    built. Connector capability rows are explicitly OUT of scope for #156 (the
-    issue assigns them to #155), so adding one to unblock a golden migration
-    would be this slice reaching into another's contract.
+    What it no longer adds is the full-envelope comparison. That half is pinned
+    now, in `test_the_notify_golden_reproduces_as_a_complete_file`, which
+    reproduces both frozen files byte-for-byte through emit + materialize. So the
+    residue this test guards is exactly ONE thing: passing through
+    `compile_process_ir_v1`, the gate the pinned route bypasses.
+
+    The blocker is a CAPABILITY the canonical surface does not model. Both
+    goldens drive a REST **POST** target, and `CONNECTOR_CALL_CAPABILITIES_V1`
+    registers only `get` and `patch` for the REST family, so
+    `compile_process_ir_v1` refuses both at
+    `PROCESS_IR_CAPABILITY_CONNECTOR_ACTION_UNSUPPORTED`. The gap is POST
+    specifically, not REST writing generally — `patch` is already a registered
+    write. Connector capability rows are out of scope for #156.
+
+    WHAT REGISTERING POST WOULD AND WOULD NOT UNBLOCK. This is measured, per
+    golden, and an earlier version of this docstring got it wrong by claiming it
+    jointly:
+
+    - `golden-000059`, the single process-scoped handler: the row is necessary
+      AND SUFFICIENT. With a synthetic POST capability it compiles through
+      `compile_process_ir_v1` and emits `<shapes>` byte-equal to the frozen file.
+      Re-point it as soon as the row lands.
+    - `golden-000005`, the double guard: the row is necessary and NOT sufficient.
+      It is then refused at `PROCESS_IR_SEMANTIC_IDEMPOTENCY_EVIDENCE_MISSING`
+      on its retried region, and once `key_reference` evidence is authored it is
+      refused AGAIN at `PROCESS_IR_SEMANTIC_PROFILE_MISMATCH` on the map. Three
+      changes, not one.
+
+    The idempotency code is not the fail-closed default arriving by the obvious
+    route: `lookup_capability` upgrades the default `unverified` to
+    `conditionally_idempotent` from the packaged replay registry's observed REST
+    POST verdict, and it is that classification which demands evidence. A row
+    registered `non_idempotent` yields `PROCESS_IR_SEMANTIC_RETRY_NON_IDEMPOTENT_WRITE`
+    instead. A future reader who assumes the default refusal will be looking for
+    the wrong diagnostic.
+
+    Exactly one region is retried — the REST-write region, count 2. The other
+    region and `golden-000059`'s handler are both count 0; any non-zero count
+    trips the same gate.
 
     This test exists so the claim is checkable rather than asserted, and so it
-    FAILS the day a REST write intent is registered — at which point the
-    migration becomes possible and should be done.
+    FAILS the day a REST write intent is registered — at which point this
+    docstring's per-golden prerequisites must be REASSESSED. That failure is a
+    trigger to re-decide, not a certificate that the migration is now possible.
     """
     from boomi_mcp.compiler.process_ir.connector_capabilities import (
         CONNECTOR_CALL_CAPABILITIES_V1,
@@ -1496,8 +1747,10 @@ def test_the_notify_goldens_cannot_take_the_canonical_corpus_route_yet():
     registered = {action for family, action in CONNECTOR_CALL_CAPABILITIES_V1
                   if family == REST_FAMILY}
     assert registered == {"get", "patch"}, (
-        "a REST write intent is now registered, so the notify goldens can take "
-        "the canonical corpus route — re-point them (issue #156 ARCH-156-r2-06): "
+        "a REST write intent is now registered. Re-decide the corpus migration "
+        "per golden, per this test's docstring: golden-000059 is unblocked by "
+        "this row alone; golden-000005 additionally needs authored idempotency "
+        "evidence and map-boundary profile refs (issue #156 ARCH-156-r2-06b): "
         + repr(sorted(registered))
     )
 
