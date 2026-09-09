@@ -999,7 +999,9 @@ def _lift_recipe_roots_into_units(components, roots, envelopes=None):
 # ---------------------------------------------------------------------------
 
 
-def build_integration_spec_preview(normalized: _NormalizedIntent) -> IntegrationSpecV1:
+def build_integration_spec_preview(
+    normalized: _NormalizedIntent, selected_indexes: Any = None
+) -> IntegrationSpecV1:
     """The ComponentPlan preview — explicitly an ``IntegrationSpecV1``.
 
     Named a preview and not a plan: it is what apply WOULD materialize, and
@@ -1040,7 +1042,9 @@ def build_integration_spec_preview(normalized: _NormalizedIntent) -> Integration
     what makes them evidence rather than an echo.
     """
     return _as_served_preview(
-        normalized, _withhold_process_roots(normalized.integration_spec)
+        normalized,
+        _withhold_process_roots(normalized.integration_spec),
+        selected_indexes=selected_indexes,
     )
 
 
@@ -1053,7 +1057,11 @@ _COMPILING_INTENT_KINDS = tuple(
 )
 
 
-def _as_served_preview(normalized: _NormalizedIntent, spec: IntegrationSpecV1):
+def _as_served_preview(
+    normalized: _NormalizedIntent,
+    spec: IntegrationSpecV1,
+    selected_indexes: Any = None,
+):
     """The served preview SHAPE for this intent (#157).
 
     For the two compiling intents the preview is `CanonicalIntegrationPreviewV1`:
@@ -1069,6 +1077,7 @@ def _as_served_preview(normalized: _NormalizedIntent, spec: IntegrationSpecV1):
         normalized.integration_spec.processes,
         normalized.integration_spec.components,
         connector_metadata=normalized.connector_metadata,
+        selected_indexes=selected_indexes,
     )
     payload = spec.model_dump(mode="json", exclude={"flows"})
     payload.pop("preview_kind", None)
@@ -1836,6 +1845,13 @@ def _validate_processes(
         config = component.config if isinstance(component.config, dict) else {}
         if isinstance(config.get("xml"), str) and config["xml"].strip():
             continue
+        if config.get("reference_only") is True:
+            # A REUSED MAP IS OPAQUE. Its in-spec mappings are candidate
+            # material describing a component this request will not write, so
+            # judging required-leaf coverage from them reports on a map that
+            # does not exist — the same rule D4 states for a reused profile,
+            # applied to the map itself (architect review, item 1).
+            continue
         coverage_error = _required_target_coverage_error(
             component,
             normalized.integration_spec.components,
@@ -1879,6 +1895,35 @@ def _validate_processes(
             )
         )
 
+    # THE WATERMARK CHECK NORMALIZATION DEFERRED. Governance validates a
+    # watermark's field against the referenced source profile, but it runs
+    # offline: a REUSED profile has no index there, so it defers rather than
+    # refusing a declaration it cannot judge (architect review, item 4). Here
+    # the selected artifact IS available, so the deferred case is decided — and
+    # only the deferred case, because governance already refused the rest.
+    _watermark_selected = _selected_profile_indexes(boomi_client, normalized)
+    if _watermark_selected:
+        from ..authoring.governance import validate_watermark_declaration
+        from .governance import GovernanceRefusal as _Refusal
+
+        _by_key = {entry.key: entry for entry in normalized.integration_spec.components}
+        for _unit in (getattr(normalized.integration_spec, "processes", ()) or ()):
+            _declaration = getattr(_unit.envelope, "watermark", None)
+            if _declaration is None:
+                continue
+            try:
+                validate_watermark_declaration(
+                    _declaration,
+                    unit_index=0,
+                    owned_keys=tuple(_by_key),
+                    components_by_key=_by_key,
+                    literal_indexes=dict(literal_indexes or {}, **_watermark_selected),
+                )
+            except _Refusal as _refusal:
+                errors += 1
+                codes.append(str(_refusal.code))
+                diagnostics.extend(_refusal.diagnostics)
+
     summary = ValidationReportSummaryV1(
         is_valid=errors == 0,
         error_count=errors,
@@ -1921,8 +1966,15 @@ def _selected_profile_indexes(boomi_client: Any, normalized: Any):
     try:
         from ..categories.integration_builder import _resolve_selected_profile_indexes
 
+        # THE CALLER'S POLICY TRAVELS WITH THE QUESTION. Without it the
+        # resolver's fallback assumes the default "reuse", so under
+        # `conflict_policy="clone"` a same-name profile was judged against the
+        # namesake it will CLONE rather than the profile being authored.
         return _resolve_selected_profile_indexes(
-            boomi_client, normalized.integration_spec
+            boomi_client,
+            normalized.integration_spec,
+            conflict_policy=getattr(normalized, "conflict_policy", None)
+            or getattr(normalized.integration_spec, "conflict_policy", None),
         ) or None
     except Exception:  # noqa: BLE001 - discovery is best effort; absence defers
         return None
@@ -2212,7 +2264,10 @@ def plan_authoring_request_v1(
         tuple(d for d in all_diagnostics if d.severity != "error")
     )
 
-    spec_preview = build_integration_spec_preview(normalized)
+    _selected_for_preview = _selected_profile_indexes(boomi_client, normalized)
+    spec_preview = build_integration_spec_preview(
+        normalized, selected_indexes=_selected_for_preview
+    )
 
     # The LEGACY component-plan lint, reused. It supplies the redacted spec echo
     # and the duplicate-connection / base-URL / folder / name warnings that a
@@ -2284,6 +2339,7 @@ def plan_authoring_request_v1(
             spec_preview = _as_served_preview(
                 normalized,
                 _withhold_process_roots(IntegrationSpecV1(**legacy["integration_spec"])),
+                selected_indexes=_selected_for_preview,
             )
         # The planner's own warning strings. The advisory arm this used to
         # accumulate is gone with the `process_ir` exemption above: an

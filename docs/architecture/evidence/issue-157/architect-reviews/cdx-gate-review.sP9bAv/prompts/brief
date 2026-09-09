@@ -1,0 +1,39 @@
+Review this implementation against the architect design plan appended verbatim below.
+
+Repository: /Users/gleb/Documents/Projects/Renera/boomi-mcp-server, branch `codex/issue-157`.
+Baseline: ba1be9f34317d720d3b012484622ab7e2742143b. Implementation HEAD: the current checkout.
+The delta touches 214 files; read `git diff ba1be9f34317d720d3b012484622ab7e2742143b..HEAD` for it.
+
+Your question is NOT "is this code good" — a separate Codex commit review already ran four rounds
+against this tree and closed clean. Your question is whether the IMPLEMENTATION REALIZES THE PLAN:
+which plan items are fully implemented, which are partially implemented, which are missing, and
+which were implemented differently from what the plan specified.
+
+Where the implementation deviates from the plan, the audit ledger at
+`docs/architecture/ISSUE_157_AUDIT_LEDGER.md` records the deviation and its reasoning: read its
+"Plan corrections" table (P1-P9, recorded before implementation began) and its "Design decisions"
+table (D1-D19). A deviation that table justifies is not automatically acceptable — say so if the
+justification does not hold — but a deviation you flag without engaging that record is less useful
+than one that engages it.
+
+Facts you will need, so you do not have to rediscover them:
+- Stage-1 live QA ran ELEVEN rounds against a live Boomi account. Forty-six findings were raised and
+  all were fixed. The ledger's findings table carries every one with its disposition and evidence.
+- One defect class recurred ten times, always in how a created component's PLACEMENT is resolved,
+  submitted, attested and explained. The ledger's second-instance section records each structural
+  answer and why the earlier ones failed.
+- The one settled platform fact: this platform IGNORES `folderName` and `folderFullPath` on create.
+  A component is placed only by a `folderId` injected at one boundary, `with_folder_id` inside
+  `_create_component_raw`. Exactly one create route bypasses that boundary — the trading-partner
+  create, which posts a typed model carrying a folder NAME and declares that limit itself.
+
+Please cover in particular:
+1. Each numbered in-scope item of the plan: implemented, partial, missing, or implemented otherwise.
+2. Whether the governance surface is on the typed per-root envelope only and never on ProcessIRV1.
+3. Whether the derived-flows projection is genuinely derived and output-only.
+4. Whether the retirements are backed by the mutation proofs the plan asks for.
+5. Whether the one required-target-leaf validator really replaced the six legacy sites and is
+   reached by both entry points.
+6. Anything the plan asked for that you cannot find evidence of.
+
+END with a verdict on its OWN FINAL line: exactly 'VERDICT: NO ISSUES' or 'VERDICT: ISSUES FOUND'.

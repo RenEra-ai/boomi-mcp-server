@@ -65,9 +65,10 @@ FUTURE_BUILDER_ISSUE_BY_ROUTE: Mapping[str, str] = {
 NORMALIZATION_RULES: Tuple[str, ...] = (
     "R1 script_body -> script_body_sha256 (+ script_body_present); ADR-001 §11",
     "R2 future_builder_issue dropped: a pure function of operation_type (measured)",
-    "R3 *_profile_generation.component_name dropped: the legacy DB form passed "
-    "None and the API form a derived default, while the emitted profile "
-    "component carries the real name in both worlds",
+    "R3 *_profile_generation.component_name dropped FOR COMPARISON ONLY: the "
+    "legacy DB form passed None and the API form a derived default, so an "
+    "equality check between the two must ignore it — the SERVED row keeps the "
+    "name, which its own model declares a field for",
     "R4 direct source_field -> source_path: two spellings of one leaf (the DB "
     "form spelled 'field', the API form served both; both-present ⇒ equal, measured)",
 )
@@ -105,9 +106,17 @@ def normalize_operation_summary(summary: Mapping[str, Any]) -> Dict[str, Any]:
     return out
 
 
-def _normalize_generation(artifact: Any) -> Any:
+def _normalize_generation(artifact: Any, *, for_comparison: bool = True) -> Any:
     if not isinstance(artifact, Mapping):
         return _plain(artifact)
+    if not for_comparison:
+        # THE SERVED PAYLOAD KEEPS THE NAME. R3 exists because the two LEGACY
+        # producers disagree with each other — one passes None, the other a
+        # derived default — so an equality check between them has to ignore it.
+        # That is a reconciliation of the COMPARISON, and applying it to the
+        # served row discarded content the row's own model declares a field for
+        # (architect review, item 2).
+        return {str(k): _plain(v) for k, v in artifact.items()}
     out = {k: _plain(v) for k, v in artifact.items() if k != "component_name"}  # R3
     return out
 
@@ -120,7 +129,9 @@ def _plain(value: Any) -> Any:
     return value
 
 
-def normalize_flow_row(row: Mapping[str, Any]) -> Dict[str, Any]:
+def normalize_flow_row(
+    row: Mapping[str, Any], *, for_comparison: bool = True
+) -> Dict[str, Any]:
     """A legacy or canonical flow row in the ONE comparable representation.
 
     Plain JSON types only, keys as authored, list order preserved, meaningful
@@ -135,7 +146,7 @@ def normalize_flow_row(row: Mapping[str, Any]) -> Dict[str, Any]:
                 for item in value
             ]
         elif key in ("source_profile_generation", "target_profile_generation"):
-            out[key] = _normalize_generation(value)
+            out[key] = _normalize_generation(value, for_comparison=for_comparison)
         else:
             out[key] = _plain(value)
     return out
@@ -157,7 +168,9 @@ def typed_row_from_legacy(row: Mapping[str, Any]) -> DerivedTransformFlowV1:
     parse without dropping content. A legacy leaf the model cannot carry is a
     parse failure here, never a silent omission.
     """
-    return DerivedTransformFlowV1.model_validate(normalize_flow_row(row))
+    return DerivedTransformFlowV1.model_validate(
+        normalize_flow_row(row, for_comparison=False)
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -230,6 +243,37 @@ def _db_schema_summary(index: Mapping[str, Mapping[str, Any]], config: Mapping[s
             }
         )
     return {"field_count": len(fields), "fields": fields}
+
+
+def _selected_or_generated(
+    component: Optional[IntegrationComponentSpec],
+    key: str,
+    selected: Mapping[str, Mapping[str, Any]],
+) -> Optional[Dict[str, Any]]:
+    """The SELECTED artifact's index when there is one, else the generator's.
+
+    A component this request will reuse is described by the account, not by the
+    candidate config the request happens to carry — the same authority rule the
+    coverage gate follows (decision D4). Applying it here too keeps the served
+    projection from describing fields the reused profile does not have.
+    """
+    generated = _generated_profile(component) if component is not None else None
+    index = selected.get(key) if key else None
+    if not (isinstance(index, Mapping) and index):
+        return generated
+    # THE SHAPE FROM THE GENERATOR, THE FIELDS FROM THE ACCOUNT. Building a
+    # summary from the index alone dropped the model's other declared fields;
+    # the point of the rule is only that the FIELD SET must come from the
+    # artifact this request will bind, not from the candidate config.
+    summary = dict(generated or {})
+    summary["field_index_by_path"] = dict(index)
+    summary["mappable_paths"] = sorted(
+        path for path, entry in index.items()
+        if isinstance(entry, Mapping) and entry.get("mappable", True)
+    )
+    if not summary.get("component_type"):
+        summary["component_type"] = getattr(component, "type", None)
+    return summary or None
 
 
 def _generated_profile(component: IntegrationComponentSpec) -> Optional[Dict[str, Any]]:
@@ -335,6 +379,7 @@ def derive_transform_flows(
     components: Sequence[IntegrationComponentSpec],
     *,
     connector_metadata: Optional[Mapping[str, Tuple[Optional[str], Optional[str]]]] = None,
+    selected_indexes: Optional[Mapping[str, Mapping[str, Any]]] = None,
 ) -> Tuple[DerivedTransformFlowV1, ...]:
     """One typed row per ``map_ref`` node, per root, in key order.
 
@@ -350,6 +395,11 @@ def derive_transform_flows(
 
     by_key = {component.key: component for component in components}
     metadata = dict(connector_metadata or {})
+    #: A REUSED profile's candidate config describes a component this request
+    #: will not write, so a row generated from it can describe fields the
+    #: account never held — and omit fields it does (architect review, item 2).
+    #: Where the selected artifact's own index is in hand, it wins.
+    selected = dict(selected_indexes or {})
     rows: List[DerivedTransformFlowV1] = []
     for unit in sorted(units, key=lambda u: u.envelope.component_key):
         nodes = _walk_nodes(unit.process_ir)
@@ -358,10 +408,12 @@ def derive_transform_flows(
             map_key = _ref_key(getattr(node, "map_ref", None) or getattr(node, "component_ref", None))
             component = by_key.get(map_key) if map_key else None
             config = (component.config or {}) if component is not None else {}
-            source_component = by_key.get(_ref_key(config.get("source_profile_id")) or "")
-            target_component = by_key.get(_ref_key(config.get("target_profile_id")) or "")
-            source_gen = _generated_profile(source_component) if source_component else None
-            target_gen = _generated_profile(target_component) if target_component else None
+            source_key = _ref_key(config.get("source_profile_id")) or ""
+            target_key = _ref_key(config.get("target_profile_id")) or ""
+            source_component = by_key.get(source_key)
+            target_component = by_key.get(target_key)
+            source_gen = _selected_or_generated(source_component, source_key, selected)
+            target_gen = _selected_or_generated(target_component, target_key, selected)
 
             # the feeding step: the nearest preceding connector node
             source_token = ""

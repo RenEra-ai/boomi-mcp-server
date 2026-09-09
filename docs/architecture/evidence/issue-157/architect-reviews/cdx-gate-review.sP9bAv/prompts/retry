@@ -1,0 +1,22 @@
+Approvals and tool escalations are unavailable in this read-only review session, so nothing you
+request will be granted and no further turn will be offered. Produce the review NOW, as plain text,
+from what you can read directly in the repository at
+/Users/gleb/Documents/Projects/Renera/boomi-mcp-server on branch `codex/issue-157`.
+
+Review the implementation against the architect design plan that was appended verbatim to the
+original prompt. Judge whether the IMPLEMENTATION REALIZES THE PLAN — item by item: fully
+implemented, partially implemented, missing, or implemented differently — not whether the code is
+good in general, which a separate four-round Codex commit review already covered and closed clean.
+
+The delta is `git diff ba1be9f34317d720d3b012484622ab7e2742143b..HEAD`, 214 files. The audit ledger
+at `docs/architecture/ISSUE_157_AUDIT_LEDGER.md` records every deviation from the plan with its
+reasoning in two tables: "Plan corrections" (P1-P9, recorded before implementation) and "Design
+decisions" (D1-D19). Engage that record where you flag a deviation.
+
+Cover each numbered in-scope plan item; whether governance sits on the typed per-root envelope only
+and never on ProcessIRV1; whether the derived-flows projection is genuinely derived and output-only;
+whether the retirements carry the mutation proofs the plan requires; whether the single
+required-target-leaf validator replaced the six legacy sites and is reached by both entry points;
+and anything the plan asked for that you cannot find evidence of.
+
+END with a verdict on its OWN FINAL line: exactly 'VERDICT: NO ISSUES' or 'VERDICT: ISSUES FOUND'.

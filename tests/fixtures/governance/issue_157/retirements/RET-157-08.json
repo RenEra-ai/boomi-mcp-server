@@ -19,6 +19,10 @@
       "transform_transform_map": "transform.map"
     },
     "emitted_xml_digests": {
+      "__trace__": {
+        "base": "16408052280cea95b4c18776db7e1ce3e7da4d9acca88864410304eae6db5271",
+        "varied": "16408052280cea95b4c18776db7e1ce3e7da4d9acca88864410304eae6db5271"
+      },
       "main_process": {
         "base": "a5273b9330e5fa020fc07d1d3217eca27386aeae309172e793c4d77e3ebed3a5",
         "varied": "a5273b9330e5fa020fc07d1d3217eca27386aeae309172e793c4d77e3ebed3a5"
@@ -55,6 +59,7 @@
     "non_vacuity_control": {
       "field_path": "source/read_operation/batch_size",
       "xml_moved": [
+        "__trace__",
         "source_db_get_operation"
       ]
     },

@@ -70,7 +70,6 @@ TRANSFORM_REVIEW_DUPLICATE_TARGET = "TRANSFORM_REVIEW_DUPLICATE_TARGET"
 from .components.builders import transform_map_validation as _tmv  # noqa: E402
 from .components.builders.transform_map_validation import (  # noqa: E402
     TRANSFORM_REVIEW_REQUIRED_TARGET_UNMAPPED,
-    normalized_map_destinations,
 )
 TRANSFORM_REVIEW_SCRIPT_REF_MISSING = "TRANSFORM_REVIEW_SCRIPT_REF_MISSING"
 TRANSFORM_REVIEW_COMPARE_FAILED = "TRANSFORM_REVIEW_COMPARE_FAILED"

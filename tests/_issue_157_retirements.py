@@ -187,6 +187,13 @@ def apply_capture(spec):
     for key, rec in (result.get("results") or {}).items():
         assert rec.get("status") == "created" and rec.get("component_id") in by_id, (key, rec)
         digests[key] = sha(by_id[rec["component_id"]])
+    # THE ORDERED TRACE, beside the per-component digests. Equal digests prove
+    # each component's BYTES did not move; they do not prove the apply issued
+    # the same writes in the same order, which is a different way a field could
+    # be wired (architect review, item 6). `store` is the create boundary's own
+    # call order, so this is a reading of what happened rather than a model of
+    # it.
+    digests["__trace__"] = sha("|".join(sha(document) for _cid, document in store))
     return digests
 
 

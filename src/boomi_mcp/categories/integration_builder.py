@@ -195,6 +195,7 @@ from .components.builders.xml_profile_builder import XMLGeneratedProfileBuilder
 from .components.builders.map_builder import DirectMapBuilder, get_map_builder
 from .components.builders.transform_map_validation import (
     resolve_map_profile_index,
+    validate_required_target_coverage,
     validate_transform_map,
 )
 from .components.builders.profile_generation import (
@@ -9534,6 +9535,18 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
             literal_indexes=literal_profile_indexes,
             selected_indexes=selected_profile_indexes,
         )
+        if drift_err is None and getattr(spec, "processes", None):
+            # AND THE REQUIRED-LEAF COVERAGE, on the canonical route only. The
+            # legacy lint deliberately does not carry this gate (decision D3),
+            # but a typed apply refreshing a selected index must not discover a
+            # newly required unmapped leaf at the map STEP, after earlier
+            # components are written (architect review, item 1).
+            drift_err = validate_required_target_coverage(
+                effective_config,
+                components_by_key,
+                literal_profile_indexes or None,
+                selected_indexes=selected_profile_indexes or None,
+            )
         if drift_err is not None:
             return {
                 "_success": False,
@@ -11390,7 +11403,33 @@ def _reject_malformed_authoring_request(payload, action: str) -> Dict[str, Any]:
 
 
 def _reject_ambiguous_authoring_request(cfg: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    """Refuse a config carrying BOTH a typed and a legacy authoring root."""
+    """Refuse a config carrying BOTH a typed and a legacy authoring root.
+
+    ``flows`` is refused by its OWN name wherever a caller writes it. It is a
+    derived, output-only projection, and the intent models already say so — but
+    only for the two locations pydantic sees. A caller who put it at the config
+    root beside a valid typed request had it silently ignored, and one who put
+    it on the request envelope got the generic input code, so the same authored
+    key was answered three different ways depending on where it landed
+    (architect review, item 5).
+    """
+    for holder, where in ((cfg, "config"), (cfg.get("authoring_request"), "authoring_request")):
+        if isinstance(holder, Mapping) and "flows" in holder:
+            return {
+                "_success": False,
+                "error_code": GOVERNANCE_FLOWS_OUTPUT_ONLY,
+                "error": (
+                    "flows is a derived, output-only projection; the server "
+                    "never merges caller-authored flow rows into it."
+                ),
+                "validation_errors": [
+                    {"path": "{0}.flows".format(where), "type": "governance_flows_output_only"}
+                ],
+                "hint": (
+                    "Remove 'flows' from the request. The served plan and "
+                    "compile results carry the derived projection."
+                ),
+            }
     conflicting = sorted(root for root in _LEGACY_SPEC_ROOTS if root in cfg)
     if not conflicting:
         return None

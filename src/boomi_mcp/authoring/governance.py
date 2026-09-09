@@ -613,6 +613,42 @@ def _operations_of(
     return found
 
 
+def _refuse_contradictory_identity(component, config, key: str) -> None:
+    """A binding may not name two different components, however it spells reuse.
+
+    Both halves of an identity — the top-level field and the config's copy —
+    name ONE component or the contract cannot say which the request means. The
+    check lived inside the reuse branch, so a connection declaring
+    ``action="create"`` with one id at the top level and another in its config
+    passed untouched, while apply under the reuse policy resolved it to the
+    first (architect review, item 3).
+    """
+    top_id = component.component_id.strip() if isinstance(component.component_id, str) else ""
+    cfg_id = config.get("component_id")
+    cfg_id = cfg_id.strip() if isinstance(cfg_id, str) else ""
+    if top_id and cfg_id and top_id != cfg_id:
+        raise _refuse(
+            GOVERNANCE_CONNECTION_BINDING_CONFLICT,
+            message="A connection binding names two disagreeing component ids.",
+            path="/components/{0}/config/component_id".format(key),
+            subject_kind="component",
+            subject_id=key,
+            remediation="Name the bound component once.",
+        )
+    top_name = component.name.strip() if isinstance(component.name, str) else ""
+    cfg_name = config.get("component_name")
+    cfg_name = cfg_name.strip() if isinstance(cfg_name, str) else ""
+    if top_name and cfg_name and top_name != cfg_name:
+        raise _refuse(
+            GOVERNANCE_CONNECTION_BINDING_CONFLICT,
+            message="A connection binding names two disagreeing component names.",
+            path="/components/{0}/config/component_name".format(key),
+            subject_kind="component",
+            subject_id=key,
+            remediation="Name the bound component once.",
+        )
+
+
 def apply_connection_binding_contract(
     components: Sequence[IntegrationComponentSpec],
 ) -> Tuple[IntegrationComponentSpec, ...]:
@@ -664,30 +700,17 @@ def apply_connection_binding_contract(
                         "connection being created."
                     ),
                 )
-            top_id = component.component_id.strip() if isinstance(component.component_id, str) else ""
-            cfg_id = config.get("component_id")
-            cfg_id = cfg_id.strip() if isinstance(cfg_id, str) else ""
-            if top_id and cfg_id and top_id != cfg_id:
-                raise _refuse(
-                    GOVERNANCE_CONNECTION_BINDING_CONFLICT,
-                    message="A reuse binding names two disagreeing component ids.",
-                    path="/components/{0}/config/component_id".format(key),
-                    subject_kind="component",
-                    subject_id=key,
-                    remediation="Name the reused component once.",
-                )
-            top_name = component.name.strip() if isinstance(component.name, str) else ""
-            cfg_name = config.get("component_name")
-            cfg_name = cfg_name.strip() if isinstance(cfg_name, str) else ""
-            if top_name and cfg_name and top_name != cfg_name:
-                raise _refuse(
-                    GOVERNANCE_CONNECTION_BINDING_CONFLICT,
-                    message="A reuse binding names two disagreeing component names.",
-                    path="/components/{0}/config/component_name".format(key),
-                    subject_kind="component",
-                    subject_id=key,
-                    remediation="Name the reused component once.",
-                )
+            _refuse_contradictory_identity(component, config, key)
+        else:
+            # A CONTRADICTION IS A CONTRADICTION OUTSIDE THE REUSE SPELLING TOO.
+            # These checks sat inside the reuse branch, so a connection
+            # declaring `action="create"` with one component id at the top
+            # level and a different one in its config — which apply resolves to
+            # a reuse under the reuse policy — carried two identities and
+            # inline settings past the contract entirely.
+            _refuse_contradictory_identity(component, config, key)
+
+        if reuse:
             continue
 
         is_rest = _resolve_rest_connector_type(config.get("connector_type")) is not None
@@ -828,7 +851,16 @@ def validate_watermark_declaration(
     index = resolve_map_profile_index(
         declaration.source_profile_ref, dict(components_by_key), literal_indexes
     )
-    entry = (index or {}).get(declaration.field) if index else None
+    if index is None:
+        # UNAVAILABLE IS NOT WRONG. Governance runs during offline
+        # normalization, which has no account access, so a watermark over a
+        # REUSED source profile has no index here — and refusing on that
+        # rejected a declaration whose field the selected profile really
+        # declares (architect review, item 4). The same deferral the coverage
+        # gate makes for an empty index: the online validation re-asks with the
+        # selected artifact, where the answer exists.
+        return
+    entry = index.get(declaration.field)
     if entry is None or not entry.get("mappable", True):
         raise _refuse(
             GOVERNANCE_WATERMARK_INCONSISTENT,
