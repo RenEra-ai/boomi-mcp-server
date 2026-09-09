@@ -5582,7 +5582,16 @@ def _resolve_selected_profile_indexes(
         # dependent maps were validated against the schema being replaced rather
         # than the one being authored. Reconstructing a decision whose authority
         # is one function is the defect class this slice keeps closing.
-        if comp.key not in reused and not _will_reuse_at_apply(
+        if reused_keys is not None:
+            # THE CALLER SUPPLIED THE DECISION, so it is the answer. Falling
+            # back to the predicate for a component the caller EXCLUDED let a
+            # default policy contradict the planner's own decision: under
+            # `conflict_policy="clone"` a same-name profile is cloned, not
+            # reused, and re-deciding here loaded the existing schema instead of
+            # the one being created.
+            if comp.key not in reused:
+                continue
+        elif not _will_reuse_at_apply(
             declared_action=getattr(comp, "action", None),
             existing_component_id=component_id,
             reference_only=_component_reference_only(comp),
@@ -9468,6 +9477,7 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
         reused_keys=_keys_reused_at_apply(
             spec=spec, existing_ids=existing_ids, conflict_policy=conflict_policy
         ),
+        conflict_policy=conflict_policy,
     )
 
     # Apply re-resolves those indexes, and live discovery can DRIFT from plan
