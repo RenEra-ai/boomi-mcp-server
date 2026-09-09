@@ -317,6 +317,10 @@ hash-pinned in its `SHA256SUMS`, all tracked in git.
 
 | Gate | Round | Run directory | Reviewed SHA | Outcome | Teardown |
 | --- | --- | --- | --- | --- | --- |
+| Stage-2 commit review | 1 | `cdx-review.oJAVqg` | `a80ab2b` | `completed`, 6 findings (1 P1, 5 P2), all validated and fixed | confirmed stopped |
+| Stage-2 commit review | 2 (fix delta) | `cdx-review.tdJpns` | `a8abefe` | `completed`, 2 findings (P2), both validated and fixed | confirmed stopped |
+| Stage-2 commit review | 3 (fix delta) | `cdx-review.wqssw8` | `ddb778e` | `completed`, 1 finding (P2), validated and fixed; checkpoint recorded | confirmed stopped |
+| Stage-2 commit review | 4 (fix delta) | `cdx-review.j03yRY` | `6e38025` | `completed`, **CLEAN** — no regressions found | confirmed stopped |
 | architect plan | 1 (turn 1 + in-session retry, one collected round) | `/tmp/cdx-gate-architect.sxpAQQ` (removed after copy to `.codex/plans/issue-157.md` + `.attest.json`) | n/a (plan over `ba1be9f`) | `completed`, attested `ok:true`; turn 1 interrupted on an MCP tool-approval elicitation, turn 2 (retry) certified | confirmed stopped |
 
 ## Final-tree validation (filled at close; every roster gate current on the FINAL sha)
