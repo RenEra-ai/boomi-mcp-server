@@ -5555,15 +5555,11 @@ def _resolve_selected_profile_indexes(
     Makes ZERO live calls when the spec reuses no profile.
     """
     reused = set(reused_keys or ())
-    collision_reuse = str(conflict_policy or "").lower() == "reuse"
     resolved: Dict[str, Dict[str, Any]] = {}
     for comp in spec.components:
         if not str(getattr(comp, "type", "") or "").startswith("profile."):
             continue
         cfg = comp.config if isinstance(comp.config, dict) else {}
-        declared_reuse = cfg.get("reference_only") is True
-        if not (declared_reuse or comp.key in reused or collision_reuse):
-            continue
         component_id = _first_nonblank_str(comp.component_id, cfg.get("component_id"))
         if not component_id:
             effective_name = _first_nonblank_str(comp.name, cfg.get("component_name"))
@@ -5577,14 +5573,21 @@ def _resolve_selected_profile_indexes(
                 candidates = []
             if len(candidates) != 1:
                 continue
-            if not (declared_reuse or comp.key in reused):
-                # A collision candidate is only a REUSE when the component is
-                # being created and the policy binds it; anything else is an
-                # ordinary create whose candidate config is its own truth.
-                if str(getattr(comp, "action", "") or "") != "create":
-                    continue
             component_id = candidates[0].get("component_id")
         if not component_id:
+            continue
+        # THE PREDICATE IS ASKED, NOT REBUILT. A first attempt reconstructed the
+        # decision from `conflict_policy` alone, which is "reuse" by default —
+        # so a profile being UPDATED was indexed from the live component and its
+        # dependent maps were validated against the schema being replaced rather
+        # than the one being authored. Reconstructing a decision whose authority
+        # is one function is the defect class this slice keeps closing.
+        if comp.key not in reused and not _will_reuse_at_apply(
+            declared_action=getattr(comp, "action", None),
+            existing_component_id=component_id,
+            reference_only=_component_reference_only(comp),
+            conflict_policy=conflict_policy or "reuse",
+        ):
             continue
         discovered = _discover_profile_index(boomi_client, str(component_id))
         if discovered is not None and isinstance(discovered.get("field_index_by_path"), Mapping):
@@ -9490,7 +9493,20 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
         # UNSUPPORTED_TRANSFORM_ROUTE on a map with no map_type/field_mappings).
         if isinstance(cfg.get("xml"), str) and cfg["xml"].strip():
             continue
-        has_literal = any(
+        # A MAP OVER A REUSED PROFILE IS DECIDABLE HERE TOO. This gate covered
+        # only literal-UUID endpoints, because those were the only ones whose
+        # index came from the account. A reused `$ref` profile's index now does
+        # as well, so a profile that lost a mapped field between planning and
+        # this refresh was discovered at the map STEP — after earlier components
+        # had been written — although the incompatible index was in hand before
+        # any write.
+        _selected_backed = any(
+            isinstance(cfg.get(side), str)
+            and cfg[side].startswith("$ref:")
+            and cfg[side][len("$ref:") :] in (selected_profile_indexes or {})
+            for side in ("source_profile_id", "target_profile_id")
+        )
+        has_literal = _selected_backed or any(
             isinstance(cfg.get(side), str)
             and cfg[side].strip()
             and not cfg[side].startswith("$ref:")
