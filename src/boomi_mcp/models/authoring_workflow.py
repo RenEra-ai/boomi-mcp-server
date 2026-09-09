@@ -72,8 +72,21 @@ from pydantic import (
 )
 from pydantic_core import PydanticCustomError
 
+from .derived_flows import DerivedFlowRowV1
+from .governance_intent import (
+    RecordedIntentV1,
+    RuntimeHintDeclarationV1,
+    WatermarkDeclarationV1,
+    reject_retired_spellings,
+)
 from .integration_models import IntegrationComponentSpec, IntegrationSpecV1
-from .process_component import ProcessAuthoringUnitV1
+from .process_component import (
+    ProcessAuthoringUnitAuthoredV1,
+    ProcessAuthoringUnitV1,
+    ProcessComponentEnvelopeAuthoredV1,
+    ProcessExtensionBindingsV1,
+)
+from .recipe_contributions import RecipeComponentKey
 from .process_ir import ProcessIRV1
 from .system_topology import SystemTopologySpecV1
 
@@ -179,15 +192,52 @@ class ProcessIRAuthoringIntentV1(_AuthoringModel):
 
     intent_kind: Literal["process_ir"] = "process_ir"
     integration_name: NonEmptyString
-    units: Tuple[ProcessAuthoringUnitV1, ...]
+    #: #157 (M12.19): the WIRE shape is the AUTHORED unit — its envelope may omit
+    #: `name` when it carries `component_prefix`, and it carries the typed
+    #: watermark / recorded-intent declarations. Normalization resolves every
+    #: authored envelope into the STRICT `ProcessAuthoringUnitV1` (name
+    #: mandatory) before anything is fingerprinted; the JSON shape of a fully
+    #: explicit unit is unchanged, so `contract_version` stays "2".
+    units: Tuple[ProcessAuthoringUnitAuthoredV1, ...]
     components: Tuple[IntegrationComponentSpec, ...] = ()
     conflict_policy: Literal["reuse", "clone", "fail"] = "reuse"
+
+    @model_validator(mode="before")
+    @classmethod
+    def _refuse_authored_flows(cls, value: Any) -> Any:
+        # #157: on a compiling intent `flows` is a DERIVED, output-only
+        # projection. Refused by name BEFORE `extra="forbid"` can report it as
+        # an anonymous unknown field — the caller must learn that the key is
+        # output-only, not merely unrecognized.
+        _refuse_flows_key(value)
+        return value
+
+    @field_validator("units", mode="before")
+    @classmethod
+    def _accept_strict_units(cls, value: Any) -> Any:
+        # A STRICT unit (an already-resolved envelope, as every in-process
+        # caller since #153 builds) is a valid authored unit whose name is
+        # explicit; it is re-expressed as one here so the wire model has ONE
+        # element type and the JSON schema advertises no alternative shape.
+        if isinstance(value, (list, tuple)):
+            return tuple(
+                ProcessAuthoringUnitAuthoredV1(
+                    envelope=ProcessComponentEnvelopeAuthoredV1(
+                        **item.envelope.model_dump(mode="python")
+                    ),
+                    process_ir=item.process_ir,
+                )
+                if isinstance(item, ProcessAuthoringUnitV1)
+                else item
+                for item in value
+            )
+        return value
 
     @field_validator("units")
     @classmethod
     def _check_units(
-        cls, value: Tuple[ProcessAuthoringUnitV1, ...]
-    ) -> Tuple[ProcessAuthoringUnitV1, ...]:
+        cls, value: Tuple[ProcessAuthoringUnitAuthoredV1, ...]
+    ) -> Tuple[ProcessAuthoringUnitAuthoredV1, ...]:
         """At least one unit, and no two units claiming the same key.
 
         Non-emptiness is enforced HERE rather than with ``Field(min_length=1)``,
@@ -240,6 +290,64 @@ class RecipeInvocationRequestV1(_AuthoringModel):
     recipe_version: Optional[NonEmptyString] = None
 
 
+class RecipeProcessEnvelopeV1(_AuthoringModel):
+    """Typed per-root governance for ONE composed recipe root (issue #157).
+
+    Key-addressed: ``component_key`` names the composed root it governs, and
+    normalization matches it EXACTLY against the roots the recipe engine
+    composed (an unmatched key is ``GOVERNANCE_ENVELOPE_UNMATCHED``, a
+    repeated key ``GOVERNANCE_ENVELOPE_DUPLICATE``). It carries governance
+    only — no ``action``, ``component_id`` or ``depends_on``, which stay
+    authored on the lifted process component the recipe emitted — and when it
+    is present the lifted component may not ALSO carry a name, description,
+    folder or extension bindings (``GOVERNANCE_SOURCE_CONFLICT``): one root,
+    one governance authority.
+
+    An envelope intake extension, not a replacement for the interim lift —
+    #159 owns direct process-unit recipe contributions.
+    """
+
+    component_key: RecipeComponentKey
+    name: Optional[str] = None
+    component_prefix: Optional[str] = None
+    description: str = ""
+    folder_name: Optional[str] = None
+    process_extensions: ProcessExtensionBindingsV1 = Field(
+        default_factory=ProcessExtensionBindingsV1
+    )
+    watermark: Optional[WatermarkDeclarationV1] = None
+    recorded_intents: Tuple[RuntimeHintDeclarationV1, ...] = ()
+
+    @model_validator(mode="before")
+    @classmethod
+    def _refuse_retired_spellings(cls, value: Any) -> Any:
+        if isinstance(value, Mapping):
+            reject_retired_spellings(value, path="")
+        return value
+
+    @field_validator("name", "component_prefix", "folder_name")
+    @classmethod
+    def _check_unpadded(cls, value: Optional[str], info) -> Optional[str]:
+        if value is None:
+            return None
+        if not value or value != value.strip():
+            raise PydanticCustomError(
+                "process_component_value_invalid",
+                "{what} must be non-blank and carry no surrounding whitespace",
+                {"what": str(info.field_name)},
+            )
+        return value
+
+    #: The governance fields this envelope can supply. DERIVED from the model,
+    #: so the source-conflict rule at the lift compares against the real field
+    #: set rather than a second hand-written list.
+    @classmethod
+    def governance_fields(cls) -> Tuple[str, ...]:
+        return tuple(
+            name for name in cls.model_fields if name != "component_key"
+        )
+
+
 class RecipeAuthoringIntentV1(_AuthoringModel):
     """Typed recipe contributions entering the workflow (issue #145)."""
 
@@ -248,6 +356,49 @@ class RecipeAuthoringIntentV1(_AuthoringModel):
     invocations: Tuple[RecipeInvocationRequestV1, ...] = Field(min_length=1)
     base_components: Tuple[IntegrationComponentSpec, ...] = ()
     conflict_policy: Literal["reuse", "clone", "fail"] = "reuse"
+    #: #157: optional typed per-root governance, key-addressed.
+    process_envelopes: Tuple[RecipeProcessEnvelopeV1, ...] = ()
+
+    @model_validator(mode="before")
+    @classmethod
+    def _refuse_authored_flows(cls, value: Any) -> Any:
+        # The intent root AND every invocation's raw_input top level: a recipe
+        # input carrying `flows` would otherwise be handed to the engine, whose
+        # own forbidden-shape scan refuses the key — but with the generic input
+        # code, not the one that says WHY.
+        _refuse_flows_key(value)
+        if isinstance(value, Mapping):
+            for invocation in value.get("invocations") or ():
+                if isinstance(invocation, Mapping):
+                    _refuse_flows_key(invocation.get("raw_input"))
+                else:
+                    _refuse_flows_key(getattr(invocation, "raw_input", None))
+        return value
+
+    @field_validator("process_envelopes")
+    @classmethod
+    def _check_envelopes(
+        cls, value: Tuple[RecipeProcessEnvelopeV1, ...]
+    ) -> Tuple[RecipeProcessEnvelopeV1, ...]:
+        keys = [envelope.component_key for envelope in value]
+        duplicated = sorted({key for key in keys if keys.count(key) > 1})
+        if duplicated:
+            raise PydanticCustomError(
+                "governance_envelope_duplicate",
+                "process_envelopes name the same component_key more than once: {keys}",
+                {"keys": ", ".join(duplicated)},
+            )
+        return value
+
+
+def _refuse_flows_key(value: Any) -> None:
+    """Refuse a caller-supplied ``flows`` on a compiling intent, by name."""
+    if isinstance(value, Mapping) and "flows" in value:
+        raise PydanticCustomError(
+            "governance_flows_output_only",
+            "flows is a derived, output-only projection on this intent; the "
+            "server never merges caller-authored flow rows into it",
+        )
 
 
 AuthoringIntentV1 = Annotated[
@@ -802,6 +953,34 @@ class ValidationReportSummaryV1(_AuthoringModel):
     codes: Tuple[str, ...] = ()
 
 
+class CanonicalIntegrationPreviewV1(IntegrationSpecV1):
+    """The served ComponentPlan preview for the two COMPILING intents (#157).
+
+    A SUBCLASS of the legacy spec model overriding exactly one field: ``flows``
+    becomes the typed, generator-DERIVED projection
+    (:mod:`boomi_mcp.models.derived_flows`) instead of the caller-authored
+    legacy list, and ``preview_kind`` says which shape a reader is holding. No
+    other field is restated, so a field added to the spec cannot be silently
+    dropped from the preview.
+
+    Served only. The plan fingerprint keeps hashing the pre-projection spec
+    (ledger correction P4), so introducing this preview moves no existing plan
+    hash; and the projection is never an input to compilation, fingerprinting
+    or mutation.
+    """
+
+    preview_kind: Literal["canonical_units"] = "canonical_units"
+    flows: Tuple[DerivedFlowRowV1, ...] = Field(  # type: ignore[assignment]
+        default=(),
+        description=(
+            "Issue #157 M12.19 — on the process_ir and recipe intents this is a "
+            "TYPED, generator-derived, OUTPUT-ONLY projection of the transform "
+            "rows. It is never authored, never merged with caller rows, and "
+            "never an input to compilation, fingerprinting or mutation."
+        ),
+    )
+
+
 class _AuthoringResultV1(_AuthoringModel):
     """Fields both read-only phases carry."""
 
@@ -810,7 +989,13 @@ class _AuthoringResultV1(_AuthoringModel):
     #: Typed ``False``, not a convention. A read-only phase that claimed to have
     #: mutated — or was edited into doing so — cannot be constructed.
     mutation_performed: Literal[False] = False
-    integration_spec_preview: IntegrationSpecV1
+    #: The canonical preview for the two compiling intents, the legacy spec echo
+    #: for `integration_spec`. Ordered most-specific first so a server-built
+    #: canonical preview keeps its class through re-validation.
+    integration_spec_preview: Union[CanonicalIntegrationPreviewV1, IntegrationSpecV1]
+    #: #157: recorded-not-wired declarations, served back so a deliberate intent
+    #: is readable, never an input to anything hashed or mutated.
+    recorded_intents: Tuple[RecordedIntentV1, ...] = ()
     pipeline_stages: Tuple[str, ...] = ()
     process_cfg: Tuple[ProcessCfgSummaryV1, ...] = ()
     component_dependencies: Tuple[ComponentDependencyEdgeV1, ...] = ()
@@ -1278,6 +1463,9 @@ class AuthoringBuildProvenanceV1(_AuthoringModel):
     #: failure leaves `digest=None` here without weakening the mutation record
     #: beside it.
     process_readbacks: Tuple[ProcessLiveReadbackAttestationV1, ...] = ()
+    #: #157: the recorded-not-wired declarations the applied request carried,
+    #: persisted with the build so they can be read back after apply.
+    recorded_intents: Tuple[RecordedIntentV1, ...] = ()
 
 
 class LiveDeploymentComparisonV1(_AuthoringModel):

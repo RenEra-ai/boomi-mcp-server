@@ -1,0 +1,18 @@
+{
+  "case_id": "composition/reuse_4legs_stream",
+  "endpoints": {
+    "0": "pending:#159",
+    "1": "pending:#159",
+    "2": "pending:#159",
+    "3": "pending:#159",
+    "4": "pending:#159",
+    "5": "pending:#159"
+  },
+  "flows": {
+    "0": "pending:#159",
+    "1": "pending:#159",
+    "2": "pending:#159",
+    "3": "pending:#159",
+    "4": "pending:#159"
+  }
+}

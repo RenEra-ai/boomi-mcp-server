@@ -1,0 +1,79 @@
+{
+  "baseline_sha": "ba1be9f34317d720d3b012484622ab7e2742143b",
+  "entry": {
+    "example": "rest_to_database_dynamic_insert",
+    "kind": "archetype_example"
+  },
+  "input": {
+    "archetype": "api_to_database_sync",
+    "parameters": {
+      "naming": {
+        "component_prefix": "CustSync",
+        "integration_name": "Customer API to DB Sync"
+      },
+      "source": {
+        "binding": {
+          "component_id": "<<existing REST connection id>>",
+          "mode": "reuse"
+        },
+        "fetch_request": {
+          "path": "/v1/<<source resource>>"
+        },
+        "response_profile": {
+          "format": "json",
+          "root": {
+            "children": [
+              {
+                "data_type": "character",
+                "kind": "simple",
+                "name": "id"
+              },
+              {
+                "data_type": "character",
+                "kind": "simple",
+                "name": "name"
+              }
+            ],
+            "kind": "object",
+            "name": "Root"
+          }
+        }
+      },
+      "target": {
+        "connection": {
+          "component_name": "<<existing DB connection>>",
+          "mode": "reuse"
+        },
+        "write_profile": {
+          "fields": [
+            {
+              "data_type": "character",
+              "mandatory": true,
+              "name": "id"
+            },
+            {
+              "data_type": "character",
+              "name": "name"
+            }
+          ],
+          "statement_type": "dynamicinsert",
+          "table_name": "<<target table>>"
+        }
+      },
+      "transform": {
+        "operations": [
+          {
+            "operation_type": "direct",
+            "source_path": "Root/id",
+            "target_path": "Fields/id"
+          },
+          {
+            "operation_type": "direct",
+            "source_path": "Root/name",
+            "target_path": "Fields/name"
+          }
+        ]
+      }
+    }
+  }
+}

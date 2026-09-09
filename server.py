@@ -2367,6 +2367,22 @@ if build_integration_action:
             ignored and a typed apply fails with
             AUTHORING_APPLY_VALIDATION_REQUIRED:
 
+            Governance (issue #157) lives on each unit's envelope, never on the
+            ProcessIR: omit `name` and set `component_prefix` to derive
+            "<prefix> <component_key>"; `folder_name` is ONE knob that also
+            places every supporting component the root owns. Both claims cover
+            only what this request CREATES — a component bound for reuse or by
+            action="update" keeps its stored name and folder — and placement is
+            resolved live at apply and reported per component. `watermark` and
+            `recorded_intents` are recorded and served back, never wired. On
+            the process_ir and recipe intents `flows` is derived-only (a
+            caller-supplied value is refused with GOVERNANCE_FLOWS_OUTPUT_ONLY),
+            a reused connection carries binding keys only, a secured REST
+            connection must be reused rather than created inline, and every
+            required target leaf of a map must be mapped
+            (TRANSFORM_REVIEW_REQUIRED_TARGET_UNMAPPED). Recipe intents may
+            supply per-root governance through `process_envelopes`.
+
                 config = {
                   "authoring_request": {
                     "contract_version": "2",

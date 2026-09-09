@@ -1,0 +1,241 @@
+{
+  "contract_version": "2",
+  "intent": {
+    "components": [
+      {
+        "action": "create",
+        "component_id": null,
+        "config": {
+          "component_name": "DEMO-ENR Source Profile",
+          "folder_path": "Integrations/API/Sync",
+          "profile_type": "json.generated",
+          "root": {
+            "children": [
+              {
+                "children": null,
+                "data_type": "character",
+                "description": null,
+                "kind": "simple",
+                "name": "id",
+                "required": true
+              },
+              {
+                "children": null,
+                "data_type": "datetime",
+                "description": null,
+                "kind": "simple",
+                "name": "updated_at",
+                "required": false
+              }
+            ],
+            "data_type": null,
+            "description": null,
+            "kind": "object",
+            "name": "Root",
+            "required": false
+          }
+        },
+        "depends_on": [],
+        "key": "source_response_profile",
+        "name": "DEMO-ENR Source Profile",
+        "type": "profile.json"
+      },
+      {
+        "action": "create",
+        "component_id": "<<existing REST source connection id>>",
+        "config": {
+          "component_id": "<<existing REST source connection id>>",
+          "connector_type": "rest",
+          "reference_only": true
+        },
+        "depends_on": [],
+        "key": "source_rest_source_connection",
+        "name": null,
+        "type": "connector-settings"
+      },
+      {
+        "action": "create",
+        "component_id": null,
+        "config": {
+          "component_name": "DEMO-ENR REST Fetch",
+          "connection_ref_key": "source_rest_source_connection",
+          "connector_type": "rest",
+          "folder_name": "Integrations/API/Sync",
+          "method": "GET",
+          "operation_mode": "execute",
+          "path": "/v1/<<source resource>>",
+          "query_parameters": {
+            "limit": "100"
+          },
+          "response_profile_id": "$ref:source_response_profile",
+          "response_profile_type": "json"
+        },
+        "depends_on": [
+          "source_rest_source_connection",
+          "source_response_profile"
+        ],
+        "key": "source_rest_source_operation",
+        "name": "DEMO-ENR REST Fetch",
+        "type": "connector-action"
+      },
+      {
+        "action": "create",
+        "component_id": null,
+        "config": {
+          "component_name": "DEMO-ENR Target Profile",
+          "folder_path": "Integrations/API/Sync",
+          "profile_type": "json.generated",
+          "root": {
+            "children": [
+              {
+                "children": null,
+                "data_type": "character",
+                "description": null,
+                "kind": "simple",
+                "name": "external_id",
+                "required": true
+              },
+              {
+                "children": null,
+                "data_type": "datetime",
+                "description": null,
+                "kind": "simple",
+                "name": "modified",
+                "required": false
+              }
+            ],
+            "data_type": null,
+            "description": null,
+            "kind": "object",
+            "name": "Root",
+            "required": false
+          }
+        },
+        "depends_on": [],
+        "key": "transform_target_profile",
+        "name": "DEMO-ENR Target Profile",
+        "type": "profile.json"
+      },
+      {
+        "action": "create",
+        "component_id": null,
+        "config": {
+          "component_name": "DEMO-ENR Field Map",
+          "field_mappings": [
+            {
+              "documentation_hint": "carry the source id verbatim",
+              "source_path": "Root/id",
+              "target_path": "Root/external_id"
+            }
+          ],
+          "folder_path": "Integrations/API/Sync",
+          "function_mappings": [
+            {
+              "function_type": "date_format",
+              "inputs": [
+                "Root/updated_at"
+              ],
+              "parameters": {
+                "input_format": "<<source datetime format>>",
+                "output_format": "<<target datetime format>>"
+              },
+              "target_path": "Root/modified"
+            }
+          ],
+          "map_type": "function",
+          "source_profile_id": "$ref:source_response_profile",
+          "source_profile_type": "profile.json",
+          "target_profile_id": "$ref:transform_target_profile",
+          "target_profile_type": "profile.json"
+        },
+        "depends_on": [
+          "transform_target_profile",
+          "source_response_profile"
+        ],
+        "key": "transform_transform_map",
+        "name": "DEMO-ENR Field Map",
+        "type": "transform.map"
+      },
+      {
+        "action": "create",
+        "component_id": "<<existing REST target connection id>>",
+        "config": {
+          "component_id": "<<existing REST target connection id>>",
+          "connector_type": "rest",
+          "reference_only": true
+        },
+        "depends_on": [],
+        "key": "target_rest_connection",
+        "name": null,
+        "type": "connector-settings"
+      },
+      {
+        "action": "create",
+        "component_id": null,
+        "config": {
+          "component_name": "DEMO-ENR REST Send",
+          "connection_ref_key": "target_rest_connection",
+          "connector_type": "rest",
+          "folder_name": "Integrations/API/Sync",
+          "method": "PUT",
+          "operation_mode": "execute",
+          "path": "/v1/<<target resource>>",
+          "request_profile_id": "$ref:transform_target_profile",
+          "request_profile_type": "json"
+        },
+        "depends_on": [
+          "target_rest_connection",
+          "transform_target_profile"
+        ],
+        "key": "target_rest_operation",
+        "name": "DEMO-ENR REST Send",
+        "type": "connector-action"
+      }
+    ],
+    "integration_name": "issue-157 replay api_to_api_sync/reuse_with_function",
+    "intent_kind": "process_ir",
+    "units": [
+      {
+        "envelope": {
+          "action": "create",
+          "component_key": "main_process",
+          "depends_on": [
+            "source_rest_source_connection",
+            "source_rest_source_operation",
+            "target_rest_connection",
+            "target_rest_operation",
+            "transform_transform_map"
+          ],
+          "folder_name": "Integrations/API/Sync",
+          "name": "DEMO-ENR API to API Sync"
+        },
+        "process_ir": {
+          "body": {
+            "kind": "sequence",
+            "steps": [
+              {
+                "connection_ref": "$ref:source_rest_source_connection",
+                "kind": "source",
+                "operation_ref": "$ref:source_rest_source_operation"
+              },
+              {
+                "kind": "map_ref",
+                "label": "Map source response to target payload",
+                "map_ref": "$ref:transform_transform_map"
+              },
+              {
+                "connection_ref": "$ref:target_rest_connection",
+                "kind": "target",
+                "operation_ref": "$ref:target_rest_operation"
+              },
+              {
+                "kind": "stop"
+              }
+            ]
+          },
+          "version": "1"
+        }
+      }
+    ]
+  }
+}

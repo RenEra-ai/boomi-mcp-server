@@ -10,7 +10,7 @@ attribute access, so callers may pass ``IntegrationComponentSpec`` instances or
 any lightweight object exposing those attributes.
 """
 
-from typing import Any, Dict, List, Mapping, Optional
+from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 from .connector_builder import BuilderValidationError
 from .json_profile_builder import JSONGeneratedProfileBuilder
@@ -23,11 +23,18 @@ from .profile_generation import (
 )
 from .xml_profile_builder import XMLGeneratedProfileBuilder
 
+#: Issue #157 (M12.19): the ONE required-target-leaf coverage diagnostic. Owned
+#: by the advisory review surface (#46) since it was introduced there; now ALSO
+#: the hard gate every authoring entry point raises, so the same identity means
+#: the same fact on every surface. `transformation_review` imports it from here.
+TRANSFORM_REVIEW_REQUIRED_TARGET_UNMAPPED = "TRANSFORM_REVIEW_REQUIRED_TARGET_UNMAPPED"
+
 
 def resolve_map_profile_index(
     profile_id: Any,
     components_by_key: Optional[Dict[str, Any]],
     literal_indexes: Optional[Dict[str, Dict[str, Any]]] = None,
+    selected_indexes: Optional[Dict[str, Dict[str, Any]]] = None,
 ) -> Optional[Dict[str, Dict[str, Any]]]:
     """Resolve the field index for a transform.map's source / target profile
     reference.
@@ -37,7 +44,15 @@ def resolve_map_profile_index(
     is looked up in ``literal_indexes`` (uuid -> field_index_by_path), which the
     caller resolves from a supplied ``profile_indexes_by_component_id`` or live
     read-only discovery. Returns None when no index is available — the map
-    validator then raises MAP_PROFILE_INDEX_UNAVAILABLE."""
+    validator then raises MAP_PROFILE_INDEX_UNAVAILABLE.
+
+    ``selected_indexes`` (issue #157) is keyed by component KEY and carries the
+    index of the artifact that was actually SELECTED for a ``$ref:KEY`` profile
+    that apply will reuse rather than build — a ``reference_only`` reuse, or a
+    name collision resolved to reuse. For such a profile the in-spec config is
+    candidate material, not evidence of what the reused component contains, so
+    it is never indexed: the selected index is used when supplied and the
+    reference is unavailable otherwise."""
     if not isinstance(profile_id, str) or not profile_id.strip():
         return None
     # Test $ref on the RAW value (do not pre-strip): the depends_on coverage
@@ -62,6 +77,14 @@ def resolve_map_profile_index(
     if target_comp is None:
         return None
     raw_config = target_comp.config or {}
+    if selected_indexes is not None and ref_key in selected_indexes:
+        selected = selected_indexes[ref_key]
+        return selected if isinstance(selected, Mapping) else None
+    if isinstance(raw_config, Mapping) and raw_config.get("reference_only") is True:
+        # A reused profile's in-spec config establishes nothing about the
+        # component apply will actually bind; without the selected artifact's
+        # own index the reference is unavailable (issue #157).
+        return None
     builder_cls = None
     if target_comp.type == "profile.json":
         builder_cls = JSONGeneratedProfileBuilder
@@ -213,11 +236,137 @@ def _check_port_shape_alignment(
     return None
 
 
+def normalized_map_destinations(
+    map_config: Mapping[str, Any],
+) -> Tuple[Tuple[str, str], ...]:
+    """Every destination a transform.map config binds, as ``(route, target_path)``.
+
+    The ONE interpretation of "what does this map write to" shared by the
+    coverage gate below and by ``review_transformation``'s mapping records:
+    direct ``field_mappings[].target_path``, ``function_mappings[].target_path``
+    and every ``script_mappings[].outputs[].target_path``. Order is authored
+    order; malformed entries are skipped here because map-config VALIDITY is
+    the map builder's job, not this reader's.
+    """
+    destinations: List[Tuple[str, str]] = []
+
+    def _paths(value: Any) -> List[str]:
+        if isinstance(value, str):
+            return [value.strip()] if value.strip() else []
+        if isinstance(value, (list, tuple)):
+            out: List[str] = []
+            for item in value:
+                if isinstance(item, str) and item.strip():
+                    out.append(item.strip())
+            return out
+        return []
+
+    for entry in map_config.get("field_mappings") or ():
+        if isinstance(entry, Mapping):
+            for path in _paths(entry.get("target_path")):
+                destinations.append(("direct", path))
+    for entry in map_config.get("function_mappings") or ():
+        if isinstance(entry, Mapping):
+            for path in _paths(entry.get("target_path")):
+                destinations.append(("map_function", path))
+    for entry in map_config.get("script_mappings") or ():
+        if isinstance(entry, Mapping):
+            for output in entry.get("outputs") or ():
+                if isinstance(output, Mapping):
+                    for path in _paths(output.get("target_path")):
+                        destinations.append(("map_script", path))
+    return tuple(destinations)
+
+
+def required_target_coverage_gaps(
+    target_index: Optional[Mapping[str, Mapping[str, Any]]],
+    destinations: Any,
+) -> Tuple[str, ...]:
+    """The required, mappable target leaves that no destination binds — sorted.
+
+    THE single implementation of required-target-leaf coverage (issue #157),
+    replacing both legacy validator families: the JSON-profile walker
+    (``_required_simple_leaf_paths``) and the DB-write required-target checks.
+    It accepts a NORMALIZED target-field index — the shape both surviving
+    generators emit (``profile_from_json_schema`` / the DB write builder's
+    ``build_field_index``) — so JSON and DB targets are one case.
+
+    An EMPTY index reports nothing. That preserves the DB deferral: an
+    unsupported statement type or a write profile missing its required
+    fields/conditions yields an empty write index, and the write-profile
+    builder's own precise emit-time refusal must not be pre-empted by an
+    invented coverage gap.
+    """
+    if not target_index:
+        return ()
+    bound = {
+        path
+        for _route, path in (
+            destinations
+            if all(isinstance(item, tuple) for item in destinations)
+            else [("direct", item) for item in destinations]
+        )
+    }
+    return tuple(
+        sorted(
+            path
+            for path, record in target_index.items()
+            if isinstance(record, Mapping)
+            and bool(record.get("required"))
+            and record.get("mappable", True)
+            and path not in bound
+        )
+    )
+
+
+def validate_required_target_coverage(
+    effective_config: Mapping[str, Any],
+    components_by_key: Optional[Dict[str, Any]],
+    literal_indexes: Optional[Dict[str, Dict[str, Any]]] = None,
+    *,
+    selected_indexes: Optional[Dict[str, Dict[str, Any]]] = None,
+) -> Optional[BuilderValidationError]:
+    """The hard gate: a structured map leaving a required target leaf unbound.
+
+    Resolves the target index through the same resolver every other map check
+    uses; an unresolvable target is NOT this gate's finding (the map validator
+    already reports ``MAP_PROFILE_INDEX_UNAVAILABLE`` for it). Offending paths
+    travel in ``details`` for the caller's repair loop; the message carries a
+    count only.
+    """
+    target_index = resolve_map_profile_index(
+        effective_config.get("target_profile_id"),
+        components_by_key,
+        literal_indexes,
+        selected_indexes,
+    )
+    if target_index is None:
+        return None
+    gaps = required_target_coverage_gaps(
+        target_index, normalized_map_destinations(effective_config)
+    )
+    if not gaps:
+        return None
+    return BuilderValidationError(
+        f"{len(gaps)} required target leaf path(s) have no mapping; every "
+        "required simple leaf of the target profile must be the destination of "
+        "at least one direct, map_function or map_script output.",
+        error_code=TRANSFORM_REVIEW_REQUIRED_TARGET_UNMAPPED,
+        field="target_profile_id",
+        hint=(
+            "Bind each path listed in details.missing_paths, or mark the target "
+            "leaf optional in the profile."
+        ),
+        details={"missing_paths": list(gaps), "missing_count": len(gaps)},
+    )
+
+
 def validate_transform_map(
     effective_config: Mapping[str, Any],
     depends_on: Any,
     components_by_key: Optional[Dict[str, Any]],
     literal_indexes: Optional[Dict[str, Dict[str, Any]]] = None,
+    selected_indexes: Optional[Dict[str, Dict[str, Any]]] = None,
 ) -> Optional[BuilderValidationError]:
     """Validate a transform.map component the way build_integration's plan does.
 
@@ -236,10 +385,16 @@ def validate_transform_map(
     # profile components so MAP_FIELD_NOT_FOUND fires when a $ref:KEY target
     # maps to a missing leaf in the referenced profile.
     source_index = resolve_map_profile_index(
-        effective_config.get("source_profile_id"), components_by_key, literal_indexes
+        effective_config.get("source_profile_id"),
+        components_by_key,
+        literal_indexes,
+        selected_indexes,
     )
     target_index = resolve_map_profile_index(
-        effective_config.get("target_profile_id"), components_by_key, literal_indexes
+        effective_config.get("target_profile_id"),
+        components_by_key,
+        literal_indexes,
+        selected_indexes,
     )
     # A non-string map_type (e.g. a JSON number/bool) must not raise on
     # .lower() — coerce to "" so get_map_builder returns None and the caller
@@ -683,6 +838,12 @@ def validate_transform_map(
             effective_config, declared_deps, components_by_key
         )
 
+    # Issue #157: required-target-leaf COVERAGE is deliberately NOT part of this
+    # structural validator. The legacy component-plan lint (and the legacy apply
+    # refresh that reuses it) is frozen legacy surface until #160 and keeps its
+    # pre-#157 verdict; the HARD gate is `validate_required_target_coverage`,
+    # invoked by the canonical entry points — the typed intents' semantic
+    # validation and the recipe engine — and consumed by the advisory review.
     return gen_profile_err
 
 

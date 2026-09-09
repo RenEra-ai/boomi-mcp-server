@@ -53,11 +53,21 @@ from ..errors import (
     PROCESS_COMPONENT_SCHEMA_INVALID_CARDINALITY,
     PROCESS_MATERIALIZATION_REFERENCE_NOT_RELOCATABLE,
 )
+from ..models.governance_intent import RecordedIntentV1
+from .governance import (
+    GovernanceRefusal,
+    iter_authored_refs as _iter_authored_refs,
+    resolve_governance,
+    scan_runtime_secrets,
+)
+from .derived_flows import derive_transform_flows
 from .process_materialization import (
     canonical_plan_material,
     envelope_relocatability_offenders,
 )
 from ..models.authoring_workflow import (
+    AUTHORING_INTENT_KINDS,
+    CanonicalIntegrationPreviewV1,
     ArtifactFingerprintV1,
     AuthoringCompileResultV1,
     AuthoringDiagnosticV1,
@@ -235,6 +245,15 @@ class _NormalizedIntent:
     integration_spec: IntegrationSpecV1
     gaps: Tuple[CapabilityGapV1, ...]
     connector_metadata: Mapping[str, Tuple[Optional[str], Optional[str]]]
+    #: #157: which intent produced this. The served preview's SHAPE keys on it
+    #: (the two compiling intents serve the canonical preview with derived
+    #: flows; the legacy intent serves the legacy echo), and nothing hashed
+    #: reads it — the request's own `intent_kind` is what the payload hashes.
+    intent_kind: str = "integration_spec"
+    #: #157: recorded-not-wired declarations. Served BESIDE the executable spec
+    #: and excluded from `_normalized_payload`, every fingerprint and every
+    #: mutation input by construction — they are not on the spec at all.
+    recorded_intents: Tuple[RecordedIntentV1, ...] = ()
 
     @property
     def process_roots(self) -> Tuple[Tuple[str, Any], ...]:
@@ -413,6 +432,14 @@ def _normalize_intent(request: AuthoringRequestV1) -> _NormalizedIntent:
 
     if kind == "integration_spec":
         spec = intent.integration_spec
+        # #157 (S14): the archetype's recursive secret scan, applied to the
+        # legacy spec's `runtime` echo BEFORE it can reach a preview, a
+        # diagnostic or a result. The typed intents carry no `runtime` at all
+        # (deliberate hints go through the recorded-intent channel instead).
+        try:
+            scan_runtime_secrets(spec.runtime)
+        except GovernanceRefusal as exc:
+            raise AuthoringWorkflowError(exc.code, exc.diagnostics) from None
         # THIS ARM REPARSES ITS UNITS TOO (§6 AR3-01). The AR2-01 sweep covered
         # the mechanism "a warning-enabled dump of a caller-reachable model" and
         # fixed the direct arm's intake; it never asked the other question — WHICH
@@ -468,18 +495,31 @@ def _normalize_intent(request: AuthoringRequestV1) -> _NormalizedIntent:
         # pydantic serializer warning. The composer arm already reparses for
         # exactly this reason; this is the same fix on the direct arm, so the
         # objects the compiler and validator dump are server-owned.
+        #
+        # #157: the units arrive AUTHORED (name optional, prefix, watermark,
+        # hints). Governance resolves them into STRICT units and derives the
+        # single-knob folder/name fan-out onto the supporting components, runs
+        # the connection binding contract, and assembles the recorded intents —
+        # all BEFORE the spec below exists, so every fingerprint covers final
+        # resolved governance and never an unexpanded knob.
+        resolution = _resolve_governance(
+            tuple(_reparsed_unit(unit) for unit in intent.units),
+            list(intent.components),
+        )
         spec = IntegrationSpecV1(
             name=intent.integration_name,
-            components=list(intent.components),
+            components=list(resolution.components),
             processes=sorted(
-                (_reparsed_unit(unit) for unit in intent.units),
+                resolution.units,
                 key=lambda unit: unit.envelope.component_key,
             ),
         )
         return _NormalizedIntent(
             integration_spec=spec,
             gaps=(),
-            connector_metadata=_connector_metadata_from_components(intent.components),
+            connector_metadata=_connector_metadata_from_components(resolution.components),
+            intent_kind=kind,
+            recorded_intents=resolution.recorded_intents,
         )
 
     # kind == "recipe"
@@ -563,11 +603,32 @@ def _normalize_recipe_intent(
 
     components = list(result.components)
     roots = tuple(sorted(result.composed.process_roots, key=lambda pair: pair[0]))
-    supporting, units = _lift_recipe_roots_into_units(components, roots)
+    envelopes = {
+        envelope.component_key: envelope
+        for envelope in (getattr(intent, "process_envelopes", None) or ())
+    }
+    supporting, authored_units = _lift_recipe_roots_into_units(
+        components, roots, envelopes
+    )
+    # #157: the recipe's own recorded-not-wired contributions, converted to the
+    # served record. The composer already refused a record for an uncomposed
+    # root and a repeated identity; governance re-checks identity against the
+    # envelope-sourced records it adds.
+    recipe_records = tuple(
+        RecordedIntentV1(
+            intent_id=contribution.intent_id,
+            process_key=contribution.process_key,
+            declaration=contribution.declaration,
+        )
+        for contribution in result.recorded_intents
+    )
+    resolution = _resolve_governance(
+        authored_units, supporting, extra_recorded_intents=recipe_records
+    )
     spec = IntegrationSpecV1(
         name=intent.integration_name,
-        components=supporting,
-        processes=units,
+        components=list(resolution.components),
+        processes=resolution.units,
     )
     return _NormalizedIntent(
         integration_spec=spec,
@@ -576,9 +637,22 @@ def _normalize_recipe_intent(
         # INCLUDING the process entries that were just lifted into units: the
         # projection keys on component type, and a lifted process contributes no
         # connector family, so passing the full list keeps the mapping identical
-        # to what it was before the lift.
+        # to what it was before the lift. Governance moves no connector family
+        # or action, so the resolved components project identically.
         connector_metadata=_connector_metadata_from_components(components),
+        intent_kind="recipe",
+        recorded_intents=resolution.recorded_intents,
     )
+
+
+def _resolve_governance(units, components, *, extra_recorded_intents=()):
+    """Run governance resolution, translating its refusal into this channel."""
+    try:
+        return resolve_governance(
+            units, components, extra_recorded_intents=extra_recorded_intents
+        )
+    except GovernanceRefusal as exc:
+        raise AuthoringWorkflowError(exc.code, exc.diagnostics) from None
 
 
 def _json_pointer(dotted: str) -> str:
@@ -666,34 +740,79 @@ def _extension_bindings_from_config(raw):
     return ProcessExtensionBindingsV1(connections=tuple(connections))
 
 
-def _lift_recipe_roots_into_units(components, roots):
+def _lift_recipe_roots_into_units(components, roots, envelopes=None):
     """Pair each composed ProcessIR root with the process component describing it.
 
     An interim bridge, and deliberately labelled one: #159 migrates recipe /
     composition authoring to author units directly. Until then a recipe still
     emits its process as an ``IntegrationComponentSpec`` alongside a composed
-    root, and this is where those two halves become the single
-    :class:`ProcessAuthoringUnitV1` the canonical chain requires.
+    root, and this is where those two halves become the single AUTHORED
+    :class:`ProcessAuthoringUnitAuthoredV1` that governance then resolves into
+    the strict unit the canonical chain requires.
 
-    Returns ``(supporting_components, units)``. The lifted process entries are
-    REMOVED from the component list: leaving them in both places would put one
-    process in two tuples of one shared key namespace, which the spec validator
-    correctly rejects — and, worse, would make it ambiguous which of the two
-    descriptions apply should build from.
+    Returns ``(supporting_components, authored_units)``. The lifted process
+    entries are REMOVED from the component list: leaving them in both places
+    would put one process in two tuples of one shared key namespace, which the
+    spec validator correctly rejects — and, worse, would make it ambiguous which
+    of the two descriptions apply should build from.
 
     ``process_kind`` is never read. That is the whole point of the milestone: a
     recipe's process is materialized from its ProcessIR root through the
     canonical chain, not by resolving a legacy dialect.
+
+    **#157 — typed per-root envelopes.** ``envelopes`` maps a composed root key
+    to the caller's :class:`RecipeProcessEnvelopeV1`. When one is present it is
+    the ONLY governance authority for that root: the lifted component may then
+    author ``action``, ``component_id`` and ``depends_on`` (which stay its) but
+    none of the governance fields the envelope owns — a lifted ``name``,
+    ``description``, ``folder_name`` or ``process_extensions`` beside a typed
+    envelope is ``GOVERNANCE_SOURCE_CONFLICT``, never a silent second copy. A
+    root with no typed envelope lifts exactly as before. An envelope naming a
+    key no composed root has is ``GOVERNANCE_ENVELOPE_UNMATCHED``.
     """
+    from ..errors import GOVERNANCE_ENVELOPE_UNMATCHED, GOVERNANCE_SOURCE_CONFLICT
+    from ..models.authoring_workflow import RecipeProcessEnvelopeV1
     from ..models.process_component import (
-        ProcessAuthoringUnitV1,
-        ProcessComponentEnvelopeV1,
+        ProcessAuthoringUnitAuthoredV1,
+        ProcessComponentEnvelopeAuthoredV1,
     )
 
     #: Config keys promoted onto the typed envelope. An ALLOWLIST, not a
     #: passthrough: every other config key belongs to the legacy component
     #: surface and must not silently become envelope contract.
     _ENVELOPE_CONFIG_KEYS = ("description", "folder_name", "process_extensions")
+    #: The governance fields a typed envelope and the lift could BOTH supply —
+    #: derived from the envelope model's own field set, never a second list.
+    _CONFLICT_FIELDS = tuple(
+        name
+        for name in RecipeProcessEnvelopeV1.governance_fields()
+        if name in _ENVELOPE_CONFIG_KEYS or name == "name"
+    )
+
+    envelopes = dict(envelopes or {})
+    root_keys = {component_key for component_key, _ir in roots}
+    for envelope_key in sorted(envelopes):
+        if envelope_key not in root_keys:
+            raise AuthoringWorkflowError(
+                GOVERNANCE_ENVELOPE_UNMATCHED,
+                (
+                    _diag(
+                        GOVERNANCE_ENVELOPE_UNMATCHED,
+                        "error",
+                        message=(
+                            "A per-root envelope names a component key that no "
+                            "composed process root carries."
+                        ),
+                        path="/intent/process_envelopes",
+                        subject_kind="process",
+                        subject_id=envelope_key,
+                        remediation=(
+                            "Name a root the invoked recipes compose, or drop "
+                            "the envelope."
+                        ),
+                    ),
+                ),
+            )
 
     by_key = {}
     for component in components:
@@ -738,15 +857,13 @@ def _lift_recipe_roots_into_units(components, roots):
             )
         component = authored[0]
         config = component.config or {}
+        typed = envelopes.get(component_key)
 
-        # `name` AND `action` must be CALLER-AUTHORED, checked via
-        # `model_fields_set` (§6 review AR1-08; plan §8 verbatim: "inspect
-        # `model_fields_set` rather than accepting the default silently").
-        # The previous version fell back to `config.get("component_name")` —
-        # a key the plan's allowlist does not include — and honoured the
-        # model's `action="create"` default, so a recipe that authored
-        # neither still lifted into a unit whose two REQUIRED envelope fields
-        # nobody wrote.
+        # `action` must be CALLER-AUTHORED, checked via `model_fields_set` (§6
+        # review AR1-08; plan §8 verbatim: "inspect `model_fields_set` rather
+        # than accepting the default silently"). The previous version honoured
+        # the model's `action="create"` default, so a recipe that authored none
+        # still lifted into a unit whose REQUIRED envelope field nobody wrote.
         authored_fields = component.model_fields_set
         if "action" not in authored_fields:
             raise AuthoringWorkflowError(
@@ -769,50 +886,97 @@ def _lift_recipe_roots_into_units(components, roots):
                     ),
                 ),
             )
-        name = component.name if "name" in authored_fields else None
-        if not name or not str(name).strip():
-            raise AuthoringWorkflowError(
-                AUTHORING_COMPILE_BLOCKED,
-                (
-                    _diag(
-                        AUTHORING_COMPILE_BLOCKED,
-                        "error",
-                        message=(
-                            "A composed process root needs a component name to "
-                            "materialize; the recipe supplied none."
-                        ),
-                        subject_kind="process",
-                        subject_id=component_key,
-                        remediation=(
-                            "Emit a non-blank 'name' on the process component "
-                            "this root belongs to."
-                        ),
-                        cause_codes=(PROCESS_COMPONENT_SCHEMA_INVALID,),
-                    ),
-                ),
-            )
 
         envelope_kwargs = {
             "component_key": component_key,
-            "name": str(name),
             # Caller-authored, verified above via `model_fields_set`.
             "action": component.action,
             "depends_on": tuple(component.depends_on or ()),
         }
         if component.component_id:
             envelope_kwargs["component_id"] = component.component_id
-        for key in _ENVELOPE_CONFIG_KEYS:
-            value = config.get(key)
-            if value in (None, "", {}, []):
-                continue
-            if key == "process_extensions":
-                envelope_kwargs[key] = _extension_bindings_from_config(value)
-            else:
-                envelope_kwargs[key] = value
+
+        if typed is not None:
+            # ONE authority per root. Any governance the lifted component also
+            # carries is refused by name rather than merged or overridden.
+            supplied = []
+            if "name" in authored_fields and component.name and str(component.name).strip():
+                supplied.append("name")
+            for key in _CONFLICT_FIELDS:
+                if key == "name":
+                    continue
+                if config.get(key) not in (None, "", {}, []):
+                    supplied.append(key)
+            if supplied:
+                raise AuthoringWorkflowError(
+                    GOVERNANCE_SOURCE_CONFLICT,
+                    (
+                        _diag(
+                            GOVERNANCE_SOURCE_CONFLICT,
+                            "error",
+                            message=(
+                                "A typed per-root envelope and the lifted process "
+                                "component both supply governance for one root."
+                            ),
+                            path=(
+                                "/intent/base_components/{0}/{1}".format(
+                                    component_key,
+                                    supplied[0]
+                                    if supplied[0] == "name"
+                                    else "config/" + supplied[0],
+                                )
+                            ),
+                            subject_kind="process",
+                            subject_id=component_key,
+                            remediation=(
+                                "Author name, description, folder_name and "
+                                "process_extensions on the typed envelope only."
+                            ),
+                        ),
+                    ),
+                )
+            for key in RecipeProcessEnvelopeV1.governance_fields():
+                envelope_kwargs[key] = getattr(typed, key)
+        else:
+            # The pre-#157 lift, byte-for-byte: name REQUIRED from the
+            # component (`config.component_name` never regains authority), the
+            # allowlisted config keys promoted.
+            name = component.name if "name" in authored_fields else None
+            if not name or not str(name).strip():
+                raise AuthoringWorkflowError(
+                    AUTHORING_COMPILE_BLOCKED,
+                    (
+                        _diag(
+                            AUTHORING_COMPILE_BLOCKED,
+                            "error",
+                            message=(
+                                "A composed process root needs a component name to "
+                                "materialize; the recipe supplied none."
+                            ),
+                            subject_kind="process",
+                            subject_id=component_key,
+                            remediation=(
+                                "Emit a non-blank 'name' on the process component "
+                                "this root belongs to, or supply a typed "
+                                "per-root envelope for it."
+                            ),
+                            cause_codes=(PROCESS_COMPONENT_SCHEMA_INVALID,),
+                        ),
+                    ),
+                )
+            envelope_kwargs["name"] = str(name)
+            for key in _ENVELOPE_CONFIG_KEYS:
+                value = config.get(key)
+                if value in (None, "", {}, []):
+                    continue
+                if key == "process_extensions":
+                    envelope_kwargs[key] = _extension_bindings_from_config(value)
+                else:
+                    envelope_kwargs[key] = value
 
         units.append(
-            ProcessAuthoringUnitV1(
-                envelope=ProcessComponentEnvelopeV1(**envelope_kwargs),
+            ProcessAuthoringUnitAuthoredV1(
+                envelope=ProcessComponentEnvelopeAuthoredV1(**envelope_kwargs),
                 process_ir=ir,
             )
         )
@@ -875,7 +1039,56 @@ def build_integration_spec_preview(normalized: _NormalizedIntent) -> Integration
     per-root artifact fingerprints — both computed from the REAL root, which is
     what makes them evidence rather than an echo.
     """
-    return _withhold_process_roots(normalized.integration_spec)
+    return _as_served_preview(
+        normalized, _withhold_process_roots(normalized.integration_spec)
+    )
+
+
+#: The intent kinds whose preview is the CANONICAL one (#157): typed units, a
+#: derived flows projection. Derived from the intent union's own kinds minus the
+#: legacy spec echo, so a fourth compiling intent inherits the canonical preview
+#: the day it is added.
+_COMPILING_INTENT_KINDS = tuple(
+    kind for kind in AUTHORING_INTENT_KINDS if kind != "integration_spec"
+)
+
+
+def _as_served_preview(normalized: _NormalizedIntent, spec: IntegrationSpecV1):
+    """The served preview SHAPE for this intent (#157).
+
+    For the two compiling intents the preview is `CanonicalIntegrationPreviewV1`:
+    the redacted spec with `flows` replaced by the typed, generator-derived
+    projection. For the legacy `integration_spec` intent it is the spec echo,
+    authored flows and all. Called at every point a spec becomes a served
+    preview — including AFTER the legacy plan echo overwrites it — for the same
+    reason `_withhold_process_roots` is: the last write must be the right shape.
+    """
+    if normalized.intent_kind not in _COMPILING_INTENT_KINDS:
+        return spec
+    flows = derive_transform_flows(
+        normalized.integration_spec.processes,
+        normalized.integration_spec.components,
+        connector_metadata=normalized.connector_metadata,
+    )
+    payload = spec.model_dump(mode="json", exclude={"flows"})
+    payload.pop("preview_kind", None)
+    return CanonicalIntegrationPreviewV1(**payload, flows=flows)
+
+
+def _plan_hash_preview(spec_preview) -> Dict[str, Any]:
+    """The preview as the plan hash sees it — its PRE-#157 shape.
+
+    Ledger correction P4: hashing the canonical preview would rotate every
+    compiling-intent plan hash for a projection that is served, not executed.
+    The hash input is therefore the legacy-shaped dump with an empty `flows`
+    list — byte-identical to what these intents hashed before the projection
+    existed — so the derived flows are covered by nothing and can move nothing.
+    """
+    payload = spec_preview.model_dump(mode="json")
+    if isinstance(spec_preview, CanonicalIntegrationPreviewV1):
+        payload.pop("preview_kind", None)
+        payload["flows"] = []
+    return payload
 
 
 def _withhold_process_roots(spec: IntegrationSpecV1) -> IntegrationSpecV1:
@@ -986,25 +1199,8 @@ def build_topology_relations(
     return sort_by_key(summaries)
 
 
-def _iter_authored_refs(value: Any) -> List[str]:
-    """Every ``$ref:KEY`` token the authored intent actually uses.
-
-    Walks the payload rather than listing the component plan's own keys. Those
-    are two different questions, and live QA showed the difference matters: a
-    dangling ``$ref`` is the ONE reference a caller needs to see, and it is
-    exactly the one a component-key listing omits (issue #146 QA, bug #410).
-    """
-    found: List[str] = []
-    if isinstance(value, str):
-        if value.startswith(_REF_PREFIX):
-            found.append(value)
-    elif isinstance(value, Mapping):
-        for item in value.values():
-            found.extend(_iter_authored_refs(item))
-    elif isinstance(value, (list, tuple)):
-        for item in value:
-            found.extend(_iter_authored_refs(item))
-    return found
+# `_iter_authored_refs` lives in `authoring.governance` since #157 (imported
+# above): the ownership closure and the legacy plan echo read ONE walker.
 
 
 def _legacy_plan_echo(
@@ -1626,6 +1822,63 @@ def _validate_processes(
                 )
             )
 
+    # #157: required-target-leaf COVERAGE, the hard gate — ONE implementation
+    # (`validate_required_target_coverage`, shared with the recipe engine and
+    # the advisory review), run over every structured transform.map in the plan
+    # regardless of whether effect declarations were supplied. Reported here
+    # as a named cause under the authoring blocked code, the way every
+    # builder-layer refusal reaches this surface, so plan, compile and the
+    # apply preflight (which re-runs this validation) all serve the same
+    # diagnostic identity.
+    for component in normalized.integration_spec.components:
+        if component.type != "transform.map":
+            continue
+        config = component.config if isinstance(component.config, dict) else {}
+        if isinstance(config.get("xml"), str) and config["xml"].strip():
+            continue
+        coverage_error = _required_target_coverage_error(
+            component,
+            normalized.integration_spec.components,
+            literal_indexes,
+            selected_indexes=_selected_profile_indexes(boomi_client, normalized),
+        )
+        if coverage_error is None:
+            continue
+        errors += 1
+        codes.append(str(coverage_error.error_code))
+        # THE COUNT IS SERVED; THE PATHS ARE NOT, AND THE TEXT SAYS SO
+        # (QA-157-r1-03). The message promised that "the count and the paths
+        # travel in the cause diagnostic" and neither did: an
+        # `AuthoringDiagnosticV1` has no `details`, and its `evidence` admits
+        # only structural tokens and codes — by design, because this surface is
+        # value-free and a target leaf path is an authored profile value. So the
+        # count, which is derived structure, travels in the message, and the
+        # caller is pointed at the one surface that does name the paths.
+        _missing = (getattr(coverage_error, "details", None) or {}).get(
+            "missing_count"
+        )
+        diagnostics.append(
+            _diag(
+                AUTHORING_COMPILE_BLOCKED,
+                "error",
+                message=(
+                    "A transform map leaves {0} required target leaf path(s) "
+                    "unbound.".format(_missing)
+                    if isinstance(_missing, int)
+                    else "A transform map leaves required target leaf paths unbound."
+                ),
+                path="/components/{0}/config/target_profile_id".format(component.key),
+                subject_kind="component",
+                subject_id=component.key,
+                remediation=(
+                    "Bind every required simple leaf of the target profile, or "
+                    "mark the leaf optional. This diagnostic does not say WHICH "
+                    "leaves are unbound; review_transformation names them."
+                ),
+                cause_codes=(str(coverage_error.error_code),),
+            )
+        )
+
     summary = ValidationReportSummaryV1(
         is_valid=errors == 0,
         error_count=errors,
@@ -1635,6 +1888,44 @@ def _validate_processes(
     )
     return (summary, tuple(diagnostics), symbols,
             resolution.capabilities_by_root, snapshot)
+
+
+def _required_target_coverage_error(
+    component, components, literal_indexes=None, *, selected_indexes=None
+):
+    """The shared coverage gate over ONE structured map, or ``None``."""
+    from ..categories.components.builders.transform_map_validation import (
+        validate_required_target_coverage,
+    )
+
+    by_key = {entry.key: entry for entry in components}
+    effective = dict(component.config or {})
+    if component.name and not effective.get("component_name"):
+        effective["component_name"] = component.name
+    return validate_required_target_coverage(
+        effective, by_key, literal_indexes or None, selected_indexes=selected_indexes or None
+    )
+
+
+def _selected_profile_indexes(boomi_client: Any, normalized: Any):
+    """Indexes of the profiles apply will REUSE, by component key, or None.
+
+    #157: reuses the integration builder's own selected-artifact resolver — the
+    same one the plan lint and the apply refresh use — so the typed coverage
+    gate judges a reused profile by what the account holds, never by the
+    candidate config. Offline (no client) it resolves nothing, and the gate
+    then treats the reused profile as unavailable rather than trusting it.
+    """
+    if boomi_client is None:
+        return None
+    try:
+        from ..categories.integration_builder import _resolve_selected_profile_indexes
+
+        return _resolve_selected_profile_indexes(
+            boomi_client, normalized.integration_spec
+        ) or None
+    except Exception:  # noqa: BLE001 - discovery is best effort; absence defers
+        return None
 
 
 def _validate_topology(
@@ -1990,8 +2281,9 @@ def plan_authoring_request_v1(
         # so the order is load-bearing. `_withhold_process_roots` is idempotent,
         # which is why calling it twice is safe rather than merely tolerable.
         if isinstance(legacy.get("integration_spec"), dict):
-            spec_preview = _withhold_process_roots(
-                IntegrationSpecV1(**legacy["integration_spec"])
+            spec_preview = _as_served_preview(
+                normalized,
+                _withhold_process_roots(IntegrationSpecV1(**legacy["integration_spec"])),
             )
         # The planner's own warning strings. The advisory arm this used to
         # accumulate is gone with the `process_ir` exemption above: an
@@ -2082,7 +2374,7 @@ def plan_authoring_request_v1(
         validation_report=validation.model_dump(mode="json"),
         capability_gaps=[g.model_dump(mode="json") for g in gaps],
         required_decisions=[d.model_dump(mode="json") for d in decisions],
-        integration_spec_preview=spec_preview.model_dump(mode="json"),
+        integration_spec_preview=_plan_hash_preview(spec_preview),
     )
 
     if request.expected_plan_hash is not None and request.expected_plan_hash != plan_hash:
@@ -2124,6 +2416,7 @@ def plan_authoring_request_v1(
         warnings=warnings,
         capability_gaps=gaps,
         required_decisions=decisions,
+        recorded_intents=normalized.recorded_intents,
     )
     internals = _PlanInternals(
         normalized=normalized,
@@ -2566,6 +2859,7 @@ def compile_authoring_request_v1(
         required_decisions=plan_result.required_decisions,
         artifact_fingerprints=fingerprints,
         normalized_intent_digest=normalized_digest,
+        recorded_intents=plan_result.recorded_intents,
     )
     return result, internals
 

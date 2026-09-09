@@ -1,0 +1,12 @@
+{
+  "case_id": "api_to_database_sync/create",
+  "endpoints": {
+    "0": "pending:#159",
+    "1": "pending:#159"
+  },
+  "flows": {
+    "0": "pending:#159",
+    "1": "pending:#159",
+    "2": "pending:#159"
+  }
+}

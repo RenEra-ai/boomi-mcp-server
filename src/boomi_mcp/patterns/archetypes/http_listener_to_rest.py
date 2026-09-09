@@ -32,6 +32,11 @@ stage.
 
 from __future__ import annotations
 
+from ...categories.components.builders.profile_generation import profile_from_json_schema
+from ...categories.components.builders.transform_map_validation import (
+    required_target_coverage_gaps,
+)
+
 from typing import Any, Dict, List, Optional, Set
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -67,7 +72,6 @@ from ..archetype_parameters import (
     MapScriptApiTransformOperation,
     NamingConfig,
     _flatten_payload_profile_leaves,
-    _required_simple_leaf_paths,
 )
 from ..archetype_assembly import (
     _TARGET_PREFIX,
@@ -190,8 +194,13 @@ class HttpListenerToRestParameters(BaseModel):
                 if len(set(script_vars)) != len(script_vars):
                     script_var_collisions += 1
 
-        required_target_paths = _required_simple_leaf_paths(self.target.payload_profile)
-        unmapped_required_count = len(required_target_paths - bound_target_paths)
+        # Issue #157: the ONE required-target-leaf coverage implementation.
+        unmapped_required_count = len(
+            required_target_coverage_gaps(
+                profile_from_json_schema(self.target.payload_profile)["field_index_by_path"],
+                bound_target_paths,
+            )
+        )
 
         issues: List[str] = []
         if unknown_source_refs:

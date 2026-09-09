@@ -64,7 +64,14 @@ TRANSFORM_REVIEW_UNSUPPORTED_ROUTE = "TRANSFORM_REVIEW_UNSUPPORTED_ROUTE"
 TRANSFORM_REVIEW_FIELD_NOT_FOUND = "TRANSFORM_REVIEW_FIELD_NOT_FOUND"
 TRANSFORM_REVIEW_FIELD_NOT_MAPPABLE = "TRANSFORM_REVIEW_FIELD_NOT_MAPPABLE"
 TRANSFORM_REVIEW_DUPLICATE_TARGET = "TRANSFORM_REVIEW_DUPLICATE_TARGET"
-TRANSFORM_REVIEW_REQUIRED_TARGET_UNMAPPED = "TRANSFORM_REVIEW_REQUIRED_TARGET_UNMAPPED"
+# Issue #157: the coverage code is OWNED by the shared map validation module,
+# where the single required-target-leaf implementation lives; re-exported
+# here under its historical name.
+from .components.builders import transform_map_validation as _tmv  # noqa: E402
+from .components.builders.transform_map_validation import (  # noqa: E402
+    TRANSFORM_REVIEW_REQUIRED_TARGET_UNMAPPED,
+    normalized_map_destinations,
+)
 TRANSFORM_REVIEW_SCRIPT_REF_MISSING = "TRANSFORM_REVIEW_SCRIPT_REF_MISSING"
 TRANSFORM_REVIEW_COMPARE_FAILED = "TRANSFORM_REVIEW_COMPARE_FAILED"
 
@@ -767,12 +774,21 @@ def _validate_unit(unit: _MapUnit):
         # lightweight field/route/function/script checks defensively.
         issues, mapped = _validate_contract_unit(unit)
 
-    # Coverage (both sources) — the tool's unique value-add over the builders:
-    # required, mappable target leaves left without any mapping.
-    unmapped_required = sorted(
-        path
-        for path, rec in unit.target_index.items()
-        if rec["mappable"] and rec["required"] and path not in mapped
+    # Coverage (both sources) — computed by the ONE required-target-leaf
+    # implementation the authoring gates raise as a hard error (issue #157), so
+    # what review flags and what build refuses cannot drift.
+    # Called THROUGH the module rather than a name bound at import, so the one
+    # implementation stays one object every route (and the route sentinel in
+    # `test_issue_157_required_target_coverage`) can observe.
+    unmapped_required = list(
+        _tmv.required_target_coverage_gaps(
+            unit.target_index,
+            tuple(
+                (m["route"], target_path)
+                for m in unit.mappings
+                for target_path in m["target_paths"]
+            ),
+        )
     )
     for path in unmapped_required:
         issues.append(
@@ -805,7 +821,10 @@ def _validate_executable_unit(unit: _MapUnit):
         unit.components_by_key,
         literal_indexes=unit.literal_indexes,
     )
-    if err is not None:
+    # The shared validator now raises the coverage gap itself; review reports
+    # that same fact per path in `_validate_unit`, so the builder-level copy is
+    # dropped here rather than served twice under one code.
+    if err is not None and err.error_code != TRANSFORM_REVIEW_REQUIRED_TARGET_UNMAPPED:
         issues.append(_issue_from_builder_error(err))
     return issues, _mapped_targets(unit)
 

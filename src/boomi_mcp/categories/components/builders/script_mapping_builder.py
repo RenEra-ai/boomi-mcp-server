@@ -148,7 +148,14 @@ _RAW_XML_REJECT_KEYS: Dict[str, str] = {
 # ``component_type`` is allowed because the integration builder threads it
 # in alongside the rest of the payload; the builder ignores its content
 # and the dispatcher upstream is what actually selects this builder.
+#: ``folder_name`` is accepted as component-level METADATA beside
+#: ``folder_path`` and is not emitted: this platform ignores both spellings on
+#: create, and a component is placed by the ``folderId`` the raw-create boundary
+#: injects, never by anything in this config. Rejecting the key made every
+#: component of this type unbuildable under a governed root that declares a
+#: folder, because #157's folder fan-out writes it (QA-157-r8-03/r9-01).
 _ALLOWED_TOP_LEVEL_KEYS: Tuple[str, ...] = (
+    "folder_name",
     "component_type",
     "component_name",
     "folder_path",

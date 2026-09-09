@@ -1,0 +1,197 @@
+{
+  "contract_version": "2",
+  "intent": {
+    "components": [
+      {
+        "action": "create",
+        "component_id": null,
+        "config": {
+          "auth_mode": "username_password",
+          "component_name": "DEMO DB Connection",
+          "connector_type": "database",
+          "credential_ref": "secrets/db/svc_sync",
+          "dbname": "AppDB",
+          "driver_id": "microsoft_jdbc",
+          "host": "db.internal",
+          "port": 1433,
+          "username": "svc_sync"
+        },
+        "depends_on": [],
+        "key": "source_db_connection",
+        "name": "DEMO DB Connection",
+        "type": "connector-settings"
+      },
+      {
+        "action": "create",
+        "component_id": null,
+        "config": {
+          "component_name": "DEMO DB Read Profile",
+          "output_fields": [
+            {
+              "data_type": "character",
+              "enforce_unique": false,
+              "mandatory": false,
+              "name": "source_field_a"
+            }
+          ],
+          "profile_type": "database.read",
+          "query": "<<user-authored DB read statement>>"
+        },
+        "depends_on": [],
+        "key": "source_db_read_profile",
+        "name": "DEMO DB Read Profile",
+        "type": "profile.db"
+      },
+      {
+        "action": "create",
+        "component_id": null,
+        "config": {
+          "component_name": "DEMO DB Get",
+          "connection_ref_key": "source_db_connection",
+          "connector_type": "database",
+          "operation_mode": "get",
+          "read_profile_id": "$ref:source_db_read_profile"
+        },
+        "depends_on": [
+          "source_db_connection",
+          "source_db_read_profile"
+        ],
+        "key": "source_db_get_operation",
+        "name": "DEMO DB Get",
+        "type": "connector-action"
+      },
+      {
+        "action": "create",
+        "component_id": null,
+        "config": {
+          "component_name": "DEMO Target Profile",
+          "profile_type": "json.generated",
+          "root": {
+            "children": [
+              {
+                "children": null,
+                "data_type": "character",
+                "description": null,
+                "kind": "simple",
+                "name": "target_a",
+                "required": false
+              }
+            ],
+            "data_type": null,
+            "description": null,
+            "kind": "object",
+            "name": "Root",
+            "required": false
+          }
+        },
+        "depends_on": [],
+        "key": "transform_target_profile",
+        "name": "DEMO Target Profile",
+        "type": "profile.json"
+      },
+      {
+        "action": "create",
+        "component_id": null,
+        "config": {
+          "component_name": "DEMO Field Map",
+          "field_mappings": [
+            {
+              "source_path": "source_field_a",
+              "target_path": "Root/target_a"
+            }
+          ],
+          "map_type": "direct",
+          "source_profile_id": "$ref:source_db_read_profile",
+          "source_profile_type": "profile.db",
+          "target_profile_id": "$ref:transform_target_profile",
+          "target_profile_type": "profile.json"
+        },
+        "depends_on": [
+          "transform_target_profile",
+          "source_db_read_profile"
+        ],
+        "key": "transform_transform_map",
+        "name": "DEMO Field Map",
+        "type": "transform.map"
+      },
+      {
+        "action": "create",
+        "component_id": "<<existing REST connection id>>",
+        "config": {
+          "component_id": "<<existing REST connection id>>",
+          "connector_type": "rest",
+          "reference_only": true
+        },
+        "depends_on": [],
+        "key": "target_rest_connection",
+        "name": null,
+        "type": "connector-settings"
+      },
+      {
+        "action": "create",
+        "component_id": null,
+        "config": {
+          "component_name": "DEMO REST Send",
+          "connection_ref_key": "target_rest_connection",
+          "connector_type": "rest",
+          "method": "POST",
+          "operation_mode": "execute",
+          "path": "/v1/items",
+          "request_profile_id": "$ref:transform_target_profile",
+          "request_profile_type": "json"
+        },
+        "depends_on": [
+          "target_rest_connection",
+          "transform_target_profile"
+        ],
+        "key": "target_rest_operation",
+        "name": "DEMO REST Send",
+        "type": "connector-action"
+      }
+    ],
+    "integration_name": "issue-157 replay database_to_api_sync/wm_off_dlq_off_target_reuse",
+    "intent_kind": "process_ir",
+    "units": [
+      {
+        "envelope": {
+          "action": "create",
+          "component_key": "main_process",
+          "depends_on": [
+            "source_db_connection",
+            "source_db_get_operation",
+            "target_rest_connection",
+            "target_rest_operation",
+            "transform_transform_map"
+          ],
+          "name": "DEMO DB to API Sync"
+        },
+        "process_ir": {
+          "body": {
+            "kind": "sequence",
+            "steps": [
+              {
+                "connection_ref": "$ref:source_db_connection",
+                "kind": "source",
+                "operation_ref": "$ref:source_db_get_operation"
+              },
+              {
+                "kind": "map_ref",
+                "label": "Map source to JSON payload",
+                "map_ref": "$ref:transform_transform_map"
+              },
+              {
+                "connection_ref": "$ref:target_rest_connection",
+                "kind": "target",
+                "operation_ref": "$ref:target_rest_operation"
+              },
+              {
+                "kind": "stop"
+              }
+            ]
+          },
+          "version": "1"
+        }
+      }
+    ]
+  }
+}

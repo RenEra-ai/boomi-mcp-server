@@ -99,6 +99,20 @@ _SAMPLES = {
         "requirement_id": "req.process",
         "requirement": {"kind": "process", "process_key": "main_process"},
     },
+    # #157 (M12.19): the fifth kind — recorded, never wired.
+    "recorded_intent": {
+        "contribution_kind": "recorded_intent",
+        "version": "1",
+        "intent_id": "watermark.main",
+        "process_key": "main_process",
+        "status": "recorded_not_wired",
+        "declaration": {
+            "declaration_kind": "watermark",
+            "source_profile_ref": "$ref:source_profile",
+            "field": "updated_at",
+            "kind": "timestamp",
+        },
+    },
 }
 
 
@@ -121,7 +135,9 @@ def test_contribution_kinds_are_derived_from_the_union_not_hand_listed():
         get_args(m.model_fields["contribution_kind"].annotation)[0] for m in members
     )
     assert derived == RECIPE_CONTRIBUTION_KINDS
-    assert len(RECIPE_CONTRIBUTION_KINDS) == 4
+    # Five since #157 added `recorded_intent` — the count is pinned so a sixth
+    # member is a deliberate decision here, not a silent widening.
+    assert len(RECIPE_CONTRIBUTION_KINDS) == 5
 
 
 @pytest.mark.parametrize("kind", sorted(_SAMPLES))
@@ -713,7 +729,9 @@ def test_the_discriminator_set_is_derived_not_hand_listed():
     assert _DISCRIMINATOR_FIELDS == frozenset(found)
     # The one that was missing, named so a regression is legible.
     assert "value_type" in _DISCRIMINATOR_FIELDS
-    assert len(_DISCRIMINATOR_FIELDS) == 5
+    # Six since #157: the recorded-intent contribution's `declaration_kind`.
+    assert "declaration_kind" in _DISCRIMINATOR_FIELDS
+    assert len(_DISCRIMINATOR_FIELDS) == 6
 
 
 def test_a_value_type_tag_does_not_corrupt_the_pointer():

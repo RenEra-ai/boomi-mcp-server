@@ -17,6 +17,7 @@ wiring surfaces as a failure here, which is precisely what the unit tests could
 not do.
 """
 
+import re
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -2824,6 +2825,23 @@ def test_a_malformed_nested_processir_keeps_the_generic_code():
     assert named["error_code"] == "PROCESS_COMPONENT_SCHEMA_UNKNOWN_FIELD"
 
 
+def _readback_of(submitted_xml: str) -> str:
+    """The submitted document as a platform SIMULATION should start from.
+
+    #157 submits the resolved ``folderId`` on a canonical create — the only
+    placement spelling this platform honours — so a fake readback built by
+    editing the submitted bytes would silently inherit that id and every
+    scenario below would describe a platform that placed the component. Worse,
+    an arm that appends its OWN ``folderId`` would produce two of them on one
+    element, which is not parseable XML at all.
+
+    So each simulation starts from the submitted bytes WITHOUT the placement and
+    states the placement it is modelling itself: an ignoring platform echoes
+    none, an honouring one echoes the folder, an imposter echoes a different id.
+    """
+    return re.sub(r'\s+folderId="[^"]*"', "", submitted_xml)
+
+
 def test_an_ignored_placement_is_never_attested_as_applied():
     """QA-153-r12-01: the platform ignores `folderName` on create.
 
@@ -2875,7 +2893,7 @@ def test_an_ignored_placement_is_never_attested_as_applied():
             )
 
     # THE HONOURING PLATFORM: readback carries the folder -> id is attested.
-    honoured = _run(lambda: _SUBMITTED["xml"].replace(
+    honoured = _run(lambda: _readback_of(_SUBMITTED["xml"]).replace(
         'name="M12.15 Process"',
         'name="M12.15 Process" folderFullPath="Acct/Target Folder"', 1,
     ))
@@ -2884,14 +2902,14 @@ def test_an_ignored_placement_is_never_attested_as_applied():
     assert placement["folder_name"] == "Target Folder"
     assert placement["folder_id"] == "folder-1"
     assert honoured["results"]["proc"]["placement_verified"] is True
-    assert not [w for w in (honoured.get("warnings") or []) if "NOT placed" in w]
+    assert not [w for w in (honoured.get("warnings") or []) if w.startswith("Process ") and "NOT placed" in w]
 
     # THE IGNORING PLATFORM (what QA measured): the component sits at root.
     # The root readback's folderFullPath is a SINGLE segment — the account
     # name, not a folder — so the attestation must carry NO folder_name at all
     # (Codex round 16 F1: the leaf reduction attested the account name as a
     # placement that never happened).
-    ignored = _run(lambda: _SUBMITTED["xml"].replace(
+    ignored = _run(lambda: _readback_of(_SUBMITTED["xml"]).replace(
         'name="M12.15 Process"',
         'name="M12.15 Process" folderFullPath="Acct"', 1,
     ).replace(' folderName="Target Folder"', "", 1))
@@ -2903,7 +2921,7 @@ def test_an_ignored_placement_is_never_attested_as_applied():
     step = ignored["results"]["proc"]
     assert step["placement_verified"] is False
     assert step["requested_folder_name"] == "Target Folder"
-    warning = [w for w in (ignored.get("warnings") or []) if "NOT placed" in w]
+    warning = [w for w in (ignored.get("warnings") or []) if w.startswith("Process ") and "NOT placed" in w]
     assert warning, ignored.get("warnings")
     assert "Target Folder" in warning[0]
     assert "the account root" in warning[0]
@@ -2954,7 +2972,7 @@ def test_a_folder_named_like_the_account_cannot_fake_a_placement():
             )
 
     # The trap: root readback, full path == the requested folder's name.
-    trapped = _run(lambda: _SUBMITTED["xml"].replace(
+    trapped = _run(lambda: _readback_of(_SUBMITTED["xml"]).replace(
         'name="M12.15 Process"',
         'name="M12.15 Process" folderFullPath="Acct"', 1,
     ).replace(' folderName="Acct"', "", 1))
@@ -2963,10 +2981,10 @@ def test_a_folder_named_like_the_account_cannot_fake_a_placement():
     assert placement["folder_id"] is None
     assert placement["folder_name"] is None
     assert trapped["results"]["proc"]["placement_verified"] is False
-    assert [w for w in (trapped.get("warnings") or []) if "NOT placed" in w]
+    assert [w for w in (trapped.get("warnings") or []) if w.startswith("Process ") and "NOT placed" in w]
 
     # The control: a genuine two-segment placement in that folder confirms.
-    genuine = _run(lambda: _SUBMITTED["xml"].replace(
+    genuine = _run(lambda: _readback_of(_SUBMITTED["xml"]).replace(
         'name="M12.15 Process"',
         'name="M12.15 Process" folderFullPath="Root/Acct"', 1,
     ))
@@ -2978,7 +2996,7 @@ def test_a_folder_named_like_the_account_cannot_fake_a_placement():
 
     # The identity check outranks the leaf: a readback whose own folderId names
     # a DIFFERENT folder does not confirm, even with the leaf name matching.
-    imposter = _run(lambda: _SUBMITTED["xml"].replace(
+    imposter = _run(lambda: _readback_of(_SUBMITTED["xml"]).replace(
         'name="M12.15 Process"',
         'name="M12.15 Process" folderFullPath="Root/Acct"'
         ' folderId="folder-OTHER"', 1,
@@ -2995,11 +3013,11 @@ def test_a_folder_named_like_the_account_cannot_fake_a_placement():
     step = imposter["results"]["proc"]
     assert step["observed_folder"] == "Root/Acct"
     assert step["observed_folder_id"] == "folder-OTHER"
-    warning = [w for w in (imposter.get("warnings") or []) if "NOT placed" in w]
+    warning = [w for w in (imposter.get("warnings") or []) if w.startswith("Process ") and "NOT placed" in w]
     assert warning, imposter.get("warnings")
     assert "Root/Acct" in warning[0]
     # ...and the SAME folderId confirms through the identity branch.
-    identified = _run(lambda: _SUBMITTED["xml"].replace(
+    identified = _run(lambda: _readback_of(_SUBMITTED["xml"]).replace(
         'name="M12.15 Process"',
         'name="M12.15 Process" folderFullPath="Root/Acct"'
         ' folderId="folder-acct"', 1,
@@ -3055,7 +3073,7 @@ def test_an_id_only_readback_is_a_folder_not_the_root():
             )
 
     # An id-only readback whose id matches the resolution CONFIRMS by identity.
-    matching = _run(lambda: _SUBMITTED["xml"].replace(
+    matching = _run(lambda: _readback_of(_SUBMITTED["xml"]).replace(
         'name="M12.15 Process"',
         'name="M12.15 Process" folderId="folder-1"', 1,
     ).replace(' folderName="Target Folder"', "", 1))
@@ -3064,10 +3082,10 @@ def test_an_id_only_readback_is_a_folder_not_the_root():
     assert placement["folder_id"] == "folder-1"
     assert matching["results"]["proc"]["placement_verified"] is True
     assert not [w for w in (matching.get("warnings") or [])
-                if "NOT placed" in w]
+                if w.startswith("Process ") and "NOT placed" in w]
 
     # A DIFFERENT id refuses — and the warning names the id, never the root.
-    different = _run(lambda: _SUBMITTED["xml"].replace(
+    different = _run(lambda: _readback_of(_SUBMITTED["xml"]).replace(
         'name="M12.15 Process"',
         'name="M12.15 Process" folderId="folder-OTHER"', 1,
     ).replace(' folderName="Target Folder"', "", 1))
@@ -3078,7 +3096,7 @@ def test_an_id_only_readback_is_a_folder_not_the_root():
     step = different["results"]["proc"]
     assert step["placement_verified"] is False
     assert step["observed_folder_id"] == "folder-OTHER"
-    warning = [w for w in (different.get("warnings") or []) if "NOT placed" in w]
+    warning = [w for w in (different.get("warnings") or []) if w.startswith("Process ") and "NOT placed" in w]
     assert warning, different.get("warnings")
     assert "folder id 'folder-OTHER'" in warning[0]
     assert "the account root" not in warning[0]
@@ -3111,7 +3129,9 @@ def test_the_roots_own_folder_id_does_not_make_it_a_folder():
     # them for a rooted component.
     def _live(_client, component_id, *_a, **_k):
         if component_id == _PROCESS_ID:
-            return {"type": "process", "xml": _SUBMITTED["xml"].replace(
+            return {"type": "process", "xml": _readback_of(
+                _SUBMITTED["xml"]
+            ).replace(
                 'name="M12.15 Process"',
                 'name="M12.15 Process" folderFullPath="Acct"'
                 ' folderId="Rjo4NjMyNjEx"', 1,
@@ -3144,7 +3164,7 @@ def test_the_roots_own_folder_id_does_not_make_it_a_folder():
     assert placement["folder_id"] is None
     assert placement["folder_name"] is None
     # ...and the warning calls it the root, not an unknown folder id.
-    warning = [w for w in (result.get("warnings") or []) if "NOT placed" in w]
+    warning = [w for w in (result.get("warnings") or []) if w.startswith("Process ") and "NOT placed" in w]
     assert warning, result.get("warnings")
     assert "the account root" in warning[0]
     assert "folder id" not in warning[0]
@@ -3227,7 +3247,9 @@ def test_an_explicitly_requested_root_folder_confirms_by_its_own_id():
     # The live root shape, with the ROOT's own id echoing the resolution.
     def _live(_client, component_id, *_a, **_k):
         if component_id == _PROCESS_ID:
-            return {"type": "process", "xml": _SUBMITTED["xml"].replace(
+            return {"type": "process", "xml": _readback_of(
+                _SUBMITTED["xml"]
+            ).replace(
                 'name="M12.15 Process"',
                 'name="M12.15 Process" folderFullPath="Acct"'
                 ' folderId="folder-root"', 1,
@@ -3255,7 +3277,7 @@ def test_an_explicitly_requested_root_folder_confirms_by_its_own_id():
     placement = result["process_mutations"][0]["resolved_placement"]
     assert placement["folder_id"] == "folder-root"
     assert placement["folder_name"] == "Acct"
-    assert not [w for w in (result.get("warnings") or []) if "NOT placed" in w]
+    assert not [w for w in (result.get("warnings") or []) if w.startswith("Process ") and "NOT placed" in w]
 
 
 def test_a_failed_readback_never_claims_the_component_is_at_root():
@@ -3315,8 +3337,13 @@ def test_a_failed_readback_never_claims_the_component_is_at_root():
     # Codex round 17 F2: this path never parsed anything — the fetch itself
     # failed — so the warning must not diagnose a parse failure.
     assert "could not be parsed" not in unverified[0]
-    assert not [w for w in warnings if "NOT placed" in w]
-    assert not [w for w in warnings if "read-back shows it in" in w]
+    assert not [w for w in warnings if w.startswith("Process ") and "NOT placed" in w]
+    # Scoped to the ROOT, whose readback is the one this test suppressed. The
+    # created connection's readback IS available here and shows the account
+    # root, so #157 warns about it — a different, true statement about a
+    # different component.
+    assert not [w for w in warnings
+                if w.startswith("Process ") and "read-back shows it in" in w]
 
 
 def test_every_registered_process_component_code_has_a_reachable_producer():
@@ -3787,11 +3814,18 @@ def test_an_update_says_so_when_its_requested_folder_is_not_applied():
     assert step["placement_verified"] is False
     assert step["observed_folder"] == "Root/Elsewhere"
     warning = [w for w in (result.get("warnings") or [])
-               if "requested folder" in w]
+               if w.startswith("Process ") and "requested folder" in w]
     assert warning, result.get("warnings")
     # ...and it names the UPDATE mechanism, not the create one.
     assert "update preservation" in warning[0], warning[0]
-    assert "ignores folderName on create" not in warning[0], warning[0]
+    # ...and NOT either create-side mechanism. #157 replaced the single create
+    # sentence ("this platform ignores folderName on create") with the two that
+    # are now distinguishable — a resolved id that the read-back does not
+    # confirm, and a name that resolved to no single folder — so this pins the
+    # update arm against both of them rather than against a string that no
+    # longer exists on any arm.
+    assert "submitted on the create" not in warning[0], warning[0]
+    assert "no folder id could be submitted" not in warning[0], warning[0]
 
 
 def test_a_confirmed_write_is_durable_before_it_is_attested():

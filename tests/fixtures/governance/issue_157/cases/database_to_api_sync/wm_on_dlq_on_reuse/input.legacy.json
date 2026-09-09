@@ -1,0 +1,146 @@
+{
+  "baseline_sha": "ba1be9f34317d720d3b012484622ab7e2742143b",
+  "entry": {
+    "example": "scheduled_with_watermark",
+    "kind": "archetype_example"
+  },
+  "input": {
+    "archetype": "database_to_api_sync",
+    "parameters": {
+      "execution": {
+        "run_metadata": {
+          "owner": "crm-team"
+        },
+        "trigger": {
+          "mode": "scheduled",
+          "schedule": {
+            "cron": "0 2 * * *",
+            "timezone": "UTC"
+          }
+        },
+        "watermark": {
+          "field": "source_b",
+          "kind": "timestamp",
+          "persistence": "dpp"
+        }
+      },
+      "naming": {
+        "component_prefix": "DEMO-INC",
+        "folder_path": "Integrations/CRM/Sync",
+        "integration_name": "demo-db-to-api-incremental",
+        "runtime_hints": {
+          "atom_pool": "primary"
+        }
+      },
+      "reliability": {
+        "catch_notify": {
+          "level": "ERROR",
+          "message_template": "<<caller-authored notify message referencing meta.base.catcherrorsmessage>>"
+        },
+        "dlq": {
+          "enabled": true,
+          "target": {
+            "document_cache_id": "<<dlq document cache component id>>",
+            "mode": "document_cache_ref"
+          }
+        },
+        "error_classifier": {
+          "custom_rules": [
+            "rate_limit_exhausted"
+          ]
+        },
+        "retry": {
+          "backoff": "platform",
+          "max_attempts": 5
+        }
+      },
+      "source": {
+        "binding": {
+          "component_id": "<<existing connector id>>",
+          "mode": "reuse"
+        },
+        "read_operation": {
+          "batch_size": 500,
+          "parameters": [
+            {
+              "direction": "in",
+              "name": "<<bind parameter name>>"
+            }
+          ],
+          "result_schema": {
+            "fields": [
+              {
+                "data_type": "character",
+                "name": "source_a",
+                "required": true
+              },
+              {
+                "data_type": "datetime",
+                "name": "source_b"
+              }
+            ]
+          },
+          "sql": "<<user-authored DB read statement>>"
+        }
+      },
+      "target": {
+        "binding": {
+          "component_id": "<<existing REST connection id>>",
+          "mode": "reuse"
+        },
+        "payload_profile": {
+          "format": "json",
+          "root": {
+            "children": [
+              {
+                "data_type": "character",
+                "kind": "simple",
+                "name": "target_a",
+                "required": true
+              },
+              {
+                "data_type": "datetime",
+                "kind": "simple",
+                "name": "target_b"
+              }
+            ],
+            "kind": "object",
+            "name": "Root"
+          }
+        },
+        "send_request": {
+          "method": "POST",
+          "path": "/v1/customers",
+          "query_parameters": [
+            {
+              "name": "since",
+              "value_source": "watermark"
+            }
+          ]
+        }
+      },
+      "transform": {
+        "operations": [
+          {
+            "documentation_hint": "carry first column verbatim",
+            "operation_type": "direct",
+            "source_field": "source_a",
+            "target_path": "Root/target_a"
+          },
+          {
+            "function_type": "date_format",
+            "inputs": [
+              "source_b"
+            ],
+            "operation_type": "map_function",
+            "parameters": {
+              "input_format": "<<source datetime format>>",
+              "output_format": "<<target datetime format>>"
+            },
+            "target_path": "Root/target_b"
+          }
+        ]
+      }
+    }
+  }
+}

@@ -1,0 +1,77 @@
+{
+  "baseline_sha": "ba1be9f34317d720d3b012484622ab7e2742143b",
+  "entry": {
+    "example": "webhook_to_database_insert",
+    "kind": "archetype_example"
+  },
+  "input": {
+    "archetype": "http_listener_to_db",
+    "parameters": {
+      "inbound_validation": {
+        "enabled": true
+      },
+      "listener": {
+        "object_name": "orderIntake",
+        "operation_type": "EXECUTE",
+        "payload_profile": {
+          "format": "json",
+          "root": {
+            "children": [
+              {
+                "data_type": "character",
+                "kind": "simple",
+                "name": "id"
+              },
+              {
+                "data_type": "number",
+                "kind": "simple",
+                "name": "amount"
+              }
+            ],
+            "kind": "object",
+            "name": "Root"
+          }
+        }
+      },
+      "naming": {
+        "component_prefix": "OrderIntake",
+        "integration_name": "Order Intake Listener"
+      },
+      "target": {
+        "connection": {
+          "component_name": "<<existing DB connection>>",
+          "mode": "reuse"
+        },
+        "write_profile": {
+          "fields": [
+            {
+              "data_type": "character",
+              "mandatory": true,
+              "name": "id"
+            },
+            {
+              "data_type": "number",
+              "name": "amount"
+            }
+          ],
+          "statement_type": "dynamicinsert",
+          "table_name": "<<target table>>"
+        }
+      },
+      "transform": {
+        "operations": [
+          {
+            "operation_type": "direct",
+            "source_path": "Root/id",
+            "target_path": "Fields/id"
+          },
+          {
+            "operation_type": "direct",
+            "source_path": "Root/amount",
+            "target_path": "Fields/amount"
+          }
+        ]
+      }
+    }
+  }
+}

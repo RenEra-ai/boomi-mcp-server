@@ -1152,6 +1152,7 @@ def _w_verified_write_replay_safety():
     from boomi_mcp.models.process_ir import parse_process_ir_v1
     from _m12_11_support import (
         APPLIABLE_CONN,
+        reuse_binding,
         APPLIABLE_OP,
         appliable_op_matching_the_capture,
         ProcessAuthoringUnitV1,
@@ -1207,7 +1208,7 @@ def _w_verified_write_replay_safety():
             components=(
                 dict(APPLIABLE_CONN, component_id=connection.component_id,
                      action="create",
-                     config=dict(APPLIABLE_CONN["config"], reference_only=True)),
+                     config=reuse_binding(APPLIABLE_CONN)),
                 dict(appliable_op_matching_the_capture(),
                      component_id=operation.component_id, action="create",
                      config=dict(appliable_op_matching_the_capture()["config"],

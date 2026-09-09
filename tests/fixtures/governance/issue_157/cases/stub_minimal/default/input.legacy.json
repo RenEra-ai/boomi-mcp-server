@@ -1,0 +1,17 @@
+{
+  "baseline_sha": "ba1be9f34317d720d3b012484622ab7e2742143b",
+  "entry": {
+    "example": "smoke_test_run",
+    "kind": "archetype_example"
+  },
+  "input": {
+    "archetype": "stub_minimal_integration",
+    "parameters": {
+      "component_prefix": "STUB",
+      "goal": "Smoke-test the V3 archetype pipeline",
+      "integration_name": "demo-stub-integration",
+      "source_label": "Stub source",
+      "target_label": "Stub target"
+    }
+  }
+}

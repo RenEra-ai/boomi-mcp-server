@@ -8,7 +8,7 @@ Provides component CRUD operations:
 - delete: Delete a component via metadata API
 """
 
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 import xml.etree.ElementTree as ET
 
 from boomi import Boomi
@@ -38,7 +38,9 @@ from .component_update_preservation import merge_for_update
 def create_component(
     boomi_client: Boomi,
     profile: str,
-    config: Dict[str, Any]
+    config: Dict[str, Any],
+    *,
+    folder_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Create a new component.
 
@@ -54,7 +56,18 @@ def create_component(
     the builder path handles namespaces for the types it knows. For other
     types, use query_components get action on an existing component to
     obtain a valid XML template.
+
+    PLACEMENT (QA-157-r1-01). ``folder_id`` — the keyword, or ``config`` for a
+    caller that authored one — is the only spelling this platform honours on a
+    create, and it is applied at the raw-create boundary for every path above.
+    ``config['folder_id']`` already satisfied the ``FOLDER_REQUIRED_ON_CREATE``
+    lint while reaching no builder, so a create declaring it was reported as
+    placed and landed at the account root; the lint's two accepted spellings
+    now both place. The builders' ``folder_name`` is left exactly as it was —
+    the platform ignores it, and rewriting every builder to say so is the
+    hand-model this repository keeps removing.
     """
+    folder_id = folder_id or config.get("folder_id")
     try:
         # Path 1: profile builder dispatch (when no raw XML override).
         component_type = config.get('component_type')
@@ -63,7 +76,7 @@ def create_component(
             builder = get_profile_builder(component_type, profile_type or "")
             if builder is not None:
                 xml = builder.build(**config)
-                result = _create_component_raw(boomi_client, xml)
+                result = _create_component_raw(boomi_client, xml, folder_id=folder_id)
                 return {
                     "_success": True,
                     "message": f"Created {component_type} '{result['name']}'",
@@ -80,7 +93,7 @@ def create_component(
             sm_builder_cls = get_script_mapping_builder(component_type)
             if sm_builder_cls is not None:
                 xml = sm_builder_cls().build(**config)
-                result = _create_component_raw(boomi_client, xml)
+                result = _create_component_raw(boomi_client, xml, folder_id=folder_id)
                 return {
                     "_success": True,
                     "message": f"Created {component_type} '{result['name']}'",
@@ -94,7 +107,7 @@ def create_component(
             pp_builder_cls = get_process_property_builder(component_type)
             if pp_builder_cls is not None:
                 xml = pp_builder_cls().build(**config)
-                result = _create_component_raw(boomi_client, xml)
+                result = _create_component_raw(boomi_client, xml, folder_id=folder_id)
                 return {
                     "_success": True,
                     "message": f"Created {component_type} '{result['name']}'",
@@ -107,7 +120,7 @@ def create_component(
             dc_builder_cls = get_document_cache_builder(component_type)
             if dc_builder_cls is not None:
                 xml = dc_builder_cls().build(**config)
-                result = _create_component_raw(boomi_client, xml)
+                result = _create_component_raw(boomi_client, xml, folder_id=folder_id)
                 return {
                     "_success": True,
                     "message": f"Created {component_type} '{result['name']}'",
@@ -122,7 +135,7 @@ def create_component(
             as_builder_cls = get_api_service_builder(component_type)
             if as_builder_cls is not None:
                 xml = as_builder_cls().build(**config)
-                result = _create_component_raw(boomi_client, xml)
+                result = _create_component_raw(boomi_client, xml, folder_id=folder_id)
                 return {
                     "_success": True,
                     "message": f"Created {component_type} '{result['name']}'",
@@ -164,7 +177,7 @@ def create_component(
 
         # Path 2: raw XML
         if config.get('xml'):
-            result = _create_component_raw(boomi_client, config['xml'])
+            result = _create_component_raw(boomi_client, config['xml'], folder_id=folder_id)
             return {
                 "_success": True,
                 "message": f"Created component '{result['name']}'",

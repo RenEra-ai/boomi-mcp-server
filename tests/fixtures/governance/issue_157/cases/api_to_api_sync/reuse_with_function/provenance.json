@@ -1,0 +1,10 @@
+{
+  "baseline_sha": "ba1be9f34317d720d3b012484622ab7e2742143b",
+  "baseline_tree_sha": "27487413b2d54234fe73bd57ae8779cb0d1352f5",
+  "case_id": "api_to_api_sync/reuse_with_function",
+  "derived_by": "tests/_issue_157_canonical_fixtures.py",
+  "derived_by_sha256": "c36d83ac828b1ef537be414ade78d27fad790b253078e55d36126e7ecc2a4a56",
+  "executed_at_replay": false,
+  "legacy_input_sha256": "55bd590edbbae77f294c4e149b130bc26ed680797737ae785b5f9a771eae8e30",
+  "method": "supporting components = the baseline archetype's emitted component list (process entry dropped); process re-authored as ProcessIR source -> map_ref -> target; map label = the frozen transform row's display name"
+}

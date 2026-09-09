@@ -15,7 +15,7 @@ import ipaddress
 import re
 from collections import defaultdict
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Mapping, Optional, Tuple
+from typing import Any, Dict, List, Mapping, NamedTuple, Optional, Tuple
 from urllib.parse import urlsplit
 from uuid import uuid4
 
@@ -146,6 +146,8 @@ from ..models.integration_models import IntegrationComponentSpec, IntegrationSpe
 from .components._shared import (
     component_get_xml,
     paginate_metadata,
+    smart_merge_would_change,
+    with_folder_id,
     ComponentGetDeadlineExceeded,
     component_get_deadline_envelope,
 )
@@ -243,6 +245,11 @@ from ..errors import (
     UPDATE_PRESERVATION_PUSH_FAILED,
     PROCESS_COMPONENT_SCHEMA_INVALID_CARDINALITY,
     PROCESS_COMPONENT_REFERENCE_INVALID_FORMAT,
+    GOVERNANCE_ENVELOPE_DUPLICATE,
+    GOVERNANCE_FLOWS_OUTPUT_ONLY,
+    GOVERNANCE_NAME_UNRESOLVED,
+    GOVERNANCE_RECORDED_INTENT_INVALID,
+    GOVERNANCE_RETIRED_SPELLING,
     PROCESS_COMPONENT_SCHEMA_INVALID,
     PROCESS_IR_REFERENCE_INVALID_FORMAT,
     PROCESS_MATERIALIZATION_FINALIZATION_FAILED,
@@ -1312,6 +1319,12 @@ def _format_actual_role(comp: IntegrationComponentSpec) -> str:
 # profile.db (which previously routed metadata-only updates through
 # generic update_component but now hits a new structured-builder
 # branch in _execute_component).
+#: The component types whose UPDATE routes through the metadata smart merge
+#: when the payload carries no body fields. Read by the apply dispatcher's own
+#: connector arm and by the pre-write no-op check, so the two cannot disagree
+#: about which route a step will take (QA-157-r2-01).
+_CONNECTOR_COMPONENT_TYPES = ("connector-settings", "connector-action")
+
 _METADATA_ONLY_KEYS = frozenset({
     "name",
     "component_name",
@@ -3717,7 +3730,19 @@ def _execute_component(
     *,
     components_by_key: Optional[Dict[str, IntegrationComponentSpec]] = None,
     literal_indexes: Optional[Dict[str, Dict[str, Any]]] = None,
+    placement: Optional["_ComponentPlacement"] = None,
 ) -> Dict[str, Any]:
+    """Execute ONE component step.
+
+    ``placement`` is the LIVE-RESOLVED placement for a create, passed as an
+    argument rather than through ``config``: the config dict is splatted into
+    the builders, and a key they do not declare is a refusal on the strict ones
+    (QA-157-r1-01). Its id reaches the wire at the one raw-create boundary
+    (:func:`with_folder_id`), so every arm that submits a component DOCUMENT is
+    placed without knowing about placement. The one arm that submits a typed
+    model instead reads the whole value and declares what it cannot do with it.
+    """
+    folder_id = placement.folder_id if placement else None
     payload = dict(config)
     # Align apply-time dispatcher predicates with plan-time predicates:
     # _build_plan keys validation off comp.type, but the create_connector /
@@ -3821,7 +3846,9 @@ def _execute_component(
                     "hint": exc.hint,
                 }
             if comp.action == "create":
-                return create_component(boomi_client, profile, {"xml": xml})
+                return create_component(
+                    boomi_client, profile, {"xml": xml}, folder_id=folder_id
+                )
             if not target_id:
                 return {
                     "_success": False,
@@ -3861,7 +3888,7 @@ def _execute_component(
             ),
         }
 
-    if comp.type in ("connector-settings", "connector-action"):
+    if comp.type in _CONNECTOR_COMPONENT_TYPES:
         # Normalize local-alias connector_types to their canonical Boomi form
         # BEFORE the get_connector sanity check, so Boomi's catalog lookup
         # recognizes the type. `rest` and `rest_client` are MCP-local aliases
@@ -3894,7 +3921,9 @@ def _execute_component(
                               % (connector_type, _validation_error_message(exc))),
                 }
         if comp.action == "create":
-            return create_connector(boomi_client, profile, payload)
+            return create_connector(
+                boomi_client, profile, payload, folder_id=folder_id
+            )
         if not target_id:
             return {"_success": False, "error": f"Missing component_id for update of connector '{comp.key}'"}
         # Issue #45 — connector update routing:
@@ -3974,7 +4003,56 @@ def _execute_component(
 
     if comp.type == "trading_partner":
         if comp.action == "create":
-            return create_trading_partner(boomi_client, profile, payload)
+            # THIS ROUTE CANNOT CARRY A PLACEMENT, and says so rather than
+            # letting the caller be told the platform ignored one
+            # (QA-157-r4-01). The trading-partner create posts a typed JSON
+            # model through its own SDK entry point, so it never reaches the
+            # raw-create boundary where `with_folder_id` places a document —
+            # the one arm of this dispatcher for which that is true. The arm
+            # declares its own limit; nothing elsewhere models it.
+            outcome = create_trading_partner(boomi_client, profile, payload)
+            # WHAT THE ROUTE ITSELF SAYS IT SENT — read, not re-derived.
+            #
+            # The previous correction claimed the route reports its submission
+            # and then re-derived the name from the resolved placement, so the
+            # served value was a stripped or ranked copy of a value the route
+            # had already returned verbatim, and the route's own default was
+            # reported nowhere (QA-157-r7-03). This reads the return.
+            _sent = (outcome or {}).get("trading_partner") or {}
+            _sent_folder = _sent.get("folder_name") if isinstance(_sent, dict) else None
+            # THIS ARM REPORTS WHAT IT SUBMITTED. Nothing else predicts it.
+            #
+            # Three corrections tried to model this route's placement from
+            # outside — whether it can place, then whether an id or a name
+            # drove the request, then both halves as one value — and each was
+            # defeated by the same asymmetry: this route submits a folder by
+            # NAME (its typed model's own field, splatted from the config) and
+            # cannot submit an id at all, so the document routes' id-over-name
+            # ranking is inverted here. A component placed by its own name was
+            # served as unplaced, with a warning saying so (QA-157-r6-01).
+            #
+            # So the prediction is gone. The arm says what it did, and the
+            # result row is built from that report: a name it submitted, or a
+            # placement it could not submit at all.
+            if isinstance(outcome, dict) and outcome.get("_success") and placement:
+                # PROVENANCE travels with the value: the row and the notice read
+                # which spelling was submitted rather than inferring it from
+                # which id fields happen to be present (QA-157-r7-02).
+                #
+                # This route ALWAYS sends a folder — its own `Home` when the
+                # request named none — so "what was sent" and "was the request
+                # honoured" are different questions. A request that asked by id
+                # is not honoured here however the route defaulted, and the row
+                # says both: the name that went, and the id that could not.
+                if placement.declared_name:
+                    outcome = dict(outcome, placement_submitted_name=_sent_folder)
+                elif placement.folder_id:
+                    outcome = dict(
+                        outcome,
+                        placement_unsupported=True,
+                        placement_submitted_name=_sent_folder,
+                    )
+            return outcome
         if not target_id:
             return {"_success": False, "error": f"Missing component_id for update of trading partner '{comp.key}'"}
         return update_trading_partner(boomi_client, profile, target_id, payload)
@@ -4007,7 +4085,9 @@ def _execute_component(
             }
         envelope = {"xml": built_xml, "component_type": "transform.function"}
         if comp.action == "create":
-            return create_component(boomi_client, profile, envelope)
+            return create_component(
+                boomi_client, profile, envelope, folder_id=folder_id
+            )
         if not target_id:
             return {
                 "_success": False,
@@ -4050,7 +4130,9 @@ def _execute_component(
             }
         envelope = {"xml": built_xml, "component_type": "script.mapping"}
         if comp.action == "create":
-            return create_component(boomi_client, profile, envelope)
+            return create_component(
+                boomi_client, profile, envelope, folder_id=folder_id
+            )
         if not target_id:
             return {
                 "_success": False,
@@ -4094,7 +4176,9 @@ def _execute_component(
             }
         envelope = {"xml": built_xml, "component_type": "processproperty"}
         if comp.action == "create":
-            return create_component(boomi_client, profile, envelope)
+            return create_component(
+                boomi_client, profile, envelope, folder_id=folder_id
+            )
         if not target_id:
             return {
                 "_success": False,
@@ -4136,7 +4220,9 @@ def _execute_component(
             }
         envelope = {"xml": built_xml, "component_type": "documentcache"}
         if comp.action == "create":
-            return create_component(boomi_client, profile, envelope)
+            return create_component(
+                boomi_client, profile, envelope, folder_id=folder_id
+            )
         if not target_id:
             return {
                 "_success": False,
@@ -4181,7 +4267,9 @@ def _execute_component(
             }
         envelope = {"xml": built_xml, "component_type": "webservice"}
         if comp.action == "create":
-            return create_component(boomi_client, profile, envelope)
+            return create_component(
+                boomi_client, profile, envelope, folder_id=folder_id
+            )
         if not target_id:
             return {
                 "_success": False,
@@ -4283,7 +4371,9 @@ def _execute_component(
             }
         envelope = {"xml": built_xml, "component_type": comp.type}
         if comp.action == "create":
-            return create_component(boomi_client, profile, envelope)
+            return create_component(
+                boomi_client, profile, envelope, folder_id=folder_id
+            )
         if not target_id:
             return {
                 "_success": False,
@@ -4370,7 +4460,9 @@ def _execute_component(
             }
         envelope = {"xml": built_xml, "component_type": "transform.map"}
         if comp.action == "create":
-            return create_component(boomi_client, profile, envelope)
+            return create_component(
+                boomi_client, profile, envelope, folder_id=folder_id
+            )
         if not target_id:
             return {
                 "_success": False,
@@ -4388,7 +4480,9 @@ def _execute_component(
         )
 
     if comp.action == "create":
-        return create_component(boomi_client, profile, payload)
+        return create_component(
+            boomi_client, profile, payload, folder_id=folder_id
+        )
     if not target_id:
         return {"_success": False, "error": f"Missing component_id for update of component '{comp.key}'"}
     return update_component(boomi_client, profile, target_id, payload)
@@ -5006,8 +5100,14 @@ def _lint_folder_placement(spec: IntegrationSpecV1) -> List[str]:
     """Folder-on-create lint (#102 E1) — prevents SILENT account-root placement.
 
     Flags every CREATE component that resolves to neither a ``folder_id`` nor a
-    ``folder_name`` (it would land in the account root). Reference-only reuse and
+    ``folder_name`` (this request then places it nowhere). Reference-only reuse and
     raw-XML creates (author owns placement) are exempt.
+
+    The text does NOT assert the account root for every route: the
+    trading-partner create submits its own ``Home`` default, so a folderless
+    component of that type lands there while a folderless process root beside
+    it lands at the account root — measured in one apply (QA-157-r7-04). The
+    warning names the mechanism, which is true of both.
 
     WARNING, not a hard failure: folderless creates are a pervasive, currently-
     valid pattern across the typed builders and archetypes (the
@@ -5035,9 +5135,10 @@ def _lint_folder_placement(spec: IntegrationSpecV1) -> List[str]:
         if not has_folder:
             warnings.append(
                 f"[FOLDER_REQUIRED_ON_CREATE] Component '{comp.key}' is created "
-                "with no folder_id or folder_name and would land in the account "
-                "root. Set a resolved folder so components are organized, never "
-                "at root."
+                "with no folder_id or folder_name, so this request does not "
+                "place it: it lands wherever its create route defaults, which "
+                "is the account root for every route that submits a component "
+                "document. Set a resolved folder so components are organized."
             )
     return warnings
 
@@ -5410,6 +5511,51 @@ def _resolve_literal_profile_indexes(
         discovered = _discover_profile_index(boomi_client, uuid)
         if discovered is not None:
             resolved[uuid] = discovered
+    return resolved
+
+
+def _resolve_selected_profile_indexes(
+    boomi_client: Boomi, spec: IntegrationSpecV1
+) -> Dict[str, Dict[str, Any]]:
+    """Field indexes for profiles apply will REUSE, keyed by component key (#157).
+
+    A ``reference_only`` profile's in-spec config is candidate material, not
+    evidence of what the reused component contains — so a transform map
+    validated against it could pass on a shape the account never held. The
+    SELECTED artifact is the existing component: resolved by its declared id, or
+    by name when exactly one component matches, and indexed from its LIVE XML
+    through the same ``index_existing_profile_xml`` the literal-UUID route uses.
+    Unresolvable entries are absent, and the map validator then reports
+    ``MAP_PROFILE_INDEX_UNAVAILABLE`` rather than trusting the candidate.
+
+    Makes ZERO live calls when the spec reuses no profile.
+    """
+    resolved: Dict[str, Dict[str, Any]] = {}
+    for comp in spec.components:
+        if not str(getattr(comp, "type", "") or "").startswith("profile."):
+            continue
+        cfg = comp.config if isinstance(comp.config, dict) else {}
+        if cfg.get("reference_only") is not True:
+            continue
+        component_id = _first_nonblank_str(comp.component_id, cfg.get("component_id"))
+        if not component_id:
+            effective_name = _first_nonblank_str(comp.name, cfg.get("component_name"))
+            if not effective_name or boomi_client is None:
+                continue
+            try:
+                candidates = _resolve_existing_components(
+                    boomi_client, comp.model_copy(update={"name": effective_name})
+                )
+            except Exception:  # noqa: BLE001 - discovery is best effort; absence defers
+                candidates = []
+            if len(candidates) != 1:
+                continue
+            component_id = candidates[0].get("component_id")
+        if not component_id:
+            continue
+        discovered = _discover_profile_index(boomi_client, str(component_id))
+        if discovered is not None and isinstance(discovered.get("field_index_by_path"), Mapping):
+            resolved[comp.key] = discovered["field_index_by_path"]
     return resolved
 
 
@@ -6081,6 +6227,7 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
     # referenced by a transform.map (supplied or live-discovered) so the map can
     # be validated against real fields. Empty (zero live calls) for all-$ref specs.
     literal_profile_indexes = _resolve_literal_profile_indexes(boomi_client, spec)
+    selected_profile_indexes = _resolve_selected_profile_indexes(boomi_client, spec)
     steps: List[Dict[str, Any]] = []
     warnings: List[str] = []
 
@@ -6960,6 +7107,7 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
                         comp.depends_on,
                         components_by_key,
                         literal_indexes=literal_profile_indexes,
+                        selected_indexes=selected_profile_indexes,
                     )
                 elif is_script_mapping_component:
                     # Issue #41: script.mapping has no source/target profile
@@ -7516,7 +7664,37 @@ _NAMED_VALIDATION_CODES = {
     "process_ir_reference_invalid_format": (
         PROCESS_COMPONENT_REFERENCE_INVALID_FORMAT
     ),
+    # #157 (M12.19): the governance models' own custom types. Every
+    # `PydanticCustomError` type string the authored envelope, the recipe
+    # per-root envelope and the recorded-intent models raise has a row here,
+    # and a two-way test pins it against the models — a governance refusal
+    # must serve its named code, never collapse to the generic input code.
+    "governance_name_unresolved": GOVERNANCE_NAME_UNRESOLVED,
+    "governance_envelope_duplicate": GOVERNANCE_ENVELOPE_DUPLICATE,
+    "governance_retired_spelling": GOVERNANCE_RETIRED_SPELLING,
+    "governance_flows_output_only": GOVERNANCE_FLOWS_OUTPUT_ONLY,
+    "governance_recorded_intent_invalid": GOVERNANCE_RECORDED_INTENT_INVALID,
 }
+
+
+#: The KEY a model-level refusal names, when pydantic's own ``loc`` cannot.
+#:
+#: A ``mode="before"`` model validator runs before any field exists, so its
+#: ``loc`` stops at the model — the served location for a caller-authored
+#: ``flows`` was the intent, not the key to remove (QA-157-r1-04). One entry per
+#: refusal that knows its key, keyed on the SAME custom-error type as
+#: ``_NAMED_VALIDATION_CODES`` so the two cannot describe different refusals.
+_NAMED_VALIDATION_PATH_LEAVES = {
+    "governance_flows_output_only": "flows",
+}
+
+
+def _located_validation_path(location: str, error_type: str) -> str:
+    """The served location, extended with the key the refusal names."""
+    leaf = _NAMED_VALIDATION_PATH_LEAVES.get(error_type)
+    if not leaf or location.split(".")[-1:] == [leaf]:
+        return location
+    return "{0}.{1}".format(location, leaf) if location else leaf
 
 
 def _step_component(step: Dict[str, Any], components_by_key: Dict[str, Any]):
@@ -7655,7 +7833,129 @@ def _named_error_code_from_validation(exc) -> Optional[str]:
     return _named_code_from_locations(locations)
 
 
-def _resolve_canonical_placement(boomi_client, envelope):
+def _account_folder_snapshot(boomi_client, folders=None):
+    """The account's non-deleted folders — the passed snapshot, or one read.
+
+    ``folders`` may be the listing itself or a callable that returns it. The
+    callable form is what keeps one apply's snapshot both SHARED and LAZY: no
+    participant reads the account until a folder name actually has to be
+    resolved, and once one has, every later participant sees that same reading.
+    """
+    if callable(folders):
+        return folders()
+    if folders is not None:
+        return folders
+    from .folders import _query_all_folders
+
+    return _query_all_folders(boomi_client, include_deleted=False)
+
+
+def _folder_name_matches(folders, folder_name):
+    """Every non-deleted folder with EXACTLY this name. One rule, two callers.
+
+    The root resolver refuses on zero and on many; the component resolver
+    leaves the component unplaced on both. Those are different POLICIES over
+    the same question, so the question is asked once here rather than answered
+    twice (this slice's own defect class).
+    """
+    return [
+        folder
+        for folder in folders
+        if folder.get("name") == folder_name and not folder.get("deleted")
+    ]
+
+
+class _ComponentPlacement(NamedTuple):
+    """What a created component's placement IS, as ONE value.
+
+    Both halves travel together to every consumer, because a consumer that
+    takes only the id makes exactly the mistake this type exists to prevent:
+    the trading-partner arm read the id alone and declared "this route cannot
+    place" for a request placed by NAME, so two of three rows announced a limit
+    their own verification refuted (QA-157-r5-01). That was the third instance
+    of one site modelling one spelling of a two-spelling fact, after the rule
+    that both halves are one answer (QA-157-r2-02, QA-157-r3-01) — so the
+    half-answer is now unrepresentable at the seam rather than merely
+    discouraged.
+    """
+
+    #: The id a route that submits a component DOCUMENT will place with: the
+    #: authored id, or the id the authored name resolved to.
+    folder_id: Optional[str]
+    #: The folder NAME that drove ``folder_id``, or ``None`` when an authored
+    #: id drove it. A document route's row reports this, so it never names the
+    #: spelling that lost (QA-157-r3-01).
+    requested_name: Optional[str]
+    #: The folder NAME the request declared or inherited, whatever else it
+    #: declared. A route that submits a folder by NAME reads this — and it is
+    #: the half the previous shape threw away, which is how a component placed
+    #: by its name was served as unplaced (QA-157-r6-01).
+    declared_name: Optional[str] = None
+
+
+def _declared_folder_name(config) -> Optional[str]:
+    """The folder NAME this component declares, if any. One reader."""
+    name = config.get("folder_name")
+    return name.strip() if isinstance(name, str) and name.strip() else None
+
+
+def _resolve_component_placement(config, folders=None):
+    """What a CREATED component's placement IS, as a :class:`_ComponentPlacement`.
+
+    ONE authority for both halves of the answer, because they are one answer.
+    Reporting the id from here and re-reading the name from the config at the
+    attestation site produced a row that named the folder the request lost with
+    the id of the folder it won, and called the placement verified
+    (QA-157-r3-01) — the same two-authorities defect as QA-157-r2-02, one
+    consumer over. ``requested_name`` is the name that actually DROVE the
+    placement, so it is ``None`` whenever an id won, and every consumer — the
+    result row, the warning it feeds — reads this return rather than the config.
+
+    An explicit ``folder_id`` wins on EVERY route: it is already an identity,
+    it needs no account read, and the folderless-create lint has always
+    accepted it as proof of placement while no builder emitted it — so a create
+    declaring it was reported as organized and landed at the account root.
+
+    A folder NAME is resolved only when ``folders`` supplies a way to read the
+    account, which the apply does exactly where #157's governance places
+    things: a request carrying canonical process roots. The legacy
+    ``integration_spec`` route keeps the behaviour it shipped with — the name
+    is emitted, this platform ignores it, the folderless-create lint says so —
+    because that surface is frozen until #160, the same boundary decision D3
+    made for the coverage gate. Widening it here would also make every legacy
+    apply read the account's whole folder list for a key the route never
+    honoured.
+
+    Resolution is BEST-EFFORT, unlike the canonical root's resolver, which
+    refuses: every legacy builder DEFAULTS this key to a folder name that need
+    not exist on a given account, so a name matching zero or several folders
+    leaves the component where it would have landed anyway rather than refusing
+    the apply. Under the #157 fan-out the value IS the root's own
+    ``folder_name``, which the root resolver has already refused or resolved
+    against this same snapshot — so a governed create is placed or the apply
+    never started. Whatever is left unplaced is reported, not hidden: the
+    placement attestation on the component's own result row says so.
+    """
+    literal = config.get("folder_id")
+    if isinstance(literal, str) and literal.strip():
+        # The id WINS, so the name — if one is also authored — drove nothing and
+        # is not reported as requested. Returning both facts together is what
+        # stops a row being assembled from two authorities (QA-157-r3-01).
+        return _ComponentPlacement(literal.strip(), None, _declared_folder_name(config))
+    name = config.get("folder_name")
+    if not (isinstance(name, str) and name.strip()):
+        return _ComponentPlacement(None, None, None)
+    if folders is None:
+        return _ComponentPlacement(None, None, name)
+    matches = _folder_name_matches(
+        _account_folder_snapshot(None, folders), name.strip()
+    )
+    if len(matches) != 1:
+        return _ComponentPlacement(None, name, name)
+    return _ComponentPlacement(matches[0].get("id") or None, name, name)
+
+
+def _resolve_canonical_placement(boomi_client, envelope, folders=None):
     """`folder_name` -> the ONE non-deleted folder id, or a named refusal.
 
     §6 review AR1-06: the placement plan item was never implemented — the two
@@ -7668,19 +7968,19 @@ def _resolve_canonical_placement(boomi_client, envelope):
 
     Returns ``None`` when the envelope names no folder (account-root placement
     is legitimate). Refusal happens BEFORE any create/update is issued.
+
+    ``folders`` is the apply's ONE account snapshot. Every root and every
+    created component resolves against the same reading, so two participants
+    of one apply can never disagree about what the account holds — and the
+    listing is paid for once instead of per root.
     """
     from .components.canonical_process_apply import CanonicalProcessApplyError
 
     if not envelope.folder_name:
         return None
-    from .folders import _query_all_folders
-
-    matches = [
-        folder
-        for folder in _query_all_folders(boomi_client, include_deleted=False)
-        if folder.get("name") == envelope.folder_name
-        and not folder.get("deleted")
-    ]
+    matches = _folder_name_matches(
+        _account_folder_snapshot(boomi_client, folders), envelope.folder_name
+    )
     key = envelope.component_key
     if not matches:
         raise CanonicalProcessApplyError(
@@ -8106,6 +8406,7 @@ def _execute_canonical_process(
         CanonicalProcessApplyError,
         applied_component_name,
         applied_placement,
+        folder_placement_honoured,
         observed_folder_identity,
         build_mutation_attestation,
         build_readback_attestation,
@@ -8328,6 +8629,19 @@ def _execute_canonical_process(
             on_pre_push=on_pre_push,
         )
     else:
+        # THE PLACEMENT IS BOUND HERE, ON THE CREATE, AND NOWHERE EARLIER
+        # (QA-157-r1-01). The materializer emits `folderName`, which this
+        # platform ignores on create — so the root was attested honestly as
+        # unplaced and landed at the account root every time. `folderId` IS
+        # honoured, and the id has been resolved against the live account since
+        # #153; it simply never reached the document. Injected after
+        # materialization and before the digest, so the fingerprinted plan and
+        # every golden stay byte-identical while the digest still describes the
+        # exact bytes the platform receives.
+        #
+        # An UPDATE deliberately gets none of this: update preservation keeps
+        # the component where it already lives.
+        xml = with_folder_id(xml, resolved_folder_id)
         # Digested immediately BEFORE the raw create call (§6 AR1-05c, plan §4
         # recording point 2). The raw create path sends the XML unchanged, so
         # these are the exact UTF-8 bytes the platform receives.
@@ -8520,29 +8834,16 @@ def _execute_canonical_process(
     )
     # (refined below: an honoured explicit-root request restores its leaf, so
     # the attestation names the folder the caller asked for and got)
-    if placement_identity is None:
-        placement_honoured = False
-    elif placement_identity["is_root"]:
-        # The account root is itself a folder row, so a caller may NAME it and
-        # resolution accepts its id (Codex round 20). The retained root id is
-        # compared BEFORE suppression: a match means the platform honoured an
-        # explicitly requested root placement, and refusing to verify it would
-        # serve a false refusal. Suppression applies only to a root the caller
-        # did not ask for.
-        placement_honoured = bool(
-            placement_identity["folder_id"]
-            and resolved_folder_id
-            and placement_identity["folder_id"] == resolved_folder_id
-        )
-    elif placement_identity["folder_id"] and resolved_folder_id:
-        # The readback's own folderId is the strongest comparison basis: it is
-        # an IDENTITY, immune to two folders sharing a leaf name.
-        placement_honoured = placement_identity["folder_id"] == resolved_folder_id
-    else:
-        placement_honoured = bool(
-            envelope.folder_name
-            and placement_identity["leaf"] == envelope.folder_name
-        )
+    #
+    # THE RULE ITSELF NOW LIVES WITH THE READBACK PARSER IT READS (QA-157-r1-01
+    # sibling sweep): the fanned-out supporting components need the identical
+    # judgement, and writing it a second time beside them is how the account
+    # root, the id comparison and the leaf fallback drift apart.
+    placement_honoured = folder_placement_honoured(
+        placement_identity,
+        resolved_folder_id=resolved_folder_id,
+        requested_folder_name=envelope.folder_name,
+    )
     if placement_honoured and placement_identity["is_root"]:
         # An HONOURED explicit-root placement is a folder placement like any
         # other — the attestation carries the name the platform reported and
@@ -8648,6 +8949,13 @@ def _execute_canonical_process(
     if envelope.folder_name and action in ("create", "update"):
         result["requested_folder_name"] = envelope.folder_name
         result["placement_verified"] = placement_honoured
+        if action == "create" and resolved_folder_id:
+            # WHAT WAS SUBMITTED, so an unhonoured placement can be told apart
+            # from one that was never resolved. The two have different causes
+            # and different remedies, and the warning below reads this to say
+            # which happened rather than asserting the create-time mechanism
+            # that used to be the only one it knew.
+            result["resolved_folder_id"] = resolved_folder_id
         # `observed_folder` is set ONLY from a PARSED readback — its presence is
         # what licenses the ignored-placement warning to name a location. A
         # failed readback leaves the key absent: the location is UNKNOWN, and
@@ -8707,6 +9015,148 @@ def _execute_canonical_process(
         # now with the evidence attached rather than discarded.
         outcome.update(_failure_envelope)
     return outcome
+
+
+def _placement_warning(subject: str, key: str, step: Dict[str, Any]) -> str:
+    """The caller's one notice that a requested folder did not take effect.
+
+    ONE builder for the canonical root and for every created component
+    (QA-157-r1-01): the root carried this text inline and the seven components
+    the #157 fan-out places carried nothing at all, so a request the server
+    could not honour was silent on exactly the rows the fan-out was about.
+
+    `subject` names WHAT ("Process"/"Component"); everything else is read from
+    the step's own recorded placement facts, which is what keeps the two
+    callers saying the same thing about the same evidence.
+
+    The MECHANISM is derived, never assumed. FOUR ways a placement fails, and
+    they have four different remedies:
+
+    - an UPDATE keeps the component where it lives, by policy (QA-153-r14-02) —
+      not because the platform refuses it: a raw component update DOES honour a
+      folder id on this account, measured;
+    - a CREATE that submitted a resolved `folderId` and cannot confirm it was
+      not honoured by the platform;
+    - a CREATE with no resolved id never submitted a placement at all, because
+      the requested name matched zero or several account folders;
+    - a CREATE whose ROUTE cannot submit the spelling the request used — the
+      trading-partner arm posts a typed model carrying a folder NAME, so it
+      places by name and cannot place by id. The arm reports what it submitted;
+      this builder reads the report rather than modelling what routes can do.
+
+    The fourth was missing, and the third's sentence fired in its place: the
+    caller was told the platform had not honoured an id that was never sent
+    (QA-157-r4-01). Then the fourth was written too wide — "does not submit a
+    folder" — and was refuted by two sibling rows of its own type placed by
+    name in the same apply (QA-157-r6-02). An enumeration of failure modes is a
+    model like any other; this one was short by one, then wrong about the one
+    it added.
+
+    The third used to be the second's text — "this platform ignores folderName
+    on create" — which was true when nothing but `folderName` was ever emitted
+    and became false the moment the id was submitted (QA-157-r1-01). A stale
+    mechanism sends the caller to fix the wrong thing.
+    """
+    # WHAT WAS ASKED FOR, in whichever spelling actually drove the placement.
+    # A row placed by an authored `folder_id` carries no requested NAME (the
+    # name, if one was also authored, drove nothing — QA-157-r3-01), so the
+    # notice names the id rather than printing an empty request.
+    # WHAT WAS ASKED FOR, read from the fields themselves. Each is written by
+    # the one site that knows it — the resolver, the route, the read-back — and
+    # their presence is the whole discriminator. A token beside them saying how
+    # to read them was invented for rows no arm reported one for, and its one
+    # overloaded value made two mechanisms fire on the wrong rows
+    # (QA-157-r8-01, QA-157-r8-02).
+    _unsubmitted = step.get("unsubmitted_folder_id")
+    if _unsubmitted:
+        # Asked by ID on a route that submits names: the id is what was asked
+        # for; the name the route sent instead is where it landed, not a request.
+        requested = "folder id {0!r}".format(_unsubmitted)
+    elif step.get("requested_folder_name"):
+        requested = step["requested_folder_name"]
+    elif step.get("submitted_folder_name"):
+        requested = step["submitted_folder_name"]
+    elif step.get("resolved_folder_id"):
+        requested = "folder id {0!r}".format(step["resolved_folder_id"])
+    else:
+        requested = None
+    updated = str(step.get("status", "")) == "updated"
+    if updated:
+        mechanism = (
+            "update preservation keeps the component where it already lives, "
+            "so a requested folder is not applied"
+        )
+    elif _unsubmitted:
+        # THE FOURTH WAY, and the one the enumeration was missing. A create
+        # route that posts a typed model rather than a component document never
+        # reaches the boundary that places one, so telling the caller the
+        # platform failed to honour a submitted id sends them to the platform
+        # for a limit of this tool (QA-157-r4-01).
+        mechanism = (
+            "this component type's create submits a folder by NAME only, so a "
+            "placement given as a folder id could not be applied by this server"
+        )
+        # THE REMEDY MUST BE ONE THAT WORKS ON THIS ROUTE. Moving a trading
+        # partner through the folder tool is refused by the platform
+        # ("PartnerInfo is not complete") while the same call succeeds on a
+        # document component, so the generic remedy below is useless for the
+        # only case this branch fires on (QA-157-r7-01).
+        return (
+            "{0} {1!r} requested {2}, but this component type's create submits "
+            "a folder by NAME only, so a placement given as a folder id was "
+            "not submitted. Author folder_name instead; this component type "
+            "cannot be moved afterwards through manage_folders.".format(
+                subject, key, requested
+            )
+        )
+    elif step.get("submitted_folder_name"):
+        # The route SUBMITTED a folder name and the read-back does not confirm
+        # it. Nothing about ids applies to this row.
+        mechanism = (
+            "this component type's create submitted the folder by name and the "
+            "read-back does not confirm it"
+        )
+    elif step.get("resolved_folder_id"):
+        mechanism = (
+            "the requested folder resolved to one account folder and its id "
+            "was submitted on the create, but the read-back does not confirm it"
+        )
+    else:
+        mechanism = (
+            "the requested folder name matched no single non-deleted account "
+            "folder, so no folder id could be submitted"
+        )
+    cause = mechanism + ("" if updated else ", so the component was NOT placed there")
+    if "observed_folder" not in step:
+        # A failed readback knows only WHY the request could not take effect,
+        # never WHERE the component is: claiming "the account root" for an
+        # unknown location is a fabrication (Codex round 16 F2).
+        return (
+            "{0} {1!r} requested folder {2!r}, but the live read-back could not "
+            "be read (unavailable or unparseable), so its placement is "
+            "UNVERIFIED — {3}, so do not assume it landed there. Re-read the "
+            "component before relying on it.".format(
+                subject, key, requested, mechanism
+            )
+        )
+    # The location line prefers the observed path, then the observed folder id
+    # (a pathless id-bearing readback is a folder with an unreported name,
+    # Codex round 18), and calls it the root only when the readback carried NO
+    # folder evidence at all.
+    location = step.get("observed_folder")
+    if location is None and step.get("observed_folder_id"):
+        location = "folder id {0!r}".format(step["observed_folder_id"])
+    return (
+        "{0} {1!r} requested folder {2!r}, but the live read-back shows it in "
+        "{3} — {4}. Move it via manage_folders or the UI.".format(
+            subject,
+            key,
+            requested,
+            repr(location) if step.get("observed_folder")
+            else (location or "the account root"),
+            cause,
+        )
+    )
 
 
 def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Dict[str, Any]:
@@ -8956,6 +9406,7 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
     # or live-discovered) so a validated literal-UUID transform.map also RENDERS
     # at apply — keeps plan and apply from diverging.
     literal_profile_indexes = _resolve_literal_profile_indexes(boomi_client, spec)
+    selected_profile_indexes = _resolve_selected_profile_indexes(boomi_client, spec)
 
     # Apply re-resolves those indexes, and live discovery can DRIFT from plan
     # time (a profile edited/removed between plan and apply, or a transient fetch
@@ -8996,6 +9447,7 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
             comp.depends_on,
             components_by_key,
             literal_indexes=literal_profile_indexes,
+            selected_indexes=selected_profile_indexes,
         )
         if drift_err is not None:
             return {
@@ -9071,6 +9523,24 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
         )
 
     resolved_placements: Dict[str, Optional[str]] = {}
+    # ONE ACCOUNT FOLDER LISTING FOR THE WHOLE APPLY, read on first need.
+    #
+    # Every root and every created component resolves its placement against the
+    # same reading, so two participants of one apply can never disagree about
+    # what the account holds — and an apply that places nothing never pays for
+    # the listing at all. Held in a one-slot list because this is a closure over
+    # a local, not a rebindable global.
+    _folder_snapshot: List[Any] = [None]
+
+    def _account_folders():
+        if _folder_snapshot[0] is None:
+            from .folders import _query_all_folders
+
+            _folder_snapshot[0] = _query_all_folders(
+                boomi_client, include_deleted=False
+            )
+        return _folder_snapshot[0]
+
     # Plans built pre-write for the RAW route, cached so the execution turn
     # consumes them rather than compiling again (§6 AR3-02). This is a MOVE of
     # the compile, not a duplication: the typed route already arrives with a
@@ -9305,7 +9775,7 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
         # placement check alone — is now the pass-level skip above.)
         try:
             resolved_placements[_pkey] = _resolve_canonical_placement(
-                boomi_client, _unit.envelope
+                boomi_client, _unit.envelope, folders=_account_folders
             )
         except _PlacementRefusal as _placement_exc:
             # A repo-raised refusal whose message is our own text — rendering it
@@ -9705,76 +10175,24 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
                 if _step.get("placement_verified") is False and (
                     str(_step.get("status", "")) not in _NON_WRITING_STEP_STATUSES
                 ):
-                    # QA-153-r12-01: the platform ignored the placement — say
-                    # so, name where the component actually is, and give the
-                    # remedy. The attestation records only the observed
-                    # placement, so this warning is the caller's one notice.
+                    # The placement request could not be honoured — say so, name
+                    # where the component actually is, and give the remedy. The
+                    # attestation records only the OBSERVED placement, so this
+                    # warning is the caller's one notice. The wording is built by
+                    # the one shared builder (QA-157-r1-01), which the created
+                    # supporting components use too.
                     #
-                    # ...but only a PARSED readback knows where the component
-                    # is. `observed_folder` is present exactly then (`None`
-                    # under it = a parsed root); a failed readback leaves it
-                    # absent, and asserting "the account root" for an unknown
-                    # location is a fabrication (Codex round 16 F2) — that case
-                    # gets the unverified wording instead.
-                    # An UPDATE and a CREATE fail this differently and the
-                    # remedy differs too (QA-153-r14-02): a create's folder was
-                    # ignored by the platform, while an update's was discarded
-                    # by update preservation, which deliberately keeps the
-                    # component where it lives. Saying "this platform ignores
-                    # folderName on create" for an update would be false —
-                    # measured: a raw component update DOES honour a folder id
-                    # on this account.
-                    _updated = str(_step.get("status", "")) == "updated"
-                    # Two phrasings on purpose. `_mechanism` names only WHY the
-                    # request could not take effect and asserts nothing about
-                    # the outcome — it is the one the UNVERIFIED branch may use,
-                    # where the location was never read (Codex round 16 F2).
-                    # `_cause` adds the outcome and belongs only to the branch
-                    # that parsed a readback and therefore knows it.
-                    _mechanism = (
-                        "update preservation keeps the component where it "
-                        "already lives, so a requested folder is not applied"
-                        if _updated
-                        else "this platform ignores folderName on create"
+                    # The condition is unchanged and stays derived: the flag is
+                    # False by construction on every result, so gating on it
+                    # alone fired on refusals (Codex round 7), and `reuse`
+                    # succeeds WITHOUT writing (round 8) — the writing split
+                    # comes from `_NON_WRITING_STEP_STATUSES`, not from naming
+                    # `created`/`updated` here, and a step that wrote and then
+                    # failed to report is deliberately still covered
+                    # (QA-153-r10-01).
+                    apply_warnings.append(
+                        _placement_warning("Process", key, _step)
                     )
-                    _cause = _mechanism + (
-                        "" if _updated
-                        else ", so the component was NOT placed there"
-                    )
-                    if "observed_folder" in _step:
-                        # The location line prefers the observed path, then the
-                        # observed folder id (a pathless id-bearing readback is
-                        # a folder with an unreported name, Codex round 18),
-                        # and calls it the root only when the readback carried
-                        # NO folder evidence at all.
-                        _loc = _step.get("observed_folder")
-                        if _loc is None and _step.get("observed_folder_id"):
-                            _loc = "folder id {0!r}".format(
-                                _step["observed_folder_id"]
-                            )
-                        apply_warnings.append(
-                            "Process {0!r} requested folder {1!r}, but the live "
-                            "read-back shows it in {2} — {3}. Move it via "
-                            "manage_folders or the UI.".format(
-                                key,
-                                _step.get("requested_folder_name"),
-                                repr(_loc) if _step.get("observed_folder")
-                                else (_loc or "the account root"),
-                                _cause,
-                            )
-                        )
-                    else:
-                        apply_warnings.append(
-                            "Process {0!r} requested folder {1!r}, but the live "
-                            "read-back could not be read (unavailable or "
-                            "unparseable), so its placement is UNVERIFIED — {2}, "
-                            "so do not assume it landed there. Re-read the "
-                            "component before relying on it.".format(
-                                key,
-                                _step.get("requested_folder_name"),
-                                _mechanism,
-                            )
-                        )
                 if (
                     str(_step.get("status", "")) not in _NON_WRITING_STEP_STATUSES
                     and _step.get("applied_name_verified") is False
@@ -9953,6 +10371,70 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
                 resolved_config = _apply_clone_suffix(comp, resolved_config)
 
             target_id = comp.component_id or existing_id
+            # AN UPDATE THAT WOULD WRITE NOTHING IS A BIND, DECIDED BEFORE THE
+            # LOOP CAN LEAVE A PARTIAL APPLY BEHIND (QA-157-r2-01).
+            #
+            # A connector bound by `action="update"` + `component_id` that
+            # authors none of the smart-merge fields routes to the metadata
+            # merge, which finds nothing to change and refuses — INSIDE the
+            # mutation loop, after earlier components have been created. The
+            # answer is fixed by the request, so it belongs here, with the
+            # other pre-decidable answers this file already hoisted.
+            #
+            # The step is recorded as `reused`, the status this apply already
+            # uses for "the component was bound, not written": that is exactly
+            # what happened, and it is the same outcome a `reference_only`
+            # binding of the same component produces. The authored action is
+            # NOT rewritten — governance never derives an action — only the
+            # write is skipped, because there is no write to make.
+            #
+            # Both predicates are the dispatcher's own: the route test it uses
+            # to choose the smart merge, and the merge's own field list. A
+            # payload carrying body fields, raw XML, or any smart-merge field
+            # fails one of them and dispatches exactly as before.
+            if (
+                comp.action == "update"
+                and target_id
+                and comp.type in _CONNECTOR_COMPONENT_TYPES
+                and _is_metadata_only_update(resolved_config)
+                and not smart_merge_would_change(resolved_config)
+            ):
+                results[key] = {
+                    "status": "reused",
+                    "component_id": target_id,
+                    "type": comp.type,
+                    "name": comp.name,
+                }
+                id_registry[key] = target_id
+                continue
+            # PLACEMENT, RESOLVED LIVE AND BOUND TO THIS CREATE (QA-157-r1-01).
+            #
+            # The #157 fan-out writes the root's `folder_name` onto every
+            # supporting component the root owns, and every builder emits it as
+            # `folderName` — which this platform ignores on create, so the whole
+            # governed build landed at the account root while the preview, the
+            # served contract and the silenced FOLDER_REQUIRED_ON_CREATE lint
+            # all said it was placed. The id IS honoured, so it is resolved here
+            # and travels as an argument, never through `config`: the config
+            # dict is splatted into the builders and a key they do not declare
+            # is a refusal on the strict ones.
+            #
+            # Only a CREATE. An update keeps the component where it lives, which
+            # is the same policy the canonical root applies.
+            _placement = (
+                _resolve_component_placement(
+                    resolved_config,
+                    # The account is read for a folder NAME only where #157
+                    # governs placement — a request carrying canonical process
+                    # roots. A literal `folder_id` needs no read and places on
+                    # every route.
+                    _account_folders if process_units_by_key else None,
+                )
+                if comp.action == "create"
+                else _ComponentPlacement(None, None)
+            )
+            _create_folder_id = _placement.folder_id
+            _requested_folder = _placement.requested_name
             exec_result = _execute_component(
                 boomi_client=boomi_client,
                 profile=profile,
@@ -9961,6 +10443,7 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
                 target_id=target_id,
                 components_by_key=components_by_key,
                 literal_indexes=literal_profile_indexes,
+                placement=_placement,
             )
 
             component_id = _extract_component_id(exec_result)
@@ -9996,6 +10479,102 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
                 "name": comp.name,
                 "result": exec_result,
             }
+
+            # THE SAME PLACEMENT HONESTY THE ROOT HAS CARRIED SINCE #153, on the
+            # components the fan-out places (QA-157-r1-01). The root was attested
+            # `placement_verified: false` with a warning while its seven owned
+            # components got neither — so the one row a caller could check said
+            # "not placed" and the seven that were equally unplaced said nothing
+            # at all. Judged by the shared readback rule and reported by the
+            # shared warning builder, so root and component can never disagree.
+            #
+            # Scoped exactly as the root scopes it: a CREATE that requested a
+            # folder BY NAME. An explicit `folder_id` is an identity submitted
+            # verbatim with no name to verify against, and an update preserves
+            # its live placement by policy.
+            # A ROW IS SERVED WHEN THE REQUEST ASKED FOR A PLACEMENT, in either
+            # spelling. A route's own default is not a request and earns no
+            # claim.
+            if step_status == "created" and process_units_by_key and (
+                _requested_folder or _create_folder_id
+            ):
+                from .components.canonical_process_apply import (
+                    folder_placement_honoured as _honoured,
+                    observed_folder_identity as _observed_identity,
+                )
+
+                _row = results[key]
+                # THE ROW IS THE ARM'S REPORT WHERE THE ARM MADE ONE. A route
+                # that submits a folder by name says which name; only then is
+                # the resolver's id also recorded, and only when it is the id
+                # THAT name resolved to (QA-157-r6-01).
+                # EVERY FIELD HERE IS A FACT SOME SITE OWNS, and there is no
+                # token beside them saying how to read them. The previous shape
+                # carried an invented `placement_spelling` that only one arm
+                # ever reported, so it was synthesised for every other row and
+                # its "none" value meant two different things — which made a
+                # document row whose folder name resolved to nothing serve
+                # "requested folder None" while holding the answer
+                # (QA-157-r8-02), and left the id-limit row's own id unwritten
+                # (QA-157-r8-01). The notice reads these fields directly.
+                _submitted_name = exec_result.get("placement_submitted_name")
+                if exec_result.get("placement_unsupported"):
+                    # Asked by id on a route that submits names: the id is
+                    # recorded as UNSUBMITTED, and the name the route sent
+                    # instead is recorded as what it sent — before anything
+                    # clears the id, which is how the guard went unreachable.
+                    if _create_folder_id:
+                        _row["unsubmitted_folder_id"] = _create_folder_id
+                    if _submitted_name:
+                        _row["submitted_folder_name"] = _submitted_name
+                    _create_folder_id = None
+                elif _submitted_name:
+                    # The route sent a NAME, verbatim. No id is claimed: the one
+                    # this apply resolved was never sent.
+                    _row["submitted_folder_name"] = _submitted_name
+                    _create_folder_id = None
+                elif _requested_folder:
+                    _row["requested_folder_name"] = _requested_folder
+                # A ROUTE THAT CANNOT SUBMIT A PLACEMENT ATTESTS NONE. The id
+                # was resolved but never sent, so recording it as `resolved`
+                # would claim a submission that did not happen; the row keeps
+                # the request and the observation, and the warning explains the
+                # limit (QA-157-r4-01).
+                _placement_unsupported = "unsubmitted_folder_id" in _row or bool(
+                    exec_result.get("placement_unsupported")
+                )
+                if _create_folder_id:
+                    _row["resolved_folder_id"] = _create_folder_id
+                _placed_xml = (
+                    _live_component_xml(boomi_client, component_id)
+                    if component_id
+                    else None
+                )
+                _identity = (
+                    _observed_identity(_placed_xml) if _placed_xml else None
+                )
+                # VERIFICATION ANSWERS THE REQUEST, not the route's default: a
+                # placement asked for by id and never submitted is unhonoured
+                # wherever the component landed.
+                _row["placement_verified"] = False if _placement_unsupported else _honoured(
+                    _identity,
+                    resolved_folder_id=_create_folder_id,
+                    requested_folder_name=_row.get("submitted_folder_name")
+                    or _row.get("requested_folder_name"),
+                )
+                if _identity is not None and not _row["placement_verified"]:
+                    # Present (even as None, meaning a parsed root) exactly when
+                    # a readback WAS parsed — its absence is what tells the
+                    # warning builder the location is unknown.
+                    _row["observed_folder"] = (
+                        _identity["full_path"] if not _identity["is_root"] else None
+                    )
+                    if _identity["folder_id"] and not _identity["is_root"]:
+                        _row["observed_folder_id"] = _identity["folder_id"]
+                if _row["placement_verified"] is False:
+                    apply_warnings.append(
+                        _placement_warning("Component", key, _row)
+                    )
 
             if not exec_result.get("_success", False):
                 return _partial_failure(
@@ -10225,6 +10804,10 @@ def _authoring_build_provenance(
         # saw only the empty pair.
         process_mutations=tuple(process_mutations),
         process_readbacks=tuple(process_readbacks),
+        # #157: the recorded-not-wired declarations the applied request carried,
+        # persisted with the build so a caller can read them back. Served only;
+        # nothing above this line consumed them.
+        recorded_intents=tuple(getattr(compile_result, "recorded_intents", ()) or ()),
     )
 
     # EVERY build-owned component is recorded, including ones whose read-back
@@ -10814,8 +11397,12 @@ def _reject_invalid_typed_request(exc, action: str) -> Dict[str, Any]:
     locations = []
     for error in getattr(exc, "errors", lambda: [])():
         location = ".".join(str(part) for part in error.get("loc", ()))
+        error_type = str(error.get("type", "invalid"))
         locations.append(
-            {"path": location, "type": str(error.get("type", "invalid"))}
+            {
+                "path": _located_validation_path(location, error_type),
+                "type": error_type,
+            }
         )
     locations.sort(key=lambda entry: (entry["path"], entry["type"]))
     # An unknown field on a PROCESS envelope/unit serves its OWN registered

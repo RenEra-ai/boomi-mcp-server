@@ -7,6 +7,7 @@ query_components, manage_component, and analyze_component modules.
 
 from typing import Dict, Any, List, Optional
 import os
+import re
 import threading
 import time
 import xml.etree.ElementTree as ET
@@ -375,14 +376,123 @@ def metadata_to_dict(comp) -> Dict[str, Any]:
 # Soft-delete helper
 # ============================================================================
 
-def _create_component_raw(boomi_client: Boomi, xml: str) -> Dict[str, Any]:
+#: The root start tag of a component document: the first element, skipping the
+#: XML declaration and any processing instruction/comment that precedes it.
+_ROOT_START_TAG = re.compile(r"<(?![?!])([A-Za-z_][\w.:-]*)((?:\s[^<>]*?)?)(/?)>", re.S)
+
+#: ``folderId`` wherever it already sits in that start tag.
+_FOLDER_ID_ATTRIBUTE = re.compile(r'\s+folderId="[^"]*"')
+
+
+def with_folder_id(xml: str, folder_id: Optional[str]) -> str:
+    """The same component document, placed in ``folder_id``.
+
+    THE ONE PLACE PLACEMENT REACHES THE WIRE. Every builder in this repository
+    emits ``folderName`` or ``folderFullPath``, and this platform IGNORES both
+    on create — measured across every builder and every spelling (QA-153-r12-01)
+    and again for the #157 folder fan-out (QA-157-r1-01), where a root and its
+    seven owned components all landed at the account root while the request,
+    the preview and the served contract all said otherwise. ``folderId`` is
+    honoured: a ``POST /Component`` carrying it places the component, proven
+    live on this account.
+
+    So placement is injected HERE, at the transport, rather than taught to each
+    builder. That is not merely cheaper: a per-builder emission is one
+    hand-model of the same fact per builder — the defect class this slice
+    exists to close — and it would move every frozen builder golden. The
+    injection is LATE-BOUND by construction: the folder id is resolved against
+    the live account at apply time, so it can never enter a plan fingerprint,
+    a compile hash or a golden.
+
+    Byte-exact when ``folder_id`` is empty (the overwhelming majority of
+    creates), and idempotent: an existing ``folderId`` is REPLACED, never
+    duplicated, so a caller that already placed the document keeps one
+    attribute and the last resolution wins.
+    """
+    if not folder_id or not str(folder_id).strip():
+        return xml
+    match = _ROOT_START_TAG.search(xml)
+    if match is None:
+        # Unparseable enough that we cannot name the root element: send the
+        # caller's bytes UNCHANGED rather than corrupt them. The placement is
+        # then unhonoured, which the readback attestation reports honestly.
+        return xml
+    tag, attributes, self_closing = match.group(1), match.group(2), match.group(3)
+    attributes = _FOLDER_ID_ATTRIBUTE.sub("", attributes)
+    escaped = (
+        str(folder_id)
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace('"', "&quot;")
+    )
+    replacement = '<{0}{1} folderId="{2}"{3}>'.format(
+        tag, attributes, escaped, self_closing
+    )
+    placed = xml[: match.start()] + replacement + xml[match.end() :]
+    # THE EDIT IS VERIFIED BEFORE IT IS RETURNED, and fails CLOSED.
+    #
+    # A raw ``>`` inside an attribute value is legal XML, and it ends the regex
+    # match early — so the "start tag" this function edited would not be the
+    # start tag at all, and the bytes it produced would be a corrupted document
+    # the platform rejects. Parsing both sides answers that directly: the edit
+    # is taken only when the result parses AND its root carries exactly the id
+    # we asked for. Otherwise the caller's original bytes travel unchanged and
+    # the component is unplaced — which the placement attestation then reports
+    # honestly, instead of a mangled create.
+    try:
+        ET.fromstring(xml)
+        if ET.fromstring(placed).attrib.get("folderId") != str(folder_id):
+            return xml
+    except ET.ParseError:
+        return xml
+    return placed
+
+
+#: The component-level metadata a SMART-MERGE update can actually change.
+#:
+#: Both smart-merge sites — the connector one and the generic component one —
+#: read exactly these, and both refuse an update that carries none of them.
+#: Named here so a caller can ask "would this update write anything?" BEFORE a
+#: mutation loop is under way, without a second hand-model of the field list
+#: (QA-157-r2-01, where the answer was discovered mid-apply, after other
+#: components had already been created).
+SMART_MERGE_UPDATE_FIELDS = frozenset(
+    {"name", "component_name", "description", "folder_name", "folder_id"}
+)
+
+
+def smart_merge_would_change(config: Dict[str, Any]) -> bool:
+    """Would a smart-merge update of ``config`` write anything?
+
+    Mirrors both sites' own conditions exactly, including that ``description``
+    counts when PRESENT (an empty description is a real edit) while the others
+    count when non-empty. A test pins this against the sites in both
+    directions, so a field added to one of them without being added here is a
+    failure rather than a silent disagreement.
+    """
+    if config.get("name") or config.get("component_name"):
+        return True
+    if config.get("folder_id") or config.get("folder_name"):
+        return True
+    return "description" in config
+
+
+def _create_component_raw(
+    boomi_client: Boomi, xml: str, *, folder_id: Optional[str] = None
+) -> Dict[str, Any]:
     """Create a component from raw XML via the SDK; return parsed response metadata.
 
     Routes through ``boomi_client.component.create_component`` (SDK 3.0.0), which
     sends the XML byte-for-byte with ``Accept``/``Content-Type: application/xml``
     and returns the raw response bytes. We parse the returned XML for the new
     component's root attributes.
+
+    ``folder_id`` places the component (:func:`with_folder_id`). It is applied
+    here, at the one raw-create boundary every builder path funnels through, so
+    a new builder is placed by construction rather than by remembering.
     """
+    xml = with_folder_id(xml, folder_id)
     try:
         raw = boomi_client.component.create_component(xml)
     except ApiError as exc:

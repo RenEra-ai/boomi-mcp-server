@@ -1,0 +1,163 @@
+{
+  "baseline_sha": "ba1be9f34317d720d3b012484622ab7e2742143b",
+  "entry": {
+    "kind": "compose_archetypes",
+    "legs": 2,
+    "staged": []
+  },
+  "input": {
+    "options": {
+      "links": [
+        {
+          "from_part": "db",
+          "to_part": "shape"
+        },
+        {
+          "from_part": "shape",
+          "to_part": "orders"
+        },
+        {
+          "from_part": "shape",
+          "to_part": "billing"
+        }
+      ],
+      "naming": {
+        "component_prefix": "CMP",
+        "integration_name": "compose-case"
+      }
+    },
+    "parts": [
+      {
+        "key": "db",
+        "kind": "db_source",
+        "parameters": {
+          "binding": {
+            "component_id": "<<existing connector id>>",
+            "mode": "reuse"
+          },
+          "read_operation": {
+            "batch_size": 500,
+            "parameters": [
+              {
+                "direction": "in",
+                "name": "<<bind parameter name>>"
+              }
+            ],
+            "result_schema": {
+              "fields": [
+                {
+                  "data_type": "character",
+                  "name": "source_a",
+                  "required": true
+                },
+                {
+                  "data_type": "datetime",
+                  "name": "source_b"
+                }
+              ]
+            },
+            "sql": "<<user-authored DB read statement>>"
+          }
+        }
+      },
+      {
+        "key": "shape",
+        "kind": "transform",
+        "parameters": {
+          "operations": [
+            {
+              "documentation_hint": "carry first column verbatim",
+              "operation_type": "direct",
+              "source_field": "source_a",
+              "target_path": "Root/target_a"
+            },
+            {
+              "function_type": "date_format",
+              "inputs": [
+                "source_b"
+              ],
+              "operation_type": "map_function",
+              "parameters": {
+                "input_format": "<<source datetime format>>",
+                "output_format": "<<target datetime format>>"
+              },
+              "target_path": "Root/target_b"
+            }
+          ]
+        }
+      },
+      {
+        "key": "orders",
+        "kind": "rest_target",
+        "label": "Orders",
+        "parameters": {
+          "binding": {
+            "component_id": "<<existing REST connection id>>",
+            "mode": "reuse"
+          },
+          "payload_profile": {
+            "format": "json",
+            "root": {
+              "children": [
+                {
+                  "data_type": "character",
+                  "kind": "simple",
+                  "name": "target_a",
+                  "required": true
+                },
+                {
+                  "data_type": "datetime",
+                  "kind": "simple",
+                  "name": "target_b"
+                }
+              ],
+              "kind": "object",
+              "name": "Root"
+            }
+          },
+          "send_request": {
+            "method": "POST",
+            "path": "/v1/customers",
+            "query_parameters": []
+          }
+        }
+      },
+      {
+        "key": "billing",
+        "kind": "rest_target",
+        "label": "Billing",
+        "parameters": {
+          "binding": {
+            "component_id": "<<existing REST connection id>>",
+            "mode": "reuse"
+          },
+          "payload_profile": {
+            "format": "json",
+            "root": {
+              "children": [
+                {
+                  "data_type": "character",
+                  "kind": "simple",
+                  "name": "target_a",
+                  "required": true
+                },
+                {
+                  "data_type": "datetime",
+                  "kind": "simple",
+                  "name": "target_b"
+                }
+              ],
+              "kind": "object",
+              "name": "Root"
+            }
+          },
+          "send_request": {
+            "method": "POST",
+            "path": "/v1/customers",
+            "query_parameters": []
+          }
+        }
+      }
+    ]
+  }
+}

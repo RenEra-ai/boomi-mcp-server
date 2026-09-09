@@ -159,6 +159,7 @@ RecipeOutputType = Literal[
     "system_topology_patch",
     "component_contribution",
     "constraint_requirement",
+    "recorded_intent",
 ]
 
 RecipeCapabilityAuthority = Literal[

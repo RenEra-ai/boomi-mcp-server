@@ -31,7 +31,11 @@ from __future__ import annotations
 from types import MappingProxyType
 from typing import Any, Dict, Mapping, NamedTuple, Optional, Tuple
 
-from ..errors import TOPOLOGY_APPLY_NOT_SUPPORTED
+from ..errors import (
+    GOVERNANCE_RETIRED_SPELLING,
+    GOVERNANCE_WATERMARK_INCONSISTENT,
+    TOPOLOGY_APPLY_NOT_SUPPORTED,
+)
 from ..models.authoring_workflow import (
     AUTHORING_ACTIONS,
     AUTHORING_CONTRACT_VERSION,
@@ -103,6 +107,16 @@ AUTHORING_SCHEMA_REGISTRY: Mapping[str, AuthoringSchemaRegistration] = MappingPr
             authoring_build_provenance_v1_json_schema,
             "runtime_schema_registry",
         ),
+        # #157 (M12.19): the governance surface's own served shapes — the
+        # recorded-not-wired record, the typed watermark declaration it can
+        # carry, and the derived flows row the canonical preview serves.
+        "RecordedIntentV1": ("1", "_recorded_intent_schema", "runtime_schema_registry"),
+        "WatermarkDeclarationV1": (
+            "1",
+            "_watermark_declaration_schema",
+            "runtime_schema_registry",
+        ),
+        "DerivedFlowRowV1": ("1", "_derived_flow_row_schema", "runtime_schema_registry"),
         "validation_report": (
             "1",
             "_validation_report_schema",
@@ -179,6 +193,28 @@ AUTHORING_CAPABILITY_REGISTRY: Mapping[str, Tuple[str, str, str]] = MappingProxy
             "2",
             "canonical_compiler",
         ),
+        # #157 (M12.19). Governance rides on the per-root envelope: default
+        # names from a component prefix, the single-knob folder fan-out, the
+        # connection binding contract (reuse XOR create, no inline secured REST
+        # create, no header collisions) and the required-target-leaf coverage
+        # gate. Version "2" because it extends the contract-version-2 envelope.
+        "authoring.process_ir.governance": (
+            "supported",
+            "2",
+            "runtime_schema_registry",
+        ),
+        # The typed, generator-derived, output-only flows projection served on
+        # the two compiling intents' preview.
+        "authoring.derived_flows": ("supported", "1", "canonical_compiler"),
+        # Recorded-not-wired declarations (watermark rule half, runtime hints)
+        # served back on plan/compile results and persisted with the build.
+        "authoring.recorded_intent": ("supported", "1", "runtime_schema_registry"),
+        # Deliberately UNSUPPORTED and published as such: binding a watermark
+        # into a REST query parameter is deferred past M12 cutover (owned by
+        # neither #155 nor #157), and live schedule activation is a future
+        # topology capability. A caller must learn this before authoring.
+        "authoring.watermark.binding": ("unsupported", "1", "runtime_schema_registry"),
+        "authoring.schedule.activation": ("unsupported", "1", "topology_planner"),
     }
 )
 
@@ -232,6 +268,11 @@ TOPOLOGY_DEPLOY_REASON_CODE = TOPOLOGY_APPLY_NOT_SUPPORTED
 _REASON_CODES: Mapping[str, str] = MappingProxyType(
     {
         "authoring.system_topology.deploy": TOPOLOGY_APPLY_NOT_SUPPORTED,
+        # #157: both are recorded-not-wired today. The declaration is accepted
+        # and served back; the wiring is refused with the governance code the
+        # typed surface uses for a spelling it will not act on.
+        "authoring.watermark.binding": GOVERNANCE_WATERMARK_INCONSISTENT,
+        "authoring.schedule.activation": GOVERNANCE_RETIRED_SPELLING,
     }
 )
 
@@ -248,6 +289,24 @@ def _system_topology_schema() -> Dict[str, Any]:
     from ..models.system_topology import system_topology_v1_json_schema
 
     return system_topology_v1_json_schema()
+
+
+def _recorded_intent_schema() -> Dict[str, Any]:
+    from ..models.governance_intent import RecordedIntentV1
+
+    return RecordedIntentV1.model_json_schema()
+
+
+def _watermark_declaration_schema() -> Dict[str, Any]:
+    from ..models.governance_intent import WatermarkDeclarationV1
+
+    return WatermarkDeclarationV1.model_json_schema()
+
+
+def _derived_flow_row_schema() -> Dict[str, Any]:
+    from ..models.derived_flows import DerivedFlowRowV1
+
+    return DerivedFlowRowV1.model_json_schema()
 
 
 def _validation_report_schema() -> Dict[str, Any]:
@@ -293,6 +352,10 @@ _LOCAL_BUILDERS = {
     "_validation_report_schema": _validation_report_schema,
     "_process_ir_authoring_schema": _process_ir_authoring_schema,
     "_process_ir_authoring_query": _process_ir_authoring_query,
+    # #157 governance selectors
+    "_recorded_intent_schema": _recorded_intent_schema,
+    "_watermark_declaration_schema": _watermark_declaration_schema,
+    "_derived_flow_row_schema": _derived_flow_row_schema,
 }
 
 
@@ -635,6 +698,61 @@ def authoring_workflow_contract() -> Dict[str, Any]:
                 "ProcessLiveReadbackAttestationV1 — what the platform SERVED "
                 "back afterwards, recorded separately so an unavailable "
                 "read-back reads as unknown rather than as agreement."
+            ),
+            # #157 M12.19. Governance lives on the per-root envelope and nowhere
+            # else; these are the served names for what it does.
+            "governance": (
+                "Per-root envelope data: name (explicit, or derived as "
+                "'<component_prefix> <component_key>' when omitted), "
+                "description, folder_name (ONE knob: it also places every "
+                "supporting component the root owns that has no folder of its "
+                "own), process_extensions, and the recorded-not-wired "
+                "declarations. A derived name and an inherited folder are "
+                "claimed ONLY for what this request CREATES: a component bound "
+                "for reuse or by action='update' keeps the name and the folder "
+                "the account already holds. Placement is resolved against the "
+                "live account at apply time and submitted as a folder id, and "
+                "the apply result reports, per component, whether the "
+                "read-back confirms it. Resolved server-side BEFORE "
+                "fingerprinting, so every hash covers final governance; never "
+                "on ProcessIRV1."
+            ),
+            "connection_binding_contract": (
+                "On the typed intents a connection is reused OR created, never "
+                "both: a reference_only connection may carry only its binding "
+                "keys; a secured REST connection must be reused, not created "
+                "inline; connection default headers and operation headers may "
+                "not collide (compared case-insensitively)."
+            ),
+            "derived_flows": (
+                "CanonicalIntegrationPreviewV1.flows — on the process_ir and "
+                "recipe intents a TYPED, generator-derived, OUTPUT-ONLY "
+                "projection (DerivedFlowRowV1). Never authored, never merged "
+                "with caller rows, never an input to compilation, "
+                "fingerprinting or mutation; a caller-supplied 'flows' is "
+                "refused with GOVERNANCE_FLOWS_OUTPUT_ONLY."
+            ),
+            "recorded_intent": (
+                "RecordedIntentV1 — a deliberate declaration (typed watermark "
+                "rule half, runtime hint) the server RECORDS and serves back "
+                "with status 'recorded_not_wired'. It changes no emitted byte, "
+                "no fingerprint and no blocking verdict; it exists so a "
+                "declaration is read back rather than silently swallowed."
+            ),
+            "required_target_coverage": (
+                "Every required simple leaf of a map's target profile must be "
+                "the destination of some mapping. ONE implementation, raised as "
+                "a hard gate by the typed intents and the recipe engine (cause "
+                "code TRANSFORM_REVIEW_REQUIRED_TARGET_UNMAPPED) and reported by "
+                "review_transformation. A REUSED profile is judged by the "
+                "existing component's own index, never by candidate config."
+            ),
+            "retired_spellings": (
+                "Legacy metadata that never affected an emitted byte, a "
+                "fingerprint, a mutation or a verdict on the legacy chain is "
+                "refused by name on the typed surface with "
+                "GOVERNANCE_RETIRED_SPELLING; the legacy archetype contracts "
+                "keep accepting it until #160's cutover."
             ),
         },
     }

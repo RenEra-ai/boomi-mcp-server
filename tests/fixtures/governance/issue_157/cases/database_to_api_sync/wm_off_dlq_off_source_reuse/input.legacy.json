@@ -1,0 +1,83 @@
+{
+  "baseline_sha": "ba1be9f34317d720d3b012484622ab7e2742143b",
+  "entry": {
+    "example": "minimal_manual_sync",
+    "kind": "archetype_example"
+  },
+  "input": {
+    "archetype": "database_to_api_sync",
+    "parameters": {
+      "execution": {
+        "trigger": {
+          "mode": "manual"
+        }
+      },
+      "naming": {
+        "component_prefix": "DEMO",
+        "integration_name": "demo-db-to-api-sync"
+      },
+      "reliability": {
+        "dlq": {
+          "enabled": false
+        },
+        "error_classifier": {},
+        "retry": {
+          "max_attempts": 1
+        }
+      },
+      "source": {
+        "binding": {
+          "component_id": "<<existing connector id>>",
+          "mode": "reuse"
+        },
+        "read_operation": {
+          "result_schema": {
+            "fields": [
+              {
+                "data_type": "character",
+                "name": "source_field_a"
+              }
+            ]
+          },
+          "sql": "<<user-authored DB read statement>>"
+        }
+      },
+      "target": {
+        "binding": {
+          "mode": "create",
+          "settings": {
+            "auth_mode": "none",
+            "base_url": "https://api.example.com"
+          }
+        },
+        "payload_profile": {
+          "format": "json",
+          "root": {
+            "children": [
+              {
+                "data_type": "character",
+                "kind": "simple",
+                "name": "target_a"
+              }
+            ],
+            "kind": "object",
+            "name": "Root"
+          }
+        },
+        "send_request": {
+          "method": "POST",
+          "path": "/v1/items"
+        }
+      },
+      "transform": {
+        "operations": [
+          {
+            "operation_type": "direct",
+            "source_field": "source_field_a",
+            "target_path": "Root/target_a"
+          }
+        ]
+      }
+    }
+  }
+}

@@ -946,3 +946,83 @@ def test_each_replay_policy_code_is_produced_by_a_real_document(code):
            if code.endswith("REQUIRES_RETRY")
            else _connector_scope(retry={"count": 2, **allow}))
     assert _compile_error(doc).code == code
+
+
+# ---------------------------------------------------------------------------
+# M12.19 / issue #157 — authoring governance
+# ---------------------------------------------------------------------------
+
+_ISSUE_157_PREFIX = "GOVERNANCE_"
+
+
+def test_issue_157_owns_the_governance_family_as_a_biconditional():
+    """#157 is the SOLE introducer of ``GOVERNANCE_*``.
+
+    The same biconditional #144, #145, #146 and #153 carry: every code #157
+    owns sits under the prefix, AND every taxonomy key under the prefix is owned
+    by #157. The forward half stops #157 scattering codes into families it does
+    not own; the reverse half stops a later issue appending to a family whose
+    semantics #157 defined.
+    """
+    owned = {code for code, spec in ERROR_TAXONOMY.items() if spec.owner == "#157"}
+    assert owned, "no #157 codes registered — this check would be vacuous"
+    for code in owned:
+        assert code.startswith(_ISSUE_157_PREFIX), code
+    for code, spec in ERROR_TAXONOMY.items():
+        if code.startswith(_ISSUE_157_PREFIX):
+            assert spec.owner == "#157", code
+
+
+def test_issue_157_does_not_extend_a_family_it_does_not_own():
+    """#157 introduces no authoring-surface, topology, or ProcessIR code.
+
+    ``AUTHORING_*`` is closed to #146 (its biconditional above); #157 reaches
+    callers THROUGH that surface, which is exactly why this is worth pinning —
+    proximity is not ownership.
+    """
+    owned = {code for code, spec in ERROR_TAXONOMY.items() if spec.owner == "#157"}
+    for code in owned:
+        assert not code.startswith(
+            ("TOPOLOGY_", "AUTHORING_", "PROCESS_IR_", "PROCESS_COMPONENT_", "RECIPE_")
+        ), code
+
+
+def test_issue_157_codes_are_complete_and_non_retryable():
+    """Every governance code is a refusal: category fixed, never retryable, summarized."""
+    owned = {code for code, spec in ERROR_TAXONOMY.items() if spec.owner == "#157"}
+    for code in owned:
+        spec = ERROR_TAXONOMY[code]
+        assert spec.category == "governance", code
+        assert spec.retryable is False, code
+        assert spec.summary and len(spec.summary) > 20, code
+
+
+def test_issue_157_named_validation_codes_are_two_way_pinned():
+    """Every governance pydantic error TYPE the models raise serves its named code.
+
+    Read from the models' own source rather than remembered: the set of
+    ``PydanticCustomError`` type strings under ``governance_`` in the governance
+    and envelope models must equal the set of ``governance_`` keys in the
+    builder's named-validation map, in both directions. A type raised with no
+    row collapses to the generic input code; a row with no raiser is a served
+    promise nothing can keep.
+    """
+    import re
+    from pathlib import Path
+
+    from boomi_mcp.categories.integration_builder import _NAMED_VALIDATION_CODES
+
+    root = Path(__file__).resolve().parent.parent / "src" / "boomi_mcp"
+    raised = set()
+    for module in (
+        root / "models" / "governance_intent.py",
+        root / "models" / "process_component.py",
+        root / "models" / "authoring_workflow.py",
+    ):
+        raised |= set(re.findall(r'"(governance_[a-z_]+)"', module.read_text()))
+    mapped = {key for key in _NAMED_VALIDATION_CODES if key.startswith("governance_")}
+    assert raised, "no governance error types found — this check would be vacuous"
+    assert raised == mapped, {"raised-not-mapped": raised - mapped, "mapped-not-raised": mapped - raised}
+    for key, code in _NAMED_VALIDATION_CODES.items():
+        if key.startswith("governance_"):
+            assert code in ERROR_TAXONOMY and ERROR_TAXONOMY[code].owner == "#157", key

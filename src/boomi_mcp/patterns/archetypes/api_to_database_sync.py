@@ -37,6 +37,10 @@ are likewise out of scope for this thin pass.
 
 from __future__ import annotations
 
+from ...categories.components.builders.transform_map_validation import (
+    required_target_coverage_gaps,
+)
+
 from typing import Any, Dict, List, Optional, Set
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -197,9 +201,6 @@ class ApiToDatabaseSyncParameters(BaseModel):
         write_index = DbWritePrimitive.build_field_index(self.target.write_profile)
         target_leaves: Set[str] = set(write_index.keys())
         validate_targets = bool(write_index)
-        required_target_paths: Set[str] = {
-            path for path, entry in write_index.items() if entry.get("required")
-        }
 
         unknown_source_refs = 0
         unknown_target_refs = 0
@@ -250,8 +251,11 @@ class ApiToDatabaseSyncParameters(BaseModel):
                 if len(set(script_vars)) != len(script_vars):
                     script_var_collisions += 1
 
-        unmapped_required_count = (
-            len(required_target_paths - bound_target_paths) if validate_targets else 0
+        # Issue #157: the ONE required-target-leaf coverage implementation. An
+        # empty write index reports nothing — the DB deferral is preserved by
+        # the shared function itself, not by a flag here.
+        unmapped_required_count = len(
+            required_target_coverage_gaps(write_index, bound_target_paths)
         )
 
         issues: List[str] = []

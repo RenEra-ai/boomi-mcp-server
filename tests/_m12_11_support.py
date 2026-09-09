@@ -228,6 +228,25 @@ APPLIABLE_IR_DOC = {
 }
 
 
+def reuse_binding(component_spec, **extra):
+    """The config a REUSED connection may carry under #157's binding contract.
+
+    `reference_only` plus the declared family/name only — never the creation
+    settings of the component it is not creating (`base_url`, `auth`, ...).
+    Reuse XOR create is a hard error on the typed surface
+    (GOVERNANCE_CONNECTION_BINDING_CONFLICT), so every fixture that reuses a
+    connection builds its config here rather than copying a create config and
+    flagging it.
+    """
+    config = component_spec["config"]
+    binding = {"reference_only": True}
+    for key in ("connector_type", "component_name", "component_id"):
+        if key in config:
+            binding[key] = config[key]
+    binding.update(extra)
+    return binding
+
+
 def appliable_process_unit(key="proc", name="M12.15 Process", **envelope_extra):
     """One authoring unit over the appliable root."""
     kwargs = {

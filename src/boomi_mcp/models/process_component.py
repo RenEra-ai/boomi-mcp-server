@@ -47,6 +47,13 @@ from typing import Literal, Optional, Tuple
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from pydantic_core import PydanticCustomError
 
+from typing import Any, Mapping
+
+from .governance_intent import (
+    RuntimeHintDeclarationV1,
+    WatermarkDeclarationV1,
+    reject_retired_spellings,
+)
 from .process_ir import ComponentRefV1, ProcessIRV1
 from .recipe_contributions import RecipeComponentKey
 
@@ -271,8 +278,114 @@ class ProcessAuthoringUnitV1(_ProcessComponentModel):
     process_ir: ProcessIRV1
 
 
+# ---------------------------------------------------------------------------
+# #157 (M12.19): the AUTHORED envelope — what a caller writes before defaults
+# ---------------------------------------------------------------------------
+
+
+class ProcessComponentEnvelopeAuthoredV1(_ProcessComponentModel):
+    """The per-root envelope as a CALLER authors it, before governance resolves.
+
+    Identical to :class:`ProcessComponentEnvelopeV1` except that ``name`` may be
+    omitted when ``component_prefix`` is supplied — the resolved name is then
+    derived at normalization (``"<prefix> <component_key>"``) and written into
+    the STRICT envelope, which keeps ``name`` mandatory. ``action`` stays
+    explicitly authored: guessing it would let a caller create or overwrite a
+    component they did not name. Nothing here reaches ``ProcessIRV1``.
+
+    Two governance channels ride on the same envelope and never on the IR:
+
+    * ``watermark`` — the typed watermark declaration (M18 rule half). Recorded
+      and served back as a recorded-not-wired intent; the persisted-DPP
+      mechanism it names lives in the graph as ``SetDppNodeV1.persist``.
+    * ``recorded_intents`` — deliberate runtime hints, likewise recorded only.
+
+    Retired legacy metadata spellings (``RETIRED_SPELLINGS``) are refused with a
+    NAMED diagnostic before pydantic's unknown-field refusal can swallow them:
+    an obsolete spelling silently landing in ``extra_forbidden`` would tell the
+    caller nothing about WHY the key is gone.
+    """
+
+    component_key: RecipeComponentKey
+    action: Literal["create", "update"]
+    name: Optional[str] = None
+    component_prefix: Optional[str] = None
+    component_id: Optional[str] = None
+    description: str = ""
+    folder_name: Optional[str] = None
+    depends_on: Tuple[RecipeComponentKey, ...] = ()
+    process_extensions: ProcessExtensionBindingsV1 = Field(
+        default_factory=ProcessExtensionBindingsV1
+    )
+    watermark: Optional[WatermarkDeclarationV1] = None
+    recorded_intents: Tuple[RuntimeHintDeclarationV1, ...] = ()
+
+    @model_validator(mode="before")
+    @classmethod
+    def _refuse_retired_spellings(cls, value: Any) -> Any:
+        if isinstance(value, Mapping):
+            reject_retired_spellings(value, path="")
+        return value
+
+    @field_validator("name", "component_prefix", "component_id", "folder_name")
+    @classmethod
+    def _check_optional_unpadded(cls, value: Optional[str], info) -> Optional[str]:
+        if value is None:
+            return None
+        return _require_unpadded(value, str(info.field_name))
+
+    @field_validator("depends_on")
+    @classmethod
+    def _check_depends_on(cls, value: Tuple[str, ...]) -> Tuple[str, ...]:
+        if len(set(value)) != len(value):
+            duplicates = sorted({key for key in value if value.count(key) > 1})
+            raise PydanticCustomError(
+                "process_component_duplicate_dependency",
+                "depends_on lists the same key more than once: {duplicates}",
+                {"duplicates": ", ".join(duplicates)},
+            )
+        return tuple(sorted(value))
+
+    @model_validator(mode="after")
+    def _check_resolvable(self) -> "ProcessComponentEnvelopeAuthoredV1":
+        if self.component_key in self.depends_on:
+            raise PydanticCustomError(
+                "process_component_self_dependency",
+                "process '{key}' cannot depend on itself",
+                {"key": self.component_key},
+            )
+        if self.name is None and self.component_prefix is None:
+            raise PydanticCustomError(
+                "governance_name_unresolved",
+                "process '{key}' authors neither a name nor a component_prefix "
+                "to derive one from",
+                {"key": self.component_key},
+            )
+        return self
+
+    #: The governance fields that resolve INTO the strict envelope unchanged.
+    #: Derived from the strict model's own field set rather than listed, so a
+    #: field added to one envelope cannot be silently dropped by the other.
+    @classmethod
+    def carried_fields(cls) -> Tuple[str, ...]:
+        return tuple(
+            name
+            for name in ProcessComponentEnvelopeV1.model_fields
+            if name in cls.model_fields
+        )
+
+
+class ProcessAuthoringUnitAuthoredV1(_ProcessComponentModel):
+    """Exactly ONE root plus its AUTHORED envelope (the wire shape of `units`)."""
+
+    envelope: ProcessComponentEnvelopeAuthoredV1
+    process_ir: ProcessIRV1
+
+
 __all__ = [
+    "ProcessAuthoringUnitAuthoredV1",
     "ProcessAuthoringUnitV1",
+    "ProcessComponentEnvelopeAuthoredV1",
     "ProcessComponentEnvelopeV1",
     "ProcessConnectionOverrideV1",
     "ProcessExtensionBindingsV1",

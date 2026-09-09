@@ -4433,6 +4433,7 @@ def test_the_plan_surface_compares_the_declared_route_against_the_account():
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     from _m12_11_support import (  # noqa: E402
         APPLIABLE_CONN,
+        reuse_binding,
         appliable_op_matching_the_capture,
         appliable_process_ir_request,
         evidenced_account_client,
@@ -4462,7 +4463,7 @@ def test_the_plan_surface_compares_the_declared_route_against_the_account():
         request = appliable_process_ir_request(components=(
             dict(APPLIABLE_CONN, component_id=connection.component_id,
                  action="create",
-                 config=dict(APPLIABLE_CONN["config"], reference_only=True)),
+                 config=reuse_binding(APPLIABLE_CONN)),
             dict(declared, component_id=operation.component_id, action="create",
                  config=dict(declared["config"], reference_only=True,
                              method="PATCH")),
@@ -4521,6 +4522,7 @@ def test_compile_serves_the_failure_s_own_field_and_remediation():
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     from _m12_11_support import (  # noqa: E402
         APPLIABLE_CONN,
+        reuse_binding,
         appliable_op_matching_the_capture,
         appliable_process_ir_request,
         evidenced_account_client,
@@ -4548,7 +4550,7 @@ def test_compile_serves_the_failure_s_own_field_and_remediation():
     declared["config"]["path"] = "/admin/cdscm/api/v1/clients/a-route-nothing-stores"
     request = appliable_process_ir_request(components=(
         dict(APPLIABLE_CONN, component_id=connection.component_id, action="create",
-             config=dict(APPLIABLE_CONN["config"], reference_only=True)),
+             config=reuse_binding(APPLIABLE_CONN)),
         dict(declared, component_id=operation.component_id, action="create",
              config=dict(declared["config"], reference_only=True, method="PATCH")),
     ))

@@ -1,0 +1,52 @@
+{
+  "RET-157-01": {
+    "classification": "RETIRE",
+    "field_path": "source/binding/settings/jdbc_options",
+    "spelling": "jdbc_options"
+  },
+  "RET-157-02": {
+    "classification": "RETIRE",
+    "field_path": "source/read_operation/fetch_size",
+    "spelling": "fetch_size"
+  },
+  "RET-157-03": {
+    "classification": "RETIRE",
+    "field_path": "source/read_operation/link_element",
+    "spelling": "link_element"
+  },
+  "RET-157-04": {
+    "classification": "RETIRE",
+    "field_path": "source/read_operation/parameters/0/sql_type",
+    "spelling": "sql_type"
+  },
+  "RET-157-05": {
+    "classification": "RETAIN",
+    "field_path": "source/read_operation/parameters/0/direction",
+    "spelling": "direction"
+  },
+  "RET-157-06": {
+    "classification": "RETIRE",
+    "field_path": "execution/trigger/schedule/cron",
+    "spelling": "cron"
+  },
+  "RET-157-07": {
+    "classification": "RETIRE",
+    "field_path": "execution/run_metadata",
+    "spelling": "run_metadata"
+  },
+  "RET-157-08": {
+    "classification": "RETIRE",
+    "field_path": "target/send_request/query_parameters",
+    "spelling": "value_source=watermark"
+  },
+  "RET-157-09": {
+    "classification": "RETIRE",
+    "field_path": "naming/runtime_hints",
+    "spelling": "runtime_hints"
+  },
+  "RET-157-10": {
+    "classification": "SPLIT",
+    "field_path": "execution/watermark",
+    "spelling": "watermark (legacy fragment: dpp_name / store_ref / persistence=dpp)"
+  }
+}

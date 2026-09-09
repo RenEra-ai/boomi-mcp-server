@@ -1,0 +1,88 @@
+{
+  "baseline_sha": "ba1be9f34317d720d3b012484622ab7e2742143b",
+  "entry": {
+    "example": "webhook_relay_to_rest",
+    "kind": "archetype_example"
+  },
+  "input": {
+    "archetype": "http_listener_to_rest",
+    "parameters": {
+      "inbound_validation": {
+        "enabled": true
+      },
+      "listener": {
+        "object_name": "eventRelay",
+        "operation_type": "EXECUTE",
+        "payload_profile": {
+          "format": "json",
+          "root": {
+            "children": [
+              {
+                "data_type": "character",
+                "kind": "simple",
+                "name": "event_id"
+              },
+              {
+                "data_type": "character",
+                "kind": "simple",
+                "name": "detail"
+              }
+            ],
+            "kind": "object",
+            "name": "Root"
+          }
+        }
+      },
+      "naming": {
+        "component_prefix": "EventRelay",
+        "integration_name": "Event Relay Listener"
+      },
+      "target": {
+        "binding": {
+          "mode": "create",
+          "settings": {
+            "auth_mode": "none",
+            "base_url": "https://api.example.com"
+          }
+        },
+        "payload_profile": {
+          "format": "json",
+          "root": {
+            "children": [
+              {
+                "data_type": "character",
+                "kind": "simple",
+                "name": "id"
+              },
+              {
+                "data_type": "character",
+                "kind": "simple",
+                "name": "message"
+              }
+            ],
+            "kind": "object",
+            "name": "Root"
+          }
+        },
+        "send_request": {
+          "method": "POST",
+          "path": "/v1/<<target resource>>"
+        }
+      },
+      "transform": {
+        "operations": [
+          {
+            "operation_type": "direct",
+            "source_path": "Root/event_id",
+            "target_path": "Root/id"
+          },
+          {
+            "operation_type": "direct",
+            "source_path": "Root/detail",
+            "target_path": "Root/message"
+          }
+        ]
+      }
+    }
+  }
+}

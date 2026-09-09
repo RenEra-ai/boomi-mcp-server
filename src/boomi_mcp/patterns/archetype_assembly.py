@@ -315,15 +315,23 @@ def _reject_case_variant_headers(headers: Dict[str, str], *, field: str) -> None
         seen.add(lower)
 
 
+#: #157: the canonical governance refusal for a default/operation header
+#: collision. Named here beside the merger it belongs to; registered in the
+#: application taxonomy under the governance family.
+GOVERNANCE_HEADER_COLLISION = "GOVERNANCE_HEADER_COLLISION"
+
+
 def _merge_request_headers(
     default_headers: Dict[str, str],
     operation_headers: Optional[Dict[str, str]],
     *,
     default_field: str,
     operation_field: str,
+    strict: bool = False,
 ) -> Optional[Dict[str, str]]:
-    """Merge connection default_headers with operation headers (operation wins).
+    """Merge connection default_headers with operation headers.
 
+    Legacy (``strict=False``, the archetype route until #160): operation wins.
     Operation-level headers are more specific than connection defaults, so a
     header set in both resolves to the operation value. HTTP header names are
     case-insensitive (RFC 7230), so the conflict is resolved on the lowercased
@@ -333,11 +341,36 @@ def _merge_request_headers(
     first checked for case-variant duplicates *within* itself (issue #127 A1).
     Returns None when both are empty so the operation config omits
     request_headers entirely.
+
+    Canonical (``strict=True``, issue #157): the SAME merger, but ANY
+    case-insensitive overlap between the two dicts — a case variant OR the
+    identical spelling — is refused with ``GOVERNANCE_HEADER_COLLISION``
+    instead of resolved last-write-wins. One implementation, two policies, so
+    the legacy route and the typed surface cannot drift on what "the same
+    header" means.
     """
     _reject_case_variant_headers(default_headers, field=default_field)
     operation_headers = operation_headers or {}
     _reject_case_variant_headers(operation_headers, field=operation_field)
     operation_lower = {name.lower() for name in operation_headers}
+    if strict:
+        overlap = sorted(
+            name for name in default_headers if name.lower() in operation_lower
+        )
+        if overlap:
+            raise BuilderValidationError(
+                f"{len(overlap)} header name(s) are set on both the connection "
+                "defaults and the operation (compared case-insensitively); the "
+                "typed surface refuses the collision rather than letting one "
+                "silently win.",
+                error_code=GOVERNANCE_HEADER_COLLISION,
+                field=operation_field,
+                hint=(
+                    "Set each header in exactly one place: the connection's "
+                    "default_headers or the operation's request headers."
+                ),
+                details={"collision_count": len(overlap)},
+            )
     merged = {
         name: value
         for name, value in default_headers.items()

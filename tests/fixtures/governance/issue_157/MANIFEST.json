@@ -1,0 +1,371 @@
+{
+  "baseline_sha": "ba1be9f34317d720d3b012484622ab7e2742143b",
+  "baseline_tree_sha": "27487413b2d54234fe73bd57ae8779cb0d1352f5",
+  "case_count": 21,
+  "cases": {
+    "api_to_api_sync/create": {
+      "endpoint_rows": 2,
+      "flow_keys": [
+        "fetch",
+        "transform",
+        "send"
+      ],
+      "flow_rows": 3,
+      "producer": "api_to_api_sync"
+    },
+    "api_to_api_sync/reuse_with_function": {
+      "endpoint_rows": 2,
+      "flow_keys": [
+        "fetch",
+        "transform",
+        "send"
+      ],
+      "flow_rows": 3,
+      "producer": "api_to_api_sync"
+    },
+    "api_to_database_sync/create": {
+      "endpoint_rows": 2,
+      "flow_keys": [
+        "fetch",
+        "transform",
+        "write"
+      ],
+      "flow_rows": 3,
+      "producer": "api_to_database_sync"
+    },
+    "api_to_database_sync/source_reuse": {
+      "endpoint_rows": 2,
+      "flow_keys": [
+        "fetch",
+        "transform",
+        "write"
+      ],
+      "flow_rows": 3,
+      "producer": "api_to_database_sync"
+    },
+    "composition/create_2legs_staged": {
+      "endpoint_rows": 4,
+      "flow_keys": [
+        "extract",
+        "transform",
+        "send",
+        "reliability",
+        "fanout"
+      ],
+      "flow_rows": 5,
+      "producer": "composition"
+    },
+    "composition/create_2legs_stream": {
+      "endpoint_rows": 4,
+      "flow_keys": [
+        "extract",
+        "transform",
+        "send",
+        "reliability",
+        "fanout"
+      ],
+      "flow_rows": 5,
+      "producer": "composition"
+    },
+    "composition/create_3legs_stream": {
+      "endpoint_rows": 5,
+      "flow_keys": [
+        "extract",
+        "transform",
+        "send",
+        "reliability",
+        "fanout"
+      ],
+      "flow_rows": 5,
+      "producer": "composition"
+    },
+    "composition/reuse_2legs_stream": {
+      "endpoint_rows": 4,
+      "flow_keys": [
+        "extract",
+        "transform",
+        "send",
+        "reliability",
+        "fanout"
+      ],
+      "flow_rows": 5,
+      "producer": "composition"
+    },
+    "composition/reuse_3legs_staged_all": {
+      "endpoint_rows": 5,
+      "flow_keys": [
+        "extract",
+        "transform",
+        "send",
+        "reliability",
+        "fanout"
+      ],
+      "flow_rows": 5,
+      "producer": "composition"
+    },
+    "composition/reuse_4legs_stream": {
+      "endpoint_rows": 6,
+      "flow_keys": [
+        "extract",
+        "transform",
+        "send",
+        "reliability",
+        "fanout"
+      ],
+      "flow_rows": 5,
+      "producer": "composition"
+    },
+    "database_to_api_sync/wm_off_dlq_off_create": {
+      "endpoint_rows": 2,
+      "flow_keys": [
+        "extract",
+        "transform",
+        "send",
+        "reliability"
+      ],
+      "flow_rows": 4,
+      "producer": "database_to_api_sync"
+    },
+    "database_to_api_sync/wm_off_dlq_off_source_reuse": {
+      "endpoint_rows": 2,
+      "flow_keys": [
+        "extract",
+        "transform",
+        "send",
+        "reliability"
+      ],
+      "flow_rows": 4,
+      "producer": "database_to_api_sync"
+    },
+    "database_to_api_sync/wm_off_dlq_off_target_reuse": {
+      "endpoint_rows": 2,
+      "flow_keys": [
+        "extract",
+        "transform",
+        "send",
+        "reliability"
+      ],
+      "flow_rows": 4,
+      "producer": "database_to_api_sync"
+    },
+    "database_to_api_sync/wm_off_dlq_on_create": {
+      "endpoint_rows": 2,
+      "flow_keys": [
+        "extract",
+        "transform",
+        "send",
+        "reliability"
+      ],
+      "flow_rows": 4,
+      "producer": "database_to_api_sync"
+    },
+    "database_to_api_sync/wm_on_dlq_off_create": {
+      "endpoint_rows": 2,
+      "flow_keys": [
+        "extract",
+        "transform",
+        "send",
+        "reliability",
+        "watermark"
+      ],
+      "flow_rows": 5,
+      "producer": "database_to_api_sync"
+    },
+    "database_to_api_sync/wm_on_dlq_on_create": {
+      "endpoint_rows": 2,
+      "flow_keys": [
+        "extract",
+        "transform",
+        "send",
+        "reliability",
+        "watermark"
+      ],
+      "flow_rows": 5,
+      "producer": "database_to_api_sync"
+    },
+    "database_to_api_sync/wm_on_dlq_on_reuse": {
+      "endpoint_rows": 2,
+      "flow_keys": [
+        "extract",
+        "transform",
+        "send",
+        "reliability",
+        "watermark"
+      ],
+      "flow_rows": 5,
+      "producer": "database_to_api_sync"
+    },
+    "http_listener_to_db/advanced_runtime": {
+      "endpoint_rows": 2,
+      "flow_keys": [
+        "listen",
+        "transform",
+        "write"
+      ],
+      "flow_rows": 3,
+      "producer": "http_listener_to_db"
+    },
+    "http_listener_to_db/plain": {
+      "endpoint_rows": 2,
+      "flow_keys": [
+        "listen",
+        "transform",
+        "write"
+      ],
+      "flow_rows": 3,
+      "producer": "http_listener_to_db"
+    },
+    "http_listener_to_rest/plain": {
+      "endpoint_rows": 2,
+      "flow_keys": [
+        "listen",
+        "transform",
+        "send"
+      ],
+      "flow_rows": 3,
+      "producer": "http_listener_to_rest"
+    },
+    "stub_minimal/default": {
+      "endpoint_rows": 2,
+      "flow_keys": [
+        "stub_noop_flow"
+      ],
+      "flow_rows": 1,
+      "producer": "stub_minimal"
+    }
+  },
+  "extraction": "git archive <baseline_sha> | tar -x, producers executed with PYTHONPATH=<extraction>/src",
+  "files": {
+    "cases/api_to_api_sync/create/discharges.json": "5272635bcf9deaeeb03d0a60036426d0b6c1cc7701e355225824bf6bc1c905a7",
+    "cases/api_to_api_sync/create/endpoints.baseline.jsonl": "fafb870d594b73b317ad020c1b4977b6f861caa7cdd662715a8cf193e37c6347",
+    "cases/api_to_api_sync/create/flows.baseline.jsonl": "ddfdc2e676e1ef9b6c0999c73aa38f1086d45d51ca1ed00ec804e9f0b458b8b4",
+    "cases/api_to_api_sync/create/input.canonical.json": "27d9a3773f86975d77f767f74c6b1dec77022f352311f3ededf14a253207f82b",
+    "cases/api_to_api_sync/create/input.legacy.json": "4ccc31eb79276f51b5b78619823dff9230dc5748860b0b2cfcee27673e58103a",
+    "cases/api_to_api_sync/create/provenance.json": "c8265399225fe6472258301a0f35ee79febd075f91e4b319d47b343fe707834d",
+    "cases/api_to_api_sync/reuse_with_function/discharges.json": "2d2b28d01b325acf420b790618a0f6133944869e0eef15af989fbf5723cc92e3",
+    "cases/api_to_api_sync/reuse_with_function/endpoints.baseline.jsonl": "8e29eb25ff8613de5d23eb403a068cbfe0ed7eebd3eb27f8459d362e1c226de5",
+    "cases/api_to_api_sync/reuse_with_function/flows.baseline.jsonl": "abcb3c865d7ccf6da0983ddb2b3f40ecbec09942efdbcc9e61f252007ad4e289",
+    "cases/api_to_api_sync/reuse_with_function/input.canonical.json": "67fab99c5e863cb97a0bdae7ceb54bc057b35b1162e3b95ca56614da14908602",
+    "cases/api_to_api_sync/reuse_with_function/input.legacy.json": "55bd590edbbae77f294c4e149b130bc26ed680797737ae785b5f9a771eae8e30",
+    "cases/api_to_api_sync/reuse_with_function/provenance.json": "539e839458dffa17c124a244df31c57bd03710b7457aafb624d36044ea622a49",
+    "cases/api_to_database_sync/create/discharges.json": "56891b23df176d36220e763ade6d4470d7b54604c3180eecc5a5bb88b4dcd2de",
+    "cases/api_to_database_sync/create/endpoints.baseline.jsonl": "2ec6275045f9e4f2a6598dae1a0fa70453c1b955fcb2c3d872b6e2429df09621",
+    "cases/api_to_database_sync/create/flows.baseline.jsonl": "64fe6c14b6566b1ad47c685db873f4ca57c11830d0d6b1d2dfe611029d2311fc",
+    "cases/api_to_database_sync/create/input.legacy.json": "bacdb6a9bd66af886a6dde8520ee6be408bb13fc6c2ccdb02a46733f09d69143",
+    "cases/api_to_database_sync/source_reuse/discharges.json": "03c17d789a98974b7e45ebc1544852b0a28f9d8af9860f53d25177a16dfe8113",
+    "cases/api_to_database_sync/source_reuse/endpoints.baseline.jsonl": "76d3be3eafcb86d9429ede114321b618f94a5f837e0b36a701ee17cc738061bd",
+    "cases/api_to_database_sync/source_reuse/flows.baseline.jsonl": "8a7c671920bf1a3675534dbea5b8c2242924bf83381c2558ab15b27ed585f3ba",
+    "cases/api_to_database_sync/source_reuse/input.legacy.json": "3df0313839d819c95cf923ee71a21d15da31dc12c10f49103f5b31f361ba8a74",
+    "cases/composition/create_2legs_staged/discharges.json": "6f07de75316a8c5901ad356634a1d39a8629590f1bd5d34f0aa690643ed1fc1e",
+    "cases/composition/create_2legs_staged/endpoints.baseline.jsonl": "91ca99731a96c98c0a8fdfd685405518a38d37a8ec5dd8a8f4f357308b3c9d06",
+    "cases/composition/create_2legs_staged/flows.baseline.jsonl": "c1b172da626a0b9742baddb7b5ea863445b8eee51a67dfc1cb168b6cb1239ba3",
+    "cases/composition/create_2legs_staged/input.legacy.json": "cf145bbd7f3a615e33f082c14e9c28c905651cbfb1c19deff46b073ad0ec9d00",
+    "cases/composition/create_2legs_stream/discharges.json": "cbd1190a5e189203d417e1bc789cccc6a4c216a98bc9c63faf801d823d5b28e2",
+    "cases/composition/create_2legs_stream/endpoints.baseline.jsonl": "465e559c5cf279669d51b5fae7d0878b98c3fc96e645d6175cb28dcd5d718453",
+    "cases/composition/create_2legs_stream/flows.baseline.jsonl": "ad2f4126ae6961b401847cbad25a1f3ec818c0ce2f52b294fc20b7cc662ed810",
+    "cases/composition/create_2legs_stream/input.legacy.json": "654caeb9098fb4e7a5d27251f2b82e4130f8bd5025038fae25cb14af02a9d99b",
+    "cases/composition/create_3legs_stream/discharges.json": "abeb4a2f65e81436300612e1662e274ad2fe46c74348382ddef1b66a0d8e0d93",
+    "cases/composition/create_3legs_stream/endpoints.baseline.jsonl": "d930560744c0f44ac643ed171620ef0029ebf633230255440193ac3ee9e2fbe1",
+    "cases/composition/create_3legs_stream/flows.baseline.jsonl": "2bd4c9c71457c53c6f7b4be865490e6733e13d09a6195faba7acbf5c09988ee6",
+    "cases/composition/create_3legs_stream/input.legacy.json": "88b0c74ebfc572af27dd53a5933476b47c907118457e051703bfc6a2182fb38d",
+    "cases/composition/reuse_2legs_stream/discharges.json": "56c1205b3c80bdc369d931c7a605bba7adccb23a67b8e7e724b5ca60dc6b83ca",
+    "cases/composition/reuse_2legs_stream/endpoints.baseline.jsonl": "f397f5431d7f69b6d0288c08ebdcbb662c2f608888f01fd40c97628e9e8a107d",
+    "cases/composition/reuse_2legs_stream/flows.baseline.jsonl": "86b77bc0c0d008b1bee0a60d719697cfd9b56a0aaac5b9ae1a236f636c4fd586",
+    "cases/composition/reuse_2legs_stream/input.legacy.json": "127055b141ee7cb2a1a016b1760589b2a88d67bff0f29ca4a719b4483a9862b3",
+    "cases/composition/reuse_3legs_staged_all/discharges.json": "39bb3935c7b5d444bf8f123c45a8015f4c442768d4e514b8d58a8f3b6507fb73",
+    "cases/composition/reuse_3legs_staged_all/endpoints.baseline.jsonl": "74cac2c2dceff08e41baf453697d7f381f5f746e3006cc39536794a81e65acb9",
+    "cases/composition/reuse_3legs_staged_all/flows.baseline.jsonl": "be7a5068f829fc53617bfe6f16b6df648b7adf2ed8f6b03f8f4c44472506a866",
+    "cases/composition/reuse_3legs_staged_all/input.legacy.json": "a2bbcb5e8c9104c05b45aa65559819e2a6ab604245fa563dae82a2b63d611726",
+    "cases/composition/reuse_4legs_stream/discharges.json": "b3fc5ba76d70ce453c48c7e9cfd13634998a338255d646b97e7d30cd5e9187f4",
+    "cases/composition/reuse_4legs_stream/endpoints.baseline.jsonl": "8c1a0bb7f9930a79dc63b5615745a6c4b76c7f4980804a414aab51a1767cca55",
+    "cases/composition/reuse_4legs_stream/flows.baseline.jsonl": "eeffedc773a790355c80469d84e4639202f5f579b4d4b1850162a5c1834194ce",
+    "cases/composition/reuse_4legs_stream/input.legacy.json": "9f5573ec3be2725916f36e924a4f2b26f30abe8f765732d03c639655029c50cd",
+    "cases/database_to_api_sync/wm_off_dlq_off_create/discharges.json": "1df4a4c55e5994f3a21fdca0c74817e84f5a48ddb1ffc7d3082400af773a874f",
+    "cases/database_to_api_sync/wm_off_dlq_off_create/endpoints.baseline.jsonl": "ed339dc3a0cc48789d2189c3aa6a39479f4dc8b0fe07299c3bb4621b8ef3c71e",
+    "cases/database_to_api_sync/wm_off_dlq_off_create/flows.baseline.jsonl": "c61161f05c1044d670ba6eb85782a3896a426ef03a49599d0a3785261eaa2d8e",
+    "cases/database_to_api_sync/wm_off_dlq_off_create/input.canonical.json": "d8f85c471ec4ec640bb54fb7b5cf6ae13a2ded18b20de08f476151c06820bf71",
+    "cases/database_to_api_sync/wm_off_dlq_off_create/input.legacy.json": "3c20120e54e7bc8b2da18e0e75a6be57177f47b65cdff86a9d92f46542f51e40",
+    "cases/database_to_api_sync/wm_off_dlq_off_create/provenance.json": "88c8eda84995cdd0f042636be56664f552b215d652d26a9e608f9c965cbe33ac",
+    "cases/database_to_api_sync/wm_off_dlq_off_source_reuse/discharges.json": "97c2ed5bc4b64c1986908616a70c884cd17aa9eaa34e13fd6ac024a67843a059",
+    "cases/database_to_api_sync/wm_off_dlq_off_source_reuse/endpoints.baseline.jsonl": "5b5e614253fba1ea38c83f1e96db9b5475c26cd7de27ec98c28851344e8cc03d",
+    "cases/database_to_api_sync/wm_off_dlq_off_source_reuse/flows.baseline.jsonl": "855f91abcb47eb64ce1a0e4da2fb3d8ddbe2a59e89f5661d9a3289cf7f2a2da8",
+    "cases/database_to_api_sync/wm_off_dlq_off_source_reuse/input.canonical.json": "9791f4046908a960f95bb916560b209f4e12901e5b81cbffd5b16e2f307f41a4",
+    "cases/database_to_api_sync/wm_off_dlq_off_source_reuse/input.legacy.json": "0279c44e7556351a7293b2a2060acb42e1b504b4ab2bdbce2546a90f817304a1",
+    "cases/database_to_api_sync/wm_off_dlq_off_source_reuse/provenance.json": "829ea03a8de7ba7e47c9248a244fa60bc0d15c473c5fad9e2db0c4b8916fe8a2",
+    "cases/database_to_api_sync/wm_off_dlq_off_target_reuse/discharges.json": "2af52f77c1d132aae7f130d1e5b431bb40471c7303ebfca713c417503da448db",
+    "cases/database_to_api_sync/wm_off_dlq_off_target_reuse/endpoints.baseline.jsonl": "b89e16e5aad098a1ce79ccde7188f84aae47816364af373e9a60bedc712b677f",
+    "cases/database_to_api_sync/wm_off_dlq_off_target_reuse/flows.baseline.jsonl": "1c79895d39f2ce69590e93ed44cd4cfe1725ab8f305cc31444d1d01a9d4b5b89",
+    "cases/database_to_api_sync/wm_off_dlq_off_target_reuse/input.canonical.json": "220dd0a7adfd0e31d87b5af77f5e59b4f702e86eeadac56c6a54893f1ce299f1",
+    "cases/database_to_api_sync/wm_off_dlq_off_target_reuse/input.legacy.json": "f46b4fbffa5b0d3a9623eea3f3cae0ed98f5b89a724ee9ee58f3e61a2d20698c",
+    "cases/database_to_api_sync/wm_off_dlq_off_target_reuse/provenance.json": "834dfc822ddfa2d01124ba67b873d7c6b87c7ca82dac4d8e91883afb9447cc0d",
+    "cases/database_to_api_sync/wm_off_dlq_on_create/discharges.json": "68cc65ed2c03311d5f96cca9df5ac5f0e83331184883898cf35933d444721b44",
+    "cases/database_to_api_sync/wm_off_dlq_on_create/endpoints.baseline.jsonl": "4316263f28d0f24f17e964e15661b449d5504eacbc9f5558389950d4d4a1ecb4",
+    "cases/database_to_api_sync/wm_off_dlq_on_create/flows.baseline.jsonl": "2a9e8314d36b98f21941c47e723be23299c9c2c0b7a3f0cdcc156d8bf60fba18",
+    "cases/database_to_api_sync/wm_off_dlq_on_create/input.canonical.json": "ff60a685d10cc90b958744b1bd54b2ba71c043b174fb8301ddfdc54e1dca4505",
+    "cases/database_to_api_sync/wm_off_dlq_on_create/input.legacy.json": "ec62d16610db05a9a0c5db19d461c173c915c2c10a7155ae69fbe6e9d4e22626",
+    "cases/database_to_api_sync/wm_off_dlq_on_create/provenance.json": "21f3d84a3e3c98b2f44532033aed0ab4307df6a51e3cd4e20b4f8868121c3621",
+    "cases/database_to_api_sync/wm_on_dlq_off_create/discharges.json": "a552d723c77c69b49a03dfb8b76023d683c1ed90271947268b4183820dcdbc6b",
+    "cases/database_to_api_sync/wm_on_dlq_off_create/endpoints.baseline.jsonl": "c5254ddb96726665d11f138127210bb910b4effbc371d888ca9453061fe433cc",
+    "cases/database_to_api_sync/wm_on_dlq_off_create/flows.baseline.jsonl": "0e66dee6a71c759dad7486220aef19d255e7296a82aebf9ef9b7e2fd1e056505",
+    "cases/database_to_api_sync/wm_on_dlq_off_create/input.canonical.json": "38e7a46dee239fd4bbd206e4c5d1861ffd867d3613016b816a82597d33731662",
+    "cases/database_to_api_sync/wm_on_dlq_off_create/input.legacy.json": "1d0d9f1c7c31b5e107c5ba993527abc95e697d445325bafe0c4ec8b4c06e45ca",
+    "cases/database_to_api_sync/wm_on_dlq_off_create/provenance.json": "a3dd84967559ec40774e691bf6c749dd24739c86817401b91eacdd6c6870dd80",
+    "cases/database_to_api_sync/wm_on_dlq_on_create/discharges.json": "053fb1070f5609356c9f49c901e4a0118d34716211b8d547e69d2a7a90c50aca",
+    "cases/database_to_api_sync/wm_on_dlq_on_create/endpoints.baseline.jsonl": "64554f0b08eca83dda8bebc128b4ab26be8c6a22bfbdc086670badac09624b7a",
+    "cases/database_to_api_sync/wm_on_dlq_on_create/flows.baseline.jsonl": "a3b39f2942ff0721e26a3737ebd4a4a7344841beb787bd9966b4974427659f98",
+    "cases/database_to_api_sync/wm_on_dlq_on_create/input.canonical.json": "f974bba77b7dad460e47fc378efdff7490fcfab3f81bee46ecc026a62b93566b",
+    "cases/database_to_api_sync/wm_on_dlq_on_create/input.legacy.json": "e20c5ac7f40b184d7daefd2b2bf45b5bba1ab52ef3e880119d6fe1979a8f24ad",
+    "cases/database_to_api_sync/wm_on_dlq_on_create/provenance.json": "10285c8f7f2f78dd7d9bb19c46cd6ff2ac7b0fe87575b4254bb0968537823b4c",
+    "cases/database_to_api_sync/wm_on_dlq_on_reuse/discharges.json": "13d97b396d30d3d9ccb95f28cefd2c47f89d26efa201731cea2b58c686c826da",
+    "cases/database_to_api_sync/wm_on_dlq_on_reuse/endpoints.baseline.jsonl": "66e4a31fdcf86b6e7f34633cc0c41070ae216f0d5248aef8722dba6aa4bae2ca",
+    "cases/database_to_api_sync/wm_on_dlq_on_reuse/flows.baseline.jsonl": "007d0a2c209955e403f699ed884e27930470576f6581c277f8b99caf6a4f75a3",
+    "cases/database_to_api_sync/wm_on_dlq_on_reuse/input.canonical.json": "8c8dc5dbee236419166d9734daa54772c5942475a192b7ca02571edb724665d0",
+    "cases/database_to_api_sync/wm_on_dlq_on_reuse/input.legacy.json": "4d09a9f9392f1b564098e5bd43cd843c696be54ef5cc6d639eb9f5dcdfd63a24",
+    "cases/database_to_api_sync/wm_on_dlq_on_reuse/provenance.json": "e81ba50d5ea21d3887a521ec92e11dd93195609cc2a7ed21e0a7c80de4c94f85",
+    "cases/http_listener_to_db/advanced_runtime/discharges.json": "c0d7172b43e3460d8e77d38c19e575415b7fd3d8e980d750e7a7aea18afc7b76",
+    "cases/http_listener_to_db/advanced_runtime/endpoints.baseline.jsonl": "7308d92b587ca78e6fe70cf5544d8adfdbba016f0b20515beb359270d0a8aa9e",
+    "cases/http_listener_to_db/advanced_runtime/flows.baseline.jsonl": "184e73c1a133c36c8174a225fa6cedf5f3790b825b47140d7055c6c43d908049",
+    "cases/http_listener_to_db/advanced_runtime/input.legacy.json": "13a5b420a11313d22c8f10c44a7bbc66c974f1c2e08017d9b1af5750b449b603",
+    "cases/http_listener_to_db/plain/discharges.json": "b2c9b1147f6fcd2743969ae76e0341cb2779990ec763b5b9ea5a0b4fd5cb9a88",
+    "cases/http_listener_to_db/plain/endpoints.baseline.jsonl": "3efa5e27d1122c2a51fae3d9478d997eb15b28451967f2ccad0ed6875b1e27ca",
+    "cases/http_listener_to_db/plain/flows.baseline.jsonl": "dd48ee5464348e0037a351544af5ad6af1513f05585a91d7b6d8476c220d3e5b",
+    "cases/http_listener_to_db/plain/input.legacy.json": "8e84fa99ae1344637b79df9cb6a2824e7c68d4df551d3fef50097d8fb28cf458",
+    "cases/http_listener_to_rest/plain/discharges.json": "8655181a6d7d6d5638e6c9ddf6ece6c80b5fcdb93265ca739d69475b7d718edd",
+    "cases/http_listener_to_rest/plain/endpoints.baseline.jsonl": "ecd8fd762dd10f00d989288a5ef6e60ca777b6d51533ad1630d0ddc25b63e992",
+    "cases/http_listener_to_rest/plain/flows.baseline.jsonl": "7fc8f9392cbbb6969926c6cf3955321b459abff9f3a47ed1976b20f4f4aced3a",
+    "cases/http_listener_to_rest/plain/input.legacy.json": "343a1f679c15048fe0b0fed9ad4b277a3eb5e7b921a38fa2b0367bb1aa4e976f",
+    "cases/stub_minimal/default/discharges.json": "d2a2966ec723cb2714ae90ee2c1cd4c41c8d359649a2c2faa791f0a18dc7d078",
+    "cases/stub_minimal/default/endpoints.baseline.jsonl": "ad12f8cc8d5f674bb4cc44be81fc0e46de20dd994ccd301c82558fa7bb8d7543",
+    "cases/stub_minimal/default/flows.baseline.jsonl": "f772482dfafb47130ffb60d3e7aa478b09a6f1e487c8d0da5e4b24dcd6d1fe7d",
+    "cases/stub_minimal/default/input.legacy.json": "ba0a7ed4167b05f68f9537979b92a1a87b63651c8251d2a6513fcd69ec41621b",
+    "retirements/INDEX.json": "0c72b06a6394cf86e9df2b07670b6da9f17f677a20486973ce579d5ae88e63ee",
+    "retirements/RET-157-01.json": "3db239b71b7b3e214a79ef617151fd6d91229d7ac355ffa9f6cea7ae25d43d8e",
+    "retirements/RET-157-02.json": "ab098c5f30e7d7478e78df5a4b0445536acc0735f769417c0cbd2e86cf4daf29",
+    "retirements/RET-157-03.json": "f9c0c9ff8c62ef440e3d9ba00170438ded8f9e2cf083264f58c47ec729ca3ff8",
+    "retirements/RET-157-04.json": "5fe2d318d9b67faef3aae2ce5a3141dc8d51c2d5b6c3620a1e1ff7cf2c126487",
+    "retirements/RET-157-05.json": "eaf406e34512b5b894ad67c6ae38366644248e9a458e3681a6b8bd261db34694",
+    "retirements/RET-157-06.json": "127421fa1df4ebbc9f7a19caefa85f2c181e4e5804484177e70b610e3ff0fdec",
+    "retirements/RET-157-07.json": "1acdf30875dacc491df97c3b1ced0b27ac1ba17d4c4eb589c7269ef87a8215e7",
+    "retirements/RET-157-08.json": "25e6176e560bdbc2101403ea0fc632e790f30a0e7c706b9033471ce9904b8561",
+    "retirements/RET-157-09.json": "096635c5045eb00f545d30f5c94e1282bfe61fe149ba7b32e0e94bc32574cdf5",
+    "retirements/RET-157-10.json": "7b093554ad8c719157022ae33a63af59bb5c4ecfe9a5e7ba7422bfac2d39f728"
+  },
+  "frozen_endpoint_rows": 58,
+  "frozen_flow_rows": 83,
+  "issue": 157,
+  "producers": {
+    "api_to_api_sync": "boomi_mcp.patterns.archetypes.api_to_api_sync",
+    "api_to_database_sync": "boomi_mcp.patterns.archetypes.api_to_database_sync",
+    "composition": "boomi_mcp.patterns.composition",
+    "database_to_api_sync": "boomi_mcp.patterns.archetypes.database_to_api_sync",
+    "http_listener_to_db": "boomi_mcp.patterns.archetypes.http_listener_to_db",
+    "http_listener_to_rest": "boomi_mcp.patterns.archetypes.http_listener_to_rest",
+    "stub_minimal": "boomi_mcp.patterns.archetypes.stub_minimal"
+  },
+  "schema_version": 1,
+  "status_counts": {
+    "discharged": 9,
+    "pending": 132,
+    "retired": 0
+  }
+}

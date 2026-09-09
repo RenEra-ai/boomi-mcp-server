@@ -33,6 +33,11 @@ parsing / DB browse / row sampling remain out of scope.
 
 from __future__ import annotations
 
+from ...categories.components.builders.profile_generation import profile_from_json_schema
+from ...categories.components.builders.transform_map_validation import (
+    required_target_coverage_gaps,
+)
+
 import re
 from typing import Any, Dict, List, Literal, Optional, Set, Tuple
 
@@ -114,7 +119,6 @@ from ..archetype_parameters import (
     RestTarget,
     TransformConfig,
     _flatten_payload_profile_leaves,
-    _required_simple_leaf_paths,
     _stripped_nonblank,
 )
 from ..archetype_assembly import (
@@ -799,8 +803,14 @@ class DatabaseToApiSyncParameters(BaseModel):
         # intentionally NOT echoed in the error message — same defense-in-depth
         # policy as the duplicate_target_bindings branch, since profile node
         # names can carry caller-specific identifiers.
-        required_target_paths = _required_simple_leaf_paths(self.target.payload_profile)
-        unmapped_required_count = len(required_target_paths - bound_target_paths)
+        # Issue #157: the ONE required-target-leaf coverage implementation,
+        # over the surviving generator's index — the legacy walker is gone.
+        unmapped_required_count = len(
+            required_target_coverage_gaps(
+                profile_from_json_schema(self.target.payload_profile)["field_index_by_path"],
+                bound_target_paths,
+            )
+        )
 
         # Issue #100 G2: validate per-document REST path replacements. Each
         # {name} token must appear literally in the send path, names must be

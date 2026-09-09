@@ -39,6 +39,11 @@ unchanged; composition is its own function surface.
 
 from __future__ import annotations
 
+from ..categories.components.builders.profile_generation import profile_from_json_schema
+from ..categories.components.builders.transform_map_validation import (
+    required_target_coverage_gaps,
+)
+
 import re
 from typing import Any, Dict, List, Literal, Optional
 
@@ -70,7 +75,6 @@ from .archetype_parameters import (
     RestTarget,
     TransformConfig,
     _flatten_payload_profile_leaves,
-    _required_simple_leaf_paths,
 )
 from .archetype_assembly import (
     _MAIN_PROCESS_KEY,
@@ -514,7 +518,12 @@ def validate_composition(
         f.name for f in source_model.read_operation.result_schema.fields
     }
     first_leaves = _flatten_payload_profile_leaves(target_models[0].payload_profile)
-    first_required = _required_simple_leaf_paths(target_models[0].payload_profile)
+    # Issue #157: the required set is the surviving generator's index asked
+    # what is unbound when NOTHING is bound — one implementation, no walker.
+    first_index = profile_from_json_schema(target_models[0].payload_profile)[
+        "field_index_by_path"
+    ]
+    first_required = set(required_target_coverage_gaps(first_index, ()))
 
     unknown_source_refs = 0
     unknown_target_refs = 0
@@ -537,7 +546,7 @@ def validate_composition(
                 bound_paths.add(out)
             else:
                 unknown_target_refs += 1
-    unmapped_required = len(first_required - bound_paths)
+    unmapped_required = len(required_target_coverage_gaps(first_index, bound_paths))
 
     mismatches: List[str] = []
     if unknown_source_refs:
@@ -566,7 +575,12 @@ def validate_composition(
             )
             continue
         leaves = _flatten_payload_profile_leaves(model.payload_profile)
-        required = _required_simple_leaf_paths(model.payload_profile)
+        required = set(
+            required_target_coverage_gaps(
+                profile_from_json_schema(model.payload_profile)["field_index_by_path"],
+                (),
+            )
+        )
         if leaves != first_leaves or required != first_required:
             mismatches.append(
                 f"rest_target part {part.key!r} declares a payload_profile "

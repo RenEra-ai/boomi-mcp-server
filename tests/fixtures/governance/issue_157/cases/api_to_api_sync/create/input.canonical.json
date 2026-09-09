@@ -1,0 +1,204 @@
+{
+  "contract_version": "2",
+  "intent": {
+    "components": [
+      {
+        "action": "create",
+        "component_id": null,
+        "config": {
+          "component_name": "DEMO Source Profile",
+          "profile_type": "json.generated",
+          "root": {
+            "children": [
+              {
+                "children": null,
+                "data_type": "character",
+                "description": null,
+                "kind": "simple",
+                "name": "source_a",
+                "required": false
+              }
+            ],
+            "data_type": null,
+            "description": null,
+            "kind": "object",
+            "name": "Root",
+            "required": false
+          }
+        },
+        "depends_on": [],
+        "key": "source_response_profile",
+        "name": "DEMO Source Profile",
+        "type": "profile.json"
+      },
+      {
+        "action": "create",
+        "component_id": null,
+        "config": {
+          "auth": "NONE",
+          "base_url": "https://source.example.com",
+          "component_name": "DEMO REST Source Connection",
+          "connector_type": "rest"
+        },
+        "depends_on": [],
+        "key": "source_rest_source_connection",
+        "name": "DEMO REST Source Connection",
+        "type": "connector-settings"
+      },
+      {
+        "action": "create",
+        "component_id": null,
+        "config": {
+          "component_name": "DEMO REST Fetch",
+          "connection_ref_key": "source_rest_source_connection",
+          "connector_type": "rest",
+          "method": "GET",
+          "operation_mode": "execute",
+          "path": "/v1/<<source resource>>",
+          "response_profile_id": "$ref:source_response_profile",
+          "response_profile_type": "json"
+        },
+        "depends_on": [
+          "source_rest_source_connection",
+          "source_response_profile"
+        ],
+        "key": "source_rest_source_operation",
+        "name": "DEMO REST Fetch",
+        "type": "connector-action"
+      },
+      {
+        "action": "create",
+        "component_id": null,
+        "config": {
+          "component_name": "DEMO Target Profile",
+          "profile_type": "json.generated",
+          "root": {
+            "children": [
+              {
+                "children": null,
+                "data_type": "character",
+                "description": null,
+                "kind": "simple",
+                "name": "target_a",
+                "required": false
+              }
+            ],
+            "data_type": null,
+            "description": null,
+            "kind": "object",
+            "name": "Root",
+            "required": false
+          }
+        },
+        "depends_on": [],
+        "key": "transform_target_profile",
+        "name": "DEMO Target Profile",
+        "type": "profile.json"
+      },
+      {
+        "action": "create",
+        "component_id": null,
+        "config": {
+          "component_name": "DEMO Field Map",
+          "field_mappings": [
+            {
+              "source_path": "Root/source_a",
+              "target_path": "Root/target_a"
+            }
+          ],
+          "map_type": "direct",
+          "source_profile_id": "$ref:source_response_profile",
+          "source_profile_type": "profile.json",
+          "target_profile_id": "$ref:transform_target_profile",
+          "target_profile_type": "profile.json"
+        },
+        "depends_on": [
+          "transform_target_profile",
+          "source_response_profile"
+        ],
+        "key": "transform_transform_map",
+        "name": "DEMO Field Map",
+        "type": "transform.map"
+      },
+      {
+        "action": "create",
+        "component_id": null,
+        "config": {
+          "auth": "NONE",
+          "base_url": "https://target.example.com",
+          "component_name": "DEMO REST Connection",
+          "connector_type": "rest"
+        },
+        "depends_on": [],
+        "key": "target_rest_connection",
+        "name": "DEMO REST Connection",
+        "type": "connector-settings"
+      },
+      {
+        "action": "create",
+        "component_id": null,
+        "config": {
+          "component_name": "DEMO REST Send",
+          "connection_ref_key": "target_rest_connection",
+          "connector_type": "rest",
+          "method": "POST",
+          "operation_mode": "execute",
+          "path": "/v1/<<target resource>>",
+          "request_profile_id": "$ref:transform_target_profile",
+          "request_profile_type": "json"
+        },
+        "depends_on": [
+          "target_rest_connection",
+          "transform_target_profile"
+        ],
+        "key": "target_rest_operation",
+        "name": "DEMO REST Send",
+        "type": "connector-action"
+      }
+    ],
+    "integration_name": "issue-157 replay api_to_api_sync/create",
+    "intent_kind": "process_ir",
+    "units": [
+      {
+        "envelope": {
+          "action": "create",
+          "component_key": "main_process",
+          "depends_on": [
+            "source_rest_source_connection",
+            "source_rest_source_operation",
+            "target_rest_connection",
+            "target_rest_operation",
+            "transform_transform_map"
+          ],
+          "name": "DEMO API to API Sync"
+        },
+        "process_ir": {
+          "body": {
+            "kind": "sequence",
+            "steps": [
+              {
+                "connection_ref": "$ref:source_rest_source_connection",
+                "kind": "source",
+                "operation_ref": "$ref:source_rest_source_operation"
+              },
+              {
+                "kind": "map_ref",
+                "label": "Map source response to target payload",
+                "map_ref": "$ref:transform_transform_map"
+              },
+              {
+                "connection_ref": "$ref:target_rest_connection",
+                "kind": "target",
+                "operation_ref": "$ref:target_rest_operation"
+              },
+              {
+                "kind": "stop"
+              }
+            ]
+          },
+          "version": "1"
+        }
+      }
+    ]
+  }
+}

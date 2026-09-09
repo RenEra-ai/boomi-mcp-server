@@ -369,17 +369,24 @@ def create_connector(
     boomi_client: Boomi,
     profile: str,
     config: Dict[str, Any],
+    *,
+    folder_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Create a new connector component.
 
     Two paths:
     1. Raw XML — if config["xml"] provided, POST directly (any connector type)
     2. Builder — if config["connector_type"] provided (e.g., "rest", "database"), use builder
+
+    ``folder_id`` places the component; see :func:`create_component` for why
+    that is the only spelling this platform honours on a create and why it is
+    applied at the transport rather than in each builder (QA-157-r1-01).
     """
+    folder_id = folder_id or config.get("folder_id")
     try:
         # Path 1: raw XML
         if config.get('xml'):
-            result = _create_component_raw(boomi_client, config['xml'])
+            result = _create_component_raw(boomi_client, config['xml'], folder_id=folder_id)
             return {
                 "_success": True,
                 "message": f"Created connector '{result['name']}'",
@@ -470,7 +477,7 @@ def create_connector(
                     ),
                 }
             xml = action_builder.build(**config)
-            result = _create_component_raw(boomi_client, xml)
+            result = _create_component_raw(boomi_client, xml, folder_id=folder_id)
             return {
                 "_success": True,
                 "message": (
@@ -506,7 +513,7 @@ def create_connector(
             }
 
         xml = builder.build(**config)
-        result = _create_component_raw(boomi_client, xml)
+        result = _create_component_raw(boomi_client, xml, folder_id=folder_id)
 
         return {
             "_success": True,

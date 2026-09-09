@@ -1,0 +1,173 @@
+{
+  "baseline_sha": "ba1be9f34317d720d3b012484622ab7e2742143b",
+  "entry": {
+    "kind": "compose_archetypes",
+    "legs": 3,
+    "staged": []
+  },
+  "input": {
+    "options": {
+      "links": [
+        {
+          "from_part": "db",
+          "to_part": "shape"
+        },
+        {
+          "from_part": "shape",
+          "to_part": "orders"
+        },
+        {
+          "from_part": "shape",
+          "to_part": "billing"
+        },
+        {
+          "from_part": "shape",
+          "to_part": "shipping"
+        }
+      ],
+      "naming": {
+        "component_prefix": "CMP",
+        "integration_name": "compose-case"
+      }
+    },
+    "parts": [
+      {
+        "key": "db",
+        "kind": "db_source",
+        "parameters": {
+          "binding": {
+            "mode": "create",
+            "settings": {
+              "auth_mode": "username_password",
+              "credential_ref": "secrets/db/svc_sync",
+              "database": "AppDB",
+              "driver": "microsoft_jdbc",
+              "host": "db.internal",
+              "username": "svc_sync"
+            }
+          },
+          "read_operation": {
+            "result_schema": {
+              "fields": [
+                {
+                  "data_type": "character",
+                  "name": "source_field_a"
+                }
+              ]
+            },
+            "sql": "<<user-authored DB read statement>>"
+          }
+        }
+      },
+      {
+        "key": "shape",
+        "kind": "transform",
+        "parameters": {
+          "operations": [
+            {
+              "operation_type": "direct",
+              "source_field": "source_field_a",
+              "target_path": "Root/target_a"
+            }
+          ]
+        }
+      },
+      {
+        "key": "orders",
+        "kind": "rest_target",
+        "label": "Orders",
+        "parameters": {
+          "binding": {
+            "mode": "create",
+            "settings": {
+              "auth_mode": "none",
+              "base_url": "https://api.example.com"
+            }
+          },
+          "payload_profile": {
+            "format": "json",
+            "root": {
+              "children": [
+                {
+                  "data_type": "character",
+                  "kind": "simple",
+                  "name": "target_a"
+                }
+              ],
+              "kind": "object",
+              "name": "Root"
+            }
+          },
+          "send_request": {
+            "method": "POST",
+            "path": "/v1/items"
+          }
+        }
+      },
+      {
+        "key": "billing",
+        "kind": "rest_target",
+        "label": "Billing",
+        "parameters": {
+          "binding": {
+            "mode": "create",
+            "settings": {
+              "auth_mode": "none",
+              "base_url": "https://api.example.com"
+            }
+          },
+          "payload_profile": {
+            "format": "json",
+            "root": {
+              "children": [
+                {
+                  "data_type": "character",
+                  "kind": "simple",
+                  "name": "target_a"
+                }
+              ],
+              "kind": "object",
+              "name": "Root"
+            }
+          },
+          "send_request": {
+            "method": "POST",
+            "path": "/v1/items"
+          }
+        }
+      },
+      {
+        "key": "shipping",
+        "kind": "rest_target",
+        "label": "Shipping",
+        "parameters": {
+          "binding": {
+            "mode": "create",
+            "settings": {
+              "auth_mode": "none",
+              "base_url": "https://api.example.com"
+            }
+          },
+          "payload_profile": {
+            "format": "json",
+            "root": {
+              "children": [
+                {
+                  "data_type": "character",
+                  "kind": "simple",
+                  "name": "target_a"
+                }
+              ],
+              "kind": "object",
+              "name": "Root"
+            }
+          },
+          "send_request": {
+            "method": "POST",
+            "path": "/v1/items"
+          }
+        }
+      }
+    ]
+  }
+}

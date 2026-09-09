@@ -516,6 +516,57 @@ UPDATE_PRESERVATION_FETCH_FAILED = "UPDATE_PRESERVATION_FETCH_FAILED"
 #: HIGH-stakes one (a write may have landed) was not.
 UPDATE_PRESERVATION_PUSH_FAILED = "UPDATE_PRESERVATION_PUSH_FAILED"
 
+# --- Authoring governance (M12.19 / issue #157) --------------------------------
+# ONE family, one introducer. #157 is the SOLE introducer of ``GOVERNANCE_*``,
+# guarded by the same biconditional #144/#145/#146/#153 carry: every code below
+# is owned by #157 AND every ``GOVERNANCE_``-prefixed key in the taxonomy is
+# owned by #157.
+#
+# Why a new family rather than ``AUTHORING_*``: that family is CLOSED to #146
+# by a biconditional test (and #153's guard asserts it introduces none), and
+# its subject is the MCP authoring surface — the contract addressed, the
+# revision bound, the phase order. These blame the GOVERNANCE data a typed
+# intent carries: the resolved per-root envelope (default naming, folder
+# fan-out), the connection binding contract, the recorded-not-wired intent
+# channel, and the retired legacy metadata spellings. Every one is a refusal or
+# a named input contradiction; none is a canonical validator's own code.
+
+#: A process root authored neither an explicit name nor a component prefix to
+#: derive one from.
+GOVERNANCE_NAME_UNRESOLVED = "GOVERNANCE_NAME_UNRESOLVED"
+#: Two roots (or a root and a derived supporting component) resolve to the
+#: same create name.
+GOVERNANCE_NAME_COLLISION = "GOVERNANCE_NAME_COLLISION"
+#: A supporting component with no explicit placement/name is owned by two
+#: roots whose governance disagrees.
+GOVERNANCE_INHERITANCE_AMBIGUOUS = "GOVERNANCE_INHERITANCE_AMBIGUOUS"
+#: A recipe per-root envelope names a key no composed root has.
+GOVERNANCE_ENVELOPE_UNMATCHED = "GOVERNANCE_ENVELOPE_UNMATCHED"
+#: Two recipe per-root envelopes name the same root.
+GOVERNANCE_ENVELOPE_DUPLICATE = "GOVERNANCE_ENVELOPE_DUPLICATE"
+#: Governance for one root arrives from two sources — a typed envelope AND the
+#: lifted component's config/name — which would make one of them a silent
+#: duplicate authority.
+GOVERNANCE_SOURCE_CONFLICT = "GOVERNANCE_SOURCE_CONFLICT"
+#: A connection binding both reuses an existing component and carries inline
+#: creation settings, or names two disagreeing reuse identities.
+GOVERNANCE_CONNECTION_BINDING_CONFLICT = "GOVERNANCE_CONNECTION_BINDING_CONFLICT"
+#: Connection default headers and operation headers collide on a
+#: case-insensitive header name.
+GOVERNANCE_HEADER_COLLISION = "GOVERNANCE_HEADER_COLLISION"
+#: A compiling intent supplied ``flows``; on those intents flows are a
+#: DERIVED, output-only projection and are never merged with authored rows.
+GOVERNANCE_FLOWS_OUTPUT_ONLY = "GOVERNANCE_FLOWS_OUTPUT_ONLY"
+#: A recorded-intent declaration is malformed or names a root/intent twice.
+GOVERNANCE_RECORDED_INTENT_INVALID = "GOVERNANCE_RECORDED_INTENT_INVALID"
+#: The typed watermark declaration contradicts the request it rides on: the
+#: tracked field is not a declared source field, or a watermark-sourced query
+#: parameter is named with no declaration to source it.
+GOVERNANCE_WATERMARK_INCONSISTENT = "GOVERNANCE_WATERMARK_INCONSISTENT"
+#: A retired legacy metadata spelling was authored on the typed surface.
+GOVERNANCE_RETIRED_SPELLING = "GOVERNANCE_RETIRED_SPELLING"
+
+
 #: #155: the connector-replay evidence registry. Every code in this family reports
 #: a REFUSAL to draw a conclusion, never a failure to perform work — which is why
 #: none of them is retryable. Retrying a refused digest yields the same refusal, and
@@ -2217,6 +2268,130 @@ ERROR_TAXONOMY: Dict[str, ErrorCodeSpec] = {
                 "created and the request may be retried."
             ),
             owner="#153",
+        ),
+        ErrorCodeSpec(
+            code=GOVERNANCE_NAME_UNRESOLVED,
+            category="governance",
+            retryable=False,
+            summary=(
+                "A process root authored neither an explicit name nor a "
+                "component prefix from which a default name could be derived."
+            ),
+            owner="#157",
+        ),
+        ErrorCodeSpec(
+            code=GOVERNANCE_NAME_COLLISION,
+            category="governance",
+            retryable=False,
+            summary=(
+                "Two process roots, or a root and a derived supporting "
+                "component, resolve to the same create name."
+            ),
+            owner="#157",
+        ),
+        ErrorCodeSpec(
+            code=GOVERNANCE_INHERITANCE_AMBIGUOUS,
+            category="governance",
+            retryable=False,
+            summary=(
+                "A supporting component with no explicit placement or name is "
+                "owned by two process roots whose governance disagrees; give "
+                "it an explicit value."
+            ),
+            owner="#157",
+        ),
+        ErrorCodeSpec(
+            code=GOVERNANCE_ENVELOPE_UNMATCHED,
+            category="governance",
+            retryable=False,
+            summary=(
+                "A recipe per-root envelope names a component key that no "
+                "composed process root carries."
+            ),
+            owner="#157",
+        ),
+        ErrorCodeSpec(
+            code=GOVERNANCE_ENVELOPE_DUPLICATE,
+            category="governance",
+            retryable=False,
+            summary="Two recipe per-root envelopes name the same process root.",
+            owner="#157",
+        ),
+        ErrorCodeSpec(
+            code=GOVERNANCE_SOURCE_CONFLICT,
+            category="governance",
+            retryable=False,
+            summary=(
+                "Governance for one process root was supplied both by a typed "
+                "per-root envelope and by the lifted component's own name or "
+                "config; only the typed envelope is an authority."
+            ),
+            owner="#157",
+        ),
+        ErrorCodeSpec(
+            code=GOVERNANCE_CONNECTION_BINDING_CONFLICT,
+            category="governance",
+            retryable=False,
+            summary=(
+                "A connection binding both reuses an existing component and "
+                "carries inline creation settings, or names two disagreeing "
+                "reuse identities; reuse and create are exclusive."
+            ),
+            owner="#157",
+        ),
+        ErrorCodeSpec(
+            code=GOVERNANCE_HEADER_COLLISION,
+            category="governance",
+            retryable=False,
+            summary=(
+                "A connection's default headers and an operation's headers "
+                "name the same HTTP header (case-insensitively); the "
+                "collision is refused rather than resolved last-write-wins."
+            ),
+            owner="#157",
+        ),
+        ErrorCodeSpec(
+            code=GOVERNANCE_FLOWS_OUTPUT_ONLY,
+            category="governance",
+            retryable=False,
+            summary=(
+                "A compiling intent supplied a flows value; on the process_ir "
+                "and recipe intents flows are a derived, output-only "
+                "projection and caller rows are never merged into it."
+            ),
+            owner="#157",
+        ),
+        ErrorCodeSpec(
+            code=GOVERNANCE_RECORDED_INTENT_INVALID,
+            category="governance",
+            retryable=False,
+            summary=(
+                "A recorded-not-wired intent declaration is malformed, names "
+                "a root that is not authored, or repeats an intent id."
+            ),
+            owner="#157",
+        ),
+        ErrorCodeSpec(
+            code=GOVERNANCE_WATERMARK_INCONSISTENT,
+            category="governance",
+            retryable=False,
+            summary=(
+                "The typed watermark declaration contradicts the request: the "
+                "tracked field is not a declared source field, or a "
+                "watermark-sourced query parameter has no declaration."
+            ),
+            owner="#157",
+        ),
+        ErrorCodeSpec(
+            code=GOVERNANCE_RETIRED_SPELLING,
+            category="governance",
+            retryable=False,
+            summary=(
+                "A retired legacy metadata spelling was authored on the typed "
+                "surface; it never affected an emitted byte, fingerprint, "
+                "mutation or verdict and is refused rather than ignored."
+            ),
+            owner="#157",
         ),
     )
 }

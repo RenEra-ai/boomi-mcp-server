@@ -129,6 +129,16 @@ class RecipeRunResultV1:
     topology_plans: Tuple[Tuple[str, Any], ...]
     provenance: Mapping[str, Any]
 
+    @property
+    def recorded_intents(self) -> Tuple[Any, ...]:
+        """#157: the recorded-not-wired contributions, in composition order.
+
+        DERIVED from the composed result rather than stored beside it, so the
+        two cannot disagree — the same reason `_NormalizedIntent.process_roots`
+        is a projection of the spec.
+        """
+        return tuple(item.contribution for item in self.composed.recorded_intents)
+
     def artifact_for(self, process_key: str) -> Any:
         for key, artifact in self.process_artifacts:
             if key == process_key:
@@ -1679,6 +1689,10 @@ def run_recipes(
     composed = compose(attributed, descriptors)
 
     components = _resolve_components(composed, catalog)
+    # #157: the required-target-leaf coverage HARD GATE, the same single
+    # implementation the typed intents' semantic validation runs, invoked on
+    # the raw recipe route too so neither entry point can skip it.
+    _validate_component_maps(components)
     process_artifacts = _compile_processes(
         composed, components, connector_metadata, resolver, effect_declarations,
         conflict_policy,
@@ -1705,6 +1719,43 @@ def run_recipes(
             ],
         },
     )
+
+
+def _validate_component_maps(components: Sequence[IntegrationComponentSpec]) -> None:
+    """Refuse a structured transform.map that leaves a required target leaf unbound.
+
+    ONE implementation (issue #157): ``validate_required_target_coverage`` in the
+    shared map-validation module, which resolves the target profile through the
+    same index resolver every map check uses and preserves the DB empty-index
+    deferral. Raw-XML maps (the ``config.xml`` escape hatch) carry no structured
+    mappings and are not this gate's subject.
+    """
+    from ..categories.components.builders.transform_map_validation import (
+        validate_required_target_coverage,
+    )
+
+    by_key = {component.key: component for component in components}
+    for component in components:
+        if component.type != "transform.map":
+            continue
+        config = component.config if isinstance(component.config, dict) else {}
+        if isinstance(config.get("xml"), str) and config["xml"].strip():
+            continue
+        effective = dict(config)
+        if component.name and not effective.get("component_name"):
+            effective["component_name"] = component.name
+        error = validate_required_target_coverage(effective, by_key)
+        if error is not None:
+            raise RecipeError(
+                (
+                    recipe_diagnostic(
+                        RECIPE_CONSTRAINT_FAILED,
+                        phase="validation",
+                        target=f"component:{component.key}",
+                        cause_codes=(str(error.error_code),),
+                    ),
+                )
+            )
 
 
 def _resolve_components(

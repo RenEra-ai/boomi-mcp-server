@@ -606,6 +606,7 @@ def test_the_public_compile_entry_reads_a_named_component_and_stringifies_it():
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     from _m12_11_support import (  # noqa: E402
         APPLIABLE_CONN,
+        reuse_binding,
         APPLIABLE_OP,
         appliable_op_matching_the_capture,
         appliable_process_ir_request,
@@ -665,6 +666,7 @@ def test_an_authored_reference_only_reuse_compiles_a_retried_evidenced_write():
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     from _m12_11_support import (  # noqa: E402
         APPLIABLE_CONN,
+        reuse_binding,
         APPLIABLE_OP,
         appliable_op_matching_the_capture,
         ProcessAuthoringUnitV1,
@@ -720,7 +722,7 @@ def test_an_authored_reference_only_reuse_compiles_a_retried_evidenced_write():
         components=(
             dict(APPLIABLE_CONN, component_id=connection.component_id,
                  action="create",
-                 config=dict(APPLIABLE_CONN["config"], reference_only=True)),
+                 config=reuse_binding(APPLIABLE_CONN)),
             dict(appliable_op_matching_the_capture(), component_id=operation.component_id, action="create",
                  config=dict(appliable_op_matching_the_capture()["config"], reference_only=True,
                              method="PATCH")),
@@ -758,6 +760,7 @@ def _evidenced_reference_only_request():
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     from _m12_11_support import (  # noqa: E402
         APPLIABLE_CONN,
+        reuse_binding,
         APPLIABLE_OP,
         appliable_op_matching_the_capture,
         ProcessAuthoringUnitV1,
@@ -784,7 +787,7 @@ def _evidenced_reference_only_request():
         components=(
             dict(APPLIABLE_CONN, component_id=connection.component_id,
                  action="create",
-                 config=dict(APPLIABLE_CONN["config"], reference_only=True)),
+                 config=reuse_binding(APPLIABLE_CONN)),
             dict(appliable_op_matching_the_capture(), component_id=operation.component_id, action="create",
                  config=dict(appliable_op_matching_the_capture()["config"], reference_only=True,
                              method="PATCH")),
@@ -908,6 +911,7 @@ def test_an_unreadable_live_component_refuses_rather_than_trusting_the_caller():
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     from _m12_11_support import (  # noqa: E402
         APPLIABLE_CONN,
+        reuse_binding,
         APPLIABLE_OP,
         appliable_op_matching_the_capture,
         ProcessAuthoringUnitV1,
@@ -944,7 +948,7 @@ def test_an_unreadable_live_component_refuses_rather_than_trusting_the_caller():
                 protected="$ref:op", upstream="$ref:getop", retry={"count": 2}))),),
         components=(
             dict(APPLIABLE_CONN, component_id=connection.component_id, action="create",
-                 config=dict(APPLIABLE_CONN["config"], reference_only=True)),
+                 config=reuse_binding(APPLIABLE_CONN)),
             dict(appliable_op_matching_the_capture(), component_id=operation.component_id, action="create",
                  config=dict(appliable_op_matching_the_capture()["config"], reference_only=True, method="GET")),
             dict(APPLIABLE_OP, key="getop", name="G",

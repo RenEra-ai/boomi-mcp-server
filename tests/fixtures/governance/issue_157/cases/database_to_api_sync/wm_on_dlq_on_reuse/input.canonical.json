@@ -1,0 +1,233 @@
+{
+  "contract_version": "2",
+  "intent": {
+    "components": [
+      {
+        "action": "create",
+        "component_id": "<<existing connector id>>",
+        "config": {
+          "component_id": "<<existing connector id>>",
+          "connector_type": "database",
+          "reference_only": true
+        },
+        "depends_on": [],
+        "key": "source_db_connection",
+        "name": null,
+        "type": "connector-settings"
+      },
+      {
+        "action": "create",
+        "component_id": null,
+        "config": {
+          "component_name": "DEMO-INC DB Read Profile",
+          "folder_name": "Integrations/CRM/Sync",
+          "output_fields": [
+            {
+              "data_type": "character",
+              "enforce_unique": false,
+              "mandatory": true,
+              "name": "source_a"
+            },
+            {
+              "data_type": "datetime",
+              "enforce_unique": false,
+              "mandatory": false,
+              "name": "source_b"
+            }
+          ],
+          "parameters": [
+            {
+              "data_type": "character",
+              "mappable": true,
+              "name": "<<bind parameter name>>"
+            }
+          ],
+          "profile_type": "database.read",
+          "query": "<<user-authored DB read statement>>"
+        },
+        "depends_on": [],
+        "key": "source_db_read_profile",
+        "name": "DEMO-INC DB Read Profile",
+        "type": "profile.db"
+      },
+      {
+        "action": "create",
+        "component_id": null,
+        "config": {
+          "batch_count": 500,
+          "component_name": "DEMO-INC DB Get",
+          "connection_ref_key": "source_db_connection",
+          "connector_type": "database",
+          "folder_name": "Integrations/CRM/Sync",
+          "operation_mode": "get",
+          "read_profile_id": "$ref:source_db_read_profile"
+        },
+        "depends_on": [
+          "source_db_connection",
+          "source_db_read_profile"
+        ],
+        "key": "source_db_get_operation",
+        "name": "DEMO-INC DB Get",
+        "type": "connector-action"
+      },
+      {
+        "action": "create",
+        "component_id": null,
+        "config": {
+          "component_name": "DEMO-INC Target Profile",
+          "folder_path": "Integrations/CRM/Sync",
+          "profile_type": "json.generated",
+          "root": {
+            "children": [
+              {
+                "children": null,
+                "data_type": "character",
+                "description": null,
+                "kind": "simple",
+                "name": "target_a",
+                "required": true
+              },
+              {
+                "children": null,
+                "data_type": "datetime",
+                "description": null,
+                "kind": "simple",
+                "name": "target_b",
+                "required": false
+              }
+            ],
+            "data_type": null,
+            "description": null,
+            "kind": "object",
+            "name": "Root",
+            "required": false
+          }
+        },
+        "depends_on": [],
+        "key": "transform_target_profile",
+        "name": "DEMO-INC Target Profile",
+        "type": "profile.json"
+      },
+      {
+        "action": "create",
+        "component_id": null,
+        "config": {
+          "component_name": "DEMO-INC Field Map",
+          "field_mappings": [
+            {
+              "documentation_hint": "carry first column verbatim",
+              "source_path": "source_a",
+              "target_path": "Root/target_a"
+            }
+          ],
+          "folder_path": "Integrations/CRM/Sync",
+          "function_mappings": [
+            {
+              "function_type": "date_format",
+              "inputs": [
+                "source_b"
+              ],
+              "parameters": {
+                "input_format": "<<source datetime format>>",
+                "output_format": "<<target datetime format>>"
+              },
+              "target_path": "Root/target_b"
+            }
+          ],
+          "map_type": "function",
+          "source_profile_id": "$ref:source_db_read_profile",
+          "source_profile_type": "profile.db",
+          "target_profile_id": "$ref:transform_target_profile",
+          "target_profile_type": "profile.json"
+        },
+        "depends_on": [
+          "transform_target_profile",
+          "source_db_read_profile"
+        ],
+        "key": "transform_transform_map",
+        "name": "DEMO-INC Field Map",
+        "type": "transform.map"
+      },
+      {
+        "action": "create",
+        "component_id": "<<existing REST connection id>>",
+        "config": {
+          "component_id": "<<existing REST connection id>>",
+          "connector_type": "rest",
+          "reference_only": true
+        },
+        "depends_on": [],
+        "key": "target_rest_connection",
+        "name": null,
+        "type": "connector-settings"
+      },
+      {
+        "action": "create",
+        "component_id": null,
+        "config": {
+          "component_name": "DEMO-INC REST Send",
+          "connection_ref_key": "target_rest_connection",
+          "connector_type": "rest",
+          "folder_name": "Integrations/CRM/Sync",
+          "method": "POST",
+          "operation_mode": "execute",
+          "path": "/v1/customers",
+          "request_profile_id": "$ref:transform_target_profile",
+          "request_profile_type": "json"
+        },
+        "depends_on": [
+          "target_rest_connection",
+          "transform_target_profile"
+        ],
+        "key": "target_rest_operation",
+        "name": "DEMO-INC REST Send",
+        "type": "connector-action"
+      }
+    ],
+    "integration_name": "issue-157 replay database_to_api_sync/wm_on_dlq_on_reuse",
+    "intent_kind": "process_ir",
+    "units": [
+      {
+        "envelope": {
+          "action": "create",
+          "component_key": "main_process",
+          "depends_on": [
+            "source_db_connection",
+            "source_db_get_operation",
+            "target_rest_connection",
+            "target_rest_operation",
+            "transform_transform_map"
+          ],
+          "folder_name": "Integrations/CRM/Sync",
+          "name": "DEMO-INC DB to API Sync"
+        },
+        "process_ir": {
+          "body": {
+            "kind": "sequence",
+            "steps": [
+              {
+                "connection_ref": "$ref:source_db_connection",
+                "kind": "source",
+                "operation_ref": "$ref:source_db_get_operation"
+              },
+              {
+                "kind": "map_ref",
+                "label": "Map source to JSON payload",
+                "map_ref": "$ref:transform_transform_map"
+              },
+              {
+                "connection_ref": "$ref:target_rest_connection",
+                "kind": "target",
+                "operation_ref": "$ref:target_rest_operation"
+              },
+              {
+                "kind": "stop"
+              }
+            ]
+          },
+          "version": "1"
+        }
+      }
+    ]
+  }
+}

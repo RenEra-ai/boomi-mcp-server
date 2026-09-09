@@ -641,7 +641,7 @@ _INTEGRATION_OVERVIEW = {
         ],
         "warnings": [
             "DUPLICATE_CONNECTION — two in-spec create connections to the same endpoint each burn a separate connection license; compatible-auth duplicates are aliased to the canonical one (see connection_aliases), differing-auth duplicates are flagged distinct. Advisory: it never blocks the build (auto-reference, not refuse).",
-            "CONNECTION_ENDPOINT_IP_LITERAL (prefer FQDN), CONNECTION_BASE_URL_HAS_PATH / CONNECTION_CARRIES_PER_CALL_FIELDS (minimal-connection), FOLDER_REQUIRED_ON_CREATE (no folder → account root), PROPERTY_NAMING (DPP_/DDP_ UPPER_SNAKE), and — when naming.convention=='bracketed' — NAMING_CONVENTION_BRACKETED per-type checks.",
+            "CONNECTION_ENDPOINT_IP_LITERAL (prefer FQDN), CONNECTION_BASE_URL_HAS_PATH / CONNECTION_CARRIES_PER_CALL_FIELDS (minimal-connection), FOLDER_REQUIRED_ON_CREATE (no folder → wherever the create route defaults), PROPERTY_NAMING (DPP_/DDP_ UPPER_SNAKE), and — when naming.convention=='bracketed' — NAMING_CONVENTION_BRACKETED per-type checks.",
         ],
         "naming_convention": "bracketed naming is a CHOSEN account convention (Boomi mandates no single style); activate it with naming.convention='bracketed'. The lint flags, never rewrites.",
         "extensions": "Environment-extension declarations cover DB (xpath-keyed) and REST (id-keyed, no xpath) connections, including reuse-mode REST credentials; SET_BY_EXTENSION is the fail-fast placeholder convention for a non-secret extension-bound field.",
@@ -11013,7 +11013,12 @@ def list_capabilities_action(
                     "AUTHORING_APPLY_VALIDATION_REQUIRED. A typed apply REQUIRES "
                     "expected_capability_revision and expected_compile_hash inside "
                     "authoring_request; legacy requests need none of them and are "
-                    "unchanged."
+                    "unchanged. Issue #157: governance (name or component_prefix, "
+                    "description, folder_name fan-out, process_extensions, watermark, "
+                    "recorded_intents) is authored on each unit's envelope and "
+                    "resolved before fingerprinting; recipe intents take "
+                    "process_envelopes; flows is derived-only on both compiling "
+                    "intents."
                 ),
             },
             "authority_versions": _AUTHORITY_VERSIONS,

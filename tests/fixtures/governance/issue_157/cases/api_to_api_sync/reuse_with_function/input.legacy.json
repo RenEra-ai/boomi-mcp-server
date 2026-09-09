@@ -1,0 +1,104 @@
+{
+  "baseline_sha": "ba1be9f34317d720d3b012484622ab7e2742143b",
+  "entry": {
+    "example": "reuse_connections_with_function",
+    "kind": "archetype_example"
+  },
+  "input": {
+    "archetype": "api_to_api_sync",
+    "parameters": {
+      "naming": {
+        "component_prefix": "DEMO-ENR",
+        "folder_path": "Integrations/API/Sync",
+        "integration_name": "demo-api-to-api-enriched",
+        "runtime_hints": {
+          "atom_pool": "primary"
+        }
+      },
+      "source": {
+        "binding": {
+          "component_id": "<<existing REST source connection id>>",
+          "mode": "reuse"
+        },
+        "fetch_request": {
+          "path": "/v1/<<source resource>>",
+          "query_parameters": {
+            "limit": "100"
+          }
+        },
+        "response_profile": {
+          "format": "json",
+          "root": {
+            "children": [
+              {
+                "data_type": "character",
+                "kind": "simple",
+                "name": "id",
+                "required": true
+              },
+              {
+                "data_type": "datetime",
+                "kind": "simple",
+                "name": "updated_at"
+              }
+            ],
+            "kind": "object",
+            "name": "Root"
+          }
+        }
+      },
+      "target": {
+        "binding": {
+          "component_id": "<<existing REST target connection id>>",
+          "mode": "reuse"
+        },
+        "payload_profile": {
+          "format": "json",
+          "root": {
+            "children": [
+              {
+                "data_type": "character",
+                "kind": "simple",
+                "name": "external_id",
+                "required": true
+              },
+              {
+                "data_type": "datetime",
+                "kind": "simple",
+                "name": "modified"
+              }
+            ],
+            "kind": "object",
+            "name": "Root"
+          }
+        },
+        "send_request": {
+          "method": "PUT",
+          "path": "/v1/<<target resource>>"
+        }
+      },
+      "transform": {
+        "operations": [
+          {
+            "documentation_hint": "carry the source id verbatim",
+            "operation_type": "direct",
+            "source_path": "Root/id",
+            "target_path": "Root/external_id"
+          },
+          {
+            "function_type": "date_format",
+            "inputs": [
+              "Root/updated_at"
+            ],
+            "operation_type": "map_function",
+            "parameters": {
+              "input_format": "<<source datetime format>>",
+              "output_format": "<<target datetime format>>"
+            },
+            "target_path": "Root/modified"
+          }
+        ]
+      }
+    }
+  }
+}

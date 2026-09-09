@@ -88,6 +88,11 @@ class ComposedContributionsV1:
     component_slots: Tuple[AttributedContributionV1, ...]
     topologies: Tuple[Tuple[str, Dict[str, Any]], ...]
     constraints: Tuple[AttributedContributionV1, ...]
+    #: #157: recorded-not-wired declarations, in contribution order. Carried
+    #: through composition unchanged and never read by compilation,
+    #: materialization, constraint evaluation or hashing — the authoring
+    #: workflow serves them beside the executable result.
+    recorded_intents: Tuple[AttributedContributionV1, ...] = ()
 
 
 def order_invocations(
@@ -351,18 +356,67 @@ def compose(
         for item in attributed
         if item.contribution.contribution_kind == "constraint_requirement"
     ]
+    recorded = [
+        item
+        for item in attributed
+        if item.contribution.contribution_kind == "recorded_intent"
+    ]
 
     roots = _compose_process_roots(process_patches, descriptors, direct_roots)
     topologies = _compose_topologies(topology_patches, descriptors, direct_topos)
     ordered_components = _compose_components(components, descriptors)
     ordered_constraints = _compose_constraints(constraints, descriptors)
+    ordered_recorded = _compose_recorded_intents(recorded, roots)
 
     return ComposedContributionsV1(
         process_roots=tuple(roots.items()),
         component_slots=tuple(ordered_components),
         topologies=tuple(topologies.items()),
         constraints=tuple(ordered_constraints),
+        recorded_intents=tuple(ordered_recorded),
     )
+
+
+def _compose_recorded_intents(
+    recorded: Sequence[AttributedContributionV1],
+    roots: Mapping[str, Any],
+) -> List[AttributedContributionV1]:
+    """Recorded-not-wired declarations, checked for identity and ownership (#157).
+
+    Two refusals, both structural: a declaration for a root nobody composed
+    (a record that describes nothing), and two declarations sharing one
+    ``(process_key, intent_id)`` (two records that claim one identity). Order
+    is contribution order — the composition already sorted invocations
+    deterministically, so this is stable without a second sort.
+    """
+    seen: Dict[Tuple[str, str], Tuple[str, str, str]] = {}
+    ordered: List[AttributedContributionV1] = []
+    for item in recorded:
+        contribution = item.contribution
+        if contribution.process_key not in roots:
+            raise RecipeError(
+                (
+                    recipe_diagnostic(
+                        RECIPE_PATCH_TARGET_NOT_FOUND,
+                        phase="composition",
+                        target=f"recorded_intent:{contribution.process_key}",
+                        recipe_ids=(item.recipe_id,),
+                        recipe_versions=(item.recipe_version,),
+                        invocation_ids=(item.invocation_id,),
+                    ),
+                )
+            )
+        identity = (contribution.process_key, contribution.intent_id)
+        previous = seen.get(identity)
+        if previous is not None:
+            raise _conflict(
+                previous,
+                _producer(item),
+                target=f"recorded_intent:{contribution.process_key}/{contribution.intent_id}",
+            )
+        seen[identity] = _producer(item)
+        ordered.append(item)
+    return ordered
 
 
 # ---------------------------------------------------------------------------

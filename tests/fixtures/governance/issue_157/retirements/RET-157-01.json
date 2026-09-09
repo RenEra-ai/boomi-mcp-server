@@ -1,0 +1,247 @@
+{
+  "baseline_sha": "ba1be9f34317d720d3b012484622ab7e2742143b",
+  "baseline_tree_sha": "27487413b2d54234fe73bd57ae8779cb0d1352f5",
+  "classification": "RETIRE",
+  "cutover_owner": "#160",
+  "field_path": "source/binding/settings/jdbc_options",
+  "id": "RET-157-01",
+  "measured_classification": "RETIRE",
+  "observations": {
+    "accepted_by_contract": true,
+    "component_types": {
+      "main_process": "process",
+      "source_db_connection": "connector-settings",
+      "source_db_get_operation": "connector-action",
+      "source_db_read_profile": "profile.db",
+      "target_rest_connection": "connector-settings",
+      "target_rest_operation": "connector-action",
+      "transform_target_profile": "profile.json",
+      "transform_transform_map": "transform.map"
+    },
+    "emitted_xml_digests": {
+      "main_process": {
+        "base": "a5273b9330e5fa020fc07d1d3217eca27386aeae309172e793c4d77e3ebed3a5",
+        "varied": "a5273b9330e5fa020fc07d1d3217eca27386aeae309172e793c4d77e3ebed3a5"
+      },
+      "source_db_connection": {
+        "base": "5011247dc5c7ce149a38f3f3ae6b518fc5112f3302edadcf914f32217938e961",
+        "varied": "5011247dc5c7ce149a38f3f3ae6b518fc5112f3302edadcf914f32217938e961"
+      },
+      "source_db_get_operation": {
+        "base": "fd4c3a8745079de220177aae1dd86b44abfaf5cd7bc9ba6e70918df17a0fcfe0",
+        "varied": "fd4c3a8745079de220177aae1dd86b44abfaf5cd7bc9ba6e70918df17a0fcfe0"
+      },
+      "source_db_read_profile": {
+        "base": "accba6f946f58c2d27ee776b9dcfa9f0c2da8dc66b40dabbd3247bbcbaceef20",
+        "varied": "accba6f946f58c2d27ee776b9dcfa9f0c2da8dc66b40dabbd3247bbcbaceef20"
+      },
+      "target_rest_connection": {
+        "base": "3fa7e7d1f58f46339451906effeb1b5142db593fa0b7d690c05f500e3f14960f",
+        "varied": "3fa7e7d1f58f46339451906effeb1b5142db593fa0b7d690c05f500e3f14960f"
+      },
+      "target_rest_operation": {
+        "base": "bed05e5d962d5fdd0044c2be225be5d53e5609d7a56f4fd23567d622e31ff697",
+        "varied": "bed05e5d962d5fdd0044c2be225be5d53e5609d7a56f4fd23567d622e31ff697"
+      },
+      "transform_target_profile": {
+        "base": "5f32fd42502f9279bdc532118186b3fac11263065dc28d32816c22677a72120d",
+        "varied": "5f32fd42502f9279bdc532118186b3fac11263065dc28d32816c22677a72120d"
+      },
+      "transform_transform_map": {
+        "base": "34049f204738b696660430e0136e52eb22e7bc193cdec69a4a37e93907952f6e",
+        "varied": "34049f204738b696660430e0136e52eb22e7bc193cdec69a4a37e93907952f6e"
+      }
+    },
+    "non_vacuity_control": {
+      "field_path": "source/read_operation/batch_size",
+      "xml_moved": [
+        "source_db_get_operation"
+      ]
+    },
+    "plan_verdict_digest": {
+      "base": "38bb3f5f959e36e417d498a36e76922a13c75ee6f4694708c85f54219da6dbc5",
+      "varied": "38bb3f5f959e36e417d498a36e76922a13c75ee6f4694708c85f54219da6dbc5"
+    },
+    "spec_digest": {
+      "base": "b3674affa7516436d7c4f8fea04982aefc1204ab3c2021da30fffe1fe073b8c7",
+      "varied": "4f87f78919c8e351cf063e324381a80d77a1044e7b424015a09b060e8feaadc5"
+    },
+    "spec_echo_paths": [
+      "/validation_rules/operational_intent/deferred/jdbc_options/count",
+      "/validation_rules/operational_intent/deferred/jdbc_options/note"
+    ],
+    "xml_moved": []
+  },
+  "pair_base": {
+    "execution": {
+      "trigger": {
+        "mode": "manual"
+      }
+    },
+    "naming": {
+      "component_prefix": "DEMO",
+      "integration_name": "demo-db-to-api-sync"
+    },
+    "reliability": {
+      "dlq": {
+        "enabled": false
+      },
+      "error_classifier": {},
+      "retry": {
+        "max_attempts": 1
+      }
+    },
+    "source": {
+      "binding": {
+        "mode": "create",
+        "settings": {
+          "auth_mode": "username_password",
+          "credential_ref": "secrets/db/svc_sync",
+          "database": "AppDB",
+          "driver": "microsoft_jdbc",
+          "host": "db.internal",
+          "username": "svc_sync"
+        }
+      },
+      "read_operation": {
+        "result_schema": {
+          "fields": [
+            {
+              "data_type": "character",
+              "name": "source_field_a"
+            }
+          ]
+        },
+        "sql": "<<user-authored DB read statement>>"
+      }
+    },
+    "target": {
+      "binding": {
+        "mode": "create",
+        "settings": {
+          "auth_mode": "none",
+          "base_url": "https://api.example.com"
+        }
+      },
+      "payload_profile": {
+        "format": "json",
+        "root": {
+          "children": [
+            {
+              "data_type": "character",
+              "kind": "simple",
+              "name": "target_a"
+            }
+          ],
+          "kind": "object",
+          "name": "Root"
+        }
+      },
+      "send_request": {
+        "method": "POST",
+        "path": "/v1/items"
+      }
+    },
+    "transform": {
+      "operations": [
+        {
+          "operation_type": "direct",
+          "source_field": "source_field_a",
+          "target_path": "Root/target_a"
+        }
+      ]
+    }
+  },
+  "pair_diff": [
+    "/source/binding/settings/jdbc_options/encrypt",
+    "/source/binding/settings/jdbc_options/trustServerCertificate"
+  ],
+  "pair_varied": {
+    "execution": {
+      "trigger": {
+        "mode": "manual"
+      }
+    },
+    "naming": {
+      "component_prefix": "DEMO",
+      "integration_name": "demo-db-to-api-sync"
+    },
+    "reliability": {
+      "dlq": {
+        "enabled": false
+      },
+      "error_classifier": {},
+      "retry": {
+        "max_attempts": 1
+      }
+    },
+    "source": {
+      "binding": {
+        "mode": "create",
+        "settings": {
+          "auth_mode": "username_password",
+          "credential_ref": "secrets/db/svc_sync",
+          "database": "AppDB",
+          "driver": "microsoft_jdbc",
+          "host": "db.internal",
+          "jdbc_options": {
+            "encrypt": "true",
+            "trustServerCertificate": "true"
+          },
+          "username": "svc_sync"
+        }
+      },
+      "read_operation": {
+        "result_schema": {
+          "fields": [
+            {
+              "data_type": "character",
+              "name": "source_field_a"
+            }
+          ]
+        },
+        "sql": "<<user-authored DB read statement>>"
+      }
+    },
+    "target": {
+      "binding": {
+        "mode": "create",
+        "settings": {
+          "auth_mode": "none",
+          "base_url": "https://api.example.com"
+        }
+      },
+      "payload_profile": {
+        "format": "json",
+        "root": {
+          "children": [
+            {
+              "data_type": "character",
+              "kind": "simple",
+              "name": "target_a"
+            }
+          ],
+          "kind": "object",
+          "name": "Root"
+        }
+      },
+      "send_request": {
+        "method": "POST",
+        "path": "/v1/items"
+      }
+    },
+    "transform": {
+      "operations": [
+        {
+          "operation_type": "direct",
+          "source_field": "source_field_a",
+          "target_path": "Root/target_a"
+        }
+      ]
+    }
+  },
+  "producer": "database_to_api_sync example minimal_manual_sync (legacy chain at ba1be9f)",
+  "refusal_code_on_typed_surface": "GOVERNANCE_RETIRED_SPELLING",
+  "replacement": "none \u2014 connection creation settings are authored on the connection component; a reused connection carries binding keys only",
+  "spelling": "jdbc_options"
+}

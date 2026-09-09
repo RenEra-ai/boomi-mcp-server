@@ -73,6 +73,7 @@ from pydantic import (
 from pydantic_core import PydanticCustomError
 
 from ..errors import RECIPE_CONTRIBUTION_INVALID
+from .governance_intent import RecordedIntentDeclarationV1
 from .process_ir import (
     BranchLegV1,
     ComponentRefV1,
@@ -468,6 +469,30 @@ class ConstraintRequirementV1(_RecipeContributionBase):
     requirement: ConstraintCheckV1
 
 
+class RecordedIntentContributionV1(_RecipeContributionBase):
+    """One recorded-not-wired declaration a recipe wants SERVED (issue #157).
+
+    The fifth contribution kind, and the deliberate opposite of a patch: it
+    changes nothing the engine compiles, materializes or hashes. A recipe uses
+    it to state an operational intent — a watermark strategy, a runtime hint —
+    that the caller can read back from the result, so a deliberate declaration
+    is recorded rather than silently swallowed.
+
+    ``status`` is a single-valued literal: there is no wired state. The engine
+    threads these into the run result unchanged; the authoring workflow serves
+    them beside the executable normalized spec and keeps them OUT of every
+    fingerprint and every mutation payload (a paired test pins that only the
+    served record moves).
+    """
+
+    contribution_kind: Literal["recorded_intent"]
+    version: Literal["1"]
+    intent_id: RecipeSemanticId
+    process_key: RecipeComponentKey
+    declaration: RecordedIntentDeclarationV1
+    status: Literal["recorded_not_wired"]
+
+
 # ---------------------------------------------------------------------------
 # The closed union
 # ---------------------------------------------------------------------------
@@ -478,6 +503,7 @@ RecipeContributionV1 = Annotated[
         SystemTopologyPatchV1,
         ComponentContributionV1,
         ConstraintRequirementV1,
+        RecordedIntentContributionV1,
     ],
     Field(discriminator="contribution_kind"),
 ]
@@ -503,6 +529,9 @@ _KIND_TO_MODEL = dict(zip(RECIPE_CONTRIBUTION_KINDS, _CONTRIBUTION_MEMBERS))
 #: contribution. Grouped by what they would reopen if admitted.
 _FORBIDDEN_EXACT_KEYS: frozenset = frozenset(
     {
+        # a caller-authored flows echo (#157: on the typed surface flows are a
+        # DERIVED, output-only projection; a recipe may not author rows)
+        "flows",
         # free-form configuration bags
         "config",
         "configuration",
@@ -665,6 +694,15 @@ _ALLOWED_KEYS: frozenset = frozenset(
         "authority",
         "subject",
         "required_state",
+        # #157 recorded-intent contribution: closed literals and its declaration
+        "intent_id",
+        "declaration",
+        "declaration_kind",
+        "status",
+        "hint_kind",
+        "persistence",
+        "source_profile_ref",
+        "query_parameter_refs",
     }
 )
 

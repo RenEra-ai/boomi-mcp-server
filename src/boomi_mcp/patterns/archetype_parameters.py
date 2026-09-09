@@ -1408,28 +1408,11 @@ def _flatten_payload_profile_leaves(
     return leaves
 
 
-def _required_simple_leaf_paths(profile: JSONPayloadProfile) -> Set[str]:
-    """Return the set of logical leaf paths whose JSON profile node is
-    ``kind='simple'`` AND ``required=True``.
-
-    Uses the same path convention as ``_flatten_payload_profile_leaves``.
-    Required structural nodes (object/array) are excluded because they are
-    not transform-targetable — only their simple leaf descendants can
-    receive a direct/map_function/map_script output.
-    """
-    required: Set[str] = set()
-
-    def _walk(node: JSONProfileNode, prefix: str) -> None:
-        if node.kind == "simple":
-            if node.required:
-                required.add(prefix)
-            return
-        segment = f"{prefix}[]" if node.kind == "array" else prefix
-        for child in node.children or []:
-            _walk(child, f"{segment}/{child.name}")
-
-    _walk(profile.root, profile.root.name)
-    return required
+# `_required_simple_leaf_paths` was DELETED by issue #157: required-target-leaf
+# coverage has ONE implementation now —
+# `categories.components.builders.transform_map_validation.required_target_coverage_gaps`
+# over the surviving generator's field index — and every former caller of the
+# walker (five archetype validators and composition) reads it.
 
 
 # A `{token}` in a fetch/send path signals a per-document dynamic path — runtime
@@ -1866,7 +1849,7 @@ class ApiTransformConfig(BaseModel):
 #:
 #: Only the reusable PARAMETER MODELS are exported. The private validators
 #: (``_stripped_nonblank``, ``_scan_for_secret_shaped_keys``,
-#: ``_flatten_payload_profile_leaves``, ``_required_simple_leaf_paths``) stay
+#: ``_flatten_payload_profile_leaves``) stay
 #: importable for the surviving archetypes and ``integration_import`` that
 #: already depend on them, but they are deliberately NOT listed: a leading
 #: underscore is the contract that they are internal, and #159 should not read

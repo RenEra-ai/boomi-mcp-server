@@ -633,6 +633,44 @@ def observed_folder_identity(component_xml: str) -> Optional[Dict[str, Any]]:
             "is_root": True}
 
 
+def folder_placement_honoured(
+    identity, *, resolved_folder_id=None, requested_folder_name=None
+) -> bool:
+    """Did the component actually land where the request asked?
+
+    ONE rule, over the readback identity :func:`observed_folder_identity`
+    returns. Both the canonical process root and every created supporting
+    component are judged by it — the root's expression used to live inline at
+    its single call site, and QA-157-r1-01 needed the same judgement for the
+    fanned-out components, which is exactly the point where a second hand-copy
+    of a rule gets written and then drifts.
+
+    The rule, unchanged from the root's:
+
+    - no parsed identity → UNKNOWN, which is never honoured;
+    - a readback classified as the account ROOT is honoured only when the
+      caller explicitly asked for the root and its id confirms it (Codex round
+      20) — a root nobody asked for is the failure this warns about;
+    - otherwise the readback's own ``folderId`` against the resolved id is the
+      strongest basis, being an IDENTITY rather than a name two folders can
+      share (Codex round 17);
+    - failing that, the observed leaf against the requested folder name.
+    """
+    if identity is None:
+        return False
+    if identity["is_root"]:
+        return bool(
+            identity["folder_id"]
+            and resolved_folder_id
+            and identity["folder_id"] == resolved_folder_id
+        )
+    if identity["folder_id"] and resolved_folder_id:
+        return identity["folder_id"] == resolved_folder_id
+    return bool(
+        requested_folder_name and identity["leaf"] == requested_folder_name
+    )
+
+
 def build_readback_attestation(*, component_key: str, component_id: str, digest):
     """The post-apply live readback, recorded SEPARATELY from the mutation.
 
@@ -656,5 +694,6 @@ __all__ = [
     "build_readback_attestation",
     "materialize_canonical_process_xml",
     "observed_folder_identity",
+    "folder_placement_honoured",
     "resolve_extension_connections",
 ]
