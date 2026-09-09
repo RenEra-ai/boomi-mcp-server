@@ -249,33 +249,62 @@ def normalized_map_destinations(
     the map builder's job, not this reader's.
     """
     destinations: List[Tuple[str, str]] = []
-
-    def _paths(value: Any) -> List[str]:
-        if isinstance(value, str):
-            return [value.strip()] if value.strip() else []
-        if isinstance(value, (list, tuple)):
-            out: List[str] = []
-            for item in value:
-                if isinstance(item, str) and item.strip():
-                    out.append(item.strip())
-            return out
-        return []
-
-    for entry in map_config.get("field_mappings") or ():
-        if isinstance(entry, Mapping):
-            for path in _paths(entry.get("target_path")):
-                destinations.append(("direct", path))
-    for entry in map_config.get("function_mappings") or ():
-        if isinstance(entry, Mapping):
-            for path in _paths(entry.get("target_path")):
-                destinations.append(("map_function", path))
-    for entry in map_config.get("script_mappings") or ():
-        if isinstance(entry, Mapping):
-            for output in entry.get("outputs") or ():
-                if isinstance(output, Mapping):
-                    for path in _paths(output.get("target_path")):
-                        destinations.append(("map_script", path))
+    for route, key in _DESTINATION_ROUTES:
+        for entry in _entries(map_config.get(key)):
+            if isinstance(entry, Mapping):
+                for path in destination_paths(route, entry):
+                    destinations.append((route, path))
     return tuple(destinations)
+
+
+#: ``(route, map-config key)`` for every mapping list a transform.map may carry.
+_DESTINATION_ROUTES: Tuple[Tuple[str, str], ...] = (
+    ("direct", "field_mappings"),
+    ("map_function", "function_mappings"),
+    ("map_script", "script_mappings"),
+)
+
+
+def _entries(value: Any) -> Tuple[Any, ...]:
+    """A mapping list's entries; anything that is not a list is empty.
+
+    ``value or ()`` was NOT this: a truthy non-list — ``field_mappings: true``,
+    ``outputs: true`` — reached ``for entry in True`` and left a TypeError
+    escaping the hard coverage gate on every route that raises it. The advisory
+    route already read these lists this way; consolidating the reading is what
+    surfaced the difference.
+    """
+    return tuple(value) if isinstance(value, (list, tuple)) else ()
+
+
+def _clean_target_paths(value: Any) -> Tuple[str, ...]:
+    if isinstance(value, str):
+        return (value.strip(),) if value.strip() else ()
+    if isinstance(value, (list, tuple)):
+        return tuple(item.strip() for item in value if isinstance(item, str) and item.strip())
+    return ()
+
+
+def destination_paths(route: str, entry: Mapping[str, Any]) -> Tuple[str, ...]:
+    """The target paths ONE mapping entry binds, in authored order.
+
+    The single reading of "what does this mapping write to", shared by the
+    required-leaf coverage gate above and by ``review_transformation``'s mapping
+    records. The advisory route used to carry its own copy of this reading — a
+    direct/function ``target_path`` and a script's ``outputs[].target_path`` —
+    which is the same fact modelled in two places, so the two could drift on any
+    new route or spelling. Callers keep their own entry enumeration; only the
+    destination interpretation lives here.
+    """
+    if route in ("direct", "map_function"):
+        return _clean_target_paths(entry.get("target_path"))
+    if route == "map_script":
+        paths: List[str] = []
+        for output in _entries(entry.get("outputs")):
+            if isinstance(output, Mapping):
+                paths.extend(_clean_target_paths(output.get("target_path")))
+        return tuple(paths)
+    return ()
 
 
 def required_target_coverage_gaps(

@@ -254,6 +254,12 @@ class _NormalizedIntent:
     #: and excluded from `_normalized_payload`, every fingerprint and every
     #: mutation input by construction — they are not on the spec at all.
     recorded_intents: Tuple[RecordedIntentV1, ...] = ()
+    #: #157: the watermark source-field rules governance could not decide
+    #: offline, each carrying the unit index THAT pass assigned it. Carried
+    #: rather than re-derived: `integration_spec.processes` is sorted by
+    #: component key on the process_ir route, so an index recomputed here would
+    #: name a different unit in the served diagnostic path.
+    deferred_watermarks: Tuple[Any, ...] = ()
 
     @property
     def process_roots(self) -> Tuple[Tuple[str, Any], ...]:
@@ -520,6 +526,7 @@ def _normalize_intent(request: AuthoringRequestV1) -> _NormalizedIntent:
             connector_metadata=_connector_metadata_from_components(resolution.components),
             intent_kind=kind,
             recorded_intents=resolution.recorded_intents,
+            deferred_watermarks=resolution.deferred_watermarks,
         )
 
     # kind == "recipe"
@@ -642,6 +649,7 @@ def _normalize_recipe_intent(
         connector_metadata=_connector_metadata_from_components(components),
         intent_kind="recipe",
         recorded_intents=resolution.recorded_intents,
+        deferred_watermarks=resolution.deferred_watermarks,
     )
 
 
@@ -1839,6 +1847,12 @@ def _validate_processes(
     # builder-layer refusal reaches this surface, so plan, compile and the
     # apply preflight (which re-runs this validation) all serve the same
     # diagnostic identity.
+    # ONE resolution for the whole pass. Asking per map component re-ran the
+    # live selected-artifact discovery once per map for an answer that cannot
+    # change within a request.
+    selected_indexes = _selected_profile_indexes(
+        boomi_client, normalized, conflict_policy
+    )
     for component in normalized.integration_spec.components:
         if component.type != "transform.map":
             continue
@@ -1856,7 +1870,7 @@ def _validate_processes(
             component,
             normalized.integration_spec.components,
             literal_indexes,
-            selected_indexes=_selected_profile_indexes(boomi_client, normalized),
+            selected_indexes=selected_indexes,
         )
         if coverage_error is None:
             continue
@@ -1895,29 +1909,27 @@ def _validate_processes(
             )
         )
 
-    # THE WATERMARK CHECK NORMALIZATION DEFERRED. Governance validates a
-    # watermark's field against the referenced source profile, but it runs
-    # offline: a REUSED profile has no index there, so it defers rather than
-    # refusing a declaration it cannot judge (architect review, item 4). Here
-    # the selected artifact IS available, so the deferred case is decided — and
-    # only the deferred case, because governance already refused the rest.
-    _watermark_selected = _selected_profile_indexes(boomi_client, normalized)
-    if _watermark_selected:
-        from ..authoring.governance import validate_watermark_declaration
+    # THE QUESTIONS NORMALIZATION RECORDED, ASKED AGAIN WHERE THE ANSWER IS.
+    # Governance validates a watermark's field against the referenced source
+    # profile, but it runs offline: a reused source profile has no index there,
+    # so it DEFERS that one rule and records the declaration with the unit index
+    # it assigned (architect review, item 4). This pass has the selected
+    # artifact, so it decides exactly those recorded questions — not every
+    # watermark, because governance already decided the rest, and not rule (b),
+    # which governance decides unconditionally.
+    if selected_indexes and normalized.deferred_watermarks:
         from .governance import GovernanceRefusal as _Refusal
+        from .governance import validate_watermark_source_field
 
         _by_key = {entry.key: entry for entry in normalized.integration_spec.components}
-        for _unit in (getattr(normalized.integration_spec, "processes", ()) or ()):
-            _declaration = getattr(_unit.envelope, "watermark", None)
-            if _declaration is None:
-                continue
+        for _deferred in normalized.deferred_watermarks:
             try:
-                validate_watermark_declaration(
-                    _declaration,
-                    unit_index=0,
-                    owned_keys=tuple(_by_key),
+                validate_watermark_source_field(
+                    _deferred.declaration,
+                    unit_index=_deferred.unit_index,
                     components_by_key=_by_key,
-                    literal_indexes=dict(literal_indexes or {}, **_watermark_selected),
+                    literal_indexes=literal_indexes,
+                    selected_indexes=selected_indexes,
                 )
             except _Refusal as _refusal:
                 errors += 1
@@ -1952,7 +1964,9 @@ def _required_target_coverage_error(
     )
 
 
-def _selected_profile_indexes(boomi_client: Any, normalized: Any):
+def _selected_profile_indexes(
+    boomi_client: Any, normalized: Any, conflict_policy: Optional[str] = None
+):
     """Indexes of the profiles apply will REUSE, by component key, or None.
 
     #157: reuses the integration builder's own selected-artifact resolver — the
@@ -1966,15 +1980,17 @@ def _selected_profile_indexes(boomi_client: Any, normalized: Any):
     try:
         from ..categories.integration_builder import _resolve_selected_profile_indexes
 
-        # THE CALLER'S POLICY TRAVELS WITH THE QUESTION. Without it the
-        # resolver's fallback assumes the default "reuse", so under
-        # `conflict_policy="clone"` a same-name profile was judged against the
-        # namesake it will CLONE rather than the profile being authored.
+        # THE CALLER'S POLICY TRAVELS WITH THE QUESTION, as an argument. Neither
+        # `_NormalizedIntent` nor `IntegrationSpecV1` carries the policy — it
+        # lives on the REQUEST's intent — so reading it off either of them found
+        # nothing and the resolver silently fell back to the default "reuse":
+        # under `conflict_policy="clone"` a same-name profile was still judged
+        # against the namesake it will CLONE rather than the profile being
+        # authored. Every caller of this helper has the request's own value.
         return _resolve_selected_profile_indexes(
             boomi_client,
             normalized.integration_spec,
-            conflict_policy=getattr(normalized, "conflict_policy", None)
-            or getattr(normalized.integration_spec, "conflict_policy", None),
+            conflict_policy=conflict_policy,
         ) or None
     except Exception:  # noqa: BLE001 - discovery is best effort; absence defers
         return None
@@ -2264,7 +2280,9 @@ def plan_authoring_request_v1(
         tuple(d for d in all_diagnostics if d.severity != "error")
     )
 
-    _selected_for_preview = _selected_profile_indexes(boomi_client, normalized)
+    _selected_for_preview = _selected_profile_indexes(
+        boomi_client, normalized, request.intent.conflict_policy
+    )
     spec_preview = build_integration_spec_preview(
         normalized, selected_indexes=_selected_for_preview
     )

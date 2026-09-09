@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 11948, "minimum_collected": 11948, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 11984, "minimum_collected": 11984, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -11971,7 +11971,7 @@
 {"kind": "test", "id": "pytest-011970", "node_id": "tests/test_issue_157_required_target_coverage.py::test_the_diagnostic_serves_the_count_and_names_where_the_paths_live", "state": "active"}
 {"kind": "test", "id": "pytest-011971", "node_id": "tests/test_issue_157_required_target_coverage.py::test_the_legacy_walker_is_gone_and_every_former_site_reads_the_shared_function", "state": "active"}
 {"kind": "test", "id": "pytest-011972", "node_id": "tests/test_issue_157_required_target_coverage.py::test_the_recipe_engine_refuses_with_the_canonical_cause_code", "state": "active"}
-{"kind": "test", "id": "pytest-011973", "node_id": "tests/test_issue_157_required_target_coverage.py::test_the_route_sentinel_sees_every_entry_point_and_fails_when_the_invocation_is_removed", "state": "active"}
+{"kind": "test", "id": "pytest-011973", "node_id": "tests/test_issue_157_required_target_coverage.py::test_the_route_sentinel_sees_every_entry_point_and_fails_when_the_invocation_is_removed", "state": "tombstone"}
 {"kind": "test", "id": "pytest-011974", "node_id": "tests/test_issue_157_required_target_coverage.py::test_the_typed_gate_reads_the_selected_index_through_the_builder_resolver", "state": "active"}
 {"kind": "test", "id": "pytest-011975", "node_id": "tests/test_m12_11_diagnostics_security.py::test_no_served_schema_example_carries_a_credential[DerivedFlowRowV1]", "state": "active"}
 {"kind": "test", "id": "pytest-011976", "node_id": "tests/test_m12_11_diagnostics_security.py::test_no_served_schema_example_carries_a_credential[RecordedIntentV1]", "state": "active"}
@@ -11995,3 +11995,40 @@
 {"kind": "test", "id": "pytest-011994", "node_id": "tests/test_issue_157_placement.py::test_no_builder_refuses_the_spelling_that_places", "state": "active"}
 {"kind": "test", "id": "pytest-011995", "node_id": "tests/test_issue_157_placement.py::test_only_a_document_carried_folder_id_stops_the_fan_out", "state": "active"}
 {"kind": "test", "id": "pytest-011996", "node_id": "tests/test_sync_pipeline_builder.py::test_folder_id_accepted_as_inert_metadata", "state": "active"}
+{"kind": "test", "id": "pytest-011997", "node_id": "tests/test_issue_157_plan_conformance.py::test_a_creating_connection_agreeing_with_itself_stays_legal", "state": "active"}
+{"kind": "test", "id": "pytest-011998", "node_id": "tests/test_issue_157_plan_conformance.py::test_a_creating_connection_naming_two_component_ids_is_refused", "state": "active"}
+{"kind": "test", "id": "pytest-011999", "node_id": "tests/test_issue_157_plan_conformance.py::test_a_creating_connection_naming_two_component_names_is_refused", "state": "active"}
+{"kind": "test", "id": "pytest-012000", "node_id": "tests/test_issue_157_plan_conformance.py::test_a_profile_the_request_will_write_is_still_described_by_its_generator", "state": "active"}
+{"kind": "test", "id": "pytest-012001", "node_id": "tests/test_issue_157_plan_conformance.py::test_a_reused_map_is_opaque_to_the_coverage_gate", "state": "active"}
+{"kind": "test", "id": "pytest-012002", "node_id": "tests/test_issue_157_plan_conformance.py::test_a_truthy_non_list_mapping_list_is_empty_not_a_crash[config0]", "state": "active"}
+{"kind": "test", "id": "pytest-012003", "node_id": "tests/test_issue_157_plan_conformance.py::test_a_truthy_non_list_mapping_list_is_empty_not_a_crash[config1]", "state": "active"}
+{"kind": "test", "id": "pytest-012004", "node_id": "tests/test_issue_157_plan_conformance.py::test_a_truthy_non_list_mapping_list_is_empty_not_a_crash[config2]", "state": "active"}
+{"kind": "test", "id": "pytest-012005", "node_id": "tests/test_issue_157_plan_conformance.py::test_a_truthy_non_list_mapping_list_is_empty_not_a_crash[config3]", "state": "active"}
+{"kind": "test", "id": "pytest-012006", "node_id": "tests/test_issue_157_plan_conformance.py::test_a_truthy_non_list_mapping_list_is_empty_not_a_crash[config4]", "state": "active"}
+{"kind": "test", "id": "pytest-012007", "node_id": "tests/test_issue_157_plan_conformance.py::test_a_watermark_over_a_reused_source_profile_is_deferred_not_refused", "state": "active"}
+{"kind": "test", "id": "pytest-012008", "node_id": "tests/test_issue_157_plan_conformance.py::test_caller_flows_beside_a_valid_typed_request_are_refused_by_name[apply-authoring_request]", "state": "active"}
+{"kind": "test", "id": "pytest-012009", "node_id": "tests/test_issue_157_plan_conformance.py::test_caller_flows_beside_a_valid_typed_request_are_refused_by_name[apply-config]", "state": "active"}
+{"kind": "test", "id": "pytest-012010", "node_id": "tests/test_issue_157_plan_conformance.py::test_caller_flows_beside_a_valid_typed_request_are_refused_by_name[compile-authoring_request]", "state": "active"}
+{"kind": "test", "id": "pytest-012011", "node_id": "tests/test_issue_157_plan_conformance.py::test_caller_flows_beside_a_valid_typed_request_are_refused_by_name[compile-config]", "state": "active"}
+{"kind": "test", "id": "pytest-012012", "node_id": "tests/test_issue_157_plan_conformance.py::test_caller_flows_beside_a_valid_typed_request_are_refused_by_name[plan-authoring_request]", "state": "active"}
+{"kind": "test", "id": "pytest-012013", "node_id": "tests/test_issue_157_plan_conformance.py::test_caller_flows_beside_a_valid_typed_request_are_refused_by_name[plan-config]", "state": "active"}
+{"kind": "test", "id": "pytest-012014", "node_id": "tests/test_issue_157_plan_conformance.py::test_the_apply_refresh_runs_the_coverage_gate_before_any_write", "state": "active"}
+{"kind": "test", "id": "pytest-012015", "node_id": "tests/test_issue_157_plan_conformance.py::test_the_apply_refresh_stays_quiet_when_the_account_did_not_move", "state": "active"}
+{"kind": "test", "id": "pytest-012016", "node_id": "tests/test_issue_157_plan_conformance.py::test_the_coverage_gate_and_the_advisory_review_share_one_destination_reading", "state": "active"}
+{"kind": "test", "id": "pytest-012017", "node_id": "tests/test_issue_157_plan_conformance.py::test_the_deferred_watermark_is_decided_against_the_selected_profile", "state": "active"}
+{"kind": "test", "id": "pytest-012018", "node_id": "tests/test_issue_157_plan_conformance.py::test_the_legacy_parse_preserves_the_profile_name_into_the_typed_row", "state": "active"}
+{"kind": "test", "id": "pytest-012019", "node_id": "tests/test_issue_157_plan_conformance.py::test_the_name_drop_is_a_comparison_rule_and_the_served_row_keeps_the_name", "state": "active"}
+{"kind": "test", "id": "pytest-012020", "node_id": "tests/test_issue_157_plan_conformance.py::test_the_online_refusal_names_the_unit_governance_assigned_not_the_first", "state": "active"}
+{"kind": "test", "id": "pytest-012021", "node_id": "tests/test_issue_157_plan_conformance.py::test_the_query_parameter_rule_still_runs_when_the_field_rule_defers", "state": "active"}
+{"kind": "test", "id": "pytest-012022", "node_id": "tests/test_issue_157_plan_conformance.py::test_the_same_typed_request_without_flows_is_not_refused_for_it[apply]", "state": "active"}
+{"kind": "test", "id": "pytest-012023", "node_id": "tests/test_issue_157_plan_conformance.py::test_the_same_typed_request_without_flows_is_not_refused_for_it[compile]", "state": "active"}
+{"kind": "test", "id": "pytest-012024", "node_id": "tests/test_issue_157_plan_conformance.py::test_the_same_typed_request_without_flows_is_not_refused_for_it[plan]", "state": "active"}
+{"kind": "test", "id": "pytest-012025", "node_id": "tests/test_issue_157_plan_conformance.py::test_the_selected_artifact_is_resolved_under_the_requests_own_conflict_policy[clone]", "state": "active"}
+{"kind": "test", "id": "pytest-012026", "node_id": "tests/test_issue_157_plan_conformance.py::test_the_selected_artifact_is_resolved_under_the_requests_own_conflict_policy[fail]", "state": "active"}
+{"kind": "test", "id": "pytest-012027", "node_id": "tests/test_issue_157_plan_conformance.py::test_the_selected_artifact_is_resolved_under_the_requests_own_conflict_policy[reuse]", "state": "active"}
+{"kind": "test", "id": "pytest-012028", "node_id": "tests/test_issue_157_plan_conformance.py::test_the_served_flow_row_describes_the_selected_profile_not_the_candidate", "state": "active"}
+{"kind": "test", "id": "pytest-012029", "node_id": "tests/test_issue_157_plan_conformance.py::test_the_shared_reading_is_route_closed", "state": "active"}
+{"kind": "test", "id": "pytest-012030", "node_id": "tests/test_issue_157_required_target_coverage.py::test_removing_a_routes_invocation_silences_that_route_and_only_that_route[binding0-quiet0-loud0]", "state": "active"}
+{"kind": "test", "id": "pytest-012031", "node_id": "tests/test_issue_157_required_target_coverage.py::test_removing_a_routes_invocation_silences_that_route_and_only_that_route[binding1-quiet1-loud1]", "state": "active"}
+{"kind": "test", "id": "pytest-012032", "node_id": "tests/test_issue_157_required_target_coverage.py::test_removing_a_routes_invocation_silences_that_route_and_only_that_route[binding2-quiet2-loud2]", "state": "active"}
+{"kind": "test", "id": "pytest-012033", "node_id": "tests/test_issue_157_required_target_coverage.py::test_the_route_sentinel_sees_every_one_of_the_six_entry_points", "state": "active"}

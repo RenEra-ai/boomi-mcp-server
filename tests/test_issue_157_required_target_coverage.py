@@ -7,10 +7,13 @@ required-target checks in two more). Now there is one implementation —
 raised as a hard gate by the typed semantic validation and by the recipe
 engine, consumed by the advisory review, and read by every former site.
 
-The route sentinel below is the proof that BOTH entry points reach the single
-implementation: a recording spy on the one function sees a hit from each
-route, and removing the invocation (patching it to a no-op) fails the sentinel
-AND the missing-leaf control.
+The route sentinel below is the proof that every entry point reaches the single
+implementation. It drives all SIX routes over one missing-leaf case — direct
+plan, compile, apply, the recipe engine's public ``run_recipes``, the typed
+recipe intent, and the advisory review — and its adversarial control removes a
+route's INVOCATION (the name that route resolves), not the algorithm: a no-op
+implementation cannot tell a route that calls the gate from one that does not,
+while a scoped removal names exactly which routes go quiet and which stay loud.
 """
 
 from __future__ import annotations
@@ -18,6 +21,7 @@ from __future__ import annotations
 import copy
 import sys
 from pathlib import Path
+from typing import Literal
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -45,6 +49,8 @@ from boomi_mcp.categories.components.builders.transform_map_validation import ( 
     validate_required_target_coverage,
 )
 from boomi_mcp.models.authoring_workflow import AuthoringRequestV1  # noqa: E402
+from boomi_mcp.models.recipe_contributions import parse_recipe_contribution  # noqa: E402
+from boomi_mcp.recipes import RecipeInputBase  # noqa: E402
 from boomi_mcp.models.integration_models import IntegrationComponentSpec  # noqa: E402
 from boomi_mcp.patterns.primitives.db_write import DbWritePrimitive  # noqa: E402
 
@@ -358,14 +364,162 @@ def test_the_advisory_review_reports_the_same_gap_once_per_path():
     assert result.get("unmapped_required_target_paths") == ["Root/must"]
 
 
-def test_the_route_sentinel_sees_every_entry_point_and_fails_when_the_invocation_is_removed():
-    """Six routes, one implementation: direct plan, compile, apply preflight, the raw recipe engine, the recipe intent's lift-free path, and the advisory review."""
+#: The components the test recipe contributes. A module GLOBAL, not a closure:
+#: the registry refuses an executor that closes over state, deliberately, so a
+#: registered recipe cannot carry hidden per-registration behaviour.
+_RECIPE_SLOTS = []
+
+
+class _CoverageInput(RecipeInputBase):
+    version: Literal["1"] = "1"
+
+
+def _coverage_executor(_inp):
+    return tuple(
+        parse_recipe_contribution(
+            {
+                "contribution_kind": "component_contribution",
+                "version": "1",
+                "contribution_id": "c." + component.key.replace("_", "-"),
+                "component_key": component.key,
+                "component_type": component.type,
+                "materialization_mode": "create",
+                "materializer_slot": component.key,
+            }
+        )
+        for component in _RECIPE_SLOTS
+    )
+
+
+def _coverage_registry(component_dicts):
+    """A registered recipe contributing exactly these components, by opaque slot.
+
+    The recipe layer is entered through ``run_recipes`` — its public entry — not
+    through the private map validator it happens to call. A sentinel that calls
+    the private function proves the function exists, not that the route reaches
+    it.
+
+    Slot names ARE the component keys, exactly as the typed recipe intent builds
+    its own catalog, so both recipe routes resolve the same slots.
+    """
+    from boomi_mcp.recipes import MaterializationCatalog
+    from boomi_mcp.recipes.contracts import RecipeConflictPolicyV1, RecipeRegistrationV1
+    from boomi_mcp.recipes.registry import build_test_registry
+
+    components = [IntegrationComponentSpec(**c) for c in component_dicts]
+    _RECIPE_SLOTS[:] = components
+    catalog = MaterializationCatalog({c.key: c for c in components})
+    registry = build_test_registry(
+        (
+            RecipeRegistrationV1(
+                recipe_id="test.coverage",
+                recipe_version="1.0.0",
+                entry_kind="executable_recipe",
+                is_default=True,
+                input_model=_CoverageInput,
+                executor=_coverage_executor,
+                output_types=("component_contribution",),
+                conflict_policy=RecipeConflictPolicyV1(),
+            ),
+        )
+    )
+    return registry, catalog, components
+
+
+def _recipe_request():
+    from boomi_mcp.recipes import RecipeRequestV1
+
+    return [
+        RecipeRequestV1(
+            recipe_id="test.coverage", invocation_id="i1", raw_input={"version": "1"}
+        )
+    ]
+
+
+def _recipe_intent_request(component_dicts):
+    """A typed RECIPE intent — the second recipe route, which lifts no roots."""
+    from boomi_mcp.models.authoring_workflow import RecipeAuthoringIntentV1
+
+    return AuthoringRequestV1(
+        intent=RecipeAuthoringIntentV1(
+            integration_name="coverage",
+            base_components=[IntegrationComponentSpec(**c) for c in component_dicts],
+            invocations=(
+                {
+                    "recipe_id": "test.coverage",
+                    "invocation_id": "i1",
+                    "raw_input": {"version": "1"},
+                },
+            ),
+        )
+    )
+
+
+def _drive_routes(refusals):
+    """Drive all six entry points over the same missing-leaf case.
+
+    ``refusals`` collects ``(route, refused)`` so a removal control can name
+    which route went quiet. Setup work that is not part of a route — the
+    covering compile the apply payload binds to — happens BEFORE this runs, so
+    it can never be counted as a route's own hit.
+    """
     from boomi_mcp.categories import integration_builder
     from boomi_mcp.categories.integration_builder import build_integration_action
     from boomi_mcp.categories.transformation_review import review_transformation_action
-    from boomi_mcp.recipes.engine import _validate_component_maps
-    from boomi_mcp.recipes.errors import RecipeError
+    from boomi_mcp.recipes import MaterializationCatalog, RecipeError, run_recipes
+    from boomi_mcp.recipes import engine as engine_module
 
+    comps = _components()
+    registry, catalog, _ = _coverage_registry(comps)
+    # SETUP, not a route: the covering compile the apply payload binds to runs
+    # here, before any route is driven, so it can never be read as apply's own.
+    apply_payload = _bound_apply_payload(comps)
+
+    result, _ = plan_authoring_request_v1(_request(comps), boomi_client=MagicMock(), profile=_PROFILE)
+    refusals.append(("plan", bool([d for d in result.errors if TRANSFORM_REVIEW_REQUIRED_TARGET_UNMAPPED in d.cause_codes])))
+
+    try:
+        compile_authoring_request_v1(_request(comps), boomi_client=MagicMock(), profile=_PROFILE)
+        refusals.append(("compile", False))
+    except AuthoringWorkflowError as exc:
+        refusals.append(("compile", TRANSFORM_REVIEW_REQUIRED_TARGET_UNMAPPED in str(exc.diagnostics)))
+
+    with patch.object(integration_builder, "_execute_component"), patch.object(
+        integration_builder, "create_component"
+    ):
+        applied = build_integration_action(MagicMock(), _PROFILE, "apply", apply_payload)
+    refusals.append(("apply", TRANSFORM_REVIEW_REQUIRED_TARGET_UNMAPPED in str(applied)))
+
+    try:
+        run_recipes(_recipe_request(), catalog=catalog, registry=registry)
+        refusals.append(("recipe_engine", False))
+    except RecipeError as exc:
+        codes = {c for d in exc.diagnostics for c in (getattr(d, "cause_codes", ()) or ())}
+        refusals.append(("recipe_engine", TRANSFORM_REVIEW_REQUIRED_TARGET_UNMAPPED in codes))
+
+    with patch.object(engine_module, "production_registry", lambda: registry):
+        try:
+            plan_authoring_request_v1(
+                _recipe_intent_request(comps), boomi_client=MagicMock(), profile=_PROFILE
+            )
+            refusals.append(("recipe_intent", False))
+        except AuthoringWorkflowError as exc:
+            refusals.append(("recipe_intent", TRANSFORM_REVIEW_REQUIRED_TARGET_UNMAPPED in str(exc.diagnostics)))
+
+    review = review_transformation_action(
+        "validate_unmapped", {"integration_spec": {"name": "x", "components": comps}}
+    )
+    refusals.append(("advisory_review", any(
+        i.get("code") == TRANSFORM_REVIEW_REQUIRED_TARGET_UNMAPPED for i in review.get("issues", [])
+    )))
+    return dict(refusals)
+
+
+_ROUTES = ("plan", "compile", "apply", "recipe_engine", "recipe_intent", "advisory_review")
+
+
+def test_the_route_sentinel_sees_every_one_of_the_six_entry_points():
+    """Every route refuses the SAME missing leaf, and each hits the one implementation."""
     seen = []
     real = tmv.required_target_coverage_gaps
 
@@ -373,27 +527,44 @@ def test_the_route_sentinel_sees_every_entry_point_and_fails_when_the_invocation
         seen.append(1)
         return real(*args, **kwargs)
 
+    refusals = []
     with patch.object(tmv, "required_target_coverage_gaps", spy):
-        plan_authoring_request_v1(_request(_components()), boomi_client=MagicMock(), profile=_PROFILE)
-        plan_hits = len(seen)
-        with pytest.raises(AuthoringWorkflowError):
-            compile_authoring_request_v1(_request(_components()), boomi_client=MagicMock(), profile=_PROFILE)
-        compile_hits = len(seen) - plan_hits
-        with patch.object(integration_builder, "_execute_component"):
-            build_integration_action(MagicMock(), _PROFILE, "apply", _bound_apply_payload(_components()))
-        apply_hits = len(seen) - plan_hits - compile_hits
-        with pytest.raises(RecipeError):
-            _validate_component_maps([IntegrationComponentSpec(**c) for c in _components()])
-        recipe_hits = len(seen) - plan_hits - compile_hits - apply_hits
-        review_transformation_action("validate_unmapped", {"integration_spec": {"name": "x", "components": _components()}})
-        review_hits = len(seen) - plan_hits - compile_hits - apply_hits - recipe_hits
-    assert min(plan_hits, compile_hits, apply_hits, recipe_hits, review_hits) >= 1, (plan_hits, compile_hits, apply_hits, recipe_hits, review_hits)
+        result = _drive_routes(refusals)
+    assert set(result) == set(_ROUTES), sorted(result)
+    assert all(result[route] for route in _ROUTES), result
+    assert seen, "the single implementation was never reached"
 
-    # adversarial removal: a no-op implementation lets the missing leaf through everywhere
-    with patch.object(tmv, "required_target_coverage_gaps", lambda *a, **k: ()):
-        result, _ = plan_authoring_request_v1(_request(_components()), boomi_client=MagicMock(), profile=_PROFILE)
-        assert not [d for d in result.errors if TRANSFORM_REVIEW_REQUIRED_TARGET_UNMAPPED in d.cause_codes]
-        _validate_component_maps([IntegrationComponentSpec(**c) for c in _components()])  # no refusal
+
+@pytest.mark.parametrize(
+    "binding,quiet,loud",
+    [
+        # each route resolves the gate by ONE name; removing that name silences
+        # exactly the routes that resolve through it, and no others.
+        (("boomi_mcp.authoring.workflow", "_required_target_coverage_error"),
+         ("plan", "compile", "apply"), ("recipe_engine", "recipe_intent", "advisory_review")),
+        (("boomi_mcp.categories.components.builders.transform_map_validation",
+          "validate_required_target_coverage"),
+         ("plan", "compile", "apply", "recipe_engine", "recipe_intent"), ("advisory_review",)),
+        (("boomi_mcp.categories.components.builders.transform_map_validation",
+          "required_target_coverage_gaps"),
+         _ROUTES, ()),
+    ],
+)
+def test_removing_a_routes_invocation_silences_that_route_and_only_that_route(binding, quiet, loud):
+    """The adversarial control removes the INVOCATION, not the algorithm.
+
+    Patching the implementation to a no-op proves only that the algorithm
+    decides; it cannot tell a route that calls it from a route that does not.
+    Removing the name a route resolves does, and the routes that stay loud are
+    the evidence the removal was scoped.
+    """
+    import importlib
+
+    module = importlib.import_module(binding[0])
+    with patch.object(module, binding[1], lambda *a, **k: None if binding[1] != "required_target_coverage_gaps" else ()):
+        result = _drive_routes([])
+    assert not any(result[route] for route in quiet), result
+    assert all(result[route] for route in loud), result
 
 
 # ---------------------------------------------------------------------------

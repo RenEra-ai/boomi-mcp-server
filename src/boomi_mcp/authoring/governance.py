@@ -343,12 +343,34 @@ def _declares_its_own_placement(component: IntegrationComponentSpec) -> Optional
 
 
 @dataclass(frozen=True)
+class DeferredWatermarkCheck:
+    """One watermark whose source-field rule this pass could not decide.
+
+    Governance runs OFFLINE, so a watermark over a reused or literal source
+    profile has no field index here. Refusing on that rejected declarations the
+    selected profile really satisfies; silently passing would drop the rule.
+    The third answer is to record the question with the unit index THIS pass
+    assigned it, so the online validation re-asks the same declaration against
+    the selected artifact and reports on the same served path. The index is
+    carried rather than recomputed: the spec's process order is not the
+    authored order, so anyone re-deriving it would name a different unit.
+    """
+
+    unit_index: int
+    process_key: str
+    declaration: Any
+
+
+@dataclass(frozen=True)
 class GovernanceResolution:
     """What normalization consumes: strict units, resolved components, records."""
 
     units: Tuple[ProcessAuthoringUnitV1, ...]
     components: Tuple[IntegrationComponentSpec, ...]
     recorded_intents: Tuple[RecordedIntentV1, ...]
+    #: Watermark source-field rules this offline pass deferred; the online
+    #: validation decides exactly these and nothing else.
+    deferred_watermarks: Tuple[DeferredWatermarkCheck, ...] = ()
 
 
 def resolve_governance(
@@ -510,6 +532,7 @@ def resolve_governance(
     # envelope is refused. Same rule, both entry points, before anything is
     # served or persisted.
     records: List[RecordedIntentV1] = []
+    deferred_watermarks: List[DeferredWatermarkCheck] = []
     _roots_by_key = {envelope.component_key: (index, envelope) for index, _u, envelope in resolved}
     for contributed in extra_recorded_intents:
         declaration = getattr(contributed, "declaration", None)
@@ -520,24 +543,38 @@ def resolve_governance(
             and owner is not None
         ):
             owner_index, owner_envelope = owner
-            validate_watermark_declaration(
+            if validate_watermark_declaration(
                 declaration,
                 unit_index=owner_index,
                 owned_keys=owned_by_root[owner_envelope.component_key],
                 components_by_key=components_by_key,
                 literal_indexes=literal_indexes,
-            )
+            ):
+                deferred_watermarks.append(
+                    DeferredWatermarkCheck(
+                        unit_index=owner_index,
+                        process_key=owner_envelope.component_key,
+                        declaration=declaration,
+                    )
+                )
         records.append(contributed)
     for index, unit, envelope in resolved:
         authored = unit.envelope
         if authored.watermark is not None:
-            validate_watermark_declaration(
+            if validate_watermark_declaration(
                 authored.watermark,
                 unit_index=index,
                 owned_keys=owned_by_root[envelope.component_key],
                 components_by_key=components_by_key,
                 literal_indexes=literal_indexes,
-            )
+            ):
+                deferred_watermarks.append(
+                    DeferredWatermarkCheck(
+                        unit_index=index,
+                        process_key=envelope.component_key,
+                        declaration=authored.watermark,
+                    )
+                )
             records.append(
                 RecordedIntentV1(
                     intent_id="watermark",
@@ -588,6 +625,7 @@ def resolve_governance(
         units=units,
         components=tuple(resolved_components),
         recorded_intents=tuple(sorted(records, key=lambda r: r.sort_key)),
+        deferred_watermarks=tuple(deferred_watermarks),
     )
 
 
@@ -832,7 +870,7 @@ def validate_watermark_declaration(
     owned_keys: Sequence[str],
     components_by_key: Mapping[str, IntegrationComponentSpec],
     literal_indexes: Optional[Mapping[str, Any]] = None,
-) -> None:
+) -> bool:
     """The two legacy consistency rules, carried onto the typed declaration.
 
     (a) the tracked field must be a declared, mappable field of the referenced
@@ -842,39 +880,23 @@ def validate_watermark_declaration(
         a REST operation the root owns — the legacy "a watermark-sourced query
         parameter requires a declaration" rule, read from the declaration's
         side.
-    """
-    from ..categories.components.builders.transform_map_validation import (
-        resolve_map_profile_index,
-    )
 
+    Returns True when rule (a) was DEFERRED because the source profile has no
+    index in reach — the caller records that question for the online pass.
+    Rule (b) is always decided here.
+    """
     base = "/units/{0}/envelope/watermark".format(unit_index)
-    index = resolve_map_profile_index(
-        declaration.source_profile_ref, dict(components_by_key), literal_indexes
+    decided = validate_watermark_source_field(
+        declaration,
+        unit_index=unit_index,
+        components_by_key=components_by_key,
+        literal_indexes=literal_indexes,
     )
-    if index is None:
-        # UNAVAILABLE IS NOT WRONG. Governance runs during offline
-        # normalization, which has no account access, so a watermark over a
-        # REUSED source profile has no index here — and refusing on that
-        # rejected a declaration whose field the selected profile really
-        # declares (architect review, item 4). The same deferral the coverage
-        # gate makes for an empty index: the online validation re-asks with the
-        # selected artifact, where the answer exists.
-        return
-    entry = index.get(declaration.field)
-    if entry is None or not entry.get("mappable", True):
-        raise _refuse(
-            GOVERNANCE_WATERMARK_INCONSISTENT,
-            message=(
-                "The watermark tracks a field that the referenced source profile "
-                "does not declare as a mappable leaf."
-            ),
-            path=base + "/field",
-            subject_kind="process",
-            remediation=(
-                "Reference an in-plan source profile ($ref:KEY) and name one of "
-                "its mappable leaf paths."
-            ),
-        )
+    # RULE (b) RUNS EITHER WAY. It reads the root's own owned operations and
+    # needs no profile index, so letting an undecidable rule (a) return early
+    # would have silently retired the query-parameter rule for every watermark
+    # over a reused source profile — a gate weakened by a deferral that was
+    # never about it (architect review, item 4).
     available: Set[str] = set()
     for key in owned_keys:
         component = components_by_key.get(key)
@@ -895,6 +917,60 @@ def validate_watermark_declaration(
                     "drop it from the watermark declaration."
                 ),
             )
+    return not decided
+
+
+def validate_watermark_source_field(
+    declaration: Any,
+    *,
+    unit_index: int,
+    components_by_key: Mapping[str, IntegrationComponentSpec],
+    literal_indexes: Optional[Mapping[str, Any]] = None,
+    selected_indexes: Optional[Mapping[str, Any]] = None,
+) -> bool:
+    """Rule (a) alone: the tracked field is a declared, mappable source leaf.
+
+    Returns True when the rule was DECIDED, False when the referenced source
+    profile has no index in reach — an unavailable answer, not a wrong one, and
+    the same deferral the required-leaf coverage gate makes for an empty index.
+    Split out so the online validation can decide the deferred case with the
+    SELECTED artifact without re-running rule (b), whose authority (the root's
+    owned operations) it does not carry.
+
+    ``selected_indexes`` is the coverage gate's own parameter, keyed by
+    component KEY — the reused artifact's index, which is a different key space
+    and a different value shape from ``literal_indexes`` (UUID -> wrapper). The
+    resolver takes both separately for exactly that reason; merging one into
+    the other resolves nothing.
+    """
+    from ..categories.components.builders.transform_map_validation import (
+        resolve_map_profile_index,
+    )
+
+    index = resolve_map_profile_index(
+        declaration.source_profile_ref,
+        dict(components_by_key),
+        literal_indexes,
+        dict(selected_indexes) if selected_indexes else None,
+    )
+    if index is None:
+        return False
+    entry = index.get(declaration.field)
+    if entry is None or not entry.get("mappable", True):
+        raise _refuse(
+            GOVERNANCE_WATERMARK_INCONSISTENT,
+            message=(
+                "The watermark tracks a field that the referenced source profile "
+                "does not declare as a mappable leaf."
+            ),
+            path="/units/{0}/envelope/watermark/field".format(unit_index),
+            subject_kind="process",
+            remediation=(
+                "Reference an in-plan source profile ($ref:KEY) and name one of "
+                "its mappable leaf paths."
+            ),
+        )
+    return True
 
 
 # ---------------------------------------------------------------------------

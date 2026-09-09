@@ -70,6 +70,7 @@ TRANSFORM_REVIEW_DUPLICATE_TARGET = "TRANSFORM_REVIEW_DUPLICATE_TARGET"
 from .components.builders import transform_map_validation as _tmv  # noqa: E402
 from .components.builders.transform_map_validation import (  # noqa: E402
     TRANSFORM_REVIEW_REQUIRED_TARGET_UNMAPPED,
+    destination_paths,
 )
 TRANSFORM_REVIEW_SCRIPT_REF_MISSING = "TRANSFORM_REVIEW_SCRIPT_REF_MISSING"
 TRANSFORM_REVIEW_COMPARE_FAILED = "TRANSFORM_REVIEW_COMPARE_FAILED"
@@ -687,7 +688,11 @@ def _mappings_from_map_config(map_config: Mapping[str, Any]) -> List[Dict[str, A
                 _mapping_record(
                     "direct",
                     source_paths=_clean_paths(fm.get("source_path")),
-                    target_paths=_clean_paths(fm.get("target_path")),
+                    # THE DESTINATIONS COME FROM THE SHARED READING (#157). This
+                    # arm carried its own copy of "what does this mapping write
+                    # to", so the advisory route and the required-leaf coverage
+                    # gate modelled one fact twice.
+                    target_paths=list(destination_paths("direct", fm)),
                 )
             )
 
@@ -698,7 +703,7 @@ def _mappings_from_map_config(map_config: Mapping[str, Any]) -> List[Dict[str, A
                 _mapping_record(
                     "map_function",
                     source_paths=_clean_paths(fm.get("inputs")),
-                    target_paths=_clean_paths(fm.get("target_path")),
+                    target_paths=list(destination_paths("map_function", fm)),
                     function_type=fm.get("function_type"),
                     parameters=dict(params) if isinstance(params, Mapping) else None,
                 )
@@ -712,9 +717,7 @@ def _mappings_from_map_config(map_config: Mapping[str, Any]) -> List[Dict[str, A
                     source_paths=_clean_paths(
                         [e.get("source_path") for e in _as_list(sm.get("inputs")) if isinstance(e, Mapping)]
                     ),
-                    target_paths=_clean_paths(
-                        [e.get("target_path") for e in _as_list(sm.get("outputs")) if isinstance(e, Mapping)]
-                    ),
+                    target_paths=list(destination_paths("map_script", sm)),
                     script_ref=sm.get("script_component_id"),
                 )
             )
