@@ -973,6 +973,83 @@ def test_a_component_declaring_a_folder_id_reports_that_placement_and_no_other()
     assert any('folderId="folder-OTHER"' in xml for xml in captured)
 
 
+_RAW_DOC = (
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+    '<bns:Component xmlns:bns="http://api.platform.boomi.com/" '
+    'type="profile.xml" name="RawProfile"{0}><bns:object/></bns:Component>'
+)
+
+
+def test_only_a_document_carried_folder_id_stops_the_fan_out():
+    """The non-vacuity witness for the raw-XML rule, in both directions.
+
+    A caller who authored a `folderId` in their own component document authored
+    the placement, and the fan-out must leave it alone. A document carrying only
+    `folderName` has authored NOTHING this platform honours, so the fan-out must
+    still claim it — accepting that spelling suppressed the fan-out for a
+    document that places nothing, which is the finding this slice opened on,
+    reinstated on the escape hatch the rule was written for.
+    """
+    from boomi_mcp.authoring.governance import _declares_its_own_placement
+    from boomi_mcp.models.integration_models import IntegrationComponentSpec
+
+    def _spec(document):
+        return IntegrationComponentSpec(
+            key="raw", type="profile.xml", action="create", config={"xml": document}
+        )
+
+    assert _declares_its_own_placement(_spec(_RAW_DOC.format(' folderId="own"'))) == "own"
+    assert _declares_its_own_placement(_spec(_RAW_DOC.format(' folderName="Home"'))) is None
+    assert _declares_its_own_placement(_spec(_RAW_DOC.format(""))) is None
+
+    # ...and through the fan-out: the id-bearing document is left alone, the
+    # name-bearing one is claimed like any other unplaced component.
+    for document, claimed in (
+        (_RAW_DOC.format(' folderId="own"'), False),
+        (_RAW_DOC.format(' folderName="Elsewhere"'), True),
+        (_RAW_DOC.format(""), True),
+    ):
+        raw = {"key": "raw", "type": "profile.xml", "action": "create",
+               "config": {"xml": document}}
+        by_key = _governed(
+            [
+                _bare_unit(
+                    component_prefix="QA157",
+                    folder_name=_FOLDER["name"],
+                    depends_on=("conn", "raw"),
+                )
+            ],
+            [_unnamed(APPLIABLE_CONN), raw],
+        )
+        got = (by_key["raw"].config or {}).get("folder_name")
+        assert (got == _FOLDER["name"]) is claimed, (document[:80], got)
+
+
+def test_a_component_document_that_declares_an_entity_is_not_read():
+    """#157 put CALLER bytes in front of the placement reader.
+
+    That reader used to see only bytes this server built or the platform
+    returned. An expat parser expands internal entities — measured, a four-level
+    declaration turns a few hundred bytes into ten thousand — so a document that
+    declares one is refused rather than parsed, and an unreadable document
+    simply carries no placement.
+    """
+    from boomi_mcp.categories.components.canonical_process_apply import (
+        applied_placement,
+    )
+
+    bomb = (
+        '<?xml version="1.0"?><!DOCTYPE lolz ['
+        '<!ENTITY a "aaaaaaaaaa">'
+        '<!ENTITY b "&a;&a;&a;&a;&a;&a;&a;&a;&a;&a;">'
+        ']><bns:Component xmlns:bns="http://api.platform.boomi.com/" '
+        'name="&b;" folderId="X"/>'
+    )
+    assert applied_placement(bomb) == {"folder_name": None, "folder_id": None}
+    # the control: the same placement WITHOUT a declaration is still read
+    assert applied_placement(_RAW_DOC.format(' folderId="X"'))["folder_id"] == "X"
+
+
 def test_every_closed_key_builder_accepts_the_key_the_fan_out_writes():
     """QA-157-r8-03 and QA-157-r9-01, closed at the place the fact belongs.
 
@@ -997,18 +1074,25 @@ def test_every_closed_key_builder_accepts_the_key_the_fan_out_writes():
 
     from boomi_mcp.categories.components import builders as package
 
+    # RECURSIVE: `iter_modules` stops at the top level, so a closed-key builder
+    # in a sub-package would pass unseen (QA-157-r10-05). Not reachable in this
+    # tree today, which is exactly when a walk gets written too narrow.
     closed = {}
-    for info in pkgutil.iter_modules(package.__path__):
-        module = importlib.import_module(package.__name__ + "." + info.name)
+    for info in pkgutil.walk_packages(package.__path__, package.__name__ + "."):
+        module = importlib.import_module(info.name)
         allowed = getattr(module, "_ALLOWED_TOP_LEVEL_KEYS", None)
         if allowed is not None:
             closed[info.name] = allowed
     assert len(closed) >= 5, closed
-    refusing = sorted(name for name, keys in closed.items() if "folder_name" not in keys)
-    assert refusing == [], (
-        "these builders refuse the key the folder fan-out writes, so a governed "
-        "root that declares a folder cannot build their component types: %r" % refusing
-    )
+    # BOTH spellings: the fan-out writes the name, and `folder_id` is the one
+    # that actually places — a lint telling a caller to set one must not be
+    # refused by the builder that receives it (QA-157-r10-03).
+    for spelling in ("folder_name", "folder_id"):
+        refusing = sorted(name for name, keys in closed.items() if spelling not in keys)
+        assert refusing == [], (
+            "these builders refuse %r, so a governed root that declares a folder "
+            "cannot build their component types: %r" % (spelling, refusing)
+        )
     # ...and accepting it changes no emitted byte: the key is metadata, and this
     # platform ignores every folder spelling in a component document anyway.
     from boomi_mcp.categories.components.builders.process_property_builder import (
@@ -1027,7 +1111,9 @@ def test_every_closed_key_builder_accepts_the_key_the_fan_out_writes():
             }
         ],
     }
-    assert builder.build(**config) == builder.build(**dict(config, folder_name="F"))
+    assert builder.build(**config) == builder.build(
+        **dict(config, folder_name="F", folder_id="folder-1")
+    )
 
     # the fan-out reaches such a component again, and claims its placement
     prop = {
@@ -1048,6 +1134,83 @@ def test_every_closed_key_builder_accepts_the_key_the_fan_out_writes():
     )
     assert by_key["prop"].config["folder_name"] == _FOLDER["name"]
     assert by_key["prop"].name == "QA157 prop"
+
+
+def test_every_served_create_template_offers_the_spelling_that_places():
+    """QA-157-r10-02: the templates carried a second copy of the builders' keys.
+
+    The correction taught the builders to accept both placement spellings; the
+    served create templates, hand-written beside them, did not follow — and the
+    only folder key several offered was the one measured never to place. A
+    caller reading the template authored the spelling that does nothing.
+
+    The graded set is DERIVED from the templates' own declaration — every
+    create template that mentions a folder at all — rather than from a hand
+    list or a hand-typed floor, because a floor is what let this be graded on
+    four templates while ten others were wrong.
+    """
+    from boomi_mcp.categories import meta_tools
+
+    graded, offenders = [], []
+    for attr in dir(meta_tools):
+        template = getattr(meta_tools, attr)
+        if not (isinstance(template, dict) and isinstance(template.get("template"), dict)):
+            continue
+        if template.get("operation") != "create":
+            continue
+        body = template["template"]
+        if not any(key.startswith("folder") for key in body):
+            continue
+        # Organizations are not components and never reach the component
+        # create boundary, so no component placement applies to them.
+        if attr == "_ORGANIZATION_CREATE":
+            continue
+        graded.append(attr)
+        if "folder_id" not in body:
+            offenders.append(attr)
+        # The completeness check applies only where the template DECLARES a
+        # complete surface (an `optional` list beside `required`); several
+        # templates list requirements alone by long-standing convention, and
+        # inventing a declaration for them is not this test's business.
+        if "optional" in template:
+            declared = (
+                set(template.get("required", ()))
+                | set(template["optional"])
+                | set(template.get("defaults", {}))
+            )
+            if set(body) - declared:
+                offenders.append((attr, sorted(set(body) - declared)))
+    assert len(graded) >= 15, graded
+    assert offenders == [], offenders
+
+
+def test_no_builder_refuses_the_spelling_that_places():
+    """Every closed enumeration in the builder layer accepts a placement id.
+
+    Derived by BEHAVIOUR, not by an attribute name: each closed key set is found
+    by walking the package, and the one enumeration that lived under a different
+    name — the process builder's — is included by asking it directly. It had
+    excluded the key on a rationale the transport correction made stale: that a
+    create carrying it "would still land in the account root". It no longer
+    does, which is the whole point of the boundary.
+    """
+    import importlib
+    import pkgutil
+
+    from boomi_mcp.categories.components import builders as package
+    from boomi_mcp.categories.components.builders import process_flow_builder
+
+    closed = {}
+    for info in pkgutil.walk_packages(package.__path__, package.__name__ + "."):
+        module = importlib.import_module(info.name)
+        keys = getattr(module, "_ALLOWED_TOP_LEVEL_KEYS", None)
+        if keys is not None:
+            closed[info.name] = set(keys)
+    closed["sync_pipeline"] = set(process_flow_builder._SYNC_PIPELINE_ALLOWED_TOP_LEVEL)
+    assert len(closed) >= 6, sorted(closed)
+    for spelling in ("folder_name", "folder_id"):
+        refusing = sorted(name for name, keys in closed.items() if spelling not in keys)
+        assert refusing == [], (spelling, refusing)
 
 
 # ---------------------------------------------------------------------------

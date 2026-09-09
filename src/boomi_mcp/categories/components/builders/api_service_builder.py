@@ -120,7 +120,7 @@ _FORBIDDEN_SECRET_FIELDS: Tuple[str, ...] = (
 # Top-level config keys this builder accepts. ``component_type`` / ``xml``
 # are integration-builder plumbing (same rationale as the sibling builders'
 # allow-lists).
-#: ``folder_name`` is accepted as component-level METADATA beside
+#: ``folder_name`` and ``folder_id`` are accepted as component-level METADATA beside
 #: ``folder_path`` and is not emitted: this platform ignores both spellings on
 #: create, and a component is placed by the ``folderId`` the raw-create boundary
 #: injects, never by anything in this config. Rejecting the key made every
@@ -128,6 +128,7 @@ _FORBIDDEN_SECRET_FIELDS: Tuple[str, ...] = (
 #: folder, because #157's folder fan-out writes it (QA-157-r8-03/r9-01).
 _ALLOWED_TOP_LEVEL_KEYS: Tuple[str, ...] = (
     "folder_name",
+    "folder_id",
     "component_type",
     "component_name",
     "folder_path",

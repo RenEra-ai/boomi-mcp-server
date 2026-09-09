@@ -7920,11 +7920,15 @@ def _resolve_component_placement(config, folders=None):
     account, which the apply does exactly where #157's governance places
     things: a request carrying canonical process roots. The legacy
     ``integration_spec`` route keeps the behaviour it shipped with — the name
-    is emitted, this platform ignores it, the folderless-create lint says so —
-    because that surface is frozen until #160, the same boundary decision D3
-    made for the coverage gate. Widening it here would also make every legacy
-    apply read the account's whole folder list for a key the route never
-    honoured.
+    is emitted and this platform ignores it — because that surface is frozen
+    until #160, the same boundary decision D3 made for the coverage gate.
+    Widening it here would also make every legacy apply read the account's
+    whole folder list for a key the route never honoured.
+
+    The folderless-create lint does NOT say so, and this comment used to claim
+    it did (QA-157-r10-04): that lint fires only when a create declares no
+    placement at all, so a legacy create naming a folder silences it and is
+    still not placed. ``folder_id`` is the spelling that places on that route.
 
     Resolution is BEST-EFFORT, unlike the canonical root's resolver, which
     refuses: every legacy builder DEFAULTS this key to a folder name that need

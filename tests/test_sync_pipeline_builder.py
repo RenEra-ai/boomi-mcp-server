@@ -680,20 +680,27 @@ def test_unknown_top_level_key_rejected(bad_key):
     assert err.field == bad_key
 
 
-def test_folder_id_rejected_steer_to_folder_name():
-    # folder_id is NOT emitted by the process builder (only folderName is), so
-    # accepting it would suppress FOLDER_REQUIRED_ON_CREATE while the component
-    # still lands in root — reject it; placement goes through folder_name.
+def test_folder_id_accepted_as_inert_metadata():
+    """INVERTED (#157): folder_id is the spelling that actually places.
+
+    This test used to pin the opposite, on the rationale that accepting the key
+    "would suppress FOLDER_REQUIRED_ON_CREATE while the component still lands in
+    root". That was true only while nothing submitted the id. #157 injects it at
+    the one raw-create boundary, so the key now places — and rejecting it here
+    made a governed root that declares a folder unable to build this process
+    kind at all. The builder still emits nothing for it, so no byte moves.
+    """
     cfg = _linear_with_map()
     cfg["folder_id"] = "some-folder-id"
-    err = SyncPipelineBuilder.validate_config(cfg, depends_on=_DEPS)
-    assert err is not None
-    assert err.error_code == "SYNC_PIPELINE_CONFIG_INVALID"
-    assert err.field == "folder_id"
+    assert SyncPipelineBuilder.validate_config(cfg, depends_on=_DEPS) is None
+    built = SyncPipelineBuilder.build(dict(cfg), name="P")
+    assert built == SyncPipelineBuilder.build(_linear_with_map(), name="P")
+    assert "folderId" not in built
 
 
 def test_folder_name_accepted():
-    # folder_name IS emitted (folderName attr) — it stays allow-listed.
+    # folder_name IS emitted (folderName attr) — it stays allow-listed, and this
+    # platform ignores it on create, which is why folder_id is what places.
     cfg = _linear_with_map()
     cfg["folder_name"] = "Process Library/Sync"
     assert SyncPipelineBuilder.validate_config(cfg, depends_on=_DEPS) is None

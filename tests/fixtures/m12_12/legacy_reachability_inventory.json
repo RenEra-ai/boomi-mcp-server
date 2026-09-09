@@ -208,7 +208,7 @@
     {
       "census": "component_xml_write",
       "count": 1,
-      "evidence_line": 8678,
+      "evidence_line": 8682,
       "form": "create_component(...)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "WR-c52b7626",
@@ -235,7 +235,7 @@
     {
       "census": "component_xml_write",
       "count": 1,
-      "evidence_line": 5893,
+      "evidence_line": 5915,
       "form": "svc.send_request(...)",
       "path": "src/boomi_mcp/categories/meta_tools.py",
       "row_id": "WR-ff78566d",
@@ -1297,7 +1297,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 9229,
+      "evidence_line": 9233,
       "form": "_build_plan(...) [legacy-bearing, src/boomi_mcp/categories/integration_builder.py]",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LT-d2d552f0",
@@ -1306,7 +1306,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 10071,
+      "evidence_line": 10075,
       "form": "_execute_canonical_process(...) [legacy-bearing, src/boomi_mcp/categories/integration_builder.py]",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LT-21fe473d",
@@ -1315,7 +1315,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 10438,
+      "evidence_line": 10442,
       "form": "_execute_component(...) [legacy-bearing, src/boomi_mcp/categories/integration_builder.py]",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LT-aabdab32",
@@ -1324,7 +1324,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 9191,
+      "evidence_line": 9195,
       "form": "preflight_typed_apply_v1(...) [legacy-bearing, src/boomi_mcp/authoring/workflow.py]",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LT-e0b988c1",
@@ -1378,7 +1378,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 11604,
+      "evidence_line": 11608,
       "form": "compile_authoring_request_v1(...) [legacy-bearing, src/boomi_mcp/authoring/workflow.py]",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LT-b741b93b",
@@ -1387,7 +1387,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 8622,
+      "evidence_line": 8626,
       "form": "_apply_structured_update(...) [legacy-bearing, src/boomi_mcp/categories/integration_builder.py]",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LT-35437114",
@@ -1396,7 +1396,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 8678,
+      "evidence_line": 8682,
       "form": "create_component(...) [legacy-bearing, src/boomi_mcp/categories/components/manage_component.py]",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LT-3999ba54",
@@ -1459,7 +1459,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 11542,
+      "evidence_line": 11546,
       "form": "plan_authoring_request_v1(...) [legacy-bearing, src/boomi_mcp/authoring/workflow.py]",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LT-e950b4e0",
@@ -1495,7 +1495,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 11941,
+      "evidence_line": 11945,
       "form": "_apply_plan(...) [legacy-bearing, src/boomi_mcp/categories/integration_builder.py]",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LT-e5bb8b19",
@@ -1504,7 +1504,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 11933,
+      "evidence_line": 11937,
       "form": "_build_plan(...) [legacy-bearing, src/boomi_mcp/categories/integration_builder.py]",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LT-dcb7048c",
@@ -1513,7 +1513,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 11937,
+      "evidence_line": 11941,
       "form": "_compile_authoring(...) [legacy-bearing, src/boomi_mcp/categories/integration_builder.py]",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LT-5ad6792c",
@@ -1522,7 +1522,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 11931,
+      "evidence_line": 11935,
       "form": "_plan_authoring(...) [legacy-bearing, src/boomi_mcp/categories/integration_builder.py]",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LT-b68fe63e",
@@ -1657,7 +1657,7 @@
     {
       "census": "process_kind_consumer",
       "count": 1,
-      "evidence_line": 5870,
+      "evidence_line": 5875,
       "form": "config.get('process_kind')",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "PC-208b7b31",
@@ -1666,7 +1666,7 @@
     {
       "census": "process_kind_consumer",
       "count": 1,
-      "evidence_line": 5870,
+      "evidence_line": 5875,
       "form": "config.get('process_type')",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "PC-107ed4a9",
@@ -1891,7 +1891,7 @@
     {
       "census": "process_kind_producer",
       "count": 1,
-      "evidence_line": 5382,
+      "evidence_line": 5387,
       "form": "dict-literal process_kind=<expr>",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "PP-78a98fd3",
@@ -1900,7 +1900,7 @@
     {
       "census": "process_kind_producer",
       "count": 2,
-      "evidence_line": 7721,
+      "evidence_line": 7743,
       "form": "dict-literal process_kind='database_to_api_sync'",
       "path": "src/boomi_mcp/categories/meta_tools.py",
       "row_id": "PP-afb1406e",
@@ -1909,7 +1909,7 @@
     {
       "census": "process_kind_producer",
       "count": 2,
-      "evidence_line": 8583,
+      "evidence_line": 8605,
       "form": "dict-literal process_kind='sync_pipeline'",
       "path": "src/boomi_mcp/categories/meta_tools.py",
       "row_id": "PP-9797a75e",
@@ -1918,7 +1918,7 @@
     {
       "census": "process_kind_producer",
       "count": 2,
-      "evidence_line": 8452,
+      "evidence_line": 8474,
       "form": "dict-literal process_kind='wrapper_subprocess'",
       "path": "src/boomi_mcp/categories/meta_tools.py",
       "row_id": "PP-67bfa71b",
@@ -2080,7 +2080,7 @@
     {
       "census": "registry_lookup",
       "count": 1,
-      "evidence_line": 6045,
+      "evidence_line": 6050,
       "form": "PROCESS_FLOW_BUILDERS (read)",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "LR-47b36d32",
@@ -2089,7 +2089,7 @@
     {
       "census": "registry_lookup",
       "count": 1,
-      "evidence_line": 6045,
+      "evidence_line": 6050,
       "form": "PROCESS_FLOW_BUILDERS.get(...)",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "LR-a4b26efd",
@@ -2161,7 +2161,7 @@
     {
       "census": "renderer_call",
       "count": 1,
-      "evidence_line": 5944,
+      "evidence_line": 5949,
       "form": "ProcessFlowBuilder.build(...)",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "LR-9e907656",
@@ -2170,7 +2170,7 @@
     {
       "census": "renderer_call",
       "count": 1,
-      "evidence_line": 5888,
+      "evidence_line": 5893,
       "form": "ProcessFlowBuilder.validate_config(...)",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "LR-dbda5628",
@@ -2359,7 +2359,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 6052,
+      "evidence_line": 6057,
       "form": "'PROCESS_FLOW_BUILDERS' (unclassified symbolic literal)",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "UR-e8179527",
@@ -2368,7 +2368,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 6049,
+      "evidence_line": 6054,
       "form": "'ProcessFlowBuilder' (unclassified symbolic literal)",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "UR-e79baecd",
@@ -2377,7 +2377,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 6051,
+      "evidence_line": 6056,
       "form": "'SyncPipelineBuilder' (unclassified symbolic literal)",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "UR-9ea5e934",
@@ -2386,7 +2386,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 6050,
+      "evidence_line": 6055,
       "form": "'WrapperSubprocessBuilder' (unclassified symbolic literal)",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "UR-ae78d786",
@@ -2395,7 +2395,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 6053,
+      "evidence_line": 6058,
       "form": "'get_process_flow_builder' (unclassified symbolic literal)",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "UR-2ca4aab3",
@@ -2404,7 +2404,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 5169,
+      "evidence_line": 5173,
       "form": "'process_kind' (unclassified selector literal)",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "UR-27eb897c",
@@ -2413,7 +2413,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 5170,
+      "evidence_line": 5174,
       "form": "'process_type' (unclassified selector literal)",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "UR-bfc0b0e8",
@@ -2422,7 +2422,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 6010,
+      "evidence_line": 6015,
       "form": "PROCESS_FLOW_BUILDERS (unclassified reference)",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "UR-fe6b7165",
@@ -2431,7 +2431,7 @@
     {
       "census": "unclassified_reference",
       "count": 3,
-      "evidence_line": 6011,
+      "evidence_line": 6016,
       "form": "ProcessFlowBuilder (unclassified reference)",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "UR-707c60da",
@@ -2440,7 +2440,7 @@
     {
       "census": "unclassified_reference",
       "count": 3,
-      "evidence_line": 6013,
+      "evidence_line": 6018,
       "form": "SyncPipelineBuilder (unclassified reference)",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "UR-8af1b075",
@@ -2449,7 +2449,7 @@
     {
       "census": "unclassified_reference",
       "count": 3,
-      "evidence_line": 6012,
+      "evidence_line": 6017,
       "form": "WrapperSubprocessBuilder (unclassified reference)",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "UR-7b298ebf",
@@ -2485,7 +2485,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 5195,
+      "evidence_line": 5200,
       "form": "ProcessFlowBuilder (unclassified reference)",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "UR-314d9050",
@@ -2494,7 +2494,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 5382,
+      "evidence_line": 5387,
       "form": "ProcessFlowBuilder (unclassified reference)",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "UR-c6ac4f5d",
@@ -2503,7 +2503,7 @@
     {
       "census": "unclassified_reference",
       "count": 2,
-      "evidence_line": 5870,
+      "evidence_line": 5875,
       "form": "'process_kind' (unclassified selector literal)",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "UR-fda30e22",
@@ -2512,7 +2512,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 5870,
+      "evidence_line": 5875,
       "form": "'process_type' (unclassified selector literal)",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "UR-14ea1b1b",
@@ -2521,7 +2521,7 @@
     {
       "census": "unclassified_reference",
       "count": 3,
-      "evidence_line": 5869,
+      "evidence_line": 5874,
       "form": "process_kind (unclassified selector name)",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "UR-59f648bc",
@@ -2584,7 +2584,7 @@
     {
       "census": "unclassified_reference",
       "count": 2,
-      "evidence_line": 6043,
+      "evidence_line": 6048,
       "form": "process_kind (unclassified selector name)",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "UR-81d88cd1",
@@ -2593,7 +2593,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 6041,
+      "evidence_line": 6046,
       "form": "process_kind (unclassified selector parameter)",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "UR-d75ee4b6",
@@ -2602,7 +2602,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 10576,
+      "evidence_line": 10580,
       "form": "'Component' (unclassified Component-endpoint literal)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "UR-37ab9607",
@@ -2953,7 +2953,7 @@
     {
       "census": "unclassified_reference",
       "count": 5,
-      "evidence_line": 8037,
+      "evidence_line": 8059,
       "form": "'process_kind' (unclassified selector literal)",
       "path": "src/boomi_mcp/categories/meta_tools.py",
       "row_id": "UR-10de511e",
@@ -4185,7 +4185,7 @@
     {
       "census": "component_xml_write",
       "disposition": "WRT-canonical-process-materialization: unchanged, and it is what the retraction leaves behind: a process root reaches the platform only through a compiled artifact whose plan fingerprint and apply-time mutation attestation are both recorded.",
-      "evidence_line": 8678,
+      "evidence_line": 8682,
       "forms": [
         "create_component(...)"
       ],
@@ -4212,7 +4212,7 @@
     {
       "census": "component_xml_write",
       "disposition": "WRT-raw-api-component: ONE canonical endpoint parser feeds classification, ID extraction AND transport; the reserved literal `bulk` is matched BEFORE the `<id>` arm and is never a componentId; every update-shaped call runs the two-sided process check.",
-      "evidence_line": 5893,
+      "evidence_line": 5915,
       "forms": [
         "svc.send_request(...)"
       ],
@@ -5026,7 +5026,7 @@
     {
       "census": "legacy_transitive_call",
       "disposition": "follow the callee's row; this is an edge, not a site",
-      "evidence_line": 9191,
+      "evidence_line": 9195,
       "forms": [
         "_build_plan(...) [legacy-bearing, src/boomi_mcp/categories/integration_builder.py]",
         "_execute_canonical_process(...) [legacy-bearing, src/boomi_mcp/categories/integration_builder.py]",
@@ -5071,7 +5071,7 @@
     {
       "census": "legacy_transitive_call",
       "disposition": "follow the callee's row; this is an edge, not a site",
-      "evidence_line": 11604,
+      "evidence_line": 11608,
       "forms": [
         "compile_authoring_request_v1(...) [legacy-bearing, src/boomi_mcp/authoring/workflow.py]"
       ],
@@ -5084,7 +5084,7 @@
     {
       "census": "legacy_transitive_call",
       "disposition": "follow the callee's row; this is an edge, not a site",
-      "evidence_line": 8622,
+      "evidence_line": 8626,
       "forms": [
         "_apply_structured_update(...) [legacy-bearing, src/boomi_mcp/categories/integration_builder.py]",
         "create_component(...) [legacy-bearing, src/boomi_mcp/categories/components/manage_component.py]"
@@ -5116,7 +5116,7 @@
     {
       "census": "legacy_transitive_call",
       "disposition": "follow the callee's row; this is an edge, not a site",
-      "evidence_line": 11542,
+      "evidence_line": 11546,
       "forms": [
         "plan_authoring_request_v1(...) [legacy-bearing, src/boomi_mcp/authoring/workflow.py]"
       ],
@@ -5156,7 +5156,7 @@
     {
       "census": "legacy_transitive_call",
       "disposition": "follow the callee's row; this is an edge, not a site",
-      "evidence_line": 11931,
+      "evidence_line": 11935,
       "forms": [
         "_apply_plan(...) [legacy-bearing, src/boomi_mcp/categories/integration_builder.py]",
         "_build_plan(...) [legacy-bearing, src/boomi_mcp/categories/integration_builder.py]",
@@ -5330,7 +5330,7 @@
     {
       "census": "process_kind_consumer",
       "disposition": "delete the legacy semantic shell",
-      "evidence_line": 5870,
+      "evidence_line": 5875,
       "forms": [
         "config.get('process_kind')",
         "config.get('process_type')"
@@ -5512,7 +5512,7 @@
     {
       "census": "process_kind_producer",
       "disposition": "delete the legacy semantic shell",
-      "evidence_line": 5382,
+      "evidence_line": 5387,
       "forms": [
         "dict-literal process_kind=<expr>"
       ],
@@ -5525,7 +5525,7 @@
     {
       "census": "process_kind_producer",
       "disposition": "retract the served legacy guidance / guard the raw route",
-      "evidence_line": 7721,
+      "evidence_line": 7743,
       "forms": [
         "dict-literal process_kind='database_to_api_sync'",
         "dict-literal process_kind='sync_pipeline'",
@@ -5713,7 +5713,7 @@
     {
       "census": "registry_lookup",
       "disposition": "delete the legacy semantic shell",
-      "evidence_line": 6045,
+      "evidence_line": 6050,
       "forms": [
         "PROCESS_FLOW_BUILDERS (read)",
         "PROCESS_FLOW_BUILDERS.get(...)"
@@ -5782,7 +5782,7 @@
     {
       "census": "renderer_call",
       "disposition": "delete the legacy semantic shell",
-      "evidence_line": 5944,
+      "evidence_line": 5949,
       "forms": [
         "ProcessFlowBuilder.build(...)"
       ],
@@ -5795,7 +5795,7 @@
     {
       "census": "renderer_call",
       "disposition": "delete the legacy semantic shell",
-      "evidence_line": 5888,
+      "evidence_line": 5893,
       "forms": [
         "ProcessFlowBuilder.validate_config(...)"
       ],
@@ -5972,7 +5972,7 @@
     {
       "census": "unclassified_reference",
       "disposition": "delete the legacy semantic shell",
-      "evidence_line": 5169,
+      "evidence_line": 5173,
       "forms": [
         "'PROCESS_FLOW_BUILDERS' (unclassified symbolic literal)",
         "'ProcessFlowBuilder' (unclassified symbolic literal)",
@@ -6010,7 +6010,7 @@
     {
       "census": "unclassified_reference",
       "disposition": "delete the legacy semantic shell",
-      "evidence_line": 5195,
+      "evidence_line": 5200,
       "forms": [
         "ProcessFlowBuilder (unclassified reference)"
       ],
@@ -6023,7 +6023,7 @@
     {
       "census": "unclassified_reference",
       "disposition": "delete the legacy semantic shell",
-      "evidence_line": 5382,
+      "evidence_line": 5387,
       "forms": [
         "ProcessFlowBuilder (unclassified reference)"
       ],
@@ -6036,7 +6036,7 @@
     {
       "census": "unclassified_reference",
       "disposition": "delete the legacy semantic shell",
-      "evidence_line": 5869,
+      "evidence_line": 5874,
       "forms": [
         "'process_kind' (unclassified selector literal)",
         "'process_type' (unclassified selector literal)",
@@ -6105,7 +6105,7 @@
     {
       "census": "unclassified_reference",
       "disposition": "delete the legacy semantic shell",
-      "evidence_line": 6041,
+      "evidence_line": 6046,
       "forms": [
         "process_kind (unclassified selector name)",
         "process_kind (unclassified selector parameter)"
@@ -6119,7 +6119,7 @@
     {
       "census": "unclassified_reference",
       "disposition": "residue: a watched name mentioned in a shape the census does not classify",
-      "evidence_line": 10576,
+      "evidence_line": 10580,
       "forms": [
         "'Component' (unclassified Component-endpoint literal)"
       ],
@@ -6326,7 +6326,7 @@
     {
       "census": "unclassified_reference",
       "disposition": "retract the served legacy guidance / guard the raw route",
-      "evidence_line": 8037,
+      "evidence_line": 8059,
       "forms": [
         "'process_kind' (unclassified selector literal)"
       ],
@@ -10331,10 +10331,10 @@
     },
     {
       "artifact_id": "SS-SCHEMA-TEMPLATES:resource_type=component|operation=create|component_type=connector-action|protocol=database.get",
-      "canonical_length": 4541,
+      "canonical_length": 4674,
       "producer": "meta_tools.get_schema_template_action(...)",
       "selector": "resource_type=component|operation=create|component_type=connector-action|protocol=database.get",
-      "sha256": "77050038b7b206478586c4c58420b18fad263dffd1f49ad38c689cef4a4081f6",
+      "sha256": "1f5b54f26e534a6af55b50285f709b401a4a331741733d3336e22781e8a2b04d",
       "surface_class": "SS-SCHEMA-TEMPLATES",
       "value": {
         "_success": true,
@@ -10427,7 +10427,8 @@
           "connection_ref_key": "<<db connection key>>",
           "connector_type": "database",
           "description": "<<optional description>>",
-          "folder_name": "<<folder>>",
+          "folder_id": "<<optional folder id; the ONE spelling that places>>",
+          "folder_name": "<<optional folder name; metadata only — this platform ignores it on create>>",
           "max_rows": 0,
           "operation_mode": "get",
           "read_profile_id": "$ref:<<db read profile key>>"
@@ -10439,13 +10440,13 @@
     },
     {
       "artifact_id": "SS-SCHEMA-TEMPLATES:resource_type=component|operation=create|component_type=connector-action|protocol=rest.operation",
-      "canonical_length": 11950,
+      "canonical_length": 12083,
       "legacy_excerpt": {
         "update_note": "Structured updates via build_integration action='update' now use read-merge-write semantics (issue #45): the builder-owned GenericOperationConfig <field id=\"...\"> children and owned attributes (customOperationType, path, requestProfile/responseProfile refs) are merged into the live XML, while unknown field ids, Operation-level Archiving/Tracking/Caching, and any future siblings survive. UI-added live query parameters and request headers survive a path-only or method-only update (Codex r8 P2). Profile bindings AND profile types are now each conditionally emitted by the builder (#50), so all four attrs merge additively: a path/method-only update (none of them supplied) preserves the live profile id+type; a type-only update (request_profile_type/response_profile_type without the matching id) now applies the new type while keeping the live id; and supplying request_profile_id+request_profile_type applies both. Setting request_profile_type/response_profile_type='none' unbinds the profile: the new 'none' type applies AND the live profile id is cleared (no stale id is left dangling beside a 'none' type). KNOWN LIMITATION (Codex r10 P2): an explicit ``query_parameters={}`` / ``request_headers={}`` to clear all live custom properties is indistinguishable from omitting those fields, so the live props survive — use the raw-XML escape hatch via manage_component to force-clear. Direct manage_component action='update' with config.xml remains a full XML replacement."
       },
       "producer": "meta_tools.get_schema_template_action(...)",
       "selector": "resource_type=component|operation=create|component_type=connector-action|protocol=rest.operation",
-      "sha256": "d5bdebd5db2ebf26ad90e00bfc09bda3949add4624af8637e477898de87e193a",
+      "sha256": "0f9f62c8abc02c3693b5bb4ad6228177779fc568f3a7b65d8b9cec90c272e001",
       "surface_class": "SS-SCHEMA-TEMPLATES",
       "value": {
         "_success": true,
@@ -10643,7 +10644,8 @@
           "connector_type": "rest",
           "credential_ref": "credential://<<vendor>>/<<role>>",
           "description": "<<optional description>>",
-          "folder_name": "<<folder>>",
+          "folder_id": "<<optional folder id; the ONE spelling that places>>",
+          "folder_name": "<<optional folder name; metadata only — this platform ignores it on create>>",
           "method": "PATCH",
           "operation_mode": "execute",
           "path": "/<<endpoint path>>",
@@ -10665,10 +10667,10 @@
     },
     {
       "artifact_id": "SS-SCHEMA-TEMPLATES:resource_type=component|operation=create|component_type=connector-action|protocol=soap.operation",
-      "canonical_length": 3476,
+      "canonical_length": 3609,
       "producer": "meta_tools.get_schema_template_action(...)",
       "selector": "resource_type=component|operation=create|component_type=connector-action|protocol=soap.operation",
-      "sha256": "2d3dc99a4d7117fac0212fdce29d7b28ef87c8a79884d0d0595d83ffb8aa6e99",
+      "sha256": "e9b53d3b73ee61c0c2cc329e63fe52e2466658c933f18a71a0bd07417c6d6175",
       "surface_class": "SS-SCHEMA-TEMPLATES",
       "value": {
         "_success": true,
@@ -10718,7 +10720,8 @@
           "description": "<<optional description>>",
           "expose_request_envelope": true,
           "expose_response_envelope": false,
-          "folder_name": "<<folder>>",
+          "folder_id": "<<optional folder id; the ONE spelling that places>>",
+          "folder_name": "<<optional folder name; metadata only — this platform ignores it on create>>",
           "operation_mode": "execute",
           "request_profile_id": "$ref:<<request profile key>>",
           "request_profile_type": "xml",
@@ -10788,7 +10791,7 @@
     },
     {
       "artifact_id": "SS-SCHEMA-TEMPLATES:resource_type=component|operation=create|component_type=connector-settings|protocol=database.sqlserver",
-      "canonical_length": 14795,
+      "canonical_length": 14862,
       "legacy_excerpt": {
         "note": "Database (Legacy) connector. One builder, one outer <DatabaseConnectionSettings> envelope, two driver shapes — host_port_db (Microsoft SQL Server / jTDS / Oracle / MySQL / SAP HANA) and custom_url (caller-supplied JDBC class + URL). Dispatched through the builder registry (CONNECTOR_BUILDERS['database']) so callers pass JSON config — not raw XML. The builder emits <DatabaseConnectionSettings> with Boomi's <WriteOptions> and <AdapterPoolInfo> blocks.",
         "password_note": "Plaintext secrets are rejected before any mutation. Pass credential_ref='credential://...' as an opaque placeholder — the builder never writes it into the emitted XML. Boomi stores passwords as ciphertext produced by its own encryption; there is no public API to encrypt a plaintext value. New components are created with <encryptedValue ... isSet=\"false\"/>. Set the password in the Boomi UI after create, or supply an existing ciphertext via the raw-XML escape hatch (config.xml=...). Forbidden secret-shaped keys (password, password_ref, secret, token, access_token, client_secret) fail validation with error_code=PLAINTEXT_SECRET_REJECTED.",
@@ -10797,7 +10800,7 @@
       },
       "producer": "meta_tools.get_schema_template_action(...)",
       "selector": "resource_type=component|operation=create|component_type=connector-settings|protocol=database.sqlserver",
-      "sha256": "15fcedfd794335661e5f78ff6e50f629de5a6fc72575e9603bbd5f79bbca6247",
+      "sha256": "1a7fee2043d9623c96e9d4a28bc23e7e0b8cabc7f0a3162d0d79a8967a7f8014",
       "surface_class": "SS-SCHEMA-TEMPLATES",
       "value": {
         "_success": true,
@@ -11190,6 +11193,7 @@
           "dbname": "MyDatabase",
           "description": "(optional) free-text description",
           "driver_id": "sqlserver",
+          "folder_id": "<<optional folder id; the ONE spelling that places>>",
           "folder_name": "Home",
           "host": "host.example.com",
           "port": 1433,
@@ -11224,13 +11228,13 @@
     },
     {
       "artifact_id": "SS-SCHEMA-TEMPLATES:resource_type=component|operation=create|component_type=connector-settings|protocol=rest.client",
-      "canonical_length": 12528,
+      "canonical_length": 12661,
       "legacy_excerpt": {
         "gotchas[2]": "OAuth2 client secret is stored as Boomi ciphertext. The builder emits an empty clientSecret attribute and an encryptedValues header marking the path isSet=false. After create, the value is supplied via the Boomi UI (or a pre-encrypted raw-XML payload via config.xml=...)."
       },
       "producer": "meta_tools.get_schema_template_action(...)",
       "selector": "resource_type=component|operation=create|component_type=connector-settings|protocol=rest.client",
-      "sha256": "3d6869640b96f9608c74eeccf391b8487eb3702a4eb507ec1023f68b168a6d6d",
+      "sha256": "bcc6cf628c4eb2242d655f8c6b94deabf71185498adc2b017086817006821d3e",
       "surface_class": "SS-SCHEMA-TEMPLATES",
       "value": {
         "_success": true,
@@ -11496,7 +11500,8 @@
           "connector_type": "rest",
           "cookie_scope": "GLOBAL",
           "description": "<<optional description>>",
-          "folder_name": "<<folder>>",
+          "folder_id": "<<optional folder id; the ONE spelling that places>>",
+          "folder_name": "<<optional folder name; metadata only — this platform ignores it on create>>",
           "oauth2": {
             "access_token_url": "https://<<host>>/oauth/token",
             "client_id": "<<client id>>",
@@ -11526,10 +11531,10 @@
     },
     {
       "artifact_id": "SS-SCHEMA-TEMPLATES:resource_type=component|operation=create|component_type=connector-settings|protocol=soap.client",
-      "canonical_length": 2499,
+      "canonical_length": 2632,
       "producer": "meta_tools.get_schema_template_action(...)",
       "selector": "resource_type=component|operation=create|component_type=connector-settings|protocol=soap.client",
-      "sha256": "6c5051c5e569ceef173e00527542b918500a83757d94e040d24f307927001877",
+      "sha256": "bf751a29e7ae88945a70f5b733976f2ce47d8bd5cda15c078431520ba2773e76",
       "surface_class": "SS-SCHEMA-TEMPLATES",
       "value": {
         "_success": true,
@@ -11572,7 +11577,8 @@
           "credential_ref": "credential://<<vendor>>/<<role>>",
           "description": "<<optional description>>",
           "endpoint_url": "https://<<host>>/<<service>>.asmx",
-          "folder_name": "<<folder>>",
+          "folder_id": "<<optional folder id; the ONE spelling that places>>",
+          "folder_name": "<<optional folder name; metadata only — this platform ignores it on create>>",
           "security": "NETWORK_AUTH",
           "username": "<<service username>>",
           "wsdl_url": "https://<<host>>/<<service>>.asmx?wsdl"
@@ -11680,10 +11686,10 @@
     },
     {
       "artifact_id": "SS-SCHEMA-TEMPLATES:resource_type=component|operation=create|component_type=processproperty",
-      "canonical_length": 5284,
+      "canonical_length": 5420,
       "producer": "meta_tools.get_schema_template_action(...)",
       "selector": "resource_type=component|operation=create|component_type=processproperty",
-      "sha256": "e38bbae7cce0409aae8561114e452ff4ae4122c3ece7faaa15726242da4ab547",
+      "sha256": "9afbf4ef299014f6798b0a86c70c5b1b8a0da259773a4a39673d2e7c6235dee1",
       "surface_class": "SS-SCHEMA-TEMPLATES",
       "value": {
         "_success": true,
@@ -11742,6 +11748,7 @@
         "note": "Declares the component's Defined Process Property slots. Each property carries an EXPLICIT stable UUID 'key' (v1 contract): the same UUID is emitted into the component XML and handed to the referencing map function as parameters.process_property_key — no generated-key token mechanism exists. 'name' becomes the property <label> (the display name the map function's property_name shows).",
         "operation": "create",
         "optional": [
+          "folder_id",
           "folder_path",
           "description"
         ],
@@ -11775,7 +11782,8 @@
           "component_name": "<<component display name>>",
           "component_type": "processproperty",
           "description": "<<optional description>>",
-          "folder_path": "<<optional folder>>",
+          "folder_id": "<<optional folder id; the ONE spelling that places>>",
+          "folder_path": "<<optional folder path; metadata only — this platform ignores it on create>>",
           "properties": [
             {
               "default_value": "<<optional default>>",
@@ -11842,10 +11850,10 @@
     },
     {
       "artifact_id": "SS-SCHEMA-TEMPLATES:resource_type=component|operation=create|component_type=profile.db|protocol=database.read",
-      "canonical_length": 4141,
+      "canonical_length": 4274,
       "producer": "meta_tools.get_schema_template_action(...)",
       "selector": "resource_type=component|operation=create|component_type=profile.db|protocol=database.read",
-      "sha256": "63f04a435803b77f0c95b34dcc06a0ac7745d843ed542f68f43d17a23c376145",
+      "sha256": "4960c47af04854f962ee17db3f621389daf9d947dcbe41f92012a4e33fc0b218",
       "surface_class": "SS-SCHEMA-TEMPLATES",
       "value": {
         "_success": true,
@@ -11963,7 +11971,8 @@
           "component_name": "<<read profile name>>",
           "component_type": "profile.db",
           "description": "<<optional description>>",
-          "folder_name": "<<folder>>",
+          "folder_id": "<<optional folder id; the ONE spelling that places>>",
+          "folder_name": "<<optional folder name; metadata only — this platform ignores it on create>>",
           "output_fields": [
             {
               "data_type": "character",
@@ -11989,10 +11998,10 @@
     },
     {
       "artifact_id": "SS-SCHEMA-TEMPLATES:resource_type=component|operation=create|component_type=profile.db|protocol=database.stored_procedure_read",
-      "canonical_length": 6169,
+      "canonical_length": 6302,
       "producer": "meta_tools.get_schema_template_action(...)",
       "selector": "resource_type=component|operation=create|component_type=profile.db|protocol=database.stored_procedure_read",
-      "sha256": "9ec930d60303fb3d4cf69bc8644e19b28579474b367f21047c378a2ebe2d13a8",
+      "sha256": "f5dc36a6ef99fa37bbc17de5b9e6e3b81bf44e64ffacfa9a9f58f7142b788880",
       "surface_class": "SS-SCHEMA-TEMPLATES",
       "value": {
         "_success": true,
@@ -12134,7 +12143,8 @@
           "component_name": "<<read profile name>>",
           "component_type": "profile.db",
           "description": "<<optional description>>",
-          "folder_name": "<<folder>>",
+          "folder_id": "<<optional folder id; the ONE spelling that places>>",
+          "folder_name": "<<optional folder name; metadata only — this platform ignores it on create>>",
           "output_fields": [
             {
               "data_type": "character",
@@ -12207,10 +12217,10 @@
     },
     {
       "artifact_id": "SS-SCHEMA-TEMPLATES:resource_type=component|operation=create|component_type=profile.json",
-      "canonical_length": 4944,
+      "canonical_length": 5068,
       "producer": "meta_tools.get_schema_template_action(...)",
       "selector": "resource_type=component|operation=create|component_type=profile.json",
-      "sha256": "6b2feaa2d5daad0cd0aafe09e6ea183fe10645c31c5a038ccffaa321458371f5",
+      "sha256": "7ca3b1c522e91f68d86b997fb70aacaef11228c08cb574e005d164cf43fcfadf",
       "surface_class": "SS-SCHEMA-TEMPLATES",
       "value": {
         "_success": true,
@@ -12312,7 +12322,8 @@
           "component_name": "<<profile name>>",
           "component_type": "profile.json",
           "description": "<<optional description>>",
-          "folder_path": "<<optional folder>>",
+          "folder_id": "<<optional folder id; the ONE spelling that places>>",
+          "folder_path": "<<optional folder path; metadata only — this platform ignores it on create>>",
           "profile_type": "json.generated",
           "root": {
             "children": [
@@ -12334,10 +12345,10 @@
     },
     {
       "artifact_id": "SS-SCHEMA-TEMPLATES:resource_type=component|operation=create|component_type=profile.xml",
-      "canonical_length": 6137,
+      "canonical_length": 6261,
       "producer": "meta_tools.get_schema_template_action(...)",
       "selector": "resource_type=component|operation=create|component_type=profile.xml",
-      "sha256": "f7901d4ffb283c1754aeb08786883923d6dba6ebdd9be3e3708b390d30dc2afc",
+      "sha256": "259db41c721928af4138db8c8116e43999ff3be0df7f96431c3c753df6ef87e0",
       "surface_class": "SS-SCHEMA-TEMPLATES",
       "value": {
         "_success": true,
@@ -12440,7 +12451,8 @@
           "component_name": "<<profile name>>",
           "component_type": "profile.xml",
           "description": "<<optional description>>",
-          "folder_path": "<<optional folder>>",
+          "folder_id": "<<optional folder id; the ONE spelling that places>>",
+          "folder_path": "<<optional folder path; metadata only — this platform ignores it on create>>",
           "profile_type": "xml.generated",
           "root": {
             "children": [
@@ -12501,10 +12513,10 @@
     },
     {
       "artifact_id": "SS-SCHEMA-TEMPLATES:resource_type=component|operation=create|component_type=script.mapping",
-      "canonical_length": 5924,
+      "canonical_length": 6060,
       "producer": "meta_tools.get_schema_template_action(...)",
       "selector": "resource_type=component|operation=create|component_type=script.mapping",
-      "sha256": "0e6a32a47766d08eca62d43cbb5a3ba00fb24217c096d7450dc6ab3d951a84e3",
+      "sha256": "0dcdf55574abd9bab57a97b9690c487ddba687722941b20fcc652b769a734b88",
       "surface_class": "SS-SCHEMA-TEMPLATES",
       "value": {
         "_success": true,
@@ -12570,6 +12582,7 @@
         "note": "Wraps a caller-authored Boomi Map Script in a structured component with declared <Input> and <Output> variables. Boomi sets mapped input values before the script runs; the script must assign each <Output> variable before returning. The component is referenced from a transform.map via map_type='script' and script_mappings[].script_component_id.",
         "operation": "create",
         "optional": [
+          "folder_id",
           "folder_path",
           "description",
           "preserve_order",
@@ -12605,7 +12618,8 @@
           "component_name": "<<script display name>>",
           "component_type": "script.mapping",
           "description": "<<optional description>>",
-          "folder_path": "<<optional folder>>",
+          "folder_id": "<<optional folder id; the ONE spelling that places>>",
+          "folder_path": "<<optional folder path; metadata only — this platform ignores it on create>>",
           "inputs": [
             {
               "data_type": "<<character | date | integer | float>>",
@@ -12769,10 +12783,10 @@
     },
     {
       "artifact_id": "SS-SCHEMA-TEMPLATES:resource_type=component|operation=create|component_type=transform.map",
-      "canonical_length": 7901,
+      "canonical_length": 8025,
       "producer": "meta_tools.get_schema_template_action(...)",
       "selector": "resource_type=component|operation=create|component_type=transform.map",
-      "sha256": "ddae1918dee249e0a49a99440ad8b89b4c9f17a9df70522f9d28cc4503f606ee",
+      "sha256": "cb192b0ed5b085696f24375d529b5b1b4b4d0a197d70fb5a1f1c84a7081b011b",
       "surface_class": "SS-SCHEMA-TEMPLATES",
       "value": {
         "_success": true,
@@ -12877,7 +12891,8 @@
               "target_path": "<<target logical path>>"
             }
           ],
-          "folder_path": "<<optional folder>>",
+          "folder_id": "<<optional folder id; the ONE spelling that places>>",
+          "folder_path": "<<optional folder path; metadata only — this platform ignores it on create>>",
           "map_type": "direct",
           "source_profile_id": "$ref:<<source profile key>>",
           "source_profile_type": "<<profile.db | profile.json | profile.xml>>",
@@ -12902,10 +12917,10 @@
     },
     {
       "artifact_id": "SS-SCHEMA-TEMPLATES:resource_type=component|operation=create|component_type=webservice",
-      "canonical_length": 6086,
+      "canonical_length": 6222,
       "producer": "meta_tools.get_schema_template_action(...)",
       "selector": "resource_type=component|operation=create|component_type=webservice",
-      "sha256": "e900809c1f3a0609e127e60d68291513ad047fdf69a28791e0367c84355aa3c6",
+      "sha256": "efbea60447e648c906145b4f0b783c1be8fc54b470d5e3a5eea77f8b178c0eab",
       "surface_class": "SS-SCHEMA-TEMPLATES",
       "value": {
         "_success": true,
@@ -12969,6 +12984,7 @@
         "note": "On an apiType='advanced' Shared Web Server, routes exist ONLY through a deployed ASC (served under /ws/rest/..., case-VERBATIM); bare /ws/simple WSS routes 404 there (live-confirmed). On basic/intermediate the inverse holds — an ASC deploys clean but does not serve. Every route's process must have a WSS Listen start (actionType='Listen', connector subType 'wss'). Empty-string route override attributes mean INHERIT from the linked WSS Listen operation (per attribute); the all-inherit effective path is /ws/rest/{WSS-op objectName}. Deploy does NOT cascade: the ASC and each route process deploy independently to the same environment (orchestrate_deploy's listener_verify handles both).",
         "operation": "create",
         "optional": [
+          "folder_id",
           "folder_path",
           "description",
           "base_url_path",
@@ -12999,7 +13015,8 @@
           "component_name": "<<component display name>>",
           "component_type": "webservice",
           "description": "<<optional description>>",
-          "folder_path": "<<optional folder>>",
+          "folder_id": "<<optional folder id; the ONE spelling that places>>",
+          "folder_path": "<<optional folder path; metadata only — this platform ignores it on create>>",
           "routes": [
             {
               "description": "<<optional route description>>",
@@ -40966,7 +40983,7 @@
       "legacy_excerpt": {},
       "producer": "meta_tools.get_schema_template_action(...) [all axes]",
       "selector": "walked_surface_digest",
-      "sha256": "e93e2599657d3efab9fa247ddde5eef64b0a72007cb5864731134bb03712b6bb",
+      "sha256": "1a122c8058dbc94d9b60da531d4ff2ff9d8ae31e5866f3d230e9ef58110b9aed",
       "surface_class": "SS-SCHEMA-TEMPLATES",
       "value": {
         "resource_type=component": "55ba0a46f10742a5bfa269767c7ba040532f5d7900c7e56953f8e57469ceecf3",
@@ -41063,40 +41080,40 @@
         "resource_type=component|operation=create|component_type=certificate": "59949c98576372ef96e08b9dabdbab9bab440054271caee6e1ea8032f7da5aad",
         "resource_type=component|operation=create|component_type=certificate.pgp": "59949c98576372ef96e08b9dabdbab9bab440054271caee6e1ea8032f7da5aad",
         "resource_type=component|operation=create|component_type=connector-action": "52066711b971408390aff5952d67ee9e1a7638694e7cb948d4e0fbb15650f153",
-        "resource_type=component|operation=create|component_type=connector-action|protocol=database.get": "77050038b7b206478586c4c58420b18fad263dffd1f49ad38c689cef4a4081f6",
-        "resource_type=component|operation=create|component_type=connector-action|protocol=database.send": "b46362159afa5cf21e4b8859554b682db7b1ce65c345a0c7d2ad6a7e93167a82",
-        "resource_type=component|operation=create|component_type=connector-action|protocol=rest.operation": "d5bdebd5db2ebf26ad90e00bfc09bda3949add4624af8637e477898de87e193a",
-        "resource_type=component|operation=create|component_type=connector-action|protocol=soap.operation": "2d3dc99a4d7117fac0212fdce29d7b28ef87c8a79884d0d0595d83ffb8aa6e99",
+        "resource_type=component|operation=create|component_type=connector-action|protocol=database.get": "1f5b54f26e534a6af55b50285f709b401a4a331741733d3336e22781e8a2b04d",
+        "resource_type=component|operation=create|component_type=connector-action|protocol=database.send": "3f3754cd7286ab4ff12b199930518a7d5124f0fa770c65a85af070893975040d",
+        "resource_type=component|operation=create|component_type=connector-action|protocol=rest.operation": "0f9f62c8abc02c3693b5bb4ad6228177779fc568f3a7b65d8b9cec90c272e001",
+        "resource_type=component|operation=create|component_type=connector-action|protocol=soap.operation": "e9b53d3b73ee61c0c2cc329e63fe52e2466658c933f18a71a0bd07417c6d6175",
         "resource_type=component|operation=create|component_type=connector-settings": "82fa660f5e8cec23116f1cf6873b98dca86e91f556669ca754a37d5754815743",
-        "resource_type=component|operation=create|component_type=connector-settings|protocol=database.sqlserver": "15fcedfd794335661e5f78ff6e50f629de5a6fc72575e9603bbd5f79bbca6247",
-        "resource_type=component|operation=create|component_type=connector-settings|protocol=rest.client": "3d6869640b96f9608c74eeccf391b8487eb3702a4eb507ec1023f68b168a6d6d",
-        "resource_type=component|operation=create|component_type=connector-settings|protocol=soap.client": "6c5051c5e569ceef173e00527542b918500a83757d94e040d24f307927001877",
+        "resource_type=component|operation=create|component_type=connector-settings|protocol=database.sqlserver": "1a7fee2043d9623c96e9d4a28bc23e7e0b8cabc7f0a3162d0d79a8967a7f8014",
+        "resource_type=component|operation=create|component_type=connector-settings|protocol=rest.client": "bcc6cf628c4eb2242d655f8c6b94deabf71185498adc2b017086817006821d3e",
+        "resource_type=component|operation=create|component_type=connector-settings|protocol=soap.client": "bf751a29e7ae88945a70f5b733976f2ce47d8bd5cda15c078431520ba2773e76",
         "resource_type=component|operation=create|component_type=crossref": "59949c98576372ef96e08b9dabdbab9bab440054271caee6e1ea8032f7da5aad",
         "resource_type=component|operation=create|component_type=customlibrary": "7079aeb6d34427a453e22e5a38787cec007077e381a82f3be9b0caab76adcc90",
-        "resource_type=component|operation=create|component_type=documentcache": "4b35553c9410c441b03bd28825b707a4744aeabf4490c4dcb1296861b899362a",
+        "resource_type=component|operation=create|component_type=documentcache": "8201dd1b6652b6dd34b04365dc265d23352dcaf84042f225ca7261e5fca5476d",
         "resource_type=component|operation=create|component_type=edistandard": "59949c98576372ef96e08b9dabdbab9bab440054271caee6e1ea8032f7da5aad",
         "resource_type=component|operation=create|component_type=flowservice": "59949c98576372ef96e08b9dabdbab9bab440054271caee6e1ea8032f7da5aad",
         "resource_type=component|operation=create|component_type=process": "b04b954422e409bcff62c1e4d78d48888ad9a8d59bb0160703aa3a9c6fe5e450",
-        "resource_type=component|operation=create|component_type=processproperty": "e38bbae7cce0409aae8561114e452ff4ae4122c3ece7faaa15726242da4ab547",
+        "resource_type=component|operation=create|component_type=processproperty": "9afbf4ef299014f6798b0a86c70c5b1b8a0da259773a4a39673d2e7c6235dee1",
         "resource_type=component|operation=create|component_type=processroute": "59949c98576372ef96e08b9dabdbab9bab440054271caee6e1ea8032f7da5aad",
         "resource_type=component|operation=create|component_type=profile.db": "8217dfb4a3de53e682d3b6dbbd4e62509025f9467bfdd52588980b0335153a3a",
-        "resource_type=component|operation=create|component_type=profile.db|protocol=database.read": "63f04a435803b77f0c95b34dcc06a0ac7745d843ed542f68f43d17a23c376145",
-        "resource_type=component|operation=create|component_type=profile.db|protocol=database.stored_procedure_read": "9ec930d60303fb3d4cf69bc8644e19b28579474b367f21047c378a2ebe2d13a8",
-        "resource_type=component|operation=create|component_type=profile.db|protocol=database.write": "bc7306d6bf9084f7648910f8182999e606fa4e74876dc23b0039f2f6ae09421c",
+        "resource_type=component|operation=create|component_type=profile.db|protocol=database.read": "4960c47af04854f962ee17db3f621389daf9d947dcbe41f92012a4e33fc0b218",
+        "resource_type=component|operation=create|component_type=profile.db|protocol=database.stored_procedure_read": "f5dc36a6ef99fa37bbc17de5b9e6e3b81bf44e64ffacfa9a9f58f7142b788880",
+        "resource_type=component|operation=create|component_type=profile.db|protocol=database.write": "c84cc8b6e6758dd624e6947367dda876322f7cd4f1dc30043456d29daacfa702",
         "resource_type=component|operation=create|component_type=profile.edi": "59949c98576372ef96e08b9dabdbab9bab440054271caee6e1ea8032f7da5aad",
         "resource_type=component|operation=create|component_type=profile.flatfile": "59949c98576372ef96e08b9dabdbab9bab440054271caee6e1ea8032f7da5aad",
-        "resource_type=component|operation=create|component_type=profile.json": "6b2feaa2d5daad0cd0aafe09e6ea183fe10645c31c5a038ccffaa321458371f5",
-        "resource_type=component|operation=create|component_type=profile.xml": "f7901d4ffb283c1754aeb08786883923d6dba6ebdd9be3e3708b390d30dc2afc",
+        "resource_type=component|operation=create|component_type=profile.json": "7ca3b1c522e91f68d86b997fb70aacaef11228c08cb574e005d164cf43fcfadf",
+        "resource_type=component|operation=create|component_type=profile.xml": "259db41c721928af4138db8c8116e43999ff3be0df7f96431c3c753df6ef87e0",
         "resource_type=component|operation=create|component_type=queue": "59949c98576372ef96e08b9dabdbab9bab440054271caee6e1ea8032f7da5aad",
-        "resource_type=component|operation=create|component_type=script.mapping": "0e6a32a47766d08eca62d43cbb5a3ba00fb24217c096d7450dc6ab3d951a84e3",
+        "resource_type=component|operation=create|component_type=script.mapping": "0dcdf55574abd9bab57a97b9690c487ddba687722941b20fcc652b769a734b88",
         "resource_type=component|operation=create|component_type=script.processing": "59949c98576372ef96e08b9dabdbab9bab440054271caee6e1ea8032f7da5aad",
         "resource_type=component|operation=create|component_type=tpcommoptions": "59949c98576372ef96e08b9dabdbab9bab440054271caee6e1ea8032f7da5aad",
         "resource_type=component|operation=create|component_type=tpgroup": "59949c98576372ef96e08b9dabdbab9bab440054271caee6e1ea8032f7da5aad",
         "resource_type=component|operation=create|component_type=tporganization": "59949c98576372ef96e08b9dabdbab9bab440054271caee6e1ea8032f7da5aad",
         "resource_type=component|operation=create|component_type=tradingpartner": "59949c98576372ef96e08b9dabdbab9bab440054271caee6e1ea8032f7da5aad",
         "resource_type=component|operation=create|component_type=transform.function": "59949c98576372ef96e08b9dabdbab9bab440054271caee6e1ea8032f7da5aad",
-        "resource_type=component|operation=create|component_type=transform.map": "ddae1918dee249e0a49a99440ad8b89b4c9f17a9df70522f9d28cc4503f606ee",
-        "resource_type=component|operation=create|component_type=webservice": "e900809c1f3a0609e127e60d68291513ad047fdf69a28791e0367c84355aa3c6",
+        "resource_type=component|operation=create|component_type=transform.map": "cb192b0ed5b085696f24375d529b5b1b4b4d0a197d70fb5a1f1c84a7081b011b",
+        "resource_type=component|operation=create|component_type=webservice": "efbea60447e648c906145b4f0b783c1be8fc54b470d5e3a5eea77f8b178c0eab",
         "resource_type=component|operation=create|component_type=webservice.external": "59949c98576372ef96e08b9dabdbab9bab440054271caee6e1ea8032f7da5aad",
         "resource_type=component|operation=create|component_type=xslt": "59949c98576372ef96e08b9dabdbab9bab440054271caee6e1ea8032f7da5aad",
         "resource_type=component|operation=safe_edit": "ffabfc9f56ceacb2cc12244f245870a0af06a86e1b6468f0c31081cfda4e5a65",

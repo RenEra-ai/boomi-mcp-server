@@ -5160,10 +5160,14 @@ _SYNC_PIPELINE_MAP_KEYS = frozenset({"primitive", "map_ref", "map_id", "label"})
 # block (``reliabilty``) or an unsupported setting (``execution``) — is rejected
 # rather than silently dropped, so the verified-linear surface stays honest while
 # framework-injected metadata is tolerated (the base process builders read only
-# the keys they need and ignore these too). ``folder_id`` is deliberately NOT
-# accepted: the process builder emits only ``folderName`` (never ``folderId``), so
-# a create carrying folder_id would suppress FOLDER_REQUIRED_ON_CREATE yet still
-# land in the account root. Placement goes through folder_name, which is emitted.
+# the keys they need and ignore these too). ``folder_id`` IS accepted, and the
+# rationale that once excluded it is stale: it said a create carrying the key
+# would suppress the folderless-create lint "yet still land in the account root",
+# which was true only while nothing submitted the id. #157 injects it at the one
+# raw-create boundary, so `folder_id` is now the spelling that actually places
+# and `folder_name` the one this platform ignores — the exact inverse of what
+# this comment used to say. The key is metadata here: the builder emits nothing
+# for it, so no emitted byte moves (asserted).
 _SYNC_PIPELINE_ALLOWED_TOP_LEVEL = frozenset(
     {
         "process_kind",
@@ -5171,6 +5175,7 @@ _SYNC_PIPELINE_ALLOWED_TOP_LEVEL = frozenset(
         "pipeline",
         "description",
         "folder_name",
+        "folder_id",
         "process_extensions",
         "name",
         "component_type",

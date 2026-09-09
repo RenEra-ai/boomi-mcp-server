@@ -538,8 +538,22 @@ def applied_placement(submitted_xml: str) -> Dict[str, Optional[str]]:
     bytes it was reading carried the id — a placement recorded as less than what
     the platform received. Two separate readers could also disagree; one cannot.
     """
+    import re as _re
     import xml.etree.ElementTree as ET
 
+    # A DOCUMENT THAT DECLARES AN ENTITY IS NOT READ.
+    #
+    # This reader used to see only bytes this server built or the platform
+    # returned. #157 also asks it what placement a CALLER's own raw-XML
+    # component carries, which put caller-controlled bytes in front of an
+    # expat parser that expands internal entities — measured: a four-level
+    # declaration turns a few hundred bytes into ten thousand, and the shape
+    # amplifies exponentially. Nothing here needs entity expansion: a
+    # component document that declares one is refused rather than screened
+    # for a particular payload, and an unreadable document simply carries no
+    # placement, which is what every caller of this function already handles.
+    if _re.search(r"<!\s*(DOCTYPE|ENTITY)\b", submitted_xml or ""):
+        return {"folder_name": None, "folder_id": None}
     try:
         root = ET.fromstring(submitted_xml)
     except ET.ParseError:

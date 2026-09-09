@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 11944, "minimum_collected": 11944, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 11948, "minimum_collected": 11948, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -8594,7 +8594,7 @@
 {"kind": "test", "id": "pytest-008593", "node_id": "tests/test_sync_pipeline_builder.py::test_fetch_to_write_no_map_validates_clean", "state": "active"}
 {"kind": "test", "id": "pytest-008594", "node_id": "tests/test_sync_pipeline_builder.py::test_fetch_to_write_with_map_validates_clean", "state": "active"}
 {"kind": "test", "id": "pytest-008595", "node_id": "tests/test_sync_pipeline_builder.py::test_fetch_with_map_validates_clean", "state": "active"}
-{"kind": "test", "id": "pytest-008596", "node_id": "tests/test_sync_pipeline_builder.py::test_folder_id_rejected_steer_to_folder_name", "state": "active"}
+{"kind": "test", "id": "pytest-008596", "node_id": "tests/test_sync_pipeline_builder.py::test_folder_id_rejected_steer_to_folder_name", "state": "tombstone"}
 {"kind": "test", "id": "pytest-008597", "node_id": "tests/test_sync_pipeline_builder.py::test_folder_name_accepted", "state": "active"}
 {"kind": "test", "id": "pytest-008598", "node_id": "tests/test_sync_pipeline_builder.py::test_gated_top_level_block_rejected[branch-value1-SYNC_PIPELINE_CONTROL_FLOW_UNSUPPORTED]", "state": "active"}
 {"kind": "test", "id": "pytest-008599", "node_id": "tests/test_sync_pipeline_builder.py::test_gated_top_level_block_rejected[process_calls-value2-SYNC_PIPELINE_CONTROL_FLOW_UNSUPPORTED]", "state": "active"}
@@ -11990,3 +11990,8 @@
 {"kind": "test", "id": "pytest-011989", "node_id": "tests/test_recipe_contribution_models.py::test_every_kind_round_trips[recorded_intent]", "state": "active"}
 {"kind": "test", "id": "pytest-011990", "node_id": "tests/test_recipe_contribution_models.py::test_repr_redacts_every_authored_value[recorded_intent]", "state": "active"}
 {"kind": "test", "id": "pytest-011991", "node_id": "tests/test_recipe_contribution_models.py::test_wrong_version_is_rejected[recorded_intent]", "state": "active"}
+{"kind": "test", "id": "pytest-011992", "node_id": "tests/test_issue_157_placement.py::test_a_component_document_that_declares_an_entity_is_not_read", "state": "active"}
+{"kind": "test", "id": "pytest-011993", "node_id": "tests/test_issue_157_placement.py::test_every_served_create_template_offers_the_spelling_that_places", "state": "active"}
+{"kind": "test", "id": "pytest-011994", "node_id": "tests/test_issue_157_placement.py::test_no_builder_refuses_the_spelling_that_places", "state": "active"}
+{"kind": "test", "id": "pytest-011995", "node_id": "tests/test_issue_157_placement.py::test_only_a_document_carried_folder_id_stops_the_fan_out", "state": "active"}
+{"kind": "test", "id": "pytest-011996", "node_id": "tests/test_sync_pipeline_builder.py::test_folder_id_accepted_as_inert_metadata", "state": "active"}

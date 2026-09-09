@@ -278,19 +278,45 @@ def _config_str(component: IntegrationComponentSpec, key: str) -> Optional[str]:
 
 
 def _declares_its_own_placement(component: IntegrationComponentSpec) -> Optional[str]:
-    """The placement this component already declares, in EITHER spelling.
+    """The placement this component already declares, in ANY of its spellings.
 
-    Both spellings are placements, so both must stop the fan-out. Testing only
-    ``folder_name`` let a component declaring ``folder_id`` inherit the root's
-    folder NAME as well — and apply then submitted the id, which wins. The
-    resulting result row was assembled from two authorities and contradicted
+    Every spelling is a placement, so every one must stop the fan-out. Testing
+    only ``folder_name`` let a component declaring ``folder_id`` inherit the
+    root's folder NAME as well — and apply then submitted the id, which wins.
+    The resulting row was assembled from two authorities and contradicted
     itself: it named the root's folder as requested, carried a different
     folder's id as resolved, and reported the placement verified (QA-157-r2-02).
-    A row that reports a placement the component does not have is a
-    mutation-accounting defect, not a cosmetic one — and the fix belongs at the
-    CLAIM, because the warning builder reads the same row.
+
+    The third spelling is a RAW-XML component's own document: it carries a
+    ``folderId`` attribute that reaches the wire unchanged, so a caller who
+    authored the document authored the placement. The fan-out claimed the
+    root's folder anyway and the create boundary replaced the caller's id —
+    silently, with a row that named the folder the caller did not ask for
+    (QA-157-r10-01). This repository's own sibling authority already answers
+    which wins: the folderless-create lint exempts a raw-XML create because
+    the author owns placement. The predicate now agrees with it, and the
+    document is ASKED rather than modelled — through the one reader that
+    already answers "what placement do these bytes carry".
     """
-    return _config_str(component, "folder_name") or _config_str(component, "folder_id")
+    declared = _config_str(component, "folder_name") or _config_str(component, "folder_id")
+    if declared:
+        return declared
+    document = (component.config or {}).get("xml")
+    if not (isinstance(document, str) and document.strip()):
+        return None
+    from ..categories.components.canonical_process_apply import applied_placement
+
+    carried = applied_placement(document)
+    # ONLY THE SPELLING THAT PLACES COUNTS AS A DECLARATION.
+    #
+    # `folderName` is what every builder in this repository emits and what
+    # every platform readback carries, and this platform IGNORES it on create.
+    # Accepting it here as "the author placed this themselves" suppressed the
+    # fan-out for a document that places nothing, so the component landed at
+    # the account root with no row and no warning — the finding this whole
+    # slice opened on, reinstated on the escape hatch this rule was written
+    # for. A document declares a placement when it carries a `folderId`.
+    return carried["folder_id"]
 
 
 # ---------------------------------------------------------------------------
