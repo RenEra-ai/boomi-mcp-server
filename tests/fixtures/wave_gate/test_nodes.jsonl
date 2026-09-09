@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 11984, "minimum_collected": 11984, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 11995, "minimum_collected": 11995, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -12032,3 +12032,14 @@
 {"kind": "test", "id": "pytest-012031", "node_id": "tests/test_issue_157_required_target_coverage.py::test_removing_a_routes_invocation_silences_that_route_and_only_that_route[binding1-quiet1-loud1]", "state": "active"}
 {"kind": "test", "id": "pytest-012032", "node_id": "tests/test_issue_157_required_target_coverage.py::test_removing_a_routes_invocation_silences_that_route_and_only_that_route[binding2-quiet2-loud2]", "state": "active"}
 {"kind": "test", "id": "pytest-012033", "node_id": "tests/test_issue_157_required_target_coverage.py::test_the_route_sentinel_sees_every_one_of_the_six_entry_points", "state": "active"}
+{"kind": "test", "id": "pytest-012034", "node_id": "tests/test_issue_157_plan_conformance.py::test_a_plan_over_a_live_discovered_reused_profile_still_validates", "state": "active"}
+{"kind": "test", "id": "pytest-012035", "node_id": "tests/test_issue_157_plan_conformance.py::test_a_reused_profile_with_no_local_body_serves_no_generation_summary", "state": "active"}
+{"kind": "test", "id": "pytest-012036", "node_id": "tests/test_issue_157_plan_conformance.py::test_a_selected_live_index_is_projected_onto_the_served_entry_schema", "state": "active"}
+{"kind": "test", "id": "pytest-012037", "node_id": "tests/test_issue_157_plan_conformance.py::test_a_watermark_naming_no_profile_is_still_refused[$ref:conn]", "state": "active"}
+{"kind": "test", "id": "pytest-012038", "node_id": "tests/test_issue_157_plan_conformance.py::test_a_watermark_naming_no_profile_is_still_refused[$ref:not_a_component]", "state": "active"}
+{"kind": "test", "id": "pytest-012039", "node_id": "tests/test_issue_157_plan_conformance.py::test_an_authored_profile_whose_own_config_yields_no_index_is_still_refused", "state": "active"}
+{"kind": "test", "id": "pytest-012040", "node_id": "tests/test_issue_157_plan_conformance.py::test_the_live_index_shape_really_is_a_superset_of_the_served_one", "state": "active"}
+{"kind": "test", "id": "pytest-012041", "node_id": "tests/test_issue_157_plan_conformance.py::test_the_map_exemption_asks_the_reuse_predicate_not_the_flag[create-None-False]", "state": "active"}
+{"kind": "test", "id": "pytest-012042", "node_id": "tests/test_issue_157_plan_conformance.py::test_the_map_exemption_asks_the_reuse_predicate_not_the_flag[create-map-uuid-1-True]", "state": "active"}
+{"kind": "test", "id": "pytest-012043", "node_id": "tests/test_issue_157_plan_conformance.py::test_the_map_exemption_asks_the_reuse_predicate_not_the_flag[update-map-uuid-1-False]", "state": "active"}
+{"kind": "test", "id": "pytest-012044", "node_id": "tests/test_issue_157_plan_conformance.py::test_the_reused_source_profile_still_defers", "state": "active"}

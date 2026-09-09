@@ -25,7 +25,7 @@ import hashlib
 import json
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
-from ..models.derived_flows import DerivedTransformFlowV1
+from ..models.derived_flows import DerivedTransformFlowV1, FieldIndexEntryV1
 from ..models.integration_models import IntegrationComponentSpec
 
 REF_PREFIX = "$ref:"
@@ -261,19 +261,51 @@ def _selected_or_generated(
     index = selected.get(key) if key else None
     if not (isinstance(index, Mapping) and index):
         return generated
+    if generated is None:
+        # NO GENERATOR ARTIFACT, NO SUMMARY. `GeneratedProfileSummaryV1` requires
+        # a generation mode and a profile config, and both are the GENERATOR's
+        # output — a reference-only profile carrying an id and no local body has
+        # neither, and synthesising them would invent content. Unavailable is the
+        # honest answer and the one this field already carried.
+        return None
     # THE SHAPE FROM THE GENERATOR, THE FIELDS FROM THE ACCOUNT. Building a
     # summary from the index alone dropped the model's other declared fields;
     # the point of the rule is only that the FIELD SET must come from the
     # artifact this request will bind, not from the candidate config.
-    summary = dict(generated or {})
-    summary["field_index_by_path"] = dict(index)
+    summary = dict(generated)
+    served = _served_index_entries(index)
+    summary["field_index_by_path"] = served
     summary["mappable_paths"] = sorted(
-        path for path, entry in index.items()
-        if isinstance(entry, Mapping) and entry.get("mappable", True)
+        path for path, entry in served.items() if entry.get("mappable", True)
     )
     if not summary.get("component_type"):
         summary["component_type"] = getattr(component, "type", None)
     return summary or None
+
+
+#: The keys `FieldIndexEntryV1` declares, read FROM the model. A live-indexed
+#: profile's entries are a documented SUPERSET of the generator's — they carry
+#: `key`, `key_path`, `name_path`, `is_mappable` and `structural` for the map
+#: builder and the review — and the served model forbids extras, so copying one
+#: straight through made every plan over a reused profile fail to validate.
+_SERVED_INDEX_ENTRY_KEYS = frozenset(FieldIndexEntryV1.model_fields)
+
+
+def _served_index_entries(index: Mapping[str, Any]) -> Dict[str, Dict[str, Any]]:
+    """Project a field index onto the SERVED entry schema, key set and all.
+
+    Derived from the model rather than hand-listed: a field added to
+    `FieldIndexEntryV1` is served without editing this, and a key the model does
+    not declare cannot reach the payload however the index was built.
+    """
+    projected: Dict[str, Dict[str, Any]] = {}
+    for path, entry in index.items():
+        if not isinstance(entry, Mapping):
+            continue
+        projected[str(path)] = {
+            str(k): _plain(v) for k, v in entry.items() if k in _SERVED_INDEX_ENTRY_KEYS
+        }
+    return projected
 
 
 def _generated_profile(component: IntegrationComponentSpec) -> Optional[Dict[str, Any]]:

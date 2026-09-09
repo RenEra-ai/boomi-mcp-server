@@ -1859,12 +1859,18 @@ def _validate_processes(
         config = component.config if isinstance(component.config, dict) else {}
         if isinstance(config.get("xml"), str) and config["xml"].strip():
             continue
-        if config.get("reference_only") is True:
+        if _will_reuse_map_at_apply(component, conflict_policy):
             # A REUSED MAP IS OPAQUE. Its in-spec mappings are candidate
             # material describing a component this request will not write, so
             # judging required-leaf coverage from them reports on a map that
             # does not exist — the same rule D4 states for a reused profile,
             # applied to the map itself (architect review, item 1).
+            #
+            # The question is asked of `_will_reuse_at_apply`, THE predicate, and
+            # not of the `reference_only` flag: a map declaring `action="update"`
+            # beside that flag is UPDATED at apply, and keying the exemption on
+            # the flag let an update leave a required target leaf unbound and
+            # still compile (Stage-2 round 5).
             continue
         coverage_error = _required_target_coverage_error(
             component,
@@ -1961,6 +1967,29 @@ def _required_target_coverage_error(
         effective["component_name"] = component.name
     return validate_required_target_coverage(
         effective, by_key, literal_indexes or None, selected_indexes=selected_indexes or None
+    )
+
+
+def _will_reuse_map_at_apply(component: Any, conflict_policy: Optional[str]) -> bool:
+    """Will apply REUSE this map rather than write it? Asked of THE predicate.
+
+    Offline the existing id is whatever the request declares; without one the
+    predicate answers "not reused" and the coverage gate runs, which is the safe
+    direction — a map this request may write is judged, and only a map it
+    demonstrably binds to an existing component is opaque.
+    """
+    from ..categories.integration_builder import (
+        _component_reference_only,
+        _will_reuse_at_apply,
+    )
+
+    config = component.config if isinstance(component.config, dict) else {}
+    declared_id = component.component_id or config.get("component_id")
+    return _will_reuse_at_apply(
+        declared_action=getattr(component, "action", None),
+        existing_component_id=declared_id if isinstance(declared_id, str) else None,
+        reference_only=_component_reference_only(component),
+        conflict_policy=conflict_policy or "reuse",
     )
 
 

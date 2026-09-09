@@ -920,6 +920,32 @@ def validate_watermark_declaration(
     return not decided
 
 
+def _watermark_source_is_deferrable(
+    source_profile_ref: Any, components_by_key: Mapping[str, IntegrationComponentSpec]
+) -> bool:
+    """Is an unresolved source-profile index an UNAVAILABLE answer, or a bad reference?
+
+    Deferrable in exactly two shapes: a literal existing-profile id, whose index
+    the online pass discovers; and an in-plan profile component this request will
+    REUSE rather than write, which is the one case the shared resolver
+    deliberately refuses to index from the candidate config. Anything else — a
+    `$ref` naming no component, a `$ref` naming a non-profile, or a profile this
+    request authors whose own config yields no index — is a reference the online
+    pass can never repair, so it stays a refusal.
+    """
+    if not isinstance(source_profile_ref, str) or not source_profile_ref.strip():
+        return False
+    if not source_profile_ref.startswith("$ref:"):
+        return True
+    component = components_by_key.get(source_profile_ref[len("$ref:") :])
+    if component is None:
+        return False
+    if not str(getattr(component, "type", "") or "").startswith("profile."):
+        return False
+    config = component.config if isinstance(component.config, dict) else {}
+    return config.get("reference_only") is True
+
+
 def validate_watermark_source_field(
     declaration: Any,
     *,
@@ -953,6 +979,29 @@ def validate_watermark_source_field(
         literal_indexes,
         dict(selected_indexes) if selected_indexes else None,
     )
+    if index is None and not _watermark_source_is_deferrable(
+        declaration.source_profile_ref, components_by_key
+    ):
+        # UNRESOLVABLE IS NOT THE SAME AS UNAVAILABLE. The resolver answers None
+        # for three different questions: a reference that names no component, a
+        # reference that names a non-profile, and a profile whose index simply is
+        # not in reach here. Only the third is a deferral; reading all three as
+        # one retired the reference check entirely, so a watermark over
+        # `$ref:missing` or over a connector planned and compiled (Stage-2
+        # round 5).
+        raise _refuse(
+            GOVERNANCE_WATERMARK_INCONSISTENT,
+            message=(
+                "The watermark references a source profile this request does "
+                "not author."
+            ),
+            path="/units/{0}/envelope/watermark/source_profile_ref".format(unit_index),
+            subject_kind="process",
+            remediation=(
+                "Reference an in-plan source profile ($ref:KEY) or an existing "
+                "profile component id."
+            ),
+        )
     if index is None:
         return False
     entry = index.get(declaration.field)

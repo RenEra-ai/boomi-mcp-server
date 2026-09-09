@@ -637,3 +637,181 @@ def test_the_legacy_parse_preserves_the_profile_name_into_the_typed_row():
     assert typed_row_from_legacy(payload).target_profile_generation.component_name == name
     # and the comparison rule still drops it, which is the only thing R3 is for
     assert "component_name" not in normalize_flow_row(payload)["target_profile_generation"]
+
+
+# ---------------------------------------------------------------------------
+# Stage-2 round 5 — defects the commit review found in the corrections above
+# ---------------------------------------------------------------------------
+
+
+_ISSUE_95_JSON = (
+    Path(__file__).resolve().parent / "fixtures" / "profile_components" / "issue_95" / "profile_json.xml"
+)
+
+
+def _live_index():
+    """A field index in the shape LIVE DISCOVERY produces, not the generator's.
+
+    Provenance: `tests/fixtures/profile_components/issue_95/profile_json.xml` is
+    an exported platform profile component, frozen long before this slice's
+    baseline — causally independent of the code under test. Every witness above
+    used a generator-built index, which is exactly why none of them saw that the
+    two shapes differ.
+    """
+    from boomi_mcp.categories.components.builders.profile_generation import (
+        index_existing_profile_xml,
+    )
+
+    return index_existing_profile_xml(_ISSUE_95_JSON.read_text(encoding="utf-8"))
+
+
+def test_the_live_index_shape_really_is_a_superset_of_the_served_one():
+    """The control for the two tests below: if these agreed, they would prove nothing."""
+    from boomi_mcp.models.derived_flows import FieldIndexEntryV1
+
+    entries = _live_index()["field_index_by_path"]
+    assert entries
+    extra = set().union(*(set(e) for e in entries.values())) - set(FieldIndexEntryV1.model_fields)
+    assert extra == {"key", "key_path", "name_path", "is_mappable", "structural"}, extra
+
+
+def test_a_selected_live_index_is_projected_onto_the_served_entry_schema():
+    """`FieldIndexEntryV1` forbids extras, so a raw live entry cannot be served."""
+    from boomi_mcp.authoring.derived_flows import derive_transform_flows
+    from boomi_mcp.models.derived_flows import FieldIndexEntryV1
+
+    live = _live_index()["field_index_by_path"]
+    (row,) = derive_transform_flows(
+        [_flow_unit()], _flow_components(reference_only=True),
+        connector_metadata={"dbc": ("database", None)},
+        selected_indexes={"tgt": live},
+    )
+    served = row.target_profile_generation.field_index_by_path
+    assert set(served) == set(live)
+    for path, entry in served.items():
+        assert isinstance(entry, FieldIndexEntryV1)
+        assert entry.mappable == live[path]["mappable"]
+    assert row.target_profile_generation.mappable_paths == tuple(
+        sorted(p for p, e in live.items() if e.get("mappable", True))
+    )
+
+
+def test_a_plan_over_a_live_discovered_reused_profile_still_validates():
+    """End to end: the served preview is built, not refused by its own model."""
+    from boomi_mcp.categories import integration_builder
+
+    comps, _root = _reused_target()
+    live = _live_index()
+    with patch.object(
+        integration_builder, "_discover_profile_index",
+        lambda client, uuid: {"profile_component_type": live["profile_component_type"],
+                              "field_index_by_path": live["field_index_by_path"]},
+    ):
+        result, _ = plan_authoring_request_v1(
+            _request(comps), boomi_client=MagicMock(), profile=_PROFILE
+        )
+    assert result.integration_spec_preview is not None
+
+
+def test_a_reused_profile_with_no_local_body_serves_no_generation_summary():
+    """`GeneratedProfileSummaryV1` needs the GENERATOR's own output; inventing it is worse."""
+    from boomi_mcp.authoring.derived_flows import derive_transform_flows
+    from boomi_mcp.models.integration_models import IntegrationComponentSpec
+
+    components = _flow_components(reference_only=True)
+    bare = [
+        c if c.key != "tgt" else IntegrationComponentSpec(
+            key="tgt", type="profile.json", action="create", name="Tgt",
+            component_id="prof-uuid-1",
+            config={"reference_only": True, "component_name": "Existing Target"},
+        )
+        for c in components
+    ]
+    (row,) = derive_transform_flows(
+        [_flow_unit()], bare, connector_metadata={"dbc": ("database", None)},
+        selected_indexes={"tgt": _live_index()["field_index_by_path"]},
+    )
+    assert row.target_profile_generation is None
+    # and the source, which DOES have a body, is unaffected
+    assert row.source_profile_generation is not None
+
+
+def _map_component(action, **extra):
+    comps = copy.deepcopy(_components())  # target profile needs `Root/must`
+    entry = next(c for c in comps if c["key"] == _MAP_KEY)
+    entry["action"] = action
+    entry["config"].update(extra)
+    return comps
+
+
+@pytest.mark.parametrize(
+    "action,component_id,opaque",
+    [
+        ("create", "map-uuid-1", True),    # a reference-only create IS reused
+        ("update", "map-uuid-1", False),   # an update is WRITTEN, so it is judged
+        ("create", None, False),           # no bound component: judged, the safe direction
+    ],
+)
+def test_the_map_exemption_asks_the_reuse_predicate_not_the_flag(action, component_id, opaque):
+    """`reference_only` beside `action="update"` is an update, not a reuse.
+
+    Keying the exemption on the flag let a map update leave a required target
+    leaf unbound and still compile.
+    """
+    comps = _map_component(action, reference_only=True)
+    entry = next(c for c in comps if c["key"] == _MAP_KEY)
+    if component_id:
+        entry["component_id"] = component_id
+    else:
+        entry.pop("component_id", None)
+    result, _ = plan_authoring_request_v1(_request(comps), boomi_client=MagicMock(), profile=_PROFILE)
+    hits = [d for d in result.errors if TRANSFORM_REVIEW_REQUIRED_TARGET_UNMAPPED in d.cause_codes]
+    assert (not hits) is opaque, [d.message for d in hits]
+
+
+def _watermark_over(ref, components):
+    from test_issue_157_governance import _conn, _op, _request as _gov_request, _unit
+
+    op = _op()
+    op["depends_on"] = ["conn"]
+    unit = _unit(
+        name="P", depends_on=("conn", "op"),
+        watermark={"source_profile_ref": ref, "field": "updated_at", "kind": "timestamp"},
+    )
+    return _gov_request([unit], [_conn(), op] + list(components))
+
+
+@pytest.mark.parametrize("ref", ["$ref:not_a_component", "$ref:conn"])
+def test_a_watermark_naming_no_profile_is_still_refused(ref):
+    """A deferral is for an unavailable index, never for an unrepairable reference.
+
+    Neither a missing component nor a connector can acquire a selected-profile
+    index later, so reading their `None` as "ask again online" retired the
+    reference check.
+    """
+    with pytest.raises(Exception) as excinfo:
+        plan_authoring_request_v1(_watermark_over(ref, []), boomi_client=None, profile=_PROFILE)
+    assert excinfo.value.code == GOVERNANCE_WATERMARK_INCONSISTENT
+    assert [d.path for d in excinfo.value.diagnostics] == [
+        "/units/0/envelope/watermark/source_profile_ref"
+    ]
+
+
+def test_an_authored_profile_whose_own_config_yields_no_index_is_still_refused():
+    """Only a REUSED profile defers: this one the request writes, so it is decided here."""
+    empty = {"key": "src_prof", "type": "profile.db", "action": "create",
+             "config": {"profile_type": "database.read"}}
+    with pytest.raises(Exception) as excinfo:
+        plan_authoring_request_v1(
+            _watermark_over("$ref:src_prof", [empty]), boomi_client=None, profile=_PROFILE
+        )
+    assert GOVERNANCE_WATERMARK_INCONSISTENT in str(excinfo.value)
+
+
+def test_the_reused_source_profile_still_defers():
+    """The adversarial half: the case the deferral exists for is untouched."""
+    result, _ = plan_authoring_request_v1(
+        _watermark_over("$ref:src_prof", [_reused_source_profile()]),
+        boomi_client=None, profile=_PROFILE,
+    )
+    assert all(d.code != GOVERNANCE_WATERMARK_INCONSISTENT for d in result.errors)
