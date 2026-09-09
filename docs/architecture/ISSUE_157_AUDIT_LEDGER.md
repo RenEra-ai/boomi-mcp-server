@@ -307,7 +307,48 @@ hash-pinned in its `SHA256SUMS`, all tracked in git.
 | Gate | Evidence (quoted output / run URL / archived round) | SHA |
 | --- | --- | --- |
 
-## Closing report (filled at close)
+## Closing report — ESCALATE-OPEN, issue #157 stays OPEN
 
-Last validated tree, chronological QA/review scopes and run directories, downstream and wave
-outcomes, restoration evidence if used, and the explicit open/close status.
+**Status: INCOMPLETE. The issue is not closed and nothing is pushed.**
+
+**Last validated tree**: `9ae1222`, the Stage-1.5 commit of the QA-validated working tree on
+`codex/issue-157` over baseline `ba1be9f34317d720d3b012484622ab7e2742143b`. That commit is a review
+boundary, never completion. The full non-KB suite is green on it: 11,772 passed and 19 skipped in
+the fast part, 153 passed in the reachability-freeze file, zero failures; the node manifest reports
+11,944 required nodes and 76 active goldens.
+
+**Gates run**: Stage-1 live QA, ten evaluations, all through the public MCP tool boundary against
+the live `renera` account, each with its own freeze attestation and net-zero accounting. Forty-one
+findings were raised across them and thirty-six fixed; five are deferred residue, all Standard tier,
+all in one surface.
+
+**Gates NOT run, and therefore owed before this slice can close**: the Stage-2 detached Codex commit
+review, the §6 architect implementation review, and the composite wave gate. They are unrun because
+the Stage-1 loop escalated, not because they were skipped or waived.
+
+**Why it escalated**: one defect class recurred eight times, always in how a created component's
+placement is resolved, submitted, attested and explained. Six corrections modelled or predicted what
+a route submits; three more asked or read. Each closed the reported sites and the next round found
+another. The checkpoint-3 fallback bound this run to escalate on a further instance, and the tenth
+round found one and named the site.
+
+**What the owner has to decide**, none of which this run should decide alone:
+
+1. Whether governance or a caller's own raw-XML placement wins when both are present
+   (QA-157-r10-01). The predicate's docstring commits to the caller; the sibling folderless-create
+   lint exempts raw-XML creates on the same premise; the fan-out currently overrides both, silently.
+2. Whether the served create templates should PROJECT each builder's declared key set rather than
+   carry a second copy of it (QA-157-r10-02).
+3. Whether the folderless-create lint's advice should name the spelling that actually places
+   (QA-157-r10-03).
+4. Whether a follow-up issue should be filed to carry the five deferred rows. Filing is
+   owner-authorised in this repository, which is why the deferral has nowhere to land and why the
+   outcome is escalation rather than `DEFER-STANDARD-AND-PROCEED`.
+
+**What is complete and validated**, and is what the commit contains: every in-scope item of the
+issue other than the placement residue — the typed per-root governance envelope with prefix-derived
+names and the folder fan-out, the connection binding contract, the typed derived-only flows
+projection with its persistent row-level baseline, the recorded-not-wired advisory channel, the
+watermark and scheduling splits, the ten inert-metadata retirement proofs, the one canonical
+required-target-leaf validator replacing six legacy sites and reached by both entry points, and the
+served schemas, capabilities and terminology for all of it.
