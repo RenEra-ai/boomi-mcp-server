@@ -1767,7 +1767,9 @@ if manage_component_action:
             clone - Clone a component with a new name:
                 component_id="abc-123-def"
                 config='{"name": "Cloned Component"}'
-                config='{"name": "Cloned", "folder_name": "Test Folder"}'
+                config='{"name": "Cloned", "folder_id": "<target folder id>"}'
+                (folder_id places the clone; folder_name is metadata this
+                platform ignores on create)
 
             delete - Delete a component:
                 component_id="abc-123-def"

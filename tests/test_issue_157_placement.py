@@ -1151,36 +1151,67 @@ def test_every_served_create_template_offers_the_spelling_that_places():
     """
     from boomi_mcp.categories import meta_tools
 
+    def _contracts(value, path="meta_tools"):
+        """Every served CREATE contract, however deeply it is nested.
+
+        The first version of this walk read module-level dicts carrying a
+        `template` block, which missed three process contracts that declare
+        `"operation": "create"` inside a registry dict and serve a folder key
+        of their own (QA-157-r11-03). The universe is the DECLARATION —
+        anything that calls itself a create — not a shape at one nesting depth.
+        """
+        if isinstance(value, dict):
+            if value.get("operation") == "create":
+                yield path, value
+            for key, child in value.items():
+                yield from _contracts(child, "%s.%s" % (path, key))
+
     graded, offenders = [], []
+    seen = set()
     for attr in dir(meta_tools):
-        template = getattr(meta_tools, attr)
-        if not (isinstance(template, dict) and isinstance(template.get("template"), dict)):
-            continue
-        if template.get("operation") != "create":
-            continue
-        body = template["template"]
-        if not any(key.startswith("folder") for key in body):
-            continue
-        # Organizations are not components and never reach the component
-        # create boundary, so no component placement applies to them.
-        if attr == "_ORGANIZATION_CREATE":
-            continue
-        graded.append(attr)
-        if "folder_id" not in body:
-            offenders.append(attr)
-        # The completeness check applies only where the template DECLARES a
-        # complete surface (an `optional` list beside `required`); several
-        # templates list requirements alone by long-standing convention, and
-        # inventing a declaration for them is not this test's business.
-        if "optional" in template:
-            declared = (
-                set(template.get("required", ()))
-                | set(template["optional"])
-                | set(template.get("defaults", {}))
+        for path, template in _contracts(getattr(meta_tools, attr), attr):
+            if id(template) in seen:
+                continue
+            seen.add(id(template))
+            body = template.get("template")
+            if not isinstance(body, dict):
+                body = (template.get("example_component_spec") or {}).get("config")
+            if not isinstance(body, dict):
+                continue
+            attr = path
+            if not any(key.startswith("folder") for key in body):
+                continue
+            # Organizations are not components and never reach the component
+            # create boundary, so no component placement applies to them.
+            if "_ORGANIZATION_CREATE" in attr:
+                continue
+            graded.append(attr)
+            # A CONTRACT MUST OFFER THE SPELLING ITS OWN ROUTE PLACES WITH.
+            # Component documents are placed by a folder id injected at the
+            # raw-create boundary; the trading-partner route posts a typed
+            # model carrying a folder NAME and cannot submit an id at all. The
+            # contract's own `resource_type` says which route it is, so this
+            # asks the declaration rather than assuming one answer for both.
+            places_by = (
+                "folder_name"
+                if template.get("resource_type") == "trading_partner"
+                else "folder_id"
             )
-            if set(body) - declared:
-                offenders.append((attr, sorted(set(body) - declared)))
-    assert len(graded) >= 15, graded
+            if places_by not in body:
+                offenders.append((attr, "does not offer %s" % places_by))
+            # The completeness check applies only where the contract DECLARES a
+            # complete surface (an `optional` list beside `required`); several
+            # list requirements alone by long-standing convention, and inventing
+            # a declaration for them is not this test's business.
+            if "optional" in template:
+                declared = (
+                    set(template.get("required", ()))
+                    | set(template["optional"])
+                    | set(template.get("defaults", {}))
+                )
+                if set(body) - declared:
+                    offenders.append((attr, sorted(set(body) - declared)))
+    assert len(graded) >= 18, graded
     assert offenders == [], offenders
 
 

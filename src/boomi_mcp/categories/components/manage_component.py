@@ -60,11 +60,14 @@ def create_component(
     PLACEMENT (QA-157-r1-01). ``folder_id`` — the keyword, or ``config`` for a
     caller that authored one — is the only spelling this platform honours on a
     create, and it is applied at the raw-create boundary for every path above.
-    ``config['folder_id']`` already satisfied the ``FOLDER_REQUIRED_ON_CREATE``
-    lint while reaching no builder, so a create declaring it was reported as
-    placed and landed at the account root; the lint's two accepted spellings
-    now both place. The builders' ``folder_name`` is left exactly as it was —
-    the platform ignores it, and rewriting every builder to say so is the
+    ``config['folder_id']`` already satisfied the folderless-create lint while
+    reaching no builder, so a create declaring it was reported as placed and
+    landed at the account root; that spelling now places. ``folder_name`` does
+    NOT — this platform ignores it on create, and on the legacy route nothing
+    resolves it to an id, so a create naming a folder silences the lint and is
+    still unplaced (QA-157-r11-05: an earlier version of this paragraph claimed
+    both spellings place, which is false for exactly that route). The builders'
+    ``folder_name`` is left as it was: rewriting every builder to say so is the
     hand-model this repository keeps removing.
     """
     folder_id = folder_id or config.get("folder_id")
@@ -351,7 +354,15 @@ def clone_component(
     component_id: str,
     config: Dict[str, Any]
 ) -> Dict[str, Any]:
-    """Clone an existing component with a new name."""
+    """Clone an existing component with a new name.
+
+    PLACEMENT: pass ``folder_id``. The clone copies the source document and
+    sets whichever folder attributes the config names, and this platform reads
+    only ``folderId`` on a create — so ``folder_name`` here is metadata that
+    changes nothing, and a clone asking for a folder by name stays where the
+    source was (QA-157-r11-04, measured live). Example:
+    ``{"name": "Cloned", "folder_id": "<the target folder's id>"}``.
+    """
     try:
         new_name = config.get('name')
         if not new_name:

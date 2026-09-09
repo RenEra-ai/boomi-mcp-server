@@ -7760,6 +7760,7 @@ _PROCESS_FLOW_PROTOCOLS = {
         ],
         "optional_fields": [
             "folder_name",
+        "folder_id",
             "description",
             "transform",
             "transform.mode",
@@ -8404,7 +8405,8 @@ _PROCESS_FLOW_PROTOCOLS = {
             ],
             "config": {
                 "process_kind": "database_to_api_sync",
-                "folder_name": "<<Boomi folder path>>",
+                "folder_name": "<<optional exact folder NAME — not a path; metadata only, this platform ignores it on create>>",
+                "folder_id": "<<optional folder id; the ONE spelling that places>>",
                 "description": "<<optional description>>",
                 "source": {
                     "connector_type": "database",
@@ -8490,6 +8492,7 @@ _PROCESS_FLOW_PROTOCOLS = {
         ],
         "optional_fields": [
             "folder_name",
+        "folder_id",
             "description",
             "process_calls[].subprocess_ref",
             "process_calls[].process_id",
@@ -8580,7 +8583,8 @@ _PROCESS_FLOW_PROTOCOLS = {
             "depends_on": ["main_logic"],
             "config": {
                 "process_kind": "wrapper_subprocess",
-                "folder_name": "<<Boomi folder path>>",
+                "folder_name": "<<optional exact folder NAME — not a path; metadata only, this platform ignores it on create>>",
+                "folder_id": "<<optional folder id; the ONE spelling that places>>",
                 "process_calls": [
                     {
                         "subprocess_ref": "$ref:main_logic",
@@ -8627,6 +8631,7 @@ _PROCESS_FLOW_PROTOCOLS = {
         "optional_fields": [
             "name",
             "folder_name",
+        "folder_id",
             "description",
             "process_extensions",
             "pipeline.dependencies",
@@ -8708,7 +8713,8 @@ _PROCESS_FLOW_PROTOCOLS = {
             "depends_on": ["db_conn", "db_op", "field_map", "rest_conn", "rest_op"],
             "config": {
                 "process_kind": "sync_pipeline",
-                "folder_name": "<<Boomi folder path>>",
+                "folder_name": "<<optional exact folder NAME — not a path; metadata only, this platform ignores it on create>>",
+                "folder_id": "<<optional folder id; the ONE spelling that places>>",
                 "pipeline": {
                     "stages": [
                         {

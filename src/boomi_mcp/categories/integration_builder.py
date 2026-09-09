@@ -7940,6 +7940,20 @@ def _resolve_component_placement(config, folders=None):
     never started. Whatever is left unplaced is reported, not hidden: the
     placement attestation on the component's own result row says so.
     """
+    document = config.get("xml")
+    if isinstance(document, str) and document.strip():
+        # A RAW-XML COMPONENT CARRIES ITS PLACEMENT IN ITS OWN DOCUMENT, and
+        # this site has to know that too. Governance learned the spelling and
+        # stopped claiming such a component; the attestation did not, so a
+        # component live in the folder its own document named got no placement
+        # row at all while its config-declaring sibling in the same apply got a
+        # verified one (QA-157-r11-02). Read through the same one reader
+        # governance uses.
+        from .components.canonical_process_apply import applied_placement
+
+        carried = applied_placement(document)
+        if carried["folder_id"]:
+            return _ComponentPlacement(carried["folder_id"], None, None)
     literal = config.get("folder_id")
     if isinstance(literal, str) and literal.strip():
         # The id WINS, so the name — if one is also authored — drove nothing and

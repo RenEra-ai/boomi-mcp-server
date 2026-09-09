@@ -538,30 +538,54 @@ def applied_placement(submitted_xml: str) -> Dict[str, Optional[str]]:
     bytes it was reading carried the id — a placement recorded as less than what
     the platform received. Two separate readers could also disagree; one cannot.
     """
-    import re as _re
-    import xml.etree.ElementTree as ET
+    import xml.parsers.expat
 
-    # A DOCUMENT THAT DECLARES AN ENTITY IS NOT READ.
+    # STREAMED, AND THE PARSER IS ASKED — not a regex.
     #
     # This reader used to see only bytes this server built or the platform
     # returned. #157 also asks it what placement a CALLER's own raw-XML
-    # component carries, which put caller-controlled bytes in front of an
-    # expat parser that expands internal entities — measured: a four-level
-    # declaration turns a few hundred bytes into ten thousand, and the shape
-    # amplifies exponentially. Nothing here needs entity expansion: a
-    # component document that declares one is refused rather than screened
-    # for a particular payload, and an unreadable document simply carries no
-    # placement, which is what every caller of this function already handles.
-    if _re.search(r"<!\s*(DOCTYPE|ENTITY)\b", submitted_xml or ""):
-        return {"folder_name": None, "folder_id": None}
+    # component carries, so caller-controlled bytes now reach it. The
+    # repository already carries three copies of a regex that screens for a
+    # DOCTYPE before parsing, and
+    # ``authoring/connector_resolution_snapshot.py`` says in as many words why
+    # it did not write a fourth: expat reports every entity declaration it
+    # reads, and a reader that stops at the root element never holds an
+    # expanded one.
+    #
+    # A fourth copy was written here anyway, and it did exactly what that
+    # docstring predicts: matching the whole document meant one XML COMMENT
+    # mentioning a DOCTYPE made a placed component read as unplaced, so the
+    # fan-out claimed it and replaced the caller's own folder id
+    # (QA-157-r11-01). The parser cannot make that mistake — a comment is a
+    # comment to it.
+    class _Refused(Exception):
+        pass
+
+    class _RootRead(Exception):
+        pass
+
+    attributes: Dict[str, str] = {}
+
+    def _entity_declared(*_args, **_kwargs):
+        raise _Refused
+
+    def _start(_name, attrs):
+        attributes.update(attrs)
+        raise _RootRead
+
+    parser = xml.parsers.expat.ParserCreate()
+    parser.EntityDeclHandler = _entity_declared
+    parser.StartElementHandler = _start
     try:
-        root = ET.fromstring(submitted_xml)
-    except ET.ParseError:
+        parser.Parse(submitted_xml or "", True)
+    except _RootRead:
+        return {
+            "folder_name": attributes.get("folderName") or None,
+            "folder_id": attributes.get("folderId") or None,
+        }
+    except (_Refused, xml.parsers.expat.ExpatError):
         return {"folder_name": None, "folder_id": None}
-    return {
-        "folder_name": root.attrib.get("folderName") or None,
-        "folder_id": root.attrib.get("folderId") or None,
-    }
+    return {"folder_name": None, "folder_id": None}
 
 
 def applied_folder_name(submitted_xml: str) -> Optional[str]:
