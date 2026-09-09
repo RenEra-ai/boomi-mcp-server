@@ -367,7 +367,28 @@ def derive_transform_flows(
             source_token = ""
             for previous in nodes[: nodes.index(node)][::-1]:
                 if getattr(previous, "kind", None) in ("source", "connector_call"):
+                    # EACH NODE KIND CARRIES ITS OWN REFERENCE. A `source`
+                    # names the connection directly; a `connector_call` names
+                    # only the OPERATION, and the operation names the
+                    # connection. Reading `connection_ref` off both meant every
+                    # map fed by a canonical connector call resolved no family
+                    # and served an empty source, even where the operation's
+                    # family was known.
                     conn_key = _ref_key(getattr(previous, "connection_ref", None))
+                    if conn_key is None:
+                        op_key = _ref_key(getattr(previous, "operation_ref", None))
+                        operation = by_key.get(op_key) if op_key else None
+                        op_config = (getattr(operation, "config", None) or {}) if operation else {}
+                        conn_key = _ref_key(op_config.get("connection_ref_key")) or (
+                            op_config.get("connection_ref_key")
+                            if isinstance(op_config.get("connection_ref_key"), str)
+                            else None
+                        )
+                        if conn_key is None and operation is not None:
+                            family = str(op_config.get("connector_type") or "") or None
+                            if family:
+                                source_token = SOURCE_TOKEN_BY_FAMILY.get(family.lower(), "")
+                                break
                     family = (metadata.get(conn_key) or (None, None))[0] if conn_key else None
                     if family:
                         source_token = SOURCE_TOKEN_BY_FAMILY.get(str(family).lower(), "")

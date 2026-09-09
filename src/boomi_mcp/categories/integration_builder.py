@@ -3730,6 +3730,7 @@ def _execute_component(
     *,
     components_by_key: Optional[Dict[str, IntegrationComponentSpec]] = None,
     literal_indexes: Optional[Dict[str, Dict[str, Any]]] = None,
+    selected_indexes: Optional[Dict[str, Dict[str, Any]]] = None,
     placement: Optional["_ComponentPlacement"] = None,
 ) -> Dict[str, Any]:
     """Execute ONE component step.
@@ -4418,15 +4419,26 @@ def _execute_component(
                 ),
             }
         raw_comp_config = comp.config or {}
+        # THE SAME INDEX INPUTS PLANNING VALIDATED WITH. #157 made a REUSED
+        # profile's index come from the selected account artifact rather than
+        # from its candidate config, and planning supplies that set — but this
+        # site did not take it, so a map over a reused profile planned clean and
+        # then failed HERE, mid-loop, after earlier components had been written.
+        # A request-decidable answer decided during the mutation is the second
+        # instance of that class in this slice; the first was hoisted to the
+        # pre-write pass, and this one is closed by giving both sites the same
+        # inputs rather than by re-deciding at the second.
         source_index = resolve_map_profile_index(
             raw_comp_config.get("source_profile_id"),
             components_by_key,
             literal_indexes,
+            selected_indexes=selected_indexes,
         )
         target_index = resolve_map_profile_index(
             raw_comp_config.get("target_profile_id"),
             components_by_key,
             literal_indexes,
+            selected_indexes=selected_indexes,
         )
         if source_index is None or target_index is None:
             return {
@@ -5515,7 +5527,10 @@ def _resolve_literal_profile_indexes(
 
 
 def _resolve_selected_profile_indexes(
-    boomi_client: Boomi, spec: IntegrationSpecV1
+    boomi_client: Boomi,
+    spec: IntegrationSpecV1,
+    reused_keys: Optional[Any] = None,
+    conflict_policy: Optional[str] = None,
 ) -> Dict[str, Dict[str, Any]]:
     """Field indexes for profiles apply will REUSE, keyed by component key (#157).
 
@@ -5528,14 +5543,26 @@ def _resolve_selected_profile_indexes(
     Unresolvable entries are absent, and the map validator then reports
     ``MAP_PROFILE_INDEX_UNAVAILABLE`` rather than trusting the candidate.
 
+    REUSE HAS TWO SPELLINGS. A profile may be reused because it declared
+    ``reference_only``, or because ``conflict_policy="reuse"`` bound it to an
+    existing component of the same NAME — and decision D4 judges a reused
+    profile by the artifact apply will bind, however that was decided. Reading
+    the flag alone left the coverage gate validating the candidate config for
+    exactly the collision case. ``reused_keys`` is the planner's own decision
+    where the caller has it; ``conflict_policy`` lets this ask the same
+    question where the caller does not.
+
     Makes ZERO live calls when the spec reuses no profile.
     """
+    reused = set(reused_keys or ())
+    collision_reuse = str(conflict_policy or "").lower() == "reuse"
     resolved: Dict[str, Dict[str, Any]] = {}
     for comp in spec.components:
         if not str(getattr(comp, "type", "") or "").startswith("profile."):
             continue
         cfg = comp.config if isinstance(comp.config, dict) else {}
-        if cfg.get("reference_only") is not True:
+        declared_reuse = cfg.get("reference_only") is True
+        if not (declared_reuse or comp.key in reused or collision_reuse):
             continue
         component_id = _first_nonblank_str(comp.component_id, cfg.get("component_id"))
         if not component_id:
@@ -5550,6 +5577,12 @@ def _resolve_selected_profile_indexes(
                 candidates = []
             if len(candidates) != 1:
                 continue
+            if not (declared_reuse or comp.key in reused):
+                # A collision candidate is only a REUSE when the component is
+                # being created and the policy binds it; anything else is an
+                # ordinary create whose candidate config is its own truth.
+                if str(getattr(comp, "action", "") or "") != "create":
+                    continue
             component_id = candidates[0].get("component_id")
         if not component_id:
             continue
@@ -6227,7 +6260,9 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
     # referenced by a transform.map (supplied or live-discovered) so the map can
     # be validated against real fields. Empty (zero live calls) for all-$ref specs.
     literal_profile_indexes = _resolve_literal_profile_indexes(boomi_client, spec)
-    selected_profile_indexes = _resolve_selected_profile_indexes(boomi_client, spec)
+    selected_profile_indexes = _resolve_selected_profile_indexes(
+        boomi_client, spec, conflict_policy=conflict_policy
+    )
     steps: List[Dict[str, Any]] = []
     warnings: List[str] = []
 
@@ -9424,7 +9459,13 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
     # or live-discovered) so a validated literal-UUID transform.map also RENDERS
     # at apply — keeps plan and apply from diverging.
     literal_profile_indexes = _resolve_literal_profile_indexes(boomi_client, spec)
-    selected_profile_indexes = _resolve_selected_profile_indexes(boomi_client, spec)
+    selected_profile_indexes = _resolve_selected_profile_indexes(
+        boomi_client,
+        spec,
+        reused_keys=_keys_reused_at_apply(
+            spec=spec, existing_ids=existing_ids, conflict_policy=conflict_policy
+        ),
+    )
 
     # Apply re-resolves those indexes, and live discovery can DRIFT from plan
     # time (a profile edited/removed between plan and apply, or a transient fetch
@@ -10461,6 +10502,7 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
                 target_id=target_id,
                 components_by_key=components_by_key,
                 literal_indexes=literal_profile_indexes,
+                selected_indexes=selected_profile_indexes,
                 placement=_placement,
             )
 

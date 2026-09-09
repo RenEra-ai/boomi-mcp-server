@@ -525,6 +525,56 @@ def build_mutation_attestation(
     )
 
 
+def document_declarations(component_xml: str) -> Dict[str, Optional[str]]:
+    """What a component document DECLARES about itself: name and placement.
+
+    One reader, because a raw-XML component is authored by its document and
+    every site that asks about one asks the same question. Placement learned
+    that first (QA-157-r10-01); the NAME half was still read from the config
+    alone, so a component named only in its own document was treated as unnamed
+    — it received a derived preview name that was never emitted, and two owning
+    roots refused it as ambiguous although the document already named it.
+    """
+    carried = applied_placement(component_xml)
+    return {
+        "name": _document_root_name(component_xml),
+        "folder_name": carried["folder_name"],
+        "folder_id": carried["folder_id"],
+    }
+
+
+def _document_root_name(component_xml: str) -> Optional[str]:
+    """The ``name`` on the document's root element, or None."""
+    import xml.parsers.expat
+
+    class _Refused(Exception):
+        pass
+
+    class _RootRead(Exception):
+        pass
+
+    attributes: Dict[str, str] = {}
+
+    def _entity_declared(*_args, **_kwargs):
+        raise _Refused
+
+    def _start(_name, attrs):
+        attributes.update(attrs)
+        raise _RootRead
+
+    parser = xml.parsers.expat.ParserCreate()
+    parser.EntityDeclHandler = _entity_declared
+    parser.StartElementHandler = _start
+    try:
+        parser.Parse(component_xml or "", True)
+    except _RootRead:
+        name = attributes.get("name")
+        return name if isinstance(name, str) and name.strip() else None
+    except (_Refused, xml.parsers.expat.ExpatError):
+        return None
+    return None
+
+
 def applied_placement(submitted_xml: str) -> Dict[str, Optional[str]]:
     """BOTH placement facts on the bytes that were actually SENT.
 
@@ -733,5 +783,6 @@ __all__ = [
     "materialize_canonical_process_xml",
     "observed_folder_identity",
     "folder_placement_honoured",
+    "document_declarations",
     "resolve_extension_connections",
 ]

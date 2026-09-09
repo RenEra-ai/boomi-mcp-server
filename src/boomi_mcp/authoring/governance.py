@@ -277,6 +277,24 @@ def _config_str(component: IntegrationComponentSpec, key: str) -> Optional[str]:
     return None
 
 
+def _declares_its_own_name(component: IntegrationComponentSpec) -> Optional[str]:
+    """The name a RAW-XML component declares in its own document, if any.
+
+    A component authored as a document is named by that document, and the
+    document is what reaches the wire. Reading only the config left such a
+    component looking unnamed: it took a derived preview name that was never
+    emitted, and two owning roots with different prefixes refused it as
+    ambiguous although its own bytes already named it. Same authority, same
+    reader as the placement half.
+    """
+    document = (component.config or {}).get("xml")
+    if not (isinstance(document, str) and document.strip()):
+        return None
+    from ..categories.components.canonical_process_apply import document_declarations
+
+    return document_declarations(document)["name"]
+
+
 def _declares_its_own_placement(component: IntegrationComponentSpec) -> Optional[str]:
     """The placement this component already declares, in ANY of its spellings.
 
@@ -384,6 +402,7 @@ def resolve_governance(
                 prefix
                 and not (component.name and component.name.strip())
                 and _config_str(component, "component_name") is None
+                and _declares_its_own_name(component) is None
             ):
                 name_claims.setdefault(key, {}).setdefault(derive_default_name(prefix, key), index)
 
@@ -483,7 +502,32 @@ def resolve_governance(
     components_by_key = {component.key: component for component in resolved_components}
 
     # 5. watermark consistency over the owned operations
-    records: List[RecordedIntentV1] = list(extra_recorded_intents)
+    #
+    # CONTRIBUTED RECORDS ARE VALIDATED LIKE AUTHORED ONES. A recipe reaches
+    # this channel through `extra_recorded_intents`, and validating only the
+    # envelope's own declaration let a recipe record a watermark naming a
+    # profile or field that does not exist — the identical declaration on an
+    # envelope is refused. Same rule, both entry points, before anything is
+    # served or persisted.
+    records: List[RecordedIntentV1] = []
+    _roots_by_key = {envelope.component_key: (index, envelope) for index, _u, envelope in resolved}
+    for contributed in extra_recorded_intents:
+        declaration = getattr(contributed, "declaration", None)
+        owner = _roots_by_key.get(getattr(contributed, "process_key", ""))
+        if (
+            declaration is not None
+            and getattr(declaration, "declaration_kind", None) == "watermark"
+            and owner is not None
+        ):
+            owner_index, owner_envelope = owner
+            validate_watermark_declaration(
+                declaration,
+                unit_index=owner_index,
+                owned_keys=owned_by_root[owner_envelope.component_key],
+                components_by_key=components_by_key,
+                literal_indexes=literal_indexes,
+            )
+        records.append(contributed)
     for index, unit, envelope in resolved:
         authored = unit.envelope
         if authored.watermark is not None:
@@ -676,7 +720,34 @@ def apply_connection_binding_contract(
         defaults = config.get("default_headers")
         if isinstance(defaults, Mapping) and defaults:
             for operation in _operations_of(key, components):
-                op_config = dict(operation.config or {})
+                # THE ROUTE HAS TO BE ABLE TO CARRY THEM. An operation authored
+                # as a raw document is submitted unchanged, and one bound for
+                # reuse is not written at all — so merging headers into their
+                # config produced a preview showing headers the wire never
+                # receives. The merge is refused rather than performed
+                # invisibly, because a caller who authored both a default
+                # header and a document has asked for two different things.
+                op_config_raw = operation.config or {}
+                document = op_config_raw.get("xml")
+                if (isinstance(document, str) and document.strip()) or _is_reuse_reference(
+                    operation
+                ):
+                    raise _refuse(
+                        GOVERNANCE_CONNECTION_BINDING_CONFLICT,
+                        message=(
+                            "A connection default header cannot reach an "
+                            "operation this request submits as its own document "
+                            "or binds for reuse."
+                        ),
+                        path="/components/{0}/config/default_headers".format(key),
+                        subject_kind="component",
+                        subject_id=key,
+                        remediation=(
+                            "Author the header in the operation itself, or drop "
+                            "default_headers from the connection."
+                        ),
+                    )
+                op_config = dict(op_config_raw)
                 try:
                     merged = _merge_request_headers(
                         dict(defaults),
