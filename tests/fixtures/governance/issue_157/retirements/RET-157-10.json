@@ -56,6 +56,13 @@
         "varied": "34049f204738b696660430e0136e52eb22e7bc193cdec69a4a37e93907952f6e"
       }
     },
+    "fingerprint_applicability": {
+      "axis": "materialization/execution fingerprint",
+      "canonical_process_units": {
+        "base": 0,
+        "varied": 0
+      }
+    },
     "non_vacuity_control": {
       "field_path": "source/read_operation/batch_size",
       "xml_moved": [

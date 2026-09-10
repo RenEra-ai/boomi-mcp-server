@@ -258,30 +258,41 @@ def _selected_or_generated(
     coverage gate follows (decision D4). Applying it here too keeps the served
     projection from describing fields the reused profile does not have.
     """
-    generated = _generated_profile(component) if component is not None else None
-    index = selected.get(key) if key else None
-    if not (isinstance(index, Mapping) and index):
-        return generated
-    if generated is None:
-        # NO GENERATOR ARTIFACT, NO SUMMARY. `GeneratedProfileSummaryV1` requires
-        # a generation mode and a profile config, and both are the GENERATOR's
-        # output — a reference-only profile carrying an id and no local body has
-        # neither, and synthesising them would invent content. Unavailable is the
-        # honest answer and the one this field already carried.
+    if key and key in selected:
+        # THE REQUEST WILL NOT WRITE THIS PROFILE, so nothing the request says
+        # about it is evidence. Either the account's own index describes it, or
+        # nothing does — the candidate config is never a fallback here, and
+        # falling back to it whenever discovery failed served a shape the account
+        # may never have held.
+        index = selected[key]
+        if not isinstance(index, Mapping):
+            return None
+        served = _served_index_entries(index)
+        return {
+            "evidence_source": "selected_artifact",
+            "component_type": getattr(component, "type", None),
+            "component_name": _selected_component_name(component),
+            "field_index_by_path": served,
+            "mappable_paths": sorted(
+                path for path, entry in served.items() if entry.get("mappable", True)
+            ),
+        }
+    return _generated_profile(component) if component is not None else None
+
+
+def _selected_component_name(component: Any) -> Optional[str]:
+    """The name the REQUEST uses to refer to the existing component, or None.
+
+    A reference to the artifact, not a description of it: the caller's own
+    binding names which component this is, and nothing else here does.
+    """
+    if component is None:
         return None
-    # THE SHAPE FROM THE GENERATOR, THE FIELDS FROM THE ACCOUNT. Building a
-    # summary from the index alone dropped the model's other declared fields;
-    # the point of the rule is only that the FIELD SET must come from the
-    # artifact this request will bind, not from the candidate config.
-    summary = dict(generated)
-    served = _served_index_entries(index)
-    summary["field_index_by_path"] = served
-    summary["mappable_paths"] = sorted(
-        path for path, entry in served.items() if entry.get("mappable", True)
-    )
-    if not summary.get("component_type"):
-        summary["component_type"] = getattr(component, "type", None)
-    return summary or None
+    config = component.config if isinstance(component.config, dict) else {}
+    for candidate in (component.name, config.get("component_name")):
+        if isinstance(candidate, str) and candidate.strip():
+            return candidate.strip()
+    return None
 
 
 #: The keys `FieldIndexEntryV1` declares, read FROM the model. A live-indexed
@@ -413,6 +424,7 @@ def derive_transform_flows(
     *,
     connector_metadata: Optional[Mapping[str, Tuple[Optional[str], Optional[str]]]] = None,
     selected_indexes: Optional[Mapping[str, Mapping[str, Any]]] = None,
+    reused_keys: Optional[Any] = None,
 ) -> Tuple[DerivedTransformFlowV1, ...]:
     """One typed row per ``map_ref`` node, per root, in key order.
 
@@ -433,6 +445,12 @@ def derive_transform_flows(
     #: account never held — and omit fields it does (architect review, item 2).
     #: Where the selected artifact's own index is in hand, it wins.
     selected = dict(selected_indexes or {})
+    #: A REUSED MAP IS OPAQUE TO THE PROJECTION TOO. Its in-spec mappings
+    #: describe a component this request will not write, so serving them
+    #: published a destination the account may never bind — the same rule the
+    #: coverage gate follows, applied to the row that DESCRIBES the map
+    #: (architect evaluation 2, finding 2).
+    reused = frozenset(reused_keys or ())
     rows: List[DerivedTransformFlowV1] = []
     for unit in sorted(units, key=lambda u: u.envelope.component_key):
         nodes = _walk_nodes(unit.process_ir)
@@ -440,13 +458,18 @@ def derive_transform_flows(
         for position, node in enumerate(map_nodes):
             map_key = _ref_key(getattr(node, "map_ref", None) or getattr(node, "component_ref", None))
             component = by_key.get(map_key) if map_key else None
-            config = (component.config or {}) if component is not None else {}
+            opaque = bool(map_key) and map_key in reused
+            config = {} if opaque else ((component.config or {}) if component is not None else {})
             source_key = _ref_key(config.get("source_profile_id")) or ""
             target_key = _ref_key(config.get("target_profile_id")) or ""
             source_component = by_key.get(source_key)
             target_component = by_key.get(target_key)
-            source_gen = _selected_or_generated(source_component, source_key, selected)
-            target_gen = _selected_or_generated(target_component, target_key, selected)
+            source_gen = (
+                None if opaque else _selected_or_generated(source_component, source_key, selected)
+            )
+            target_gen = (
+                None if opaque else _selected_or_generated(target_component, target_key, selected)
+            )
 
             # the feeding step: the nearest preceding connector node
             source_token = ""

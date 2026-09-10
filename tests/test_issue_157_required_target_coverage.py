@@ -49,6 +49,7 @@ from boomi_mcp.categories.components.builders.transform_map_validation import ( 
     validate_required_target_coverage,
 )
 from boomi_mcp.models.authoring_workflow import AuthoringRequestV1  # noqa: E402
+from boomi_mcp.recipes.materialization import component_materialization_mode  # noqa: E402
 from boomi_mcp.models.recipe_contributions import parse_recipe_contribution  # noqa: E402
 from boomi_mcp.recipes import RecipeInputBase  # noqa: E402
 from boomi_mcp.models.integration_models import IntegrationComponentSpec  # noqa: E402
@@ -383,7 +384,7 @@ def _coverage_executor(_inp):
                 "contribution_id": "c." + component.key.replace("_", "-"),
                 "component_key": component.key,
                 "component_type": component.type,
-                "materialization_mode": "create",
+                "materialization_mode": component_materialization_mode(component),
                 "materializer_slot": component.key,
             }
         )

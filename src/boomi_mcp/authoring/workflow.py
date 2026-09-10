@@ -1008,7 +1008,7 @@ def _lift_recipe_roots_into_units(components, roots, envelopes=None):
 
 
 def build_integration_spec_preview(
-    normalized: _NormalizedIntent, selected_indexes: Any = None
+    normalized: _NormalizedIntent, selected_indexes: Any = None, reused_keys: Any = None
 ) -> IntegrationSpecV1:
     """The ComponentPlan preview — explicitly an ``IntegrationSpecV1``.
 
@@ -1053,6 +1053,7 @@ def build_integration_spec_preview(
         normalized,
         _withhold_process_roots(normalized.integration_spec),
         selected_indexes=selected_indexes,
+        reused_keys=reused_keys,
     )
 
 
@@ -1069,6 +1070,7 @@ def _as_served_preview(
     normalized: _NormalizedIntent,
     spec: IntegrationSpecV1,
     selected_indexes: Any = None,
+    reused_keys: Any = None,
 ):
     """The served preview SHAPE for this intent (#157).
 
@@ -1086,6 +1088,7 @@ def _as_served_preview(
         normalized.integration_spec.components,
         connector_metadata=normalized.connector_metadata,
         selected_indexes=selected_indexes,
+        reused_keys=reused_keys,
     )
     payload = spec.model_dump(mode="json", exclude={"flows"})
     payload.pop("preview_kind", None)
@@ -1547,7 +1550,7 @@ def _validate_processes(
     conflict_policy: str = "reuse",
     literal_indexes: Any = None,
     boomi_client: Any = None,
-) -> Tuple[ValidationReportSummaryV1, Tuple[AuthoringDiagnosticV1, ...], Any, Any, Any, Any]:
+) -> Tuple[ValidationReportSummaryV1, Tuple[AuthoringDiagnosticV1, ...], Any, Any, Any, Any, Any]:
     """Run the unified #143 semantic validator over every authored process.
 
     Uses ``validate_process_ir``, which REPORTS and does not raise on a bad
@@ -1957,7 +1960,7 @@ def _validate_processes(
         codes=tuple(sorted(set(codes))),
     )
     return (summary, tuple(diagnostics), symbols,
-            resolution.capabilities_by_root, snapshot, selected_indexes)
+            resolution.capabilities_by_root, snapshot, selected_indexes, reused_keys)
 
 
 def _required_target_coverage_error(
@@ -2036,6 +2039,7 @@ def _selected_profile_indexes(
             reused_keys=None if reused_keys is None else set(reused_keys),
             conflict_policy=conflict_policy,
         ) or None
+
     except Exception:  # noqa: BLE001 - discovery is best effort; absence defers
         return None
 
@@ -2305,6 +2309,7 @@ def plan_authoring_request_v1(
         effect_capabilities,
         resolution_snapshot,
         _selected_for_preview,
+        _reused_for_preview,
     ) = _validate_processes(
         normalized,
         request.effect_declarations,
@@ -2331,7 +2336,7 @@ def plan_authoring_request_v1(
     # account can disagree, so the preview and the gate could describe different
     # artifacts (live QA r12).
     spec_preview = build_integration_spec_preview(
-        normalized, selected_indexes=_selected_for_preview
+        normalized, selected_indexes=_selected_for_preview, reused_keys=_reused_for_preview
     )
 
     # The LEGACY component-plan lint, reused. It supplies the redacted spec echo
@@ -2405,6 +2410,7 @@ def plan_authoring_request_v1(
                 normalized,
                 _withhold_process_roots(IntegrationSpecV1(**legacy["integration_spec"])),
                 selected_indexes=_selected_for_preview,
+                reused_keys=_reused_for_preview,
             )
         # The planner's own warning strings. The advisory arm this used to
         # accumulate is gone with the `process_ir` exemption above: an

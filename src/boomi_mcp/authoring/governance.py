@@ -946,46 +946,6 @@ def _watermark_source_profile(
 _UNRESOLVABLE_SOURCE = object()
 
 
-def _watermark_index_is_authoritative(
-    source_profile_ref: Any,
-    literal_indexes: Optional[Mapping[str, Any]] = None,
-    selected_indexes: Optional[Mapping[str, Any]] = None,
-) -> bool:
-    """Did the index this pass resolved come from the ARTIFACT rather than the config?
-
-    An index the account supplied is the answer even when it is empty; an index
-    the candidate config yielded is a guess this pass may not be able to make.
-    """
-    if not isinstance(source_profile_ref, str) or not source_profile_ref.strip():
-        return False
-    if not source_profile_ref.startswith("$ref:"):
-        return bool(literal_indexes) and source_profile_ref.strip() in literal_indexes
-    return bool(selected_indexes) and source_profile_ref[len("$ref:") :] in selected_indexes
-
-
-def _watermark_source_is_reused(
-    source_profile_ref: Any,
-    components_by_key: Mapping[str, IntegrationComponentSpec],
-    reused_keys: Optional[Any] = None,
-) -> bool:
-    """Will the referenced source profile be REUSED rather than written?
-
-    Not this pass's question to answer. ``reused_keys`` is the caller's
-    authority: ``None`` means "not known here", which is normalization's honest
-    state — it runs offline, so a profile reused by NAME is indistinguishable
-    from one this request writes — and defers to the pass that does know.
-
-    An earlier version read ``config.reference_only`` instead. That is one
-    spelling of reuse out of several, and modelling it here refused declarations
-    the account can satisfy (Stage-2 round 6).
-    """
-    if not isinstance(source_profile_ref, str) or not source_profile_ref.startswith("$ref:"):
-        return True
-    if reused_keys is None:
-        return True
-    return source_profile_ref[len("$ref:") :] in reused_keys
-
-
 def validate_watermark_source_field(
     declaration: Any,
     *,
@@ -997,68 +957,85 @@ def validate_watermark_source_field(
 ) -> bool:
     """Rule (a) alone: the tracked field is a declared, mappable source leaf.
 
-    Returns True when the rule was DECIDED, False when the referenced source
-    profile has no index in reach — an unavailable answer, not a wrong one, and
-    the same deferral the required-leaf coverage gate makes for an empty index.
-    Split out so the online validation can decide the deferred case with the
-    SELECTED artifact without re-running rule (b), whose authority (the root's
-    owned operations) it does not carry.
+    Returns True when the rule was DECIDED and False when it was DEFERRED. Split
+    out so the online validation can decide a deferred case with the SELECTED
+    artifact without re-running rule (b), whose authority (the root's owned
+    operations) it does not carry.
 
-    ``selected_indexes`` is the coverage gate's own parameter, keyed by
-    component KEY — the reused artifact's index, which is a different key space
-    and a different value shape from ``literal_indexes`` (UUID -> wrapper). The
-    resolver takes both separately for exactly that reason; merging one into
-    the other resolves nothing.
+    **Who decides what.** ``reused_keys`` is ``None`` for the offline
+    normalization pass, which cannot tell a profile this request writes from one
+    a name collision will reuse. So it decides ONLY what no later pass can
+    change — a reference naming no component, or naming a non-profile — and
+    defers everything else. Deciding an in-plan reference from its candidate
+    config there refused declarations the account satisfies and accepted ones it
+    does not, in the same tree (architect evaluation 2, finding 3).
+
+    The online pass supplies ``reused_keys`` and ``selected_indexes``. There a
+    reused profile's key is always present: a mapping value is the artifact's own
+    answer, empty or not, and ``None`` means the artifact could not be read at
+    all — which is refused rather than deferred a second time, because no later
+    pass exists to ask.
+
+    ``selected_indexes`` is the coverage gate's own parameter, keyed by component
+    KEY — a different key space and value shape from ``literal_indexes``
+    (UUID -> wrapper). The resolver takes both separately for that reason.
     """
     from ..categories.components.builders.transform_map_validation import (
         resolve_map_profile_index,
     )
 
-    index = resolve_map_profile_index(
-        declaration.source_profile_ref,
-        dict(components_by_key),
-        literal_indexes,
-        dict(selected_indexes) if selected_indexes else None,
-    )
-    # AN EMPTY INDEX IS ONLY UNAVAILABLE WHEN IT CAME FROM THE CANDIDATE CONFIG.
-    # The resolver returns `{}` both for a profile whose own config declares no
-    # fields — which normalization cannot judge, because the account may say
-    # otherwise — and for a SELECTED artifact that really declares none, which
-    # is a confirmed absence and the strongest evidence there is. Reading both as
-    # "ask again later" let a watermark over an empty reused profile compile
-    # (Stage-2 round 7).
-    if not index and not _watermark_index_is_authoritative(
-        declaration.source_profile_ref, literal_indexes, selected_indexes
-    ):
-        if (
-            _watermark_source_profile(declaration.source_profile_ref, components_by_key)
-            is _UNRESOLVABLE_SOURCE
-        ):
-            # UNRESOLVABLE IS NOT UNAVAILABLE. Reading every `None` from the
-            # resolver as one answer retired the reference check entirely, so a
-            # watermark over `$ref:missing` or over a connector planned and
-            # compiled (Stage-2 round 5).
+    ref = declaration.source_profile_ref
+    if _watermark_source_profile(ref, components_by_key) is _UNRESOLVABLE_SOURCE:
+        # UNREPAIRABLE, and therefore decidable by every pass: a reference that
+        # names no component, or names a non-profile, can never acquire an index.
+        raise _refuse(
+            GOVERNANCE_WATERMARK_INCONSISTENT,
+            message=(
+                "The watermark references a source profile this request does "
+                "not author."
+            ),
+            path="/units/{0}/envelope/watermark/source_profile_ref".format(unit_index),
+            subject_kind="process",
+            remediation=(
+                "Reference an in-plan source profile ($ref:KEY) or an existing "
+                "profile component id."
+            ),
+        )
+    if reused_keys is None:
+        # The offline pass stops here. Everything below needs to know whether
+        # apply will reuse this profile, and offline that is unknowable.
+        return False
+
+    selected = dict(selected_indexes) if selected_indexes else {}
+    if isinstance(ref, str) and ref.startswith("$ref:") and ref[len("$ref:") :] in selected:
+        if selected[ref[len("$ref:") :]] is None:
+            # REUSED, AND THE ARTIFACT COULD NOT BE READ. The map route answers
+            # this with MAP_PROFILE_INDEX_UNAVAILABLE and refuses; a watermark
+            # cannot be validated against evidence nobody has either, and
+            # returning "deferred" here left a request compiling with a rule
+            # nothing ever decided.
             raise _refuse(
                 GOVERNANCE_WATERMARK_INCONSISTENT,
                 message=(
-                    "The watermark references a source profile this request does "
-                    "not author."
+                    "The watermark's source profile is reused, and its field "
+                    "index could not be read, so the declaration cannot be "
+                    "validated."
                 ),
                 path="/units/{0}/envelope/watermark/source_profile_ref".format(unit_index),
                 subject_kind="process",
                 remediation=(
-                    "Reference an in-plan source profile ($ref:KEY) or an existing "
-                    "profile component id."
+                    "Supply the existing profile's index, or reference a source "
+                    "profile this request authors."
                 ),
             )
-        if _watermark_source_is_reused(
-            declaration.source_profile_ref, components_by_key, reused_keys
-        ):
-            return False
-        # A profile this request WRITES, whose own config is the only authority
-        # its index could come from: an empty index cannot declare the field, so
-        # this falls through to the field refusal below, exactly as before.
-    entry = (index or {}).get(declaration.field)
+    index = resolve_map_profile_index(
+        ref, dict(components_by_key), literal_indexes, selected or None
+    )
+    if index is None:
+        # No index at all and nothing selected: the account was never asked, so
+        # this stays deferred rather than being decided from the candidate.
+        return False
+    entry = index.get(declaration.field)
     if entry is None or not entry.get("mappable", True):
         raise _refuse(
             GOVERNANCE_WATERMARK_INCONSISTENT,

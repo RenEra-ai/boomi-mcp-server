@@ -210,6 +210,19 @@ def measure(base, varied):
     sb, sv = rb["integration_spec"], rv["integration_spec"]
     fsb, fsv = flatten(sb), flatten(sv)
     echo = sorted(k for k in set(fsb) | set(fsv) if fsb.get(k) != fsv.get(k))
+    # THE FINGERPRINT AXIS, AND WHY IT IS NOT MEASURED AS A DIGEST. A
+    # materialization or execution fingerprint exists only for a CANONICAL
+    # process root, and these historical specs are legacy archetype output that
+    # authors none — measured here on both sides rather than asserted, so the
+    # record establishes non-applicability instead of inventing an invariant
+    # legacy fingerprint (architect evaluation 2, finding 5).
+    applicability = {
+        "canonical_process_units": {
+            "base": len(sb.get("processes") or ()),
+            "varied": len(sv.get("processes") or ()),
+        },
+        "axis": "materialization/execution fingerprint",
+    }
     pb, pv = plan_offline(sb), plan_offline(sv)
     strip = lambda p: {k: v for k, v in p.items() if k != "integration_spec"}
     db, dv = apply_capture(sb), apply_capture(sv)
@@ -222,6 +235,7 @@ def measure(base, varied):
         "component_types": types,
         "xml_moved": sorted(k for k in db if dv.get(k) != db[k]),
         "spec_digest": {"base": sha(canon(sb)), "varied": sha(canon(sv))},
+        "fingerprint_applicability": applicability,
     }
 
 
@@ -333,6 +347,7 @@ def freeze() -> Dict[str, Any]:
                 "plan_verdict_digest": report.get("plan_verdict_digest"),
                 "spec_echo_paths": report.get("spec_echo_paths"),
                 "spec_digest": report.get("spec_digest"),
+                "fingerprint_applicability": report.get("fingerprint_applicability"),
                 "non_vacuity_control": {"field_path": CONTROL["field_path"], "xml_moved": control_moved},
             },
             "replacement": spec["replacement"],
@@ -379,6 +394,31 @@ def check() -> List[str]:
         frozen = record["observations"]["emitted_xml_digests"]
         if report.get("xml_digests") != frozen:
             problems.append("emitted XML digests drift at HEAD: " + rid)
+        problems.extend(applicability_problems(rid, record, report))
+    return problems
+
+
+def applicability_problems(rid, record, report) -> List[str]:
+    """THE APPLICABILITY DISPOSITION IS CHECKED, NOT ASSERTED.
+
+    A record may omit the materialization/execution fingerprint axis only while
+    its producer authors no canonical process root — which is a measurement, not
+    a claim. The day one appears the omission stops being non-applicability, and
+    this says so instead of leaving an axis quietly unmeasured (architect
+    evaluation 2, finding 5).
+    """
+    applicability = (record.get("observations") or {}).get("fingerprint_applicability")
+    if applicability is None:
+        return ["no fingerprint-applicability disposition: " + rid]
+    problems = []
+    if applicability != report.get("fingerprint_applicability"):
+        problems.append("fingerprint applicability drift at HEAD: " + rid)
+    units = applicability.get("canonical_process_units") or {}
+    if any(units.get(side) for side in ("base", "varied")):
+        problems.append(
+            "producer now authors a canonical process root, so the "
+            "fingerprint axis is applicable and unmeasured: " + rid
+        )
     return problems
 
 

@@ -1,0 +1,56 @@
+Review this implementation against the architect design plan appended verbatim below.
+
+Repository: /Users/gleb/Documents/Projects/Renera/boomi-mcp-server, branch `codex/issue-157`.
+Baseline: ba1be9f34317d720d3b012484622ab7e2742143b. Implementation HEAD: the current checkout
+(`6e217b09249ae336a943b22a4d8e8b2dd424384e`). The delta touches 261 files; read
+`git diff ba1be9f34317d720d3b012484622ab7e2742143b..HEAD` for it.
+
+Your question is NOT "is this code good" — a separate Codex commit review has run EIGHT rounds
+against this tree and closed clean. Your question is whether the IMPLEMENTATION REALIZES THE PLAN:
+which plan items are fully implemented, which are partially implemented, which are missing, and
+which were implemented differently from what the plan specified.
+
+This is the SECOND architect evaluation. The first (run directory `cdx-gate-review.sP9bAv`,
+archived under `docs/architecture/evidence/issue-157/`) returned `VERDICT: ISSUES FOUND` with seven
+conformance findings, recorded as ARCH-157-e1-01..07 in the audit ledger. All seven were corrected,
+and the corrections were then validated by live QA and by four further commit-review rounds, which
+found fourteen more defects — five of them in the corrections themselves. Every one of those is in
+the ledger too. **Your first job is to judge whether the seven original findings are actually
+closed on this tree**, not whether they were answered in prose.
+
+Where the implementation deviates from the plan, the audit ledger at
+`docs/architecture/ISSUE_157_AUDIT_LEDGER.md` records the deviation and its reasoning: read its
+"Plan corrections" table (P1-P9, recorded before implementation began), its "Design decisions"
+table (D1-D19), and its findings table (which now carries the ARCH, CDX, QA and SELF rows for
+everything since). A deviation that table justifies is not automatically acceptable — say so if the
+justification does not hold — but a deviation you flag without engaging that record is less useful
+than one that engages it.
+
+Facts you will need, so you do not have to rediscover them:
+- Stage-1 live QA ran TWELVE rounds against a live Boomi account. Round 12 covered this correction
+  batch specifically and reported 7 findings (0 Critical, 3 High), all now fixed.
+- One defect class recurred ten times in how a created component's PLACEMENT is resolved, submitted,
+  attested and explained. A second class — a site re-deriving a decision whose authority is one
+  function — reached six instances and took its mandatory structural fix: `resolve_planner_binding`
+  is now the single resolution of which existing component a spec entry binds to, and
+  `resolve_reused_keys` composes it with `_will_reuse_at_apply` so every pre-write consumer asks one
+  authority.
+- The one settled platform fact: this platform IGNORES `folderName` and `folderFullPath` on create.
+  A component is placed only by a `folderId` injected at one boundary, `with_folder_id` inside
+  `_create_component_raw`. Exactly one create route bypasses that boundary — the trading-partner
+  create, which posts a typed model carrying a folder NAME and declares that limit itself.
+
+Please cover in particular:
+1. Whether each of ARCH-157-e1-01..07 is closed ON THIS TREE, with the code that closes it.
+2. Each numbered in-scope item of the plan: implemented, partial, missing, or implemented otherwise.
+3. Whether the governance surface is on the typed per-root envelope only and never on ProcessIRV1.
+4. Whether the derived-flows projection is genuinely derived and output-only.
+5. Whether the retirements are backed by the mutation proofs the plan asks for.
+6. Whether the one required-target-leaf validator really replaced the six legacy sites and is
+   reached by every entry point. The route sentinel is
+   `tests/test_issue_157_required_target_coverage.py::test_the_route_sentinel_sees_every_one_of_the_six_entry_points`
+   and its removal control is the parametrized test beside it; the first evaluation found the older
+   sentinel measured five paths and used a no-op mutant, so judge the replacement on its merits.
+7. Anything the plan asked for that you cannot find evidence of.
+
+END with a verdict on its OWN FINAL line: exactly 'VERDICT: NO ISSUES' or 'VERDICT: ISSUES FOUND'.

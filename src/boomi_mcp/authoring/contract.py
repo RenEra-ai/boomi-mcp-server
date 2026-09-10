@@ -748,11 +748,15 @@ def authoring_workflow_contract() -> Dict[str, Any]:
                 "existing component's own index, never by candidate config."
             ),
             "retired_spellings": (
-                "Legacy metadata that never affected an emitted byte, a "
-                "fingerprint, a mutation or a verdict on the legacy chain is "
+                "Legacy metadata that was MEASURED, on the legacy chain at the "
+                "recorded baseline, to move no emitted component byte, no "
+                "ordered create trace, no plan verdict and no mutation is "
                 "refused by name on the typed surface with "
                 "GOVERNANCE_RETIRED_SPELLING; the legacy archetype contracts "
-                "keep accepting it until #160's cutover."
+                "keep accepting it until #160's cutover. The measurement names "
+                "the axes it covered: it does NOT claim the spelling is absent "
+                "from every hash, because the legacy spec echo is hashed whole "
+                "and carries it."
             ),
         },
     }

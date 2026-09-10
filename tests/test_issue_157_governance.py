@@ -580,13 +580,22 @@ def test_a_watermark_over_a_declared_field_is_recorded_not_wired():
 
 
 def test_a_watermark_over_an_undeclared_field_is_the_named_inconsistency():
+    """REPORTED, not raised: the source-field rule is decided by the pass that
+    knows whether the profile will be reused, and that pass reports its findings
+    the way planning reports everything else. Normalization decides only the
+    references no later pass can repair (architect evaluation 2, finding 3)."""
     op = _op()
     op["depends_on"] = ["conn", "src_prof"]
     unit = _unit(name="P", depends_on=("conn", "op", "src_prof"),
                  watermark={"source_profile_ref": "$ref:src_prof", "field": "missing", "kind": "timestamp"})
-    error = _refusal([unit], [_conn(), op, _profile()])
-    assert error.code == GOVERNANCE_WATERMARK_INCONSISTENT
-    assert error.diagnostics[0].path.endswith("/watermark/field")
+    result, _ = _plan([unit], [_conn(), op, _profile()])
+    hits = [d for d in result.errors if d.code == GOVERNANCE_WATERMARK_INCONSISTENT]
+    assert hits and hits[0].path.endswith("/watermark/field")
+    with pytest.raises(AuthoringWorkflowError) as excinfo:
+        compile_authoring_request_v1(
+            _request([unit], [_conn(), op, _profile()]), boomi_client=MagicMock(), profile=_PROFILE
+        )
+    assert GOVERNANCE_WATERMARK_INCONSISTENT in {d.code for d in excinfo.value.diagnostics}
 
 
 def test_a_watermark_naming_an_undeclared_query_parameter_is_the_named_inconsistency():

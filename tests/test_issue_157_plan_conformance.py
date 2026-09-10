@@ -28,6 +28,9 @@ from boomi_mcp.authoring.workflow import (  # noqa: E402
     compile_authoring_request_v1,
     plan_authoring_request_v1,
 )
+from boomi_mcp.categories.components.builders.profile_generation import (  # noqa: E402
+    MAP_PROFILE_INDEX_UNAVAILABLE,
+)
 from boomi_mcp.categories.components.builders.transform_map_validation import (  # noqa: E402
     TRANSFORM_REVIEW_REQUIRED_TARGET_UNMAPPED,
     destination_paths,
@@ -586,13 +589,16 @@ def test_the_served_flow_row_describes_the_selected_profile_not_the_candidate():
     (selected_row,) = derive_transform_flows(
         [_flow_unit()], components, connector_metadata=metadata, selected_indexes=selected
     )
-    assert selected_row.target_profile_generation.mappable_paths == ("Root/platform_only",)
-    assert set(selected_row.target_profile_generation.field_index_by_path) == set(
-        _json_index(_SELECTED_ROOT)
-    )
-    # the row keeps the model's other declared fields — only the FIELD SET moves
-    assert selected_row.target_profile_generation.component_type == "profile.json"
-    assert selected_row.target_profile_generation.profile_config is not None
+    summary = selected_row.target_profile_generation
+    assert summary.mappable_paths == ("Root/platform_only",)
+    assert set(summary.field_index_by_path) == set(_json_index(_SELECTED_ROOT))
+    # and it says so: the row names the artifact as its evidence and carries NO
+    # generation body, because nothing generated this component
+    assert summary.evidence_source == "selected_artifact"
+    assert summary.generation_mode is None and summary.profile_config is None
+    assert summary.component_type == "profile.json"
+    # the candidate's own shape appears nowhere in the served summary
+    assert "candidate_only" not in repr(summary.model_dump(mode="json"))
 
 
 def test_a_profile_the_request_will_write_is_still_described_by_its_generator():
@@ -722,8 +728,13 @@ def test_a_plan_over_a_live_discovered_reused_profile_still_validates():
     assert result.integration_spec_preview is not None
 
 
-def test_a_reused_profile_with_no_local_body_serves_no_generation_summary():
-    """`GeneratedProfileSummaryV1` needs the GENERATOR's own output; inventing it is worse."""
+def test_a_reused_profile_with_no_local_body_is_described_by_the_artifact_alone():
+    """No generator artifact is no obstacle once the summary names its source.
+
+    The earlier answer served nothing at all here, because the model demanded a
+    generation body for every summary. It demands one only of a summary that
+    CLAIMS a generator now, so the account's own index can be served on its own.
+    """
     from boomi_mcp.authoring.derived_flows import derive_transform_flows
     from boomi_mcp.models.integration_models import IntegrationComponentSpec
 
@@ -736,13 +747,29 @@ def test_a_reused_profile_with_no_local_body_serves_no_generation_summary():
         )
         for c in components
     ]
+    live = _live_index()["field_index_by_path"]
     (row,) = derive_transform_flows(
         [_flow_unit()], bare, connector_metadata={"dbc": ("database", None)},
-        selected_indexes={"tgt": _live_index()["field_index_by_path"]},
+        selected_indexes={"tgt": live},
+    )
+    assert row.target_profile_generation.evidence_source == "selected_artifact"
+    assert set(row.target_profile_generation.field_index_by_path) == set(live)
+    assert row.target_profile_generation.component_name == "Tgt"
+    # the source, which this request DOES write, keeps its generator body
+    assert row.source_profile_generation.evidence_source == "generator"
+    assert row.source_profile_generation.profile_config is not None
+
+
+def test_a_reused_profile_whose_artifact_could_not_be_read_serves_no_summary():
+    """Reused and unreadable is not "fall back to the candidate"."""
+    from boomi_mcp.authoring.derived_flows import derive_transform_flows
+
+    (row,) = derive_transform_flows(
+        [_flow_unit()], _flow_components(reference_only=True),
+        connector_metadata={"dbc": ("database", None)},
+        selected_indexes={"tgt": None},
     )
     assert row.target_profile_generation is None
-    # and the source, which DOES have a body, is unaffected
-    assert row.source_profile_generation is not None
 
 
 def _map_component(action, **extra):
@@ -1103,8 +1130,250 @@ def test_an_empty_index_from_the_selected_artifact_is_a_confirmed_absence():
     hits = [d for d in decided.errors if d.code == GOVERNANCE_WATERMARK_INCONSISTENT]
     assert hits and hits[0].path.endswith("/watermark/field"), [d.path for d in decided.errors]
 
-    # the adversarial half: with nothing selected, the candidate's empty config
-    # still defers rather than refusing a declaration the account may satisfy
+    # and the artifact that could not be read at all is REFUSED, not deferred a
+    # second time: no later pass exists to ask, and returning "undecided" left a
+    # request compiling with a rule nothing ever decided
     with patch.object(integration_builder, "_discover_profile_index", lambda client, uuid: None):
-        deferred, _ = plan_authoring_request_v1(request, boomi_client=MagicMock(), profile=_PROFILE)
-    assert all(d.code != GOVERNANCE_WATERMARK_INCONSISTENT for d in deferred.errors)
+        unreadable, _ = plan_authoring_request_v1(request, boomi_client=MagicMock(), profile=_PROFILE)
+    stuck = [d for d in unreadable.errors if d.code == GOVERNANCE_WATERMARK_INCONSISTENT]
+    assert stuck and stuck[0].path.endswith("/watermark/source_profile_ref"), [
+        d.path for d in unreadable.errors
+    ]
+
+
+# ---------------------------------------------------------------------------
+# architect evaluation 2 — the candidate config is never the authority
+# ---------------------------------------------------------------------------
+
+
+def _name_reused_target():
+    """A target profile with no id and no flag, reused by NAME under the default policy."""
+    comps = _components()  # its target profile needs `Root/must`
+    target = next(c for c in comps if c["key"] == _TARGET_KEY)
+    target["name"] = "Existing Target"
+    target.pop("component_id", None)
+    return comps
+
+
+def test_a_name_reused_profile_whose_artifact_cannot_be_read_is_unavailable():
+    """A failed discovery must not hand the candidate config back as the answer.
+
+    The key is recorded with no index, which the resolver reads as "reused, and
+    the evidence is unavailable" — the same answer the map validator already
+    gives a `reference_only` profile.
+    """
+    from boomi_mcp.categories import integration_builder
+
+    comps = _name_reused_target()
+    with _account_holding("Existing Target"), patch.object(
+        integration_builder, "_discover_profile_index", lambda client, uuid: None
+    ):
+        result, _ = plan_authoring_request_v1(
+            _request(comps), boomi_client=MagicMock(), profile=_PROFILE
+        )
+    codes = {c for d in result.errors for c in d.cause_codes}
+    # the same served shape a `reference_only` unavailability produces: the map
+    # step is unexecutable, and no gate invented an answer from the candidate
+    assert "error_generated_profile_validation" in codes, [d.cause_codes for d in result.errors]
+    assert TRANSFORM_REVIEW_REQUIRED_TARGET_UNMAPPED not in codes
+    # and the underlying refusal really is unavailability, from the shared validator
+    from boomi_mcp.categories.components.builders.transform_map_validation import (
+        validate_transform_map,
+    )
+
+    by_key = {c["key"]: IntegrationComponentSpec(**c) for c in comps}
+    effective = dict(by_key[_MAP_KEY].config, component_name="Map")
+    err = validate_transform_map(
+        effective, by_key[_MAP_KEY].depends_on, by_key, None,
+        {_TARGET_KEY: None},
+    )
+    assert err is not None and err.error_code == MAP_PROFILE_INDEX_UNAVAILABLE
+
+
+def test_a_name_reused_watermark_source_is_decided_by_the_account_both_ways():
+    """The candidate index must not decide for a profile the request will not write."""
+    from boomi_mcp.categories import integration_builder
+
+    def _plan_with(account_fields, candidate_fields):
+        profile = {
+            "key": "src_prof", "type": "profile.db", "action": "create",
+            "name": "Existing Source",
+            "config": {"profile_type": "database.read",
+                       "output_fields": [{"name": f, "data_type": "character"} for f in candidate_fields]},
+        }
+        request = _watermark_over("$ref:src_prof", [profile])
+        with _account_holding("Existing Source"), patch.object(
+            integration_builder, "_discover_profile_index",
+            lambda client, uuid: {"profile_component_type": "profile.db",
+                                  "field_index_by_path": _index(account_fields)},
+        ):
+            return plan_authoring_request_v1(request, boomi_client=MagicMock(), profile=_PROFILE)[0]
+
+    # the candidate says yes and the account says no: the account decides
+    lying = _plan_with(account_fields=("id",), candidate_fields=("updated_at", "id"))
+    assert [d for d in lying.errors if d.code == GOVERNANCE_WATERMARK_INCONSISTENT]
+    # the candidate says no and the account says yes: the account decides
+    honest = _plan_with(account_fields=("updated_at", "id"), candidate_fields=("id",))
+    assert all(d.code != GOVERNANCE_WATERMARK_INCONSISTENT for d in honest.errors)
+
+
+def test_the_recipe_routes_exempt_a_reused_map_like_the_direct_route():
+    """One request, one answer — through direct authoring and through run_recipes."""
+    from boomi_mcp.recipes import MaterializationCatalog, RecipeError, run_recipes
+    from test_issue_157_required_target_coverage import _coverage_registry, _recipe_request
+
+    comps = copy.deepcopy(_components())  # target profile needs `Root/must`
+    entry = next(c for c in comps if c["key"] == _MAP_KEY)
+    entry["config"]["reference_only"] = True
+    entry["component_id"] = "map-uuid-1"
+
+    with patch(_PAGINATE, lambda *a, **k: []):
+        direct, _ = plan_authoring_request_v1(
+            _request(comps), boomi_client=MagicMock(), profile=_PROFILE
+        )
+    assert not [d for d in direct.errors if TRANSFORM_REVIEW_REQUIRED_TARGET_UNMAPPED in d.cause_codes]
+
+    registry, catalog, _ = _coverage_registry(comps)
+    run_recipes(_recipe_request(), catalog=catalog, registry=registry)  # must not raise
+
+    # the adversarial half: without the binding the same map IS judged, both ways
+    entry.pop("component_id")
+    entry["config"].pop("reference_only")
+    with patch(_PAGINATE, lambda *a, **k: []):
+        judged, _ = plan_authoring_request_v1(
+            _request(comps), boomi_client=MagicMock(), profile=_PROFILE
+        )
+    assert [d for d in judged.errors if TRANSFORM_REVIEW_REQUIRED_TARGET_UNMAPPED in d.cause_codes]
+    registry, catalog, _ = _coverage_registry(comps)
+    with pytest.raises(RecipeError):
+        run_recipes(_recipe_request(), catalog=catalog, registry=registry)
+
+
+def test_the_projection_serves_no_content_for_a_map_it_will_not_write():
+    """A reused map's candidate destinations are discarded material, not a flow."""
+    from boomi_mcp.authoring.derived_flows import derive_transform_flows
+
+    components = _flow_components(reference_only=False)
+    (described,) = derive_transform_flows(
+        [_flow_unit()], components, connector_metadata={"dbc": ("database", None)}
+    )
+    assert described.operations and described.target_profile_generation is not None
+
+    (opaque,) = derive_transform_flows(
+        [_flow_unit()], components, connector_metadata={"dbc": ("database", None)},
+        reused_keys={"map"},
+    )
+    assert opaque.operations == () and opaque.direct_field_mappings == ()
+    assert opaque.source_profile_generation is None
+    assert opaque.target_profile_generation is None
+    assert "Root/candidate_only" not in repr(opaque.model_dump(mode="json"))
+
+
+# ---------------------------------------------------------------------------
+# architect evaluation 2 — what the accounting oracle actually checks
+# ---------------------------------------------------------------------------
+
+
+def test_a_wrong_profile_name_is_caught_even_though_the_digest_ignores_it():
+    """R3 reconciles two PRODUCERS; it is not a licence to accept any name.
+
+    Each replay compares a case against its own baseline, so the name is
+    checked beside the digest instead of being dropped from both.
+    """
+    from _issue_157_flows_accounting import _profile_name_problems
+    from boomi_mcp.authoring.derived_flows import normalize_flow_row
+
+    frozen = {"ordinal": 3, "payload": {
+        "key": "transform",
+        "source_profile_generation": {"component_name": "Real Source", "mappable_paths": ["a"]},
+    }}
+    same = {"key": "transform", "source_profile_generation": {"component_name": "Real Source", "mappable_paths": ["a"]}}
+    wrong = {"key": "transform", "source_profile_generation": {"component_name": "UNRELATED WRONG PROFILE NAME", "mappable_paths": ["a"]}}
+
+    assert _profile_name_problems([frozen], [same]) == []
+    problems = _profile_name_problems([frozen], [wrong])
+    assert problems and "UNRELATED WRONG PROFILE NAME" in problems[0]
+    # the digest genuinely does not see it, which is why the check has to exist
+    assert normalize_flow_row(same) == normalize_flow_row(wrong)
+    # and a side that carries no name on one half is still reconciled, not failed
+    assert _profile_name_problems([frozen], [{"key": "t", "source_profile_generation": {"mappable_paths": ["a"]}}]) == []
+
+
+@pytest.mark.parametrize(
+    "record,expected",
+    [
+        ({"classification": "RETIRE", "field_path": "a/b"}, None),
+        ({"classification": "RETAIN", "field_path": "a/b"}, "retires nothing"),
+        ({"classification": "SPLIT", "field_path": "a/b"}, "retires nothing"),
+        ({"classification": "RETIRE", "field_path": "somewhere/else"}, "is not this row's"),
+        (None, "unknown retirement record"),
+    ],
+)
+def test_a_retired_row_must_cite_a_record_that_retires_this_field(record, expected):
+    """The status was believed on the strength of the id existing."""
+    from _issue_157_flows_accounting import _retirement_problem
+
+    retirements = {"RET-157-99": record} if record is not None else {}
+    problem = _retirement_problem("row 1", "RET-157-99", retirements, field_path="a/b")
+    if expected is None:
+        assert problem is None
+    else:
+        assert problem is not None and expected in problem
+
+
+def test_every_retirement_record_carries_a_measured_applicability_disposition():
+    """The fingerprint axis is disposed of by MEASUREMENT, not by omission.
+
+    A materialization or execution fingerprint exists only for a canonical
+    process root, and these historical specs author none — recorded from the
+    replay so the day a producer starts authoring one, the omission stops being
+    non-applicability and the checker says so.
+    """
+    import copy as _copy
+
+    from _issue_157_retirements import applicability_problems, load_records
+
+    records = load_records()
+    assert records
+    for rid, record in records.items():
+        applicability = record["observations"].get("fingerprint_applicability")
+        assert applicability is not None, rid
+        assert applicability["axis"] == "materialization/execution fingerprint", rid
+        units = applicability["canonical_process_units"]
+        assert units == {"base": 0, "varied": 0}, (rid, units)
+        # and the CHECKER is what holds it: a record without the disposition, and
+        # a producer that starts authoring a canonical root, are both reported
+        report = {"fingerprint_applicability": applicability}
+        assert applicability_problems(rid, record, report) == []
+        stripped = _copy.deepcopy(record)
+        stripped["observations"].pop("fingerprint_applicability")
+        assert applicability_problems(rid, stripped, report), rid
+        moved = _copy.deepcopy(record)
+        moved["observations"]["fingerprint_applicability"]["canonical_process_units"]["base"] = 1
+        assert applicability_problems(rid, moved, {"fingerprint_applicability": moved["observations"]["fingerprint_applicability"]}), rid
+
+
+def test_the_offline_reuse_reader_touches_no_account():
+    """Archetype composition and the recipe engine both contract never to.
+
+    The reuse exemption they gained reads DECLARED bindings only, through the
+    same precedence rule the planner uses rather than a second copy of it.
+    """
+    from boomi_mcp.categories import integration_builder
+    from boomi_mcp.categories.integration_builder import reused_keys_for_components
+    from boomi_mcp.models.integration_models import IntegrationComponentSpec
+
+    bound = IntegrationComponentSpec(
+        key="m", type="transform.map", action="create", name="Bound",
+        component_id="existing-1", config={"reference_only": True},
+    )
+    named = IntegrationComponentSpec(
+        key="n", type="transform.map", action="create", name="ByName",
+        config={"reference_only": True},
+    )
+    with patch.object(integration_builder, "paginate_metadata") as boundary:
+        answer = reused_keys_for_components([bound, named])
+    boundary.assert_not_called()
+    # the declared binding is honoured; the name, which only the account could
+    # resolve, is NOT invented — so the map is judged rather than skipped
+    assert answer == {"m"}

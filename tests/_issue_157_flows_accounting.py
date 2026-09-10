@@ -640,6 +640,57 @@ class DischargeReport:
         return not self.problems
 
 
+def _retirement_problem(row_label, record_id, retirements, field_path=None):
+    """Is this row's cited retirement record one that RETIRES anything, and this?
+
+    The status used to be believed on the strength of the id existing. A frozen
+    row could therefore cite a record classified RETAIN or SPLIT — neither of
+    which retires the row — or a record about an entirely unrelated field, and
+    the accounting reported it retired (architect evaluation 2, finding 4).
+    """
+    record = retirements.get(record_id)
+    if record is None:
+        return "{0} names an unknown retirement record".format(row_label)
+    classification = (record or {}).get("classification")
+    if classification != "RETIRE":
+        return "{0} cites {1}, classified {2}, which retires nothing".format(
+            row_label, record_id, classification
+        )
+    if field_path is not None and record.get("field_path") != field_path:
+        return "{0} cites {1}, whose measured field {2!r} is not this row's {3!r}".format(
+            row_label, record_id, record.get("field_path"), field_path
+        )
+    return None
+
+
+def _profile_name_problems(expected, derived):
+    """Names must AGREE where both sides carry one.
+
+    R3 drops `*_profile_generation.component_name` from the comparison because
+    two legacy producers spell it differently — one passes None, the other a
+    derived default. That reconciliation is between PRODUCERS; each replay here
+    compares a case against its own baseline, where a wrong name is a wrong name.
+    Dropping it unconditionally let an unrelated profile name be accepted.
+    """
+    problems = []
+    for index, (frozen, actual) in enumerate(zip(expected, derived)):
+        for side in ("source_profile_generation", "target_profile_generation"):
+            a = (frozen.get("payload") or {}).get(side)
+            b = actual.get(side)
+            if not (isinstance(a, dict) and isinstance(b, dict)):
+                continue
+            want, got = a.get("component_name"), b.get("component_name")
+            if want is None or got is None:
+                continue
+            if want != got:
+                problems.append(
+                    "row {0} {1} names {2!r}; the derived projection names {3!r}".format(
+                        frozen.get("ordinal", index), side, want, got
+                    )
+                )
+    return problems
+
+
 def discharge_case(case: Case, derived: Sequence[Mapping[str, Any]], retirements: Mapping[str, Any]) -> DischargeReport:
     """Two-sided, ordered accounting of one case's flows sequence."""
     report = DischargeReport()
@@ -657,8 +708,11 @@ def discharge_case(case: Case, derived: Sequence[Mapping[str, Any]], retirements
             expected.append(row)
         elif status.startswith(RETIRED_PREFIX):
             report.retired += 1
-            if status[len(RETIRED_PREFIX):] not in retirements:
-                report.problems.append("row {0} names an unknown retirement record".format(row["ordinal"]))
+            problem = _retirement_problem(
+                "row {0}".format(row["ordinal"]), status[len(RETIRED_PREFIX):], retirements
+            )
+            if problem:
+                report.problems.append(problem)
         elif status == PENDING:
             report.pending += 1
         else:
@@ -675,6 +729,9 @@ def discharge_case(case: Case, derived: Sequence[Mapping[str, Any]], retirements
             )
         if _digest(row["payload"]) != row["payload_sha256"]:
             report.problems.append("frozen row {0} payload does not match its own digest".format(row["ordinal"]))
+
+    # side 1b: the names R3 removes from the DIGEST are compared here instead
+    report.problems.extend(_profile_name_problems(expected, derived))
 
     # side 2: the derived sequence EQUALS the discharged sequence, in order
     expected_digests = [row["payload_sha256"] for row in expected]
@@ -717,8 +774,11 @@ def discharge_endpoints(case: Case, derived: Sequence[Mapping[str, Any]], retire
             expected.append(row["payload_sha256"])
         elif status.startswith(RETIRED_PREFIX):
             report.retired += 1
-            if status[len(RETIRED_PREFIX):] not in retirements:
-                report.problems.append("endpoint row {0} names an unknown retirement record".format(row["ordinal"]))
+            problem = _retirement_problem(
+                "endpoint row {0}".format(row["ordinal"]), status[len(RETIRED_PREFIX):], retirements
+            )
+            if problem:
+                report.problems.append(problem)
         elif status == PENDING:
             report.pending += 1
         else:

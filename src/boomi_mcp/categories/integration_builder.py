@@ -5554,6 +5554,13 @@ def _resolve_selected_profile_indexes(
     question where the caller does not.
 
     Makes ZERO live calls when the spec reuses no profile.
+
+    EVERY reused profile key appears in the result. Its value is the selected
+    artifact's field index, or ``None`` when the artifact could not be read —
+    which is not the same as absence: an absent key means "not reused, index the
+    candidate config", and a present ``None`` means "reused, and the evidence is
+    unavailable". Collapsing the two let a name-collision reuse be validated
+    against the candidate fields whenever discovery happened to fail.
     """
     profile_keys = {
         comp.key
@@ -5595,12 +5602,19 @@ def _resolve_selected_profile_indexes(
         # is one function is the defect class this slice keeps closing.
         if comp.key not in reused:
             continue
+        # EVERY REUSED KEY IS PRESENT, discovered or not. The map resolver reads
+        # "key present" as "the candidate config is not the authority here", and
+        # omitting a key whose discovery failed let it fall straight back to the
+        # candidate — for a profile the request will not write. A `None` value
+        # says REUSED AND UNAVAILABLE, which is what the caller must act on.
+        # The `reference_only` flag used to carry this, and it is one spelling of
+        # reuse out of several (architect evaluation 2, finding 1).
         try:
             discovered = _discover_profile_index(boomi_client, str(component_id))
         except Exception:  # noqa: BLE001 - one unreadable profile, not a lost pass
-            continue
-        if discovered is not None and isinstance(discovered.get("field_index_by_path"), Mapping):
-            resolved[comp.key] = discovered["field_index_by_path"]
+            discovered = None
+        index = discovered.get("field_index_by_path") if isinstance(discovered, Mapping) else None
+        resolved[comp.key] = index if isinstance(index, Mapping) else None
     return resolved
 
 
@@ -5741,7 +5755,7 @@ class _PlannerBinding(NamedTuple):
     candidates: Tuple[Dict[str, Any], ...]
 
 
-def resolve_planner_binding(boomi_client, comp) -> "_PlannerBinding":
+def resolve_planner_binding(boomi_client, comp, *, declared_only=False) -> "_PlannerBinding":
     """WHICH existing component, if any, this spec entry binds to. THE resolution.
 
     One function so a pre-write check that needs the answer asks it rather than
@@ -5757,6 +5771,11 @@ def resolve_planner_binding(boomi_client, comp) -> "_PlannerBinding":
     CREATE where the request meant a reuse. Best-effort callers catch it
     themselves (``resolve_reused_keys`` does) rather than having the answer
     softened for everyone.
+
+    ``declared_only`` answers from the request alone and TOUCHES NO ACCOUNT — for
+    callers whose contract is that they never do, like archetype composition and
+    the recipe engine. It shares this function's precedence rule rather than
+    re-stating it, which is the whole reason this function exists.
     """
     config = comp.config if isinstance(comp.config, dict) else {}
     reference_only = bool(config.get("reference_only"))
@@ -5771,6 +5790,8 @@ def resolve_planner_binding(boomi_client, comp) -> "_PlannerBinding":
         effective_name = _first_nonblank_str(comp.name, config.get("component_name"))
     if effective_component_id:
         return _PlannerBinding(reference_only, effective_component_id, ())
+    if declared_only:
+        return _PlannerBinding(reference_only, None, ())
     resolve_comp = (
         comp.model_copy(update={"name": effective_name})
         if effective_name != comp.name
@@ -5828,6 +5849,32 @@ def resolve_reused_keys(boomi_client, spec, conflict_policy, keys=None, bindings
     return {key for key in reused if key in existing_ids}
 
 
+def reused_keys_for_components(components, conflict_policy="reuse"):
+    """The reuse answer for a bare component sequence, from DECLARED bindings only.
+
+    The recipe engine holds resolved components and no spec, and it had no
+    exemption at all: a map its request will REUSE was judged on the candidate
+    mappings it discards, so one request was answered differently through the
+    direct route and through `run_recipes` (architect evaluation 2, finding 1).
+    It also has a contract — shared with archetype composition — that it touches
+    no account, so only a DECLARED binding is knowable here. That is the safe
+    direction anyway: an unanswered binding is judged rather than skipped.
+    """
+    existing_ids = {}
+    for comp in components:
+        key = getattr(comp, "key", None)
+        if not (isinstance(key, str) and key):
+            continue
+        existing_ids[key] = resolve_planner_binding(
+            None, comp, declared_only=True
+        ).existing_id
+    return _keys_reused_at_apply(
+        components=list(components),
+        existing_ids=existing_ids,
+        conflict_policy=conflict_policy,
+    )
+
+
 def _will_reuse_at_apply(
     *, declared_action, existing_component_id, reference_only, conflict_policy
 ):
@@ -5858,10 +5905,14 @@ def _component_reference_only(comp) -> bool:
     return isinstance(config, dict) and bool(config.get("reference_only"))
 
 
-def _keys_reused_at_apply(*, spec, existing_ids, conflict_policy):
-    """Every component key apply will reuse, by the one predicate."""
+def _keys_reused_at_apply(*, spec=None, existing_ids, conflict_policy, components=None):
+    """Every component key apply will reuse, by the one predicate.
+
+    Takes a spec or a bare component sequence: the recipe engine composes
+    components without ever building a spec, and it needs the same answer.
+    """
     reused = set()
-    for comp in (getattr(spec, "components", None) or ()):
+    for comp in (components if components is not None else (getattr(spec, "components", None) or ())):
         key = getattr(comp, "key", None)
         if not (isinstance(key, str) and key):
             continue

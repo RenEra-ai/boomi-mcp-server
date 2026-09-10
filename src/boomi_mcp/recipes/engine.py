@@ -1733,10 +1733,19 @@ def _validate_component_maps(components: Sequence[IntegrationComponentSpec]) -> 
     from ..categories.components.builders.transform_map_validation import (
         validate_required_target_coverage,
     )
+    from ..categories.integration_builder import reused_keys_for_components
 
     by_key = {component.key: component for component in components}
+    # A REUSED MAP IS OPAQUE HERE TOO. Its in-spec mappings describe a component
+    # this request will not write, and judging them reported on a map that does
+    # not exist — the same rule the direct route follows, asked of the same
+    # predicate. Without it one request was accepted through direct authoring and
+    # refused through `run_recipes` (architect evaluation 2, finding 1).
+    reused = reused_keys_for_components(components)
     for component in components:
         if component.type != "transform.map":
+            continue
+        if component.key in reused:
             continue
         config = component.config if isinstance(component.config, dict) else {}
         if isinstance(config.get("xml"), str) and config["xml"].strip():

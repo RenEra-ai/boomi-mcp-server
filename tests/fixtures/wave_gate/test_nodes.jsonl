@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 12005, "minimum_collected": 12005, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 12018, "minimum_collected": 12018, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -12033,7 +12033,7 @@
 {"kind": "test", "id": "pytest-012032", "node_id": "tests/test_issue_157_required_target_coverage.py::test_removing_a_routes_invocation_silences_that_route_and_only_that_route[binding2-quiet2-loud2]", "state": "active"}
 {"kind": "test", "id": "pytest-012033", "node_id": "tests/test_issue_157_required_target_coverage.py::test_the_route_sentinel_sees_every_one_of_the_six_entry_points", "state": "active"}
 {"kind": "test", "id": "pytest-012034", "node_id": "tests/test_issue_157_plan_conformance.py::test_a_plan_over_a_live_discovered_reused_profile_still_validates", "state": "active"}
-{"kind": "test", "id": "pytest-012035", "node_id": "tests/test_issue_157_plan_conformance.py::test_a_reused_profile_with_no_local_body_serves_no_generation_summary", "state": "active"}
+{"kind": "test", "id": "pytest-012035", "node_id": "tests/test_issue_157_plan_conformance.py::test_a_reused_profile_with_no_local_body_serves_no_generation_summary", "state": "tombstone"}
 {"kind": "test", "id": "pytest-012036", "node_id": "tests/test_issue_157_plan_conformance.py::test_a_selected_live_index_is_projected_onto_the_served_entry_schema", "state": "active"}
 {"kind": "test", "id": "pytest-012037", "node_id": "tests/test_issue_157_plan_conformance.py::test_a_watermark_naming_no_profile_is_still_refused[$ref:conn]", "state": "active"}
 {"kind": "test", "id": "pytest-012038", "node_id": "tests/test_issue_157_plan_conformance.py::test_a_watermark_naming_no_profile_is_still_refused[$ref:not_a_component]", "state": "active"}
@@ -12053,3 +12053,17 @@
 {"kind": "test", "id": "pytest-012052", "node_id": "tests/test_issue_157_plan_conformance.py::test_the_typed_pass_discovers_each_reused_profile_once_per_request", "state": "active"}
 {"kind": "test", "id": "pytest-012053", "node_id": "tests/test_issue_157_plan_conformance.py::test_an_empty_index_from_the_selected_artifact_is_a_confirmed_absence", "state": "active"}
 {"kind": "test", "id": "pytest-012054", "node_id": "tests/test_issue_157_plan_conformance.py::test_one_unreadable_profile_does_not_disable_the_gate_for_the_others", "state": "active"}
+{"kind": "test", "id": "pytest-012055", "node_id": "tests/test_issue_157_plan_conformance.py::test_a_name_reused_profile_whose_artifact_cannot_be_read_is_unavailable", "state": "active"}
+{"kind": "test", "id": "pytest-012056", "node_id": "tests/test_issue_157_plan_conformance.py::test_a_name_reused_watermark_source_is_decided_by_the_account_both_ways", "state": "active"}
+{"kind": "test", "id": "pytest-012057", "node_id": "tests/test_issue_157_plan_conformance.py::test_a_retired_row_must_cite_a_record_that_retires_this_field[None-unknown retirement record]", "state": "active"}
+{"kind": "test", "id": "pytest-012058", "node_id": "tests/test_issue_157_plan_conformance.py::test_a_retired_row_must_cite_a_record_that_retires_this_field[record0-None]", "state": "active"}
+{"kind": "test", "id": "pytest-012059", "node_id": "tests/test_issue_157_plan_conformance.py::test_a_retired_row_must_cite_a_record_that_retires_this_field[record1-retires nothing]", "state": "active"}
+{"kind": "test", "id": "pytest-012060", "node_id": "tests/test_issue_157_plan_conformance.py::test_a_retired_row_must_cite_a_record_that_retires_this_field[record2-retires nothing]", "state": "active"}
+{"kind": "test", "id": "pytest-012061", "node_id": "tests/test_issue_157_plan_conformance.py::test_a_retired_row_must_cite_a_record_that_retires_this_field[record3-is not this row's]", "state": "active"}
+{"kind": "test", "id": "pytest-012062", "node_id": "tests/test_issue_157_plan_conformance.py::test_a_reused_profile_whose_artifact_could_not_be_read_serves_no_summary", "state": "active"}
+{"kind": "test", "id": "pytest-012063", "node_id": "tests/test_issue_157_plan_conformance.py::test_a_reused_profile_with_no_local_body_is_described_by_the_artifact_alone", "state": "active"}
+{"kind": "test", "id": "pytest-012064", "node_id": "tests/test_issue_157_plan_conformance.py::test_a_wrong_profile_name_is_caught_even_though_the_digest_ignores_it", "state": "active"}
+{"kind": "test", "id": "pytest-012065", "node_id": "tests/test_issue_157_plan_conformance.py::test_every_retirement_record_carries_a_measured_applicability_disposition", "state": "active"}
+{"kind": "test", "id": "pytest-012066", "node_id": "tests/test_issue_157_plan_conformance.py::test_the_offline_reuse_reader_touches_no_account", "state": "active"}
+{"kind": "test", "id": "pytest-012067", "node_id": "tests/test_issue_157_plan_conformance.py::test_the_projection_serves_no_content_for_a_map_it_will_not_write", "state": "active"}
+{"kind": "test", "id": "pytest-012068", "node_id": "tests/test_issue_157_plan_conformance.py::test_the_recipe_routes_exempt_a_reused_map_like_the_direct_route", "state": "active"}

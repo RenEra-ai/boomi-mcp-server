@@ -34,7 +34,7 @@ from __future__ import annotations
 
 from typing import Annotated, Any, Dict, Literal, Mapping, Optional, Tuple, Union
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
 NonEmptyString = Annotated[str, StringConstraints(min_length=1)]
 
@@ -134,15 +134,42 @@ class DbReadProfileConfigV1(_DerivedFlowModel):
 
 
 class GeneratedProfileSummaryV1(_DerivedFlowModel):
-    """The surviving generator's output (`profile_from_*`), typed to its own shape."""
+    """A profile's shape, and WHICH artifact the shape came from.
 
-    generation_mode: Literal["profile_from_db_read_fields", "profile_from_json_schema"]
+    ``evidence_source`` is the field that makes this row checkable. A summary
+    built by the surviving generator carries that generator's mode and the
+    profile config it was built from. A summary describing an artifact this
+    request will REUSE carries neither: the account supplied the field index and
+    nothing supplied a generation body, and copying the candidate config beside
+    the account's index served two contradictory descriptions of one component
+    (architect evaluation 2, finding 2).
+    """
+
+    evidence_source: Literal["generator", "selected_artifact"] = "generator"
+    generation_mode: Optional[
+        Literal["profile_from_db_read_fields", "profile_from_json_schema"]
+    ] = None
     component_type: Literal["profile.db", "profile.json"]
     profile_type: Optional[str] = None
     component_name: Optional[str] = None
-    profile_config: Union[JsonProfileConfigV1, DbReadProfileConfigV1]
+    profile_config: Optional[Union[JsonProfileConfigV1, DbReadProfileConfigV1]] = None
     field_index_by_path: Mapping[str, FieldIndexEntryV1]
     mappable_paths: Tuple[str, ...] = ()
+
+    @model_validator(mode="after")
+    def _generation_body_matches_its_source(self):
+        if self.evidence_source == "generator":
+            if self.generation_mode is None or self.profile_config is None:
+                raise ValueError(
+                    "a generator-sourced profile summary carries its generation "
+                    "mode and the profile config it was built from"
+                )
+        elif self.generation_mode is not None or self.profile_config is not None:
+            raise ValueError(
+                "a selected-artifact profile summary carries no generation body; "
+                "the account supplied the field index and nothing generated it"
+            )
+        return self
 
 
 class DirectFieldMappingV1(_DerivedFlowModel):
