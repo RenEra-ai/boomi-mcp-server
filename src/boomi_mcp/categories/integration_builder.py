@@ -3140,6 +3140,23 @@ def _resolve_dependency_tokens(value: Any, id_registry: Dict[str, str]) -> Any:
 _CLONE_SUFFIX_FORMAT = "{0}-clone"
 
 
+def _created_component_name(exec_result: Any, comp: IntegrationComponentSpec):
+    """What the create route says it named the component, else the request's own.
+
+    The route's return is the authority: it is what the platform was actually
+    asked to create, clone suffix and all. The request's name is a fallback for
+    a route that reports none, never a second opinion beside one that does.
+    """
+    if isinstance(exec_result, Mapping):
+        for candidate in (
+            exec_result.get("name"),
+            (exec_result.get("result") or {}).get("name") if isinstance(exec_result.get("result"), Mapping) else None,
+        ):
+            if isinstance(candidate, str) and candidate.strip():
+                return candidate.strip()
+    return comp.name
+
+
 def _apply_clone_suffix(comp: IntegrationComponentSpec, config: Dict[str, Any]) -> Dict[str, Any]:
     suffix = "-clone"
     cloned = dict(config)
@@ -6452,10 +6469,16 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
     # normalization — which is where the raw route builds the echo from.
     runtime_secret_err = _scan_raw_runtime_secrets(config)
     if runtime_secret_err is not None:
+        # THE WHOLE REFUSAL, not a third of it. This built a field, a hint and a
+        # path and then served only the code and the message, while the typed
+        # route serves all of them for the same refusal (live QA r14).
         return {
             "_success": False,
             "error_code": runtime_secret_err.error_code,
             "error": str(runtime_secret_err),
+            "field": runtime_secret_err.field,
+            "hint": runtime_secret_err.hint,
+            "details": runtime_secret_err.details,
         }
     pipeline_secret_err = _scan_top_level_pipeline_secrets(config)
     if pipeline_secret_err is not None:
@@ -10842,11 +10865,17 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
                 step_status = "refused"
             else:
                 step_status = "failed"
+            # THE NAME THE ROUTE REPORTS, NOT THE ONE THE REQUEST ASKED FOR.
+            # These two lines carried different answers to one question: under
+            # `conflict_policy="clone"` the request's name identifies a
+            # DIFFERENT, real account component while the nested result carries
+            # the name actually created, so the served row named something the
+            # apply never touched (live QA r14, mutation accounting).
             results[key] = {
                 "status": step_status,
                 "component_id": component_id,
                 "type": comp.type,
-                "name": comp.name,
+                "name": _created_component_name(exec_result, comp),
                 "result": exec_result,
             }
 

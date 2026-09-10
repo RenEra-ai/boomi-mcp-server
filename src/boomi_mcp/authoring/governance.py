@@ -1066,6 +1066,33 @@ def validate_watermark_source_field(
     # field is not a declared mappable leaf — and this is the LAST pass, so
     # returning "undecided" here left the rule decided by nobody (Stage-2
     # round 9).
+    if not index and not (
+        isinstance(ref, str) and ref.startswith("$ref:")
+    ):
+        from ..categories.components.builders.profile_generation import (
+            MAP_PROFILE_INDEX_UNAVAILABLE,
+        )
+
+        # A LITERAL ID NOBODY COULD INDEX IS AN UNAVAILABILITY, NOT A BAD FIELD.
+        # The sibling map route answers this exact shape with
+        # MAP_PROFILE_INDEX_UNAVAILABLE; serving the field diagnosis instead
+        # told a caller their field was wrong when the profile was never read
+        # (live QA r14).
+        raise _refuse(
+            GOVERNANCE_WATERMARK_INCONSISTENT,
+            message=(
+                "The watermark's source profile is an existing-profile id that "
+                "could not be indexed, so the declaration cannot be validated."
+            ),
+            path="/units/{0}/envelope/watermark/source_profile_ref".format(unit_index),
+            subject_kind="process",
+            remediation=(
+                "Index the existing profile with index_profile_component and "
+                "supply it via profile_indexes_by_component_id, or reference an "
+                "in-plan source profile ($ref:KEY)."
+            ),
+            cause_codes=(MAP_PROFILE_INDEX_UNAVAILABLE,),
+        )
     entry = (index or {}).get(declaration.field)
     if entry is None or not entry.get("mappable", True):
         raise _refuse(

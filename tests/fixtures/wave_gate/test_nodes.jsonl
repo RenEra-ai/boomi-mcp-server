@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 12039, "minimum_collected": 12039, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 12045, "minimum_collected": 12045, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -12089,3 +12089,9 @@
 {"kind": "test", "id": "pytest-012088", "node_id": "tests/test_issue_157_plan_conformance.py::test_the_raw_route_scans_its_runtime_block_for_secrets[source_description]", "state": "active"}
 {"kind": "test", "id": "pytest-012089", "node_id": "tests/test_issue_157_plan_conformance.py::test_the_recipe_route_defers_a_declared_reuse_it_cannot_resolve", "state": "active"}
 {"kind": "test", "id": "pytest-012090", "node_id": "tests/test_issue_157_plan_conformance.py::test_the_retirement_refusal_claims_only_what_was_measured", "state": "active"}
+{"kind": "test", "id": "pytest-012091", "node_id": "tests/test_issue_157_plan_conformance.py::test_a_clone_plan_serves_the_name_apply_will_create_through_the_public_route", "state": "active"}
+{"kind": "test", "id": "pytest-012092", "node_id": "tests/test_issue_157_plan_conformance.py::test_a_reference_only_map_update_is_judged_by_the_recipe_route", "state": "active"}
+{"kind": "test", "id": "pytest-012093", "node_id": "tests/test_issue_157_plan_conformance.py::test_an_unindexable_literal_watermark_says_so_rather_than_blaming_the_field", "state": "active"}
+{"kind": "test", "id": "pytest-012094", "node_id": "tests/test_issue_157_plan_conformance.py::test_the_apply_row_reports_the_name_the_create_route_returned", "state": "active"}
+{"kind": "test", "id": "pytest-012095", "node_id": "tests/test_issue_157_plan_conformance.py::test_the_name_oracle_accepts_the_name_the_clone_authority_produces", "state": "active"}
+{"kind": "test", "id": "pytest-012096", "node_id": "tests/test_issue_157_plan_conformance.py::test_the_raw_secret_refusal_serves_everything_it_builds", "state": "active"}

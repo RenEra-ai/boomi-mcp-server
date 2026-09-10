@@ -716,6 +716,20 @@ def _retirement_problem(row_label, record_id, retirements, field_path=None, prod
     return None
 
 
+def _cloned_name(component, authored):
+    """The name a clone will carry, from the apply-side authority itself."""
+    from boomi_mcp.categories.integration_builder import _apply_clone_suffix
+    from boomi_mcp.models.integration_models import IntegrationComponentSpec
+
+    try:
+        spec = IntegrationComponentSpec(**component)
+    except Exception:  # noqa: BLE001 - a fixture the model refuses clones nothing
+        return authored
+    cloned = _apply_clone_suffix(spec, dict(spec.config or {}))
+    name = cloned.get("component_name") or cloned.get("name")
+    return name.strip() if isinstance(name, str) and name.strip() else authored
+
+
 def _profile_name_problems(case, served_rows):
     """Every served profile name must be one the case's own request authors.
 
@@ -728,13 +742,23 @@ def _profile_name_problems(case, served_rows):
     real replay, which is what the earlier version could not do — it compared a
     field both sides had already dropped (architect evaluation 3, e3-05).
     """
+    # THE SAME NAMING AUTHORITY THE PREVIEW USES. The served name is the name
+    # apply will give the component, which under `conflict_policy="clone"` is
+    # the authored one plus a suffix — so an oracle that accepts only authored
+    # names would call the correct served name wrong the moment a case clones
+    # (live QA r14). Asked of `_apply_clone_suffix`, not modelled here.
+    intent = (case.input_canonical or {}).get("intent") or {}
+    conflict_policy = intent.get("conflict_policy") or "reuse"
     authored = set()
-    for component in ((case.input_canonical or {}).get("intent") or {}).get("components") or ():
+    for component in intent.get("components") or ():
         if not isinstance(component, dict):
             continue
-        for candidate in (component.get("name"), (component.get("config") or {}).get("component_name")):
+        names = [component.get("name"), (component.get("config") or {}).get("component_name")]
+        for candidate in names:
             if isinstance(candidate, str) and candidate.strip():
                 authored.add(candidate.strip())
+                if conflict_policy == "clone":
+                    authored.add(_cloned_name(component, candidate.strip()))
     problems = []
     for index, row in enumerate(served_rows):
         for side in ("source_profile_generation", "target_profile_generation"):

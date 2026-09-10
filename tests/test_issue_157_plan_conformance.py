@@ -1918,3 +1918,204 @@ def test_the_retirement_refusal_claims_only_what_was_measured():
         assert "no ordered create trace" in text or "ordered create trace" in text, text
     # and the boundary is stated where a caller can read it
     assert any("hashed whole" in text for text in served)
+
+
+# ---------------------------------------------------------------------------
+# live QA r14 + Stage-2 round 13 — the last corrections
+# ---------------------------------------------------------------------------
+
+
+def test_a_clone_plan_serves_the_name_apply_will_create_through_the_public_route():
+    """Wired, not merely built. The earlier witness never ran a plan.
+
+    The helper answered correctly in isolation while neither preview call site
+    passed its answer, so a `clone` plan served the authored name and apply then
+    created a differently-named component.
+    """
+    from boomi_mcp.categories import integration_builder
+
+    comps = _components(missing_required=False)
+    target = next(c for c in comps if c["key"] == _TARGET_KEY)
+    target["name"] = "Existing Target"
+    request = _request(comps)
+    request = request.model_copy(
+        update={"intent": request.intent.model_copy(update={"conflict_policy": "clone"})}
+    )
+    with _account_holding("Existing Target"), patch.object(
+        integration_builder, "_discover_profile_index", lambda client, uuid: None
+    ):
+        result, _ = plan_authoring_request_v1(request, boomi_client=MagicMock(), profile=_PROFILE)
+    names = [
+        row.target_profile_generation.component_name
+        for row in result.integration_spec_preview.flows
+        if row.target_profile_generation is not None
+    ]
+    assert names and all(n.endswith("-clone") for n in names), names
+    # the adversarial half: a policy that clones nothing serves the authored
+    # name. `fail` is used rather than `reuse`, because a reuse would serve the
+    # ACCOUNT's artifact and describe a different thing entirely.
+    failing = request.model_copy(
+        update={"intent": request.intent.model_copy(update={"conflict_policy": "fail"})}
+    )
+    with _account_holding("Existing Target"):
+        plain, _ = plan_authoring_request_v1(failing, boomi_client=MagicMock(), profile=_PROFILE)
+    reused_names = [
+        row.target_profile_generation.component_name
+        for row in plain.integration_spec_preview.flows
+        if row.target_profile_generation is not None
+    ]
+    assert reused_names and not any(n.endswith("-clone") for n in reused_names), reused_names
+    # the served clone name is the APPLY authority's, base and suffix: it prefers
+    # the config's `component_name` where the generator prefers the top-level
+    # `name`, and the served row follows apply because apply is what names the
+    # component. Asserted against that authority rather than against a string
+    # this test composed.
+    from boomi_mcp.categories.integration_builder import resolve_final_component_names
+    from boomi_mcp.models.integration_models import IntegrationSpecV1
+
+    spec = IntegrationSpecV1(name="x", components=[
+        IntegrationComponentSpec(**c) for c in comps
+    ])
+    with _account_holding("Existing Target"):
+        authority = resolve_final_component_names(MagicMock(), spec, "clone")
+    assert names == [authority[_TARGET_KEY]], (names, authority)
+
+
+def test_the_apply_row_reports_the_name_the_create_route_returned():
+    """Two answers to one question sat on adjacent lines of the same dict.
+
+    Under `clone` the request's name identifies a DIFFERENT, real account
+    component, while the nested result carries the name actually created.
+    """
+    from boomi_mcp.categories.integration_builder import _created_component_name
+    from boomi_mcp.models.integration_models import IntegrationComponentSpec
+
+    comp = IntegrationComponentSpec(key="p", type="profile.json", action="create", name="Authored")
+    assert _created_component_name({"name": "Authored-clone"}, comp) == "Authored-clone"
+    assert _created_component_name({"result": {"name": "Authored-clone"}}, comp) == "Authored-clone"
+    # a route that reports no name falls back to the request's, which is the
+    # only other thing anyone knows — never a second opinion beside one that does
+    assert _created_component_name({}, comp) == "Authored"
+    assert _created_component_name(None, comp) == "Authored"
+
+    # and the SERVED ROW carries it, which is where the two answers sat. Driven
+    # through the RAW apply over a components-only spec, so the row this asserts
+    # on is the one the mutation loop actually builds.
+    from boomi_mcp.categories import integration_builder
+    from boomi_mcp.categories.integration_builder import build_integration_action
+
+    def _named(*args, **kwargs):
+        return {
+            "_success": True,
+            "component_id": "made-1",
+            "name": "Authored-clone",
+            "message": "Created component 'Authored-clone'",
+        }
+
+    spec = {
+        "name": "x",
+        "components": [
+            {
+                "key": "p",
+                "type": "profile.json",
+                "action": "create",
+                "name": "Authored",
+                "config": {
+                    "profile_type": "json.generated",
+                    "format": "json",
+                    "root": copy.deepcopy(_TGT_ROOT),
+                },
+            }
+        ],
+    }
+    with patch(_PAGINATE, lambda *a, **k: []), patch.object(
+        integration_builder, "_execute_component", _named
+    ):
+        applied = build_integration_action(
+            MagicMock(), _PROFILE, "apply", {"integration_spec": spec, "dry_run": False}
+        )
+    row = (applied.get("results") or {}).get("p")
+    assert isinstance(row, dict), applied
+    assert row.get("name") == "Authored-clone", row
+    assert (row.get("result") or {}).get("name") == "Authored-clone"
+
+
+def test_a_reference_only_map_update_is_judged_by_the_recipe_route():
+    """`reference_only` beside `action="update"` is a WRITE, on this route too."""
+    from boomi_mcp.recipes import RecipeError, run_recipes
+    from test_issue_157_required_target_coverage import _coverage_registry, _recipe_request
+
+    comps = copy.deepcopy(_components())  # target profile needs `Root/must`
+    entry = next(c for c in comps if c["key"] == _MAP_KEY)
+    entry["config"]["reference_only"] = True
+    entry["name"] = "Reused Map"
+
+    entry["action"] = "create"
+    registry, catalog, _ = _coverage_registry(comps)
+    run_recipes(_recipe_request(), catalog=catalog, registry=registry)  # deferred
+
+    entry["action"] = "update"
+    registry, catalog, _ = _coverage_registry(comps)
+    with pytest.raises(RecipeError):
+        run_recipes(_recipe_request(), catalog=catalog, registry=registry)
+
+
+def test_an_unindexable_literal_watermark_says_so_rather_than_blaming_the_field():
+    """The sibling map route answers this shape with an unavailability."""
+    from boomi_mcp.categories.components.builders.profile_generation import (
+        MAP_PROFILE_INDEX_UNAVAILABLE,
+    )
+
+    literal = _watermark_over("11111111-1111-1111-1111-111111111111", [])
+    with patch(_PAGINATE, lambda *a, **k: []):
+        result, _ = plan_authoring_request_v1(literal, boomi_client=MagicMock(), profile=_PROFILE)
+    hits = [d for d in result.errors if d.code == GOVERNANCE_WATERMARK_INCONSISTENT]
+    assert hits, [d.code for d in result.errors]
+    assert hits[0].path.endswith("/watermark/source_profile_ref"), hits[0].path
+    assert MAP_PROFILE_INDEX_UNAVAILABLE in hits[0].cause_codes, hits[0].cause_codes
+
+
+def test_the_raw_secret_refusal_serves_everything_it_builds():
+    """It constructed a field, a hint and a path and served none of them."""
+    from _m12_11_support import APPLIABLE_CONN
+    from boomi_mcp.categories.integration_builder import build_integration_action
+
+    with patch(_PAGINATE, lambda *a, **k: []):
+        result = build_integration_action(MagicMock(), _PROFILE, "plan", {
+            "integration_spec": {"name": "x", "components": [APPLIABLE_CONN],
+                                 "runtime": {"password_zq9": "canary"}}})
+    assert result.get("field") == "runtime"
+    assert result.get("hint")
+    assert (result.get("details") or {}).get("path")
+    assert "canary" not in repr(result) and "password_zq9" not in repr(result)
+
+
+def test_the_name_oracle_accepts_the_name_the_clone_authority_produces():
+    """E and H must not encode contradictory rules for one served field.
+
+    Driven through `_profile_name_problems` itself: the oracle has to accept the
+    name the preview will actually serve for a cloning case, or the two rules
+    contradict each other the moment a corpus case sets `conflict_policy`.
+    """
+    from types import SimpleNamespace
+
+    from _issue_157_flows_accounting import _cloned_name, _profile_name_problems
+
+    component = {"key": "p", "type": "profile.json", "action": "create", "name": "DEMO Source Profile"}
+    cloned = _cloned_name(component, "DEMO Source Profile")
+    assert cloned == "DEMO Source Profile-clone"
+    assert _cloned_name({"nonsense": True}, "DEMO Source Profile") == "DEMO Source Profile"
+
+    case = SimpleNamespace(input_canonical={
+        "intent": {"conflict_policy": "clone", "components": [component]}
+    })
+    served = [{"source_profile_generation": {"component_name": cloned}}]
+    assert _profile_name_problems(case, served) == []
+    # and a name neither authored nor cloned is still caught
+    wrong = [{"source_profile_generation": {"component_name": "UNRELATED WRONG PROFILE NAME"}}]
+    assert _profile_name_problems(case, wrong)
+    # under a policy that clones nothing, the clone name is NOT accepted
+    plain = SimpleNamespace(input_canonical={
+        "intent": {"conflict_policy": "reuse", "components": [component]}
+    })
+    assert _profile_name_problems(plain, served)

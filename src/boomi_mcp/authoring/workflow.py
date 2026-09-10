@@ -2494,6 +2494,7 @@ def plan_authoring_request_v1(
             normalized,
             selected_artifacts=_artifacts_for_preview,
             reused_keys=_reused_for_preview,
+            final_names=_names_for_preview,
         )
 
     # The LEGACY component-plan lint, reused. It supplies the redacted spec echo
@@ -2571,6 +2572,7 @@ def plan_authoring_request_v1(
                     _withhold_process_roots(IntegrationSpecV1(**legacy["integration_spec"])),
                     selected_artifacts=_artifacts_for_preview,
                     reused_keys=_reused_for_preview,
+                    final_names=_names_for_preview,
                 )
         # The planner's own warning strings. The advisory arm this used to
         # accumulate is gone with the `process_ir` exemption above: an
