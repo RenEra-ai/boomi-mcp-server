@@ -80,10 +80,23 @@ def resolve_map_profile_index(
     if selected_indexes is not None and ref_key in selected_indexes:
         selected = selected_indexes[ref_key]
         return selected if isinstance(selected, Mapping) else None
-    if isinstance(raw_config, Mapping) and raw_config.get("reference_only") is True:
+    if (
+        isinstance(raw_config, Mapping)
+        and raw_config.get("reference_only") is True
+        and str(getattr(target_comp, "action", "") or "") == "create"
+    ):
         # A reused profile's in-spec config establishes nothing about the
         # component apply will actually bind; without the selected artifact's
         # own index the reference is unavailable (issue #157).
+        #
+        # SCOPED TO WHAT THE REUSE PREDICATE ACTUALLY SAYS. `_will_reuse_at_apply`
+        # answers False for any declared action but `create`, so a
+        # `reference_only` entry declaring `action="update"` is WRITTEN by this
+        # request and its own config is exactly what it will write. Reading the
+        # flag alone refused a valid profile update whose `output_fields` really
+        # do declare the field (Stage-2 round 10). The agreement between this
+        # branch and that predicate is pinned by a test rather than restated
+        # here, because restating it is the defect.
         return None
     builder_cls = None
     if target_comp.type == "profile.json":

@@ -1602,3 +1602,64 @@ def test_the_connector_snapshot_is_told_the_reuse_set_not_the_live_readings():
     # the live reading is identical in both runs; only the POLICY differs, and
     # the snapshot's answer has to move with it
     assert clone_answer == frozenset(), clone_answer
+
+
+# ---------------------------------------------------------------------------
+# Stage-2 round 10 — the flag is not the reuse decision, anywhere
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("action", ["create", "update"])
+def test_the_index_resolver_agrees_with_the_reuse_predicate_on_every_action(action):
+    """A `reference_only` UPDATE is WRITTEN, so its own config is the authority.
+
+    Pinned in both directions against `_will_reuse_at_apply` rather than
+    restated: the resolver's short-circuit and the predicate must give the same
+    answer for the same binding, and a test is what holds that, because a second
+    statement of the rule is the defect this slice keeps closing.
+    """
+    from boomi_mcp.categories.components.builders.transform_map_validation import (
+        resolve_map_profile_index,
+    )
+    from boomi_mcp.categories.integration_builder import _will_reuse_at_apply
+    from boomi_mcp.models.integration_models import IntegrationComponentSpec
+
+    profile = IntegrationComponentSpec(
+        key="src_prof", type="profile.db", action=action, name="Src",
+        component_id="prof-uuid-1",
+        config={"reference_only": True, "profile_type": "database.read",
+                "output_fields": [{"name": "updated_at", "data_type": "character"}]},
+    )
+    by_key = {"src_prof": profile}
+    index = resolve_map_profile_index("$ref:src_prof", by_key, None, None)
+    predicate_says_reused = _will_reuse_at_apply(
+        declared_action=action, existing_component_id="prof-uuid-1",
+        reference_only=True, conflict_policy="reuse",
+    )
+    # the resolver withholds the candidate index exactly when the predicate says
+    # the request will not write this component
+    assert (index is None) is predicate_says_reused, (action, index)
+    if not predicate_says_reused:
+        assert "updated_at" in index
+
+
+def test_a_watermark_over_an_updated_reference_only_profile_is_accepted():
+    """End to end: the profile the request WRITES declares the field, so it passes."""
+    profile = {"key": "src_prof", "type": "profile.db", "action": "update",
+               "name": "Src", "component_id": "prof-uuid-1",
+               "config": {"reference_only": True, "profile_type": "database.read",
+                          "output_fields": [{"name": "updated_at", "data_type": "character"}]}}
+    request = _watermark_over("$ref:src_prof", [profile])
+    with patch(_PAGINATE, lambda *a, **k: []):
+        result, _ = plan_authoring_request_v1(request, boomi_client=MagicMock(), profile=_PROFILE)
+    assert all(d.code != GOVERNANCE_WATERMARK_INCONSISTENT for d in result.errors), [
+        (d.code, d.path) for d in result.errors
+    ]
+    # and the adversarial half: a field it does NOT declare is still refused
+    missing = copy.deepcopy(profile)
+    missing["config"]["output_fields"] = [{"name": "id", "data_type": "character"}]
+    with patch(_PAGINATE, lambda *a, **k: []):
+        refused, _ = plan_authoring_request_v1(
+            _watermark_over("$ref:src_prof", [missing]), boomi_client=MagicMock(), profile=_PROFILE
+        )
+    assert [d for d in refused.errors if d.code == GOVERNANCE_WATERMARK_INCONSISTENT]

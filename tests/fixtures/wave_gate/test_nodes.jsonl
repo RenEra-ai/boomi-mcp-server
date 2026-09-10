@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 12025, "minimum_collected": 12025, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 12028, "minimum_collected": 12028, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -12074,3 +12074,6 @@
 {"kind": "test", "id": "pytest-012073", "node_id": "tests/test_issue_157_plan_conformance.py::test_an_unexecutable_step_serves_its_own_cause_code_and_remedy", "state": "active"}
 {"kind": "test", "id": "pytest-012074", "node_id": "tests/test_issue_157_plan_conformance.py::test_the_connector_snapshot_is_told_the_reuse_set_not_the_live_readings", "state": "active"}
 {"kind": "test", "id": "pytest-012075", "node_id": "tests/test_issue_157_plan_conformance.py::test_the_recipe_reuse_exemption_honours_the_callers_conflict_policy", "state": "active"}
+{"kind": "test", "id": "pytest-012076", "node_id": "tests/test_issue_157_plan_conformance.py::test_a_watermark_over_an_updated_reference_only_profile_is_accepted", "state": "active"}
+{"kind": "test", "id": "pytest-012077", "node_id": "tests/test_issue_157_plan_conformance.py::test_the_index_resolver_agrees_with_the_reuse_predicate_on_every_action[create]", "state": "active"}
+{"kind": "test", "id": "pytest-012078", "node_id": "tests/test_issue_157_plan_conformance.py::test_the_index_resolver_agrees_with_the_reuse_predicate_on_every_action[update]", "state": "active"}
