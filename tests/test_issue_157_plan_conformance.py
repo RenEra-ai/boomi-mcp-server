@@ -1049,3 +1049,62 @@ def test_the_typed_pass_discovers_each_reused_profile_once_per_request():
     legacy_lint_owner = 1
     assert len(asked) == typed_owners + legacy_lint_owner, asked
     assert set(asked) == {"prof-uuid-1"}
+
+
+# ---------------------------------------------------------------------------
+# Stage-2 round 7 — one failure is one component, one empty index is an answer
+# ---------------------------------------------------------------------------
+
+
+def test_one_unreadable_profile_does_not_disable_the_gate_for_the_others():
+    """A failed metadata read is one unanswered component, never a lost pass.
+
+    An unguarded resolution aborted the whole selected-artifact pass, and the
+    caller's broad handler then discarded every index it had — silently
+    disabling required-target coverage for profiles that resolved perfectly.
+    """
+    from boomi_mcp.categories import integration_builder
+
+    comps, root = _reused_target(missing_required=True)
+    source = next(c for c in comps if c["type"] == "profile.db")
+
+    def _explodes(client, comp):
+        if comp.name == source.get("name"):
+            raise RuntimeError("metadata read failed for this one component")
+        return []
+
+    with patch.object(integration_builder, "_resolve_existing_components", _explodes), \
+         patch.object(
+             integration_builder, "_discover_profile_index",
+             lambda client, uuid: {"profile_component_type": "profile.json",
+                                   "field_index_by_path": _json_index(root)},
+         ):
+        result, _ = plan_authoring_request_v1(
+            _request(comps), boomi_client=MagicMock(), profile=_PROFILE
+        )
+    hits = [d for d in result.errors if TRANSFORM_REVIEW_REQUIRED_TARGET_UNMAPPED in d.cause_codes]
+    assert hits, [d.code for d in result.errors]
+
+
+def test_an_empty_index_from_the_selected_artifact_is_a_confirmed_absence():
+    """`{}` from the account is the strongest evidence there is, not "ask later".
+
+    The same `{}` from a candidate config is a guess normalization cannot make,
+    so only the artifact's own answer decides.
+    """
+    from boomi_mcp.categories import integration_builder
+
+    request = _watermark_over("$ref:src_prof", [_reused_source_profile()])
+    with patch.object(
+        integration_builder, "_discover_profile_index",
+        lambda client, uuid: {"profile_component_type": "profile.db", "field_index_by_path": {}},
+    ):
+        decided, _ = plan_authoring_request_v1(request, boomi_client=MagicMock(), profile=_PROFILE)
+    hits = [d for d in decided.errors if d.code == GOVERNANCE_WATERMARK_INCONSISTENT]
+    assert hits and hits[0].path.endswith("/watermark/field"), [d.path for d in decided.errors]
+
+    # the adversarial half: with nothing selected, the candidate's empty config
+    # still defers rather than refusing a declaration the account may satisfy
+    with patch.object(integration_builder, "_discover_profile_index", lambda client, uuid: None):
+        deferred, _ = plan_authoring_request_v1(request, boomi_client=MagicMock(), profile=_PROFILE)
+    assert all(d.code != GOVERNANCE_WATERMARK_INCONSISTENT for d in deferred.errors)

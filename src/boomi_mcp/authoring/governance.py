@@ -946,6 +946,23 @@ def _watermark_source_profile(
 _UNRESOLVABLE_SOURCE = object()
 
 
+def _watermark_index_is_authoritative(
+    source_profile_ref: Any,
+    literal_indexes: Optional[Mapping[str, Any]] = None,
+    selected_indexes: Optional[Mapping[str, Any]] = None,
+) -> bool:
+    """Did the index this pass resolved come from the ARTIFACT rather than the config?
+
+    An index the account supplied is the answer even when it is empty; an index
+    the candidate config yielded is a guess this pass may not be able to make.
+    """
+    if not isinstance(source_profile_ref, str) or not source_profile_ref.strip():
+        return False
+    if not source_profile_ref.startswith("$ref:"):
+        return bool(literal_indexes) and source_profile_ref.strip() in literal_indexes
+    return bool(selected_indexes) and source_profile_ref[len("$ref:") :] in selected_indexes
+
+
 def _watermark_source_is_reused(
     source_profile_ref: Any,
     components_by_key: Mapping[str, IntegrationComponentSpec],
@@ -1003,9 +1020,16 @@ def validate_watermark_source_field(
         literal_indexes,
         dict(selected_indexes) if selected_indexes else None,
     )
-    # An EMPTY index is the same answer as no index: the resolver returns `{}`
-    # for a profile whose own config declares no fields.
-    if not index:
+    # AN EMPTY INDEX IS ONLY UNAVAILABLE WHEN IT CAME FROM THE CANDIDATE CONFIG.
+    # The resolver returns `{}` both for a profile whose own config declares no
+    # fields — which normalization cannot judge, because the account may say
+    # otherwise — and for a SELECTED artifact that really declares none, which
+    # is a confirmed absence and the strongest evidence there is. Reading both as
+    # "ask again later" let a watermark over an empty reused profile compile
+    # (Stage-2 round 7).
+    if not index and not _watermark_index_is_authoritative(
+        declaration.source_profile_ref, literal_indexes, selected_indexes
+    ):
         if (
             _watermark_source_profile(declaration.source_profile_ref, components_by_key)
             is _UNRESOLVABLE_SOURCE

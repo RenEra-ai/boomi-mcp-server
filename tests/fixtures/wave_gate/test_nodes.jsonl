@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 12003, "minimum_collected": 12003, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 12005, "minimum_collected": 12005, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -12051,3 +12051,5 @@
 {"kind": "test", "id": "pytest-012050", "node_id": "tests/test_issue_157_plan_conformance.py::test_the_projection_reads_its_mapping_lists_through_the_shared_reader", "state": "active"}
 {"kind": "test", "id": "pytest-012051", "node_id": "tests/test_issue_157_plan_conformance.py::test_the_same_profile_under_clone_is_written_so_its_watermark_is_decided_here", "state": "active"}
 {"kind": "test", "id": "pytest-012052", "node_id": "tests/test_issue_157_plan_conformance.py::test_the_typed_pass_discovers_each_reused_profile_once_per_request", "state": "active"}
+{"kind": "test", "id": "pytest-012053", "node_id": "tests/test_issue_157_plan_conformance.py::test_an_empty_index_from_the_selected_artifact_is_a_confirmed_absence", "state": "active"}
+{"kind": "test", "id": "pytest-012054", "node_id": "tests/test_issue_157_plan_conformance.py::test_one_unreadable_profile_does_not_disable_the_gate_for_the_others", "state": "active"}

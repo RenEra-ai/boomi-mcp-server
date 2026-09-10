@@ -5555,31 +5555,36 @@ def _resolve_selected_profile_indexes(
 
     Makes ZERO live calls when the spec reuses no profile.
     """
-    reused = set(reused_keys or ())
-    # ASKED ONCE, of the one authority, when the caller did not supply the answer.
-    _resolved_reused = (
-        set()
+    profile_keys = {
+        comp.key
+        for comp in spec.components
+        if str(getattr(comp, "type", "") or "").startswith("profile.")
+    }
+    # EXCLUDED KEYS ARE SKIPPED BEFORE ANYTHING IS RESOLVED. A caller that
+    # already decided which components are reused is telling this pass what not
+    # to ask about, and asking anyway spent live reads on components whose
+    # answer was never used — and made their failures this pass's problem.
+    if reused_keys is not None:
+        profile_keys &= set(reused_keys)
+    # WHICH component an entry binds to is the planner's question, asked here
+    # rather than answered again: the config-level id/name binding is read only
+    # for a `reference_only` entry, and re-deriving that precedence rule was
+    # wrong in both directions (Stage-2 round 6). Resolved ONCE per component,
+    # isolated, and reused for both the reuse decision and the discovery.
+    bindings = resolve_planner_bindings(boomi_client, spec, profile_keys)
+    reused = (
+        set(reused_keys)
         if reused_keys is not None
         else resolve_reused_keys(
-            boomi_client,
-            spec,
-            conflict_policy or "reuse",
-            keys={
-                comp.key
-                for comp in spec.components
-                if str(getattr(comp, "type", "") or "").startswith("profile.")
-            },
+            boomi_client, spec, conflict_policy or "reuse", bindings=bindings
         )
     )
     resolved: Dict[str, Dict[str, Any]] = {}
     for comp in spec.components:
-        if not str(getattr(comp, "type", "") or "").startswith("profile."):
+        if comp.key not in profile_keys:
             continue
-        # WHICH component this entry binds to is the planner's question, and it
-        # is asked here rather than answered again: the config-level id/name
-        # binding is read only for a `reference_only` entry, and re-deriving
-        # that precedence rule was wrong in both directions (Stage-2 round 6).
-        component_id = resolve_planner_binding(boomi_client, comp).existing_id
+        binding = bindings.get(comp.key)
+        component_id = binding.existing_id if binding is not None else None
         if not component_id:
             continue
         # THE PREDICATE IS ASKED, NOT REBUILT. A first attempt reconstructed the
@@ -5588,18 +5593,12 @@ def _resolve_selected_profile_indexes(
         # dependent maps were validated against the schema being replaced rather
         # than the one being authored. Reconstructing a decision whose authority
         # is one function is the defect class this slice keeps closing.
-        if reused_keys is not None:
-            # THE CALLER SUPPLIED THE DECISION, so it is the answer. Falling
-            # back to the predicate for a component the caller EXCLUDED let a
-            # default policy contradict the planner's own decision: under
-            # `conflict_policy="clone"` a same-name profile is cloned, not
-            # reused, and re-deciding here loaded the existing schema instead of
-            # the one being created.
-            if comp.key not in reused:
-                continue
-        elif comp.key not in _resolved_reused:
+        if comp.key not in reused:
             continue
-        discovered = _discover_profile_index(boomi_client, str(component_id))
+        try:
+            discovered = _discover_profile_index(boomi_client, str(component_id))
+        except Exception:  # noqa: BLE001 - one unreadable profile, not a lost pass
+            continue
         if discovered is not None and isinstance(discovered.get("field_index_by_path"), Mapping):
             resolved[comp.key] = discovered["field_index_by_path"]
     return resolved
@@ -5782,7 +5781,30 @@ def resolve_planner_binding(boomi_client, comp) -> "_PlannerBinding":
     return _PlannerBinding(reference_only, existing_id, tuple(candidates))
 
 
-def resolve_reused_keys(boomi_client, spec, conflict_policy, keys=None):
+def resolve_planner_bindings(boomi_client, spec, keys=None):
+    """``{key: binding or None}``, resolved ONCE per component and ISOLATED.
+
+    One failed metadata read is one unanswered component, never a lost pass: an
+    unguarded resolution here aborted the whole selected-artifact resolution and
+    the caller's broad handler then discarded every index it had, silently
+    disabling the required-target coverage gate for profiles that resolved
+    perfectly well (Stage-2 round 7).
+    """
+    out = {}
+    for comp in (getattr(spec, "components", None) or ()):
+        key = getattr(comp, "key", None)
+        if not (isinstance(key, str) and key):
+            continue
+        if keys is not None and key not in keys:
+            continue
+        try:
+            out[key] = resolve_planner_binding(boomi_client, comp)
+        except Exception:  # noqa: BLE001 - an unanswered binding is not a bound one
+            out[key] = None
+    return out
+
+
+def resolve_reused_keys(boomi_client, spec, conflict_policy, keys=None, bindings=None):
     """Every key in ``keys`` that apply will REUSE rather than write.
 
     The ONE answer, composed from the two authorities that own its halves:
@@ -5791,20 +5813,15 @@ def resolve_reused_keys(boomi_client, spec, conflict_policy, keys=None):
     ``keys`` to bound the metadata reads; a key that was not resolved is absent
     from the result, so ask only about the keys you will act on.
     """
-    existing_ids = {}
-    for comp in (getattr(spec, "components", None) or ()):
-        key = getattr(comp, "key", None)
-        if not (isinstance(key, str) and key):
-            continue
-        if keys is not None and key not in keys:
-            continue
-        try:
-            existing_ids[key] = resolve_planner_binding(boomi_client, comp).existing_id
-        except Exception:  # noqa: BLE001 - a pre-write reader; an unanswered
-            # binding means "not demonstrably reused", and every consumer of this
-            # set judges a written component and stays silent about a reused one,
-            # so the unanswered case fails towards checking rather than skipping.
-            existing_ids[key] = None
+    # An unanswered binding means "not demonstrably reused", and every consumer
+    # of this set judges a written component and stays silent about a reused
+    # one, so the unanswered case fails towards checking rather than skipping.
+    if bindings is None:
+        bindings = resolve_planner_bindings(boomi_client, spec, keys)
+    existing_ids = {
+        key: (binding.existing_id if binding is not None else None)
+        for key, binding in bindings.items()
+    }
     reused = _keys_reused_at_apply(
         spec=spec, existing_ids=existing_ids, conflict_policy=conflict_policy
     )
