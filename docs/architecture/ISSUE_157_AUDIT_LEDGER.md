@@ -457,25 +457,26 @@ hash-pinned in its `SHA256SUMS`, all tracked in git.
 
 ## Final-tree validation (every roster gate current on the FINAL sha)
 
-The wave SHA is `68a82e5` — the tree the composite wave gate measured, which carries this closing
-record. It was run twice: once at `63758f2` and again at `68a82e5`, and both passed with the same
-three lines. The landing commit adds only this paragraph, which is prose the gate reads and no code
-it runs.
+The wave SHA is **`5dc469d`** — the tree the composite wave gate measured, and the tree this record
+describes. The gate ran three times over the closing sequence, at `63758f2`, at a superseded commit,
+and finally at `5dc469d`, passing identically each time. The landing commit adds only the sentence
+naming that SHA, which is prose the gate reads and no code it runs; the wave SHA and the landing SHA
+are recorded as different commits for exactly that reason, as they were in #155.
 
 | Gate | Evidence (quoted output / archived round) | SHA |
 | --- | --- | --- |
 | Stage-1 live QA (roster loop 1) | Fourteen rounds through the public MCP tool boundary against the live `renera` account. The last, r14, covered every correction of the final architect batch with a parent-SHA A/B and discharged the Critical secrets finding on a hard control: 8 secret arms across all three raw spellings, **0 of 16 canary needles** in the served envelope, 5 of those arms leaking BOTH key and value at the parent, and three clean-runtime positive controls proving every absence is a measurement. Account accounting `NET ZERO: true`, report `agents/reports/2026-09-10-issue-157-r14.md` | `c8282dd` |
 | Stage-2 repo commit review (roster loop 2) | Fourteen collected rounds, every one archived with its attestation and confirmed teardown under `docs/architecture/evidence/issue-157/commit-reviews/`. The last, round 14, returned CLEAN: "No actionable regressions were found relative to the specified base" | `8e0cf8c` |
 | §6 architect implementation review (roster loop 3) | Three evaluations, the owner cap, each attested `ok:true` against the plan's own bytes and archived under `docs/architecture/evidence/issue-157/architect-reviews/`. The third returned six findings; all are fixed, and the loop closed on the CLEAN Stage-2 review of that correction delta, exactly as `docs/architecture/COMPLETION_WORKFLOW_RULES.md` prescribes | `362414d` |
-| Composite wave gate | `scripts/wave_gate.py wave --base ba1be9f34317d720d3b012484622ab7e2742143b --require-plan-fingerprint`, exit 0, six lines: "manifests ok (12045 required nodes, 76 active goldens)", "collection ok (12045 tests)", "non-KB suite green (12026 passed, 19 skipped, cap 30)", "76 active goldens deterministic and byte-exact", "plan fingerprint checked:2 case(s)". The node manifest is a legal successor of the baseline's: 372 rows appended in COLLECTION order, tombstones only for identities that existed, and the three rows added and removed inside this range carry no row at all | `68a82e5` |
-| Full non-KB suite | 12026 passed, 19 skipped, 0 failed — the wave gate's own run, and independently before it | `68a82e5` |
+| Composite wave gate | `scripts/wave_gate.py wave --base ba1be9f34317d720d3b012484622ab7e2742143b --require-plan-fingerprint`, exit 0, six lines: "manifests ok (12045 required nodes, 76 active goldens)", "collection ok (12045 tests)", "non-KB suite green (12026 passed, 19 skipped, cap 30)", "76 active goldens deterministic and byte-exact", "plan fingerprint checked:2 case(s)". The node manifest is a legal successor of the baseline's: 372 rows appended in COLLECTION order, tombstones only for identities that existed, and the three rows added and removed inside this range carry no row at all | `5dc469d` |
+| Full non-KB suite | 12026 passed, 19 skipped, 0 failed — the wave gate's own run, and independently before it | `5dc469d` |
 
 ## Closing report — issue #157, recorded 2026-09-10
 
 **Status: CLOSED.** Every required gate is current on the final tree, there are zero unresolved
 findings of any tier, and no deferral is carried.
 
-**Last validated tree.** `68a82e5` on `codex/issue-157`, over baseline
+**Last validated tree.** `5dc469d` on `codex/issue-157`, over baseline
 `ba1be9f34317d720d3b012484622ab7e2742143b` — which is `origin/dev`, so the branch fast-forwards.
 
 **Gates run, in roster order.** Stage-1 live QA, fourteen evaluations against the live account.
