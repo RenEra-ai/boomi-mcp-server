@@ -1663,3 +1663,52 @@ def test_a_watermark_over_an_updated_reference_only_profile_is_accepted():
             _watermark_over("$ref:src_prof", [missing]), boomi_client=MagicMock(), profile=_PROFILE
         )
     assert [d for d in refused.errors if d.code == GOVERNANCE_WATERMARK_INCONSISTENT]
+
+
+def test_the_advisory_view_carries_every_attribute_the_shared_helpers_read():
+    """A view that omits a field answers a different question from the component.
+
+    The shared reuse rule reads `action`; the advisory view omitted it, so the
+    advisory route indexed the candidate config of a profile apply will reuse —
+    exactly what the rule exists to prevent.
+    """
+    from types import SimpleNamespace
+
+    from boomi_mcp.categories.transformation_review import _comp_view
+    from boomi_mcp.models.integration_models import IntegrationComponentSpec
+
+    authored = {"key": "p", "type": "profile.db", "name": "P",
+                "config": {"reference_only": True}, "depends_on": []}
+    view = _comp_view(authored)
+    real = IntegrationComponentSpec(**authored)
+    # the DEFAULT travels too: an omitted action is the model's default, not None
+    assert view.action == real.action == "create"
+    assert _comp_view(dict(authored, action="update")).action == "update"
+    # and every attribute the shared resolver reads is present on the view
+    for attribute in ("key", "type", "name", "action", "config", "depends_on"):
+        assert hasattr(view, attribute), attribute
+
+
+def test_the_advisory_route_will_not_index_a_reused_profile_from_its_candidate():
+    """The sibling of the model-based rule, on the caller the review flagged."""
+    from boomi_mcp.categories.transformation_review import review_transformation_action
+
+    comps = copy.deepcopy(_components(missing_required=False))
+    target = next(c for c in comps if c["key"] == _TARGET_KEY)
+    target["component_id"] = "prof-uuid-1"
+    target["config"] = {"reference_only": True, "component_name": "Existing Target",
+                        "profile_type": "json.generated", "root": target["config"]["root"]}
+
+    reused = review_transformation_action(
+        "validate_unmapped", {"integration_spec": {"name": "x", "components": comps}}
+    )
+    assert reused.get("_success") is False or reused.get("valid") is not True, reused
+    assert "PROFILE_INDEX_UNAVAILABLE" in str(reused), reused
+
+    # the adversarial half: the same profile as an UPDATE is written by this
+    # request, so its own config is indexed and the review answers normally
+    target["action"] = "update"
+    written = review_transformation_action(
+        "validate_unmapped", {"integration_spec": {"name": "x", "components": comps}}
+    )
+    assert "PROFILE_INDEX_UNAVAILABLE" not in str(written), written

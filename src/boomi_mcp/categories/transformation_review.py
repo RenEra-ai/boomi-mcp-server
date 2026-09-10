@@ -510,15 +510,28 @@ def _coerce_component(comp: Any) -> Optional[Dict[str, Any]]:
 
 
 def _comp_view(cd: Mapping[str, Any]) -> SimpleNamespace:
-    """Lightweight component view exposing .type/.config/.name/.depends_on for
+    """Lightweight view exposing .key/.type/.name/.action/.config/.depends_on for
     the shared transform_map_validation helpers, without constructing (and
-    validating) a pydantic IntegrationComponentSpec."""
+    validating) a pydantic IntegrationComponentSpec.
+
+    The field set is not a convenience: every attribute the shared helpers read
+    has to be here, with the model's own defaults, or this view answers a
+    different question from the one the real component would.
+    """
     cfg = cd.get("config")
     deps = cd.get("depends_on")
+    action = cd.get("action")
     return SimpleNamespace(
         key=cd.get("key"),
         type=cd.get("type"),
         name=cd.get("name"),
+        # THE DECLARED ACTION, INCLUDING ITS DEFAULT. The shared helpers read it
+        # to tell a component this request WRITES from one it will reuse, and a
+        # view that omits it answered "not create" for every component — so the
+        # advisory route indexed the candidate config of a profile apply will
+        # reuse, which is precisely what the shared rule exists to prevent
+        # (Stage-2 round 11). The default is the model's own.
+        action=action if isinstance(action, str) and action.strip() else "create",
         config=cfg if isinstance(cfg, Mapping) else {},
         # Coerce to a list — validate_transform_map does set(depends_on) and a
         # truthy non-list (e.g. a number) would raise. IntegrationComponentSpec
