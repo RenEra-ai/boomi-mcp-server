@@ -1,0 +1,30 @@
+{
+  "pipeline": {
+    "dependencies": [
+      {
+        "from_stage": "s",
+        "to_stage": "t"
+      }
+    ],
+    "stages": [
+      {
+        "config": {
+          "operation_id": "WSSOP-1",
+          "primitive": "wss_listen"
+        },
+        "key": "s",
+        "kind": "listener"
+      },
+      {
+        "config": {
+          "connection_id": "TGT-CONN",
+          "operation_id": "TGT-OP",
+          "primitive": "soap_send"
+        },
+        "key": "t",
+        "kind": "send"
+      }
+    ]
+  },
+  "process_kind": "sync_pipeline"
+}

@@ -1,0 +1,36 @@
+{
+  "artifacts": [
+    {
+      "bytes": 1562,
+      "chain": "listener_soap_send",
+      "component_name": "Sync Listener Soap Send Golden",
+      "folder_name": "Golden/Fixtures",
+      "input": "listener_soap_send.input.json",
+      "output": "sync_pipeline_listener_soap_send.xml",
+      "producers_agree": [
+        "SyncPipelineBuilder.build",
+        "ProcessFlowBuilder.build(lower_config)"
+      ],
+      "sha256": "a678f4831b3f5071b421649b8881cbd81227bc9e1a2bbc5b932796a1ddb766a7"
+    },
+    {
+      "bytes": 1810,
+      "chain": "listener_map_soap_send",
+      "component_name": "Sync Listener Map Soap Send Golden",
+      "folder_name": "Golden/Fixtures",
+      "input": "listener_map_soap_send.input.json",
+      "output": "sync_pipeline_listener_map_soap_send.xml",
+      "producers_agree": [
+        "SyncPipelineBuilder.build",
+        "ProcessFlowBuilder.build(lower_config)"
+      ],
+      "sha256": "b9c50541da707cfcdd0bec2cf68aaa700626a7709c7f8fe139e68c73b77e16c0"
+    }
+  ],
+  "baseline_sha": "3a8469e109cbf414aff1f9db35649ef06071fb66",
+  "invocation": "capture_preflip_anchors.py <oracle-extraction> <out-dir>",
+  "issue": 158,
+  "kind": "pre-flip legacy-oracle listener anchor capture",
+  "provenance": "legacy renderer at the step-0 baseline, executed from a pristine `git archive` extraction of that commit (never the working tree)",
+  "python": "3.12.13"
+}

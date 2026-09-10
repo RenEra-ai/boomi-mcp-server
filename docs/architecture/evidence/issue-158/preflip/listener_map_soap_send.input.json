@@ -1,0 +1,42 @@
+{
+  "pipeline": {
+    "dependencies": [
+      {
+        "from_stage": "s",
+        "to_stage": "m"
+      },
+      {
+        "from_stage": "m",
+        "to_stage": "t"
+      }
+    ],
+    "stages": [
+      {
+        "config": {
+          "operation_id": "WSSOP-1",
+          "primitive": "wss_listen"
+        },
+        "key": "s",
+        "kind": "listener"
+      },
+      {
+        "config": {
+          "map_ref": "MAP-1",
+          "primitive": "map"
+        },
+        "key": "m",
+        "kind": "map"
+      },
+      {
+        "config": {
+          "connection_id": "TGT-CONN",
+          "operation_id": "TGT-OP",
+          "primitive": "soap_send"
+        },
+        "key": "t",
+        "kind": "send"
+      }
+    ]
+  },
+  "process_kind": "sync_pipeline"
+}
