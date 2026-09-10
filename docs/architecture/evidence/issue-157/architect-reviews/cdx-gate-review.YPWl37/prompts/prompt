@@ -1,0 +1,408 @@
+Review this implementation against the architect design plan appended verbatim below.
+
+Repository: /Users/gleb/Documents/Projects/Renera/boomi-mcp-server, branch `codex/issue-157`.
+Baseline: ba1be9f34317d720d3b012484622ab7e2742143b. Implementation HEAD:
+`362414d3a8575f0adb7a66ae9c6845e84a4d63dd`. The delta touches 307 files; read
+`git diff ba1be9f34317d720d3b012484622ab7e2742143b..HEAD` for it.
+
+Your question is NOT "is this code good" — a separate Codex commit review has now run TWELVE rounds
+against this tree and closed clean twice. Your question is whether the IMPLEMENTATION REALIZES THE
+PLAN: which plan items are fully implemented, which are partially implemented, which are missing,
+and which were implemented differently from what the plan specified.
+
+**This is the THIRD and FINAL architect evaluation.** The repository caps this loop at three
+(`docs/architecture/COMPLETION_WORKFLOW_RULES.md`): on the third evaluation the loop ENDS — the
+implementation applies this round's batched correction, runs the Stage-2 commit review over that
+correction delta until it returns CLEAN, and closes on that. So please be exhaustive about what is
+NOT yet true, and explicit about which of your findings are blocking. There is no fourth evaluation
+to catch what you leave out.
+
+What the two earlier evaluations established, so you can spend your effort on what is still open:
+
+- **Evaluation 1** (`cdx-gate-review.sP9bAv`, archived) returned seven findings, ARCH-157-e1-01..07.
+- **Evaluation 2** (`cdx-gate-review.VsHZ3l`, archived) judged three of those CLOSED (e1-03 the
+  connection identity contract, e1-05 the named `flows` refusal, e1-07 the validator consolidation
+  and its six-route sentinel) and four PARTIAL, and raised five new findings ARCH-157-e2-01..05.
+- All five, plus fourteen findings from live QA rounds 12 and 13 and eight from commit-review rounds
+  9 through 11, are corrected on this tree. Every correction carries a witness that was hand-run
+  against a mutant removing exactly the correction it guards.
+
+**Your first job is to judge whether ARCH-157-e1-01, -02, -04 and -06 and ARCH-157-e2-01..05 are
+actually closed ON THIS TREE**, with the code that closes them — not whether they were answered in
+prose. The audit ledger at `docs/architecture/ISSUE_157_AUDIT_LEDGER.md` records every finding with
+its disposition, its defect class, and the second-instance structural answers; read its "Plan
+corrections" (P1-P9), "Design decisions" (D1-D19), "Shipped contracts this slice builds on"
+(the consolidation plan item 1 asked for, added after evaluation 2 reported it missing), the
+findings table and the second-instance check. A deviation that record justifies is not
+automatically acceptable — say so if the justification does not hold.
+
+Facts you will need:
+- The one settled platform fact: this platform IGNORES `folderName` and `folderFullPath` on create.
+  A component is placed only by a `folderId` injected at one boundary, `with_folder_id` inside
+  `_create_component_raw`. Exactly one create route bypasses it — the trading-partner create, which
+  posts a typed model carrying a folder NAME and declares that limit itself.
+- The recurring defect class of this slice is a site that re-derives a decision whose authority is
+  one function. It reached EIGHT instances and took its structural fix: `resolve_planner_binding` is
+  the single resolution of which existing component a spec entry binds to, `resolve_reused_keys`
+  composes it with `_will_reuse_at_apply`, and every pre-write consumer is handed that one answer.
+- A reused profile's key is always PRESENT in the selected-artifact map, with `None` meaning "reused
+  and unreadable"; absence means "not reused, index the candidate". That distinction is what stops
+  the candidate config from standing in for an account artifact.
+
+Please cover in particular:
+1. Whether ARCH-157-e1-01, -02, -04, -06 and ARCH-157-e2-01..05 are closed on this tree.
+2. Each numbered in-scope plan item: implemented, partial, missing, or implemented otherwise.
+3. Whether the governance surface is on the typed per-root envelope only and never on ProcessIRV1.
+4. Whether the derived-flows projection is genuinely derived and output-only, and whether it now
+   describes only artifacts this request will bind.
+5. Whether the retirements carry the mutation proofs the plan asks for, including the
+   fingerprint-applicability disposition added after evaluation 2.
+6. Whether the one required-target-leaf validator replaced the six legacy sites and is reached by
+   every entry point.
+7. Anything the plan asked for that you cannot find evidence of.
+
+END with a verdict on its OWN FINAL line: exactly 'VERDICT: NO ISSUES' or 'VERDICT: ISSUES FOUND'.
+
+
+=== ARCHITECT DESIGN PLAN (verbatim) ===
+Issue #157 — concrete implementation plan
+
+Grounding: clean branch `codex/issue-157`, HEAD `ba1be9f34317d720d3b012484622ab7e2742143b`. Locations below refer to this tree. No files were changed, tests run, or external mutations performed. Read-only Boomi discovery returned profiles `renera` and `work`; querying an existing process confirmed that readback exposes `name`, `description`, `folder_name`, `folder_id`, `folder_full_path`, and full Component XML.
+
+1. Establish the audit record and freeze the historical evidence first.
+
+   Files:
+   - Add `docs/architecture/ISSUE_157_AUDIT_LEDGER.md`.
+   - Update `docs/architecture/M12_COMPATIBILITY_INVENTORY.md`.
+   - Add `tests/fixtures/governance/issue_157/` for immutable historical cases, flows baselines, retirement records, and their provenance.
+   - Add `tests/_issue_157_flows_accounting.py` and `tests/test_issue_157_flows_accounting.py`.
+
+   Record the literal baseline SHA, shipped contracts from the #153–#156 ledgers and final #153 handoff, architectural decisions below, retirement dispositions, and the ordered gate roster before implementation.
+
+   Freeze historical cases from an isolated extraction of the baseline tree, not from a working tree being edited. Each case records its producer, immutable input-file digest, baseline SHA, complete ordered flows sequence, and separate ordered endpoint/provenance summaries. Preserve complete normalized payloads, not merely row identities.
+
+   Census all seven producer modules independently of their current recipe registration:
+   - `patterns/archetypes/database_to_api_sync.py`: rich rows at 2346–2399; returned at 2471.
+   - `patterns/archetypes/api_to_api_sync.py`: rich rows at 667–701; returned at 779.
+   - `patterns/archetypes/api_to_database_sync.py`: rows at 749; returned at 866.
+   - `patterns/archetypes/http_listener_to_db.py`: rows at 980; returned at 1093.
+   - `patterns/archetypes/http_listener_to_rest.py`: rows at 411; returned at 526.
+   - `patterns/archetypes/stub_minimal.py`: 122.
+   - `patterns/composition.py`: fan-out row at 1140.
+
+   Key rows by `(producer, case_id, normalized flow key/kind)` and retain their ordinal. Reject duplicate identities within a case instead of silently collapsing them.
+
+   Decision: these are permanent compatibility oracles, not regeneratable snapshots of the new implementation. Baseline changes require explicit evidence and review; normal schema regeneration must never rewrite them.
+
+2. Add authored defaults while preserving the strict resolved per-root envelope.
+
+   Files:
+   - `src/boomi_mcp/models/process_component.py`, `ProcessComponentEnvelopeV1` at 187.
+   - `src/boomi_mcp/models/authoring_workflow.py`, compiling intents at 152 and 243.
+   - Add `src/boomi_mcp/authoring/governance.py`.
+   - `src/boomi_mcp/authoring/workflow.py`, normalization at 410/491 and recipe lift at 669.
+   - `src/boomi_mcp/patterns/archetype_assembly.py`, existing naming helpers around 168.
+   - `src/boomi_mcp/models/integration_models.py`.
+
+   Keep resolved `ProcessComponentEnvelopeV1.name` mandatory, preserve explicitly authored `action`, and leave `ProcessIRV1` unchanged. Add a small authored-envelope counterpart that permits an omitted name plus `component_prefix`; normalize it into the existing strict envelope before producing `IntegrationSpecV1.processes`. The direct request retains contract version `"2"` and the existing `units` wire shape.
+
+   Resolve explicit names unchanged. Otherwise derive `"<component_prefix> <component_key>"`. Reject missing name and prefix, blank/padded structural strings, and colliding resolved create names. Do not derive `action`.
+
+   Decision: use the stable component key as the canonical default suffix; this avoids a second hand-maintained role-name registry. Existing archetype-specific suffixes remain their producers’ responsibility until #159.
+
+   For recipe requests, add an optional typed, key-addressed `process_envelopes` collection. It supplies per-root governance while the existing component-config lift remains in place. Match envelopes to composed root keys exactly; reject duplicate, unmatched, or competing governance sources. When a typed envelope is supplied, the lifted component cannot also supply name/description/folder/extensions. Existing recipe-produced metadata continues through the current lift when no typed envelope is supplied.
+
+   Decision: this is an envelope intake extension, not direct process-unit recipe contributions; replacing the lift remains #159.
+
+   Normalize once into server-owned objects. Remove consumed prefix/default inputs from the executable normalized representation. Explicitly authored final governance and equivalent defaults must produce identical normalized envelopes and fingerprints.
+
+3. Implement folder fan-out from each root’s dependency ownership.
+
+   Files:
+   - `src/boomi_mcp/authoring/governance.py`.
+   - `src/boomi_mcp/authoring/workflow.py`, normalization and `build_component_dependencies` at 898.
+   - `src/boomi_mcp/models/process_component.py`.
+   - `src/boomi_mcp/models/integration_models.py`.
+
+   Use each envelope’s existing `folder_name` as the single placement knob for that root and its derived supporting components. Walk the existing component dependency/reference authority, including extension references; do not maintain a component-type or recipe-name list.
+
+   Fan-out stops at another process root, which owns its own governance. Reference-only components are never moved. For supporting components without explicit placement, resolve inherited placement before fingerprinting.
+
+   Reject conflicting folders inherited by a shared supporting component unless that component has an explicit placement. Preserve distinct explicit root names and folders. Apply the same ownership rule to inherited supporting-component name prefixes; ambiguous inherited defaults require an explicit name.
+
+   Decision: per-root inheritance preserves multi-root cardinality while allowing one knob to place a complete derived component set. No integration-global governance blob is introduced.
+
+   Continue using #153’s name-based folder resolution and mutation/readback attestations. Do not silently introduce post-create move calls or alter update-preservation policy.
+
+4. Reuse the secret scanner and enforce the connection binding contract.
+
+   Files:
+   - `src/boomi_mcp/patterns/archetype_parameters.py`, scanner at 83–108; binding models at 415 and 690.
+   - `src/boomi_mcp/patterns/archetype_assembly.py`, inline REST policy at 102/234 and header merge at 319.
+   - `src/boomi_mcp/models/integration_models.py`, `runtime` at 134.
+   - `src/boomi_mcp/authoring/governance.py`.
+   - `src/boomi_mcp/authoring/workflow.py`.
+   - `src/boomi_mcp/categories/integration_builder.py`, reference precedence at 6240–6286.
+   - `src/boomi_mcp/recipes/materialization.py`, existing materialization-mode authority.
+   - `src/boomi_mcp/errors.py`.
+
+   Apply the existing recursive secret-key scanner to `spec.runtime` before validation errors, previews, or result echoes can expose it. Reuse the scanner’s key authority; do not copy its substring list. Recheck at intake when accepting already-constructed mutable models.
+
+   Runtime connection bindings remain in each envelope’s `process_extensions`. Do not add a second free-form runtime binding authority. Deliberate non-executable runtime hints belong in the recorded-intent channel described below and undergo the same secret policy.
+
+   Enforce reuse XOR inline create using `component_materialization_mode`. Preserve the legitimate encoding `action="create", config.reference_only=true`; it denotes reuse, not contradictory creation. Reject reuse identity plus inline creation settings and conflicting top-level/config identities before collision resolution.
+
+   Share the existing `_REST_CREATE_AUTH_MAP` policy with canonical normalization: inline REST creation accepts only unsecured mode; secured connections require reuse. Leave standalone `RestClientConnectionBuilder.SUPPORTED_AUTH_MODES` at `connector_builder.py:2330` intact.
+
+   Make the shared header merger support strict canonical collision checking: reject all case-insensitive overlaps, including identical spelling, across default and operation headers. Retain historical legacy merge behavior only where needed to preserve the frozen legacy route until cutover; do not implement a second merger.
+
+   Add named, value-free diagnostics for binding conflicts, secured inline REST creation, header collisions, and runtime secrets. Reuse existing equivalent codes where available; register any new code through the existing taxonomy and public error translation.
+
+5. Replace both required-target-leaf validator families with one implementation.
+
+   Files:
+   - `src/boomi_mcp/categories/components/builders/transform_map_validation.py`, resolver at 26 and validator at 216.
+   - `src/boomi_mcp/categories/transformation_review.py`, mapping normalization at 671–721 and coverage at 759–787.
+   - `src/boomi_mcp/patterns/archetype_parameters.py`, `_required_simple_leaf_paths` at 1411.
+   - `src/boomi_mcp/patterns/archetypes/database_to_api_sync.py`: 802.
+   - `src/boomi_mcp/patterns/archetypes/api_to_api_sync.py`: 191.
+   - `src/boomi_mcp/patterns/archetypes/http_listener_to_rest.py`: 193.
+   - `src/boomi_mcp/patterns/composition.py`: 517/539/569.
+   - `src/boomi_mcp/patterns/archetypes/api_to_database_sync.py`: 200/254.
+   - `src/boomi_mcp/patterns/archetypes/http_listener_to_db.py`: 332/381.
+
+   Place the sole implementation in the existing transform-map validation module. It accepts a normalized target-field index and normalized mapped destinations and returns sorted missing paths where fields are required and mappable.
+
+   Move/reuse the advisory mapping normalizer so direct mappings, function outputs, and script outputs share one destination interpretation. Make `review_transformation` consume the shared result without reporting duplicate findings.
+
+   Obtain JSON indexes from the surviving `profile_from_json_schema` generator at `profile_generation.py:360`; obtain DB indexes through `DbWritePrimitive.build_field_index` at `patterns/primitives/db_write.py:262`. Remove the legacy required-leaf tree walker and replace every listed consumer, including composition’s required-contract comparison.
+
+   Preserve empty DB-index deferral: the shared validator reports no invented missing path, allowing the write-profile builder to produce its precise emit-time error.
+
+   Decision: retain `TRANSFORM_REVIEW_REQUIRED_TARGET_UNMAPPED` as the shared diagnostic identity. Authoring treats it as blocking; advisory review reports it through its existing report contract.
+
+6. Route coverage through every real entry and the selected artifact authority.
+
+   Files:
+   - `src/boomi_mcp/authoring/workflow.py`, `_literal_profile_indexes` at 1307 and `_validate_processes` at 1331.
+   - `src/boomi_mcp/recipes/engine.py`, component resolution around 1681 and compilation around 1728.
+   - `src/boomi_mcp/categories/integration_builder.py`, profile resolution at 5362, map validation at 6958, apply refresh at 8955–9005.
+   - `src/boomi_mcp/categories/components/builders/transform_map_validation.py`.
+   - `src/boomi_mcp/compiler/process_ir/semantic_validation/findings.py`.
+
+   Validate structured maps independently of whether effect declarations exist. Direct plan/compile/apply preflight and the raw recipe engine must all reach the shared validator. Recipe failures preserve the canonical code inside `RECIPE_CONSTRAINT_FAILED.cause_codes`.
+
+   Extend the existing profile-index resolver with selected plan action/identity context. Create, clone, and update use the profile configuration that will actually be materialized. Reuse/reference-only uses the selected existing profile’s index, including name collisions resolved to reuse. Candidate config is not evidence of reused content.
+
+   Reuse existing supplied/literal/live index resolution. Preserve #154 effect-context plumbing and #155 trusted connector context. Unavailable selected profile evidence produces `MAP_PROFILE_INDEX_UNAVAILABLE`.
+
+   Broaden apply’s existing literal-only map revalidation to all structured maps being built, including `$ref` profiles selected for reuse, before the first mutation.
+
+   Decision: reused maps and raw-XML maps remain opaque under the shipped contract; this issue does not introduce a raw-map parser or claim candidate mappings establish their coverage.
+
+7. Add the typed, generator-derived flows result.
+
+   Files:
+   - Add `src/boomi_mcp/models/derived_flows.py`.
+   - Add `src/boomi_mcp/authoring/derived_flows.py`.
+   - `src/boomi_mcp/categories/components/builders/profile_generation.py`.
+   - `src/boomi_mcp/models/authoring_workflow.py`, result models.
+   - `src/boomi_mcp/authoring/workflow.py`, normalization and preview construction at 838.
+   - `src/boomi_mcp/categories/transformation_review.py`.
+
+   Preserve the legacy caller-authored `IntegrationSpecV1.flows` field unchanged. Introduce a distinct canonical output-preview model whose `flows` field contains typed generated-profile rows. Select that preview for the two compiling intents; keep the legacy preview for `integration_spec`.
+
+   Build rich flow rows from surviving profile-generation results, selected profile identity, final component naming, and normalized mappings. Preserve all served rich payload fields, including field indexes, mappings, generated-profile subshapes, profile identities/names, and meaningful nulls.
+
+   Normalize both legacy rich forms into the same typed representation, with an explicit test for DB-source and API-source forms. Normalization may reconcile representation differences but cannot discard content to manufacture parity.
+
+   Reject caller-supplied `flows` on compiling intents with `AUTHORING_FLOWS_OUTPUT_ONLY`, including attempts through recipe input or competing request locations. Never merge authored rows with derived rows.
+
+   Decision: derived flows are a served projection, not compiler input. Their source artifacts and mappings remain executable authorities; the projection itself does not become another fingerprint or materialization authority. #159 consumes this projection for composition summaries.
+
+8. Make flows accounting persistent, ordered, two-sided, and reusable after deletion.
+
+   Files:
+   - `tests/fixtures/governance/issue_157/`.
+   - `tests/_issue_157_flows_accounting.py`.
+   - `tests/test_issue_157_flows_accounting.py`.
+   - Add `tests/test_issue_157_derived_flows.py`.
+
+   Freeze cases covering profile mappings, watermark off/on, DLQ off/on, multiple composition leg counts, and connection binding modes.
+
+   Classify differential pairs correctly:
+   - Watermark: presence pair.
+   - Reliability/DLQ target: payload pair; the row remains present.
+   - Composition leg count: payload pair; the fan-out row remains present.
+   - Binding mode: endpoint/provenance pair; it does not vary flows.
+
+   Each discharge either matches the frozen row’s complete normalized payload or references a typed retirement record with its proof. Then independently compare the entire derived sequence with the frozen sequence after retired rows are removed. Apply ordered two-sided equality to endpoint/provenance summaries too.
+
+   Reject partial-payload matches, unexpected rows, duplicates, reordering, modified baselines, deleted baseline rows, edited inputs without corresponding approved freezing, double discharge, and missing discharge. Pin the frozen corpus’s identities and digests so deregistration or ordinary snapshot regeneration cannot shrink the denominator.
+
+   #157 discharges the two rich generated-profile forms and applicable proven retirements. Preserve the remaining rows explicitly as #159 obligations; do not label them retired or fully covered.
+
+   Commit canonical-form replay inputs now for cases this issue discharges. Require #159 to commit one canonical invocation fixture for every remaining case. Historical inputs and any conversion mapping are provenance only; replay must never execute legacy parsing.
+
+   Add deterministic generative differential tests using existing dependencies or the standard library. Vary profile nesting, field names, required flags, and mapping subsets; compare mapping count, field identity, and generated-profile structure directly with the generated inputs. Fixed corpus cases do not replace this coverage.
+
+9. Add one recorded-not-wired channel with an explicit hash boundary.
+
+   Files:
+   - `src/boomi_mcp/models/recipe_contributions.py`, contribution union at 475.
+   - `src/boomi_mcp/recipes/composer.py`, composed collections at 84.
+   - `src/boomi_mcp/recipes/engine.py`, `RecipeRunResultV1` at 123 and deterministic serialization.
+   - `src/boomi_mcp/models/authoring_workflow.py`.
+   - `src/boomi_mcp/authoring/workflow.py`, `_NormalizedIntent` at 230 and `_normalized_payload` at 1806.
+   - `src/boomi_mcp/categories/integration_authoring.py`.
+
+   Add a fifth typed `recorded_intent` contribution with stable identity, owning process key, a closed declaration kind, typed payload, and literal status `recorded_not_wired`. Carry it through composition and recipe results into the same direct-authoring result channel.
+
+   Do not overload `CapabilityGapV1`: its existing states describe absent/gated/planned capabilities, not deliberately recorded declarations.
+
+   Keep records beside the executable normalized spec. Exclude them from `_normalized_payload`, artifact fingerprints, materialization-plan fingerprints, mutation inputs, and blocking validation. Persist and serve them in authoring/build provenance so callers can read them back.
+
+   Keep recipe output determinism checks covering the recorded channel; exclude records only from executable hash and constraint inputs.
+
+   Decision: accepted records may change only served declaration/provenance output. Invalid record shape or secrets are input errors; valid record content cannot change execution or the blocking verdict.
+
+10. Implement watermark and scheduling SPLITs and evidence-backed retirements.
+
+   Files:
+   - Add `src/boomi_mcp/models/governance_intent.py`.
+   - `src/boomi_mcp/models/process_component.py`.
+   - `src/boomi_mcp/authoring/governance.py`.
+   - `src/boomi_mcp/patterns/archetypes/database_to_api_sync.py`, consistency checks at 729/906 and deferred intent at 1665–1709.
+   - `src/boomi_mcp/patterns/archetype_parameters.py`.
+   - `src/boomi_mcp/patterns/primitives/operational.py`, `schedule_envelope`.
+   - `src/boomi_mcp/categories/integration_authoring.py`.
+   - `docs/architecture/M12_COMPATIBILITY_INVENTORY.md`.
+   - Add `tests/test_issue_157_intent_retirements.py`.
+
+   Add one typed per-root `watermark` declaration containing source-profile reference, field, timestamp/sequence kind, persistence intent, and optional initial value/query-intent references. Validate the selected source field and internal declaration consistency through existing profile resolution.
+
+   Keep `SetDppNodeV1.persist` as the actual executable persistence mechanism. A declaration neither inserts a DPP node nor binds a REST query parameter. Record the declaration as not wired while retaining its explicitly validation-bearing consistency rule.
+
+   Retire typed acceptance of legacy watermark/query metadata spellings. Retire intent-only cron/run metadata and schedule-envelope echoes; do not replace them with a pretend schedule capability.
+
+   Create individual retirement records for inert legacy paths after baseline measurement, including the deferred-intent candidates `jdbc_options`, `fetch_size`, `link_element`, SQL parameter `sql_type`/`direction`, inert run metadata, and inert watermark/query payload portions.
+
+   Do not classify `default_headers`, an entire watermark object, naming governance, or reliability validation as inert: those have retained or validation-bearing behavior.
+
+   For each RETIRE record, freeze a valid baseline pair differing only in that field and prove equality of emitted bytes, execution/materialization fingerprints, mutation trace, and semantic validation verdict. Store the exact field path, baseline case, observations, classification, replacement/refusal code, and cutover owner.
+
+   Decision: a candidate failing any inertness assertion is SPLIT or RETAIN, not RETIRE. In particular, the legacy typed `integration_spec` path hashes its complete echo; record that authoring-hash churn separately rather than falsely claiming every historical hash was invariant.
+
+   Independently test named rejection of obsolete spellings on the new typed surface. #160 owns rejection across deleted legacy entrypoints.
+
+11. Update all affected served contracts and regenerate their artifacts.
+
+   Files:
+   - `src/boomi_mcp/authoring/contract.py`: schema registry at 75, capability registry at 144, workflow contract at 507, schema bundle at 648, revision material.
+   - `src/boomi_mcp/authoring/process_ir_projection.py`: diagnostic projection at 1470 and revision payload at 2459.
+   - `src/boomi_mcp/categories/meta_tools.py`: schema dispatch at 6934/7208/7535 and capability publication at 10240/11004.
+   - `src/boomi_mcp/errors.py`, taxonomy at 636.
+   - `src/boomi_mcp/categories/integration_builder.py`, public validation translation at 7496/7610.
+   - `src/boomi_mcp/compiler/process_ir/semantic_validation/findings.py`.
+   - `server.py`, `build_integration` documentation at 2346.
+   - `tests/fixtures/authoring_contract/process_ir_authoring_v1.contract.json`.
+   - `tests/fixtures/m12_12/legacy_reachability_inventory.json`.
+   - `tests/fixtures/wave_gate/test_nodes.jsonl`.
+
+   Publish default-name/folder behavior, derived-only flows, recorded intent, watermark limits, and named remediation through existing runtime registries. Preserve contract version 2. Derive diagnostic projections and revision changes from their authorities; do not maintain parallel code/message lists.
+
+   Regenerate the committed authoring contract fixture from `process_ir_authoring_revision_payload()` with the existing exact serialization: sorted keys, compact separators, ASCII, no trailing newline.
+
+   The page-schema fixture is generated from `process_ir_authoring_contract_v1_json_schema()` and should remain identical unless its page envelope changes. `tests/fixtures/process_ir/process_ir_v1.schema.json` must remain unchanged.
+
+   Regenerate the #149 inventory using `tests/_m12_12_legacy_inventory.py --write`, produce its markdown with `--emit-markdown`, and replace tables by subsection heading. Run its `--check` during implementation validation.
+
+   Collect final non-KB test nodes, preserve existing wave-manifest IDs, append new tests, and update the manifest arithmetic. Tombstone only genuinely removed pre-existing tests with a reason.
+
+   Do not regenerate or alter process XML byte goldens or `tests/fixtures/wave_gate/goldens.jsonl`. No dependency or CI workflow changes are required.
+
+12. Implement the test matrix before live QA.
+
+   New test files:
+   - `tests/test_issue_157_governance.py`.
+   - `tests/test_issue_157_connection_contract.py`.
+   - `tests/test_issue_157_required_target_coverage.py`.
+   - `tests/test_issue_157_derived_flows.py`.
+   - `tests/test_issue_157_flows_accounting.py`.
+   - `tests/test_issue_157_intent_retirements.py`.
+
+   Extend existing coverage in:
+   - `tests/test_issue_153_canonical_apply_e2e.py`.
+   - `tests/test_recipe_validation_gate.py`.
+   - `tests/test_transformation_review.py`.
+   - `tests/test_issue_95_profile_indexing.py`.
+   - `tests/test_m12_11_schema_templates.py`.
+   - `tests/test_process_ir_authoring_contract.py`.
+   - `tests/test_process_ir_authoring_contract_parity.py`.
+   - `tests/test_error_taxonomy.py`.
+   - `tests/test_issue_149_legacy_reachability_freeze.py`.
+   - Existing affected archetype/composition tests, preserving their test identities.
+
+   Required scenarios:
+   - Defaults versus explicit equivalent governance; missing/blank/padded names; duplicate resolved names; dependency-derived folder fan-out; shared-component ambiguity; multi-root isolation; unchanged process XML.
+   - Binding cases derived from actual mode/schema authorities; both/neither sources; conflicting identities; secured modes derived from the REST builder’s recognized modes; all header collision directions.
+   - Secret cases derived from the scanner authority across case variations and nested dictionaries/lists; no key/value leakage in public success or error envelopes.
+   - JSON and DB required targets: missing/covered leaves, optional leaves, containers, nested arrays, direct/function/script destinations, DB field/condition paths, and empty-index deferral.
+   - Deliberately opposed candidate and selected profile indexes for create/update/reuse/clone/reference-only; unavailable evidence; apply-time drift refused before mutation.
+   - A shared-validator sentinel proving direct plan, compile, apply preflight, raw recipe execution, recipe intent, and advisory review reach the same implementation. An adversarial removal of the invocation must fail the route test.
+   - Both rich producer normalization forms; all two-sided accounting mutants from step 8; generative profile/mapping differentials.
+   - Every retirement’s historical mutation proof, separate obsolete-input refusal, advisory no-effect pairs, watermark consistency failures, and persisted-DPP positive behavior.
+   - Both intents’ plan → compile → materialize dry-run, deterministic fingerprints, public diagnostic identity/pointer/remediation, and served-schema parity.
+
+13. Run one concrete public-boundary live governance QA scenario during implementation.
+
+   Use `list_boomi_profiles` first, select `renera`, and pass that profile on every account-scoped call. Use independent platform templates, pre-baseline goldens, or proven-operable captures as fixture provenance.
+
+   Direct case:
+   - Call `build_integration(profile=P, action="plan", config=JSON)` with `authoring_request.contract_version="2"` and `intent.intent_kind="process_ir"`.
+   - Supply a valid independently grounded graph, an explicit envelope `action="create"`, omitted name, `component_prefix="QA157-<unique>"`, description `"QA157 governance description"`, and one existing uniquely resolved non-root `folder_name`.
+   - Include at least one created supporting profile/map/operation reachable from the root so fan-out is exercised.
+   - Call `"compile"` with the same request.
+   - Call `"apply"` with the returned expected capability revision and compile hash in the authoring request and `dry_run=false` at config root.
+
+   Recipe case:
+   - Repeat through `intent_kind="recipe"` using registered `boomi.archetype.api_to_api_sync@0.1.0`.
+   - Use `SyncRecipeInputV1` at `recipes/builtins/sync.py:54`: `version`, `process_key`, source/target connection and operation references, `map_ref`, and `component_slots`.
+   - Supply matching materializations through `base_components` and the new typed per-root envelope. Exercise the real recipe engine and interim lift.
+
+   Readback:
+   - Read each created ID with `query_components(profile=P, action="get", component_id=ID)`.
+   - Assert `Component/@name` equals the resolved name.
+   - Assert namespaced description text equals the authored description.
+   - Compare folder metadata and XML folder attributes with the resolved folder ID/path.
+   - Assert placement for every created supporting component, not only the process.
+
+   Extension and preservation control:
+   - Include `process_extensions.connections=[{"connection_id":"$ref:conn","fields":[{"id":"url","label":"QA157-EXT"}]}]`.
+   - Assert readback contains the real connection ID and the expected overrideable field; no unresolved reference or placeholder remains.
+   - Change a harmless graph marker, set `action="update"` and the created `component_id`, omit description/extensions, then re-plan, recompile, rebind, and apply.
+   - Assert the marker changes while description, override subtree, and existing folder remain preserved. #153 explicitly preserves update placement; do not test an update move as expected behavior.
+
+   Multi-root control:
+   - Create two roots with distinct explicit names, folders, descriptions, extension labels, and appropriate dependencies.
+   - Update only one; represent the other as a reused dependency where needed.
+   - Read both back and prove sibling XML/governance remains unchanged, references remain resolved, and root ownership does not collapse.
+   - Match every `process_mutations[].plan_fingerprint` to that root’s compiled `process_component_materialization_plan` artifact. Check separate mutation/readback attestations and public `"verify"` for drift.
+
+   Cleanup exact created IDs in reverse dependency order through `manage_component(action="delete")`; exclude reused fixtures. No deployment or execution is required.
+
+   Existing limitation: #153 records that the platform may ignore requested create placement. A placement warning or resolved request is not a passing folder assertion. If live readback reproduces this, record a blocking QA result; do not hide it with an unplanned relocation mutation or claim acceptance passed.
+
+14. Complete validation and preserve the downstream scope boundaries.
+
+   During implementation, run affected tests and the full Python 3.11 non-KB suite using existing CI settings. After the scoped live QA, commit the QA-validated tree and run the required detached Codex review against the literal baseline SHA. Follow with the declared architect implementation gate and final composite wave gate using `--require-plan-fingerprint`.
+
+   Keep the tree fixed during each gate. Every correction receives affected QA and review of its complete unreviewed delta. Record severity-aware checkpoints every third evaluation; the architect implementation review alone ends after its third evaluation under `COMPLETION_WORKFLOW_RULES.md`. Required correction and final-tree wave validation still run.
+
+   Explicitly out of scope:
+   - #159: direct process-unit recipe contributions, replacement of the interim lift, composition naming/per-leg summaries, recipe/example migration, remaining flows discharges, and canonical-input replay with legacy modules import-blocked.
+   - #160: physical legacy deletion, removal of legacy registrations/schemas, universal post-cutover rejection, deleted-name allowlists, and replay after modules are physically absent. Preserve frozen baselines, retirement records, canonical fixtures, inert historical inputs, and provenance mappings.
+   - #155: generic dynamic-path binding and connector capability expansion. Consume shipped trusted context; do not reopen connector grammar or add REST methods.
+   - Beyond M12: watermark-to-REST-query wiring and live schedule deployment/activation.
+   - #153 machinery: no redesign of late binding, conflict policies, preservation, attestations, or apply topology.
+   - No new dependencies, compatibility aliases, deprecation windows, new emitter shapes, or process XML golden changes.

@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 12030, "minimum_collected": 12030, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 12039, "minimum_collected": 12039, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -12062,7 +12062,7 @@
 {"kind": "test", "id": "pytest-012061", "node_id": "tests/test_issue_157_plan_conformance.py::test_a_retired_row_must_cite_a_record_that_retires_this_field[record3-is not this row's]", "state": "active"}
 {"kind": "test", "id": "pytest-012062", "node_id": "tests/test_issue_157_plan_conformance.py::test_a_reused_profile_whose_artifact_could_not_be_read_serves_no_summary", "state": "active"}
 {"kind": "test", "id": "pytest-012063", "node_id": "tests/test_issue_157_plan_conformance.py::test_a_reused_profile_with_no_local_body_is_described_by_the_artifact_alone", "state": "active"}
-{"kind": "test", "id": "pytest-012064", "node_id": "tests/test_issue_157_plan_conformance.py::test_a_wrong_profile_name_is_caught_even_though_the_digest_ignores_it", "state": "active"}
+{"kind": "test", "id": "pytest-012064", "node_id": "tests/test_issue_157_plan_conformance.py::test_a_wrong_profile_name_is_caught_even_though_the_digest_ignores_it", "state": "tombstone"}
 {"kind": "test", "id": "pytest-012065", "node_id": "tests/test_issue_157_plan_conformance.py::test_every_retirement_record_carries_a_measured_applicability_disposition", "state": "active"}
 {"kind": "test", "id": "pytest-012066", "node_id": "tests/test_issue_157_plan_conformance.py::test_the_offline_reuse_reader_touches_no_account", "state": "active"}
 {"kind": "test", "id": "pytest-012067", "node_id": "tests/test_issue_157_plan_conformance.py::test_the_projection_serves_no_content_for_a_map_it_will_not_write", "state": "active"}
@@ -12079,3 +12079,13 @@
 {"kind": "test", "id": "pytest-012078", "node_id": "tests/test_issue_157_plan_conformance.py::test_the_index_resolver_agrees_with_the_reuse_predicate_on_every_action[update]", "state": "active"}
 {"kind": "test", "id": "pytest-012079", "node_id": "tests/test_issue_157_plan_conformance.py::test_the_advisory_route_will_not_index_a_reused_profile_from_its_candidate", "state": "active"}
 {"kind": "test", "id": "pytest-012080", "node_id": "tests/test_issue_157_plan_conformance.py::test_the_advisory_view_carries_every_attribute_the_shared_helpers_read", "state": "active"}
+{"kind": "test", "id": "pytest-012081", "node_id": "tests/test_issue_157_plan_conformance.py::test_a_known_reused_key_keeps_its_sentinel_when_the_binding_lookup_fails", "state": "active"}
+{"kind": "test", "id": "pytest-012082", "node_id": "tests/test_issue_157_plan_conformance.py::test_a_retired_row_must_cite_a_record_measured_on_its_own_producer", "state": "active"}
+{"kind": "test", "id": "pytest-012083", "node_id": "tests/test_issue_157_plan_conformance.py::test_a_wrong_profile_name_is_caught_through_the_real_discharge_route", "state": "active"}
+{"kind": "test", "id": "pytest-012084", "node_id": "tests/test_issue_157_plan_conformance.py::test_the_db_summary_of_a_selected_artifact_never_reads_the_candidate", "state": "active"}
+{"kind": "test", "id": "pytest-012085", "node_id": "tests/test_issue_157_plan_conformance.py::test_the_projection_reports_the_name_apply_will_actually_give_a_clone", "state": "active"}
+{"kind": "test", "id": "pytest-012086", "node_id": "tests/test_issue_157_plan_conformance.py::test_the_raw_route_scans_its_runtime_block_for_secrets[bare]", "state": "active"}
+{"kind": "test", "id": "pytest-012087", "node_id": "tests/test_issue_157_plan_conformance.py::test_the_raw_route_scans_its_runtime_block_for_secrets[integration_spec]", "state": "active"}
+{"kind": "test", "id": "pytest-012088", "node_id": "tests/test_issue_157_plan_conformance.py::test_the_raw_route_scans_its_runtime_block_for_secrets[source_description]", "state": "active"}
+{"kind": "test", "id": "pytest-012089", "node_id": "tests/test_issue_157_plan_conformance.py::test_the_recipe_route_defers_a_declared_reuse_it_cannot_resolve", "state": "active"}
+{"kind": "test", "id": "pytest-012090", "node_id": "tests/test_issue_157_plan_conformance.py::test_the_retirement_refusal_claims_only_what_was_measured", "state": "active"}

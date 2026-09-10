@@ -954,15 +954,20 @@ def _watermark_evidence_is_still_owed(
 ) -> bool:
     """Could a later reading still supply this source profile's index?
 
-    Only two shapes: a literal existing-profile id nobody supplied an index for,
-    and an in-plan profile apply will REUSE that this pass never discovered. A
-    profile this request WRITES is answered by its own config, whatever that
-    config yields — including nothing.
+    ONE shape: an in-plan profile apply will REUSE that this pass never
+    discovered. A literal id is discovered by this pass, and a profile this
+    request WRITES is answered by its own config, whatever that config yields —
+    including nothing.
     """
     if not isinstance(ref, str) or not ref.strip():
         return False
     if not ref.startswith("$ref:"):
-        return not (literal_indexes and ref.strip() in literal_indexes)
+        # A LITERAL ID IS DISCOVERED BY THIS PASS, so an absent index means the
+        # discovery ran and found nothing — not that nobody has asked yet. The
+        # map route answers the same shape with MAP_PROFILE_INDEX_UNAVAILABLE
+        # and refuses; deferring it here left the rule decided by nobody
+        # (architect evaluation 3, e3-04).
+        return False
     key = ref[len("$ref:") :]
     return key not in selected and key in (reused_keys or ())
 

@@ -1752,6 +1752,16 @@ def _validate_component_maps(
             continue
         if component.key in reused:
             continue
+        config_view = component.config if isinstance(component.config, dict) else {}
+        if config_view.get("reference_only") is True:
+            # DECLARED REUSE THIS ROUTE CANNOT RESOLVE IS DEFERRED, NOT JUDGED.
+            # The entry says it binds an existing component and names it only;
+            # resolving that name needs the account, which this layer never
+            # touches. Judging its discarded candidate mappings made one request
+            # pass through direct authoring and fail through the recipe routes
+            # (architect evaluation 3, e3-02). The account-aware validation
+            # decides it.
+            continue
         config = component.config if isinstance(component.config, dict) else {}
         if isinstance(config.get("xml"), str) and config["xml"].strip():
             continue

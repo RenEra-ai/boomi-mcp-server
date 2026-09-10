@@ -5475,7 +5475,7 @@ def _discover_profile_index(
 
 
 def _resolve_literal_profile_indexes(
-    boomi_client: Boomi, spec: IntegrationSpecV1
+    boomi_client: Boomi, spec: IntegrationSpecV1, extra_profile_refs=None
 ) -> Dict[str, Dict[str, Any]]:
     """Resolve field indexes for literal existing-profile UUIDs in transform maps.
 
@@ -5505,6 +5505,16 @@ def _resolve_literal_profile_indexes(
                 and not value.startswith("$ref:")
             ):
                 uuids.add(value.strip())
+    # A WATERMARK'S SOURCE PROFILE IS A LITERAL ENDPOINT TOO. This collected map
+    # endpoints only, so a UUID referenced solely by a watermark was never
+    # discovered and its rule deferred through compile with nobody left to
+    # decide it (architect evaluation 3, e3-04). The declarations are passed in
+    # rather than walked from the spec: after governance they live beside it, in
+    # the recorded intents, and re-deriving where they live is the defect class
+    # this slice keeps closing.
+    for value in extra_profile_refs or ():
+        if isinstance(value, str) and value.strip() and not value.startswith("$ref:"):
+            uuids.add(value.strip())
     if not uuids:
         return {}
 
@@ -5601,6 +5611,14 @@ def resolve_selected_profile_artifacts(
         binding = bindings.get(comp.key)
         component_id = binding.existing_id if binding is not None else None
         if not component_id:
+            # A KEY THE CALLER ALREADY DECIDED IS REUSED KEEPS ITS SENTINEL. This
+            # pass resolves the binding a SECOND time, and a transient failure
+            # there dropped the key entirely — which the map resolver reads as
+            # "not reused, index the candidate", turning the candidate config
+            # back into evidence for a profile already known to be reused
+            # (architect evaluation 3, e3-02).
+            if comp.key in reused:
+                resolved[comp.key] = None
             continue
         # THE PREDICATE IS ASKED, NOT REBUILT. A first attempt reconstructed the
         # decision from `conflict_policy` alone, which is "reuse" by default —
@@ -5646,6 +5664,55 @@ def _resolve_selected_profile_indexes(
             boomi_client, spec, reused_keys=reused_keys, conflict_policy=conflict_policy
         ).items()
     }
+
+
+def _scan_raw_runtime_secrets(
+    config: Dict[str, Any],
+) -> Optional[BuilderValidationError]:
+    """Scan every RAW spelling of ``spec.runtime`` this route accepts.
+
+    The raw route has three input forms — an explicit ``integration_spec``, a
+    ``source_description`` object, and the bare top-level shape — and each of
+    them carries ``runtime`` into the normalized spec. All three are scanned
+    here, from the caller's own bytes, BEFORE normalization builds the echo the
+    leak rode out on. The scanner itself is the typed surface's, imported rather
+    than reimplemented, so the two intakes cannot disagree about what a
+    secret-shaped key is.
+    """
+    from ..authoring.governance import (
+        PLAINTEXT_SECRET_REJECTED,
+        GovernanceRefusal,
+        scan_runtime_secrets,
+    )
+
+    if not isinstance(config, dict):
+        return None
+    spec_payload = config.get("integration_spec")
+    source_description = config.get("source_description")
+    candidates = [
+        spec_payload.get("runtime") if isinstance(spec_payload, dict) else None,
+        source_description.get("runtime") if isinstance(source_description, dict) else None,
+        config.get("runtime"),
+    ]
+    for runtime in candidates:
+        if not runtime:
+            continue
+        try:
+            scan_runtime_secrets(runtime)
+        except GovernanceRefusal as refusal:
+            return BuilderValidationError(
+                "a secret-shaped key was found in the runtime block; the "
+                "authoring surface never carries plaintext secrets",
+                error_code=PLAINTEXT_SECRET_REJECTED,
+                field="runtime",
+                hint=(
+                    "Reference connector secrets through the connection's "
+                    "credential_ref; spec.runtime is echoed back and must not "
+                    "carry secrets."
+                ),
+                details={"path": refusal.diagnostics[0].path if refusal.diagnostics else "/integration_spec/runtime"},
+            )
+    return None
 
 
 def _scan_top_level_pipeline_secrets(
@@ -5877,6 +5944,39 @@ def resolve_reused_keys(boomi_client, spec, conflict_policy, keys=None, bindings
         spec=spec, existing_ids=existing_ids, conflict_policy=conflict_policy
     )
     return {key for key in reused if key in existing_ids}
+
+
+def resolve_final_component_names(boomi_client, spec, conflict_policy, keys=None):
+    """The NAME each component will carry after apply, where it differs.
+
+    Only clones differ, and only the apply path knows how: `_apply_clone_suffix`
+    is that authority and is CALLED here rather than restated. The served
+    preview reported the authored name for a component apply renames, so a
+    caller reading the projection learned a name the account never gets
+    (architect evaluation 3, e3-03).
+    """
+    final = {}
+    if str(conflict_policy or "reuse") != "clone":
+        return final
+    for comp in (getattr(spec, "components", None) or ()):
+        key = getattr(comp, "key", None)
+        if not (isinstance(key, str) and key):
+            continue
+        if keys is not None and key not in keys:
+            continue
+        if getattr(comp, "action", None) != "create":
+            continue
+        try:
+            binding = resolve_planner_binding(boomi_client, comp)
+        except Exception:  # noqa: BLE001 - an unanswered binding renames nothing
+            continue
+        if binding.reference_only or not (binding.existing_id or binding.candidates):
+            continue
+        cloned = _apply_clone_suffix(comp, dict(comp.config or {}))
+        name = cloned.get("component_name") or cloned.get("name")
+        if isinstance(name, str) and name.strip():
+            final[key] = name.strip()
+    return final
 
 
 def reused_keys_for_components(components, conflict_policy="reuse"):
@@ -6344,6 +6444,19 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
     # integration_spec.pipeline BEFORE normalization (so a malformed stage cannot
     # leak the value through a pydantic ValidationError), and before any synthesis,
     # authority/collision lookup, plan echo, or mutation.
+    # THE SAME SCAN, AT THE OTHER INTAKE. `spec.runtime` is scanned on the typed
+    # route before any preview, error or echo; the RAW route reached the preview
+    # without it, so a secret-shaped runtime key rode back out in plan output
+    # while the identical spec through `authoring_request` was refused
+    # (architect evaluation 3, Critical). One scanner, both intakes, before
+    # normalization — which is where the raw route builds the echo from.
+    runtime_secret_err = _scan_raw_runtime_secrets(config)
+    if runtime_secret_err is not None:
+        return {
+            "_success": False,
+            "error_code": runtime_secret_err.error_code,
+            "error": str(runtime_secret_err),
+        }
     pipeline_secret_err = _scan_top_level_pipeline_secrets(config)
     if pipeline_secret_err is not None:
         return {

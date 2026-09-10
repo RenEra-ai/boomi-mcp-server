@@ -209,9 +209,22 @@ def test_a_presence_assertion_on_a_persistent_row_cannot_pass(cases):
 
 
 def test_every_case_discharges_cleanly(cases, derived):
+    """The REAL route, including the served rows the name check reads.
+
+    Passing them is what makes that check reachable at all: the normalized rows
+    the digest compares have had the name dropped by R3 on both sides.
+    """
+    from _issue_157_flows_accounting import derive_served_projection
+
     retirements = retirement_ids()
+    # OFFLINE, like every other replay here: the projection drives the real
+    # planning entry, and only the live metadata boundary is faked.
+    with patch(_PAGINATE, lambda *a, **k: []):
+        served = {case_id: derive_served_projection(case) for case_id, case in cases.items()}
     for case_id, case in cases.items():
-        report = discharge_case(case, derived[case_id], retirements)
+        report = discharge_case(
+            case, derived[case_id], retirements, served=served[case_id]
+        )
         assert report.ok, (case_id, report.problems)
         endpoint_report = discharge_endpoints(case, [], retirements)
         assert endpoint_report.ok, (case_id, endpoint_report.problems)

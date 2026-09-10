@@ -232,19 +232,36 @@ def _leaves_summary(index: Mapping[str, Mapping[str, Any]]) -> Dict[str, Any]:
     }
 
 
-def _db_schema_summary(index: Mapping[str, Mapping[str, Any]], config: Mapping[str, Any]) -> Dict[str, Any]:
+def _db_schema_summary(
+    index: Mapping[str, Mapping[str, Any]],
+    config: Mapping[str, Any],
+    from_selected_artifact: bool = False,
+) -> Dict[str, Any]:
+    """The DB field summary, taken from ONE authority.
+
+    ``from_selected_artifact`` says the index came from the account, and then
+    the candidate config is not consulted at all: reading the required flags off
+    it beside the artifact's own fields served a row whose two halves
+    contradicted each other — the same field `required: true` in one and
+    `required: false` in the other (architect evaluation 3, e3-03).
+    """
     fields = []
     declared = {}
-    for entry in mapping_entries(config.get("output_fields") or config.get("fields")):
-        if isinstance(entry, Mapping) and isinstance(entry.get("name"), str):
-            declared[entry["name"]] = entry
+    if not from_selected_artifact:
+        for entry in mapping_entries(config.get("output_fields") or config.get("fields")):
+            if isinstance(entry, Mapping) and isinstance(entry.get("name"), str):
+                declared[entry["name"]] = entry
     for name, record in index.items():
         source = declared.get(name, {})
         fields.append(
             {
                 "name": name,
                 "data_type": record.get("data_type") or "",
-                "required": bool(source.get("required", source.get("mandatory", False))),
+                "required": bool(
+                    record.get("required", False)
+                    if from_selected_artifact
+                    else source.get("required", source.get("mandatory", False))
+                ),
             }
         )
     return {"field_count": len(fields), "fields": fields}
@@ -254,6 +271,7 @@ def _selected_or_generated(
     component: Optional[IntegrationComponentSpec],
     key: str,
     selected: Mapping[str, Mapping[str, Any]],
+    final_names: Optional[Mapping[str, str]] = None,
 ) -> Optional[Dict[str, Any]]:
     """The SELECTED artifact's index when there is one, else the generator's.
 
@@ -291,7 +309,11 @@ def _selected_or_generated(
                 path for path, entry in served.items() if entry.get("mappable", True)
             ),
         }
-    return _generated_profile(component) if component is not None else None
+    return (
+        _generated_profile(component, (final_names or {}).get(key))
+        if component is not None
+        else None
+    )
 
 
 #: The profile families `GeneratedProfileSummaryV1` can carry, read FROM the
@@ -325,15 +347,22 @@ def _served_index_entries(index: Mapping[str, Any]) -> Dict[str, Dict[str, Any]]
     return projected
 
 
-def _generated_profile(component: IntegrationComponentSpec) -> Optional[Dict[str, Any]]:
-    """The surviving generator's artifact for an in-plan profile component."""
+def _generated_profile(
+    component: IntegrationComponentSpec, final_name: Optional[str] = None
+) -> Optional[Dict[str, Any]]:
+    """The surviving generator's artifact for an in-plan profile component.
+
+    ``final_name`` is the name apply will actually give it, which differs from
+    the authored one for a clone. Supplied by the caller from the apply-side
+    naming authority rather than derived here.
+    """
     from ..categories.components.builders.profile_generation import (
         profile_from_db_read_fields,
         profile_from_json_schema,
     )
 
     config = component.config or {}
-    name = component.name or config.get("component_name")
+    name = final_name or component.name or config.get("component_name")
     try:
         if component.type == "profile.json":
             root = config.get("root")
@@ -430,6 +459,7 @@ def derive_transform_flows(
     connector_metadata: Optional[Mapping[str, Tuple[Optional[str], Optional[str]]]] = None,
     selected_artifacts: Optional[Mapping[str, Mapping[str, Any]]] = None,
     reused_keys: Optional[Any] = None,
+    final_names: Optional[Mapping[str, str]] = None,
 ) -> Tuple[DerivedTransformFlowV1, ...]:
     """One typed row per ``map_ref`` node, per root, in key order.
 
@@ -470,10 +500,14 @@ def derive_transform_flows(
             source_component = by_key.get(source_key)
             target_component = by_key.get(target_key)
             source_gen = (
-                None if opaque else _selected_or_generated(source_component, source_key, selected)
+                None
+                if opaque
+                else _selected_or_generated(source_component, source_key, selected, final_names)
             )
             target_gen = (
-                None if opaque else _selected_or_generated(target_component, target_key, selected)
+                None
+                if opaque
+                else _selected_or_generated(target_component, target_key, selected, final_names)
             )
 
             # the feeding step: the nearest preceding connector node
@@ -509,7 +543,9 @@ def derive_transform_flows(
 
             if source_gen is not None and source_gen["component_type"] == "profile.db":
                 source_schema: Dict[str, Any] = _db_schema_summary(
-                    source_gen["field_index_by_path"], source_component.config or {}
+                    source_gen["field_index_by_path"],
+                    source_component.config or {} if source_component is not None else {},
+                    from_selected_artifact=source_gen.get("evidence_source") == "selected_artifact",
                 )
             elif source_gen is not None:
                 source_schema = _leaves_summary(source_gen["field_index_by_path"])

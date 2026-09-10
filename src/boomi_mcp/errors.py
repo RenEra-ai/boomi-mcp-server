@@ -2400,8 +2400,11 @@ ERROR_TAXONOMY: Dict[str, ErrorCodeSpec] = {
             retryable=False,
             summary=(
                 "A retired legacy metadata spelling was authored on the typed "
-                "surface; it never affected an emitted byte, fingerprint, "
-                "mutation or verdict and is refused rather than ignored."
+                "surface; it was MEASURED on the legacy chain to move no "
+                "emitted component byte, no ordered create trace, no plan "
+                "verdict and no mutation, and is refused rather than ignored. "
+                "The claim is the measurement's own scope: the legacy spec echo "
+                "is hashed whole and does carry the spelling."
             ),
             owner="#157",
         ),

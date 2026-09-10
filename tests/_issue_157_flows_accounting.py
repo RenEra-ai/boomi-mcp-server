@@ -588,15 +588,54 @@ def verify_manifest() -> List[str]:
 
 
 def retirement_ids() -> Dict[str, Dict[str, Any]]:
+    """Every retirement record, keyed by id, with its own fields.
+
+    The INDEX carries a summary; the applicability checks need the record's
+    `classification` and the PRODUCER it was measured on, and reading them from
+    the record itself is what makes them checkable at all — the index alone
+    could only say the id exists, which is exactly the check that let an
+    unrelated record retire a row.
+    """
     index_path = RETIREMENTS_DIR / "INDEX.json"
     if not index_path.is_file():
         return {}
-    return json.loads(index_path.read_text(encoding="utf-8"))
+    index = json.loads(index_path.read_text(encoding="utf-8"))
+    merged = {}
+    for record_id, summary in index.items():
+        record_path = RETIREMENTS_DIR / (record_id + ".json")
+        record = json.loads(record_path.read_text(encoding="utf-8")) if record_path.is_file() else {}
+        merged[record_id] = dict(summary, **{
+            key: record[key]
+            for key in ("classification", "field_path", "producer")
+            if key in record
+        })
+    return merged
 
 
 # ---------------------------------------------------------------------------
 # derive + discharge
 # ---------------------------------------------------------------------------
+
+
+def derive_served_projection(case: Case) -> List[Dict[str, Any]]:
+    """The case's SERVED rows, un-normalized. The name check reads these.
+
+    `derive_case_projection` normalizes for the digest comparison, and R3 drops
+    the profile name there by design — so the name has to be read from what the
+    caller actually receives, or nothing checks it at all.
+    """
+    from unittest.mock import MagicMock
+
+    from boomi_mcp.authoring.workflow import plan_authoring_request_v1
+    from boomi_mcp.models.authoring_workflow import AuthoringRequestV1
+
+    if case.input_canonical is None:
+        return []
+    request = AuthoringRequestV1.model_validate(case.input_canonical)
+    result, _internals = plan_authoring_request_v1(
+        request, boomi_client=MagicMock(), profile="issue-157-replay"
+    )
+    return [row.model_dump(mode="json", exclude_unset=True) for row in result.integration_spec_preview.flows]
 
 
 def derive_case_projection(case: Case) -> List[Dict[str, Any]]:
@@ -640,13 +679,21 @@ class DischargeReport:
         return not self.problems
 
 
-def _retirement_problem(row_label, record_id, retirements, field_path=None):
-    """Is this row's cited retirement record one that RETIRES anything, and this?
+def _retirement_problem(row_label, record_id, retirements, field_path=None, producer=None):
+    """Is this row's cited retirement record one that RETIRES anything, and THIS?
 
     The status used to be believed on the strength of the id existing. A frozen
     row could therefore cite a record classified RETAIN or SPLIT — neither of
-    which retires the row — or a record about an entirely unrelated field, and
-    the accounting reported it retired (architect evaluation 2, finding 4).
+    which retires the row — or a record measured on an entirely unrelated
+    producer, and the accounting reported it retired (architect evaluations 2
+    and 3).
+
+    ``producer`` is the applicability check the DATA actually supports for a
+    flow or endpoint row: a row has no field pointer, but it belongs to a case,
+    and a retirement record names the producer it was measured on. Requiring
+    them to agree is what stops an API send row from citing a record measured on
+    the database producer. ``field_path`` remains available for a caller that
+    does have one.
     """
     record = retirements.get(record_id)
     if record is None:
@@ -660,38 +707,58 @@ def _retirement_problem(row_label, record_id, retirements, field_path=None):
         return "{0} cites {1}, whose measured field {2!r} is not this row's {3!r}".format(
             row_label, record_id, record.get("field_path"), field_path
         )
+    if producer is not None:
+        measured = str(record.get("producer") or "")
+        if not measured or producer.split("/")[0] not in measured:
+            return "{0} cites {1}, measured on {2!r}, which is not this row's producer {3!r}".format(
+                row_label, record_id, record.get("producer"), producer
+            )
     return None
 
 
-def _profile_name_problems(expected, derived):
-    """Names must AGREE where both sides carry one.
+def _profile_name_problems(case, served_rows):
+    """Every served profile name must be one the case's own request authors.
 
-    R3 drops `*_profile_generation.component_name` from the comparison because
+    R3 drops `*_profile_generation.component_name` from the COMPARISON, because
     two legacy producers spell it differently — one passes None, the other a
-    derived default. That reconciliation is between PRODUCERS; each replay here
-    compares a case against its own baseline, where a wrong name is a wrong name.
-    Dropping it unconditionally let an unrelated profile name be accepted.
+    derived default — and the frozen payloads therefore carry no name to compare
+    against. So the check is not a comparison: the SERVED rows are read
+    un-normalized, and each name they carry has to be a name the canonical
+    request actually authors. An unrelated profile name is then caught by the
+    real replay, which is what the earlier version could not do — it compared a
+    field both sides had already dropped (architect evaluation 3, e3-05).
     """
+    authored = set()
+    for component in ((case.input_canonical or {}).get("intent") or {}).get("components") or ():
+        if not isinstance(component, dict):
+            continue
+        for candidate in (component.get("name"), (component.get("config") or {}).get("component_name")):
+            if isinstance(candidate, str) and candidate.strip():
+                authored.add(candidate.strip())
     problems = []
-    for index, (frozen, actual) in enumerate(zip(expected, derived)):
+    for index, row in enumerate(served_rows):
         for side in ("source_profile_generation", "target_profile_generation"):
-            a = (frozen.get("payload") or {}).get(side)
-            b = actual.get(side)
-            if not (isinstance(a, dict) and isinstance(b, dict)):
+            summary = row.get(side)
+            if not isinstance(summary, dict):
                 continue
-            want, got = a.get("component_name"), b.get("component_name")
-            if want is None or got is None:
+            name = summary.get("component_name")
+            if name is None:
                 continue
-            if want != got:
+            if name not in authored:
                 problems.append(
-                    "row {0} {1} names {2!r}; the derived projection names {3!r}".format(
-                        frozen.get("ordinal", index), side, want, got
+                    "served row {0} {1} names {2!r}, which this case authors nowhere".format(
+                        index, side, name
                     )
                 )
     return problems
 
 
-def discharge_case(case: Case, derived: Sequence[Mapping[str, Any]], retirements: Mapping[str, Any]) -> DischargeReport:
+def discharge_case(
+    case: Case,
+    derived: Sequence[Mapping[str, Any]],
+    retirements: Mapping[str, Any],
+    served: Optional[Sequence[Mapping[str, Any]]] = None,
+) -> DischargeReport:
     """Two-sided, ordered accounting of one case's flows sequence."""
     report = DischargeReport()
     statuses = case.discharges.get("flows") or {}
@@ -709,7 +776,10 @@ def discharge_case(case: Case, derived: Sequence[Mapping[str, Any]], retirements
         elif status.startswith(RETIRED_PREFIX):
             report.retired += 1
             problem = _retirement_problem(
-                "row {0}".format(row["ordinal"]), status[len(RETIRED_PREFIX):], retirements
+                "row {0}".format(row["ordinal"]),
+                status[len(RETIRED_PREFIX):],
+                retirements,
+                producer=case.producer,
             )
             if problem:
                 report.problems.append(problem)
@@ -730,8 +800,9 @@ def discharge_case(case: Case, derived: Sequence[Mapping[str, Any]], retirements
         if _digest(row["payload"]) != row["payload_sha256"]:
             report.problems.append("frozen row {0} payload does not match its own digest".format(row["ordinal"]))
 
-    # side 1b: the names R3 removes from the DIGEST are compared here instead
-    report.problems.extend(_profile_name_problems(expected, derived))
+    # side 1b: the names R3 removes from the DIGEST are checked here instead,
+    # against the SERVED rows, since the frozen payloads carry none
+    report.problems.extend(_profile_name_problems(case, served if served is not None else ()))
 
     # side 2: the derived sequence EQUALS the discharged sequence, in order
     expected_digests = [row["payload_sha256"] for row in expected]
@@ -775,7 +846,10 @@ def discharge_endpoints(case: Case, derived: Sequence[Mapping[str, Any]], retire
         elif status.startswith(RETIRED_PREFIX):
             report.retired += 1
             problem = _retirement_problem(
-                "endpoint row {0}".format(row["ordinal"]), status[len(RETIRED_PREFIX):], retirements
+                "endpoint row {0}".format(row["ordinal"]),
+                status[len(RETIRED_PREFIX):],
+                retirements,
+                producer=case.producer,
             )
             if problem:
                 report.problems.append(problem)

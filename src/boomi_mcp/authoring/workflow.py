@@ -1013,7 +1013,10 @@ def _lift_recipe_roots_into_units(components, roots, envelopes=None):
 
 
 def build_integration_spec_preview(
-    normalized: _NormalizedIntent, selected_artifacts: Any = None, reused_keys: Any = None
+    normalized: _NormalizedIntent,
+    selected_artifacts: Any = None,
+    reused_keys: Any = None,
+    final_names: Any = None,
 ) -> IntegrationSpecV1:
     """The ComponentPlan preview — explicitly an ``IntegrationSpecV1``.
 
@@ -1059,6 +1062,7 @@ def build_integration_spec_preview(
         _withhold_process_roots(normalized.integration_spec),
         selected_artifacts=selected_artifacts,
         reused_keys=reused_keys,
+        final_names=final_names,
     )
 
 
@@ -1076,6 +1080,7 @@ def _as_served_preview(
     spec: IntegrationSpecV1,
     selected_artifacts: Any = None,
     reused_keys: Any = None,
+    final_names: Any = None,
 ):
     """The served preview SHAPE for this intent (#157).
 
@@ -1094,6 +1099,7 @@ def _as_served_preview(
         connector_metadata=normalized.connector_metadata,
         selected_artifacts=selected_artifacts,
         reused_keys=reused_keys,
+        final_names=final_names,
     )
     payload = spec.model_dump(mode="json", exclude={"flows"})
     payload.pop("preview_kind", None)
@@ -1543,7 +1549,13 @@ def _literal_profile_indexes(boomi_client: Any, normalized: Any):
         from ..categories.integration_builder import _resolve_literal_profile_indexes
 
         return _resolve_literal_profile_indexes(
-            boomi_client, normalized.integration_spec
+            boomi_client,
+            normalized.integration_spec,
+            extra_profile_refs=tuple(
+                getattr(record.declaration, "source_profile_ref", None)
+                for record in (getattr(normalized, "recorded_intents", ()) or ())
+                if getattr(record, "intent_id", None) == "watermark"
+            ),
         ) or None
     except Exception:  # noqa: BLE001 - discovery is best effort; absence defers
         return None
@@ -1555,7 +1567,7 @@ def _validate_processes(
     conflict_policy: str = "reuse",
     literal_indexes: Any = None,
     boomi_client: Any = None,
-) -> Tuple[ValidationReportSummaryV1, Tuple[AuthoringDiagnosticV1, ...], Any, Any, Any, Any, Any]:
+) -> Tuple[ValidationReportSummaryV1, Tuple[AuthoringDiagnosticV1, ...], Any, Any, Any, Any, Any, Any]:
     """Run the unified #143 semantic validator over every authored process.
 
     Uses ``validate_process_ir``, which REPORTS and does not raise on a bad
@@ -1877,6 +1889,7 @@ def _validate_processes(
     # also re-ran the live selected-artifact discovery once per map, for an
     # answer that cannot change within a request.
     reused_keys = _reused_component_keys(boomi_client, normalized, conflict_policy)
+    final_names = _final_component_names(boomi_client, normalized, conflict_policy)
     selected_artifacts = _selected_profile_artifacts(
         boomi_client, normalized, conflict_policy, reused_keys
     )
@@ -1979,7 +1992,8 @@ def _validate_processes(
         codes=tuple(sorted(set(codes))),
     )
     return (summary, tuple(diagnostics), symbols,
-            resolution.capabilities_by_root, snapshot, selected_artifacts, reused_keys)
+            resolution.capabilities_by_root, snapshot, selected_artifacts, reused_keys,
+            final_names)
 
 
 def _required_target_coverage_error(
@@ -2072,6 +2086,30 @@ def _preview_or_named_refusal():
                 for location in (locations or ["<unknown>"])
             ),
         ) from None
+
+
+def _final_component_names(boomi_client: Any, normalized: Any, conflict_policy):
+    """What apply will NAME each component, where that differs from the request.
+
+    Asked of the apply-side naming authority, restricted to the profile keys the
+    projection describes so it costs no reads the projection does not need.
+    """
+    spec = normalized.integration_spec
+    keys = {
+        component.key
+        for component in spec.components
+        if str(getattr(component, "type", "") or "").startswith("profile.")
+    }
+    if not keys or str(conflict_policy or "reuse") != "clone":
+        return {}
+    try:
+        from ..categories.integration_builder import resolve_final_component_names
+
+        return resolve_final_component_names(
+            boomi_client, spec, conflict_policy, keys=keys
+        )
+    except Exception:  # noqa: BLE001 - an unanswered name is the authored one
+        return {}
 
 
 def _index_projection(artifacts):
@@ -2425,6 +2463,7 @@ def plan_authoring_request_v1(
         resolution_snapshot,
         _artifacts_for_preview,
         _reused_for_preview,
+        _names_for_preview,
     ) = _validate_processes(
         normalized,
         request.effect_declarations,

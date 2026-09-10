@@ -1278,29 +1278,52 @@ def test_the_projection_serves_no_content_for_a_map_it_will_not_write():
 # ---------------------------------------------------------------------------
 
 
-def test_a_wrong_profile_name_is_caught_even_though_the_digest_ignores_it():
-    """R3 reconciles two PRODUCERS; it is not a licence to accept any name.
+def test_a_wrong_profile_name_is_caught_through_the_real_discharge_route():
+    """Through `discharge_case` itself, not through a helper with a hand-built row.
 
-    Each replay compares a case against its own baseline, so the name is
-    checked beside the digest instead of being dropped from both.
+    The digest comparison cannot see the name — R3 drops it on both sides — so
+    the check reads the SERVED rows, and the mutation has to survive the real
+    replay to prove anything. The earlier witness fed the helper a payload the
+    real route never produces, which is why it passed while the route did not.
     """
-    from _issue_157_flows_accounting import _profile_name_problems
-    from boomi_mcp.authoring.derived_flows import normalize_flow_row
+    from unittest.mock import patch as _patch
 
-    frozen = {"ordinal": 3, "payload": {
-        "key": "transform",
-        "source_profile_generation": {"component_name": "Real Source", "mappable_paths": ["a"]},
-    }}
-    same = {"key": "transform", "source_profile_generation": {"component_name": "Real Source", "mappable_paths": ["a"]}}
-    wrong = {"key": "transform", "source_profile_generation": {"component_name": "UNRELATED WRONG PROFILE NAME", "mappable_paths": ["a"]}}
+    from _issue_157_flows_accounting import (
+        derive_case_projection,
+        derive_served_projection,
+        discharge_case,
+        load_cases,
+        retirement_ids,
+    )
 
-    assert _profile_name_problems([frozen], [same]) == []
-    problems = _profile_name_problems([frozen], [wrong])
-    assert problems and "UNRELATED WRONG PROFILE NAME" in problems[0]
-    # the digest genuinely does not see it, which is why the check has to exist
-    assert normalize_flow_row(same) == normalize_flow_row(wrong)
-    # and a side that carries no name on one half is still reconciled, not failed
-    assert _profile_name_problems([frozen], [{"key": "t", "source_profile_generation": {"mappable_paths": ["a"]}}]) == []
+    named = None
+    with _patch(_PAGINATE, lambda *a, **k: []):
+        for case in load_cases().values():
+            if case.input_canonical is None:
+                continue
+            served = derive_served_projection(case)
+            if any(
+                isinstance(row.get(side), dict) and row[side].get("component_name")
+                for row in served
+                for side in ("source_profile_generation", "target_profile_generation")
+            ):
+                named = (case, derive_case_projection(case), served)
+                break
+    assert named, "no case serves a generated-profile name, so this would prove nothing"
+    case, derived, served = named
+    retirements = retirement_ids()
+    assert discharge_case(case, derived, retirements, served=served).ok
+
+    wrong = copy.deepcopy(served)
+    replaced = 0
+    for row in wrong:
+        for side in ("source_profile_generation", "target_profile_generation"):
+            if isinstance(row.get(side), dict) and row[side].get("component_name"):
+                row[side]["component_name"] = "UNRELATED WRONG PROFILE NAME"
+                replaced += 1
+    assert replaced
+    report = discharge_case(case, derived, retirements, served=wrong)
+    assert not report.ok and any("UNRELATED WRONG PROFILE NAME" in p for p in report.problems)
 
 
 @pytest.mark.parametrize(
@@ -1319,6 +1342,11 @@ def test_a_retired_row_must_cite_a_record_that_retires_this_field(record, expect
 
     retirements = {"RET-157-99": record} if record is not None else {}
     problem = _retirement_problem("row 1", "RET-157-99", retirements, field_path="a/b")
+    if expected is None:
+        assert problem is None
+    else:
+        assert problem is not None and expected in problem
+    return
     if expected is None:
         assert problem is None
     else:
@@ -1456,11 +1484,24 @@ def test_a_watermark_over_a_profile_this_request_writes_is_always_decided():
         result, _ = plan_authoring_request_v1(request, boomi_client=MagicMock(), profile=_PROFILE)
     hits = [d for d in result.errors if d.code == GOVERNANCE_WATERMARK_INCONSISTENT]
     assert hits and hits[0].path.endswith("/watermark/field"), [d.path for d in result.errors]
-    # and a LITERAL id with no supplied index is still genuinely owed, so it defers
+    # a LITERAL id is DISCOVERED by this pass, so an undiscoverable one is
+    # refused rather than deferred to nobody (architect evaluation 3, e3-04)
     literal = _watermark_over("11111111-1111-1111-1111-111111111111", [])
     with patch(_PAGINATE, lambda *a, **k: []):
-        deferred, _ = plan_authoring_request_v1(literal, boomi_client=MagicMock(), profile=_PROFILE)
-    assert all(d.code != GOVERNANCE_WATERMARK_INCONSISTENT for d in deferred.errors)
+        unresolved, _ = plan_authoring_request_v1(literal, boomi_client=MagicMock(), profile=_PROFILE)
+    assert [d for d in unresolved.errors if d.code == GOVERNANCE_WATERMARK_INCONSISTENT]
+    # and a literal whose index the account DOES supply is decided on its fields
+    from boomi_mcp.categories import integration_builder
+
+    with patch(_PAGINATE, lambda *a, **k: []), patch.object(
+        integration_builder, "_discover_profile_index",
+        lambda client, uuid: {"profile_component_type": "profile.db",
+                              "field_index_by_path": _index(("updated_at",))},
+    ):
+        decided, _ = plan_authoring_request_v1(literal, boomi_client=MagicMock(), profile=_PROFILE)
+    assert all(d.code != GOVERNANCE_WATERMARK_INCONSISTENT for d in decided.errors), [
+        (d.code, d.path) for d in decided.errors
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -1712,3 +1753,168 @@ def test_the_advisory_route_will_not_index_a_reused_profile_from_its_candidate()
         "validate_unmapped", {"integration_spec": {"name": "x", "components": comps}}
     )
     assert "PROFILE_INDEX_UNAVAILABLE" not in str(written), written
+
+
+def test_a_retired_row_must_cite_a_record_measured_on_its_own_producer():
+    """The applicability check the DATA supports, supplied by the REAL callers.
+
+    A flow row has no field pointer, but it belongs to a case, and a retirement
+    record names the producer it was measured on. Without that, an API send row
+    could be "retired" by a record measured on the database producer — and the
+    earlier check never ran at all, because neither caller passed anything.
+    """
+    from _issue_157_flows_accounting import _retirement_problem, load_cases, retirement_ids
+
+    retirements = retirement_ids()
+    record_id = sorted(k for k, v in retirements.items() if v.get("classification") == "RETIRE")[0]
+    measured = retirements[record_id]["producer"]
+    assert "database_to_api_sync" in measured, measured
+
+    assert _retirement_problem("row 1", record_id, retirements, producer="database_to_api_sync/x") is None
+    problem = _retirement_problem("row 1", record_id, retirements, producer="api_to_api_sync/x")
+    assert problem is not None and "not this row's producer" in problem
+
+    # and the REAL callers supply it: every case's producer is what discharge passes
+    for case in load_cases().values():
+        assert case.producer and isinstance(case.producer, str)
+        break
+
+
+# ---------------------------------------------------------------------------
+# architect evaluation 3 — the last batch
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("form", ["integration_spec", "source_description", "bare"])
+def test_the_raw_route_scans_its_runtime_block_for_secrets(form):
+    """Plan item 4 scans `spec.runtime` before any preview, error or echo.
+
+    It was scanned on the TYPED intake only, so the identical spec through the
+    raw route returned the secret-shaped key and its value in the plan preview.
+    """
+    from _m12_11_support import APPLIABLE_CONN
+    from boomi_mcp.categories.integration_builder import build_integration_action
+    from boomi_mcp.authoring.governance import PLAINTEXT_SECRET_REJECTED
+
+    runtime = {"password_zq9": "canary-157-runtime"}
+    body = {"name": "x", "components": [APPLIABLE_CONN], "runtime": runtime}
+    config = {form: body} if form != "bare" else dict(body)
+    with patch(_PAGINATE, lambda *a, **k: []):
+        result = build_integration_action(MagicMock(), _PROFILE, "plan", config)
+    assert result.get("_success") is False
+    assert result.get("error_code") == PLAINTEXT_SECRET_REJECTED, result
+    assert "canary-157-runtime" not in repr(result)
+    assert "password_zq9" not in repr(result)
+    # the adversarial half: the same spec with a clean runtime plans
+    clean = {form: dict(body, runtime={"atom_name": "local"})} if form != "bare" else dict(body, runtime={"atom_name": "local"})
+    with patch(_PAGINATE, lambda *a, **k: []):
+        ok = build_integration_action(MagicMock(), _PROFILE, "plan", clean)
+    assert ok.get("error_code") != PLAINTEXT_SECRET_REJECTED
+
+
+def test_a_known_reused_key_keeps_its_sentinel_when_the_binding_lookup_fails():
+    """A second binding lookup that fails must not turn a reused profile candidate."""
+    from boomi_mcp.categories import integration_builder
+    from boomi_mcp.categories.integration_builder import resolve_selected_profile_artifacts
+    from boomi_mcp.models.integration_models import IntegrationComponentSpec
+    from boomi_mcp.models.integration_models import IntegrationSpecV1
+
+    profile = IntegrationComponentSpec(
+        key="tgt", type="profile.json", action="create", name="Existing Target",
+        config={"reference_only": True},
+    )
+    spec = IntegrationSpecV1(name="x", components=[profile])
+
+    def _explodes(client, comp, **kwargs):
+        raise RuntimeError("metadata read failed")
+
+    with patch.object(integration_builder, "resolve_planner_binding", _explodes):
+        artifacts = resolve_selected_profile_artifacts(
+            MagicMock(), spec, reused_keys={"tgt"}, conflict_policy="reuse"
+        )
+    # PRESENT with no artifact, which the map resolver reads as "reused and
+    # unavailable" — absence would have meant "index the candidate"
+    assert artifacts == {"tgt": None}
+
+
+def test_the_db_summary_of_a_selected_artifact_never_reads_the_candidate():
+    """Two halves of one row contradicted each other on the same field."""
+    from boomi_mcp.authoring.derived_flows import _db_schema_summary
+
+    index = {"source_field_a": {"data_type": "character", "required": True}}
+    candidate = {"output_fields": [{"name": "source_field_a", "data_type": "character", "mandatory": False}]}
+    selected = _db_schema_summary(index, candidate, from_selected_artifact=True)
+    generated = _db_schema_summary(index, candidate, from_selected_artifact=False)
+    assert selected["fields"][0]["required"] is True
+    assert generated["fields"][0]["required"] is False
+
+
+def test_the_projection_reports_the_name_apply_will_actually_give_a_clone():
+    """Under `clone` the preview reported the authored name; apply appends a suffix."""
+    from boomi_mcp.categories import integration_builder
+    from boomi_mcp.categories.integration_builder import resolve_final_component_names
+    from boomi_mcp.models.integration_models import IntegrationComponentSpec, IntegrationSpecV1
+
+    profile = IntegrationComponentSpec(
+        key="tgt", type="profile.json", action="create", name="Existing Target",
+        config={"format": "json", "root": copy.deepcopy(_TGT_ROOT)},
+    )
+    spec = IntegrationSpecV1(name="x", components=[profile])
+    with _account_holding("Existing Target"):
+        cloned = resolve_final_component_names(MagicMock(), spec, "clone")
+        reused = resolve_final_component_names(MagicMock(), spec, "reuse")
+    assert cloned == {"tgt": "Existing Target-clone"}, cloned
+    assert reused == {}, reused
+    # and the projection uses it
+    from boomi_mcp.authoring.derived_flows import _generated_profile
+
+    assert _generated_profile(profile)["component_name"] == "Existing Target"
+    assert _generated_profile(profile, "Existing Target-clone")["component_name"] == "Existing Target-clone"
+
+
+def test_the_recipe_route_defers_a_declared_reuse_it_cannot_resolve():
+    """It touches no account, so a name-only binding is deferred, not judged."""
+    from boomi_mcp.recipes import run_recipes
+    from test_issue_157_required_target_coverage import _coverage_registry, _recipe_request
+
+    comps = copy.deepcopy(_components())  # the target profile needs `Root/must`
+    entry = next(c for c in comps if c["key"] == _MAP_KEY)
+    entry["config"]["reference_only"] = True
+    entry["name"] = "Reused Map"          # named only: no id for this layer to bind
+    entry.pop("component_id", None)
+
+    registry, catalog, _ = _coverage_registry(comps)
+    run_recipes(_recipe_request(), catalog=catalog, registry=registry)  # must not raise
+    # and the direct route agrees when the account resolves that name
+    with _account_holding("Reused Map"):
+        direct, _ = plan_authoring_request_v1(
+            _request(comps), boomi_client=MagicMock(), profile=_PROFILE
+        )
+    assert not [d for d in direct.errors if TRANSFORM_REVIEW_REQUIRED_TARGET_UNMAPPED in d.cause_codes]
+
+
+def test_the_retirement_refusal_claims_only_what_was_measured():
+    """The served text names the axes the records measured — and the one it does not.
+
+    "never affected a fingerprint" is wider than the evidence: the records
+    establish non-applicability of canonical execution/materialization
+    fingerprints and acknowledge that the legacy spec echo is hashed whole and
+    carries the spelling.
+    """
+    from boomi_mcp.errors import ERROR_TAXONOMY, GOVERNANCE_RETIRED_SPELLING
+    from boomi_mcp.models import governance_intent
+    from boomi_mcp.models.governance_intent import reject_retired_spellings
+
+    served = [ERROR_TAXONOMY[GOVERNANCE_RETIRED_SPELLING].summary, governance_intent.__doc__]
+    try:
+        reject_retired_spellings({"jdbc_options": 1}, path="/x")
+    except Exception as exc:  # noqa: BLE001 - the refusal's own served text
+        served.append(str(exc))
+    else:
+        raise AssertionError("the retired spelling was not refused")
+
+    for text in served:
+        assert "never affected" not in text, text
+        assert "no ordered create trace" in text or "ordered create trace" in text, text
+    # and the boundary is stated where a caller can read it
+    assert any("hashed whole" in text for text in served)

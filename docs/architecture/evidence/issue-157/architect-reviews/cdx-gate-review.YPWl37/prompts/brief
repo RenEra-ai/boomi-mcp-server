@@ -1,0 +1,64 @@
+Review this implementation against the architect design plan appended verbatim below.
+
+Repository: /Users/gleb/Documents/Projects/Renera/boomi-mcp-server, branch `codex/issue-157`.
+Baseline: ba1be9f34317d720d3b012484622ab7e2742143b. Implementation HEAD:
+`362414d3a8575f0adb7a66ae9c6845e84a4d63dd`. The delta touches 307 files; read
+`git diff ba1be9f34317d720d3b012484622ab7e2742143b..HEAD` for it.
+
+Your question is NOT "is this code good" — a separate Codex commit review has now run TWELVE rounds
+against this tree and closed clean twice. Your question is whether the IMPLEMENTATION REALIZES THE
+PLAN: which plan items are fully implemented, which are partially implemented, which are missing,
+and which were implemented differently from what the plan specified.
+
+**This is the THIRD and FINAL architect evaluation.** The repository caps this loop at three
+(`docs/architecture/COMPLETION_WORKFLOW_RULES.md`): on the third evaluation the loop ENDS — the
+implementation applies this round's batched correction, runs the Stage-2 commit review over that
+correction delta until it returns CLEAN, and closes on that. So please be exhaustive about what is
+NOT yet true, and explicit about which of your findings are blocking. There is no fourth evaluation
+to catch what you leave out.
+
+What the two earlier evaluations established, so you can spend your effort on what is still open:
+
+- **Evaluation 1** (`cdx-gate-review.sP9bAv`, archived) returned seven findings, ARCH-157-e1-01..07.
+- **Evaluation 2** (`cdx-gate-review.VsHZ3l`, archived) judged three of those CLOSED (e1-03 the
+  connection identity contract, e1-05 the named `flows` refusal, e1-07 the validator consolidation
+  and its six-route sentinel) and four PARTIAL, and raised five new findings ARCH-157-e2-01..05.
+- All five, plus fourteen findings from live QA rounds 12 and 13 and eight from commit-review rounds
+  9 through 11, are corrected on this tree. Every correction carries a witness that was hand-run
+  against a mutant removing exactly the correction it guards.
+
+**Your first job is to judge whether ARCH-157-e1-01, -02, -04 and -06 and ARCH-157-e2-01..05 are
+actually closed ON THIS TREE**, with the code that closes them — not whether they were answered in
+prose. The audit ledger at `docs/architecture/ISSUE_157_AUDIT_LEDGER.md` records every finding with
+its disposition, its defect class, and the second-instance structural answers; read its "Plan
+corrections" (P1-P9), "Design decisions" (D1-D19), "Shipped contracts this slice builds on"
+(the consolidation plan item 1 asked for, added after evaluation 2 reported it missing), the
+findings table and the second-instance check. A deviation that record justifies is not
+automatically acceptable — say so if the justification does not hold.
+
+Facts you will need:
+- The one settled platform fact: this platform IGNORES `folderName` and `folderFullPath` on create.
+  A component is placed only by a `folderId` injected at one boundary, `with_folder_id` inside
+  `_create_component_raw`. Exactly one create route bypasses it — the trading-partner create, which
+  posts a typed model carrying a folder NAME and declares that limit itself.
+- The recurring defect class of this slice is a site that re-derives a decision whose authority is
+  one function. It reached EIGHT instances and took its structural fix: `resolve_planner_binding` is
+  the single resolution of which existing component a spec entry binds to, `resolve_reused_keys`
+  composes it with `_will_reuse_at_apply`, and every pre-write consumer is handed that one answer.
+- A reused profile's key is always PRESENT in the selected-artifact map, with `None` meaning "reused
+  and unreadable"; absence means "not reused, index the candidate". That distinction is what stops
+  the candidate config from standing in for an account artifact.
+
+Please cover in particular:
+1. Whether ARCH-157-e1-01, -02, -04, -06 and ARCH-157-e2-01..05 are closed on this tree.
+2. Each numbered in-scope plan item: implemented, partial, missing, or implemented otherwise.
+3. Whether the governance surface is on the typed per-root envelope only and never on ProcessIRV1.
+4. Whether the derived-flows projection is genuinely derived and output-only, and whether it now
+   describes only artifacts this request will bind.
+5. Whether the retirements carry the mutation proofs the plan asks for, including the
+   fingerprint-applicability disposition added after evaluation 2.
+6. Whether the one required-target-leaf validator replaced the six legacy sites and is reached by
+   every entry point.
+7. Anything the plan asked for that you cannot find evidence of.
+
+END with a verdict on its OWN FINAL line: exactly 'VERDICT: NO ISSUES' or 'VERDICT: ISSUES FOUND'.

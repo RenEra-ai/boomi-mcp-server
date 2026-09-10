@@ -13,8 +13,10 @@ semantic process graph and nothing else (ADR-001; #153 kept that boundary and
   mutation payload, and a paired test pins that only the served record moves.
 
 * **Retired legacy spellings.** The M12 triage (plan §4) retires the inert
-  legacy metadata spellings — the ones that never affected an emitted byte, a
-  fingerprint, a mutation or a validation verdict on the legacy chain. Each
+  legacy metadata spellings — the ones MEASURED to move no emitted component
+  byte, no ordered create trace, no plan verdict and no mutation on the legacy
+  chain. That is the measurement's own scope: the legacy spec echo is hashed
+  whole and does carry the spelling. Each
   retirement is proven by a frozen baseline pair under
   ``tests/fixtures/governance/issue_157/retirements/`` and then REFUSED on the
   typed surface with a named diagnostic, rather than silently accepted and
@@ -242,9 +244,10 @@ def reject_retired_spellings(value: Any, *, path: str = "") -> None:
     if found:
         raise PydanticCustomError(
             "governance_retired_spelling",
-            "retired legacy metadata spelling at {path}; it never affected an "
-            "emitted byte, a fingerprint, a mutation or a validation verdict, "
-            "and the typed surface refuses it rather than ignoring it",
+            "retired legacy metadata spelling at {path}; it was measured on the "
+            "legacy chain to move no emitted component byte, no ordered create "
+            "trace, no plan verdict and no mutation, and the typed surface "
+            "refuses it rather than ignoring it",
             {"path": found[0][0]},
         )
 
