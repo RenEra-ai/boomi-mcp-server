@@ -42,7 +42,12 @@ import re as _re
 from dataclasses import dataclass, field, replace
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
+from contextlib import contextmanager
+
+from pydantic import ValidationError
+
 from ..errors import (
+    GOVERNANCE_PREVIEW_UNREPRESENTABLE,
     AUTHORING_APPLY_VALIDATION_REQUIRED,
     AUTHORING_CAPABILITY_REVISION_MISMATCH,
     AUTHORING_COMPILE_BLOCKED,
@@ -1008,7 +1013,7 @@ def _lift_recipe_roots_into_units(components, roots, envelopes=None):
 
 
 def build_integration_spec_preview(
-    normalized: _NormalizedIntent, selected_indexes: Any = None, reused_keys: Any = None
+    normalized: _NormalizedIntent, selected_artifacts: Any = None, reused_keys: Any = None
 ) -> IntegrationSpecV1:
     """The ComponentPlan preview — explicitly an ``IntegrationSpecV1``.
 
@@ -1052,7 +1057,7 @@ def build_integration_spec_preview(
     return _as_served_preview(
         normalized,
         _withhold_process_roots(normalized.integration_spec),
-        selected_indexes=selected_indexes,
+        selected_artifacts=selected_artifacts,
         reused_keys=reused_keys,
     )
 
@@ -1069,7 +1074,7 @@ _COMPILING_INTENT_KINDS = tuple(
 def _as_served_preview(
     normalized: _NormalizedIntent,
     spec: IntegrationSpecV1,
-    selected_indexes: Any = None,
+    selected_artifacts: Any = None,
     reused_keys: Any = None,
 ):
     """The served preview SHAPE for this intent (#157).
@@ -1087,7 +1092,7 @@ def _as_served_preview(
         normalized.integration_spec.processes,
         normalized.integration_spec.components,
         connector_metadata=normalized.connector_metadata,
-        selected_indexes=selected_indexes,
+        selected_artifacts=selected_artifacts,
         reused_keys=reused_keys,
     )
     payload = spec.model_dump(mode="json", exclude={"flows"})
@@ -1600,6 +1605,19 @@ def _validate_processes(
         _declared_live = live_readings_for_declared_components(
             boomi_client, normalized.integration_spec.components
         )
+        # THE REUSE SET, from the one authority, not the set that read live.
+        # This parameter's own contract names `_will_reuse_at_apply`; the live
+        # readings are a different question, and under `conflict_policy="clone"`
+        # the two disagree about every declared component — which is how plan
+        # and compile accepted a request the wet apply then refused (live QA
+        # r13). Answered from DECLARED bindings, so it adds no account call: a
+        # component that read live is one the author bound by id, and that is
+        # exactly the binding this predicate needs.
+        from ..categories.integration_builder import reused_keys_for_components
+
+        _snapshot_reused = reused_keys_for_components(
+            normalized.integration_spec.components, conflict_policy or "reuse"
+        ) & set(_declared_live)
         # THE ACCOUNT, threaded. Without it the snapshot carries no account scope,
         # and the registry corroboration SKIPS its account check whenever that
         # value is falsey — so a plan run against a different account than the
@@ -1611,7 +1629,7 @@ def _validate_processes(
             normalized.integration_spec.components,
             declared=normalized.connector_metadata,
             live_component_xml=_declared_live or None,
-            reused_keys=tuple(_declared_live),
+            reused_keys=tuple(sorted(_snapshot_reused)),
             account_id=_client_account_id(boomi_client) if boomi_client else None,
         )
     except ConnectorIdentityError as snapshot_error:
@@ -1855,13 +1873,14 @@ def _validate_processes(
     # got it wrong while rebuilding it separately. `resolve_reused_keys` composes
     # the planner's own binding resolution with `_will_reuse_at_apply`, so a
     # reuse bound by NAME and a config-only id that binds nothing are both
-    # answered here rather than modelled three times.
+    # answered here rather than modelled three times. Asking per map component
+    # also re-ran the live selected-artifact discovery once per map, for an
+    # answer that cannot change within a request.
     reused_keys = _reused_component_keys(boomi_client, normalized, conflict_policy)
-    # Asking per map component also re-ran the live selected-artifact discovery
-    # once per map for an answer that cannot change within a request.
-    selected_indexes = _selected_profile_indexes(
+    selected_artifacts = _selected_profile_artifacts(
         boomi_client, normalized, conflict_policy, reused_keys
     )
+    selected_indexes = _index_projection(selected_artifacts)
     for component in normalized.integration_spec.components:
         if component.type != "transform.map":
             continue
@@ -1960,7 +1979,7 @@ def _validate_processes(
         codes=tuple(sorted(set(codes))),
     )
     return (summary, tuple(diagnostics), symbols,
-            resolution.capabilities_by_root, snapshot, selected_indexes, reused_keys)
+            resolution.capabilities_by_root, snapshot, selected_artifacts, reused_keys)
 
 
 def _required_target_coverage_error(
@@ -1980,8 +1999,102 @@ def _required_target_coverage_error(
     )
 
 
+#: Planned actions whose cause really IS a collision the caller can re-policy.
+_COLLISION_ACTIONS = ("error_ambiguous_match", "error_if_exists")
+
+
+def _unexecutable_causes(step) -> Tuple[str, ...]:
+    """The step's own error code beside its planned action, deduplicated.
+
+    Structural tokens only — this surface is value-free, so the step's message
+    and hint, which quote authored values, never travel.
+    """
+    codes = []
+    for candidate in (
+        (step.get("validation_error") or {}).get("error_code"),
+        step.get("planned_action"),
+    ):
+        token = str(candidate or "").strip()
+        if token and token not in codes:
+            codes.append(token)
+    return tuple(codes)
+
+
+def _unexecutable_remedy(step) -> str:
+    """The remedy this step's OWN cause calls for."""
+    if str(step.get("planned_action", "")) in _COLLISION_ACTIONS:
+        return (
+            "Resolve the component collision, or re-plan with a different "
+            "conflict_policy."
+        )
+    return (
+        "This step cannot execute as planned; the cause code above names why. "
+        "review_transformation and index_profile_component report the detail "
+        "this value-free surface does not carry."
+    )
+
+
+@contextmanager
+def _preview_or_named_refusal():
+    """A served row its own model cannot carry is refused BY NAME, not by leak.
+
+    Scoped to building the preview, deliberately: a `ValidationError` from
+    anywhere else on this route is the caller's request being wrong, and the
+    surface already has codes for that. The one shape it must never take is the
+    one it took — a bare pydantic message with no `error_code` at all (live QA
+    r13). Value-free: the refusal names the FIELDS, never their values.
+    """
+    try:
+        yield
+    except ValidationError as exc:
+        locations = []
+        for error in exc.errors():
+            location = ".".join(str(part) for part in (error.get("loc") or ()))
+            if location and location not in locations:
+                locations.append(location)
+        raise AuthoringWorkflowError(
+            GOVERNANCE_PREVIEW_UNREPRESENTABLE,
+            tuple(
+                _diag(
+                    GOVERNANCE_PREVIEW_UNREPRESENTABLE,
+                    "error",
+                    message=(
+                        "The served preview could not be built: a projection "
+                        "field is not representable by its own model."
+                    ),
+                    path="/integration_spec_preview/" + location.replace(".", "/"),
+                    subject_kind="component",
+                    remediation=(
+                        "This is a server-side projection limit, not a defect in "
+                        "the request. The unrepresentable field is named above."
+                    ),
+                )
+                for location in (locations or ["<unknown>"])
+            ),
+        ) from None
+
+
+def _index_projection(artifacts):
+    """The field-index view of the selected artifacts, with the same keys.
+
+    Key PRESENCE is the map resolver's signal that the candidate config is not
+    the authority for that component, so a key whose artifact could not be read
+    is present with no index rather than absent.
+    """
+    if not artifacts:
+        return artifacts
+    return {key: (artifact or {}).get("field_index_by_path") for key, artifact in artifacts.items()}
+
+
 def _reused_component_keys(boomi_client: Any, normalized: Any, conflict_policy):
-    """Which maps and profiles apply will REUSE. Asked, once, of the one authority.
+    """Which maps and profiles apply will REUSE. Asked, ONCE, of the one authority.
+
+    SCOPED, deliberately: this resolution may resolve a name against the
+    account, and asking it about every component of every request re-opened the
+    unbounded-pagination hazard this slice already closed once (SELF-157-r2-01).
+    Callers that need the answer for other component families and cannot afford
+    a live read ask `reused_keys_for_components`, which answers from declared
+    bindings alone.
 
     Offline (no client) only a declared binding is knowable, so a component
     reused by name is reported as written — the safe direction for every
@@ -2007,13 +2120,13 @@ def _reused_component_keys(boomi_client: Any, normalized: Any, conflict_policy):
         return frozenset()
 
 
-def _selected_profile_indexes(
+def _selected_profile_artifacts(
     boomi_client: Any,
     normalized: Any,
     conflict_policy: Optional[str] = None,
     reused_keys: Optional[Any] = None,
 ):
-    """Indexes of the profiles apply will REUSE, by component key, or None.
+    """The SELECTED artifact for each reused profile, by component key, or None.
 
     #157: reuses the integration builder's own selected-artifact resolver — the
     same one the plan lint and the apply refresh use — so the typed coverage
@@ -2024,7 +2137,9 @@ def _selected_profile_indexes(
     if boomi_client is None:
         return None
     try:
-        from ..categories.integration_builder import _resolve_selected_profile_indexes
+        from ..categories.integration_builder import (
+            resolve_selected_profile_artifacts,
+        )
 
         # THE CALLER'S POLICY TRAVELS WITH THE QUESTION, as an argument. Neither
         # `_NormalizedIntent` nor `IntegrationSpecV1` carries the policy — it
@@ -2033,7 +2148,7 @@ def _selected_profile_indexes(
         # under `conflict_policy="clone"` a same-name profile was still judged
         # against the namesake it will CLONE rather than the profile being
         # authored. Every caller of this helper has the request's own value.
-        return _resolve_selected_profile_indexes(
+        return resolve_selected_profile_artifacts(
             boomi_client,
             normalized.integration_spec,
             reused_keys=None if reused_keys is None else set(reused_keys),
@@ -2308,7 +2423,7 @@ def plan_authoring_request_v1(
         symbols,
         effect_capabilities,
         resolution_snapshot,
-        _selected_for_preview,
+        _artifacts_for_preview,
         _reused_for_preview,
     ) = _validate_processes(
         normalized,
@@ -2335,9 +2450,12 @@ def plan_authoring_request_v1(
     # an answer that cannot change within a request — and two reads of a live
     # account can disagree, so the preview and the gate could describe different
     # artifacts (live QA r12).
-    spec_preview = build_integration_spec_preview(
-        normalized, selected_indexes=_selected_for_preview, reused_keys=_reused_for_preview
-    )
+    with _preview_or_named_refusal():
+        spec_preview = build_integration_spec_preview(
+            normalized,
+            selected_artifacts=_artifacts_for_preview,
+            reused_keys=_reused_for_preview,
+        )
 
     # The LEGACY component-plan lint, reused. It supplies the redacted spec echo
     # and the duplicate-connection / base-URL / folder / name warnings that a
@@ -2368,6 +2486,11 @@ def plan_authoring_request_v1(
         # yes. Found by reading the comment against the behaviour this slice
         # ships, not by a test — nothing failed, because the two tests covering
         # it both asserted the stale premise.
+        # THE STEP'S OWN CAUSE, NOT A GUESS AT IT. Every unexecutable step
+        # carries a `validation_error` naming WHY, and this discarded it and
+        # served one hand-written diagnosis for all of them — so an unreadable
+        # profile index was reported as a component collision, and the code that
+        # actually names it appeared nowhere in the served plan (live QA r13).
         unexecutable = tuple(
             _diag(
                 AUTHORING_COMPILE_BLOCKED,
@@ -2379,11 +2502,8 @@ def plan_authoring_request_v1(
                 path=f"/components/{step.get('key', '')}",
                 subject_kind="component",
                 subject_id=str(step.get("key", "")),
-                remediation=(
-                    "Resolve the component collision, or re-plan with a "
-                    "different conflict_policy."
-                ),
-                cause_codes=(str(step.get("planned_action", "")),),
+                remediation=_unexecutable_remedy(step),
+                cause_codes=_unexecutable_causes(step),
             )
             for step in (legacy.get("steps") or ())
             if str(step.get("planned_action", "")).startswith("error_")
@@ -2406,12 +2526,13 @@ def plan_authoring_request_v1(
         # so the order is load-bearing. `_withhold_process_roots` is idempotent,
         # which is why calling it twice is safe rather than merely tolerable.
         if isinstance(legacy.get("integration_spec"), dict):
-            spec_preview = _as_served_preview(
-                normalized,
-                _withhold_process_roots(IntegrationSpecV1(**legacy["integration_spec"])),
-                selected_indexes=_selected_for_preview,
-                reused_keys=_reused_for_preview,
-            )
+            with _preview_or_named_refusal():
+                spec_preview = _as_served_preview(
+                    normalized,
+                    _withhold_process_roots(IntegrationSpecV1(**legacy["integration_spec"])),
+                    selected_artifacts=_artifacts_for_preview,
+                    reused_keys=_reused_for_preview,
+                )
         # The planner's own warning strings. The advisory arm this used to
         # accumulate is gone with the `process_ir` exemption above: an
         # unexecutable step is now an ERROR for every intent kind, so there is no

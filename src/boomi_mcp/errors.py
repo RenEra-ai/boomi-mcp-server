@@ -563,6 +563,7 @@ GOVERNANCE_RECORDED_INTENT_INVALID = "GOVERNANCE_RECORDED_INTENT_INVALID"
 #: tracked field is not a declared source field, or a watermark-sourced query
 #: parameter is named with no declaration to source it.
 GOVERNANCE_WATERMARK_INCONSISTENT = "GOVERNANCE_WATERMARK_INCONSISTENT"
+GOVERNANCE_PREVIEW_UNREPRESENTABLE = "GOVERNANCE_PREVIEW_UNREPRESENTABLE"
 #: A retired legacy metadata spelling was authored on the typed surface.
 GOVERNANCE_RETIRED_SPELLING = "GOVERNANCE_RETIRED_SPELLING"
 
@@ -2368,6 +2369,17 @@ ERROR_TAXONOMY: Dict[str, ErrorCodeSpec] = {
             summary=(
                 "A recorded-not-wired intent declaration is malformed, names "
                 "a root that is not authored, or repeats an intent id."
+            ),
+            owner="#157",
+        ),
+        ErrorCodeSpec(
+            code=GOVERNANCE_PREVIEW_UNREPRESENTABLE,
+            category="governance",
+            retryable=False,
+            summary=(
+                "The request is well formed, but a served preview row cannot be "
+                "represented by its own model, so planning refuses with a code "
+                "rather than leaking an uncoded validation failure."
             ),
             owner="#157",
         ),

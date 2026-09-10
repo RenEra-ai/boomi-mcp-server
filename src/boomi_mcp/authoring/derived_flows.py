@@ -23,10 +23,14 @@ from __future__ import annotations
 
 import hashlib
 import json
-from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple, get_args
 
 from ..categories.components.builders.transform_map_validation import mapping_entries
-from ..models.derived_flows import DerivedTransformFlowV1, FieldIndexEntryV1
+from ..models.derived_flows import (
+    DerivedTransformFlowV1,
+    FieldIndexEntryV1,
+    GeneratedProfileSummaryV1,
+)
 from ..models.integration_models import IntegrationComponentSpec
 
 REF_PREFIX = "$ref:"
@@ -260,18 +264,28 @@ def _selected_or_generated(
     """
     if key and key in selected:
         # THE REQUEST WILL NOT WRITE THIS PROFILE, so nothing the request says
-        # about it is evidence. Either the account's own index describes it, or
-        # nothing does — the candidate config is never a fallback here, and
-        # falling back to it whenever discovery failed served a shape the account
-        # may never have held.
-        index = selected[key]
+        # about it is evidence — not its field shape, not its type, not its
+        # name. Either the account's own artifact describes it or nothing does.
+        artifact = selected[key]
+        if not isinstance(artifact, Mapping):
+            return None
+        index = artifact.get("field_index_by_path")
         if not isinstance(index, Mapping):
+            return None
+        component_type = artifact.get("profile_component_type")
+        if component_type not in _SUMMARISABLE_PROFILE_TYPES:
+            # OPAQUE RATHER THAN WRONG. This summary's model carries the two
+            # profile families the surviving generators emit; a reused
+            # `profile.xml` has an index but no representation here, and
+            # building one anyway made its `component_type` unrepresentable and
+            # failed the whole preview — for a plan that used to succeed
+            # (Stage-2 round 9). Extending the projection to XML profiles is a
+            # capability, not a correction.
             return None
         served = _served_index_entries(index)
         return {
             "evidence_source": "selected_artifact",
-            "component_type": getattr(component, "type", None),
-            "component_name": _selected_component_name(component),
+            "component_type": component_type,
             "field_index_by_path": served,
             "mappable_paths": sorted(
                 path for path, entry in served.items() if entry.get("mappable", True)
@@ -280,20 +294,11 @@ def _selected_or_generated(
     return _generated_profile(component) if component is not None else None
 
 
-def _selected_component_name(component: Any) -> Optional[str]:
-    """The name the REQUEST uses to refer to the existing component, or None.
-
-    A reference to the artifact, not a description of it: the caller's own
-    binding names which component this is, and nothing else here does.
-    """
-    if component is None:
-        return None
-    config = component.config if isinstance(component.config, dict) else {}
-    for candidate in (component.name, config.get("component_name")):
-        if isinstance(candidate, str) and candidate.strip():
-            return candidate.strip()
-    return None
-
+#: The profile families `GeneratedProfileSummaryV1` can carry, read FROM the
+#: model rather than listed again here.
+_SUMMARISABLE_PROFILE_TYPES = frozenset(
+    get_args(GeneratedProfileSummaryV1.model_fields["component_type"].annotation)
+)
 
 #: The keys `FieldIndexEntryV1` declares, read FROM the model. A live-indexed
 #: profile's entries are a documented SUPERSET of the generator's — they carry
@@ -423,7 +428,7 @@ def derive_transform_flows(
     components: Sequence[IntegrationComponentSpec],
     *,
     connector_metadata: Optional[Mapping[str, Tuple[Optional[str], Optional[str]]]] = None,
-    selected_indexes: Optional[Mapping[str, Mapping[str, Any]]] = None,
+    selected_artifacts: Optional[Mapping[str, Mapping[str, Any]]] = None,
     reused_keys: Optional[Any] = None,
 ) -> Tuple[DerivedTransformFlowV1, ...]:
     """One typed row per ``map_ref`` node, per root, in key order.
@@ -444,7 +449,7 @@ def derive_transform_flows(
     #: will not write, so a row generated from it can describe fields the
     #: account never held — and omit fields it does (architect review, item 2).
     #: Where the selected artifact's own index is in hand, it wins.
-    selected = dict(selected_indexes or {})
+    selected = dict(selected_artifacts or {})
     #: A REUSED MAP IS OPAQUE TO THE PROJECTION TOO. Its in-spec mappings
     #: describe a component this request will not write, so serving them
     #: published a destination the account may never bind — the same rule the

@@ -946,6 +946,27 @@ def _watermark_source_profile(
 _UNRESOLVABLE_SOURCE = object()
 
 
+def _watermark_evidence_is_still_owed(
+    ref: Any,
+    selected: Mapping[str, Any],
+    reused_keys: Any,
+    literal_indexes: Optional[Mapping[str, Any]] = None,
+) -> bool:
+    """Could a later reading still supply this source profile's index?
+
+    Only two shapes: a literal existing-profile id nobody supplied an index for,
+    and an in-plan profile apply will REUSE that this pass never discovered. A
+    profile this request WRITES is answered by its own config, whatever that
+    config yields — including nothing.
+    """
+    if not isinstance(ref, str) or not ref.strip():
+        return False
+    if not ref.startswith("$ref:"):
+        return not (literal_indexes and ref.strip() in literal_indexes)
+    key = ref[len("$ref:") :]
+    return key not in selected and key in (reused_keys or ())
+
+
 def validate_watermark_source_field(
     declaration: Any,
     *,
@@ -1031,11 +1052,16 @@ def validate_watermark_source_field(
     index = resolve_map_profile_index(
         ref, dict(components_by_key), literal_indexes, selected or None
     )
-    if index is None:
-        # No index at all and nothing selected: the account was never asked, so
-        # this stays deferred rather than being decided from the candidate.
+    if index is None and _watermark_evidence_is_still_owed(ref, selected, reused_keys, literal_indexes):
+        # The account was never asked about THIS profile, so the rule stays
+        # deferred rather than being decided from the candidate.
         return False
-    entry = index.get(declaration.field)
+    # Otherwise the request WRITES this profile and its own config is the only
+    # authority its index could ever have. No index, or an empty one, means the
+    # field is not a declared mappable leaf — and this is the LAST pass, so
+    # returning "undecided" here left the rule decided by nobody (Stage-2
+    # round 9).
+    entry = (index or {}).get(declaration.field)
     if entry is None or not entry.get("mappable", True):
         raise _refuse(
             GOVERNANCE_WATERMARK_INCONSISTENT,

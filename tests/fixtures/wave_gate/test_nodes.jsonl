@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 12018, "minimum_collected": 12018, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 12025, "minimum_collected": 12025, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -12067,3 +12067,10 @@
 {"kind": "test", "id": "pytest-012066", "node_id": "tests/test_issue_157_plan_conformance.py::test_the_offline_reuse_reader_touches_no_account", "state": "active"}
 {"kind": "test", "id": "pytest-012067", "node_id": "tests/test_issue_157_plan_conformance.py::test_the_projection_serves_no_content_for_a_map_it_will_not_write", "state": "active"}
 {"kind": "test", "id": "pytest-012068", "node_id": "tests/test_issue_157_plan_conformance.py::test_the_recipe_routes_exempt_a_reused_map_like_the_direct_route", "state": "active"}
+{"kind": "test", "id": "pytest-012069", "node_id": "tests/test_issue_157_plan_conformance.py::test_a_preview_the_server_cannot_build_is_refused_with_a_code", "state": "active"}
+{"kind": "test", "id": "pytest-012070", "node_id": "tests/test_issue_157_plan_conformance.py::test_a_reused_profile_family_the_summary_cannot_carry_stays_opaque", "state": "active"}
+{"kind": "test", "id": "pytest-012071", "node_id": "tests/test_issue_157_plan_conformance.py::test_a_selected_summary_takes_its_type_from_the_artifact_not_the_request", "state": "active"}
+{"kind": "test", "id": "pytest-012072", "node_id": "tests/test_issue_157_plan_conformance.py::test_a_watermark_over_a_profile_this_request_writes_is_always_decided", "state": "active"}
+{"kind": "test", "id": "pytest-012073", "node_id": "tests/test_issue_157_plan_conformance.py::test_an_unexecutable_step_serves_its_own_cause_code_and_remedy", "state": "active"}
+{"kind": "test", "id": "pytest-012074", "node_id": "tests/test_issue_157_plan_conformance.py::test_the_connector_snapshot_is_told_the_reuse_set_not_the_live_readings", "state": "active"}
+{"kind": "test", "id": "pytest-012075", "node_id": "tests/test_issue_157_plan_conformance.py::test_the_recipe_reuse_exemption_honours_the_callers_conflict_policy", "state": "active"}

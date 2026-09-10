@@ -228,6 +228,7 @@ from .components.component_update_preservation import merge_for_update
 from pydantic import ValidationError
 
 from ..errors import (
+    GOVERNANCE_PREVIEW_UNREPRESENTABLE,
     AUTHORING_APPLY_VALIDATION_REQUIRED,
     AUTHORING_LIVE_DEPLOYMENT_DRIFT,
     INTEGRATION_COMPONENT_KEY_DUPLICATE,
@@ -5527,13 +5528,20 @@ def _resolve_literal_profile_indexes(
     return resolved
 
 
-def _resolve_selected_profile_indexes(
+def resolve_selected_profile_artifacts(
     boomi_client: Boomi,
     spec: IntegrationSpecV1,
     reused_keys: Optional[Any] = None,
     conflict_policy: Optional[str] = None,
-) -> Dict[str, Dict[str, Any]]:
-    """Field indexes for profiles apply will REUSE, keyed by component key (#157).
+) -> Dict[str, Optional[Dict[str, Any]]]:
+    """The SELECTED artifact for every reused profile, keyed by component key.
+
+    Each value is ``{"profile_component_type", "field_index_by_path"}`` — the
+    ARTIFACT's own type, read and verified by discovery, beside its index — or
+    ``None`` when the artifact could not be read. Both projections of this come
+    from ONE discovery: the served row needs the type, and reading it off the
+    REQUEST beside the account's index described one component from two
+    authorities, one of them unverified (live QA r13).
 
     A ``reference_only`` profile's in-spec config is candidate material, not
     evidence of what the reused component contains — so a transform map
@@ -5614,8 +5622,30 @@ def _resolve_selected_profile_indexes(
         except Exception:  # noqa: BLE001 - one unreadable profile, not a lost pass
             discovered = None
         index = discovered.get("field_index_by_path") if isinstance(discovered, Mapping) else None
-        resolved[comp.key] = index if isinstance(index, Mapping) else None
+        resolved[comp.key] = (
+            {
+                "profile_component_type": discovered.get("profile_component_type"),
+                "field_index_by_path": index,
+            }
+            if isinstance(index, Mapping)
+            else None
+        )
     return resolved
+
+
+def _resolve_selected_profile_indexes(
+    boomi_client: Boomi,
+    spec: IntegrationSpecV1,
+    reused_keys: Optional[Any] = None,
+    conflict_policy: Optional[str] = None,
+) -> Dict[str, Optional[Dict[str, Any]]]:
+    """The field-index projection of the selected artifacts. Same discovery."""
+    return {
+        key: (artifact or {}).get("field_index_by_path")
+        for key, artifact in resolve_selected_profile_artifacts(
+            boomi_client, spec, reused_keys=reused_keys, conflict_policy=conflict_policy
+        ).items()
+    }
 
 
 def _scan_top_level_pipeline_secrets(
@@ -11867,6 +11897,7 @@ def _compile_authoring(
         )
     except AuthoringWorkflowError as exc:
         return _authoring_error_envelope(exc, "compile")
+
 
     return {
         "_success": True,

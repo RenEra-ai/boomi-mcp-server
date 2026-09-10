@@ -1692,7 +1692,7 @@ def run_recipes(
     # #157: the required-target-leaf coverage HARD GATE, the same single
     # implementation the typed intents' semantic validation runs, invoked on
     # the raw recipe route too so neither entry point can skip it.
-    _validate_component_maps(components)
+    _validate_component_maps(components, conflict_policy)
     process_artifacts = _compile_processes(
         composed, components, connector_metadata, resolver, effect_declarations,
         conflict_policy,
@@ -1721,7 +1721,9 @@ def run_recipes(
     )
 
 
-def _validate_component_maps(components: Sequence[IntegrationComponentSpec]) -> None:
+def _validate_component_maps(
+    components: Sequence[IntegrationComponentSpec], conflict_policy: str = "reuse"
+) -> None:
     """Refuse a structured transform.map that leaves a required target leaf unbound.
 
     ONE implementation (issue #157): ``validate_required_target_coverage`` in the
@@ -1741,7 +1743,10 @@ def _validate_component_maps(components: Sequence[IntegrationComponentSpec]) -> 
     # not exist — the same rule the direct route follows, asked of the same
     # predicate. Without it one request was accepted through direct authoring and
     # refused through `run_recipes` (architect evaluation 2, finding 1).
-    reused = reused_keys_for_components(components)
+    # THE CALLER'S POLICY TRAVELS WITH THE QUESTION here too. Defaulting to
+    # "reuse" exempted a map that `conflict_policy="clone"` will WRITE, which is
+    # the same defect the direct route closed one layer up (Stage-2 round 9).
+    reused = reused_keys_for_components(components, conflict_policy)
     for component in components:
         if component.type != "transform.map":
             continue

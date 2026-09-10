@@ -585,9 +585,10 @@ def test_the_served_flow_row_describes_the_selected_profile_not_the_candidate():
     (candidate_row,) = derive_transform_flows([_flow_unit()], components, connector_metadata=metadata)
     assert candidate_row.target_profile_generation.mappable_paths == ("Root/candidate_only",)
 
-    selected = {"tgt": _json_index(_SELECTED_ROOT)}
+    selected = {"tgt": {"profile_component_type": "profile.json",
+                        "field_index_by_path": _json_index(_SELECTED_ROOT)}}
     (selected_row,) = derive_transform_flows(
-        [_flow_unit()], components, connector_metadata=metadata, selected_indexes=selected
+        [_flow_unit()], components, connector_metadata=metadata, selected_artifacts=selected
     )
     summary = selected_row.target_profile_generation
     assert summary.mappable_paths == ("Root/platform_only",)
@@ -608,7 +609,8 @@ def test_a_profile_the_request_will_write_is_still_described_by_its_generator():
     components = _flow_components(reference_only=False)
     (row,) = derive_transform_flows(
         [_flow_unit()], components, connector_metadata={"dbc": ("database", None)},
-        selected_indexes={"some_other_key": _json_index(_SELECTED_ROOT)},
+        selected_artifacts={"some_other_key": {"profile_component_type": "profile.json",
+                                              "field_index_by_path": _json_index(_SELECTED_ROOT)}},
     )
     assert row.target_profile_generation.mappable_paths == ("Root/candidate_only",)
 
@@ -699,7 +701,7 @@ def test_a_selected_live_index_is_projected_onto_the_served_entry_schema():
     (row,) = derive_transform_flows(
         [_flow_unit()], _flow_components(reference_only=True),
         connector_metadata={"dbc": ("database", None)},
-        selected_indexes={"tgt": live},
+        selected_artifacts={"tgt": {"profile_component_type": "profile.json", "field_index_by_path": live}},
     )
     served = row.target_profile_generation.field_index_by_path
     assert set(served) == set(live)
@@ -750,11 +752,13 @@ def test_a_reused_profile_with_no_local_body_is_described_by_the_artifact_alone(
     live = _live_index()["field_index_by_path"]
     (row,) = derive_transform_flows(
         [_flow_unit()], bare, connector_metadata={"dbc": ("database", None)},
-        selected_indexes={"tgt": live},
+        selected_artifacts={"tgt": {"profile_component_type": "profile.json", "field_index_by_path": live}},
     )
     assert row.target_profile_generation.evidence_source == "selected_artifact"
     assert set(row.target_profile_generation.field_index_by_path) == set(live)
-    assert row.target_profile_generation.component_name == "Tgt"
+    # and NOT the request's own name for it: the account supplied the shape, and
+    # nothing verified the caller's label against the artifact (live QA r13)
+    assert row.target_profile_generation.component_name is None
     # the source, which this request DOES write, keeps its generator body
     assert row.source_profile_generation.evidence_source == "generator"
     assert row.source_profile_generation.profile_config is not None
@@ -767,7 +771,7 @@ def test_a_reused_profile_whose_artifact_could_not_be_read_serves_no_summary():
     (row,) = derive_transform_flows(
         [_flow_unit()], _flow_components(reference_only=True),
         connector_metadata={"dbc": ("database", None)},
-        selected_indexes={"tgt": None},
+        selected_artifacts={"tgt": None},
     )
     assert row.target_profile_generation is None
 
@@ -1377,3 +1381,224 @@ def test_the_offline_reuse_reader_touches_no_account():
     # the declared binding is honoured; the name, which only the account could
     # resolve, is NOT invented — so the map is judged rather than skipped
     assert answer == {"m"}
+
+
+# ---------------------------------------------------------------------------
+# Stage-2 round 9 — what the evaluation-2 batch broke
+# ---------------------------------------------------------------------------
+
+
+_ISSUE_95_XML = (
+    Path(__file__).resolve().parent / "fixtures" / "profile_components" / "issue_95" / "profile_xml.xml"
+)
+
+
+def test_a_reused_profile_family_the_summary_cannot_carry_stays_opaque():
+    """An index without a representation is served as nothing, not as a crash.
+
+    The summary model carries the two families the surviving generators emit.
+    Building one for a reused `profile.xml` made its `component_type`
+    unrepresentable and failed the whole preview, for a plan that used to work.
+    """
+    from boomi_mcp.authoring.derived_flows import _SUMMARISABLE_PROFILE_TYPES, derive_transform_flows
+    from boomi_mcp.categories.components.builders.profile_generation import (
+        index_existing_profile_xml,
+    )
+    from boomi_mcp.models.integration_models import IntegrationComponentSpec
+
+    assert "profile.xml" not in _SUMMARISABLE_PROFILE_TYPES
+    indexed = index_existing_profile_xml(_ISSUE_95_XML.read_text(encoding="utf-8"))
+    assert indexed["profile_component_type"] == "profile.xml"
+
+    components = [
+        c if c.key != "tgt" else IntegrationComponentSpec(
+            key="tgt", type="profile.xml", action="create", name="Tgt",
+            component_id="prof-uuid-x", config={"reference_only": True},
+        )
+        for c in _flow_components(reference_only=True)
+    ]
+    (row,) = derive_transform_flows(
+        [_flow_unit()], components, connector_metadata={"dbc": ("database", None)},
+        selected_artifacts={"tgt": {"profile_component_type": indexed["profile_component_type"],
+                                   "field_index_by_path": indexed["field_index_by_path"]}},
+    )
+    assert row.target_profile_generation is None
+    # the db source beside it is still described, so this is opacity, not silence
+    assert row.source_profile_generation is not None
+
+
+def test_the_recipe_reuse_exemption_honours_the_callers_conflict_policy():
+    """Under `clone` the map is WRITTEN, so its candidate mappings are judged."""
+    from boomi_mcp.recipes import MaterializationCatalog, RecipeError, run_recipes
+    from test_issue_157_required_target_coverage import _coverage_registry, _recipe_request
+
+    comps = copy.deepcopy(_components())  # target profile needs `Root/must`
+    entry = next(c for c in comps if c["key"] == _MAP_KEY)
+    entry["component_id"] = "map-uuid-1"  # a binding, but no reference_only flag
+
+    registry, catalog, _ = _coverage_registry(comps)
+    run_recipes(_recipe_request(), catalog=catalog, registry=registry, conflict_policy="reuse")
+    registry, catalog, _ = _coverage_registry(comps)
+    with pytest.raises(RecipeError):
+        run_recipes(_recipe_request(), catalog=catalog, registry=registry, conflict_policy="clone")
+
+
+def test_a_watermark_over_a_profile_this_request_writes_is_always_decided():
+    """The last pass decides; "undecided" leaves the rule decided by nobody.
+
+    A raw-XML profile yields no structured index, and this request WRITES it, so
+    its own config is the only authority the field rule could ever have.
+    """
+    raw = {"key": "src_prof", "type": "profile.json", "action": "create", "name": "Raw",
+           "config": {"xml": "<JSONProfile/>"}}
+    request = _watermark_over("$ref:src_prof", [raw])
+    with patch(_PAGINATE, lambda *a, **k: []):
+        result, _ = plan_authoring_request_v1(request, boomi_client=MagicMock(), profile=_PROFILE)
+    hits = [d for d in result.errors if d.code == GOVERNANCE_WATERMARK_INCONSISTENT]
+    assert hits and hits[0].path.endswith("/watermark/field"), [d.path for d in result.errors]
+    # and a LITERAL id with no supplied index is still genuinely owed, so it defers
+    literal = _watermark_over("11111111-1111-1111-1111-111111111111", [])
+    with patch(_PAGINATE, lambda *a, **k: []):
+        deferred, _ = plan_authoring_request_v1(literal, boomi_client=MagicMock(), profile=_PROFILE)
+    assert all(d.code != GOVERNANCE_WATERMARK_INCONSISTENT for d in deferred.errors)
+
+
+# ---------------------------------------------------------------------------
+# live QA r13 — the request is never the authority on an existing component
+# ---------------------------------------------------------------------------
+
+
+def test_a_selected_summary_takes_its_type_from_the_artifact_not_the_request():
+    """Discovery reads and verifies the real type; the request's is a claim.
+
+    Nothing checks a request's declared type against the component it binds to,
+    so serving it beside the account's index described one component from two
+    authorities — and the unverified half is the one that crashed the preview.
+    """
+    from boomi_mcp.authoring.derived_flows import derive_transform_flows
+    from boomi_mcp.models.integration_models import IntegrationComponentSpec
+
+    components = [
+        c if c.key != "tgt" else IntegrationComponentSpec(
+            key="tgt", type="profile.json", action="create", name="Tgt",
+            component_id="prof-uuid-1",
+            config={"reference_only": True, "component_name": "A NAME THE ACCOUNT DOES NOT HAVE"},
+        )
+        for c in _flow_components(reference_only=True)
+    ]
+    # the ARTIFACT is a db profile, whatever the request declared
+    artifact = {
+        "profile_component_type": "profile.db",
+        "field_index_by_path": {
+            "updated_at": {
+                "path": "updated_at", "name": "updated_at", "mappable": True,
+                "profile_component_type": "profile.db", "data_type": "character",
+            }
+        },
+    }
+    (row,) = derive_transform_flows(
+        [_flow_unit()], components, connector_metadata={"dbc": ("database", None)},
+        selected_artifacts={"tgt": artifact},
+    )
+    assert row.target_profile_generation.component_type == "profile.db"
+    assert row.target_profile_generation.component_name is None
+    assert "A NAME THE ACCOUNT DOES NOT HAVE" not in repr(row.model_dump(mode="json"))
+
+
+def test_an_unexecutable_step_serves_its_own_cause_code_and_remedy():
+    """One hand-written diagnosis for every unexecutable step named the wrong cause.
+
+    An unreadable profile index was reported as a component collision, and the
+    code that actually names it appeared nowhere in the served plan.
+    """
+    from boomi_mcp.categories import integration_builder
+
+    comps = _name_reused_target()
+    with _account_holding("Existing Target"), patch.object(
+        integration_builder, "_discover_profile_index", lambda client, uuid: None
+    ):
+        result, _ = plan_authoring_request_v1(
+            _request(comps), boomi_client=MagicMock(), profile=_PROFILE
+        )
+    hits = [d for d in result.errors if d.subject_id == _MAP_KEY and d.cause_codes]
+    assert hits, [d.code for d in result.errors]
+    assert MAP_PROFILE_INDEX_UNAVAILABLE in hits[0].cause_codes, hits[0].cause_codes
+    assert "component collision" not in hits[0].remediation
+    # and a step whose cause really IS a collision keeps the collision remedy
+    from boomi_mcp.authoring.workflow import _unexecutable_remedy
+
+    assert "component collision" in _unexecutable_remedy(
+        {"planned_action": "error_ambiguous_match"}
+    )
+
+
+def test_a_preview_the_server_cannot_build_is_refused_with_a_code():
+    """A bare pydantic message with no `error_code` is the one shape this surface avoids.
+
+    Scoped to the preview build: a validation failure anywhere else on this
+    route is the caller's request being wrong, and the surface already has codes
+    for that — so the catch must not swallow those.
+    """
+    from boomi_mcp.authoring import workflow as wf
+    from boomi_mcp.errors import GOVERNANCE_PREVIEW_UNREPRESENTABLE
+    from boomi_mcp.models.derived_flows import GeneratedProfileSummaryV1
+
+    with pytest.raises(wf.AuthoringWorkflowError) as excinfo:
+        with wf._preview_or_named_refusal():
+            GeneratedProfileSummaryV1.model_validate(
+                {"component_type": "profile.zzz", "field_index_by_path": {}}
+            )
+    assert excinfo.value.code == GOVERNANCE_PREVIEW_UNREPRESENTABLE
+    paths = [d.path for d in excinfo.value.diagnostics]
+    assert paths and all(p.startswith("/integration_spec_preview/") for p in paths), paths
+    # value-free: the offending INPUT never travels, only the field that rejected it
+    assert "profile.zzz" not in repr([d.model_dump(mode="json") for d in excinfo.value.diagnostics])
+    # and the code reaches the dispatcher's envelope as a coded refusal
+    from boomi_mcp.categories.integration_builder import _authoring_error_envelope
+
+    envelope = _authoring_error_envelope(excinfo.value, "plan")
+    assert envelope["_success"] is False
+    assert GOVERNANCE_PREVIEW_UNREPRESENTABLE in repr(envelope)
+
+
+def test_the_connector_snapshot_is_told_the_reuse_set_not_the_live_readings():
+    """The parameter's own contract names the reuse predicate.
+
+    The components that READ LIVE are a different question: under
+    `conflict_policy="clone"` a declared component is cloned, not reused, and
+    handing the snapshot the live-reading set made plan and compile accept a
+    request the wet apply then refused.
+    """
+    from boomi_mcp.authoring import connector_resolution_snapshot as crs
+    from test_issue_157_governance import _conn, _op, _request as _gov_request, _unit
+
+    seen = []
+    real = crs.build_connector_resolution_snapshot
+
+    def spy(components, **kwargs):
+        seen.append(frozenset(kwargs.get("reused_keys") or ()))
+        return real(components, **kwargs)
+
+    def _plan_under(policy):
+        # a CREATE bound to an existing component by id, and no reuse flag: it
+        # is reused under the default policy and CLONED under `clone`, which is
+        # exactly the distinction the live-reading set cannot make
+        conn = _conn()
+        conn["component_id"] = "existing-conn-1"
+        request = _gov_request([_unit(name="P")], [conn, _op()])
+        request = request.model_copy(
+            update={"intent": request.intent.model_copy(update={"conflict_policy": policy})}
+        )
+        with patch.object(crs, "build_connector_resolution_snapshot", spy), patch.object(
+            crs, "live_readings_for_declared_components",
+            lambda client, components: {"conn": "<bns:Component/>"},
+        ):
+            plan_authoring_request_v1(request, boomi_client=MagicMock(), profile=_PROFILE)
+        return seen[-1]
+
+    reuse_answer = _plan_under("reuse")
+    clone_answer = _plan_under("clone")
+    assert reuse_answer == frozenset({"conn"}), reuse_answer
+    # the live reading is identical in both runs; only the POLICY differs, and
+    # the snapshot's answer has to move with it
+    assert clone_answer == frozenset(), clone_answer
