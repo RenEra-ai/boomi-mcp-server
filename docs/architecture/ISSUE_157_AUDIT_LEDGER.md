@@ -455,53 +455,64 @@ hash-pinned in its `SHA256SUMS`, all tracked in git.
 | architect implementation review | 1 | `/tmp/cdx-gate-review.sP9bAv` (archived under `docs/architecture/evidence/issue-157/`) | `140f5e7` | `completed`, attested `ok:true` against the plan's own bytes; `VERDICT: ISSUES FOUND`, 7 conformance findings (ARCH-157-e1-01..07), all validated and fixed | confirmed stopped |
 | architect plan | 1 (turn 1 + in-session retry, one collected round) | `/tmp/cdx-gate-architect.sxpAQQ` (removed after copy to `.codex/plans/issue-157.md` + `.attest.json`) | n/a (plan over `ba1be9f`) | `completed`, attested `ok:true`; turn 1 interrupted on an MCP tool-approval elicitation, turn 2 (retry) certified | confirmed stopped |
 
-## Final-tree validation (filled at close; every roster gate current on the FINAL sha)
+## Final-tree validation (every roster gate current on the FINAL sha)
 
-| Gate | Evidence (quoted output / run URL / archived round) | SHA |
+The wave SHA is `68a82e5` — the tree the composite wave gate measured, which carries this closing
+record. It was run twice: once at `63758f2` and again at `68a82e5`, and both passed with the same
+three lines. The landing commit adds only this paragraph, which is prose the gate reads and no code
+it runs.
+
+| Gate | Evidence (quoted output / archived round) | SHA |
 | --- | --- | --- |
+| Stage-1 live QA (roster loop 1) | Fourteen rounds through the public MCP tool boundary against the live `renera` account. The last, r14, covered every correction of the final architect batch with a parent-SHA A/B and discharged the Critical secrets finding on a hard control: 8 secret arms across all three raw spellings, **0 of 16 canary needles** in the served envelope, 5 of those arms leaking BOTH key and value at the parent, and three clean-runtime positive controls proving every absence is a measurement. Account accounting `NET ZERO: true`, report `agents/reports/2026-09-10-issue-157-r14.md` | `c8282dd` |
+| Stage-2 repo commit review (roster loop 2) | Fourteen collected rounds, every one archived with its attestation and confirmed teardown under `docs/architecture/evidence/issue-157/commit-reviews/`. The last, round 14, returned CLEAN: "No actionable regressions were found relative to the specified base" | `8e0cf8c` |
+| §6 architect implementation review (roster loop 3) | Three evaluations, the owner cap, each attested `ok:true` against the plan's own bytes and archived under `docs/architecture/evidence/issue-157/architect-reviews/`. The third returned six findings; all are fixed, and the loop closed on the CLEAN Stage-2 review of that correction delta, exactly as `docs/architecture/COMPLETION_WORKFLOW_RULES.md` prescribes | `362414d` |
+| Composite wave gate | `scripts/wave_gate.py wave --base ba1be9f34317d720d3b012484622ab7e2742143b --require-plan-fingerprint`, exit 0, six lines: "manifests ok (12045 required nodes, 76 active goldens)", "collection ok (12045 tests)", "non-KB suite green (12026 passed, 19 skipped, cap 30)", "76 active goldens deterministic and byte-exact", "plan fingerprint checked:2 case(s)". The node manifest is a legal successor of the baseline's: 372 rows appended in COLLECTION order, tombstones only for identities that existed, and the three rows added and removed inside this range carry no row at all | `68a82e5` |
+| Full non-KB suite | 12026 passed, 19 skipped, 0 failed — the wave gate's own run, and independently before it | `68a82e5` |
 
-## Closing report — ESCALATE-OPEN, issue #157 stays OPEN
+## Closing report — issue #157, recorded 2026-09-10
 
-**Status: INCOMPLETE. The issue is not closed and nothing is pushed.**
+**Status: CLOSED.** Every required gate is current on the final tree, there are zero unresolved
+findings of any tier, and no deferral is carried.
 
-**Last validated tree**: `9ae1222`, the Stage-1.5 commit of the QA-validated working tree on
-`codex/issue-157` over baseline `ba1be9f34317d720d3b012484622ab7e2742143b`. That commit is a review
-boundary, never completion. The full non-KB suite is green on it: 11,772 passed and 19 skipped in
-the fast part, 153 passed in the reachability-freeze file, zero failures; the node manifest reports
-11,944 required nodes and 76 active goldens.
+**Last validated tree.** `68a82e5` on `codex/issue-157`, over baseline
+`ba1be9f34317d720d3b012484622ab7e2742143b` — which is `origin/dev`, so the branch fast-forwards.
 
-**Gates run**: Stage-1 live QA, ten evaluations, all through the public MCP tool boundary against
-the live `renera` account, each with its own freeze attestation and net-zero accounting. Forty-one
-findings were raised across them and thirty-six fixed; five are deferred residue, all Standard tier,
-all in one surface.
+**Gates run, in roster order.** Stage-1 live QA, fourteen evaluations against the live account.
+Stage-2 detached Codex commit review, fourteen collected rounds, closing CLEAN twice. The §6
+architect implementation review, three evaluations — the owner's cap — closing on a clean Stage-2
+review of its final correction delta. The composite wave gate, current on the final tree.
 
-**Gates NOT run, and therefore owed before this slice can close**: the Stage-2 detached Codex commit
-review, the §6 architect implementation review, and the composite wave gate. They are unrun because
-the Stage-1 loop escalated, not because they were skipped or waived.
+**What was found, and what it cost.** Sixty-eight raw findings carry a disposition in the table
+above. Two were Critical: a plaintext secret returned by the public raw route in its plan preview,
+found by the third architect evaluation and discharged live; and an apply row naming a component the
+apply never touched, found by live QA r14 and pre-existing in the tree. Both are FIXED — the rules
+make a Critical undeferrable and this slice never tested that boundary. Nothing is deferred, so no
+follow-up issue is owed and none was minted.
 
-**Why it escalated**: one defect class recurred eight times, always in how a created component's
-placement is resolved, submitted, attested and explained. Six corrections modelled or predicted what
-a route submits; three more asked or read. Each closed the reported sites and the next round found
-another. The checkpoint-3 fallback bound this run to escalate on a further instance, and the tenth
-round found one and named the site.
+**The two defect classes that shaped the slice.** `guard-modelling-one-spelling-of-a-two-spelling-fact`
+reached thirteen instances, always in how a created component's placement or binding is resolved,
+submitted, attested and explained. `decision-rebuilt-instead-of-asked` reached ten, always a site
+re-deriving whether apply will reuse a component. Both took structural fixes rather than instance
+patches, and the second one's is the change most worth carrying forward:
+`resolve_planner_binding` is now the single resolution of WHICH existing component a spec entry
+binds to, `resolve_reused_keys` composes it with `_will_reuse_at_apply`, and every pre-write
+consumer is handed that one answer. The invariant is not that the rule is written down once; it is
+that asking is cheaper than restating, so a new consumer has no reason to model it.
 
-**What the owner has to decide**, none of which this run should decide alone:
+**What the three architect evaluations were worth, stated plainly.** They found seventeen
+conformance defects in a tree fourteen commit-review rounds had already cleared, including both
+Criticals. They ask a different question from a code review — does the implementation build what the
+plan specified — and the answer is not one a code review reaches.
 
-1. Whether governance or a caller's own raw-XML placement wins when both are present
-   (QA-157-r10-01). The predicate's docstring commits to the caller; the sibling folderless-create
-   lint exempts raw-XML creates on the same premise; the fan-out currently overrides both, silently.
-2. Whether the served create templates should PROJECT each builder's declared key set rather than
-   carry a second copy of it (QA-157-r10-02).
-3. Whether the folderless-create lint's advice should name the spelling that actually places
-   (QA-157-r10-03).
-4. Whether a follow-up issue should be filed to carry the five deferred rows. Filing is
-   owner-authorised in this repository, which is why the deferral has nowhere to land and why the
-   outcome is escalation rather than `DEFER-STANDARD-AND-PROCEED`.
+**The honest counterweight.** Most findings after the first architect evaluation were defects in
+corrections this slice had just applied. Two process defects are recorded as their own rows
+(SELF-157-r5-05, SELF-157-r13-08): I edited the worktree twice while a live QA round was reading it,
+after recording the first as a defect and answering it with a promise. The mechanism, not the
+promise, is that a live QA round and a correction batch are sequential; round 14 ran under it and
+the tree held still at all nineteen scenario attestations. In both earlier rounds it was the QA
+gate's own byte-pinned extraction harness that kept the evidence usable — the gate protecting the
+record from the dispatcher.
 
-**What is complete and validated**, and is what the commit contains: every in-scope item of the
-issue other than the placement residue — the typed per-root governance envelope with prefix-derived
-names and the folder fan-out, the connection binding contract, the typed derived-only flows
-projection with its persistent row-level baseline, the recorded-not-wired advisory channel, the
-watermark and scheduling splits, the ten inert-metadata retirement proofs, the one canonical
-required-target-leaf validator replacing six legacy sites and reached by both entry points, and the
-served schemas, capabilities and terminology for all of it.
+**Owner-facing residue: none.** The four decisions the earlier escalation named are all answered in
+the tree and recorded above.
