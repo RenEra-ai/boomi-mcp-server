@@ -366,6 +366,7 @@ hash-pinned in its `SHA256SUMS`, all tracked in git.
 | Stage-2 commit review | 5 (fix delta over the architect corrections) | `cdx-review.WoHUEv` | `557f1b7` | `completed`, 4 findings (1 P1, 3 P2), all validated and fixed | confirmed stopped |
 | Stage-2 commit review | 6 (fix delta) | `cdx-review.vtNvH0` | `0bc76b3` | `completed`, 2 findings (P2), both validated and fixed; checkpoint recorded | confirmed stopped |
 | Stage-2 commit review | 7 (fix delta) | `cdx-review.0176p1` | `78cf7e7` | `completed`, 2 findings (P2), both validated and fixed | confirmed stopped |
+| Stage-2 commit review | 8 (fix delta) | `cdx-review.mfQy1C` | `993d9db` | `completed`, **CLEAN** — "No actionable regressions were found in the scoped diff" | confirmed stopped |
 | architect implementation review | 1 | `/tmp/cdx-gate-review.sP9bAv` (archived under `docs/architecture/evidence/issue-157/`) | `140f5e7` | `completed`, attested `ok:true` against the plan's own bytes; `VERDICT: ISSUES FOUND`, 7 conformance findings (ARCH-157-e1-01..07), all validated and fixed | confirmed stopped |
 | architect plan | 1 (turn 1 + in-session retry, one collected round) | `/tmp/cdx-gate-architect.sxpAQQ` (removed after copy to `.codex/plans/issue-157.md` + `.attest.json`) | n/a (plan over `ba1be9f`) | `completed`, attested `ok:true`; turn 1 interrupted on an MCP tool-approval elicitation, turn 2 (retry) certified | confirmed stopped |
 
