@@ -5556,25 +5556,30 @@ def _resolve_selected_profile_indexes(
     Makes ZERO live calls when the spec reuses no profile.
     """
     reused = set(reused_keys or ())
+    # ASKED ONCE, of the one authority, when the caller did not supply the answer.
+    _resolved_reused = (
+        set()
+        if reused_keys is not None
+        else resolve_reused_keys(
+            boomi_client,
+            spec,
+            conflict_policy or "reuse",
+            keys={
+                comp.key
+                for comp in spec.components
+                if str(getattr(comp, "type", "") or "").startswith("profile.")
+            },
+        )
+    )
     resolved: Dict[str, Dict[str, Any]] = {}
     for comp in spec.components:
         if not str(getattr(comp, "type", "") or "").startswith("profile."):
             continue
-        cfg = comp.config if isinstance(comp.config, dict) else {}
-        component_id = _first_nonblank_str(comp.component_id, cfg.get("component_id"))
-        if not component_id:
-            effective_name = _first_nonblank_str(comp.name, cfg.get("component_name"))
-            if not effective_name or boomi_client is None:
-                continue
-            try:
-                candidates = _resolve_existing_components(
-                    boomi_client, comp.model_copy(update={"name": effective_name})
-                )
-            except Exception:  # noqa: BLE001 - discovery is best effort; absence defers
-                candidates = []
-            if len(candidates) != 1:
-                continue
-            component_id = candidates[0].get("component_id")
+        # WHICH component this entry binds to is the planner's question, and it
+        # is asked here rather than answered again: the config-level id/name
+        # binding is read only for a `reference_only` entry, and re-deriving
+        # that precedence rule was wrong in both directions (Stage-2 round 6).
+        component_id = resolve_planner_binding(boomi_client, comp).existing_id
         if not component_id:
             continue
         # THE PREDICATE IS ASKED, NOT REBUILT. A first attempt reconstructed the
@@ -5592,12 +5597,7 @@ def _resolve_selected_profile_indexes(
             # the one being created.
             if comp.key not in reused:
                 continue
-        elif not _will_reuse_at_apply(
-            declared_action=getattr(comp, "action", None),
-            existing_component_id=component_id,
-            reference_only=_component_reference_only(comp),
-            conflict_policy=conflict_policy or "reuse",
-        ):
+        elif comp.key not in _resolved_reused:
             continue
         discovered = _discover_profile_index(boomi_client, str(component_id))
         if discovered is not None and isinstance(discovered.get("field_index_by_path"), Mapping):
@@ -5732,6 +5732,83 @@ def _authored_process_validation_error(
         "create",
         {c.key: c for c in spec.components},
     )
+
+
+class _PlannerBinding(NamedTuple):
+    """What the planner resolves for one spec entry, before any action is chosen."""
+
+    reference_only: bool
+    existing_id: Optional[str]
+    candidates: Tuple[Dict[str, Any], ...]
+
+
+def resolve_planner_binding(boomi_client, comp) -> "_PlannerBinding":
+    """WHICH existing component, if any, this spec entry binds to. THE resolution.
+
+    One function so a pre-write check that needs the answer asks it rather than
+    re-deriving its precedence rule. That rule is not obvious and a hand-model of
+    it was wrong in both directions (Stage-2 round 6): the config-level
+    ``component_id`` / ``component_name`` binding is read ONLY for a
+    ``reference_only`` entry, so a config-only id elsewhere is not a binding at
+    all; and a ``reference_only`` entry carrying only a NAME still binds, through
+    an unambiguous metadata match, which a declared-id-only reading missed.
+
+    Raises whatever discovery raises: a failed metadata read is not the same as
+    "nothing exists", and answering it as an empty candidate list would plan a
+    CREATE where the request meant a reuse. Best-effort callers catch it
+    themselves (``resolve_reused_keys`` does) rather than having the answer
+    softened for everyone.
+    """
+    config = comp.config if isinstance(comp.config, dict) else {}
+    reference_only = bool(config.get("reference_only"))
+    effective_component_id = comp.component_id
+    effective_name = comp.name
+    if reference_only:
+        # Top-level then config, treating blank / whitespace as absent so a "  "
+        # id/name cannot become a fake reuse target.
+        effective_component_id = _first_nonblank_str(
+            comp.component_id, config.get("component_id")
+        )
+        effective_name = _first_nonblank_str(comp.name, config.get("component_name"))
+    if effective_component_id:
+        return _PlannerBinding(reference_only, effective_component_id, ())
+    resolve_comp = (
+        comp.model_copy(update={"name": effective_name})
+        if effective_name != comp.name
+        else comp
+    )
+    candidates = _resolve_existing_components(boomi_client, resolve_comp)
+    existing_id = candidates[0].get("component_id") if len(candidates) == 1 else None
+    return _PlannerBinding(reference_only, existing_id, tuple(candidates))
+
+
+def resolve_reused_keys(boomi_client, spec, conflict_policy, keys=None):
+    """Every key in ``keys`` that apply will REUSE rather than write.
+
+    The ONE answer, composed from the two authorities that own its halves:
+    ``resolve_planner_binding`` for which existing component an entry binds to,
+    and ``_will_reuse_at_apply`` for what apply then does with it. Restrict with
+    ``keys`` to bound the metadata reads; a key that was not resolved is absent
+    from the result, so ask only about the keys you will act on.
+    """
+    existing_ids = {}
+    for comp in (getattr(spec, "components", None) or ()):
+        key = getattr(comp, "key", None)
+        if not (isinstance(key, str) and key):
+            continue
+        if keys is not None and key not in keys:
+            continue
+        try:
+            existing_ids[key] = resolve_planner_binding(boomi_client, comp).existing_id
+        except Exception:  # noqa: BLE001 - a pre-write reader; an unanswered
+            # binding means "not demonstrably reused", and every consumer of this
+            # set judges a written component and stays silent about a reused one,
+            # so the unanswered case fails towards checking rather than skipping.
+            existing_ids[key] = None
+    reused = _keys_reused_at_apply(
+        spec=spec, existing_ids=existing_ids, conflict_policy=conflict_policy
+    )
+    return {key for key in reused if key in existing_ids}
 
 
 def _will_reuse_at_apply(
@@ -6445,42 +6522,15 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
         # (the documented reference_only config_shape: {reference_only,
         # component_id?, component_name?}). Resolve an effective id / name
         # honouring both, with the top-level surface taking precedence.
-        reference_only = isinstance(comp.config, dict) and bool(
-            comp.config.get("reference_only")
-        )
-        effective_component_id = comp.component_id
-        effective_name = comp.name
-        if reference_only:
-            # Resolve the binding from top-level then config, treating blank /
-            # whitespace as absent so a "  " id/name can't become a fake reuse
-            # target (top-level precedence preserved by argument order).
-            effective_component_id = _first_nonblank_str(
-                comp.component_id, comp.config.get("component_id")
-            )
-            effective_name = _first_nonblank_str(
-                comp.name, comp.config.get("component_name")
-            )
-
-        # If an explicit component_id is available, skip ambiguity checking.
-        if effective_component_id:
-            candidates: List[Dict[str, Any]] = []
-            existing_id: Optional[str] = effective_component_id
-        else:
-            # Resolve by the effective name; a reference_only binding can carry
-            # its name in config.component_name even when the top-level name is
-            # unset, so resolve against that name when it differs.
-            resolve_comp = (
-                comp.model_copy(update={"name": effective_name})
-                if effective_name != comp.name
-                else comp
-            )
-            candidates = _resolve_existing_components(boomi_client, resolve_comp)
-            existing_id = candidates[0].get("component_id") if len(candidates) == 1 else None
+        binding = resolve_planner_binding(boomi_client, comp)
+        reference_only = binding.reference_only
+        candidates: List[Dict[str, Any]] = list(binding.candidates)
+        existing_id: Optional[str] = binding.existing_id
 
         planned_action = comp.action
 
         if reference_only and comp.action == "create":
-            if effective_component_id or len(candidates) == 1:
+            if binding.existing_id is not None or len(candidates) == 1:
                 planned_action = "reuse"
             elif len(candidates) == 0:
                 planned_action = "error_missing_target"
@@ -9481,18 +9531,28 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
         conflict_policy=conflict_policy,
     )
 
+
     # Apply re-resolves those indexes, and live discovery can DRIFT from plan
     # time (a profile edited/removed between plan and apply, or a transient fetch
     # failure). Re-validate every literal-UUID transform.map that will actually be
     # built, against the apply-time indexes, and FAIL FAST here — before the
     # mutation loop — so a drifted/missing index can never create earlier
     # components and then fail at the map step (partial mutation).
-    _built_actions = ("create", "create_clone", "update")
+    # WHICH MAPS THIS APPLY WRITES — asked of the predicate that decides it a
+    # few dozen lines below, not modelled from the plan's label. The two
+    # disagree in a corner the predicate's own docstring records: an explicit
+    # `component_id` skips candidate resolution, so a declared create keeps
+    # `planned_action="create"` while apply reuses it. Modelling the label here
+    # gated a map the pre-write pass had correctly exempted (live QA r12).
+    _reused_at_apply = _keys_reused_at_apply(
+        spec=spec, existing_ids=existing_ids, conflict_policy=conflict_policy
+    )
     _built_map_keys = {
         step["key"]
         for step in planned["steps"]
         if step.get("type") == "transform.map"
-        and step.get("planned_action") in _built_actions
+        and step["key"] not in _reused_at_apply
+        and not str(step.get("planned_action") or "").startswith("error_")
     }
     for comp in spec.components:
         if comp.type != "transform.map" or comp.key not in _built_map_keys:
@@ -11405,13 +11465,18 @@ def _reject_malformed_authoring_request(payload, action: str) -> Dict[str, Any]:
 def _reject_ambiguous_authoring_request(cfg: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """Refuse a config carrying BOTH a typed and a legacy authoring root.
 
-    ``flows`` is refused by its OWN name wherever a caller writes it. It is a
-    derived, output-only projection, and the intent models already say so — but
-    only for the two locations pydantic sees. A caller who put it at the config
-    root beside a valid typed request had it silently ignored, and one who put
-    it on the request envelope got the generic input code, so the same authored
-    key was answered three different ways depending on where it landed
-    (architect review, item 5).
+    ``flows`` is refused by its OWN name at every location a TYPED request can
+    carry it: the intent models refuse it inside the intent, and this refuses it
+    at the config root and on the request envelope beside them. A caller who put
+    it at the config root had it silently ignored, and one who put it on the
+    envelope got the generic input code, so the same authored key was answered
+    three different ways depending on where it landed (architect review, item 5).
+
+    The LEGACY authoring root is deliberately outside this: `config.flows` there
+    is a documented field of the bare/`source_description` spec form, carried as
+    an inert echo, and this function is only reached once an `authoring_request`
+    is present. The claim is scoped to the typed surface rather than widened to
+    a legacy field the server still accepts (live QA r12).
     """
     for holder, where in ((cfg, "config"), (cfg.get("authoring_request"), "authoring_request")):
         if isinstance(holder, Mapping) and "flows" in holder:

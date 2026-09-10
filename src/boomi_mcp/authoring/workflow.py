@@ -1547,7 +1547,7 @@ def _validate_processes(
     conflict_policy: str = "reuse",
     literal_indexes: Any = None,
     boomi_client: Any = None,
-) -> Tuple[ValidationReportSummaryV1, Tuple[AuthoringDiagnosticV1, ...], Any, Any]:
+) -> Tuple[ValidationReportSummaryV1, Tuple[AuthoringDiagnosticV1, ...], Any, Any, Any, Any]:
     """Run the unified #143 semantic validator over every authored process.
 
     Uses ``validate_process_ir``, which REPORTS and does not raise on a bad
@@ -1847,11 +1847,17 @@ def _validate_processes(
     # builder-layer refusal reaches this surface, so plan, compile and the
     # apply preflight (which re-runs this validation) all serve the same
     # diagnostic identity.
-    # ONE resolution for the whole pass. Asking per map component re-ran the
-    # live selected-artifact discovery once per map for an answer that cannot
-    # change within a request.
+    # ONE resolution for the whole pass, of ONE authority. Three checks below
+    # need the same answer — will apply reuse this component? — and each of them
+    # got it wrong while rebuilding it separately. `resolve_reused_keys` composes
+    # the planner's own binding resolution with `_will_reuse_at_apply`, so a
+    # reuse bound by NAME and a config-only id that binds nothing are both
+    # answered here rather than modelled three times.
+    reused_keys = _reused_component_keys(boomi_client, normalized, conflict_policy)
+    # Asking per map component also re-ran the live selected-artifact discovery
+    # once per map for an answer that cannot change within a request.
     selected_indexes = _selected_profile_indexes(
-        boomi_client, normalized, conflict_policy
+        boomi_client, normalized, conflict_policy, reused_keys
     )
     for component in normalized.integration_spec.components:
         if component.type != "transform.map":
@@ -1859,7 +1865,7 @@ def _validate_processes(
         config = component.config if isinstance(component.config, dict) else {}
         if isinstance(config.get("xml"), str) and config["xml"].strip():
             continue
-        if _will_reuse_map_at_apply(component, conflict_policy):
+        if component.key in reused_keys:
             # A REUSED MAP IS OPAQUE. Its in-spec mappings are candidate
             # material describing a component this request will not write, so
             # judging required-leaf coverage from them reports on a map that
@@ -1923,7 +1929,7 @@ def _validate_processes(
     # artifact, so it decides exactly those recorded questions — not every
     # watermark, because governance already decided the rest, and not rule (b),
     # which governance decides unconditionally.
-    if selected_indexes and normalized.deferred_watermarks:
+    if normalized.deferred_watermarks:
         from .governance import GovernanceRefusal as _Refusal
         from .governance import validate_watermark_source_field
 
@@ -1936,6 +1942,7 @@ def _validate_processes(
                     components_by_key=_by_key,
                     literal_indexes=literal_indexes,
                     selected_indexes=selected_indexes,
+                    reused_keys=reused_keys,
                 )
             except _Refusal as _refusal:
                 errors += 1
@@ -1950,7 +1957,7 @@ def _validate_processes(
         codes=tuple(sorted(set(codes))),
     )
     return (summary, tuple(diagnostics), symbols,
-            resolution.capabilities_by_root, snapshot)
+            resolution.capabilities_by_root, snapshot, selected_indexes)
 
 
 def _required_target_coverage_error(
@@ -1970,31 +1977,38 @@ def _required_target_coverage_error(
     )
 
 
-def _will_reuse_map_at_apply(component: Any, conflict_policy: Optional[str]) -> bool:
-    """Will apply REUSE this map rather than write it? Asked of THE predicate.
+def _reused_component_keys(boomi_client: Any, normalized: Any, conflict_policy):
+    """Which maps and profiles apply will REUSE. Asked, once, of the one authority.
 
-    Offline the existing id is whatever the request declares; without one the
-    predicate answers "not reused" and the coverage gate runs, which is the safe
-    direction — a map this request may write is judged, and only a map it
-    demonstrably binds to an existing component is opaque.
+    Offline (no client) only a declared binding is knowable, so a component
+    reused by name is reported as written — the safe direction for every
+    consumer here, each of which judges a written component and stays silent
+    about a reused one.
     """
-    from ..categories.integration_builder import (
-        _component_reference_only,
-        _will_reuse_at_apply,
-    )
+    spec = normalized.integration_spec
+    keys = {
+        component.key
+        for component in spec.components
+        if component.type == "transform.map"
+        or str(getattr(component, "type", "") or "").startswith("profile.")
+    }
+    if not keys:
+        return frozenset()
+    try:
+        from ..categories.integration_builder import resolve_reused_keys
 
-    config = component.config if isinstance(component.config, dict) else {}
-    declared_id = component.component_id or config.get("component_id")
-    return _will_reuse_at_apply(
-        declared_action=getattr(component, "action", None),
-        existing_component_id=declared_id if isinstance(declared_id, str) else None,
-        reference_only=_component_reference_only(component),
-        conflict_policy=conflict_policy or "reuse",
-    )
+        return frozenset(
+            resolve_reused_keys(boomi_client, spec, conflict_policy or "reuse", keys=keys)
+        )
+    except Exception:  # noqa: BLE001 - discovery is best effort; absence judges
+        return frozenset()
 
 
 def _selected_profile_indexes(
-    boomi_client: Any, normalized: Any, conflict_policy: Optional[str] = None
+    boomi_client: Any,
+    normalized: Any,
+    conflict_policy: Optional[str] = None,
+    reused_keys: Optional[Any] = None,
 ):
     """Indexes of the profiles apply will REUSE, by component key, or None.
 
@@ -2019,6 +2033,7 @@ def _selected_profile_indexes(
         return _resolve_selected_profile_indexes(
             boomi_client,
             normalized.integration_spec,
+            reused_keys=None if reused_keys is None else set(reused_keys),
             conflict_policy=conflict_policy,
         ) or None
     except Exception:  # noqa: BLE001 - discovery is best effort; absence defers
@@ -2289,6 +2304,7 @@ def plan_authoring_request_v1(
         symbols,
         effect_capabilities,
         resolution_snapshot,
+        _selected_for_preview,
     ) = _validate_processes(
         normalized,
         request.effect_declarations,
@@ -2309,9 +2325,11 @@ def plan_authoring_request_v1(
         tuple(d for d in all_diagnostics if d.severity != "error")
     )
 
-    _selected_for_preview = _selected_profile_indexes(
-        boomi_client, normalized, request.intent.conflict_policy
-    )
+    # THE VALIDATION PASS ALREADY ASKED. Resolving the selected artifacts a
+    # second time here asked the account the same question twice per plan, for
+    # an answer that cannot change within a request — and two reads of a live
+    # account can disagree, so the preview and the gate could describe different
+    # artifacts (live QA r12).
     spec_preview = build_integration_spec_preview(
         normalized, selected_indexes=_selected_for_preview
     )

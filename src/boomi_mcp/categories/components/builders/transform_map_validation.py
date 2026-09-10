@@ -250,7 +250,7 @@ def normalized_map_destinations(
     """
     destinations: List[Tuple[str, str]] = []
     for route, key in _DESTINATION_ROUTES:
-        for entry in _entries(map_config.get(key)):
+        for entry in mapping_entries(map_config.get(key)):
             if isinstance(entry, Mapping):
                 for path in destination_paths(route, entry):
                     destinations.append((route, path))
@@ -265,14 +265,17 @@ _DESTINATION_ROUTES: Tuple[Tuple[str, str], ...] = (
 )
 
 
-def _entries(value: Any) -> Tuple[Any, ...]:
+def mapping_entries(value: Any) -> Tuple[Any, ...]:
     """A mapping list's entries; anything that is not a list is empty.
 
     ``value or ()`` was NOT this: a truthy non-list — ``field_mappings: true``,
     ``outputs: true`` — reached ``for entry in True`` and left a TypeError
     escaping the hard coverage gate on every route that raises it. The advisory
     route already read these lists this way; consolidating the reading is what
-    surfaced the difference.
+    surfaced the difference. Public because the derived-flows projection reads
+    the same lists and carried its own copies of ``or ()`` — including one that
+    runs BEFORE this gate, so its ``TypeError`` reached the caller as an
+    unstructured failure carrying no machine code at all (live QA r12).
     """
     return tuple(value) if isinstance(value, (list, tuple)) else ()
 
@@ -300,7 +303,7 @@ def destination_paths(route: str, entry: Mapping[str, Any]) -> Tuple[str, ...]:
         return _clean_target_paths(entry.get("target_path"))
     if route == "map_script":
         paths: List[str] = []
-        for output in _entries(entry.get("outputs")):
+        for output in mapping_entries(entry.get("outputs")):
             if isinstance(output, Mapping):
                 paths.extend(_clean_target_paths(output.get("target_path")))
         return tuple(paths)

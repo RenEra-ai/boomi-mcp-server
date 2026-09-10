@@ -148,11 +148,13 @@ def test_the_apply_refresh_runs_the_coverage_gate_before_any_write():
 
     ``validate_transform_map`` alone does not carry required-leaf coverage, so a
     selected index re-read at apply could newly require a leaf and the gap would
-    surface at the map STEP, after earlier components were written. The drift is
-    simulated where the code itself distinguishes the two reads: the refresh is
-    the ONLY caller that supplies ``reused_keys`` (the planner's own decision),
-    so answering that one question with the changed profile is exactly "the
-    account moved after the plan was validated".
+    surface at the map STEP, after earlier components were written.
+
+    The drift is placed where the code itself draws the line: the refresh is the
+    re-read that happens AFTER the plan has been built and validated, so the stub
+    answers with the changed profile only once ``_build_plan`` has returned.
+    That is exactly "the account moved after this request was validated", and it
+    does not depend on how many times anything was asked.
     """
     from boomi_mcp.categories import integration_builder
 
@@ -162,11 +164,16 @@ def test_the_apply_refresh_runs_the_coverage_gate_before_any_write():
         {"name": "must", "kind": "simple", "data_type": "character", "required": True}
     )
 
-    asked = []
+    planned = []
+    real_build = integration_builder._build_plan
+
+    def _build_then_drift(*args, **kwargs):
+        out = real_build(*args, **kwargs)
+        planned.append(1)
+        return out
 
     def drifting(client, spec, reused_keys=None, conflict_policy=None):
-        asked.append(reused_keys)
-        root = drifted_root if reused_keys is not None else clean_root
+        root = drifted_root if planned else clean_root
         return {_TARGET_KEY: _json_index(root)}
 
     clean_discovery = patch.object(
@@ -177,12 +184,14 @@ def test_the_apply_refresh_runs_the_coverage_gate_before_any_write():
     with clean_discovery:
         payload = _bound_wet(comps)
     with clean_discovery, patch.object(
+        integration_builder, "_build_plan", _build_then_drift
+    ), patch.object(
         integration_builder, "_resolve_selected_profile_indexes", drifting
     ), patch.object(integration_builder, "_execute_component") as execute, patch.object(
         integration_builder, "create_component"
     ) as create:
         result = integration_builder.build_integration_action(MagicMock(), _PROFILE, "apply", payload)
-    assert any(k is None for k in asked) and any(k is not None for k in asked), asked
+    assert planned, "the plan was never built, so nothing reached the refresh"
     assert result.get("_success") is False
     assert result.get("error_code") == TRANSFORM_REVIEW_REQUIRED_TARGET_UNMAPPED, result
     assert execute.call_count == 0 and create.call_count == 0
@@ -798,14 +807,24 @@ def test_a_watermark_naming_no_profile_is_still_refused(ref):
 
 
 def test_an_authored_profile_whose_own_config_yields_no_index_is_still_refused():
-    """Only a REUSED profile defers: this one the request writes, so it is decided here."""
+    """Only a REUSED profile defers: this one the request writes, so it is decided.
+
+    Reported rather than raised: normalization cannot tell a name-reuse from a
+    write, so it defers, and the pass that CAN tell reports the refusal the way
+    planning reports everything else — as a diagnostic, with compile raising on
+    it like any other error.
+    """
     empty = {"key": "src_prof", "type": "profile.db", "action": "create",
              "config": {"profile_type": "database.read"}}
+    request = _watermark_over("$ref:src_prof", [empty])
+    result, _ = plan_authoring_request_v1(request, boomi_client=None, profile=_PROFILE)
+    hits = [d for d in result.errors if d.code == GOVERNANCE_WATERMARK_INCONSISTENT]
+    assert hits and hits[0].path.endswith("/watermark/field")
     with pytest.raises(Exception) as excinfo:
-        plan_authoring_request_v1(
-            _watermark_over("$ref:src_prof", [empty]), boomi_client=None, profile=_PROFILE
-        )
-    assert GOVERNANCE_WATERMARK_INCONSISTENT in str(excinfo.value)
+        compile_authoring_request_v1(request, boomi_client=None, profile=_PROFILE)
+    assert GOVERNANCE_WATERMARK_INCONSISTENT in {
+        d.code for d in excinfo.value.diagnostics
+    }
 
 
 def test_the_reused_source_profile_still_defers():
@@ -815,3 +834,218 @@ def test_the_reused_source_profile_still_defers():
         boomi_client=None, profile=_PROFILE,
     )
     assert all(d.code != GOVERNANCE_WATERMARK_INCONSISTENT for d in result.errors)
+
+
+# ---------------------------------------------------------------------------
+# Stage-2 round 6 — one answer to "will apply reuse this?", asked once
+# ---------------------------------------------------------------------------
+
+
+def _account_holding(*names):
+    """Patch the metadata boundary so these component NAMES resolve to one match each."""
+    rows = [
+        {"component_id": "existing-{0}".format(i), "name": name, "type": "t", "folder_name": "Home"}
+        for i, name in enumerate(names, 1)
+    ]
+    return patch(_PAGINATE, lambda *a, **k: list(rows))
+
+
+def _map_named(name, **config):
+    comps = copy.deepcopy(_components())  # the target profile needs `Root/must`
+    entry = next(c for c in comps if c["key"] == _MAP_KEY)
+    entry["name"] = name
+    entry["config"].update(config)
+    return comps
+
+
+def test_a_map_bound_by_name_is_opaque_even_with_no_declared_id():
+    """A `reference_only` entry binds through an unambiguous NAME match too.
+
+    Reading only a declared id called that map "written", so its candidate
+    mappings were judged and a valid request was refused.
+    """
+    comps = _map_named("Reused Map", reference_only=True, component_name="Reused Map")
+    with _account_holding("Reused Map"):
+        result, _ = plan_authoring_request_v1(_request(comps), boomi_client=MagicMock(), profile=_PROFILE)
+    assert not [d for d in result.errors if TRANSFORM_REVIEW_REQUIRED_TARGET_UNMAPPED in d.cause_codes]
+    # and with nothing in the account to bind to, the same request IS judged
+    with patch(_PAGINATE, lambda *a, **k: []):
+        alone, _ = plan_authoring_request_v1(_request(comps), boomi_client=MagicMock(), profile=_PROFILE)
+    assert [d for d in alone.errors if TRANSFORM_REVIEW_REQUIRED_TARGET_UNMAPPED in d.cause_codes]
+
+
+def test_a_config_only_component_id_without_the_reuse_flag_binds_nothing():
+    """The planner reads the config-level id ONLY for a `reference_only` entry.
+
+    Treating it as a binding everywhere made a map that apply CREATES look
+    reused, so its missing required target leaf went unreported.
+    """
+    comps = _map_named("Fresh Map", component_id="existing-elsewhere")
+    with patch(_PAGINATE, lambda *a, **k: []):
+        result, _ = plan_authoring_request_v1(_request(comps), boomi_client=MagicMock(), profile=_PROFILE)
+    assert [d for d in result.errors if TRANSFORM_REVIEW_REQUIRED_TARGET_UNMAPPED in d.cause_codes]
+    # the same id on the TOP level is a binding, and then the map is opaque
+    comps = _map_named("Fresh Map")
+    next(c for c in comps if c["key"] == _MAP_KEY)["component_id"] = "existing-elsewhere"
+    with patch(_PAGINATE, lambda *a, **k: []):
+        bound, _ = plan_authoring_request_v1(_request(comps), boomi_client=MagicMock(), profile=_PROFILE)
+    assert not [d for d in bound.errors if TRANSFORM_REVIEW_REQUIRED_TARGET_UNMAPPED in d.cause_codes]
+
+
+def _name_reused_source_profile(name="Existing Source"):
+    """An in-plan profile carrying no local body — reused by NAME, no flag."""
+    return {"key": "src_prof", "type": "profile.db", "action": "create", "name": name,
+            "config": {"profile_type": "database.read"}}
+
+
+def test_a_watermark_over_a_name_reused_profile_is_deferred_not_refused():
+    """`reference_only` is one spelling of reuse; a name collision carries no flag.
+
+    Keying deferrability on the flag rejected, during offline normalization, a
+    declaration the account can satisfy.
+    """
+    from boomi_mcp.categories import integration_builder
+
+    request = _watermark_over("$ref:src_prof", [_name_reused_source_profile()])
+    with _account_holding("Existing Source"), patch.object(
+        integration_builder, "_discover_profile_index",
+        lambda client, uuid: {"profile_component_type": "profile.db",
+                              "field_index_by_path": _index(("updated_at", "id"))},
+    ):
+        result, _ = plan_authoring_request_v1(request, boomi_client=MagicMock(), profile=_PROFILE)
+    assert all(d.code != GOVERNANCE_WATERMARK_INCONSISTENT for d in result.errors)
+
+
+def test_the_same_profile_under_clone_is_written_so_its_watermark_is_decided_here():
+    """The adversarial half: under `clone` the request WRITES it, so its config is the authority."""
+    from boomi_mcp.categories import integration_builder
+
+    request = _watermark_over("$ref:src_prof", [_name_reused_source_profile()])
+    request = request.model_copy(
+        update={"intent": request.intent.model_copy(update={"conflict_policy": "clone"})}
+    )
+    with _account_holding("Existing Source"), patch.object(
+        integration_builder, "_discover_profile_index",
+        lambda client, uuid: {"profile_component_type": "profile.db",
+                              "field_index_by_path": _index(("updated_at", "id"))},
+    ):
+        result, _ = plan_authoring_request_v1(request, boomi_client=MagicMock(), profile=_PROFILE)
+    assert [d for d in result.errors if d.code == GOVERNANCE_WATERMARK_INCONSISTENT]
+
+
+# ---------------------------------------------------------------------------
+# live QA r12 — what the corrections still modelled twice
+# ---------------------------------------------------------------------------
+
+
+def test_a_truthy_non_list_mapping_list_never_reaches_the_caller_as_a_type_error():
+    """The projection reads these lists BEFORE the coverage gate does.
+
+    Its own copies of ``or ()`` turned `field_mappings: true` into a bare
+    `TypeError`, served as a three-key envelope with no machine code at all —
+    the gate that would have refused it never ran.
+    """
+    from boomi_mcp.categories.integration_builder import build_integration_action
+
+    for junk in ("field_mappings", "function_mappings", "script_mappings"):
+        comps = copy.deepcopy(_components())
+        entry = next(c for c in comps if c["key"] == _MAP_KEY)
+        entry["config"][junk] = True
+        for action in ("plan", "compile"):
+            result = build_integration_action(
+                MagicMock(), _PROFILE, action,
+                {"authoring_request": _request(comps).model_dump(mode="json")},
+            )
+            assert result.get("exception_type") != "TypeError", (junk, action, result)
+            assert "object is not iterable" not in str(result.get("error") or ""), (junk, action)
+
+
+def test_the_projection_reads_its_mapping_lists_through_the_shared_reader():
+    """One reader, or the projection is a third copy of it.
+
+    Removing the shared reader must take the projection's operations with it —
+    proof that the enrolment is a call and not a comment.
+    """
+    from boomi_mcp.authoring import derived_flows
+    from boomi_mcp.authoring.derived_flows import derive_transform_flows
+
+    (row,) = derive_transform_flows(
+        [_flow_unit()], _flow_components(reference_only=False),
+        connector_metadata={"dbc": ("database", None)},
+    )
+    assert row.operations, "the fixture binds no mapping, so this proves nothing"
+    with patch.object(derived_flows, "mapping_entries", lambda value: ()):
+        (blind,) = derive_transform_flows(
+            [_flow_unit()], _flow_components(reference_only=False),
+            connector_metadata={"dbc": ("database", None)},
+        )
+    assert blind.operations == ()
+
+
+def test_plan_compile_and_apply_agree_on_which_maps_are_written():
+    """The apply refresh modelled "written" from the plan's LABEL, not the predicate.
+
+    An explicit `component_id` skips candidate resolution, so a declared create
+    keeps `planned_action="create"` while apply reuses it — the corner the
+    predicate's own docstring records. Modelling the label gated at apply a map
+    the pre-write pass had correctly exempted, so plan and compile said yes and
+    apply said no about the same request.
+
+    The map's target is a reused profile, which is what brings the refresh's
+    gate into play at all; the map itself is bound to an existing component, so
+    every pass that asks the predicate exempts it.
+    """
+    from boomi_mcp.categories import integration_builder
+    from boomi_mcp.categories.integration_builder import build_integration_action
+
+    comps, clean_root = _reused_target()
+    entry = next(c for c in comps if c["key"] == _MAP_KEY)
+    entry["component_id"] = "map-uuid-1"
+    account_root = copy.deepcopy(clean_root)
+    account_root["children"].append(
+        {"name": "must", "kind": "simple", "data_type": "character", "required": True}
+    )
+    discovery = patch.object(
+        integration_builder, "_discover_profile_index",
+        lambda client, uuid: {"profile_component_type": "profile.json",
+                              "field_index_by_path": _json_index(account_root)},
+    )
+    with patch(_PAGINATE, lambda *a, **k: []), discovery:
+        planned, _ = plan_authoring_request_v1(
+            _request(comps), boomi_client=MagicMock(), profile=_PROFILE
+        )
+        assert not [
+            d for d in planned.errors
+            if TRANSFORM_REVIEW_REQUIRED_TARGET_UNMAPPED in d.cause_codes
+        ], "the pre-write pass already disagrees, so this proves nothing"
+        payload = _bound_wet(comps)
+        with patch.object(integration_builder, "_execute_component"):
+            applied = build_integration_action(MagicMock(), _PROFILE, "apply", payload)
+    assert applied.get("error_code") != TRANSFORM_REVIEW_REQUIRED_TARGET_UNMAPPED, applied
+
+
+def test_the_typed_pass_discovers_each_reused_profile_once_per_request():
+    """Two owners in the typed pass asked the account the same question twice.
+
+    Two reads of a live account can disagree, so the served preview and the gate
+    could describe different artifacts. The legacy component-plan lint keeps its
+    own read: it is a separate subsystem with its own resolution, reached
+    through `_build_plan`, and that remainder is measured here rather than
+    claimed away.
+    """
+    from boomi_mcp.categories import integration_builder
+
+    comps, clean_root = _reused_target()
+    asked = []
+
+    def counting(client, uuid):
+        asked.append(uuid)
+        return {"profile_component_type": "profile.json",
+                "field_index_by_path": _json_index(clean_root)}
+
+    with patch.object(integration_builder, "_discover_profile_index", counting):
+        plan_authoring_request_v1(_request(comps), boomi_client=MagicMock(), profile=_PROFILE)
+    typed_owners = 1
+    legacy_lint_owner = 1
+    assert len(asked) == typed_owners + legacy_lint_owner, asked
+    assert set(asked) == {"prof-uuid-1"}

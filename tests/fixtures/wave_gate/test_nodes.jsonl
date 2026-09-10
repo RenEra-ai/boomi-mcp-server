@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 11995, "minimum_collected": 11995, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 12003, "minimum_collected": 12003, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -12043,3 +12043,11 @@
 {"kind": "test", "id": "pytest-012042", "node_id": "tests/test_issue_157_plan_conformance.py::test_the_map_exemption_asks_the_reuse_predicate_not_the_flag[create-map-uuid-1-True]", "state": "active"}
 {"kind": "test", "id": "pytest-012043", "node_id": "tests/test_issue_157_plan_conformance.py::test_the_map_exemption_asks_the_reuse_predicate_not_the_flag[update-map-uuid-1-False]", "state": "active"}
 {"kind": "test", "id": "pytest-012044", "node_id": "tests/test_issue_157_plan_conformance.py::test_the_reused_source_profile_still_defers", "state": "active"}
+{"kind": "test", "id": "pytest-012045", "node_id": "tests/test_issue_157_plan_conformance.py::test_a_config_only_component_id_without_the_reuse_flag_binds_nothing", "state": "active"}
+{"kind": "test", "id": "pytest-012046", "node_id": "tests/test_issue_157_plan_conformance.py::test_a_map_bound_by_name_is_opaque_even_with_no_declared_id", "state": "active"}
+{"kind": "test", "id": "pytest-012047", "node_id": "tests/test_issue_157_plan_conformance.py::test_a_truthy_non_list_mapping_list_never_reaches_the_caller_as_a_type_error", "state": "active"}
+{"kind": "test", "id": "pytest-012048", "node_id": "tests/test_issue_157_plan_conformance.py::test_a_watermark_over_a_name_reused_profile_is_deferred_not_refused", "state": "active"}
+{"kind": "test", "id": "pytest-012049", "node_id": "tests/test_issue_157_plan_conformance.py::test_plan_compile_and_apply_agree_on_which_maps_are_written", "state": "active"}
+{"kind": "test", "id": "pytest-012050", "node_id": "tests/test_issue_157_plan_conformance.py::test_the_projection_reads_its_mapping_lists_through_the_shared_reader", "state": "active"}
+{"kind": "test", "id": "pytest-012051", "node_id": "tests/test_issue_157_plan_conformance.py::test_the_same_profile_under_clone_is_written_so_its_watermark_is_decided_here", "state": "active"}
+{"kind": "test", "id": "pytest-012052", "node_id": "tests/test_issue_157_plan_conformance.py::test_the_typed_pass_discovers_each_reused_profile_once_per_request", "state": "active"}

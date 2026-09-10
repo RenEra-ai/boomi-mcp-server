@@ -920,30 +920,53 @@ def validate_watermark_declaration(
     return not decided
 
 
-def _watermark_source_is_deferrable(
+def _watermark_source_profile(
     source_profile_ref: Any, components_by_key: Mapping[str, IntegrationComponentSpec]
-) -> bool:
-    """Is an unresolved source-profile index an UNAVAILABLE answer, or a bad reference?
+):
+    """The referenced in-plan profile, ``None`` for a literal id, or the bad marker.
 
-    Deferrable in exactly two shapes: a literal existing-profile id, whose index
-    the online pass discovers; and an in-plan profile component this request will
-    REUSE rather than write, which is the one case the shared resolver
-    deliberately refuses to index from the candidate config. Anything else — a
-    `$ref` naming no component, a `$ref` naming a non-profile, or a profile this
-    request authors whose own config yields no index — is a reference the online
-    pass can never repair, so it stays a refusal.
+    Three answers, because the resolver's single ``None`` was three questions: a
+    reference that names no component and one that names a non-profile are
+    UNREPAIRABLE — no later pass can give either a profile index — while a
+    literal id and an in-plan profile are answerable elsewhere.
     """
     if not isinstance(source_profile_ref, str) or not source_profile_ref.strip():
-        return False
+        return _UNRESOLVABLE_SOURCE
     if not source_profile_ref.startswith("$ref:"):
-        return True
+        return None
     component = components_by_key.get(source_profile_ref[len("$ref:") :])
     if component is None:
-        return False
+        return _UNRESOLVABLE_SOURCE
     if not str(getattr(component, "type", "") or "").startswith("profile."):
-        return False
-    config = component.config if isinstance(component.config, dict) else {}
-    return config.get("reference_only") is True
+        return _UNRESOLVABLE_SOURCE
+    return component
+
+
+#: "this reference can never resolve to a profile", distinct from "not in reach here".
+_UNRESOLVABLE_SOURCE = object()
+
+
+def _watermark_source_is_reused(
+    source_profile_ref: Any,
+    components_by_key: Mapping[str, IntegrationComponentSpec],
+    reused_keys: Optional[Any] = None,
+) -> bool:
+    """Will the referenced source profile be REUSED rather than written?
+
+    Not this pass's question to answer. ``reused_keys`` is the caller's
+    authority: ``None`` means "not known here", which is normalization's honest
+    state — it runs offline, so a profile reused by NAME is indistinguishable
+    from one this request writes — and defers to the pass that does know.
+
+    An earlier version read ``config.reference_only`` instead. That is one
+    spelling of reuse out of several, and modelling it here refused declarations
+    the account can satisfy (Stage-2 round 6).
+    """
+    if not isinstance(source_profile_ref, str) or not source_profile_ref.startswith("$ref:"):
+        return True
+    if reused_keys is None:
+        return True
+    return source_profile_ref[len("$ref:") :] in reused_keys
 
 
 def validate_watermark_source_field(
@@ -953,6 +976,7 @@ def validate_watermark_source_field(
     components_by_key: Mapping[str, IntegrationComponentSpec],
     literal_indexes: Optional[Mapping[str, Any]] = None,
     selected_indexes: Optional[Mapping[str, Any]] = None,
+    reused_keys: Optional[Any] = None,
 ) -> bool:
     """Rule (a) alone: the tracked field is a declared, mappable source leaf.
 
@@ -979,32 +1003,38 @@ def validate_watermark_source_field(
         literal_indexes,
         dict(selected_indexes) if selected_indexes else None,
     )
-    if index is None and not _watermark_source_is_deferrable(
-        declaration.source_profile_ref, components_by_key
-    ):
-        # UNRESOLVABLE IS NOT THE SAME AS UNAVAILABLE. The resolver answers None
-        # for three different questions: a reference that names no component, a
-        # reference that names a non-profile, and a profile whose index simply is
-        # not in reach here. Only the third is a deferral; reading all three as
-        # one retired the reference check entirely, so a watermark over
-        # `$ref:missing` or over a connector planned and compiled (Stage-2
-        # round 5).
-        raise _refuse(
-            GOVERNANCE_WATERMARK_INCONSISTENT,
-            message=(
-                "The watermark references a source profile this request does "
-                "not author."
-            ),
-            path="/units/{0}/envelope/watermark/source_profile_ref".format(unit_index),
-            subject_kind="process",
-            remediation=(
-                "Reference an in-plan source profile ($ref:KEY) or an existing "
-                "profile component id."
-            ),
-        )
-    if index is None:
-        return False
-    entry = index.get(declaration.field)
+    # An EMPTY index is the same answer as no index: the resolver returns `{}`
+    # for a profile whose own config declares no fields.
+    if not index:
+        if (
+            _watermark_source_profile(declaration.source_profile_ref, components_by_key)
+            is _UNRESOLVABLE_SOURCE
+        ):
+            # UNRESOLVABLE IS NOT UNAVAILABLE. Reading every `None` from the
+            # resolver as one answer retired the reference check entirely, so a
+            # watermark over `$ref:missing` or over a connector planned and
+            # compiled (Stage-2 round 5).
+            raise _refuse(
+                GOVERNANCE_WATERMARK_INCONSISTENT,
+                message=(
+                    "The watermark references a source profile this request does "
+                    "not author."
+                ),
+                path="/units/{0}/envelope/watermark/source_profile_ref".format(unit_index),
+                subject_kind="process",
+                remediation=(
+                    "Reference an in-plan source profile ($ref:KEY) or an existing "
+                    "profile component id."
+                ),
+            )
+        if _watermark_source_is_reused(
+            declaration.source_profile_ref, components_by_key, reused_keys
+        ):
+            return False
+        # A profile this request WRITES, whose own config is the only authority
+        # its index could come from: an empty index cannot declare the field, so
+        # this falls through to the field refusal below, exactly as before.
+    entry = (index or {}).get(declaration.field)
     if entry is None or not entry.get("mappable", True):
         raise _refuse(
             GOVERNANCE_WATERMARK_INCONSISTENT,

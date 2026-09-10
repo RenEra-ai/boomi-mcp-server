@@ -25,6 +25,7 @@ import hashlib
 import json
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
+from ..categories.components.builders.transform_map_validation import mapping_entries
 from ..models.derived_flows import DerivedTransformFlowV1, FieldIndexEntryV1
 from ..models.integration_models import IntegrationComponentSpec
 
@@ -230,7 +231,7 @@ def _leaves_summary(index: Mapping[str, Mapping[str, Any]]) -> Dict[str, Any]:
 def _db_schema_summary(index: Mapping[str, Mapping[str, Any]], config: Mapping[str, Any]) -> Dict[str, Any]:
     fields = []
     declared = {}
-    for entry in config.get("output_fields") or config.get("fields") or ():
+    for entry in mapping_entries(config.get("output_fields") or config.get("fields")):
         if isinstance(entry, Mapping) and isinstance(entry.get("name"), str):
             declared[entry["name"]] = entry
     for name, record in index.items():
@@ -350,7 +351,7 @@ def _generated_profile(component: IntegrationComponentSpec) -> Optional[Dict[str
 
 def _operation_summaries(map_config: Mapping[str, Any]) -> List[Dict[str, Any]]:
     summaries: List[Dict[str, Any]] = []
-    for entry in map_config.get("field_mappings") or ():
+    for entry in mapping_entries(map_config.get("field_mappings")):
         if isinstance(entry, Mapping):
             summary: Dict[str, Any] = {
                 "operation_type": "direct",
@@ -360,9 +361,9 @@ def _operation_summaries(map_config: Mapping[str, Any]) -> List[Dict[str, Any]]:
             if isinstance(entry.get("documentation_hint"), str):
                 summary["documentation_hint"] = entry["documentation_hint"]
             summaries.append(summary)
-    for entry in map_config.get("function_mappings") or ():
+    for entry in mapping_entries(map_config.get("function_mappings")):
         if isinstance(entry, Mapping):
-            inputs = list(entry.get("inputs") or ())
+            inputs = list(mapping_entries(entry.get("inputs")))
             summary = {
                 "operation_type": "map_function",
                 "function_type": entry.get("function_type"),
@@ -375,16 +376,16 @@ def _operation_summaries(map_config: Mapping[str, Any]) -> List[Dict[str, Any]]:
             if isinstance(entry.get("documentation_hint"), str):
                 summary["documentation_hint"] = entry["documentation_hint"]
             summaries.append(summary)
-    for entry in map_config.get("script_mappings") or ():
+    for entry in mapping_entries(map_config.get("script_mappings")):
         if isinstance(entry, Mapping):
             inputs = [
                 item.get("source_path")
-                for item in (entry.get("inputs") or ())
+                for item in mapping_entries(entry.get("inputs"))
                 if isinstance(item, Mapping)
             ]
             outputs = [
                 item.get("target_path")
-                for item in (entry.get("outputs") or ())
+                for item in mapping_entries(entry.get("outputs"))
                 if isinstance(item, Mapping)
             ]
             summary = {
@@ -495,7 +496,7 @@ def derive_transform_flows(
                         target_gen["field_index_by_path"],
                         [
                             {"source_field": e.get("source_path"), "target_path": e.get("target_path")}
-                            for e in (config.get("field_mappings") or ())
+                            for e in mapping_entries(config.get("field_mappings"))
                             if isinstance(e, Mapping)
                         ],
                     )
