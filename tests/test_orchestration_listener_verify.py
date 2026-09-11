@@ -1985,7 +1985,8 @@ def test_an_overlap_probe_answered_by_the_other_route_is_re_probed_until_this_pr
     this listener served the path minutes later. A 2xx there is not this
     listener's until its own execution record says so, so the verify probes
     again within the registration window, and says what the early probes hit."""
-    readbacks = int(orchestration._LISTENER_READBACK_SECONDS // 5)
+    # Queries in one readback: every 5 s, and one AT its deadline (CDX-158-r7-01).
+    readbacks = int(orchestration._LISTENER_READBACK_SECONDS // 5) + 1
     result, probe = _inherited_method_collision_run(
         registry, monkeypatch, other_object="orders", other_url_path="intake",
         asc_fresh=True, own_records=[_RECORD_EMPTY] * readbacks + [_RECORD_OK],
@@ -2105,11 +2106,13 @@ class _RegisteringPlatform:
 
 
 def test_every_registration_inside_the_window_verifies_on_one_own_execution(registry, monkeypatch):
-    """#158 CDX-158-r5-01 and CDX-158-r6-01 were two defects in one hand-built
-    schedule of probes and readbacks: a readback shorter than the record-latency
-    allowance replayed a probe whose record was late, and a continuation test
-    read after the last readback dropped the final probe, failing a route that
-    registered in the window's last minute. The schedule is judged here against
+    """#158 CDX-158-r5-01, CDX-158-r6-01 and CDX-158-r7-01 were three defects in
+    one hand-built schedule of probes and readbacks: a readback shorter than the
+    record-latency allowance replayed a probe whose record was late; a
+    continuation test read after the last readback dropped the final probe,
+    failing a route that registered in the window's last minute; and the
+    readback never queried at its own deadline, so a record readable in its last
+    5 s was missed and the probe replayed. The schedule is judged here against
     the two windows it answers to, over their whole case space: for every
     registration time inside the registration window and every record latency
     inside the readback window, the verify succeeds, runs this listener's
@@ -2117,9 +2120,19 @@ def test_every_registration_inside_the_window_verifies_on_one_own_execution(regi
     stays within the probe bound."""
     window = orchestration._LISTENER_ROUTE_REGISTRATION_WINDOW_SECONDS
     readback = orchestration._LISTENER_READBACK_SECONDS
+    # The COMPLETE case space, not a sample (CDX-158-r7-01: the sample
+    # {0, 5, 40, 55} missed a record readable in the readback's last 5 s). The
+    # outcome depends only on which probe is the first at or after the route
+    # registers — so every probe instant and its two neighbours — and on which
+    # readback query first sees the record — so every whole-second latency the
+    # readback allows, its last instant included.
+    probe_instants = range(0, window + readback + 1, readback)
+    registrations = sorted(
+        {r for instant in probe_instants for r in (instant - 1, instant, instant + 1) if 0 <= r <= window}
+    )
     failures = []
-    for registered_at in range(0, window + 1, 10):
-        for latency in (0, 5, 40, readback - 5):
+    for registered_at in registrations:
+        for latency in range(0, readback + 1):
             platform = _RegisteringPlatform(registered_at, latency)
             result, _probe = _inherited_method_collision_run(
                 registry, monkeypatch, other_object="orders", other_url_path="intake",
@@ -2133,3 +2146,25 @@ def test_every_registration_inside_the_window_verifies_on_one_own_execution(regi
             elif len(platform.probe_times) > window // readback + 2:
                 failures.append(("probes", case))
     assert not failures, failures
+
+
+def test_a_record_readable_in_the_readbacks_last_seconds_verifies(registry, monkeypatch):
+    """#158 CDX-158-r7-01, the sibling in the ordinary readback (present since the
+    baseline): polling every 5 s and stopping when the clock reached the
+    deadline never read the window's last 5 s, so a probe whose record became
+    readable at 58 s failed `LISTENER_EXECUTION_RECORD_MISSING` although its
+    listener ran inside the allowance. The last query runs at the deadline."""
+    bid = registry("b-asc-late-record", _asc_entry())
+    latency = orchestration._LISTENER_READBACK_SECONDS - 2
+    platform = _RegisteringPlatform(registered_at=0, latency=latency)
+    _patch_asc_real_run(
+        monkeypatch,
+        server_info=_server_info(api_type="advanced"),
+        probe=platform.probe,
+        execution_records=_RECORD_OK,
+    )
+    monkeypatch.setattr(orchestration, "monitor_platform_action", platform.monitor)
+    result = _run(bid)
+    assert result["_success"] is True, result.get("error")
+    assert len(platform.probe_times) == 1
+    assert result["listener_verify"]["execution_record_found"] is True

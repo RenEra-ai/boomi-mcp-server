@@ -1270,7 +1270,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 2,
-      "evidence_line": 2185,
+      "evidence_line": 2194,
       "form": "_listener_probe(...) [legacy-bearing, src/boomi_mcp/categories/deployment/orchestration.py]",
       "path": "src/boomi_mcp/categories/deployment/orchestration.py",
       "row_id": "LT-063d5fb8",
@@ -1279,7 +1279,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 5512,
+      "evidence_line": 5521,
       "form": "_run_listener_verify_stage(...) [legacy-bearing, src/boomi_mcp/categories/deployment/orchestration.py]",
       "path": "src/boomi_mcp/categories/deployment/orchestration.py",
       "row_id": "LT-6549f556",
@@ -4996,7 +4996,7 @@
     {
       "census": "legacy_transitive_call",
       "disposition": "follow the callee's row; this is an edge, not a site",
-      "evidence_line": 2185,
+      "evidence_line": 2194,
       "forms": [
         "_listener_probe(...) [legacy-bearing, src/boomi_mcp/categories/deployment/orchestration.py]"
       ],
@@ -5009,7 +5009,7 @@
     {
       "census": "legacy_transitive_call",
       "disposition": "follow the callee's row; this is an edge, not a site",
-      "evidence_line": 5512,
+      "evidence_line": 5521,
       "forms": [
         "_run_listener_verify_stage(...) [legacy-bearing, src/boomi_mcp/categories/deployment/orchestration.py]"
       ],

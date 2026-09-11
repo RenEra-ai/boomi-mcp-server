@@ -2119,13 +2119,19 @@ def _run_listener_verify_stage(
 
     def _read_own_execution(seconds: float):
         """(found, execution_id, status, error): a record of THIS listener's
-        process that the probe triggered, waited for up to ``seconds``."""
+        process that the probe triggered, waited for up to ``seconds``.
+
+        The last query runs AT the deadline (#158 CDX-158-r7-01): polling every
+        5 s and stopping when the clock reached the deadline left the window's
+        last 5 s unread, so a record readable then failed the verify — or, in
+        the overlap loop, had its probe replayed and the listener run twice.
+        """
         found = False
         found_id: Optional[str] = None
         found_status: Optional[str] = None
         error: Optional[str] = None
         deadline = time.monotonic() + seconds
-        while time.monotonic() < deadline:
+        while True:
             try:
                 records_result = monitor_platform_action(
                     boomi_client,
@@ -2157,7 +2163,10 @@ def _run_listener_verify_stage(
                     break
             else:
                 error = str((records_result or {}).get("error") or "unknown error")
-            time.sleep(5)
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            time.sleep(min(5.0, remaining))
         return found, found_id, found_status, error
 
     url = base_url.rstrip("/") + endpoint_path
