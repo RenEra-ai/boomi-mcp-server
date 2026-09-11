@@ -1817,7 +1817,7 @@ def test_asc_failure_cleanup_includes_fresh_asc_resources(registry, monkeypatch)
 def _inherited_method_collision_run(
     registry, monkeypatch, *, other_object, other_url_path, other_base="",
     my_object="intake", my_base="orders", my_url_path="",
-    asc_fresh=False, own_records=None, probe=None,
+    asc_fresh=False, own_records=None, probe=None, monitor=None,
 ):
     """#158 CDX-158-r1-01: only an explicit http_method pins a route's method, so an
     other ASC's route that overrides objectName and inputType but INHERITS its
@@ -1886,6 +1886,8 @@ def _inherited_method_collision_run(
             other_op: other_op_xml,
         },
     )
+    if monitor is not None:
+        monkeypatch.setattr(orchestration, "monitor_platform_action", monitor)
     if own_records is not None:
         # Baseline query first, then this listener's readbacks in order.
         monkeypatch.setattr(
@@ -2066,3 +2068,68 @@ def test_a_registration_lag_warning_is_served_only_beside_a_verified_run(registr
         w for w in result["listener_verify"]["warnings"]
         if "LISTENER_ROUTE_REGISTRATION_LAG" in w
     ], result["listener_verify"]["warnings"]
+
+
+class _RegisteringPlatform:
+    """The overlap arrangement as the platform behaves (#158 QA s2r3b/s2r4):
+    until this listener's route registers at ``registered_at``, the path is
+    answered by the overlapping route (its process runs, this one's does not);
+    from then on each probe runs THIS listener's process, whose execution
+    record becomes readable ``latency`` seconds later."""
+
+    def __init__(self, registered_at, latency):
+        self.registered_at = registered_at
+        self.latency = latency
+        self.own_runs = []  # record-readable times of this listener's executions
+        self.probe_times = []
+
+    def probe(self, url, *, method, payload, headers, timeout_seconds):
+        now = orchestration.time.monotonic()
+        self.probe_times.append(now)
+        if now >= self.registered_at:
+            self.own_runs.append(now + self.latency)
+        return 200, None
+
+    def monitor(self, sdk=None, profile=None, action=None, config_data=None, **kwargs):
+        assert action == "execution_records", action
+        now = orchestration.time.monotonic()
+        visible = [i for i, readable in enumerate(self.own_runs) if readable <= now]
+        return {
+            "_success": True,
+            "total_count": len(visible),
+            "execution_records": [
+                {"execution_id": "own-%d" % i, "status": "COMPLETE", "execution_type": "exec_listener"}
+                for i in visible
+            ],
+        }
+
+
+def test_every_registration_inside_the_window_verifies_on_one_own_execution(registry, monkeypatch):
+    """#158 CDX-158-r5-01 and CDX-158-r6-01 were two defects in one hand-built
+    schedule of probes and readbacks: a readback shorter than the record-latency
+    allowance replayed a probe whose record was late, and a continuation test
+    read after the last readback dropped the final probe, failing a route that
+    registered in the window's last minute. The schedule is judged here against
+    the two windows it answers to, over their whole case space: for every
+    registration time inside the registration window and every record latency
+    inside the readback window, the verify succeeds, runs this listener's
+    process exactly once (no probe replayed while its record is pending), and
+    stays within the probe bound."""
+    window = orchestration._LISTENER_ROUTE_REGISTRATION_WINDOW_SECONDS
+    readback = orchestration._LISTENER_READBACK_SECONDS
+    failures = []
+    for registered_at in range(0, window + 1, 10):
+        for latency in (0, 5, 40, readback - 5):
+            platform = _RegisteringPlatform(registered_at, latency)
+            result, _probe = _inherited_method_collision_run(
+                registry, monkeypatch, other_object="orders", other_url_path="intake",
+                asc_fresh=True, probe=platform.probe, monitor=platform.monitor,
+            )
+            case = (registered_at, latency, [round(x) for x in platform.probe_times])
+            if result["_success"] is not True:
+                failures.append(("failed", case, result.get("error_code")))
+            elif len(platform.own_runs) != 1:
+                failures.append(("own runs", case, len(platform.own_runs)))
+            elif len(platform.probe_times) > window // readback + 2:
+                failures.append(("probes", case))
+    assert not failures, failures

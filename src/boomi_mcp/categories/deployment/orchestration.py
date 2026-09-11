@@ -1146,12 +1146,13 @@ def _build_declares_process_extensions(build_id: str) -> bool:
 _LISTENER_ROUTE_REGISTRATION_WINDOW_SECONDS = 240
 _LISTENER_ROUTE_REGISTRATION_POLL_SECONDS = 15
 # How long a probe's own execution record may take to appear. #158
-# (QA-158-s2r3b-01, CDX-158-r4-01, CDX-158-r5-01): while a fresh listener route
-# registers, an overlapping route of another ASC still answers its path, so a
-# 2xx there counts only once this listener's record appears — and a probe is
-# re-sent only after this whole window passed without one, which both spaces
-# those probes (each may execute the OTHER integration) and never replays a
-# probe whose record is merely late.
+# (QA-158-s2r3b-01, CDX-158-r4-01, CDX-158-r5-01, CDX-158-r6-01): while a fresh
+# listener route registers, an overlapping route of another ASC still answers
+# its path, so a 2xx there counts only once this listener's record appears — and
+# a probe is re-sent only after this whole window passed without one (which
+# spaces those probes, each of which may execute the OTHER integration, and
+# never replays a probe whose record is merely late), for as long as the probe
+# being re-sent was itself inside the registration window.
 _LISTENER_READBACK_SECONDS = 60
 
 
@@ -2180,6 +2181,7 @@ def _run_listener_verify_stage(
     readback = None
     while True:
         probe_attempts += 1
+        probe_sent_at = time.monotonic()
         status_code, probe_error = _listener_probe(
             url,
             method=http_method,
@@ -2241,8 +2243,13 @@ def _run_listener_verify_stage(
             # answers this path until ours registers, so a 2xx is not ours
             # until THIS process's execution record says so; until then the
             # route is unregistered, like a 401/404 above.
+            # Every probe sent inside the registration window gets the whole
+            # readback, and one that found nothing is followed by another —
+            # judged by when THIS probe was sent, not by the clock after its
+            # readback, which would drop the window's last probe
+            # (CDX-158-r6-01).
             readback = _read_own_execution(_LISTENER_READBACK_SECONDS)
-            if not readback[0] and time.monotonic() < registration_deadline:
+            if not readback[0] and probe_sent_at < registration_deadline:
                 continue
         break
     registration_lag_warning: Optional[str] = None
