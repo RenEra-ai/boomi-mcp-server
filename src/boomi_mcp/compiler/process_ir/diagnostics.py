@@ -24,6 +24,9 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from ...errors import (
     PROCESS_IR_CAPABILITY_ERROR_SCOPE_UNSUPPORTED,
+    PROCESS_IR_CAPABILITY_LISTENER_COMPOSITION_UNSUPPORTED,
+    PROCESS_IR_REFERENCE_LISTENER_OPERATION_INVALID,
+    PROCESS_IR_SEMANTIC_LISTENER_INBOUND_CONTRACT_UNSATISFIED,
     PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY,
     PROCESS_IR_CAPABILITY_PROCESS_CALL_RETURN_PATH_BINDING_UNSUPPORTED,
     PROCESS_IR_COMPILE_ERROR_REGION_INVALID,
@@ -203,7 +206,10 @@ _REMEDIATION = {
         "capability matrix, and either omit the authored action or set it to the "
         "operation's own action. The callable pairs are published at "
         "get_schema_template(schema_name='process_ir_authoring', "
-        "category='connector_action')."
+        "category='connector_action'). A Web Services Server Listen operation is "
+        "never callable: it is authored as the process's listener entry, described "
+        "at get_schema_template(schema_name='process_ir_authoring', "
+        "node_kind='listener')."
     ),
     PROCESS_IR_CAPABILITY_DYNAMIC_PATH_UNSUPPORTED: (
         "Remove the path binding, or move the call to a connector family that "
@@ -236,6 +242,27 @@ _REMEDIATION = {
     PROCESS_IR_COMPILE_CONNECTOR_BINDING_INVALID: (
         "This is a compiler defect: a connector-call binding was missing or "
         "inconsistent at emission time — please report it with the authored path."
+    ),
+    # --- #158 M12.20, listener entry --------------------------------------
+    PROCESS_IR_REFERENCE_LISTENER_OPERATION_INVALID: (
+        "Point the listener's operation_ref at an operation component declared as "
+        "a Web Services Server Listen operation — a Web Services Server "
+        "connector_type with operation_mode 'listen' — and bind no connection to "
+        "it; a listener has none. A reused (reference_only) or raw-XML operation "
+        "carries that declaration too: the operation is recognized from its "
+        "declared configuration. See "
+        "get_schema_template(schema_name='process_ir_authoring', node_kind='listener')."
+    ),
+    PROCESS_IR_SEMANTIC_LISTENER_INBOUND_CONTRACT_UNSATISFIED: (
+        "Give the listener operation a JSON or XML input type and bind its request "
+        "profile, or drop inbound_validation from the listener. See "
+        "get_schema_template(schema_name='process_ir_authoring', node_kind='listener')."
+    ),
+    PROCESS_IR_CAPABILITY_LISTENER_COMPOSITION_UNSUPPORTED: (
+        "Remove the named step from the listener flow. A listener flow admits "
+        "linear steps followed by a target and a stop, or connector_call steps "
+        "ending on a call before a stop — see "
+        "get_schema_template(schema_name='process_ir_authoring', node_kind='listener')."
     ),
     # --- #142 M12.7 -------------------------------------------------------
     PROCESS_IR_CAPABILITY_ERROR_SCOPE_UNSUPPORTED: (
@@ -388,6 +415,17 @@ _MESSAGES = {
     ),
     PROCESS_IR_COMPILE_CONNECTOR_BINDING_INVALID: (
         "a connector-call binding is missing or inconsistent"
+    ),
+    PROCESS_IR_REFERENCE_LISTENER_OPERATION_INVALID: (
+        "the listener's operation is not declared as a Web Services Server Listen "
+        "operation without a connection"
+    ),
+    PROCESS_IR_SEMANTIC_LISTENER_INBOUND_CONTRACT_UNSATISFIED: (
+        "the listener operation does not accept JSON or XML input bound to a "
+        "request profile"
+    ),
+    PROCESS_IR_CAPABILITY_LISTENER_COMPOSITION_UNSUPPORTED: (
+        "this construct is not admitted in a listener flow"
     ),
 }
 

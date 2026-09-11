@@ -20,12 +20,14 @@ share one selector become two symbols with one ``component_id``.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Callable, Optional
 
 from ....errors import LEGACY_ADAPTER_OUTPUT_PARITY_FAILED
 from ..contracts import ComponentSymbolV1, SymbolTableV1
 from ..diagnostics import CompilerDiagnostic, ProcessIRCompileError
 from ..emitter_registry import ProcessEmissionArtifactV1, emit_process
+from ..execution_profile import derive_process_execution_profile
 from ..pipeline import compile_process_ir_v1
 from .contracts import LegacyAdapterResultV1, adapter_diagnostic
 
@@ -50,6 +52,20 @@ def _symbol_table(result: LegacyAdapterResultV1, resolver: Resolver) -> SymbolTa
     return SymbolTableV1(symbols=symbols)
 
 
+@dataclass(frozen=True)
+class LegacyEmissionV1:
+    """A verified artifact together with the execution profile compiled beside it.
+
+    #158. A caller assembling the ``<process>`` element needs the profile, and it
+    must come from the SAME compile that produced the shapes — deriving it again
+    from the config, or from a second compile, is a second authority that could
+    disagree with the shapes it is wrapped around.
+    """
+
+    artifact: ProcessEmissionArtifactV1
+    execution_profile: str
+
+
 def emit_legacy_result(
     result: LegacyAdapterResultV1,
     *,
@@ -57,6 +73,22 @@ def emit_legacy_result(
     dialect: Optional[str] = None,
 ) -> ProcessEmissionArtifactV1:
     """Compile + emit a normalized legacy result into a verified process artifact.
+
+    The artifact half of :func:`emit_legacy_result_with_profile`, kept for the
+    callers that assemble no ``<process>`` options of their own.
+    """
+    return emit_legacy_result_with_profile(
+        result, resolver=resolver, dialect=dialect
+    ).artifact
+
+
+def emit_legacy_result_with_profile(
+    result: LegacyAdapterResultV1,
+    *,
+    resolver: Optional[Resolver] = None,
+    dialect: Optional[str] = None,
+) -> LegacyEmissionV1:
+    """Compile + emit a normalized legacy result, returning the derived profile too.
 
     A canonical compile/emit/verify failure AFTER successful legacy validation is
     an output-parity defect: it is wrapped as a value-free ``LegacyAdapterError``
@@ -85,7 +117,10 @@ def emit_legacy_result(
             symbols,
             validation_policy=lookup_policy(dialect) if dialect else None,
         )
-        return emit_process(plan, symbols)
+        return LegacyEmissionV1(
+            artifact=emit_process(plan, symbols),
+            execution_profile=derive_process_execution_profile(cfg, symbols),
+        )
     except ProcessIRCompileError as exc:
         raise adapter_diagnostic(
             LEGACY_ADAPTER_OUTPUT_PARITY_FAILED,
@@ -94,4 +129,4 @@ def emit_legacy_result(
         ) from exc
 
 
-__all__ = ["emit_legacy_result"]
+__all__ = ["LegacyEmissionV1", "emit_legacy_result", "emit_legacy_result_with_profile"]

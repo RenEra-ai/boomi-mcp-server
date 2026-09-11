@@ -46,7 +46,7 @@ import urllib.error
 import urllib.request
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Literal, Optional, Tuple
+from typing import Any, Dict, List, Literal, NamedTuple, Optional, Tuple
 
 from pydantic import BaseModel, Field, StrictBool, ValidationError
 
@@ -68,6 +68,8 @@ from ..components.analyze_component import (  # ASC route/XML extraction shared 
 from ...patterns.primitives.wss_listen import (  # single-source WSS endpoint formula (M6 #12)
     compute_wss_endpoint,
     effective_api_service_route,
+    route_refuses_its_input,
+    uncallable_route_remedies,
     normalize_api_service_path_segment,
     sentence_case_object_name,
     wss_http_method,
@@ -103,6 +105,20 @@ BUILD_REGISTRY_ENTRY_MALFORMED = "BUILD_REGISTRY_ENTRY_MALFORMED"
 BUILD_PROCESS_NOT_FOUND = "BUILD_PROCESS_NOT_FOUND"
 BUILD_MULTIPLE_PROCESS_COMPONENTS = "BUILD_MULTIPLE_PROCESS_COMPONENTS"
 BUILD_PROCESS_ID_MISSING = "BUILD_PROCESS_ID_MISSING"
+# #158: the build's listener root was REUSED at apply — never materialized by it —
+# and the stored component does not start on the Listen operation the build
+# records, or its start could not be read. Refused before any package exists.
+BUILD_LISTENER_ENTRY_MISMATCH = "BUILD_LISTENER_ENTRY_MISMATCH"
+# #158: the target listens (its entry says so), but the build does not carry its
+# Listen operation's endpoint fields — the operation is reused by reference or
+# named by literal id — and the operation read from the account on the real run
+# did not yield them. Refused before any package exists.
+LISTENER_ENDPOINT_UNRESOLVED = "LISTENER_ENDPOINT_UNRESOLVED"
+# #158 (QA-158-r2-01): the build publishes its listener through an API Service
+# route that serves GET for an operation expecting input. The platform refuses
+# every call to such a route (HTTP 405, measured), so it is refused before any
+# package exists rather than deployed and then failing verification.
+LISTENER_ASC_ROUTE_UNCALLABLE = "LISTENER_ASC_ROUTE_UNCALLABLE"
 
 # Package/deploy stage error codes (issue #61).
 BOOMI_CLIENT_REQUIRED = "BOOMI_CLIENT_REQUIRED"
@@ -149,8 +165,8 @@ TEST_LOGS_UNAVAILABLE = "TEST_LOGS_UNAVAILABLE"
 EMPTY_PROCESS_OVERRIDES_REJECTED = "EMPTY_PROCESS_OVERRIDES_REJECTED"
 
 # M6 (#12) — listener_verify stage error codes. The stage runs only for a build
-# whose process is a WSS listener (validation_rules.listener in the build
-# registry), between schedule and execution.
+# whose deploy target is a WSS listener (its entry listens — #158), between
+# schedule and execution.
 LISTENER_SERVER_INFO_FAILED = "LISTENER_SERVER_INFO_FAILED"
 LISTENER_APITYPE_UNSUPPORTED = "LISTENER_APITYPE_UNSUPPORTED"
 LISTENER_DEPLOYMENT_INACTIVE = "LISTENER_DEPLOYMENT_INACTIVE"
@@ -229,7 +245,7 @@ class OrchestrateDeployRequest(BaseModel):
     # would orphan those extension values. Inspected only — this issue does not mutate extensions.
     process_overrides: Optional[Dict[str, Any]] = None
     # M6 (#12) — listener_verify stage inputs. Only consulted on a real run of a build whose
-    # process is a WSS listener (validation_rules.listener in the build registry).
+    # deploy target is a WSS listener (its entry listens — #158).
     # listener_base_url overrides the probe base URL (e.g. http://localhost:9090 for a
     # docker-hosted local atom whose SharedServerInformation url is container-internal).
     listener_test_payload: Optional[str] = None
@@ -525,11 +541,18 @@ def _build_component_summary(
     components: List[Any],
     results: Dict[str, Any],
     execution_order: List[Any],
+    *,
+    processes: Optional[List[Any]] = None,
 ) -> ComponentSummary:
     """Summarize every component in the build, ordered by execution order.
 
     Components are emitted in ``execution_order`` first (the build's topological order),
     then any remaining components in their declared spec order, so the summary is stable.
+
+    #158: canonical process roots are summarized too, as ``process`` entries under
+    their envelope key. They share the components' key namespace and are applied
+    in the same order, so a summary that omitted them described a build without
+    the very process it deploys.
     """
     comps_by_key: Dict[str, Dict[str, Any]] = {}
     declared_order: List[str] = []
@@ -540,6 +563,22 @@ def _build_component_summary(
         if key is None:
             continue
         comps_by_key[key] = comp
+        declared_order.append(key)
+    for unit in processes or ():
+        if not isinstance(unit, dict):
+            continue
+        envelope = unit.get("envelope")
+        if not isinstance(envelope, dict):
+            continue
+        key = envelope.get("component_key")
+        if not isinstance(key, str) or key in comps_by_key:
+            continue
+        comps_by_key[key] = {
+            "key": key,
+            "type": "process",
+            "name": envelope.get("name"),
+            "component_id": envelope.get("component_id"),
+        }
         declared_order.append(key)
 
     ordered_keys: List[str] = []
@@ -587,6 +626,326 @@ def _safe_process_key(comp: Any) -> str:
     return "<unknown>"
 
 
+class _ProcessRoot(NamedTuple):
+    """One process participant of a recorded build (#158).
+
+    ``origin`` is ``"component"`` for a legacy process component in
+    ``spec.components`` and ``"canonical_root"`` for a ProcessIR root in
+    ``spec.processes``. The two share one key namespace since #153, so a root is
+    found by its key whichever tuple holds it. ``payload`` is the recorded dict:
+    the component, or the authoring unit (``envelope`` + ``process_ir``).
+    """
+
+    key: Any
+    origin: str
+    payload: Dict[str, Any]
+    reference_only: bool
+
+    @property
+    def declared_component_id(self) -> Any:
+        if self.origin == "component":
+            return self.payload.get("component_id")
+        envelope = self.payload.get("envelope")
+        return envelope.get("component_id") if isinstance(envelope, dict) else None
+
+    @property
+    def declared_name(self) -> Any:
+        if self.origin == "component":
+            return self.payload.get("name")
+        envelope = self.payload.get("envelope")
+        return envelope.get("name") if isinstance(envelope, dict) else None
+
+
+def _process_roots(
+    components: List[Any], processes: List[Any]
+) -> List["_ProcessRoot"]:
+    """EVERY process participant of a recorded build, from both namespaces (#158).
+
+    Before #158 only ``spec.components`` was searched, so a build whose process
+    is a canonical root — the only kind #153's direct apply creates — resolved to
+    "no process to deploy". A reference-only process component is recorded as
+    such rather than dropped: whether it may be the target is the SELECTION's
+    question, answered in one place below.
+    """
+    roots: List[_ProcessRoot] = []
+    for comp in components:
+        if isinstance(comp, dict) and _effective_component_type(comp) == "process":
+            config = comp.get("config")
+            roots.append(
+                _ProcessRoot(
+                    key=comp.get("key"),
+                    origin="component",
+                    payload=comp,
+                    reference_only=isinstance(config, dict)
+                    and config.get("reference_only") is True,
+                )
+            )
+    for unit in processes:
+        if not isinstance(unit, dict):
+            continue
+        envelope = unit.get("envelope")
+        roots.append(
+            _ProcessRoot(
+                key=envelope.get("component_key") if isinstance(envelope, dict) else None,
+                origin="canonical_root",
+                payload=unit,
+                reference_only=False,
+            )
+        )
+    return roots
+
+
+def _recorded_process_units(spec: Any) -> Optional[List[Any]]:
+    """The canonical roots a recorded spec carries, as a list; None when malformed (#158).
+
+    Apply records ``spec.model_dump()``, which keeps each field's DECLARED
+    container, and ``IntegrationSpecV1.processes`` is a tuple — so a real record
+    holds a tuple (``()`` for a build with no canonical root), while a record
+    written before #153 has no key at all. Every reader of recorded roots goes
+    through this one function, so the container type is decided once here rather
+    than assumed at each site: a list-only check at five sites refused every
+    build apply recorded.
+    """
+    processes = spec.get("processes") if isinstance(spec, dict) else None
+    if processes is None:
+        return []
+    if isinstance(processes, (list, tuple)):
+        return list(processes)
+    return None
+
+
+def _deployment_root_candidates(roots: List["_ProcessRoot"]) -> List["_ProcessRoot"]:
+    """The roots a deploy may target — THE one selection rule (#158).
+
+    Every AUTHORED root is eligible; a reference-only process component is a
+    dependency the build merely names, so it neither becomes the target nor makes
+    a single authored root ambiguous. Only when a build authors no root at all do
+    its reference-only processes stay eligible, which is what a build of nothing
+    but a reference resolved to before #158 — so that case is unchanged.
+
+    Selection never guesses from order, name, or kind: more than one eligible
+    root is refused by the caller, before any package or deployment is touched.
+    """
+    authored = [root for root in roots if not root.reference_only]
+    return authored if authored else list(roots)
+
+
+def _root_entry(root: "_ProcessRoot"):
+    """How ``root`` enters, from the ONE entry-recognition authority (#158).
+
+    A canonical root is classified by the compiler's entry policy over its
+    recorded IR; a legacy component from its config's entry. Raises
+    ``RecordedEntryUnreadable`` for a recorded IR that no longer parses.
+    """
+    from ...authoring.process_entry import canonical_root_entry, legacy_config_entry
+
+    if root.origin == "canonical_root":
+        return canonical_root_entry(root.payload.get("process_ir"))
+    return legacy_config_entry(root.payload.get("config"))
+
+
+def _recorded_operation_id(entry: Dict[str, Any], operation_ref: str) -> Optional[str]:
+    """The component id a listener's operation ref names in a recorded build.
+
+    ``$ref:KEY`` resolves through the build's own result for that key (its
+    declared id as a fallback); a literal id is already the answer.
+    """
+    ref = operation_ref.strip()
+    if not ref.startswith("$ref:"):
+        return ref or None
+    key = ref[len("$ref:"):].strip()
+    spec = entry.get("spec") if isinstance(entry.get("spec"), dict) else {}
+    for comp in spec.get("components") or []:
+        if isinstance(comp, dict) and comp.get("key") == key:
+            return _recorded_component_id(entry, comp)
+    return None
+
+
+def _target_listener_operation_id(build_id: str, target: ResolvedBuildTarget) -> Optional[str]:
+    """The component id of the Listen operation the deploy target's entry names.
+
+    #158. The target root is found by the one selection rule and classified by
+    the one entry authority, exactly as ``_resolve_listener_metadata`` does; the
+    operation reference is resolved through the build's own results. None when
+    the target does not listen, its recorded IR no longer parses, or the
+    reference names nothing the build recorded.
+    """
+    from ...authoring.process_entry import RecordedEntryUnreadable
+
+    entry = integration_builder._BUILD_REGISTRY.get(build_id)
+    entry = entry if isinstance(entry, dict) else {}
+    spec = entry.get("spec") if isinstance(entry.get("spec"), dict) else {}
+    roots = [
+        root
+        for root in _deployment_root_candidates(
+            _process_roots(
+                spec.get("components") if isinstance(spec.get("components"), list) else [],
+                _recorded_process_units(spec) or [],
+            )
+        )
+        if root.key == target.process_key
+    ]
+    if len(roots) != 1:
+        return None
+    try:
+        root_entry = _root_entry(roots[0])
+    except RecordedEntryUnreadable:
+        return None
+    if not root_entry.is_listener or not root_entry.operation_ref:
+        return None
+    return _recorded_operation_id(entry, root_entry.operation_ref)
+
+
+def _account_listen_operation_facts(
+    boomi_client: Any, build_id: str, target: ResolvedBuildTarget
+) -> Tuple[Optional[Dict[str, str]], Optional[OrchestrateDeployError]]:
+    """Endpoint fields of the target's Listen operation, read from the ACCOUNT.
+
+    #158. Used only when the build does not carry them — the operation is reused
+    by reference or named by literal id, so its config holds no ``object_name``.
+    The operation the entry names is read back and its
+    ``WebServicesServerListenAction`` supplies the fields. Real run only (a dry
+    run reads nothing), and fails CLOSED before any package exists: a listener
+    whose endpoint cannot be determined can be neither verified nor published.
+    """
+
+    def _refuse(message: str) -> Tuple[None, OrchestrateDeployError]:
+        return None, _error(
+            LISTENER_ENDPOINT_UNRESOLVED,
+            message,
+            field="build_id",
+            details={"build_id": build_id, "process_key": target.process_key},
+        )
+
+    operation_id = _target_listener_operation_id(build_id, target)
+    if not operation_id:
+        return _refuse(
+            f"Build '{build_id}' deploys a listener whose Listen operation could not "
+            "be resolved to a component id, so its endpoint cannot be determined."
+        )
+    try:
+        facts = _extract_wss_operation_config(
+            component_get_xml(boomi_client, operation_id)["xml"]
+        )
+    except Exception:
+        facts = None
+        unreadable = True
+    else:
+        unreadable = False
+    if unreadable or not facts or not str(facts.get("object_name") or "").strip():
+        return _refuse(
+            f"Build '{build_id}' deploys a listener whose Listen operation "
+            f"{operation_id} is not in the build, and reading it from the account "
+            "did not yield a Web Services Server Listen operation with an object "
+            "name, so its endpoint cannot be determined. Check the operation, or "
+            "author it in the build."
+        )
+    return facts, None
+
+
+def _uncallable_route_refusal(
+    build_id: str, target: ResolvedBuildTarget, listener_meta: Optional[Dict[str, Any]]
+) -> Optional[OrchestrateDeployError]:
+    """Refuse an API Service route the platform cannot serve a call on (#158).
+
+    QA-158-r2-01 measured it: an all-inherit route for a GET or QUERY operation
+    serves GET alone, and GET is refused for an operation expecting input
+    (HTTP 405 "... which expects input"). Deploying it publishes an endpoint
+    nothing can call and then fails verification after a four-minute wait, so
+    it is refused before any package exists, wherever its facts are known.
+    """
+    if not listener_meta or not listener_meta.get("route_refuses_input"):
+        return None
+    # The remedies follow the CAUSE (QA-158-r5-01), and each one offered is a
+    # change the predicate confirms makes the route callable (QA-158-r6-01).
+    remedies = uncallable_route_remedies(
+        explicit_method=(
+            listener_meta.get("http_method")
+            if listener_meta.get("route_method_explicit")
+            else ""
+        ),
+        operation_type=listener_meta.get("operation_type"),
+        input_type=listener_meta.get("input_type"),
+        method_field="the route's http_method",
+    )
+    remedy = "; or ".join(text for text, _change in remedies)
+    remedy = remedy[:1].upper() + remedy[1:] + "."
+    return _error(
+        LISTENER_ASC_ROUTE_UNCALLABLE,
+        (
+            f"Build '{build_id}' publishes its listener through an API Service "
+            f"route that serves {listener_meta.get('http_method')} for an operation "
+            f"expecting {listener_meta.get('input_type')!r} input; the platform "
+            "refuses every call to such a route, so nothing was deployed. " + remedy
+        ),
+        field="build_id",
+        details={
+            "build_id": build_id,
+            "process_key": target.process_key,
+            "http_method": listener_meta.get("http_method"),
+            "input_type": listener_meta.get("input_type"),
+            "endpoint_path": listener_meta.get("endpoint_path"),
+        },
+    )
+
+
+def _reused_listener_entry_mismatch(
+    boomi_client: Any, build_id: str, target: ResolvedBuildTarget
+) -> Optional[OrchestrateDeployError]:
+    """Confirm a REUSED listener root actually starts on the build's Listen operation.
+
+    #158. A root the build reused was never materialized by it, so the
+    classification the build records — derived from the AUTHORED root — says
+    nothing about the stored component, which may be any process of that name.
+    Its start shape is read back and must carry the Listen action for the
+    operation the build records; otherwise the deploy would publish, and verify,
+    an endpoint the process does not serve. Fails CLOSED: a start that cannot be
+    read is not a confirmed one. The classification is never revised from what
+    is read — a mismatch refuses, it does not reclassify.
+    """
+    expected = _target_listener_operation_id(build_id, target)
+
+    def _refuse(message: str) -> OrchestrateDeployError:
+        return _error(
+            BUILD_LISTENER_ENTRY_MISMATCH,
+            message,
+            field="build_id",
+            details={"build_id": build_id, "process_key": target.process_key},
+        )
+
+    if not expected:
+        return _refuse(
+            f"Build '{build_id}' reused an existing process as its listener, and the "
+            "listener operation it records could not be resolved to a component id, "
+            "so the reused process's entry cannot be confirmed."
+        )
+    try:
+        read = component_get_xml(boomi_client, target.process_component_id)
+        root_xml = ET.fromstring(read["xml"])
+    except Exception:
+        return _refuse(
+            f"Build '{build_id}' reused an existing process as its listener, and that "
+            "process could not be read back to confirm it starts on the listener "
+            "operation. Retry, or deploy a process the build created."
+        )
+    listen_ops = [
+        action.get("operationId")
+        for shape in root_xml.iter("shape")
+        if shape.get("shapetype") == "start"
+        for action in shape.iter("connectoraction")
+        if action.get("actionType") == "Listen"
+        and str(action.get("connectorType") or "").lower() == "wss"
+    ]
+    if expected not in listen_ops:
+        return _refuse(
+            f"Build '{build_id}' reused an existing process as its listener, but the "
+            "stored process does not start on the listener operation the build "
+            "records. Rename the root so apply creates it, or reuse a process that "
+            "listens on that operation."
+        )
+    return None
+
+
 def _resolve_build_deployment_target(
     build_id: str,
 ) -> Tuple[Optional[ResolvedBuildTarget], Optional[OrchestrateDeployError]]:
@@ -631,17 +990,24 @@ def _resolve_build_deployment_target(
             details={"build_id": build_id},
         )
 
+    # #158: canonical roots live in `spec.processes`, not among the components.
+    # A legacy record carries no such key, which reads as "no canonical roots".
+    processes = _recorded_process_units(spec)
+    if processes is None:
+        return None, _error(
+            BUILD_REGISTRY_ENTRY_MALFORMED,
+            f"Build '{build_id}' spec has a malformed process list.",
+            field="build_id",
+            details={"build_id": build_id},
+        )
+
     results = entry.get("results")
     results = results if isinstance(results, dict) else {}
     execution_order = entry.get("execution_order")
     execution_order = execution_order if isinstance(execution_order, list) else []
     integration_name = spec.get("name")
 
-    process_candidates = [
-        comp
-        for comp in components
-        if isinstance(comp, dict) and _effective_component_type(comp) == "process"
-    ]
+    process_candidates = _deployment_root_candidates(_process_roots(components, processes))
 
     if not process_candidates:
         return None, _error(
@@ -652,7 +1018,7 @@ def _resolve_build_deployment_target(
         )
 
     if len(process_candidates) > 1:
-        process_keys = [_safe_process_key(comp) for comp in process_candidates]
+        process_keys = [_safe_process_key({"key": root.key}) for root in process_candidates]
         return None, _error(
             BUILD_MULTIPLE_PROCESS_COMPONENTS,
             (
@@ -663,8 +1029,8 @@ def _resolve_build_deployment_target(
             details={"build_id": build_id, "process_keys": process_keys},
         )
 
-    process_comp = process_candidates[0]
-    process_key = process_comp.get("key")
+    root = process_candidates[0]
+    process_key = root.key
 
     # A malformed registry entry (missing/blank/non-string key — including an UNHASHABLE list/dict)
     # must surface as a structured error, not an uncaught exception (#129 D3). Validate BEFORE using
@@ -676,7 +1042,7 @@ def _resolve_build_deployment_target(
             BUILD_REGISTRY_ENTRY_MALFORMED,
             f"Build '{build_id}' process component has a missing or non-string key.",
             field="build_id",
-            details={"build_id": build_id, "process_key": _safe_process_key(process_comp)},
+            details={"build_id": build_id, "process_key": _safe_process_key({"key": process_key})},
         )
 
     result_entry = results.get(process_key)
@@ -690,7 +1056,7 @@ def _resolve_build_deployment_target(
     result_component_id = result_entry.get("component_id")
     process_component_id = (
         result_component_id if result_component_id is not None
-        else process_comp.get("component_id")
+        else root.declared_component_id
     )
 
     # Present-but-non-string component_id is malformed registry data, distinct from the blank/missing
@@ -722,9 +1088,11 @@ def _resolve_build_deployment_target(
         integration_name=integration_name,
         process_key=process_key,
         process_component_id=process_component_id,
-        process_name=result_entry.get("name") or process_comp.get("name"),
+        process_name=result_entry.get("name") or root.declared_name,
         process_status=result_entry.get("status"),
-        component_summary=_build_component_summary(components, results, execution_order),
+        component_summary=_build_component_summary(
+            components, results, execution_order, processes=processes
+        ),
     )
     return target, None
 
@@ -755,10 +1123,16 @@ def _build_declares_process_extensions(build_id: str) -> bool:
             bool(ext.get(k)) for k in ("connections", "properties", "process_properties", "cross_references")
         ):
             return True
+    # #158: a canonical root declares its extensions on its ENVELOPE, and it is
+    # deployable now, so the empty-overrides guard must see those too.
+    for unit in _recorded_process_units(spec) or ():
+        envelope = unit.get("envelope") if isinstance(unit, dict) else None
+        ext = envelope.get("process_extensions") if isinstance(envelope, dict) else None
+        if isinstance(ext, dict) and ext.get("connections"):
+            return True
     return False
 
 
-_WSS_CONNECTOR_ALIASES = frozenset({"wss", "web_services", "web_services_server"})
 
 # M6 (#12): how long listener_verify re-probes a freshly created deployment
 # whose route still answers the no-route signal (404 local / 401 cloud), and
@@ -769,37 +1143,17 @@ _LISTENER_ROUTE_REGISTRATION_POLL_SECONDS = 15
 
 
 def _listener_operation_ref_from_process(process_config: Any) -> Optional[str]:
-    """The WSS Listen operation reference the process's SOURCE binding carries.
+    """The WSS Listen operation reference a LEGACY process config enters on.
 
-    Returns the operation_id token ('$ref:KEY' or a literal id) when the process
-    is listener-sourced, else None. Two recognized shapes: a sync_pipeline
-    ``listener`` stage, and a lowered/hand-authored ``source`` binding with a
-    WSS connector_type + Listen action.
+    Returns the operation_id token ('$ref:KEY' or a literal id) when the
+    process is listener-sourced, else None. #158: delegates to the one
+    entry-recognition authority (``authoring.process_entry``) — the same one
+    ``integration_builder`` consults — rather than keeping a second alias set.
     """
-    if not isinstance(process_config, dict):
-        return None
-    pipeline = process_config.get("pipeline")
-    if isinstance(pipeline, dict):
-        for stage in pipeline.get("stages") or []:
-            if not isinstance(stage, dict):
-                continue
-            if str(stage.get("kind") or "").strip().lower() != "listener":
-                continue
-            stage_config = stage.get("config")
-            if isinstance(stage_config, dict):
-                operation_id = stage_config.get("operation_id")
-                if isinstance(operation_id, str) and operation_id.strip():
-                    return operation_id.strip()
-            return None
-    source = process_config.get("source")
-    if isinstance(source, dict):
-        connector_type = str(source.get("connector_type") or "").strip().lower()
-        action_type = str(source.get("action_type") or "").strip()
-        if connector_type in _WSS_CONNECTOR_ALIASES and action_type == "Listen":
-            operation_id = source.get("operation_id")
-            if isinstance(operation_id, str) and operation_id.strip():
-                return operation_id.strip()
-    return None
+    from ...authoring.process_entry import legacy_config_entry
+
+    entry = legacy_config_entry(process_config)
+    return entry.operation_ref if entry.is_listener else None
 
 
 def _recorded_component_id(entry: Dict[str, Any], comp: Dict[str, Any]) -> Optional[str]:
@@ -835,6 +1189,15 @@ def _resolve_asc_binding(
     """
     process_key = process_comp.get("key")
     process_id = _recorded_component_id(entry, process_comp)
+    # #158: a route's `$ref:KEY` may name a canonical root in `spec.processes` —
+    # the two share one key namespace — so targets are resolved against BOTH, or
+    # a canonical root's recorded id would be missing from the ids deploy-both
+    # verification requires to be active.
+    spec = entry.get("spec") if isinstance(entry.get("spec"), dict) else {}
+    processes = _recorded_process_units(spec) or []
+    ref_targets: List[Dict[str, Any]] = [c for c in components if isinstance(c, dict)]
+    for root in _process_roots([], processes):
+        ref_targets.append({"key": root.key, "component_id": root.declared_component_id})
     for comp in components:
         if not isinstance(comp, dict):
             continue
@@ -858,8 +1221,8 @@ def _resolve_asc_binding(
             resolved: Optional[str] = None
             if ref.startswith("$ref:"):
                 ref_key = ref[5:].strip()
-                for candidate in components:
-                    if isinstance(candidate, dict) and candidate.get("key") == ref_key:
+                for candidate in ref_targets:
+                    if candidate.get("key") == ref_key:
                         resolved = _recorded_component_id(entry, candidate)
                         break
                 if ref_key and ref_key == process_key and matched_route is None:
@@ -881,24 +1244,42 @@ def _resolve_asc_binding(
     return None
 
 
-def _resolve_listener_metadata(build_id: Optional[str]) -> Optional[Dict[str, Any]]:
+def _resolve_listener_metadata(
+    build_id: Optional[str],
+    target: Optional[ResolvedBuildTarget] = None,
+    *,
+    account_facts: Optional[Dict[str, str]] = None,
+) -> Optional[Dict[str, Any]]:
     """Read the recorded build's WSS listener metadata, or None for non-listener builds.
 
-    Classification ALWAYS keys off the single deploy-target PROCESS's own
-    source binding (a sync_pipeline ``listener`` stage or a lowered WSS/Listen
-    source) — ``validation_rules.listener`` is caller-suppliable metadata on a
-    hand-authored spec, so it is consulted only AFTER the binding confirms the
-    deployed process really listens (architect review, M6 #12). Once confirmed,
-    the archetype-emitted ``validation_rules.listener`` block is preferred (it
-    carries the richer field set); otherwise the referenced Listen operation
-    component is resolved in-spec and the endpoint fields derived from it. A
-    spec that merely CONTAINS a WSS operation the deployed process does not
-    listen on is NOT a listener build (Codex review, M6 #12) — and a confirmed
-    listener whose operation is an external literal id with no metadata block
-    cannot be endpoint-derived, so it returns None (no listener_verify rather
-    than a wrong probe). Read-only registry inspection; tolerant of a
-    missing/malformed entry (returns None).
+    Classification ALWAYS keys off the single deploy-target PROCESS's own entry —
+    never off caller-suppliable metadata. #158 made both halves of that one
+    authority each:
+
+    * WHICH process is the target comes from the same selection rule
+      ``_resolve_build_deployment_target`` applies (``_deployment_root_candidates``
+      over components AND canonical roots), and when the resolved ``target`` is
+      passed in it is used as-is — this never selects a process of its own;
+    * WHETHER it listens comes from the one entry-recognition authority: the
+      compiler's entry policy for a canonical root, the entry-shape normalizer for
+      a legacy config.
+
+    ``validation_rules.listener`` is consulted only AFTER the entry confirms the
+    deployed process really listens (architect review, M6 #12), so metadata can
+    never turn a scheduled target into a listener. A spec that merely CONTAINS a
+    WSS operation the deployed process does not listen on is NOT a listener build
+    (Codex review, M6 #12).
+
+    The endpoint fields never decide the classification (#158 QA-158-r1-02). A
+    confirmed listener whose build does not carry them — its Listen operation
+    reused by reference, or named by a literal id — returns a record marked
+    ``endpoint_unresolved``; the real run then reads the operation from the
+    account and calls back with ``account_facts``, or refuses before packaging.
+    Read-only registry inspection; tolerant of a missing/malformed entry
+    (returns None).
     """
+    from ...authoring.process_entry import RecordedEntryUnreadable
+
     entry = integration_builder._BUILD_REGISTRY.get(build_id)
     if not isinstance(entry, dict):
         return None
@@ -908,25 +1289,32 @@ def _resolve_listener_metadata(build_id: Optional[str]) -> Optional[Dict[str, An
     components = spec.get("components")
     if not isinstance(components, list):
         return None
+    processes = _recorded_process_units(spec) or []
 
-    # 1. Confirm the deploy target listens: the spec's single process (mirrors
-    #    _resolve_build_deployment_target; ambiguous/multi-process specs are
-    #    rejected there anyway) must carry a WSS Listen source binding.
-    process_comps = [
-        comp
-        for comp in components
-        if isinstance(comp, dict) and _effective_component_type(comp) == "process"
-    ]
-    if len(process_comps) != 1:
+    # 1. The deploy target, by the ONE selection rule. An ambiguous or empty
+    #    selection is refused by `_resolve_build_deployment_target` before this
+    #    runs; here it simply means there is no single listener to verify.
+    candidates = _deployment_root_candidates(_process_roots(components, processes))
+    if target is not None:
+        candidates = [root for root in candidates if root.key == target.process_key]
+    if len(candidates) != 1:
         return None
-    operation_ref = _listener_operation_ref_from_process(process_comps[0].get("config"))
-    if not operation_ref:
+    root = candidates[0]
+    try:
+        root_entry = _root_entry(root)
+    except RecordedEntryUnreadable:
         return None
+    if not root_entry.is_listener:
+        return None
+    operation_ref = root_entry.operation_ref or ""
+    # The ASC matcher reads a component-shaped record: the root's key, and its
+    # declared id where the recorded result has none.
+    process_comp = {"key": root.key, "component_id": root.declared_component_id}
 
     # 1.5. M6.1 (#133): detect an in-spec API Service Component routing to the
     # confirmed listener process (publish_mode='api_service'). Detection keys
     # off the ASC's own route references, not caller metadata.
-    asc_binding = _resolve_asc_binding(entry, components, process_comps[0])
+    asc_binding = _resolve_asc_binding(entry, components, process_comp)
 
     def _attach_asc(meta: Dict[str, Any]) -> Dict[str, Any]:
         if asc_binding is None:
@@ -945,6 +1333,16 @@ def _resolve_listener_metadata(build_id: Optional[str]) -> Optional[Dict[str, An
         meta["api_service_base_url_path"] = str(
             asc_binding["config"].get("base_url_path") or ""
         )
+        # #158: a GET route for an operation expecting input cannot be called
+        # (measured); flagged here, refused by the caller before any package.
+        # Whether the route pins its method decides the remedy the refusal names.
+        meta["route_method_explicit"] = bool(
+            str(asc_binding["route"].get("http_method") or "").strip()
+        )
+        if not meta.get("endpoint_unresolved"):
+            meta["route_refuses_input"] = route_refuses_its_input(
+                meta.get("http_method"), meta.get("input_type")
+            )
         return meta
 
     # 2. Binding confirmed — prefer the archetype-emitted metadata block.
@@ -956,7 +1354,71 @@ def _resolve_listener_metadata(build_id: Optional[str]) -> Optional[Dict[str, An
 
     # 3. No metadata block — resolve the referenced Listen operation component
     #    in-spec ($ref:KEY by component key; a literal id by recorded/declared
-    #    component_id) and derive the endpoint fields from its config.
+    #    component_id) and derive the endpoint fields from its config. #158:
+    #    whether the target LISTENS was settled by its entry above; these fields
+    #    only say WHERE. A build that does not carry them — the operation reused
+    #    by reference, or named by a literal id — still returns a listener
+    #    record, marked `endpoint_unresolved`, and the real run reads the
+    #    operation from the account (`account_facts`) before anything is
+    #    packaged. Returning None here would deploy a listener as a scheduled
+    #    process: no verify, no ASC publish, and no reused-root check.
+    facts = _listen_operation_facts_in_build(entry, components, operation_ref)
+    if facts is None and account_facts is not None:
+        facts = dict(account_facts)
+    if facts is None:
+        return _attach_asc({"endpoint_unresolved": True})
+    object_name = str(facts.get("object_name") or "").strip()
+    operation_type = str(facts.get("operation_type") or "EXECUTE").strip().upper()
+    input_type = str(facts.get("input_type") or "singlejson").strip().lower()
+    output_type = str(facts.get("output_type") or "none").strip().lower()
+    meta = {
+        "object_name": object_name,
+        "operation_type": operation_type,
+        "input_type": input_type,
+        "output_type": output_type,
+        "http_method": wss_http_method(input_type),
+        "endpoint_path": compute_wss_endpoint(operation_type, object_name),
+    }
+    if asc_binding is not None:
+        # Hand-authored ASC spec without a metadata block: derive the
+        # effective /ws/rest route from the ASC config + the resolved WSS
+        # operation via the shared inherit formula (#133).
+        asc_config = asc_binding["config"]
+        route = asc_binding["route"]
+        effective = effective_api_service_route(
+            str(asc_config.get("base_url_path") or ""),
+            {
+                "http_method": route.get("http_method"),
+                "url_path": route.get("url_path"),
+                "object_name": route.get("object_name"),
+                "input_type": route.get("input_type"),
+                "output_type": route.get("output_type"),
+            },
+            {
+                "object_name": object_name,
+                "operation_type": operation_type,
+                "input_type": input_type,
+                "output_type": output_type,
+            },
+        )
+        meta["http_method"] = effective["method"]
+        meta["input_type"] = effective["input_type"] or input_type
+        meta["endpoint_path"] = effective["path"]
+        meta["bare_wss_endpoint_path"] = compute_wss_endpoint(operation_type, object_name)
+    return _attach_asc(meta)
+
+
+def _listen_operation_facts_in_build(
+    entry: Dict[str, Any], components: List[Any], operation_ref: str
+) -> Optional[Dict[str, str]]:
+    """Endpoint fields of a listener's operation from its config IN the build.
+
+    None when the build does not carry them: the operation component is not
+    in-spec, is not a native WSS Listen config, or names no ``object_name``
+    (a reused-by-reference or raw-XML operation).
+    """
+    if not operation_ref:
+        return None
     op_comp: Optional[Dict[str, Any]] = None
     if operation_ref.startswith("$ref:"):
         ref_key = operation_ref[5:].strip()
@@ -984,48 +1446,18 @@ def _resolve_listener_metadata(build_id: Optional[str]) -> Optional[Dict[str, An
     config = op_comp.get("config")
     if not isinstance(config, dict):
         return None
-    connector_type = str(config.get("connector_type") or "").strip().lower()
-    operation_mode = str(config.get("operation_mode") or "").strip().lower()
-    if connector_type not in _WSS_CONNECTOR_ALIASES or operation_mode != "listen":
+    # #158: the WSS builder's own derivation — the same one the authoring intake
+    # and the identity projection call — rather than a local alias set.
+    from ..components.builders.connector_builder import wss_listen_action_from_config
+
+    if wss_listen_action_from_config(config) is None:
         return None
-    object_name = str(config.get("object_name") or "").strip()
-    if not object_name:
+    if not str(config.get("object_name") or "").strip():
         return None
-    operation_type = str(config.get("operation_type") or "EXECUTE").strip().upper()
-    input_type = str(config.get("input_type") or "singlejson").strip().lower()
-    meta = {
-        "object_name": object_name,
-        "operation_type": operation_type,
-        "input_type": input_type,
-        "output_type": str(config.get("output_type") or "none").strip().lower(),
-        "http_method": wss_http_method(input_type),
-        "endpoint_path": compute_wss_endpoint(operation_type, object_name),
+    return {
+        field: str(config.get(field) or "")
+        for field in ("object_name", "operation_type", "input_type", "output_type")
     }
-    if asc_binding is not None:
-        # Hand-authored ASC spec without a metadata block: derive the
-        # effective /ws/rest route from the ASC config + the resolved WSS
-        # operation via the shared inherit formula (#133).
-        asc_config = asc_binding["config"]
-        route = asc_binding["route"]
-        effective = effective_api_service_route(
-            str(asc_config.get("base_url_path") or ""),
-            {
-                "http_method": route.get("http_method"),
-                "url_path": route.get("url_path"),
-                "object_name": route.get("object_name"),
-                "input_type": route.get("input_type"),
-                "output_type": route.get("output_type"),
-            },
-            {
-                "object_name": object_name,
-                "input_type": input_type,
-                "output_type": str(config.get("output_type") or "none").strip().lower(),
-            },
-        )
-        meta["http_method"] = effective["method"]
-        meta["endpoint_path"] = effective["path"]
-        meta["bare_wss_endpoint_path"] = compute_wss_endpoint(operation_type, object_name)
-    return _attach_asc(meta)
 
 
 def _listener_probe(
@@ -4664,7 +5096,9 @@ def orchestrate_deploy_action(
     declares_extensions = _build_declares_process_extensions(build_id)
     # M6 (#12): listener detection — a WSS listener build gets the listener_verify stage
     # (planned in dry-run, executed after schedule on a real run) and no test execution.
-    listener_meta = _resolve_listener_metadata(build_id)
+    # #158: handed the RESOLVED target, so listener classification can never
+    # select a different process than the one packaged and deployed below.
+    listener_meta = _resolve_listener_metadata(build_id, target)
     process_overrides = request.process_overrides
     # B4 — an EXPLICITLY empty process-overrides set over a process that declares extensions
     #      would orphan those values. Reject fail-fast. (None = "not supplied" is fine — it
@@ -4697,6 +5131,24 @@ def orchestrate_deploy_action(
             run_test=run_test,
             package_version=package_version,
         )
+    # #158: an API Service route nothing can call is refused here, in BOTH runs,
+    # whenever the build carries the facts that decide it; a build whose
+    # operation is read from the account is checked again after that read.
+    uncallable = _uncallable_route_refusal(build_id, target, listener_meta)
+    if uncallable is not None:
+        return _error_response(
+            uncallable.message,
+            [uncallable],
+            profile=profile,
+            build_id=build_id,
+            dry_run=dry_run,
+            target=target,
+            environment_id=environment_id,
+            runtime_id=runtime_id,
+            schedule_override=schedule_override,
+            run_test=run_test,
+            package_version=package_version,
+        )
     # F1 + B4 steering warnings (advisory, never block). Surfaced on the dry-run plan where
     # they are actionable before the caller commits to a real deploy.
     steering_warnings: List[str] = []
@@ -4712,6 +5164,13 @@ def orchestrate_deploy_action(
             "[PROCESS_OVERRIDES_NOT_SUPPLIED] this build's process declares environment "
             "extensions but no process_overrides were supplied; the deploy preserves the "
             "existing environment-extension values and does not set them."
+        )
+    if listener_meta is not None and listener_meta.get("endpoint_unresolved"):
+        steering_warnings.append(
+            "[LISTENER_ENDPOINT_FROM_ACCOUNT] this build deploys a listener whose Listen "
+            "operation is not in the build (it is reused by reference or named by id), so "
+            "its endpoint is not known yet; the real run reads that operation from the "
+            "account before anything is packaged, and refuses if it cannot."
         )
 
     # 3a. Dry-run: assemble the plan-only response without any SDK call.
@@ -4759,6 +5218,46 @@ def orchestrate_deploy_action(
                 "A Boomi client is required to run package/deploy (dry_run=False).",
                 field="boomi_client",
             ),
+        )
+
+    # 3b2. #158: two account reads a listener may need, both before anything is
+    #      packaged, both real run only (a dry run reads nothing). `listener_meta`
+    #      is non-None for EVERY target whose entry listens — the endpoint fields
+    #      never decide that — so neither check can be skipped by a build that
+    #      does not carry them.
+    #      (a) A listener root the build REUSED was never materialized by it, so
+    #          its stored start is confirmed.
+    #      (b) A listener whose Listen operation is not in the build has its
+    #          endpoint read from the account's own operation.
+    listener_refusal: Optional[OrchestrateDeployError] = None
+    if listener_meta is not None and (target.process_status or "") == "reused":
+        listener_refusal = _reused_listener_entry_mismatch(boomi_client, build_id, target)
+    if (
+        listener_refusal is None
+        and listener_meta is not None
+        and listener_meta.get("endpoint_unresolved")
+    ):
+        account_facts, listener_refusal = _account_listen_operation_facts(
+            boomi_client, build_id, target
+        )
+        if listener_refusal is None:
+            listener_meta = _resolve_listener_metadata(
+                build_id, target, account_facts=account_facts
+            )
+            listener_refusal = _uncallable_route_refusal(build_id, target, listener_meta)
+    if listener_refusal is not None:
+        return _error_response(
+            listener_refusal.message,
+            [listener_refusal],
+            profile=profile,
+            build_id=build_id,
+            dry_run=dry_run,
+            target=target,
+            environment_id=environment_id,
+            runtime_id=runtime_id,
+            schedule_override=schedule_override,
+            run_test=run_test,
+            package_version=package_version,
         )
 
     # 3c. Package stage (create or reuse). A failure blocks every later stage.

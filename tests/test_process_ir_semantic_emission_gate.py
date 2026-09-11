@@ -194,9 +194,15 @@ def test_the_legacy_adapter_only_passes_its_identity_across():
     the compiler cannot derive."""
     import inspect
 
-    source = inspect.getsource(emission_mod.emit_legacy_result)
+    # #158: the ONE compile moved into `emit_legacy_result_with_profile`, which
+    # also returns the profile that same compile derives; `emit_legacy_result`
+    # delegates to it and compiles nothing itself.
+    source = inspect.getsource(emission_mod.emit_legacy_result_with_profile)
     assert "validation_policy=lookup_policy(dialect)" in source
     assert "_enforce_semantic_report" not in source
+    wrapper = inspect.getsource(emission_mod.emit_legacy_result)
+    assert "emit_legacy_result_with_profile(" in wrapper
+    assert "compile_process_ir_v1" not in wrapper
 
 
 def test_every_production_call_site_names_a_registered_dialect():

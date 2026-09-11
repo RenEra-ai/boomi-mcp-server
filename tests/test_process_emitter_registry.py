@@ -104,10 +104,11 @@ def _map_symbols(component_id="MAP", component_type="transform.map"):
 
 
 def test_registry_covers_discriminator_exactly():
-    # 18 model classes, 19 discriminator keys (connector source + target share a
-    # model). #142 added ``catcherrors``; #156 added ``notify``.
+    # 19 model classes, 20 discriminator keys (connector source + target share a
+    # model). #142 added ``catcherrors``; #156 added ``notify``; #158 added
+    # ``start_listen``.
     assert R.registry_keys() == R.discriminator_keys()
-    assert len(R.registry_keys()) == 19
+    assert len(R.registry_keys()) == 20
 
 
 def test_connector_roles_share_one_renderer():
@@ -148,13 +149,36 @@ def test_non_ir_shapes_are_absent_from_the_registry():
     #
     # ``notify`` left this set the same way in #156, and for the same reason: it
     # is now a compiled recovery-path construct with the nineteenth registry key,
-    # driving the SAME `render_notify` the legacy caller drives. `start_listen`
-    # and `route` stay — #158 owns listener entry, and route has no IR construct
-    # at all.
-    for absent in ("emit_fragment", "start_listen", "route"):
+    # driving the SAME `render_notify` the legacy caller drives. ``start_listen``
+    # left it in #158 as the twentieth key — the listener entry is a compiled
+    # construct now — and ``route`` stays: it has no IR construct at all.
+    for absent in ("emit_fragment", "route"):
         assert absent not in R.registry_keys()
     assert "catcherrors" in R.registry_keys()
     assert "notify" in R.registry_keys()
+    assert "start_listen" in R.registry_keys()
+
+
+def test_start_listen_registration_is_operation_only():
+    """#158: the listener Start needs its operation symbol and NOTHING else.
+
+    A connection requirement would make every listener Start unsatisfiable — a
+    listener has none — and accepting one would invent it. The registration also
+    shares the Start's shape type and single outgoing wire, and drives the SAME
+    renderer the legacy listener start drives.
+    """
+    from boomi_mcp.compiler.process_ir.contracts import StartListenInputV1
+
+    reg = R.registration_for("start_listen")
+    assert reg.input_type is StartListenInputV1
+    assert reg.produced_shape_type == "start"
+    assert reg.outgoing == R.registration_for("start_noaction").outgoing
+    requirements = reg.requirements(
+        StartListenInputV1(operation_id="OP-1", userlabel="")
+    )
+    assert [(r.slot, r.component_id, r.component_types) for r in requirements] == [
+        ("operation", "OP-1", ("connector-action",))
+    ]
 
 
 # ---------------------------------------------------------------------------

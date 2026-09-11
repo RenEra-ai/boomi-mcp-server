@@ -51,6 +51,8 @@ from .findings import finding
 #: but is filed under this package's phase vocabulary so report ordering stays
 #: coherent with the natively-collected findings around it.
 _PHASE_BY_CODE_SUFFIX = (
+    # #158: the listener's inbound contract is a request-profile binding fact.
+    ("INBOUND_CONTRACT", "profile"),
     ("PROFILE", "profile"),
     ("CARDINALITY", "cardinality"),
     ("RETRY", "retry"),

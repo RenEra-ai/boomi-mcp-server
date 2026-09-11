@@ -182,6 +182,9 @@ def _atom(kind):
         },
         "source": {"connection_ref": _REF, "operation_ref": _REF},
         "target": {"connection_ref": _REF, "operation_ref": _REF},
+        # #158. Operation-only: a listener has no connection, and the model
+        # refuses one outright.
+        "listener": {"operation_ref": _REF},
     }
     return {"kind": kind, **simple[kind]}
 

@@ -34,7 +34,10 @@ from ._shared import (
     component_get_deadline_envelope,
     _component_get_deadline_seconds,
 )
-from .builders._api_service_paths import effective_api_service_route
+from .builders._api_service_paths import (
+    effective_api_service_route,
+    route_refuses_its_input,
+)
 
 
 # ============================================================================
@@ -287,22 +290,26 @@ def _analyze_api_service(
         effective = effective_api_service_route(base_url_path, overrides, wss_op_config)
         effective_key = f"{effective['method']} {effective['path']}"
         # Inherit-dependent PATH (no explicit objectName) or METHOD (no
-        # explicit httpMethod and no explicit inputType to derive one from)
-        # whose WSS operation could not be resolved: the computed value is a
-        # guess — e.g. the method defaults to POST while the real op may be
-        # inputType='none' (GET) — so flag it unresolved and never
-        # collision-compare it (Codex review r1).
+        # explicit httpMethod) whose WSS operation could not be resolved: the
+        # computed value is a guess, so flag it unresolved and never
+        # collision-compare it (Codex review r1). #158: an inherited method
+        # comes from the operation's TYPE (measured), so an explicit inputType
+        # no longer pins it, and a type outside the platform's vocabulary
+        # leaves it unknown even when the operation was read.
         path_unresolved = wss_op_config is None and not str(
             overrides.get("object_name") or ""
         ).strip()
-        method_unresolved = wss_op_config is None and not (
-            str(overrides.get("http_method") or "").strip()
-            or str(overrides.get("input_type") or "").strip()
+        method_unresolved = not effective["method"] or (
+            wss_op_config is None and not str(overrides.get("http_method") or "").strip()
         )
         if path_unresolved:
             flags.append("effective_path_unresolved")
         if method_unresolved:
             flags.append("effective_method_unresolved")
+        elif route_refuses_its_input(effective["method"], effective["input_type"]):
+            # A GET route for an operation expecting input: the platform
+            # refuses every call to it (HTTP 405, measured #158).
+            flags.append("route_refuses_input")
         if not (path_unresolved or method_unresolved):
             if effective_key in seen_effective:
                 flags.append("duplicate_effective_path")

@@ -324,19 +324,34 @@ def test_dry_run_listener_with_run_test_marks_execution_not_required(registry):
 
 
 def test_non_listener_build_reports_not_required_and_skips_stage(registry, monkeypatch):
-    """A non-listener build must never call the shared-resources preflight."""
-    entry = _listener_entry()
-    del entry["spec"]["validation_rules"]["listener"]
-    bid = registry("b-nl", entry)
+    """A non-listener build must never call the shared-resources preflight.
+
+    #158: a build is a listener when its deploy target's ENTRY listens, never
+    because a metadata block is present or absent — the earlier fixture deleted
+    the metadata from a process that still started on a WSS Listen source, and
+    passed only because that absence used to decide the classification. This
+    process starts on a REST source, so it is a non-listener whether or not the
+    metadata block is there.
+    """
 
     def _explode(*args, **kwargs):
         raise AssertionError("listener preflight must not run for a non-listener build")
 
     monkeypatch.setattr(orchestration, "manage_shared_resources_action", _explode)
-    result = orchestrate_deploy_action(
-        build_id=bid, environment_id="env-1", runtime_id="rt-1", dry_run=True
-    )
-    assert result["listener_verify"]["status"] == "not_required"
+    for keep_metadata in (True, False):
+        entry = _listener_entry()
+        entry["spec"]["components"][0]["config"]["source"] = {
+            "connector_type": "rest",
+            "action_type": "GET",
+            "operation_id": "REST-OP-LIT",
+        }
+        if not keep_metadata:
+            del entry["spec"]["validation_rules"]["listener"]
+        bid = registry("b-nl-%s" % keep_metadata, entry)
+        result = orchestrate_deploy_action(
+            build_id=bid, environment_id="env-1", runtime_id="rt-1", dry_run=True
+        )
+        assert result["listener_verify"]["status"] == "not_required", keep_metadata
 
 
 def _hand_authored_entry(*, process_references_op: bool):
@@ -369,6 +384,19 @@ def _hand_authored_entry(*, process_references_op: bool):
                 "connector_type": "wss",
                 "action_type": "Listen",
                 "operation_id": "$ref:wss_op",
+            },
+        }
+    else:
+        # #158: the process genuinely does not listen — it starts on a REST
+        # source — so the spec's WSS Listen operation is one it never uses. (The
+        # earlier fixture kept a WSS Listen source on a literal operation, which
+        # IS a listener under the entry authority.)
+        entry["spec"]["components"][0]["config"] = {
+            "process_kind": "database_to_api_sync",
+            "source": {
+                "connector_type": "rest",
+                "action_type": "GET",
+                "operation_id": "REST-OP-LIT",
             },
         }
     return entry
@@ -426,19 +454,76 @@ def test_sync_pipeline_listener_stage_detected(registry):
     assert result["listener_verify"]["endpoint_path"] == "/ws/simple/createHandRolled"
 
 
-def test_external_literal_operation_ref_returns_non_listener(registry):
-    """A listener process referencing an EXTERNAL (literal, out-of-spec) WSS
-    operation cannot be endpoint-derived — no listener_verify rather than a
-    wrong probe."""
+_EXTERNAL_WSS_OP_ID = "11111111-2222-3333-4444-555555555555"
+
+
+def _external_literal_entry():
     entry = _hand_authored_entry(process_references_op=True)
-    entry["spec"]["components"][0]["config"]["source"]["operation_id"] = (
-        "11111111-2222-3333-4444-555555555555"
+    entry["spec"]["components"][0]["config"]["source"]["operation_id"] = _EXTERNAL_WSS_OP_ID
+    return entry
+
+
+def test_external_literal_operation_ref_is_read_from_the_account(registry, monkeypatch):
+    """#158 (QA-158-r1-02): a listener process whose WSS operation is EXTERNAL
+    (a literal, out-of-spec id) is still a listener — its entry says so. The build
+    carries no endpoint for it, so the plan says the endpoint is not known yet and
+    suppresses Test mode, and the real run reads the operation from the account
+    and verifies the endpoint the account's operation serves.
+
+    This replaces the M6 rule "cannot be endpoint-derived, so not a listener",
+    which deployed such a process with no verification at all.
+    """
+    from boomi_mcp.categories.components.builders.connector_builder import (
+        WssListenerOperationBuilder,
     )
-    bid = registry("b-hand-ext", entry)
-    result = orchestrate_deploy_action(
-        build_id=bid, environment_id="env-1", runtime_id="rt-1", dry_run=True
+
+    bid = registry("b-hand-ext", _external_literal_entry())
+    planned = orchestrate_deploy_action(
+        build_id=bid, environment_id="env-1", runtime_id="rt-1", dry_run=True, run_test=True
     )
-    assert result["listener_verify"]["status"] == "not_required"
+    assert planned["listener_verify"]["status"] == "planned"
+    assert planned["listener_verify"]["endpoint_path"] is None
+    assert planned["execution"]["status"] == "not_required"
+    assert any("LISTENER_ENDPOINT_FROM_ACCOUNT" in w for w in planned["warnings"])
+
+    # The account stores the operation the WSS builder emits for the hand-authored
+    # config above (the live-captured shape, M6 #12).
+    account_op = WssListenerOperationBuilder().build(
+        operation_mode="listen", component_name="Listener Op", object_name="handRolled",
+        operation_type="CREATE", input_type="none",
+    )
+    probe = _FakeProbe([(200, None)])
+    _patch_real_run(
+        monkeypatch,
+        server_info=_server_info(),
+        probe=probe,
+        execution_records=_RECORD_OK,
+        component_xml={_EXTERNAL_WSS_OP_ID: account_op},
+    )
+    result = _run(bid)
+    assert result["_success"] is True, result
+    assert result["listener_verify"]["status"] == "completed"
+    assert result["listener_verify"]["endpoint_url"] == (
+        "http://atom.local:9090/ws/simple/createHandRolled"
+    )
+    (call,) = probe.calls
+    assert call["method"] == "GET"  # input_type none
+
+
+def test_external_literal_operation_the_account_cannot_supply_refuses(registry, monkeypatch):
+    """Fail closed: the external operation cannot be read, so nothing is packaged."""
+    bid = registry("b-hand-ext-unread", _external_literal_entry())
+    fakes = _patch_real_run(
+        monkeypatch,
+        server_info=_server_info(),
+        probe=_FakeProbe([(200, None)]),
+        execution_records=_RECORD_OK,
+        component_xml={},
+    )
+    result = _run(bid)
+    assert result["_success"] is False
+    assert [e["code"] for e in result["errors"]] == ["LISTENER_ENDPOINT_UNRESOLVED"]
+    assert fakes["deployment"].calls == []
 
 
 # ---------------------------------------------------------------------------

@@ -57,6 +57,7 @@ from ..process_component_materializer import (
     LISTENER_PROCESS_OPTIONS,
     assemble_component_xml,
     extension_bindings_from_legacy_config,
+    process_options_for_profile,
     render_process_overrides,
 )
 from .cache_property_lineage import validate_config_lineage
@@ -5093,24 +5094,23 @@ _SYNC_PIPELINE_STAGE_ALT_PRIMITIVE: Dict[str, str] = {
 }
 
 def _sync_pipeline_is_canonical(lowered: Dict[str, Any]) -> bool:
-    """Does this lowered sync_pipeline core route to the canonical chain (#139C)?
+    """Does this lowered sync_pipeline core route to the canonical chain? Always (#158).
 
-    Exactly ONE named capability gap keeps a chain on the legacy renderer: a WSS
-    listener source, whose legacy entry FUSES the start and source shapes into a
-    single ``start_listen`` that ProcessIR v1 cannot express (#140 owns the entry
-    policy; the compiler fails closed on a listener source, and
-    ``SourceEndpointV1.connection_ref`` is required while a lowered listener
-    binding carries no ``connection_id`` at all).
+    Until #158 exactly ONE named capability gap kept a chain on the legacy
+    renderer: a WSS listener source, whose legacy entry fuses the start and source
+    shapes into one ``start_listen``. #158 made that entry a canonical capability
+    (the root-only ``listener`` node, fused by the compiler's entry policy), so no
+    lowered core has a reason to take the legacy arm any more.
 
-    This is an ALLOW decision on a named gap, never a catch-all fallback: any
-    other chain the adapter cannot represent must FAIL, not silently render
-    through a second path. It uses the SAME resolver the legacy body uses to
-    select ``start_listen``, so the two can never disagree about what a listener is.
+    The predicate and the fallback call it guards are KEPT, unreached, on purpose:
+    the fallback is the oracle the listener transfer was proven against, and #160
+    removes both together as a pure deletion. Every lowered core is admitted —
+    including a refused listener spelling (``wssserver``/``listener``), which the
+    legacy body would have mis-shaped as an ordinary source and which the
+    adapter's own gate now refuses with a pointed diagnostic instead.
     """
-    source = lowered.get("source") or {}
-    if not isinstance(source, dict):
-        return True
-    return _resolve_wss_connector_type(source.get("connector_type")) is None
+    del lowered  # routing no longer depends on the core
+    return True
 
 
 # Hints for reserved stage *kinds* (rejected by the kind gate).
@@ -5923,12 +5923,12 @@ class SyncPipelineBuilder(ProcessFlowBuilder):
         the same lowered config (which remains the untouched legacy renderer,
         because this intercepts BEFORE delegating).
 
-        WSS listener chains stay on the legacy renderer: their entry FUSES the
-        start and connector shapes into one ``start_listen``, which ProcessIR v1
-        cannot express (#140 owns the entry policy). That is an ALLOW decision on
-        one named capability gap, never a catch-all fallback — a chain that passes
-        the gate but that the adapter cannot represent RAISES, and is never
-        re-routed.
+        #158: WSS listener chains take the canonical chain too. Their source
+        lowers to the root-only ``listener`` entry, the compiler fuses it with the
+        Start into one ``start_listen``, and the ``<process>`` options come from
+        the profile that same compile derives. The legacy fallback below is kept,
+        unreached, for #160 to delete — a chain the adapter cannot represent
+        RAISES, and is never re-routed.
         """
         lowered = cls.lower_config(config)
 
@@ -5971,7 +5971,7 @@ class SyncPipelineBuilder(ProcessFlowBuilder):
             LegacyAdapterError,
         )
         from ....compiler.process_ir.legacy_adapters.emission import (
-            emit_legacy_result,
+            emit_legacy_result_with_profile,
         )
         from ....compiler.process_ir.legacy_adapters.sync_pipeline import (
             adapt_sync_pipeline,
@@ -5980,9 +5980,11 @@ class SyncPipelineBuilder(ProcessFlowBuilder):
 
         try:
             result = adapt_sync_pipeline(lowered)
-            shape_xml_parts = list(
-                emit_legacy_result(result, dialect="sync_pipeline").shape_xml_parts
-            )
+            # #158: the profile comes from the SAME compile as the shapes, so a
+            # listener chain gets the listener <process> options and no other
+            # chain can — the entry node is the only authority for either.
+            emission = emit_legacy_result_with_profile(result, dialect="sync_pipeline")
+            shape_xml_parts = list(emission.artifact.shape_xml_parts)
         except (
             LegacyAdapterError,
             ProcessIRCompileError,
@@ -6001,10 +6003,12 @@ class SyncPipelineBuilder(ProcessFlowBuilder):
             description=description,
             folder_name=folder_name,
             process_overrides_xml=process_overrides_xml,
-            # process_options is deliberately omitted (the 7-attribute scheduled
-            # default). The 6-attribute _LISTENER_PROCESS_OPTIONS set applies only
-            # to a listener source, and the gate above makes this arm non-listener
-            # by construction.
+            # #158: derived, never chosen here. The compiler recorded the profile
+            # from the entry node, and the one profile -> option-bytes mapping the
+            # neutral materializer uses turns it into the <process> attributes —
+            # the 6-attribute listener set for a listener entry, the scheduled
+            # default for everything else.
+            process_options=process_options_for_profile(emission.execution_profile),
         )
 
 

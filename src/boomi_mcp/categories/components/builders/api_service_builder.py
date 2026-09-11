@@ -77,7 +77,11 @@ from __future__ import annotations
 import uuid
 from typing import Any, Dict, List, Mapping, Optional, Tuple
 
-from ._api_service_paths import api_service_http_method, compute_asc_endpoint
+from ._api_service_paths import (
+    ASC_METHOD_RULE,
+    api_service_http_method,
+    compute_asc_endpoint,
+)
 from ._preservation_policy import OwnedPath, PreservationPolicy
 from .connector_builder import (
     _WSS_INPUT_TYPES,
@@ -446,7 +450,7 @@ class ApiServiceBuilder:
                     field=f"{field_prefix}.http_method",
                     hint=(
                         "Empty string inherits the method from the WSS "
-                        "operation (input_type none -> GET, else POST)."
+                        "operation: " + ASC_METHOD_RULE + "."
                     ),
                 )
 
@@ -505,15 +509,16 @@ class ApiServiceBuilder:
 
             # Effective (method, path) collision — only when computable
             # WITHOUT WSS-op inheritance: an explicit object_name pins the
-            # path, and an explicit http_method or input_type pins the
-            # method. Inherit-dependent routes are collision-checked at
-            # analyze/orchestration time where the linked operation is
-            # readable.
+            # path, and only an explicit http_method pins the method. #158:
+            # an inherited method comes from the linked operation's TYPE
+            # (measured), which no route attribute states — an input_type
+            # override does not pin it. Inherit-dependent routes are
+            # collision-checked at analyze/orchestration time where the linked
+            # operation is readable.
             object_name = str(entry.get("object_name") or "").strip()
-            input_type_token = str(entry.get("input_type") or "").strip().lower()
-            if object_name and (method_token or input_type_token):
-                effective_method = method_token or api_service_http_method(
-                    "", input_type_token
+            if object_name and method_token:
+                effective_method = api_service_http_method(
+                    method_token, operation_type=None
                 )
                 effective_path = compute_asc_endpoint(
                     str(config.get("base_url_path") or ""),

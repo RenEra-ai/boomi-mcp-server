@@ -84,6 +84,7 @@ from typing_extensions import Annotated
 
 from ..errors import (
     PROCESS_IR_CAPABILITY_ERROR_SCOPE_UNSUPPORTED,
+    PROCESS_IR_CAPABILITY_LISTENER_COMPOSITION_UNSUPPORTED,
     PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY,
     PROCESS_IR_CAPABILITY_PROCESS_CALL_RETURN_PATH_BINDING_UNSUPPORTED,
     PROCESS_IR_CAPABILITY_UNSUPPORTED,
@@ -92,6 +93,7 @@ from ..errors import (
     PROCESS_IR_SCHEMA_BRANCH_CARDINALITY,
     PROCESS_IR_SCHEMA_INVALID,
     PROCESS_IR_SCHEMA_INVALID_CARDINALITY,
+    PROCESS_IR_SCHEMA_LISTENER_CONNECTION_FORBIDDEN,
     PROCESS_IR_SCHEMA_RETRY_COUNT,
     PROCESS_IR_SCHEMA_UNKNOWN_FIELD,
     PROCESS_IR_SCHEMA_UNKNOWN_NODE,
@@ -732,8 +734,12 @@ IdempotencyContractRefV1 = Annotated[
 ]
 
 
-def _cardinality_error(message: str) -> PydanticCustomError:
-    return PydanticCustomError("process_ir_schema_invalid_cardinality", message)  # noqa: EM101
+def _cardinality_error(message: str, *, at: Tuple[Any, ...] = ()) -> PydanticCustomError:
+    return PydanticCustomError(  # noqa: EM101
+        "process_ir_schema_invalid_cardinality",
+        message,
+        {"offending_path": tuple(at)} if at else None,
+    )
 
 
 def _schema_invalid_error(message: str) -> PydanticCustomError:
@@ -748,8 +754,12 @@ def _schema_invalid_error(message: str) -> PydanticCustomError:
     return PydanticCustomError("process_ir_schema_invalid", message)  # noqa: EM101
 
 
-def _capability_error(message: str) -> PydanticCustomError:
-    return PydanticCustomError("process_ir_capability_unsupported", message)  # noqa: EM101
+def _capability_error(message: str, *, at: Tuple[Any, ...] = ()) -> PydanticCustomError:
+    return PydanticCustomError(  # noqa: EM101
+        "process_ir_capability_unsupported",
+        message,
+        {"offending_path": tuple(at)} if at else None,
+    )
 
 
 def _continuation_error(message: str) -> PydanticCustomError:
@@ -809,6 +819,23 @@ def _error_scope_error(message: str) -> PydanticCustomError:
     """#142: an unknown error scope, or a known scope in an unverified placement."""
     return PydanticCustomError(  # noqa: EM101
         "process_ir_capability_error_scope_unsupported", message
+    )
+
+
+def _listener_composition_error(
+    message: str, *, at: Tuple[Any, ...] = ()
+) -> PydanticCustomError:
+    """#158: a construct a listener flow does not admit.
+
+    Its own code rather than the generic capability one: the caller has not asked
+    for an unknown feature, they have combined a supported entry with a construct
+    that entry does not compose with, and the fix is to remove that construct.
+    ``at`` names the offending step, as for :func:`_body_kind_error`.
+    """
+    return PydanticCustomError(  # noqa: EM101
+        "process_ir_capability_listener_composition_unsupported",
+        message,
+        {"offending_path": tuple(at)} if at else None,
     )
 
 
@@ -1223,6 +1250,48 @@ class TargetEndpointV1(_ProcessIRBase):
     operation_ref: ComponentRefV1
     path_binding: Optional[ConnectorPathBindingV1] = None
     label: Optional[str] = None
+
+
+class InboundValidationV1(_ProcessIRBase):
+    """Build-time inbound contract requested for a listener (#158).
+
+    ``profile_bound`` asks the compiler to prove, from the RESOLVED listener
+    operation, that inbound documents arrive as JSON or XML and are bound to a
+    request profile. Both facts are read from the operation — never restated
+    here — so the request cannot disagree with the operation it describes.
+
+    It is a build-time guarantee only. Nothing is emitted for it and no payload
+    is validated at run time.
+    """
+
+    mode: Literal["profile_bound"]
+
+
+class ListenerEntryNodeV1(_ProcessIRBase):
+    """The inbound-HTTP entry of a listener process (#158).
+
+    Receives each inbound request as a document and starts the flow with it. It
+    is the FIRST root step and appears exactly once; it cannot sit inside a
+    control body. The process is started by its inbound requests instead of a
+    schedule, and the process-level options that follow from that are derived
+    from this node — they are never authored separately.
+
+    Authors only the listener OPERATION. A listener has no connection: the
+    platform binds the inbound endpoint to the operation itself, so
+    ``connection_ref`` is refused rather than ignored. The connector family and
+    action are never authored either — they are read from the resolved operation,
+    which must be a Web Services Server Listen operation.
+
+    A listener flow continues with linear steps and then either a ``target`` and
+    a ``stop``, or one or more ``connector_call`` steps ending on a call before a
+    ``stop``. Error handling, fan-out, flow control, process calls and returning
+    documents are not available in a listener flow.
+    """
+
+    kind: Literal["listener"]
+    operation_ref: ComponentRefV1
+    label: Optional[str] = None
+    inbound_validation: Optional[InboundValidationV1] = None
 
 
 # #142 M12.7. Idempotency evidence for a RETRIED connector call.
@@ -2069,6 +2138,67 @@ def process_call_root_verdict(kinds):
     )
 
 
+#: #158. The two ways a listener entry can be misplaced, as verdict reasons.
+LISTENER_PLACEMENT_POSITION = "listener_position"
+LISTENER_PLACEMENT_COMPOSITION = "listener_composition"
+
+#: Root kinds a listener flow may never contain. The listener is the flow's
+#: entry, so a second entry (``source``) is meaningless, and the rest are the
+#: constructs the legacy listener builder refused to compose with an inbound
+#: entry: reliability wrapping (``try_catch``), fan-out (``branch``/``decision``),
+#: ``flow_control`` and ``return_documents``. ``process_call`` and ``exception``
+#: were never an audited listener form, so they stay refused rather than
+#: admitted on no evidence. ``notify`` and ``continue`` are refused for every
+#: root by the shared never-admitted table before this is consulted.
+LISTENER_EXCLUDED_ROOT_KINDS = frozenset(
+    {
+        "source",
+        "process_call",
+        "try_catch",
+        "branch",
+        "decision",
+        "flow_control",
+        "return_documents",
+        "exception",
+    }
+)
+
+
+def listener_root_verdict(kinds):
+    """THE authority on where a ``listener`` may sit and what it composes with.
+
+    Same contract as :func:`process_call_root_verdict`: ``(reason, at, message)``
+    for the first rule broken, or ``None`` when the placement is legal (including
+    every root with no listener at all). The model validators and the compiler's
+    body-capability pass both RENDER this rather than deciding, so the two entry
+    points cannot serve different identities for one mistake.
+
+    Position is checked BEFORE composition: a listener after a prefix is a
+    misplaced entry whatever follows it, and reporting a composition refusal for
+    it would send the caller to remove the wrong step.
+    """
+    if "listener" not in kinds:
+        return None
+    for index, kind in enumerate(kinds):
+        if kind == "listener" and index != 0:
+            return (
+                LISTENER_PLACEMENT_POSITION,
+                ("steps", index),
+                "a listener is the entry of its flow — it may appear only as the "
+                "first root step, exactly once (step {0})".format(index),
+            )
+    for index, kind in enumerate(kinds):
+        if kind in LISTENER_EXCLUDED_ROOT_KINDS:
+            return (
+                LISTENER_PLACEMENT_COMPOSITION,
+                ("steps", index),
+                "a listener flow may not contain {0} (step {1}) — it admits linear "
+                "steps followed by a target and stop, or connector_call steps "
+                "ending on a call before a stop".format(kind, index),
+            )
+    return None
+
+
 def process_call_placement_verdict(
     steps: List[Any], terminal: Any, *, context: str, recovery: bool = False
 ) -> Optional[Tuple[str, Tuple[Any, ...], str]]:
@@ -2750,6 +2880,7 @@ PROCESS_IR_V1_MAX_CONTROL_DEPTH = 2
 
 ProcessNodeV1 = Annotated[
     Union[
+        ListenerEntryNodeV1,
         SourceEndpointV1,
         TargetEndpointV1,
         ConnectorCallNodeV1,
@@ -2962,6 +3093,107 @@ def _check_serialized_region_chain(steps: List[Any]) -> None:
             )
 
 
+def _check_listener_root(steps: List[Any]) -> None:
+    """The listener flow's grammar (#158). Every rule is a refusal a caller can act on.
+
+    Two forms are admitted, and they are the two the legacy listener builder and
+    the connector-call vocabulary can already express downstream of an entry:
+
+    * ENDPOINT form — ``listener, linear*, target, stop``. Every audited listener
+      anchor has this shape, and it is the only way to reach a write action the
+      connector-call vocabulary does not publish.
+    * CONNECTOR-CALL form — ``listener, (linear | connector_call)*,
+      connector_call, stop``, under the ordinary connector-call rules: a map is
+      bracketed by calls on BOTH sides, and the sequence ends on a call. The
+      listener is an entry, not a call, so it does not bracket a map.
+
+    The shared verdict answers placement and composition FIRST, so a misplaced
+    listener or a forbidden construct is never reported as a grammar defect of a
+    form the caller was not trying to write.
+    """
+    kinds = [getattr(step, "kind", None) for step in steps]
+    verdict = listener_root_verdict(kinds)
+    if verdict is not None:
+        reason, at, message = verdict
+        if reason == LISTENER_PLACEMENT_POSITION:
+            raise _cardinality_error(message, at=at)
+        raise _listener_composition_error(message, at=at)
+
+    if kinds[-1] != "stop":
+        raise _cardinality_error(
+            "a listener flow must end in a stop terminal — after a target, or "
+            "after its last connector_call"
+        )
+    body = kinds[1:-1]
+
+    if "connector_call" in body:
+        if "target" in body:
+            raise _capability_error(
+                "a listener flow may author its outbound steps as connector_call "
+                "steps or as a target endpoint, not both"
+            )
+        for index, kind in enumerate(body, start=1):
+            if kind not in _ROOT_LINEAR_KINDS and kind != "connector_call":
+                raise _capability_error(
+                    "a listener flow with connector_call steps may contain only "
+                    "connector_call and linear steps before its stop (step {0})".format(
+                        index
+                    ),
+                    at=("steps", index),
+                )
+        for i, kind in enumerate(body):
+            if kind != "map_ref":
+                continue
+            if i + 1 >= len(body) or body[i + 1] != "connector_call":
+                raise _cardinality_error(
+                    "a map_ref in a listener flow must be immediately followed by "
+                    "a connector_call (step {0})".format(i + 1),
+                    at=("steps", i + 1),
+                )
+            if i == 0 or body[i - 1] != "connector_call":
+                raise _cardinality_error(
+                    "a map_ref in a listener flow's connector_call steps must be "
+                    "immediately preceded by a connector_call (step {0}) — the "
+                    "listener is the entry, not a call".format(i + 1),
+                    at=("steps", i + 1),
+                )
+        if body[-1] != "connector_call":
+            raise _capability_error(
+                "a listener flow must end on a connector_call before its stop — "
+                "linear steps after the last call are unsupported"
+            )
+        _check_cache_put_followed_by_read(steps, context="listener flow steps")
+        _check_trailing_cache_put(
+            steps[:-1], steps[-1],
+            allowed_terminals=frozenset(),
+            message=(
+                "a trailing cache_put in a listener flow must be followed by a "
+                "stream-replacing cache read, not by the terminal"
+            ),
+        )
+        return
+
+    if not body or body[-1] != "target":
+        raise _cardinality_error(
+            "a stop terminal in a listener flow must be immediately preceded by "
+            "the target endpoint or a connector_call"
+        )
+    for index, kind in enumerate(body[:-1], start=1):
+        if kind == "target":
+            raise _cardinality_error(
+                "the target endpoint must be immediately followed by a stop "
+                "(step {0})".format(index),
+                at=("steps", index),
+            )
+        if kind not in _ROOT_LINEAR_KINDS:
+            raise _capability_error(
+                "a listener flow may contain only linear steps before its target "
+                "(step {0})".format(index),
+                at=("steps", index),
+            )
+    _check_cache_put_followed_by_read(steps, context="listener flow steps")
+
+
 class SequenceNodeV1(_ProcessIRBase):
     """Ordered root sequence. Local structural rules mirror today's builder:
 
@@ -2982,6 +3214,9 @@ class SequenceNodeV1(_ProcessIRBase):
       capability-gated, and keeps its own diagnostic);
     - a CONTROL-ONLY root (#141) is exactly one ``branch``/``decision`` and
       nothing else;
+    - a LISTENER flow (#158) starts with exactly one ``listener`` and continues
+      either with linear steps, a ``target`` and a ``stop``, or with
+      ``connector_call`` steps ending on a call before a ``stop``;
     - ``cache_put`` must be immediately followed by a stream-replacing cache
       read (never by the target/terminal).
     """
@@ -3002,6 +3237,15 @@ class SequenceNodeV1(_ProcessIRBase):
         # The table, not this call site, is what keeps the next such rule from
         # landing below a branch again.
         _check_root_kinds_never_admitted(self.steps)
+
+        # #158. A LISTENER root has its own grammar, consulted before every
+        # branch below. Each of those returns early and each assumes an entry
+        # that is a source or a call, so letting a listener reach one would judge
+        # it by a grammar it is not written in — `[listener, target, stop]` would
+        # be told a connector flow "must start with the source endpoint".
+        if "listener" in kinds:
+            _check_listener_root(self.steps)
+            return self
 
         # #156 T5. SERIALIZED CONNECTOR REGIONS, matched exactly and checked
         # FIRST — ahead of every exact-match branch below, all of which return
@@ -3306,7 +3550,9 @@ def _control_depth(node: Any) -> int:
 #: Node kinds that execute a connector. A ``process_call`` may not share a
 #: root-to-leaf path with any of them while ``process_call_connector_mixing`` is
 #: gated.
-_CONNECTOR_KINDS = frozenset({"source", "target", "connector_call"})
+#: #158: a ``listener`` executes a connector too — the inbound Web Services
+#: Server endpoint is bound to its operation — so it is a member.
+_CONNECTOR_KINDS = frozenset({"listener", "source", "target", "connector_call"})
 
 
 class ProcessIRV1(_ProcessIRBase):
@@ -3329,6 +3575,10 @@ PROCESS_IR_V1_CAPABILITIES: Mapping[str, str] = MappingProxyType(
         # whichever meaning happened to still be gated, the two constructs now
         # have two names.
         "generalized_connector_call": "supported",  # #140
+        # #158 M12.20. The inbound-HTTP entry: a root-only ``listener`` node the
+        # compiler fuses with the process start, and from which it derives the
+        # listener process options. Its error scope stays gated below.
+        "listener_entry": "supported",  # #158
         "mixed_connector_execution": "supported",  # #140 — many calls per path
         # Still GATED after #141 and #175: ProcessCall and connector execution may
         # not share one root-to-leaf path. #175 admits ProcessCall as the TERMINAL
@@ -3385,8 +3635,9 @@ PROCESS_IR_V1_CAPABILITIES: Mapping[str, str] = MappingProxyType(
         #     omission, not an unknown.
         #   * write retry safety: no authoritative classification exists for any
         #     stock write action, so none ships as replay-safe (capture §G4).
-        #   * listener error scope: the fused listener start rejects reliability
-        #     composition today.
+        #   * listener error scope: the listener entry is supported (#158), but a
+        #     listener flow still refuses reliability composition — the legacy
+        #     listener builder refused it and no capture evidences the shape.
         #   * nested try_catch: composition rewrites the outer step's effective
         #     error selection, adjacency-dependently (capture §G6).
         "catch_failure_trigger_selection": "gated",  # #142
@@ -3503,6 +3754,7 @@ _NODE_KIND_TAGS = frozenset(_kinds_of(ProcessNodeV1))
 _DISCRIMINATOR_TAGS = frozenset(
     {
         "sequence",
+        "listener",
         "source",
         "target",
         "connector_call",
@@ -3667,6 +3919,18 @@ _REMEDIATION = {
     PROCESS_IR_SEMANTIC_RECOVERY_PROCESS_CALL_INVALID: (
         "Author the recovery call with wait=true and abort_on_error=true. abort_on_error defaults to false, so it must be written explicitly: the parent has to observe a failed hand-off rather than complete over it."
     ),
+    PROCESS_IR_SCHEMA_LISTENER_CONNECTION_FORBIDDEN: (
+        "Remove connection_ref from the listener and author only its operation_ref. "
+        "See get_schema_template(schema_name='process_ir_authoring', "
+        "node_kind='listener')."
+    ),
+    PROCESS_IR_CAPABILITY_LISTENER_COMPOSITION_UNSUPPORTED: (
+        "Remove the named step from the listener flow. A listener flow admits "
+        "linear steps followed by a target and a stop, or connector_call steps "
+        "ending on a call before a stop — see "
+        "get_schema_template(schema_name='process_ir_authoring', "
+        "node_kind='listener')."
+    ),
 }
 
 _CUSTOM_ERROR_CODES = {
@@ -3700,6 +3964,10 @@ _CUSTOM_ERROR_CODES = {
     "process_ir_capability_process_call_return_path_binding_unsupported": (
         PROCESS_IR_CAPABILITY_PROCESS_CALL_RETURN_PATH_BINDING_UNSUPPORTED
     ),
+    # #158
+    "process_ir_capability_listener_composition_unsupported": (
+        PROCESS_IR_CAPABILITY_LISTENER_COMPOSITION_UNSUPPORTED
+    ),
 }
 
 _MESSAGES = {
@@ -3729,6 +3997,12 @@ _MESSAGES = {
     PROCESS_IR_SEMANTIC_RECOVERY_PROCESS_CALL_INVALID: "a recovery process_call is not authored wait=true and abort_on_error=true",
     PROCESS_IR_CAPABILITY_PROCESS_CALL_RETURN_PATH_BINDING_UNSUPPORTED: (
         "a process call may not be followed by another node in ProcessIR v1"
+    ),
+    PROCESS_IR_SCHEMA_LISTENER_CONNECTION_FORBIDDEN: (
+        "a listener authors only its operation — connection_ref is not accepted"
+    ),
+    PROCESS_IR_CAPABILITY_LISTENER_COMPOSITION_UNSUPPORTED: (
+        "this construct is not admitted in a listener flow"
     ),
 }
 
@@ -3831,6 +4105,11 @@ def _translate_pydantic_error(error: Mapping[str, Any]) -> ProcessIRDiagnostic:
         return _diagnostic(PROCESS_IR_SEMANTIC_CATCH_UNTERMINATED, path)
 
     if err_type == "extra_forbidden":
+        # #158: a connection on a listener is a named mistake, not an unknown
+        # field. Matched on the IMMEDIATE OWNER tag, as the gated keys below are,
+        # so a `connection_ref` on any other node keeps its own diagnosis.
+        if last == "connection_ref" and len(loc) >= 2 and loc[-2] == "listener":
+            return _diagnostic(PROCESS_IR_SCHEMA_LISTENER_CONNECTION_FORBIDDEN, path)
         if (
             isinstance(last, str)
             and last in _GATED_EXTRA_KEYS

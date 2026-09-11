@@ -206,7 +206,8 @@ def _direct_corpus():
     root = json.loads((_FIXTURES / "process_ir_v1.json").read_text())
     for name in sorted(root):
         docs.append(("process_ir_v1.json::%s" % name, root[name], "root"))
-    for sub, tag in (("rich_control", "rich"), ("error_handling", "error")):
+    for sub, tag in (("rich_control", "rich"), ("error_handling", "error"),
+                     ("listener", "listener")):
         for path in sorted((_FIXTURES / sub).glob("*.json")):
             docs.append(("%s/%s" % (sub, path.name),
                          json.loads(path.read_text()), tag))
@@ -230,6 +231,16 @@ def _direct_route_keys():
                 cfg, _sentinel_symbols(cfg, bindings))
         elif tag == "rich":
             (_cfg, plan), _tbl = corpus.rich_compile_doc(doc)
+        elif tag == "listener":
+            # #158: a listener document names typed roles — a WSS Listen entry and
+            # an outbound target — that the sentinel table cannot type. It
+            # compiles against the symbols its capability witness pins to the
+            # frozen golden it reproduces; a new listener document without them
+            # fails here rather than silently contributing no route.
+            from _process_ir_capability_witnesses import _listener_symbols
+
+            _cfg, plan = compile_process_ir_v1(
+                parse_process_ir_v1(doc), _listener_symbols())
         else:
             _cfg, plan = corpus.error_compile(doc)
         keys |= _plan_keys(plan, where)

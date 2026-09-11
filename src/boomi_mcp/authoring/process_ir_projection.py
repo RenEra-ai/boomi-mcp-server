@@ -88,6 +88,10 @@ SOURCE_CONTRIBUTIONS = "runtime.recipe_contribution_kinds"
 SOURCE_MAP_FUNCTIONS = "runtime.map_function_registry"
 SOURCE_VETTED_SCRIPTS = "runtime.vetted_script_registry"
 SOURCE_EFFECT_RESOLVER = "runtime.process_ir_effect_resolver"
+#: #158. The compiler's entry policy — how a process starts, and the profile
+#: that follows — and the resolution of a listener's operation and inbound facts.
+SOURCE_ENTRY_POLICY = "runtime.compiler_entry_policy"
+SOURCE_LISTENER_RESOLUTION = "runtime.listener_entry_resolution"
 
 
 class ProcessIRAuthoringQueryError(ValueError):
@@ -289,6 +293,38 @@ _NODE_FACTS: Mapping[str, Mapping[str, Any]] = {
             "The root sequence must reach a terminal; an unterminated path is rejected.",
         ),
         _DOCS: ("optional", "documents", "per_document"),
+        _STAGES: ("author", "plan"),
+    },
+    # #158 M12.20. The inbound-HTTP entry.
+    "listener": {
+        "category": "connector",
+        "title": "Listener (inbound HTTP entry)",
+        "summary": (
+            "The entry of a process started by inbound HTTP requests instead of a "
+            "schedule. Authors ONLY the Web Services Server Listen operation — a "
+            "listener has no connection, so connection_ref is refused. The "
+            "process-level options a listener needs are derived from this node "
+            "and are never authored separately."
+        ),
+        _ORDERING: (
+            "A listener is the first step of its process and appears exactly once.",
+            "It receives each inbound request as a document, so the steps after it "
+            "have documents to work on.",
+            "A listener flow continues with linear steps followed by a target and a "
+            "stop, or with connector_call steps ending on a call before a stop. "
+            "Error handling, fan-out, flow control, process calls and returned "
+            "documents are not available in a listener flow.",
+            "inbound_validation with mode profile_bound is a build-time check that "
+            "the operation accepts JSON or XML input bound to a request profile; "
+            "nothing validates a payload at run time.",
+        ),
+        _DOCS: ("none", "documents", "per_document"),
+        _CAPS: ("listener_entry", "listener_error_scope"),
+        _RELATED: (
+            "semantic_rule.listener.entry_authority",
+            "semantic_rule.listener.composition",
+            "semantic_rule.listener.inbound_validation",
+        ),
         _STAGES: ("author", "plan"),
     },
     "source": {
@@ -826,6 +862,41 @@ _SEMANTIC_RULES: Tuple[Tuple[str, str, str, str, Tuple[str, ...], Tuple[str, ...
         "to the same operation).",
         ("try_catch", "connector_call"),
         ("node.try_catch", "node.connector_call"),
+    ),
+    # #158 M12.20. The three rules the listener entry adds.
+    (
+        "semantic_rule.listener.entry_authority",
+        "structure",
+        "The compiler owns how a process starts",
+        "Every process has exactly one compiler-synthesized start, in one of two "
+        "forms: scheduled, or listener when the first step is a listener entry. "
+        "A listener is fused with that start, and the process-level options a "
+        "listener needs follow from it. No caller authors the start, its "
+        "position, its wiring or those options.",
+        ("listener",),
+        ("node.listener", "capability.listener_entry"),
+    ),
+    (
+        "semantic_rule.listener.composition",
+        "connector",
+        "A listener flow is linear",
+        "After the listener come linear steps and then a target and a stop, or "
+        "connector_call steps ending on a call before a stop. Error handling, "
+        "fan-out, flow control, process calls and returned documents are refused "
+        "in a listener flow; its error scope is gated separately.",
+        ("listener",),
+        ("node.listener", "capability.listener_error_scope"),
+    ),
+    (
+        "semantic_rule.listener.inbound_validation",
+        "connector",
+        "Listener inbound validation is a build-time contract",
+        "inbound_validation with mode profile_bound requires the resolved listener "
+        "operation to accept JSON or XML input bound to a request profile. It is "
+        "checked when the process is compiled; nothing is emitted for it and no "
+        "payload is validated at run time.",
+        ("listener",),
+        ("node.listener",),
     ),
     (
         "semantic_rule.documents.explicit_split_combine",
@@ -1670,6 +1741,11 @@ _SEMANTIC_RULE_SOURCES = {
     "semantic_rule.retry.replay_safety": (SOURCE_RETRY, SOURCE_CONNECTORS),
     "semantic_rule.documents.explicit_split_combine": (SOURCE_CAPABILITIES,),
     "semantic_rule.references.opaque": (SOURCE_MODELS,),
+    # #158: each names the authority that enforces it — the entry policy, the
+    # model's shared listener placement verdict, and the listener resolution.
+    "semantic_rule.listener.entry_authority": (SOURCE_ENTRY_POLICY,),
+    "semantic_rule.listener.composition": (SOURCE_MODELS,),
+    "semantic_rule.listener.inbound_validation": (SOURCE_LISTENER_RESOLUTION,),
     # #154. The effect rules are deliberately ABSENT: their source is derived
     # per family from `_EFFECT_AUTHORITY_SOURCES`, keyed by the authority token
     # the resolver publishes. Listing them here too would put a generated row

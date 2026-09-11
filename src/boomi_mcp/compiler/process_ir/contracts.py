@@ -71,14 +71,16 @@ CATCH_DRAGPOINT_Y = 464.0
 BRANCH_MIN_LEGS = 2
 BRANCH_MAX_LEGS = 25
 
-# Connector families whose legacy entry FUSES the start shape with the connector
-# (``_emit_start_listen``) instead of the ``start_noaction`` + ``connectoraction``
-# pair this compiler emits. ProcessIRV1 has no listener node kind, so such an
-# entry can only arrive through the symbol table — the guard therefore lives in
-# reference resolution, not in IR lowering. #140 owns the alternate entry policy.
-# Compared against the CANONICAL, case-folded connector family, so every
-# spelling that resolves to the listener family is covered rather than just the
-# exact lowercase token.
+# Connector family spellings that may NEVER be the operation of a ``source``
+# endpoint or a ``connector_call`` — a REFUSAL set, not an admission set (#158).
+# A listener is authored as its own ``listener`` node, whose entry the compiler
+# fuses with the process start; a listener family arriving through an ordinary
+# connector position would be emitted as a start + connector pair, which is a
+# different process. Deliberately BROADER than the spellings a listener node
+# accepts (``connector_builder._resolve_wss_connector_type``): ``wssserver`` and
+# ``listener`` are refused here and accepted nowhere. Compared against the
+# CANONICAL, case-folded connector family, so every spelling that resolves to
+# the listener family is covered rather than just the exact lowercase token.
 LISTENER_CONNECTOR_TYPES = frozenset(
     {"wss", "web_services", "web_services_server", "wssserver", "listener"}
 )
@@ -207,6 +209,13 @@ class ComponentSymbolV1(_CompilerModel):
     requires_path_binding: Optional[bool] = None
     input_profile_ref: Optional[str] = None
     output_profile_ref: Optional[str] = None
+    #: #158. The document type a LISTENER operation accepts on its inbound
+    #: request (``singlejson``, ``singlexml``, ``none``, ...), as the resolved
+    #: operation stores it. Tri-state like ``requires_path_binding``: ``None``
+    #: means nobody told the compiler, and a check that needs the fact refuses
+    #: rather than guessing. Carried rather than derived for the same reason —
+    #: reading the component would break this layer's purity.
+    input_document_type: Optional[str] = None
 
     @field_validator("ref", "component_id", "component_type")
     @classmethod
@@ -216,7 +225,8 @@ class ComponentSymbolV1(_CompilerModel):
         return value
 
     @field_validator(
-        "connection_ref", "input_profile_ref", "output_profile_ref"
+        "connection_ref", "input_profile_ref", "output_profile_ref",
+        "input_document_type",
     )
     @classmethod
     def _optional_ref_shape(cls, value: Optional[str]) -> Optional[str]:
@@ -863,6 +873,21 @@ class TryCatchSemanticV1(_CompilerModel):
     label: Optional[str] = None
 
 
+class ListenerSemanticV1(_CompilerModel):
+    """The listener entry (#158): the authored operation, and nothing else.
+
+    No ``connection_ref``: a listener has none, and a copy here would be a field
+    nobody may set. The operation's family and action stay on the symbol table,
+    where reference resolution checks them — this carries only what was authored.
+    ``inbound_validation`` is the requested build-time contract, never its result.
+    """
+
+    semantic_kind: Literal["listener"] = "listener"
+    operation_ref: str
+    label: Optional[str] = None
+    inbound_validation: Optional[Literal["profile_bound"]] = None
+
+
 class StopSemanticV1(_CompilerModel):
     semantic_kind: Literal["stop"] = "stop"
 
@@ -874,6 +899,7 @@ class ReturnDocumentsSemanticV1(_CompilerModel):
 
 CfgSemanticV1 = Annotated[
     Union[
+        ListenerSemanticV1,
         ConnectorSemanticV1,
         ConnectorCallSemanticV1,
         MessageSemanticV1,
@@ -1059,6 +1085,19 @@ DataProcessStepInputV1 = Annotated[
 
 class StartNoActionInputV1(_CompilerModel):
     emitter_kind: Literal["start_noaction"] = "start_noaction"
+
+
+class StartListenInputV1(_CompilerModel):
+    """The fused listener start (#158): a Start shape carrying the Listen action.
+
+    Synthetic like :class:`StartNoActionInputV1` — the compiler builds it from
+    the listener entry and the resolved operation symbol, and no caller authors
+    it. ``operation_id`` is the RESOLVED component id, never the authored ref.
+    """
+
+    emitter_kind: Literal["start_listen"] = "start_listen"
+    operation_id: str = Field(..., min_length=1)
+    userlabel: str = ""
 
 
 class ConnectorDynamicPathInputV1(_CompilerModel):
@@ -1269,6 +1308,7 @@ class ReturnDocumentsInputV1(_CompilerModel):
 EmitterInputV1 = Annotated[
     Union[
         StartNoActionInputV1,
+        StartListenInputV1,
         ConnectorActionInputV1,
         MessageInputV1,
         MapInputV1,
@@ -1419,6 +1459,7 @@ __all__: List[str] = [
     "ComponentSymbolV1",
     "ConnectorActionInputV1",
     "ConnectorSemanticV1",
+    "ListenerSemanticV1",
     "DataProcessInputV1",
     "DataProcessOpSemanticV1",
     "DataProcessSemanticV1",
@@ -1455,6 +1496,7 @@ __all__: List[str] = [
     "SemanticCfgV1",
     "SetPropertiesStepInputV1",
     "SetPropertySemanticV1",
+    "StartListenInputV1",
     "StartNoActionInputV1",
     "StopInputV1",
     "StopSemanticV1",

@@ -139,6 +139,30 @@ def _requires_path_binding(snapshot, component_key):
     return None
 
 
+def _listener_inbound_facts(component, snapshot) -> Tuple[Optional[str], Optional[str]]:
+    """``(input type, request profile)`` of a WSS listener OPERATION (#158).
+
+    From the resolution snapshot when it resolved this component — the account's
+    stored bytes for a reused operation, the submitted bytes for a raw create —
+    and otherwise from the component's own structured config, read the way the
+    WSS builder emits it. ``(None, None)`` for anything that is not a listener
+    operation, so no other symbol changes. The operation's connection is never
+    touched: a listener has none.
+    """
+    from ..categories.components.builders.connector_builder import (
+        connector_family_of,
+        wss_listener_inbound_facts,
+    )
+
+    identity = snapshot.lookup(component.key) if snapshot is not None else None
+    if identity is not None and identity.family == "wss":
+        return identity.listener_input_type, identity.listener_request_profile
+    config = component.config or {}
+    if connector_family_of(config.get("connector_type")) != "wss":
+        return None, None
+    return wss_listener_inbound_facts(config)
+
+
 def build_symbol_table(
     components: Sequence[IntegrationComponentSpec],
     *,
@@ -215,6 +239,12 @@ def build_symbol_table(
         connection_ref_key = (
             raw_connection_ref_key.strip() if isinstance(raw_connection_ref_key, str) else ""
         )
+        # #158: a listener operation's inbound facts, for the requested inbound
+        # contract. Carried on the symbol the listener entry resolves; `None` for
+        # every other component.
+        listener_input_type, listener_request_profile = _listener_inbound_facts(
+            component, connector_resolution_snapshot
+        )
         symbols.append(
             ComponentSymbolV1(
                 ref=ref,
@@ -225,6 +255,8 @@ def build_symbol_table(
                 connection_ref=(
                     f"{_REF_PREFIX}{connection_ref_key}" if connection_ref_key else None
                 ),
+                input_profile_ref=listener_request_profile,
+                input_document_type=listener_input_type,
                 # Tri-state, and absent unless a snapshot actually resolved it: a
                 # caller that builds no snapshot says nothing, and the blank-path
                 # refusal only speaks on an explicit True. Populating this is what

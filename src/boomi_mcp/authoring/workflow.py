@@ -310,15 +310,16 @@ def _action_type_from_config(config: Mapping[str, Any]) -> Optional[str]:
     still an inline literal here, exactly as it is in
     `_classify_connector_action`.
 
-    Two families are deliberately NOT derived. `wss` (the listener family) and
-    plain `http` fall through to `None`, and that is the correct answer: they
-    are absent from the connector-call allowlist, so the compiler refuses them
-    with `..._CONNECTOR_ACTION_UNSUPPORTED` and cites the entries that ARE
-    supported. That is an honest refusal, and the opposite of the SOAP bug —
-    there the contract published the action as supported while the derivation
-    silently produced nothing. So this consults two resolvers, not the three
-    `_classify_connector_action` uses; the set is deliberate, not exhaustive,
-    and an earlier version of this docstring claimed otherwise.
+    #158: the `wss` (listener) family IS derived now, through
+    `connector_builder.wss_listen_action_from_config` — the one derivation the
+    pre-apply identity projection also calls. A native WSS operation authors
+    `operation_mode="listen"` and nobody writes `action_type`, so declining it
+    made every listener operation look action-less and the listener entry could
+    not resolve its own operation. Deriving `Listen` does not make a WSS
+    operation callable: the connector-call allowlist still has no WSS row, so a
+    WSS operation named by a `connector_call` is refused exactly as before, and
+    only the `listener` entry accepts it. Plain `http` still falls through to
+    `None`, an honest refusal.
 
     `action_type` stays an accepted alias because the legacy path accepts it —
     except that the SOAP builder REJECTS it as an unsupported operation field,
@@ -327,6 +328,7 @@ def _action_type_from_config(config: Mapping[str, Any]) -> Optional[str]:
     from ..categories.components.builders.connector_builder import (
         _resolve_rest_connector_type,
         _resolve_soap_client_connector_type,
+        wss_listen_action_from_config,
     )
 
     declared = config.get("action_type") or config.get("actionType")
@@ -358,6 +360,10 @@ def _action_type_from_config(config: Mapping[str, Any]) -> Optional[str]:
         if mode == "execute":
             return "EXECUTE"
         return declared.upper() if declared else None
+
+    listen = wss_listen_action_from_config(config)
+    if listen is not None:
+        return listen
 
     return declared or None
 

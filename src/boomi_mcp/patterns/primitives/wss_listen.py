@@ -21,8 +21,10 @@ It also exports the endpoint computation shared with ``orchestrate_deploy``'s
     the component stores it verbatim — LIVE-SETTLED 2026-07-04 M6 QA on the
     renera local atom: objectName ``qaM6IntakeA`` served
     ``/ws/simple/executeQaM6IntakeA`` with 200 and 404'd the verbatim form), and
-  * HTTP method — derived from ``input_type`` (``none`` -> GET, anything else
-    -> POST); the method is never set on the operation component.
+  * HTTP method — on the bare route, derived from ``input_type``
+    (``BARE_METHOD_RULE``); behind an API Service route it follows the operation
+    type instead (``ASC_METHOD_RULE``; #158, measured). The method is never set
+    on the operation component.
 
 Like every source primitive, this emits JSON ``IntegrationComponentSpec``
 objects only — all XML authoring and structured validation is delegated to the
@@ -88,10 +90,16 @@ def compute_wss_endpoint(operation_type: str, object_name: str) -> str:
 # categories/components/builders/_api_service_paths.py for the live-grounded
 # formula documentation (#133).
 from ...categories.components.builders._api_service_paths import (  # noqa: F401
+    ASC_BODY_METHOD_CHOICES,
+    ASC_GET_WITH_INPUT_RULE,
+    ASC_METHOD_RULE,
+    BARE_METHOD_RULE,
     api_service_http_method,
     compute_asc_endpoint,
     effective_api_service_route,
     normalize_api_service_path_segment,
+    route_refuses_its_input,
+    uncallable_route_remedies,
     wss_http_method,
 )
 
@@ -122,15 +130,20 @@ class WssListenParameters(BaseModel):
         default="EXECUTE",
         description=(
             "WSS operationType: GET | QUERY | CREATE | UPDATE | UPSERT | DELETE "
-            "| EXECUTE. NOT an HTTP verb — the method derives from input_type."
+            "| EXECUTE. NOT an HTTP verb. A bare /ws/simple route ignores it for "
+            "the method; behind an API Service route "
+            + ASC_METHOD_RULE
+            + "."
         ),
     )
     input_type: str = Field(
         default="singlejson",
         description=(
             "Inbound document shape: none | singledata | singlejson | multijson "
-            "| singlexml | multixml. Also selects the HTTP method (none -> GET, "
-            "else POST)."
+            "| singlexml | multixml. Also selects the method a bare /ws/simple "
+            "route is called with ("
+            + BARE_METHOD_RULE
+            + ")."
         ),
     )
     output_type: str = Field(
@@ -193,7 +206,7 @@ class WssListenPrimitive(PrimitivePattern):
             "(/ws/simple/{operationtype}{SentenceCase(objectName)} — Boomi "
             "upper-cases the first objectName letter on the served path, "
             "live-settled 2026-07-04) and derived HTTP method "
-            "(input_type none -> GET, else POST). The listener has NO "
+            "(" + BARE_METHOD_RULE + "). The listener has NO "
             "connection component — it binds inside the process start shape "
             "(actionType='Listen'). Bare WSS serves basic/intermediate "
             "runtimes; apiType=advanced routes only through an API Service "

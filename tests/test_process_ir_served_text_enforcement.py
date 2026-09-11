@@ -227,7 +227,12 @@ COMPILER_REGISTERED_PARSE_CODES = frozenset(
         # reachable this way, which is why `_as_compile_error` translates a closed
         # set (`body_capabilities._CHAIN_RULE_CODES`) rather than doing a blanket
         # lookup.
-        "PROCESS_IR_SCHEMA_INVALID_CARDINALITY",
+        #
+        # RETIRED by #158, as the stale-allowance check below requires: the
+        # compiler now EMITS `PROCESS_IR_SCHEMA_INVALID_CARDINALITY` itself —
+        # `body_capabilities._check_listener_placement` raises it for a listener
+        # that is not the first root step — so the source scan accounts for it
+        # directly and an allowance for it would be a second, stale account.
     }
 )
 

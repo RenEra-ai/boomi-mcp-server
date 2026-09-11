@@ -18,6 +18,10 @@ from dataclasses import dataclass
 from typing import Any, Dict, Mapping, Optional
 
 from boomi_mcp.connector_replay.ids import BOOMI_COMPONENT_ID_RE
+from boomi_mcp.categories.components.builders._api_service_paths import (
+    ASC_METHOD_RULE,
+    BARE_METHOD_RULE,
+)
 from boomi_mcp.categories.components.builders._preservation_policy import (
     OwnedPath,
     PreservationPolicy,
@@ -388,7 +392,61 @@ def connector_family_of(connector_type) -> Optional[str]:
         return "soap_client"
     if raw.strip().lower() == "database":
         return "database"
+    # #158: the inbound Web Services Server family, through the resolver the WSS
+    # builder routes on. Its identity is never mintable (see
+    # `normalized_identity_projection`): a listener has no outbound route.
+    if _resolve_wss_connector_type(raw) is not None:
+        return "wss"
     return None
+
+
+def wss_listen_action_from_config(config) -> Optional[str]:
+    """``"Listen"`` for a native WSS listener operation config, else ``None`` (#158).
+
+    THE derivation of a WSS operation's connector action from its structured
+    config, shared by the pre-apply identity projection and the authoring
+    intake. The intake alone also honours an authored ``action_type`` alias, as
+    it does for every family; the builder refuses a create whose mode is not
+    ``listen``, and a reuse is compared against the account. A WSS operation is authored with
+    ``operation_mode="listen"``; nobody writes ``action_type``, and requiring it
+    would make every native listener operation look action-less. The mode set is
+    the builder's own :attr:`WssListenerOperationBuilder.SUPPORTED_OPERATION_MODES`,
+    normalised the way its validator normalises it.
+
+    ``operationType`` (``CREATE``/``EXECUTE``/...) is deliberately NOT the action:
+    it is the served verb of the listener's endpoint, a different vocabulary, and
+    every WSS Listen operation's connector action is ``Listen`` whatever it says.
+    """
+    if not isinstance(config, Mapping):
+        return None
+    if _resolve_wss_connector_type(config.get("connector_type")) is None:
+        return None
+    raw = config.get("operation_mode")
+    mode = raw.lower() if isinstance(raw, str) else ""
+    if mode in WssListenerOperationBuilder.SUPPORTED_OPERATION_MODES:
+        return "Listen"
+    return None
+
+
+def wss_listener_inbound_facts(config) -> "Tuple[Optional[str], Optional[str]]":
+    """``(input_type, request_profile)`` a WSS listener config settles (#158).
+
+    Read the way :class:`WssListenerOperationBuilder` emits them: an absent
+    ``input_type`` is the builder's DEFAULT, because that is what the operation
+    will store, and an absent or blank ``request_profile`` binds nothing.
+    ``(None, None)`` for anything that is not a WSS listener config.
+    """
+    if wss_listen_action_from_config(config) is None:
+        return None, None
+    raw_type = config.get("input_type")
+    input_type = (
+        raw_type.strip().lower()
+        if isinstance(raw_type, str) and raw_type.strip()
+        else WssListenerOperationBuilder.DEFAULT_INPUT_TYPE
+    )
+    raw_profile = config.get("request_profile")
+    profile = raw_profile.strip() if isinstance(raw_profile, str) and raw_profile.strip() else None
+    return input_type, profile
 
 
 def _normalized_action(config: "Mapping[str, Any]", family: Optional[str]) -> Optional[str]:
@@ -419,6 +477,9 @@ def _normalized_action(config: "Mapping[str, Any]", family: Optional[str]) -> Op
         # lowercase projection made every SOAP component compare unequal to
         # ITSELF and refused its own reuse. The parity test holds the two here.
         return "EXECUTE" if mode == "execute" else None
+    if family == "wss":
+        # #158: the ONE shared derivation, called rather than restated.
+        return wss_listen_action_from_config(config)
     return None
 
 
@@ -445,6 +506,16 @@ def normalized_identity_projection(config, live_projection=None):
 
     family = connector_family_of(config.get("connector_type"))
     action = _normalized_action(config, family)
+
+    # #158: a Web Services Server listener has no outbound route at all — its
+    # endpoint is served BY the runtime, not called — so there is nothing to pin
+    # and its identity is never mintable. Answered before the endpoint scan,
+    # which would otherwise read this family's absent `base_url` as "no route
+    # declared" and fall through to the account's reading.
+    if family == "wss":
+        return NormalizedConnectorIdentity(
+            family=family, action=action, route_state="unavailable"
+        )
 
     # TWO SEPARATE QUESTIONS, and conflating them broke one of them. Whether
     # ANY endpoint field is bound to an environment extension is asked across
@@ -4762,7 +4833,8 @@ _WSS_ALIASES = ("wss", "web_services", "web_services_server")
 # WebServicesServerListenAction vocabulary (companion fixture, live-verified
 # against renera op 601cf5a3 "Configure a Web Listener", 2026-07-04).
 # operationType is a case-sensitive wire enum; the HTTP verb is NEVER set on
-# the operation — Boomi derives it from inputType (none -> GET, else POST).
+# the operation. A bare /ws/simple route is called by input type, an API
+# Service route by this operation type (#158, measured — `_api_service_paths`).
 _WSS_OPERATION_TYPES = frozenset(
     {"GET", "QUERY", "CREATE", "UPDATE", "UPSERT", "DELETE", "EXECUTE"}
 )
@@ -4849,8 +4921,9 @@ class WssListenerOperationBuilder:
                                 CREATE / UPDATE / UPSERT / DELETE / EXECUTE
                                 (canonicalized to uppercase). HTTP verbs
                                 (POST/PUT/PATCH) are rejected — the HTTP method
-                                derives from input_type (none -> GET, else POST)
-                                and is never set on the operation.
+                                is never set on the operation: a bare /ws/simple
+                                route follows input_type, an API Service route
+                                follows this operation type (#158).
         input_type:             optional, default "singlejson". One of none /
                                 singledata / singlejson / multijson / singlexml /
                                 multixml.
@@ -4976,9 +5049,12 @@ class WssListenerOperationBuilder:
                 error_code="WSS_OPERATION_CONFIG_INVALID",
                 field="operation_type",
                 hint=(
-                    "The HTTP method is never set on a WSS operation — Boomi "
-                    "derives it from input_type (none -> GET, anything else -> "
-                    "POST). Choose the semantic operationType instead: "
+                    "The HTTP method is never set on a WSS operation. A bare "
+                    "/ws/simple route is called by input type ("
+                    + BARE_METHOD_RULE
+                    + "); behind an API Service route "
+                    + ASC_METHOD_RULE
+                    + ". Choose the semantic operationType instead: "
                     + ", ".join(sorted(_WSS_OPERATION_TYPES))
                     + "."
                 ),
@@ -5001,8 +5077,12 @@ class WssListenerOperationBuilder:
                 error_code="WSS_OPERATION_CONFIG_INVALID",
                 field="input_type",
                 hint=(
-                    "input_type selects the inbound document shape AND the HTTP "
-                    "method (none -> GET, anything else -> POST)."
+                    "input_type selects the inbound document shape and the "
+                    "method a bare /ws/simple route is called with ("
+                    + BARE_METHOD_RULE
+                    + "); behind an API Service route "
+                    + ASC_METHOD_RULE
+                    + "."
                 ),
             )
 

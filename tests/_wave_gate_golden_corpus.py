@@ -1707,7 +1707,12 @@ def _case_archetype_notify_dlq_document_cache():
 
 
 # ---------------------------------------------------------------------------
-# K. Legacy listener chains (consumed by tests/test_sync_pipeline_adapter_cutover.py)
+# K. WSS listener chains (consumed by tests/test_sync_pipeline_adapter_cutover.py)
+#
+# Canonical since #158. The chains themselves are DEFINED in the JSON parity
+# corpus (section L) — the cases carrying a `listener_chain:*` golden identity —
+# and `LISTENER_CHAINS` below is read from there, so there is one definition.
+# The stage helpers stay: the cut-over tests build their own variants with them.
 # ---------------------------------------------------------------------------
 
 CHAIN_TGT = {"connection_id": "TGT-CONN", "operation_id": "TGT-OP"}
@@ -1740,13 +1745,32 @@ def chain_db_write(key="t", **cfg):
     return chain_stage(key, "write", {"primitive": "db_write", **CHAIN_TGT}, cfg)
 
 
-# The four chains that stay on the legacy renderer (#140).
-LISTENER_CHAINS = {
-    "listener_send": [chain_listen(), chain_rest_send()],
-    "listener_map_send": [chain_listen(), chain_map(), chain_rest_send()],
-    "listener_write": [chain_listen(), chain_db_write()],
-    "listener_map_write": [chain_listen(), chain_map(), chain_db_write()],
-}
+_LISTENER_CHAIN_CASE_PREFIX = "listener_chain:"
+
+
+def _listener_chains_from_parity_corpus():
+    """``{chain name: stages}`` for every corpus case owning a listener golden.
+
+    READ, not restated (#158): the JSON corpus is the one definition of these
+    chains, so the cut-over tests and the golden manifest cannot disagree about
+    what a listener chain is.
+    """
+    corpus = json.loads(
+        (_HERE / "fixtures" / "process_ir" / "sync_pipeline_emitter_parity_cases.json")
+        .read_text(encoding="utf-8")
+    )["cases"]
+    chains = {}
+    for case in corpus.values():
+        identity = case.get("golden_input_case") or ""
+        if identity.startswith(_LISTENER_CHAIN_CASE_PREFIX):
+            chains[identity[len(_LISTENER_CHAIN_CASE_PREFIX):]] = copy.deepcopy(
+                case["config"]["pipeline"]["stages"]
+            )
+    return dict(sorted(chains.items()))
+
+
+# All six WSS listener chains — REST/DB/SOAP targets, each with and without a map.
+LISTENER_CHAINS = _listener_chains_from_parity_corpus()
 
 
 def listener_pipeline(stages, **top):
@@ -1770,15 +1794,6 @@ def listener_chain_golden_name(chain):
         + chain.replace("listener_", "").replace("_", " ").title()
         + " Golden"
     )
-
-
-def _listener_chain_case(chain):
-    def render():
-        cfg = listener_pipeline(copy.deepcopy(LISTENER_CHAINS[chain]))
-        return _sync_pipeline_builder().build(
-            cfg, name=listener_chain_golden_name(chain), folder_name="Golden/Fixtures"
-        )
-    return render
 
 
 # ---------------------------------------------------------------------------
@@ -1826,9 +1841,13 @@ def _sync_parity_entries():
     for case_name in sorted(corpus):
         if not corpus[case_name].get("anchor"):
             continue
-        entries["sync_parity:" + case_name] = (
-            "process-component-v1", _sync_parity_case(case_name)
+        # #158: a case may keep the golden identity its anchor already had. The
+        # listener anchors were registered as `listener_chain:*` before they
+        # became corpus cases, and re-keying them would move golden-manifest rows.
+        input_case = corpus[case_name].get("golden_input_case") or (
+            "sync_parity:" + case_name
         )
+        entries[input_case] = ("process-component-v1", _sync_parity_case(case_name))
     return entries
 
 
@@ -1907,11 +1926,8 @@ def _build_registry():
         # J — archetype-path DLQ
         "archetype_dlq:document_cache": ("process-component-v1", _case_archetype_dlq_document_cache),
         "archetype_dlq:notify_document_cache": ("process-component-v1", _case_archetype_notify_dlq_document_cache),
-        # K — legacy listener chains
-        "listener_chain:listener_send": ("process-component-v1", _listener_chain_case("listener_send")),
-        "listener_chain:listener_map_send": ("process-component-v1", _listener_chain_case("listener_map_send")),
-        "listener_chain:listener_write": ("process-component-v1", _listener_chain_case("listener_write")),
-        "listener_chain:listener_map_write": ("process-component-v1", _listener_chain_case("listener_map_write")),
+        # K — the six WSS listener chains register from the parity corpus below
+        # under their `listener_chain:*` identities (#158).
     }
     registry.update(_sync_parity_entries())
     return registry

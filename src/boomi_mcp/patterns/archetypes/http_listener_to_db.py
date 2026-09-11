@@ -68,11 +68,16 @@ from ..primitives.inbound_validate import (
     InboundValidatePrimitive,
 )
 from ..primitives.wss_listen import (
+    ASC_GET_WITH_INPUT_RULE,
+    ASC_METHOD_RULE,
+    BARE_METHOD_RULE,
     WssListenParameters,
     WssListenPrimitive,
     api_service_http_method,
     compute_asc_endpoint,
     compute_wss_endpoint,
+    route_refuses_its_input,
+    uncallable_route_remedies,
     wss_http_method,
 )
 
@@ -153,16 +158,24 @@ class ListenerSource(BaseModel):
         default="EXECUTE",
         description=(
             "WSS operationType: GET | QUERY | CREATE | UPDATE | UPSERT | DELETE "
-            "| EXECUTE. NOT an HTTP verb — the HTTP method derives from "
-            "input_type (JSON input -> POST)."
+            "| EXECUTE. NOT an HTTP verb. A bare /ws/simple route ignores it for "
+            "the method; behind an API Service route (asc_wrapper) "
+            + ASC_METHOD_RULE
+            + ". This preset's input is always a document, and "
+            + ASC_GET_WITH_INPUT_RULE
+            + "."
         ),
     )
     input_type: Literal["singlejson", "multijson"] = Field(
         default="singlejson",
         description=(
             "Inbound JSON document shape. This preset is JSON-input only (the "
-            "transform maps the declared payload profile leaves); both values "
-            "arrive as HTTP POST."
+            "transform maps the declared payload profile leaves). A bare "
+            "/ws/simple route is called by input type ("
+            + BARE_METHOD_RULE
+            + "); behind an API Service route "
+            + ASC_METHOD_RULE
+            + "."
         ),
     )
     response_content_type: Literal[
@@ -260,7 +273,9 @@ class AscWrapperConfig(BaseModel):
         default=None,
         description=(
             "Route httpMethod override (GET/POST/PUT/DELETE/PATCH). Default "
-            "(None) inherits from the listener input_type (JSON input -> POST)."
+            "(None) inherits it from the listener's operation: "
+            + ASC_METHOD_RULE
+            + "."
         ),
     )
     title: Optional[str] = Field(
@@ -418,6 +433,10 @@ class HttpListenerToDbParameters(BaseModel):
                 "map_script input/output path yields a unique variable name"
             )
 
+        uncallable = _uncallable_asc_route_issue(self)
+        if uncallable is not None:
+            issues.append(uncallable)
+
         if issues:
             raise ValueError(" | ".join(issues))
 
@@ -531,9 +550,52 @@ def _asc_effective_route(parameters) -> Dict[str, str]:
     listener = parameters.listener
     object_name = (asc.object_name or "").strip() or listener.object_name.strip()
     return {
-        "method": api_service_http_method(asc.http_method, listener.input_type),
+        # #158: an inherited ASC method comes from the operation TYPE (measured),
+        # never the input type — that rule is the bare /ws/simple one.
+        "method": api_service_http_method(
+            asc.http_method, operation_type=listener.operation_type
+        ),
         "path": compute_asc_endpoint(asc.base_url_path, object_name, asc.route_url_path),
     }
+
+
+def _uncallable_asc_route_issue(parameters) -> Optional[str]:
+    """The issue text when ``asc_wrapper`` would publish a route nothing can call.
+
+    #158 (QA-158-r4-01): an all-inherit API Service route for a GET or QUERY
+    operation serves GET, and GET is refused for an operation expecting input —
+    which every value of this preset's ``input_type`` is (measured, evidence
+    cap158-r3-wss-method-matrix). ``orchestrate_deploy`` refuses such a route
+    before packaging; refusing it here keeps apply from creating it at all. An
+    explicit ``asc_wrapper.http_method`` the platform does serve is honoured.
+    """
+    if not parameters.asc_wrapper.enabled:
+        return None
+    method = _asc_effective_route(parameters)["method"]
+    input_type = parameters.listener.input_type
+    if not route_refuses_its_input(method, input_type):
+        return None
+    explicit = str(parameters.asc_wrapper.http_method or "").strip()
+    # The cause is named (QA-158-r5-01), and every remedy offered is one the
+    # predicate confirms makes the route callable (QA-158-r6-01) — this preset
+    # cannot take input type 'none', so that remedy is never offered.
+    cause = (
+        f"asc_wrapper.http_method {explicit!r} publishes the listener on GET"
+        if explicit
+        else "asc_wrapper publishes the listener on GET — what an all-inherit route "
+        f"serves for operation_type {parameters.listener.operation_type!r} —"
+    )
+    remedies = uncallable_route_remedies(
+        explicit_method=explicit,
+        operation_type=parameters.listener.operation_type,
+        input_type=input_type,
+        method_field="asc_wrapper.http_method",
+        input_none_available=False,
+    )
+    return (
+        f"{cause} which the platform refuses for an operation expecting "
+        f"{input_type!r} input; " + "; or ".join(text for text, _change in remedies)
+    )
 
 
 def _build_asc_component(parameters, overrides: Dict[str, str]) -> IntegrationComponentSpec:
@@ -809,7 +871,11 @@ class HttpListenerToDbArchetype(ArchetypePattern):
         "Emits a main process with process_kind='sync_pipeline' and an intact listener -> map -> write stage graph; SyncPipelineBuilder lowers the listener stage to the live-verified Listen start shape (connectoraction inside the start shape, no connection component).",
         "Listener process options are locked by construction: allowSimultaneous='true', updateRunDates='false' (live-captured invariants; defaults cause HTTP 500 under concurrency).",
         "The generated listener request profile is the transform's source shape; the database write profile (Fields/Conditions) is the map target through the confirmed #32 builders.",
-        "Records the computed listener endpoint (/ws/simple/{operationtype}{SentenceCase(objectName)}, HTTP method from input_type) in validation_rules.listener for orchestrate_deploy's listener_verify stage.",
+        "Records the computed listener endpoint and HTTP method in validation_rules.listener for orchestrate_deploy's listener_verify stage: bare /ws/simple/{operationtype}{SentenceCase(objectName)} ("
+        + BARE_METHOD_RULE
+        + "), or with asc_wrapper the /ws/rest route ("
+        + ASC_METHOD_RULE
+        + ").",
         "Opt-in asc_wrapper emits a typed API Service Component (one REST route -> the listener process, depends_on ordering, /ws/rest/... endpoint metadata with publish_mode='api_service') for apiType=advanced runtimes (#133).",
         "Opt-in inbound_validation (mode='profile_bound') asserts at build time that the listener binds a JSON request profile.",
         "Emits executable component specs for build_integration(action='plan'); all XML comes from the existing builders.",
@@ -879,7 +945,8 @@ class HttpListenerToDbArchetype(ArchetypePattern):
                 "Same listener -> map -> write graph published on an "
                 "apiType=advanced runtime: asc_wrapper.enabled=true appends an "
                 "API Service Component whose all-inherit route serves "
-                "POST /ws/rest/orderIntake (objectName verbatim). Both the ASC "
+                "POST /ws/rest/orderIntake for its EXECUTE operation (objectName "
+                "verbatim). Both the ASC "
                 "and the listener process must be deployed to the environment "
                 "(deploy does not cascade) — orchestrate_deploy handles both."
             ),

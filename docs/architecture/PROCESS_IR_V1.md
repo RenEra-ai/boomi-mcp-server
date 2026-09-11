@@ -66,6 +66,7 @@ Root sequence (`SequenceNodeV1.steps`, discriminated on `kind`):
 
 | Kind | Model | Notes / defaults (all grounded in the frozen builder grammar) |
 |---|---|---|
+| `listener` | `ListenerEntryNodeV1` | **#158**: `operation_ref` + optional `label` + optional `inbound_validation`. **No `connection_ref`** — refused with `PROCESS_IR_SCHEMA_LISTENER_CONNECTION_FORBIDDEN`. First root step, exactly once; see §3d |
 | `source` | `SourceEndpointV1` | `connection_ref`, `operation_ref`, optional `label`; first step of a connector flow |
 | `target` | `TargetEndpointV1` | same fields; success terminal position only |
 | `connector_call` | `ConnectorCallNodeV1` | **#140**: `operation_ref` + optional `action` assertion + optional `label`. No `connection_ref` — see below |
@@ -102,6 +103,15 @@ Sequence rules (local/structural — the CFG-aware checks are #137/#143):
   (`process_call_connector_mixing` — renamed from `mixed_connector_execution` by
   #140, which took that name back for its own, ADR-001 §8 meaning) and keeps its own diagnostic,
   because it remains gated on its own terms even once return-path binding lands.
+- A **listener flow** (#158) starts with exactly one `listener` and continues either with linear
+  steps, a `target` and a `stop` (the endpoint form every audited listener anchor has), or with
+  `connector_call` steps ending on a call before a `stop` (the connector-call form, under the
+  ordinary map-bracketing rule — the listener is an entry, not a call, so it brackets no map). A
+  listener anywhere but the first step, or twice, is `PROCESS_IR_SCHEMA_INVALID_CARDINALITY`; a
+  listener flow containing `source`, `process_call`, `try_catch`, `branch`, `decision`,
+  `flow_control`, `return_documents` or `exception` is
+  `PROCESS_IR_CAPABILITY_LISTENER_COMPOSITION_UNSUPPORTED`. The placement and composition rule is
+  ONE shared verdict (`listener_root_verdict`) rendered by both the parser and the compiler.
 - `cache_put` must be immediately followed by a stream-replacing cache read
   (`cache_get`/`document_cache_retrieve`); a trailing `cache_put` in a branch leg is expressed
   as the leg's staging **terminal**, and a decision false-arm may end its steps with
@@ -312,6 +322,39 @@ documentation shows that composing two Try/Catch steps silently rewrites the OUT
 error selection, and that the rule differs depending on whether the two are adjacent (capture §G6) —
 so a single deterministic semantic cannot be derived from the authored fields alone.
 
+### 3d. `listener` — the #158 inbound-HTTP entry
+
+A listener process is started by inbound HTTP requests instead of a schedule. It is authored as a
+ProcessIR root whose first step is the `listener` node:
+
+```json
+{"kind": "listener", "operation_ref": "$ref:listener_operation",
+ "label": "Receive orders", "inbound_validation": {"mode": "profile_bound"}}
+```
+
+- **Operation-only.** The node names the Web Services Server Listen operation and nothing else. A
+  listener has no connection — the platform binds the inbound endpoint to the operation — so
+  `connection_ref` is refused rather than ignored, the exact inverse of `SourceEndpointV1`. Family and
+  action are read from the resolved operation symbol, which must be a WSS spelling the WSS builder
+  accepts (`wss`, `web_services`, `web_services_server`), the `Listen` action, and no connection
+  (`PROCESS_IR_REFERENCE_LISTENER_OPERATION_INVALID` otherwise). A native WSS operation authored
+  with `operation_mode="listen"` derives `Listen` with no caller-authored `action_type`.
+- **Fused entry.** The compiler's entry policy fuses the listener with the process Start: the
+  emission plan carries exactly one compiler-synthesized entry shape at `shape1`, in one of two
+  admitted forms — `start_noaction` for a scheduled root, `start_listen` for a listener root — and the
+  listener node has no shape of its own. Geometry, wiring and the Start's input stay compiler-owned
+  and are re-derived by the plan invariants for both forms.
+- **Derived options.** The process execution profile (`listener` vs `scheduled`) is derived from the
+  entry node by the same entry policy, recorded on the materialization plan, and mapped to the
+  6-attribute listener `<process>` option bytes by the materializer. No independent listener flag
+  exists that could contradict the graph.
+- **`inbound_validation`** with mode `profile_bound` is a build-time check that the resolved
+  operation accepts JSON or XML input bound to a request profile
+  (`PROCESS_IR_SEMANTIC_LISTENER_INBOUND_CONTRACT_UNSATISFIED` otherwise). Nothing is emitted for it
+  and no payload is validated at run time. Absent, it adds no requirement.
+- **Composition** is linear only (see the sequence rules above). Reliability composition stays
+  gated as `listener_error_scope`.
+
 ## 4. Alias normalization (private codec)
 
 The public model has ONE canonical spelling per node. Legacy spellings are normalized only in
@@ -414,7 +457,8 @@ Published as the immutable `PROCESS_IR_V1_CAPABILITIES` manifest (not an authore
 | `verified_write_replay_safety` — a stock write action classified replay-safe | supported | #155 — classified by OBSERVATION: seven attested REST captures and one account-scoped operation contract record from a live double execution. To USE it, author the operation as reference-only reuse so its live identity can be read, and name a contract reference the packaged registry corroborates; a component being created or changed mints nothing, and a retried write with no evidence refuses as before |
 | `dynamic_path` — binding a connector call's per-document request path to a dynamic document property | **supported** | #155 (shipped) — the family publishes which locations it binds; the writer composing the path is checked on every reaching path |
 | `source_replay_policy` — explicitly accepting that a retried process-scope region replays its own document producer | **supported** | #155 (shipped) — an acknowledgement, never a relaxation: the write-safety rules are checked independently and unchanged |
-| `listener_error_scope` | gated | #142 — the fused listener start rejects reliability composition |
+| `listener_entry` — the §3d `listener` node: an operation-only inbound-HTTP entry the compiler fuses with the process Start | **supported** | #158 (shipped) |
+| `listener_error_scope` | gated | #142 — a listener flow still refuses reliability composition (#158 ships the entry, not its error scope) |
 | `nested_try_catch` | gated | #142 — composition rewrites the outer error selection (capture §G6) |
 | `parallel_branch_execution` — Branch legs executing concurrently | **unsupported** | #146 — legs are ordered and sequential by construction; concurrency is different semantics, not more speed |
 | `flow_control_parallel_chunks` — authoring a parallel-chunk flow-control setting | **unsupported** | #146 — the platform has the setting; this contract authors no field for it |
@@ -439,8 +483,9 @@ names rather than pick one meaning and silently redefine the flag.
 
 - **#137** owns the compiler CFG + lowering contracts consuming these models (shipped dark —
   see [PROCESS_IR_COMPILER_V1](PROCESS_IR_COMPILER_V1.md); it adds the `PROCESS_IR_SEMANTIC_*`
-  and `PROCESS_IR_COMPILE_*` families and rejects listener entry with #136's
-  `PROCESS_IR_CAPABILITY_UNSUPPORTED` until #140); **#138** the
+  and `PROCESS_IR_COMPILE_*` families and rejected listener entry with #136's
+  `PROCESS_IR_CAPABILITY_UNSUPPORTED` until #158 added the `listener` node — the refusal still
+  stands for a WSS family arriving as a `source`); **#138** the
   verified emitter registry; **#139** the production legacy adapters (including the legacy
   config-root leniency — inventory §2.7 — which #136 deliberately does NOT tighten); **#141/#142**
   the gated control-flow/error-handling capabilities; **#143** CFG-aware semantic validation.

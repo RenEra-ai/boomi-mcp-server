@@ -411,7 +411,8 @@ def test_direct_process_ir_planning_needs_no_archetype():
 def test_direct_planning_returns_bounded_constructs_gaps_and_a_query():
     payload = meta_tools.plan_integration_design_action(authoring_mode="process_ir")
     constructs = payload["supported_process_ir_constructs"]
-    assert len(constructs) == 23  # #156 added the notify and continue entries
+    # #156 added the notify and continue entries; #158 the listener entry.
+    assert len(constructs) == 24
     for construct in constructs:
         assert construct["contract_entry_id"].startswith("node.")
     gaps = payload["process_ir_capability_gaps"]
@@ -4790,9 +4791,15 @@ def test_the_action_type_derivation_matches_the_legacy_builder():
             underivable.append((family, action, _action_type_from_config(config)))
     assert underivable == [], underivable
 
-    # ...and an unpublished family derives nothing FROM `operation_mode` alone,
-    # which is the documented intent: `wss` and `http` are refused by absence
-    # rather than by a branch.
+    # ...and an unpublished family derives nothing FROM `operation_mode` alone —
+    # with ONE deliberate exception since #158: a native Web Services Server
+    # operation authors `operation_mode="listen"` and nobody writes an
+    # `action_type`, so declining it left every listener operation action-less and
+    # the listener ENTRY unable to resolve its own operation. It derives `Listen`
+    # now, through the WSS builder's own derivation. Deriving it does NOT make it
+    # callable: the allowlist still has no WSS row, so a connector_call naming that
+    # operation is refused exactly as before (asserted below) — only the listener
+    # entry accepts it. `http` and `ftp` stay refused by absence.
     #
     # This is NOT the allowlist gate, and saying so matters — an earlier
     # version of this comment claimed it was, while forty lines above the same
@@ -4805,7 +4812,11 @@ def test_the_action_type_derivation_matches_the_legacy_builder():
     # doing the work.
     assert _action_type_from_config(
         {"connector_type": "wss", "operation_mode": "listen"}
-    ) is None
+    ) == "Listen"
+    from boomi_mcp.compiler.process_ir.connector_capabilities import lookup_capability
+
+    assert lookup_capability("wss", "Listen") is None
+    assert not any(family == "wss" for family, _action in published)
     assert _action_type_from_config(
         {"connector_type": "ftp", "operation_mode": "execute"}
     ) is None

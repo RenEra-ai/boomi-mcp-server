@@ -1214,6 +1214,9 @@ def test_schema_closed_discriminated_union():
         # by `_sequence_rules` on its own terms.
         "continue",
         "exception", "stop", "return_documents",
+        # #158. The listener entry: a root-only kind, admitted ONLY as the first
+        # root step and refused in every control body by the body unions.
+        "listener",
     }
 
 
@@ -1424,6 +1427,8 @@ def test_capability_manifest_immutable_and_complete():
         "connector_call_in_control_body",
         "dynamic_path",
         "generalized_connector_call",
+        # #158: the operation-only inbound entry, fused with the process Start.
+        "listener_entry",
         "mixed_connector_execution",
         "recovery_process_call",
         "rich_branch_decision_bodies",
@@ -1450,7 +1455,9 @@ def test_every_process_ir_def_has_a_non_empty_description():
     guess at or discover by failing a compile.
     """
     defs = process_ir_v1_json_schema()["$defs"]
-    assert len(defs) == 42  # #156 added NotifyNodeV1 and ContinueNodeV1
+    # #156 added NotifyNodeV1 and ContinueNodeV1; #158 added ListenerEntryNodeV1
+    # and InboundValidationV1.
+    assert len(defs) == 44
     undescribed = sorted(name for name, body in defs.items() if not body.get("description"))
     assert undescribed == []
 

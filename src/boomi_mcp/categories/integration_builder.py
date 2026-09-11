@@ -2055,36 +2055,17 @@ def _check_wss_operation_dependencies(
     return None
 
 
-# WSS connector_type aliases accepted in lowered process source bindings —
-# mirrors orchestration's listener classification vocabulary (M6 #12) but
-# stays local so categories doesn't import from categories.deployment.
-_WSS_SOURCE_CONNECTOR_ALIASES = frozenset({"wss", "web_services", "web_services_server"})
-
-
 def _process_config_has_wss_listen(process_config: Any) -> bool:
-    """True when a process config carries a WSS Listen SOURCE binding.
+    """True when a LEGACY process config enters on a WSS Listen binding.
 
-    Recognizes both authoring shapes (mirrors orchestration's
-    ``_listener_operation_ref_from_process``): a sync_pipeline ``listener``
-    stage, and a lowered/hand-authored ``source`` binding with a WSS
-    connector_type + Listen action.
+    #158: delegates to the one entry-recognition authority
+    (``authoring.process_entry``), which the deployment recognizer consults too.
+    The private alias set that stood here was a second copy of the WSS builder's
+    own resolver; both recognizers now read the entry through that resolver.
     """
-    if not isinstance(process_config, dict):
-        return False
-    pipeline = process_config.get("pipeline")
-    if isinstance(pipeline, dict):
-        for stage in pipeline.get("stages") or []:
-            if not isinstance(stage, dict):
-                continue
-            if str(stage.get("kind") or "").strip().lower() == "listener":
-                return True
-    source = process_config.get("source")
-    if isinstance(source, dict):
-        connector_type = str(source.get("connector_type") or "").strip().lower()
-        action_type = str(source.get("action_type") or "").strip()
-        if connector_type in _WSS_SOURCE_CONNECTOR_ALIASES and action_type == "Listen":
-            return True
-    return False
+    from ..authoring.process_entry import legacy_config_entry
+
+    return legacy_config_entry(process_config).is_listener
 
 
 def _check_api_service_route_dependencies(
@@ -2165,17 +2146,27 @@ def _check_api_service_route_dependencies(
         # a legal ASC target yet. Reporting the wrong reason would send a caller
         # to add a component they already declared.
         if ref_key in (process_units_by_key or {}):
+            # #158: a canonical root is classified by the COMPILER — its entry
+            # policy decides whether the root enters on a listener, the same
+            # authority that derives its Start form and execution profile. A
+            # listener root is a legal route target; a scheduled one is not,
+            # whatever else the spec contains.
+            from ..authoring.process_entry import canonical_root_entry
+
+            unit = process_units_by_key[ref_key]
+            if canonical_root_entry(unit.process_ir).is_listener:
+                continue
             return BuilderValidationError(
-                f"{field} $ref target {ref_key!r} is a canonical ProcessIR root, "
-                f"which cannot yet publish an API Service route",
+                f"{field} $ref target {ref_key!r} is a canonical ProcessIR root "
+                f"that does not enter on a listener",
                 error_code="API_SERVICE_ROUTE_PROCESS_NOT_LISTEN",
                 field=field,
                 hint=(
-                    "ASC routes publish WSS Listen processes. A canonical "
-                    "ProcessIR root compiles to a SCHEDULED process today — "
-                    "listener entry arrives with #158, which activates the "
-                    "compiler-recorded execution profile. Until then, publish "
-                    "the listener through a legacy process component."
+                    "ASC routes publish WSS Listen processes. Make the route "
+                    "target a process root whose first step is a listener entry "
+                    "(see get_schema_template(schema_name='process_ir_authoring', "
+                    "node_kind='listener')) — a scheduled root deploys clean but "
+                    "404s at runtime."
                 ),
                 details={"ref_key": ref_key, "actual_role": "process_ir_root"},
             )

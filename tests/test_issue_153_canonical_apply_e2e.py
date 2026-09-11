@@ -4102,146 +4102,61 @@ def test_a_process_only_plan_is_not_called_empty():
 
 
 def test_the_compiler_revision_covers_the_execution_profile_derivation():
-    """§6 AR3-07, and then AR4-01 when the first fix proved insufficient.
+    """§6 AR3-07 / AR4-01, rebuilt on the entry policy by #158.
 
     `compiler_revision` is what a caller binds to, and it is deliberately a
-    manifest of published contracts rather than a source hash. The
-    execution-profile derivation — which decides whether a process is scheduled
-    or listener — was absent from it, so a stale binding kept validating across a
-    change to that rule.
+    manifest of published contracts rather than a source hash. The projection
+    CALLS the execution-profile rule over a derived case set, and this test
+    asserts the property that makes that worth doing: a change in CLASSIFICATION
+    moves the revision, and a change that classifies identically does not.
 
-    The first fix projected the derivation's VOCABULARY: the two profile labels
-    and the listener family set. This test's first version widened the family set
-    and asserted the revision moved, which it did — and proved nothing about the
-    rule, because the family table is exactly what a vocabulary projection reads.
-    The §6 gate then measured the case that mattered: replacing
-    `derive_process_execution_profile` with an always-scheduled implementation
-    left the served revision byte-identical.
-
-    So the projection now CALLS the rule over a derived case set, and this test
-    asserts the property the earlier one only appeared to: a change in
-    CLASSIFICATION moves the revision, and a change that classifies identically
-    does not.
+    #158 changed the rule itself. A process is a listener exactly when its CFG
+    enters on the authored ``listener`` node; the connector family of an operation
+    symbol no longer decides anything. So the regressions this binds are now:
+    a rule that ignores the listener entry (always-scheduled), and a rule that
+    lets a symbol family drive the answer again — the pre-#158 rule included.
     """
+    import boomi_mcp.compiler.process_ir.contracts as C
     import boomi_mcp.compiler.process_ir.execution_profile as ep
     from boomi_mcp.authoring.contract import (
+        _cfg_semantic_members,
         _compiler_revision,
+        _connector_member,
         _execution_profile_behaviour_oracle,
+        _literal_options,
     )
+    from boomi_mcp.compiler.process_ir.invariants import ENTRY_ROLE_RESTRICTIONS
 
     baseline = _compiler_revision()
     oracle = _execution_profile_behaviour_oracle()
 
-    # NON-DEGENERACY, before either mutation. A case set that classified
-    # everything the same way, or that lost its per-family rows, would move under
-    # the mutant below for the wrong reason.
+    # NON-DEGENERACY, before any mutation: both answers occur, and the listener
+    # answer comes from the listener entry and nowhere else.
     assert oracle != "unavailable" and oracle["cases"], oracle
     assert set(oracle["cases"].values()) == {"scheduled", "listener"}, oracle
-    from boomi_mcp.authoring.contract import _connector_member, _literal_options
+    listener_rows = sorted(k for k, v in oracle["cases"].items() if v == "listener")
+    assert listener_rows and all("listener" in row for row in listener_rows), listener_rows
 
-    connector_roles = _literal_options(_connector_member(), "role")
-    assert len(connector_roles) >= 2, connector_roles
-    for role in connector_roles:
-        rows = {k for k in oracle["cases"]
-                if k.startswith("connector-%s-" % role)
-                and k[len("connector-%s-" % role):] in ep.LISTENER_CONNECTOR_TYPES}
-        assert len(rows) == len(ep.LISTENER_CONNECTOR_TYPES), (role, sorted(rows))
-    # ...and the two roles disagree, or the role test is not covered at all.
-    listener_role, other_role = connector_roles[0], connector_roles[1]
-    family = sorted(ep.LISTENER_CONNECTOR_TYPES)[0]
-    assert oracle["cases"]["connector-%s-%s" % (listener_role, family)] == "listener"
-    assert oracle["cases"]["connector-%s-%s" % (other_role, family)] == "scheduled"
-
-    # THE THREE DISCRIMINANTS MUST BE SCHEDULED FOR THEIR OWN REASON. They all
-    # report "scheduled", and so does a connector row in the non-listener role —
-    # so a discriminant carrying the wrong role is scheduled for the WRONG reason
-    # and probes nothing, while looking identical in the output. That is not a
-    # hypothetical: pointing the discriminants at the other role left every
-    # assertion above green when this check was absent.
-    #
-    # The role is now ASKED OF THE RULE rather than read off declaration order
-    # (L2 round 45), so the check is that the rule's answer really is the
-    # listener-yielding role — with the classifier passed in the same shape the
-    # oracle passes it, so this cannot pass against a different question.
-    from boomi_mcp.authoring.contract import _listener_role
-
-    def _classify_role(role):
-        return oracle["cases"].get("connector-%s-%s" % (role, family))
-
-    chosen = _listener_role(_classify_role, sorted(ep.LISTENER_CONNECTOR_TYPES))
-    assert oracle["cases"]["connector-%s-%s" % (chosen, family)] == "listener", chosen
-
-    # ...and it must still be the right role when the schema's declaration order
-    # is REVERSED, which is the only condition under which asking the rule and
-    # reading the first option differ. Without this the fix is untested: `source`
-    # happens to be declared first, so a version that reads declaration order
-    # gives the same answer on today's schema.
-    reversed_first = tuple(reversed(connector_roles))[0]
-    assert reversed_first != chosen, connector_roles
-
-    def _classify_reversed(role):
-        return oracle["cases"].get("connector-%s-%s" % (role, family))
-
-    from unittest.mock import patch as _patch
-
-    with _patch(
-        "boomi_mcp.authoring.contract._literal_options",
-        side_effect=lambda model, field: tuple(reversed(connector_roles))
-        if field == "role"
-        else _literal_options(model, field),
-    ):
-        assert _listener_role(
-            _classify_reversed, sorted(ep.LISTENER_CONNECTOR_TYPES)
-        ) == chosen, "the listener role is being read off declaration order"
-
-    # ...and EVERY entry kind the schema admits is exercised, derived from the
-    # schema on both sides so the check cannot pass by agreeing with itself
-    # (L2 round 43: the case set stood one `message` node in for "any
-    # non-connector entry", which made the whole connector_call family
-    # invisible). `connector` is the one kind absent from these rows — it is
-    # covered per family, per role, above.
-    from boomi_mcp.authoring.contract import _cfg_semantic_members
-
+    # EVERY entry kind the schema admits is exercised — derived from the schema on
+    # both sides, so the check cannot pass by agreeing with itself. Since #158 that
+    # includes `listener` itself and `connector`, which is probed like any other
+    # kind now that its family no longer matters.
     schema_kinds = {
-        member.model_fields["semantic_kind"].default
-        for member in _cfg_semantic_members()
+        member.model_fields["semantic_kind"].default for member in _cfg_semantic_members()
     }
-    assert len(schema_kinds) > 10, sorted(schema_kinds)
-    exercised = {k[len("entry-kind-"):].split("-role-")[0].removesuffix(
-        "-listener-shaped") for k in oracle["cases"] if k.startswith("entry-kind-")}
-    assert exercised == schema_kinds - {"connector"}, sorted(
-        (schema_kinds - {"connector"}) ^ exercised
-    )
+    assert {"listener", "connector", "connector_call"} <= schema_kinds
+    exercised = {
+        k[len("entry-kind-"):].split("-role-")[0].removesuffix("-listener-shaped")
+        for k in oracle["cases"] if k.startswith("entry-kind-")
+    }
+    assert exercised == schema_kinds, sorted(schema_kinds ^ exercised)
+    assert oracle["cases"]["entry-kind-listener"] == "listener"
+    assert oracle["cases"]["entry-kind-connector-role-source"] == "scheduled"
 
-    # ...and every kind that declares a ROLE is probed with each role its OWN
-    # schema admits (L2 round 44). The previous version stamped `role="source"`
-    # on all of them, which for `connector_call` — whose schema admits only
-    # `entry|downstream` — meant the kind most likely to become listener-eligible
-    # was probed with a role it can never carry. Both sides derive from the
-    # schema, so the check cannot pass by agreeing with the oracle's own copy.
-    # ...and probed with the roles that are legal AT THE ENTRY POSITION, which is
-    # narrower than what the field admits (L2 round 45): `_classify` installs the
-    # probed node as the entry, and `check_cfg_invariants` rejects a
-    # `connector_call` entry in any role but `entry`. Probing the illegal one
-    # made the served revision rotate for a shape production cannot produce.
-    # Asserted in BOTH directions — every legal role present, every illegal one
-    # absent — because "all declared roles present" was the previous version of
-    # this assertion and it is exactly what round 45 found wrong.
-    from boomi_mcp.authoring.contract import _literal_options
-    from boomi_mcp.compiler.process_ir.invariants import ENTRY_ROLE_RESTRICTIONS
-
-    def _connector_call_member():
-        return next(m for m in _cfg_semantic_members()
-                    if m.model_fields["semantic_kind"].default == "connector_call")
-
+    # ...each probed with the roles legal AT THE ENTRY POSITION (L2 round 45),
+    # asserted in both directions from `ENTRY_ROLE_RESTRICTIONS`, the AUTHORITY.
     for member in _cfg_semantic_members():
         kind = member.model_fields["semantic_kind"].default
-        if kind == "connector":
-            continue
-        # The expectation comes from `ENTRY_ROLE_RESTRICTIONS` — the AUTHORITY —
-        # not from `_entry_roles`, the consumer being checked. Deriving it from
-        # the consumer made this assertion agree with itself: a mutant that
-        # ignored the restriction entirely widened both sides and passed.
         declared = _literal_options(member, "role")
         allowed = ENTRY_ROLE_RESTRICTIONS.get(kind)
         legal = set(declared if allowed is None else allowed)
@@ -4249,16 +4164,30 @@ def test_the_compiler_revision_covers_the_execution_profile_derivation():
             key = "entry-kind-%s-role-%s" % (kind, role)
             assert (key in oracle["cases"]) == (role in legal), (kind, role, legal)
 
-    # 1. A BEHAVIOUR mutant — the reviewer's own: a derivation that classifies
-    #    every graph as scheduled. This is the case the vocabulary projection
-    #    could not see.
+    # ...and the decoy rows cover EVERY listener-family spelling in both connector
+    # roles, all scheduled: no family, however spelled, makes a connector entry a
+    # listener. A rule that re-read the family would flip these.
+    connector_roles = _literal_options(_connector_member(), "role")
+    assert len(connector_roles) >= 2, connector_roles
+    for role in connector_roles:
+        for family in C.LISTENER_CONNECTOR_TYPES:
+            for key in ("connector-%s-%s" % (role, family),
+                        "connector-%s-unnormalized-%s" % (role, family)):
+                assert oracle["cases"][key] == "scheduled", key
+
+    def _revision_under(rule):
+        original = ep.derive_process_execution_profile
+        try:
+            ep.derive_process_execution_profile = rule
+            return _compiler_revision()
+        finally:
+            ep.derive_process_execution_profile = original
+
     original_derive = ep.derive_process_execution_profile
-    try:
-        ep.derive_process_execution_profile = lambda cfg, symbols: ep.SCHEDULED
-        always_scheduled = _compiler_revision()
-    finally:
-        ep.derive_process_execution_profile = original_derive
-    assert always_scheduled != baseline, (
+
+    # 1. A BEHAVIOUR mutant: a derivation that classifies every graph as scheduled
+    #    — ignoring the listener entry entirely.
+    assert _revision_under(lambda cfg, symbols: ep.SCHEDULED) != baseline, (
         "replacing the derivation with an always-scheduled rule left the served "
         "compiler revision unchanged — the revision covers the vocabulary, not "
         "the behaviour"
@@ -4266,73 +4195,57 @@ def test_the_compiler_revision_covers_the_execution_profile_derivation():
     assert _compiler_revision() == baseline
 
     # 2. An EQUIVALENCE wrapper — same classifications, different code. The
-    #    revision must NOT move, or it is hashing identity rather than behaviour
-    #    and every unrelated refactor would break a caller's binding.
-    try:
-        ep.derive_process_execution_profile = (
-            lambda cfg, symbols: original_derive(cfg, symbols)
-        )
-        wrapped = _compiler_revision()
-    finally:
-        ep.derive_process_execution_profile = original_derive
-    assert wrapped == baseline, (
-        "a behaviour-preserving wrapper moved the served revision"
-    )
+    #    revision must NOT move, or it hashes identity rather than behaviour.
+    assert _revision_under(
+        lambda cfg, symbols: original_derive(cfg, symbols)
+    ) == baseline, "a behaviour-preserving wrapper moved the served revision"
 
-    # 3. THE REGRESSION THE SCHEMA CAN ACTUALLY PRODUCE: a derivation that
-    #    starts classifying listener-family `connector_call` entries.
-    #
-    #    L2 round 43 raised this and its mutant keyed on `role == "source"`,
-    #    which round 44 then showed `ConnectorCallSemanticV1` does not admit —
-    #    its roles are `entry|downstream`. That mutant is WITHDRAWN rather than
-    #    kept beside this one: a control asserting the revision moves for a node
-    #    the schema cannot construct would be claiming coverage of an impossible
-    #    case, which is worse than no control. Both admitted roles are asserted —
-    #    `entry` is the one a listener would plausibly become, and `downstream`
-    #    proves the coverage is not one lucky value.
-    def _valid_role_listener(valid_role):
+    # 3. THE PRE-#158 RULE, re-introduced: a connector entry whose operation symbol
+    #    names a listener family is classified a listener. The decoy rows are what
+    #    make this visible, so it must move the revision — per role that can be
+    #    the entry, and NOT for a role that cannot (L2 round 45: rotating a
+    #    caller's binding for a graph the compiler rejects is a cost with no
+    #    behaviour behind it).
+    folded = {f.strip().lower() for f in C.LISTENER_CONNECTOR_TYPES}
+
+    def _family_rule(kind, role):
         def _rule(cfg, symbols):
-            entry = ep._entry_node(cfg)
-            if entry is None:
-                return ep.SCHEDULED
-            semantic = entry.semantic
+            entry = next(
+                (n for n in cfg.nodes if n.node_id == cfg.entry_node_id), None
+            )
+            semantic = getattr(entry, "semantic", None)
             if (
-                getattr(semantic, "semantic_kind", None) == "connector_call"
-                and getattr(semantic, "role", None) == valid_role
+                getattr(semantic, "semantic_kind", None) == kind
+                and getattr(semantic, "role", None) == role
             ):
-                family = ep._operation_connector_family(
-                    symbols, getattr(semantic, "operation_ref", "")
-                )
-                if family and family in ep.LISTENER_CONNECTOR_TYPES:
+                row = symbols.build_index().get(getattr(semantic, "operation_ref", ""))
+                family = getattr(row, "connector_type", None)
+                if isinstance(family, str) and family.strip().lower() in folded:
                     return ep.LISTENER
-                return ep.SCHEDULED
             return original_derive(cfg, symbols)
 
         return _rule
 
-    # BOTH DIRECTIONS, and they differ — which is the whole content of round 45.
-    # A regression on the role that CAN be the entry must move the revision; one
-    # confined to the role that cannot must NOT, because rotating a caller's
-    # binding for a graph the compiler rejects is a cost with no behaviour behind
-    # it. Round 44's version of this control asserted `downstream` moved it too,
-    # which is what round 45 found wrong.
+    assert _revision_under(_family_rule("connector", "source")) != baseline
+    assert _revision_under(_family_rule("connector", "target")) != baseline
     entry_legal = set(ENTRY_ROLE_RESTRICTIONS["connector_call"])
-    for role in _literal_options(_connector_call_member(), "role"):
-        try:
-            ep.derive_process_execution_profile = _valid_role_listener(role)
-            probed = _compiler_revision()
-        finally:
-            ep.derive_process_execution_profile = original_derive
+    connector_call_member = next(
+        m for m in _cfg_semantic_members()
+        if m.model_fields["semantic_kind"].default == "connector_call"
+    )
+    for role in _literal_options(connector_call_member, "role"):
+        probed = _revision_under(_family_rule("connector_call", role))
         assert (probed != baseline) == (role in entry_legal), (role, entry_legal)
-        assert _compiler_revision() == baseline
+    assert _compiler_revision() == baseline
 
-    # 4. The family table is still covered — the property the first fix had.
-    original_families = ep.LISTENER_CONNECTOR_TYPES
+    # 4. The decoy family table is still covered: widening the compiler's refusal
+    #    set adds decoy rows, so the served revision moves.
+    original_families = C.LISTENER_CONNECTOR_TYPES
     try:
-        ep.LISTENER_CONNECTOR_TYPES = frozenset(set(original_families) | {"zzz-probe"})
+        C.LISTENER_CONNECTOR_TYPES = frozenset(set(original_families) | {"zzz-probe"})
         widened = _compiler_revision()
     finally:
-        ep.LISTENER_CONNECTOR_TYPES = original_families
+        C.LISTENER_CONNECTOR_TYPES = original_families
     assert widened != baseline
     assert _compiler_revision() == baseline
 
@@ -5011,461 +4924,274 @@ def test_the_entry_role_restriction_is_pinned_to_the_invariant_that_enforces_it(
 # §6 AR5-01 — the served revision must bind MULTI-SYMBOL lookup behaviour
 # --------------------------------------------------------------------------
 
-def _family_lookup_mutants(ep):
-    """Wrong-row variants of `_operation_connector_family`.
+def _symbol_driven_mutants(ep, contracts):
+    """Rules that let the SYMBOL TABLE decide the profile (#158 rewrite).
 
-    Each answers from a row it was not asked for, or refuses a table shape. The
-    set grew as two more gates found shapes the earlier padding could not see:
-    `second` (the referenced symbol sat at index 1 in every padded row) and
-    `big-table-listener` (no probe exceeded three symbols, while a normal
-    compiling database-source/WSS-target process carries four).
-
-    Whether a mutant is INVISIBLE to a one-symbol case set is derived below by
-    comparison, never asserted here — a first draft hand-listed that partition
-    and got it wrong.
+    Before #158 the rule looked up the entry operation's family, and these
+    witnesses bound WRONG-ROW lookups of it. #158 made the entry node the only
+    authority, so the regressions worth binding are now every way a symbol table
+    could creep back into the answer: any listener-family row anywhere, a row
+    read by position, a size-keyed path, and the entry operation's own family —
+    each of which the real rule never consults.
     """
-    listener = {f.strip().lower() for f in ep.LISTENER_CONNECTOR_TYPES}
-    real = ep._operation_connector_family
+    folded = {f.strip().lower() for f in contracts.LISTENER_CONNECTOR_TYPES}
+    real = ep.derive_process_execution_profile
 
-    def _fold(value):
-        return value.strip().lower() if isinstance(value, str) else None
+    def _is_listener_family(value):
+        return isinstance(value, str) and value.strip().lower() in folded
 
     def _rows(symbols):
         return tuple(symbols.symbols or ())
 
-    def first0_refchecked(symbols, ref):
-        rows = _rows(symbols)
-        return _fold(rows[0].connector_type) if rows and rows[0].ref == ref else None
+    def _flip(predicate):
+        def _rule(cfg, symbols):
+            if predicate(cfg, symbols):
+                return ep.LISTENER
+            return real(cfg, symbols)
+        return _rule
 
-    def first0_refblind(symbols, ref):
-        rows = _rows(symbols)
-        return _fold(rows[0].connector_type) if rows else None
-
-    def last_row(symbols, ref):
-        rows = _rows(symbols)
-        return _fold(rows[-1].connector_type) if rows else None
-
-    def second_row(symbols, ref):
-        rows = _rows(symbols)
-        if len(rows) > 1:
-            return _fold(rows[1].connector_type)
-        return _fold(rows[0].connector_type) if rows else None
-
-    def single_symbol_only(symbols, ref):
-        rows = _rows(symbols)
-        if len(rows) > 1:
-            return None
-        return next((_fold(r.connector_type) for r in rows if r.ref == ref), None)
-
-    def wrong_loop_var(symbols, ref):
-        rows = _rows(symbols)
-        if any(r.ref == ref for r in rows):
-            return _fold(rows[0].connector_type)
-        return None
-
-    def listener_anywhere(symbols, ref):
-        rows = _rows(symbols)
-        if not any(r.ref == ref for r in rows):
-            return None
-        for row in rows:
-            folded = _fold(row.connector_type)
-            if folded in listener:
-                return folded
-        return next((_fold(r.connector_type) for r in rows if r.ref == ref), None)
-
-    def penultimate_row(symbols, ref):
-        """Confirms the ref exists, then reads `rows[-2]` — invisible while every
-        padded row put the referenced symbol exactly there (L2 round 48)."""
-        rows = _rows(symbols)
-        if not any(r.ref == ref for r in rows):
-            return None
-        return _fold(rows[-2].connector_type) if len(rows) > 1 else _fold(rows[0].connector_type)
-
-    def big_table_listener(symbols, ref):
-        """A path taken only for production-sized tables — invisible to every
-        probe while the largest carried three symbols (L2 round 47)."""
-        rows = _rows(symbols)
-        if len(rows) > 3:
-            for row in rows:
-                folded = _fold(row.connector_type)
-                if folded in listener:
-                    return folded
-        return real(symbols, ref)
+    def _entry_ref(cfg):
+        entry = next((n for n in cfg.nodes if n.node_id == cfg.entry_node_id), None)
+        return getattr(getattr(entry, "semantic", None), "operation_ref", "")
 
     return {
-        "first0-refchecked": first0_refchecked,
-        "first0-refblind": first0_refblind,
-        "last-row": last_row,
-        "second-row": second_row,
-        "single-symbol-only": single_symbol_only,
-        "wrong-loop-var": wrong_loop_var,
-        "listener-anywhere": listener_anywhere,
-        "big-table-listener": big_table_listener,
-        "penultimate-row": penultimate_row,
+        "listener-anywhere": _flip(lambda cfg, symbols: any(
+            _is_listener_family(r.connector_type) for r in _rows(symbols))),
+        "first-row": _flip(lambda cfg, symbols: bool(_rows(symbols)) and
+                           _is_listener_family(_rows(symbols)[0].connector_type)),
+        "last-row": _flip(lambda cfg, symbols: bool(_rows(symbols)) and
+                          _is_listener_family(_rows(symbols)[-1].connector_type)),
+        "second-row": _flip(lambda cfg, symbols: len(_rows(symbols)) > 1 and
+                            _is_listener_family(_rows(symbols)[1].connector_type)),
+        "big-table-listener": _flip(lambda cfg, symbols: len(_rows(symbols)) > 3 and any(
+            _is_listener_family(r.connector_type) for r in _rows(symbols))),
+        "entry-operation-family": _flip(lambda cfg, symbols: _is_listener_family(
+            getattr(symbols.build_index().get(_entry_ref(cfg)), "connector_type", None))),
     }
 
 
 def test_the_served_revision_binds_multi_symbol_family_lookup():
-    """§6 AR5-01: every probe passed at most ONE symbol; the rule searches a table.
+    """§6 AR5-01, rebuilt by #158: no symbol table may drive the profile.
 
-    The reviewer found the blind spot and then read it in the harmless direction
-    — real=listener flipping to scheduled, which needs a graph lowering refuses.
-    Three independent verifications took the other direction and all three built
-    a request that COMPILES today and is materialized WRONG: a correctly-
-    scheduled process stamped with listener `<process>` bytes. It needs no
-    listener entry at all, only a listener-family symbol somewhere in the table
-    — and `build_symbol_table` puts every component of the spec in one table —
-    plus a lookup that answers from the wrong row. The apply-time re-derive
-    cannot catch it, because it calls the same function.
+    The reachable damage has not changed: `build_symbol_table` puts every
+    component of a spec in one table, so a rule that answers from the table
+    instead of the entry would stamp a correctly-scheduled process with listener
+    `<process>` bytes the moment ANY listener-family operation sits in its spec —
+    and apply's re-derive cannot catch it, because it calls the same function.
 
-    Asserted on `_compiler_revision()`, the SERVED value, not on the oracle
-    helper: what a caller binds to is the revision.
+    Asserted on `_compiler_revision()`, the SERVED value: every symbol-driven
+    mutant must move it, and every faithful reimplementation must not.
     """
+    import boomi_mcp.compiler.process_ir.contracts as C
     import boomi_mcp.compiler.process_ir.execution_profile as ep
     from boomi_mcp.authoring.contract import _compiler_revision
+    from boomi_mcp.compiler.process_ir.entry_policy import classify_entry
 
     baseline = _compiler_revision()
-    original = ep._operation_connector_family
-    mutants = _family_lookup_mutants(ep)
+    original = ep.derive_process_execution_profile
+    mutants = _symbol_driven_mutants(ep, C)
+    assert len(mutants) >= 6, sorted(mutants)
 
     survived = []
     try:
         for name, mutant in mutants.items():
-            ep._operation_connector_family = mutant
+            ep.derive_process_execution_profile = mutant
             if _compiler_revision() == baseline:
                 survived.append(name)
     finally:
-        ep._operation_connector_family = original
+        ep.derive_process_execution_profile = original
     assert survived == [], (
-        "the served revision is blind to these lookup regressions: %s" % survived
+        "the served revision is blind to these symbol-driven regressions: %s" % survived
     )
     assert _compiler_revision() == baseline
 
-    # CONTROL 1 — EQUIVALENCE. A semantically identical, order-independent
-    # reimplementation must leave the revision byte-identical, or the new rows
-    # are pinning an implementation shape rather than behaviour and every
-    # unrelated refactor would break a caller's binding.
-    def _by_index(symbols, ref):
-        index = {
-            row.ref: row.connector_type for row in (symbols.symbols or ())
-        }
-        value = index.get(ref)
-        return value.strip().lower() if isinstance(value, str) else None
+    # CONTROL — EQUIVALENCE. Implementations that classify identically must leave
+    # the revision byte-identical, including one that BUILDS the table's index and
+    # then ignores it: a faithful refactor must never rotate a caller's binding.
+    def _via_policy(cfg, symbols):
+        return classify_entry(cfg)
 
-    def _by_bisect(symbols, ref):
-        """Correct on every valid input BY RELYING ON THE DOCUMENTED SORT.
+    def _via_entry_map(cfg, symbols):
+        by_id = {getattr(n, "node_id", None): n for n in (cfg.nodes or ())}
+        entry = by_id.get(cfg.entry_node_id)
+        kind = getattr(getattr(entry, "semantic", None), "semantic_kind", None)
+        return ep.LISTENER if kind == "listener" else ep.SCHEDULED
 
-        `SymbolTableV1` canonicalises by `ref`, so a binary search is a faithful
-        implementation — and it was the one that exposed the probes building
-        tables production cannot supply (L2 round 48). It must leave the
-        revision identical, or the oracle is rotating callers' bindings for
-        implementation shape rather than behaviour.
-        """
-        import bisect
+    def _index_built_and_ignored(cfg, symbols):
+        symbols.build_index()
+        return original(cfg, symbols)
 
-        rows = tuple(symbols.symbols or ())
-        refs = [row.ref for row in rows]
-        position = bisect.bisect_left(refs, ref)
-        if position < len(rows) and rows[position].ref == ref:
-            value = rows[position].connector_type
-            return value.strip().lower() if isinstance(value, str) else None
-        return None
-
-    def _by_table_api(symbols, ref):
-        """The table's OWN documented API (§6 evaluation 6).
-
-        `SymbolTableV1.build_index()` exists to be used, so an implementation
-        that uses it is faithful by construction — and it was the one that
-        exposed the probes passing a stand-in object which cannot answer it.
-        """
-        row = symbols.build_index().get(ref)
-        value = getattr(row, "connector_type", None)
-        return value.strip().lower() if isinstance(value, str) else None
-
-    for equivalent in (_by_index, _by_bisect, _by_table_api):
+    for equivalent in (_via_policy, _via_entry_map, _index_built_and_ignored):
         try:
-            ep._operation_connector_family = equivalent
+            ep.derive_process_execution_profile = equivalent
             assert _compiler_revision() == baseline, (
-                "an equivalent lookup moved the served revision: %s"
-                % equivalent.__name__
+                "an equivalent rule moved the served revision: %s" % equivalent.__name__
             )
         finally:
-            ep._operation_connector_family = original
-
-    # CONTROL 2 — the mutants really are invisible to a ONE-SYMBOL case set, so
-    # "the shipped oracle could not see them" is measured rather than asserted.
-    #
-    # FOUR of the five, not all five. `first0-refblind` ignores the reference
-    # entirely, so it already differs on a one-symbol table whose symbol does
-    # not match — which is exactly why the shipped case set already caught it,
-    # and the kill above asserts that detection is RETAINED rather than newly
-    # gained. Writing this control over all five was the first draft, and it
-    # failed on that mutant: the claim was broader than the fact. Scoped here to
-    # the four whose invisibility is the finding.
-    # REAL model objects, not stand-ins. A hand-built table with only `.symbols`
-    # cannot answer `build_index()`, which the lookup now uses — the same defect
-    # the reviewer found in the oracle's probes, reproduced here in a control.
-    from boomi_mcp.compiler.process_ir.contracts import (
-        ComponentSymbolV1,
-        SymbolTableV1,
-    )
-
-    def _row(ref, family):
-        return ComponentSymbolV1(
-            ref=ref, component_id="id-" + ref, component_type="connector-action",
-            connector_type=family,
-        )
-
-    single = [
-        SymbolTableV1(symbols=()),
-        SymbolTableV1(symbols=(_row("$ref:op", "database"),)),
-        SymbolTableV1(symbols=(_row("$ref:op", sorted(ep.LISTENER_CONNECTOR_TYPES)[0]),)),
-        SymbolTableV1(symbols=(_row("$ref:other", "database"),)),
-    ]
-    # The partition is DERIVED, not written down: a mutant is "invisible to a
-    # one-symbol case set" exactly when it agrees with the real function on every
-    # 0- and 1-symbol table. The first draft hand-listed which mutants were
-    # invisible and was wrong about one of them, which is the same hand-model
-    # defect this whole artifact keeps producing.
-    def _agrees_on_small_tables(mutant):
-        return all(
-            mutant(table, ref) == original(table, ref)
-            for table in single
-            for ref in ("$ref:op", "$ref:missing")
-        )
-
-    invisible = {k for k, v in mutants.items() if _agrees_on_small_tables(v)}
-    visible = set(mutants) - invisible
-    # Both groups must be non-empty, or the derivation has collapsed and this
-    # control is asserting nothing.
-    assert invisible and visible, (sorted(invisible), sorted(visible))
-    # The invisible group is the finding: those are the regressions the shipped
-    # one-symbol case set could not possibly have caught, and they are killed
-    # above only because the probes now carry real tables.
-    assert "listener-anywhere" in invisible and "big-table-listener" in invisible, (
-        sorted(invisible)
-    )
+            ep.derive_process_execution_profile = original
 
 
 def test_the_profile_case_set_keeps_both_arities_and_both_directions():
-    """The structural guard, so a future row cannot re-open AR5-01 silently.
+    """The structural guard over the case set, so a future edit cannot re-open
+    AR5-01 silently (#158 rewrite: recorded at the rule's own call, not at a
+    family lookup the rule no longer makes).
 
-    Padding two rows fixes today's case set; it does not stop the next edit from
-    reverting to a one-symbol-only probe set, which is how this defect arrived.
-    So the property is asserted over the case set itself, derived from the rows
-    that actually reach the lookup rather than from a list written here:
-
-      * both arities stay represented — at least one single-symbol probe and at
-        least one multi-symbol probe;
-      * BOTH expected directions carry a multi-symbol table — a row whose value
-        is `scheduled` and a row whose value is `listener` — because a mutant
-        that flips only one direction is invisible to a case set that only
-        exercises the other;
-      * in every multi-symbol table the referenced symbol is not alone, and at
-        least one decoy carries the opposite family class from the row's own
-        answer, since a decoy of the same class discriminates nothing.
+      * both arities stay represented — a single-symbol probe and a multi-symbol
+        probe, and at least one production-sized (four or more) table;
+      * BOTH answers carry a multi-symbol table whose decoys are of the OTHER
+        class: a `scheduled` row whose table holds listener-family symbols, and a
+        `listener` row whose table holds none — so a rule that reads the table in
+        either direction flips a row;
+      * the referenced symbol's index, from both ends, varies across padded rows;
+      * every probe table is canonically sorted by `ref`, the only order
+        production can supply.
     """
+    import boomi_mcp.compiler.process_ir.contracts as C
     import boomi_mcp.compiler.process_ir.execution_profile as ep
     from boomi_mcp.authoring import contract as ct
 
-    seen = []
-    original = ep._operation_connector_family
+    folded = {f.strip().lower() for f in C.LISTENER_CONNECTOR_TYPES}
 
-    def _recording(symbols, ref):
-        rows = tuple(symbols.symbols or ())
-        seen.append((tuple((r.ref, r.connector_type) for r in rows), ref))
-        return original(symbols, ref)
+    def _is_listener_family(value):
+        return isinstance(value, str) and value.strip().lower() in folded
+
+    seen = []
+    original = ep.derive_process_execution_profile
+
+    def _recording(cfg, symbols):
+        answer = original(cfg, symbols)
+        entry = next((n for n in cfg.nodes if n.node_id == cfg.entry_node_id), None)
+        ref = getattr(getattr(entry, "semantic", None), "operation_ref", None)
+        rows = tuple((r.ref, r.connector_type) for r in (symbols.symbols or ()))
+        seen.append((rows, ref, answer))
+        return answer
 
     try:
-        ep._operation_connector_family = _recording
+        ep.derive_process_execution_profile = _recording
         oracle = ct._execution_profile_behaviour_oracle()
     finally:
-        ep._operation_connector_family = original
+        ep.derive_process_execution_profile = original
 
-    assert seen, "no probe reached the family lookup at all"
-    arities = {len(rows) for rows, _ref in seen}
-    assert any(a == 1 for a in arities), sorted(arities)
-    assert any(a > 1 for a in arities), sorted(arities)
-
-    # PRODUCTION-SIZED, not merely multi-symbol (L2 round 47). A normal compiling
-    # database-source / WSS-target process carries four symbols — two operations
-    # and two connections — so a regression on a path like `len(symbols) > 3`
-    # was invisible while every probe topped out at three.
+    assert seen, "no probe reached the rule at all"
+    arities = {len(rows) for rows, _ref, _a in seen}
+    assert 1 in arities and any(a > 1 for a in arities), sorted(arities)
     assert max(arities) >= 4, sorted(arities)
 
-    # ...and the referenced symbol is not always at the same INDEX (QA round 20,
-    # which censused it and found index 1 in all eleven padded rows). With one
-    # universal index, an off-by-one to that index is exactly the shape the
-    # decoys cannot see, and a direction carried by a single row goes dark the
-    # moment that row is simplified.
-    resolved_indices = {
-        next(i for i, (r, _t) in enumerate(rows) if r == ref)
-        for rows, ref in seen
-        if len(rows) > 1 and any(r == ref for r, _t in rows)
-    }
-    assert len(resolved_indices) >= 3, sorted(resolved_indices)
-    assert 0 in resolved_indices and max(resolved_indices) >= 2, sorted(resolved_indices)
-
-    # ...and the index FROM THE END varies too (L2 round 48). Absolute spread is
-    # not sufficient: the first attempt varied it while leaving
-    # `arity - 1 - position == 1` in every row, so the referenced symbol was
-    # `rows[-2]` throughout and a lookup reading the penultimate row was as
-    # invisible as everything had been before the padding existed.
-    from_end = {
-        len(rows) - 1 - next(i for i, (r, _t) in enumerate(rows) if r == ref)
-        for rows, ref in seen
-        if len(rows) > 1 and any(r == ref for r, _t in rows)
-    }
-    assert len(from_end) >= 3, sorted(from_end)
-
-    # EVERY probe table is canonically sorted by `ref`, because that is the only
-    # order production can supply — `SymbolTableV1` sorts on `ref` at
-    # construction. A probe in any other order makes the served revision rotate
-    # for an implementation that is correct on every valid input (a binary
-    # search over the documented sorted tuple), which invalidates caller
-    # bindings for no behaviour change. This is the false-POSITIVE direction,
-    # and it is asserted here rather than left to the shape of the decoy refs.
-    for rows, _ref in seen:
+    for rows, _ref, _answer in seen:
         assert list(rows) == sorted(rows), rows
 
-    listener_families = {f.strip().lower() for f in ep.LISTENER_CONNECTOR_TYPES}
+    multi = [(rows, ref, answer) for rows, ref, answer in seen if len(rows) > 1]
+    resolved = [(rows, ref) for rows, ref, _a in multi if any(r == ref for r, _t in rows)]
+    positions = {next(i for i, (r, _t) in enumerate(rows) if r == ref) for rows, ref in resolved}
+    from_end = {
+        len(rows) - 1 - next(i for i, (r, _t) in enumerate(rows) if r == ref)
+        for rows, ref in resolved
+    }
+    assert len(positions) >= 3 and 0 in positions and max(positions) >= 2, sorted(positions)
+    assert len(from_end) >= 3, sorted(from_end)
 
-    def _is_listener(value):
-        return isinstance(value, str) and value.strip().lower() in listener_families
+    # Both directions, each carried by a multi-symbol table of the OTHER class.
+    scheduled_decoyed = [
+        rows for rows, _ref, answer in multi
+        if answer == "scheduled" and any(_is_listener_family(t) for _r, t in rows)
+    ]
+    listener_decoyed = [
+        rows for rows, _ref, answer in multi
+        if answer == "listener" and not any(_is_listener_family(t) for _r, t in rows)
+    ]
+    assert len(scheduled_decoyed) >= 2, len(scheduled_decoyed)
+    assert listener_decoyed, "no listener row carries a table of the other class"
 
-    multi = [(rows, ref) for rows, ref in seen if len(rows) > 1]
-    directions = []
-    for rows, ref in multi:
-        referenced = next((t for r, t in rows if r == ref), None)
-        answer = "listener" if _is_listener(referenced) else "scheduled"
-        decoys = [t for r, t in rows if r != ref]
-        assert decoys, (rows, ref)
-        # ...and at least one decoy is of the opposite class from the answer.
-        assert any(_is_listener(t) != _is_listener(referenced) for t in decoys), (
-            "a multi-symbol probe carries only same-class decoys, which "
-            "discriminate nothing: %r" % (rows,)
-        )
-        directions.append(answer)
-    assert set(directions) == {"listener", "scheduled"}, sorted(set(directions))
-    # ...and NEITHER direction rests on a single row, so simplifying any one
-    # padded table cannot silently take a whole direction dark.
-    for answer in ("listener", "scheduled"):
-        assert directions.count(answer) >= 2, (answer, directions)
-
-    # ...and the rows' VALUES are what the directions above claim, so this guard
-    # cannot pass over a case set whose answers have silently changed.
-    assert oracle["cases"]["non-listener-family"] == "scheduled"
+    # ...and the served values are what the directions above claim.
+    assert oracle["cases"]["listener-entry-non-listener-table"] == "listener"
+    assert oracle["cases"]["entry-kind-connector-role-source"] == "scheduled"
 
 
 def test_the_family_lookup_ignores_symbols_it_was_not_asked_about():
-    """§6 evaluation 6: no finite probe set can bind an unbounded table size.
+    """§6 evaluation 7, re-anchored by #158 on the lookup that still exists.
 
-    The oracle's largest probe carries five symbols; production tables have no
-    bound, so a regression that changes behaviour only above five leaves the
-    served revision byte-identical. That is not a defect in the probe set — it
-    is what a digest over samples inherently cannot do, and raising the bound
-    only moves the threshold, which is why five previous rounds of exactly that
-    move each produced the next one.
+    The execution profile no longer looks anything up — it is decided by the
+    entry node — and that is asserted here over generated tables: its answer on
+    any table equals its answer on an EMPTY one. The one family lookup left on
+    this path is the listener entry's resolution of its OWN operation, and the
+    property that mattered for the old lookup is asserted there instead: it must
+    depend ONLY on the row whose `ref` matches, so adding any number of other
+    symbols, of either class, at any position, cannot change the verdict.
 
-    The property is therefore asserted where quantification is possible: over
-    generated tables rather than over the digest. `_operation_connector_family`
-    must depend ONLY on the row whose `ref` matches — so adding any number of
-    non-matching symbols, in any position, must not change its answer. Any
-    regression that behaves differently on a large table breaks this, whether or
-    not the oracle happens to contain a probe that size.
-
-    Sizes run well past anything the oracle carries, and the referenced symbol
-    is placed at every index of every size, so the tested space includes the
-    sixth-symbol case the reviewer constructed and far beyond it.
+    Decoys are minted on BOTH lexical sides and the resulting index is ASSERTED,
+    because `SymbolTableV1` canonicalises by `ref` and would otherwise discard the
+    intended position (the first version of the old test swept one index).
     """
     import boomi_mcp.compiler.process_ir.execution_profile as ep
-    from boomi_mcp.compiler.process_ir.contracts import (
-        ComponentSymbolV1,
-        SymbolTableV1,
+    from boomi_mcp.compiler.process_ir.connector_resolution import (
+        is_listener_operation_symbol,
+        listener_operation_symbol,
     )
+    from boomi_mcp.compiler.process_ir.contracts import ComponentSymbolV1, SymbolTableV1
+    from boomi_mcp.compiler.process_ir.lowering import lower_process_ir_to_cfg
+    from boomi_mcp.models.process_ir import parse_process_ir_v1
 
-    listener_family = sorted(ep.LISTENER_CONNECTOR_TYPES)[0]
-
-    def _symbol(ref, family):
+    def _operation(ref, family, action):
         return ComponentSymbolV1(
             ref=ref, component_id="id-" + ref, component_type="connector-action",
-            connector_type=family,
+            connector_type=family, action_type=action,
         )
 
-    referenced = _symbol("$ref:op", "database")
-    alone = SymbolTableV1(symbols=(referenced,))
-    baseline = ep._operation_connector_family(alone, "$ref:op")
-    assert baseline == "database", baseline
+    listen = _operation("$ref:op", "wss", "Listen")
+    not_listen = _operation("$ref:op", "database", "Get")
 
-    # THE POSITION IS CHOSEN BY THE REFS, NOT BY AN INSERTION SLOT. The first
-    # version of this loop inserted the referenced row at `slot` and then handed
-    # the list to `SymbolTableV1`, which canonicalises by `ref` — and every
-    # `$ref:pad-*` sorts AFTER `$ref:op`, so the slot was discarded and the
-    # referenced symbol sat at index 0 in all 116 cases. The loop looked like it
-    # swept every position and swept one. So decoys are minted on BOTH lexical
-    # sides, and the resulting index is ASSERTED rather than assumed — an
-    # arrangement that silently collapses fails here instead of passing.
+    listener_cfg = lower_process_ir_to_cfg(parse_process_ir_v1({
+        "version": "1", "body": {"kind": "sequence", "steps": [
+            {"kind": "listener", "operation_ref": "$ref:op"},
+            {"kind": "target", "connection_ref": "$ref:c", "operation_ref": "$ref:t"},
+            {"kind": "stop"},
+        ]}}))
+    empty = SymbolTableV1(symbols=())
+    profile_on_empty = ep.derive_process_execution_profile(listener_cfg, empty)
+    assert profile_on_empty == "listener"
+
     positions = set()
     checked = 0
     for size in (2, 3, 5, 6, 9, 17, 33, 41):
         for slot in range(size):
-            # `slot` decoys sort BEFORE the referenced ref, the rest after.
-            rows = [
-                _symbol("$ref:aa-%03d" % index, listener_family)
-                for index in range(slot)
-            ]
-            rows.append(referenced)
-            rows.extend(
-                _symbol("$ref:zz-%03d" % index, listener_family)
-                for index in range(size - 1 - slot)
-            )
-            table = SymbolTableV1(symbols=tuple(rows))
-            actual = [row.ref for row in table.symbols].index("$ref:op")
-            assert actual == slot, (size, slot, actual)
-            positions.add(actual)
-            assert ep._operation_connector_family(table, "$ref:op") == baseline, (
-                size, slot,
-            )
-            # ...and a reference present in NO row still resolves to nothing,
-            # however many rows there are.
-            assert ep._operation_connector_family(table, "$ref:absent") is None
-            checked += 1
-    assert checked >= 100, checked
-    # The sweep really covered every index up to the largest table.
+            for referenced, decoy_family, decoy_action, expected in (
+                (listen, "database", "Get", True),
+                (not_listen, "wss", "Listen", False),
+            ):
+                rows = [
+                    _operation("$ref:aa-%03d" % i, decoy_family, decoy_action)
+                    for i in range(slot)
+                ]
+                rows.append(referenced)
+                rows.extend(
+                    _operation("$ref:zz-%03d" % i, decoy_family, decoy_action)
+                    for i in range(size - 1 - slot)
+                )
+                table = SymbolTableV1(symbols=tuple(rows))
+                actual = [row.ref for row in table.symbols].index("$ref:op")
+                assert actual == slot, (size, slot, actual)
+                positions.add(actual)
+                found = listener_operation_symbol(table, "$ref:op")
+                assert is_listener_operation_symbol(found) is expected, (size, slot)
+                assert listener_operation_symbol(table, "$ref:absent") is None
+                assert (
+                    ep.derive_process_execution_profile(listener_cfg, table)
+                    == profile_on_empty
+                ), (size, slot)
+                checked += 1
+    assert checked >= 200, checked
     assert positions == set(range(41)), sorted(positions)
 
-    # NON-VACUITY: the property must be violable, or the loop above proves
-    # nothing. A lookup that answers from the first row satisfies it on a
-    # one-symbol table and fails here.
+    # NON-VACUITY: the property must be violable. A lookup answering from the
+    # first row satisfies it on a one-symbol table and fails here.
     def _first_row(symbols, ref):
         rows = tuple(symbols.symbols or ())
-        value = rows[0].connector_type if rows else None
-        return value.strip().lower() if isinstance(value, str) else None
+        return rows[0] if rows else None
 
-    table = SymbolTableV1(symbols=(_symbol("$ref:aa-x", listener_family), referenced))
-    assert [row.ref for row in table.symbols].index("$ref:op") == 1, table.symbols
-    assert _first_row(table, "$ref:op") != ep._operation_connector_family(table, "$ref:op")
-
-    # ...and the reviewer's own escape from the FIRST version of this test: a
-    # regression keyed on a large table that reads `symbols[0]` after confirming
-    # the ref. It passed the collapsed sweep because the referenced symbol was
-    # always index 0 there; it must fail now.
-    def _big_table_first_row(symbols, ref):
-        rows = tuple(symbols.symbols or ())
-        if len(rows) > 40 and any(r.ref == ref for r in rows):
-            value = rows[0].connector_type
-            return value.strip().lower() if isinstance(value, str) else None
-        return ep._operation_connector_family(symbols, ref)
-
-    big = SymbolTableV1(symbols=tuple(
-        [_symbol("$ref:aa-%03d" % i, listener_family) for i in range(20)]
-        + [referenced]
-        + [_symbol("$ref:zz-%03d" % i, listener_family) for i in range(20)]
-    ))
-    assert len(big.symbols) == 41
-    assert _big_table_first_row(big, "$ref:op") != ep._operation_connector_family(
-        big, "$ref:op"
-    )
+    table = SymbolTableV1(symbols=(_operation("$ref:aa-x", "database", "Get"), listen))
+    assert [row.ref for row in table.symbols].index("$ref:op") == 1
+    assert is_listener_operation_symbol(_first_row(table, "$ref:op")) is False
+    assert is_listener_operation_symbol(listener_operation_symbol(table, "$ref:op")) is True
 
 
 def _table_access_offenders(function_source):
@@ -5562,10 +5288,13 @@ def test_the_family_lookup_cannot_depend_on_table_size():
     permits. A digest over samples, and equally a property test over enumerated
     sizes, both have a largest case; a mutant one above it always escapes.
 
-    So the property is made UNWRITABLE rather than merely untested.
-    `_operation_connector_family` resolves through the table's own
-    `build_index()` dict, and the check below is a WHITELIST: the only thing the
-    function may do with its table is ask it for that index. A size-dependent
+    So the property is made UNWRITABLE rather than merely untested. The lookup
+    resolves through the table's own `build_index()` dict, and the check below is
+    a WHITELIST: the only thing the function may do with its table is ask it for
+    that index. #158 moved the lookup — the profile is decided by the entry node
+    and reads no table at all, and the family lookup on this path is now the
+    listener entry's (`connector_resolution.listener_operation_symbol`) — so the
+    whitelist is applied there, and the profile is asserted to read nothing. A size-dependent
     answer needs to reach the rows, and there is no spelling of reaching them
     that this permits.
 
@@ -5575,12 +5304,33 @@ def test_the_family_lookup_cannot_depend_on_table_size():
     defect the whole artifact has been about: enumerating forms instead of
     deriving from the contract.
     """
+    import ast
     import inspect
+    import textwrap
 
+    import boomi_mcp.compiler.process_ir.connector_resolution as cr
     import boomi_mcp.compiler.process_ir.execution_profile as ep
 
-    source = inspect.getsource(ep._operation_connector_family)
+    # #158: the execution profile no longer looks anything up — the entry node
+    # alone decides — so the family lookup left on this path is the listener
+    # entry's resolution of its own operation. THAT is pinned to the one keyed
+    # expression now.
+    source = inspect.getsource(cr.listener_operation_symbol)
     assert _table_access_offenders(source) == [], _table_access_offenders(source)
+
+    # ...and the profile touches its table NOT AT ALL: the only reference to the
+    # parameter is the `del` that says so. A size-dependent answer would need to
+    # read the table, and there is no spelling of reading it this permits.
+    profile = ast.parse(textwrap.dedent(inspect.getsource(ep.derive_process_execution_profile)))
+    func = profile.body[0]
+    table = func.args.args[1].arg
+    uses = [
+        node for node in ast.walk(func)
+        if isinstance(node, ast.Name) and node.id == table
+    ]
+    assert uses and all(isinstance(node.ctx, ast.Del) for node in uses), [
+        type(node.ctx).__name__ for node in uses
+    ]
 
     # NON-VACUITY. Every bypass that defeated a previous version of this guard
     # is kept as a permanent case, so a regression to any of them fails here.

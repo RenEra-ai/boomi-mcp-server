@@ -122,6 +122,13 @@ LIVE_ANCHOR_PROVENANCE = {
         "tests/fixtures/golden_xml/"
         "connector_scoped_trycatch_notify_dlq_document_cache.xml (golden-000005)"
     ),
+    # #158. The listener document's SHAPE reproduces a legacy-renderer golden frozen
+    # at 9711a9c (2026-08-10), a month before this slice's baseline: the witness
+    # asserts the canonical emission equals that golden's shapes byte-for-byte.
+    "listener/listener_rest_send.json": (
+        "tests/fixtures/golden_xml/sync_pipeline_listener_send.xml (golden-000042, "
+        "legacy renderer, frozen 9711a9c)"
+    ),
 }
 
 
@@ -968,6 +975,72 @@ def _w_listener_error_scope():
     )
 
 
+_LISTENER_ANCHOR = "listener/listener_rest_send.json"
+
+
+def _listener_symbols():
+    """The golden's own ids, so the emitted bytes can be compared with it."""
+    from boomi_mcp.compiler.process_ir.contracts import ComponentSymbolV1, SymbolTableV1
+
+    return SymbolTableV1(
+        symbols=(
+            ComponentSymbolV1(
+                ref="$ref:wss_listen_op", component_id="WSSOP-1",
+                component_type="connector-action", connector_type="wss",
+                action_type="Listen",
+            ),
+            ComponentSymbolV1(
+                ref="$ref:rest_conn", component_id="TGT-CONN",
+                component_type="connector-settings", connector_type="rest",
+            ),
+            ComponentSymbolV1(
+                ref="$ref:rest_post_op", component_id="TGT-OP",
+                component_type="connector-action", connector_type="rest",
+                action_type="POST", connection_ref="$ref:rest_conn",
+            ),
+        )
+    )
+
+
+def _w_listener_entry():
+    def run():
+        from boomi_mcp.compiler.process_ir.emitter_registry import emit_process
+        from boomi_mcp.compiler.process_ir.execution_profile import (
+            derive_process_execution_profile,
+        )
+
+        symbols = _listener_symbols()
+        cfg, plan = _compiles(_fixture(_LISTENER_ANCHOR), symbols)
+        shapes = "".join(emit_process(plan, symbols).shape_xml_parts)
+        return cfg, plan, shapes, derive_process_execution_profile(cfg, symbols)
+
+    def observe(result):
+        cfg, plan, shapes, profile = result
+        # The entry is FUSED: the one synthesized Start at shape1 is the Listen
+        # form, and the listener node has no shape of its own.
+        start = plan.nodes[0]
+        assert (start.shape_id, start.emitter_input.emitter_kind) == (
+            "shape1", "start_listen",
+        ), (start.shape_id, start.emitter_input.emitter_kind)
+        assert "listener" not in _emitter_kinds(plan), _emitter_kinds(plan)
+        assert profile == "listener", profile
+        # ...and it is the AUDITED form, byte-for-byte: the frozen legacy golden's
+        # `<shapes>` body is exactly what the canonical chain emits.
+        golden = (_ROOT / "tests" / "fixtures" / "golden_xml"
+                  / "sync_pipeline_listener_send.xml").read_text(encoding="utf-8")
+        body = golden[golden.index("<shapes>") + len("<shapes>"):golden.index("</shapes>")]
+        assert shapes == body, "the canonical listener emission drifted from its anchor"
+
+    return CapabilityWitness(
+        "listener_entry",
+        "admits",
+        PROVENANCE_LIVE_ANCHORED + " " + _LISTENER_ANCHOR
+        + " (" + LIVE_ANCHOR_PROVENANCE[_LISTENER_ANCHOR] + ")",
+        run,
+        observe,
+    )
+
+
 def _w_nested_try_catch():
     inner = {
         "kind": "try_catch",
@@ -1454,6 +1527,7 @@ _ENTRIES: Tuple[object, ...] = (
     _w_process_call_return_path_binding(),
     _w_continuation_after_branch_or_decision(),
     _w_catch_failure_trigger_selection(),
+    _w_listener_entry(),
     _w_listener_error_scope(),
     _w_nested_try_catch(),
     _w_keyed_cache(),

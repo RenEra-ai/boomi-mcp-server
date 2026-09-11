@@ -142,15 +142,22 @@ def test_cutover_is_byte_identical_to_the_legacy_renderer(chain):
     assert LEGACY_ADAPTER_ALIAS_PREFIX not in emitted
 
 
-#: Byte anchors for the legacy listener arm, captured through the legacy renderer
-#: BEFORE it is deleted. This is the last moment they can be obtained independently:
-#: the renderer is the only other implementation, so a golden written after its
-#: removal would confirm the canonical arm against itself. Named by their chain.
+#: Byte anchors for the six listener chains, each captured through the LEGACY
+#: renderer while it was still the only implementation — four before #158, and the
+#: two SOAP targets at #158's step-0 baseline, before either routing gate changed.
+#: A golden written after the flip would confirm the canonical arm against itself.
+#: Read from the corpus that defines the chains, so the two cannot drift.
 _LISTENER_GOLDENS = {
-    "listener_send": "sync_pipeline_listener_send.xml",
-    "listener_map_send": "sync_pipeline_listener_map_send.xml",
-    "listener_write": "sync_pipeline_listener_write.xml",
-    "listener_map_write": "sync_pipeline_listener_map_write.xml",
+    case["golden_input_case"].split(":", 1)[1]: case["anchor"]
+    for case in json.loads(
+        (
+            Path(__file__).resolve().parent
+            / "fixtures"
+            / "process_ir"
+            / "sync_pipeline_emitter_parity_cases.json"
+        ).read_text()
+    )["cases"].values()
+    if (case.get("golden_input_case") or "").startswith("listener_chain:")
 }
 
 
@@ -159,8 +166,9 @@ def test_listener_chain_matches_its_committed_golden(chain):
     """A raw-byte anchor per listener chain, independent of the differential.
 
     The differential below compares two callers of the SAME renderer, so it cannot
-    see a drift in that renderer. These bytes were captured pre-deletion and pin the
-    fused ``start_listen`` entry that ProcessIR v1 still cannot express.
+    see a drift in that renderer. These bytes were captured through the legacy
+    renderer before the flip, and since #158 they pin the CANONICAL chain's fused
+    ``start_listen`` entry and derived listener options.
     """
     golden = (
         Path(__file__).resolve().parent / "fixtures" / "golden_xml" / _LISTENER_GOLDENS[chain]
@@ -279,9 +287,18 @@ def test_non_listener_chain_actually_goes_through_the_adapter(adapter_spy):
     assert len(adapter_spy) == 1
 
 
-def test_listener_chain_does_not_reach_the_adapter(adapter_spy):
+def test_listener_chain_reaches_the_adapter(adapter_spy, monkeypatch):
+    """#158 flipped the routing: a listener chain is adapted like any other.
+
+    Asserted as EXACTLY one adapter call with the legacy renderer armed to fail, so
+    the listener bytes can only have come from the canonical chain.
+    """
+    def _legacy_reached(*_args, **_kwargs):
+        raise AssertionError("the legacy renderer was reached")
+
+    monkeypatch.setattr(ProcessFlowBuilder, "build", _legacy_reached)
     SyncPipelineBuilder.build(_pipeline([_listen(), _map(), _rest_send()]), name="P")
-    assert adapter_spy == []
+    assert len(adapter_spy) == 1
 
 
 def test_archetype_style_direct_process_flow_build_does_not_reach_the_adapter(adapter_spy):
@@ -333,39 +350,84 @@ def test_the_real_archetype_pre_lowers_so_it_can_never_reach_this_dialect(adapte
 
 
 @pytest.mark.parametrize(
-    "connector_type,canonical",
+    "connector_type",
     [
-        ("wss", False), ("WSS", False), ("  wss  ", False),
-        ("web_services", False), ("web_services_server", False),
-        ("database", True), ("rest", True), ("rest_client", True),
-        ("soap_client", True), (None, True), ("", True),
+        "wss", "WSS", "  wss  ", "web_services", "web_services_server",
+        "database", "rest", "rest_client", "soap_client", None, "",
+        # The two spellings the compiler refuses as a listener family and the WSS
+        # builder does not accept are routed canonically too: the legacy body
+        # would mis-shape them as ordinary sources, and the adapter refuses them.
+        "wssserver", "listener",
     ],
 )
-def test_routing_gate_matches_the_legacy_listener_predicate(connector_type, canonical):
-    assert _sync_pipeline_is_canonical({"source": {"connector_type": connector_type}}) is canonical
+def test_routing_gate_admits_every_source_family(connector_type):
+    """#158: every lowered core takes the canonical chain.
+
+    The predicate once mirrored the legacy listener selector and kept WSS chains on
+    the legacy renderer. The listener entry is canonical now, so nothing is routed
+    to the fallback — which stays in the builder, unreached, until #160 deletes it.
+    """
+    assert _sync_pipeline_is_canonical({"source": {"connector_type": connector_type}}) is True
 
 
 # ---------------------------------------------------------------------------
-# 4. Gate 2 -- the adapter refuses a listener even if routed one
+# 4. Gate 2 -- the adapter adapts an accepted listener and refuses the rest
 # ---------------------------------------------------------------------------
+
+
+def _listener_core(connector_type, **source_over):
+    return {
+        "process_kind": "database_to_api_sync",
+        "source": {"connector_type": connector_type, "action_type": "Listen",
+                   "operation_id": "WSSOP-1", **source_over},
+        "transform": {"mode": "passthrough"},
+        "target": {"connector_type": "rest", "action_type": "POST",
+                   "connection_id": "TC", "operation_id": "TO"},
+    }
+
+
+@pytest.mark.parametrize(
+    "connector_type", ["wss", "WSS", "  wss  ", "web_services", "web_services_server"]
+)
+def test_adapter_adapts_every_accepted_listener_alias(connector_type):
+    """Every spelling the WSS builder accepts lowers to the operation-only
+    ``listener`` entry — one operation requirement, no connection."""
+    result = adapt_sync_pipeline(_listener_core(connector_type))
+    first = result.process_ir.body.steps[0]
+    assert first.kind == "listener"
+    listener_reqs = [
+        r for r in result.symbol_requirements if r.role.startswith("start_listen.")
+    ]
+    assert [(r.role, r.legacy_selector, r.expected_component_type) for r in listener_reqs] == [
+        ("start_listen.operation", "WSSOP-1", "connector-action")
+    ]
+    assert not any(r.role.endswith(".connection") and r.source_pointer.startswith("/source")
+                   for r in result.symbol_requirements)
+
+
+def test_adapter_refuses_a_connection_on_a_listener_source():
+    """A listener has no connection: one arriving on the binding is refused at that
+    exact field rather than dropped — or turned into an invented binding."""
+    with pytest.raises(LegacyAdapterError) as exc:
+        adapt_sync_pipeline(_listener_core("wss", connection_id="C-1"))
+    diag = exc.value.diagnostics[0]
+    assert diag.code == "LEGACY_ADAPTER_UNSUPPORTED_KIND"
+    assert diag.legacy_source_path == "/source/connection_id"
 
 
 @pytest.mark.parametrize(
     "connector_type",
     [
-        "wss", "WSS", "  wss  ", "web_services", "web_services_server",
-        # The routing gate mirrors the LEGACY selector, which does not resolve
-        # these two; the refusal gate mirrors the COMPILER's set, which does. No
-        # reachable config can tell them apart (lower_config admits only the wss
-        # aliases), but refusing here turns a deep PROCESS_IR_CAPABILITY_UNSUPPORTED
-        # into a precise adapter pointer -- and #140 promotes this adapter to a
-        # dialect whose input is not pre-filtered.
+        # The compiler's refusal set holds these two; the WSS builder accepts
+        # neither. No reachable config can carry them (lower_config admits only the
+        # wss aliases), but refusing here turns a deep PROCESS_IR_CAPABILITY_UNSUPPORTED
+        # into a precise adapter pointer.
         "wssserver", "listener",
     ],
 )
 def test_adapter_refuses_a_listener_source(connector_type):
-    """The independent backstop: a caller must not be able to route a listener
-    past the builder's gate and get a silently mis-shaped start_noaction pair."""
+    """The independent backstop, narrowed by #158 to the spellings neither a
+    listener nor an ordinary source may carry."""
     core = {
         "process_kind": "database_to_api_sync",
         "source": {"connector_type": connector_type, "action_type": "Listen",
@@ -568,20 +630,24 @@ def test_map_pointer_names_the_spelling_the_author_actually_used(map_config, exp
     )
 
 
-def test_registry_listener_diagnostic_points_at_the_primitive_not_connector_type():
-    """A raw listener stage is identified by its PRIMITIVE. `connector_type` is
-    accepted there but wholly inert -- every value emits identical XML and none of
-    them selects the listener path -- so a diagnostic aimed at it would misdirect."""
+def test_registry_listener_pointers_are_operation_only():
+    """#158: the registry entry ADAPTS a raw listener config, and its one listener
+    requirement points at the stage's real `operation_id` — RFC 6901, in the
+    document the caller handed over. No requirement points at a connection."""
     from boomi_mcp.compiler.process_ir.legacy_adapters import (
         SYNC_PIPELINE_DIALECT,
         adapter_for,
     )
 
     raw = _pipeline([_listen(), _rest_send()])
-    with pytest.raises(LegacyAdapterError) as exc:
-        adapter_for(SYNC_PIPELINE_DIALECT)(raw)
-    pointer = exc.value.diagnostics[0].legacy_source_path
-    assert _rfc6901(raw, pointer) == "wss_listen"
+    result = adapter_for(SYNC_PIPELINE_DIALECT)(raw)
+    listener = [r for r in result.symbol_requirements if r.role.startswith("start_listen.")]
+    assert [r.source_pointer for r in listener] == ["/pipeline/stages/0/config/operation_id"]
+    assert _rfc6901(raw, listener[0].source_pointer) == listener[0].legacy_selector == "WSSOP-1"
+    assert all(
+        not r.source_pointer.startswith("/pipeline/stages/0/config/connection")
+        for r in result.symbol_requirements
+    )
 
 
 # ---------------------------------------------------------------------------

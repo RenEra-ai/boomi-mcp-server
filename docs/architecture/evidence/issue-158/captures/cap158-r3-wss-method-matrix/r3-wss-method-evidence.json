@@ -1,0 +1,3029 @@
+{
+ "account_id": "trainingglebbochkarov-16926N",
+ "atom_id": "a40a3313-1537-47c4-91c7-573a703537c7",
+ "deployments": {
+  "ASC": {
+   "component_id": "c1a45957-4845-44e1-b69a-3ec652b33955",
+   "component_type": "webservice",
+   "deployment_id": "8ae7bebe-360c-4a8b-8c1a-677baccefa86",
+   "package_id": "e3c61ab4-5547-49de-806f-d7f87c24e526"
+  },
+  "CREATE|none": {
+   "component_id": "1770479b-9081-4a8c-8425-6e53bf1d2ae7",
+   "component_type": "process",
+   "deployment_id": "44fab101-244f-44aa-8b36-731de408a9e9",
+   "package_id": "4a5af8fa-4f93-4d77-913b-1eebe2cb5ba3"
+  },
+  "CREATE|singlejson": {
+   "component_id": "3b8c2b53-57c0-4764-8afe-b4d40754770e",
+   "component_type": "process",
+   "deployment_id": "b44a139d-6296-49a4-b269-097b44cc3eea",
+   "package_id": "b42142f0-befa-43e9-8a51-d24971a95ad3"
+  },
+  "DELETE|none": {
+   "component_id": "f89df7ec-bb8b-4ff7-b875-9b64d7ec9c20",
+   "component_type": "process",
+   "deployment_id": "907cee91-acf5-42d8-bbb8-813cf9d71c2a",
+   "package_id": "fd9be772-661d-4166-83de-a2c70b2f1c27"
+  },
+  "DELETE|singlejson": {
+   "component_id": "ab9fd3d2-73fa-4259-81f3-6d9757b5ba3b",
+   "component_type": "process",
+   "deployment_id": "9c7587ce-81d3-4dd6-aad6-e737a6336a1e",
+   "package_id": "538712cb-8696-462b-b30f-7d1524184b6c"
+  },
+  "EXECUTE|none": {
+   "component_id": "7283c356-916f-4579-a330-aed6b45aa9a3",
+   "component_type": "process",
+   "deployment_id": "b548be0f-5d3a-4481-93cb-3c78a4d39aa6",
+   "package_id": "471de68f-5f58-407b-a811-413ee8557dae"
+  },
+  "EXECUTE|singlejson": {
+   "component_id": "5b82ad12-337d-4a9e-a51b-695ba65b0330",
+   "component_type": "process",
+   "deployment_id": "c77e9248-d778-4bd5-8c84-abbb3877afe4",
+   "package_id": "e25e93bf-c5fe-43a2-ad76-4f4b6b74799b"
+  },
+  "GET|none": {
+   "component_id": "d87228c6-0b70-4a37-8fc7-66adb4bf7d25",
+   "component_type": "process",
+   "deployment_id": "28885e8b-86d9-446f-a006-4fc52fa29d71",
+   "package_id": "10617e14-9b63-4e72-91e6-8b1dde79e3b9"
+  },
+  "GET|singlejson": {
+   "component_id": "d42af456-35c3-4a9b-a4e3-92ce7a8cc204",
+   "component_type": "process",
+   "deployment_id": "ab38e350-3827-40e1-8a8f-341ae8373444",
+   "package_id": "9b90eea2-db08-4bdc-936a-2d4ccda20d9a"
+  },
+  "QUERY|none": {
+   "component_id": "5c8dc98b-9750-42ff-a895-5946a080313e",
+   "component_type": "process",
+   "deployment_id": "f6327917-cf5e-423f-93a1-88b8a64893b3",
+   "package_id": "52431a1c-e6ac-4ec6-bb17-6a0abecf00d3"
+  },
+  "QUERY|singlejson": {
+   "component_id": "63dec29e-6527-4f5b-a6dd-6074498e71ef",
+   "component_type": "process",
+   "deployment_id": "50ab1e55-751a-4b0a-9c91-fa980441d640",
+   "package_id": "0454634e-ba0d-4be4-a8cb-2569f0d74107"
+  },
+  "UPDATE|none": {
+   "component_id": "53496d4e-be1e-4e65-b2b1-c57052cbf292",
+   "component_type": "process",
+   "deployment_id": "dc4de8e3-033a-4753-ac5a-e44c73e0cb4a",
+   "package_id": "cbd10085-b250-41e5-9d6c-35e026131201"
+  },
+  "UPDATE|singlejson": {
+   "component_id": "0c18ba51-0462-44e0-a88c-f318cc286542",
+   "component_type": "process",
+   "deployment_id": "8386ff25-2413-4705-bc3e-f8da3d58c5ea",
+   "package_id": "524a8254-d6a7-499b-b183-b33995aa9386"
+  },
+  "UPSERT|none": {
+   "component_id": "5d297590-2e48-42f5-8bc7-e89f98452886",
+   "component_type": "process",
+   "deployment_id": "b09e850e-1735-4841-858c-cf2213ca7f1a",
+   "package_id": "7f074f66-df03-401c-b5b7-3e88774ab640"
+  },
+  "UPSERT|singlejson": {
+   "component_id": "a71ed2d6-dbad-4e77-a59a-36ceacefce22",
+   "component_type": "process",
+   "deployment_id": "c077eaf0-c946-48b3-91dd-0243f6f5e95a",
+   "package_id": "f639878a-c412-423e-bc3c-6961acfbe6b0"
+  }
+ },
+ "docs": [
+  {
+   "quote": [
+    "Shows the HTTP method used in requests for the operation specified in the route.",
+    "GET — GET or QUERY operation. POST — CREATE, EXECUTE or UPSERT operation. PUT — UPDATE operation. DELETE — DELETE operation. PATCH — PATCH operation."
+   ],
+   "title": "API service REST tab",
+   "tool": "WebFetch of the official page (search_boomi_docs is NOT registered locally: BOOMI_DOCS_ENABLED unset, KB db /app/kb/boomi_knowledge_db absent; hosted MCP not granted)",
+   "url": "https://help.boomi.com/docs/Atomsphere/API%20Management/Topics/r-atm-API_REST_tab_53469a70-6574-486b-a6cf-58fc147546fc"
+  },
+  {
+   "quote": [
+    "Operation Type - Allows you to define a specific action requirement. It is used purely for design purposes to control steps that you would like to execute in the linked process.",
+    "None — Indicates that there is no input data for the linked process.",
+    "Single Data — Indicates that a single document can be posted to the Simple URL path for each client request."
+   ],
+   "title": "Web Services Server operation",
+   "url": "https://help.boomi.com/docs/Atomsphere/Integration/Connectors/r-atm-Web_Services_Server_operation_e74fceaf-877d-45fa-a7b0-7a5ac72719b4"
+  },
+  {
+   "quote": [
+    "Select the HTTP Method (GET, POST, PUT, DELETE, or PATCH) for this endpoint",
+    "Optional: Set an override for the operation's HTTP Method."
+   ],
+   "title": "Configuring a REST endpoint in an API Service component",
+   "url": "https://help.boomi.com/docs/Atomsphere/API%20Management/Topics/t-atm-Configuring_a_REST_route_in_an_API_component_c61c0d7e-ecc9-47c3-8fc9-452c8ffc62aa"
+  }
+ ],
+ "environment_id": "b173ce8a-2d7f-41e3-9d3f-06e45d5b0de9",
+ "fixture_provenance": {
+  "asc": "baseline (3a8469e) webservice builder via manage_component create; 14 all-inherit routes, base urlPath qa158r3a",
+  "process": "raw XML: Listen start -> Stop, shapes from the pre-baseline golden tests/fixtures/golden_xml/sync_pipeline_listener_send.xml (frozen at 9711a9c), connector shape removed; <process> options = the listener set every platform-authored WSS sample carries",
+  "wss_op": "raw component XML in the stored shape of the platform-authored training op 82d2fb27 (WSS Single - queryExample): Operation/Archiving/Configuration/WebServicesServerListenAction/Tracking/Caching; outputType=none, responseContentType=text/plain"
+ },
+ "fixtures": {
+  "asc_id": "c1a45957-4845-44e1-b69a-3ec652b33955",
+  "asc_routes": [
+   "<route processId=\"d42af456-35c3-4a9b-a4e3-92ce7a8cc204\"><overrides httpMethod=\"\" inputProfileKey=\"\" inputType=\"\" objectName=\"\" outputType=\"\" urlPath=\"\"/>",
+   "<route processId=\"d87228c6-0b70-4a37-8fc7-66adb4bf7d25\"><overrides httpMethod=\"\" inputProfileKey=\"\" inputType=\"\" objectName=\"\" outputType=\"\" urlPath=\"\"/>",
+   "<route processId=\"63dec29e-6527-4f5b-a6dd-6074498e71ef\"><overrides httpMethod=\"\" inputProfileKey=\"\" inputType=\"\" objectName=\"\" outputType=\"\" urlPath=\"\"/>",
+   "<route processId=\"5c8dc98b-9750-42ff-a895-5946a080313e\"><overrides httpMethod=\"\" inputProfileKey=\"\" inputType=\"\" objectName=\"\" outputType=\"\" urlPath=\"\"/>",
+   "<route processId=\"3b8c2b53-57c0-4764-8afe-b4d40754770e\"><overrides httpMethod=\"\" inputProfileKey=\"\" inputType=\"\" objectName=\"\" outputType=\"\" urlPath=\"\"/>",
+   "<route processId=\"1770479b-9081-4a8c-8425-6e53bf1d2ae7\"><overrides httpMethod=\"\" inputProfileKey=\"\" inputType=\"\" objectName=\"\" outputType=\"\" urlPath=\"\"/>",
+   "<route processId=\"5b82ad12-337d-4a9e-a51b-695ba65b0330\"><overrides httpMethod=\"\" inputProfileKey=\"\" inputType=\"\" objectName=\"\" outputType=\"\" urlPath=\"\"/>",
+   "<route processId=\"7283c356-916f-4579-a330-aed6b45aa9a3\"><overrides httpMethod=\"\" inputProfileKey=\"\" inputType=\"\" objectName=\"\" outputType=\"\" urlPath=\"\"/>",
+   "<route processId=\"0c18ba51-0462-44e0-a88c-f318cc286542\"><overrides httpMethod=\"\" inputProfileKey=\"\" inputType=\"\" objectName=\"\" outputType=\"\" urlPath=\"\"/>",
+   "<route processId=\"53496d4e-be1e-4e65-b2b1-c57052cbf292\"><overrides httpMethod=\"\" inputProfileKey=\"\" inputType=\"\" objectName=\"\" outputType=\"\" urlPath=\"\"/>",
+   "<route processId=\"a71ed2d6-dbad-4e77-a59a-36ceacefce22\"><overrides httpMethod=\"\" inputProfileKey=\"\" inputType=\"\" objectName=\"\" outputType=\"\" urlPath=\"\"/>",
+   "<route processId=\"5d297590-2e48-42f5-8bc7-e89f98452886\"><overrides httpMethod=\"\" inputProfileKey=\"\" inputType=\"\" objectName=\"\" outputType=\"\" urlPath=\"\"/>",
+   "<route processId=\"ab9fd3d2-73fa-4259-81f3-6d9757b5ba3b\"><overrides httpMethod=\"\" inputProfileKey=\"\" inputType=\"\" objectName=\"\" outputType=\"\" urlPath=\"\"/>",
+   "<route processId=\"f89df7ec-bb8b-4ff7-b875-9b64d7ec9c20\"><overrides httpMethod=\"\" inputProfileKey=\"\" inputType=\"\" objectName=\"\" outputType=\"\" urlPath=\"\"/>"
+  ],
+  "asc_sha256": "4bfa703cdfa1c62bd02a60d78059084f28853f8d90b7714378ccd423da0bc2b7",
+  "cells": {
+   "CREATE|none": {
+    "input_type": "none",
+    "object_name": "q3createna",
+    "op_id": "d2ea3c21-56be-4f74-983e-8626ea009263",
+    "op_readback_action": "<WebServicesServerListenAction inputType=\"none\" objectName=\"q3createna\" operationType=\"CREATE\" outputType=\"none\" responseContentType=\"text/plain\"/>",
+    "op_sha256": "9053f5f7ce0dda0851b42fd1199a033a402383c953b333923bd299f5627b2bff",
+    "op_type": "CREATE",
+    "proc_id": "1770479b-9081-4a8c-8425-6e53bf1d2ae7",
+    "proc_sha256": "421daab28efd254ed0ddd5f485c988f3770f79d012995b32927b0044eed8584c"
+   },
+   "CREATE|singlejson": {
+    "input_type": "singlejson",
+    "object_name": "q3createja",
+    "op_id": "4cb34a8a-ed0c-4fe1-b4ce-2d00caa306fa",
+    "op_readback_action": "<WebServicesServerListenAction inputType=\"singlejson\" objectName=\"q3createja\" operationType=\"CREATE\" outputType=\"none\" responseContentType=\"text/plain\"/>",
+    "op_sha256": "4ef6b8c1c3fa4d563b18585b33ffb5bebce21531e685ce41cea0f38adcc85d07",
+    "op_type": "CREATE",
+    "proc_id": "3b8c2b53-57c0-4764-8afe-b4d40754770e",
+    "proc_sha256": "b6d2c233920a7f810861aae11f7e184f66c7c3df3ae1f439720a7d877921b522"
+   },
+   "DELETE|none": {
+    "input_type": "none",
+    "object_name": "q3deletena",
+    "op_id": "14bd1af5-b765-4f1a-9d45-9aa3b4598531",
+    "op_readback_action": "<WebServicesServerListenAction inputType=\"none\" objectName=\"q3deletena\" operationType=\"DELETE\" outputType=\"none\" responseContentType=\"text/plain\"/>",
+    "op_sha256": "7ff7b7397e884bb4fb7c56b92949868d9cd2b33022eaa041dbddf9c894422f9d",
+    "op_type": "DELETE",
+    "proc_id": "f89df7ec-bb8b-4ff7-b875-9b64d7ec9c20",
+    "proc_sha256": "b89fa9258fd22d6373e47f9eb560596003ea3113344054cab59e22707efe18a1"
+   },
+   "DELETE|singlejson": {
+    "input_type": "singlejson",
+    "object_name": "q3deleteja",
+    "op_id": "ed733590-ea95-4d2f-b74b-542396b2e644",
+    "op_readback_action": "<WebServicesServerListenAction inputType=\"singlejson\" objectName=\"q3deleteja\" operationType=\"DELETE\" outputType=\"none\" responseContentType=\"text/plain\"/>",
+    "op_sha256": "0438e6227412ed35bdc61246abb8ea5a97138253cde677c9e40e78044b20ed54",
+    "op_type": "DELETE",
+    "proc_id": "ab9fd3d2-73fa-4259-81f3-6d9757b5ba3b",
+    "proc_sha256": "6ee2fe4b5656ee90803281bdc27a41db954be4f90444663c5fc3e362204cdeb3"
+   },
+   "EXECUTE|none": {
+    "input_type": "none",
+    "object_name": "q3executena",
+    "op_id": "b598c932-004c-4516-8cc9-60fbab1555a1",
+    "op_readback_action": "<WebServicesServerListenAction inputType=\"none\" objectName=\"q3executena\" operationType=\"EXECUTE\" outputType=\"none\" responseContentType=\"text/plain\"/>",
+    "op_sha256": "9928f52cda7be0777d6a8d8ec2f2f6fa50cf87509ad6cb4a4b3ef2b9a1f40237",
+    "op_type": "EXECUTE",
+    "proc_id": "7283c356-916f-4579-a330-aed6b45aa9a3",
+    "proc_sha256": "4aaca2e86d621ca2bf9bf0341d2b3ba7f6dbef369d5bd5e6a669cfb438da96a9"
+   },
+   "EXECUTE|singlejson": {
+    "input_type": "singlejson",
+    "object_name": "q3executeja",
+    "op_id": "451cdffb-0cb4-47fa-9fbb-7b5f42a1c4b4",
+    "op_readback_action": "<WebServicesServerListenAction inputType=\"singlejson\" objectName=\"q3executeja\" operationType=\"EXECUTE\" outputType=\"none\" responseContentType=\"text/plain\"/>",
+    "op_sha256": "552ea10ef8272e921c23494279ab1ab061a8f697f1f7e2facb41861e9778597f",
+    "op_type": "EXECUTE",
+    "proc_id": "5b82ad12-337d-4a9e-a51b-695ba65b0330",
+    "proc_sha256": "5f18aeeca8c610951ae2e9efd0684a1e989237b2623e6c76a34d86c583dee04d"
+   },
+   "GET|none": {
+    "input_type": "none",
+    "object_name": "q3getna",
+    "op_id": "cd12cf17-9877-4476-a710-0e98c5cb1b74",
+    "op_readback_action": "<WebServicesServerListenAction inputType=\"none\" objectName=\"q3getna\" operationType=\"GET\" outputType=\"none\" responseContentType=\"text/plain\"/>",
+    "op_sha256": "988d08a69c98015085bb16f310719d0ee4631ea171cd766e1bbfe2dd663ceba8",
+    "op_type": "GET",
+    "proc_id": "d87228c6-0b70-4a37-8fc7-66adb4bf7d25",
+    "proc_sha256": "b165e93656501b2bf14a99e9130f47438422d16909718b427919fdec3bc739a3"
+   },
+   "GET|singlejson": {
+    "input_type": "singlejson",
+    "object_name": "q3getja",
+    "op_id": "6dc04ffc-dc08-4212-9cc1-540b56df4761",
+    "op_readback_action": "<WebServicesServerListenAction inputType=\"singlejson\" objectName=\"q3getja\" operationType=\"GET\" outputType=\"none\" responseContentType=\"text/plain\"/>",
+    "op_sha256": "0332131a5018774b72825b81c99cf500cd0e8bedb327edb9aa97de903dd40d0a",
+    "op_type": "GET",
+    "proc_id": "d42af456-35c3-4a9b-a4e3-92ce7a8cc204",
+    "proc_sha256": "3fb7ab72d30ba855b012b1d5b3a608712c1b266edf6091d6d0f15009ba351e57"
+   },
+   "QUERY|none": {
+    "input_type": "none",
+    "object_name": "q3queryna",
+    "op_id": "95380144-8984-497f-8040-1bf05e701e45",
+    "op_readback_action": "<WebServicesServerListenAction inputType=\"none\" objectName=\"q3queryna\" operationType=\"QUERY\" outputType=\"none\" responseContentType=\"text/plain\"/>",
+    "op_sha256": "7bb63ae060e243cdfc63bfeffe0be6def8ab84e2f3644b10dd4d85aa18e863d8",
+    "op_type": "QUERY",
+    "proc_id": "5c8dc98b-9750-42ff-a895-5946a080313e",
+    "proc_sha256": "c8e8e4b2f2d5bbbf705617a155e3a82da318485fb30bebe851e9418352fbe838"
+   },
+   "QUERY|singlejson": {
+    "input_type": "singlejson",
+    "object_name": "q3queryja",
+    "op_id": "728f1bdf-a110-408c-a3af-c4ba6dd2a9e7",
+    "op_readback_action": "<WebServicesServerListenAction inputType=\"singlejson\" objectName=\"q3queryja\" operationType=\"QUERY\" outputType=\"none\" responseContentType=\"text/plain\"/>",
+    "op_sha256": "431256408c3666f49fa07c32361db41fda7a9a221dcc4f55f9e84c685e5e9efe",
+    "op_type": "QUERY",
+    "proc_id": "63dec29e-6527-4f5b-a6dd-6074498e71ef",
+    "proc_sha256": "a03ea8231b029c8da9091e9acb630b60379ce3c786e42709c4285bf0c42fed93"
+   },
+   "UPDATE|none": {
+    "input_type": "none",
+    "object_name": "q3updatena",
+    "op_id": "a6d8ee4f-e178-4159-905a-0e9678670dab",
+    "op_readback_action": "<WebServicesServerListenAction inputType=\"none\" objectName=\"q3updatena\" operationType=\"UPDATE\" outputType=\"none\" responseContentType=\"text/plain\"/>",
+    "op_sha256": "4e9bb1716c66bc6c540d8ef562f7d6837412162b7f0bac882c0965de1c102c24",
+    "op_type": "UPDATE",
+    "proc_id": "53496d4e-be1e-4e65-b2b1-c57052cbf292",
+    "proc_sha256": "728bdb6bf760c2093c51bb8430ba49d1d565c6bdce0e75a889a28fecf6e4a279"
+   },
+   "UPDATE|singlejson": {
+    "input_type": "singlejson",
+    "object_name": "q3updateja",
+    "op_id": "85f759f3-0723-48a5-a227-a3f7635f256e",
+    "op_readback_action": "<WebServicesServerListenAction inputType=\"singlejson\" objectName=\"q3updateja\" operationType=\"UPDATE\" outputType=\"none\" responseContentType=\"text/plain\"/>",
+    "op_sha256": "4e620f21c54956e17f9624a2bf554b5080c54cf282894aceb145a332febf0287",
+    "op_type": "UPDATE",
+    "proc_id": "0c18ba51-0462-44e0-a88c-f318cc286542",
+    "proc_sha256": "2975645052c9c4fdc44bf7c841053c435a1fd01bc027c2c482a67f6adbd89bd7"
+   },
+   "UPSERT|none": {
+    "input_type": "none",
+    "object_name": "q3upsertna",
+    "op_id": "7e6eb66b-2fb4-4f00-8020-8447225fe6ba",
+    "op_readback_action": "<WebServicesServerListenAction inputType=\"none\" objectName=\"q3upsertna\" operationType=\"UPSERT\" outputType=\"none\" responseContentType=\"text/plain\"/>",
+    "op_sha256": "d9d8b3cc97d05e5fa32d97b826c539f8d7a65477916734c3376c9f57d7404815",
+    "op_type": "UPSERT",
+    "proc_id": "5d297590-2e48-42f5-8bc7-e89f98452886",
+    "proc_sha256": "73ddda31b431cd32674c1d003712764d44e765d5c50117eaa6b5dac9a3ab7bab"
+   },
+   "UPSERT|singlejson": {
+    "input_type": "singlejson",
+    "object_name": "q3upsertja",
+    "op_id": "69728693-d5ac-40e8-9b40-03d3c0c948ac",
+    "op_readback_action": "<WebServicesServerListenAction inputType=\"singlejson\" objectName=\"q3upsertja\" operationType=\"UPSERT\" outputType=\"none\" responseContentType=\"text/plain\"/>",
+    "op_sha256": "c8300c3bfd8aae17dee9408563a3f997642be17001c939853571f0f2c37ddf93",
+    "op_type": "UPSERT",
+    "proc_id": "a71ed2d6-dbad-4e77-a59a-36ceacefce22",
+    "proc_sha256": "43c50e8b420544458d4c9cabed6989dc8be996eca80afb0dd6289794f2f7ef7d"
+   }
+  }
+ },
+ "kind": "boomi-platform-measurement",
+ "measured_utc": "2026-09-11",
+ "phase_A_ws_rest_asc_advanced": {
+  "cells": {
+   "CREATE|none": {
+    "405_text": null,
+    "callable": true,
+    "execution_check": {
+     "accepted_n": 1,
+     "record_status": [
+      "COMPLETE"
+     ],
+     "records": [
+      {
+       "executionId": "execution-3043c35d-3011-489c-ae13-925794b37abd-2026.09.11",
+       "executionTime": "2026-09-11T00:54:52Z",
+       "inboundDocumentCount": 1,
+       "status": "COMPLETE"
+      }
+     ],
+     "records_n": 1
+    },
+    "input_type": "none",
+    "methods": {
+     "DELETE": {
+      "body_raw": "",
+      "body_text": "",
+      "status": 404,
+      "ts_iso": "2026-09-11T00:54:53Z"
+     },
+     "GET": {
+      "body_raw": "<html>\n<head>\n<meta http-equiv=\"Content-Type\" content=\"text/html; charset=ISO-8859-1\"/>\n<title>Error 404 Unknown operation for the given URL path.</title>\n</head>\n<body><h2>HTTP ERROR 404</h2>\n<p>Problem accessing /ws/rest/qa158r3a/q3createna. Reason:\n<pre>    Unknown operation for the given URL path.</pre></p>\n</body>\n</html>\n",
+      "body_text": "Error 404 Unknown operation for the given URL path.",
+      "status": 404,
+      "ts_iso": "2026-09-11T00:54:51Z"
+     },
+     "PATCH": {
+      "body_raw": "",
+      "body_text": "",
+      "status": 404,
+      "ts_iso": "2026-09-11T00:54:53Z"
+     },
+     "POST": {
+      "body_raw": "",
+      "body_text": "",
+      "status": 200,
+      "ts_iso": "2026-09-11T00:54:52Z"
+     },
+     "PUT": {
+      "body_raw": "",
+      "body_text": "",
+      "status": 404,
+      "ts_iso": "2026-09-11T00:54:52Z"
+     }
+    },
+    "methods_2xx": [
+     "POST"
+    ],
+    "op_type": "CREATE",
+    "path": "http://localhost:9090/ws/rest/qa158r3a/q3createna"
+   },
+   "CREATE|singlejson": {
+    "405_text": null,
+    "callable": true,
+    "execution_check": {
+     "accepted_n": 1,
+     "record_status": [
+      "COMPLETE"
+     ],
+     "records": [
+      {
+       "executionId": "execution-01550494-b33b-4d81-8ff2-0e085e24aab1-2026.09.11",
+       "executionTime": "2026-09-11T00:54:54Z",
+       "inboundDocumentCount": 1,
+       "status": "COMPLETE"
+      }
+     ],
+     "records_n": 1
+    },
+    "input_type": "singlejson",
+    "methods": {
+     "DELETE": {
+      "body_raw": "",
+      "body_text": "",
+      "status": 404,
+      "ts_iso": "2026-09-11T00:54:55Z"
+     },
+     "GET": {
+      "body_raw": "<html>\n<head>\n<meta http-equiv=\"Content-Type\" content=\"text/html; charset=ISO-8859-1\"/>\n<title>Error 404 Unknown operation for the given URL path.</title>\n</head>\n<body><h2>HTTP ERROR 404</h2>\n<p>Problem accessing /ws/rest/qa158r3a/q3createja. Reason:\n<pre>    Unknown operation for the given URL path.</pre></p>\n</body>\n</html>\n",
+      "body_text": "Error 404 Unknown operation for the given URL path.",
+      "status": 404,
+      "ts_iso": "2026-09-11T00:54:54Z"
+     },
+     "PATCH": {
+      "body_raw": "",
+      "body_text": "",
+      "status": 404,
+      "ts_iso": "2026-09-11T00:54:55Z"
+     },
+     "POST": {
+      "body_raw": "",
+      "body_text": "",
+      "status": 200,
+      "ts_iso": "2026-09-11T00:54:54Z"
+     },
+     "PUT": {
+      "body_raw": "",
+      "body_text": "",
+      "status": 404,
+      "ts_iso": "2026-09-11T00:54:54Z"
+     }
+    },
+    "methods_2xx": [
+     "POST"
+    ],
+    "op_type": "CREATE",
+    "path": "http://localhost:9090/ws/rest/qa158r3a/q3createja"
+   },
+   "DELETE|none": {
+    "405_text": null,
+    "callable": true,
+    "execution_check": {
+     "accepted_n": 1,
+     "record_status": [
+      "COMPLETE"
+     ],
+     "records": [
+      {
+       "executionId": "execution-e742c587-e75d-4f4d-9256-846452578bc4-2026.09.11",
+       "executionTime": "2026-09-11T00:54:58Z",
+       "inboundDocumentCount": 1,
+       "status": "COMPLETE"
+      }
+     ],
+     "records_n": 1
+    },
+    "input_type": "none",
+    "methods": {
+     "DELETE": {
+      "body_raw": "",
+      "body_text": "",
+      "status": 200,
+      "ts_iso": "2026-09-11T00:54:57Z"
+     },
+     "GET": {
+      "body_raw": "<html>\n<head>\n<meta http-equiv=\"Content-Type\" content=\"text/html; charset=ISO-8859-1\"/>\n<title>Error 404 Unknown operation for the given URL path.</title>\n</head>\n<body><h2>HTTP ERROR 404</h2>\n<p>Problem accessing /ws/rest/qa158r3a/q3deletena. Reason:\n<pre>    Unknown operation for the given URL path.</pre></p>\n</body>\n</html>\n",
+      "body_text": "Error 404 Unknown operation for the given URL path.",
+      "status": 404,
+      "ts_iso": "2026-09-11T00:54:56Z"
+     },
+     "PATCH": {
+      "body_raw": "",
+      "body_text": "",
+      "status": 404,
+      "ts_iso": "2026-09-11T00:54:57Z"
+     },
+     "POST": {
+      "body_raw": "<html>\n<head>\n<meta http-equiv=\"Content-Type\" content=\"text/html; charset=ISO-8859-1\"/>\n<title>Error 404 Unknown operation for the given URL path.</title>\n</head>\n<body><h2>HTTP ERROR 404</h2>\n<p>Problem accessing /ws/rest/qa158r3a/q3deletena. Reason:\n<pre>    Unknown operation for the given URL path.</pre></p>\n</body>\n</html>\n",
+      "body_text": "Error 404 Unknown operation for the given URL path.",
+      "status": 404,
+      "ts_iso": "2026-09-11T00:54:56Z"
+     },
+     "PUT": {
+      "body_raw": "",
+      "body_text": "",
+      "status": 404,
+      "ts_iso": "2026-09-11T00:54:57Z"
+     }
+    },
+    "methods_2xx": [
+     "DELETE"
+    ],
+    "op_type": "DELETE",
+    "path": "http://localhost:9090/ws/rest/qa158r3a/q3deletena"
+   },
+   "DELETE|singlejson": {
+    "405_text": null,
+    "callable": true,
+    "execution_check": {
+     "accepted_n": 1,
+     "record_status": [
+      "COMPLETE"
+     ],
+     "records": [
+      {
+       "executionId": "execution-04f9b6bf-02fc-4c6b-bac4-8a91280896e8-2026.09.11",
+       "executionTime": "2026-09-11T00:55:00Z",
+       "inboundDocumentCount": 1,
+       "status": "COMPLETE"
+      }
+     ],
+     "records_n": 1
+    },
+    "input_type": "singlejson",
+    "methods": {
+     "DELETE": {
+      "body_raw": "",
+      "body_text": "",
+      "status": 200,
+      "ts_iso": "2026-09-11T00:55:00Z"
+     },
+     "GET": {
+      "body_raw": "<html>\n<head>\n<meta http-equiv=\"Content-Type\" content=\"text/html; charset=ISO-8859-1\"/>\n<title>Error 404 Unknown operation for the given URL path.</title>\n</head>\n<body><h2>HTTP ERROR 404</h2>\n<p>Problem accessing /ws/rest/qa158r3a/q3deleteja. Reason:\n<pre>    Unknown operation for the given URL path.</pre></p>\n</body>\n</html>\n",
+      "body_text": "Error 404 Unknown operation for the given URL path.",
+      "status": 404,
+      "ts_iso": "2026-09-11T00:54:58Z"
+     },
+     "PATCH": {
+      "body_raw": "",
+      "body_text": "",
+      "status": 404,
+      "ts_iso": "2026-09-11T00:54:59Z"
+     },
+     "POST": {
+      "body_raw": "<html>\n<head>\n<meta http-equiv=\"Content-Type\" content=\"text/html; charset=ISO-8859-1\"/>\n<title>Error 404 Unknown operation for the given URL path.</title>\n</head>\n<body><h2>HTTP ERROR 404</h2>\n<p>Problem accessing /ws/rest/qa158r3a/q3deleteja. Reason:\n<pre>    Unknown operation for the given URL path.</pre></p>\n</body>\n</html>\n",
+      "body_text": "Error 404 Unknown operation for the given URL path.",
+      "status": 404,
+      "ts_iso": "2026-09-11T00:54:58Z"
+     },
+     "PUT": {
+      "body_raw": "",
+      "body_text": "",
+      "status": 404,
+      "ts_iso": "2026-09-11T00:54:59Z"
+     }
+    },
+    "methods_2xx": [
+     "DELETE"
+    ],
+    "op_type": "DELETE",
+    "path": "http://localhost:9090/ws/rest/qa158r3a/q3deleteja"
+   },
+   "EXECUTE|none": {
+    "405_text": null,
+    "callable": true,
+    "execution_check": {
+     "accepted_n": 1,
+     "record_status": [
+      "COMPLETE"
+     ],
+     "records": [
+      {
+       "executionId": "execution-bd549987-fc03-4582-9650-e58daf41be43-2026.09.11",
+       "executionTime": "2026-09-11T00:55:01Z",
+       "inboundDocumentCount": 1,
+       "status": "COMPLETE"
+      }
+     ],
+     "records_n": 1
+    },
+    "input_type": "none",
+    "methods": {
+     "DELETE": {
+      "body_raw": "",
+      "body_text": "",
+      "status": 404,
+      "ts_iso": "2026-09-11T00:55:02Z"
+     },
+     "GET": {
+      "body_raw": "<html>\n<head>\n<meta http-equiv=\"Content-Type\" content=\"text/html; charset=ISO-8859-1\"/>\n<title>Error 404 Unknown operation for the given URL path.</title>\n</head>\n<body><h2>HTTP ERROR 404</h2>\n<p>Problem accessing /ws/rest/qa158r3a/q3executena. Reason:\n<pre>    Unknown operation for the given URL path.</pre></p>\n</body>\n</html>\n",
+      "body_text": "Error 404 Unknown operation for the given URL path.",
+      "status": 404,
+      "ts_iso": "2026-09-11T00:55:00Z"
+     },
+     "PATCH": {
+      "body_raw": "",
+      "body_text": "",
+      "status": 404,
+      "ts_iso": "2026-09-11T00:55:01Z"
+     },
+     "POST": {
+      "body_raw": "",
+      "body_text": "",
+      "status": 200,
+      "ts_iso": "2026-09-11T00:55:01Z"
+     },
+     "PUT": {
+      "body_raw": "",
+      "body_text": "",
+      "status": 404,
+      "ts_iso": "2026-09-11T00:55:01Z"
+     }
+    },
+    "methods_2xx": [
+     "POST"
+    ],
+    "op_type": "EXECUTE",
+    "path": "http://localhost:9090/ws/rest/qa158r3a/q3executena"
+   },
+   "EXECUTE|singlejson": {
+    "405_text": null,
+    "callable": true,
+    "execution_check": {
+     "accepted_n": 1,
+     "record_status": [
+      "COMPLETE"
+     ],
+     "records": [
+      {
+       "executionId": "execution-bf3e35fc-7380-4b37-aee4-2f25c56b4bfb-2026.09.11",
+       "executionTime": "2026-09-11T00:55:03Z",
+       "inboundDocumentCount": 1,
+       "status": "COMPLETE"
+      }
+     ],
+     "records_n": 1
+    },
+    "input_type": "singlejson",
+    "methods": {
+     "DELETE": {
+      "body_raw": "",
+      "body_text": "",
+      "status": 404,
+      "ts_iso": "2026-09-11T00:55:04Z"
+     },
+     "GET": {
+      "body_raw": "<html>\n<head>\n<meta http-equiv=\"Content-Type\" content=\"text/html; charset=ISO-8859-1\"/>\n<title>Error 404 Unknown operation for the given URL path.</title>\n</head>\n<body><h2>HTTP ERROR 404</h2>\n<p>Problem accessing /ws/rest/qa158r3a/q3executeja. Reason:\n<pre>    Unknown operation for the given URL path.</pre></p>\n</body>\n</html>\n",
+      "body_text": "Error 404 Unknown operation for the given URL path.",
+      "status": 404,
+      "ts_iso": "2026-09-11T00:55:02Z"
+     },
+     "PATCH": {
+      "body_raw": "",
+      "body_text": "",
+      "status": 404,
+      "ts_iso": "2026-09-11T00:55:04Z"
+     },
+     "POST": {
+      "body_raw": "",
+      "body_text": "",
+      "status": 200,
+      "ts_iso": "2026-09-11T00:55:03Z"
+     },
+     "PUT": {
+      "body_raw": "",
+      "body_text": "",
+      "status": 404,
+      "ts_iso": "2026-09-11T00:55:03Z"
+     }
+    },
+    "methods_2xx": [
+     "POST"
+    ],
+    "op_type": "EXECUTE",
+    "path": "http://localhost:9090/ws/rest/qa158r3a/q3executeja"
+   },
+   "GET|none": {
+    "405_text": null,
+    "callable": true,
+    "execution_check": {
+     "accepted_n": 1,
+     "record_status": [
+      "COMPLETE"
+     ],
+     "records": [
+      {
+       "executionId": "execution-78a72a4a-6e02-4dae-b431-b2aaa9805921-2026.09.11",
+       "executionTime": "2026-09-11T00:55:04Z",
+       "inboundDocumentCount": 1,
+       "status": "COMPLETE"
+      }
+     ],
+     "records_n": 1
+    },
+    "input_type": "none",
+    "methods": {
+     "DELETE": {
+      "body_raw": "",
+      "body_text": "",
+      "status": 404,
+      "ts_iso": "2026-09-11T00:55:06Z"
+     },
+     "GET": {
+      "body_raw": "",
+      "body_text": "",
+      "status": 200,
+      "ts_iso": "2026-09-11T00:55:04Z"
+     },
+     "PATCH": {
+      "body_raw": "",
+      "body_text": "",
+      "status": 404,
+      "ts_iso": "2026-09-11T00:55:06Z"
+     },
+     "POST": {
+      "body_raw": "<html>\n<head>\n<meta http-equiv=\"Content-Type\" content=\"text/html; charset=ISO-8859-1\"/>\n<title>Error 404 Unknown operation for the given URL path.</title>\n</head>\n<body><h2>HTTP ERROR 404</h2>\n<p>Problem accessing /ws/rest/qa158r3a/q3getna. Reason:\n<pre>    Unknown operation for the given URL path.</pre></p>\n</body>\n</html>\n",
+      "body_text": "Error 404 Unknown operation for the given URL path.",
+      "status": 404,
+      "ts_iso": "2026-09-11T00:55:05Z"
+     },
+     "PUT": {
+      "body_raw": "",
+      "body_text": "",
+      "status": 404,
+      "ts_iso": "2026-09-11T00:55:05Z"
+     }
+    },
+    "methods_2xx": [
+     "GET"
+    ],
+    "op_type": "GET",
+    "path": "http://localhost:9090/ws/rest/qa158r3a/q3getna"
+   },
+   "GET|singlejson": {
+    "405_text": "Error 405 Cannot make GET request on operation GET:/ws/rest/qa158r3a/q3getja/[d42af456-35c3-4a9b-a4e3-92ce7a8cc204] which expects input",
+    "callable": false,
+    "execution_check": {
+     "accepted_n": 0,
+     "record_status": [],
+     "records": [],
+     "records_n": 0
+    },
+    "input_type": "singlejson",
+    "methods": {
+     "DELETE": {
+      "body_raw": "",
+      "body_text": "",
+      "status": 404,
+      "ts_iso": "2026-09-11T00:55:08Z"
+     },
+     "GET": {
+      "body_raw": "<html>\n<head>\n<meta http-equiv=\"Content-Type\" content=\"text/html; charset=ISO-8859-1\"/>\n<title>Error 405 Cannot make GET request on operation GET:/ws/rest/qa158r3a/q3getja/[d42af456-35c3-4a9b-a4e3-92ce7a8cc204] which expects input</title>\n</head>\n<body><h2>HTTP ERROR 405</h2>\n<p>Problem accessing /ws/rest/qa158r3a/q3getja. Reason:\n<pre>    Cannot make GET request on operation GET:/ws/rest/qa158r3a/q3getja/[d42af456-35c3-4a9b-a4e3-92ce7a8cc204] which expects input</pre></p>\n</body>\n</html>\n",
+      "body_text": "Error 405 Cannot make GET request on operation GET:/ws/rest/qa158r3a/q3getja/[d42af456-35c3-4a9b-a4e3-92ce7a8cc204] which expects input",
+      "status": 405,
+      "ts_iso": "2026-09-11T00:55:07Z"
+     },
+     "PATCH": {
+      "body_raw": "",
+      "body_text": "",
+      "status": 404,
+      "ts_iso": "2026-09-11T00:55:08Z"
+     },
+     "POST": {
+      "body_raw": "<html>\n<head>\n<meta http-equiv=\"Content-Type\" content=\"text/html; charset=ISO-8859-1\"/>\n<title>Error 404 Unknown operation for the given URL path.</title>\n</head>\n<body><h2>HTTP ERROR 404</h2>\n<p>Problem accessing /ws/rest/qa158r3a/q3getja. Reason:\n<pre>    Unknown operation for the given URL path.</pre></p>\n</body>\n</html>\n",
+      "body_text": "Error 404 Unknown operation for the given URL path.",
+      "status": 404,
+      "ts_iso": "2026-09-11T00:55:07Z"
+     },
+     "PUT": {
+      "body_raw": "",
+      "body_text": "",
+      "status": 404,
+      "ts_iso": "2026-09-11T00:55:07Z"
+     }
+    },
+    "methods_2xx": [],
+    "op_type": "GET",
+    "path": "http://localhost:9090/ws/rest/qa158r3a/q3getja"
+   },
+   "QUERY|none": {
+    "405_text": null,
+    "callable": true,
+    "execution_check": {
+     "accepted_n": 1,
+     "record_status": [
+      "COMPLETE"
+     ],
+     "records": [
+      {
+       "executionId": "execution-df57576d-5654-49ef-828c-8e50e56bfc2e-2026.09.11",
+       "executionTime": "2026-09-11T00:55:09Z",
+       "inboundDocumentCount": 1,
+       "status": "COMPLETE"
+      }
+     ],
+     "records_n": 1
+    },
+    "input_type": "none",
+    "methods": {
+     "DELETE": {
+      "body_raw": "",
+      "body_text": "",
+      "status": 404,
+      "ts_iso": "2026-09-11T00:55:10Z"
+     },
+     "GET": {
+      "body_raw": "",
+      "body_text": "",
+      "status": 200,
+      "ts_iso": "2026-09-11T00:55:09Z"
+     },
+     "PATCH": {
+      "body_raw": "",
+      "body_text": "",
+      "status": 404,
+      "ts_iso": "2026-09-11T00:55:10Z"
+     },
+     "POST": {
+      "body_raw": "<html>\n<head>\n<meta http-equiv=\"Content-Type\" content=\"text/html; charset=ISO-8859-1\"/>\n<title>Error 404 Unknown operation for the given URL path.</title>\n</head>\n<body><h2>HTTP ERROR 404</h2>\n<p>Problem accessing /ws/rest/qa158r3a/q3queryna. Reason:\n<pre>    Unknown operation for the given URL path.</pre></p>\n</body>\n</html>\n",
+      "body_text": "Error 404 Unknown operation for the given URL path.",
+      "status": 404,
+      "ts_iso": "2026-09-11T00:55:09Z"
+     },
+     "PUT": {
+      "body_raw": "",
+      "body_text": "",
+      "status": 404,
+      "ts_iso": "2026-09-11T00:55:10Z"
+     }
+    },
+    "methods_2xx": [
+     "GET"
+    ],
+    "op_type": "QUERY",
+    "path": "http://localhost:9090/ws/rest/qa158r3a/q3queryna"
+   },
+   "QUERY|singlejson": {
+    "405_text": "Error 405 Cannot make GET request on operation GET:/ws/rest/qa158r3a/q3queryja/[63dec29e-6527-4f5b-a6dd-6074498e71ef] which expects input",
+    "callable": false,
+    "execution_check": {
+     "accepted_n": 0,
+     "record_status": [],
+     "records": [],
+     "records_n": 0
+    },
+    "input_type": "singlejson",
+    "methods": {
+     "DELETE": {
+      "body_raw": "",
+      "body_text": "",
+      "status": 404,
+      "ts_iso": "2026-09-11T00:55:13Z"
+     },
+     "GET": {
+      "body_raw": "<html>\n<head>\n<meta http-equiv=\"Content-Type\" content=\"text/html; charset=ISO-8859-1\"/>\n<title>Error 405 Cannot make GET request on operation GET:/ws/rest/qa158r3a/q3queryja/[63dec29e-6527-4f5b-a6dd-6074498e71ef] which expects input</title>\n</head>\n<body><h2>HTTP ERROR 405</h2>\n<p>Problem accessing /ws/rest/qa158r3a/q3queryja. Reason:\n<pre>    Cannot make GET request on operation GET:/ws/rest/qa158r3a/q3queryja/[63dec29e-6527-4f5b-a6dd-6074498e71ef] which expects input</pre></p>\n</body>\n</html>\n",
+      "body_text": "Error 405 Cannot make GET request on operation GET:/ws/rest/qa158r3a/q3queryja/[63dec29e-6527-4f5b-a6dd-6074498e71ef] which expects input",
+      "status": 405,
+      "ts_iso": "2026-09-11T00:55:11Z"
+     },
+     "PATCH": {
+      "body_raw": "",
+      "body_text": "",
+      "status": 404,
+      "ts_iso": "2026-09-11T00:55:12Z"
+     },
+     "POST": {
+      "body_raw": "<html>\n<head>\n<meta http-equiv=\"Content-Type\" content=\"text/html; charset=ISO-8859-1\"/>\n<title>Error 404 Unknown operation for the given URL path.</title>\n</head>\n<body><h2>HTTP ERROR 404</h2>\n<p>Problem accessing /ws/rest/qa158r3a/q3queryja. Reason:\n<pre>    Unknown operation for the given URL path.</pre></p>\n</body>\n</html>\n",
+      "body_text": "Error 404 Unknown operation for the given URL path.",
+      "status": 404,
+      "ts_iso": "2026-09-11T00:55:11Z"
+     },
+     "PUT": {
+      "body_raw": "",
+      "body_text": "",
+      "status": 404,
+      "ts_iso": "2026-09-11T00:55:12Z"
+     }
+    },
+    "methods_2xx": [],
+    "op_type": "QUERY",
+    "path": "http://localhost:9090/ws/rest/qa158r3a/q3queryja"
+   },
+   "UPDATE|none": {
+    "405_text": null,
+    "callable": true,
+    "execution_check": {
+     "accepted_n": 1,
+     "record_status": [
+      "COMPLETE"
+     ],
+     "records": [
+      {
+       "executionId": "execution-dd6b9280-757b-4754-b4db-d6c0c32843b4-2026.09.11",
+       "executionTime": "2026-09-11T00:55:14Z",
+       "inboundDocumentCount": 1,
+       "status": "COMPLETE"
+      }
+     ],
+     "records_n": 1
+    },
+    "input_type": "none",
+    "methods": {
+     "DELETE": {
+      "body_raw": "",
+      "body_text": "",
+      "status": 404,
+      "ts_iso": "2026-09-11T00:55:15Z"
+     },
+     "GET": {
+      "body_raw": "<html>\n<head>\n<meta http-equiv=\"Content-Type\" content=\"text/html; charset=ISO-8859-1\"/>\n<title>Error 404 Unknown operation for the given URL path.</title>\n</head>\n<body><h2>HTTP ERROR 404</h2>\n<p>Problem accessing /ws/rest/qa158r3a/q3updatena. Reason:\n<pre>    Unknown operation for the given URL path.</pre></p>\n</body>\n</html>\n",
+      "body_text": "Error 404 Unknown operation for the given URL path.",
+      "status": 404,
+      "ts_iso": "2026-09-11T00:55:13Z"
+     },
+     "PATCH": {
+      "body_raw": "",
+      "body_text": "",
+      "status": 404,
+      "ts_iso": "2026-09-11T00:55:14Z"
+     },
+     "POST": {
+      "body_raw": "<html>\n<head>\n<meta http-equiv=\"Content-Type\" content=\"text/html; charset=ISO-8859-1\"/>\n<title>Error 404 Unknown operation for the given URL path.</title>\n</head>\n<body><h2>HTTP ERROR 404</h2>\n<p>Problem accessing /ws/rest/qa158r3a/q3updatena. Reason:\n<pre>    Unknown operation for the given URL path.</pre></p>\n</body>\n</html>\n",
+      "body_text": "Error 404 Unknown operation for the given URL path.",
+      "status": 404,
+      "ts_iso": "2026-09-11T00:55:13Z"
+     },
+     "PUT": {
+      "body_raw": "",
+      "body_text": "",
+      "status": 200,
+      "ts_iso": "2026-09-11T00:55:14Z"
+     }
+    },
+    "methods_2xx": [
+     "PUT"
+    ],
+    "op_type": "UPDATE",
+    "path": "http://localhost:9090/ws/rest/qa158r3a/q3updatena"
+   },
+   "UPDATE|singlejson": {
+    "405_text": null,
+    "callable": true,
+    "execution_check": {
+     "accepted_n": 1,
+     "record_status": [
+      "COMPLETE"
+     ],
+     "records": [
+      {
+       "executionId": "execution-d1af3683-4952-4e0f-9abf-ab233dd8bcf8-2026.09.11",
+       "executionTime": "2026-09-11T00:55:16Z",
+       "inboundDocumentCount": 1,
+       "status": "COMPLETE"
+      }
+     ],
+     "records_n": 1
+    },
+    "input_type": "singlejson",
+    "methods": {
+     "DELETE": {
+      "body_raw": "",
+      "body_text": "",
+      "status": 404,
+      "ts_iso": "2026-09-11T00:55:17Z"
+     },
+     "GET": {
+      "body_raw": "<html>\n<head>\n<meta http-equiv=\"Content-Type\" content=\"text/html; charset=ISO-8859-1\"/>\n<title>Error 404 Unknown operation for the given URL path.</title>\n</head>\n<body><h2>HTTP ERROR 404</h2>\n<p>Problem accessing /ws/rest/qa158r3a/q3updateja. Reason:\n<pre>    Unknown operation for the given URL path.</pre></p>\n</body>\n</html>\n",
+      "body_text": "Error 404 Unknown operation for the given URL path.",
+      "status": 404,
+      "ts_iso": "2026-09-11T00:55:15Z"
+     },
+     "PATCH": {
+      "body_raw": "",
+      "body_text": "",
+      "status": 404,
+      "ts_iso": "2026-09-11T00:55:16Z"
+     },
+     "POST": {
+      "body_raw": "<html>\n<head>\n<meta http-equiv=\"Content-Type\" content=\"text/html; charset=ISO-8859-1\"/>\n<title>Error 404 Unknown operation for the given URL path.</title>\n</head>\n<body><h2>HTTP ERROR 404</h2>\n<p>Problem accessing /ws/rest/qa158r3a/q3updateja. Reason:\n<pre>    Unknown operation for the given URL path.</pre></p>\n</body>\n</html>\n",
+      "body_text": "Error 404 Unknown operation for the given URL path.",
+      "status": 404,
+      "ts_iso": "2026-09-11T00:55:16Z"
+     },
+     "PUT": {
+      "body_raw": "",
+      "body_text": "",
+      "status": 200,
+      "ts_iso": "2026-09-11T00:55:16Z"
+     }
+    },
+    "methods_2xx": [
+     "PUT"
+    ],
+    "op_type": "UPDATE",
+    "path": "http://localhost:9090/ws/rest/qa158r3a/q3updateja"
+   },
+   "UPSERT|none": {
+    "405_text": null,
+    "callable": true,
+    "execution_check": {
+     "accepted_n": 1,
+     "record_status": [
+      "COMPLETE"
+     ],
+     "records": [
+      {
+       "executionId": "execution-f3c80e75-39bd-4144-af5e-708434d6c276-2026.09.11",
+       "executionTime": "2026-09-11T00:55:18Z",
+       "inboundDocumentCount": 1,
+       "status": "COMPLETE"
+      }
+     ],
+     "records_n": 1
+    },
+    "input_type": "none",
+    "methods": {
+     "DELETE": {
+      "body_raw": "",
+      "body_text": "",
+      "status": 404,
+      "ts_iso": "2026-09-11T00:55:19Z"
+     },
+     "GET": {
+      "body_raw": "<html>\n<head>\n<meta http-equiv=\"Content-Type\" content=\"text/html; charset=ISO-8859-1\"/>\n<title>Error 404 Unknown operation for the given URL path.</title>\n</head>\n<body><h2>HTTP ERROR 404</h2>\n<p>Problem accessing /ws/rest/qa158r3a/q3upsertna. Reason:\n<pre>    Unknown operation for the given URL path.</pre></p>\n</body>\n</html>\n",
+      "body_text": "Error 404 Unknown operation for the given URL path.",
+      "status": 404,
+      "ts_iso": "2026-09-11T00:55:17Z"
+     },
+     "PATCH": {
+      "body_raw": "",
+      "body_text": "",
+      "status": 404,
+      "ts_iso": "2026-09-11T00:55:19Z"
+     },
+     "POST": {
+      "body_raw": "",
+      "body_text": "",
+      "status": 200,
+      "ts_iso": "2026-09-11T00:55:18Z"
+     },
+     "PUT": {
+      "body_raw": "",
+      "body_text": "",
+      "status": 404,
+      "ts_iso": "2026-09-11T00:55:18Z"
+     }
+    },
+    "methods_2xx": [
+     "POST"
+    ],
+    "op_type": "UPSERT",
+    "path": "http://localhost:9090/ws/rest/qa158r3a/q3upsertna"
+   },
+   "UPSERT|singlejson": {
+    "405_text": null,
+    "callable": true,
+    "execution_check": {
+     "accepted_n": 1,
+     "record_status": [
+      "COMPLETE"
+     ],
+     "records": [
+      {
+       "executionId": "execution-91138f2a-3d93-495f-bf49-d98c3fddc817-2026.09.11",
+       "executionTime": "2026-09-11T00:55:20Z",
+       "inboundDocumentCount": 1,
+       "status": "COMPLETE"
+      }
+     ],
+     "records_n": 1
+    },
+    "input_type": "singlejson",
+    "methods": {
+     "DELETE": {
+      "body_raw": "",
+      "body_text": "",
+      "status": 404,
+      "ts_iso": "2026-09-11T00:55:21Z"
+     },
+     "GET": {
+      "body_raw": "<html>\n<head>\n<meta http-equiv=\"Content-Type\" content=\"text/html; charset=ISO-8859-1\"/>\n<title>Error 404 Unknown operation for the given URL path.</title>\n</head>\n<body><h2>HTTP ERROR 404</h2>\n<p>Problem accessing /ws/rest/qa158r3a/q3upsertja. Reason:\n<pre>    Unknown operation for the given URL path.</pre></p>\n</body>\n</html>\n",
+      "body_text": "Error 404 Unknown operation for the given URL path.",
+      "status": 404,
+      "ts_iso": "2026-09-11T00:55:19Z"
+     },
+     "PATCH": {
+      "body_raw": "",
+      "body_text": "",
+      "status": 404,
+      "ts_iso": "2026-09-11T00:55:21Z"
+     },
+     "POST": {
+      "body_raw": "",
+      "body_text": "",
+      "status": 200,
+      "ts_iso": "2026-09-11T00:55:20Z"
+     },
+     "PUT": {
+      "body_raw": "",
+      "body_text": "",
+      "status": 404,
+      "ts_iso": "2026-09-11T00:55:20Z"
+     }
+    },
+    "methods_2xx": [
+     "POST"
+    ],
+    "op_type": "UPSERT",
+    "path": "http://localhost:9090/ws/rest/qa158r3a/q3upsertja"
+   }
+  },
+  "final_round": "poll07",
+  "rounds": [
+   {
+    "grid": {
+     "CREATE|none DELETE": 404,
+     "CREATE|none GET": 404,
+     "CREATE|none PATCH": 404,
+     "CREATE|none POST": 404,
+     "CREATE|none PUT": 404,
+     "CREATE|singlejson DELETE": 0,
+     "CREATE|singlejson GET": 404,
+     "CREATE|singlejson PATCH": 404,
+     "CREATE|singlejson POST": 404,
+     "CREATE|singlejson PUT": 404,
+     "DELETE|none DELETE": 200,
+     "DELETE|none GET": 0,
+     "DELETE|none PATCH": 404,
+     "DELETE|none POST": 0,
+     "DELETE|none PUT": 404,
+     "DELETE|singlejson DELETE": 200,
+     "DELETE|singlejson GET": 404,
+     "DELETE|singlejson PATCH": 404,
+     "DELETE|singlejson POST": 404,
+     "DELETE|singlejson PUT": 404,
+     "EXECUTE|none DELETE": 404,
+     "EXECUTE|none GET": 404,
+     "EXECUTE|none PATCH": 404,
+     "EXECUTE|none POST": 200,
+     "EXECUTE|none PUT": 404,
+     "EXECUTE|singlejson DELETE": 404,
+     "EXECUTE|singlejson GET": 404,
+     "EXECUTE|singlejson PATCH": 404,
+     "EXECUTE|singlejson POST": 200,
+     "EXECUTE|singlejson PUT": 404,
+     "GET|none DELETE": 404,
+     "GET|none GET": 200,
+     "GET|none PATCH": 404,
+     "GET|none POST": 404,
+     "GET|none PUT": 404,
+     "GET|singlejson DELETE": 404,
+     "GET|singlejson GET": 405,
+     "GET|singlejson PATCH": 404,
+     "GET|singlejson POST": 404,
+     "GET|singlejson PUT": 404,
+     "QUERY|none DELETE": 404,
+     "QUERY|none GET": 200,
+     "QUERY|none PATCH": 404,
+     "QUERY|none POST": 404,
+     "QUERY|none PUT": 404,
+     "QUERY|singlejson DELETE": 404,
+     "QUERY|singlejson GET": 405,
+     "QUERY|singlejson PATCH": 404,
+     "QUERY|singlejson POST": 404,
+     "QUERY|singlejson PUT": 404,
+     "UPDATE|none DELETE": 404,
+     "UPDATE|none GET": 404,
+     "UPDATE|none PATCH": 404,
+     "UPDATE|none POST": 404,
+     "UPDATE|none PUT": 200,
+     "UPDATE|singlejson DELETE": 404,
+     "UPDATE|singlejson GET": 404,
+     "UPDATE|singlejson PATCH": 404,
+     "UPDATE|singlejson POST": 404,
+     "UPDATE|singlejson PUT": 200,
+     "UPSERT|none DELETE": 404,
+     "UPSERT|none GET": 404,
+     "UPSERT|none PATCH": 404,
+     "UPSERT|none POST": 200,
+     "UPSERT|none PUT": 404,
+     "UPSERT|singlejson DELETE": 404,
+     "UPSERT|singlejson GET": 404,
+     "UPSERT|singlejson PATCH": 404,
+     "UPSERT|singlejson POST": 200,
+     "UPSERT|singlejson PUT": 404
+    },
+    "round": "r3-evidence-A-poll01.json"
+   },
+   {
+    "grid": {
+     "CREATE|none DELETE": 404,
+     "CREATE|none GET": 404,
+     "CREATE|none PATCH": 404,
+     "CREATE|none POST": 200,
+     "CREATE|none PUT": 404,
+     "CREATE|singlejson DELETE": 404,
+     "CREATE|singlejson GET": 404,
+     "CREATE|singlejson PATCH": 404,
+     "CREATE|singlejson POST": 200,
+     "CREATE|singlejson PUT": 404,
+     "DELETE|none DELETE": 200,
+     "DELETE|none GET": 404,
+     "DELETE|none PATCH": 404,
+     "DELETE|none POST": 404,
+     "DELETE|none PUT": 404,
+     "DELETE|singlejson DELETE": 200,
+     "DELETE|singlejson GET": 404,
+     "DELETE|singlejson PATCH": 404,
+     "DELETE|singlejson POST": 404,
+     "DELETE|singlejson PUT": 404,
+     "EXECUTE|none DELETE": 404,
+     "EXECUTE|none GET": 404,
+     "EXECUTE|none PATCH": 404,
+     "EXECUTE|none POST": 200,
+     "EXECUTE|none PUT": 404,
+     "EXECUTE|singlejson DELETE": 404,
+     "EXECUTE|singlejson GET": 404,
+     "EXECUTE|singlejson PATCH": 404,
+     "EXECUTE|singlejson POST": 200,
+     "EXECUTE|singlejson PUT": 404,
+     "GET|none DELETE": 404,
+     "GET|none GET": 200,
+     "GET|none PATCH": 404,
+     "GET|none POST": 404,
+     "GET|none PUT": 404,
+     "GET|singlejson DELETE": 404,
+     "GET|singlejson GET": 405,
+     "GET|singlejson PATCH": 404,
+     "GET|singlejson POST": 404,
+     "GET|singlejson PUT": 404,
+     "QUERY|none DELETE": 404,
+     "QUERY|none GET": 200,
+     "QUERY|none PATCH": 404,
+     "QUERY|none POST": 404,
+     "QUERY|none PUT": 404,
+     "QUERY|singlejson DELETE": 404,
+     "QUERY|singlejson GET": 405,
+     "QUERY|singlejson PATCH": 404,
+     "QUERY|singlejson POST": 404,
+     "QUERY|singlejson PUT": 404,
+     "UPDATE|none DELETE": 404,
+     "UPDATE|none GET": 404,
+     "UPDATE|none PATCH": 404,
+     "UPDATE|none POST": 404,
+     "UPDATE|none PUT": 200,
+     "UPDATE|singlejson DELETE": 404,
+     "UPDATE|singlejson GET": 404,
+     "UPDATE|singlejson PATCH": 404,
+     "UPDATE|singlejson POST": 404,
+     "UPDATE|singlejson PUT": 200,
+     "UPSERT|none DELETE": 404,
+     "UPSERT|none GET": 404,
+     "UPSERT|none PATCH": 404,
+     "UPSERT|none POST": 200,
+     "UPSERT|none PUT": 404,
+     "UPSERT|singlejson DELETE": 404,
+     "UPSERT|singlejson GET": 404,
+     "UPSERT|singlejson PATCH": 404,
+     "UPSERT|singlejson POST": 200,
+     "UPSERT|singlejson PUT": 404
+    },
+    "round": "r3-evidence-A-poll02.json"
+   },
+   {
+    "grid": {
+     "CREATE|none DELETE": 404,
+     "CREATE|none GET": 404,
+     "CREATE|none PATCH": 404,
+     "CREATE|none POST": 200,
+     "CREATE|none PUT": 404,
+     "CREATE|singlejson DELETE": 404,
+     "CREATE|singlejson GET": 404,
+     "CREATE|singlejson PATCH": 404,
+     "CREATE|singlejson POST": 200,
+     "CREATE|singlejson PUT": 404,
+     "DELETE|none DELETE": 200,
+     "DELETE|none GET": 404,
+     "DELETE|none PATCH": 404,
+     "DELETE|none POST": 404,
+     "DELETE|none PUT": 404,
+     "DELETE|singlejson DELETE": 200,
+     "DELETE|singlejson GET": 404,
+     "DELETE|singlejson PATCH": 404,
+     "DELETE|singlejson POST": 404,
+     "DELETE|singlejson PUT": 404,
+     "EXECUTE|none DELETE": 404,
+     "EXECUTE|none GET": 404,
+     "EXECUTE|none PATCH": 404,
+     "EXECUTE|none POST": 200,
+     "EXECUTE|none PUT": 404,
+     "EXECUTE|singlejson DELETE": 404,
+     "EXECUTE|singlejson GET": 404,
+     "EXECUTE|singlejson PATCH": 404,
+     "EXECUTE|singlejson POST": 200,
+     "EXECUTE|singlejson PUT": 404,
+     "GET|none DELETE": 404,
+     "GET|none GET": 200,
+     "GET|none PATCH": 404,
+     "GET|none POST": 404,
+     "GET|none PUT": 404,
+     "GET|singlejson DELETE": 404,
+     "GET|singlejson GET": 405,
+     "GET|singlejson PATCH": 404,
+     "GET|singlejson POST": 404,
+     "GET|singlejson PUT": 404,
+     "QUERY|none DELETE": 404,
+     "QUERY|none GET": 200,
+     "QUERY|none PATCH": 404,
+     "QUERY|none POST": 404,
+     "QUERY|none PUT": 404,
+     "QUERY|singlejson DELETE": 404,
+     "QUERY|singlejson GET": 405,
+     "QUERY|singlejson PATCH": 404,
+     "QUERY|singlejson POST": 404,
+     "QUERY|singlejson PUT": 404,
+     "UPDATE|none DELETE": 404,
+     "UPDATE|none GET": 404,
+     "UPDATE|none PATCH": 404,
+     "UPDATE|none POST": 404,
+     "UPDATE|none PUT": 200,
+     "UPDATE|singlejson DELETE": 404,
+     "UPDATE|singlejson GET": 404,
+     "UPDATE|singlejson PATCH": 404,
+     "UPDATE|singlejson POST": 404,
+     "UPDATE|singlejson PUT": 200,
+     "UPSERT|none DELETE": 404,
+     "UPSERT|none GET": 404,
+     "UPSERT|none PATCH": 404,
+     "UPSERT|none POST": 200,
+     "UPSERT|none PUT": 404,
+     "UPSERT|singlejson DELETE": 404,
+     "UPSERT|singlejson GET": 404,
+     "UPSERT|singlejson PATCH": 404,
+     "UPSERT|singlejson POST": 200,
+     "UPSERT|singlejson PUT": 404
+    },
+    "round": "r3-evidence-A-poll03.json"
+   },
+   {
+    "grid": {
+     "CREATE|none DELETE": 404,
+     "CREATE|none GET": 404,
+     "CREATE|none PATCH": 404,
+     "CREATE|none POST": 200,
+     "CREATE|none PUT": 404,
+     "CREATE|singlejson DELETE": 404,
+     "CREATE|singlejson GET": 404,
+     "CREATE|singlejson PATCH": 404,
+     "CREATE|singlejson POST": 200,
+     "CREATE|singlejson PUT": 404,
+     "DELETE|none DELETE": 200,
+     "DELETE|none GET": 404,
+     "DELETE|none PATCH": 404,
+     "DELETE|none POST": 404,
+     "DELETE|none PUT": 404,
+     "DELETE|singlejson DELETE": 200,
+     "DELETE|singlejson GET": 404,
+     "DELETE|singlejson PATCH": 404,
+     "DELETE|singlejson POST": 404,
+     "DELETE|singlejson PUT": 404,
+     "EXECUTE|none DELETE": 404,
+     "EXECUTE|none GET": 404,
+     "EXECUTE|none PATCH": 404,
+     "EXECUTE|none POST": 200,
+     "EXECUTE|none PUT": 404,
+     "EXECUTE|singlejson DELETE": 404,
+     "EXECUTE|singlejson GET": 404,
+     "EXECUTE|singlejson PATCH": 404,
+     "EXECUTE|singlejson POST": 200,
+     "EXECUTE|singlejson PUT": 404,
+     "GET|none DELETE": 404,
+     "GET|none GET": 200,
+     "GET|none PATCH": 404,
+     "GET|none POST": 404,
+     "GET|none PUT": 404,
+     "GET|singlejson DELETE": 404,
+     "GET|singlejson GET": 405,
+     "GET|singlejson PATCH": 404,
+     "GET|singlejson POST": 404,
+     "GET|singlejson PUT": 404,
+     "QUERY|none DELETE": 404,
+     "QUERY|none GET": 200,
+     "QUERY|none PATCH": 404,
+     "QUERY|none POST": 404,
+     "QUERY|none PUT": 404,
+     "QUERY|singlejson DELETE": 404,
+     "QUERY|singlejson GET": 405,
+     "QUERY|singlejson PATCH": 404,
+     "QUERY|singlejson POST": 404,
+     "QUERY|singlejson PUT": 404,
+     "UPDATE|none DELETE": 404,
+     "UPDATE|none GET": 404,
+     "UPDATE|none PATCH": 404,
+     "UPDATE|none POST": 404,
+     "UPDATE|none PUT": 200,
+     "UPDATE|singlejson DELETE": 404,
+     "UPDATE|singlejson GET": 404,
+     "UPDATE|singlejson PATCH": 404,
+     "UPDATE|singlejson POST": 404,
+     "UPDATE|singlejson PUT": 200,
+     "UPSERT|none DELETE": 404,
+     "UPSERT|none GET": 404,
+     "UPSERT|none PATCH": 404,
+     "UPSERT|none POST": 200,
+     "UPSERT|none PUT": 404,
+     "UPSERT|singlejson DELETE": 404,
+     "UPSERT|singlejson GET": 404,
+     "UPSERT|singlejson PATCH": 404,
+     "UPSERT|singlejson POST": 200,
+     "UPSERT|singlejson PUT": 404
+    },
+    "round": "r3-evidence-A-poll04.json"
+   },
+   {
+    "grid": {
+     "CREATE|none DELETE": 404,
+     "CREATE|none GET": 404,
+     "CREATE|none PATCH": 404,
+     "CREATE|none POST": 200,
+     "CREATE|none PUT": 404,
+     "CREATE|singlejson DELETE": 404,
+     "CREATE|singlejson GET": 404,
+     "CREATE|singlejson PATCH": 404,
+     "CREATE|singlejson POST": 200,
+     "CREATE|singlejson PUT": 404,
+     "DELETE|none DELETE": 200,
+     "DELETE|none GET": 404,
+     "DELETE|none PATCH": 404,
+     "DELETE|none POST": 404,
+     "DELETE|none PUT": 404,
+     "DELETE|singlejson DELETE": 200,
+     "DELETE|singlejson GET": 404,
+     "DELETE|singlejson PATCH": 404,
+     "DELETE|singlejson POST": 404,
+     "DELETE|singlejson PUT": 404,
+     "EXECUTE|none DELETE": 404,
+     "EXECUTE|none GET": 404,
+     "EXECUTE|none PATCH": 404,
+     "EXECUTE|none POST": 200,
+     "EXECUTE|none PUT": 404,
+     "EXECUTE|singlejson DELETE": 404,
+     "EXECUTE|singlejson GET": 404,
+     "EXECUTE|singlejson PATCH": 404,
+     "EXECUTE|singlejson POST": 200,
+     "EXECUTE|singlejson PUT": 404,
+     "GET|none DELETE": 404,
+     "GET|none GET": 200,
+     "GET|none PATCH": 404,
+     "GET|none POST": 404,
+     "GET|none PUT": 404,
+     "GET|singlejson DELETE": 404,
+     "GET|singlejson GET": 405,
+     "GET|singlejson PATCH": 404,
+     "GET|singlejson POST": 404,
+     "GET|singlejson PUT": 404,
+     "QUERY|none DELETE": 404,
+     "QUERY|none GET": 200,
+     "QUERY|none PATCH": 404,
+     "QUERY|none POST": 404,
+     "QUERY|none PUT": 404,
+     "QUERY|singlejson DELETE": 404,
+     "QUERY|singlejson GET": 405,
+     "QUERY|singlejson PATCH": 404,
+     "QUERY|singlejson POST": 404,
+     "QUERY|singlejson PUT": 404,
+     "UPDATE|none DELETE": 404,
+     "UPDATE|none GET": 404,
+     "UPDATE|none PATCH": 404,
+     "UPDATE|none POST": 404,
+     "UPDATE|none PUT": 200,
+     "UPDATE|singlejson DELETE": 404,
+     "UPDATE|singlejson GET": 404,
+     "UPDATE|singlejson PATCH": 404,
+     "UPDATE|singlejson POST": 404,
+     "UPDATE|singlejson PUT": 200,
+     "UPSERT|none DELETE": 404,
+     "UPSERT|none GET": 404,
+     "UPSERT|none PATCH": 404,
+     "UPSERT|none POST": 200,
+     "UPSERT|none PUT": 404,
+     "UPSERT|singlejson DELETE": 404,
+     "UPSERT|singlejson GET": 404,
+     "UPSERT|singlejson PATCH": 404,
+     "UPSERT|singlejson POST": 200,
+     "UPSERT|singlejson PUT": 404
+    },
+    "round": "r3-evidence-A-poll05.json"
+   },
+   {
+    "grid": {
+     "CREATE|none DELETE": 404,
+     "CREATE|none GET": 404,
+     "CREATE|none PATCH": 404,
+     "CREATE|none POST": 200,
+     "CREATE|none PUT": 404,
+     "CREATE|singlejson DELETE": 404,
+     "CREATE|singlejson GET": 404,
+     "CREATE|singlejson PATCH": 404,
+     "CREATE|singlejson POST": 200,
+     "CREATE|singlejson PUT": 404,
+     "DELETE|none DELETE": 200,
+     "DELETE|none GET": 404,
+     "DELETE|none PATCH": 404,
+     "DELETE|none POST": 404,
+     "DELETE|none PUT": 404,
+     "DELETE|singlejson DELETE": 200,
+     "DELETE|singlejson GET": 404,
+     "DELETE|singlejson PATCH": 404,
+     "DELETE|singlejson POST": 404,
+     "DELETE|singlejson PUT": 404,
+     "EXECUTE|none DELETE": 404,
+     "EXECUTE|none GET": 404,
+     "EXECUTE|none PATCH": 404,
+     "EXECUTE|none POST": 200,
+     "EXECUTE|none PUT": 404,
+     "EXECUTE|singlejson DELETE": 404,
+     "EXECUTE|singlejson GET": 404,
+     "EXECUTE|singlejson PATCH": 404,
+     "EXECUTE|singlejson POST": 200,
+     "EXECUTE|singlejson PUT": 404,
+     "GET|none DELETE": 404,
+     "GET|none GET": 200,
+     "GET|none PATCH": 404,
+     "GET|none POST": 404,
+     "GET|none PUT": 404,
+     "GET|singlejson DELETE": 404,
+     "GET|singlejson GET": 405,
+     "GET|singlejson PATCH": 404,
+     "GET|singlejson POST": 404,
+     "GET|singlejson PUT": 404,
+     "QUERY|none DELETE": 404,
+     "QUERY|none GET": 200,
+     "QUERY|none PATCH": 404,
+     "QUERY|none POST": 404,
+     "QUERY|none PUT": 404,
+     "QUERY|singlejson DELETE": 404,
+     "QUERY|singlejson GET": 405,
+     "QUERY|singlejson PATCH": 404,
+     "QUERY|singlejson POST": 404,
+     "QUERY|singlejson PUT": 404,
+     "UPDATE|none DELETE": 404,
+     "UPDATE|none GET": 404,
+     "UPDATE|none PATCH": 404,
+     "UPDATE|none POST": 404,
+     "UPDATE|none PUT": 200,
+     "UPDATE|singlejson DELETE": 404,
+     "UPDATE|singlejson GET": 404,
+     "UPDATE|singlejson PATCH": 404,
+     "UPDATE|singlejson POST": 404,
+     "UPDATE|singlejson PUT": 200,
+     "UPSERT|none DELETE": 404,
+     "UPSERT|none GET": 404,
+     "UPSERT|none PATCH": 404,
+     "UPSERT|none POST": 200,
+     "UPSERT|none PUT": 404,
+     "UPSERT|singlejson DELETE": 404,
+     "UPSERT|singlejson GET": 404,
+     "UPSERT|singlejson PATCH": 404,
+     "UPSERT|singlejson POST": 200,
+     "UPSERT|singlejson PUT": 404
+    },
+    "round": "r3-evidence-A-poll06.json"
+   },
+   {
+    "grid": {
+     "CREATE|none DELETE": 404,
+     "CREATE|none GET": 404,
+     "CREATE|none PATCH": 404,
+     "CREATE|none POST": 200,
+     "CREATE|none PUT": 404,
+     "CREATE|singlejson DELETE": 404,
+     "CREATE|singlejson GET": 404,
+     "CREATE|singlejson PATCH": 404,
+     "CREATE|singlejson POST": 200,
+     "CREATE|singlejson PUT": 404,
+     "DELETE|none DELETE": 200,
+     "DELETE|none GET": 404,
+     "DELETE|none PATCH": 404,
+     "DELETE|none POST": 404,
+     "DELETE|none PUT": 404,
+     "DELETE|singlejson DELETE": 200,
+     "DELETE|singlejson GET": 404,
+     "DELETE|singlejson PATCH": 404,
+     "DELETE|singlejson POST": 404,
+     "DELETE|singlejson PUT": 404,
+     "EXECUTE|none DELETE": 404,
+     "EXECUTE|none GET": 404,
+     "EXECUTE|none PATCH": 404,
+     "EXECUTE|none POST": 200,
+     "EXECUTE|none PUT": 404,
+     "EXECUTE|singlejson DELETE": 404,
+     "EXECUTE|singlejson GET": 404,
+     "EXECUTE|singlejson PATCH": 404,
+     "EXECUTE|singlejson POST": 200,
+     "EXECUTE|singlejson PUT": 404,
+     "GET|none DELETE": 404,
+     "GET|none GET": 200,
+     "GET|none PATCH": 404,
+     "GET|none POST": 404,
+     "GET|none PUT": 404,
+     "GET|singlejson DELETE": 404,
+     "GET|singlejson GET": 405,
+     "GET|singlejson PATCH": 404,
+     "GET|singlejson POST": 404,
+     "GET|singlejson PUT": 404,
+     "QUERY|none DELETE": 404,
+     "QUERY|none GET": 200,
+     "QUERY|none PATCH": 404,
+     "QUERY|none POST": 404,
+     "QUERY|none PUT": 404,
+     "QUERY|singlejson DELETE": 404,
+     "QUERY|singlejson GET": 405,
+     "QUERY|singlejson PATCH": 404,
+     "QUERY|singlejson POST": 404,
+     "QUERY|singlejson PUT": 404,
+     "UPDATE|none DELETE": 404,
+     "UPDATE|none GET": 404,
+     "UPDATE|none PATCH": 404,
+     "UPDATE|none POST": 404,
+     "UPDATE|none PUT": 200,
+     "UPDATE|singlejson DELETE": 404,
+     "UPDATE|singlejson GET": 404,
+     "UPDATE|singlejson PATCH": 404,
+     "UPDATE|singlejson POST": 404,
+     "UPDATE|singlejson PUT": 200,
+     "UPSERT|none DELETE": 404,
+     "UPSERT|none GET": 404,
+     "UPSERT|none PATCH": 404,
+     "UPSERT|none POST": 200,
+     "UPSERT|none PUT": 404,
+     "UPSERT|singlejson DELETE": 404,
+     "UPSERT|singlejson GET": 404,
+     "UPSERT|singlejson PATCH": 404,
+     "UPSERT|singlejson POST": 200,
+     "UPSERT|singlejson PUT": 404
+    },
+    "round": "r3-evidence-A-poll07.json"
+   }
+  ]
+ },
+ "phase_B_bare_ws_simple_intermediate": {
+  "cells": {
+   "CREATE|none": {
+    "405_text": null,
+    "callable": true,
+    "execution_check": {
+     "accepted_n": 4,
+     "record_status": [
+      "COMPLETE"
+     ],
+     "records": [
+      {
+       "executionId": "execution-0bfb1fcb-b915-47d4-a93d-e4823095d2a6-2026.09.11",
+       "executionTime": "2026-09-11T00:46:35Z",
+       "inboundDocumentCount": 1,
+       "status": "COMPLETE"
+      },
+      {
+       "executionId": "execution-09222152-29d2-4f7c-98c0-03a42e5ff004-2026.09.11",
+       "executionTime": "2026-09-11T00:46:36Z",
+       "inboundDocumentCount": 1,
+       "status": "COMPLETE"
+      },
+      {
+       "executionId": "execution-362862bd-10a9-4554-918b-093b6970e9f8-2026.09.11",
+       "executionTime": "2026-09-11T00:46:36Z",
+       "inboundDocumentCount": 1,
+       "status": "COMPLETE"
+      },
+      {
+       "executionId": "execution-305f3e3c-5ce9-46b0-9c62-d3ef9b59dd6b-2026.09.11",
+       "executionTime": "2026-09-11T00:46:37Z",
+       "inboundDocumentCount": 1,
+       "status": "COMPLETE"
+      }
+     ],
+     "records_n": 4
+    },
+    "input_type": "none",
+    "methods": {
+     "DELETE": {
+      "body_raw": "",
+      "body_text": "",
+      "status": 200,
+      "ts_iso": "2026-09-11T00:46:37Z"
+     },
+     "GET": {
+      "body_raw": "",
+      "body_text": "",
+      "status": 200,
+      "ts_iso": "2026-09-11T00:46:35Z"
+     },
+     "PATCH": {
+      "body_raw": "",
+      "body_text": "",
+      "status": 501,
+      "ts_iso": "2026-09-11T00:46:37Z"
+     },
+     "POST": {
+      "body_raw": "",
+      "body_text": "",
+      "status": 200,
+      "ts_iso": "2026-09-11T00:46:36Z"
+     },
+     "PUT": {
+      "body_raw": "",
+      "body_text": "",
+      "status": 200,
+      "ts_iso": "2026-09-11T00:46:36Z"
+     }
+    },
+    "methods_2xx": [
+     "GET",
+     "POST",
+     "PUT",
+     "DELETE"
+    ],
+    "op_type": "CREATE",
+    "path": "http://localhost:9090/ws/simple/createQ3createna"
+   },
+   "CREATE|singlejson": {
+    "405_text": "Error 405 Cannot make GET request on operation /ws/simple/createQ3createja[3b8c2b53-57c0-4764-8afe-b4d40754770e] which expects input",
+    "callable": true,
+    "execution_check": {
+     "accepted_n": 3,
+     "record_status": [
+      "COMPLETE"
+     ],
+     "records": [
+      {
+       "executionId": "execution-7059559e-e024-4b91-a494-7dfce45f8ed7-2026.09.11",
+       "executionTime": "2026-09-11T00:46:38Z",
+       "inboundDocumentCount": 1,
+       "status": "COMPLETE"
+      },
+      {
+       "executionId": "execution-de0b1016-4183-45fa-8574-baf070c77e00-2026.09.11",
+       "executionTime": "2026-09-11T00:46:38Z",
+       "inboundDocumentCount": 1,
+       "status": "COMPLETE"
+      },
+      {
+       "executionId": "execution-643fad3a-8c4c-4a2b-93b7-478750afbcb3-2026.09.11",
+       "executionTime": "2026-09-11T00:46:39Z",
+       "inboundDocumentCount": 1,
+       "status": "COMPLETE"
+      }
+     ],
+     "records_n": 3
+    },
+    "input_type": "singlejson",
+    "methods": {
+     "DELETE": {
+      "body_raw": "",
+      "body_text": "",
+      "status": 200,
+      "ts_iso": "2026-09-11T00:46:39Z"
+     },
+     "GET": {
+      "body_raw": "<html>\n<head>\n<meta http-equiv=\"Content-Type\" content=\"text/html; charset=ISO-8859-1\"/>\n<title>Error 405 Cannot make GET request on operation /ws/simple/createQ3createja[3b8c2b53-57c0-4764-8afe-b4d40754770e] which expects input</title>\n</head>\n<body><h2>HTTP ERROR 405</h2>\n<p>Problem accessing /ws/simple/createQ3createja. Reason:\n<pre>    Cannot make GET request on operation /ws/simple/createQ3createja[3b8c2b53-57c0-4764-8afe-b4d40754770e] which expects input</pre></p>\n</body>\n</html>\n",
+      "body_text": "Error 405 Cannot make GET request on operation /ws/simple/createQ3createja[3b8c2b53-57c0-4764-8afe-b4d40754770e] which expects input",
+      "status": 405,
+      "ts_iso": "2026-09-11T00:46:37Z"
+     },
+     "PATCH": {
+      "body_raw": "",
+      "body_text": "",
+      "status": 501,
+      "ts_iso": "2026-09-11T00:46:39Z"
+     },
+     "POST": {
+      "body_raw": "",
+      "body_text": "",
+      "status": 200,
+      "ts_iso": "2026-09-11T00:46:38Z"
+     },
+     "PUT": {
+      "body_raw": "",
+      "body_text": "",
+      "status": 200,
+      "ts_iso": "2026-09-11T00:46:38Z"
+     }
+    },
+    "methods_2xx": [
+     "POST",
+     "PUT",
+     "DELETE"
+    ],
+    "op_type": "CREATE",
+    "path": "http://localhost:9090/ws/simple/createQ3createja"
+   },
+   "DELETE|none": {
+    "405_text": null,
+    "callable": true,
+    "execution_check": {
+     "accepted_n": 4,
+     "record_status": [
+      "COMPLETE"
+     ],
+     "records": [
+      {
+       "executionId": "execution-8f17e8ef-771e-4a88-9fdf-c64c1ecae94f-2026.09.11",
+       "executionTime": "2026-09-11T00:46:40Z",
+       "inboundDocumentCount": 1,
+       "status": "COMPLETE"
+      },
+      {
+       "executionId": "execution-d651abdc-0e97-43f4-9149-5244ab597a28-2026.09.11",
+       "executionTime": "2026-09-11T00:46:40Z",
+       "inboundDocumentCount": 1,
+       "status": "COMPLETE"
+      },
+      {
+       "executionId": "execution-31d96378-3910-41a8-867d-c21e591b85f7-2026.09.11",
+       "executionTime": "2026-09-11T00:46:41Z",
+       "inboundDocumentCount": 1,
+       "status": "COMPLETE"
+      },
+      {
+       "executionId": "execution-f494ff9d-4d0a-4170-9d5c-3101094da7d0-2026.09.11",
+       "executionTime": "2026-09-11T00:46:41Z",
+       "inboundDocumentCount": 1,
+       "status": "COMPLETE"
+      }
+     ],
+     "records_n": 4
+    },
+    "input_type": "none",
+    "methods": {
+     "DELETE": {
+      "body_raw": "",
+      "body_text": "",
+      "status": 200,
+      "ts_iso": "2026-09-11T00:46:41Z"
+     },
+     "GET": {
+      "body_raw": "",
+      "body_text": "",
+      "status": 200,
+      "ts_iso": "2026-09-11T00:46:40Z"
+     },
+     "PATCH": {
+      "body_raw": "",
+      "body_text": "",
+      "status": 501,
+      "ts_iso": "2026-09-11T00:46:41Z"
+     },
+     "POST": {
+      "body_raw": "",
+      "body_text": "",
+      "status": 200,
+      "ts_iso": "2026-09-11T00:46:40Z"
+     },
+     "PUT": {
+      "body_raw": "",
+      "body_text": "",
+      "status": 200,
+      "ts_iso": "2026-09-11T00:46:41Z"
+     }
+    },
+    "methods_2xx": [
+     "GET",
+     "POST",
+     "PUT",
+     "DELETE"
+    ],
+    "op_type": "DELETE",
+    "path": "http://localhost:9090/ws/simple/deleteQ3deletena"
+   },
+   "DELETE|singlejson": {
+    "405_text": "Error 405 Cannot make GET request on operation /ws/simple/deleteQ3deleteja[ab9fd3d2-73fa-4259-81f3-6d9757b5ba3b] which expects input",
+    "callable": true,
+    "execution_check": {
+     "accepted_n": 3,
+     "record_status": [
+      "COMPLETE"
+     ],
+     "records": [
+      {
+       "executionId": "execution-9b8117f8-b626-4ce2-a322-8e2427a144f8-2026.09.11",
+       "executionTime": "2026-09-11T00:46:42Z",
+       "inboundDocumentCount": 1,
+       "status": "COMPLETE"
+      },
+      {
+       "executionId": "execution-217b06bd-da2e-4cd2-bcdc-6fc211046745-2026.09.11",
+       "executionTime": "2026-09-11T00:46:43Z",
+       "inboundDocumentCount": 1,
+       "status": "COMPLETE"
+      },
+      {
+       "executionId": "execution-de268fa1-0892-42c0-9c6c-b968aae5821e-2026.09.11",
+       "executionTime": "2026-09-11T00:46:44Z",
+       "inboundDocumentCount": 1,
+       "status": "COMPLETE"
+      }
+     ],
+     "records_n": 3
+    },
+    "input_type": "singlejson",
+    "methods": {
+     "DELETE": {
+      "body_raw": "",
+      "body_text": "",
+      "status": 200,
+      "ts_iso": "2026-09-11T00:46:44Z"
+     },
+     "GET": {
+      "body_raw": "<html>\n<head>\n<meta http-equiv=\"Content-Type\" content=\"text/html; charset=ISO-8859-1\"/>\n<title>Error 405 Cannot make GET request on operation /ws/simple/deleteQ3deleteja[ab9fd3d2-73fa-4259-81f3-6d9757b5ba3b] which expects input</title>\n</head>\n<body><h2>HTTP ERROR 405</h2>\n<p>Problem accessing /ws/simple/deleteQ3deleteja. Reason:\n<pre>    Cannot make GET request on operation /ws/simple/deleteQ3deleteja[ab9fd3d2-73fa-4259-81f3-6d9757b5ba3b] which expects input</pre></p>\n</body>\n</html>\n",
+      "body_text": "Error 405 Cannot make GET request on operation /ws/simple/deleteQ3deleteja[ab9fd3d2-73fa-4259-81f3-6d9757b5ba3b] which expects input",
+      "status": 405,
+      "ts_iso": "2026-09-11T00:46:42Z"
+     },
+     "PATCH": {
+      "body_raw": "",
+      "body_text": "",
+      "status": 501,
+      "ts_iso": "2026-09-11T00:46:43Z"
+     },
+     "POST": {
+      "body_raw": "",
+      "body_text": "",
+      "status": 200,
+      "ts_iso": "2026-09-11T00:46:42Z"
+     },
+     "PUT": {
+      "body_raw": "",
+      "body_text": "",
+      "status": 200,
+      "ts_iso": "2026-09-11T00:46:43Z"
+     }
+    },
+    "methods_2xx": [
+     "POST",
+     "PUT",
+     "DELETE"
+    ],
+    "op_type": "DELETE",
+    "path": "http://localhost:9090/ws/simple/deleteQ3deleteja"
+   },
+   "EXECUTE|none": {
+    "405_text": null,
+    "callable": true,
+    "execution_check": {
+     "accepted_n": 4,
+     "record_status": [
+      "COMPLETE"
+     ],
+     "records": [
+      {
+       "executionId": "execution-00b5f32b-5b28-4bb8-9dd3-1b34375fc700-2026.09.11",
+       "executionTime": "2026-09-11T00:46:44Z",
+       "inboundDocumentCount": 1,
+       "status": "COMPLETE"
+      },
+      {
+       "executionId": "execution-1c6af6cc-0218-4bf8-b39e-6bfb9536c71e-2026.09.11",
+       "executionTime": "2026-09-11T00:46:44Z",
+       "inboundDocumentCount": 1,
+       "status": "COMPLETE"
+      },
+      {
+       "executionId": "execution-dbd2630f-d0bf-431f-8c9b-ab14e0c258cc-2026.09.11",
+       "executionTime": "2026-09-11T00:46:45Z",
+       "inboundDocumentCount": 1,
+       "status": "COMPLETE"
+      },
+      {
+       "executionId": "execution-6aad5c99-a68a-438c-97f9-a19ab83f9894-2026.09.11",
+       "executionTime": "2026-09-11T00:46:46Z",
+       "inboundDocumentCount": 1,
+       "status": "COMPLETE"
+      }
+     ],
+     "records_n": 4
+    },
+    "input_type": "none",
+    "methods": {
+     "DELETE": {
+      "body_raw": "",
+      "body_text": "",
+      "status": 200,
+      "ts_iso": "2026-09-11T00:46:46Z"
+     },
+     "GET": {
+      "body_raw": "",
+      "body_text": "",
+      "status": 200,
+      "ts_iso": "2026-09-11T00:46:44Z"
+     },
+     "PATCH": {
+      "body_raw": "",
+      "body_text": "",
+      "status": 501,
+      "ts_iso": "2026-09-11T00:46:45Z"
+     },
+     "POST": {
+      "body_raw": "",
+      "body_text": "",
+      "status": 200,
+      "ts_iso": "2026-09-11T00:46:44Z"
+     },
+     "PUT": {
+      "body_raw": "",
+      "body_text": "",
+      "status": 200,
+      "ts_iso": "2026-09-11T00:46:45Z"
+     }
+    },
+    "methods_2xx": [
+     "GET",
+     "POST",
+     "PUT",
+     "DELETE"
+    ],
+    "op_type": "EXECUTE",
+    "path": "http://localhost:9090/ws/simple/executeQ3executena"
+   },
+   "EXECUTE|singlejson": {
+    "405_text": "Error 405 Cannot make GET request on operation /ws/simple/executeQ3executeja[5b82ad12-337d-4a9e-a51b-695ba65b0330] which expects input",
+    "callable": true,
+    "execution_check": {
+     "accepted_n": 3,
+     "record_status": [
+      "COMPLETE"
+     ],
+     "records": [
+      {
+       "executionId": "execution-2165cf7e-d800-4953-b3bd-80524b0aa356-2026.09.11",
+       "executionTime": "2026-09-11T00:46:47Z",
+       "inboundDocumentCount": 1,
+       "status": "COMPLETE"
+      },
+      {
+       "executionId": "execution-a2620d36-12ba-4a93-8aeb-09fb65da4562-2026.09.11",
+       "executionTime": "2026-09-11T00:46:47Z",
+       "inboundDocumentCount": 1,
+       "status": "COMPLETE"
+      },
+      {
+       "executionId": "execution-bb2bd1ac-55b2-4688-ba22-3fd81ff4f753-2026.09.11",
+       "executionTime": "2026-09-11T00:46:48Z",
+       "inboundDocumentCount": 1,
+       "status": "COMPLETE"
+      }
+     ],
+     "records_n": 3
+    },
+    "input_type": "singlejson",
+    "methods": {
+     "DELETE": {
+      "body_raw": "",
+      "body_text": "",
+      "status": 200,
+      "ts_iso": "2026-09-11T00:46:48Z"
+     },
+     "GET": {
+      "body_raw": "<html>\n<head>\n<meta http-equiv=\"Content-Type\" content=\"text/html; charset=ISO-8859-1\"/>\n<title>Error 405 Cannot make GET request on operation /ws/simple/executeQ3executeja[5b82ad12-337d-4a9e-a51b-695ba65b0330] which expects input</title>\n</head>\n<body><h2>HTTP ERROR 405</h2>\n<p>Problem accessing /ws/simple/executeQ3executeja. Reason:\n<pre>    Cannot make GET request on operation /ws/simple/executeQ3executeja[5b82ad12-337d-4a9e-a51b-695ba65b0330] which expects input</pre></p>\n</body>\n</html>\n",
+      "body_text": "Error 405 Cannot make GET request on operation /ws/simple/executeQ3executeja[5b82ad12-337d-4a9e-a51b-695ba65b0330] which expects input",
+      "status": 405,
+      "ts_iso": "2026-09-11T00:46:46Z"
+     },
+     "PATCH": {
+      "body_raw": "",
+      "body_text": "",
+      "status": 501,
+      "ts_iso": "2026-09-11T00:46:47Z"
+     },
+     "POST": {
+      "body_raw": "",
+      "body_text": "",
+      "status": 200,
+      "ts_iso": "2026-09-11T00:46:47Z"
+     },
+     "PUT": {
+      "body_raw": "",
+      "body_text": "",
+      "status": 200,
+      "ts_iso": "2026-09-11T00:46:47Z"
+     }
+    },
+    "methods_2xx": [
+     "POST",
+     "PUT",
+     "DELETE"
+    ],
+    "op_type": "EXECUTE",
+    "path": "http://localhost:9090/ws/simple/executeQ3executeja"
+   },
+   "GET|none": {
+    "405_text": null,
+    "callable": true,
+    "execution_check": {
+     "accepted_n": 4,
+     "record_status": [
+      "COMPLETE"
+     ],
+     "records": [
+      {
+       "executionId": "execution-da38f681-5bbc-4dfc-a534-a23712ed3006-2026.09.11",
+       "executionTime": "2026-09-11T00:46:48Z",
+       "inboundDocumentCount": 1,
+       "status": "COMPLETE"
+      },
+      {
+       "executionId": "execution-584032a2-9c2e-47ea-b08a-099587c4cb8d-2026.09.11",
+       "executionTime": "2026-09-11T00:46:49Z",
+       "inboundDocumentCount": 1,
+       "status": "COMPLETE"
+      },
+      {
+       "executionId": "execution-752cc2e3-4ae5-43eb-a764-20084cc97a59-2026.09.11",
+       "executionTime": "2026-09-11T00:46:49Z",
+       "inboundDocumentCount": 1,
+       "status": "COMPLETE"
+      },
+      {
+       "executionId": "execution-01fb37dd-0636-4652-b28e-3127fb4fbd67-2026.09.11",
+       "executionTime": "2026-09-11T00:46:50Z",
+       "inboundDocumentCount": 1,
+       "status": "COMPLETE"
+      }
+     ],
+     "records_n": 4
+    },
+    "input_type": "none",
+    "methods": {
+     "DELETE": {
+      "body_raw": "",
+      "body_text": "",
+      "status": 200,
+      "ts_iso": "2026-09-11T00:46:50Z"
+     },
+     "GET": {
+      "body_raw": "",
+      "body_text": "",
+      "status": 200,
+      "ts_iso": "2026-09-11T00:46:48Z"
+     },
+     "PATCH": {
+      "body_raw": "",
+      "body_text": "",
+      "status": 501,
+      "ts_iso": "2026-09-11T00:46:50Z"
+     },
+     "POST": {
+      "body_raw": "",
+      "body_text": "",
+      "status": 200,
+      "ts_iso": "2026-09-11T00:46:49Z"
+     },
+     "PUT": {
+      "body_raw": "",
+      "body_text": "",
+      "status": 200,
+      "ts_iso": "2026-09-11T00:46:49Z"
+     }
+    },
+    "methods_2xx": [
+     "GET",
+     "POST",
+     "PUT",
+     "DELETE"
+    ],
+    "op_type": "GET",
+    "path": "http://localhost:9090/ws/simple/getQ3getna"
+   },
+   "GET|singlejson": {
+    "405_text": "Error 405 Cannot make GET request on operation /ws/simple/getQ3getja[d42af456-35c3-4a9b-a4e3-92ce7a8cc204] which expects input",
+    "callable": true,
+    "execution_check": {
+     "accepted_n": 3,
+     "record_status": [
+      "COMPLETE"
+     ],
+     "records": [
+      {
+       "executionId": "execution-727baa0a-4efa-4108-baeb-7f7d255de0fc-2026.09.11",
+       "executionTime": "2026-09-11T00:46:51Z",
+       "inboundDocumentCount": 1,
+       "status": "COMPLETE"
+      },
+      {
+       "executionId": "execution-dc455da6-91ce-4c44-b028-7ad0ed496cfb-2026.09.11",
+       "executionTime": "2026-09-11T00:46:51Z",
+       "inboundDocumentCount": 1,
+       "status": "COMPLETE"
+      },
+      {
+       "executionId": "execution-dd72be15-b372-45d9-9de8-bdad62f899cd-2026.09.11",
+       "executionTime": "2026-09-11T00:46:52Z",
+       "inboundDocumentCount": 1,
+       "status": "COMPLETE"
+      }
+     ],
+     "records_n": 3
+    },
+    "input_type": "singlejson",
+    "methods": {
+     "DELETE": {
+      "body_raw": "",
+      "body_text": "",
+      "status": 200,
+      "ts_iso": "2026-09-11T00:46:52Z"
+     },
+     "GET": {
+      "body_raw": "<html>\n<head>\n<meta http-equiv=\"Content-Type\" content=\"text/html; charset=ISO-8859-1\"/>\n<title>Error 405 Cannot make GET request on operation /ws/simple/getQ3getja[d42af456-35c3-4a9b-a4e3-92ce7a8cc204] which expects input</title>\n</head>\n<body><h2>HTTP ERROR 405</h2>\n<p>Problem accessing /ws/simple/getQ3getja. Reason:\n<pre>    Cannot make GET request on operation /ws/simple/getQ3getja[d42af456-35c3-4a9b-a4e3-92ce7a8cc204] which expects input</pre></p>\n</body>\n</html>\n",
+      "body_text": "Error 405 Cannot make GET request on operation /ws/simple/getQ3getja[d42af456-35c3-4a9b-a4e3-92ce7a8cc204] which expects input",
+      "status": 405,
+      "ts_iso": "2026-09-11T00:46:51Z"
+     },
+     "PATCH": {
+      "body_raw": "",
+      "body_text": "",
+      "status": 501,
+      "ts_iso": "2026-09-11T00:46:52Z"
+     },
+     "POST": {
+      "body_raw": "",
+      "body_text": "",
+      "status": 200,
+      "ts_iso": "2026-09-11T00:46:51Z"
+     },
+     "PUT": {
+      "body_raw": "",
+      "body_text": "",
+      "status": 200,
+      "ts_iso": "2026-09-11T00:46:51Z"
+     }
+    },
+    "methods_2xx": [
+     "POST",
+     "PUT",
+     "DELETE"
+    ],
+    "op_type": "GET",
+    "path": "http://localhost:9090/ws/simple/getQ3getja"
+   },
+   "QUERY|none": {
+    "405_text": null,
+    "callable": true,
+    "execution_check": {
+     "accepted_n": 4,
+     "record_status": [
+      "COMPLETE"
+     ],
+     "records": [
+      {
+       "executionId": "execution-933c83f6-b818-4769-aeac-c415b249248f-2026.09.11",
+       "executionTime": "2026-09-11T00:46:53Z",
+       "inboundDocumentCount": 1,
+       "status": "COMPLETE"
+      },
+      {
+       "executionId": "execution-f9c6ac4e-dd9a-44c1-a777-1d8e01832708-2026.09.11",
+       "executionTime": "2026-09-11T00:46:53Z",
+       "inboundDocumentCount": 1,
+       "status": "COMPLETE"
+      },
+      {
+       "executionId": "execution-68164051-2b68-4ffd-a8ea-dbfeb4a6ba52-2026.09.11",
+       "executionTime": "2026-09-11T00:46:54Z",
+       "inboundDocumentCount": 1,
+       "status": "COMPLETE"
+      },
+      {
+       "executionId": "execution-d5b2c495-414d-4def-8e21-b944e3136560-2026.09.11",
+       "executionTime": "2026-09-11T00:46:55Z",
+       "inboundDocumentCount": 1,
+       "status": "COMPLETE"
+      }
+     ],
+     "records_n": 4
+    },
+    "input_type": "none",
+    "methods": {
+     "DELETE": {
+      "body_raw": "",
+      "body_text": "",
+      "status": 200,
+      "ts_iso": "2026-09-11T00:46:55Z"
+     },
+     "GET": {
+      "body_raw": "",
+      "body_text": "",
+      "status": 200,
+      "ts_iso": "2026-09-11T00:46:53Z"
+     },
+     "PATCH": {
+      "body_raw": "",
+      "body_text": "",
+      "status": 501,
+      "ts_iso": "2026-09-11T00:46:54Z"
+     },
+     "POST": {
+      "body_raw": "",
+      "body_text": "",
+      "status": 200,
+      "ts_iso": "2026-09-11T00:46:53Z"
+     },
+     "PUT": {
+      "body_raw": "",
+      "body_text": "",
+      "status": 200,
+      "ts_iso": "2026-09-11T00:46:54Z"
+     }
+    },
+    "methods_2xx": [
+     "GET",
+     "POST",
+     "PUT",
+     "DELETE"
+    ],
+    "op_type": "QUERY",
+    "path": "http://localhost:9090/ws/simple/queryQ3queryna"
+   },
+   "QUERY|singlejson": {
+    "405_text": "Error 405 Cannot make GET request on operation /ws/simple/queryQ3queryja[63dec29e-6527-4f5b-a6dd-6074498e71ef] which expects input",
+    "callable": true,
+    "execution_check": {
+     "accepted_n": 3,
+     "record_status": [
+      "COMPLETE"
+     ],
+     "records": [
+      {
+       "executionId": "execution-7bbbe1ec-1c56-44ca-8a81-191327c1388d-2026.09.11",
+       "executionTime": "2026-09-11T00:46:55Z",
+       "inboundDocumentCount": 1,
+       "status": "COMPLETE"
+      },
+      {
+       "executionId": "execution-e51f6779-68a9-46d3-894b-81b8c4382fea-2026.09.11",
+       "executionTime": "2026-09-11T00:46:56Z",
+       "inboundDocumentCount": 1,
+       "status": "COMPLETE"
+      },
+      {
+       "executionId": "execution-9393c186-52f3-4874-b075-46b6bc8a6ecc-2026.09.11",
+       "executionTime": "2026-09-11T00:46:57Z",
+       "inboundDocumentCount": 1,
+       "status": "COMPLETE"
+      }
+     ],
+     "records_n": 3
+    },
+    "input_type": "singlejson",
+    "methods": {
+     "DELETE": {
+      "body_raw": "",
+      "body_text": "",
+      "status": 200,
+      "ts_iso": "2026-09-11T00:46:57Z"
+     },
+     "GET": {
+      "body_raw": "<html>\n<head>\n<meta http-equiv=\"Content-Type\" content=\"text/html; charset=ISO-8859-1\"/>\n<title>Error 405 Cannot make GET request on operation /ws/simple/queryQ3queryja[63dec29e-6527-4f5b-a6dd-6074498e71ef] which expects input</title>\n</head>\n<body><h2>HTTP ERROR 405</h2>\n<p>Problem accessing /ws/simple/queryQ3queryja. Reason:\n<pre>    Cannot make GET request on operation /ws/simple/queryQ3queryja[63dec29e-6527-4f5b-a6dd-6074498e71ef] which expects input</pre></p>\n</body>\n</html>\n",
+      "body_text": "Error 405 Cannot make GET request on operation /ws/simple/queryQ3queryja[63dec29e-6527-4f5b-a6dd-6074498e71ef] which expects input",
+      "status": 405,
+      "ts_iso": "2026-09-11T00:46:55Z"
+     },
+     "PATCH": {
+      "body_raw": "",
+      "body_text": "",
+      "status": 501,
+      "ts_iso": "2026-09-11T00:46:56Z"
+     },
+     "POST": {
+      "body_raw": "",
+      "body_text": "",
+      "status": 200,
+      "ts_iso": "2026-09-11T00:46:55Z"
+     },
+     "PUT": {
+      "body_raw": "",
+      "body_text": "",
+      "status": 200,
+      "ts_iso": "2026-09-11T00:46:56Z"
+     }
+    },
+    "methods_2xx": [
+     "POST",
+     "PUT",
+     "DELETE"
+    ],
+    "op_type": "QUERY",
+    "path": "http://localhost:9090/ws/simple/queryQ3queryja"
+   },
+   "UPDATE|none": {
+    "405_text": null,
+    "callable": true,
+    "execution_check": {
+     "accepted_n": 4,
+     "record_status": [
+      "COMPLETE"
+     ],
+     "records": [
+      {
+       "executionId": "execution-b937a487-63ef-45c4-b1ac-49c11b58ba93-2026.09.11",
+       "executionTime": "2026-09-11T00:46:57Z",
+       "inboundDocumentCount": 1,
+       "status": "COMPLETE"
+      },
+      {
+       "executionId": "execution-f09fb773-67ca-40b2-9cea-4ec489571efd-2026.09.11",
+       "executionTime": "2026-09-11T00:46:58Z",
+       "inboundDocumentCount": 1,
+       "status": "COMPLETE"
+      },
+      {
+       "executionId": "execution-ff41983a-c18d-4f0d-98b8-71f69da4c24e-2026.09.11",
+       "executionTime": "2026-09-11T00:46:58Z",
+       "inboundDocumentCount": 1,
+       "status": "COMPLETE"
+      },
+      {
+       "executionId": "execution-0dda6507-ddda-4d06-8f7e-c53f97f3c3fb-2026.09.11",
+       "executionTime": "2026-09-11T00:46:59Z",
+       "inboundDocumentCount": 1,
+       "status": "COMPLETE"
+      }
+     ],
+     "records_n": 4
+    },
+    "input_type": "none",
+    "methods": {
+     "DELETE": {
+      "body_raw": "",
+      "body_text": "",
+      "status": 200,
+      "ts_iso": "2026-09-11T00:46:59Z"
+     },
+     "GET": {
+      "body_raw": "",
+      "body_text": "",
+      "status": 200,
+      "ts_iso": "2026-09-11T00:46:57Z"
+     },
+     "PATCH": {
+      "body_raw": "",
+      "body_text": "",
+      "status": 501,
+      "ts_iso": "2026-09-11T00:46:58Z"
+     },
+     "POST": {
+      "body_raw": "",
+      "body_text": "",
+      "status": 200,
+      "ts_iso": "2026-09-11T00:46:58Z"
+     },
+     "PUT": {
+      "body_raw": "",
+      "body_text": "",
+      "status": 200,
+      "ts_iso": "2026-09-11T00:46:58Z"
+     }
+    },
+    "methods_2xx": [
+     "GET",
+     "POST",
+     "PUT",
+     "DELETE"
+    ],
+    "op_type": "UPDATE",
+    "path": "http://localhost:9090/ws/simple/updateQ3updatena"
+   },
+   "UPDATE|singlejson": {
+    "405_text": "Error 405 Cannot make GET request on operation /ws/simple/updateQ3updateja[0c18ba51-0462-44e0-a88c-f318cc286542] which expects input",
+    "callable": true,
+    "execution_check": {
+     "accepted_n": 3,
+     "record_status": [
+      "COMPLETE"
+     ],
+     "records": [
+      {
+       "executionId": "execution-737c8eeb-4662-4c6a-86fd-3d4b93b060b7-2026.09.11",
+       "executionTime": "2026-09-11T00:47:00Z",
+       "inboundDocumentCount": 1,
+       "status": "COMPLETE"
+      },
+      {
+       "executionId": "execution-a8669c39-0f22-4c32-a795-186255d7a7d0-2026.09.11",
+       "executionTime": "2026-09-11T00:47:00Z",
+       "inboundDocumentCount": 1,
+       "status": "COMPLETE"
+      },
+      {
+       "executionId": "execution-26936e40-b0b9-44ff-916f-a0a969a0e326-2026.09.11",
+       "executionTime": "2026-09-11T00:47:01Z",
+       "inboundDocumentCount": 1,
+       "status": "COMPLETE"
+      }
+     ],
+     "records_n": 3
+    },
+    "input_type": "singlejson",
+    "methods": {
+     "DELETE": {
+      "body_raw": "",
+      "body_text": "",
+      "status": 200,
+      "ts_iso": "2026-09-11T00:47:01Z"
+     },
+     "GET": {
+      "body_raw": "<html>\n<head>\n<meta http-equiv=\"Content-Type\" content=\"text/html; charset=ISO-8859-1\"/>\n<title>Error 405 Cannot make GET request on operation /ws/simple/updateQ3updateja[0c18ba51-0462-44e0-a88c-f318cc286542] which expects input</title>\n</head>\n<body><h2>HTTP ERROR 405</h2>\n<p>Problem accessing /ws/simple/updateQ3updateja. Reason:\n<pre>    Cannot make GET request on operation /ws/simple/updateQ3updateja[0c18ba51-0462-44e0-a88c-f318cc286542] which expects input</pre></p>\n</body>\n</html>\n",
+      "body_text": "Error 405 Cannot make GET request on operation /ws/simple/updateQ3updateja[0c18ba51-0462-44e0-a88c-f318cc286542] which expects input",
+      "status": 405,
+      "ts_iso": "2026-09-11T00:46:59Z"
+     },
+     "PATCH": {
+      "body_raw": "",
+      "body_text": "",
+      "status": 501,
+      "ts_iso": "2026-09-11T00:47:01Z"
+     },
+     "POST": {
+      "body_raw": "",
+      "body_text": "",
+      "status": 200,
+      "ts_iso": "2026-09-11T00:47:00Z"
+     },
+     "PUT": {
+      "body_raw": "",
+      "body_text": "",
+      "status": 200,
+      "ts_iso": "2026-09-11T00:47:00Z"
+     }
+    },
+    "methods_2xx": [
+     "POST",
+     "PUT",
+     "DELETE"
+    ],
+    "op_type": "UPDATE",
+    "path": "http://localhost:9090/ws/simple/updateQ3updateja"
+   },
+   "UPSERT|none": {
+    "405_text": null,
+    "callable": true,
+    "execution_check": {
+     "accepted_n": 4,
+     "record_status": [
+      "COMPLETE"
+     ],
+     "records": [
+      {
+       "executionId": "execution-92c6fa14-ac3d-4233-a5e9-ffd57b8600c1-2026.09.11",
+       "executionTime": "2026-09-11T00:47:01Z",
+       "inboundDocumentCount": 1,
+       "status": "COMPLETE"
+      },
+      {
+       "executionId": "execution-251a57aa-2e2c-4af3-82e8-643a11d71562-2026.09.11",
+       "executionTime": "2026-09-11T00:47:02Z",
+       "inboundDocumentCount": 1,
+       "status": "COMPLETE"
+      },
+      {
+       "executionId": "execution-e3129e78-5f2c-4b7a-8b0c-b3fc07f5ab08-2026.09.11",
+       "executionTime": "2026-09-11T00:47:02Z",
+       "inboundDocumentCount": 1,
+       "status": "COMPLETE"
+      },
+      {
+       "executionId": "execution-f6ba1453-2633-4ecd-a3a1-8067ad6e1bfa-2026.09.11",
+       "executionTime": "2026-09-11T00:47:03Z",
+       "inboundDocumentCount": 1,
+       "status": "COMPLETE"
+      }
+     ],
+     "records_n": 4
+    },
+    "input_type": "none",
+    "methods": {
+     "DELETE": {
+      "body_raw": "",
+      "body_text": "",
+      "status": 200,
+      "ts_iso": "2026-09-11T00:47:03Z"
+     },
+     "GET": {
+      "body_raw": "",
+      "body_text": "",
+      "status": 200,
+      "ts_iso": "2026-09-11T00:47:01Z"
+     },
+     "PATCH": {
+      "body_raw": "",
+      "body_text": "",
+      "status": 501,
+      "ts_iso": "2026-09-11T00:47:03Z"
+     },
+     "POST": {
+      "body_raw": "",
+      "body_text": "",
+      "status": 200,
+      "ts_iso": "2026-09-11T00:47:02Z"
+     },
+     "PUT": {
+      "body_raw": "",
+      "body_text": "",
+      "status": 200,
+      "ts_iso": "2026-09-11T00:47:02Z"
+     }
+    },
+    "methods_2xx": [
+     "GET",
+     "POST",
+     "PUT",
+     "DELETE"
+    ],
+    "op_type": "UPSERT",
+    "path": "http://localhost:9090/ws/simple/upsertQ3upsertna"
+   },
+   "UPSERT|singlejson": {
+    "405_text": "Error 405 Cannot make GET request on operation /ws/simple/upsertQ3upsertja[a71ed2d6-dbad-4e77-a59a-36ceacefce22] which expects input",
+    "callable": true,
+    "execution_check": {
+     "accepted_n": 3,
+     "record_status": [
+      "COMPLETE"
+     ],
+     "records": [
+      {
+       "executionId": "execution-1723ecb8-75f0-455d-b169-a27808849c2f-2026.09.11",
+       "executionTime": "2026-09-11T00:47:04Z",
+       "inboundDocumentCount": 1,
+       "status": "COMPLETE"
+      },
+      {
+       "executionId": "execution-dc58d915-2544-4d15-8592-7424a9f8815b-2026.09.11",
+       "executionTime": "2026-09-11T00:47:04Z",
+       "inboundDocumentCount": 1,
+       "status": "COMPLETE"
+      },
+      {
+       "executionId": "execution-06b5e429-bff6-411a-8a4a-4b29df7890d9-2026.09.11",
+       "executionTime": "2026-09-11T00:47:05Z",
+       "inboundDocumentCount": 1,
+       "status": "COMPLETE"
+      }
+     ],
+     "records_n": 3
+    },
+    "input_type": "singlejson",
+    "methods": {
+     "DELETE": {
+      "body_raw": "",
+      "body_text": "",
+      "status": 200,
+      "ts_iso": "2026-09-11T00:47:05Z"
+     },
+     "GET": {
+      "body_raw": "<html>\n<head>\n<meta http-equiv=\"Content-Type\" content=\"text/html; charset=ISO-8859-1\"/>\n<title>Error 405 Cannot make GET request on operation /ws/simple/upsertQ3upsertja[a71ed2d6-dbad-4e77-a59a-36ceacefce22] which expects input</title>\n</head>\n<body><h2>HTTP ERROR 405</h2>\n<p>Problem accessing /ws/simple/upsertQ3upsertja. Reason:\n<pre>    Cannot make GET request on operation /ws/simple/upsertQ3upsertja[a71ed2d6-dbad-4e77-a59a-36ceacefce22] which expects input</pre></p>\n</body>\n</html>\n",
+      "body_text": "Error 405 Cannot make GET request on operation /ws/simple/upsertQ3upsertja[a71ed2d6-dbad-4e77-a59a-36ceacefce22] which expects input",
+      "status": 405,
+      "ts_iso": "2026-09-11T00:47:04Z"
+     },
+     "PATCH": {
+      "body_raw": "",
+      "body_text": "",
+      "status": 501,
+      "ts_iso": "2026-09-11T00:47:05Z"
+     },
+     "POST": {
+      "body_raw": "",
+      "body_text": "",
+      "status": 200,
+      "ts_iso": "2026-09-11T00:47:04Z"
+     },
+     "PUT": {
+      "body_raw": "",
+      "body_text": "",
+      "status": 200,
+      "ts_iso": "2026-09-11T00:47:04Z"
+     }
+    },
+    "methods_2xx": [
+     "POST",
+     "PUT",
+     "DELETE"
+    ],
+    "op_type": "UPSERT",
+    "path": "http://localhost:9090/ws/simple/upsertQ3upsertja"
+   }
+  },
+  "final_round": "poll05",
+  "rounds": [
+   {
+    "grid": {
+     "CREATE|none DELETE": 200,
+     "CREATE|none GET": 200,
+     "CREATE|none PATCH": 501,
+     "CREATE|none POST": 200,
+     "CREATE|none PUT": 200,
+     "CREATE|singlejson DELETE": 200,
+     "CREATE|singlejson GET": 405,
+     "CREATE|singlejson PATCH": 501,
+     "CREATE|singlejson POST": 200,
+     "CREATE|singlejson PUT": 200,
+     "DELETE|none DELETE": 200,
+     "DELETE|none GET": 200,
+     "DELETE|none PATCH": 501,
+     "DELETE|none POST": 200,
+     "DELETE|none PUT": 200,
+     "DELETE|singlejson DELETE": 200,
+     "DELETE|singlejson GET": 405,
+     "DELETE|singlejson PATCH": 501,
+     "DELETE|singlejson POST": 200,
+     "DELETE|singlejson PUT": 200,
+     "EXECUTE|none DELETE": 200,
+     "EXECUTE|none GET": 200,
+     "EXECUTE|none PATCH": 501,
+     "EXECUTE|none POST": 200,
+     "EXECUTE|none PUT": 200,
+     "EXECUTE|singlejson DELETE": 200,
+     "EXECUTE|singlejson GET": 405,
+     "EXECUTE|singlejson PATCH": 501,
+     "EXECUTE|singlejson POST": 200,
+     "EXECUTE|singlejson PUT": 200,
+     "GET|none DELETE": 200,
+     "GET|none GET": 200,
+     "GET|none PATCH": 501,
+     "GET|none POST": 200,
+     "GET|none PUT": 200,
+     "GET|singlejson DELETE": 200,
+     "GET|singlejson GET": 405,
+     "GET|singlejson PATCH": 501,
+     "GET|singlejson POST": 200,
+     "GET|singlejson PUT": 200,
+     "QUERY|none DELETE": 200,
+     "QUERY|none GET": 200,
+     "QUERY|none PATCH": 501,
+     "QUERY|none POST": 200,
+     "QUERY|none PUT": 200,
+     "QUERY|singlejson DELETE": 200,
+     "QUERY|singlejson GET": 405,
+     "QUERY|singlejson PATCH": 501,
+     "QUERY|singlejson POST": 200,
+     "QUERY|singlejson PUT": 200,
+     "UPDATE|none DELETE": 200,
+     "UPDATE|none GET": 200,
+     "UPDATE|none PATCH": 501,
+     "UPDATE|none POST": 200,
+     "UPDATE|none PUT": 200,
+     "UPDATE|singlejson DELETE": 200,
+     "UPDATE|singlejson GET": 405,
+     "UPDATE|singlejson PATCH": 501,
+     "UPDATE|singlejson POST": 200,
+     "UPDATE|singlejson PUT": 200,
+     "UPSERT|none DELETE": 200,
+     "UPSERT|none GET": 200,
+     "UPSERT|none PATCH": 501,
+     "UPSERT|none POST": 200,
+     "UPSERT|none PUT": 200,
+     "UPSERT|singlejson DELETE": 200,
+     "UPSERT|singlejson GET": 405,
+     "UPSERT|singlejson PATCH": 501,
+     "UPSERT|singlejson POST": 200,
+     "UPSERT|singlejson PUT": 200
+    },
+    "round": "r3-evidence-B-poll01.json"
+   },
+   {
+    "grid": {
+     "CREATE|none DELETE": 200,
+     "CREATE|none GET": 200,
+     "CREATE|none PATCH": 501,
+     "CREATE|none POST": 200,
+     "CREATE|none PUT": 200,
+     "CREATE|singlejson DELETE": 200,
+     "CREATE|singlejson GET": 405,
+     "CREATE|singlejson PATCH": 501,
+     "CREATE|singlejson POST": 200,
+     "CREATE|singlejson PUT": 200,
+     "DELETE|none DELETE": 200,
+     "DELETE|none GET": 200,
+     "DELETE|none PATCH": 501,
+     "DELETE|none POST": 200,
+     "DELETE|none PUT": 200,
+     "DELETE|singlejson DELETE": 200,
+     "DELETE|singlejson GET": 405,
+     "DELETE|singlejson PATCH": 501,
+     "DELETE|singlejson POST": 200,
+     "DELETE|singlejson PUT": 200,
+     "EXECUTE|none DELETE": 200,
+     "EXECUTE|none GET": 200,
+     "EXECUTE|none PATCH": 501,
+     "EXECUTE|none POST": 200,
+     "EXECUTE|none PUT": 200,
+     "EXECUTE|singlejson DELETE": 200,
+     "EXECUTE|singlejson GET": 405,
+     "EXECUTE|singlejson PATCH": 501,
+     "EXECUTE|singlejson POST": 200,
+     "EXECUTE|singlejson PUT": 200,
+     "GET|none DELETE": 200,
+     "GET|none GET": 200,
+     "GET|none PATCH": 501,
+     "GET|none POST": 200,
+     "GET|none PUT": 200,
+     "GET|singlejson DELETE": 200,
+     "GET|singlejson GET": 405,
+     "GET|singlejson PATCH": 501,
+     "GET|singlejson POST": 200,
+     "GET|singlejson PUT": 200,
+     "QUERY|none DELETE": 200,
+     "QUERY|none GET": 200,
+     "QUERY|none PATCH": 501,
+     "QUERY|none POST": 200,
+     "QUERY|none PUT": 200,
+     "QUERY|singlejson DELETE": 200,
+     "QUERY|singlejson GET": 405,
+     "QUERY|singlejson PATCH": 501,
+     "QUERY|singlejson POST": 200,
+     "QUERY|singlejson PUT": 200,
+     "UPDATE|none DELETE": 200,
+     "UPDATE|none GET": 200,
+     "UPDATE|none PATCH": 501,
+     "UPDATE|none POST": 200,
+     "UPDATE|none PUT": 200,
+     "UPDATE|singlejson DELETE": 200,
+     "UPDATE|singlejson GET": 405,
+     "UPDATE|singlejson PATCH": 501,
+     "UPDATE|singlejson POST": 200,
+     "UPDATE|singlejson PUT": 200,
+     "UPSERT|none DELETE": 200,
+     "UPSERT|none GET": 200,
+     "UPSERT|none PATCH": 501,
+     "UPSERT|none POST": 200,
+     "UPSERT|none PUT": 200,
+     "UPSERT|singlejson DELETE": 200,
+     "UPSERT|singlejson GET": 405,
+     "UPSERT|singlejson PATCH": 501,
+     "UPSERT|singlejson POST": 200,
+     "UPSERT|singlejson PUT": 200
+    },
+    "round": "r3-evidence-B-poll02.json"
+   },
+   {
+    "grid": {
+     "CREATE|none DELETE": 200,
+     "CREATE|none GET": 200,
+     "CREATE|none PATCH": 501,
+     "CREATE|none POST": 200,
+     "CREATE|none PUT": 200,
+     "CREATE|singlejson DELETE": 200,
+     "CREATE|singlejson GET": 405,
+     "CREATE|singlejson PATCH": 501,
+     "CREATE|singlejson POST": 200,
+     "CREATE|singlejson PUT": 200,
+     "DELETE|none DELETE": 200,
+     "DELETE|none GET": 200,
+     "DELETE|none PATCH": 501,
+     "DELETE|none POST": 200,
+     "DELETE|none PUT": 200,
+     "DELETE|singlejson DELETE": 200,
+     "DELETE|singlejson GET": 405,
+     "DELETE|singlejson PATCH": 501,
+     "DELETE|singlejson POST": 200,
+     "DELETE|singlejson PUT": 200,
+     "EXECUTE|none DELETE": 200,
+     "EXECUTE|none GET": 200,
+     "EXECUTE|none PATCH": 501,
+     "EXECUTE|none POST": 200,
+     "EXECUTE|none PUT": 200,
+     "EXECUTE|singlejson DELETE": 200,
+     "EXECUTE|singlejson GET": 405,
+     "EXECUTE|singlejson PATCH": 501,
+     "EXECUTE|singlejson POST": 200,
+     "EXECUTE|singlejson PUT": 200,
+     "GET|none DELETE": 200,
+     "GET|none GET": 200,
+     "GET|none PATCH": 501,
+     "GET|none POST": 200,
+     "GET|none PUT": 200,
+     "GET|singlejson DELETE": 200,
+     "GET|singlejson GET": 405,
+     "GET|singlejson PATCH": 501,
+     "GET|singlejson POST": 200,
+     "GET|singlejson PUT": 200,
+     "QUERY|none DELETE": 200,
+     "QUERY|none GET": 200,
+     "QUERY|none PATCH": 501,
+     "QUERY|none POST": 200,
+     "QUERY|none PUT": 200,
+     "QUERY|singlejson DELETE": 200,
+     "QUERY|singlejson GET": 405,
+     "QUERY|singlejson PATCH": 501,
+     "QUERY|singlejson POST": 200,
+     "QUERY|singlejson PUT": 200,
+     "UPDATE|none DELETE": 200,
+     "UPDATE|none GET": 200,
+     "UPDATE|none PATCH": 501,
+     "UPDATE|none POST": 200,
+     "UPDATE|none PUT": 200,
+     "UPDATE|singlejson DELETE": 200,
+     "UPDATE|singlejson GET": 405,
+     "UPDATE|singlejson PATCH": 501,
+     "UPDATE|singlejson POST": 200,
+     "UPDATE|singlejson PUT": 200,
+     "UPSERT|none DELETE": 200,
+     "UPSERT|none GET": 200,
+     "UPSERT|none PATCH": 501,
+     "UPSERT|none POST": 200,
+     "UPSERT|none PUT": 200,
+     "UPSERT|singlejson DELETE": 200,
+     "UPSERT|singlejson GET": 405,
+     "UPSERT|singlejson PATCH": 501,
+     "UPSERT|singlejson POST": 200,
+     "UPSERT|singlejson PUT": 200
+    },
+    "round": "r3-evidence-B-poll03.json"
+   },
+   {
+    "grid": {
+     "CREATE|none DELETE": 200,
+     "CREATE|none GET": 200,
+     "CREATE|none PATCH": 501,
+     "CREATE|none POST": 200,
+     "CREATE|none PUT": 200,
+     "CREATE|singlejson DELETE": 200,
+     "CREATE|singlejson GET": 405,
+     "CREATE|singlejson PATCH": 501,
+     "CREATE|singlejson POST": 200,
+     "CREATE|singlejson PUT": 200,
+     "DELETE|none DELETE": 200,
+     "DELETE|none GET": 200,
+     "DELETE|none PATCH": 501,
+     "DELETE|none POST": 200,
+     "DELETE|none PUT": 200,
+     "DELETE|singlejson DELETE": 200,
+     "DELETE|singlejson GET": 405,
+     "DELETE|singlejson PATCH": 501,
+     "DELETE|singlejson POST": 200,
+     "DELETE|singlejson PUT": 200,
+     "EXECUTE|none DELETE": 200,
+     "EXECUTE|none GET": 200,
+     "EXECUTE|none PATCH": 501,
+     "EXECUTE|none POST": 200,
+     "EXECUTE|none PUT": 200,
+     "EXECUTE|singlejson DELETE": 200,
+     "EXECUTE|singlejson GET": 405,
+     "EXECUTE|singlejson PATCH": 501,
+     "EXECUTE|singlejson POST": 200,
+     "EXECUTE|singlejson PUT": 200,
+     "GET|none DELETE": 200,
+     "GET|none GET": 200,
+     "GET|none PATCH": 501,
+     "GET|none POST": 200,
+     "GET|none PUT": 200,
+     "GET|singlejson DELETE": 200,
+     "GET|singlejson GET": 405,
+     "GET|singlejson PATCH": 501,
+     "GET|singlejson POST": 200,
+     "GET|singlejson PUT": 200,
+     "QUERY|none DELETE": 200,
+     "QUERY|none GET": 200,
+     "QUERY|none PATCH": 501,
+     "QUERY|none POST": 200,
+     "QUERY|none PUT": 200,
+     "QUERY|singlejson DELETE": 200,
+     "QUERY|singlejson GET": 405,
+     "QUERY|singlejson PATCH": 501,
+     "QUERY|singlejson POST": 200,
+     "QUERY|singlejson PUT": 200,
+     "UPDATE|none DELETE": 200,
+     "UPDATE|none GET": 200,
+     "UPDATE|none PATCH": 501,
+     "UPDATE|none POST": 200,
+     "UPDATE|none PUT": 200,
+     "UPDATE|singlejson DELETE": 200,
+     "UPDATE|singlejson GET": 405,
+     "UPDATE|singlejson PATCH": 501,
+     "UPDATE|singlejson POST": 200,
+     "UPDATE|singlejson PUT": 200,
+     "UPSERT|none DELETE": 200,
+     "UPSERT|none GET": 200,
+     "UPSERT|none PATCH": 501,
+     "UPSERT|none POST": 200,
+     "UPSERT|none PUT": 200,
+     "UPSERT|singlejson DELETE": 200,
+     "UPSERT|singlejson GET": 405,
+     "UPSERT|singlejson PATCH": 501,
+     "UPSERT|singlejson POST": 200,
+     "UPSERT|singlejson PUT": 200
+    },
+    "round": "r3-evidence-B-poll04.json"
+   },
+   {
+    "grid": {
+     "CREATE|none DELETE": 200,
+     "CREATE|none GET": 200,
+     "CREATE|none PATCH": 501,
+     "CREATE|none POST": 200,
+     "CREATE|none PUT": 200,
+     "CREATE|singlejson DELETE": 200,
+     "CREATE|singlejson GET": 405,
+     "CREATE|singlejson PATCH": 501,
+     "CREATE|singlejson POST": 200,
+     "CREATE|singlejson PUT": 200,
+     "DELETE|none DELETE": 200,
+     "DELETE|none GET": 200,
+     "DELETE|none PATCH": 501,
+     "DELETE|none POST": 200,
+     "DELETE|none PUT": 200,
+     "DELETE|singlejson DELETE": 200,
+     "DELETE|singlejson GET": 405,
+     "DELETE|singlejson PATCH": 501,
+     "DELETE|singlejson POST": 200,
+     "DELETE|singlejson PUT": 200,
+     "EXECUTE|none DELETE": 200,
+     "EXECUTE|none GET": 200,
+     "EXECUTE|none PATCH": 501,
+     "EXECUTE|none POST": 200,
+     "EXECUTE|none PUT": 200,
+     "EXECUTE|singlejson DELETE": 200,
+     "EXECUTE|singlejson GET": 405,
+     "EXECUTE|singlejson PATCH": 501,
+     "EXECUTE|singlejson POST": 200,
+     "EXECUTE|singlejson PUT": 200,
+     "GET|none DELETE": 200,
+     "GET|none GET": 200,
+     "GET|none PATCH": 501,
+     "GET|none POST": 200,
+     "GET|none PUT": 200,
+     "GET|singlejson DELETE": 200,
+     "GET|singlejson GET": 405,
+     "GET|singlejson PATCH": 501,
+     "GET|singlejson POST": 200,
+     "GET|singlejson PUT": 200,
+     "QUERY|none DELETE": 200,
+     "QUERY|none GET": 200,
+     "QUERY|none PATCH": 501,
+     "QUERY|none POST": 200,
+     "QUERY|none PUT": 200,
+     "QUERY|singlejson DELETE": 200,
+     "QUERY|singlejson GET": 405,
+     "QUERY|singlejson PATCH": 501,
+     "QUERY|singlejson POST": 200,
+     "QUERY|singlejson PUT": 200,
+     "UPDATE|none DELETE": 200,
+     "UPDATE|none GET": 200,
+     "UPDATE|none PATCH": 501,
+     "UPDATE|none POST": 200,
+     "UPDATE|none PUT": 200,
+     "UPDATE|singlejson DELETE": 200,
+     "UPDATE|singlejson GET": 405,
+     "UPDATE|singlejson PATCH": 501,
+     "UPDATE|singlejson POST": 200,
+     "UPDATE|singlejson PUT": 200,
+     "UPSERT|none DELETE": 200,
+     "UPSERT|none GET": 200,
+     "UPSERT|none PATCH": 501,
+     "UPSERT|none POST": 200,
+     "UPSERT|none PUT": 200,
+     "UPSERT|singlejson DELETE": 200,
+     "UPSERT|singlejson GET": 405,
+     "UPSERT|singlejson PATCH": 501,
+     "UPSERT|singlejson POST": 200,
+     "UPSERT|singlejson PUT": 200
+    },
+    "round": "r3-evidence-B-poll05.json"
+   }
+  ]
+ },
+ "question": "HTTP method(s) served per Web Services Server operationType x inputType, /ws/rest (all-inherit ASC route, apiType advanced) and bare /ws/simple (apiType intermediate)",
+ "tool_tree": "git archive 3a8469e (code digest 7fdd71d3b7c1aec8); worktree neither imported nor stamped"
+}

@@ -655,6 +655,13 @@ INSPECTABLE_CHILD_KINDS = frozenset({
     "document_cache_retrieve",
     "exception",
     "flow_control",
+    # #158: listener. INSPECTABLE for the reason `connector` is: it receives
+    # inbound requests, which is I/O, not state. MEASURED against the same
+    # authorities: `_reads_of` and `_writes_of` both return `()` for a listener
+    # semantic and `_replay_hazard` returns None, so it cannot change a state
+    # answer or a replay verdict. It mints no replay grant either — it is not a
+    # connector-call binding, so the grant path never reaches it.
+    "listener",
     "message",
     # #156: notify. INSPECTABLE for exactly the reason `connector` is — it does
     # I/O, and I/O is not state. MEASURED against the lineage authority rather

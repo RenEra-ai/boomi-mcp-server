@@ -68,12 +68,14 @@ from typing import (
 
 from ...errors import (
     PROCESS_IR_CAPABILITY_ERROR_SCOPE_UNSUPPORTED,
+    PROCESS_IR_CAPABILITY_LISTENER_COMPOSITION_UNSUPPORTED,
     PROCESS_IR_CAPABILITY_UNSUPPORTED,
     PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY,
     PROCESS_IR_SEMANTIC_RECOVERY_PROCESS_CALL_INVALID,
     PROCESS_IR_CAPABILITY_PROCESS_CALL_RETURN_PATH_BINDING_UNSUPPORTED,
     PROCESS_IR_SEMANTIC_CATCH_UNTERMINATED,
     PROCESS_IR_SEMANTIC_NESTING_LIMIT,
+    PROCESS_IR_SCHEMA_INVALID_CARDINALITY,
 )
 from pydantic_core import PydanticCustomError
 
@@ -83,6 +85,7 @@ from ...models.process_ir import (
     PLACEMENT_ROOT_CONNECTOR_MIXING,
     PROCESS_CALL_PLACEMENT_CONTEXT_LABELS,
     PROCESS_IR_V1_MAX_CONTROL_DEPTH,
+    LISTENER_PLACEMENT_POSITION,
     BranchLegV1,
     DecisionFalseArmV1,
     DecisionTrueArmV1,
@@ -94,6 +97,7 @@ from ...models.process_ir import (
     _check_no_orphan_continue,
     _check_serialized_region_chain,
     _is_serialized_region_chain,
+    listener_root_verdict,
     process_call_placement_verdict,
     process_call_root_verdict,
 )
@@ -799,6 +803,30 @@ def _check_process_call_placement(ir: ProcessIRV1) -> None:
     )
 
 
+def _check_listener_placement(ir: ProcessIRV1) -> None:
+    """Re-check WHERE a ``listener`` sits and what it composes with (#158).
+
+    Same mutable-model defence as :func:`_check_process_call_placement`, and the
+    same shared verdict the parser renders, so the two entry points cannot serve
+    different identities for one document. A listener is a ROOT-ONLY kind, so a
+    nested one never reaches this: the body unions do not admit it at all.
+    """
+    verdict = listener_root_verdict(
+        [getattr(step, "kind", None) for step in ir.body.steps]
+    )
+    if verdict is None:
+        return
+    reason, at, message = verdict
+    raise raise_compile_error(
+        PROCESS_IR_SCHEMA_INVALID_CARDINALITY
+        if reason == LISTENER_PLACEMENT_POSITION
+        else PROCESS_IR_CAPABILITY_LISTENER_COMPOSITION_UNSUPPORTED,
+        _SEMANTIC_PHASE,
+        _join("/body", *at),
+        message=message,
+    )
+
+
 def validate_body_capabilities(ir: ProcessIRV1) -> None:
     """Check every control-body slot and the control-depth bound.
 
@@ -808,6 +836,7 @@ def validate_body_capabilities(ir: ProcessIRV1) -> None:
     A document with no control node walks zero bodies and returns immediately,
     so no pre-#141 dialect changes behaviour.
     """
+    _check_listener_placement(ir)
     _check_try_catch_placement(ir)
     _check_process_call_placement(ir)
     root_kinds = [getattr(step, "kind", None) for step in ir.body.steps]

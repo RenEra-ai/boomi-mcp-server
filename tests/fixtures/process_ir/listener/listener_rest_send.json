@@ -1,0 +1,11 @@
+{
+  "version": "1",
+  "body": {
+    "kind": "sequence",
+    "steps": [
+      {"kind": "listener", "operation_ref": "$ref:wss_listen_op"},
+      {"kind": "target", "connection_ref": "$ref:rest_conn", "operation_ref": "$ref:rest_post_op"},
+      {"kind": "stop"}
+    ]
+  }
+}

@@ -1,7 +1,7 @@
 {
   "_doc": [
-    "Frozen test-only corpus (#139E M12.4): EVERY currently-canonical NON-listener",
-    "sync_pipeline chain, plus one verb-casing duplicate. No production code path",
+    "Frozen test-only corpus (#139E M12.4, listener chains added by #158): EVERY",
+    "canonical sync_pipeline chain, plus one verb-casing duplicate. No production code path",
     "reads this file.",
     "",
     "It is the SINGLE definition of 'which chains are canonical', shared by",
@@ -98,10 +98,14 @@
     "byte-exact or the anchored assertion is meaningless. The rest are pinned by the",
     "differential oracle alone.",
     "",
-    "The WSS listener chains are NOT here: their fused `start_listen` entry has no",
-    "registry key, so they stay on the legacy renderer. The coverage test still GENERATES",
-    "them as candidates and asserts the gate routes them to the legacy arm -- so when #140",
-    "lands start_listen and they become canonical, that test fails until this corpus grows."
+    "The six WSS listener chains (wss_listen x {rest_send, soap_send, db_write} x +/-map) ARE",
+    "here since #158 made the fused `start_listen` entry canonical and flipped both routing",
+    "gates. All six carry an `anchor`: four were rendered by the legacy renderer before",
+    "#158 (listener_chain:* goldens), and the two SOAP-target anchors were captured from",
+    "the legacy renderer at #158's step-0 baseline, BEFORE either gate changed",
+    "(docs/architecture/evidence/issue-158/preflip/). `golden_input_case` keeps each",
+    "anchor's existing golden-manifest identity, so the corpus is the single definition",
+    "of these chains and the manifest rows did not move."
   ],
   "cases": {
     "db_read_rest_send": {
@@ -814,6 +818,260 @@
           "dependencies": [
             {
               "from_stage": "s",
+              "to_stage": "t"
+            }
+          ]
+        }
+      }
+    },
+    "wss_listen_rest_send": {
+      "anchor": "sync_pipeline_listener_send.xml",
+      "golden_input_case": "listener_chain:listener_send",
+      "name": "Sync Listener Send Golden",
+      "folder_name": "Golden/Fixtures",
+      "config": {
+        "process_kind": "sync_pipeline",
+        "pipeline": {
+          "stages": [
+            {
+              "key": "s",
+              "kind": "listener",
+              "config": {
+                "primitive": "wss_listen",
+                "operation_id": "WSSOP-1"
+              }
+            },
+            {
+              "key": "t",
+              "kind": "send",
+              "config": {
+                "primitive": "rest_send",
+                "action_type": "POST",
+                "connection_id": "TGT-CONN",
+                "operation_id": "TGT-OP"
+              }
+            }
+          ],
+          "dependencies": [
+            {
+              "from_stage": "s",
+              "to_stage": "t"
+            }
+          ]
+        }
+      }
+    },
+    "wss_listen_map_rest_send": {
+      "anchor": "sync_pipeline_listener_map_send.xml",
+      "golden_input_case": "listener_chain:listener_map_send",
+      "name": "Sync Listener Map Send Golden",
+      "folder_name": "Golden/Fixtures",
+      "config": {
+        "process_kind": "sync_pipeline",
+        "pipeline": {
+          "stages": [
+            {
+              "key": "s",
+              "kind": "listener",
+              "config": {
+                "primitive": "wss_listen",
+                "operation_id": "WSSOP-1"
+              }
+            },
+            {
+              "key": "m",
+              "kind": "map",
+              "config": {
+                "primitive": "map",
+                "map_ref": "MAP-1"
+              }
+            },
+            {
+              "key": "t",
+              "kind": "send",
+              "config": {
+                "primitive": "rest_send",
+                "action_type": "POST",
+                "connection_id": "TGT-CONN",
+                "operation_id": "TGT-OP"
+              }
+            }
+          ],
+          "dependencies": [
+            {
+              "from_stage": "s",
+              "to_stage": "m"
+            },
+            {
+              "from_stage": "m",
+              "to_stage": "t"
+            }
+          ]
+        }
+      }
+    },
+    "wss_listen_db_write": {
+      "anchor": "sync_pipeline_listener_write.xml",
+      "golden_input_case": "listener_chain:listener_write",
+      "name": "Sync Listener Write Golden",
+      "folder_name": "Golden/Fixtures",
+      "config": {
+        "process_kind": "sync_pipeline",
+        "pipeline": {
+          "stages": [
+            {
+              "key": "s",
+              "kind": "listener",
+              "config": {
+                "primitive": "wss_listen",
+                "operation_id": "WSSOP-1"
+              }
+            },
+            {
+              "key": "t",
+              "kind": "write",
+              "config": {
+                "primitive": "db_write",
+                "connection_id": "TGT-CONN",
+                "operation_id": "TGT-OP"
+              }
+            }
+          ],
+          "dependencies": [
+            {
+              "from_stage": "s",
+              "to_stage": "t"
+            }
+          ]
+        }
+      }
+    },
+    "wss_listen_map_db_write": {
+      "anchor": "sync_pipeline_listener_map_write.xml",
+      "golden_input_case": "listener_chain:listener_map_write",
+      "name": "Sync Listener Map Write Golden",
+      "folder_name": "Golden/Fixtures",
+      "config": {
+        "process_kind": "sync_pipeline",
+        "pipeline": {
+          "stages": [
+            {
+              "key": "s",
+              "kind": "listener",
+              "config": {
+                "primitive": "wss_listen",
+                "operation_id": "WSSOP-1"
+              }
+            },
+            {
+              "key": "m",
+              "kind": "map",
+              "config": {
+                "primitive": "map",
+                "map_ref": "MAP-1"
+              }
+            },
+            {
+              "key": "t",
+              "kind": "write",
+              "config": {
+                "primitive": "db_write",
+                "connection_id": "TGT-CONN",
+                "operation_id": "TGT-OP"
+              }
+            }
+          ],
+          "dependencies": [
+            {
+              "from_stage": "s",
+              "to_stage": "m"
+            },
+            {
+              "from_stage": "m",
+              "to_stage": "t"
+            }
+          ]
+        }
+      }
+    },
+    "wss_listen_soap_send": {
+      "anchor": "sync_pipeline_listener_soap_send.xml",
+      "golden_input_case": "listener_chain:listener_soap_send",
+      "name": "Sync Listener Soap Send Golden",
+      "folder_name": "Golden/Fixtures",
+      "config": {
+        "process_kind": "sync_pipeline",
+        "pipeline": {
+          "stages": [
+            {
+              "key": "s",
+              "kind": "listener",
+              "config": {
+                "primitive": "wss_listen",
+                "operation_id": "WSSOP-1"
+              }
+            },
+            {
+              "key": "t",
+              "kind": "send",
+              "config": {
+                "primitive": "soap_send",
+                "connection_id": "TGT-CONN",
+                "operation_id": "TGT-OP"
+              }
+            }
+          ],
+          "dependencies": [
+            {
+              "from_stage": "s",
+              "to_stage": "t"
+            }
+          ]
+        }
+      }
+    },
+    "wss_listen_map_soap_send": {
+      "anchor": "sync_pipeline_listener_map_soap_send.xml",
+      "golden_input_case": "listener_chain:listener_map_soap_send",
+      "name": "Sync Listener Map Soap Send Golden",
+      "folder_name": "Golden/Fixtures",
+      "config": {
+        "process_kind": "sync_pipeline",
+        "pipeline": {
+          "stages": [
+            {
+              "key": "s",
+              "kind": "listener",
+              "config": {
+                "primitive": "wss_listen",
+                "operation_id": "WSSOP-1"
+              }
+            },
+            {
+              "key": "m",
+              "kind": "map",
+              "config": {
+                "primitive": "map",
+                "map_ref": "MAP-1"
+              }
+            },
+            {
+              "key": "t",
+              "kind": "send",
+              "config": {
+                "primitive": "soap_send",
+                "connection_id": "TGT-CONN",
+                "operation_id": "TGT-OP"
+              }
+            }
+          ],
+          "dependencies": [
+            {
+              "from_stage": "s",
+              "to_stage": "m"
+            },
+            {
+              "from_stage": "m",
               "to_stage": "t"
             }
           ]

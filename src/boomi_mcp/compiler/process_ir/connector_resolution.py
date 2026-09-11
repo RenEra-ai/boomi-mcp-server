@@ -38,8 +38,10 @@ from ...errors import (
     PROCESS_IR_SEMANTIC_DYNAMIC_PATH_REQUIRED,
     PROCESS_IR_REFERENCE_CONNECTION_MISMATCH,
     PROCESS_IR_REFERENCE_CONNECTION_NOT_FOUND,
+    PROCESS_IR_REFERENCE_LISTENER_OPERATION_INVALID,
     PROCESS_IR_REFERENCE_OPERATION_NOT_FOUND,
     PROCESS_IR_SEMANTIC_CARDINALITY_MISMATCH,
+    PROCESS_IR_SEMANTIC_LISTENER_INBOUND_CONTRACT_UNSATISFIED,
     PROCESS_IR_SEMANTIC_PROFILE_MISMATCH,
 )
 from .connector_capabilities import (
@@ -92,6 +94,131 @@ def _symbol(index: Mapping[str, Any], ref: Optional[str]) -> Optional[ComponentS
     if not ref:
         return None
     return index.get(ref)
+
+
+# ---------------------------------------------------------------------------
+# #158: the listener entry
+# ---------------------------------------------------------------------------
+
+#: The action a Web Services Server operation must resolve to for it to be a
+#: listener's operation, case-folded for comparison only.
+LISTENER_ACTION = "Listen"
+
+
+def is_listener_operation_symbol(symbol: Optional[ComponentSymbolV1]) -> bool:
+    """Does this resolved symbol name an operation a ``listener`` may bind to?
+
+    A connector-action whose family is a Web Services Server spelling the
+    builder ACCEPTS, whose action is Listen, and which carries no connection.
+    The accepted spellings come from ``connector_builder`` — the resolver the
+    WSS builder itself routes on — rather than from ``LISTENER_CONNECTOR_TYPES``,
+    which is a broader REFUSAL set: ``wssserver`` and ``listener`` are refused
+    as an ordinary connector and accepted nowhere. A connection on the symbol is
+    refused rather than ignored — a listener has none, and one arriving through
+    the symbol table is an invented binding.
+    """
+    from ...categories.components.builders.connector_builder import (
+        _resolve_wss_connector_type,
+    )
+
+    if symbol is None or _canonical_type(symbol) != CONNECTOR_ACTION_COMPONENT_TYPE:
+        return False
+    if _resolve_wss_connector_type(symbol.connector_type) is None:
+        return False
+    if str(symbol.action_type or "").strip().casefold() != LISTENER_ACTION.casefold():
+        return False
+    return symbol.connection_ref is None
+
+
+def profile_bound_input_types() -> frozenset:
+    """The listener input types that carry a profile-bindable document.
+
+    Read from the WSS operation builder, which validates ``input_type`` against
+    the same set when it binds a request profile — one authority for "this input
+    type can be bound to a profile", not a copy kept beside it.
+    """
+    from ...categories.components.builders.connector_builder import (
+        _WSS_JSON_XML_TYPES,
+    )
+
+    return frozenset(_WSS_JSON_XML_TYPES)
+
+
+def _inbound_profile_bound(index: Mapping[str, Any], ref: Optional[str]) -> bool:
+    """Is the listener's request profile bound to something that can be a profile?
+
+    Absent or blank is unbound. A ``$ref:`` naming a symbol must name a PROFILE
+    component — a map or a connection is not a weaker binding, it is none. A
+    literal component id outside the table cannot be classified offline and is
+    accepted, exactly as the listener builder's own contract accepts it.
+    """
+    if not isinstance(ref, str) or not ref.strip():
+        return False
+    symbol = index.get(ref)
+    if symbol is not None:
+        return _canonical_type(symbol) in PROFILE_COMPONENT_TYPES
+    return not ref.startswith("$ref:")
+
+
+def listener_operation_symbol(
+    symbols: SymbolTableV1, operation_ref: str
+) -> Optional[ComponentSymbolV1]:
+    """The symbol a listener's operation ref names — the listener entry's ONE lookup.
+
+    Through the table's own index, keyed on the reference it was asked about, so
+    the answer cannot depend on how many other symbols the table holds or where
+    they sit. Pinned structurally to exactly this expression by
+    ``test_the_family_lookup_cannot_depend_on_table_size``.
+    """
+    return symbols.build_index().get(operation_ref)
+
+
+def validate_listener_entry(cfg: SemanticCfgV1, symbols: SymbolTableV1) -> None:
+    """Resolve the listener entry's operation and its requested inbound contract.
+
+    Operation-only, the inverse of a ``connector_call``: the listener names an
+    operation and NO connection, so there is no connection to resolve and a
+    connection-carrying symbol is refused. Nothing here mints endpoint, path or
+    replay facts for the listener; the outbound checks for the calls downstream
+    of it run unchanged in the passes after this one.
+    """
+    index = symbols.build_index()
+    for node in cfg.nodes:
+        semantic = node.semantic
+        if semantic.semantic_kind != "listener":
+            continue
+        path = node.source_path
+        operation_path = "{0}/operation_ref".format(path)
+        operation = (
+            listener_operation_symbol(symbols, semantic.operation_ref)
+            if semantic.operation_ref
+            else None
+        )
+        if operation is None or _canonical_type(operation) != CONNECTOR_ACTION_COMPONENT_TYPE:
+            raise raise_compile_error(
+                PROCESS_IR_REFERENCE_OPERATION_NOT_FOUND,
+                "reference_resolution",
+                operation_path,
+                internal_node_id=node.node_id,
+            )
+        if not is_listener_operation_symbol(operation):
+            raise raise_compile_error(
+                PROCESS_IR_REFERENCE_LISTENER_OPERATION_INVALID,
+                "reference_resolution",
+                operation_path,
+                internal_node_id=node.node_id,
+            )
+        if semantic.inbound_validation == "profile_bound":
+            input_type = str(operation.input_document_type or "").strip().casefold()
+            if input_type not in profile_bound_input_types() or not _inbound_profile_bound(
+                index, operation.input_profile_ref
+            ):
+                raise raise_compile_error(
+                    PROCESS_IR_SEMANTIC_LISTENER_INBOUND_CONTRACT_UNSATISFIED,
+                    "reference_resolution",
+                    "{0}/inbound_validation".format(path),
+                    internal_node_id=node.node_id,
+                )
 
 
 def _canonical_type(symbol: ComponentSymbolV1) -> str:
@@ -596,6 +723,14 @@ def _walk_paths(cfg: SemanticCfgV1, index, binding_by_node) -> None:
             state.producer = node
             state.producer_binding = None
             state.blocked_by = None
+        elif kind == "listener":
+            # #158. The inbound request IS the flow's documents, so a
+            # documents-required call downstream of a listener has input. Like a
+            # legacy source endpoint it carries no response profile a map could
+            # be compared against, so it is a producer but never a binding.
+            state.producer = node
+            state.producer_binding = None
+            state.blocked_by = None
         elif kind == "cache_put":
             # Add to Cache consumes the stream. The model already requires a
             # stream-replacing read immediately after it within the same body.
@@ -767,6 +902,9 @@ def validate_connector_calls(cfg: SemanticCfgV1, symbols: SymbolTableV1) -> None
     an unsafe retry is reported as an unsafe retry, rather than surfacing as
     whichever cardinality/profile complaint the same payload happens to trip.
     """
+    # #158: the listener entry first — it is the flow's entry, so an unusable
+    # listener is the root cause of anything downstream that would also fail.
+    validate_listener_entry(cfg, symbols)
     validate_dynamic_path_capability(cfg, symbols)
     validate_dynamic_path_required(cfg, symbols)
     bindings = resolve_connector_call_bindings(cfg, symbols)
@@ -776,6 +914,11 @@ def validate_connector_calls(cfg: SemanticCfgV1, symbols: SymbolTableV1) -> None
 
 __all__ = [
     "ConnectorCallBindingV1",
+    "LISTENER_ACTION",
+    "is_listener_operation_symbol",
+    "listener_operation_symbol",
+    "profile_bound_input_types",
+    "validate_listener_entry",
     "validate_dynamic_path_capability",
     "resolve_connector_call_bindings",
     "validate_connector_call_semantics",

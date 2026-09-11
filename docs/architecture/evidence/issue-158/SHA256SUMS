@@ -1,3 +1,5 @@
+ed5eb2fd179f4cde4a522304d635b170237847fc49b3cca8181664533d1981ff  captures/cap158-r3-wss-method-matrix/RECORD.json
+bb6751b4122dc02cacea62b3ebc1a4f7b8cb42799e7a8af27f6d07792c7defc3  captures/cap158-r3-wss-method-matrix/r3-wss-method-evidence.json
 75eba19ee4546c5f6f9d9675598cf30463821e1aceb147f7b85eaf38717d1cac  index.jsonl
 63d96273999f5de91a2aad94a8f3e93cc1adbf48c8f46f99da9f8e51099643e8  preflip/MANIFEST.json
 468086d75fd182cc1d783133a0d9e0b3eaad3e8be2d5386ba179c4108fcd5814  preflip/capture_preflip_anchors.py

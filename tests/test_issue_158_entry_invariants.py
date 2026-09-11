@@ -1,0 +1,400 @@
+"""#158: the relaxed entry-shape invariants still reject every mutation they did.
+
+The emission plan's ordinal-1 contract used to be "exactly one synthetic
+``start_noaction`` at shape1". #158 re-expressed it as **exactly one
+compiler-synthesized entry shape at shape1, of one of two admitted forms** — the
+no-action Start for a scheduled root, the fused listener Start for a listener
+root — so a listener entry could be emitted without weakening what the checks
+guarantee: the compiler owns the entry, and a caller can author neither its
+geometry, nor its wiring, nor its input.
+
+These are the per-site adversarials the acceptance criteria ask for. Every one
+starts from a plan the compiler REALLY produced (so the baseline is not a
+hand-built shape production never emits) and applies exactly one mutation; each
+asserts the exact refusal code. Where a scheduled control is meaningful it is
+asserted too, so a check that became form-blind in either direction fails.
+
+Fixture provenance: the listener flow is the audited listener form — it is the
+IR the `listener_entry` capability witness compiles to the frozen legacy golden
+``sync_pipeline_listener_send.xml`` byte-for-byte — plus a map step, the shape of
+``sync_pipeline_listener_map_send.xml``. Symbol ids are opaque test values.
+"""
+
+from __future__ import annotations
+
+import pytest
+
+from boomi_mcp.compiler.process_ir.contracts import (
+    SHAPE_Y,
+    START_SHAPE_X,
+    START_SHAPE_Y,
+    ComponentSymbolV1,
+    StartListenInputV1,
+    StartNoActionInputV1,
+    SymbolTableV1,
+    shape_x,
+)
+from boomi_mcp.compiler.process_ir.diagnostics import ProcessIRCompileError
+from boomi_mcp.compiler.process_ir.entry_policy import derive_process_entry
+from boomi_mcp.compiler.process_ir.execution_profile import (
+    derive_process_execution_profile,
+)
+from boomi_mcp.compiler.process_ir.invariants import (
+    check_cfg_invariants,
+    check_emission_plan_invariants,
+)
+from boomi_mcp.compiler.process_ir.lowering import _emitter_input_for
+from boomi_mcp.compiler.process_ir.pipeline import compile_process_ir_v1
+from boomi_mcp.errors import (
+    PROCESS_IR_COMPILE_EMISSION_PLAN_INVALID,
+    PROCESS_IR_COMPILE_INTERNAL,
+    PROCESS_IR_COMPILE_NONDETERMINISTIC,
+)
+from boomi_mcp.models.process_ir import parse_process_ir_v1
+
+_PLAN_INVALID = PROCESS_IR_COMPILE_EMISSION_PLAN_INVALID
+
+
+def _symbols():
+    return SymbolTableV1(
+        symbols=(
+            ComponentSymbolV1(ref="$ref:wss_op", component_id="WSSOP-1",
+                              component_type="connector-action",
+                              connector_type="wss", action_type="Listen"),
+            # A SECOND valid Listen operation: a forged Start naming it passes every
+            # "is this id in the table" check, so only exact re-derivation refuses it.
+            ComponentSymbolV1(ref="$ref:wss_op_2", component_id="WSSOP-2",
+                              component_type="connector-action",
+                              connector_type="wss", action_type="Listen"),
+            ComponentSymbolV1(ref="$ref:map", component_id="MAP-1",
+                              component_type="transform.map"),
+            ComponentSymbolV1(ref="$ref:tc", component_id="TGT-CONN",
+                              component_type="connector-settings",
+                              connector_type="rest"),
+            ComponentSymbolV1(ref="$ref:to", component_id="TGT-OP",
+                              component_type="connector-action",
+                              connector_type="rest", action_type="POST"),
+            ComponentSymbolV1(ref="$ref:sc", component_id="SRC-CONN",
+                              component_type="connector-settings",
+                              connector_type="database"),
+            ComponentSymbolV1(ref="$ref:so", component_id="SRC-OP",
+                              component_type="connector-action",
+                              connector_type="database", action_type="Get"),
+        )
+    )
+
+
+def _listener_doc(label=None):
+    listener = {"kind": "listener", "operation_ref": "$ref:wss_op"}
+    if label is not None:
+        listener["label"] = label
+    return {"version": "1", "body": {"kind": "sequence", "steps": [
+        listener,
+        {"kind": "map_ref", "map_ref": "$ref:map"},
+        {"kind": "target", "connection_ref": "$ref:tc", "operation_ref": "$ref:to"},
+        {"kind": "stop"},
+    ]}}
+
+
+def _scheduled_doc():
+    return {"version": "1", "body": {"kind": "sequence", "steps": [
+        {"kind": "source", "connection_ref": "$ref:sc", "operation_ref": "$ref:so"},
+        {"kind": "map_ref", "map_ref": "$ref:map"},
+        {"kind": "target", "connection_ref": "$ref:tc", "operation_ref": "$ref:to"},
+        {"kind": "stop"},
+    ]}}
+
+
+def _compiled(doc):
+    symbols = _symbols()
+    cfg, plan = compile_process_ir_v1(parse_process_ir_v1(doc), symbols)
+    return cfg, plan, symbols
+
+
+def _refusal(plan, cfg, symbols):
+    with pytest.raises(ProcessIRCompileError) as excinfo:
+        check_emission_plan_invariants(plan, cfg, symbols)
+    return excinfo.value.diagnostics[0]
+
+
+#: The static message each physical-entry site fails with. Pinned so a test that
+#: names a site proves THAT site refuses — an overlapping later check would
+#: otherwise let a test pass after its own site was deleted.
+_SITE_FORM = "in the form the entry policy derives"
+_SITE_ENTRY_ID = "the declared entry shape is not shape1"
+_SITE_START_GEOMETRY = "the synthetic start shape has non-parity geometry"
+_SITE_ONE_START = "the plan must contain exactly one synthetic start shape"
+_SITE_SUCCESSOR = "the synthetic start shape must wire to the shape the entry policy derives"
+_SITE_INPUT = "synthetic plan node carries the wrong emitter input"
+_SITE_BODY_GEOMETRY = "plan shape geometry does not match the parity formula"
+_SITE_ONE_WIRE = "the synthetic start must carry exactly one synthetic wire"
+
+
+def _site(diagnostic, fragment):
+    assert diagnostic.code == _PLAN_INVALID, diagnostic.code
+    assert fragment in diagnostic.message, diagnostic.message
+
+
+def _with_start(plan, **update):
+    start = plan.nodes[0].model_copy(update=update)
+    return plan.model_copy(update={"nodes": (start,) + tuple(plan.nodes[1:])})
+
+
+def _with_start_wires(plan, wires):
+    return _with_start(plan, outgoing=tuple(wires))
+
+
+# ---------------------------------------------------------------------------
+# The fused form itself, and the scheduled control
+# ---------------------------------------------------------------------------
+
+
+def test_listener_is_fused_once_at_shape1():
+    cfg, plan, symbols = _compiled(_listener_doc())
+    check_emission_plan_invariants(plan, cfg, symbols)  # the baseline is legal
+
+    start = plan.nodes[0]
+    assert (start.shape_id, start.origin, start.synthetic_role) == ("shape1", "synthetic", "start")
+    assert start.emitter_input == StartListenInputV1(operation_id="WSSOP-1", userlabel="")
+    assert (start.layout.x, start.layout.y) == (START_SHAPE_X, START_SHAPE_Y)
+
+    # The listener CFG node has NO plan node of its own; every other node has
+    # exactly one, in order, numbered from shape2.
+    listener_id = cfg.entry_node_id
+    assert cfg.nodes[0].semantic.semantic_kind == "listener"
+    ir_nodes = [n for n in plan.nodes if n.origin == "ir"]
+    assert [n.cfg_node_id for n in ir_nodes] == [n.node_id for n in cfg.nodes[1:]]
+    assert listener_id not in {n.cfg_node_id for n in ir_nodes}
+    assert [n.shape_id for n in plan.nodes] == ["shape1", "shape2", "shape3", "shape4"]
+    assert plan.nodes[1].layout.x == shape_x(2)
+    # ...and the Start's one synthetic wire reaches the listener's SUCCESSOR.
+    assert [t.to_shape_id for t in start.outgoing] == ["shape2"]
+    assert derive_process_execution_profile(cfg, symbols) == "listener"
+
+
+def test_scheduled_control_is_unchanged():
+    cfg, plan, symbols = _compiled(_scheduled_doc())
+    check_emission_plan_invariants(plan, cfg, symbols)
+    start = plan.nodes[0]
+    assert start.emitter_input == StartNoActionInputV1()
+    # The scheduled Start absorbs nothing: every CFG node has its own plan node.
+    assert [n.cfg_node_id for n in plan.nodes if n.origin == "ir"] == [
+        n.node_id for n in cfg.nodes
+    ]
+    assert [t.to_shape_id for t in start.outgoing] == ["shape2"]
+    assert derive_process_execution_profile(cfg, symbols) == "scheduled"
+
+
+# ---------------------------------------------------------------------------
+# The eight physical-entry sites
+# ---------------------------------------------------------------------------
+
+
+def test_entry_rejects_wrong_form_or_origin():
+    """Site 1: shape1 is compiler-owned and carries the POLICY-selected form."""
+    cfg, plan, symbols = _compiled(_listener_doc())
+    # The other admitted form, on a listener root.
+    _site(_refusal(
+        _with_start(plan, emitter_input=StartNoActionInputV1()), cfg, symbols
+    ), _SITE_FORM)
+    # ...and the reverse, on a scheduled root.
+    s_cfg, s_plan, s_symbols = _compiled(_scheduled_doc())
+    _site(_refusal(
+        _with_start(s_plan, emitter_input=StartListenInputV1(operation_id="WSSOP-1")),
+        s_cfg, s_symbols,
+    ), _SITE_FORM)
+    # A Start claiming IR origin for the absorbed listener.
+    _site(_refusal(
+        _with_start(plan, origin="ir", synthetic_role=None,
+                    cfg_node_id=cfg.entry_node_id, source_path="/body/steps/0"),
+        cfg, symbols,
+    ), _SITE_FORM)
+
+
+def test_entry_rejects_retargeted_entry_id():
+    """Site 2: the declared entry shape stays shape1."""
+    cfg, plan, symbols = _compiled(_listener_doc())
+    _site(_refusal(
+        plan.model_copy(update={"entry_shape_id": "shape2"}), cfg, symbols
+    ), _SITE_ENTRY_ID)
+
+
+@pytest.mark.parametrize("axis", ["x", "y"])
+def test_entry_rejects_authored_coordinates(axis):
+    """Site 3: the Start's coordinates are fixed, on each axis independently."""
+    cfg, plan, symbols = _compiled(_listener_doc())
+    layout = plan.nodes[0].layout.model_copy(
+        update={axis: getattr(plan.nodes[0].layout, axis) + 8.0}
+    )
+    _site(_refusal(_with_start(plan, layout=layout), cfg, symbols), _SITE_START_GEOMETRY)
+
+
+def test_entry_rejects_second_start():
+    """Site 4: exactly one synthetic Start — also when an extra one is disguised."""
+    cfg, plan, symbols = _compiled(_listener_doc())
+    extra = plan.nodes[-1]
+    last = extra.ordinal + 1
+    second = plan.nodes[0].model_copy(update={
+        "ordinal": last, "shape_id": "shape%d" % last, "outgoing": (),
+    })
+    doubled = plan.model_copy(update={"nodes": tuple(plan.nodes) + (second,)})
+    _site(_refusal(doubled, cfg, symbols), _SITE_ONE_START)
+    # A listener Start dressed up as a synthetic terminal Stop.
+    disguised = plan.nodes[0].model_copy(update={
+        "ordinal": last, "shape_id": "shape%d" % last, "outgoing": (),
+        "synthetic_role": "terminal_stop",
+    })
+    dressed = plan.model_copy(update={"nodes": tuple(plan.nodes) + (disguised,)})
+    assert _refusal(dressed, cfg, symbols).code in (
+        _PLAN_INVALID, PROCESS_IR_COMPILE_NONDETERMINISTIC
+    )
+
+
+@pytest.mark.parametrize("target", ["shape3", "shape1"])
+def test_entry_rejects_wrong_successor(target):
+    """Site 5: the Start wires to the policy-derived successor — not a later
+    existing shape, and not itself."""
+    cfg, plan, symbols = _compiled(_listener_doc())
+    wire = plan.nodes[0].outgoing[0].model_copy(update={"to_shape_id": target})
+    _site(_refusal(_with_start_wires(plan, [wire]), cfg, symbols), _SITE_SUCCESSOR)
+
+
+def test_entry_rejects_forged_operation_or_label():
+    """Site 6: the Start's WHOLE input is re-derived. Symbol membership alone must
+    not suffice — `WSSOP-2` is a valid Listen operation in the table."""
+    cfg, plan, symbols = _compiled(_listener_doc(label="In"))
+    assert plan.nodes[0].emitter_input.userlabel == "In"
+    forged_op = StartListenInputV1(operation_id="WSSOP-2", userlabel="In")
+    _site(_refusal(_with_start(plan, emitter_input=forged_op), cfg, symbols), _SITE_INPUT)
+    forged_label = StartListenInputV1(operation_id="WSSOP-1", userlabel="Other")
+    _site(_refusal(
+        _with_start(plan, emitter_input=forged_label), cfg, symbols
+    ), _SITE_INPUT)
+
+
+def test_entry_preserves_body_geometry_formula():
+    """Site 7: the generic geometry rule keeps its Start exception — body shapes
+    use the body formula, and the Start may not take body coordinates."""
+    cfg, plan, symbols = _compiled(_listener_doc())
+    moved = plan.nodes[1].model_copy(update={
+        "layout": plan.nodes[1].layout.model_copy(update={"x": plan.nodes[1].layout.x + 16})
+    })
+    body_moved = plan.model_copy(
+        update={"nodes": (plan.nodes[0], moved) + tuple(plan.nodes[2:])}
+    )
+    _site(_refusal(body_moved, cfg, symbols), _SITE_BODY_GEOMETRY)
+    start_on_body_row = plan.nodes[0].layout.model_copy(update={"y": SHAPE_Y})
+    assert _refusal(
+        _with_start(plan, layout=start_on_body_row), cfg, symbols
+    ).code == _PLAN_INVALID
+
+
+def test_entry_rejects_wire_count_or_provenance():
+    """Site 8: exactly one synthetic Start wire."""
+    cfg, plan, symbols = _compiled(_listener_doc())
+    wire = plan.nodes[0].outgoing[0]
+    assert _refusal(_with_start_wires(plan, []), cfg, symbols).code == _PLAN_INVALID
+    twin = wire.model_copy(update={"local_ordinal": 2,
+                                   "dragpoint_name": "shape1.dragpoint2"})
+    assert _refusal(_with_start_wires(plan, [wire, twin]), cfg, symbols).code in (
+        _PLAN_INVALID, PROCESS_IR_COMPILE_NONDETERMINISTIC
+    )
+    claimed = wire.model_copy(update={"provenance": "cfg_edge", "cfg_edge_id": "e1"})
+    _site(_refusal(_with_start_wires(plan, [claimed]), cfg, symbols), _SITE_ONE_WIRE)
+
+
+# ---------------------------------------------------------------------------
+# Adjacent protections the listener form must not open
+# ---------------------------------------------------------------------------
+
+
+def test_the_absorbed_listener_cannot_reappear_as_a_plan_node():
+    """CFG correspondence: the ONE node the Start absorbs has no plan node, and no
+    other node may disappear. Adding an IR node for the listener, or dropping a
+    body node, is refused.
+
+    MEASURED, and recorded rather than hidden: disabling the correspondence check
+    alone leaves both mutations refused — by the Start-successor site and by the
+    ordinal-contiguity check, which fire first — because every plan node's wiring
+    is re-derived from the CFG, so no single-node insertion or deletion keeps the
+    wires consistent. The correspondence check is defense in depth here, and this
+    test pins the PROPERTY (the absorbed node cannot reappear, no node can vanish),
+    not which of the overlapping checks reports it.
+    """
+    cfg, plan, symbols = _compiled(_listener_doc())
+    listener_node = plan.nodes[1].model_copy(update={
+        "cfg_node_id": cfg.entry_node_id, "source_path": "/body/steps/0",
+    })
+    forged = plan.model_copy(update={"nodes": (plan.nodes[0], listener_node) + tuple(plan.nodes[2:])})
+    assert _refusal(forged, cfg, symbols).code in (_PLAN_INVALID, PROCESS_IR_COMPILE_INTERNAL)
+    dropped = plan.model_copy(update={"nodes": (plan.nodes[0],) + tuple(plan.nodes[2:])})
+    assert _refusal(dropped, cfg, symbols).code in (
+        _PLAN_INVALID, PROCESS_IR_COMPILE_NONDETERMINISTIC
+    )
+
+
+def test_forged_ir_origin_node_for_absorbed_listener():
+    """Asking for the listener's own emitter input is a forged-plan signal: the
+    listener has no shape of its own, so lowering refuses to derive one."""
+    cfg, _plan, symbols = _compiled(_listener_doc())
+    with pytest.raises(ProcessIRCompileError) as excinfo:
+        _emitter_input_for(cfg.nodes[0], symbols.build_index())
+    assert excinfo.value.diagnostics[0].code == _PLAN_INVALID
+
+
+def test_cfg_rejects_listener_off_entry_or_twice_or_fanout():
+    """The CFG half: a listener must be the single entry, from the first root step,
+    with exactly one successor — re-derived from the graph, never trusted."""
+    cfg, _plan, _symbols_ = _compiled(_listener_doc())
+    listener = cfg.nodes[0]
+    # Off the entry: move the entry to the map node.
+    off_entry = cfg.model_copy(update={"entry_node_id": cfg.nodes[1].node_id})
+    with pytest.raises(ProcessIRCompileError):
+        check_cfg_invariants(off_entry)
+    # From a path that is not the first root step.
+    relocated = cfg.model_copy(update={"nodes": (
+        listener.model_copy(update={"source_path": "/body/steps/1"}),
+    ) + tuple(cfg.nodes[1:])})
+    with pytest.raises(ProcessIRCompileError) as excinfo:
+        check_cfg_invariants(relocated)
+    assert excinfo.value.diagnostics[0].code == PROCESS_IR_COMPILE_INTERNAL
+    # Twice: a second listener semantic on the map node.
+    twice = cfg.model_copy(update={"nodes": (listener, cfg.nodes[1].model_copy(update={
+        "semantic": listener.semantic}),) + tuple(cfg.nodes[2:])})
+    with pytest.raises(ProcessIRCompileError):
+        check_cfg_invariants(twice)
+    # The strict entry derivation refuses a fan-out too.
+    extra = cfg.edges[0].model_copy(update={
+        "edge_id": "e9", "ordinal": 9, "local_ordinal": 2,
+        "target_node_id": cfg.nodes[2].node_id,
+    })
+    with pytest.raises(ProcessIRCompileError) as excinfo:
+        derive_process_entry(cfg.model_copy(update={"edges": tuple(cfg.edges) + (extra,)}))
+    assert excinfo.value.diagnostics[0].code == PROCESS_IR_COMPILE_INTERNAL
+
+
+def test_no_connector_call_may_carry_the_entry_role_under_a_listener():
+    """Under a listener every outbound call is downstream: forging the entry role
+    onto one would emit it with the source-read key and start the flow twice."""
+    doc = {"version": "1", "body": {"kind": "sequence", "steps": [
+        {"kind": "listener", "operation_ref": "$ref:wss_op"},
+        {"kind": "connector_call", "operation_ref": "$ref:get_op"},
+        {"kind": "stop"},
+    ]}}
+    symbols = SymbolTableV1(symbols=_symbols().symbols + (
+        ComponentSymbolV1(ref="$ref:rc", component_id="REST-CONN",
+                          component_type="connector-settings", connector_type="rest"),
+        ComponentSymbolV1(ref="$ref:get_op", component_id="GET-OP",
+                          component_type="connector-action", connector_type="rest",
+                          action_type="GET", connection_ref="$ref:rc"),
+    ))
+    cfg, plan = compile_process_ir_v1(parse_process_ir_v1(doc), symbols)
+    call = cfg.nodes[1]
+    assert call.semantic.role == "downstream"
+    assert plan.nodes[1].emitter_input.emitter_kind == "connectoraction_target"
+    forged = cfg.model_copy(update={"nodes": (cfg.nodes[0], call.model_copy(update={
+        "semantic": call.semantic.model_copy(update={"role": "entry"})}),)
+        + tuple(cfg.nodes[2:])})
+    with pytest.raises(ProcessIRCompileError) as excinfo:
+        check_cfg_invariants(forged)
+    assert excinfo.value.diagnostics[0].code == PROCESS_IR_COMPILE_INTERNAL

@@ -169,13 +169,14 @@ def test_every_migrated_adapter_accepts_its_raw_dialect_config():
         assert result.process_ir is not None, dialect
 
 
-def test_registry_sync_pipeline_entry_fails_closed_on_a_listener_config():
-    """A listener config through the registry RAISES rather than returning.
+def test_registry_sync_pipeline_entry_adapts_a_listener_config():
+    """A listener config through the registry RETURNS IR since #158.
 
-    An adapter returns IR or fails; it cannot express "use the legacy renderer",
-    which is why routing lives in the builder. So the registry entry's meaning is
-    "this dialect is cut over", not "every config of it is" — and the listener
-    arm's deferral to #140 must surface as a fail-closed diagnostic here.
+    Until #158 the listener arm deferred to the legacy renderer, and because an
+    adapter cannot express "use the legacy renderer" the registry entry raised.
+    The listener entry is canonical now: the raw config lowers to the root-only
+    ``listener`` node — operation-only — followed by the target and the stop, and
+    its one listener requirement is rooted in the RAW config the registry accepts.
     """
     listener_cfg = {
         "process_kind": "sync_pipeline",
@@ -190,17 +191,16 @@ def test_registry_sync_pipeline_entry_fails_closed_on_a_listener_config():
             "dependencies": [{"from_stage": "l", "to_stage": "t"}],
         },
     }
-    with pytest.raises(LegacyAdapterError) as exc:
-        adapter_for(SYNC_PIPELINE_DIALECT)(listener_cfg)
-    assert exc.value.diagnostics[0].code == "LEGACY_ADAPTER_UNSUPPORTED_KIND"
-    # Rooted in the RAW config the registry entry accepts, and aimed at the field
-    # that actually identifies a listener (the primitive), not at `connector_type`
-    # -- which a listener stage accepts but ignores entirely. The core-relative
-    # `/source/connector_type` is what the BUILDER entry point reports.
-    assert (
-        exc.value.diagnostics[0].legacy_source_path
-        == "/pipeline/stages/0/config/primitive"
-    )
+    result = adapter_for(SYNC_PIPELINE_DIALECT)(listener_cfg)
+    assert [step.kind for step in result.process_ir.body.steps] == [
+        "listener", "target", "stop",
+    ]
+    listener = [
+        r for r in result.symbol_requirements if r.role == "start_listen.operation"
+    ]
+    assert [(r.source_pointer, r.legacy_selector) for r in listener] == [
+        ("/pipeline/stages/0/config/operation_id", "WSSOP-1")
+    ]
 
 
 def test_registry_reserved_dialects_are_not_migrated():

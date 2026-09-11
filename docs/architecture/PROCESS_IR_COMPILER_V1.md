@@ -259,7 +259,9 @@ ids, unreachable nodes, missing terminals, noncanonical ordinals) they enforce:
   equal its ordered CFG out-edges, and each transition must target that edge's shape. Per-transition
   checking alone is too weak: swapping *both* the `cfg_edge_id` and `to_shape_id` of a Decision's
   two wires leaves each individually consistent while the position-fixed dragpoint labels route
-  `True` down the false arm. The synthetic Start must wire to the CFG entry, and `synthetic`
+  `True` down the false arm. The synthetic Start must wire to the node the entry policy derives
+  (the CFG entry for a scheduled root, the listener's sole successor for a listener root — #158),
+  and `synthetic`
   provenance is restricted to exactly the Start wire and routed-target Stop wires — otherwise a
   malformed plan could relabel an ordinary wire as synthetic and skip correspondence entirely.
 - **`routed_target` is role- and position-checked** — only a `target` endpoint may carry it (a
@@ -348,17 +350,21 @@ how a caller ends up "fixing" correct input.
 
 ## 8. Boundaries and gates
 
-- **WSS / listener entry is rejected** with #136's `PROCESS_IR_CAPABILITY_UNSUPPORTED` in the
-  `reference_resolution` phase. The legacy path *fuses* the start and connector into a single
-  `start_listen` shape (`_emit_start_listen:3430`), whereas this compiler always emits the
-  `start_noaction` + `connectoraction` pair — so a listener source would be silently mis-shaped.
-  Note the guard lives in reference resolution, **not** IR lowering: `ProcessIRV1` has no listener
-  node kind at all, so such an entry can only arrive through the symbol table's `connector_type`.
-  **#140 settled the alternate entry policy: listener entry stays UNSUPPORTED.** It is now gated in
-  two independent places — the pre-existing `LISTENER_CONNECTOR_TYPES` guard for the legacy
-  `source`/`target` dialect, and, for a `connector_call`, by simple absence from the closed capability
-  allowlist (§10a). No `start_listen` emitter key exists, so there is nothing to cut over to; the WSS
-  arm of `sync_pipeline` stays on the legacy renderer until an issue ships that emitter.
+- **Listener entry is a supported entry form since #158.** The authored `listener` node lowers to
+  a `listener` CFG entry, and the compiler's entry policy (`entry_policy.py`) fuses it with the
+  process Start: the emission plan carries **exactly one compiler-synthesized entry shape at
+  shape1, of one of two admitted forms** — `start_noaction` for a scheduled root, `start_listen` for a
+  listener root. The listener node takes no plan ordinal of its own; the Start's single synthetic wire
+  reaches the listener's sole successor, and every other CFG node keeps exactly one plan node, in
+  order. All eight physical-entry checks stay in force for both forms — shape1, compiler origin,
+  the policy-selected form, fixed geometry, one Start, one synthetic wire, the policy-derived
+  successor, and an emitter input re-derived from the CFG and the symbol table (a listener Start
+  carrying another valid operation id or a different label is refused). The execution profile is
+  derived by the same policy, so the Start form and the recorded profile cannot disagree.
+  **A WSS family arriving as a `source` endpoint is still refused** with
+  `PROCESS_IR_CAPABILITY_UNSUPPORTED` in `reference_resolution` (`LISTENER_CONNECTOR_TYPES`, now a
+  refusal-only set), and a WSS operation named by a `connector_call` is still refused by absence from
+  the closed capability allowlist (§10a): a listener is authored as the `listener` node or not at all.
 - **`return_documents` with a control terminal is unrepresentable** — rejected by both
   `_validate_flow_sequence_config:4733` and the #136 codec, so the compiler has no branch for it.
 - The six #137 codes are the **first** codes of the `PROCESS_IR_SEMANTIC_*` and

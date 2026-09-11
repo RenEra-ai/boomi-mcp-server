@@ -137,6 +137,10 @@ def test_component_symbol_optional_field_set_is_pinned():
         # consumes it, and the compiler cannot derive it without reading the
         # component — which its purity promise forbids.
         "requires_path_binding",
+        # #158. What a WSS listener operation accepts inbound (its `inputType`),
+        # which the listener's `profile_bound` inbound contract is proven from;
+        # the snapshot or the structured config fills it, never the compiler.
+        "input_document_type",
     }
     # Every optional field must actually default, or a pre-#140 caller's symbol
     # construction would break.

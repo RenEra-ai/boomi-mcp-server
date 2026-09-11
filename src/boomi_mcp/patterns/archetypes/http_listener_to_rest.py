@@ -60,7 +60,7 @@ from ..primitives._helpers import (
 )
 from ..primitives.field_map import FieldMapPrimitive
 from ..primitives.rest_send import RestSendWithRetryPrimitive
-from ..primitives.wss_listen import WssListenPrimitive
+from ..primitives.wss_listen import ASC_METHOD_RULE, BARE_METHOD_RULE, WssListenPrimitive
 
 # Reuse #73's REST target contract + assembly helpers verbatim (duck-typed on
 # ``parameters.target`` / ``parameters.transform`` / ``parameters.naming``).
@@ -84,6 +84,7 @@ from ..archetype_assembly import (
 # Shared listener source contract + assembly helpers (M6 sibling preset).
 from .http_listener_to_db import (
     AscWrapperConfig,
+    _uncallable_asc_route_issue,
     InboundValidationConfig,
     ListenerSource,
     _LISTENER_REQUEST_PROFILE_KEY,
@@ -237,6 +238,10 @@ class HttpListenerToRestParameters(BaseModel):
                 "map_script input/output path yields a unique variable name"
             )
 
+        uncallable = _uncallable_asc_route_issue(self)
+        if uncallable is not None:
+            issues.append(uncallable)
+
         if issues:
             raise ValueError(" | ".join(issues))
 
@@ -286,7 +291,11 @@ class HttpListenerToRestArchetype(ArchetypePattern):
         "Emits a main process with process_kind='sync_pipeline' and an intact listener -> map -> send stage graph; SyncPipelineBuilder lowers the listener stage to the live-verified Listen start shape (connectoraction inside the start shape, no connection component).",
         "Listener process options are locked by construction: allowSimultaneous='true', updateRunDates='false' (live-captured invariants).",
         "The generated listener request profile is the transform's source shape; the target payload profile is generated and bound as the REST send request body.",
-        "Records the computed listener endpoint (/ws/simple/{operationtype}{SentenceCase(objectName)}, HTTP method from input_type) in validation_rules.listener for orchestrate_deploy's listener_verify stage.",
+        "Records the computed listener endpoint and HTTP method in validation_rules.listener for orchestrate_deploy's listener_verify stage: bare /ws/simple/{operationtype}{SentenceCase(objectName)} ("
+        + BARE_METHOD_RULE
+        + "), or with asc_wrapper the /ws/rest route ("
+        + ASC_METHOD_RULE
+        + ").",
         "Opt-in asc_wrapper emits a typed API Service Component (one REST route -> the listener process, depends_on ordering, /ws/rest/... endpoint metadata with publish_mode='api_service') for apiType=advanced runtimes (#133).",
         "Opt-in inbound_validation (mode='profile_bound') asserts at build time that the listener binds a JSON request profile.",
         "Emits executable component specs for build_integration(action='plan'); all XML comes from the existing builders.",

@@ -54,7 +54,6 @@ from .contracts import (
     START_SHAPE_Y,
     EmissionPlanV1,
     SemanticCfgV1,
-    StartNoActionInputV1,
     StopInputV1,
     SymbolTableV1,
     dragpoint_name,
@@ -63,6 +62,7 @@ from .contracts import (
     shape_x,
 )
 from .diagnostics import raise_compile_error
+from .entry_policy import derive_process_entry, start_emitter_input
 from .error_handling import catch_region_node_ids, derive_error_regions
 
 _SEMANTIC_PHASE = "semantic_lowering"
@@ -125,6 +125,10 @@ _ROUTED_TARGET_PATH = re.compile(r"(?:/legs/\d+|/true_arm)/terminal$")
 # downstream handler. A TRY terminal is deliberately absent: that body ends only
 # on a plain stop.
 _CACHE_STAGE_PATH = re.compile(r"(?:/legs/\d+|/catch_body)/terminal$")
+
+# #158: the only authored position a listener entry can hold — the first root
+# step. The model enforces it; this pins the CFG to the same fact.
+_LISTENER_ENTRY_PATH = "/body/steps/0"
 
 # Emitter-input fields that must name a component resolved through the symbol
 # table. Anything here that is absent from the table means the plan carries a
@@ -466,6 +470,34 @@ def check_cfg_invariants(cfg: SemanticCfgV1) -> None:
     # satisfied by exactly the bug it exists to catch. The property that actually
     # holds is about the ROOT SEQUENCE: the first call on the root spine is the
     # connector entry, and nothing else may claim that role.
+    # --- #158: the listener entry -------------------------------------------
+    # A listener is FUSED with the synthesized Start at emission planning, so it
+    # must be exactly the node the flow enters on: the single CFG entry, lowered
+    # from the first root step. Anywhere else it would put a Start in the middle
+    # of a flow; twice, it would make two. Re-derived here from the graph rather
+    # than trusted from lowering, like every other role this checker verifies.
+    listeners = [node for node in nodes if node.semantic.semantic_kind == "listener"]
+    listener_rooted = False
+    if listeners:
+        misplaced = next(
+            (
+                node
+                for node in listeners
+                if node.node_id != cfg.entry_node_id
+                or node.source_path != _LISTENER_ENTRY_PATH
+            ),
+            listeners[1] if len(listeners) > 1 else None,
+        )
+        if misplaced is not None:
+            raise _fail(
+                PROCESS_IR_COMPILE_INTERNAL,
+                _SEMANTIC_PHASE,
+                misplaced.source_path,
+                "a listener must be the single CFG entry node at the first root step",
+                misplaced.node_id,
+            )
+        listener_rooted = True
+
     calls = [
         node for node in nodes if node.semantic.semantic_kind == "connector_call"
     ]
@@ -506,16 +538,30 @@ def check_cfg_invariants(cfg: SemanticCfgV1) -> None:
                 "root connector call order disagrees with the ordering edges",
                 root_calls_by_execution[0].node_id,
             )
-        expected_entry = root_calls_by_ordinal[0] if root_calls_by_ordinal else None
+        # #158: under a listener the LISTENER is the flow's entry, so every call
+        # is downstream of the inbound request and none may carry the role —
+        # emitting one as the source-read key would start the flow twice.
+        expected_entry = (
+            root_calls_by_ordinal[0]
+            if root_calls_by_ordinal and not listener_rooted
+            else None
+        )
         if expected_entry is None:
-            # Every call is nested in a control body: no call is the flow's
-            # connector entry, so no call may carry the role.
+            # Every call is nested in a control body, or the flow enters on a
+            # listener: no call is the flow's connector entry, so no call may
+            # carry the role.
             if entries:
                 raise _fail(
                     PROCESS_IR_COMPILE_INTERNAL,
                     _SEMANTIC_PHASE,
                     entries[0].source_path,
-                    "only a root-sequence connector call may carry the entry call role",
+                    (
+                        "no connector call may carry the entry call role in a "
+                        "flow that enters on a listener"
+                        if listener_rooted
+                        else "only a root-sequence connector call may carry the "
+                        "entry call role"
+                    ),
                     entries[0].node_id,
                 )
         elif len(entries) != 1:
@@ -1156,18 +1202,25 @@ def check_emission_plan_invariants(
         )
 
     # --- the synthetic Start ------------------------------------------------
+    # #158: shape1 has TWO admitted forms, and which one a plan must carry is
+    # re-derived here from the CFG by the same entry policy lowering used — never
+    # read off the plan. Everything else about the Start is unchanged and checked
+    # below for both forms alike: compiler-owned, at shape1, fixed geometry, the
+    # only Start, one synthetic wire.
+    entry = derive_process_entry(cfg)
     start = nodes[0]
     if (
         start.shape_id != shape_id(1)
         or start.origin != "synthetic"
         or start.synthetic_role != "start"
-        or start.emitter_input.emitter_kind != "start_noaction"
+        or start.emitter_input.emitter_kind != entry.start_emitter_kind
     ):
         raise _fail(
             PROCESS_IR_COMPILE_EMISSION_PLAN_INVALID,
             _PLAN_PHASE,
             "",
-            "the plan must begin with exactly one synthetic start_noaction at shape1",
+            "the plan must begin with exactly one synthetic start at shape1, in the "
+            "form the entry policy derives",
         )
     if plan.entry_shape_id != shape_id(1):
         raise _fail(
@@ -1193,7 +1246,8 @@ def check_emission_plan_invariants(
         )
 
     # The Start shape is synthetic, so it has no CFG edge to check against —
-    # but it must still target the CFG entry node's shape.
+    # but it must still target the node the entry policy derives: the CFG entry
+    # for a scheduled flow, the listener's sole successor for a listener.
     shape_for_cfg_node = {
         node.cfg_node_id: node.shape_id for node in nodes if node.origin == "ir"
     }
@@ -1204,13 +1258,15 @@ def check_emission_plan_invariants(
     cfg_out_by_source: Dict[str, List] = {}
     for edge in cfg.edges:
         cfg_out_by_source.setdefault(edge.source_node_id, []).append(edge)
-    entry_shape = shape_for_cfg_node.get(cfg.entry_node_id)
-    if [item.to_shape_id for item in start.outgoing] != [entry_shape]:
+    entry_shape = shape_for_cfg_node.get(entry.start_target_node_id)
+    if entry_shape is None or [item.to_shape_id for item in start.outgoing] != [
+        entry_shape
+    ]:
         raise _fail(
             PROCESS_IR_COMPILE_EMISSION_PLAN_INVALID,
             _PLAN_PHASE,
             "",
-            "the synthetic start shape must wire to the CFG entry node's shape",
+            "the synthetic start shape must wire to the shape the entry policy derives",
         )
 
     # --- symbol resolution --------------------------------------------------
@@ -1275,7 +1331,12 @@ def check_emission_plan_invariants(
         node.node_id for node in cfg.nodes if node.exit_role == "routed_target"
     }
     planned_cfg_ids = [node.cfg_node_id for node in nodes if node.origin == "ir"]
-    if planned_cfg_ids != [node.node_id for node in cfg.nodes]:
+    # #158: the one node a Start may absorb has no plan node of its own; every
+    # other CFG node must still have exactly one, in order. The exemption is the
+    # entry policy's single derived id, so no other node can disappear.
+    if planned_cfg_ids != [
+        node.node_id for node in cfg.nodes if node.node_id != entry.absorbed_node_id
+    ]:
         raise _fail(
             PROCESS_IR_COMPILE_EMISSION_PLAN_INVALID,
             _PLAN_PHASE,
@@ -1377,8 +1438,11 @@ def check_emission_plan_invariants(
             # ``continue_`` flipped would otherwise pass, since both variants
             # share the "stop" emitter kind. Both synthetic inputs are fully
             # determined by their role, so the expected value is exact.
+            # #158: the Start's input is re-derived from the entry policy and the
+            # symbol table — a listener Start carrying another valid operation id
+            # or a different label is refused, not merely one naming an unknown id.
             expected_synthetic = {
-                "start": StartNoActionInputV1(),
+                "start": start_emitter_input(entry, symbol_index),
                 "terminal_stop": StopInputV1(),
             }.get(node.synthetic_role)
             if node.emitter_input != expected_synthetic:

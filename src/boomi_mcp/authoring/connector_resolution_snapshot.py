@@ -94,7 +94,15 @@ class ConnectorIdentityError(Exception):
 #: `GenericOperationConfig`, the database family in its action element. A family
 #: outside this set is one whose bytes we cannot judge, and the raw-XML escape
 #: hatch exists to create exactly those.
-_FAMILIES_WITH_A_KNOWN_VERB_LOCATION = frozenset({"rest", "soap_client", "database"})
+#:
+#: #158 adds the Web Services Server family. Its verb location is the PRESENCE of
+#: `WebServicesServerListenAction` under the operation's configuration — the one
+#: action element the platform stores for it, measured from the live listener
+#: capture the WSS builder reproduces — so a submitted WSS document without that
+#: element settles no action and is refused like any other family's.
+_FAMILIES_WITH_A_KNOWN_VERB_LOCATION = frozenset(
+    {"rest", "soap_client", "database", "wss"}
+)
 
 
 #: CLOSED, as the plan specifies. These were open optional strings, which is a
@@ -197,6 +205,14 @@ class ResolvedConnectorComponentIdentityV1(_SnapshotModel):
     #: had not written. The reader knows which case it saw; discarding that and
     #: making the caller re-derive it is the same weaker-key defect one level in.
     action_contradicted: Optional[bool] = None
+    #: #158. What a Web Services Server LISTENER operation accepts inbound: its
+    #: input type (``singlejson``, ``none``, ...) and the request profile bound to
+    #: it. Carried only for that family, from whichever artifact answered — the
+    #: account's stored bytes for a reused operation, otherwise the request's own
+    #: — because a listener's requested inbound contract is checked against the
+    #: operation that will actually serve it. ``None`` when nothing settled it.
+    listener_input_type: Optional[str] = None
+    listener_request_profile: Optional[str] = None
     #: Whether the DOCUMENT this came from parsed. ``None`` when no document was
     #: read at all (a config projection). Tracked rather than inferred: the first
     #: version derived it from "did we find a family or an action", which labels a
@@ -372,6 +388,9 @@ def live_identity_from_component_xml(
         "rest": {"GenericOperationConfig"},
         "soap_client": {"GenericOperationConfig"},
         "database": {"DatabaseGetAction", "DatabaseSendAction"},
+        # #158: the WSS builder's own element, measured from the live listener
+        # capture (`Operation/Configuration/WebServicesServerListenAction`).
+        "wss": {"WebServicesServerListenAction"},
     }
 
 
@@ -438,6 +457,10 @@ def live_identity_from_component_xml(
                         "element": local,
                         "customOperationType": attributes.get("customOperationType"),
                         "operationType": attributes.get("operationType"),
+                        # #158: a listener's inbound facts live on its action
+                        # element, read with the element they belong to.
+                        "inputType": attributes.get("inputType"),
+                        "requestProfile": attributes.get("requestProfile"),
                         # THE PATHS THIS CANDIDATE OWNS. Collected per candidate
                         # so they are filtered by family alongside it: a shared
                         # list let a decoy sibling's path field make a genuinely
@@ -551,7 +574,24 @@ def live_identity_from_component_xml(
             return _DATABASE_ACTION_ELEMENTS.get(config["element"])
         if family == "soap_client":
             return config["operationType"]
+        if family == "wss":
+            # #158: the ELEMENT'S PRESENCE is the verb. Its `operationType`
+            # (CREATE, EXECUTE, ...) is the served verb of the listener's
+            # endpoint — a different vocabulary — and never the connector action.
+            return "LISTEN"
         return config["customOperationType"]
+
+    def _listener_fact(field):
+        """One inbound fact, only when exactly one listener element states it."""
+        if family != "wss" or len(actions) != 1:
+            return None
+        value = actions[0].get(field)
+        if not isinstance(value, str) or not value.strip():
+            return None
+        return value.strip().lower() if field == "inputType" else value.strip()
+
+    listener_input_type = _listener_fact("inputType")
+    listener_request_profile = _listener_fact("requestProfile")
 
     actions = [_verb_of(config) for config in actions]
 
@@ -624,6 +664,8 @@ def live_identity_from_component_xml(
         action_contradicted=contradicted,
         action_blank_present=blank_present,
         document_component_type=component_type,
+        listener_input_type=listener_input_type,
+        listener_request_profile=listener_request_profile,
     )
 
 
@@ -646,6 +688,7 @@ def build_connector_resolution_snapshot(
     """
     from ..categories.components.builders.connector_builder import (
         normalized_identity_projection,
+        wss_listener_inbound_facts,
     )
 
     live = live_projections or {}
@@ -902,6 +945,10 @@ def build_connector_resolution_snapshot(
         projection = normalized_identity_projection(
             config, live_projection=live.get(key)
         )
+        # #158: a listener's inbound facts, read the way its builder emits them.
+        listener_input_type, listener_request_profile = wss_listener_inbound_facts(
+            config
+        )
         resolved.append(
             ResolvedConnectorComponentIdentityV1(
                 component_key=key,
@@ -912,6 +959,8 @@ def build_connector_resolution_snapshot(
                 route_state=projection.route_state,
                 authority="normalized_structured_fields",
                 extension_bound_endpoint=projection.extension_bound,
+                listener_input_type=listener_input_type,
+                listener_request_profile=listener_request_profile,
                 **carried,
             )
         )

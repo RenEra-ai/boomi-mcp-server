@@ -77,6 +77,7 @@ from .contracts import (
     ProcessCallInputV1,
     ReturnDocumentsInputV1,
     SetPropertiesStepInputV1,
+    StartListenInputV1,
     StartNoActionInputV1,
     StopInputV1,
     SymbolTableV1,
@@ -315,6 +316,17 @@ def _emit_start(inp, ctx):
     return rendering.render_start_noaction(_shape_context(ctx.node))
 
 
+def _emit_start_listen(inp, ctx):
+    # #158: the SAME renderer the legacy builder's listener start drives, so the
+    # canonical listener Start is byte-identical to the legacy one by
+    # construction rather than by a second template kept in step.
+    return rendering.render_start_listen(
+        _shape_context(ctx.node),
+        userlabel=inp.userlabel,
+        operation_id=inp.operation_id,
+    )
+
+
 def _emit_connector(inp, ctx):
     dynamic_path = getattr(inp, "dynamic_path", None)
     return rendering.render_connectoraction(
@@ -507,6 +519,13 @@ def _req_connector(inp) -> Tuple[SymbolRequirement, ...]:
     return tuple(reqs)
 
 
+def _req_start_listen(inp) -> Tuple[SymbolRequirement, ...]:
+    # #158: operation ONLY. A listener has no connection — the inbound endpoint
+    # is bound to the operation — so requiring a connection symbol here would make
+    # every listener Start unsatisfiable, and accepting one would invent it.
+    return (SymbolRequirement("operation", inp.operation_id, _CONNECTOR_ACTION_TYPES),)
+
+
 def _req_map(inp) -> Tuple[SymbolRequirement, ...]:
     return (SymbolRequirement("map", inp.map_id, _MAP_TYPES),)
 
@@ -656,6 +675,16 @@ def _pre_notify(inp) -> Optional[str]:
     return None
 
 
+def _pre_start_listen(inp) -> Optional[str]:
+    # TYPE FIRST, as for notify: a `model_construct`-ed input skips validation,
+    # and a blank or non-string id would render a Listen action bound to nothing.
+    if not isinstance(inp.operation_id, str) or not inp.operation_id.strip():
+        return "listener start operation_id is blank or not a string"
+    if not isinstance(inp.userlabel, str):
+        return "listener start userlabel is not a string"
+    return None
+
+
 def _pre_exception(inp) -> Optional[str]:
     # The resolved ``binding`` and the legacy ``parameter_source`` must agree — the
     # legacy emitter derives the exParameters form from parameter_source, so an
@@ -670,13 +699,17 @@ def _pre_exception(inp) -> Optional[str]:
 
 
 # ---------------------------------------------------------------------------
-# Default registrations (19 discriminator keys; 18 model classes — the connector
+# Default registrations (20 discriminator keys; 19 model classes — the connector
 # source/target keys share one renderer). #142 added ``catcherrors``; #156 added
-# ``notify``.
+# ``notify``; #158 added ``start_listen``.
 # ---------------------------------------------------------------------------
 
 _REGISTRATIONS: Tuple[EmitterRegistration, ...] = (
     EmitterRegistration("start_noaction", StartNoActionInputV1, "start", CAPABILITY_PROCESS_IR_V1, EXACT_ONE, _no_requirements, _emit_start),
+    # #158, the TWENTIETH key: the fused listener Start. Same shape type and the
+    # same single outgoing wire as the no-action Start; it differs only in the
+    # Listen action it carries, and needs the operation symbol that action names.
+    EmitterRegistration("start_listen", StartListenInputV1, "start", CAPABILITY_PROCESS_IR_V1, EXACT_ONE, _req_start_listen, _emit_start_listen, _pre_start_listen),
     EmitterRegistration("connectoraction_source", ConnectorActionInputV1, "connectoraction", CAPABILITY_PROCESS_IR_V1, EXACT_ONE, _req_connector, _emit_connector),
     EmitterRegistration("connectoraction_target", ConnectorActionInputV1, "connectoraction", CAPABILITY_PROCESS_IR_V1, EXACT_ONE, _req_connector, _emit_connector),
     EmitterRegistration("message", MessageInputV1, "message", CAPABILITY_PROCESS_IR_V1, EXACT_ONE, _no_requirements, _emit_message),

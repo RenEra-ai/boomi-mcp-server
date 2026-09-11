@@ -1802,6 +1802,42 @@ def _served_builder_error_codes():
     return frozenset(found)
 
 
+def _served_orchestration_error_codes():
+    """Every ``orchestrate_deploy`` error code, read from the deployment module.
+
+    A FOURTH family outside ``ERROR_TAXONOMY``: the deployment module declares each
+    code it serves as a module-level constant spelled as its own value
+    (``BUILD_REGISTRY_ENTRY_MALFORMED = "BUILD_REGISTRY_ENTRY_MALFORMED"``). #158
+    needed a second of them in one ledger, and the first had been hand-listed —
+    the second instance of the hand-copy this module's derivations exist to stop,
+    so the family is asked for instead of remembered.
+    """
+    import importlib
+    import re as _re
+
+    module = importlib.import_module("boomi_mcp.categories.deployment.orchestration")
+    return frozenset(
+        name
+        for name, value in vars(module).items()
+        if isinstance(value, str)
+        and value == name
+        and _re.fullmatch(r"[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+", name)
+    )
+
+
+def _wss_route_method_names():
+    """The measured WSS route-method facts a #158 row names, from the leaf's exports.
+
+    A table and the served texts generated from it — not diagnostics. Asked of
+    the module (`__all__`) rather than hand-listed: the set grew twice in one
+    slice while the texts were being generated.
+    """
+    import importlib
+
+    module = importlib.import_module("boomi_mcp.categories.components.wss_route_methods")
+    return frozenset(module.__all__)
+
+
 _LEDGER_NON_DIAGNOSTIC_TOKENS = frozenset({
     "BLIND",
     # GIT ENVIRONMENT VARIABLES, named because the archiver's index snapshot has to
@@ -1880,6 +1916,16 @@ _LEDGER_NON_DIAGNOSTIC_TOKENS = frozenset({
     # has to be able to name that declaration.
     "ENTRY_CALL_ROLE",
     "ENTRY_ROLE_RESTRICTIONS",
+    # #158 (M12.20). The production tables a listener-entry row has to name —
+    # the connector-call allowlist a WSS Listen operation is deliberately absent
+    # from, the unconsumed reasons table QA-158-r1-01 measured as never served,
+    # and the model's table of constructs a listener flow refuses.
+    # (`orchestrate_deploy` codes are DERIVED: `_served_orchestration_error_codes`.)
+    "CONNECTOR_CALL_CAPABILITIES_V1",
+    "GATED_CONNECTOR_CALL_REASONS",
+    # (The measured WSS route-method table and the served texts generated from
+    # it are DERIVED from their module's exports: `_wss_route_method_names`.)
+    "LISTENER_EXCLUDED_ROOT_KINDS",
     # #175 (M12 defect slice). Served error codes from the two families the
     # taxonomy-derived allowlist above does NOT cover: `BuilderValidationError`
     # codes, which are inline strings on the legacy builder facade, and
@@ -2597,6 +2643,8 @@ def test_diagnostic_codes_named_in_the_audit_ledger_exist():
             - _LEDGER_NON_DIAGNOSTIC_TOKENS
             - _error_taxonomy_codes()
             - _served_builder_error_codes()
+            - _served_orchestration_error_codes()
+            - _wss_route_method_names()
         )
 
     # The two forms are scanned SEPARATELY, not merged, so each can be asserted on
@@ -2657,6 +2705,28 @@ def test_diagnostic_codes_named_in_the_audit_ledger_exist():
     assert _builder_codes & _taxonomy == set(), sorted(_builder_codes & _taxonomy)
     assert len(_builder_codes) > 20, len(_builder_codes)
     assert "PROCESS_NOTIFY_CONFIG_INVALID" in _builder_codes
+    # #158: the served `orchestrate_deploy` family, on the same terms — it may not
+    # shadow a gate diagnostic, and it must not be vacuously empty.
+    _orchestration_codes = _served_orchestration_error_codes()
+    assert _orchestration_codes & gate.DIAGNOSTIC_CODES == set(), sorted(
+        _orchestration_codes & gate.DIAGNOSTIC_CODES
+    )
+    assert len(_orchestration_codes) > 30, len(_orchestration_codes)
+    assert {"BUILD_REGISTRY_ENTRY_MALFORMED", "BUILD_LISTENER_ENTRY_MISMATCH"} <= (
+        _orchestration_codes
+    )
+    # CONTROL: the derivation reads the module's self-named constants only, so a
+    # string constant spelled differently from its value is not swept in.
+    from boomi_mcp.categories.deployment import orchestration as _orchestration
+
+    assert isinstance(_orchestration._RUN_TEST_LOG_LEVEL, str)
+    assert "_RUN_TEST_LOG_LEVEL" not in _orchestration_codes
+    assert _orchestration._RUN_TEST_LOG_LEVEL not in _orchestration_codes
+    # #158: the WSS route-method names, asked of the module, may not shadow a
+    # gate diagnostic and are not vacuously empty.
+    _route_names = _wss_route_method_names()
+    assert _route_names & gate.DIAGNOSTIC_CODES == set(), sorted(_route_names & gate.DIAGNOSTIC_CODES)
+    assert {"ASC_METHOD_BY_OPERATION_TYPE", "ASC_GET_WITH_INPUT_RULE"} <= _route_names
     # ...and the derivation is not vacuously empty, which would silently turn the
     # allowlist back into whatever the hand-list still happens to contain.
     assert len(_taxonomy) > 100, len(_taxonomy)
@@ -2859,6 +2929,8 @@ def test_diagnostic_codes_named_in_the_audit_ledger_exist():
             - derived_stems
             - _taxonomy
             - _builder_codes
+            - _orchestration_codes
+            - _wss_route_method_names()
         )
         assert unknown_here == set(), (
             "{0} names diagnostic codes the gate cannot emit: {1}".format(

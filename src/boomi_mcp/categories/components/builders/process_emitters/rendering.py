@@ -350,7 +350,11 @@ def render_start_noaction(ctx: ShapeRenderContext) -> str:
 
 
 def render_start_listen(ctx: ShapeRenderContext, *, userlabel: str, operation_id: str) -> str:
-    """WSS Listen start shape (M6, #12) — legacy-only (no registry emitter_kind)."""
+    """WSS Listen start shape (M6, #12).
+
+    Shared by the legacy builder's listener start and, since #158, the canonical
+    ``start_listen`` registry emitter — one template, so the two cannot drift.
+    """
     dragpoints = render_dragpoints(ctx.transitions)
     userlabel = _escape_xml(userlabel or "")
     operation_id = _escape_xml(str(operation_id or "").strip())

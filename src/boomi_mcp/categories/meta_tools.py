@@ -21,6 +21,11 @@ from ..errors import (
     WORKFLOW_SEQUENCE_NOT_FOUND,
 )
 from ..models.integration_models import IntegrationSpecV1
+from .components.wss_route_methods import (
+    ASC_GET_WITH_INPUT_RULE,
+    ASC_METHOD_RULE,
+    BARE_METHOD_RULE,
+)
 from ..kb.design_doctrine import (
     get_design_doctrine_catalog,
     get_design_pattern,
@@ -4100,7 +4105,7 @@ _COMPONENT_CREATE_API_SERVICE = {
         "routes": [
             {
                 "process": "<<'$ref:<process key>' (build_integration) or a process component UUID (manage_component)>>",
-                "http_method": "<<'' inherit (input_type none->GET else POST) | GET | POST | PUT | DELETE | PATCH>>",
+                "http_method": "<<'' inherit (" + ASC_METHOD_RULE + ") | GET | POST | PUT | DELETE | PATCH>>",
                 "url_path": "<<optional trailing path segment; '' contributes none>>",
                 "object_name": "<<'' inherits the WSS operation objectName>>",
                 "input_type": "<<'' inherit | none|singledata|singlejson|multijson|singlexml|multixml>>",
@@ -4212,8 +4217,10 @@ _COMPONENT_CREATE_API_SERVICE = {
             ],
         },
         "_example_note": (
-            "All-inherit route: the served path/method come from the "
-            "process's WSS Listen operation (/ws/rest/{objectName})."
+            "All-inherit route: the served path comes from the process's WSS "
+            "Listen operation (/ws/rest/{objectName}), and its method: "
+            + ASC_METHOD_RULE
+            + "."
         ),
     },
 }
@@ -8660,7 +8667,7 @@ _PROCESS_FLOW_PROTOCOLS = {
             "pipeline": "An M5.1 PipelineSpec: {stages: [...], dependencies: [...]}. Only the verified-linear, all-'ordering' subset is lowered in M5.2.",
             "pipeline.stages[].kind": "One of read/fetch/listener/map/send/write. The source is read (DB Get), fetch(rest_fetch) (REST GET), fetch(soap_fetch) (SOAP EXECUTE, #126), or listener(wss_listen) (inbound WSS Listen, M6 #12); the target is send(rest_send) (REST), send(soap_send) (SOAP EXECUTE, #126), or write (DB Send, M5.8 #74 — from a fetch/listener source); every other PipelineStageKind is reserved (see reserved_stage_kinds) and rejected.",
             "pipeline.stages[].config.primitive": "Required discriminator: 'db_read' for a read stage, 'rest_fetch' OR 'soap_fetch' for a fetch stage (#126), 'wss_listen' for a listener stage (M6 #12), 'map' for a map stage, 'rest_send' OR 'soap_send' for a send stage (#126), 'db_write' for a write stage (M5.8 #74). A fetch/send stage's declared primitive selects the REST-vs-SOAP connector family. A primitive on the wrong stage (e.g. 'db_write' on a 'send' stage, or 'rest_fetch' on a non-fetch stage) is rejected with a hint pointing at the right stage.",
-            "listener": "A listener stage (config.primitive='wss_listen', M6 #12) is the inbound Web Services Server Listen source: it lowers to the Listen START SHAPE (connectoraction actionType='Listen' connectorType='wss' embedded in the start shape) — no separate source connector shape and NO connection component, so the stage config carries ONLY primitive/operation_id/label (+ optional connector_type='wss'). The emitted process locks the listener options allowSimultaneous='true' / updateRunDates='false'. Bare-WSS endpoint = /ws/simple/{lowercase(operationType)}{SentenceCase(objectName)} — the objectName is stored verbatim on the operation but Boomi upper-cases its FIRST letter on the served path (live-settled 2026-07-04); HTTP method derives from the operation's input_type (none -> GET, else POST). Serves basic/intermediate apiType runtimes; 'advanced' requires an API Service Component routing to the listener process (typed 'webservice' builder / listener-archetype asc_wrapper.enabled=true, #133) — the served path becomes /ws/rest/... (case-verbatim). Listener processes have no Test mode — orchestrate_deploy runs a listener_verify stage (apiType preflight, ASC deploy-both check in api_service mode, collision check, live probe, execution readback) instead.",
+            "listener": "A listener stage (config.primitive='wss_listen', M6 #12) is the inbound Web Services Server Listen source: it lowers to the Listen START SHAPE (connectoraction actionType='Listen' connectorType='wss' embedded in the start shape) — no separate source connector shape and NO connection component, so the stage config carries ONLY primitive/operation_id/label (+ optional connector_type='wss'). The emitted process locks the listener options allowSimultaneous='true' / updateRunDates='false'. Bare-WSS endpoint = /ws/simple/{lowercase(operationType)}{SentenceCase(objectName)} — the objectName is stored verbatim on the operation but Boomi upper-cases its FIRST letter on the served path (live-settled 2026-07-04); a bare route is called by input type (" + BARE_METHOD_RULE + "). Serves basic/intermediate apiType runtimes; 'advanced' requires an API Service Component routing to the listener process (typed 'webservice' builder / listener-archetype asc_wrapper.enabled=true, #133) — the served path becomes /ws/rest/... (case-verbatim), and its method: " + ASC_METHOD_RULE + "; " + ASC_GET_WITH_INPUT_RULE + ". Listener processes have no Test mode — orchestrate_deploy runs a listener_verify stage (apiType preflight, ASC deploy-both check in api_service mode, collision check, live probe, execution readback) instead.",
             "pipeline.stages[].config": "read/fetch/send/write carry the connector binding (connection_id, operation_id, optional connector_type/action_type/label); map carries map_ref (or map_id). Any other config key — e.g. a gated dynamic_path or reliability sub-block — is rejected (never silently dropped).",
             "fetch": "A fetch stage is a REST GET source (config.primitive='rest_fetch', M5.4 #72) or a SOAP Client EXECUTE source (config.primitive='soap_fetch', #126). A rest_fetch carries an explicit response/output shape and an EMPTY request document (some APIs reject GET-with-body); action_type defaults to 'GET' and must be 'GET'. A soap_fetch lowers to connectorType='wssoapclientsdk'; action_type defaults to 'EXECUTE' and must be 'EXECUTE' (SOAP Client is EXECUTE-only).",
             "send": "A send stage is a REST target (config.primitive='rest_send') carrying an explicit HTTP method, or a SOAP Client EXECUTE target (config.primitive='soap_send', #126) which lowers to connectorType='wssoapclientsdk' with action_type defaulting to (and required to be) 'EXECUTE'.",

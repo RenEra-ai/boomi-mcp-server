@@ -21,13 +21,14 @@ represented here — the component assembler owns it, exactly as the legacy path
 does. Per ADR-001 §6 the IR carries no XML, layout, shape ids, CFG edges,
 credentials, or raw legacy config, and every diagnostic is value-free.
 
-**Listener chains are NOT handled here (#140).** A WSS listener source is not
-representable in ProcessIR v1 at three independent layers: there is no
-``start_listen`` emitter key, the compiler fails closed for a listener source,
-and ``SourceEndpointV1.connection_ref`` is required while a lowered listener
-binding carries no ``connection_id`` at all. The builder routes those chains to
-the legacy renderer *before* calling this adapter; the guard below is the second,
-independent gate so a future caller cannot route one in past the first.
+**Listener chains ARE handled here since #158.** A WSS listener source lowers to
+the root-only ``listener`` node — operation-only, with no connection, exactly
+the binding a lowered listener core carries — and the compiler fuses it with the
+process Start. Until #158 the builder routed these chains to the legacy renderer
+and this adapter refused them; both gates now admit them, and the legacy
+fallback stays in the builder, unreached, until #160 deletes it. Spellings the
+compiler refuses as a listener family but the WSS builder does not accept
+(``wssserver``, ``listener``) are still refused here, with a pointed diagnostic.
 
 Refs are **occurrence-scoped aliases** (#139B): every id slot becomes
 ``$ref:legacy.adapter:<RFC 6901 pointer>`` and the requirement carries the real
@@ -225,30 +226,82 @@ def _check_binding(binding: Dict[str, Any], pointer: str) -> None:
         )
 
 
-def _is_listener(binding: Dict[str, Any]) -> bool:
-    """Would the canonical compiler REFUSE this source as a listener entry?
+#: The keys a LISTENER binding may carry: an operation and never a connection.
+_LISTENER_BINDING_KEYS = frozenset(
+    {"connector_type", "action_type", "operation_id", "label"}
+)
 
-    Deliberately the compiler's own ``LISTENER_CONNECTOR_TYPES``, NOT the builder's
-    ``_resolve_wss_connector_type``. The two gates mirror different things on
-    purpose: the builder's ROUTING gate must agree with the LEGACY selector (it
-    decides which renderer runs, so disagreeing there would mis-shape a real
-    listener), while this REFUSAL gate must agree with what the canonical chain can
-    represent. The compiler's set is a strict superset — it also holds ``wssserver``
-    and ``listener`` — so refusing on it converts a deep
-    ``PROCESS_IR_CAPABILITY_UNSUPPORTED`` raised during lowering into a precise
-    adapter diagnostic pointing at ``/source/connector_type``.
+LISTENER_DISPOSITION = "listener"
+REFUSED_LISTENER_DISPOSITION = "refused"
 
-    No reachable config can tell the two apart: ``_check_source_connector_family``
-    admits only the ``wss`` aliases, and the adapter is reached only through
-    ``lower_config``. The distinction matters for #140, which promotes this adapter
-    to a dialect whose input is not pre-filtered that way.
+
+def _listener_disposition(binding: Dict[str, Any]) -> Optional[str]:
+    """How this source binding relates to the listener entry (#158).
+
+    ``"listener"`` — a spelling the WSS builder ACCEPTS
+    (``connector_builder._resolve_wss_connector_type``, the resolver the legacy
+    body also routed on), so the source becomes the ``listener`` node.
+
+    ``"refused"`` — a spelling in the compiler's broader refusal set
+    (``LISTENER_CONNECTOR_TYPES``: ``wssserver``, ``listener``) that the builder
+    does not accept. Neither a listener nor an ordinary source may carry it, so it
+    is refused here with a precise pointer rather than deep inside lowering.
+
+    ``None`` — an ordinary source.
     """
+    from ....categories.components.builders.connector_builder import (
+        _resolve_wss_connector_type,
+    )
     from ..contracts import LISTENER_CONNECTOR_TYPES
 
     connector_type = binding.get("connector_type")
     if not isinstance(connector_type, str):
-        return False
-    return connector_type.strip().lower() in LISTENER_CONNECTOR_TYPES
+        return None
+    if _resolve_wss_connector_type(connector_type) is not None:
+        return LISTENER_DISPOSITION
+    if connector_type.strip().lower() in LISTENER_CONNECTOR_TYPES:
+        return REFUSED_LISTENER_DISPOSITION
+    return None
+
+
+def _listener_slot(
+    binding: Dict[str, Any], base: str
+) -> Tuple[Dict[str, Any], List[LegacySymbolRequirementV1]]:
+    """Build the ``listener`` IR node plus its ONE operation requirement (#158).
+
+    Operation-only, the inverse of :func:`_binding_slots`: a listener has no
+    connection, so a binding that carries one is refused at that exact field
+    rather than having a connection silently dropped — or invented, which is what
+    requiring the two-slot shape would amount to.
+    """
+    extra = sorted(set(binding) - _LISTENER_BINDING_KEYS)
+    if extra:
+        raise adapter_diagnostic(
+            LEGACY_ADAPTER_UNSUPPORTED_KIND,
+            f"{base}/{extra[0]}",
+            "a listener binding authors only its operation — this key is not "
+            "representable on a listener entry",
+        )
+    pointer = f"{base}/operation_id"
+    selector = _coerce_id(binding.get("operation_id"))
+    if not selector:
+        raise adapter_diagnostic(
+            LEGACY_ADAPTER_SEMANTIC_LOSS,
+            pointer,
+            "listener binding is missing a resolved operation id",
+        )
+    alias = LEGACY_ADAPTER_ALIAS_PREFIX + pointer
+    node = {"kind": "listener", "operation_ref": alias, **_label_field(binding)}
+    requirement = LegacySymbolRequirementV1(
+        role="start_listen.operation",
+        ir_ref=alias,
+        legacy_selector=selector,
+        source_pointer=pointer,
+        expected_component_type="connector-action",
+        connector_type=binding.get("connector_type"),
+        action_type=binding.get("action_type"),
+    )
+    return node, [requirement]
 
 
 def _binding_slots(
@@ -386,22 +439,29 @@ def adapt_sync_pipeline(
         "transform",
     )
 
-    if _is_listener(source):
-        # Gate 2. The builder routes listener chains to the legacy renderer before
-        # reaching here (Gate 1); this is the independent backstop, so a listener
-        # can never be silently mis-shaped as a start_noaction + connectoraction
-        # pair instead of the fused start_listen shape.
+    disposition = _listener_disposition(source)
+    if disposition == REFUSED_LISTENER_DISPOSITION:
+        # Gate 2, narrowed by #158. A spelling the compiler refuses as a listener
+        # family but the WSS builder does not accept can be neither a listener
+        # nor an ordinary source: refused here, pointing at the field that
+        # identifies it, rather than deep inside lowering.
         raise adapter_diagnostic(
             LEGACY_ADAPTER_UNSUPPORTED_KIND,
             pointer_bases.listener,
-            "listener entry is not representable in ProcessIR v1 — the legacy path "
-            "fuses the start and connector shapes (#140)",
+            "this listener connector spelling is not accepted — use wss, "
+            "web_services or web_services_server",
         )
 
-    _check_binding(source, pointer_bases.source)
     _check_binding(target, pointer_bases.target)
-
-    source_node, requirements = _binding_slots(source, pointer_bases.source, "source")
+    if disposition == LISTENER_DISPOSITION:
+        # #158: the source IS the listener entry, fused with the Start by the
+        # compiler — one operation requirement and no connection.
+        source_node, requirements = _listener_slot(source, pointer_bases.source)
+    else:
+        _check_binding(source, pointer_bases.source)
+        source_node, requirements = _binding_slots(
+            source, pointer_bases.source, "source"
+        )
     steps: List[Dict[str, Any]] = [source_node]
 
     map_node, map_requirements = _map_slot(
@@ -460,12 +520,11 @@ def adapt_sync_pipeline_config(config: Dict[str, Any]) -> LegacyAdapterResultV1:
     (ADR-001 asks adapters to preserve it), and it names the real defect far better
     than a re-wrapped adapter diagnostic could.
 
-    A WSS listener config raises ``LEGACY_ADAPTER_UNSUPPORTED_KIND`` here rather
-    than returning anything. That is correct and not a gap: an adapter returns IR
-    or fails, so it *cannot* express "use the legacy renderer" — choosing the
-    renderer is the builder's job (`_sync_pipeline_is_canonical`). This mirrors the
-    registry entry's documented meaning: the dialect is cut over, not every one of
-    its configs.
+    A WSS listener config adapts like any other since #158: its source becomes the
+    operation-only ``listener`` entry, and its pointers are rebased onto the raw
+    listener stage exactly as every other slot's are. Only the refused listener
+    spellings (``wssserver``, ``listener``) still raise
+    ``LEGACY_ADAPTER_UNSUPPORTED_KIND``, pointed at the stage's ``primitive``.
 
     Pointers are rebased onto the raw config, because ``source_pointer`` and the
     aliases that embed it are contractually the EXACT location a reference came

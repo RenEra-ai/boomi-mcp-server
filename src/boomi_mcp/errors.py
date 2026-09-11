@@ -212,6 +212,26 @@ PROCESS_IR_SEMANTIC_RECOVERY_PROCESS_CALL_INVALID = (
 )
 PROCESS_IR_COMPILE_ERROR_REGION_INVALID = "PROCESS_IR_COMPILE_ERROR_REGION_INVALID"
 
+# --- ProcessIR listener entry (M12.20 / issue #158; ADR-001 §7) ---------------
+# #158 ADDS to four families that already exist (SCHEMA_*, CAPABILITY_*,
+# REFERENCE_*, SEMANTIC_*) — no new family, no rename, no re-scope. Each names
+# a listener-specific defect a more generic member would have misdescribed:
+# a supplied connection is not an unknown field on an unrelated node, a
+# forbidden construct is not an unknown capability, and an operation that is
+# not a Listen operation is not a missing one.
+PROCESS_IR_SCHEMA_LISTENER_CONNECTION_FORBIDDEN = (
+    "PROCESS_IR_SCHEMA_LISTENER_CONNECTION_FORBIDDEN"
+)
+PROCESS_IR_CAPABILITY_LISTENER_COMPOSITION_UNSUPPORTED = (
+    "PROCESS_IR_CAPABILITY_LISTENER_COMPOSITION_UNSUPPORTED"
+)
+PROCESS_IR_REFERENCE_LISTENER_OPERATION_INVALID = (
+    "PROCESS_IR_REFERENCE_LISTENER_OPERATION_INVALID"
+)
+PROCESS_IR_SEMANTIC_LISTENER_INBOUND_CONTRACT_UNSATISFIED = (
+    "PROCESS_IR_SEMANTIC_LISTENER_INBOUND_CONTRACT_UNSATISFIED"
+)
+
 # --- ProcessIR unified semantic validation (M12.8 / issue #143; ADR-001 §7) ---
 # #143 ADDS to four families it is a declared introducer for — REFERENCE_*,
 # CAPABILITY_*, SEMANTIC_* and the LEGACY_ADAPTER_EXEMPTION_* subfamily. It is
@@ -1457,6 +1477,52 @@ ERROR_TAXONOMY: Dict[str, ErrorCodeSpec] = {
                 "(edges, ordinals, or containment) — a compiler defect, not authored input."
             ),
             owner="#142",
+        ),
+        # --- #158 M12.20: listener entry ------------------------------------
+        ErrorCodeSpec(
+            code=PROCESS_IR_SCHEMA_LISTENER_CONNECTION_FORBIDDEN,
+            category="process_ir",
+            retryable=False,
+            summary=(
+                "A listener entry supplies a connection. A listener authors only its "
+                "operation: the inbound endpoint is bound to the operation itself, so "
+                "a connection is refused rather than ignored."
+            ),
+            owner="#158",
+        ),
+        ErrorCodeSpec(
+            code=PROCESS_IR_CAPABILITY_LISTENER_COMPOSITION_UNSUPPORTED,
+            category="process_ir",
+            retryable=False,
+            summary=(
+                "A listener flow contains a construct it does not compose with — a "
+                "second entry, error handling, fan-out, flow control, a process call, "
+                "an exception or returned documents."
+            ),
+            owner="#158",
+        ),
+        ErrorCodeSpec(
+            code=PROCESS_IR_REFERENCE_LISTENER_OPERATION_INVALID,
+            category="process_ir",
+            retryable=False,
+            summary=(
+                "A listener's operation does not resolve to a component declared as "
+                "a Web Services Server Listen operation (a Web Services Server "
+                "connector_type with operation_mode 'listen') with no connection "
+                "binding."
+            ),
+            owner="#158",
+        ),
+        ErrorCodeSpec(
+            code=PROCESS_IR_SEMANTIC_LISTENER_INBOUND_CONTRACT_UNSATISFIED,
+            category="process_ir",
+            retryable=False,
+            summary=(
+                "A listener requests profile-bound inbound validation, but its "
+                "resolved operation does not accept JSON or XML input bound to a "
+                "request profile."
+            ),
+            owner="#158",
         ),
         # --- #143 M12.8: unified semantic validation ----------------------
         ErrorCodeSpec(

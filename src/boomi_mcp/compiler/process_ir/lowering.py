@@ -66,6 +66,7 @@ from .contracts import (
     NotifyInputV1,
     NotifySemanticV1,
     IdempotencyEvidenceSemanticV1,
+    ListenerSemanticV1,
     FlowControlInputV1,
     FlowControlSemanticV1,
     MapInputV1,
@@ -79,7 +80,6 @@ from .contracts import (
     SemanticCfgV1,
     SetPropertiesStepInputV1,
     SetPropertySemanticV1,
-    StartNoActionInputV1,
     StopInputV1,
     StopSemanticV1,
     TryCatchSemanticV1,
@@ -93,6 +93,7 @@ from .contracts import (
 )
 from .error_handling import catch_region_node_ids
 from .diagnostics import raise_compile_error
+from .entry_policy import derive_process_entry, start_emitter_input
 
 # Default profile type the legacy property emitter falls back to
 # (``_emit_property_source_value``, builder :4016).
@@ -266,6 +267,17 @@ def _semantic_for(node: Any, *, routed: bool = False, entry: bool = False) -> An
     kind = node.kind
     label = getattr(node, "label", None)
 
+    if kind == "listener":
+        # #158. The entry's own facts only: the operation ref, the label and the
+        # REQUESTED inbound contract. The entry policy fuses this node with the
+        # synthesized Start at emission planning; lowering keeps it an ordinary
+        # CFG node so every graph check sees the flow it actually has.
+        inbound = getattr(node, "inbound_validation", None)
+        return ListenerSemanticV1(
+            operation_ref=node.operation_ref,
+            label=label,
+            inbound_validation=getattr(inbound, "mode", None),
+        )
     if kind in ("source", "target"):
         return ConnectorSemanticV1(
             role="source" if kind == "source" else "target",
@@ -704,6 +716,11 @@ def lower_process_ir_to_cfg(ir: ProcessIRV1) -> SemanticCfgV1:
     first_root_call = next(
         (i for i, step in enumerate(steps) if step.kind == "connector_call"), None
     )
+    # #158. Under a listener the flow's entry is the listener, so NO call is the
+    # connector entry: every outbound call is downstream of the inbound request.
+    # Letting the first call take the entry role would emit it as a source read.
+    if steps and steps[0].kind == "listener":
+        first_root_call = None
 
     previous: Optional[str] = None
     #: Handlers whose recovery path is lowered after the main spine, in AUTHORED
@@ -911,6 +928,19 @@ def _emitter_input_for(node: CfgNodeV1, symbols: Mapping[str, Any]) -> Any:
     label = getattr(semantic, "label", None) or ""
 
     kind = semantic.semantic_kind
+
+    if kind == "listener":
+        # #158. A listener has no shape of its own — the entry policy absorbs it
+        # into the synthesized Start. Asking for its emitter input means a plan
+        # node claims IR origin for the absorbed entry, which only a forged or
+        # defective plan can do.
+        raise raise_compile_error(
+            PROCESS_IR_COMPILE_EMISSION_PLAN_INVALID,
+            "emission_planning",
+            path,
+            internal_node_id=node_id,
+            message="the listener entry is absorbed into the synthesized start shape",
+        )
 
     if kind == "connector":
         connection = _resolve(symbols, semantic.connection_ref, path, node_id)
@@ -1203,10 +1233,17 @@ def lower_cfg_to_emission_plan(
     # function again and compares, so the checker verifies geometry against the
     # GRAPH rather than against a note lowering left for itself.
     catch_ids = catch_region_node_ids(cfg)
+    # #158. The entry policy decides the Start's form, the node it absorbs (a
+    # listener) and the node its wire reaches. An absorbed node takes no ordinal:
+    # the Start at shape1 IS its shape, so every later node numbers from shape2
+    # exactly as a scheduled flow's nodes do.
+    entry = derive_process_entry(cfg)
     ordinal_for_cfg_node = {}
     synthetic_stop_for = {}
     next_ordinal = 2
     for node in cfg.nodes:
+        if node.node_id == entry.absorbed_node_id:
+            continue
         ordinal_for_cfg_node[node.node_id] = next_ordinal
         next_ordinal += 1
         if node.exit_role == "routed_target":
@@ -1221,20 +1258,22 @@ def lower_cfg_to_emission_plan(
     nodes: List[EmissionNodeV1] = []
     terminal_shapes: List[str] = []
 
-    entry_target = shape_id(ordinal_for_cfg_node[cfg.entry_node_id])
+    entry_target = shape_id(ordinal_for_cfg_node[entry.start_target_node_id])
     nodes.append(
         EmissionNodeV1(
             ordinal=1,
             shape_id=shape_id(1),
             origin="synthetic",
             synthetic_role="start",
-            emitter_input=StartNoActionInputV1(),
+            emitter_input=start_emitter_input(entry, symbol_index),
             layout=EmissionLayoutV1(x=START_SHAPE_X, y=START_SHAPE_Y),
             outgoing=(_transition(1, 1, entry_target, provenance="synthetic"),),
         )
     )
 
     for node in cfg.nodes:
+        if node.node_id == entry.absorbed_node_id:
+            continue
         ordinal = ordinal_for_cfg_node[node.node_id]
         semantic_kind = node.semantic.semantic_kind
         transitions: List[EmissionTransitionV1] = []

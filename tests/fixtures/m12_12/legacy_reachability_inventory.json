@@ -109,7 +109,7 @@
     {
       "census": "component_xml_write",
       "count": 1,
-      "evidence_line": 658,
+      "evidence_line": 665,
       "form": "component.update_component_raw(...)",
       "path": "src/boomi_mcp/categories/components/analyze_component.py",
       "row_id": "WR-ab01f1b9",
@@ -199,7 +199,7 @@
     {
       "census": "component_xml_write",
       "count": 1,
-      "evidence_line": 3316,
+      "evidence_line": 3307,
       "form": "component.update_component_raw(...)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "WR-86ab577f",
@@ -208,7 +208,7 @@
     {
       "census": "component_xml_write",
       "count": 1,
-      "evidence_line": 9028,
+      "evidence_line": 9019,
       "form": "create_component(...)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "WR-c52b7626",
@@ -217,7 +217,7 @@
     {
       "census": "component_xml_write",
       "count": 9,
-      "evidence_line": 3869,
+      "evidence_line": 3860,
       "form": "create_component(...)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "WR-1ee76aa9",
@@ -226,7 +226,7 @@
     {
       "census": "component_xml_write",
       "count": 1,
-      "evidence_line": 4519,
+      "evidence_line": 4510,
       "form": "update_component(...)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "WR-a22eb226",
@@ -235,7 +235,7 @@
     {
       "census": "component_xml_write",
       "count": 1,
-      "evidence_line": 5915,
+      "evidence_line": 5922,
       "form": "svc.send_request(...)",
       "path": "src/boomi_mcp/categories/meta_tools.py",
       "row_id": "WR-ff78566d",
@@ -298,7 +298,7 @@
     {
       "census": "http_client_call",
       "count": 1,
-      "evidence_line": 1048,
+      "evidence_line": 1480,
       "form": "request.urlopen -> URLOPEN <dynamic> (hand-rolled HTTP)",
       "path": "src/boomi_mcp/categories/deployment/orchestration.py",
       "row_id": "HT-aabbaba4",
@@ -379,7 +379,7 @@
     {
       "census": "legacy_emitter",
       "count": 1,
-      "evidence_line": 81,
+      "evidence_line": 82,
       "form": "import _emit_branch",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "LE-0aa791fb",
@@ -388,7 +388,7 @@
     {
       "census": "legacy_emitter",
       "count": 1,
-      "evidence_line": 81,
+      "evidence_line": 82,
       "form": "import _emit_catcherrors",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "LE-69aac1eb",
@@ -397,7 +397,7 @@
     {
       "census": "legacy_emitter",
       "count": 1,
-      "evidence_line": 81,
+      "evidence_line": 82,
       "form": "import _emit_connectoraction",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "LE-09c3ba82",
@@ -406,7 +406,7 @@
     {
       "census": "legacy_emitter",
       "count": 1,
-      "evidence_line": 81,
+      "evidence_line": 82,
       "form": "import _emit_dataprocess",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "LE-27b529d0",
@@ -415,7 +415,7 @@
     {
       "census": "legacy_emitter",
       "count": 1,
-      "evidence_line": 81,
+      "evidence_line": 82,
       "form": "import _emit_dataprocess_combine_body",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "LE-567b1550",
@@ -424,7 +424,7 @@
     {
       "census": "legacy_emitter",
       "count": 1,
-      "evidence_line": 81,
+      "evidence_line": 82,
       "form": "import _emit_dataprocess_split_body",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "LE-0392aed3",
@@ -433,7 +433,7 @@
     {
       "census": "legacy_emitter",
       "count": 1,
-      "evidence_line": 81,
+      "evidence_line": 82,
       "form": "import _emit_dataprocess_step",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "LE-a653b400",
@@ -442,7 +442,7 @@
     {
       "census": "legacy_emitter",
       "count": 1,
-      "evidence_line": 81,
+      "evidence_line": 82,
       "form": "import _emit_decision",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "LE-7b0cb433",
@@ -451,7 +451,7 @@
     {
       "census": "legacy_emitter",
       "count": 1,
-      "evidence_line": 81,
+      "evidence_line": 82,
       "form": "import _emit_decisionvalue",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "LE-9510d4cb",
@@ -460,7 +460,7 @@
     {
       "census": "legacy_emitter",
       "count": 1,
-      "evidence_line": 81,
+      "evidence_line": 82,
       "form": "import _emit_doccacheload",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "LE-cc47c410",
@@ -469,7 +469,7 @@
     {
       "census": "legacy_emitter",
       "count": 1,
-      "evidence_line": 81,
+      "evidence_line": 82,
       "form": "import _emit_doccacheremove",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "LE-9aa8c618",
@@ -478,7 +478,7 @@
     {
       "census": "legacy_emitter",
       "count": 1,
-      "evidence_line": 81,
+      "evidence_line": 82,
       "form": "import _emit_doccacheretrieve",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "LE-2439fa94",
@@ -487,7 +487,7 @@
     {
       "census": "legacy_emitter",
       "count": 1,
-      "evidence_line": 81,
+      "evidence_line": 82,
       "form": "import _emit_documentproperty_assignment",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "LE-5c7ab46c",
@@ -496,7 +496,7 @@
     {
       "census": "legacy_emitter",
       "count": 1,
-      "evidence_line": 81,
+      "evidence_line": 82,
       "form": "import _emit_dragpoints",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "LE-8aaa55e5",
@@ -505,7 +505,7 @@
     {
       "census": "legacy_emitter",
       "count": 1,
-      "evidence_line": 81,
+      "evidence_line": 82,
       "form": "import _emit_exception",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "LE-b8364ce7",
@@ -514,7 +514,7 @@
     {
       "census": "legacy_emitter",
       "count": 1,
-      "evidence_line": 81,
+      "evidence_line": 82,
       "form": "import _emit_exception_parameters",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "LE-efc7eff7",
@@ -523,7 +523,7 @@
     {
       "census": "legacy_emitter",
       "count": 1,
-      "evidence_line": 81,
+      "evidence_line": 82,
       "form": "import _emit_flowcontrol",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "LE-212d5e10",
@@ -532,7 +532,7 @@
     {
       "census": "legacy_emitter",
       "count": 1,
-      "evidence_line": 81,
+      "evidence_line": 82,
       "form": "import _emit_map",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "LE-20158373",
@@ -541,7 +541,7 @@
     {
       "census": "legacy_emitter",
       "count": 1,
-      "evidence_line": 81,
+      "evidence_line": 82,
       "form": "import _emit_message",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "LE-95426bbc",
@@ -550,7 +550,7 @@
     {
       "census": "legacy_emitter",
       "count": 1,
-      "evidence_line": 81,
+      "evidence_line": 82,
       "form": "import _emit_notify",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "LE-01e60eaf",
@@ -559,7 +559,7 @@
     {
       "census": "legacy_emitter",
       "count": 1,
-      "evidence_line": 81,
+      "evidence_line": 82,
       "form": "import _emit_processcall",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "LE-2366e009",
@@ -568,7 +568,7 @@
     {
       "census": "legacy_emitter",
       "count": 1,
-      "evidence_line": 81,
+      "evidence_line": 82,
       "form": "import _emit_property_source_value",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "LE-096305c5",
@@ -577,7 +577,7 @@
     {
       "census": "legacy_emitter",
       "count": 1,
-      "evidence_line": 81,
+      "evidence_line": 82,
       "form": "import _emit_returndocuments",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "LE-552e93ac",
@@ -586,7 +586,7 @@
     {
       "census": "legacy_emitter",
       "count": 1,
-      "evidence_line": 81,
+      "evidence_line": 82,
       "form": "import _emit_setproperties",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "LE-76d4f9cd",
@@ -595,7 +595,7 @@
     {
       "census": "legacy_emitter",
       "count": 1,
-      "evidence_line": 81,
+      "evidence_line": 82,
       "form": "import _emit_setproperties_shape",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "LE-a9d5f134",
@@ -604,7 +604,7 @@
     {
       "census": "legacy_emitter",
       "count": 1,
-      "evidence_line": 81,
+      "evidence_line": 82,
       "form": "import _emit_setproperties_step",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "LE-7ecef830",
@@ -613,7 +613,7 @@
     {
       "census": "legacy_emitter",
       "count": 1,
-      "evidence_line": 81,
+      "evidence_line": 82,
       "form": "import _emit_start_listen",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "LE-33587e6b",
@@ -622,7 +622,7 @@
     {
       "census": "legacy_emitter",
       "count": 1,
-      "evidence_line": 81,
+      "evidence_line": 82,
       "form": "import _emit_start_noaction",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "LE-690ffa2d",
@@ -631,7 +631,7 @@
     {
       "census": "legacy_emitter",
       "count": 1,
-      "evidence_line": 81,
+      "evidence_line": 82,
       "form": "import _emit_stop",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "LE-d448c0d2",
@@ -640,7 +640,7 @@
     {
       "census": "legacy_emitter",
       "count": 1,
-      "evidence_line": 3346,
+      "evidence_line": 3347,
       "form": "_emit_branch(...)",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "LE-af335dd5",
@@ -649,7 +649,7 @@
     {
       "census": "legacy_emitter",
       "count": 1,
-      "evidence_line": 4477,
+      "evidence_line": 4478,
       "form": "_emit_doccacheload(...)",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "LE-3e4e9a25",
@@ -658,7 +658,7 @@
     {
       "census": "legacy_emitter",
       "count": 1,
-      "evidence_line": 4490,
+      "evidence_line": 4491,
       "form": "_emit_exception(...)",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "LE-ad55f303",
@@ -667,7 +667,7 @@
     {
       "census": "legacy_emitter",
       "count": 1,
-      "evidence_line": 4462,
+      "evidence_line": 4463,
       "form": "_emit_notify(...)",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "LE-cfd2058b",
@@ -676,7 +676,7 @@
     {
       "census": "legacy_emitter",
       "count": 1,
-      "evidence_line": 4488,
+      "evidence_line": 4489,
       "form": "_emit_processcall(...)",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "LE-484b2b15",
@@ -685,7 +685,7 @@
     {
       "census": "legacy_emitter",
       "count": 1,
-      "evidence_line": 4492,
+      "evidence_line": 4493,
       "form": "_emit_stop(...)",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "LE-bf5233ad",
@@ -694,7 +694,7 @@
     {
       "census": "legacy_emitter",
       "count": 2,
-      "evidence_line": 4579,
+      "evidence_line": 4580,
       "form": "_emit_catcherrors(...)",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "LE-871a2e42",
@@ -703,7 +703,7 @@
     {
       "census": "legacy_emitter",
       "count": 1,
-      "evidence_line": 4576,
+      "evidence_line": 4577,
       "form": "_emit_start_noaction(...)",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "LE-4ced33b4",
@@ -712,7 +712,7 @@
     {
       "census": "legacy_emitter",
       "count": 1,
-      "evidence_line": 3423,
+      "evidence_line": 3424,
       "form": "_emit_decision(...)",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "LE-e85c0c2f",
@@ -721,7 +721,7 @@
     {
       "census": "legacy_emitter",
       "count": 1,
-      "evidence_line": 3231,
+      "evidence_line": 3232,
       "form": "_emit_connectoraction(...)",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "LE-35327e3e",
@@ -730,7 +730,7 @@
     {
       "census": "legacy_emitter",
       "count": 1,
-      "evidence_line": 3239,
+      "evidence_line": 3240,
       "form": "_emit_dataprocess(...)",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "LE-9c90f5b8",
@@ -739,7 +739,7 @@
     {
       "census": "legacy_emitter",
       "count": 1,
-      "evidence_line": 3243,
+      "evidence_line": 3244,
       "form": "_emit_doccacheremove(...)",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "LE-30ab4c16",
@@ -748,7 +748,7 @@
     {
       "census": "legacy_emitter",
       "count": 1,
-      "evidence_line": 3241,
+      "evidence_line": 3242,
       "form": "_emit_doccacheretrieve(...)",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "LE-804d5fd2",
@@ -757,7 +757,7 @@
     {
       "census": "legacy_emitter",
       "count": 1,
-      "evidence_line": 3237,
+      "evidence_line": 3238,
       "form": "_emit_flowcontrol(...)",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "LE-57b01978",
@@ -766,7 +766,7 @@
     {
       "census": "legacy_emitter",
       "count": 1,
-      "evidence_line": 3235,
+      "evidence_line": 3236,
       "form": "_emit_map(...)",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "LE-17312cab",
@@ -775,7 +775,7 @@
     {
       "census": "legacy_emitter",
       "count": 1,
-      "evidence_line": 3233,
+      "evidence_line": 3234,
       "form": "_emit_message(...)",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "LE-afe76114",
@@ -784,7 +784,7 @@
     {
       "census": "legacy_emitter",
       "count": 1,
-      "evidence_line": 3271,
+      "evidence_line": 3272,
       "form": "_emit_processcall(...)",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "LE-e2130642",
@@ -793,7 +793,7 @@
     {
       "census": "legacy_emitter",
       "count": 1,
-      "evidence_line": 3285,
+      "evidence_line": 3286,
       "form": "_emit_returndocuments(...)",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "LE-5a639532",
@@ -802,7 +802,7 @@
     {
       "census": "legacy_emitter",
       "count": 1,
-      "evidence_line": 3245,
+      "evidence_line": 3246,
       "form": "_emit_setproperties(...)",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "LE-58bdd0bd",
@@ -811,7 +811,7 @@
     {
       "census": "legacy_emitter",
       "count": 1,
-      "evidence_line": 3248,
+      "evidence_line": 3249,
       "form": "_emit_setproperties_step(...)",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "LE-ecd7e656",
@@ -820,7 +820,7 @@
     {
       "census": "legacy_emitter",
       "count": 1,
-      "evidence_line": 3229,
+      "evidence_line": 3230,
       "form": "_emit_start_listen(...)",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "LE-f4ee3d25",
@@ -829,7 +829,7 @@
     {
       "census": "legacy_emitter",
       "count": 1,
-      "evidence_line": 3226,
+      "evidence_line": 3227,
       "form": "_emit_start_noaction(...)",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "LE-4806f23a",
@@ -838,7 +838,7 @@
     {
       "census": "legacy_emitter",
       "count": 1,
-      "evidence_line": 3287,
+      "evidence_line": 3288,
       "form": "_emit_stop(...)",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "LE-c2c8b7c0",
@@ -847,7 +847,7 @@
     {
       "census": "legacy_emitter",
       "count": 1,
-      "evidence_line": 4305,
+      "evidence_line": 4306,
       "form": "_emit_catcherrors(...)",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "LE-564f3344",
@@ -856,7 +856,7 @@
     {
       "census": "legacy_emitter",
       "count": 1,
-      "evidence_line": 4303,
+      "evidence_line": 4304,
       "form": "_emit_start_noaction(...)",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "LE-94f93542",
@@ -865,7 +865,7 @@
     {
       "census": "legacy_semantic_validation",
       "count": 1,
-      "evidence_line": 6395,
+      "evidence_line": 6386,
       "form": "_process_ir_semantic_error(...)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LV-4a3017fe",
@@ -874,7 +874,7 @@
     {
       "census": "legacy_semantic_validation",
       "count": 1,
-      "evidence_line": 6421,
+      "evidence_line": 6412,
       "form": "validate_legacy_process_config(...)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LV-4815adb5",
@@ -1000,7 +1000,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 1263,
+      "evidence_line": 1269,
       "form": "_build_plan(...) [legacy-bearing, src/boomi_mcp/categories/integration_builder.py]",
       "path": "src/boomi_mcp/authoring/workflow.py",
       "row_id": "LT-56f8bcbb",
@@ -1009,7 +1009,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 3060,
+      "evidence_line": 3066,
       "form": "plan_authoring_request_v1(...) [legacy-bearing, src/boomi_mcp/authoring/workflow.py]",
       "path": "src/boomi_mcp/authoring/workflow.py",
       "row_id": "LT-a45c3afb",
@@ -1018,7 +1018,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 2503,
+      "evidence_line": 2509,
       "form": "_legacy_plan_echo(...) [legacy-bearing, src/boomi_mcp/authoring/workflow.py]",
       "path": "src/boomi_mcp/authoring/workflow.py",
       "row_id": "LT-16a15362",
@@ -1027,7 +1027,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 3301,
+      "evidence_line": 3307,
       "form": "compile_authoring_request_v1(...) [legacy-bearing, src/boomi_mcp/authoring/workflow.py]",
       "path": "src/boomi_mcp/authoring/workflow.py",
       "row_id": "LT-f9b9e35e",
@@ -1036,7 +1036,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 900,
+      "evidence_line": 907,
       "form": "merge_versions(...) [legacy-bearing, src/boomi_mcp/categories/components/analyze_component.py]",
       "path": "src/boomi_mcp/categories/components/analyze_component.py",
       "row_id": "LT-5cb7e6d8",
@@ -1045,7 +1045,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 1083,
+      "evidence_line": 1084,
       "form": "_emit_branch_shapes(...) [legacy-bearing, src/boomi_mcp/categories/components/builders/process_flow_builder.py]",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "LT-abcb1575",
@@ -1054,7 +1054,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 1118,
+      "evidence_line": 1119,
       "form": "_emit_decision_shapes(...) [legacy-bearing, src/boomi_mcp/categories/components/builders/process_flow_builder.py]",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "LT-0c3afd66",
@@ -1063,7 +1063,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 1251,
+      "evidence_line": 1252,
       "form": "_emit_linear_shapes(...) [legacy-bearing, src/boomi_mcp/categories/components/builders/process_flow_builder.py]",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "LT-d42b7adc",
@@ -1072,7 +1072,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 2,
-      "evidence_line": 3333,
+      "evidence_line": 3334,
       "form": "_emit_flow_shape(...) [legacy-bearing, src/boomi_mcp/categories/components/builders/process_flow_builder.py]",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "LT-9f91dd17",
@@ -1081,7 +1081,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 2,
-      "evidence_line": 4568,
+      "evidence_line": 4569,
       "form": "_emit_catch_leg(...) [legacy-bearing, src/boomi_mcp/categories/components/builders/process_flow_builder.py]",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "LT-87d3d258",
@@ -1090,7 +1090,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 5,
-      "evidence_line": 4585,
+      "evidence_line": 4586,
       "form": "_emit_flow_shape(...) [legacy-bearing, src/boomi_mcp/categories/components/builders/process_flow_builder.py]",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "LT-ef5f9d2f",
@@ -1099,7 +1099,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 3375,
+      "evidence_line": 3376,
       "form": "_emit_flow_shape(...) [legacy-bearing, src/boomi_mcp/categories/components/builders/process_flow_builder.py]",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "LT-bbb31b5e",
@@ -1108,7 +1108,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 2,
-      "evidence_line": 3426,
+      "evidence_line": 3427,
       "form": "_emit_decision_leg(...) [legacy-bearing, src/boomi_mcp/categories/components/builders/process_flow_builder.py]",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "LT-48acdf6c",
@@ -1117,7 +1117,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 3409,
+      "evidence_line": 3410,
       "form": "_emit_flow_shape(...) [legacy-bearing, src/boomi_mcp/categories/components/builders/process_flow_builder.py]",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "LT-462787c4",
@@ -1126,7 +1126,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 3245,
+      "evidence_line": 3246,
       "form": "_emit_setproperties(...) [legacy-bearing, src/boomi_mcp/categories/components/builders/process_emitters/legacy.py]",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "LT-a6de98b2",
@@ -1135,7 +1135,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 3248,
+      "evidence_line": 3249,
       "form": "_emit_setproperties_step(...) [legacy-bearing, src/boomi_mcp/categories/components/builders/process_emitters/legacy.py]",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "LT-ec94c2c5",
@@ -1144,7 +1144,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 3304,
+      "evidence_line": 3305,
       "form": "_emit_flow_shape(...) [legacy-bearing, src/boomi_mcp/categories/components/builders/process_flow_builder.py]",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "LT-e686ae36",
@@ -1153,7 +1153,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 4297,
+      "evidence_line": 4298,
       "form": "_emit_catch_leg(...) [legacy-bearing, src/boomi_mcp/categories/components/builders/process_flow_builder.py]",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "LT-00403741",
@@ -1162,7 +1162,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 4315,
+      "evidence_line": 4316,
       "form": "_emit_flow_shape(...) [legacy-bearing, src/boomi_mcp/categories/components/builders/process_flow_builder.py]",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "LT-4f4fe175",
@@ -1270,7 +1270,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 2,
-      "evidence_line": 1639,
+      "evidence_line": 2071,
       "form": "_listener_probe(...) [legacy-bearing, src/boomi_mcp/categories/deployment/orchestration.py]",
       "path": "src/boomi_mcp/categories/deployment/orchestration.py",
       "row_id": "LT-063d5fb8",
@@ -1279,7 +1279,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 4894,
+      "evidence_line": 5393,
       "form": "_run_listener_verify_stage(...) [legacy-bearing, src/boomi_mcp/categories/deployment/orchestration.py]",
       "path": "src/boomi_mcp/categories/deployment/orchestration.py",
       "row_id": "LT-6549f556",
@@ -1297,7 +1297,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 9579,
+      "evidence_line": 9570,
       "form": "_build_plan(...) [legacy-bearing, src/boomi_mcp/categories/integration_builder.py]",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LT-d2d552f0",
@@ -1306,7 +1306,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 10463,
+      "evidence_line": 10454,
       "form": "_execute_canonical_process(...) [legacy-bearing, src/boomi_mcp/categories/integration_builder.py]",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LT-21fe473d",
@@ -1315,7 +1315,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 10830,
+      "evidence_line": 10821,
       "form": "_execute_component(...) [legacy-bearing, src/boomi_mcp/categories/integration_builder.py]",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LT-aabdab32",
@@ -1324,7 +1324,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 9541,
+      "evidence_line": 9532,
       "form": "preflight_typed_apply_v1(...) [legacy-bearing, src/boomi_mcp/authoring/workflow.py]",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LT-e0b988c1",
@@ -1333,7 +1333,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 5855,
+      "evidence_line": 5846,
       "form": "_process_component_preflight(...) [legacy-bearing, src/boomi_mcp/categories/integration_builder.py]",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LT-c2b5c918",
@@ -1342,7 +1342,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 6531,
+      "evidence_line": 6522,
       "form": "_authored_process_validation_error(...) [legacy-bearing, src/boomi_mcp/categories/integration_builder.py]",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LT-2de2f7a6",
@@ -1351,7 +1351,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 7307,
+      "evidence_line": 7298,
       "form": "_process_component_preflight(...) [legacy-bearing, src/boomi_mcp/categories/integration_builder.py]",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LT-a902f4d3",
@@ -1360,7 +1360,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 7629,
+      "evidence_line": 7620,
       "form": "_resolve_preservation_policy(...) [legacy-bearing, src/boomi_mcp/categories/integration_builder.py]",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LT-aa0c9c33",
@@ -1369,7 +1369,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 6510,
+      "evidence_line": 6501,
       "form": "evaluate_pipeline_authority(...) [legacy-bearing, src/boomi_mcp/compiler/process_ir/legacy_adapters/authority.py]",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LT-d3d95fdb",
@@ -1378,7 +1378,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 12034,
+      "evidence_line": 12025,
       "form": "compile_authoring_request_v1(...) [legacy-bearing, src/boomi_mcp/authoring/workflow.py]",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LT-b741b93b",
@@ -1387,7 +1387,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 8972,
+      "evidence_line": 8963,
       "form": "_apply_structured_update(...) [legacy-bearing, src/boomi_mcp/categories/integration_builder.py]",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LT-35437114",
@@ -1396,7 +1396,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 9028,
+      "evidence_line": 9019,
       "form": "create_component(...) [legacy-bearing, src/boomi_mcp/categories/components/manage_component.py]",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LT-3999ba54",
@@ -1405,7 +1405,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 10,
-      "evidence_line": 3880,
+      "evidence_line": 3871,
       "form": "_apply_structured_update(...) [legacy-bearing, src/boomi_mcp/categories/integration_builder.py]",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LT-e2d2ad35",
@@ -1414,7 +1414,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 9,
-      "evidence_line": 3869,
+      "evidence_line": 3860,
       "form": "create_component(...) [legacy-bearing, src/boomi_mcp/categories/components/manage_component.py]",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LT-9d79c02d",
@@ -1423,7 +1423,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 3944,
+      "evidence_line": 3935,
       "form": "create_connector(...) [legacy-bearing, src/boomi_mcp/categories/components/connectors.py]",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LT-49361ab2",
@@ -1432,7 +1432,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 3826,
+      "evidence_line": 3817,
       "form": "get_process_flow_builder(...) [legacy-bearing, src/boomi_mcp/categories/components/builders/process_flow_builder.py]",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LT-056be69b",
@@ -1441,7 +1441,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 4519,
+      "evidence_line": 4510,
       "form": "update_component(...) [legacy-bearing, src/boomi_mcp/categories/components/manage_component.py]",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LT-6c155310",
@@ -1450,7 +1450,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 4022,
+      "evidence_line": 4013,
       "form": "update_connector(...) [legacy-bearing, src/boomi_mcp/categories/components/connectors.py]",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LT-dcac7790",
@@ -1459,7 +1459,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 11972,
+      "evidence_line": 11963,
       "form": "plan_authoring_request_v1(...) [legacy-bearing, src/boomi_mcp/authoring/workflow.py]",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LT-e950b4e0",
@@ -1468,7 +1468,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 6395,
+      "evidence_line": 6386,
       "form": "_process_ir_semantic_error(...) [legacy-bearing, src/boomi_mcp/categories/integration_builder.py]",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LT-9fd56560",
@@ -1477,7 +1477,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 6265,
+      "evidence_line": 6256,
       "form": "get_process_flow_builder(...) [legacy-bearing, src/boomi_mcp/categories/components/builders/process_flow_builder.py]",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LT-79296ce3",
@@ -1495,7 +1495,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 12372,
+      "evidence_line": 12363,
       "form": "_apply_plan(...) [legacy-bearing, src/boomi_mcp/categories/integration_builder.py]",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LT-e5bb8b19",
@@ -1504,7 +1504,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 12364,
+      "evidence_line": 12355,
       "form": "_build_plan(...) [legacy-bearing, src/boomi_mcp/categories/integration_builder.py]",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LT-dcb7048c",
@@ -1513,7 +1513,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 12368,
+      "evidence_line": 12359,
       "form": "_compile_authoring(...) [legacy-bearing, src/boomi_mcp/categories/integration_builder.py]",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LT-5ad6792c",
@@ -1522,7 +1522,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 12362,
+      "evidence_line": 12353,
       "form": "_plan_authoring(...) [legacy-bearing, src/boomi_mcp/categories/integration_builder.py]",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LT-b68fe63e",
@@ -1531,7 +1531,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 3432,
+      "evidence_line": 3423,
       "form": "get_process_flow_builder(...) [legacy-bearing, src/boomi_mcp/categories/components/builders/process_flow_builder.py]",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LT-18528039",
@@ -1630,7 +1630,7 @@
     {
       "census": "process_kind_consumer",
       "count": 1,
-      "evidence_line": 474,
+      "evidence_line": 480,
       "form": "<expr>('process_kind')",
       "path": "src/boomi_mcp/authoring/workflow.py",
       "row_id": "PC-ff87edbd",
@@ -1639,7 +1639,7 @@
     {
       "census": "process_kind_consumer",
       "count": 1,
-      "evidence_line": 668,
+      "evidence_line": 669,
       "form": "config.get('process_kind')",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "PC-d0b4d50b",
@@ -1648,7 +1648,7 @@
     {
       "census": "process_kind_consumer",
       "count": 1,
-      "evidence_line": 668,
+      "evidence_line": 669,
       "form": "config.get('process_type')",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "PC-ed2333e0",
@@ -1675,7 +1675,7 @@
     {
       "census": "process_kind_consumer",
       "count": 1,
-      "evidence_line": 4833,
+      "evidence_line": 4834,
       "form": "config.get('process_kind')",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "PC-af8e3eed",
@@ -1684,7 +1684,7 @@
     {
       "census": "process_kind_consumer",
       "count": 1,
-      "evidence_line": 4833,
+      "evidence_line": 4834,
       "form": "config.get('process_type')",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "PC-fdaeb740",
@@ -1693,7 +1693,7 @@
     {
       "census": "process_kind_consumer",
       "count": 1,
-      "evidence_line": 5849,
+      "evidence_line": 5840,
       "form": "raw_config.get('process_kind')",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "PC-87a07e6f",
@@ -1702,7 +1702,7 @@
     {
       "census": "process_kind_consumer",
       "count": 1,
-      "evidence_line": 5849,
+      "evidence_line": 5840,
       "form": "raw_config.get('process_type')",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "PC-68ef9ab4",
@@ -1711,7 +1711,7 @@
     {
       "census": "process_kind_consumer",
       "count": 1,
-      "evidence_line": 5292,
+      "evidence_line": 5283,
       "form": "config.get('process_kind')",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "PC-79d659fc",
@@ -1720,7 +1720,7 @@
     {
       "census": "process_kind_consumer",
       "count": 1,
-      "evidence_line": 5292,
+      "evidence_line": 5283,
       "form": "config.get('process_type')",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "PC-f2498867",
@@ -1729,7 +1729,7 @@
     {
       "census": "process_kind_consumer",
       "count": 1,
-      "evidence_line": 6807,
+      "evidence_line": 6798,
       "form": "raw_config.get('process_kind')",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "PC-09078af3",
@@ -1738,7 +1738,7 @@
     {
       "census": "process_kind_consumer",
       "count": 1,
-      "evidence_line": 6807,
+      "evidence_line": 6798,
       "form": "raw_config.get('process_type')",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "PC-5db2f770",
@@ -1747,7 +1747,7 @@
     {
       "census": "process_kind_consumer",
       "count": 1,
-      "evidence_line": 3823,
+      "evidence_line": 3814,
       "form": "payload.get('process_kind')",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "PC-58fea9a9",
@@ -1756,7 +1756,7 @@
     {
       "census": "process_kind_consumer",
       "count": 1,
-      "evidence_line": 3823,
+      "evidence_line": 3814,
       "form": "payload.get('process_type')",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "PC-05d45c93",
@@ -1765,7 +1765,7 @@
     {
       "census": "process_kind_consumer",
       "count": 1,
-      "evidence_line": 4578,
+      "evidence_line": 4569,
       "form": "config.get('process_kind')",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "PC-aedb3466",
@@ -1774,7 +1774,7 @@
     {
       "census": "process_kind_consumer",
       "count": 1,
-      "evidence_line": 4578,
+      "evidence_line": 4569,
       "form": "config.get('process_type')",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "PC-8ee6e9e7",
@@ -1837,7 +1837,7 @@
     {
       "census": "process_kind_consumer",
       "count": 1,
-      "evidence_line": 3415,
+      "evidence_line": 3406,
       "form": "payload.get('process_kind')",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "PC-c2d99ca6",
@@ -1846,7 +1846,7 @@
     {
       "census": "process_kind_consumer",
       "count": 1,
-      "evidence_line": 3415,
+      "evidence_line": 3406,
       "form": "payload.get('process_type')",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "PC-c602e0b6",
@@ -1900,7 +1900,7 @@
     {
       "census": "process_kind_producer",
       "count": 2,
-      "evidence_line": 7743,
+      "evidence_line": 7750,
       "form": "dict-literal process_kind='database_to_api_sync'",
       "path": "src/boomi_mcp/categories/meta_tools.py",
       "row_id": "PP-afb1406e",
@@ -1909,7 +1909,7 @@
     {
       "census": "process_kind_producer",
       "count": 2,
-      "evidence_line": 8609,
+      "evidence_line": 8616,
       "form": "dict-literal process_kind='sync_pipeline'",
       "path": "src/boomi_mcp/categories/meta_tools.py",
       "row_id": "PP-9797a75e",
@@ -1918,7 +1918,7 @@
     {
       "census": "process_kind_producer",
       "count": 2,
-      "evidence_line": 8476,
+      "evidence_line": 8483,
       "form": "dict-literal process_kind='wrapper_subprocess'",
       "path": "src/boomi_mcp/categories/meta_tools.py",
       "row_id": "PP-67bfa71b",
@@ -2035,7 +2035,7 @@
     {
       "census": "process_kind_producer",
       "count": 1,
-      "evidence_line": 1106,
+      "evidence_line": 1173,
       "form": "dict-literal process_kind='sync_pipeline'",
       "path": "src/boomi_mcp/patterns/archetypes/http_listener_to_db.py",
       "row_id": "PP-79953583",
@@ -2044,7 +2044,7 @@
     {
       "census": "process_kind_producer",
       "count": 1,
-      "evidence_line": 759,
+      "evidence_line": 821,
       "form": "IntegrationComponentSpec(type='process')",
       "path": "src/boomi_mcp/patterns/archetypes/http_listener_to_db.py",
       "row_id": "PP-522b2369",
@@ -2053,7 +2053,7 @@
     {
       "census": "process_kind_producer",
       "count": 1,
-      "evidence_line": 748,
+      "evidence_line": 810,
       "form": "dict-literal process_kind='sync_pipeline'",
       "path": "src/boomi_mcp/patterns/archetypes/http_listener_to_db.py",
       "row_id": "PP-4b4ed68e",
@@ -2062,7 +2062,7 @@
     {
       "census": "process_kind_producer",
       "count": 1,
-      "evidence_line": 546,
+      "evidence_line": 555,
       "form": "dict-literal process_kind='sync_pipeline'",
       "path": "src/boomi_mcp/patterns/archetypes/http_listener_to_rest.py",
       "row_id": "PP-685eb126",
@@ -2080,7 +2080,7 @@
     {
       "census": "registry_lookup",
       "count": 1,
-      "evidence_line": 6050,
+      "evidence_line": 6054,
       "form": "PROCESS_FLOW_BUILDERS (read)",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "LR-47b36d32",
@@ -2089,7 +2089,7 @@
     {
       "census": "registry_lookup",
       "count": 1,
-      "evidence_line": 6050,
+      "evidence_line": 6054,
       "form": "PROCESS_FLOW_BUILDERS.get(...)",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "LR-a4b26efd",
@@ -2098,7 +2098,7 @@
     {
       "census": "registry_lookup",
       "count": 2,
-      "evidence_line": 3838,
+      "evidence_line": 3829,
       "form": "PROCESS_FLOW_BUILDERS (read)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LR-e040f2d3",
@@ -2107,7 +2107,7 @@
     {
       "census": "registry_lookup",
       "count": 1,
-      "evidence_line": 3826,
+      "evidence_line": 3817,
       "form": "get_process_flow_builder(...)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LR-b9a99717",
@@ -2116,7 +2116,7 @@
     {
       "census": "registry_lookup",
       "count": 2,
-      "evidence_line": 6161,
+      "evidence_line": 6152,
       "form": "PROCESS_FLOW_BUILDERS (read)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LR-b5b7bf83",
@@ -2125,7 +2125,7 @@
     {
       "census": "registry_lookup",
       "count": 1,
-      "evidence_line": 6265,
+      "evidence_line": 6256,
       "form": "get_process_flow_builder(...)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LR-abde9a91",
@@ -2143,7 +2143,7 @@
     {
       "census": "registry_lookup",
       "count": 2,
-      "evidence_line": 3428,
+      "evidence_line": 3419,
       "form": "PROCESS_FLOW_BUILDERS (read)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LR-37438b9f",
@@ -2152,7 +2152,7 @@
     {
       "census": "registry_lookup",
       "count": 1,
-      "evidence_line": 3432,
+      "evidence_line": 3423,
       "form": "get_process_flow_builder(...)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LR-83eea984",
@@ -2179,7 +2179,7 @@
     {
       "census": "renderer_call",
       "count": 1,
-      "evidence_line": 3855,
+      "evidence_line": 3846,
       "form": "<registry-bound>.build(...)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LR-555595d7",
@@ -2188,7 +2188,7 @@
     {
       "census": "renderer_call",
       "count": 1,
-      "evidence_line": 6289,
+      "evidence_line": 6280,
       "form": "<registry-bound>.validate_config(...)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LR-6d57df6a",
@@ -2197,7 +2197,7 @@
     {
       "census": "renderer_call",
       "count": 1,
-      "evidence_line": 6322,
+      "evidence_line": 6313,
       "form": "SyncPipelineBuilder.lower_config(...)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LR-f4bbf547",
@@ -2206,7 +2206,7 @@
     {
       "census": "renderer_call",
       "count": 1,
-      "evidence_line": 3445,
+      "evidence_line": 3436,
       "form": "<registry-bound>.build(...)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LR-896e12cd",
@@ -2260,7 +2260,7 @@
     {
       "census": "renderer_call",
       "count": 1,
-      "evidence_line": 481,
+      "evidence_line": 540,
       "form": "SyncPipelineBuilder.lower_config(...)",
       "path": "src/boomi_mcp/compiler/process_ir/legacy_adapters/sync_pipeline.py",
       "row_id": "LR-2be627e0",
@@ -2305,7 +2305,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 474,
+      "evidence_line": 480,
       "form": "'process_kind' (unclassified selector literal)",
       "path": "src/boomi_mcp/authoring/workflow.py",
       "row_id": "UR-8b2712eb",
@@ -2359,7 +2359,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 6057,
+      "evidence_line": 6061,
       "form": "'PROCESS_FLOW_BUILDERS' (unclassified symbolic literal)",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "UR-e8179527",
@@ -2368,7 +2368,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 6054,
+      "evidence_line": 6058,
       "form": "'ProcessFlowBuilder' (unclassified symbolic literal)",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "UR-e79baecd",
@@ -2377,7 +2377,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 6056,
+      "evidence_line": 6060,
       "form": "'SyncPipelineBuilder' (unclassified symbolic literal)",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "UR-9ea5e934",
@@ -2386,7 +2386,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 6055,
+      "evidence_line": 6059,
       "form": "'WrapperSubprocessBuilder' (unclassified symbolic literal)",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "UR-ae78d786",
@@ -2395,7 +2395,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 6058,
+      "evidence_line": 6062,
       "form": "'get_process_flow_builder' (unclassified symbolic literal)",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "UR-2ca4aab3",
@@ -2422,7 +2422,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 6015,
+      "evidence_line": 6019,
       "form": "PROCESS_FLOW_BUILDERS (unclassified reference)",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "UR-fe6b7165",
@@ -2431,7 +2431,7 @@
     {
       "census": "unclassified_reference",
       "count": 3,
-      "evidence_line": 6016,
+      "evidence_line": 6020,
       "form": "ProcessFlowBuilder (unclassified reference)",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "UR-707c60da",
@@ -2440,7 +2440,7 @@
     {
       "census": "unclassified_reference",
       "count": 3,
-      "evidence_line": 6018,
+      "evidence_line": 6022,
       "form": "SyncPipelineBuilder (unclassified reference)",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "UR-8af1b075",
@@ -2449,7 +2449,7 @@
     {
       "census": "unclassified_reference",
       "count": 3,
-      "evidence_line": 6017,
+      "evidence_line": 6021,
       "form": "WrapperSubprocessBuilder (unclassified reference)",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "UR-7b298ebf",
@@ -2458,7 +2458,7 @@
     {
       "census": "unclassified_reference",
       "count": 2,
-      "evidence_line": 668,
+      "evidence_line": 669,
       "form": "'process_kind' (unclassified selector literal)",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "UR-7065c393",
@@ -2467,7 +2467,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 668,
+      "evidence_line": 669,
       "form": "'process_type' (unclassified selector literal)",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "UR-e2d593a2",
@@ -2476,7 +2476,7 @@
     {
       "census": "unclassified_reference",
       "count": 3,
-      "evidence_line": 668,
+      "evidence_line": 669,
       "form": "process_kind (unclassified selector name)",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "UR-0a55db58",
@@ -2530,7 +2530,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 4782,
+      "evidence_line": 4783,
       "form": "ProcessFlowBuilder (unclassified reference)",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "UR-66e80fc5",
@@ -2539,7 +2539,7 @@
     {
       "census": "unclassified_reference",
       "count": 2,
-      "evidence_line": 4833,
+      "evidence_line": 4834,
       "form": "'process_kind' (unclassified selector literal)",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "UR-5b68211d",
@@ -2548,7 +2548,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 4833,
+      "evidence_line": 4834,
       "form": "'process_type' (unclassified selector literal)",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "UR-79261f95",
@@ -2557,7 +2557,7 @@
     {
       "census": "unclassified_reference",
       "count": 3,
-      "evidence_line": 4832,
+      "evidence_line": 4833,
       "form": "process_kind (unclassified selector name)",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "UR-a80149bc",
@@ -2566,7 +2566,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 2131,
+      "evidence_line": 2132,
       "form": "ProcessFlowBuilder (unclassified reference)",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "UR-f217fb4d",
@@ -2575,7 +2575,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 1688,
+      "evidence_line": 1689,
       "form": "ProcessFlowBuilder (unclassified reference)",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "UR-5dc5ade2",
@@ -2584,7 +2584,7 @@
     {
       "census": "unclassified_reference",
       "count": 2,
-      "evidence_line": 6048,
+      "evidence_line": 6052,
       "form": "process_kind (unclassified selector name)",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "UR-81d88cd1",
@@ -2593,7 +2593,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 6046,
+      "evidence_line": 6050,
       "form": "process_kind (unclassified selector parameter)",
       "path": "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
       "row_id": "UR-d75ee4b6",
@@ -2602,7 +2602,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 10975,
+      "evidence_line": 10966,
       "form": "'Component' (unclassified Component-endpoint literal)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "UR-37ab9607",
@@ -2611,7 +2611,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 5849,
+      "evidence_line": 5840,
       "form": "'process_kind' (unclassified selector literal)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "UR-552ab0c8",
@@ -2620,7 +2620,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 5849,
+      "evidence_line": 5840,
       "form": "'process_type' (unclassified selector literal)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "UR-efeb1e84",
@@ -2629,7 +2629,7 @@
     {
       "census": "unclassified_reference",
       "count": 2,
-      "evidence_line": 5848,
+      "evidence_line": 5839,
       "form": "process_kind (unclassified selector name)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "UR-91ead14e",
@@ -2638,7 +2638,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 5292,
+      "evidence_line": 5283,
       "form": "'process_kind' (unclassified selector literal)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "UR-bfccf421",
@@ -2647,7 +2647,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 5292,
+      "evidence_line": 5283,
       "form": "'process_type' (unclassified selector literal)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "UR-ad8d292d",
@@ -2656,7 +2656,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 6807,
+      "evidence_line": 6798,
       "form": "'process_kind' (unclassified selector literal)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "UR-9a34a4e3",
@@ -2665,7 +2665,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 6807,
+      "evidence_line": 6798,
       "form": "'process_type' (unclassified selector literal)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "UR-43bc6a4f",
@@ -2674,7 +2674,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 7331,
+      "evidence_line": 7322,
       "form": "ProcessFlowBuilder (unclassified reference)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "UR-257e0ae4",
@@ -2683,7 +2683,7 @@
     {
       "census": "unclassified_reference",
       "count": 2,
-      "evidence_line": 6806,
+      "evidence_line": 6797,
       "form": "process_kind (unclassified selector name)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "UR-f9bf77bc",
@@ -2692,7 +2692,7 @@
     {
       "census": "unclassified_reference",
       "count": 2,
-      "evidence_line": 3823,
+      "evidence_line": 3814,
       "form": "'process_kind' (unclassified selector literal)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "UR-27157a57",
@@ -2701,7 +2701,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 3823,
+      "evidence_line": 3814,
       "form": "'process_type' (unclassified selector literal)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "UR-3ee64ea8",
@@ -2710,7 +2710,7 @@
     {
       "census": "unclassified_reference",
       "count": 4,
-      "evidence_line": 3822,
+      "evidence_line": 3813,
       "form": "process_kind (unclassified selector name)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "UR-289e945f",
@@ -2719,7 +2719,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 6270,
+      "evidence_line": 6261,
       "form": "'process_kind' (unclassified selector literal)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "UR-142ade12",
@@ -2728,7 +2728,7 @@
     {
       "census": "unclassified_reference",
       "count": 4,
-      "evidence_line": 6147,
+      "evidence_line": 6138,
       "form": "ProcessFlowBuilder (unclassified reference)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "UR-62f9bdcd",
@@ -2737,7 +2737,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 6320,
+      "evidence_line": 6311,
       "form": "SyncPipelineBuilder (unclassified reference)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "UR-72bd52b2",
@@ -2746,7 +2746,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 6307,
+      "evidence_line": 6298,
       "form": "WrapperSubprocessBuilder (unclassified reference)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "UR-b4d881e8",
@@ -2755,7 +2755,7 @@
     {
       "census": "unclassified_reference",
       "count": 5,
-      "evidence_line": 6139,
+      "evidence_line": 6130,
       "form": "process_kind (unclassified selector name)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "UR-848e2adc",
@@ -2764,7 +2764,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 6107,
+      "evidence_line": 6098,
       "form": "process_kind (unclassified selector parameter)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "UR-31c89c01",
@@ -2773,7 +2773,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 6421,
+      "evidence_line": 6412,
       "form": "process_kind (unclassified selector name)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "UR-c5ca1bed",
@@ -2782,7 +2782,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 6401,
+      "evidence_line": 6392,
       "form": "process_kind (unclassified selector parameter)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "UR-93745e9b",
@@ -2791,7 +2791,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 4578,
+      "evidence_line": 4569,
       "form": "'process_kind' (unclassified selector literal)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "UR-c0dedee7",
@@ -2800,7 +2800,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 4578,
+      "evidence_line": 4569,
       "form": "'process_type' (unclassified selector literal)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "UR-45fcc23c",
@@ -2809,7 +2809,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 4580,
+      "evidence_line": 4571,
       "form": "ProcessFlowBuilder (unclassified reference)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "UR-352e92e4",
@@ -2818,7 +2818,7 @@
     {
       "census": "unclassified_reference",
       "count": 2,
-      "evidence_line": 4577,
+      "evidence_line": 4568,
       "form": "process_kind (unclassified selector name)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "UR-7719f4b8",
@@ -2854,7 +2854,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 5763,
+      "evidence_line": 5754,
       "form": "ProcessFlowBuilder (unclassified reference)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "UR-ac199858",
@@ -2917,7 +2917,7 @@
     {
       "census": "unclassified_reference",
       "count": 2,
-      "evidence_line": 3415,
+      "evidence_line": 3406,
       "form": "'process_kind' (unclassified selector literal)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "UR-f3da9b48",
@@ -2926,7 +2926,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 3415,
+      "evidence_line": 3406,
       "form": "'process_type' (unclassified selector literal)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "UR-3e5c5362",
@@ -2935,7 +2935,7 @@
     {
       "census": "unclassified_reference",
       "count": 4,
-      "evidence_line": 3414,
+      "evidence_line": 3405,
       "form": "process_kind (unclassified selector name)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "UR-15bbe49f",
@@ -2953,7 +2953,7 @@
     {
       "census": "unclassified_reference",
       "count": 5,
-      "evidence_line": 8060,
+      "evidence_line": 8067,
       "form": "'process_kind' (unclassified selector literal)",
       "path": "src/boomi_mcp/categories/meta_tools.py",
       "row_id": "UR-10de511e",
@@ -2962,7 +2962,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 697,
+      "evidence_line": 730,
       "form": "_emit_branch (unclassified reference)",
       "path": "src/boomi_mcp/compiler/process_ir/emitter_registry.py",
       "row_id": "UR-5a756388",
@@ -2971,7 +2971,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 699,
+      "evidence_line": 732,
       "form": "_emit_catcherrors (unclassified reference)",
       "path": "src/boomi_mcp/compiler/process_ir/emitter_registry.py",
       "row_id": "UR-a154f9d0",
@@ -2980,7 +2980,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 685,
+      "evidence_line": 718,
       "form": "_emit_dataprocess (unclassified reference)",
       "path": "src/boomi_mcp/compiler/process_ir/emitter_registry.py",
       "row_id": "UR-a7ceae01",
@@ -2989,7 +2989,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 698,
+      "evidence_line": 731,
       "form": "_emit_decision (unclassified reference)",
       "path": "src/boomi_mcp/compiler/process_ir/emitter_registry.py",
       "row_id": "UR-49bf579b",
@@ -2998,7 +2998,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 686,
+      "evidence_line": 719,
       "form": "_emit_doccacheload (unclassified reference)",
       "path": "src/boomi_mcp/compiler/process_ir/emitter_registry.py",
       "row_id": "UR-b767d23e",
@@ -3007,7 +3007,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 688,
+      "evidence_line": 721,
       "form": "_emit_doccacheremove (unclassified reference)",
       "path": "src/boomi_mcp/compiler/process_ir/emitter_registry.py",
       "row_id": "UR-a92bf099",
@@ -3016,7 +3016,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 687,
+      "evidence_line": 720,
       "form": "_emit_doccacheretrieve (unclassified reference)",
       "path": "src/boomi_mcp/compiler/process_ir/emitter_registry.py",
       "row_id": "UR-688b8a54",
@@ -3025,7 +3025,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 700,
+      "evidence_line": 733,
       "form": "_emit_exception (unclassified reference)",
       "path": "src/boomi_mcp/compiler/process_ir/emitter_registry.py",
       "row_id": "UR-524f34f4",
@@ -3034,7 +3034,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 684,
+      "evidence_line": 717,
       "form": "_emit_flowcontrol (unclassified reference)",
       "path": "src/boomi_mcp/compiler/process_ir/emitter_registry.py",
       "row_id": "UR-9c933362",
@@ -3043,7 +3043,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 683,
+      "evidence_line": 716,
       "form": "_emit_map (unclassified reference)",
       "path": "src/boomi_mcp/compiler/process_ir/emitter_registry.py",
       "row_id": "UR-ff9294a1",
@@ -3052,7 +3052,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 682,
+      "evidence_line": 715,
       "form": "_emit_message (unclassified reference)",
       "path": "src/boomi_mcp/compiler/process_ir/emitter_registry.py",
       "row_id": "UR-8a1177ad",
@@ -3061,7 +3061,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 705,
+      "evidence_line": 738,
       "form": "_emit_notify (unclassified reference)",
       "path": "src/boomi_mcp/compiler/process_ir/emitter_registry.py",
       "row_id": "UR-7c9bac73",
@@ -3070,7 +3070,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 696,
+      "evidence_line": 729,
       "form": "_emit_processcall (unclassified reference)",
       "path": "src/boomi_mcp/compiler/process_ir/emitter_registry.py",
       "row_id": "UR-b6e4be49",
@@ -3079,7 +3079,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 707,
+      "evidence_line": 740,
       "form": "_emit_returndocuments (unclassified reference)",
       "path": "src/boomi_mcp/compiler/process_ir/emitter_registry.py",
       "row_id": "UR-5cfe1e40",
@@ -3088,7 +3088,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 689,
+      "evidence_line": 722,
       "form": "_emit_setproperties (unclassified reference)",
       "path": "src/boomi_mcp/compiler/process_ir/emitter_registry.py",
       "row_id": "UR-0b3b3cf0",
@@ -3097,7 +3097,16 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 706,
+      "evidence_line": 712,
+      "form": "_emit_start_listen (unclassified reference)",
+      "path": "src/boomi_mcp/compiler/process_ir/emitter_registry.py",
+      "row_id": "UR-b9f3bb46",
+      "symbol": "<module>"
+    },
+    {
+      "census": "unclassified_reference",
+      "count": 1,
+      "evidence_line": 739,
       "form": "_emit_stop (unclassified reference)",
       "path": "src/boomi_mcp/compiler/process_ir/emitter_registry.py",
       "row_id": "UR-2df1446f",
@@ -3178,7 +3187,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 62,
+      "evidence_line": 63,
       "form": "'process_kind' (unclassified selector literal)",
       "path": "src/boomi_mcp/compiler/process_ir/legacy_adapters/sync_pipeline.py",
       "row_id": "UR-62db3bb6",
@@ -3502,7 +3511,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 336,
+      "evidence_line": 345,
       "form": "'send_request' (unclassified symbolic literal)",
       "path": "src/boomi_mcp/patterns/archetypes/http_listener_to_rest.py",
       "row_id": "UR-a91828a1",
@@ -3511,7 +3520,7 @@
     {
       "census": "unclassified_reference",
       "count": 2,
-      "evidence_line": 387,
+      "evidence_line": 396,
       "form": "send_request (unclassified attribute)",
       "path": "src/boomi_mcp/patterns/archetypes/http_listener_to_rest.py",
       "row_id": "UR-73283940",
@@ -4054,7 +4063,7 @@
     {
       "census": "component_xml_write",
       "disposition": "WRT-analyze-component-merge: REJECT when the target is a process OR the source/merged root is a process — the merged root IS the source root, so a target-only check never sees a process-root source over a non-process target.",
-      "evidence_line": 658,
+      "evidence_line": 665,
       "forms": [
         "component.update_component_raw(...)"
       ],
@@ -4172,7 +4181,7 @@
     {
       "census": "component_xml_write",
       "disposition": "WRT-build-integration-preservation-merge: preserved, re-homed onto the canonical apply path.",
-      "evidence_line": 3316,
+      "evidence_line": 3307,
       "forms": [
         "component.update_component_raw(...)"
       ],
@@ -4185,7 +4194,7 @@
     {
       "census": "component_xml_write",
       "disposition": "WRT-canonical-process-materialization: unchanged, and it is what the retraction leaves behind: a process root reaches the platform only through a compiled artifact whose plan fingerprint and apply-time mutation attestation are both recorded.",
-      "evidence_line": 9028,
+      "evidence_line": 9019,
       "forms": [
         "create_component(...)"
       ],
@@ -4198,7 +4207,7 @@
     {
       "census": "component_xml_write",
       "disposition": "WRT-build-integration-generic: content guard at BOTH plan and apply boundaries, placed BEFORE all type dispatch (the process and connector arms dispatch before the fall-through ever runs); mutation-tested with an unknown/future declared type. · WRT-build-integration-structured-process: replaced by canonical ProcessIR materialization/apply. · WRT-build-integration-typed-nonprocess: unchanged — the content guard never matches these roots.",
-      "evidence_line": 3869,
+      "evidence_line": 3860,
       "forms": [
         "create_component(...)",
         "update_component(...)"
@@ -4212,7 +4221,7 @@
     {
       "census": "component_xml_write",
       "disposition": "WRT-raw-api-component: ONE canonical endpoint parser feeds classification, ID extraction AND transport; the reserved literal `bulk` is matched BEFORE the `<id>` arm and is never a componentId; every update-shaped call runs the two-sided process check.",
-      "evidence_line": 5915,
+      "evidence_line": 5922,
       "forms": [
         "svc.send_request(...)"
       ],
@@ -4303,7 +4312,7 @@
     {
       "census": "http_client_call",
       "disposition": "WRT-external-transport-listener-probe: unchanged — the URL comes from the listener's endpoint, never from a Component route.",
-      "evidence_line": 1048,
+      "evidence_line": 1480,
       "forms": [
         "request.urlopen -> URLOPEN <dynamic> (hand-rolled HTTP)"
       ],
@@ -4372,7 +4381,7 @@
     {
       "census": "legacy_emitter",
       "disposition": "delete the legacy semantic shell",
-      "evidence_line": 81,
+      "evidence_line": 82,
       "forms": [
         "import _emit_branch",
         "import _emit_catcherrors",
@@ -4413,7 +4422,7 @@
     {
       "census": "legacy_emitter",
       "disposition": "delete the legacy semantic shell",
-      "evidence_line": 3346,
+      "evidence_line": 3347,
       "forms": [
         "_emit_branch(...)"
       ],
@@ -4426,7 +4435,7 @@
     {
       "census": "legacy_emitter",
       "disposition": "delete the legacy semantic shell",
-      "evidence_line": 4462,
+      "evidence_line": 4463,
       "forms": [
         "_emit_doccacheload(...)",
         "_emit_exception(...)",
@@ -4443,7 +4452,7 @@
     {
       "census": "legacy_emitter",
       "disposition": "delete the legacy semantic shell",
-      "evidence_line": 4576,
+      "evidence_line": 4577,
       "forms": [
         "_emit_catcherrors(...)",
         "_emit_start_noaction(...)"
@@ -4457,7 +4466,7 @@
     {
       "census": "legacy_emitter",
       "disposition": "delete the legacy semantic shell",
-      "evidence_line": 3423,
+      "evidence_line": 3424,
       "forms": [
         "_emit_decision(...)"
       ],
@@ -4470,7 +4479,7 @@
     {
       "census": "legacy_emitter",
       "disposition": "delete the legacy semantic shell",
-      "evidence_line": 3226,
+      "evidence_line": 3227,
       "forms": [
         "_emit_connectoraction(...)",
         "_emit_dataprocess(...)",
@@ -4496,7 +4505,7 @@
     {
       "census": "legacy_emitter",
       "disposition": "delete the legacy semantic shell",
-      "evidence_line": 4303,
+      "evidence_line": 4304,
       "forms": [
         "_emit_catcherrors(...)",
         "_emit_start_noaction(...)"
@@ -4510,7 +4519,7 @@
     {
       "census": "legacy_semantic_validation",
       "disposition": "delete with the legacy semantic shell",
-      "evidence_line": 6395,
+      "evidence_line": 6386,
       "forms": [
         "_process_ir_semantic_error(...)"
       ],
@@ -4523,7 +4532,7 @@
     {
       "census": "legacy_semantic_validation",
       "disposition": "delete with the legacy semantic shell",
-      "evidence_line": 6421,
+      "evidence_line": 6412,
       "forms": [
         "validate_legacy_process_config(...)"
       ],
@@ -4705,7 +4714,7 @@
     {
       "census": "legacy_transitive_call",
       "disposition": "follow the callee's row; this is an edge, not a site",
-      "evidence_line": 1263,
+      "evidence_line": 1269,
       "forms": [
         "_build_plan(...) [legacy-bearing, src/boomi_mcp/categories/integration_builder.py]"
       ],
@@ -4718,7 +4727,7 @@
     {
       "census": "legacy_transitive_call",
       "disposition": "follow the callee's row; this is an edge, not a site",
-      "evidence_line": 3060,
+      "evidence_line": 3066,
       "forms": [
         "plan_authoring_request_v1(...) [legacy-bearing, src/boomi_mcp/authoring/workflow.py]"
       ],
@@ -4731,7 +4740,7 @@
     {
       "census": "legacy_transitive_call",
       "disposition": "follow the callee's row; this is an edge, not a site",
-      "evidence_line": 2503,
+      "evidence_line": 2509,
       "forms": [
         "_legacy_plan_echo(...) [legacy-bearing, src/boomi_mcp/authoring/workflow.py]"
       ],
@@ -4744,7 +4753,7 @@
     {
       "census": "legacy_transitive_call",
       "disposition": "follow the callee's row; this is an edge, not a site",
-      "evidence_line": 3301,
+      "evidence_line": 3307,
       "forms": [
         "compile_authoring_request_v1(...) [legacy-bearing, src/boomi_mcp/authoring/workflow.py]"
       ],
@@ -4757,7 +4766,7 @@
     {
       "census": "legacy_transitive_call",
       "disposition": "follow the callee's row; this is an edge, not a site",
-      "evidence_line": 900,
+      "evidence_line": 907,
       "forms": [
         "merge_versions(...) [legacy-bearing, src/boomi_mcp/categories/components/analyze_component.py]"
       ],
@@ -4770,7 +4779,7 @@
     {
       "census": "legacy_transitive_call",
       "disposition": "follow the callee's row; this is an edge, not a site",
-      "evidence_line": 1083,
+      "evidence_line": 1084,
       "forms": [
         "_emit_branch_shapes(...) [legacy-bearing, src/boomi_mcp/categories/components/builders/process_flow_builder.py]",
         "_emit_decision_shapes(...) [legacy-bearing, src/boomi_mcp/categories/components/builders/process_flow_builder.py]",
@@ -4785,7 +4794,7 @@
     {
       "census": "legacy_transitive_call",
       "disposition": "follow the callee's row; this is an edge, not a site",
-      "evidence_line": 3333,
+      "evidence_line": 3334,
       "forms": [
         "_emit_flow_shape(...) [legacy-bearing, src/boomi_mcp/categories/components/builders/process_flow_builder.py]"
       ],
@@ -4798,7 +4807,7 @@
     {
       "census": "legacy_transitive_call",
       "disposition": "follow the callee's row; this is an edge, not a site",
-      "evidence_line": 4568,
+      "evidence_line": 4569,
       "forms": [
         "_emit_catch_leg(...) [legacy-bearing, src/boomi_mcp/categories/components/builders/process_flow_builder.py]",
         "_emit_flow_shape(...) [legacy-bearing, src/boomi_mcp/categories/components/builders/process_flow_builder.py]"
@@ -4812,7 +4821,7 @@
     {
       "census": "legacy_transitive_call",
       "disposition": "follow the callee's row; this is an edge, not a site",
-      "evidence_line": 3375,
+      "evidence_line": 3376,
       "forms": [
         "_emit_flow_shape(...) [legacy-bearing, src/boomi_mcp/categories/components/builders/process_flow_builder.py]"
       ],
@@ -4825,7 +4834,7 @@
     {
       "census": "legacy_transitive_call",
       "disposition": "follow the callee's row; this is an edge, not a site",
-      "evidence_line": 3409,
+      "evidence_line": 3410,
       "forms": [
         "_emit_decision_leg(...) [legacy-bearing, src/boomi_mcp/categories/components/builders/process_flow_builder.py]",
         "_emit_flow_shape(...) [legacy-bearing, src/boomi_mcp/categories/components/builders/process_flow_builder.py]"
@@ -4839,7 +4848,7 @@
     {
       "census": "legacy_transitive_call",
       "disposition": "follow the callee's row; this is an edge, not a site",
-      "evidence_line": 3245,
+      "evidence_line": 3246,
       "forms": [
         "_emit_setproperties(...) [legacy-bearing, src/boomi_mcp/categories/components/builders/process_emitters/legacy.py]",
         "_emit_setproperties_step(...) [legacy-bearing, src/boomi_mcp/categories/components/builders/process_emitters/legacy.py]"
@@ -4853,7 +4862,7 @@
     {
       "census": "legacy_transitive_call",
       "disposition": "follow the callee's row; this is an edge, not a site",
-      "evidence_line": 3304,
+      "evidence_line": 3305,
       "forms": [
         "_emit_flow_shape(...) [legacy-bearing, src/boomi_mcp/categories/components/builders/process_flow_builder.py]"
       ],
@@ -4866,7 +4875,7 @@
     {
       "census": "legacy_transitive_call",
       "disposition": "follow the callee's row; this is an edge, not a site",
-      "evidence_line": 4297,
+      "evidence_line": 4298,
       "forms": [
         "_emit_catch_leg(...) [legacy-bearing, src/boomi_mcp/categories/components/builders/process_flow_builder.py]",
         "_emit_flow_shape(...) [legacy-bearing, src/boomi_mcp/categories/components/builders/process_flow_builder.py]"
@@ -4987,7 +4996,7 @@
     {
       "census": "legacy_transitive_call",
       "disposition": "follow the callee's row; this is an edge, not a site",
-      "evidence_line": 1639,
+      "evidence_line": 2071,
       "forms": [
         "_listener_probe(...) [legacy-bearing, src/boomi_mcp/categories/deployment/orchestration.py]"
       ],
@@ -5000,7 +5009,7 @@
     {
       "census": "legacy_transitive_call",
       "disposition": "follow the callee's row; this is an edge, not a site",
-      "evidence_line": 4894,
+      "evidence_line": 5393,
       "forms": [
         "_run_listener_verify_stage(...) [legacy-bearing, src/boomi_mcp/categories/deployment/orchestration.py]"
       ],
@@ -5026,7 +5035,7 @@
     {
       "census": "legacy_transitive_call",
       "disposition": "follow the callee's row; this is an edge, not a site",
-      "evidence_line": 9541,
+      "evidence_line": 9532,
       "forms": [
         "_build_plan(...) [legacy-bearing, src/boomi_mcp/categories/integration_builder.py]",
         "_execute_canonical_process(...) [legacy-bearing, src/boomi_mcp/categories/integration_builder.py]",
@@ -5042,7 +5051,7 @@
     {
       "census": "legacy_transitive_call",
       "disposition": "follow the callee's row; this is an edge, not a site",
-      "evidence_line": 5855,
+      "evidence_line": 5846,
       "forms": [
         "_process_component_preflight(...) [legacy-bearing, src/boomi_mcp/categories/integration_builder.py]"
       ],
@@ -5055,7 +5064,7 @@
     {
       "census": "legacy_transitive_call",
       "disposition": "follow the callee's row; this is an edge, not a site",
-      "evidence_line": 6510,
+      "evidence_line": 6501,
       "forms": [
         "_authored_process_validation_error(...) [legacy-bearing, src/boomi_mcp/categories/integration_builder.py]",
         "_process_component_preflight(...) [legacy-bearing, src/boomi_mcp/categories/integration_builder.py]",
@@ -5071,7 +5080,7 @@
     {
       "census": "legacy_transitive_call",
       "disposition": "follow the callee's row; this is an edge, not a site",
-      "evidence_line": 12034,
+      "evidence_line": 12025,
       "forms": [
         "compile_authoring_request_v1(...) [legacy-bearing, src/boomi_mcp/authoring/workflow.py]"
       ],
@@ -5084,7 +5093,7 @@
     {
       "census": "legacy_transitive_call",
       "disposition": "follow the callee's row; this is an edge, not a site",
-      "evidence_line": 8972,
+      "evidence_line": 8963,
       "forms": [
         "_apply_structured_update(...) [legacy-bearing, src/boomi_mcp/categories/integration_builder.py]",
         "create_component(...) [legacy-bearing, src/boomi_mcp/categories/components/manage_component.py]"
@@ -5098,7 +5107,7 @@
     {
       "census": "legacy_transitive_call",
       "disposition": "follow the callee's row; this is an edge, not a site",
-      "evidence_line": 3826,
+      "evidence_line": 3817,
       "forms": [
         "_apply_structured_update(...) [legacy-bearing, src/boomi_mcp/categories/integration_builder.py]",
         "create_component(...) [legacy-bearing, src/boomi_mcp/categories/components/manage_component.py]",
@@ -5116,7 +5125,7 @@
     {
       "census": "legacy_transitive_call",
       "disposition": "follow the callee's row; this is an edge, not a site",
-      "evidence_line": 11972,
+      "evidence_line": 11963,
       "forms": [
         "plan_authoring_request_v1(...) [legacy-bearing, src/boomi_mcp/authoring/workflow.py]"
       ],
@@ -5129,7 +5138,7 @@
     {
       "census": "legacy_transitive_call",
       "disposition": "follow the callee's row; this is an edge, not a site",
-      "evidence_line": 6265,
+      "evidence_line": 6256,
       "forms": [
         "_process_ir_semantic_error(...) [legacy-bearing, src/boomi_mcp/categories/integration_builder.py]",
         "get_process_flow_builder(...) [legacy-bearing, src/boomi_mcp/categories/components/builders/process_flow_builder.py]"
@@ -5156,7 +5165,7 @@
     {
       "census": "legacy_transitive_call",
       "disposition": "follow the callee's row; this is an edge, not a site",
-      "evidence_line": 12362,
+      "evidence_line": 12353,
       "forms": [
         "_apply_plan(...) [legacy-bearing, src/boomi_mcp/categories/integration_builder.py]",
         "_build_plan(...) [legacy-bearing, src/boomi_mcp/categories/integration_builder.py]",
@@ -5172,7 +5181,7 @@
     {
       "census": "legacy_transitive_call",
       "disposition": "follow the callee's row; this is an edge, not a site",
-      "evidence_line": 3432,
+      "evidence_line": 3423,
       "forms": [
         "get_process_flow_builder(...) [legacy-bearing, src/boomi_mcp/categories/components/builders/process_flow_builder.py]"
       ],
@@ -5303,7 +5312,7 @@
     {
       "census": "process_kind_consumer",
       "disposition": "delete with the legacy consumer",
-      "evidence_line": 474,
+      "evidence_line": 480,
       "forms": [
         "<expr>('process_kind')"
       ],
@@ -5316,7 +5325,7 @@
     {
       "census": "process_kind_consumer",
       "disposition": "delete the legacy semantic shell",
-      "evidence_line": 668,
+      "evidence_line": 669,
       "forms": [
         "config.get('process_kind')",
         "config.get('process_type')"
@@ -5344,7 +5353,7 @@
     {
       "census": "process_kind_consumer",
       "disposition": "delete the legacy semantic shell",
-      "evidence_line": 4833,
+      "evidence_line": 4834,
       "forms": [
         "config.get('process_kind')",
         "config.get('process_type')"
@@ -5358,7 +5367,7 @@
     {
       "census": "process_kind_consumer",
       "disposition": "delete with the legacy consumer",
-      "evidence_line": 5849,
+      "evidence_line": 5840,
       "forms": [
         "raw_config.get('process_kind')",
         "raw_config.get('process_type')"
@@ -5372,7 +5381,7 @@
     {
       "census": "process_kind_consumer",
       "disposition": "delete with the legacy consumer",
-      "evidence_line": 5292,
+      "evidence_line": 5283,
       "forms": [
         "config.get('process_kind')",
         "config.get('process_type')"
@@ -5386,7 +5395,7 @@
     {
       "census": "process_kind_consumer",
       "disposition": "delete with the legacy consumer",
-      "evidence_line": 6807,
+      "evidence_line": 6798,
       "forms": [
         "raw_config.get('process_kind')",
         "raw_config.get('process_type')"
@@ -5400,7 +5409,7 @@
     {
       "census": "process_kind_consumer",
       "disposition": "delete with the legacy consumer",
-      "evidence_line": 3823,
+      "evidence_line": 3814,
       "forms": [
         "payload.get('process_kind')",
         "payload.get('process_type')"
@@ -5414,7 +5423,7 @@
     {
       "census": "process_kind_consumer",
       "disposition": "delete with the legacy consumer",
-      "evidence_line": 4578,
+      "evidence_line": 4569,
       "forms": [
         "config.get('process_kind')",
         "config.get('process_type')"
@@ -5470,7 +5479,7 @@
     {
       "census": "process_kind_consumer",
       "disposition": "delete with the legacy consumer",
-      "evidence_line": 3415,
+      "evidence_line": 3406,
       "forms": [
         "payload.get('process_kind')",
         "payload.get('process_type')"
@@ -5525,7 +5534,7 @@
     {
       "census": "process_kind_producer",
       "disposition": "retract the served legacy guidance / guard the raw route",
-      "evidence_line": 7743,
+      "evidence_line": 7750,
       "forms": [
         "dict-literal process_kind='database_to_api_sync'",
         "dict-literal process_kind='sync_pipeline'",
@@ -5660,7 +5669,7 @@
     {
       "census": "process_kind_producer",
       "disposition": "migrate the archetype to canonical ProcessIR",
-      "evidence_line": 1106,
+      "evidence_line": 1173,
       "forms": [
         "dict-literal process_kind='sync_pipeline'"
       ],
@@ -5673,7 +5682,7 @@
     {
       "census": "process_kind_producer",
       "disposition": "migrate the archetype to canonical ProcessIR",
-      "evidence_line": 748,
+      "evidence_line": 810,
       "forms": [
         "IntegrationComponentSpec(type='process')",
         "dict-literal process_kind='sync_pipeline'"
@@ -5687,7 +5696,7 @@
     {
       "census": "process_kind_producer",
       "disposition": "migrate the archetype to canonical ProcessIR",
-      "evidence_line": 546,
+      "evidence_line": 555,
       "forms": [
         "dict-literal process_kind='sync_pipeline'"
       ],
@@ -5713,7 +5722,7 @@
     {
       "census": "registry_lookup",
       "disposition": "delete the legacy semantic shell",
-      "evidence_line": 6050,
+      "evidence_line": 6054,
       "forms": [
         "PROCESS_FLOW_BUILDERS (read)",
         "PROCESS_FLOW_BUILDERS.get(...)"
@@ -5727,7 +5736,7 @@
     {
       "census": "registry_lookup",
       "disposition": "replace with canonical ProcessIR materialization/apply",
-      "evidence_line": 3826,
+      "evidence_line": 3817,
       "forms": [
         "PROCESS_FLOW_BUILDERS (read)",
         "get_process_flow_builder(...)"
@@ -5741,7 +5750,7 @@
     {
       "census": "registry_lookup",
       "disposition": "replace with canonical ProcessIR materialization/apply",
-      "evidence_line": 6161,
+      "evidence_line": 6152,
       "forms": [
         "PROCESS_FLOW_BUILDERS (read)",
         "get_process_flow_builder(...)"
@@ -5768,7 +5777,7 @@
     {
       "census": "registry_lookup",
       "disposition": "replace with canonical ProcessIR materialization/apply",
-      "evidence_line": 3428,
+      "evidence_line": 3419,
       "forms": [
         "PROCESS_FLOW_BUILDERS (read)",
         "get_process_flow_builder(...)"
@@ -5808,7 +5817,7 @@
     {
       "census": "renderer_call",
       "disposition": "replace with canonical ProcessIR materialization/apply",
-      "evidence_line": 3855,
+      "evidence_line": 3846,
       "forms": [
         "<registry-bound>.build(...)"
       ],
@@ -5821,7 +5830,7 @@
     {
       "census": "renderer_call",
       "disposition": "replace with canonical ProcessIR materialization/apply",
-      "evidence_line": 6289,
+      "evidence_line": 6280,
       "forms": [
         "<registry-bound>.validate_config(...)",
         "SyncPipelineBuilder.lower_config(...)"
@@ -5835,7 +5844,7 @@
     {
       "census": "renderer_call",
       "disposition": "replace with canonical ProcessIR materialization/apply",
-      "evidence_line": 3445,
+      "evidence_line": 3436,
       "forms": [
         "<registry-bound>.build(...)"
       ],
@@ -5877,7 +5886,7 @@
     {
       "census": "renderer_call",
       "disposition": "re-home onto the neutral extraction",
-      "evidence_line": 481,
+      "evidence_line": 540,
       "forms": [
         "SyncPipelineBuilder.lower_config(...)"
       ],
@@ -5942,7 +5951,7 @@
     {
       "census": "unclassified_reference",
       "disposition": "residue: a watched name mentioned in a shape the census does not classify",
-      "evidence_line": 474,
+      "evidence_line": 480,
       "forms": [
         "'process_kind' (unclassified selector literal)"
       ],
@@ -5995,7 +6004,7 @@
     {
       "census": "unclassified_reference",
       "disposition": "delete the legacy semantic shell",
-      "evidence_line": 668,
+      "evidence_line": 669,
       "forms": [
         "'process_kind' (unclassified selector literal)",
         "'process_type' (unclassified selector literal)",
@@ -6051,7 +6060,7 @@
     {
       "census": "unclassified_reference",
       "disposition": "delete the legacy semantic shell",
-      "evidence_line": 4782,
+      "evidence_line": 4783,
       "forms": [
         "ProcessFlowBuilder (unclassified reference)"
       ],
@@ -6064,7 +6073,7 @@
     {
       "census": "unclassified_reference",
       "disposition": "delete the legacy semantic shell",
-      "evidence_line": 4832,
+      "evidence_line": 4833,
       "forms": [
         "'process_kind' (unclassified selector literal)",
         "'process_type' (unclassified selector literal)",
@@ -6079,7 +6088,7 @@
     {
       "census": "unclassified_reference",
       "disposition": "delete the legacy semantic shell",
-      "evidence_line": 2131,
+      "evidence_line": 2132,
       "forms": [
         "ProcessFlowBuilder (unclassified reference)"
       ],
@@ -6092,7 +6101,7 @@
     {
       "census": "unclassified_reference",
       "disposition": "delete the legacy semantic shell",
-      "evidence_line": 1688,
+      "evidence_line": 1689,
       "forms": [
         "ProcessFlowBuilder (unclassified reference)"
       ],
@@ -6105,7 +6114,7 @@
     {
       "census": "unclassified_reference",
       "disposition": "delete the legacy semantic shell",
-      "evidence_line": 6046,
+      "evidence_line": 6050,
       "forms": [
         "process_kind (unclassified selector name)",
         "process_kind (unclassified selector parameter)"
@@ -6119,7 +6128,7 @@
     {
       "census": "unclassified_reference",
       "disposition": "residue: a watched name mentioned in a shape the census does not classify",
-      "evidence_line": 10975,
+      "evidence_line": 10966,
       "forms": [
         "'Component' (unclassified Component-endpoint literal)"
       ],
@@ -6132,7 +6141,7 @@
     {
       "census": "unclassified_reference",
       "disposition": "residue: a watched name mentioned in a shape the census does not classify",
-      "evidence_line": 5848,
+      "evidence_line": 5839,
       "forms": [
         "'process_kind' (unclassified selector literal)",
         "'process_type' (unclassified selector literal)",
@@ -6147,7 +6156,7 @@
     {
       "census": "unclassified_reference",
       "disposition": "residue: a watched name mentioned in a shape the census does not classify",
-      "evidence_line": 5292,
+      "evidence_line": 5283,
       "forms": [
         "'process_kind' (unclassified selector literal)",
         "'process_type' (unclassified selector literal)"
@@ -6161,7 +6170,7 @@
     {
       "census": "unclassified_reference",
       "disposition": "residue: a watched name mentioned in a shape the census does not classify",
-      "evidence_line": 6806,
+      "evidence_line": 6797,
       "forms": [
         "'process_kind' (unclassified selector literal)",
         "'process_type' (unclassified selector literal)",
@@ -6177,7 +6186,7 @@
     {
       "census": "unclassified_reference",
       "disposition": "residue: a watched name mentioned in a shape the census does not classify",
-      "evidence_line": 3822,
+      "evidence_line": 3813,
       "forms": [
         "'process_kind' (unclassified selector literal)",
         "'process_type' (unclassified selector literal)",
@@ -6192,7 +6201,7 @@
     {
       "census": "unclassified_reference",
       "disposition": "residue: a watched name mentioned in a shape the census does not classify",
-      "evidence_line": 6107,
+      "evidence_line": 6098,
       "forms": [
         "'process_kind' (unclassified selector literal)",
         "ProcessFlowBuilder (unclassified reference)",
@@ -6210,7 +6219,7 @@
     {
       "census": "unclassified_reference",
       "disposition": "residue: a watched name mentioned in a shape the census does not classify",
-      "evidence_line": 6401,
+      "evidence_line": 6392,
       "forms": [
         "process_kind (unclassified selector name)",
         "process_kind (unclassified selector parameter)"
@@ -6224,7 +6233,7 @@
     {
       "census": "unclassified_reference",
       "disposition": "residue: a watched name mentioned in a shape the census does not classify",
-      "evidence_line": 4577,
+      "evidence_line": 4568,
       "forms": [
         "'process_kind' (unclassified selector literal)",
         "'process_type' (unclassified selector literal)",
@@ -6255,7 +6264,7 @@
     {
       "census": "unclassified_reference",
       "disposition": "residue: a watched name mentioned in a shape the census does not classify",
-      "evidence_line": 5763,
+      "evidence_line": 5754,
       "forms": [
         "ProcessFlowBuilder (unclassified reference)"
       ],
@@ -6298,7 +6307,7 @@
     {
       "census": "unclassified_reference",
       "disposition": "residue: a watched name mentioned in a shape the census does not classify",
-      "evidence_line": 3414,
+      "evidence_line": 3405,
       "forms": [
         "'process_kind' (unclassified selector literal)",
         "'process_type' (unclassified selector literal)",
@@ -6326,7 +6335,7 @@
     {
       "census": "unclassified_reference",
       "disposition": "retract the served legacy guidance / guard the raw route",
-      "evidence_line": 8060,
+      "evidence_line": 8067,
       "forms": [
         "'process_kind' (unclassified selector literal)"
       ],
@@ -6339,7 +6348,7 @@
     {
       "census": "unclassified_reference",
       "disposition": "residue: a watched name mentioned in a shape the census does not classify",
-      "evidence_line": 682,
+      "evidence_line": 712,
       "forms": [
         "_emit_branch (unclassified reference)",
         "_emit_catcherrors (unclassified reference)",
@@ -6356,12 +6365,13 @@
         "_emit_processcall (unclassified reference)",
         "_emit_returndocuments (unclassified reference)",
         "_emit_setproperties (unclassified reference)",
+        "_emit_start_listen (unclassified reference)",
         "_emit_stop (unclassified reference)"
       ],
       "ledger_id": "LG-de5e36cb",
       "owning_issue": "#160",
       "path": "src/boomi_mcp/compiler/process_ir/emitter_registry.py",
-      "sites": 16,
+      "sites": 17,
       "symbol": "<module>"
     },
     {
@@ -6423,7 +6433,7 @@
     {
       "census": "unclassified_reference",
       "disposition": "re-home onto the neutral extraction",
-      "evidence_line": 62,
+      "evidence_line": 63,
       "forms": [
         "'process_kind' (unclassified selector literal)"
       ],
@@ -6711,7 +6721,7 @@
     {
       "census": "unclassified_reference",
       "disposition": "migrate the archetype to canonical ProcessIR",
-      "evidence_line": 336,
+      "evidence_line": 345,
       "forms": [
         "'send_request' (unclassified symbolic literal)"
       ],
@@ -6724,7 +6734,7 @@
     {
       "census": "unclassified_reference",
       "disposition": "migrate the archetype to canonical ProcessIR",
-      "evidence_line": 387,
+      "evidence_line": 396,
       "forms": [
         "send_request (unclassified attribute)"
       ],
@@ -6952,7 +6962,7 @@
       "symbol",
       "form"
     ],
-    "python_source_count": 236,
+    "python_source_count": 239,
     "roots": [
       "*.py (repo root)",
       "src/boomi_mcp",
@@ -7317,14 +7327,14 @@
     },
     {
       "artifact_id": "SS-CAPABILITY-CATALOG:authoring_contract",
-      "canonical_length": 13010,
+      "canonical_length": 13038,
       "legacy_excerpt": {
         "archetypes[2].name": "database_to_api_sync",
         "schemas[13].selector": "archetype:database_to_api_sync"
       },
       "producer": "meta_tools.list_capabilities_action()",
       "selector": "authoring_contract",
-      "sha256": "7a61db237673ac0f1204fa3f6829da56808260f5d473b00c8c22c82d95a7435a",
+      "sha256": "0f7ac90e9835000afe2ef4646e09db64b441a3535901cdbfd12b27b8062fea13",
       "surface_class": "SS-CAPABILITY-CATALOG",
       "value": {
         "actions": [
@@ -7461,11 +7471,11 @@
           }
         ],
         "capability_comparison": {
-          "actual_capability_revision": "sha256:56f720c7e4932c598fa0f5f7bf54984db23c5f62aa556674ff8dd87972c7d177",
+          "actual_capability_revision": "sha256:e53946f8821fa339f50200c6e9f06f7ede682162f9b622814e9bac05bd3adaa5",
           "status": "not_requested"
         },
-        "capability_revision": "sha256:56f720c7e4932c598fa0f5f7bf54984db23c5f62aa556674ff8dd87972c7d177",
-        "compiler_revision": "sha256:35180555d72d786236ccf680a2825a864007c433e3dd1ea5ff027a3d14a7c180",
+        "capability_revision": "sha256:e53946f8821fa339f50200c6e9f06f7ede682162f9b622814e9bac05bd3adaa5",
+        "compiler_revision": "sha256:0b9d6d2f29b83d9529f4b34cf2715f222dcfa09cfb3ef2cb078fd088787b1c00",
         "contract_version": "2",
         "intent_kinds": [
           "integration_spec",
@@ -7474,17 +7484,17 @@
         ],
         "manifest_version": "1",
         "process_ir_authoring": {
-          "entry_count": 204,
+          "entry_count": 213,
           "entry_counts_by_type": {
-            "capability": 32,
+            "capability": 33,
             "connector_action": 5,
-            "diagnostic": 66,
+            "diagnostic": 70,
             "doctrine": 39,
-            "node": 23,
+            "node": 24,
             "placement": 10,
             "recipe": 8,
             "recipe_contribution": 5,
-            "semantic_rule": 12,
+            "semantic_rule": 15,
             "state_visibility": 4
           },
           "entry_types": [
@@ -7514,6 +7524,7 @@
               "generalized_connector_call",
               "joins",
               "keyed_cache",
+              "listener_entry",
               "listener_error_scope",
               "loops",
               "mixed_connector_execution",
@@ -7562,6 +7573,7 @@
               "document_cache_retrieve",
               "exception",
               "flow_control",
+              "listener",
               "map_ref",
               "message",
               "notify",
@@ -7705,11 +7717,11 @@
             "constraint_only",
             "executable_recipe"
           ],
-          "registry_revision": "00480c7399276ddecd614ddf0172526ae6d3986b878694645837ad5819b7bbda",
+          "registry_revision": "5c455a894830c486873299f5209af2a5d09bcd8b3d69589738af9c6d643ae5df",
           "schema_version": "1",
           "source_version": "0.1.0"
         },
-        "schema_revision": "sha256:2459db273777d9a2a924174acec4525f1168c8b04566d42af912bcd0868d8f50",
+        "schema_revision": "sha256:f39086223ca3eafdf043154a5cec10ae01577a502aa93c93648004653e9b7a94",
         "schemas": [
           {
             "owned_by_authoring_contract": true,
@@ -7721,21 +7733,21 @@
           {
             "owned_by_authoring_contract": true,
             "provenance": "runtime_schema_registry",
-            "schema_hash": "sha256:83580a8561b64dd72b0f3dea63d21ff24d91efb03b48ae02422d810244b6b817",
+            "schema_hash": "sha256:629aae81bff060f84f2872d93491d6ab218808085a0b8eb9c7cba45c03014d1d",
             "schema_version": "2",
             "selector": "AuthoringCompileResultV1"
           },
           {
             "owned_by_authoring_contract": true,
             "provenance": "runtime_schema_registry",
-            "schema_hash": "sha256:4edcdc25f17b2c09aef17687990704f2610f2c7ae1694fbb8cfbbcdd40fe4311",
+            "schema_hash": "sha256:4d565282bbf1017b3043d64c124faf43078371755ffe71daf2038417c9d09631",
             "schema_version": "2",
             "selector": "AuthoringPlanResultV1"
           },
           {
             "owned_by_authoring_contract": true,
             "provenance": "runtime_schema_registry",
-            "schema_hash": "sha256:27d9f81df0ad75bab0c43b65eaaf5a879451d85395c7c5c188e331873981dffb",
+            "schema_hash": "sha256:1a1bfb576d39e52dcd655d227c5188d45be987f4c092d4f19da76f22dca12eb3",
             "schema_version": "2",
             "selector": "AuthoringRequestV1"
           },
@@ -7756,13 +7768,13 @@
           {
             "owned_by_authoring_contract": false,
             "provenance": "runtime_schema_registry",
-            "schema_hash": "sha256:c30da4457a77ff3448eda3c33c1b6942b5d4f6c7f5de6a786a4771bad16f4ffe",
+            "schema_hash": "sha256:7ec0b5936c8339239707806e14df847d5821a01f3affd82c442608ea858276b7",
             "selector": "IntegrationSpecV1"
           },
           {
             "owned_by_authoring_contract": true,
             "provenance": "runtime_schema_registry",
-            "schema_hash": "sha256:a46cc243ad0abf2680924cf6c0e0f75b0ca113c0c1ef55cfac282c085bb84aec",
+            "schema_hash": "sha256:d1b6a1911c3c22bd38608e43cd5d48fa4f760791af0d6829477e7da6813c57b0",
             "schema_version": "1",
             "selector": "ProcessIRV1"
           },
@@ -7808,13 +7820,13 @@
           {
             "owned_by_authoring_contract": false,
             "provenance": "runtime_schema_registry",
-            "schema_hash": "sha256:d826d338a3d790240dec62d1e5b2ff7a318fd0c43b16fe01cdf196e3a933954f",
+            "schema_hash": "sha256:a9992edcb85614ef37150c5bec91815123433b8e7054dcfbe092cf9b0eac08cc",
             "selector": "archetype:http_listener_to_db"
           },
           {
             "owned_by_authoring_contract": false,
             "provenance": "runtime_schema_registry",
-            "schema_hash": "sha256:90119e5a86e6a00f1513404f9d2ecc7b31e2e6d3e7257cfa03144d4302eaf363",
+            "schema_hash": "sha256:7ee9ad6831d3c01cf8d7596beeb4fee512791a7dd73c9fd3319f45ff4253f5eb",
             "selector": "archetype:http_listener_to_rest"
           },
           {
@@ -7845,7 +7857,7 @@
           {
             "owned_by_authoring_contract": false,
             "provenance": "runtime_schema_registry",
-            "schema_hash": "sha256:8e3ed1d59cc6642398c33245c37f0f46d325037a00960e1ce143d5fad5235f69",
+            "schema_hash": "sha256:f5b80da6ca6fc44cab5572740e8dfc6460717bc36e5cfd5e19ab26ab79f84f8d",
             "selector": "recipe_contributions"
           },
           {
@@ -12917,10 +12929,10 @@
     },
     {
       "artifact_id": "SS-SCHEMA-TEMPLATES:resource_type=component|operation=create|component_type=webservice",
-      "canonical_length": 6222,
+      "canonical_length": 6456,
       "producer": "meta_tools.get_schema_template_action(...)",
       "selector": "resource_type=component|operation=create|component_type=webservice",
-      "sha256": "efbea60447e648c906145b4f0b783c1be8fc54b470d5e3a5eea77f8b178c0eab",
+      "sha256": "ea772849fd025dda71aa6197bc3f124481554c82d81f523560843604d26ce372",
       "surface_class": "SS-SCHEMA-TEMPLATES",
       "value": {
         "_success": true,
@@ -12946,7 +12958,7 @@
           "PLAINTEXT_SECRET_REJECTED": "a dict key inside the config matches a secret-shaped name — endpoint auth comes from the Shared Web Server, never component XML"
         },
         "example": {
-          "_example_note": "All-inherit route: the served path/method come from the process's WSS Listen operation (/ws/rest/{objectName}).",
+          "_example_note": "All-inherit route: the served path comes from the process's WSS Listen operation (/ws/rest/{objectName}), and its method: the linked operation's type decides it: CREATE / EXECUTE / UPSERT -> POST; DELETE -> DELETE; GET / QUERY -> GET; UPDATE -> PUT.",
           "action": "create",
           "config": {
             "component_name": "<<component display name>>",
@@ -13020,7 +13032,7 @@
           "routes": [
             {
               "description": "<<optional route description>>",
-              "http_method": "<<'' inherit (input_type none->GET else POST) | GET | POST | PUT | DELETE | PATCH>>",
+              "http_method": "<<'' inherit (the linked operation's type decides it: CREATE / EXECUTE / UPSERT -> POST; DELETE -> DELETE; GET / QUERY -> GET; UPDATE -> PUT) | GET | POST | PUT | DELETE | PATCH>>",
               "input_type": "<<'' inherit | none|singledata|singlejson|multijson|singlexml|multixml>>",
               "object_name": "<<'' inherits the WSS operation objectName>>",
               "output_type": "<<'' inherit | same vocabulary>>",
@@ -13619,7 +13631,7 @@
     },
     {
       "artifact_id": "SS-SCHEMA-TEMPLATES:resource_type=process|operation=create|protocol=sync_pipeline",
-      "canonical_length": 11361,
+      "canonical_length": 11747,
       "legacy_excerpt": {
         "description": "Verified-linear process builder (issue #70 M5.2). Takes a semantic M5.1 PipelineSpec (issue #69) stage graph and lowers the all-'ordering' linear subset — read(db_read) | fetch(rest_fetch) -> [map] -> send(rest_send) -> stop, or (M5.8 #74) fetch(rest_fetch) -> [map] -> write(db_write) -> stop — into the proven database_to_api_sync source/transform/target config. The source is a DB Get (read) or a REST GET (fetch, M5.4 #72); the target is a REST send or a database Send/write (write, M5.8 #74, via the #32 write-profile / Send-operation builders); it adds NO new shape. Routed via build_integration when a type='process' component carries config.process_kind='sync_pipeline'.",
         "example_component_spec.config.process_kind": "sync_pipeline",
@@ -13638,7 +13650,7 @@
       },
       "producer": "meta_tools.get_schema_template_action(...)",
       "selector": "resource_type=process|operation=create|protocol=sync_pipeline",
-      "sha256": "86b9819895dcf564b3902f634efa626b4ad85c56708d51f4578a6e1a8a5cb2a6",
+      "sha256": "d52dd09419ca6afd3400660821457a7e44db58b49f68bc2799ce282a6bdd1150",
       "surface_class": "SS-SCHEMA-TEMPLATES",
       "value": {
         "_success": true,
@@ -13716,7 +13728,7 @@
         "field_notes": {
           "fetch": "A fetch stage is a REST GET source (config.primitive='rest_fetch', M5.4 #72) or a SOAP Client EXECUTE source (config.primitive='soap_fetch', #126). A rest_fetch carries an explicit response/output shape and an EMPTY request document (some APIs reject GET-with-body); action_type defaults to 'GET' and must be 'GET'. A soap_fetch lowers to connectorType='wssoapclientsdk'; action_type defaults to 'EXECUTE' and must be 'EXECUTE' (SOAP Client is EXECUTE-only).",
           "gated_blocks": "reliability (Try/Catch retry+DLQ), branch, process_calls, and return_documents are GATED for sync_pipeline — it is verified-linear only (M5.2). Use database_to_api_sync (reliability/dynamic path) or wrapper_subprocess (Process Calls) instead.",
-          "listener": "A listener stage (config.primitive='wss_listen', M6 #12) is the inbound Web Services Server Listen source: it lowers to the Listen START SHAPE (connectoraction actionType='Listen' connectorType='wss' embedded in the start shape) — no separate source connector shape and NO connection component, so the stage config carries ONLY primitive/operation_id/label (+ optional connector_type='wss'). The emitted process locks the listener options allowSimultaneous='true' / updateRunDates='false'. Bare-WSS endpoint = /ws/simple/{lowercase(operationType)}{SentenceCase(objectName)} — the objectName is stored verbatim on the operation but Boomi upper-cases its FIRST letter on the served path (live-settled 2026-07-04); HTTP method derives from the operation's input_type (none -> GET, else POST). Serves basic/intermediate apiType runtimes; 'advanced' requires an API Service Component routing to the listener process (typed 'webservice' builder / listener-archetype asc_wrapper.enabled=true, #133) — the served path becomes /ws/rest/... (case-verbatim). Listener processes have no Test mode — orchestrate_deploy runs a listener_verify stage (apiType preflight, ASC deploy-both check in api_service mode, collision check, live probe, execution readback) instead.",
+          "listener": "A listener stage (config.primitive='wss_listen', M6 #12) is the inbound Web Services Server Listen source: it lowers to the Listen START SHAPE (connectoraction actionType='Listen' connectorType='wss' embedded in the start shape) — no separate source connector shape and NO connection component, so the stage config carries ONLY primitive/operation_id/label (+ optional connector_type='wss'). The emitted process locks the listener options allowSimultaneous='true' / updateRunDates='false'. Bare-WSS endpoint = /ws/simple/{lowercase(operationType)}{SentenceCase(objectName)} — the objectName is stored verbatim on the operation but Boomi upper-cases its FIRST letter on the served path (live-settled 2026-07-04); a bare route is called by input type (input_type none -> GET, anything else -> POST). Serves basic/intermediate apiType runtimes; 'advanced' requires an API Service Component routing to the listener process (typed 'webservice' builder / listener-archetype asc_wrapper.enabled=true, #133) — the served path becomes /ws/rest/... (case-verbatim), and its method: the linked operation's type decides it: CREATE / EXECUTE / UPSERT -> POST; DELETE -> DELETE; GET / QUERY -> GET; UPDATE -> PUT; an API Service route whose method is GET — an explicit http_method GET, or an all-inherit route for a GET / QUERY operation — cannot be called for an operation expecting input; an explicit http_method other than GET is used as given. Listener processes have no Test mode — orchestrate_deploy runs a listener_verify stage (apiType preflight, ASC deploy-both check in api_service mode, collision check, live probe, execution readback) instead.",
           "multi_shape_composition": "Issue #117 M10 follow-up: a multi-shape M10 graph (chained routing/batching/cache/throw) is authored via database_to_api_sync.flow_sequence, NOT through sync_pipeline reserved-stage lowering — sync_pipeline stays verified-linear (read -> [map] -> send). The reserved combine/flow_control/branch/decision/dataprocess/exception/doccache stage kinds above remain unlowered.",
           "pipeline": "An M5.1 PipelineSpec: {stages: [...], dependencies: [...]}. Only the verified-linear, all-'ordering' subset is lowered in M5.2.",
           "pipeline.dependencies": "Typed edges; sync_pipeline requires every edge to be edge_kind='ordering' (the default). The chain must be a single read -> [map] -> send path with no fan-out/fan-in.",
@@ -13959,7 +13971,7 @@
     },
     {
       "artifact_id": "SS-SCHEMA-TEMPLATES:schema_name=AuthoringCompileResultV1",
-      "canonical_length": 110675,
+      "canonical_length": 113248,
       "legacy_excerpt": {
         "json_schema.$defs.CanonicalIntegrationPreviewV1.properties.processes.description": "Issue #153 M12.15 — canonical process roots authored as ProcessIR. Each entry is one ProcessAuthoringUnitV1: exactly one ProcessComponentEnvelopeV1 plus exactly one ProcessIRV1 root. These are compiled by the canonical chain and materialized by the neutral ProcessComponentMaterializer — they resolve NO legacy process_kind. 'components' remains the home of supporting components and of reference-only existing processes. 'components' and 'processes' share ONE key namespace: a key used by a component and by a process envelope is a duplicate, and all four depends_on directions (component->component, component->process, process->component, process->process) enter one topological order with one cycle check. A TUPLE, per the plan's field type: pydantic coerces list input, so the wire shape is an ordinary JSON array and no caller sends anything different — but unlike this model's legacy List siblings, mutating the collection itself is unrepresentable. Per-element immutability lives on the frozen ProcessAuthoringUnitV1 entries.",
         "json_schema.$defs.IntegrationComponentSpec.properties.config.description": "Type-specific configuration payload. For type='process', config.process_kind selects a structured process-flow builder (e.g. 'database_to_api_sync' or 'wrapper_subprocess' — issue #25) and is REQUIRED for any authoring action that emits or rebuilds process XML (create / create_clone / update): such a process without process_kind is rejected at plan time with PROCESS_KIND_REQUIRED (legacy freeform JSON-to-XML process authoring has been removed). A reference-only reuse of an existing process (no XML emitted) may omit it. Use manage_component for an explicit raw process XML escape hatch.",
@@ -13967,7 +13979,7 @@
       },
       "producer": "meta_tools.get_schema_template_action(...)",
       "selector": "schema_name=AuthoringCompileResultV1",
-      "sha256": "2ade69c2c6988cdb15bf9531371d640fe829a4e2f813b2a3cbbff2473abc7d55",
+      "sha256": "33ccd2d4445f04128289ed131bc04e055b2dd7e9a2a8177b666e42b49aa78b6c",
       "surface_class": "SS-SCHEMA-TEMPLATES",
       "value": {
         "_success": true,
@@ -15913,6 +15925,22 @@
               "title": "GeneratedProfileSummaryV1",
               "type": "object"
             },
+            "InboundValidationV1": {
+              "additionalProperties": false,
+              "description": "Build-time inbound contract requested for a listener (#158).\n\n``profile_bound`` asks the compiler to prove, from the RESOLVED listener\noperation, that inbound documents arrive as JSON or XML and are bound to a\nrequest profile. Both facts are read from the operation — never restated\nhere — so the request cannot disagree with the operation it describes.\n\nIt is a build-time guarantee only. Nothing is emitted for it and no payload\nis validated at run time.",
+              "properties": {
+                "mode": {
+                  "const": "profile_bound",
+                  "title": "Mode",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "mode"
+              ],
+              "title": "InboundValidationV1",
+              "type": "object"
+            },
             "IntegrationComponentSpec": {
               "description": "Canonical description of a component operation in an integration build.",
               "properties": {
@@ -16205,6 +16233,51 @@
                 "contract_ref"
               ],
               "title": "KeyReferenceIdempotencyV1",
+              "type": "object"
+            },
+            "ListenerEntryNodeV1": {
+              "additionalProperties": false,
+              "description": "The inbound-HTTP entry of a listener process (#158).\n\nReceives each inbound request as a document and starts the flow with it. It\nis the FIRST root step and appears exactly once; it cannot sit inside a\ncontrol body. The process is started by its inbound requests instead of a\nschedule, and the process-level options that follow from that are derived\nfrom this node — they are never authored separately.\n\nAuthors only the listener OPERATION. A listener has no connection: the\nplatform binds the inbound endpoint to the operation itself, so\n``connection_ref`` is refused rather than ignored. The connector family and\naction are never authored either — they are read from the resolved operation,\nwhich must be a Web Services Server Listen operation.\n\nA listener flow continues with linear steps and then either a ``target`` and\na ``stop``, or one or more ``connector_call`` steps ending on a call before a\n``stop``. Error handling, fan-out, flow control, process calls and returning\ndocuments are not available in a listener flow.",
+              "properties": {
+                "inbound_validation": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/InboundValidationV1"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null
+                },
+                "kind": {
+                  "const": "listener",
+                  "title": "Kind",
+                  "type": "string"
+                },
+                "label": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "title": "Label"
+                },
+                "operation_ref": {
+                  "description": "Opaque component reference: exact '$ref:KEY' token or literal component id",
+                  "title": "Operation Ref",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "kind",
+                "operation_ref"
+              ],
+              "title": "ListenerEntryNodeV1",
               "type": "object"
             },
             "MapFunctionOperationSummaryV1": {
@@ -17225,7 +17298,7 @@
             },
             "SequenceNodeV1": {
               "additionalProperties": false,
-              "description": "Ordered root sequence. Local structural rules mirror today's builder:\n\n- a LEGACY connector flow starts with ``source`` and ends in exactly one of\n  ``target``+``stop``, ``target``+``return_documents``, a standalone\n  ``return_documents`` terminal, or a terminal control\n  (``branch``/``decision``/``exception``). ``target`` is part of the terminal\n  SUFFIX, not a movable step: it may appear only immediately before its\n  ``stop`` or ``return_documents``;\n- a GENERALIZED ``connector_call`` flow may carry linear steps before and\n  between its calls, must contain at least one call, and must end ON a call\n  before its terminal — linear work after the last call is unsupported. Each\n  ``map_ref`` must be bracketed by calls on BOTH sides. The flow's connector\n  entry is its FIRST call, wherever that call sits;\n- a process-call root is EXACTLY one ``process_call`` and nothing else: the\n  call ends its own path, so no trailing ``stop``/``return_documents`` and no\n  second call may follow it (mixed connector execution stays\n  capability-gated, and keeps its own diagnostic);\n- a CONTROL-ONLY root (#141) is exactly one ``branch``/``decision`` and\n  nothing else;\n- ``cache_put`` must be immediately followed by a stream-replacing cache\n  read (never by the target/terminal).",
+              "description": "Ordered root sequence. Local structural rules mirror today's builder:\n\n- a LEGACY connector flow starts with ``source`` and ends in exactly one of\n  ``target``+``stop``, ``target``+``return_documents``, a standalone\n  ``return_documents`` terminal, or a terminal control\n  (``branch``/``decision``/``exception``). ``target`` is part of the terminal\n  SUFFIX, not a movable step: it may appear only immediately before its\n  ``stop`` or ``return_documents``;\n- a GENERALIZED ``connector_call`` flow may carry linear steps before and\n  between its calls, must contain at least one call, and must end ON a call\n  before its terminal — linear work after the last call is unsupported. Each\n  ``map_ref`` must be bracketed by calls on BOTH sides. The flow's connector\n  entry is its FIRST call, wherever that call sits;\n- a process-call root is EXACTLY one ``process_call`` and nothing else: the\n  call ends its own path, so no trailing ``stop``/``return_documents`` and no\n  second call may follow it (mixed connector execution stays\n  capability-gated, and keeps its own diagnostic);\n- a CONTROL-ONLY root (#141) is exactly one ``branch``/``decision`` and\n  nothing else;\n- a LISTENER flow (#158) starts with exactly one ``listener`` and continues\n  either with linear steps, a ``target`` and a ``stop``, or with\n  ``connector_call`` steps ending on a call before a ``stop``;\n- ``cache_put`` must be immediately followed by a stream-replacing cache\n  read (never by the target/terminal).",
               "properties": {
                 "kind": {
                   "const": "sequence",
@@ -17247,6 +17320,7 @@
                         "document_cache_retrieve": "#/$defs/DocumentCacheRetrieveNodeV1",
                         "exception": "#/$defs/ExceptionNodeV1",
                         "flow_control": "#/$defs/FlowControlNodeV1",
+                        "listener": "#/$defs/ListenerEntryNodeV1",
                         "map_ref": "#/$defs/MapRefNodeV1",
                         "message": "#/$defs/MessageNodeV1",
                         "notify": "#/$defs/NotifyNodeV1",
@@ -17262,6 +17336,9 @@
                       "propertyName": "kind"
                     },
                     "oneOf": [
+                      {
+                        "$ref": "#/$defs/ListenerEntryNodeV1"
+                      },
                       {
                         "$ref": "#/$defs/SourceEndpointV1"
                       },
@@ -18479,12 +18556,12 @@
         "raw_xml_exposed": false,
         "read_only": true,
         "revision_binding": {
-          "capability_revision": "sha256:56f720c7e4932c598fa0f5f7bf54984db23c5f62aa556674ff8dd87972c7d177",
-          "compiler_revision": "sha256:35180555d72d786236ccf680a2825a864007c433e3dd1ea5ff027a3d14a7c180",
+          "capability_revision": "sha256:e53946f8821fa339f50200c6e9f06f7ede682162f9b622814e9bac05bd3adaa5",
+          "compiler_revision": "sha256:0b9d6d2f29b83d9529f4b34cf2715f222dcfa09cfb3ef2cb078fd088787b1c00",
           "contract_version": "2",
-          "schema_revision": "sha256:2459db273777d9a2a924174acec4525f1168c8b04566d42af912bcd0868d8f50"
+          "schema_revision": "sha256:f39086223ca3eafdf043154a5cec10ae01577a502aa93c93648004653e9b7a94"
         },
-        "schema_hash": "sha256:83580a8561b64dd72b0f3dea63d21ff24d91efb03b48ae02422d810244b6b817",
+        "schema_hash": "sha256:629aae81bff060f84f2872d93491d6ab218808085a0b8eb9c7cba45c03014d1d",
         "schema_name": "AuthoringCompileResultV1",
         "schema_version": "2",
         "surface": "MCP authoring contract (issue #146 M12.11)"
@@ -18493,7 +18570,7 @@
     },
     {
       "artifact_id": "SS-SCHEMA-TEMPLATES:schema_name=AuthoringPlanResultV1",
-      "canonical_length": 109349,
+      "canonical_length": 111922,
       "legacy_excerpt": {
         "json_schema.$defs.CanonicalIntegrationPreviewV1.properties.processes.description": "Issue #153 M12.15 — canonical process roots authored as ProcessIR. Each entry is one ProcessAuthoringUnitV1: exactly one ProcessComponentEnvelopeV1 plus exactly one ProcessIRV1 root. These are compiled by the canonical chain and materialized by the neutral ProcessComponentMaterializer — they resolve NO legacy process_kind. 'components' remains the home of supporting components and of reference-only existing processes. 'components' and 'processes' share ONE key namespace: a key used by a component and by a process envelope is a duplicate, and all four depends_on directions (component->component, component->process, process->component, process->process) enter one topological order with one cycle check. A TUPLE, per the plan's field type: pydantic coerces list input, so the wire shape is an ordinary JSON array and no caller sends anything different — but unlike this model's legacy List siblings, mutating the collection itself is unrepresentable. Per-element immutability lives on the frozen ProcessAuthoringUnitV1 entries.",
         "json_schema.$defs.IntegrationComponentSpec.properties.config.description": "Type-specific configuration payload. For type='process', config.process_kind selects a structured process-flow builder (e.g. 'database_to_api_sync' or 'wrapper_subprocess' — issue #25) and is REQUIRED for any authoring action that emits or rebuilds process XML (create / create_clone / update): such a process without process_kind is rejected at plan time with PROCESS_KIND_REQUIRED (legacy freeform JSON-to-XML process authoring has been removed). A reference-only reuse of an existing process (no XML emitted) may omit it. Use manage_component for an explicit raw process XML escape hatch.",
@@ -18501,7 +18578,7 @@
       },
       "producer": "meta_tools.get_schema_template_action(...)",
       "selector": "schema_name=AuthoringPlanResultV1",
-      "sha256": "8d567cb8f8e417c903eabd695d87f1269b055a977a75f044f050f7f9afa44cb2",
+      "sha256": "2a61e704b12505bf01ff5f9697bc513b23fa89ebc6da172a06060988b6ec6a1c",
       "surface_class": "SS-SCHEMA-TEMPLATES",
       "value": {
         "_success": true,
@@ -20398,6 +20475,22 @@
               "title": "GeneratedProfileSummaryV1",
               "type": "object"
             },
+            "InboundValidationV1": {
+              "additionalProperties": false,
+              "description": "Build-time inbound contract requested for a listener (#158).\n\n``profile_bound`` asks the compiler to prove, from the RESOLVED listener\noperation, that inbound documents arrive as JSON or XML and are bound to a\nrequest profile. Both facts are read from the operation — never restated\nhere — so the request cannot disagree with the operation it describes.\n\nIt is a build-time guarantee only. Nothing is emitted for it and no payload\nis validated at run time.",
+              "properties": {
+                "mode": {
+                  "const": "profile_bound",
+                  "title": "Mode",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "mode"
+              ],
+              "title": "InboundValidationV1",
+              "type": "object"
+            },
             "IntegrationComponentSpec": {
               "description": "Canonical description of a component operation in an integration build.",
               "properties": {
@@ -20690,6 +20783,51 @@
                 "contract_ref"
               ],
               "title": "KeyReferenceIdempotencyV1",
+              "type": "object"
+            },
+            "ListenerEntryNodeV1": {
+              "additionalProperties": false,
+              "description": "The inbound-HTTP entry of a listener process (#158).\n\nReceives each inbound request as a document and starts the flow with it. It\nis the FIRST root step and appears exactly once; it cannot sit inside a\ncontrol body. The process is started by its inbound requests instead of a\nschedule, and the process-level options that follow from that are derived\nfrom this node — they are never authored separately.\n\nAuthors only the listener OPERATION. A listener has no connection: the\nplatform binds the inbound endpoint to the operation itself, so\n``connection_ref`` is refused rather than ignored. The connector family and\naction are never authored either — they are read from the resolved operation,\nwhich must be a Web Services Server Listen operation.\n\nA listener flow continues with linear steps and then either a ``target`` and\na ``stop``, or one or more ``connector_call`` steps ending on a call before a\n``stop``. Error handling, fan-out, flow control, process calls and returning\ndocuments are not available in a listener flow.",
+              "properties": {
+                "inbound_validation": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/InboundValidationV1"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null
+                },
+                "kind": {
+                  "const": "listener",
+                  "title": "Kind",
+                  "type": "string"
+                },
+                "label": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "title": "Label"
+                },
+                "operation_ref": {
+                  "description": "Opaque component reference: exact '$ref:KEY' token or literal component id",
+                  "title": "Operation Ref",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "kind",
+                "operation_ref"
+              ],
+              "title": "ListenerEntryNodeV1",
               "type": "object"
             },
             "MapFunctionOperationSummaryV1": {
@@ -21710,7 +21848,7 @@
             },
             "SequenceNodeV1": {
               "additionalProperties": false,
-              "description": "Ordered root sequence. Local structural rules mirror today's builder:\n\n- a LEGACY connector flow starts with ``source`` and ends in exactly one of\n  ``target``+``stop``, ``target``+``return_documents``, a standalone\n  ``return_documents`` terminal, or a terminal control\n  (``branch``/``decision``/``exception``). ``target`` is part of the terminal\n  SUFFIX, not a movable step: it may appear only immediately before its\n  ``stop`` or ``return_documents``;\n- a GENERALIZED ``connector_call`` flow may carry linear steps before and\n  between its calls, must contain at least one call, and must end ON a call\n  before its terminal — linear work after the last call is unsupported. Each\n  ``map_ref`` must be bracketed by calls on BOTH sides. The flow's connector\n  entry is its FIRST call, wherever that call sits;\n- a process-call root is EXACTLY one ``process_call`` and nothing else: the\n  call ends its own path, so no trailing ``stop``/``return_documents`` and no\n  second call may follow it (mixed connector execution stays\n  capability-gated, and keeps its own diagnostic);\n- a CONTROL-ONLY root (#141) is exactly one ``branch``/``decision`` and\n  nothing else;\n- ``cache_put`` must be immediately followed by a stream-replacing cache\n  read (never by the target/terminal).",
+              "description": "Ordered root sequence. Local structural rules mirror today's builder:\n\n- a LEGACY connector flow starts with ``source`` and ends in exactly one of\n  ``target``+``stop``, ``target``+``return_documents``, a standalone\n  ``return_documents`` terminal, or a terminal control\n  (``branch``/``decision``/``exception``). ``target`` is part of the terminal\n  SUFFIX, not a movable step: it may appear only immediately before its\n  ``stop`` or ``return_documents``;\n- a GENERALIZED ``connector_call`` flow may carry linear steps before and\n  between its calls, must contain at least one call, and must end ON a call\n  before its terminal — linear work after the last call is unsupported. Each\n  ``map_ref`` must be bracketed by calls on BOTH sides. The flow's connector\n  entry is its FIRST call, wherever that call sits;\n- a process-call root is EXACTLY one ``process_call`` and nothing else: the\n  call ends its own path, so no trailing ``stop``/``return_documents`` and no\n  second call may follow it (mixed connector execution stays\n  capability-gated, and keeps its own diagnostic);\n- a CONTROL-ONLY root (#141) is exactly one ``branch``/``decision`` and\n  nothing else;\n- a LISTENER flow (#158) starts with exactly one ``listener`` and continues\n  either with linear steps, a ``target`` and a ``stop``, or with\n  ``connector_call`` steps ending on a call before a ``stop``;\n- ``cache_put`` must be immediately followed by a stream-replacing cache\n  read (never by the target/terminal).",
               "properties": {
                 "kind": {
                   "const": "sequence",
@@ -21732,6 +21870,7 @@
                         "document_cache_retrieve": "#/$defs/DocumentCacheRetrieveNodeV1",
                         "exception": "#/$defs/ExceptionNodeV1",
                         "flow_control": "#/$defs/FlowControlNodeV1",
+                        "listener": "#/$defs/ListenerEntryNodeV1",
                         "map_ref": "#/$defs/MapRefNodeV1",
                         "message": "#/$defs/MessageNodeV1",
                         "notify": "#/$defs/NotifyNodeV1",
@@ -21747,6 +21886,9 @@
                       "propertyName": "kind"
                     },
                     "oneOf": [
+                      {
+                        "$ref": "#/$defs/ListenerEntryNodeV1"
+                      },
                       {
                         "$ref": "#/$defs/SourceEndpointV1"
                       },
@@ -22943,12 +23085,12 @@
         "raw_xml_exposed": false,
         "read_only": true,
         "revision_binding": {
-          "capability_revision": "sha256:56f720c7e4932c598fa0f5f7bf54984db23c5f62aa556674ff8dd87972c7d177",
-          "compiler_revision": "sha256:35180555d72d786236ccf680a2825a864007c433e3dd1ea5ff027a3d14a7c180",
+          "capability_revision": "sha256:e53946f8821fa339f50200c6e9f06f7ede682162f9b622814e9bac05bd3adaa5",
+          "compiler_revision": "sha256:0b9d6d2f29b83d9529f4b34cf2715f222dcfa09cfb3ef2cb078fd088787b1c00",
           "contract_version": "2",
-          "schema_revision": "sha256:2459db273777d9a2a924174acec4525f1168c8b04566d42af912bcd0868d8f50"
+          "schema_revision": "sha256:f39086223ca3eafdf043154a5cec10ae01577a502aa93c93648004653e9b7a94"
         },
-        "schema_hash": "sha256:4edcdc25f17b2c09aef17687990704f2610f2c7ae1694fbb8cfbbcdd40fe4311",
+        "schema_hash": "sha256:4d565282bbf1017b3043d64c124faf43078371755ffe71daf2038417c9d09631",
         "schema_name": "AuthoringPlanResultV1",
         "schema_version": "2",
         "surface": "MCP authoring contract (issue #146 M12.11)"
@@ -22957,7 +23099,7 @@
     },
     {
       "artifact_id": "SS-SCHEMA-TEMPLATES:schema_name=AuthoringRequestV1",
-      "canonical_length": 111734,
+      "canonical_length": 114307,
       "legacy_excerpt": {
         "json_schema.$defs.IntegrationComponentSpec.properties.config.description": "Type-specific configuration payload. For type='process', config.process_kind selects a structured process-flow builder (e.g. 'database_to_api_sync' or 'wrapper_subprocess' — issue #25) and is REQUIRED for any authoring action that emits or rebuilds process XML (create / create_clone / update): such a process without process_kind is rejected at plan time with PROCESS_KIND_REQUIRED (legacy freeform JSON-to-XML process authoring has been removed). A reference-only reuse of an existing process (no XML emitted) may omit it. Use manage_component for an explicit raw process XML escape hatch.",
         "json_schema.$defs.IntegrationSpecV1.properties.processes.description": "Issue #153 M12.15 — canonical process roots authored as ProcessIR. Each entry is one ProcessAuthoringUnitV1: exactly one ProcessComponentEnvelopeV1 plus exactly one ProcessIRV1 root. These are compiled by the canonical chain and materialized by the neutral ProcessComponentMaterializer — they resolve NO legacy process_kind. 'components' remains the home of supporting components and of reference-only existing processes. 'components' and 'processes' share ONE key namespace: a key used by a component and by a process envelope is a duplicate, and all four depends_on directions (component->component, component->process, process->component, process->process) enter one topological order with one cycle check. A TUPLE, per the plan's field type: pydantic coerces list input, so the wire shape is an ordinary JSON array and no caller sends anything different — but unlike this model's legacy List siblings, mutating the collection itself is unrepresentable. Per-element immutability lives on the frozen ProcessAuthoringUnitV1 entries.",
@@ -22965,7 +23107,7 @@
       },
       "producer": "meta_tools.get_schema_template_action(...)",
       "selector": "schema_name=AuthoringRequestV1",
-      "sha256": "542fd8a99a15e2d7e3561863ef6607f37e12b3f33c0b775751d96136292abe8a",
+      "sha256": "81c5373572d44fdcf3e8d44633ad4fb8b02ea00e00fd0e7f1366af3b719d2b6a",
       "surface_class": "SS-SCHEMA-TEMPLATES",
       "value": {
         "_success": true,
@@ -24334,6 +24476,22 @@
               "title": "FlowControlNodeV1",
               "type": "object"
             },
+            "InboundValidationV1": {
+              "additionalProperties": false,
+              "description": "Build-time inbound contract requested for a listener (#158).\n\n``profile_bound`` asks the compiler to prove, from the RESOLVED listener\noperation, that inbound documents arrive as JSON or XML and are bound to a\nrequest profile. Both facts are read from the operation — never restated\nhere — so the request cannot disagree with the operation it describes.\n\nIt is a build-time guarantee only. Nothing is emitted for it and no payload\nis validated at run time.",
+              "properties": {
+                "mode": {
+                  "const": "profile_bound",
+                  "title": "Mode",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "mode"
+              ],
+              "title": "InboundValidationV1",
+              "type": "object"
+            },
             "IntegrationComponentSpec": {
               "description": "Canonical description of a component operation in an integration build.",
               "properties": {
@@ -24579,6 +24737,51 @@
                 "contract_ref"
               ],
               "title": "KeyReferenceIdempotencyV1",
+              "type": "object"
+            },
+            "ListenerEntryNodeV1": {
+              "additionalProperties": false,
+              "description": "The inbound-HTTP entry of a listener process (#158).\n\nReceives each inbound request as a document and starts the flow with it. It\nis the FIRST root step and appears exactly once; it cannot sit inside a\ncontrol body. The process is started by its inbound requests instead of a\nschedule, and the process-level options that follow from that are derived\nfrom this node — they are never authored separately.\n\nAuthors only the listener OPERATION. A listener has no connection: the\nplatform binds the inbound endpoint to the operation itself, so\n``connection_ref`` is refused rather than ignored. The connector family and\naction are never authored either — they are read from the resolved operation,\nwhich must be a Web Services Server Listen operation.\n\nA listener flow continues with linear steps and then either a ``target`` and\na ``stop``, or one or more ``connector_call`` steps ending on a call before a\n``stop``. Error handling, fan-out, flow control, process calls and returning\ndocuments are not available in a listener flow.",
+              "properties": {
+                "inbound_validation": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/InboundValidationV1"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null
+                },
+                "kind": {
+                  "const": "listener",
+                  "title": "Kind",
+                  "type": "string"
+                },
+                "label": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "title": "Label"
+                },
+                "operation_ref": {
+                  "description": "Opaque component reference: exact '$ref:KEY' token or literal component id",
+                  "title": "Operation Ref",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "kind",
+                "operation_ref"
+              ],
+              "title": "ListenerEntryNodeV1",
               "type": "object"
             },
             "MapRefNodeV1": {
@@ -25912,7 +26115,7 @@
             },
             "SequenceNodeV1": {
               "additionalProperties": false,
-              "description": "Ordered root sequence. Local structural rules mirror today's builder:\n\n- a LEGACY connector flow starts with ``source`` and ends in exactly one of\n  ``target``+``stop``, ``target``+``return_documents``, a standalone\n  ``return_documents`` terminal, or a terminal control\n  (``branch``/``decision``/``exception``). ``target`` is part of the terminal\n  SUFFIX, not a movable step: it may appear only immediately before its\n  ``stop`` or ``return_documents``;\n- a GENERALIZED ``connector_call`` flow may carry linear steps before and\n  between its calls, must contain at least one call, and must end ON a call\n  before its terminal — linear work after the last call is unsupported. Each\n  ``map_ref`` must be bracketed by calls on BOTH sides. The flow's connector\n  entry is its FIRST call, wherever that call sits;\n- a process-call root is EXACTLY one ``process_call`` and nothing else: the\n  call ends its own path, so no trailing ``stop``/``return_documents`` and no\n  second call may follow it (mixed connector execution stays\n  capability-gated, and keeps its own diagnostic);\n- a CONTROL-ONLY root (#141) is exactly one ``branch``/``decision`` and\n  nothing else;\n- ``cache_put`` must be immediately followed by a stream-replacing cache\n  read (never by the target/terminal).",
+              "description": "Ordered root sequence. Local structural rules mirror today's builder:\n\n- a LEGACY connector flow starts with ``source`` and ends in exactly one of\n  ``target``+``stop``, ``target``+``return_documents``, a standalone\n  ``return_documents`` terminal, or a terminal control\n  (``branch``/``decision``/``exception``). ``target`` is part of the terminal\n  SUFFIX, not a movable step: it may appear only immediately before its\n  ``stop`` or ``return_documents``;\n- a GENERALIZED ``connector_call`` flow may carry linear steps before and\n  between its calls, must contain at least one call, and must end ON a call\n  before its terminal — linear work after the last call is unsupported. Each\n  ``map_ref`` must be bracketed by calls on BOTH sides. The flow's connector\n  entry is its FIRST call, wherever that call sits;\n- a process-call root is EXACTLY one ``process_call`` and nothing else: the\n  call ends its own path, so no trailing ``stop``/``return_documents`` and no\n  second call may follow it (mixed connector execution stays\n  capability-gated, and keeps its own diagnostic);\n- a CONTROL-ONLY root (#141) is exactly one ``branch``/``decision`` and\n  nothing else;\n- a LISTENER flow (#158) starts with exactly one ``listener`` and continues\n  either with linear steps, a ``target`` and a ``stop``, or with\n  ``connector_call`` steps ending on a call before a ``stop``;\n- ``cache_put`` must be immediately followed by a stream-replacing cache\n  read (never by the target/terminal).",
               "properties": {
                 "kind": {
                   "const": "sequence",
@@ -25934,6 +26137,7 @@
                         "document_cache_retrieve": "#/$defs/DocumentCacheRetrieveNodeV1",
                         "exception": "#/$defs/ExceptionNodeV1",
                         "flow_control": "#/$defs/FlowControlNodeV1",
+                        "listener": "#/$defs/ListenerEntryNodeV1",
                         "map_ref": "#/$defs/MapRefNodeV1",
                         "message": "#/$defs/MessageNodeV1",
                         "notify": "#/$defs/NotifyNodeV1",
@@ -25949,6 +26153,9 @@
                       "propertyName": "kind"
                     },
                     "oneOf": [
+                      {
+                        "$ref": "#/$defs/ListenerEntryNodeV1"
+                      },
                       {
                         "$ref": "#/$defs/SourceEndpointV1"
                       },
@@ -27116,12 +27323,12 @@
         "raw_xml_exposed": false,
         "read_only": true,
         "revision_binding": {
-          "capability_revision": "sha256:56f720c7e4932c598fa0f5f7bf54984db23c5f62aa556674ff8dd87972c7d177",
-          "compiler_revision": "sha256:35180555d72d786236ccf680a2825a864007c433e3dd1ea5ff027a3d14a7c180",
+          "capability_revision": "sha256:e53946f8821fa339f50200c6e9f06f7ede682162f9b622814e9bac05bd3adaa5",
+          "compiler_revision": "sha256:0b9d6d2f29b83d9529f4b34cf2715f222dcfa09cfb3ef2cb078fd088787b1c00",
           "contract_version": "2",
-          "schema_revision": "sha256:2459db273777d9a2a924174acec4525f1168c8b04566d42af912bcd0868d8f50"
+          "schema_revision": "sha256:f39086223ca3eafdf043154a5cec10ae01577a502aa93c93648004653e9b7a94"
         },
-        "schema_hash": "sha256:27d9f81df0ad75bab0c43b65eaaf5a879451d85395c7c5c188e331873981dffb",
+        "schema_hash": "sha256:1a1bfb576d39e52dcd655d227c5188d45be987f4c092d4f19da76f22dca12eb3",
         "schema_name": "AuthoringRequestV1",
         "schema_version": "2",
         "surface": "MCP authoring contract (issue #146 M12.11)"
@@ -27130,14 +27337,14 @@
     },
     {
       "artifact_id": "SS-SCHEMA-TEMPLATES:schema_name=IntegrationSpecV1",
-      "canonical_length": 76523,
+      "canonical_length": 79096,
       "legacy_excerpt": {
         "json_schema.$defs.IntegrationComponentSpec.properties.config.description": "Type-specific configuration payload. For type='process', config.process_kind selects a structured process-flow builder (e.g. 'database_to_api_sync' or 'wrapper_subprocess' — issue #25) and is REQUIRED for any authoring action that emits or rebuilds process XML (create / create_clone / update): such a process without process_kind is rejected at plan time with PROCESS_KIND_REQUIRED (legacy freeform JSON-to-XML process authoring has been removed). A reference-only reuse of an existing process (no XML emitted) may omit it. Use manage_component for an explicit raw process XML escape hatch.",
         "json_schema.properties.processes.description": "Issue #153 M12.15 — canonical process roots authored as ProcessIR. Each entry is one ProcessAuthoringUnitV1: exactly one ProcessComponentEnvelopeV1 plus exactly one ProcessIRV1 root. These are compiled by the canonical chain and materialized by the neutral ProcessComponentMaterializer — they resolve NO legacy process_kind. 'components' remains the home of supporting components and of reference-only existing processes. 'components' and 'processes' share ONE key namespace: a key used by a component and by a process envelope is a duplicate, and all four depends_on directions (component->component, component->process, process->component, process->process) enter one topological order with one cycle check. A TUPLE, per the plan's field type: pydantic coerces list input, so the wire shape is an ordinary JSON array and no caller sends anything different — but unlike this model's legacy List siblings, mutating the collection itself is unrepresentable. Per-element immutability lives on the frozen ProcessAuthoringUnitV1 entries."
       },
       "producer": "meta_tools.get_schema_template_action(...)",
       "selector": "schema_name=IntegrationSpecV1",
-      "sha256": "591e0f63bfc0754eea4a1e7de6527db7983615f98b1f6600291ea269a6a1ad83",
+      "sha256": "5990b758169f169a3f990a36992ae37a4d50b5f257e5d7416aeceb40e0a962bd",
       "surface_class": "SS-SCHEMA-TEMPLATES",
       "value": {
         "_success": true,
@@ -28178,6 +28385,22 @@
               "title": "FlowControlNodeV1",
               "type": "object"
             },
+            "InboundValidationV1": {
+              "additionalProperties": false,
+              "description": "Build-time inbound contract requested for a listener (#158).\n\n``profile_bound`` asks the compiler to prove, from the RESOLVED listener\noperation, that inbound documents arrive as JSON or XML and are bound to a\nrequest profile. Both facts are read from the operation — never restated\nhere — so the request cannot disagree with the operation it describes.\n\nIt is a build-time guarantee only. Nothing is emitted for it and no payload\nis validated at run time.",
+              "properties": {
+                "mode": {
+                  "const": "profile_bound",
+                  "title": "Mode",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "mode"
+              ],
+              "title": "InboundValidationV1",
+              "type": "object"
+            },
             "IntegrationComponentSpec": {
               "description": "Canonical description of a component operation in an integration build.",
               "properties": {
@@ -28269,6 +28492,51 @@
                 "contract_ref"
               ],
               "title": "KeyReferenceIdempotencyV1",
+              "type": "object"
+            },
+            "ListenerEntryNodeV1": {
+              "additionalProperties": false,
+              "description": "The inbound-HTTP entry of a listener process (#158).\n\nReceives each inbound request as a document and starts the flow with it. It\nis the FIRST root step and appears exactly once; it cannot sit inside a\ncontrol body. The process is started by its inbound requests instead of a\nschedule, and the process-level options that follow from that are derived\nfrom this node — they are never authored separately.\n\nAuthors only the listener OPERATION. A listener has no connection: the\nplatform binds the inbound endpoint to the operation itself, so\n``connection_ref`` is refused rather than ignored. The connector family and\naction are never authored either — they are read from the resolved operation,\nwhich must be a Web Services Server Listen operation.\n\nA listener flow continues with linear steps and then either a ``target`` and\na ``stop``, or one or more ``connector_call`` steps ending on a call before a\n``stop``. Error handling, fan-out, flow control, process calls and returning\ndocuments are not available in a listener flow.",
+              "properties": {
+                "inbound_validation": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/InboundValidationV1"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null
+                },
+                "kind": {
+                  "const": "listener",
+                  "title": "Kind",
+                  "type": "string"
+                },
+                "label": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "title": "Label"
+                },
+                "operation_ref": {
+                  "description": "Opaque component reference: exact '$ref:KEY' token or literal component id",
+                  "title": "Operation Ref",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "kind",
+                "operation_ref"
+              ],
+              "title": "ListenerEntryNodeV1",
               "type": "object"
             },
             "MapRefNodeV1": {
@@ -28794,7 +29062,7 @@
             },
             "SequenceNodeV1": {
               "additionalProperties": false,
-              "description": "Ordered root sequence. Local structural rules mirror today's builder:\n\n- a LEGACY connector flow starts with ``source`` and ends in exactly one of\n  ``target``+``stop``, ``target``+``return_documents``, a standalone\n  ``return_documents`` terminal, or a terminal control\n  (``branch``/``decision``/``exception``). ``target`` is part of the terminal\n  SUFFIX, not a movable step: it may appear only immediately before its\n  ``stop`` or ``return_documents``;\n- a GENERALIZED ``connector_call`` flow may carry linear steps before and\n  between its calls, must contain at least one call, and must end ON a call\n  before its terminal — linear work after the last call is unsupported. Each\n  ``map_ref`` must be bracketed by calls on BOTH sides. The flow's connector\n  entry is its FIRST call, wherever that call sits;\n- a process-call root is EXACTLY one ``process_call`` and nothing else: the\n  call ends its own path, so no trailing ``stop``/``return_documents`` and no\n  second call may follow it (mixed connector execution stays\n  capability-gated, and keeps its own diagnostic);\n- a CONTROL-ONLY root (#141) is exactly one ``branch``/``decision`` and\n  nothing else;\n- ``cache_put`` must be immediately followed by a stream-replacing cache\n  read (never by the target/terminal).",
+              "description": "Ordered root sequence. Local structural rules mirror today's builder:\n\n- a LEGACY connector flow starts with ``source`` and ends in exactly one of\n  ``target``+``stop``, ``target``+``return_documents``, a standalone\n  ``return_documents`` terminal, or a terminal control\n  (``branch``/``decision``/``exception``). ``target`` is part of the terminal\n  SUFFIX, not a movable step: it may appear only immediately before its\n  ``stop`` or ``return_documents``;\n- a GENERALIZED ``connector_call`` flow may carry linear steps before and\n  between its calls, must contain at least one call, and must end ON a call\n  before its terminal — linear work after the last call is unsupported. Each\n  ``map_ref`` must be bracketed by calls on BOTH sides. The flow's connector\n  entry is its FIRST call, wherever that call sits;\n- a process-call root is EXACTLY one ``process_call`` and nothing else: the\n  call ends its own path, so no trailing ``stop``/``return_documents`` and no\n  second call may follow it (mixed connector execution stays\n  capability-gated, and keeps its own diagnostic);\n- a CONTROL-ONLY root (#141) is exactly one ``branch``/``decision`` and\n  nothing else;\n- a LISTENER flow (#158) starts with exactly one ``listener`` and continues\n  either with linear steps, a ``target`` and a ``stop``, or with\n  ``connector_call`` steps ending on a call before a ``stop``;\n- ``cache_put`` must be immediately followed by a stream-replacing cache\n  read (never by the target/terminal).",
               "properties": {
                 "kind": {
                   "const": "sequence",
@@ -28816,6 +29084,7 @@
                         "document_cache_retrieve": "#/$defs/DocumentCacheRetrieveNodeV1",
                         "exception": "#/$defs/ExceptionNodeV1",
                         "flow_control": "#/$defs/FlowControlNodeV1",
+                        "listener": "#/$defs/ListenerEntryNodeV1",
                         "map_ref": "#/$defs/MapRefNodeV1",
                         "message": "#/$defs/MessageNodeV1",
                         "notify": "#/$defs/NotifyNodeV1",
@@ -28831,6 +29100,9 @@
                       "propertyName": "kind"
                     },
                     "oneOf": [
+                      {
+                        "$ref": "#/$defs/ListenerEntryNodeV1"
+                      },
                       {
                         "$ref": "#/$defs/SourceEndpointV1"
                       },
@@ -33803,7 +34075,7 @@
     },
     {
       "artifact_id": "SS-SCHEMA-TEMPLATES:schema_name=archetype:http_listener_to_db",
-      "canonical_length": 30548,
+      "canonical_length": 31551,
       "legacy_excerpt": {
         "capability_notes[1]": "Emits a main process with process_kind='sync_pipeline' and an intact listener -> map -> write stage graph; SyncPipelineBuilder lowers the listener stage to the live-verified Listen start shape (connectoraction inside the start shape, no connection component).",
         "examples[0].description": "Receive a JSON webhook on /ws/simple/executeOrderIntake and insert the payload fields into a database table, as a process_kind='sync_pipeline' listener -> map -> write graph.",
@@ -33814,7 +34086,7 @@
       },
       "producer": "meta_tools.get_schema_template_action(...)",
       "selector": "schema_name=archetype:http_listener_to_db",
-      "sha256": "b21d41d870324ce66e872957fa09126dc641354753a0d7681d14d3489f7dcf3f",
+      "sha256": "89fba5aa6120b1ad51fb0a08eef875365775893a2cbc3572098f04a1ef8b194f",
       "surface_class": "SS-SCHEMA-TEMPLATES",
       "value": {
         "_success": true,
@@ -33824,7 +34096,7 @@
           "Emits a main process with process_kind='sync_pipeline' and an intact listener -> map -> write stage graph; SyncPipelineBuilder lowers the listener stage to the live-verified Listen start shape (connectoraction inside the start shape, no connection component).",
           "Listener process options are locked by construction: allowSimultaneous='true', updateRunDates='false' (live-captured invariants; defaults cause HTTP 500 under concurrency).",
           "The generated listener request profile is the transform's source shape; the database write profile (Fields/Conditions) is the map target through the confirmed #32 builders.",
-          "Records the computed listener endpoint (/ws/simple/{operationtype}{SentenceCase(objectName)}, HTTP method from input_type) in validation_rules.listener for orchestrate_deploy's listener_verify stage.",
+          "Records the computed listener endpoint and HTTP method in validation_rules.listener for orchestrate_deploy's listener_verify stage: bare /ws/simple/{operationtype}{SentenceCase(objectName)} (input_type none -> GET, anything else -> POST), or with asc_wrapper the /ws/rest route (the linked operation's type decides it: CREATE / EXECUTE / UPSERT -> POST; DELETE -> DELETE; GET / QUERY -> GET; UPDATE -> PUT).",
           "Opt-in asc_wrapper emits a typed API Service Component (one REST route -> the listener process, depends_on ordering, /ws/rest/... endpoint metadata with publish_mode='api_service') for apiType=advanced runtimes (#133).",
           "Opt-in inbound_validation (mode='profile_bound') asserts at build time that the listener binds a JSON request profile.",
           "Emits executable component specs for build_integration(action='plan'); all XML comes from the existing builders."
@@ -33905,7 +34177,7 @@
             "template_status": "example_only_not_reusable_template"
           },
           {
-            "description": "Same listener -> map -> write graph published on an apiType=advanced runtime: asc_wrapper.enabled=true appends an API Service Component whose all-inherit route serves POST /ws/rest/orderIntake (objectName verbatim). Both the ASC and the listener process must be deployed to the environment (deploy does not cascade) — orchestrate_deploy handles both.",
+            "description": "Same listener -> map -> write graph published on an apiType=advanced runtime: asc_wrapper.enabled=true appends an API Service Component whose all-inherit route serves POST /ws/rest/orderIntake for its EXECUTE operation (objectName verbatim). Both the ASC and the listener process must be deployed to the environment (deploy does not cascade) — orchestrate_deploy handles both.",
             "is_template": false,
             "name": "webhook_to_database_insert_advanced_runtime",
             "parameters": {
@@ -34091,7 +34363,7 @@
                     }
                   ],
                   "default": null,
-                  "description": "Route httpMethod override (GET/POST/PUT/DELETE/PATCH). Default (None) inherits from the listener input_type (JSON input -> POST).",
+                  "description": "Route httpMethod override (GET/POST/PUT/DELETE/PATCH). Default (None) inherits it from the listener's operation: the linked operation's type decides it: CREATE / EXECUTE / UPSERT -> POST; DELETE -> DELETE; GET / QUERY -> GET; UPDATE -> PUT.",
                   "title": "Http Method"
                 },
                 "object_name": {
@@ -34714,7 +34986,7 @@
               "properties": {
                 "input_type": {
                   "default": "singlejson",
-                  "description": "Inbound JSON document shape. This preset is JSON-input only (the transform maps the declared payload profile leaves); both values arrive as HTTP POST.",
+                  "description": "Inbound JSON document shape. This preset is JSON-input only (the transform maps the declared payload profile leaves). A bare /ws/simple route is called by input type (input_type none -> GET, anything else -> POST); behind an API Service route the linked operation's type decides it: CREATE / EXECUTE / UPSERT -> POST; DELETE -> DELETE; GET / QUERY -> GET; UPDATE -> PUT.",
                   "enum": [
                     "singlejson",
                     "multijson"
@@ -34742,7 +35014,7 @@
                 },
                 "operation_type": {
                   "default": "EXECUTE",
-                  "description": "WSS operationType: GET | QUERY | CREATE | UPDATE | UPSERT | DELETE | EXECUTE. NOT an HTTP verb — the HTTP method derives from input_type (JSON input -> POST).",
+                  "description": "WSS operationType: GET | QUERY | CREATE | UPDATE | UPSERT | DELETE | EXECUTE. NOT an HTTP verb. A bare /ws/simple route ignores it for the method; behind an API Service route (asc_wrapper) the linked operation's type decides it: CREATE / EXECUTE / UPSERT -> POST; DELETE -> DELETE; GET / QUERY -> GET; UPDATE -> PUT. This preset's input is always a document, and an API Service route whose method is GET — an explicit http_method GET, or an all-inherit route for a GET / QUERY operation — cannot be called for an operation expecting input; an explicit http_method other than GET is used as given.",
                   "title": "Operation Type",
                   "type": "string"
                 },
@@ -35047,7 +35319,7 @@
     },
     {
       "artifact_id": "SS-SCHEMA-TEMPLATES:schema_name=archetype:http_listener_to_rest",
-      "canonical_length": 26681,
+      "canonical_length": 27658,
       "legacy_excerpt": {
         "capability_notes[1]": "Emits a main process with process_kind='sync_pipeline' and an intact listener -> map -> send stage graph; SyncPipelineBuilder lowers the listener stage to the live-verified Listen start shape (connectoraction inside the start shape, no connection component).",
         "examples[0].description": "Receive a JSON webhook on /ws/simple/executeEventRelay and POST the mapped payload to a downstream REST API, as a process_kind='sync_pipeline' listener -> map -> send graph.",
@@ -35058,7 +35330,7 @@
       },
       "producer": "meta_tools.get_schema_template_action(...)",
       "selector": "schema_name=archetype:http_listener_to_rest",
-      "sha256": "cdd6c9c6fb51cd8afda5c7245a2ef37548939610c1c5235cd9abe1ed9deac3d9",
+      "sha256": "31ae8b8ce1479adddbd480d2dc69e07aa9289959bb683002e02628a88ad02e25",
       "surface_class": "SS-SCHEMA-TEMPLATES",
       "value": {
         "_success": true,
@@ -35068,7 +35340,7 @@
           "Emits a main process with process_kind='sync_pipeline' and an intact listener -> map -> send stage graph; SyncPipelineBuilder lowers the listener stage to the live-verified Listen start shape (connectoraction inside the start shape, no connection component).",
           "Listener process options are locked by construction: allowSimultaneous='true', updateRunDates='false' (live-captured invariants).",
           "The generated listener request profile is the transform's source shape; the target payload profile is generated and bound as the REST send request body.",
-          "Records the computed listener endpoint (/ws/simple/{operationtype}{SentenceCase(objectName)}, HTTP method from input_type) in validation_rules.listener for orchestrate_deploy's listener_verify stage.",
+          "Records the computed listener endpoint and HTTP method in validation_rules.listener for orchestrate_deploy's listener_verify stage: bare /ws/simple/{operationtype}{SentenceCase(objectName)} (input_type none -> GET, anything else -> POST), or with asc_wrapper the /ws/rest route (the linked operation's type decides it: CREATE / EXECUTE / UPSERT -> POST; DELETE -> DELETE; GET / QUERY -> GET; UPDATE -> PUT).",
           "Opt-in asc_wrapper emits a typed API Service Component (one REST route -> the listener process, depends_on ordering, /ws/rest/... endpoint metadata with publish_mode='api_service') for apiType=advanced runtimes (#133).",
           "Opt-in inbound_validation (mode='profile_bound') asserts at build time that the listener binds a JSON request profile.",
           "Emits executable component specs for build_integration(action='plan'); all XML comes from the existing builders."
@@ -35367,7 +35639,7 @@
                     }
                   ],
                   "default": null,
-                  "description": "Route httpMethod override (GET/POST/PUT/DELETE/PATCH). Default (None) inherits from the listener input_type (JSON input -> POST).",
+                  "description": "Route httpMethod override (GET/POST/PUT/DELETE/PATCH). Default (None) inherits it from the listener's operation: the linked operation's type decides it: CREATE / EXECUTE / UPSERT -> POST; DELETE -> DELETE; GET / QUERY -> GET; UPDATE -> PUT.",
                   "title": "Http Method"
                 },
                 "object_name": {
@@ -35581,7 +35853,7 @@
               "properties": {
                 "input_type": {
                   "default": "singlejson",
-                  "description": "Inbound JSON document shape. This preset is JSON-input only (the transform maps the declared payload profile leaves); both values arrive as HTTP POST.",
+                  "description": "Inbound JSON document shape. This preset is JSON-input only (the transform maps the declared payload profile leaves). A bare /ws/simple route is called by input type (input_type none -> GET, anything else -> POST); behind an API Service route the linked operation's type decides it: CREATE / EXECUTE / UPSERT -> POST; DELETE -> DELETE; GET / QUERY -> GET; UPDATE -> PUT.",
                   "enum": [
                     "singlejson",
                     "multijson"
@@ -35609,7 +35881,7 @@
                 },
                 "operation_type": {
                   "default": "EXECUTE",
-                  "description": "WSS operationType: GET | QUERY | CREATE | UPDATE | UPSERT | DELETE | EXECUTE. NOT an HTTP verb — the HTTP method derives from input_type (JSON input -> POST).",
+                  "description": "WSS operationType: GET | QUERY | CREATE | UPDATE | UPSERT | DELETE | EXECUTE. NOT an HTTP verb. A bare /ws/simple route ignores it for the method; behind an API Service route (asc_wrapper) the linked operation's type decides it: CREATE / EXECUTE / UPSERT -> POST; DELETE -> DELETE; GET / QUERY -> GET; UPDATE -> PUT. This preset's input is always a document, and an API Service route whose method is GET — an explicit http_method GET, or an all-inherit route for a GET / QUERY operation — cannot be called for an operation expecting input; an explicit http_method other than GET is used as given.",
                   "title": "Operation Type",
                   "type": "string"
                 },
@@ -37134,13 +37406,13 @@
     },
     {
       "artifact_id": "SS-SCHEMA-TEMPLATES:schema_name=recipe_contributions",
-      "canonical_length": 96454,
+      "canonical_length": 99027,
       "legacy_excerpt": {
         "authoring_note": "These are the ONLY values a registered recipe may return. They carry opaque references and closed enumerations — never configuration, credentials, headers, SQL, raw XML, executable code, JSON pointers, or caller-authored graph edges. Recipe output is validated exactly as direct ProcessIR/topology/component authoring and cannot be exempted."
       },
       "producer": "meta_tools.get_schema_template_action(...)",
       "selector": "schema_name=recipe_contributions",
-      "sha256": "1e85b394db280abf7f5f0a24d22d1fdfc94da0fd8ad1de6ec229cc0e03b09cab",
+      "sha256": "80aad10d17313b1c9bb3b3f90e9edd716cf059cdc23de8a6f166bc955a6f5fe5",
       "surface_class": "SS-SCHEMA-TEMPLATES",
       "value": {
         "_success": true,
@@ -38824,6 +39096,22 @@
               "title": "FlowControlNodeV1",
               "type": "object"
             },
+            "InboundValidationV1": {
+              "additionalProperties": false,
+              "description": "Build-time inbound contract requested for a listener (#158).\n\n``profile_bound`` asks the compiler to prove, from the RESOLVED listener\noperation, that inbound documents arrive as JSON or XML and are bound to a\nrequest profile. Both facts are read from the operation — never restated\nhere — so the request cannot disagree with the operation it describes.\n\nIt is a build-time guarantee only. Nothing is emitted for it and no payload\nis validated at run time.",
+              "properties": {
+                "mode": {
+                  "const": "profile_bound",
+                  "title": "Mode",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "mode"
+              ],
+              "title": "InboundValidationV1",
+              "type": "object"
+            },
             "InsertRootLinearStepV1": {
               "additionalProperties": false,
               "description": "Insert one linear step immediately before the root's terminal unit.\n\n\"Terminal unit\" is the indivisible tail of the root sequence: a terminal\ncontrol (``branch``/``decision``/``exception``/``try_catch``), a standalone\n``return_documents``/``stop``, or the ``target``+``stop`` PAIR — which is\nnever split, because a step between a target and its stop is a step on no\npath the emitter can express.",
@@ -38927,6 +39215,51 @@
                 "contract_ref"
               ],
               "title": "KeyReferenceIdempotencyV1",
+              "type": "object"
+            },
+            "ListenerEntryNodeV1": {
+              "additionalProperties": false,
+              "description": "The inbound-HTTP entry of a listener process (#158).\n\nReceives each inbound request as a document and starts the flow with it. It\nis the FIRST root step and appears exactly once; it cannot sit inside a\ncontrol body. The process is started by its inbound requests instead of a\nschedule, and the process-level options that follow from that are derived\nfrom this node — they are never authored separately.\n\nAuthors only the listener OPERATION. A listener has no connection: the\nplatform binds the inbound endpoint to the operation itself, so\n``connection_ref`` is refused rather than ignored. The connector family and\naction are never authored either — they are read from the resolved operation,\nwhich must be a Web Services Server Listen operation.\n\nA listener flow continues with linear steps and then either a ``target`` and\na ``stop``, or one or more ``connector_call`` steps ending on a call before a\n``stop``. Error handling, fan-out, flow control, process calls and returning\ndocuments are not available in a listener flow.",
+              "properties": {
+                "inbound_validation": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/InboundValidationV1"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null
+                },
+                "kind": {
+                  "const": "listener",
+                  "title": "Kind",
+                  "type": "string"
+                },
+                "label": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "title": "Label"
+                },
+                "operation_ref": {
+                  "description": "Opaque component reference: exact '$ref:KEY' token or literal component id",
+                  "title": "Operation Ref",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "kind",
+                "operation_ref"
+              ],
+              "title": "ListenerEntryNodeV1",
               "type": "object"
             },
             "MapRefNodeV1": {
@@ -39793,7 +40126,7 @@
             },
             "SequenceNodeV1": {
               "additionalProperties": false,
-              "description": "Ordered root sequence. Local structural rules mirror today's builder:\n\n- a LEGACY connector flow starts with ``source`` and ends in exactly one of\n  ``target``+``stop``, ``target``+``return_documents``, a standalone\n  ``return_documents`` terminal, or a terminal control\n  (``branch``/``decision``/``exception``). ``target`` is part of the terminal\n  SUFFIX, not a movable step: it may appear only immediately before its\n  ``stop`` or ``return_documents``;\n- a GENERALIZED ``connector_call`` flow may carry linear steps before and\n  between its calls, must contain at least one call, and must end ON a call\n  before its terminal — linear work after the last call is unsupported. Each\n  ``map_ref`` must be bracketed by calls on BOTH sides. The flow's connector\n  entry is its FIRST call, wherever that call sits;\n- a process-call root is EXACTLY one ``process_call`` and nothing else: the\n  call ends its own path, so no trailing ``stop``/``return_documents`` and no\n  second call may follow it (mixed connector execution stays\n  capability-gated, and keeps its own diagnostic);\n- a CONTROL-ONLY root (#141) is exactly one ``branch``/``decision`` and\n  nothing else;\n- ``cache_put`` must be immediately followed by a stream-replacing cache\n  read (never by the target/terminal).",
+              "description": "Ordered root sequence. Local structural rules mirror today's builder:\n\n- a LEGACY connector flow starts with ``source`` and ends in exactly one of\n  ``target``+``stop``, ``target``+``return_documents``, a standalone\n  ``return_documents`` terminal, or a terminal control\n  (``branch``/``decision``/``exception``). ``target`` is part of the terminal\n  SUFFIX, not a movable step: it may appear only immediately before its\n  ``stop`` or ``return_documents``;\n- a GENERALIZED ``connector_call`` flow may carry linear steps before and\n  between its calls, must contain at least one call, and must end ON a call\n  before its terminal — linear work after the last call is unsupported. Each\n  ``map_ref`` must be bracketed by calls on BOTH sides. The flow's connector\n  entry is its FIRST call, wherever that call sits;\n- a process-call root is EXACTLY one ``process_call`` and nothing else: the\n  call ends its own path, so no trailing ``stop``/``return_documents`` and no\n  second call may follow it (mixed connector execution stays\n  capability-gated, and keeps its own diagnostic);\n- a CONTROL-ONLY root (#141) is exactly one ``branch``/``decision`` and\n  nothing else;\n- a LISTENER flow (#158) starts with exactly one ``listener`` and continues\n  either with linear steps, a ``target`` and a ``stop``, or with\n  ``connector_call`` steps ending on a call before a ``stop``;\n- ``cache_put`` must be immediately followed by a stream-replacing cache\n  read (never by the target/terminal).",
               "properties": {
                 "kind": {
                   "const": "sequence",
@@ -39815,6 +40148,7 @@
                         "document_cache_retrieve": "#/$defs/DocumentCacheRetrieveNodeV1",
                         "exception": "#/$defs/ExceptionNodeV1",
                         "flow_control": "#/$defs/FlowControlNodeV1",
+                        "listener": "#/$defs/ListenerEntryNodeV1",
                         "map_ref": "#/$defs/MapRefNodeV1",
                         "message": "#/$defs/MessageNodeV1",
                         "notify": "#/$defs/NotifyNodeV1",
@@ -39830,6 +40164,9 @@
                       "propertyName": "kind"
                     },
                     "oneOf": [
+                      {
+                        "$ref": "#/$defs/ListenerEntryNodeV1"
+                      },
                       {
                         "$ref": "#/$defs/SourceEndpointV1"
                       },
@@ -41027,7 +41364,7 @@
       "legacy_excerpt": {},
       "producer": "meta_tools.get_schema_template_action(...) [all axes]",
       "selector": "walked_surface_digest",
-      "sha256": "4b2889c5ec1e3a49db95bf9d8ec99761f39193f4a47b1bf59d2739963324ba79",
+      "sha256": "cc7a3960a6577200ef143315635b38d250fa795009360ddc0bbcb81d2d933224",
       "surface_class": "SS-SCHEMA-TEMPLATES",
       "value": {
         "resource_type=component": "55ba0a46f10742a5bfa269767c7ba040532f5d7900c7e56953f8e57469ceecf3",
@@ -41157,7 +41494,7 @@
         "resource_type=component|operation=create|component_type=tradingpartner": "59949c98576372ef96e08b9dabdbab9bab440054271caee6e1ea8032f7da5aad",
         "resource_type=component|operation=create|component_type=transform.function": "59949c98576372ef96e08b9dabdbab9bab440054271caee6e1ea8032f7da5aad",
         "resource_type=component|operation=create|component_type=transform.map": "cb192b0ed5b085696f24375d529b5b1b4b4d0a197d70fb5a1f1c84a7081b011b",
-        "resource_type=component|operation=create|component_type=webservice": "efbea60447e648c906145b4f0b783c1be8fc54b470d5e3a5eea77f8b178c0eab",
+        "resource_type=component|operation=create|component_type=webservice": "ea772849fd025dda71aa6197bc3f124481554c82d81f523560843604d26ce372",
         "resource_type=component|operation=create|component_type=webservice.external": "59949c98576372ef96e08b9dabdbab9bab440054271caee6e1ea8032f7da5aad",
         "resource_type=component|operation=create|component_type=xslt": "59949c98576372ef96e08b9dabdbab9bab440054271caee6e1ea8032f7da5aad",
         "resource_type=component|operation=safe_edit": "ffabfc9f56ceacb2cc12244f245870a0af06a86e1b6468f0c31081cfda4e5a65",
@@ -41259,7 +41596,7 @@
         "resource_type=process": "c849305819bed33d61293941505f57bc47d0d02eb5b47397e07b0179c68396d8",
         "resource_type=process|operation=create": "ab664345fefff17bb41aa70aa8b7d41da6c4ff7d8f9736558613dbdef062ef2d",
         "resource_type=process|operation=create|protocol=database_to_api_sync": "9358fe7d92e5227f5b25f6a268e2725372dacd0658a189a44f6c3cf2693849ff",
-        "resource_type=process|operation=create|protocol=sync_pipeline": "86b9819895dcf564b3902f634efa626b4ad85c56708d51f4578a6e1a8a5cb2a6",
+        "resource_type=process|operation=create|protocol=sync_pipeline": "d52dd09419ca6afd3400660821457a7e44db58b49f68bc2799ce282a6bdd1150",
         "resource_type=process|operation=create|protocol=wrapper_subprocess": "825ee637e8ec56415a81f200a0cf4f5b197dcc2fdb11f8b97d55b5da7c178c80",
         "resource_type=process|operation=list": "4d99e71f0ea37c6406b81d03ec9ccc3e215c5844c41954247fd2ffc12c8f1131",
         "resource_type=profile_inference": "ec75342eb2cd848126f5bce5da94dbe6ef24cc4c709e12b566237caa109693b2",
@@ -41309,26 +41646,26 @@
         "resource_type=trading_partner|operation=update|standard=rosettanet": "83537ac74be6088a4607997d0e200d76ec7c6367c900aa9923e823d610dd27e1",
         "resource_type=trading_partner|operation=update|standard=tradacoms": "83537ac74be6088a4607997d0e200d76ec7c6367c900aa9923e823d610dd27e1",
         "resource_type=trading_partner|operation=update|standard=x12": "83537ac74be6088a4607997d0e200d76ec7c6367c900aa9923e823d610dd27e1",
-        "schema_name=AuthoringBuildProvenanceV1": "63ce9cb68deb4ef1ca1ec35cb0b6ba0fdefa2a1356d4f239b2603225929ffee3",
-        "schema_name=AuthoringCompileResultV1": "2ade69c2c6988cdb15bf9531371d640fe829a4e2f813b2a3cbbff2473abc7d55",
-        "schema_name=AuthoringPlanResultV1": "8d567cb8f8e417c903eabd695d87f1269b055a977a75f044f050f7f9afa44cb2",
-        "schema_name=AuthoringRequestV1": "542fd8a99a15e2d7e3561863ef6607f37e12b3f33c0b775751d96136292abe8a",
-        "schema_name=AuthoringRevisionBindingV1": "2f7485e58496cf0fd8629dc6b73dc6eeb576691b3c897e9b03861e9187b1c5b9",
-        "schema_name=DerivedFlowRowV1": "d776948d4451a8bd05bf44496b7ef0c5140c4a3384f9fe91fb06e397ed8b7f29",
-        "schema_name=IntegrationSpecV1": "591e0f63bfc0754eea4a1e7de6527db7983615f98b1f6600291ea269a6a1ad83",
-        "schema_name=ProcessIRV1": "6430bbd5a688ce51ddae66f304dd923824785c7c8a7df87aa82c6b1bdf7d47eb",
-        "schema_name=RecordedIntentV1": "48b1c5451b04c8d462fd3affa7aa57e92d9364f652a8be1f6fae1bc1000b4d1c",
-        "schema_name=SystemTopologySpecV1": "4e4771b574a29698ad9fc77876f8346534277c345e3b76ff114e1fd2f59cfec3",
-        "schema_name=WatermarkDeclarationV1": "df5085b703c9dc6866b100f0b083bf1658f60887ee799d644d045f9776e00e40",
+        "schema_name=AuthoringBuildProvenanceV1": "7217ab92e0d54a44544a9c3e10f593bbd12f1ef4025cdb26b2f3c0eca5c85c19",
+        "schema_name=AuthoringCompileResultV1": "33ccd2d4445f04128289ed131bc04e055b2dd7e9a2a8177b666e42b49aa78b6c",
+        "schema_name=AuthoringPlanResultV1": "2a61e704b12505bf01ff5f9697bc513b23fa89ebc6da172a06060988b6ec6a1c",
+        "schema_name=AuthoringRequestV1": "81c5373572d44fdcf3e8d44633ad4fb8b02ea00e00fd0e7f1366af3b719d2b6a",
+        "schema_name=AuthoringRevisionBindingV1": "a75e8fe4a08ceb9e693029bac8273e2d95a6740444ac54e1c250d74801a42852",
+        "schema_name=DerivedFlowRowV1": "13dcb0adb24e1b8a9c6f0e1441464e445a38baef0fee48fd0923b9c6e4fa3d2d",
+        "schema_name=IntegrationSpecV1": "5990b758169f169a3f990a36992ae37a4d50b5f257e5d7416aeceb40e0a962bd",
+        "schema_name=ProcessIRV1": "767fca338227f252352720e39794bd3cdc1d64d9974cc816a44b1b1f19939125",
+        "schema_name=RecordedIntentV1": "9140325983bb38ae7b78aa36628b052d839bf89ed7c088b2012277b696b924e9",
+        "schema_name=SystemTopologySpecV1": "d391640768467a75768989c17ca857c9a744c872b55aeaa088d2596393c33cd4",
+        "schema_name=WatermarkDeclarationV1": "32692f243d0f65c2097b5faeaeecdde40518661f5f368fa923e1aea76dac479e",
         "schema_name=account_governance": "d0773b315a5b59bad4bbb0021a2468e5cb4d3a85c4dbac216a887f0194a2ecdc",
         "schema_name=api_service": "c7be12ec5b2c503bd54088bd2c7b00adfa435e3f3fc9610bae0b91117657911b",
         "schema_name=archetype:api_to_api_sync": "7e4653429bdfc56d53ecb1c07fb7f477e11c2180c3afdfad94566cab1ca716e7",
         "schema_name=archetype:api_to_database_sync": "9d2354f73495dec576192d718e1d7120b4d1db0d80ba66910b392645d2ca2f73",
         "schema_name=archetype:database_to_api_sync": "f93ee14391db774d687d5b0f82417d5e23afeb5fd3c328b36ab9d979e3279857",
-        "schema_name=archetype:http_listener_to_db": "b21d41d870324ce66e872957fa09126dc641354753a0d7681d14d3489f7dcf3f",
-        "schema_name=archetype:http_listener_to_rest": "cdd6c9c6fb51cd8afda5c7245a2ef37548939610c1c5235cd9abe1ed9deac3d9",
+        "schema_name=archetype:http_listener_to_db": "89fba5aa6120b1ad51fb0a08eef875365775893a2cbc3572098f04a1ef8b194f",
+        "schema_name=archetype:http_listener_to_rest": "31ae8b8ce1479adddbd480d2dc69e07aa9289959bb683002e02628a88ad02e25",
         "schema_name=archetype:stub_minimal_integration": "28f1d13a8568cea1df47bb1b361708d17e490204c7425787999e80df63f4b0fc",
-        "schema_name=authoring_workflow": "87eca4eca74ec60884465daf48bf13e2dee97a11441a6c76dd874a94d8975fff",
+        "schema_name=authoring_workflow": "67fb9e9c10774611cdf6476380c3923c019b196defa5d878de5cdbaa5c6d975a",
         "schema_name=cache_property_authoring": "484017df545d247be99c71ef4be4edf8d47013e565a6e05119c357699229ed6f",
         "schema_name=compose_archetypes": "ec23808a15913ec8ce1d6e510ff941952be25b006a42128216b891d05f1a9d7f",
         "schema_name=design_doctrine": "458e7385ec9ad21c5d8f1d319a1db3252c9c1e017640967bfdc9714c38bb38b5",
@@ -41391,21 +41728,21 @@
         "schema_name=governance_pattern:support_folder_isolation_and_privacy": "4f0b206e14ad2f2272b03dfc8c9575dbcc3d454d28894a42602a9cca546de2ed",
         "schema_name=governance_pattern:tools_utilities_folder_non_integration": "50ddcf761e63e68f305271b4f079d8a7effd9b750726a8be784c2c52993c2cbc",
         "schema_name=governance_pattern:tracked_field_naming_generic_and_unique": "42ae3917d1ddb0f23a9dd0e9083a9106a3ed6c18bc06e740a1c07014830204d1",
-        "schema_name=process_ir_authoring": "33cfeaa0e2d4a32a5076113c66a0565c5e172bd3445256edb8e9f1e1ec2ac910",
+        "schema_name=process_ir_authoring": "aa85e5a61e8ec4cf7bc243710c9e16dd1e959392a94d28587825ade0951aed0f",
         "schema_name=process_property": "43c9cf66e73fb39b6f1625d00a9a01f876005bfa94b34fb99cb14e0deebe699b",
-        "schema_name=recipe:boomi.adapter.api_to_api_sync@1.0.0": "ae5488aa58b44d3ce39941bfae1baf3962b4e0144207a72a5989c3d7db771f4d",
-        "schema_name=recipe:boomi.adapter.api_to_database_sync@1.0.0": "1f46736c4d34b73b0dcb02dddc5f7e732fb33a72f35710647789de4e7cad9028",
-        "schema_name=recipe:boomi.adapter.compose_archetypes@1.0.0": "7cf4162fc109c1e840d8472b3bf057d5e743ba0254e4e064fa951e4979700a75",
-        "schema_name=recipe:boomi.advisory.integration_design@1.0.0": "bfc6a8323ea6f9ce5a19554795c4175a8e0aaf13d3c306cdbe53bfa85e735237",
-        "schema_name=recipe:boomi.archetype.api_to_api_sync@0.1.0": "fea08626fa07fc0ba4b1098883893d0f49cff0ffb9f70cf7e86487277e0ecfcf",
-        "schema_name=recipe:boomi.archetype.api_to_database_sync@0.1.0": "d8c114aec4b7a550a5eb792badab43be0d38cbd84205d21249e0cc81bfa086a9",
-        "schema_name=recipe:boomi.compose.db_rest_fanout@1.0.0": "d72477e1d75c75f207872fdf7fd249fabaa007b18d6c76e81a764c2c420ed9fa",
-        "schema_name=recipe:boomi.constraint.inbound_validate@1.0.0": "98fca353261fee911ad2f127fe3fc9f5870da3baab2ffbaf8d566a1e45307f5e",
-        "schema_name=recipe_contributions": "1e85b394db280abf7f5f0a24d22d1fdfc94da0fd8ad1de6ec229cc0e03b09cab",
-        "schema_name=recipe_registry": "d8af1e79a4dc16e49acc61c46e6ac1bda83c043279eff962703fffd8fdcb1813",
+        "schema_name=recipe:boomi.adapter.api_to_api_sync@1.0.0": "6395c7fe32d09799ce0e397b817e5582f6512bbef5fd4b6ee7be4f6372710db0",
+        "schema_name=recipe:boomi.adapter.api_to_database_sync@1.0.0": "321a81d5c2a8b15b17031fb1425691ea1a65376e279404bac360441f4385956c",
+        "schema_name=recipe:boomi.adapter.compose_archetypes@1.0.0": "cae4afe5ab7c3fe8350140609e86bbb59f56294e2da311d670eaec7f2b49289d",
+        "schema_name=recipe:boomi.advisory.integration_design@1.0.0": "6dd7bfb7efef7f362f8b8932e6357b27939e94097980c772e2a31364c593d6e6",
+        "schema_name=recipe:boomi.archetype.api_to_api_sync@0.1.0": "5fc6fc94e6ad768fe0be624f3c43a0ae117ffeedcdb65282608470c2c0ba8017",
+        "schema_name=recipe:boomi.archetype.api_to_database_sync@0.1.0": "f0f3fb143227647c09dc4eeee5b17521b555590986030de0de8886d97f665a84",
+        "schema_name=recipe:boomi.compose.db_rest_fanout@1.0.0": "d9ee6924fc9a72103e5b74f809491355f0060002744a6089daa3a3424f994cb9",
+        "schema_name=recipe:boomi.constraint.inbound_validate@1.0.0": "d477644d904e51f7123b0f129fc0ba43c611a735675115c7d04c3b4eba1768ec",
+        "schema_name=recipe_contributions": "80aad10d17313b1c9bb3b3f90e9edd716cf059cdc23de8a6f166bc955a6f5fe5",
+        "schema_name=recipe_registry": "a99951316b251d8dbf162ee9c8ef549170b64bd11654e72c0ff85467c3187fd9",
         "schema_name=script_dataprocess": "86d6cac0e593188c5c6a253e684097dadda0a6c3c331a1d71672c827133af143",
         "schema_name=script_mapping": "165e78ea08d24f54221f6da5973cbe20c7747d1a37f9fde496a42876b594e029",
-        "schema_name=validation_report": "52f80fa570f382c54db66b333dd74b075a6d63b3b4d42e5b0b5d051af4c57144",
+        "schema_name=validation_report": "f1a5a6428b0fe910556dfb80543043053d2518700aac0b3c725e24d701b98bb7",
         "schema_name=workflow:build_and_verify_http_listener": "bf6ab2e405f375735cd6aaed29da0dbc6b717909dc1c184ba8dbe341f2b95800",
         "schema_name=workflow:build_integration_from_description": "72a20b29bbaf7a0ce39e06fb8514e13831968332bc5d0373d7f100bd7a943be0",
         "schema_name=workflow:compose_multi_target_integration": "6b04f2d192bcaf817a983a1aefda2f2f7b9674ce1c996737137c7ce8d6b932e0",

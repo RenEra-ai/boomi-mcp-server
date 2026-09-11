@@ -2388,9 +2388,15 @@ def test_the_verb_scope_names_only_the_family_whose_verb_location_is_measured():
         _FAMILIES_WITH_A_KNOWN_VERB_LOCATION as measured,
     )
 
-    assert measured == {"rest", "soap_client", "database"}, measured
+    # #158 measured a fourth: a Web Services Server operation carries its only
+    # action (Listen) AS the element name, which the listener builder emits.
+    assert "<WebServicesServerListenAction" in source, (
+        "the WSS listener verb is no longer the element name; re-measure the scope"
+    )
+    assert measured == {"rest", "soap_client", "database", "wss"}, measured
     assert "GenericOperationConfig" in text, "the REST/SOAP element is not named"
     assert "DatabaseGetAction" in text, "the database action element is not named"
+    assert "WebServicesServerListenAction" in text, "the WSS action element is not named"
 
 
 def test_the_unsettled_reasons_have_exactly_one_authority():
@@ -3094,7 +3100,27 @@ def test_every_family_the_resolver_can_return_has_an_endpoint_field():
         "derive its universe from the source: " + repr(computed)
     )
     missing = returned - set(cb._ENDPOINT_FIELDS_BY_FAMILY)
+    # #158: a family with no endpoint field is legal only when the projection
+    # itself says it has no route — the inbound WSS listener is served BY the
+    # runtime, never called. Decided by asking the projection, not by a list: a
+    # declared base_url must still leave such a family's route unavailable, or
+    # it has a route this table cannot pin.
+    unrouted = set()
+    for family in missing:
+        assert cb.connector_family_of(family) == family, family
+        identity = cb.normalized_identity_projection(
+            {"connector_type": family, "base_url": "http://h:8081/x"}
+        )
+        if identity.family == family and identity.route_state == "unavailable":
+            unrouted.add(family)
+    missing -= unrouted
     assert not missing, f"families with no endpoint field: {sorted(missing)}"
+    # CONTROL: the probe discriminates — a routed family given the same config
+    # does NOT read as route-unavailable.
+    routed = cb.normalized_identity_projection(
+        {"connector_type": "rest", "base_url": "http://h:8081/x"}
+    )
+    assert routed.route_state != "unavailable", routed
 
 
 @pytest.mark.parametrize(

@@ -290,15 +290,27 @@ def test_unresolved_inherit_method_not_collision_flagged():
         assert "effective_method_unresolved" in route["flags"]
         assert "effective_path_unresolved" not in route["flags"]  # path IS explicit
         assert "duplicate_effective_path" not in route["flags"]
-    # An explicit inputType pins the method (none -> GET) without the op:
-    # no method-unresolved flag, and the duplicate check applies again.
+    # #158: an explicit inputType does NOT pin the method — an inherited ASC
+    # method comes from the linked operation's TYPE (measured live, evidence
+    # cap158-r3-wss-method-matrix), which is unreadable here. Still unresolved,
+    # still never collision-compared.
     xml2 = _asc_xml(
         _route(_PROCESS_ID, objectName="intake", inputType="none")
         + _route(_PROCESS_ID, objectName="intake", inputType="none")
     )
     result2 = _analyze(xml2, reads)
-    assert result2["routes"][0]["effective_method"] == "GET"
     for route in result2["routes"]:
+        assert "effective_method_unresolved" in route["flags"]
+        assert "duplicate_effective_path" not in route["flags"]
+    # Only an explicit httpMethod pins it without the op: the duplicate check
+    # applies again.
+    xml3 = _asc_xml(
+        _route(_PROCESS_ID, objectName="intake", httpMethod="PUT")
+        + _route(_PROCESS_ID, objectName="intake", httpMethod="PUT")
+    )
+    result3 = _analyze(xml3, reads)
+    assert result3["routes"][0]["effective_method"] == "PUT"
+    for route in result3["routes"]:
         assert "effective_method_unresolved" not in route["flags"]
         assert "duplicate_effective_path" in route["flags"]
 

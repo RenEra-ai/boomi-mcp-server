@@ -48,11 +48,12 @@ TWO independent corpora live here; they share no machinery on purpose.
    a uniform drift moves both sides of a differential together and the
    differential alone would never see it.
 
-The WSS listener chains are in NEITHER corpus: their fused ``start_listen`` entry
-has no registry key at all, so they stay on the legacy renderer and keep their own
-goldens. They ARE generated as candidates by the coverage test, which asserts the
-gate routes them to the legacy arm — so when #140 lands ``start_listen`` and they
-become canonical, that test fails until this corpus grows to cover them.
+The six WSS listener chains JOINED the adapter-dialect corpus in #158, which made
+the fused ``start_listen`` entry a canonical capability and flipped both routing
+gates. The coverage test still generates every chain as a candidate; the legacy arm
+it once asserted is now asserted EMPTY, so a chain that fell back to the legacy
+renderer would fail it. All six listener cases carry an anchor captured through the
+legacy renderer before either gate changed.
 """
 
 from __future__ import annotations
@@ -334,10 +335,6 @@ _SYNC_STAGE_IDS = {
 _SYNC_ENRICHED_MAX_LENGTH = 4
 
 _SYNC_CROSSCHECK_MAX_LENGTH = 5
-
-#: Golden fixtures under this prefix belong to the LEGACY listener arm, not to
-#: this canonical corpus. #139F commits them before it touches the routing gate.
-_SYNC_LEGACY_GOLDEN_PREFIX = "sync_pipeline_listener_"
 
 _ANCHORED_SYNC_CASES = sorted(n for n, c in SYNC_CASES.items() if c["anchor"])
 
@@ -1042,18 +1039,19 @@ def test_sync_corpus_covers_every_canonical_chain():
         )
     fingerprints = [_sync_fingerprint(raw) for raw in canonical.values()]
 
-    # The legacy arm is exactly the WSS listener chains (#140 owns the fused
-    # start_listen entry). When that lands, these move into `canonical` and the
-    # coverage assertion below fails until the corpus grows -- which is the whole
-    # reason listener candidates are probed rather than skipped by name.
-    assert {_sync_fingerprint(raw) for raw in legacy_arm.values()} == {
+    # The legacy arm is EMPTY since #158: the six WSS listener chains it held
+    # until then are canonical now, so the corpus below covers them too. Asserted
+    # empty rather than ignored, so a chain that fell back to the legacy renderer
+    # fails here instead of silently leaving the corpus.
+    assert legacy_arm == {}, sorted(_sync_fingerprint(raw) for raw in legacy_arm.values())
+    assert {
         "wss_listen_rest_send",
         "wss_listen_map_rest_send",
         "wss_listen_soap_send",
         "wss_listen_map_soap_send",
         "wss_listen_db_write",
         "wss_listen_map_db_write",
-    }
+    } <= set(fingerprints)
     # The DB-to-DB chain is the one endpoint-shaped pairing the builder refuses on
     # purpose (no archetype). It is not in the grammar, so it is never probed above
     # -- assert the refusal directly, so "excluded by design" stays a tested claim
@@ -1076,7 +1074,8 @@ def test_sync_corpus_covers_every_canonical_chain():
     # against UNIFORM drift. If the corpus and the derivation grew together,
     # `corpus == set(canonical)` below would still hold and only this literal would
     # fire -- the same reason the golden anchors sit beside the differential oracle.
-    assert len(canonical) == 16
+    # 16 before #158; the six listener chains joined when the gates flipped.
+    assert len(canonical) == 22
 
     corpus = {_sync_fingerprint(c["config"]) for c in SYNC_CASES.values()}
     assert corpus == set(fingerprints)
@@ -1104,56 +1103,58 @@ def test_sync_corpus_has_one_case_per_fingerprint_plus_the_verb_duplicate():
 
 
 def test_sync_corpus_anchors_every_committed_sync_golden():
-    """Fail-closed on the ADDITION direction: a new CANONICAL ``sync_pipeline_*``
-    golden cannot arrive without a parity case claiming it, and a case cannot claim
-    an anchor that does not exist.
+    """Fail-closed on the ADDITION direction: a new ``sync_pipeline_*`` golden
+    cannot arrive without a parity case claiming it, and a case cannot claim an
+    anchor that does not exist.
 
-    The inventory is split by prefix rather than globbing everything, because the
-    two arms are governed differently. #139F must commit legacy-rendered
-    ``sync_pipeline_listener_*.xml`` fixtures BEFORE it touches the routing gate --
-    that is the plan's own pre-cutover discipline, and how #139C avoided a
-    self-confirming anchor. A single glob would deadlock that step: the new fixture
-    fails this equality, and adding it as a corpus case instead fails
-    ``test_sync_case_routes_to_the_canonical_chain``, since a listener chain is by
-    definition not canonical yet. Raised by the Codex impl-vs-plan review.
-
-    The listener arm is asserted EMPTY rather than ignored, so those fixtures
-    landing is a deliberate edit here (moving the name into the legacy inventory)
-    rather than a silently widened glob.
+    Until #158 the inventory was split by prefix: the ``sync_pipeline_listener_*``
+    fixtures belonged to a LEGACY listener arm, captured through the legacy renderer
+    before any gate flip, and asserted separately. #158 captured the last two of
+    them (the SOAP targets) the same way, then flipped both routing gates in the
+    change that moved all six into this corpus — so there is no second arm left and
+    the whole committed glob must be claimed.
     """
     committed = {p.name for p in _GOLDEN_XML.glob("sync_pipeline_*.xml")}
-    legacy = {n for n in committed if n.startswith(_SYNC_LEGACY_GOLDEN_PREFIX)}
-    canonical = committed - legacy
-
     claimed = {c["anchor"] for c in SYNC_CASES.values() if c["anchor"]}
-    assert claimed == canonical
+    assert claimed == committed
     for name in claimed:
         assert (_GOLDEN_XML / name).is_file()
-
-    # The legacy arm's OWN inventory, pinned by name. These four were captured
-    # through the legacy renderer while it still existed -- the pre-cutover
-    # discipline -- because it is the only INDEPENDENT source of those bytes: once
-    # the ordinary dialect and its renderer are deleted, any golden written for a
-    # listener chain would be confirming the canonical arm against itself. They stay
-    # out of the canonical corpus (a listener chain is not canonical yet) and are
-    # asserted by test_sync_pipeline_adapter_cutover.py instead.
-    assert legacy == {
+    # The six listener anchors are among them, by name — the two SOAP-target
+    # captures included, whose bytes are pinned to their pre-flip evidence
+    # elsewhere (tests/test_issue_158_listener_compile.py).
+    assert {
         "sync_pipeline_listener_send.xml",
         "sync_pipeline_listener_map_send.xml",
         "sync_pipeline_listener_write.xml",
         "sync_pipeline_listener_map_write.xml",
-    }
+        "sync_pipeline_listener_soap_send.xml",
+        "sync_pipeline_listener_map_soap_send.xml",
+    } <= claimed
 
 
 @pytest.mark.parametrize("case_name", sorted(SYNC_CASES))
-def test_sync_case_routes_to_the_canonical_chain(case_name):
+def test_sync_case_routes_to_the_canonical_chain(case_name, monkeypatch):
     """Pins that every case in the corpus really is canonical (the MEMBER
     direction; ``test_sync_corpus_covers_every_canonical_chain`` owns the superset
-    direction). A listener case added here would take the legacy arm, and every
-    parity assertion below would then be comparing the legacy renderer with
-    itself."""
-    _case, _raw, lowered = _sync_case(case_name)
+    direction).
+
+    #158 made the routing predicate admit every lowered core, so asking it proves
+    nothing any more. The observable fact is asked instead: the case BUILDS with
+    the legacy renderer armed to fail, so the bytes can only have come from the
+    canonical chain — otherwise every parity assertion below would be comparing the
+    legacy renderer with itself.
+    """
+    case, raw, lowered = _sync_case(case_name)
     assert _sync_pipeline_is_canonical(lowered) is True
+
+    def _legacy_reached(*_args, **_kwargs):
+        raise AssertionError("the legacy renderer was reached")
+
+    monkeypatch.setattr(ProcessFlowBuilder, "build", _legacy_reached)
+    xml = SyncPipelineBuilder.build(
+        copy.deepcopy(raw), name=case["name"], folder_name=case["folder_name"]
+    )
+    assert "<shapes>" in xml
 
 
 @pytest.mark.parametrize("case_name", sorted(SYNC_CASES))

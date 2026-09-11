@@ -1258,30 +1258,6 @@ def _connector_member():
     raise LookupError("the CFG semantic union declares no `connector` member")
 
 
-def _listener_role(classify, families) -> str:
-    """The `connector` role the derivation ACTUALLY classifies as a listener.
-
-    Asked of the rule, not read off the schema (L2 round 45). The previous
-    version took `ConnectorSemanticV1`'s first declared `Literal`, which is
-    `source` today and correct today — but declaration order carries no meaning,
-    and reordering that vocabulary would have returned `target` while the rule
-    still tested `source`. The three discriminant rows below would then all have
-    stopped at the role check, so removing the operation or family guard would
-    have left the served revision unchanged: three inert rows that still look
-    like coverage.
-
-    Falls back to the first declared option only if no role yields `listener` at
-    all — a state in which the discriminants cannot discriminate anyway, and one
-    the accompanying witness fails on.
-    """
-    options = _literal_options(_connector_member(), "role")
-    if families:
-        for role in options:
-            if classify(role) == _import("execution_profile").LISTENER:
-                return role
-    return options[0] if options else "source"
-
-
 def _literal_options(model, field_name: str) -> Tuple[str, ...]:
     """The `Literal` values a model's field admits, or `()` if it has no such field.
 
@@ -1300,23 +1276,27 @@ def _literal_options(model, field_name: str) -> Tuple[str, ...]:
 
 
 def _execution_profile_behaviour_oracle() -> Dict[str, Any]:
-    """The execution-profile derivation, projected as BEHAVIOUR (§6 AR4-01).
+    """The execution-profile derivation, projected as BEHAVIOUR (§6 AR4-01, #158).
 
-    The first attempt projected the derivation's vocabulary — the two profile
-    labels and the listener family set. That moves when the family table moves,
-    which is what its witness measured, but it is not what a caller binds to: the
-    §6 gate replaced `derive_process_execution_profile` with an always-scheduled
-    implementation and the served revision did not change by a byte. A caller
-    holding that revision would have kept validating across a change in how every
-    process is classified.
+    The projection CALLS the rule over a derived case set rather than describing
+    it: a vocabulary projection was measured blind to an always-scheduled
+    implementation, which is the property a caller binds to.
 
-    So the projection CALLS the rule instead of describing it. The case set is
-    derived from the same authority the rule reads — one case per listener
-    connector family, so adding or retiring a family still moves the revision —
-    plus the fixed discriminants that separate this rule from a constant: no
-    entry node, a non-connector entry, a connector acting as a target, a source
-    whose family is not a listener family, an operation reference that resolves
-    to no symbol, and a family that needs case-folding to match.
+    #158 rebuilt the case set on the compiler's entry policy. Classification is
+    now by the ENTRY NODE's own kind — a process is a listener exactly when it
+    enters on the authored listener node — and no longer by the connector family
+    of an operation symbol. The case set therefore has two jobs:
+
+    * probe EVERY entry kind the CFG schema admits, read from the schema, so
+      the one kind that classifies as a listener is covered and any other kind
+      that began to would move the revision;
+    * carry DECOY symbol tables — every connector spelling the compiler treats
+      as a listener family, at varied positions and table sizes, on every kind —
+      so an implementation that lets the symbol table drive the answer (the
+      pre-#158 family rule, a wrong-row lookup, "any listener family anywhere")
+      flips a scheduled row and moves the revision. Decoys are inert under the
+      real rule: every row's value, and the served revision, is what the entry
+      alone decides.
 
     The stand-ins are plain attribute holders rather than the compiler's models
     on purpose: the rule reads its inputs by attribute, the projection must be
@@ -1328,69 +1308,48 @@ def _execution_profile_behaviour_oracle() -> Dict[str, Any]:
 
     module = _import("execution_profile")
     derive = module.derive_process_execution_profile
-    families = sorted(module.LISTENER_CONNECTOR_TYPES)
-
     contracts = _import("contracts")
+    #: The decoy families: every spelling the compiler treats as a listener
+    #: family anywhere. None of them may make a non-listener entry a listener.
+    families = sorted(contracts.LISTENER_CONNECTOR_TYPES)
 
     def _classify(node, symbols=(), entry_id="entry"):
         cfg = SimpleNamespace(
             entry_node_id=entry_id, nodes=() if node is None else (node,)
         )
-        # A REAL `SymbolTableV1`, not a stand-in (§6 evaluation 6). A
-        # `SimpleNamespace` carrying only `.symbols` cannot answer the table's
-        # own documented `build_index()` API, so an implementation that used it
-        # — behaviourally identical on every real table, and the API the model
-        # exists to offer — rotated the served revision for no behaviour change.
-        # The stand-in also let the probes hold orders the real model forbids.
-        # Constructing the real thing costs a few field values and removes both.
+        # A REAL `SymbolTableV1`, not a stand-in (§6 evaluation 6): a stand-in
+        # cannot answer the table's documented `build_index()` API, so a faithful
+        # implementation that used it would rotate the served revision for no
+        # behaviour change, and the stand-in could hold orders the model forbids.
         return derive(cfg, contracts.SymbolTableV1(symbols=tuple(symbols)))
 
-    def _connector(role, operation_ref):
-        return SimpleNamespace(
-            node_id="entry",
-            semantic=SimpleNamespace(
-                semantic_kind="connector", role=role, operation_ref=operation_ref
-            ),
-        )
+    def _node(semantic, node_id="entry"):
+        return SimpleNamespace(node_id=node_id, semantic=SimpleNamespace(**semantic))
 
-    def _symbol(ref, connector_type):
+    def _symbol(ref, connector_type, action_type=None):
         return contracts.ComponentSymbolV1(
             ref=ref,
             component_id="id-%s" % ref.rsplit(":", 1)[-1],
             component_type="connector-action",
             connector_type=connector_type,
+            action_type=action_type,
         )
 
-    # EVERY entry-node kind the CFG schema admits, read from the schema (L2
-    # round 43). The first version stood one hand-picked `message` node in for
-    # "any non-connector entry", which is the same hand-enumeration defect this
-    # oracle was written to fix, one level down: `SemanticCfgV1` already admits
-    # `connector_call`, so a derivation that began classifying listener-family
-    # connector calls would leave every exercised case — and therefore the served
-    # revision — byte-identical. The kinds come from the discriminated union's
-    # own members, so a kind added to the schema joins the case set on its own.
+    # Position and arity pairs chosen so that NEITHER the absolute index NOR the
+    # index from the end is the same in every padded row (L2 round 48).
+    _shapes = _cycle(((0, 2), (2, 3), (0, 4), (3, 5), (1, 3)))
+
     cases = {
         "entry-absent": _classify(None),
     }
     for member in _cfg_semantic_members():
         kind = member.model_fields["semantic_kind"].default
-        if kind == "connector":
-            continue  # covered in both roles, per family, below
-        cases["entry-kind-" + kind] = _classify(
-            SimpleNamespace(
-                node_id="entry", semantic=SimpleNamespace(semantic_kind=kind)
-            )
-        )
-        # ...and the same kind carrying the fields the connector arm reads, so a
-        # rule that started honouring role/operation on ANOTHER kind is visible
-        # too. The roles come from THIS member's own declaration (L2 round 44):
-        # the previous version stamped `role="source"` on every kind, and
-        # `ConnectorCallSemanticV1.role` admits `entry|downstream` — so the one
-        # kind most likely to become listener-eligible was probed with a role its
-        # schema rejects, and a regression classifying a valid
-        # `(connector_call, entry)` node would have left both of its rows
-        # scheduled and the revision unmoved. Guessing a field's vocabulary
-        # instead of reading it is the same defect as guessing the kind set.
+        cases["entry-kind-" + kind] = _classify(_node({"semantic_kind": kind}))
+        # ...and the same kind carrying the fields an operation-keyed rule would
+        # read, with each role its OWN schema admits at the entry position, and a
+        # table whose referenced operation is a Web Services Server Listen
+        # operation. Only a listener entry may classify as a listener here; any
+        # other kind that did would be a rule reading the symbol table.
         for role in _entry_roles(member) or (None,):
             semantic = {"semantic_kind": kind, "operation_ref": "$ref:op"}
             suffix = "-listener-shaped"
@@ -1398,122 +1357,42 @@ def _execution_profile_behaviour_oracle() -> Dict[str, Any]:
                 semantic["role"] = role
                 suffix = "-role-" + role
             cases["entry-kind-" + kind + suffix] = _classify(
-                SimpleNamespace(node_id="entry", semantic=SimpleNamespace(**semantic)),
-                [_symbol("$ref:op", families[0])] if families else [],
+                _node(semantic),
+                [_symbol("$ref:op", families[0], "Listen")] if families else [],
             )
-    listener_role = _listener_role(
-        lambda role: _classify(
-            _connector(role, "$ref:op"), [_symbol("$ref:op", families[0])]
-        )
-        if families
-        else None,
-        families,
+    # A listener node the CFG does not name as its entry: a rule reading the
+    # first node instead of the declared entry says listener here.
+    cases["entry-id-names-no-node"] = _classify(
+        _node({"semantic_kind": "listener", "operation_ref": "$ref:op"}),
+        [_symbol("$ref:op", families[0] if families else "wss", "Listen")],
+        entry_id="somewhere-else",
     )
-    cases.update({
-        # The listener-eligible role, ASKED OF THE RULE rather than read off the
-        # schema: these three discriminants are only discriminating if the role
-        # they carry is the one the rule can actually say "listener" for.
-        "entry-id-names-no-node": _classify(
-            _connector(listener_role, "$ref:op"),
-            [_symbol("$ref:op", families[0] if families else "http")],
-            entry_id="somewhere-else",
-        ),
-        # The SECOND row carrying the `scheduled` direction with a multi-symbol
-        # table (QA round 20: that direction rested on one row, so simplifying
-        # it would take the direction dark while the digest stood still). The
-        # entry's reference resolves to nothing here, so the honest answer is
-        # `scheduled`; every symbol present — the decoys and the unreferenced
-        # one — is a listener family, so ANY lookup that answers from a row it
-        # was not asked for flips this row. The existing `first0-refblind` kill
-        # is retained by construction: index 0 is still a listener family.
-        "operation-unresolved": _classify(
-            _connector(listener_role, "$ref:missing"),
-            _padded(_symbol, _symbol("$ref:op", families[0] if families else "http"),
-                    families[-1] if families else "http", position=1, arity=3),
-        ),
-        # THE ONLY ROW THAT CAN PIN THE scheduled -> listener DIRECTION, and the
-        # only reason it can is the decoys (§6 AR5-01). The entry's reference
-        # resolves here and the answer is `scheduled`, so a lookup that answers
-        # from the WRONG ROW — a `symbols[0]` refactor, a wrong loop variable, or
-        # "any listener family anywhere in the table" — flips this row and only
-        # this row. Every other row passes at most one symbol, which is why the
-        # whole case set was byte-identical under three such mutants.
-        #
-        # Real tables are never one symbol: `build_symbol_table` projects every
-        # component of the spec into one table sorted by `$ref:KEY`, so a
-        # listener-family operation used anywhere in a request that COMPILES
-        # sits in the same table as the entry's operation, at a caller-chosen
-        # index. That is the reachable damage — a correctly-scheduled process
-        # stamped with listener `<process>` bytes — and the apply-time re-derive
-        # cannot catch it because it calls the same function.
-        #
-        # The decoy refs match nothing, so this row's VALUE is unchanged and the
-        # served revision does NOT rotate: detection is added at zero cost to
-        # every outstanding caller binding. Decoys sit on BOTH sides of the
-        # referenced symbol so neither "take the first" nor "take the last"
-        # passes.
-        "non-listener-family": _classify(
-            _connector(listener_role, "$ref:op"),
-            _padded(_symbol, _symbol("$ref:op", "database"),
-                    families[0] if families else "http", position=2, arity=4),
-        ),
-    })
-    # The `connector` rows, per family and per role. The ROLES come from
-    # `ConnectorSemanticV1`'s own declaration for the same reason the other
-    # members' do (L2 round 44's sibling sweep): the pair happened to be spelled
-    # correctly here, but a hand-typed literal beside a schema that declares it
-    # is the same defect whether or not today's spelling is right. Covering every
-    # admitted role is also what makes the role test part of the covered
-    # behaviour rather than an untested branch.
+    # The LISTENER direction with decoys of the other class: a listener entry
+    # whose table holds no listener-family symbol at all is still a listener, so
+    # a rule that requires one — or reads it from the wrong row — flips this.
+    cases["listener-entry-non-listener-table"] = _classify(
+        _node({"semantic_kind": "listener", "operation_ref": "$ref:op"}),
+        _padded(_symbol, _symbol("$ref:op", "database"), "database",
+                position=1, arity=4),
+    )
+    # The SCHEDULED direction, per decoy family and per connector role: the
+    # pre-#158 rule classified a `source` whose operation is a listener family as
+    # a listener; the entry policy never does. Each family gets a single-symbol
+    # row and a padded twin spelled the way a normalizing rule would fold it.
     connector_roles = _literal_options(_connector_member(), "role")
-    # Position and arity cycles, so the padded rows spread across indices and
-    # table sizes instead of all sharing one shape. Deterministic and finite:
-    # the oracle must be reproducible byte-for-byte on every call.
-    # (position, arity) pairs chosen so that NEITHER the absolute index NOR the
-    # index from the end is the same in every row.
-    #
-    # Two independent cycles were the first attempt and did not achieve it:
-    # equal lengths gave the pairs (0,2), (1,3), (2,4), (3,5), and in every one
-    # of those `arity - 1 - position == 1`, so the referenced symbol was
-    # `rows[-2]` throughout and a lookup reading the penultimate row stayed
-    # invisible (L2 round 48). Changing the cycle LENGTHS did not fix it either
-    # — measured, the from-end index was still uniformly 1 — because the
-    # property is about the pairs, not about how they are generated. So the
-    # pairs are stated, and the accompanying guard asserts the property they are
-    # chosen to satisfy; if a later edit breaks it, the guard fails rather than
-    # the coverage silently going flat.
-    _shapes = _cycle(((0, 2), (2, 3), (0, 4), (3, 5), (1, 3)))
     for family in families:
-        symbols = [_symbol("$ref:op", family)]
-        # Advanced once per FAMILY, not per (family, role): the derivation
-        # returns early for the non-listener role and never reaches the lookup,
-        # so advancing per role handed every row that DOES reach it the same two
-        # cycle positions — measured, indices {0, 2} only. A spread that aliases
-        # against an early return is not a spread.
         _position, _arity = next(_shapes)
         for role in connector_roles:
+            connector = {"semantic_kind": "connector", "role": role,
+                         "operation_ref": "$ref:op"}
             cases["connector-%s-%s" % (role, family)] = _classify(
-                _connector(role, "$ref:op"), symbols
+                _node(connector), [_symbol("$ref:op", family, "Listen")]
             )
-            # ...and the same family spelled the way the rule has to normalize
-            # it. This twin carries the multi-symbol table for the OTHER
-            # direction (listener -> scheduled): a lookup that stops at the
-            # first symbol, or refuses a table of more than one, answers
-            # `scheduled` here. Its plain sibling above stays single-symbol on
-            # purpose, so both arities remain represented in the case set.
-            # The POSITION and the ARITY are varied across these rows, not fixed
-            # (L2 round 47 + QA round 20, which found the same gap from two
-            # sides): with the referenced symbol at index 1 in every padded row
-            # and no table larger than three, an off-by-one to index 1 and a
-            # `len(symbols) > 3` path were both invisible, and one direction
-            # rested on a single row. `_padded` walks positions and sizes so no
-            # index and no arity is universal. Decoy refs still match nothing, so
-            # every row's VALUE — and the served revision — is unchanged.
             cases["connector-%s-unnormalized-%s" % (role, family)] = _classify(
-                _connector(role, "$ref:op"),
+                _node(connector),
                 _padded(_symbol,
-                        _symbol("$ref:op", "  " + family.upper() + "  "),
-                        "database", position=_position, arity=_arity),
+                        _symbol("$ref:op", "  " + family.upper() + "  ", "Listen"),
+                        family, position=_position, arity=_arity),
             )
     return {
         "profiles": sorted({module.SCHEDULED, module.LISTENER}),

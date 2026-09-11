@@ -208,10 +208,14 @@ CONNECTOR_CALL_CAPABILITIES_V1 = _rows(
 #: never by membership here, so a class missing from this map still fails closed.
 GATED_CONNECTOR_CALL_REASONS: Mapping[str, str] = MappingProxyType(
     {
+        # #158: the listener entry is supported — as its own node, never as a
+        # call. A WSS Listen operation still has no row in the allowlist above.
         "listener": (
-            "Listener/WSS entry is not representable as a connector_call: the legacy "
-            "path fuses the start and connector into one start_listen shape, which "
-            "this compiler does not emit."
+            "A Web Services Server Listen operation is not callable as a "
+            "connector_call. Author it as the listener entry — the first step of "
+            "a process, naming only its operation — described at "
+            "get_schema_template(schema_name='process_ir_authoring', "
+            "node_kind='listener')."
         ),
         "database_v2": (
             "Database V2 is a different connector from Database (Legacy) and has no "
