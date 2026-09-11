@@ -1983,7 +1983,7 @@ def test_an_overlap_probe_answered_by_the_other_route_is_re_probed_until_this_pr
     this listener served the path minutes later. A 2xx there is not this
     listener's until its own execution record says so, so the verify probes
     again within the registration window, and says what the early probes hit."""
-    readbacks = int(orchestration._LISTENER_OVERLAP_READBACK_SECONDS // 5)
+    readbacks = int(orchestration._LISTENER_READBACK_SECONDS // 5)
     result, probe = _inherited_method_collision_run(
         registry, monkeypatch, other_object="orders", other_url_path="intake",
         asc_fresh=True, own_records=[_RECORD_EMPTY] * readbacks + [_RECORD_OK],
@@ -1993,7 +1993,7 @@ def test_an_overlap_probe_answered_by_the_other_route_is_re_probed_until_this_pr
     verify = result["listener_verify"]
     assert verify["execution_record_found"] is True
     assert len(probe.calls) == 2
-    assert probe.calls_at[1] - probe.calls_at[0] >= orchestration._LISTENER_OVERLAP_REPROBE_SECONDS
+    assert probe.calls_at[1] - probe.calls_at[0] >= orchestration._LISTENER_READBACK_SECONDS
     (lag,) = [w for w in verify["warnings"] if "LISTENER_ROUTE_REGISTRATION_LAG" in w]
     assert "GET /ws/rest/orders/intake (ASC OTHER-ASC)" in lag, lag
 
@@ -2013,6 +2013,56 @@ def test_an_overlap_route_that_never_yields_fails_naming_it_and_bounds_the_probe
     assert result["error_code"] == "LISTENER_EXECUTION_RECORD_MISSING"
     assert "GET /ws/rest/orders/intake (ASC OTHER-ASC)" in result["error"], result["error"]
     gaps = [b - a for a, b in zip(probe.calls_at, probe.calls_at[1:])]
-    assert gaps and min(gaps) >= orchestration._LISTENER_OVERLAP_REPROBE_SECONDS, gaps
+    assert gaps and min(gaps) >= orchestration._LISTENER_READBACK_SECONDS, gaps
     window = orchestration._LISTENER_ROUTE_REGISTRATION_WINDOW_SECONDS
-    assert len(probe.calls) <= window // orchestration._LISTENER_OVERLAP_REPROBE_SECONDS + 1
+    assert len(probe.calls) <= window // orchestration._LISTENER_READBACK_SECONDS + 1
+    # QA-158-s2r4-01 / CDX-158-r5-02: nothing beside the failure says the route
+    # answered and no action is needed.
+    assert not [
+        w for w in result["listener_verify"]["warnings"]
+        if "LISTENER_ROUTE_REGISTRATION_LAG" in w
+    ], result["listener_verify"]["warnings"]
+
+
+def test_an_overlap_probe_whose_record_is_late_is_not_sent_again(registry, monkeypatch):
+    """#158 CDX-158-r5-01: the first probe reached this listener, but its record
+    appeared 40 s later. A 30 s readback followed by an idle wait re-sent the
+    probe — running the listener twice, and failing the verify if the replay
+    timed out — where the ordinary 60 s readback succeeds on the one probe. A
+    probe is re-sent only after the whole readback window passed without its
+    record."""
+    late = int(40 // 5)
+    result, probe = _inherited_method_collision_run(
+        registry, monkeypatch, other_object="orders", other_url_path="intake",
+        asc_fresh=True, own_records=[_RECORD_EMPTY] * late + [_RECORD_OK],
+        probe=_ClockedProbe([(200, None)]),
+    )
+    assert result["_success"] is True, result.get("error")
+    assert len(probe.calls) == 1
+    assert not [
+        w for w in result["listener_verify"]["warnings"]
+        if "LISTENER_ROUTE_REGISTRATION_LAG" in w
+    ]
+
+
+def test_a_registration_lag_warning_is_served_only_beside_a_verified_run(registry, monkeypatch):
+    """#158 QA-158-s2r4-01 sibling, the pre-existing path: a fresh ASC answered
+    401 then 200, and no record appeared. The verify fails unverified, and no
+    warning beside it says the route answered and no action is needed."""
+    bid = registry("b-asc-lag-missing", _asc_entry())
+    probe = _FakeProbe([(401, None), (200, None)])
+    _patch_asc_real_run(
+        monkeypatch,
+        server_info=_server_info(api_type="advanced"),
+        probe=probe,
+        execution_records=_RECORD_EMPTY,
+        deployment_responses=_asc_deployment_responses(asc_fresh=True),
+    )
+    result = _run(bid)
+    assert result["_success"] is False
+    assert result["error_code"] == "LISTENER_EXECUTION_RECORD_MISSING"
+    assert len(probe.calls) == 2
+    assert not [
+        w for w in result["listener_verify"]["warnings"]
+        if "LISTENER_ROUTE_REGISTRATION_LAG" in w
+    ], result["listener_verify"]["warnings"]

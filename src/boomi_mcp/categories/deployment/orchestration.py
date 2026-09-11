@@ -1145,13 +1145,14 @@ def _build_declares_process_extensions(build_id: str) -> bool:
 # first-time deploy on a local atom, up to ~4 min after an apiType flip.
 _LISTENER_ROUTE_REGISTRATION_WINDOW_SECONDS = 240
 _LISTENER_ROUTE_REGISTRATION_POLL_SECONDS = 15
-# #158 (QA-158-s2r3b-01, CDX-158-r4-01): while a fresh listener route registers,
-# an overlapping route of another ASC still answers its path, so each probe in
-# that window may execute the OTHER integration's process. Probes there are
-# spaced this far apart, and each waits this long for this listener's own
-# execution record before counting as unanswered.
-_LISTENER_OVERLAP_REPROBE_SECONDS = 60
-_LISTENER_OVERLAP_READBACK_SECONDS = 30
+# How long a probe's own execution record may take to appear. #158
+# (QA-158-s2r3b-01, CDX-158-r4-01, CDX-158-r5-01): while a fresh listener route
+# registers, an overlapping route of another ASC still answers its path, so a
+# 2xx there counts only once this listener's record appears — and a probe is
+# re-sent only after this whole window passed without one, which both spaces
+# those probes (each may execute the OTHER integration) and never replays a
+# probe whose record is merely late.
+_LISTENER_READBACK_SECONDS = 60
 
 
 def _listener_operation_ref_from_process(process_config: Any) -> Optional[str]:
@@ -1937,7 +1938,8 @@ def _run_listener_verify_stage(
                             "that route still answers the path, so a verify probe "
                             "in that window can execute that integration's "
                             "process; the verify counts only this listener's own "
-                            "execution and probes at most once a minute there."
+                            "execution and probes at most once every "
+                            f"{_LISTENER_READBACK_SECONDS} s there."
                         )
                         continue
                     collision_count += 1
@@ -2178,7 +2180,6 @@ def _run_listener_verify_stage(
     readback = None
     while True:
         probe_attempts += 1
-        probe_sent_at = time.monotonic()
         status_code, probe_error = _listener_probe(
             url,
             method=http_method,
@@ -2240,19 +2241,16 @@ def _run_listener_verify_stage(
             # answers this path until ours registers, so a 2xx is not ours
             # until THIS process's execution record says so; until then the
             # route is unregistered, like a 401/404 above.
-            readback = _read_own_execution(_LISTENER_OVERLAP_READBACK_SECONDS)
+            readback = _read_own_execution(_LISTENER_READBACK_SECONDS)
             if not readback[0] and time.monotonic() < registration_deadline:
-                time.sleep(
-                    max(
-                        0.0,
-                        _LISTENER_OVERLAP_REPROBE_SECONDS
-                        - (time.monotonic() - probe_sent_at),
-                    )
-                )
                 continue
         break
+    registration_lag_warning: Optional[str] = None
     if probe_attempts > 1 and status_code is not None and 200 <= status_code < 300:
-        stage.warnings.append(
+        # Served only once this listener's own record proves the route answered
+        # (#158 QA-158-s2r4-01 / CDX-158-r5-02): beside a failed readback, "the
+        # route answered … no action needed" contradicted the failure.
+        registration_lag_warning = (
             f"[LISTENER_ROUTE_REGISTRATION_LAG] the route answered only on probe "
             f"attempt {probe_attempts} — a fresh deploy registers its WSS route "
             "asynchronously (~1-4 min observed live); no action needed."
@@ -2313,7 +2311,7 @@ def _run_listener_verify_stage(
     #    probe's own execution (degraded to any-record + warning only when the
     #    baseline query itself failed above).
     if readback is None:
-        readback = _read_own_execution(60)
+        readback = _read_own_execution(_LISTENER_READBACK_SECONDS)
     record_found, execution_id, execution_status, readback_error = readback
     stage.execution_record_found = record_found
     stage.execution_id = execution_id
@@ -2338,6 +2336,8 @@ def _run_listener_verify_stage(
             endpoint_url=url,
             probe_status_code=status_code,
         )
+    if registration_lag_warning is not None:
+        stage.warnings.append(registration_lag_warning)
     if execution_status and execution_status.upper() not in ("COMPLETE",):
         stage.warnings.append(
             f"[LISTENER_EXECUTION_{execution_status.upper()}] the probe returned HTTP "
