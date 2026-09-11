@@ -1817,6 +1817,7 @@ def test_asc_failure_cleanup_includes_fresh_asc_resources(registry, monkeypatch)
 def _inherited_method_collision_run(
     registry, monkeypatch, *, other_object, other_url_path, other_base="",
     my_object="intake", my_base="orders", my_url_path="",
+    asc_fresh=False, own_records=None, probe=None,
 ):
     """#158 CDX-158-r1-01: only an explicit http_method pins a route's method, so an
     other ASC's route that overrides objectName and inputType but INHERITS its
@@ -1866,17 +1867,18 @@ def _inherited_method_collision_run(
         operation_mode="listen", component_name="Other op", object_name="whatever",
         operation_type="QUERY", input_type="none",
     )
-    probe = _FakeProbe([(200, None)])
+    probe = probe or _FakeProbe([(200, None)])
     _patch_asc_real_run(
         monkeypatch,
         server_info=_server_info(api_type="advanced"),
         probe=probe,
         execution_records=_RECORD_OK,
         deployment_responses=_asc_deployment_responses(
+            asc_fresh=asc_fresh,
             collision_deployments=[
                 {"deployment_id": "dep-x", "component_id": "OTHER-ASC",
                  "component_type": "webservice", "active": True}
-            ]
+            ],
         ),
         component_xml={
             "OTHER-ASC": other_asc,
@@ -1884,6 +1886,14 @@ def _inherited_method_collision_run(
             other_op: other_op_xml,
         },
     )
+    if own_records is not None:
+        # Baseline query first, then this listener's readbacks in order.
+        monkeypatch.setattr(
+            orchestration,
+            "monitor_platform_action",
+            _FakeAction({"execution_records": [_RECORD_EMPTY] + list(own_records)},
+                        label="monitoring"),
+        )
     return _run(bid), probe
 
 
@@ -1954,3 +1964,55 @@ def test_asc_collision_skips_a_route_the_platform_never_serves(registry, monkeyp
         "LISTENER_COLLISION_ROUTE_NOT_SERVED" in w for w in result["listener_verify"]["warnings"]
     ), result["listener_verify"]["warnings"]
     assert len(probe.calls) == 1
+
+
+class _ClockedProbe(_FakeProbe):
+    """A `_FakeProbe` that also records the fake clock at each probe."""
+
+    def __call__(self, url, **kwargs):
+        self.calls_at = getattr(self, "calls_at", []) + [orchestration.time.monotonic()]
+        return super().__call__(url, **kwargs)
+
+
+def test_an_overlap_probe_answered_by_the_other_route_is_re_probed_until_this_process_runs(
+    registry, monkeypatch
+):
+    """#158 QA-158-s2r3b-01 / CDX-158-r4-01, reproduced live: with a fresh ASC
+    whose path an older route also reaches, the first probe's 200 came from the
+    OLDER route (its process ran, ours did not) and the verify failed, although
+    this listener served the path minutes later. A 2xx there is not this
+    listener's until its own execution record says so, so the verify probes
+    again within the registration window, and says what the early probes hit."""
+    readbacks = int(orchestration._LISTENER_OVERLAP_READBACK_SECONDS // 5)
+    result, probe = _inherited_method_collision_run(
+        registry, monkeypatch, other_object="orders", other_url_path="intake",
+        asc_fresh=True, own_records=[_RECORD_EMPTY] * readbacks + [_RECORD_OK],
+        probe=_ClockedProbe([(200, None)]),
+    )
+    assert result["_success"] is True, result.get("error")
+    verify = result["listener_verify"]
+    assert verify["execution_record_found"] is True
+    assert len(probe.calls) == 2
+    assert probe.calls_at[1] - probe.calls_at[0] >= orchestration._LISTENER_OVERLAP_REPROBE_SECONDS
+    (lag,) = [w for w in verify["warnings"] if "LISTENER_ROUTE_REGISTRATION_LAG" in w]
+    assert "GET /ws/rest/orders/intake (ASC OTHER-ASC)" in lag, lag
+
+
+def test_an_overlap_route_that_never_yields_fails_naming_it_and_bounds_the_probes(
+    registry, monkeypatch
+):
+    """When this listener's process never runs inside the registration window,
+    the verify fails unverified and names the overlapping route whose process
+    the probes may have executed — and, because each of those probes can run
+    another integration, it probes at most once a minute."""
+    result, probe = _inherited_method_collision_run(
+        registry, monkeypatch, other_object="orders", other_url_path="intake",
+        asc_fresh=True, own_records=[_RECORD_EMPTY], probe=_ClockedProbe([(200, None)]),
+    )
+    assert result["_success"] is False
+    assert result["error_code"] == "LISTENER_EXECUTION_RECORD_MISSING"
+    assert "GET /ws/rest/orders/intake (ASC OTHER-ASC)" in result["error"], result["error"]
+    gaps = [b - a for a, b in zip(probe.calls_at, probe.calls_at[1:])]
+    assert gaps and min(gaps) >= orchestration._LISTENER_OVERLAP_REPROBE_SECONDS, gaps
+    window = orchestration._LISTENER_ROUTE_REGISTRATION_WINDOW_SECONDS
+    assert len(probe.calls) <= window // orchestration._LISTENER_OVERLAP_REPROBE_SECONDS + 1

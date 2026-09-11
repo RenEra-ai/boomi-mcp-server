@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 12270, "minimum_collected": 12270, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 12272, "minimum_collected": 12272, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -12347,3 +12347,5 @@
 {"kind": "test", "id": "pytest-012346", "node_id": "tests/test_orchestration_listener_verify.py::test_a_cross_base_overlap_from_a_more_specific_base_refuses", "state": "active"}
 {"kind": "test", "id": "pytest-012347", "node_id": "tests/test_orchestration_listener_verify.py::test_a_slash_route_that_cannot_reach_this_path_is_not_reported", "state": "active"}
 {"kind": "test", "id": "pytest-012348", "node_id": "tests/test_orchestration_listener_verify.py::test_asc_collision_skips_a_route_the_platform_never_serves", "state": "active"}
+{"kind": "test", "id": "pytest-012349", "node_id": "tests/test_orchestration_listener_verify.py::test_an_overlap_probe_answered_by_the_other_route_is_re_probed_until_this_process_runs", "state": "active"}
+{"kind": "test", "id": "pytest-012350", "node_id": "tests/test_orchestration_listener_verify.py::test_an_overlap_route_that_never_yields_fails_naming_it_and_bounds_the_probes", "state": "active"}

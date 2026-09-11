@@ -1145,6 +1145,13 @@ def _build_declares_process_extensions(build_id: str) -> bool:
 # first-time deploy on a local atom, up to ~4 min after an apiType flip.
 _LISTENER_ROUTE_REGISTRATION_WINDOW_SECONDS = 240
 _LISTENER_ROUTE_REGISTRATION_POLL_SECONDS = 15
+# #158 (QA-158-s2r3b-01, CDX-158-r4-01): while a fresh listener route registers,
+# an overlapping route of another ASC still answers its path, so each probe in
+# that window may execute the OTHER integration's process. Probes there are
+# spaced this far apart, and each waits this long for this listener's own
+# execution record before counting as unanswered.
+_LISTENER_OVERLAP_REPROBE_SECONDS = 60
+_LISTENER_OVERLAP_READBACK_SECONDS = 30
 
 
 def _listener_operation_ref_from_process(process_config: Any) -> Optional[str]:
@@ -1796,6 +1803,10 @@ def _run_listener_verify_stage(
     collision_paths: List[str] = []
     base_collided = False
     route_collided = False
+    #: Routes of other ASCs that reach this listener's path from a less specific
+    #: base: they lose it once this listener's route registers, and answer it
+    #: until then (QA-158-s2r3b-01).
+    overlapping_routes: List[str] = []
 
     def _base_depth(base: str) -> int:
         return len([segment for segment in (base or "").split("/") if segment])
@@ -1914,13 +1925,19 @@ def _run_listener_verify_stage(
                     if _base_depth(my_base) > _base_depth(other_base):
                         # Ours is the more specific base, which serves in either
                         # deploy order (measured): the other route loses the path.
+                        overlapping_routes.append(f"{other_key} (ASC {comp_id})")
                         stage.warnings.append(
                             f"[LISTENER_ASC_ROUTE_OVERLAP] ASC {comp_id} (base "
                             f"{other_base!r}) also routes {other_key}. Measured: "
                             + ASC_CROSS_BASE_MEASURED_PRECEDENCE
                             + " — here that is this listener's ASC, so that "
                             "ASC's route stops receiving this path while this "
-                            "listener is deployed."
+                            "listener is deployed. Until this listener's route "
+                            "registers (about 1-4 minutes after a fresh deploy), "
+                            "that route still answers the path, so a verify probe "
+                            "in that window can execute that integration's "
+                            "process; the verify counts only this listener's own "
+                            "execution and probes at most once a minute there."
                         )
                         continue
                     collision_count += 1
@@ -2097,6 +2114,49 @@ def _run_listener_verify_stage(
         )
     stage.readback_baseline_available = baseline_unavailable is None
 
+    def _read_own_execution(seconds: float):
+        """(found, execution_id, status, error): a record of THIS listener's
+        process that the probe triggered, waited for up to ``seconds``."""
+        found = False
+        found_id: Optional[str] = None
+        found_status: Optional[str] = None
+        error: Optional[str] = None
+        deadline = time.monotonic() + seconds
+        while time.monotonic() < deadline:
+            try:
+                records_result = monitor_platform_action(
+                    boomi_client,
+                    profile,
+                    "execution_records",
+                    config_data={
+                        "process_id": target.process_component_id,
+                        "start_date": window_start,
+                        "limit": 50,
+                    },
+                )
+            except Exception as exc:
+                records_result = {"_success": False, "error": str(exc)}
+            if isinstance(records_result, dict) and records_result.get("_success"):
+                error = None
+                for record in records_result.get("execution_records") or []:
+                    if not isinstance(record, dict):
+                        continue
+                    record_id = record.get("execution_id")
+                    if baseline_unavailable is None:
+                        # Strict mode: only an id-bearing record OUTSIDE the
+                        # baseline proves the probe triggered an execution.
+                        if not record_id or record_id in baseline_execution_ids:
+                            continue
+                    found = True
+                    found_id = record_id or found_id
+                    found_status = record.get("status") or found_status
+                if found:
+                    break
+            else:
+                error = str((records_result or {}).get("error") or "unknown error")
+            time.sleep(5)
+        return found, found_id, found_status, error
+
     url = base_url.rstrip("/") + endpoint_path
     # A FRESHLY CREATED deployment registers its WSS route asynchronously —
     # live-observed 2026-07-04: ~1 min on a local atom after a first-time
@@ -2114,8 +2174,11 @@ def _run_listener_verify_stage(
     )
     registration_deadline = time.monotonic() + _LISTENER_ROUTE_REGISTRATION_WINDOW_SECONDS
     probe_attempts = 0
+    #: Step 5's readback, when the probe loop already had to take it.
+    readback = None
     while True:
         probe_attempts += 1
+        probe_sent_at = time.monotonic()
         status_code, probe_error = _listener_probe(
             url,
             method=http_method,
@@ -2167,12 +2230,39 @@ def _run_listener_verify_stage(
         ):
             time.sleep(_LISTENER_ROUTE_REGISTRATION_POLL_SECONDS)
             continue
+        if (
+            overlapping_routes
+            and registration_wait
+            and status_code is not None
+            and 200 <= status_code < 300
+        ):
+            # #158 QA-158-s2r3b-01 / CDX-158-r4-01: an overlapping route
+            # answers this path until ours registers, so a 2xx is not ours
+            # until THIS process's execution record says so; until then the
+            # route is unregistered, like a 401/404 above.
+            readback = _read_own_execution(_LISTENER_OVERLAP_READBACK_SECONDS)
+            if not readback[0] and time.monotonic() < registration_deadline:
+                time.sleep(
+                    max(
+                        0.0,
+                        _LISTENER_OVERLAP_REPROBE_SECONDS
+                        - (time.monotonic() - probe_sent_at),
+                    )
+                )
+                continue
         break
     if probe_attempts > 1 and status_code is not None and 200 <= status_code < 300:
         stage.warnings.append(
             f"[LISTENER_ROUTE_REGISTRATION_LAG] the route answered only on probe "
             f"attempt {probe_attempts} — a fresh deploy registers its WSS route "
             "asynchronously (~1-4 min observed live); no action needed."
+            + (
+                " Earlier probes were answered by an overlapping route ("
+                + ", ".join(overlapping_routes)
+                + "), which may have executed that integration's process."
+                if overlapping_routes
+                else ""
+            )
         )
 
     if status_code is None:
@@ -2222,54 +2312,29 @@ def _run_listener_verify_stage(
     #    baseline, so pre-existing listener traffic can never stand in for the
     #    probe's own execution (degraded to any-record + warning only when the
     #    baseline query itself failed above).
-    record_found = False
-    execution_id: Optional[str] = None
-    execution_status: Optional[str] = None
-    readback_deadline = time.monotonic() + 60
-    readback_error: Optional[str] = None
-    while time.monotonic() < readback_deadline:
-        try:
-            records_result = monitor_platform_action(
-                boomi_client,
-                profile,
-                "execution_records",
-                config_data={
-                    "process_id": target.process_component_id,
-                    "start_date": window_start,
-                    "limit": 50,
-                },
-            )
-        except Exception as exc:
-            records_result = {"_success": False, "error": str(exc)}
-        if isinstance(records_result, dict) and records_result.get("_success"):
-            readback_error = None
-            for record in records_result.get("execution_records") or []:
-                if not isinstance(record, dict):
-                    continue
-                record_id = record.get("execution_id")
-                if baseline_unavailable is None:
-                    # Strict mode: only an id-bearing record OUTSIDE the
-                    # baseline proves the probe triggered an execution.
-                    if not record_id or record_id in baseline_execution_ids:
-                        continue
-                record_found = True
-                execution_id = record_id or execution_id
-                execution_status = record.get("status") or execution_status
-            if record_found:
-                break
-        else:
-            readback_error = str((records_result or {}).get("error") or "unknown error")
-        time.sleep(5)
+    if readback is None:
+        readback = _read_own_execution(60)
+    record_found, execution_id, execution_status, readback_error = readback
     stage.execution_record_found = record_found
     stage.execution_id = execution_id
     stage.execution_status = execution_status
     if not record_found:
         detail = f" (record query error: {readback_error})" if readback_error else ""
+        overlap_detail = (
+            " Another ASC's route reaches this path ("
+            + ", ".join(overlapping_routes)
+            + ") and answers it until this listener's route registers, so the "
+            f"{probe_attempts} probe(s) may have executed that integration's "
+            "process instead."
+            if overlapping_routes
+            else ""
+        )
         return _fail(
             LISTENER_EXECUTION_RECORD_MISSING,
             "The listener endpoint acknowledged the probe but no execution record "
             "appeared for the process within the readback window — the HTTP ack is "
-            f"decoupled from process execution, so this run is unverified{detail}.",
+            f"decoupled from process execution, so this run is unverified{detail}."
+            + overlap_detail,
             endpoint_url=url,
             probe_status_code=status_code,
         )
