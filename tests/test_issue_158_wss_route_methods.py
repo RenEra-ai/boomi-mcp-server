@@ -487,3 +487,47 @@ def test_every_offered_remedy_makes_the_route_callable():
                             assert "input type 'none'" not in text
     # NON-VACUITY: the refused states include the pinned-GET-over-QUERY case.
     assert refused_states >= 5, refused_states
+
+
+def test_the_resolver_is_the_one_answer_to_what_needs_the_operation():
+    """CDX-158-r1-01: `method_resolved` / `path_resolved` say what is knowable
+    WITHOUT the linked operation. Only an explicit http_method pins the method
+    (an input_type override does not — the method comes from the operation's
+    type), and only an explicit object_name pins the path."""
+    unlinked = lambda overrides: effective_api_service_route("base", overrides, None)  # noqa: E731
+
+    assert unlinked({"object_name": "o", "input_type": "none"})["method_resolved"] is False
+    assert unlinked({"object_name": "o", "http_method": "PUT"})["method_resolved"] is True
+    assert unlinked({"object_name": "o"})["path_resolved"] is True
+    assert unlinked({"http_method": "PUT"})["path_resolved"] is False
+    linked = effective_api_service_route(
+        "base", {"input_type": "none"}, {"object_name": "o", "operation_type": "QUERY"}
+    )
+    assert (linked["method"], linked["method_resolved"], linked["path_resolved"]) == ("GET", True, True)
+    # An operation whose type is outside the vocabulary leaves the method unknown.
+    unknown = effective_api_service_route("base", {}, {"object_name": "o", "operation_type": "PATCH"})
+    assert (unknown["method"], unknown["method_resolved"]) == ("", False)
+
+
+def test_the_served_asc_precedence_texts_are_the_measured_ones():
+    """#158 QA-158-s2r2-01: a cross-base overlap was refused with the same-base
+    text, which blamed the listener that actually served the path. Every served
+    text saying which of two API Services answers a path is built from the
+    leaf's measured texts, and the refusal names the cause that fired."""
+    from boomi_mcp.categories import meta_tools
+    from boomi_mcp.categories.components import wss_route_methods as leaf
+    from boomi_mcp.categories.deployment import orchestration
+
+    note = meta_tools._COMPONENT_CREATE_API_SERVICE["collision_note"]
+    assert leaf.ASC_SAME_BASE_SHADOWING in note
+    assert leaf.ASC_CROSS_BASE_MEASURED_PRECEDENCE in note
+    assert "LISTENER_ASC_ROUTE_OVERLAP" in note and "LISTENER_ASC_COLLISION" in note
+
+    step = orchestration._next_step_for_failure(
+        orchestration.OrchestrateDeployError(
+            code=orchestration.LISTENER_ASC_COLLISION, message="x"
+        ),
+        "listener_verify",
+    )
+    assert leaf.ASC_SAME_BASE_SHADOWING in step
+    assert leaf.ASC_CROSS_BASE_LISTENER_LOSES in step

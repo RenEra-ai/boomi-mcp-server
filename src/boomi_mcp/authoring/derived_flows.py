@@ -32,6 +32,7 @@ from ..models.derived_flows import (
     GeneratedProfileSummaryV1,
 )
 from ..models.integration_models import IntegrationComponentSpec
+from ..models.process_ir import _CONNECTOR_KINDS
 
 REF_PREFIX = "$ref:"
 
@@ -210,6 +211,104 @@ def _walk_nodes(node: Any) -> List[Any]:
                     if isinstance(item, BaseModel):
                         found.extend(_walk_nodes(item))
     return found
+
+
+def _authored_pointers(root: Any) -> Dict[str, Any]:
+    """Every authored node by its JSON pointer — the ``source_path`` the CFG carries."""
+    from pydantic import BaseModel
+
+    found: Dict[str, Any] = {}
+
+    def _visit(node: Any, pointer: str) -> None:
+        found[pointer] = node
+        for name in type(node).model_fields:
+            child = getattr(node, name, None)
+            if isinstance(child, BaseModel):
+                _visit(child, "{0}/{1}".format(pointer, name))
+            elif isinstance(child, (list, tuple)):
+                for index, item in enumerate(child):
+                    if isinstance(item, BaseModel):
+                        _visit(item, "{0}/{1}/{2}".format(pointer, name, index))
+
+    if isinstance(root, BaseModel):
+        _visit(root, "")
+    return found
+
+
+def _feeding_nodes(root: Any, pointers: Mapping[str, Any]) -> Optional[Dict[str, Any]]:
+    """For every ``map_ref``, the connector node that feeds it — read off the CFG.
+
+    #158 (CDX-158-r2-01, CDX-158-r3-01, CDX-158-r3-02): "the nearest preceding
+    connector" is a question about CONTROL FLOW, and the compiler's CFG is its
+    authority. Two models of it failed here in turn: the flattened document
+    order crossed sibling branch legs, and an authored-tree walk missed that a
+    ``continue`` hands the successful try body's stream to the next step, and
+    that a container's terminal follows its steps. The CFG has none of these to
+    model — a ``continue`` is an ordering edge from the try body's last step,
+    and a catch path hangs off its own ``catch`` edge — so a depth-first walk
+    carrying the last connector node down each path answers exactly. None when
+    the document does not lower (the preview then claims no source).
+    """
+    from ..compiler.process_ir.lowering import lower_process_ir_to_cfg
+
+    try:
+        cfg = lower_process_ir_to_cfg(root)
+    except Exception:
+        return None
+    by_id = {node.node_id: node for node in cfg.nodes}
+    outgoing: Dict[str, List[str]] = {}
+    for edge in cfg.edges:
+        outgoing.setdefault(edge.source_node_id, []).append(edge.target_node_id)
+    feeders: Dict[str, Any] = {}
+    stack: List[Tuple[str, Any]] = [(cfg.entry_node_id, None)]
+    while stack:
+        node_id, feeder = stack.pop()
+        authored = pointers.get(by_id[node_id].source_path)
+        kind = getattr(authored, "kind", None)
+        if kind == "map_ref":
+            feeders[by_id[node_id].source_path] = feeder
+        elif kind in _CONNECTOR_KINDS:
+            feeder = authored
+        for target_id in outgoing.get(node_id, ()):
+            stack.append((target_id, feeder))
+    return feeders
+
+
+def _source_token_for(feeder: Any, by_key: Mapping[str, Any], metadata: Mapping[str, Any]) -> str:
+    """The served source token for the connector node feeding a map ("" if none).
+
+    EACH NODE KIND CARRIES ITS OWN REFERENCE. A `source` names the connection
+    directly; a `connector_call` names only the OPERATION, and the operation
+    names the connection. Reading `connection_ref` off both meant every map fed
+    by a canonical connector call resolved no family and served an empty
+    source, even where the operation's family was known.
+    """
+    if feeder is None:
+        return ""
+    conn_key = _ref_key(getattr(feeder, "connection_ref", None))
+    if conn_key is None:
+        op_key = _ref_key(getattr(feeder, "operation_ref", None))
+        operation = by_key.get(op_key) if op_key else None
+        op_config = (getattr(operation, "config", None) or {}) if operation else {}
+        conn_key = _ref_key(op_config.get("connection_ref_key")) or (
+            op_config.get("connection_ref_key")
+            if isinstance(op_config.get("connection_ref_key"), str)
+            else None
+        )
+        if conn_key is None and operation is not None:
+            # An operation-only node (a WSS listener's operation has no
+            # connection): its family, through the resolver the builders route
+            # on, so an alias such as `web_services` names the same family as `wss`.
+            family = str(op_config.get("connector_type") or "") or None
+            if family:
+                from ..categories.components.builders.connector_builder import (
+                    connector_family_of,
+                )
+
+                resolved = connector_family_of(family) or family.strip().lower()
+                return SOURCE_TOKEN_BY_FAMILY.get(resolved, "")
+    family = (metadata.get(conn_key) or (None, None))[0] if conn_key else None
+    return SOURCE_TOKEN_BY_FAMILY.get(str(family).lower(), "") if family else ""
 
 
 def _leaves_summary(index: Mapping[str, Mapping[str, Any]]) -> Dict[str, Any]:
@@ -489,6 +588,9 @@ def derive_transform_flows(
     rows: List[DerivedTransformFlowV1] = []
     for unit in sorted(units, key=lambda u: u.envelope.component_key):
         nodes = _walk_nodes(unit.process_ir)
+        pointers = _authored_pointers(unit.process_ir)
+        pointer_of = {id(node): pointer for pointer, node in pointers.items()}
+        feeders = _feeding_nodes(unit.process_ir, pointers) or {}
         map_nodes = [node for node in nodes if getattr(node, "kind", None) == "map_ref"]
         for position, node in enumerate(map_nodes):
             map_key = _ref_key(getattr(node, "map_ref", None) or getattr(node, "component_ref", None))
@@ -510,36 +612,12 @@ def derive_transform_flows(
                 else _selected_or_generated(target_component, target_key, selected, final_names)
             )
 
-            # the feeding step: the nearest preceding connector node
-            source_token = ""
-            for previous in nodes[: nodes.index(node)][::-1]:
-                if getattr(previous, "kind", None) in ("source", "connector_call"):
-                    # EACH NODE KIND CARRIES ITS OWN REFERENCE. A `source`
-                    # names the connection directly; a `connector_call` names
-                    # only the OPERATION, and the operation names the
-                    # connection. Reading `connection_ref` off both meant every
-                    # map fed by a canonical connector call resolved no family
-                    # and served an empty source, even where the operation's
-                    # family was known.
-                    conn_key = _ref_key(getattr(previous, "connection_ref", None))
-                    if conn_key is None:
-                        op_key = _ref_key(getattr(previous, "operation_ref", None))
-                        operation = by_key.get(op_key) if op_key else None
-                        op_config = (getattr(operation, "config", None) or {}) if operation else {}
-                        conn_key = _ref_key(op_config.get("connection_ref_key")) or (
-                            op_config.get("connection_ref_key")
-                            if isinstance(op_config.get("connection_ref_key"), str)
-                            else None
-                        )
-                        if conn_key is None and operation is not None:
-                            family = str(op_config.get("connector_type") or "") or None
-                            if family:
-                                source_token = SOURCE_TOKEN_BY_FAMILY.get(family.lower(), "")
-                                break
-                    family = (metadata.get(conn_key) or (None, None))[0] if conn_key else None
-                    if family:
-                        source_token = SOURCE_TOKEN_BY_FAMILY.get(str(family).lower(), "")
-                    break
+            # the feeding step: the connector node the CFG says feeds this map
+            # (see `_feeding_nodes`). #158 CDX-158-r1-02: "connector node" is
+            # the MODEL's set, so a `listener` feeds a map like any source.
+            source_token = _source_token_for(
+                feeders.get(pointer_of.get(id(node), "")), by_key, metadata
+            )
 
             if source_gen is not None and source_gen["component_type"] == "profile.db":
                 source_schema: Dict[str, Any] = _db_schema_summary(

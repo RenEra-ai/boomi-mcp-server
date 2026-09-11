@@ -1812,3 +1812,145 @@ def test_asc_failure_cleanup_includes_fresh_asc_resources(registry, monkeypatch)
         if op["resource_id"] in ("dep-asc", "pkg-asc")
     ]
     assert asc_ops == []
+
+
+def _inherited_method_collision_run(
+    registry, monkeypatch, *, other_object, other_url_path, other_base="",
+    my_object="intake", my_base="orders", my_url_path="",
+):
+    """#158 CDX-158-r1-01: only an explicit http_method pins a route's method, so an
+    other ASC's route that overrides objectName and inputType but INHERITS its
+    method needs its linked operation's TYPE. The scanner used to treat the
+    inputType override as pinning the method, skipped the operation, and computed
+    POST — missing a GET-vs-GET collision reached through a different base.
+
+    The other route reaches our path by an objectName + urlPath split (the
+    served formula /ws/rest/<base>/<objectName>/<urlPath>, #133); QA-158-s2r1-01
+    measured that a split through a SLASH objectName is never served, so the
+    first version of this test (objectName "orders/intake") pinned a collision
+    that does not exist."""
+    from boomi_mcp.categories.components.builders.connector_builder import (
+        WssListenerOperationBuilder,
+    )
+
+    meta = dict(
+        _ASC_LISTENER_META,
+        object_name=my_object,
+        operation_type="QUERY",
+        input_type="none",
+        http_method="GET",
+        endpoint_path="/ws/rest/orders/intake",
+    )
+    entry = _asc_entry(listener_meta=meta)
+    entry["spec"]["components"][-1]["config"]["base_url_path"] = my_base
+    entry["spec"]["components"][-1]["config"]["routes"][0]["url_path"] = my_url_path
+    bid = registry("b-asc-inherit-coll", entry)
+
+    other_process = "00000000-0000-0000-0000-0000000000aa"
+    other_op = "00000000-0000-0000-0000-0000000000bb"
+    other_asc = (
+        '<bns:Component xmlns:bns="http://api.platform.boomi.com/" type="webservice" name="Other">'
+        f'<bns:object><webservice xmlns="" urlPath="{other_base}"><restApi>'
+        f'<route processId="{other_process}">'
+        '<overrides httpMethod="" inputProfileKey="" inputType="none" '
+        f'objectName="{other_object}" outputType="" urlPath="{other_url_path}"/><description/></route>'
+        "</restApi></webservice></bns:object></bns:Component>"
+    )
+    other_process_xml = (
+        '<bns:Component xmlns:bns="http://api.platform.boomi.com/" type="process" name="P">'
+        "<bns:object><process><shapes><shape shapetype=\"start\"><configuration>"
+        f'<connectoraction actionType="Listen" connectorType="wss" operationId="{other_op}"/>'
+        "</configuration></shape></shapes></process></bns:object></bns:Component>"
+    )
+    other_op_xml = WssListenerOperationBuilder().build(
+        operation_mode="listen", component_name="Other op", object_name="whatever",
+        operation_type="QUERY", input_type="none",
+    )
+    probe = _FakeProbe([(200, None)])
+    _patch_asc_real_run(
+        monkeypatch,
+        server_info=_server_info(api_type="advanced"),
+        probe=probe,
+        execution_records=_RECORD_OK,
+        deployment_responses=_asc_deployment_responses(
+            collision_deployments=[
+                {"deployment_id": "dep-x", "component_id": "OTHER-ASC",
+                 "component_type": "webservice", "active": True}
+            ]
+        ),
+        component_xml={
+            "OTHER-ASC": other_asc,
+            other_process: other_process_xml,
+            other_op: other_op_xml,
+        },
+    )
+    return _run(bid), probe
+
+
+def test_asc_collision_resolves_an_inherited_method_from_the_linked_operation(registry, monkeypatch):
+    """The other route (base "", objectName "orders", urlPath "intake") reaches
+    our /ws/rest/orders/intake only once its method is read off the linked QUERY
+    operation. #158 QA-158-s2r2-01 then measured it live: this listener's ASC
+    is on the more specific base, which serves the path in either deploy order,
+    and the other route got none of it — so it is a warning that names the
+    route losing the path, not a refusal blaming this one."""
+    result, probe = _inherited_method_collision_run(
+        registry, monkeypatch, other_object="orders", other_url_path="intake"
+    )
+    assert result["_success"] is True, result.get("error")
+    verify = result["listener_verify"]
+    assert verify["collision_count"] == 0
+    assert verify["collision_paths"] == []
+    (overlap,) = [w for w in verify["warnings"] if "LISTENER_ASC_ROUTE_OVERLAP" in w]
+    assert "OTHER-ASC" in overlap and "GET /ws/rest/orders/intake" in overlap, overlap
+    assert orchestration.ASC_CROSS_BASE_MEASURED_PRECEDENCE in overlap, overlap
+    assert len(probe.calls) == 1
+
+
+def test_a_cross_base_overlap_from_a_more_specific_base_refuses(registry, monkeypatch):
+    """The opposite arrangement — this listener's ASC on base "" with objectName
+    "orders" and urlPath "intake", the other on the MORE specific base "orders"
+    and deployed first. Measured live (#158 QA s2r3, 11/11 probes): the more
+    specific base serves in this deploy order too, so this listener's route
+    receives none of the path, and the verify refuses, saying why."""
+    result, probe = _inherited_method_collision_run(
+        registry, monkeypatch, other_object="intake", other_url_path="",
+        other_base="orders", my_object="orders", my_base="", my_url_path="intake",
+    )
+    assert result["_success"] is False
+    assert result["error_code"] == "LISTENER_ASC_COLLISION"
+    assert result["listener_verify"]["collision_paths"] == ["GET /ws/rest/orders/intake"]
+    assert orchestration.ASC_CROSS_BASE_LISTENER_LOSES in result["error"], result["error"]
+    assert orchestration.ASC_SAME_BASE_SHADOWING not in result["error"], result["error"]
+    assert probe.calls == []
+
+
+def test_a_slash_route_that_cannot_reach_this_path_is_not_reported(registry, monkeypatch):
+    """#158 QA-158-s2r2 O1: the unserved-route warning is about a route that
+    would otherwise have matched this listener's path, not every slash route of
+    every other deployed ASC."""
+    result, probe = _inherited_method_collision_run(
+        registry, monkeypatch, other_object="elsewhere/intake", other_url_path=""
+    )
+    assert result["_success"] is True, result.get("error")
+    assert not [
+        w for w in result["listener_verify"]["warnings"]
+        if "LISTENER_COLLISION_ROUTE_NOT_SERVED" in w
+    ], result["listener_verify"]["warnings"]
+    assert len(probe.calls) == 1
+
+
+def test_asc_collision_skips_a_route_the_platform_never_serves(registry, monkeypatch):
+    """#158 QA-158-s2r1-01: an objectName carrying a slash is never served
+    (measured live: 404 raw and %2F-encoded, through a full verify window), so a
+    route reaching our path that way cannot shadow it. Refusing on it failed a
+    listener that the platform then served normally; it is skipped, and says so."""
+    result, probe = _inherited_method_collision_run(
+        registry, monkeypatch, other_object="orders/intake", other_url_path=""
+    )
+    assert result["_success"] is True, result.get("error")
+    assert result["listener_verify"]["collision_count"] == 0
+    assert any(
+        "LISTENER_COLLISION_ROUTE_NOT_SERVED" in w for w in result["listener_verify"]["warnings"]
+    ), result["listener_verify"]["warnings"]
+    assert len(probe.calls) == 1

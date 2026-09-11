@@ -79,8 +79,7 @@ from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 from ._api_service_paths import (
     ASC_METHOD_RULE,
-    api_service_http_method,
-    compute_asc_endpoint,
+    effective_api_service_route,
 )
 from ._preservation_policy import OwnedPath, PreservationPolicy
 from .connector_builder import (
@@ -515,16 +514,18 @@ class ApiServiceBuilder:
             # override does not pin it. Inherit-dependent routes are
             # collision-checked at analyze/orchestration time where the linked
             # operation is readable.
-            object_name = str(entry.get("object_name") or "").strip()
-            if object_name and method_token:
-                effective_method = api_service_http_method(
-                    method_token, operation_type=None
-                )
-                effective_path = compute_asc_endpoint(
-                    str(config.get("base_url_path") or ""),
-                    object_name,
-                    str(entry.get("url_path") or ""),
-                )
+            unlinked = effective_api_service_route(
+                str(config.get("base_url_path") or ""),
+                {
+                    "http_method": method_token,
+                    "object_name": entry.get("object_name"),
+                    "url_path": entry.get("url_path"),
+                },
+                None,
+            )
+            if unlinked["method_resolved"] and unlinked["path_resolved"]:
+                effective_method = unlinked["method"]
+                effective_path = unlinked["path"]
                 effective = (effective_method, effective_path)
                 if effective in seen_effective:
                     return BuilderValidationError(

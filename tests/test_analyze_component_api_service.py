@@ -322,3 +322,70 @@ def test_budget_exhaustion_flags_instead_of_reading():
     ):
         result = _analyze(_asc_xml(_route(_PROCESS_ID, httpMethod="POST")))
     assert "analysis_budget_exhausted" in result["routes"][0]["flags"]
+
+
+def test_a_slash_object_name_route_is_flagged_not_served():
+    """#158 QA-158-s2r1-01: an explicit objectName carrying a slash is never
+    served (measured live), so the analysis says so and never collision-compares
+    it — even against a route with the same computed path."""
+    reads = {
+        _PROCESS_ID: {"type": "process", "xml": _LISTENER_PROCESS_XML},
+        _OP_ID: {"type": "connector-action", "xml": _WSS_OP_XML},
+    }
+    xml = _asc_xml(
+        _route(_PROCESS_ID, objectName="a/b", httpMethod="POST")
+        + _route(_PROCESS_ID, objectName="a/b", httpMethod="POST")
+    )
+    result = _analyze(xml, reads)
+    for route in result["routes"]:
+        assert "object_name_not_served" in route["flags"]
+        assert "duplicate_effective_path" not in route["flags"]
+    # CONTROL: the same pair without the slash is a served duplicate.
+    flat = _analyze(
+        _asc_xml(
+            _route(_PROCESS_ID, objectName="ab", httpMethod="POST")
+            + _route(_PROCESS_ID, objectName="ab", httpMethod="POST")
+        ),
+        reads,
+    )
+    for route in flat["routes"]:
+        assert "object_name_not_served" not in route["flags"]
+        assert "duplicate_effective_path" in route["flags"]
+
+
+def test_the_served_note_names_every_flag_that_stops_a_route_serving():
+    """#158 QA-158-s2r2-02: the note saying which flags mean "deploys clean but
+    does not serve correctly" was hand-written and left out the flag this slice
+    added. It is generated from the analyzer's classification now. Every flag the
+    analyzer can raise must be classified — read off its source, so a new flag
+    cannot skip the table — and the served note names each not-serving flag with
+    its consequence, and the measured cross-base precedence."""
+    import ast
+    import inspect
+    import textwrap
+
+    from src.boomi_mcp.categories.components import analyze_component as module
+    from src.boomi_mcp.categories.components.wss_route_methods import (
+        ASC_CROSS_BASE_MEASURED_PRECEDENCE,
+    )
+
+    tree = ast.parse(textwrap.dedent(inspect.getsource(module._analyze_api_service)))
+    raised = {
+        node.args[0].value
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "append"
+        and node.args
+        and isinstance(node.args[0], ast.Constant)
+        and isinstance(node.args[0].value, str)
+    }
+    not_serving = set(module._ROUTE_NOT_SERVING_FLAGS)
+    assert not not_serving & module._ROUTE_ANALYSIS_FLAGS
+    classified = not_serving | module._ROUTE_ANALYSIS_FLAGS
+    assert raised == classified, sorted(raised ^ classified)
+
+    note = _analyze(_asc_xml(_route(_PROCESS_ID, objectName="ab", httpMethod="POST")))["note"]
+    for flag, consequence in module._ROUTE_NOT_SERVING_FLAGS.items():
+        assert flag in note and consequence in note, flag
+    assert ASC_CROSS_BASE_MEASURED_PRECEDENCE in note

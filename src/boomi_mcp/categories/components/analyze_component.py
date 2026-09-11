@@ -38,6 +38,44 @@ from .builders._api_service_paths import (
     effective_api_service_route,
     route_refuses_its_input,
 )
+from .wss_route_methods import (
+    ASC_CROSS_BASE_MEASURED_PRECEDENCE,
+    ASC_SAME_BASE_SHADOWING,
+)
+
+
+#: Route flags meaning the route deploys clean but does not serve correctly,
+#: each with what a caller of it gets. The served ``note`` is generated from
+#: this table (#158 QA-158-s2r2-02: a flag added without its note entry served
+#: a note that left it out), and a test requires every flag the analyzer can
+#: raise to be here or in ``_ROUTE_ANALYSIS_FLAGS``.
+_ROUTE_NOT_SERVING_FLAGS: Dict[str, str] = {
+    "not_wss_listen": "the route's process has no WSS Listen start, so calls 404",
+    "duplicate_effective_path": (
+        "another route of this ASC has the same method and path, and the first "
+        "route wins"
+    ),
+    "object_name_not_served": (
+        "its objectName contains '/', which the platform never serves, so calls "
+        "404 (measured #158)"
+    ),
+    "route_refuses_input": (
+        "its method is GET for an operation expecting input, which the platform "
+        "refuses on every call with HTTP 405 (measured #158)"
+    ),
+}
+#: Route flags that report what the analysis could or could not establish, not
+#: a measured runtime consequence.
+_ROUTE_ANALYSIS_FLAGS = frozenset({
+    "analysis_budget_exhausted",
+    "effective_method_unresolved",
+    "effective_path_unresolved",
+    "not_process",
+    "process_missing",
+    "process_unreadable",
+    "wss_operation_not_listen",
+    "wss_operation_unreadable",
+})
 
 
 # ============================================================================
@@ -296,21 +334,21 @@ def _analyze_api_service(
         # comes from the operation's TYPE (measured), so an explicit inputType
         # no longer pins it, and a type outside the platform's vocabulary
         # leaves it unknown even when the operation was read.
-        path_unresolved = wss_op_config is None and not str(
-            overrides.get("object_name") or ""
-        ).strip()
-        method_unresolved = not effective["method"] or (
-            wss_op_config is None and not str(overrides.get("http_method") or "").strip()
-        )
+        path_unresolved = not effective["path_resolved"]
+        method_unresolved = not effective["method_resolved"]
         if path_unresolved:
             flags.append("effective_path_unresolved")
+        elif not effective["served"]:
+            # #158 QA-158-s2r1-01: an objectName with a slash is never served
+            # (measured); the computed path names nothing a caller can reach.
+            flags.append("object_name_not_served")
         if method_unresolved:
             flags.append("effective_method_unresolved")
         elif route_refuses_its_input(effective["method"], effective["input_type"]):
             # A GET route for an operation expecting input: the platform
             # refuses every call to it (HTTP 405, measured #158).
             flags.append("route_refuses_input")
-        if not (path_unresolved or method_unresolved):
+        if not (path_unresolved or method_unresolved or not effective["served"]):
             if effective_key in seen_effective:
                 flags.append("duplicate_effective_path")
                 prior = routes_out[seen_effective[effective_key]]
@@ -343,12 +381,16 @@ def _analyze_api_service(
             "Effective paths are /ws/rest/<base>/<objectName>/<urlPath> with "
             "empty segments omitted, case-verbatim; empty override attributes "
             "inherit from each route's WSS Listen operation. Routes flagged "
-            "not_wss_listen/duplicate_effective_path deploy clean but do not "
-            "serve correctly (within one ASC the first route wins; "
-            "non-listeners 404). Across components, shadowing is per BASE "
-            "urlPath: one deployed ASC serves per base, first-deployed wins "
-            "for the whole component (live-proven 2026-07-05) — keep "
-            "base_url_path unique per environment."
+            + "/".join(_ROUTE_NOT_SERVING_FLAGS)
+            + " deploy clean but do not serve correctly ("
+            + "; ".join(
+                "{0}: {1}".format(flag, consequence)
+                for flag, consequence in _ROUTE_NOT_SERVING_FLAGS.items()
+            )
+            + "). Across components: " + ASC_SAME_BASE_SHADOWING
+            + " — keep base_url_path unique per environment; and "
+            + ASC_CROSS_BASE_MEASURED_PRECEDENCE
+            + "."
         ),
     }
 

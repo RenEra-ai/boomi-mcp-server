@@ -965,3 +965,200 @@ def test_a_listener_operation_is_recognised_by_its_declaration_and_the_refusal_s
     # The served entry carries the same wording a caller receives.
     served = _cited_entry_text("diagnostic.process_ir_reference_listener_operation_invalid")
     assert "operation_mode" in served and "reference_only" in served
+
+
+@pytest.mark.parametrize("alias", ["wss", "web_services", "  WSS  "])
+def test_a_listener_feeding_a_map_serves_its_source_family(alias):
+    """CDX-158-r1-02: the served transform row names the family of the step that
+    FEEDS the map. The projection hand-listed ``source`` and ``connector_call`` as
+    the feeding kinds, so a canonical ``listener -> map_ref`` row served an empty
+    source; the feeding set is now the model's connector-kind set, and an
+    operation-only node's family goes through the builders' resolver, so every
+    accepted alias names the same family."""
+    from boomi_mcp.authoring.derived_flows import SOURCE_TOKEN_BY_FAMILY, derive_transform_flows
+    from boomi_mcp.models.process_component import (
+        ProcessAuthoringUnitAuthoredV1,
+        ProcessComponentEnvelopeAuthoredV1,
+    )
+
+    root = {"name": "Root", "kind": "object", "children": [
+        {"name": "id", "kind": "simple", "data_type": "character", "required": True},
+    ]}
+    components = [
+        IntegrationComponentSpec(key="src", type="profile.json", action="create", name="Src",
+                                 config={"format": "json", "root": root}),
+        IntegrationComponentSpec(key="tgt", type="profile.json", action="create", name="Tgt",
+                                 config={"format": "json", "root": root}),
+        IntegrationComponentSpec(
+            key="map", type="transform.map", action="create", name="Map", depends_on=["src", "tgt"],
+            config={"map_type": "direct", "source_profile_id": "$ref:src",
+                    "target_profile_id": "$ref:tgt",
+                    "field_mappings": [{"source_path": "Root/id", "target_path": "Root/id"}]},
+        ),
+        _spec("wss_op", "connector-action", _wss_config(connector_type=alias)),
+    ]
+    conn, rest_op = _rest_components()
+    components += [conn, rest_op]
+    unit = ProcessAuthoringUnitAuthoredV1(
+        envelope=ProcessComponentEnvelopeAuthoredV1(
+            component_key="proc", name="P", action="create", depends_on=("wss_op", "map", "conn", "op"),
+        ),
+        process_ir=parse_process_ir_v1({"version": "1", "body": {"kind": "sequence", "steps": [
+            {"kind": "listener", "operation_ref": "$ref:wss_op"},
+            {"kind": "map_ref", "map_ref": "$ref:map", "label": "Inbound"},
+            {"kind": "target", "connection_ref": "$ref:conn", "operation_ref": "$ref:op"},
+            {"kind": "stop"},
+        ]}}),
+    )
+    (row,) = derive_transform_flows([unit], components)
+    assert row.source == SOURCE_TOKEN_BY_FAMILY["wss"] == "listen", row.source
+
+
+def test_a_map_in_a_branch_leg_is_fed_by_its_own_path_not_a_sibling_leg():
+    """CDX-158-r2-01: the feeding step is searched on the map's OWN control-flow
+    path. A database source feeds two branch legs, each ``map -> REST target``;
+    in flattened document order the first leg's target precedes the second
+    leg's map, and a search over that order named the second map ``fetch``.
+    Both legs receive the database stream, so both serve ``extract``."""
+    from boomi_mcp.authoring.derived_flows import SOURCE_TOKEN_BY_FAMILY, derive_transform_flows
+    from boomi_mcp.models.process_component import (
+        ProcessAuthoringUnitAuthoredV1,
+        ProcessComponentEnvelopeAuthoredV1,
+    )
+
+    root = {"name": "Root", "kind": "object", "children": [
+        {"name": "id", "kind": "simple", "data_type": "character", "required": True},
+    ]}
+    conn, rest_op = _rest_components()
+    components = [
+        IntegrationComponentSpec(key="src", type="profile.db", action="create", name="Src",
+                                 config={"profile_type": "database.read", "output_fields": [
+                                     {"name": "id", "data_type": "character", "mandatory": True}]}),
+        IntegrationComponentSpec(key="tgt", type="profile.json", action="create", name="Tgt",
+                                 config={"format": "json", "root": root}),
+        IntegrationComponentSpec(key="dbc", type="connector-settings", action="create", name="DB",
+                                 config={"connector_type": "database", "reference_only": True,
+                                         "component_name": "Existing DB"}),
+        IntegrationComponentSpec(key="dbo", type="connector-action", action="create", name="Get",
+                                 depends_on=["dbc", "src"],
+                                 config={"connector_type": "database", "operation_mode": "get",
+                                         "connection_ref_key": "dbc", "read_profile_id": "$ref:src"}),
+        conn, rest_op,
+    ]
+    for key in ("map_a", "map_b"):
+        components.append(IntegrationComponentSpec(
+            key=key, type="transform.map", action="create", name=key, depends_on=["src", "tgt"],
+            config={"map_type": "direct", "source_profile_id": "$ref:src",
+                    "target_profile_id": "$ref:tgt",
+                    "field_mappings": [{"source_path": "id", "target_path": "Root/id"}]},
+        ))
+    target = {"kind": "target", "connection_ref": "$ref:conn", "operation_ref": "$ref:op"}
+    unit = ProcessAuthoringUnitAuthoredV1(
+        envelope=ProcessComponentEnvelopeAuthoredV1(
+            component_key="proc", name="P", action="create",
+            depends_on=("dbc", "dbo", "map_a", "map_b", "conn", "op"),
+        ),
+        process_ir=parse_process_ir_v1({"version": "1", "body": {"kind": "sequence", "steps": [
+            {"kind": "source", "connection_ref": "$ref:dbc", "operation_ref": "$ref:dbo"},
+            {"kind": "branch", "legs": [
+                {"steps": [{"kind": "map_ref", "map_ref": "$ref:map_a", "label": "A"}], "terminal": target},
+                {"steps": [{"kind": "map_ref", "map_ref": "$ref:map_b", "label": "B"}], "terminal": target},
+            ]},
+        ]}}),
+    )
+    rows = derive_transform_flows([unit], components, connector_metadata={"dbc": ("database", None)})
+    assert [(row.name, row.source) for row in rows] == [
+        ("A", SOURCE_TOKEN_BY_FAMILY["database"]),
+        ("B", SOURCE_TOKEN_BY_FAMILY["database"]),
+    ]
+
+
+def _feeding_fixture():
+    """Profiles, one map, a REST connection with GET and PATCH operations, and a
+    database connection with a Get — the shapes of the rich-control and
+    error-handling fixtures, keyed for `derive_transform_flows`."""
+    from boomi_mcp.models.integration_models import IntegrationComponentSpec as Spec
+
+    root = {"name": "Root", "kind": "object", "children": [
+        {"name": "id", "kind": "simple", "data_type": "character", "required": True},
+    ]}
+    rest = lambda key, method: Spec(  # noqa: E731
+        key=key, type="connector-action", action="create", name=key, depends_on=["conn"],
+        config={"connector_type": "rest_client", "method": method, "connection_ref_key": "conn"},
+    )
+    return [
+        Spec(key="src", type="profile.json", action="create", name="Src", config={"format": "json", "root": root}),
+        Spec(key="tgt", type="profile.json", action="create", name="Tgt", config={"format": "json", "root": root}),
+        Spec(key="map_a", type="transform.map", action="create", name="Map", depends_on=["src", "tgt"],
+             config={"map_type": "direct", "source_profile_id": "$ref:src", "target_profile_id": "$ref:tgt",
+                     "field_mappings": [{"source_path": "Root/id", "target_path": "Root/id"}]}),
+        Spec(key="conn", type="connector-settings", action="create", name="REST",
+             config={"connector_type": "rest_client", "reference_only": True, "component_name": "R"}),
+        rest("rest_get", "GET"), rest("rest_patch", "PATCH"),
+        Spec(key="dbc", type="connector-settings", action="create", name="DB",
+             config={"connector_type": "database", "reference_only": True, "component_name": "D"}),
+        Spec(key="dbo", type="connector-action", action="create", name="Get", depends_on=["dbc"],
+             config={"connector_type": "database", "operation_mode": "get", "connection_ref_key": "dbc"}),
+    ]
+
+
+def _one_row(steps):
+    from boomi_mcp.authoring.derived_flows import derive_transform_flows
+    from boomi_mcp.models.process_component import (
+        ProcessAuthoringUnitAuthoredV1,
+        ProcessComponentEnvelopeAuthoredV1,
+    )
+
+    unit = ProcessAuthoringUnitAuthoredV1(
+        envelope=ProcessComponentEnvelopeAuthoredV1(component_key="proc", name="P", action="create"),
+        process_ir=parse_process_ir_v1({"version": "1", "body": {"kind": "sequence", "steps": steps}}),
+    )
+    (row,) = derive_transform_flows(
+        [unit], _feeding_fixture(),
+        connector_metadata={"conn": ("rest", None), "dbc": ("database", None)},
+    )
+    return row
+
+
+def test_a_map_after_a_continue_is_fed_by_the_successful_try_body():
+    """CDX-158-r3-01: in a serialized `try_catch(continue) -> map_ref ->
+    try_catch` chain, the documents reaching the map are the ones the first
+    try body's GET returned — `continue` hands that stream on. The CFG carries
+    it as an ordering edge from the try body's last step."""
+    handler = lambda op, terminal: {  # noqa: E731
+        "kind": "try_catch", "scope": "connector", "retry": {"count": 0},
+        "try_body": {"steps": [{"kind": "connector_call", "operation_ref": op}], "terminal": terminal},
+        "catch_body": {"steps": [{"kind": "notify", "level": "ERROR",
+                                              "message_template": "Failed: meta.base.catcherrorsmessage"}],
+                       "terminal": {"kind": "stop"}},
+    }
+    row = _one_row([
+        handler("$ref:rest_get", {"kind": "continue"}),
+        {"kind": "map_ref", "map_ref": "$ref:map_a"},
+        handler("$ref:rest_patch", {"kind": "stop"}),
+    ])
+    assert row.source == "fetch", row.source
+
+
+def test_a_map_in_a_nested_terminal_is_fed_by_its_containers_steps():
+    """CDX-158-r3-02: a branch leg's database Get feeds a map inside the nested
+    decision that terminates that leg — the container's steps precede its
+    terminal — not the REST call before the branch."""
+    decision = {
+        "kind": "decision", "comparison": "equals",
+        "left": {"value_type": "static", "static_value": "a"},
+        "right": {"value_type": "static", "static_value": "b"},
+        "true_arm": {"steps": [
+            {"kind": "map_ref", "map_ref": "$ref:map_a"},
+            {"kind": "connector_call", "operation_ref": "$ref:rest_patch"},
+        ], "terminal": {"kind": "stop"}},
+        "false_arm": {"steps": [], "terminal": {"kind": "stop"}},
+    }
+    row = _one_row([
+        {"kind": "connector_call", "operation_ref": "$ref:rest_get"},
+        {"kind": "branch", "legs": [
+            {"steps": [{"kind": "connector_call", "operation_ref": "$ref:dbo"}], "terminal": decision},
+            {"steps": [{"kind": "message", "text": "t"}], "terminal": {"kind": "stop"}},
+        ]},
+    ])
+    assert row.source == "extract", row.source

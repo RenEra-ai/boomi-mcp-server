@@ -580,7 +580,7 @@ def _uncallable_asc_route_issue(parameters) -> Optional[str]:
     # predicate confirms makes the route callable (QA-158-r6-01) — this preset
     # cannot take input type 'none', so that remedy is never offered.
     cause = (
-        f"asc_wrapper.http_method {explicit!r} publishes the listener on GET"
+        f"asc_wrapper.http_method {explicit!r} publishes the listener on GET,"
         if explicit
         else "asc_wrapper publishes the listener on GET — what an all-inherit route "
         f"serves for operation_type {parameters.listener.operation_type!r} —"

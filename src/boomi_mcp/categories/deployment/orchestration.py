@@ -60,6 +60,11 @@ from ..execution import execute_process_action  # test-run execution (issue #63)
 from ..monitoring import monitor_platform_action  # test-run log/artifact retrieval (issue #63)
 from ..shared_resources import manage_shared_resources_action  # listener apiType/auth preflight (M6 #12)
 from ..components._shared import component_get_xml  # listener collision check component reads (M6 #12)
+from ..components.wss_route_methods import (  # measured ASC path precedence, served (#158)
+    ASC_CROSS_BASE_LISTENER_LOSES,
+    ASC_CROSS_BASE_MEASURED_PRECEDENCE,
+    ASC_SAME_BASE_SHADOWING,
+)
 from ..components.analyze_component import (  # ASC route/XML extraction shared with the analyzer (M6.1 #133)
     _extract_wss_listen_binding,
     _extract_wss_operation_config,
@@ -1779,11 +1784,22 @@ def _run_listener_verify_stage(
     #    (routes do NOT merge across ASCs sharing a base; live-proven A/B/A
     #    2026-07-05: same component 404'd on base "" while a fixture ASC held
     #    it, served 200 on a distinct base). Read each other active deployed
-    #    webservice component and flag ANY equal base (case-verbatim); the
-    #    per-route effective method+path comparison is kept as a defensive
-    #    second signal (it catches interior-slash equivalence across bases).
+    #    webservice component and flag ANY equal base (case-verbatim). A route
+    #    of an ASC on a DIFFERENT base can still reach our path (an objectName
+    #    plus a urlPath split); #158 measured that the more specific base serves
+    #    it in either deploy order (QA s2r2, s2r3). So when ours is the more
+    #    specific base it is a warning naming the route that loses the path, and
+    #    when the other's is, ours is the loser and the verify refuses. #158
+    #    QA-158-s2r1-01 measured that an objectName carrying a slash is never
+    #    served, so such a route is never compared.
     collision_count = 0
     collision_paths: List[str] = []
+    base_collided = False
+    route_collided = False
+
+    def _base_depth(base: str) -> int:
+        return len([segment for segment in (base or "").split("/") if segment])
+
     _COLLISION_SCAN_CAP = 25
     try:
         deployments_result = manage_deployment_action(
@@ -1837,6 +1853,7 @@ def _run_listener_verify_stage(
                 )
                 if other_base == my_base:
                     collision_count += 1
+                    base_collided = True
                     base_key = (
                         f"BASE /ws/rest/{my_base or ''} (component {comp_id})"
                     )
@@ -1850,9 +1867,14 @@ def _run_listener_verify_stage(
                     }
                     wss_op_config = None
                     route_pid = route.get("process_id")
-                    needs_op = not str(overrides.get("object_name") or "").strip() or not (
-                        str(overrides.get("http_method") or "").strip()
-                        or str(overrides.get("input_type") or "").strip()
+                    # #158 CDX-158-r1-01: asked of the resolver — only an
+                    # explicit http_method pins the method now, so an inherited
+                    # one always needs the linked operation's type.
+                    unlinked = effective_api_service_route(
+                        parsed_asc.get("base_url_path") or "", overrides, None
+                    )
+                    needs_op = not (
+                        unlinked["method_resolved"] and unlinked["path_resolved"]
                     )
                     if route_pid and needs_op:
                         try:
@@ -1876,10 +1898,35 @@ def _run_listener_verify_stage(
                         parsed_asc.get("base_url_path") or "", overrides, wss_op_config
                     )
                     other_key = f"{effective['method']} {effective['path']}"
-                    if other_key == my_route_key:
-                        collision_count += 1
-                        if other_key not in collision_paths:
-                            collision_paths.append(other_key)
+                    if other_key != my_route_key:
+                        continue
+                    if not effective["served"]:
+                        # #158 QA-158-s2r1-01: the platform never serves a route
+                        # whose objectName has a slash (measured), so it cannot
+                        # take ours — refusing on it failed a working listener.
+                        stage.warnings.append(
+                            f"[LISTENER_COLLISION_ROUTE_NOT_SERVED] ASC {comp_id} route "
+                            f"objectName {effective['object_name']!r} spells this "
+                            "listener's path, but contains '/', which the platform "
+                            "does not serve; it was not treated as a collision."
+                        )
+                        continue
+                    if _base_depth(my_base) > _base_depth(other_base):
+                        # Ours is the more specific base, which serves in either
+                        # deploy order (measured): the other route loses the path.
+                        stage.warnings.append(
+                            f"[LISTENER_ASC_ROUTE_OVERLAP] ASC {comp_id} (base "
+                            f"{other_base!r}) also routes {other_key}. Measured: "
+                            + ASC_CROSS_BASE_MEASURED_PRECEDENCE
+                            + " — here that is this listener's ASC, so that "
+                            "ASC's route stops receiving this path while this "
+                            "listener is deployed."
+                        )
+                        continue
+                    collision_count += 1
+                    route_collided = True
+                    if other_key not in collision_paths:
+                        collision_paths.append(other_key)
         else:
             my_path_key = f"{operation_type.lower()}{object_name}".casefold()
             other_process_ids = []
@@ -1945,16 +1992,17 @@ def _run_listener_verify_stage(
     stage.collision_paths = collision_paths
     if collision_count:
         if asc_mode:
+            causes = []
+            if base_collided:
+                causes.append("Same base: " + ASC_SAME_BASE_SHADOWING + ".")
+            if route_collided:
+                causes.append("Same path, other base: " + ASC_CROSS_BASE_LISTENER_LOSES + ".")
             return _fail(
                 LISTENER_ASC_COLLISION,
                 f"{collision_count} collision(s) with other deployed API Service "
-                f"Component(s) in this environment ({collision_paths}). Shadowing "
-                "granularity is the ASC's BASE urlPath: the platform binds ONE "
-                "deployed webservice component per base and the FIRST-deployed "
-                "serves — a later same-base ASC is shadowed IN ITS ENTIRETY, even "
-                "for routes with unique paths (live-proven 2026-07-05); "
-                "undeploying the winner does NOT activate the loser. Choose a "
-                "distinct base_url_path or undeploy the colliding ASC.",
+                f"Component(s) in this environment ({collision_paths}). "
+                + " ".join(causes)
+                + " Choose a distinct base_url_path or undeploy the colliding ASC.",
                 endpoint_path=endpoint_path,
                 collision_count=collision_count,
                 collision_paths=collision_paths,
@@ -4091,13 +4139,12 @@ def _next_step_for_failure(error: OrchestrateDeployError, failed_stage: str) -> 
             )
         if code == LISTENER_ASC_COLLISION:
             return (
-                "Another deployed API Service Component collides with this one. The "
-                "platform binds ONE deployed webservice component per BASE urlPath — "
-                "the first-deployed serves and a later same-base ASC is shadowed in "
-                "its entirety, even for routes with unique paths (undeploying the "
-                "winner does not activate the loser). Give this ASC a distinct "
-                "base_url_path (asc_wrapper.base_url_path) or undeploy the colliding "
-                "ASC, then re-run."
+                "Another deployed API Service Component collides with this one: "
+                "either it shares this ASC's base — "
+                + ASC_SAME_BASE_SHADOWING
+                + " — or " + ASC_CROSS_BASE_LISTENER_LOSES + ". Give this ASC a "
+                "distinct base_url_path (asc_wrapper.base_url_path) or undeploy the "
+                "colliding ASC, then re-run."
             )
         if code == LISTENER_APITYPE_UNSUPPORTED:
             return (

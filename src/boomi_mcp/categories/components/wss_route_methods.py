@@ -1,4 +1,5 @@
-"""The HTTP method a WSS listener route is served on — the measured platform facts.
+"""How the platform serves a WSS listener route — the measured facts: the HTTP
+method a route is served on, and which API Service answers a path two reach.
 
 A leaf module with no package imports, so a caller that must stay importable
 without the builders package (``categories.meta_tools`` serves these texts at
@@ -76,11 +77,41 @@ ASC_GET_WITH_INPUT_RULE = (
 ASC_BODY_METHOD_CHOICES = _clauses({"POST", "PUT", "DELETE", "PATCH"})
 
 
+# Which deployed API Service Component answers a /ws/rest path two of them
+# reach — as served text, one copy each, stating only what was measured.
+#: Equal base urlPath (#133, live-proven A/B/A 2026-07-05).
+ASC_SAME_BASE_SHADOWING = (
+    "the platform binds ONE deployed webservice component per BASE urlPath — "
+    "the first-deployed serves and a later same-base ASC is shadowed in its "
+    "entirety, even for routes with unique paths (undeploying the winner does "
+    "not activate the loser)"
+)
+#: Different bases, one path, measured in BOTH deploy orders (#158): with the
+#: more specific base deployed second it served 4/4 probes and undeploying it
+#: handed the path back 8/8 (QA s2r2); deployed first it served 11/11 (QA s2r3).
+ASC_CROSS_BASE_MEASURED_PRECEDENCE = (
+    "when API Service Components on different bases reach one path, the one on "
+    "the more specific base serves it in either deploy order, and the other "
+    "ASC's route receives none of it while that one is deployed (undeploying "
+    "the more specific one handed the path back)"
+)
+#: The same fact from the side of a listener whose ASC is on the LESS specific
+#: base: the reason its verify refuses.
+ASC_CROSS_BASE_LISTENER_LOSES = (
+    "a route of another deployed ASC on a MORE specific base reaches this "
+    "listener's path — " + ASC_CROSS_BASE_MEASURED_PRECEDENCE + " — so this "
+    "listener's route receives none of it while that ASC is deployed"
+)
+
+
 __all__ = [
     "ASC_BODY_METHOD_CHOICES",
+    "ASC_CROSS_BASE_LISTENER_LOSES",
+    "ASC_CROSS_BASE_MEASURED_PRECEDENCE",
     "ASC_GET_WITH_INPUT_RULE",
     "ASC_METHOD_BY_OPERATION_TYPE",
     "ASC_METHOD_RULE",
+    "ASC_SAME_BASE_SHADOWING",
     "BARE_METHOD_RULE",
     "DEFAULT_WSS_OPERATION_TYPE",
 ]

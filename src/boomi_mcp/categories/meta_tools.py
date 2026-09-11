@@ -22,8 +22,10 @@ from ..errors import (
 )
 from ..models.integration_models import IntegrationSpecV1
 from .components.wss_route_methods import (
+    ASC_CROSS_BASE_MEASURED_PRECEDENCE,
     ASC_GET_WITH_INPUT_RULE,
     ASC_METHOD_RULE,
+    ASC_SAME_BASE_SHADOWING,
     BARE_METHOD_RULE,
 )
 from ..kb.design_doctrine import (
@@ -4134,16 +4136,16 @@ _COMPONENT_CREATE_API_SERVICE = {
         "all-inherit route serves /ws/rest/{WSS-op objectName}."
     ),
     "collision_note": (
-        "Shadowing granularity is the ASC's BASE urlPath (live-proven "
-        "2026-07-05): the platform binds ONE deployed webservice component "
-        "per base — the FIRST-deployed serves and a later same-base ASC is "
-        "shadowed IN ITS ENTIRETY (even for routes with unique paths); "
-        "undeploying the winner does NOT activate the loser. Give every ASC "
-        "a distinct base_url_path (the default '' collides with any other "
-        "default-base ASC). orchestrate_deploy's listener_verify "
-        "collision-scans active webservice deployments by base (plus "
-        "per-route effective paths as a secondary signal; never live "
-        "pre-probes — the cloud perimeter answers a uniform 401 "
+        "Same base (live-proven 2026-07-05): " + ASC_SAME_BASE_SHADOWING
+        + ". Give every ASC a distinct base_url_path (the default '' collides "
+        "with any other default-base ASC). Different bases (#158, measured in "
+        "both deploy orders): " + ASC_CROSS_BASE_MEASURED_PRECEDENCE
+        + ". orchestrate_deploy's listener_verify collision-scans active "
+        "webservice deployments: an equal base refuses LISTENER_ASC_COLLISION; "
+        "another ASC's route reaching the listener's path warns "
+        "LISTENER_ASC_ROUTE_OVERLAP when the listener's ASC is on the more "
+        "specific base, and refuses LISTENER_ASC_COLLISION when the other's is; "
+        "never live pre-probes (the cloud perimeter answers a uniform 401 "
         "pre-registration)."
     ),
     "raw_xml_exposed": False,

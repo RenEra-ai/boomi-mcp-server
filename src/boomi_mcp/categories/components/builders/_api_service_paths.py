@@ -181,7 +181,7 @@ def effective_api_service_route(
     base_url_path: Any,
     route_overrides: Dict[str, Any],
     wss_operation_config: Optional[Dict[str, Any]] = None,
-) -> Dict[str, str]:
+) -> Dict[str, Any]:
     """Resolve an ASC route's EFFECTIVE method + served path.
 
     ``route_overrides`` uses the builder's snake_case route keys
@@ -193,7 +193,9 @@ def effective_api_service_route(
     route ``url_path`` contributes no path suffix. An inherited method comes
     from the operation TYPE (#158), never from the input type. Returns
     ``{method, path, object_name, input_type, output_type}`` with the path
-    computed by :func:`compute_asc_endpoint`.
+    computed by :func:`compute_asc_endpoint`, plus ``method_resolved`` /
+    ``path_resolved``: whether each is determined by what was given (a caller
+    resolving WITHOUT the operation learns whether it still needs it).
     """
     op = wss_operation_config or {}
 
@@ -207,8 +209,9 @@ def effective_api_service_route(
     input_type = _inherit("input_type", "input_type")
     output_type = _inherit("output_type", "output_type")
     url_path = str(route_overrides.get("url_path") or "").strip()
+    explicit_method = str(route_overrides.get("http_method") or "").strip()
     method = api_service_http_method(
-        route_overrides.get("http_method"), operation_type=op.get("operation_type")
+        explicit_method, operation_type=op.get("operation_type")
     )
     return {
         "method": method,
@@ -216,6 +219,21 @@ def effective_api_service_route(
         "object_name": object_name,
         "input_type": input_type,
         "output_type": output_type,
+        # THE one answer to "is this knowable without the linked operation?"
+        # (#158 CDX-158-r1-01). Only an explicit http_method pins the method —
+        # an inherited one comes from the operation's TYPE — and only an
+        # explicit object_name pins the path. Three callers used to encode this
+        # separately, and the collision scan kept the retired rule (an
+        # input_type override "pinning" the method) after the other two moved.
+        "method_resolved": bool(explicit_method) or (
+            wss_operation_config is not None and bool(method)
+        ),
+        "path_resolved": bool(object_name),
+        # #158 QA-158-s2r1-01, measured: a route whose objectName carries a
+        # slash is never served (404, raw and %2F-encoded, through a full
+        # verify window), so its computed path names nothing a caller can reach
+        # — and nothing it can collide with.
+        "served": "/" not in object_name,
     }
 
 

@@ -109,7 +109,7 @@
     {
       "census": "component_xml_write",
       "count": 1,
-      "evidence_line": 665,
+      "evidence_line": 707,
       "form": "component.update_component_raw(...)",
       "path": "src/boomi_mcp/categories/components/analyze_component.py",
       "row_id": "WR-ab01f1b9",
@@ -235,7 +235,7 @@
     {
       "census": "component_xml_write",
       "count": 1,
-      "evidence_line": 5922,
+      "evidence_line": 5924,
       "form": "svc.send_request(...)",
       "path": "src/boomi_mcp/categories/meta_tools.py",
       "row_id": "WR-ff78566d",
@@ -298,7 +298,7 @@
     {
       "census": "http_client_call",
       "count": 1,
-      "evidence_line": 1480,
+      "evidence_line": 1485,
       "form": "request.urlopen -> URLOPEN <dynamic> (hand-rolled HTTP)",
       "path": "src/boomi_mcp/categories/deployment/orchestration.py",
       "row_id": "HT-aabbaba4",
@@ -1036,7 +1036,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 907,
+      "evidence_line": 949,
       "form": "merge_versions(...) [legacy-bearing, src/boomi_mcp/categories/components/analyze_component.py]",
       "path": "src/boomi_mcp/categories/components/analyze_component.py",
       "row_id": "LT-5cb7e6d8",
@@ -1270,7 +1270,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 2,
-      "evidence_line": 2071,
+      "evidence_line": 2119,
       "form": "_listener_probe(...) [legacy-bearing, src/boomi_mcp/categories/deployment/orchestration.py]",
       "path": "src/boomi_mcp/categories/deployment/orchestration.py",
       "row_id": "LT-063d5fb8",
@@ -1279,7 +1279,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 5393,
+      "evidence_line": 5440,
       "form": "_run_listener_verify_stage(...) [legacy-bearing, src/boomi_mcp/categories/deployment/orchestration.py]",
       "path": "src/boomi_mcp/categories/deployment/orchestration.py",
       "row_id": "LT-6549f556",
@@ -1900,7 +1900,7 @@
     {
       "census": "process_kind_producer",
       "count": 2,
-      "evidence_line": 7750,
+      "evidence_line": 7752,
       "form": "dict-literal process_kind='database_to_api_sync'",
       "path": "src/boomi_mcp/categories/meta_tools.py",
       "row_id": "PP-afb1406e",
@@ -1909,7 +1909,7 @@
     {
       "census": "process_kind_producer",
       "count": 2,
-      "evidence_line": 8616,
+      "evidence_line": 8618,
       "form": "dict-literal process_kind='sync_pipeline'",
       "path": "src/boomi_mcp/categories/meta_tools.py",
       "row_id": "PP-9797a75e",
@@ -1918,7 +1918,7 @@
     {
       "census": "process_kind_producer",
       "count": 2,
-      "evidence_line": 8483,
+      "evidence_line": 8485,
       "form": "dict-literal process_kind='wrapper_subprocess'",
       "path": "src/boomi_mcp/categories/meta_tools.py",
       "row_id": "PP-67bfa71b",
@@ -2953,7 +2953,7 @@
     {
       "census": "unclassified_reference",
       "count": 5,
-      "evidence_line": 8067,
+      "evidence_line": 8069,
       "form": "'process_kind' (unclassified selector literal)",
       "path": "src/boomi_mcp/categories/meta_tools.py",
       "row_id": "UR-10de511e",
@@ -4063,7 +4063,7 @@
     {
       "census": "component_xml_write",
       "disposition": "WRT-analyze-component-merge: REJECT when the target is a process OR the source/merged root is a process — the merged root IS the source root, so a target-only check never sees a process-root source over a non-process target.",
-      "evidence_line": 665,
+      "evidence_line": 707,
       "forms": [
         "component.update_component_raw(...)"
       ],
@@ -4221,7 +4221,7 @@
     {
       "census": "component_xml_write",
       "disposition": "WRT-raw-api-component: ONE canonical endpoint parser feeds classification, ID extraction AND transport; the reserved literal `bulk` is matched BEFORE the `<id>` arm and is never a componentId; every update-shaped call runs the two-sided process check.",
-      "evidence_line": 5922,
+      "evidence_line": 5924,
       "forms": [
         "svc.send_request(...)"
       ],
@@ -4312,7 +4312,7 @@
     {
       "census": "http_client_call",
       "disposition": "WRT-external-transport-listener-probe: unchanged — the URL comes from the listener's endpoint, never from a Component route.",
-      "evidence_line": 1480,
+      "evidence_line": 1485,
       "forms": [
         "request.urlopen -> URLOPEN <dynamic> (hand-rolled HTTP)"
       ],
@@ -4766,7 +4766,7 @@
     {
       "census": "legacy_transitive_call",
       "disposition": "follow the callee's row; this is an edge, not a site",
-      "evidence_line": 907,
+      "evidence_line": 949,
       "forms": [
         "merge_versions(...) [legacy-bearing, src/boomi_mcp/categories/components/analyze_component.py]"
       ],
@@ -4996,7 +4996,7 @@
     {
       "census": "legacy_transitive_call",
       "disposition": "follow the callee's row; this is an edge, not a site",
-      "evidence_line": 2071,
+      "evidence_line": 2119,
       "forms": [
         "_listener_probe(...) [legacy-bearing, src/boomi_mcp/categories/deployment/orchestration.py]"
       ],
@@ -5009,7 +5009,7 @@
     {
       "census": "legacy_transitive_call",
       "disposition": "follow the callee's row; this is an edge, not a site",
-      "evidence_line": 5393,
+      "evidence_line": 5440,
       "forms": [
         "_run_listener_verify_stage(...) [legacy-bearing, src/boomi_mcp/categories/deployment/orchestration.py]"
       ],
@@ -5534,7 +5534,7 @@
     {
       "census": "process_kind_producer",
       "disposition": "retract the served legacy guidance / guard the raw route",
-      "evidence_line": 7750,
+      "evidence_line": 7752,
       "forms": [
         "dict-literal process_kind='database_to_api_sync'",
         "dict-literal process_kind='sync_pipeline'",
@@ -6335,7 +6335,7 @@
     {
       "census": "unclassified_reference",
       "disposition": "retract the served legacy guidance / guard the raw route",
-      "evidence_line": 8067,
+      "evidence_line": 8069,
       "forms": [
         "'process_kind' (unclassified selector literal)"
       ],
@@ -12929,14 +12929,14 @@
     },
     {
       "artifact_id": "SS-SCHEMA-TEMPLATES:resource_type=component|operation=create|component_type=webservice",
-      "canonical_length": 6456,
+      "canonical_length": 6919,
       "producer": "meta_tools.get_schema_template_action(...)",
       "selector": "resource_type=component|operation=create|component_type=webservice",
-      "sha256": "ea772849fd025dda71aa6197bc3f124481554c82d81f523560843604d26ce372",
+      "sha256": "f6ec7d6e3489ba9ae8650f47518721cdf10708415836aac043a8b28bc78c05f9",
       "surface_class": "SS-SCHEMA-TEMPLATES",
       "value": {
         "_success": true,
-        "collision_note": "Shadowing granularity is the ASC's BASE urlPath (live-proven 2026-07-05): the platform binds ONE deployed webservice component per base — the FIRST-deployed serves and a later same-base ASC is shadowed IN ITS ENTIRETY (even for routes with unique paths); undeploying the winner does NOT activate the loser. Give every ASC a distinct base_url_path (the default '' collides with any other default-base ASC). orchestrate_deploy's listener_verify collision-scans active webservice deployments by base (plus per-route effective paths as a secondary signal; never live pre-probes — the cloud perimeter answers a uniform 401 pre-registration).",
+        "collision_note": "Same base (live-proven 2026-07-05): the platform binds ONE deployed webservice component per BASE urlPath — the first-deployed serves and a later same-base ASC is shadowed in its entirety, even for routes with unique paths (undeploying the winner does not activate the loser). Give every ASC a distinct base_url_path (the default '' collides with any other default-base ASC). Different bases (#158, measured in both deploy orders): when API Service Components on different bases reach one path, the one on the more specific base serves it in either deploy order, and the other ASC's route receives none of it while that one is deployed (undeploying the more specific one handed the path back). orchestrate_deploy's listener_verify collision-scans active webservice deployments: an equal base refuses LISTENER_ASC_COLLISION; another ASC's route reaching the listener's path warns LISTENER_ASC_ROUTE_OVERLAP when the listener's ASC is on the more specific base, and refuses LISTENER_ASC_COLLISION when the other's is; never live pre-probes (the cloud perimeter answers a uniform 401 pre-registration).",
         "component_type": "webservice",
         "defaults": {
           "component_type": "webservice",
@@ -41364,7 +41364,7 @@
       "legacy_excerpt": {},
       "producer": "meta_tools.get_schema_template_action(...) [all axes]",
       "selector": "walked_surface_digest",
-      "sha256": "cc7a3960a6577200ef143315635b38d250fa795009360ddc0bbcb81d2d933224",
+      "sha256": "d7ac231f63c4026c5441707c7662f12d44d8f11fbae05c0f7f6e41b9955673bf",
       "surface_class": "SS-SCHEMA-TEMPLATES",
       "value": {
         "resource_type=component": "55ba0a46f10742a5bfa269767c7ba040532f5d7900c7e56953f8e57469ceecf3",
@@ -41494,7 +41494,7 @@
         "resource_type=component|operation=create|component_type=tradingpartner": "59949c98576372ef96e08b9dabdbab9bab440054271caee6e1ea8032f7da5aad",
         "resource_type=component|operation=create|component_type=transform.function": "59949c98576372ef96e08b9dabdbab9bab440054271caee6e1ea8032f7da5aad",
         "resource_type=component|operation=create|component_type=transform.map": "cb192b0ed5b085696f24375d529b5b1b4b4d0a197d70fb5a1f1c84a7081b011b",
-        "resource_type=component|operation=create|component_type=webservice": "ea772849fd025dda71aa6197bc3f124481554c82d81f523560843604d26ce372",
+        "resource_type=component|operation=create|component_type=webservice": "f6ec7d6e3489ba9ae8650f47518721cdf10708415836aac043a8b28bc78c05f9",
         "resource_type=component|operation=create|component_type=webservice.external": "59949c98576372ef96e08b9dabdbab9bab440054271caee6e1ea8032f7da5aad",
         "resource_type=component|operation=create|component_type=xslt": "59949c98576372ef96e08b9dabdbab9bab440054271caee6e1ea8032f7da5aad",
         "resource_type=component|operation=safe_edit": "ffabfc9f56ceacb2cc12244f245870a0af06a86e1b6468f0c31081cfda4e5a65",

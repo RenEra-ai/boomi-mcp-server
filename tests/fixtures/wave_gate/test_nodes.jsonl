@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 12256, "minimum_collected": 12256, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 12270, "minimum_collected": 12270, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -12333,3 +12333,17 @@
 {"kind": "test", "id": "pytest-012332", "node_id": "tests/test_sync_pipeline_adapter_cutover.py::test_registry_listener_pointers_are_operation_only", "state": "active"}
 {"kind": "test", "id": "pytest-012333", "node_id": "tests/test_wave_gate_goldens.py::test_golden_manifest_row[golden-000077]", "state": "active"}
 {"kind": "test", "id": "pytest-012334", "node_id": "tests/test_wave_gate_goldens.py::test_golden_manifest_row[golden-000078]", "state": "active"}
+{"kind": "test", "id": "pytest-012335", "node_id": "tests/test_analyze_component_api_service.py::test_a_slash_object_name_route_is_flagged_not_served", "state": "active"}
+{"kind": "test", "id": "pytest-012336", "node_id": "tests/test_analyze_component_api_service.py::test_the_served_note_names_every_flag_that_stops_a_route_serving", "state": "active"}
+{"kind": "test", "id": "pytest-012337", "node_id": "tests/test_issue_158_wss_identity.py::test_a_listener_feeding_a_map_serves_its_source_family[wss]", "state": "active"}
+{"kind": "test", "id": "pytest-012338", "node_id": "tests/test_issue_158_wss_identity.py::test_a_listener_feeding_a_map_serves_its_source_family[web_services]", "state": "active"}
+{"kind": "test", "id": "pytest-012339", "node_id": "tests/test_issue_158_wss_identity.py::test_a_listener_feeding_a_map_serves_its_source_family[  WSS  ]", "state": "active"}
+{"kind": "test", "id": "pytest-012340", "node_id": "tests/test_issue_158_wss_identity.py::test_a_map_in_a_branch_leg_is_fed_by_its_own_path_not_a_sibling_leg", "state": "active"}
+{"kind": "test", "id": "pytest-012341", "node_id": "tests/test_issue_158_wss_identity.py::test_a_map_after_a_continue_is_fed_by_the_successful_try_body", "state": "active"}
+{"kind": "test", "id": "pytest-012342", "node_id": "tests/test_issue_158_wss_identity.py::test_a_map_in_a_nested_terminal_is_fed_by_its_containers_steps", "state": "active"}
+{"kind": "test", "id": "pytest-012343", "node_id": "tests/test_issue_158_wss_route_methods.py::test_the_resolver_is_the_one_answer_to_what_needs_the_operation", "state": "active"}
+{"kind": "test", "id": "pytest-012344", "node_id": "tests/test_issue_158_wss_route_methods.py::test_the_served_asc_precedence_texts_are_the_measured_ones", "state": "active"}
+{"kind": "test", "id": "pytest-012345", "node_id": "tests/test_orchestration_listener_verify.py::test_asc_collision_resolves_an_inherited_method_from_the_linked_operation", "state": "active"}
+{"kind": "test", "id": "pytest-012346", "node_id": "tests/test_orchestration_listener_verify.py::test_a_cross_base_overlap_from_a_more_specific_base_refuses", "state": "active"}
+{"kind": "test", "id": "pytest-012347", "node_id": "tests/test_orchestration_listener_verify.py::test_a_slash_route_that_cannot_reach_this_path_is_not_reported", "state": "active"}
+{"kind": "test", "id": "pytest-012348", "node_id": "tests/test_orchestration_listener_verify.py::test_asc_collision_skips_a_route_the_platform_never_serves", "state": "active"}
