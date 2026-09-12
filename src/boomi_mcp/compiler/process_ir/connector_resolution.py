@@ -915,6 +915,9 @@ def validate_connector_calls(cfg: SemanticCfgV1, symbols: SymbolTableV1) -> None
 __all__ = [
     "ConnectorCallBindingV1",
     "LISTENER_ACTION",
+    # The served revision's listener oracle reads this set through the module
+    # (#158 CDX-158-r9-01), so it is part of this module's public surface.
+    "PROFILE_COMPONENT_TYPES",
     "is_listener_operation_symbol",
     "listener_operation_symbol",
     "profile_bound_input_types",

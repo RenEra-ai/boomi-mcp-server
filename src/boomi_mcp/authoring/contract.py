@@ -1037,16 +1037,31 @@ def _listener_inbound_behaviour_oracle() -> Dict[str, Any]:
     ):
         cases["recognition-" + label] = _verdict("$ref:op", (_symbol(**overrides),), None)
     # The inbound half: every input type the WSS builder admits, against every
-    # requested contract, with the binding bound / unbound / bound to a
-    # component that is not a profile.
+    # requested contract, with the binding unbound, bound to EACH profile type
+    # the resolver accepts, bound to a component that is not one, or a literal
+    # id. The bound cases are enumerated from the runtime set rather than
+    # sampled (#158 CDX-158-r9-01: one sampled type left a change to any other
+    # member invisible — acceptance moved and no verdict did).
+    profile_types = sorted(module.PROFILE_COMPONENT_TYPES)
+    not_a_profile = next(
+        candidate
+        for candidate in ("transform.map", "connector-settings", "process")
+        if candidate not in module.PROFILE_COMPONENT_TYPES
+    )
     for input_type in sorted(_WSS_INPUT_TYPES):
         for inbound in inbound_options:
-            for binding, extra in (
-                ("unbound", ()),
-                ("profile", (_profile("$ref:profile", "profile.json"),)),
-                ("not-a-profile", (_profile("$ref:profile", "transform.map"),)),
-                ("literal-id", ()),
-            ):
+            bindings = (
+                [("unbound", ())]
+                + [
+                    ("profile-" + profile_type, (_profile("$ref:profile", profile_type),))
+                    for profile_type in profile_types
+                ]
+                + [
+                    ("not-a-profile", (_profile("$ref:profile", not_a_profile),)),
+                    ("literal-id", ()),
+                ]
+            )
+            for binding, extra in bindings:
                 profile_ref = (
                     "b1e0f2a4-0000-4000-8000-000000000001"
                     if binding == "literal-id"

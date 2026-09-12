@@ -4133,11 +4133,21 @@ def test_the_compiler_revision_covers_the_listener_inbound_contract():
         assert any(input_type in key for key in cases), input_type
 
     # Each authority the rule consults, perturbed on BOTH module objects the
-    # suite can hold (bare and `src.`-prefixed), moves the served revision.
-    for name, replacement in (
+    # suite can hold (bare and `src.`-prefixed), moves the served revision —
+    # and, for a set, dropping ANY SINGLE MEMBER does (#158 CDX-158-r9-01: the
+    # oracle sampled one profile type, so a change to any other member moved
+    # acceptance with every verdict and the digest unchanged).
+    members = [
+        ("PROFILE_COMPONENT_TYPES", frozenset(cr.PROFILE_COMPONENT_TYPES - {one}))
+        for one in sorted(cr.PROFILE_COMPONENT_TYPES)
+    ] + [
+        ("profile_bound_input_types", staticmethod(lambda: frozenset()))
+    ]
+    assert len(members) > 2, members
+    for name, replacement in members + [
         ("profile_bound_input_types", staticmethod(lambda: frozenset())),
         ("PROFILE_COMPONENT_TYPES", frozenset()),
-    ):
+    ]:
         original = (getattr(cr, name), getattr(cr_src, name))
         value = replacement.__func__ if isinstance(replacement, staticmethod) else replacement
         try:

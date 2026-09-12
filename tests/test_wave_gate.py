@@ -1838,6 +1838,20 @@ def _wss_route_method_names():
     return frozenset(module.__all__)
 
 
+def _listener_resolution_names():
+    """The listener-resolution authorities a #158 row names, from the module's exports.
+
+    Asked of the module (`__all__`) rather than hand-listed, like
+    `_wss_route_method_names`: these are compiler authorities the served
+    revision projects, not diagnostics, and a row recording that the projection
+    missed one has to be able to name it.
+    """
+    import importlib
+
+    module = importlib.import_module("boomi_mcp.compiler.process_ir.connector_resolution")
+    return frozenset(name for name in module.__all__ if name.isupper())
+
+
 _LEDGER_NON_DIAGNOSTIC_TOKENS = frozenset({
     "BLIND",
     # GIT ENVIRONMENT VARIABLES, named because the archiver's index snapshot has to
@@ -2645,6 +2659,7 @@ def test_diagnostic_codes_named_in_the_audit_ledger_exist():
             - _served_builder_error_codes()
             - _served_orchestration_error_codes()
             - _wss_route_method_names()
+            - _listener_resolution_names()
         )
 
     # The two forms are scanned SEPARATELY, not merged, so each can be asserted on
@@ -2931,6 +2946,7 @@ def test_diagnostic_codes_named_in_the_audit_ledger_exist():
             - _builder_codes
             - _orchestration_codes
             - _wss_route_method_names()
+            - _listener_resolution_names()
         )
         assert unknown_here == set(), (
             "{0} names diagnostic codes the gate cannot emit: {1}".format(
