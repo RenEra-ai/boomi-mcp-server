@@ -185,6 +185,59 @@ outcome and rationale.
 | CK-5 | Stage-2 repo commit review | window 3, evaluation 2 / cumulative 8 (batch 6 + QA s2r6 + round 7; batch 7 + QA s2r7 + round 8) | `79b1660` (clean; full non-KB suite on this tree: 12258 passed, 19 skipped) | 0 | 0 | resolved: overlap-probe-schedule-hand-model (CDX-158-r5-01a, CDX-158-r6-01, CDX-158-r7-01), on the readback's deadline query and the invariant that enumerates the schedule's whole case space; recurring open: none | **CLOSE-CLEAN** (Stage-2 loop) | Round 8 returned no finding over the batch-7 delta; every Stage-2 correction was validated live by the support QA (s2r1–s2r7, A/B against each parent tree) before its fix-only review ran. The non-blocking residue CK-2 queued (r7 O1, the missing comma in the pinned-GET preset refusal) landed in `b6ed297`, covered by round 4 and QA s2r3. Next owed, in roster order: the architect implementation review (loop 3, a fresh window, capped at three evaluations), then the composite wave gate (loop 4). |
 | CK-6 | Architect implementation review (loop 3) | window 1, evaluation 3 / cumulative 3 — the CAP in `docs/architecture/COMPLETION_WORKFLOW_RULES.md` | `5637194` (clean; full non-KB suite on this tree: 12298 passed, 19 skipped) | 0 | 0 | resolved across the loop: authored-config-read-for-a-component-the-build-does-not-write (ARCH-158-r1-01, ARCH-158-r2-01), listener-classification-keyed-on-a-proxy (ARCH-158-r1-02, ARCH-158-r2-02), served-revision-blind-to-an-authority (ARCH-158-r1-03), oracle-probe-set-hand-picked (ARCH-158-r1-04, ARCH-158-r2-03, ARCH-158-r2-04, ARCH-158-r3-01); recurring open: none | **CLOSE-CLEAN** (architect loop, on the cap's own terms) | The cap ends the loop at the third evaluation: its batched correction was applied (batch 11), its validation ran — a darkness proof (the batch changes no runtime file, verified by digest and file-level diff, with a mutation control showing the new case fails only with the guard removed and its absence measurable on the parent) plus the full suite — and the repo's own commit review over the correction delta returned CLEAN at round 12. No fourth architect evaluation. Every finding of all three evaluations is recorded with exactly one disposition and all are `fixed`. Pattern recorded across this loop, as at CK-4: each round found the previous correction incomplete ONE LEVEL IN — a declared-mode authority where apply's own record was the authority, a fixed half of a two-halved rule, and three successive case sets that sampled where the authority enumerates. What stopped it was deriving each case set from the authority that enumerates its own members rather than widening the sample. Next owed: the composite wave gate (loop 4) on the final tree. |
 
+## Final report (closure)
+
+**Status: COMPLETE — every required gate is current on the final tree, zero unresolved findings, zero
+deferrals.** Last validated tree: `cdb086c` on `codex/issue-158`, baseline `3a8469e`.
+
+**The loop roster, all four loops closed.**
+
+| Loop | Evaluations | Outcome |
+| --- | --- | --- |
+| 1 — Stage-1 QA | 7 rounds (r1–r7) + the r3 platform capture | `CLOSE-CLEAN` at CK-2 |
+| 2 — Stage-2 repo commit review | 12 rounds | `CLOSE-CLEAN` at CK-5 (round 8), then clean again as the architect loop's support gate at rounds 10, 11 and 12 |
+| 3 — Architect implementation review | 3 evaluations (the cap) | `CLOSE-CLEAN` at CK-6, on the clean commit review of its final correction |
+| 4 — Composite wave gate | 1 | green on `cdb086c` |
+| 5 — Terminal correction loop | not needed | the non-blocking residue CK-2 queued landed inside a validated batch (`b6ed297`) |
+
+**Findings.** The findings table holds 46 rows: 39 distinct raw findings, plus 6 scanner-visible records of
+originals whose id shape the ledger scanner cannot parse (SELF-158-r26-01) and 1 revision row
+(`CDX-158-r5-01a`). Every distinct finding carries exactly one disposition: **38 `fixed`, 1 `finding-refuted`**
+(SELF-158-r1-04, whose reproduction is not reachable from any public route). **No row is `deferred`**, so no
+follow-up issue is owed for residue, and **no row derives the critical tier** — the highest source label in the
+slice is Medium/P2. (These counts are read off the table, not carried in prose: the first draft of this report
+hand-typed them and was wrong, which is the same defect class the slice spent four rounds removing from its
+tests.)
+
+**Checkpoints.** CK-1 `CONTINUE`, CK-2 `CLOSE-CLEAN`, CK-3 `CONTINUE` (owner-authorized override, recorded as
+not meeting the rule's letter), CK-4 `CONTINUE`, CK-5 `CLOSE-CLEAN`, CK-6 `CLOSE-CLEAN`.
+
+**Live validation.** 11 support QA rounds beyond Stage 1 (s2r1–s2r11), each A/B against its parent tree, each
+closing the account at net zero with `apiType` restored. The final tree's runtime digest equals the tree whose
+full live matrix ran in s2r10.
+
+**What the slice changed, in one line each.** The listener is a root-only ProcessIR node fused into the
+synthesized start, with one entry authority and one root-selection rule; orchestrate keys listener handling on
+the ENTRY rather than on endpoint metadata, reading a reused operation's endpoint from the account; the API
+Service route method follows the linked operation's type, measured cell-for-cell and served from one generated
+table; the collision scan states only measured precedence; and the served compiler revision now projects the
+listener entry's resolution rule, not just its classification.
+
+**Recurrence recorded, follow-up OWED and unfiled.** The mechanism "a case set claimed as an authority's
+coverage but hand-picked from it" recurred across four rows under different authorities (CDX-158-r7-01,
+CDX-158-r9-01, ARCH-158-r2-03/-r2-04, ARCH-158-r3-01). Each instance is fixed in place by deriving its case set
+from the authority that enumerates its members. The repo's rule makes a cross-authority recurrence a recorded
+recurrence PLUS a follow-up filed at reconciliation; filing an issue is the owner's call in this repository, so
+no issue was minted here. The follow-up's scope, for the owner: make "derived coverage" checkable — a claim that
+a test or oracle covers an authority's case set should be enumerated from that authority, and the repo has at
+least five artifacts where that claim is currently prose.
+
+**Process deviations, recorded rather than hidden.** CK-1 and CK-4 record corrections applied before their
+checkpoint row was written. SELF-158-s2r3-01's text correction was applied after its QA and before its review,
+against the validate-before-next-mutation order; it was validated by QA s2r3b and covered by review round 4.
+SELF-158-r26-01 records that six finding rows were invisible to the ledger scanner's id grammar, that one was
+edited after its first commit undetected, and how both are now prevented.
+
 ## Gate evidence
 
 | Gate | Round | Run directory | Reviewed SHA | Outcome | Teardown |
@@ -225,3 +278,4 @@ outcome and rationale.
 | Architect implementation review | 3 (FINAL under the cap; `--gate review`, `send --prompt-file`, scoped to the correction delta `1e73f23..7071100`, plan inlined verbatim) | `/tmp/cdx-gate-review.YjVRSx` (+ prompts `/tmp/cdx-gate-prompts.i0cy3d`) | `7071100` (clean) | `completed`, attested `ok:true`, `parsedVerdict: ISSUES FOUND`: 1 finding, ARCH-158-r3-01 (P2, test coverage); the other three round-2 corrections accepted and the owner-owed follow-up noted as recorded | confirmed stopped |
 | Architect-loop support QA | s2r11 (for batch 11; DARKNESS PROOF, finding ids `QA-158-r31-NN`) | same `boomi-qa-tester` session (report `agents/reports/2026-09-10-issue-158-s2r11.md`, persisted by the dispatcher) | `7071100` + batch 11 (11 rows), worktree unmoved (7554 files, 0 changed at close) | completed: the batch is DARK three ways — `git diff HEAD -- src server.py` is 0 bytes, the worktree code digest equals `git archive HEAD`'s (`d88802b1…`, 216 files), and a file-level diff reports no differing runtime file; the changed set is tests + the one-row node manifest + the audit record and archived evidence. Mutation control, on COPIES of both trees: with the synthetic-edge guard removed the batch fails exactly `[start.wire0.cfg_edge_id]` (1 of 53), while the SAME mutant on the parent passes 52 of 52 — the guard was genuinely unproven before and is proven now. Nothing live was touched; **no new finding**. That digest equals treeS10's, so the s2r10 live matrix remains current for this tree | n/a (no daemon) |
 | Stage-2 commit review | 12 (fix-only, `--base da76207ff348736633b783f7584cf510009dd716` over the final architect correction committed as `5637194`) | `/tmp/cdx-review.zjvGGt`, archived `docs/architecture/evidence/issue-158/commit-reviews/cdx-review.zjvGGt/` | `5637194` (clean) | `completed` (collector exit 0): **no finding** — the clean review the cap closes the architect loop on (CK-6) | confirmed stopped |
+| Composite wave gate (loop 4) | 1 | `scripts/wave_gate.py wave --base 3a8469e109cbf414aff1f9db35649ef06071fb66 --require-plan-fingerprint` (log in the session scratchpad) | `cdb086c` (clean) | **green, exit 0**: manifests ok (12317 required nodes, 78 active goldens), collection ok (12317 tests), non-KB suite green (12298 passed, 19 skipped, cap 30), 78 active goldens deterministic and byte-exact, plan fingerprint checked (2 cases). The wave's live-scenario-per-capability-class half is current without a re-run: QA measured in s2r11 that this tree's runtime code digest (`d88802b1…`) is byte-identical to treeS10's, the tree whose live matrix ran in s2r10, and every commit since is dark | n/a (no daemon) |
