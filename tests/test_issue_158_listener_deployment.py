@@ -1213,6 +1213,66 @@ def _string_constants(module):
     }
 
 
+def test_a_reused_operations_authored_endpoint_is_not_the_accounts(monkeypatch):
+    """#158 ARCH-158-r1-01: a reuse binding names a component apply never writes,
+    so its authored endpoint fields are not what the account serves. Reading them
+    suppressed the account read and verified an endpoint the platform does not
+    route: the deploy probed the authored object name while the stored operation
+    kept its own. Only a component this build writes may describe itself."""
+    account_id = _ACCOUNT_WSS_OP_ID
+    reused = {
+        "key": _WSS_OP_KEY, "type": "connector-action", "action": "create",
+        "config": {"reference_only": True, "component_id": account_id,
+                   "connector_type": "wss", "operation_mode": "listen",
+                   "object_name": "wrongIntake158", "operation_type": "EXECUTE",
+                   "input_type": "singlejson", "output_type": "none"},
+    }
+    entry = {"results": {_WSS_OP_KEY: {"status": "reused", "component_id": account_id}}}
+    assert orchestration._listen_operation_facts_in_build(entry, [reused], account_id) is None
+    # CONTROL: the same config as a CREATE describes the component it creates.
+    created = {
+        **reused,
+        "config": {k: v for k, v in reused["config"].items() if k != "reference_only"},
+    }
+    facts = orchestration._listen_operation_facts_in_build(entry, [created], account_id)
+    assert facts and facts["object_name"] == "wrongIntake158"
+
+
+def test_a_stray_listener_stage_is_not_the_entry_of_another_process_kind():
+    """#158 ARCH-158-r1-02: plan §3 requires the ACTIVE entry, not any listener
+    stage. A `database_to_api_sync` config carrying a listener stage passes the
+    builder's validation and emits its scheduled database start, yet the
+    recognizer read the stage and reported a listener entry — the misclassified
+    root would be treated as a listener for ASC routing and verification."""
+    from boomi_mcp.categories.components.builders.process_flow_builder import (
+        ProcessFlowBuilder,
+    )
+
+    stray = {"stages": [{"kind": "listener", "config": {"operation_id": "WSSOP"}}]}
+    config = {
+        "process_kind": "database_to_api_sync",
+        "source": {"connector_type": "database", "connection_id": "00000000-0000-0000-0000-000000000001",
+                   "operation_id": "00000000-0000-0000-0000-000000000002", "action_type": "Get"},
+        "transform": {"mode": "passthrough"},
+        "target": {"connector_type": "rest", "connection_id": "00000000-0000-0000-0000-000000000001",
+                   "operation_id": "00000000-0000-0000-0000-000000000002", "action_type": "POST"},
+        "reliability": {"retry_count": 0, "dlq": {"mode": "disabled"}},
+        "pipeline": stray,
+    }
+    # The emitter accepts it and starts on the DATABASE source, with no Listen.
+    assert ProcessFlowBuilder.validate_config(config) is None
+    xml = ProcessFlowBuilder.build(config, name="P")
+    assert 'actionType="Listen"' not in xml and 'connectorType="database"' in xml
+    assert legacy_config_entry(config) == ProcessEntryV1("scheduled")
+    assert integration_builder._process_config_has_wss_listen(config) is False
+    # CONTROL 1: the pipeline builder's own kind still enters on its stage.
+    assert legacy_config_entry({"process_kind": "sync_pipeline", "pipeline": stray}) == ProcessEntryV1(
+        "listener", "WSSOP"
+    )
+    # CONTROL 2: an abbreviated shape naming no kind is read as before.
+    assert legacy_config_entry({"pipeline": stray}) == ProcessEntryV1("listener", "WSSOP")
+
+
 def test_listener_recognizers_share_compiler_entry_authority(monkeypatch):
     from boomi_mcp.compiler.process_ir.contracts import SymbolTableV1
     from boomi_mcp.compiler.process_ir.entry_policy import classify_entry

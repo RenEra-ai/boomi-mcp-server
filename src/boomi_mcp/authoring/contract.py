@@ -927,6 +927,140 @@ def build_authoring_contract_manifest() -> Mapping[str, Any]:
     return frozen
 
 
+def _nested_literal_options(model, field_name: str) -> Tuple[str, ...]:
+    """Every ``Literal`` string a field admits, through any wrapper.
+
+    `_literal_options` reads a bare `Literal`; this field is
+    `Optional[Literal[...]]`, whose args are the Literal and `NoneType`, so the
+    bare reader returned nothing and the probe silently covered one value of a
+    two-value vocabulary — an oracle that samples nothing reports nothing.
+    """
+    import typing
+
+    found: list = []
+
+    def _walk(annotation) -> None:
+        for arg in typing.get_args(annotation):
+            if isinstance(arg, str):
+                found.append(arg)
+            else:
+                _walk(arg)
+
+    field = model.model_fields.get(field_name)
+    if field is None:
+        return ()
+    _walk(field.annotation)
+    return tuple(dict.fromkeys(found))
+
+
+def _listener_inbound_behaviour_oracle() -> Dict[str, Any]:
+    """The listener entry's RESOLUTION rule, projected as BEHAVIOUR (#158 ARCH-158-r1-03).
+
+    The execution-profile oracle beside this one covers CLASSIFICATION — which
+    process is a listener. Nothing covered what the compiler then REQUIRES of a
+    listener's operation, so the authorities that decide it could move with the
+    served revision standing still: emptying ``profile_bound_input_types()``
+    turned an accepted bound-JSON listener into a refusal without moving the
+    digest, and a caller's binding cannot see a change it was built to report.
+
+    Like that oracle, this CALLS the rule over a case set derived from the
+    vocabularies the rule itself consults — the WSS builder's input types, the
+    listener semantic's own ``inbound_validation`` options, and the profile /
+    non-profile component types — and records each verdict: ``accepted``, or the
+    refusal code. Stand-ins are attribute holders for the CFG (cheap, hermetic,
+    and the rule reads its inputs by attribute) with REAL symbol models, which
+    is what the rule's own lookups require.
+    """
+    from types import SimpleNamespace
+
+    module = _import("connector_resolution")
+    contracts = _import("contracts")
+    validate = module.validate_listener_entry
+    from ..categories.components.builders.connector_builder import _WSS_INPUT_TYPES
+
+    listener_member = next(
+        member
+        for member in _cfg_semantic_members()
+        if member.model_fields["semantic_kind"].default == "listener"
+    )
+    inbound_options = (None,) + _nested_literal_options(
+        listener_member, "inbound_validation"
+    )
+
+    def _symbol(**overrides):
+        fields = dict(
+            ref="$ref:op",
+            component_id="id-op",
+            component_type="connector-action",
+            connector_type="wss",
+            action_type="Listen",
+        )
+        fields.update(overrides)
+        return contracts.ComponentSymbolV1(**fields)
+
+    def _profile(ref, component_type):
+        return contracts.ComponentSymbolV1(
+            ref=ref, component_id="id-" + ref.rsplit(":", 1)[-1], component_type=component_type
+        )
+
+    def _verdict(operation, symbols, inbound_validation):
+        node = SimpleNamespace(
+            node_id="entry",
+            source_path="/body/steps/0",
+            semantic=SimpleNamespace(
+                semantic_kind="listener",
+                operation_ref=operation,
+                inbound_validation=inbound_validation,
+            ),
+        )
+        cfg = SimpleNamespace(entry_node_id="entry", nodes=(node,))
+        try:
+            validate(cfg, contracts.SymbolTableV1(symbols=tuple(symbols)))
+        except Exception as exc:  # noqa: BLE001 — the verdict IS the refusal
+            codes = [
+                getattr(d, "code", None) for d in getattr(exc, "diagnostics", ()) or ()
+            ]
+            return codes[0] if codes else type(exc).__name__
+        return "accepted"
+
+    cases: Dict[str, Any] = {
+        "operation-absent": _verdict(None, (), None),
+        "operation-unresolved": _verdict("$ref:missing", (), None),
+    }
+    # The recognition half: what a listener's operation must BE.
+    for label, overrides in (
+        ("not-an-operation", {"component_type": "connector-settings"}),
+        ("non-wss-family", {"connector_type": "rest"}),
+        ("non-listen-action", {"action_type": "Execute"}),
+        ("carries-a-connection", {"connection_ref": "$ref:conn"}),
+        ("listen", {}),
+    ):
+        cases["recognition-" + label] = _verdict("$ref:op", (_symbol(**overrides),), None)
+    # The inbound half: every input type the WSS builder admits, against every
+    # requested contract, with the binding bound / unbound / bound to a
+    # component that is not a profile.
+    for input_type in sorted(_WSS_INPUT_TYPES):
+        for inbound in inbound_options:
+            for binding, extra in (
+                ("unbound", ()),
+                ("profile", (_profile("$ref:profile", "profile.json"),)),
+                ("not-a-profile", (_profile("$ref:profile", "transform.map"),)),
+                ("literal-id", ()),
+            ):
+                profile_ref = (
+                    "b1e0f2a4-0000-4000-8000-000000000001"
+                    if binding == "literal-id"
+                    else ("$ref:profile" if binding != "unbound" else None)
+                )
+                operation = _symbol(
+                    input_document_type=input_type, input_profile_ref=profile_ref
+                )
+                cases[
+                    "inbound-{0}-{1}-{2}".format(input_type, inbound or "none", binding)
+                ] = _verdict("$ref:op", (operation,) + extra, inbound)
+    return cases
+
+
 def _compiler_revision_payload() -> dict:
     """Fingerprint of the compiler + validator + recipe capability contracts.
 
@@ -1105,6 +1239,13 @@ def _compiler_revision_payload() -> dict:
                 dict(spec)
                 for spec in _import("semantic_validation.findings").finding_specs()
             ],
+        ),
+        (
+            # The listener entry's resolution rule, beside the classification
+            # oracle above: read through `connector_resolution`, so the
+            # authorities it consults move the revision (#158 ARCH-158-r1-03).
+            "listener_inbound_contract",
+            _listener_inbound_behaviour_oracle,
         ),
         ("parse_diagnostic_specs", _parse_diagnostic_specs_payload),
         ("process_ir_authoring_contract", _authoring_projection_payload),

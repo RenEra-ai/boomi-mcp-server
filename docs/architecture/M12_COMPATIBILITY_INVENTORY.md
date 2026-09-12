@@ -2118,17 +2118,25 @@ rather than aspirational.
 | LG-dce7aa49 | legacy_transitive_call | src/boomi_mcp/categories/components/safe_edit_component.py | _compute_merged_xml | 1 | 314 | #160 | follow the callee's row; this is an edge, not a site |
 | LG-a3fb531d | legacy_transitive_call | src/boomi_mcp/categories/components/safe_edit_component.py | apply_component_edit_action | 1 | 544 | #160 | follow the callee's row; this is an edge, not a site |
 | LG-0b6058fb | legacy_transitive_call | src/boomi_mcp/categories/components/safe_edit_component.py | prepare_component_edit_action | 1 | 381 | #160 | follow the callee's row; this is an edge, not a site |
-| LG-205964b1 | legacy_transitive_call | src/boomi_mcp/categories/deployment/orchestration.py | _run_listener_verify_stage | 2 | 2194 | #160 | follow the callee's row; this is an edge, not a site |
-| LG-ab50f45d | legacy_transitive_call | src/boomi_mcp/categories/deployment/orchestration.py | orchestrate_deploy_action | 1 | 5521 | #160 | follow the callee's row; this is an edge, not a site |
+| LG-dcad5d33 | legacy_transitive_call | src/boomi_mcp/categories/deployment/orchestration.py | _account_listen_operation_facts | 1 | 825 | #160 | follow the callee's row; this is an edge, not a site |
+| LG-c02d94f3 | legacy_transitive_call | src/boomi_mcp/categories/deployment/orchestration.py | _listener_operation_ref_from_process | 1 | 1169 | #160 | follow the callee's row; this is an edge, not a site |
+| LG-0a50fc28 | legacy_transitive_call | src/boomi_mcp/categories/deployment/orchestration.py | _resolve_listener_metadata | 1 | 1318 | #160 | follow the callee's row; this is an edge, not a site |
+| LG-cde80696 | legacy_transitive_call | src/boomi_mcp/categories/deployment/orchestration.py | _reused_listener_entry_mismatch | 1 | 911 | #160 | follow the callee's row; this is an edge, not a site |
+| LG-90edd5fc | legacy_transitive_call | src/boomi_mcp/categories/deployment/orchestration.py | _root_entry | 1 | 749 | #160 | follow the callee's row; this is an edge, not a site |
+| LG-205964b1 | legacy_transitive_call | src/boomi_mcp/categories/deployment/orchestration.py | _run_listener_verify_stage | 2 | 2208 | #160 | follow the callee's row; this is an edge, not a site |
+| LG-65019d95 | legacy_transitive_call | src/boomi_mcp/categories/deployment/orchestration.py | _target_listener_operation_id | 1 | 796 | #160 | follow the callee's row; this is an edge, not a site |
+| LG-ab50f45d | legacy_transitive_call | src/boomi_mcp/categories/deployment/orchestration.py | orchestrate_deploy_action | 5 | 5243 | #160 | follow the callee's row; this is an edge, not a site |
 | LG-77376652 | legacy_transitive_call | src/boomi_mcp/categories/integration_authoring.py | compose_archetypes_action | 1 | 479 | #160 | follow the callee's row; this is an edge, not a site |
 | LG-3cf79d6e | legacy_transitive_call | src/boomi_mcp/categories/integration_builder.py | _apply_plan | 4 | 9532 | #160 | follow the callee's row; this is an edge, not a site |
 | LG-3a7213a4 | legacy_transitive_call | src/boomi_mcp/categories/integration_builder.py | _authored_process_validation_error | 1 | 5846 | #160 | follow the callee's row; this is an edge, not a site |
-| LG-86e93983 | legacy_transitive_call | src/boomi_mcp/categories/integration_builder.py | _build_plan | 4 | 6501 | #160 | follow the callee's row; this is an edge, not a site |
+| LG-86e93983 | legacy_transitive_call | src/boomi_mcp/categories/integration_builder.py | _build_plan | 5 | 6501 | #160 | follow the callee's row; this is an edge, not a site |
+| LG-8c22801a | legacy_transitive_call | src/boomi_mcp/categories/integration_builder.py | _check_api_service_route_dependencies | 1 | 2194 | #160 | follow the callee's row; this is an edge, not a site |
 | LG-ab4b2334 | legacy_transitive_call | src/boomi_mcp/categories/integration_builder.py | _compile_authoring | 1 | 12025 | #160 | follow the callee's row; this is an edge, not a site |
 | LG-01c3922d | legacy_transitive_call | src/boomi_mcp/categories/integration_builder.py | _execute_canonical_process | 2 | 8963 | #160 | follow the callee's row; this is an edge, not a site |
 | LG-f16d0493 | legacy_transitive_call | src/boomi_mcp/categories/integration_builder.py | _execute_component | 23 | 3817 | #160 | follow the callee's row; this is an edge, not a site |
 | LG-308b6e78 | legacy_transitive_call | src/boomi_mcp/categories/integration_builder.py | _plan_authoring | 1 | 11963 | #160 | follow the callee's row; this is an edge, not a site |
 | LG-f1e10478 | legacy_transitive_call | src/boomi_mcp/categories/integration_builder.py | _process_component_preflight | 2 | 6256 | #160 | follow the callee's row; this is an edge, not a site |
+| LG-0a17dc6a | legacy_transitive_call | src/boomi_mcp/categories/integration_builder.py | _process_config_has_wss_listen | 1 | 2068 | #160 | follow the callee's row; this is an edge, not a site |
 | LG-4ef294c2 | legacy_transitive_call | src/boomi_mcp/categories/integration_builder.py | _resolve_preservation_policy | 1 | 1407 | #160 | follow the callee's row; this is an edge, not a site |
 | LG-1f766152 | legacy_transitive_call | src/boomi_mcp/categories/integration_builder.py | build_integration_action | 4 | 12353 | #160 | follow the callee's row; this is an edge, not a site |
 | LG-8796f643 | legacy_transitive_call | src/boomi_mcp/categories/integration_builder.py | build_structured_update_xml | 1 | 3423 | #160 | follow the callee's row; this is an edge, not a site |
@@ -2141,6 +2149,7 @@ rather than aspirational.
 | LG-492bfbd5 | legacy_transitive_call | src/boomi_mcp/patterns/archetypes/api_to_database_sync.py | ApiToDatabaseSyncArchetype.emit_spec | 1 | 847 | #160 | follow the callee's row; this is an edge, not a site |
 | LG-492d9518 | legacy_transitive_call | src/boomi_mcp/patterns/archetypes/database_to_api_sync.py | DatabaseToApiSyncArchetype.emit_spec | 1 | 2460 | #160 | follow the callee's row; this is an edge, not a site |
 | LG-d88fe3f1 | legacy_transitive_call | src/boomi_mcp/patterns/recipe_bridge.py | run_sync_preset_recipe | 1 | 244 | #160 | follow the callee's row; this is an edge, not a site |
+| LG-0ea86058 | registry_lookup | src/boomi_mcp/authoring/process_entry.py | legacy_config_entry | 1 | 101 | #160 | delete with the legacy registry |
 | LG-a6b08ee4 | registry_lookup | src/boomi_mcp/categories/components/builders/process_flow_builder.py | get_process_flow_builder | 2 | 6054 | #160 | delete the legacy semantic shell |
 | LG-e131eb91 | registry_lookup | src/boomi_mcp/categories/integration_builder.py | _execute_component | 3 | 3817 | #153 | replace with canonical ProcessIR materialization/apply |
 | LG-85b86f7b | registry_lookup | src/boomi_mcp/categories/integration_builder.py | _process_component_preflight | 3 | 6152 | #153 | replace with canonical ProcessIR materialization/apply |
@@ -2158,6 +2167,7 @@ rather than aspirational.
 | LG-08a97ecd | renderer_call | src/boomi_mcp/patterns/composition.py | compose_archetypes | 1 | 1127 | #160 | delete with the legacy renderer |
 | LG-a1863ac0 | unclassified_reference | server.py | <module> | 3 | 390 | #160 | residue: a watched name mentioned in a shape the census does not classify |
 | LG-8cf67bd6 | unclassified_reference | src/boomi_mcp/authoring/contract.py | authoring_workflow_contract | 1 | 660 | #160 | residue: a watched name mentioned in a shape the census does not classify |
+| LG-6993ec78 | unclassified_reference | src/boomi_mcp/authoring/process_entry.py | legacy_config_entry | 3 | 99 | #160 | residue: a watched name mentioned in a shape the census does not classify |
 | LG-0a2735c3 | unclassified_reference | src/boomi_mcp/authoring/workflow.py | _normalize_intent | 1 | 480 | #160 | residue: a watched name mentioned in a shape the census does not classify |
 | LG-a3b03f12 | unclassified_reference | src/boomi_mcp/categories/components/builders/__init__.py | <module> | 5 | 57 | #160 | residue: a watched name mentioned in a shape the census does not classify |
 | LG-bd39ea58 | unclassified_reference | src/boomi_mcp/categories/components/builders/process_flow_builder.py | <module> | 17 | 5173 | #160 | delete the legacy semantic shell |
@@ -2249,6 +2259,7 @@ example producers are globbed, never enumerated: a sixth example is a diff, not 
 | LG-04ef53a3 | example_producer | examples/m11/cache_property_authoring_join.integration.json | integration_spec.components[2].config.process_kind | 1 | 76 | #159 | migrate the example to canonical ProcessIR |
 | LG-3740584a | example_producer | examples/m8/cache_handoff_staged_fanout.integration.json | integration_spec.components[10].config.process_kind | 1 | 402 | #159 | migrate the example to canonical ProcessIR |
 | LG-637793a5 | example_producer | examples/m8/composed_db_to_api_fanout.integration.json | integration_spec.components[9].config.process_kind | 1 | 353 | #159 | migrate the example to canonical ProcessIR |
+| LG-ca7479a7 | process_kind_consumer | src/boomi_mcp/authoring/process_entry.py | legacy_config_entry | 2 | 99 | #160 | delete with the legacy consumer |
 | LG-851b002a | process_kind_consumer | src/boomi_mcp/authoring/workflow.py | _normalize_intent | 1 | 480 | #160 | delete with the legacy consumer |
 | LG-65a53d30 | process_kind_consumer | src/boomi_mcp/categories/components/builders/process_flow_builder.py | ProcessFlowBuilder.validate_config | 2 | 669 | #160 | delete the legacy semantic shell |
 | LG-bba865c6 | process_kind_consumer | src/boomi_mcp/categories/components/builders/process_flow_builder.py | SyncPipelineBuilder.validate_config | 2 | 5875 | #160 | delete the legacy semantic shell |
@@ -2348,7 +2359,7 @@ above says what each location means; this one says exactly where the calls are.
 | LG-1d129c81 | component_xml_write | src/boomi_mcp/categories/meta_tools.py | invoke_api | 1 | 5924 | #160 | WRT-raw-api-component: ONE canonical endpoint parser feeds classification, ID extraction AND transport; the reserved literal `bulk` is matched BEFORE the `<id>` arm and is never a componentId; every update-shaped call runs the two-sided process check. |
 | LG-0c9343f4 | component_xml_write | src/boomi_mcp/categories/shared_resources.py | _get_channel_raw_json | 1 | 204 | #160 | WRT-shared-channel-lossless-read: unchanged — the endpoint is not /Component and the call is a read, so the process-content classifier never applies; it is inventoried so a future edit cannot turn a hand-rolled transport into a write route unnoticed. |
 | LG-efa0b8f0 | http_client_call | server.py | web_callback | 1 | 5427 | #160 | WRT-external-transport-oauth-callback: unchanged — assert the target host/path is the configured token endpoint, never /Component. |
-| LG-7709911a | http_client_call | src/boomi_mcp/categories/deployment/orchestration.py | _listener_probe | 1 | 1494 | #160 | WRT-external-transport-listener-probe: unchanged — the URL comes from the listener's endpoint, never from a Component route. |
+| LG-7709911a | http_client_call | src/boomi_mcp/categories/deployment/orchestration.py | _listener_probe | 1 | 1508 | #160 | WRT-external-transport-listener-probe: unchanged — the URL comes from the listener's endpoint, never from a Component route. |
 | LG-7e973d10 | http_client_call | src/boomi_mcp/categories/marketplace.py | search_marketplace_recipes_action | 1 | 253 | #160 | WRT-external-transport-marketplace: unchanged — assert the endpoint is the Marketplace GraphQL host and no component XML is submitted. |
 | LG-9b78e266 | http_client_call | src/boomi_mcp/categories/schema_discovery.py | _fetch | 1 | 461 | #160 | WRT-external-transport-schema-discovery: unchanged — the SSRF guard already forbids platform hosts; assert no /Component target is reachable. |
 | LG-c3bf6d69 | raw_api_invoker | server.py | invoke_boomi_api | 1 | 3456 | #160 | WRT-raw-api-component: ONE canonical endpoint parser feeds classification, ID extraction AND transport; the reserved literal `bulk` is matched BEFORE the `<id>` arm and is never a componentId; every update-shaped call runs the two-sided process check. |
@@ -2410,11 +2421,12 @@ over the census, so a row cannot be silently orphaned when a file moves.
 | #160 | WRT-shared-dormant-writer: sits behind the two-sided guard, or is deleted. | 1 |
 | #160 | WRT-shared-raw-create-sink: the shared process-content classifier is enforced at or before this sink for every caller. | 1 |
 | #160 | delete the legacy semantic shell | 24 |
-| #160 | delete with the legacy consumer | 10 |
+| #160 | delete with the legacy consumer | 11 |
+| #160 | delete with the legacy registry | 1 |
 | #160 | delete with the legacy renderer | 3 |
 | #160 | delete with the legacy semantic shell | 2 |
-| #160 | follow the callee's row; this is an edge, not a site | 57 |
-| #160 | residue: a watched name mentioned in a shape the census does not classify | 35 |
+| #160 | follow the callee's row; this is an edge, not a site | 65 |
+| #160 | residue: a watched name mentioned in a shape the census does not classify | 36 |
 | #160 | retract the served legacy guidance / guard the raw route | 2 |
 
 Owner semantics: **#151** neutral extraction and `flow_sequence` parity/reachability; **#153**

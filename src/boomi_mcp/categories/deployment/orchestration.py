@@ -1460,6 +1460,20 @@ def _listen_operation_facts_in_build(
     config = op_comp.get("config")
     if not isinstance(config, dict):
         return None
+    # #158 ARCH-158-r1-01: only a component this build WRITES can be described by
+    # its authored config. A reuse binding names a component the apply leaves
+    # untouched, so its authored endpoint fields are not what the account serves
+    # — the account is, and the caller reads it when this returns None. The
+    # question "does this build write it?" has one authority, the same one the
+    # effects projection asks.
+    from types import SimpleNamespace
+
+    from ...recipes import component_materialization_mode
+
+    if component_materialization_mode(
+        SimpleNamespace(config=config, action=op_comp.get("action"))
+    ) == "reuse_reference":
+        return None
     # #158: the WSS builder's own derivation — the same one the authoring intake
     # and the identity projection call — rather than a local alias set.
     from ..components.builders.connector_builder import wss_listen_action_from_config

@@ -1,0 +1,455 @@
+You are the ARCHITECT reviewing the IMPLEMENTATION of GitHub issue #158 ("M12.20 — Canonical WSS listener entry and materialization (T7)") in the repository at the current working directory, branch `codex/issue-158`, against the architect design plan reproduced verbatim at the end of this prompt. This is a read-only review: do not modify files, and do NOT call any Boomi MCP tool or any network tool — read the repository only.
+
+WHAT TO REVIEW
+- The implementation is the commit range `3a8469e109cbf414aff1f9db35649ef06071fb66..HEAD` (inspect it with `git diff 3a8469e109cbf414aff1f9db35649ef06071fb66..HEAD` and `git log --oneline 3a8469e..HEAD`). The working tree is clean.
+- Your job is PLAN CONFORMANCE: does the implementation realize every element of the design plan and every acceptance criterion of the issue? Report gaps (a plan element or acceptance criterion that is missing, partial, or realized differently than the plan requires without a recorded reason), contradictions between the implementation and the plan, and correctness defects that make a plan element fail at runtime or in served contract text. Do not re-review code quality that the plan does not govern.
+- Recorded deviations: the audit ledger `docs/architecture/ISSUE_158_AUDIT_LEDGER.md` records plan corrections ("Plan corrections" section), design decisions ("Design decisions" section), and every finding raised by the repository's own QA and commit-review gates with its disposition. A deviation from the plan that the ledger records with a reason is not by itself a finding — judge whether the recorded reason holds. Measured platform facts used by the implementation are archived under `docs/architecture/evidence/issue-158/`.
+- The repository's own gates have already run on this tree: live QA through the public MCP tool boundary (Stage 1, seven rounds; Stage 2 support QA, seven rounds) and a detached Codex commit review whose last round over the final correction returned no finding. Your review is additive: implementation versus the architect plan.
+
+CHANGED FILES (source, tests, docs; plus 90 archived evidence files under docs/architecture/evidence/issue-158/)
+docs/architecture/ISSUE_158_AUDIT_LEDGER.md
+docs/architecture/M12_COMPATIBILITY_INVENTORY.md
+docs/architecture/PROCESS_IR_COMPILER_V1.md
+docs/architecture/PROCESS_IR_V1.md
+src/boomi_mcp/authoring/connector_resolution_snapshot.py
+src/boomi_mcp/authoring/contract.py
+src/boomi_mcp/authoring/derived_flows.py
+src/boomi_mcp/authoring/process_entry.py
+src/boomi_mcp/authoring/process_ir_effects.py
+src/boomi_mcp/authoring/process_ir_projection.py
+src/boomi_mcp/authoring/workflow.py
+src/boomi_mcp/categories/components/analyze_component.py
+src/boomi_mcp/categories/components/builders/_api_service_paths.py
+src/boomi_mcp/categories/components/builders/api_service_builder.py
+src/boomi_mcp/categories/components/builders/connector_builder.py
+src/boomi_mcp/categories/components/builders/process_emitters/rendering.py
+src/boomi_mcp/categories/components/builders/process_flow_builder.py
+src/boomi_mcp/categories/components/wss_route_methods.py
+src/boomi_mcp/categories/deployment/orchestration.py
+src/boomi_mcp/categories/integration_builder.py
+src/boomi_mcp/categories/meta_tools.py
+src/boomi_mcp/compiler/process_ir/body_capabilities.py
+src/boomi_mcp/compiler/process_ir/connector_capabilities.py
+src/boomi_mcp/compiler/process_ir/connector_resolution.py
+src/boomi_mcp/compiler/process_ir/contracts.py
+src/boomi_mcp/compiler/process_ir/diagnostics.py
+src/boomi_mcp/compiler/process_ir/emitter_registry.py
+src/boomi_mcp/compiler/process_ir/entry_policy.py
+src/boomi_mcp/compiler/process_ir/execution_profile.py
+src/boomi_mcp/compiler/process_ir/invariants.py
+src/boomi_mcp/compiler/process_ir/legacy_adapters/emission.py
+src/boomi_mcp/compiler/process_ir/legacy_adapters/sync_pipeline.py
+src/boomi_mcp/compiler/process_ir/lowering.py
+src/boomi_mcp/compiler/process_ir/semantic_validation/flow.py
+src/boomi_mcp/errors.py
+src/boomi_mcp/models/process_ir.py
+src/boomi_mcp/patterns/archetypes/http_listener_to_db.py
+src/boomi_mcp/patterns/archetypes/http_listener_to_rest.py
+src/boomi_mcp/patterns/primitives/wss_listen.py
+src/boomi_mcp/recipes/materialization.py
+tests/_process_ir_capability_witnesses.py
+tests/_wave_gate_golden_corpus.py
+tests/fixtures/authoring_contract/process_ir_authoring_v1.contract.json
+tests/fixtures/golden_xml/sync_pipeline_listener_map_soap_send.xml
+tests/fixtures/golden_xml/sync_pipeline_listener_soap_send.xml
+tests/fixtures/m12_12/legacy_reachability_inventory.json
+tests/fixtures/process_ir/listener/listener_rest_send.json
+tests/fixtures/process_ir/process_ir_v1.schema.json
+tests/fixtures/process_ir/sync_pipeline_emitter_parity_cases.json
+tests/fixtures/wave_gate/goldens.jsonl
+tests/fixtures/wave_gate/test_nodes.jsonl
+tests/test_analyze_component_api_service.py
+tests/test_connector_call_resolution.py
+tests/test_issue_151_reachability_freeze.py
+tests/test_issue_153_canonical_apply_e2e.py
+tests/test_issue_155_identity_projection.py
+tests/test_issue_158_audit_ledger.py
+tests/test_issue_158_entry_invariants.py
+tests/test_issue_158_listener_compile.py
+tests/test_issue_158_listener_deployment.py
+tests/test_issue_158_listener_model.py
+tests/test_issue_158_wss_identity.py
+tests/test_issue_158_wss_route_methods.py
+tests/test_legacy_process_ir_adapters.py
+tests/test_orchestration_listener_verify.py
+tests/test_process_emitter_parity.py
+tests/test_process_emitter_registry.py
+tests/test_process_execution_profile.py
+tests/test_process_ir_authoring_contract.py
+tests/test_process_ir_entrypoint_diagnostic_parity.py
+tests/test_process_ir_models.py
+tests/test_process_ir_semantic_emission_gate.py
+tests/test_process_ir_served_text_enforcement.py
+tests/test_sync_pipeline_adapter_cutover.py
+tests/test_wave_gate.py
+
+REPORT FORMAT
+- One numbered finding per defect: a short title; severity P0–P3; the plan section or acceptance criterion it concerns; `file:line` evidence; what the implementation does versus what the plan requires; the failure it causes. Prefer a concrete reproduction or a named test that should fail. Do not report style.
+- Then a line starting `Reviewed files:` listing the files you actually read.
+- END with a verdict on its OWN FINAL line: exactly 'VERDICT: NO ISSUES' or 'VERDICT: ISSUES FOUND'.
+
+
+=== ARCHITECT DESIGN PLAN (verbatim) ===
+# #158 — Canonical WSS listener entry, materialization, and deployment
+
+## 1. Design and file-by-file implementation
+
+Plan against clean branch `codex/issue-158`, baseline **`3a8469e109cbf414aff1f9db35649ef06071fb66`**. Inspection was read-only: no files changed, pytest runs, or MCP calls. Locations below refer to this baseline.
+
+Use existing dependencies and rendering functions. Keep #159 conveniences, listener reliability, and #160 legacy deletion outside this change.
+
+### Listener representation and compiler authority
+
+Add a **root-only semantic node** at `ProcessIRV1.body.steps[0]`:
+
+```json
+{
+  "kind": "listener",
+  "operation_ref": "$ref:listener_operation",
+  "label": "Receive orders",
+  "inbound_validation": {"mode": "profile_bound"}
+}
+```
+
+Only `kind` and `operation_ref` are required. `label` defaults to absent; `inbound_validation` defaults to absent/off. Reject `connection_ref`, including explicit `null`, with `PROCESS_IR_SCHEMA_LISTENER_CONNECTION_FORBIDDEN`. Family, action, geometry, wiring, and execution profile remain unauthorable.
+
+The semantic listener becomes the CFG entry, but its physical representation is **one compiler-synthesized `start_listen` at shape1**. It does not emit a second connector shape.
+
+| File and current location | Concrete changes |
+|---|---|
+| [models/process_ir.py:1200](/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/src/boomi_mcp/models/process_ir.py:1200) | Add `ListenerEntryNodeV1` beside `SourceEndpointV1`, plus the small `InboundValidationV1(mode="profile_bound")` contract. Keep the existing source endpoint’s required connection unchanged. |
+| [models/process_ir.py:2751](/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/src/boomi_mcp/models/process_ir.py:2751) | Add `listener` to `ProcessNodeV1`; exclude it from every nested-body union. At sequence validation around **2993**, introduce a shared listener placement/composition verdict before existing early returns. Require exactly one listener, first on the root spine; reject source/listener and process-call/listener mixing. |
+| [models/process_ir.py:3306](/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/src/boomi_mcp/models/process_ir.py:3306) | Include listener in connector-execution classification. Add `PROCESS_IR_V1_CAPABILITIES["listener_entry"] = "supported"` around **3322**. Keep `listener_error_scope` gated at **3424**. Extend parse-diagnostic mapping around **3776/3833** for the forbidden connection. |
+| [compiler/process_ir/contracts.py:683](/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/src/boomi_mcp/compiler/process_ir/contracts.py:683) | Add `ListenerSemanticV1` to `CfgSemanticV1` around **875**. Carry operation ref, label, and requested inbound-validation mode; no connection. Add `StartListenInputV1(operation_id, userlabel="")` beside `StartNoActionInputV1` at **1060**, and to `EmitterInputV1` around **1282**. |
+| New `compiler/process_ir/entry_policy.py` | Own the closed physical-entry policy and `derive_process_entry(cfg)`: scheduled entry → `start_noaction`; listener entry → `start_listen`, operation ref, and the one absorbed CFG node. Expose read-only policy rows for contract projection. Derive the descriptor from `cfg.entry_node_id`, never symbol order or the presence of any WSS operation elsewhere. |
+| [compiler/process_ir/body_capabilities.py:802](/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/src/boomi_mcp/compiler/process_ir/body_capabilities.py:802) | Consume the shared placement/composition verdict at compiler intake, including mutated-model inputs. Retain union-derived nested-body exclusions. |
+| [compiler/process_ir/lowering.py:264](/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/src/boomi_mcp/compiler/process_ir/lowering.py:264) | Lower the new node into `ListenerSemanticV1`. At **704**, suppress the scheduled “first connector call is entry” rule for listener roots: every outbound `connector_call` is downstream. At **909–958**, resolve the listener operation separately; retain refusal of a WSS source placeholder with an invented connection. |
+| [compiler/process_ir/lowering.py:1196](/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/src/boomi_mcp/compiler/process_ir/lowering.py:1196) | Replace unconditional start synthesis with the derived entry policy. Map the listener CFG entry to shape1, omit its ordinary emission-node pass, and allocate the remaining CFG nodes from shape2. |
+| [compiler/process_ir/emitter_registry.py:314](/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/src/boomi_mcp/compiler/process_ir/emitter_registry.py:314) | Add `_emit_start_listen`; add operation-only requirements around **492**; register `start_listen` around **678**, with input `StartListenInputV1`, shape type `start`, and exactly one outgoing transition. |
+| [process_emitters/rendering.py:352](/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/src/boomi_mcp/categories/components/builders/process_emitters/rendering.py:352) | Reuse `render_start_listen` unchanged. It already supplies the correct attribute order, escaping, hidden settings, operation binding, and absence of connection/no-action elements. Update only its obsolete “legacy-only” description. |
+| [errors.py:131](/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/src/boomi_mcp/errors.py:131), [compiler/process_ir/diagnostics.py:191](/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/src/boomi_mcp/compiler/process_ir/diagnostics.py:191) | Register static, value-free listener schema/reference/composition diagnostics and remediation. Add a separate reference diagnostic for a forged listener operation symbol carrying a connection; the existing WSS builder retains its own config-error contract. |
+
+**Composition default:** admit existing linear processing and outbound connector calls, including established-property prefixes needed by #155 path binding. Keep Try/Catch, retry/DLQ, Branch, Decision, Flow Control, Return Documents, and process-call mixing refused. This transfers the existing guard at [process_flow_builder.py:1454](/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/src/boomi_mcp/categories/components/builders/process_flow_builder.py:1454) into a semantic rule without shipping listener error scope.
+
+### Connector resolution, native WSS intake, and inbound validation
+
+Do **not** add WSS Listen to `CONNECTOR_CALL_CAPABILITIES_V1`. That registry authorizes ordinary connector calls and its resolver requires a connection. Add an operation-only **listener-entry capability row** instead; publish its placement as `listener` only.
+
+| File and current location | Concrete changes |
+|---|---|
+| [compiler/process_ir/connector_capabilities.py:60](/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/src/boomi_mcp/compiler/process_ir/connector_capabilities.py:60) | Expose the listener-entry capability from the entry policy alongside existing outbound capability projection. Change the served listener refusal at **211** to direct callers to `node.listener`; ordinary WSS `connector_call` remains refused. |
+| [compiler/process_ir/connector_resolution.py:101](/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/src/boomi_mcp/compiler/process_ir/connector_resolution.py:101) | Add `resolve_listener_entry_binding`: require a real `connector-action`, canonical WSS family, intrinsic action `Listen`, and no connection binding. Retain existing outbound connection, family, path, and replay checks. |
+| [compiler/process_ir/connector_resolution.py:310](/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/src/boomi_mcp/compiler/process_ir/connector_resolution.py:310) | Validate requested inbound contract from resolved operation facts. In `_walk_paths` around **529–593**, make listener entry establish the inbound stream for document-required downstream calls. Preserve existing source/target parity semantics; do not impose new generalized-map requirements on legacy anchors that never supplied profile context. |
+| [connector_builder.py:370](/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/src/boomi_mcp/categories/components/builders/connector_builder.py:370) | Extend `connector_family_of` and normalized action projection using `_resolve_wss_connector_type` at **4780**. Consolidate shared action derivation used by projection and authoring intake, preserving existing non-WSS fallback behavior. Native `operation_mode="listen"` derives `Listen`. |
+| [authoring/workflow.py:290](/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/src/boomi_mcp/authoring/workflow.py:290) | Update `_action_type_from_config` to consume that shared action authority. Remove the intentional WSS exclusion; require no authored `action_type`. |
+| [authoring/connector_resolution_snapshot.py:97](/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/src/boomi_mcp/authoring/connector_resolution_snapshot.py:97) | Extend structured/live/submitted-XML identity support for WSS. Recognize the operation’s own `Operation/Configuration/WebServicesServerListenAction`, following the existing scoped parser at **330**. Its element establishes connector action `Listen`; its `operationType` is a different WSS operation vocabulary and must not become the connector action. Carry resolved `inputType` and request-profile binding for semantic validation. Preserve existing create/update/reuse precedence. |
+| [recipes/materialization.py:148](/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/src/boomi_mcp/recipes/materialization.py:148) | Extend `build_symbol_table` to carry the listener’s resolved input contract from the same selected structured/XML snapshot. Keep operation connection absent. Do not invent endpoint/path facts or mint replay evidence for the listener. |
+| [semantic_validation/flow.py:185](/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/src/boomi_mcp/compiler/process_ir/semantic_validation/flow.py:185), [semantic_validation/findings.py:38](/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/src/boomi_mcp/compiler/process_ir/semantic_validation/findings.py:38) | Integrate listener binding, composition, and inbound-validation findings through the existing semantic pipeline, with dependency suppression for unresolved operations and static diagnostics. |
+| [authoring/process_ir_effects.py:647](/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/src/boomi_mcp/authoring/process_ir_effects.py:647) | Explicitly classify the added semantic kind in the vocabulary-partitioned effect model. Listener entry may not authorize replay; preserve outbound effect/grant enforcement and the partition tests. |
+
+`inbound_validation={"mode":"profile_bound"}` means the existing build-time guarantee from [inbound_validate.py:105](/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/src/boomi_mcp/patterns/primitives/inbound_validate.py:105): JSON/XML input type and a nonempty request-profile binding. Read those facts from the resolved operation, not duplicated entry fields or `validation_rules.listener`. Preserve existing `$ref` role/type checking and UUID-binding behavior. Emit no validation shape and claim no runtime payload validation.
+
+Use the actual WSS resolver’s three accepted aliases: `wss`, `web_services`, `web_services_server`, including its case/whitespace normalization. The old refusal set at `contracts.py:82` additionally names `wssserver` and `listener`; those are **not accepted aliases**. Retain their refusal, and stop using that broader set as listener admission/classification authority.
+
+### Existing execution-profile seam and served contract
+
+| File and current location | Concrete changes |
+|---|---|
+| [compiler/process_ir/execution_profile.py:99](/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/src/boomi_mcp/compiler/process_ir/execution_profile.py:99) | Keep `derive_process_execution_profile(cfg, symbols)` and delegate to the compiler entry policy. An unrelated WSS symbol cannot change a scheduled root’s profile. |
+| [authoring/process_materialization.py:298](/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/src/boomi_mcp/authoring/process_materialization.py:298) | Preserve the existing `execution_profile` field and assignment at **769**, including fingerprint coverage. Extend tests for the newly reachable listener arm. |
+| [canonical_process_apply.py:279](/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/src/boomi_mcp/categories/components/canonical_process_apply.py:279) | Preserve recompile → re-derive → compare → materialize. Tampering must still produce `PROCESS_MATERIALIZATION_EXECUTION_PROFILE_INVALID` before mutation. |
+| [process_component_materializer.py:81](/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/src/boomi_mcp/categories/components/process_component_materializer.py:81) | Reuse `process_options_for_profile` and the exact six listener attributes unchanged. Continue omitting `stopProcessingIfZeroDocuments`. |
+| [legacy_adapters/emission.py:55](/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/src/boomi_mcp/compiler/process_ir/legacy_adapters/emission.py:55) | Factor its existing compile into an internal companion result containing emitted artifact plus compiler-derived profile. Preserve `emit_legacy_result`’s existing artifact-returning interface for other callers. |
+| [process_flow_builder.py:5982](/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/src/boomi_mcp/categories/components/builders/process_flow_builder.py:5982) | Consume the companion result and pass `process_options_for_profile(profile)` into canonical component assembly. This arm currently retains only shape XML, which would otherwise produce scheduled options after the gate flip. |
+| [authoring/process_ir_projection.py:1135](/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/src/boomi_mcp/authoring/process_ir_projection.py:1135) | Publish `node.listener`, `capability.listener_entry`, `connector_action.wss.listen`, and semantic entries for entry authority, listener composition, and inbound validation. Derive admission/placement from runtime policy; publish no compiler shape IDs or emitter inputs. Extend `ProjectionSourcesV1` rather than hard-coding another capability list. |
+| [authoring/contract.py:1302](/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/src/boomi_mcp/authoring/contract.py:1302) | Replace the execution-profile oracle’s source-role-only assumptions with cases derived from the new entry policy. Cover both forms, all admitted entry semantics, missing/wrong entry identity, unrelated WSS symbols, and operation-resolution mutations. Classification/validation changes must rotate the served revision; equivalent wrappers must not. |
+| [docs/architecture/PROCESS_IR_V1.md:417](/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/docs/architecture/PROCESS_IR_V1.md:417), [tests/_process_ir_capability_witnesses.py:950](/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/tests/_process_ir_capability_witnesses.py:950) | Document/register the supported listener entry and add an executable witness. Retain the gated listener-error-scope witness. Update served-schema/projection pins with runtime registration, not a doctrine-only claim. |
+
+## 2. Entry invariants and adversarial coverage
+
+The invariant becomes:
+
+> Exactly one compiler-synthesized entry shape exists at shape1, in the form selected by the compiler entry policy: `start_noaction` or `start_listen`.
+
+For a listener, CFG entry `n1` maps to shape1, but the physical node still has `origin="synthetic"`, `synthetic_role="start"`, and **no authored `cfg_node_id` or `source_path`**. Its one synthetic transition targets the listener CFG entry’s sole successor. Scheduled synthesis continues targeting the CFG entry itself.
+
+The listener’s absorbed node and outgoing edge are accounted for explicitly by the entry policy. No other node/edge may disappear from correspondence checking.
+
+All eight current physical-entry checks in [invariants.py](/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/src/boomi_mcp/compiler/process_ir/invariants.py:1158) remain:
+
+| Current site | Required check | Adversarial test in new `tests/test_issue_158_entry_invariants.py` |
+|---|---|---|
+| **1160** | First node is compiler-owned shape1 with the policy-selected form. | `test_entry_rejects_wrong_form_or_origin`: exchange listen/no-action forms between profiles; forge IR origin. |
+| **1172** | Declared entry remains shape1. | `test_entry_rejects_retargeted_entry_id`: declare shape2. |
+| **1179** | Exact start coordinates `(96.0, 94.0)`. | `test_entry_rejects_authored_coordinates`: mutate x and y independently. |
+| **1186** | Exactly one synthetic start. | `test_entry_rejects_second_start`: add a second start with otherwise valid numbering; also disguise an extra start as another synthetic role. |
+| **1207** | Exact policy-derived successor. | `test_entry_rejects_wrong_successor`: skip to a later existing shape or wire to itself. |
+| **1380** | Entire synthetic emitter input equals re-derived input. | `test_entry_rejects_forged_operation_or_label`: substitute another valid operation ID or change the label. Symbol membership alone must not suffice. |
+| **1396** | Generic layout formula retains its start exception. | `test_entry_preserves_body_geometry_formula`: mutate downstream geometry; separately substitute ordinary-body coordinates for start coordinates. Earlier rejection is acceptable where checks overlap. |
+| **1471** | Exactly one synthetic start wire. | `test_entry_rejects_wire_count_or_provenance`: remove/duplicate the wire or claim CFG-edge provenance. |
+
+The synthesis site is [lowering.py:1196](/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/src/boomi_mcp/compiler/process_ir/lowering.py:1196), including allocation at **1208** and unconditional start construction at **1224**. Add `test_listener_is_fused_once_at_shape1`, with a scheduled control proving unchanged numbering and bytes.
+
+Also retain and extend these adjacent protections:
+
+- **`invariants.py:1132`** — ordinal order, derived shape IDs, uniqueness: corrupt each independently.
+- **1277** — ordered CFG correspondence: drop/reorder a non-entry node or absorb a second node.
+- **1362** — synthetic provenance: attach an authored source path or CFG-node ID.
+- **1511** — dragpoint identity, geometry, target existence, and CFG-edge claims: mutate name, local ordinal, coordinates, edge ID, and target.
+- **442/509** — connector-call entry roles: forge `role="entry"` on an outbound call in a listener, and preserve existing scheduled root ordering adversarials.
+- Model/body intake — reject listener after a prefix, multiple listeners, nested listener, source/listener mixing, and caller-authored shape/layout/wiring fields through both parser and direct compiler entry.
+
+Keep existing adversarials in `tests/test_process_ir_compiler_invariants.py`; add listener counterparts rather than replacing scheduled coverage.
+
+## 3. Deployment and routing: one recognition authority
+
+Add **one shared projection**, `authoring/process_entry.py`:
+
+- Canonical root: parse the recorded IR → pure `lower_process_ir_to_cfg` → compiler entry descriptor.
+- Legacy process: normalize only its recognized source/pipeline entry into that same semantic descriptor, using the actual WSS resolver.
+- Do not fully recompile at deployment: recorded builds lack the trusted effects/replay context needed for that.
+- Do not persist a second listener flag. The recorded spec supplies the semantic root; the existing materialization plan owns its recorded execution profile.
+
+Legacy normalization must preserve existing abbreviated/source-only recognizer fixtures. It must identify the process entry, not scan for any WSS stage or unrelated operation.
+
+| File and current location | Required consumer change |
+|---|---|
+| [integration_builder.py:917](/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/src/boomi_mcp/categories/integration_builder.py:917) | Extend/reuse `_integration_participants` as the shared components/processes identity view. Canonical envelopes and legacy components share one key namespace; reference-only dependencies remain indexed. |
+| [integration_builder.py:2064](/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/src/boomi_mcp/categories/integration_builder.py:2064) | Make `_process_config_has_wss_listen` delegate to the shared entry projection. Remove its copied alias set at **2061**. |
+| [integration_builder.py:2090](/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/src/boomi_mcp/categories/integration_builder.py:2090) | In `_check_api_service_route_dependencies`, replace the canonical-root refusal at **2167** with listener-profile classification. Preserve `$ref`, existence, role, and `depends_on` checks. Scheduled canonical ASC targets still fail `API_SERVICE_ROUTE_PROCESS_NOT_LISTEN`. |
+| [integration_builder.py:2230](/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/src/boomi_mcp/categories/integration_builder.py:2230) | Update `_check_process_flow_ref_types`, including WSS dispatch at **2260**, to consume the same descriptor and operation-only role. Preserve all outbound source/target role checks. |
+| [deployment/orchestration.py:590](/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/src/boomi_mcp/categories/deployment/orchestration.py:590) | `_resolve_build_deployment_target` selects eligible authored process roots from both namespaces. Exclude explicitly reference-only dependencies from root candidates, but never exclude an authored root merely because apply reused it. Resolve its actual applied result ID; preserve `BUILD_MULTIPLE_PROCESS_COMPONENTS` before mutation. |
+| [deployment/orchestration.py:530](/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/src/boomi_mcp/categories/deployment/orchestration.py:530) | Update `_build_component_summary` and extension handling at **732** through the same participant view, including canonical envelopes. |
+| [deployment/orchestration.py:771](/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/src/boomi_mcp/categories/deployment/orchestration.py:771) | `_listener_operation_ref_from_process` becomes a descriptor consumer; remove its duplicate alias definition at **761**. |
+| [deployment/orchestration.py:823](/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/src/boomi_mcp/categories/deployment/orchestration.py:823) | `_resolve_asc_binding` resolves canonical route targets and operation IDs through the unified participant/result index. Its current components-only lookup is an additional required consumer. |
+| [deployment/orchestration.py:884](/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/src/boomi_mcp/categories/deployment/orchestration.py:884) | `_resolve_listener_metadata` receives the already-selected target. Remove its independent process count at **916**. Read listener/ASC metadata only after the selected root classifies as listener; metadata cannot establish that classification. |
+| [deployment/orchestration.py:4628](/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/src/boomi_mcp/categories/deployment/orchestration.py:4628) | Resolve once and thread the identity through metadata at **4667**, packaging at **4765**, deployment at **4799**, and runtime binding at **4831**. Never select a process again downstream. |
+
+Add `tests/test_issue_158_listener_deployment.py`, using the existing fake-SDK/public-tool patterns. Its primary matrix must create the recorded build through plan/compile/apply and assert the **exact applied root ID at package creation/lookup**, then the package passed to deploy:
+
+| Parameter ID | Expected behavior |
+|---|---|
+| `scheduled-alone` | Canonical root deploys normally. |
+| `scheduled-reference-child` | Same root ID; reference-only child neither replaces it nor creates ambiguity. |
+| `listener-alone` | Canonical root ID reaches listener verification. |
+| `listener-reference-child` | Same listener ID; child remains a dependency. |
+
+Additional named tests:
+
+- `test_multiple_eligible_roots_refuse_before_package_deploy`
+- `test_reference_only_dependencies_do_not_make_a_root`
+- `test_scheduled_root_with_wss_child_or_operation_stays_scheduled`
+- `test_listener_metadata_cannot_reclassify_scheduled_root`
+- `test_canonical_asc_route_uses_selected_listener_and_resolved_id`
+- `test_canonical_scheduled_asc_route_is_refused`
+- `test_wss_entry_ref_is_operation_only_and_role_checked`
+- `test_listener_recognizers_share_compiler_entry_authority`
+
+Extend `tests/test_orchestrate_deploy_contract.py`, `tests/test_orchestration_listener_verify.py`, and `tests/test_integration_builder.py`; preserve reused-root and legacy controls.
+
+**Reuse decision:** a reused component can differ from the authored root because reuse may bypass materialization. Confirm the selected reused listener’s actual start operation through the existing readback seam before package/ASC mutation. Treat disagreement as a typed entry mismatch, never as a reason to reclassify the root. Keep this check limited to listener reuse; ordinary scheduled target behavior remains intact.
+
+## 4. Anchors, atomic cutover, and manifests
+
+### Capture before changing either gate
+
+The missing forms are precisely:
+
+1. `wss_listen → soap_send`
+2. `wss_listen → map → soap_send`
+
+Capture using the baseline **legacy renderer**, with raw inputs patterned after the existing independent listener corpus:
+
+```python
+ProcessFlowBuilder.build(
+    SyncPipelineBuilder.lower_config(copy.deepcopy(raw)),
+    name=listener_chain_golden_name(chain),
+    folder_name="Golden/Fixtures",
+)
+```
+
+Use `WSSOP-1`, optional `MAP-1`, and the existing target fixture convention `TGT-CONN`/`TGT-OP`. Let legacy lowering supply SOAP `EXECUTE`. Preserve emitted UTF-8 bytes without XML reserialization.
+
+Archive inputs, output bytes, exact invocation, baseline SHA, hashes, and producer provenance under `docs/architecture/evidence/issue-158/preflip/`, following the archive structure in [issue-156/captures/MANIFEST.json](/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/docs/architecture/evidence/issue-156/captures/MANIFEST.json:1).
+
+Existing source/golden provenance cites the July 4 library capture; the inspected architecture archive does not establish a fresh successful listener serving run. Keep legacy-byte evidence and later live-runtime evidence distinct.
+
+### Atomic implementation change
+
+These changes must land together:
+
+- Gate 1: `_sync_pipeline_is_canonical` at [process_flow_builder.py:5095](/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/src/boomi_mcp/categories/components/builders/process_flow_builder.py:5095).
+- Gate 2: listener refusal in `adapt_sync_pipeline` at [legacy_adapters/sync_pipeline.py:392](/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/src/boomi_mcp/compiler/process_ir/legacy_adapters/sync_pipeline.py:392).
+- Operation-only adapter requirements in `_binding_slots` at **255**, preserving `_label_field` at **208** and raw RFC6901 occurrence pointers.
+- Derived-profile plumbing into component assembly.
+- All seven canonical anchor proofs and the re-homed pinned tests.
+- Corresponding test/golden manifest changes.
+
+Keep the legacy fallback call at `process_flow_builder.py:5948` present but unreached by admitted listener routes.
+
+### Golden ownership
+
+Preserve existing bytes and filenames:
+
+| Existing anchor | Active manifest row |
+|---|---|
+| `listener_wss_start.xml` | `golden-000022` |
+| `sync_pipeline_listener_map_send.xml` | `golden-000040` |
+| `sync_pipeline_listener_map_write.xml` | `golden-000041` |
+| `sync_pipeline_listener_send.xml` | `golden-000042` |
+| `sync_pipeline_listener_write.xml` | `golden-000043` |
+
+Move the four sync anchors from the legacy inventory into the canonical corpus. The fifth anchor’s existing `SyncPipelineBuilder` producer becomes canonical through the gate flip. Add:
+
+| New row | `input_case` | Expected file |
+|---|---|---|
+| `golden-000077` | `listener_chain:listener_soap_send` | `tests/fixtures/golden_xml/sync_pipeline_listener_soap_send.xml` |
+| `golden-000078` | `listener_chain:listener_map_soap_send` | `tests/fixtures/golden_xml/sync_pipeline_listener_map_soap_send.xml` |
+
+Both new rows use `renderer="process-component-v1"`, `owner="#158"`, `disposition="survivor"`, `state="active"`. **No golden tombstones or edits to existing row identities. Raise the active golden floor from 76 to 78.**
+
+Update these files:
+
+- `tests/fixtures/process_ir/sync_pipeline_emitter_parity_cases.json`: add the six listener fingerprints, covering REST/DB/SOAP with and without map.
+- [tests/test_process_emitter_parity.py:997](/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/tests/test_process_emitter_parity.py:997): canonical fingerprints **16 → 22**; keep the existing single SOAP-verb duplicate. At **1106**, canonical inventory owns all six sync-listener anchors and the legacy inventory becomes empty.
+- [tests/_wave_gate_golden_corpus.py:1744](/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/tests/_wave_gate_golden_corpus.py:1744): derive listener cases from the JSON corpus. Preserve existing `listener_chain:*` registry identities through an explicit case `input_case`; remove duplicate static registrations. This preserves the registry/manifest bijection enforced by `tests/test_wave_gate_goldens.py:131`.
+- `tests/test_sync_pipeline_adapter_cutover.py`: positive adapter reachability, operation-only pointer coverage, alias acceptance/refusal, and two additional SOAP byte/differential parameters.
+- `tests/test_process_emitter_registry.py:141`: remove only `start_listen` from the absence assertion; add positive registration and operation-only requirement assertions.
+
+### Required-node ledger
+
+Preserve existing IDs for continuing tests, including:
+
+- `pytest-004162`, `pytest-004163`: inventory and canonical coverage.
+- `pytest-004204`: non-IR registry exclusions.
+- `pytest-008462`–`pytest-008469`: existing listener byte/differential nodes.
+
+Tombstone these retired nodes **in the same change that removes/renames them**, then append their successors:
+
+| Rows | Replacement |
+|---|---|
+| `pytest-003081` | Positive registry listener-adaptation test. |
+| `pytest-008427`–`pytest-008433` | Accepted-alias adaptation tests plus explicit refusal of `listener`/`wssserver`. |
+| `pytest-008461` | `test_listener_chain_reaches_the_adapter`, asserting one invocation. |
+| `pytest-008497` | Positive operation-pointer and forbidden-connection-pointer coverage. |
+| `pytest-008498`–`pytest-008508` | Renamed canonical-routing admission tests. |
+| `pytest-010110`–`pytest-010119` | Replace old “reclassify a scheduled CFG by swapping symbol families” probes with explicit listener compilation/profile tests and unsupported-spelling controls. |
+
+Append new IDs starting at **`pytest-012094`**. Add rows for:
+
+- All successors above.
+- Six listener cases × six existing parity tests: **36 nodes**.
+- Six listener cases × two existing cutover corpus tests: **12 nodes**.
+- Two SOAP variants × two listener byte/differential tests: **4 nodes**.
+- Golden tests for `golden-000077` and `golden-000078`: **2 nodes**.
+- The named entry-invariant and deployment tests, plus listener model, semantic, profile, authoring, and apply tests.
+
+The explicit retirements above total **31 nodes**. Set active/collected floors from actual implementation-time collection: **`12045 + appended − 31`**, including every newly collected parameter. Keep skipped cap **30**. Do not regenerate/reorder the ledger or repoint any existing `node_id`.
+
+Update #153 revision witnesses in `tests/test_issue_153_canonical_apply_e2e.py` around **4104, 5108, 5360, 5555** to exercise the new entry/resolution authority while retaining their enduring revision-binding and lookup-isolation responsibilities.
+
+Because `recipes/materialization.py` changes, regenerate its affected inventory and served revision artifacts with the exact wrapper:
+
+```sh
+PYTHONPATH=src .venv/bin/python scripts/rebaseline_m12_12_inventory.py
+```
+
+This updates `tests/fixtures/m12_12/legacy_reachability_inventory.json` and generated tables in `docs/architecture/M12_COMPATIBILITY_INVENTORY.md`. Review that diff; do not hand-edit digest values or remove surrounding prose.
+
+## 5. Ordered execution, validation, and decisions
+
+### Implementation sequence
+
+1. Record the literal baseline and the slice gate roster/audit ledger before code changes.
+2. Capture both SOAP forms with unchanged legacy code. Commit the evidence-only archive; this is an intermediate commit within the slice, not completion.
+3. Implement model/entry policy, operation resolution, synthesis/invariants, emitter registration, and existing profile plumbing.
+4. Implement native WSS snapshots/intake, semantic composition/inbound validation, shared recognizers, and canonical target selection.
+5. Integrate both routing flips, re-homed corpora/tests, new byte files, served projections, and manifest successors as one implementation change.
+6. Run targeted tests, then the full non-KB suite using `PYTHONPATH=src .venv/bin/python -m pytest`. Rebaseline the M12.12 artifacts and reconcile required-node collection.
+7. Run one scoped initial live QA pass through the public MCP boundary in an implementation session with MCP available.
+8. Commit the QA-validated implementation. Run the initial detached Codex review against **`3a8469e109cbf414aff1f9db35649ef06071fb66`**, covering both commits.
+9. Complete correction/additive gates and final-tree wave verification. Run the wave command with the Python 3.12 venv and this literal base, including `--require-plan-fingerprint`; retain its full evidence.
+
+### Offline acceptance tests
+
+Extend existing model, compiler-invariant, semantic, materialization, apply, execution-profile, emitter, authoring-projection, and #155 identity suites. Required cases include:
+
+- Missing operation; wrong component type/family/action; connection supplied as value/null; invalid placement; label preservation and XML escaping.
+- Native WSS structured create/update/reuse and scoped XML identity; `operationType="CREATE"` still means connector action `Listen`.
+- Seven byte anchors, graph verification, deterministic CFG/emission/fingerprints, and nonempty-label comparison against `render_start_listen`.
+- Plan → compile → materialize → apply of a root in `spec.processes`; tampered profile and operation rebinding fail before mutation.
+- Requested inbound validation succeeds for bound JSON/XML and refuses absent binding or `none`/`singledata`; absent validation adds no new requirement.
+- Outbound connection/family mismatch, profile continuity, blank/dynamic path, and applicable replay/effect refusals remain active inside listener roots.
+- The four exact-ID deployment boundary cases and all classification/ambiguity controls above.
+- Served model/manifest/registry/projection agreement and revision non-vacuity.
+
+### Scoped live matrix
+
+Use profile `renera`, account `trainingglebbochkarov-16926N`, `renera-local-atom`, and TEST environment **Local Test Env**. Use independently sourced fixtures and record their provenance.
+
+| Target family | Bare WSS | ASC |
+|---|---|---|
+| REST | Deploy canonical root; send inbound payload to derived `/ws/simple/...`; verify successful execution and target result. | Deploy root and ASC route; send payload to effective `/ws/rest/...`; verify the same target identity and result. |
+| Database | Same, with a verifiable database effect. | Same through ASC. |
+| SOAP | Same, with a successful SOAP target invocation. | Same through ASC. |
+
+Mapped/unmapped forms are covered exhaustively by the byte corpus; live QA is grouped by capability family. Record applied process IDs, package/deployment identities, operation/route binding, request/result, and fresh execution evidence.
+
+Set Shared Web Server `apiType` appropriately for each routing mode and retain existing mismatch refusals. **Undeploy between families** to respect the three-deployment Standard TEST license pool; explicitly deploy the ASC and its target process.
+
+### Recommended decisions and risks
+
+- **Root-only node:** choose it over a root field or nullable source variant. It fits existing walkers and keeps CFG entry as #153’s authority.
+- **Separate listener-entry capability:** avoids granting movable WSS calls, connections, or replay rights through the outbound registry.
+- **Build-time inbound validation only:** matches the existing primitive’s guarantee; runtime schema validation remains outside scope.
+- **Reuse confirmation before mutation:** necessary because authored listener intent alone does not prove a reused stored process has that entry.
+- **Largest risk:** fused CFG/shape correspondence. The eight retained checks, adjacent ownership checks, and scheduled controls are the acceptance bar.
+- **Atomic cutover risk:** profile-envelope omission and duplicate golden registry keys can survive shape-only tests; full component bytes and manifest bijection tests must accompany both flips.
+
+Apply the repository’s completion policy: one scoped initial QA and initial review, mandatory affected QA plus full unreviewed-delta review after every correction, severity-aware checkpoints every third evaluation, structural fixes for repeated defect classes, and no deferred critical findings. The architect implementation review alone ends after its third evaluation under `COMPLETION_WORKFLOW_RULES.md`; owed correction and final-tree wave validation still run. Missing live QA or unattested review leaves implementation incomplete.
+
+
+=== ISSUE ACCEPTANCE CRITERIA ===
+## Acceptance criteria
+
+- Every audited working listener form compiles and materializes canonically, byte-identical to its
+  anchor — the 5 existing listener anchors (`listener_wss_start.xml`, landed @`0addebb` M12.3, plus
+  4 × `sync_pipeline_listener_*.xml` landed @`9711a9c`) plus the 2 SOAP-target anchors captured here
+  pre-flip — 7 listener anchors in all.
+- The relaxed entry-shape invariants still reject every caller-authored geometry/wiring/entry-shape mutation they reject today — proven by adversarial tests per invariant site, not by deletion of the checks.
+- Listener process options appear on the canonical arm and are derived solely from the entry node; no independent flag exists that could contradict the graph.
+- Both routing gates are flipped in this change, the two pinned tests are re-homed in the same change, and the legacy fallback remains present but unreached by the flipped routes.
+- A canonical listener stored only in `IntegrationSpecV1.processes` plans, compiles, applies, resolves from its recorded build, deploys, and reaches listener verification; both bare WSS and ASC routes work. Scheduled roots remain refused as listener/ASC targets, not as ordinary scheduled deployment targets; unrelated-WSS-symbol and ambiguous-target controls stay refused. Native WSS `operation_mode="listen"` resolves without an authored action/connection workaround, and the outbound connector checks added in #155 remain active.
+- The `listener_entry` manifest row, entry authority policy, and published authoring projection exist; the published contract matches the registry (no doctrine claim without a registration).
+
+### Deployment-target regression clarification (2026-09-06)
+
+This clarifies the shared resolver work already owned by in-scope item 8; it adds no new deployment API or multi-process deployment capability.
+
+- Cover both scheduled and listener canonical roots stored in `IntegrationSpecV1.processes`, each with and without a reference-only subprocess in `spec.components`.
+- For each single-root case, resolution from the recorded build selects the canonical root's actual applied component ID. A reference-only subprocess neither replaces that root nor creates false multiple-root ambiguity.
+- Feed the resolved identity into the package/deploy boundary in offline regression tests and assert the exact target ID; a helper-only success is insufficient if a later stage selects a different process. Keep the existing scoped listener live-QA matrix.
+- Multiple eligible roots without an unambiguous target produce a typed refusal before package/deploy mutation; never guess from order, name, or reference-only dependencies. No new explicit-target selector is required by this clarification.
+- Listener/ASC classification is based on the selected root's compiler-derived entry/profile. A scheduled root remains a valid ordinary deployment target but is not classified or verified as a listener merely because a referenced child or unrelated operation is WSS.
+
+## Required tests
+
+Per the verification policy (#152): directly affected unit + adversarial tests (invariant-relaxation
+adversarials per site; connection-forbidden rejection; alias acceptance; recognizer matrix across both
+consumer modules); byte goldens for all listener anchors incl. the 2 new SOAP-target captures; a
+non-empty-label case (unit byte assertion against `render_start_listen`, or one captured labeled
+listener anchor — all 5 existing listener goldens/anchors have `userlabel=""`, so byte-identity to
+anchors cannot detect a dropped label mapping); graph
+verification; a plan → compile → materialize dry-run of a listener root; the full non-KB suite; ONE
+scoped live QA pass through the public MCP tool boundary — listener deploy + inbound payload for each
+distinct listener family (plan §5 live matrix); The current completion policy applies: one scoped initial QA pass and one initial Codex review after the QA-validated commit; every applied correction gets affected QA and a review of its full unreviewed delta. Every third evaluation is a severity-aware checkpoint, not a general stop condition. Critical findings cannot be deferred; standard blocking residue requires an already-filed, sequenced follow-up with reason class and lineage. The architect implementation review alone ends after its third evaluation under `docs/architecture/COMPLETION_WORKFLOW_RULES.md`; owed correction validation and final-tree wave validation still run. QA fixtures require provenance independent of the implementation under test.
+
+## Definition of done
+
+The fused `start_listen` entry is a canonical-chain capability: authored as ProcessIR, compiled under
+unweakened compiler-owned entry-shape invariants, materialized with derived listener options,
+recognized by deployment, and live-proven with an inbound payload — with the SOAP-target anchors
+secured pre-flip and both routing gates flipped atomically with the anchors, so #160 can later
+remove the WSS fallback as a pure deletion with no capability loss.
+
+

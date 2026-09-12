@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 12277, "minimum_collected": 12277, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 12287, "minimum_collected": 12287, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -12354,3 +12354,13 @@
 {"kind": "test", "id": "pytest-012353", "node_id": "tests/test_issue_158_audit_ledger.py::test_every_finding_row_of_the_158_ledger_is_visible_to_its_scanner", "state": "active"}
 {"kind": "test", "id": "pytest-012354", "node_id": "tests/test_orchestration_listener_verify.py::test_every_registration_inside_the_window_verifies_on_one_own_execution", "state": "active"}
 {"kind": "test", "id": "pytest-012355", "node_id": "tests/test_orchestration_listener_verify.py::test_a_record_readable_in_the_readbacks_last_seconds_verifies", "state": "active"}
+{"kind": "test", "id": "pytest-012356", "node_id": "tests/test_issue_153_canonical_apply_e2e.py::test_the_compiler_revision_covers_the_listener_inbound_contract", "state": "active"}
+{"kind": "test", "id": "pytest-012357", "node_id": "tests/test_issue_158_entry_invariants.py::test_listener_plan_rejects_a_duplicate_shape_id", "state": "active"}
+{"kind": "test", "id": "pytest-012358", "node_id": "tests/test_issue_158_entry_invariants.py::test_listener_plan_rejects_noncontiguous_ordinals", "state": "active"}
+{"kind": "test", "id": "pytest-012359", "node_id": "tests/test_issue_158_entry_invariants.py::test_listener_plan_rejects_a_dangling_transition", "state": "active"}
+{"kind": "test", "id": "pytest-012360", "node_id": "tests/test_issue_158_entry_invariants.py::test_listener_plan_rejects_a_wrong_dragpoint_name", "state": "active"}
+{"kind": "test", "id": "pytest-012361", "node_id": "tests/test_issue_158_entry_invariants.py::test_listener_plan_rejects_a_wrong_dragpoint_row", "state": "active"}
+{"kind": "test", "id": "pytest-012362", "node_id": "tests/test_issue_158_entry_invariants.py::test_listener_plan_rejects_a_duplicate_local_ordinal", "state": "active"}
+{"kind": "test", "id": "pytest-012363", "node_id": "tests/test_issue_158_entry_invariants.py::test_listener_start_claiming_authored_provenance_is_rejected", "state": "active"}
+{"kind": "test", "id": "pytest-012364", "node_id": "tests/test_issue_158_listener_deployment.py::test_a_reused_operations_authored_endpoint_is_not_the_accounts", "state": "active"}
+{"kind": "test", "id": "pytest-012365", "node_id": "tests/test_issue_158_listener_deployment.py::test_a_stray_listener_stage_is_not_the_entry_of_another_process_kind", "state": "active"}

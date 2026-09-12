@@ -1,0 +1,8 @@
+Your previous turn ended without the required report. Approvals are unavailable in this read-only session, and no Boomi MCP or network tool may be called — read the repository only.
+
+Complete the ARCHITECT implementation review of GitHub issue #158 now: compare the implementation in the commit range `3a8469e109cbf414aff1f9db35649ef06071fb66..HEAD` (branch `codex/issue-158`, clean working tree) with the architect design plan and the issue acceptance criteria given in the first message of this session, taking into account the plan corrections, design decisions and finding dispositions recorded in `docs/architecture/ISSUE_158_AUDIT_LEDGER.md`.
+
+Emit the FULL report as plain text NOW:
+- one numbered finding per defect: short title; severity P0–P3; the plan section or acceptance criterion it concerns; `file:line` evidence; what the implementation does versus what the plan requires; the failure it causes;
+- then a line starting `Reviewed files:` listing the files you read;
+- and END with a verdict on its OWN FINAL line: exactly 'VERDICT: NO ISSUES' or 'VERDICT: ISSUES FOUND'.

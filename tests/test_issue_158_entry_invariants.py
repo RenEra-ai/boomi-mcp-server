@@ -398,3 +398,87 @@ def test_no_connector_call_may_carry_the_entry_role_under_a_listener():
     with pytest.raises(ProcessIRCompileError) as excinfo:
         check_cfg_invariants(forged)
     assert excinfo.value.diagnostics[0].code == PROCESS_IR_COMPILE_INTERNAL
+
+
+# ---------------------------------------------------------------------------
+# The shared plan invariants, on a LISTENER root (#158 ARCH-158-r1-04)
+# ---------------------------------------------------------------------------
+#
+# Acceptance criterion 2 requires an adversarial per invariant SITE on the
+# relaxed entry, and the counterparts in `test_process_ir_compiler_invariants`
+# run on scheduled roots only — so nothing proved these still refuse once the
+# entry is a fused listener. Each mutation below is independent: it perturbs one
+# fact and nothing else, so no earlier site can mask the one under test.
+
+
+def _body_wire(plan, node_index=1, **update):
+    """The listener plan with one body node's single outgoing wire perturbed."""
+    node = plan.nodes[node_index]
+    wire = node.outgoing[0].model_copy(update=update)
+    mutated = node.model_copy(update={"outgoing": (wire,)})
+    return plan.model_copy(
+        update={
+            "nodes": plan.nodes[:node_index] + (mutated,) + plan.nodes[node_index + 1:]
+        }
+    )
+
+
+def test_listener_plan_rejects_a_duplicate_shape_id():
+    cfg, plan, symbols = _compiled(_listener_doc())
+    duplicated = plan.nodes[2].model_copy(update={"shape_id": plan.nodes[1].shape_id})
+    broken = plan.model_copy(update={"nodes": plan.nodes[:2] + (duplicated,) + plan.nodes[3:]})
+    assert _refusal(broken, cfg, symbols).code == _PLAN_INVALID
+
+
+def test_listener_plan_rejects_noncontiguous_ordinals():
+    cfg, plan, symbols = _compiled(_listener_doc())
+    shifted = plan.nodes[1].model_copy(update={"ordinal": plan.nodes[-1].ordinal + 3})
+    broken = plan.model_copy(update={"nodes": (plan.nodes[0], shifted) + plan.nodes[2:]})
+    assert _refusal(broken, cfg, symbols).code == PROCESS_IR_COMPILE_NONDETERMINISTIC
+
+
+def test_listener_plan_rejects_a_dangling_transition():
+    cfg, plan, symbols = _compiled(_listener_doc())
+    assert _refusal(_body_wire(plan, to_shape_id="shape99"), cfg, symbols).code == _PLAN_INVALID
+
+
+def test_listener_plan_rejects_a_wrong_dragpoint_name():
+    cfg, plan, symbols = _compiled(_listener_doc())
+    wire = plan.nodes[1].outgoing[0]
+    assert _refusal(
+        _body_wire(plan, dragpoint_name=wire.dragpoint_name + "7"), cfg, symbols
+    ).code == _PLAN_INVALID
+
+
+def test_listener_plan_rejects_a_wrong_dragpoint_row():
+    cfg, plan, symbols = _compiled(_listener_doc())
+    wire = plan.nodes[1].outgoing[0]
+    assert _refusal(_body_wire(plan, y=wire.y + 999.0), cfg, symbols).code == _PLAN_INVALID
+
+
+def test_listener_plan_rejects_a_duplicate_local_ordinal():
+    cfg, plan, symbols = _compiled(_listener_doc())
+    node = plan.nodes[1]
+    wire = node.outgoing[0]
+    twice = node.model_copy(update={"outgoing": (wire, wire.model_copy())})
+    broken = plan.model_copy(update={"nodes": (plan.nodes[0], twice) + plan.nodes[2:]})
+    assert _refusal(broken, cfg, symbols).code in (
+        _PLAN_INVALID,
+        PROCESS_IR_COMPILE_NONDETERMINISTIC,
+    )
+
+
+def test_listener_start_claiming_authored_provenance_is_rejected():
+    """The provenance site on its OWN mutation. The case inside the form test
+    changes `origin` to `ir` as well, so the form site answers first and the
+    provenance check is never reached — a masked site is an unproven one."""
+    cfg, plan, symbols = _compiled(_listener_doc())
+    start = plan.nodes[0]
+    assert (start.origin, start.synthetic_role, start.source_path) == (
+        "synthetic", "start", None,
+    )
+    # ONLY the provenance moves: the Start stays synthetic, in its role, with
+    # the emitter input and wiring the policy derived.
+    assert _refusal(
+        _with_start(plan, source_path="/body/steps/0"), cfg, symbols
+    ).code == _PLAN_INVALID

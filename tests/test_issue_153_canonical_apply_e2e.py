@@ -4101,6 +4101,67 @@ def test_a_process_only_plan_is_not_called_empty():
             if "zero executable steps" in w], bare.get("warnings")
 
 
+def test_the_compiler_revision_covers_the_listener_inbound_contract():
+    """#158 ARCH-158-r1-03: the classification oracle beside this one answers
+    WHICH process is a listener; nothing answered what the compiler then requires
+    of a listener's operation, so those authorities could move while the served
+    revision stood still. Measured then: emptying `profile_bound_input_types()`
+    turned an accepted bound-JSON listener into
+    `PROCESS_IR_SEMANTIC_LISTENER_INBOUND_CONTRACT_UNSATISFIED` with the digest
+    unchanged. The projection now CALLS the resolution rule over a case set
+    derived from the vocabularies the rule consults, and this binds the property:
+    a change in what the rule ACCEPTS moves the revision.
+    """
+    import boomi_mcp.compiler.process_ir.connector_resolution as cr
+    import src.boomi_mcp.compiler.process_ir.connector_resolution as cr_src
+    from boomi_mcp.authoring.contract import (
+        _compiler_revision,
+        _listener_inbound_behaviour_oracle,
+        _nested_literal_options,
+    )
+
+    baseline = _compiler_revision()
+    cases = _listener_inbound_behaviour_oracle()
+    # The oracle is not vacuous: it reaches every verdict the rule can reach,
+    # including the inbound refusal, and its case set follows the vocabularies.
+    assert {"accepted", "PROCESS_IR_SEMANTIC_LISTENER_INBOUND_CONTRACT_UNSATISFIED",
+            "PROCESS_IR_REFERENCE_LISTENER_OPERATION_INVALID",
+            "PROCESS_IR_REFERENCE_OPERATION_NOT_FOUND"} <= set(cases.values()), cases
+    from boomi_mcp.categories.components.builders.connector_builder import _WSS_INPUT_TYPES
+
+    for input_type in _WSS_INPUT_TYPES:
+        assert any(input_type in key for key in cases), input_type
+
+    # Each authority the rule consults, perturbed on BOTH module objects the
+    # suite can hold (bare and `src.`-prefixed), moves the served revision.
+    for name, replacement in (
+        ("profile_bound_input_types", staticmethod(lambda: frozenset())),
+        ("PROFILE_COMPONENT_TYPES", frozenset()),
+    ):
+        original = (getattr(cr, name), getattr(cr_src, name))
+        value = replacement.__func__ if isinstance(replacement, staticmethod) else replacement
+        try:
+            setattr(cr, name, value)
+            setattr(cr_src, name, value)
+            assert _compiler_revision() != baseline, name
+        finally:
+            setattr(cr, name, original[0])
+            setattr(cr_src, name, original[1])
+    assert _compiler_revision() == baseline
+
+    # The requested-contract vocabulary is read THROUGH its Optional wrapper: a
+    # reader that stops at `Optional` covers one value of a two-value vocabulary
+    # and reports nothing (that is how this gap first read as covered).
+    listener = next(
+        member
+        for member in __import__(
+            "boomi_mcp.authoring.contract", fromlist=["_cfg_semantic_members"]
+        )._cfg_semantic_members()
+        if member.model_fields["semantic_kind"].default == "listener"
+    )
+    assert _nested_literal_options(listener, "inbound_validation") == ("profile_bound",)
+
+
 def test_the_compiler_revision_covers_the_execution_profile_derivation():
     """§6 AR3-07 / AR4-01, rebuilt on the entry policy by #158.
 

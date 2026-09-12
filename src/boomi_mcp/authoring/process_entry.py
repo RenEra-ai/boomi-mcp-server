@@ -83,7 +83,23 @@ def legacy_config_entry(process_config: Any) -> ProcessEntryV1:
 
     if not isinstance(process_config, Mapping):
         return _SCHEDULED_ENTRY
-    pipeline = process_config.get("pipeline")
+    # #158 ARCH-158-r1-01 sibling / ARCH-158-r1-02: the entry is what the process
+    # ENTERS on, so a `pipeline` block belongs to the entry only for the builder
+    # that emits from it. A `database_to_api_sync` config carrying a stray
+    # listener stage emits its scheduled source start, and reading the stage
+    # there reported a listener entry for a process that has none. The
+    # discriminator is the builder registry's own, and a config naming no kind
+    # (the abbreviated recognizer shapes) is read as before.
+    from ..categories.components.builders.process_flow_builder import (
+        PROCESS_FLOW_BUILDERS,
+        SyncPipelineBuilder,
+    )
+
+    kind = str(
+        process_config.get("process_kind") or process_config.get("process_type") or ""
+    ).strip().lower()
+    pipeline_is_the_entry = kind not in PROCESS_FLOW_BUILDERS or kind == SyncPipelineBuilder.PROCESS_KIND
+    pipeline = process_config.get("pipeline") if pipeline_is_the_entry else None
     if isinstance(pipeline, Mapping):
         for stage in pipeline.get("stages") or []:
             if not isinstance(stage, Mapping):

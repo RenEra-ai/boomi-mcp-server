@@ -1,0 +1,89 @@
+You are the ARCHITECT reviewing the IMPLEMENTATION of GitHub issue #158 ("M12.20 — Canonical WSS listener entry and materialization (T7)") in the repository at the current working directory, branch `codex/issue-158`, against the architect design plan reproduced verbatim at the end of this prompt. This is a read-only review: do not modify files, and do NOT call any Boomi MCP tool or any network tool — read the repository only.
+
+WHAT TO REVIEW
+- The implementation is the commit range `3a8469e109cbf414aff1f9db35649ef06071fb66..HEAD` (inspect it with `git diff 3a8469e109cbf414aff1f9db35649ef06071fb66..HEAD` and `git log --oneline 3a8469e..HEAD`). The working tree is clean.
+- Your job is PLAN CONFORMANCE: does the implementation realize every element of the design plan and every acceptance criterion of the issue? Report gaps (a plan element or acceptance criterion that is missing, partial, or realized differently than the plan requires without a recorded reason), contradictions between the implementation and the plan, and correctness defects that make a plan element fail at runtime or in served contract text. Do not re-review code quality that the plan does not govern.
+- Recorded deviations: the audit ledger `docs/architecture/ISSUE_158_AUDIT_LEDGER.md` records plan corrections ("Plan corrections" section), design decisions ("Design decisions" section), and every finding raised by the repository's own QA and commit-review gates with its disposition. A deviation from the plan that the ledger records with a reason is not by itself a finding — judge whether the recorded reason holds. Measured platform facts used by the implementation are archived under `docs/architecture/evidence/issue-158/`.
+- The repository's own gates have already run on this tree: live QA through the public MCP tool boundary (Stage 1, seven rounds; Stage 2 support QA, seven rounds) and a detached Codex commit review whose last round over the final correction returned no finding. Your review is additive: implementation versus the architect plan.
+
+CHANGED FILES (source, tests, docs; plus 90 archived evidence files under docs/architecture/evidence/issue-158/)
+docs/architecture/ISSUE_158_AUDIT_LEDGER.md
+docs/architecture/M12_COMPATIBILITY_INVENTORY.md
+docs/architecture/PROCESS_IR_COMPILER_V1.md
+docs/architecture/PROCESS_IR_V1.md
+src/boomi_mcp/authoring/connector_resolution_snapshot.py
+src/boomi_mcp/authoring/contract.py
+src/boomi_mcp/authoring/derived_flows.py
+src/boomi_mcp/authoring/process_entry.py
+src/boomi_mcp/authoring/process_ir_effects.py
+src/boomi_mcp/authoring/process_ir_projection.py
+src/boomi_mcp/authoring/workflow.py
+src/boomi_mcp/categories/components/analyze_component.py
+src/boomi_mcp/categories/components/builders/_api_service_paths.py
+src/boomi_mcp/categories/components/builders/api_service_builder.py
+src/boomi_mcp/categories/components/builders/connector_builder.py
+src/boomi_mcp/categories/components/builders/process_emitters/rendering.py
+src/boomi_mcp/categories/components/builders/process_flow_builder.py
+src/boomi_mcp/categories/components/wss_route_methods.py
+src/boomi_mcp/categories/deployment/orchestration.py
+src/boomi_mcp/categories/integration_builder.py
+src/boomi_mcp/categories/meta_tools.py
+src/boomi_mcp/compiler/process_ir/body_capabilities.py
+src/boomi_mcp/compiler/process_ir/connector_capabilities.py
+src/boomi_mcp/compiler/process_ir/connector_resolution.py
+src/boomi_mcp/compiler/process_ir/contracts.py
+src/boomi_mcp/compiler/process_ir/diagnostics.py
+src/boomi_mcp/compiler/process_ir/emitter_registry.py
+src/boomi_mcp/compiler/process_ir/entry_policy.py
+src/boomi_mcp/compiler/process_ir/execution_profile.py
+src/boomi_mcp/compiler/process_ir/invariants.py
+src/boomi_mcp/compiler/process_ir/legacy_adapters/emission.py
+src/boomi_mcp/compiler/process_ir/legacy_adapters/sync_pipeline.py
+src/boomi_mcp/compiler/process_ir/lowering.py
+src/boomi_mcp/compiler/process_ir/semantic_validation/flow.py
+src/boomi_mcp/errors.py
+src/boomi_mcp/models/process_ir.py
+src/boomi_mcp/patterns/archetypes/http_listener_to_db.py
+src/boomi_mcp/patterns/archetypes/http_listener_to_rest.py
+src/boomi_mcp/patterns/primitives/wss_listen.py
+src/boomi_mcp/recipes/materialization.py
+tests/_process_ir_capability_witnesses.py
+tests/_wave_gate_golden_corpus.py
+tests/fixtures/authoring_contract/process_ir_authoring_v1.contract.json
+tests/fixtures/golden_xml/sync_pipeline_listener_map_soap_send.xml
+tests/fixtures/golden_xml/sync_pipeline_listener_soap_send.xml
+tests/fixtures/m12_12/legacy_reachability_inventory.json
+tests/fixtures/process_ir/listener/listener_rest_send.json
+tests/fixtures/process_ir/process_ir_v1.schema.json
+tests/fixtures/process_ir/sync_pipeline_emitter_parity_cases.json
+tests/fixtures/wave_gate/goldens.jsonl
+tests/fixtures/wave_gate/test_nodes.jsonl
+tests/test_analyze_component_api_service.py
+tests/test_connector_call_resolution.py
+tests/test_issue_151_reachability_freeze.py
+tests/test_issue_153_canonical_apply_e2e.py
+tests/test_issue_155_identity_projection.py
+tests/test_issue_158_audit_ledger.py
+tests/test_issue_158_entry_invariants.py
+tests/test_issue_158_listener_compile.py
+tests/test_issue_158_listener_deployment.py
+tests/test_issue_158_listener_model.py
+tests/test_issue_158_wss_identity.py
+tests/test_issue_158_wss_route_methods.py
+tests/test_legacy_process_ir_adapters.py
+tests/test_orchestration_listener_verify.py
+tests/test_process_emitter_parity.py
+tests/test_process_emitter_registry.py
+tests/test_process_execution_profile.py
+tests/test_process_ir_authoring_contract.py
+tests/test_process_ir_entrypoint_diagnostic_parity.py
+tests/test_process_ir_models.py
+tests/test_process_ir_semantic_emission_gate.py
+tests/test_process_ir_served_text_enforcement.py
+tests/test_sync_pipeline_adapter_cutover.py
+tests/test_wave_gate.py
+
+REPORT FORMAT
+- One numbered finding per defect: a short title; severity P0–P3; the plan section or acceptance criterion it concerns; `file:line` evidence; what the implementation does versus what the plan requires; the failure it causes. Prefer a concrete reproduction or a named test that should fail. Do not report style.
+- Then a line starting `Reviewed files:` listing the files you actually read.
+- END with a verdict on its OWN FINAL line: exactly 'VERDICT: NO ISSUES' or 'VERDICT: ISSUES FOUND'.
