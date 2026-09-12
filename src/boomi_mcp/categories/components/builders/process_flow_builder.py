@@ -484,6 +484,11 @@ class ProcessFlowBuilder:
     """
 
     PROCESS_KIND = "database_to_api_sync"
+    #: The config key this builder's emitted START comes from (#158
+    #: ARCH-158-r2-02). The recognizer asks the builder rather than modelling
+    #: which keys are entries, so a key this builder ignores can never be read
+    #: as an entry. `None` means the start is synthesised, not authored.
+    ENTRY_CONFIG_KEY = "source"
 
     # ------------------------------------------------------------------
     # Plan-time validation
@@ -4822,6 +4827,9 @@ class WrapperSubprocessBuilder(ProcessFlowBuilder):
     """
 
     PROCESS_KIND = "wrapper_subprocess"
+    #: A facade's start is a no-action Start this builder synthesises; any
+    #: `source` in its config is ignored at emission (#158 ARCH-158-r2-02).
+    ENTRY_CONFIG_KEY = None
 
     @classmethod
     def validate_config(
@@ -5222,6 +5230,9 @@ class SyncPipelineBuilder(ProcessFlowBuilder):
     """
 
     PROCESS_KIND = "sync_pipeline"
+    #: The verified-linear builder emits its start from the first pipeline
+    #: stage (#158 ARCH-158-r2-02).
+    ENTRY_CONFIG_KEY = "pipeline"
 
     @classmethod
     def lower_config(cls, config: Dict[str, Any]) -> Dict[str, Any]:

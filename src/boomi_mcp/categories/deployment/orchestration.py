@@ -1422,6 +1422,31 @@ def _resolve_listener_metadata(
     return _attach_asc(meta)
 
 
+def _apply_reused_component(entry: Dict[str, Any], component: Dict[str, Any]) -> bool:
+    """Did apply REUSE this recorded component rather than write it?
+
+    Read from the result row apply itself wrote (`status`), because apply has
+    already run when a build is deployed: every branch that skips the write
+    records `"reused"`, including the ones no declared-mode reading can see
+    (`_will_reuse_at_apply`'s existing-id create under a reuse conflict policy,
+    and a metadata-only update). Falls back to the declared materialization
+    mode when the entry carries no result row for the component.
+    """
+    key = component.get("key")
+    results = entry.get("results")
+    row = results.get(key) if isinstance(results, dict) and isinstance(key, str) else None
+    status = str(row.get("status") or "").strip().lower() if isinstance(row, dict) else ""
+    if status:
+        return status == "reused"
+    from types import SimpleNamespace
+
+    from ...recipes import component_materialization_mode
+
+    return component_materialization_mode(
+        SimpleNamespace(config=component.get("config") or {}, action=component.get("action"))
+    ) == "reuse_reference"
+
+
 def _listen_operation_facts_in_build(
     entry: Dict[str, Any], components: List[Any], operation_ref: str
 ) -> Optional[Dict[str, str]]:
@@ -1460,19 +1485,16 @@ def _listen_operation_facts_in_build(
     config = op_comp.get("config")
     if not isinstance(config, dict):
         return None
-    # #158 ARCH-158-r1-01: only a component this build WRITES can be described by
-    # its authored config. A reuse binding names a component the apply leaves
-    # untouched, so its authored endpoint fields are not what the account serves
-    # — the account is, and the caller reads it when this returns None. The
-    # question "does this build write it?" has one authority, the same one the
-    # effects projection asks.
-    from types import SimpleNamespace
-
-    from ...recipes import component_materialization_mode
-
-    if component_materialization_mode(
-        SimpleNamespace(config=config, action=op_comp.get("action"))
-    ) == "reuse_reference":
+    # #158 ARCH-158-r1-01, corrected at ARCH-158-r2-01: only a component this
+    # build WROTE can be described by its authored config; one apply left
+    # untouched is described by the ACCOUNT, which the caller reads when this
+    # returns None. Apply already ran by now, and it RECORDED what it did — so
+    # the record is the authority, not a prediction from the declared mode. It
+    # also covers the reuses a declared mode cannot see: a `create` carrying an
+    # existing component id under `conflict_policy="reuse"`, and a
+    # metadata-only update apply skipped. The declared mode remains the fallback
+    # for a record with no result row (a registry entry seeded without one).
+    if _apply_reused_component(entry, op_comp):
         return None
     # #158: the WSS builder's own derivation — the same one the authoring intake
     # and the identity projection call — rather than a local alias set.

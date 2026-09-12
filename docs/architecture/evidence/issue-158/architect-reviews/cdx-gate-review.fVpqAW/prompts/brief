@@ -1,0 +1,34 @@
+You are the ARCHITECT, continuing your implementation review of GitHub issue #158 ("M12.20 — Canonical WSS listener entry and materialization (T7)") in the repository at the current working directory, branch `codex/issue-158`. This is round 2, and it is SCOPED TO THE CORRECTION DELTA: the changes made in answer to your round-1 findings. Read-only: do not modify files, and do NOT call any Boomi MCP tool or any network tool.
+
+WHAT TO REVIEW — the delta `79b1660cd98f057a839fff5a1e289aba5bdba8f3..HEAD` (inspect with `git diff 79b1660..HEAD` and `git log --oneline 79b1660..HEAD`; the working tree is clean). Judge these corrections against the architect design plan reproduced verbatim below and the issue's acceptance criteria. Do not re-review the parts of the implementation your round-1 review already passed — only this delta, and only where it bears on the plan.
+
+YOUR ROUND-1 FINDINGS AND WHAT WAS DONE
+1. Reused operations use discarded endpoint configuration (P2). Reproduced before fixing: a `reference_only` operation carrying `object_name` is accepted (the reuse-binding key rule governs connections, not operations), apply never writes it, and the facts reader returned the authored fields for it exactly as for a created component, so the account read was suppressed. `_listen_operation_facts_in_build` now asks `component_materialization_mode` and returns None for a reuse binding, which is what makes the caller read the account. Live A/B: the fixed tree resolves the stored `/ws/simple/queryExample` and verifies (probe 200, execution record COMPLETE) where the parent probed the authored path and failed 404. An `action="update"` operation still describes itself from the build (verified live).
+2. Legacy recognition scans beyond the actual entry (P2). `legacy_config_entry` now consults the process-flow builder registry: a config whose `process_kind` names a registered builder other than the pipeline builder is read from its `source` binding; a config naming no kind is read as before, which preserves the abbreviated recognizer fixtures the plan requires. Measured both halves: the builder accepts the stray-stage config and emits a database start with no Listen. Live A/B: the fixed tree treats it as scheduled and refuses an ASC route at that process (`API_SERVICE_ROUTE_PROCESS_NOT_LISTEN`); the parent classified it a listener and accepted the route.
+3. Listener policy and validation missing from the served revision authority (P2). Confirmed your example: emptying `profile_bound_input_types()` left the digest byte-identical while acceptance moved. `_compiler_revision_payload` now carries `listener_inbound_contract`, a behaviour oracle beside the classification one: it calls `validate_listener_entry` over a case set derived from the vocabularies the rule consults and records each verdict. The repo's own commit review then found that the oracle SAMPLED one profile component type, so a change to any other member still moved acceptance invisibly; the bound cases are now enumerated from `connector_resolution.PROFILE_COMPONENT_TYPES`, one case per member, and the non-vacuity test requires dropping EACH member to move the revision.
+4. Required listener invariant adversarials incomplete (P2). Seven listener adversarials added, each perturbing one fact so no earlier site can answer first, including the previously masked synthetic-provenance case (now mutating only `source_path`). Non-vacuity: with `check_emission_plan_invariants` stubbed to return, 18 of that file's 23 tests fail.
+
+WHAT TO JUDGE
+- Does each correction actually realize what the plan requires, at the authority the plan names — or does it restate the same defect one level in? Name any case the correction still misses, with a concrete reproduction.
+- Are the new invariants and oracles non-vacuous and derived from their runtime authorities rather than hand-listed?
+- Did the corrections introduce any new plan deviation, contract change, or runtime regression?
+- The audit ledger `docs/architecture/ISSUE_158_AUDIT_LEDGER.md` records every finding, its defect class and disposition, including the recorded recurrence for the sampling mechanism; judge whether those records match the code.
+
+CHANGED FILES IN THIS DELTA (plus archived evidence under docs/architecture/evidence/issue-158/)
+docs/architecture/ISSUE_158_AUDIT_LEDGER.md
+docs/architecture/M12_COMPATIBILITY_INVENTORY.md
+src/boomi_mcp/authoring/contract.py
+src/boomi_mcp/authoring/process_entry.py
+src/boomi_mcp/categories/deployment/orchestration.py
+src/boomi_mcp/compiler/process_ir/connector_resolution.py
+tests/fixtures/m12_12/legacy_reachability_inventory.json
+tests/fixtures/wave_gate/test_nodes.jsonl
+tests/test_issue_153_canonical_apply_e2e.py
+tests/test_issue_158_entry_invariants.py
+tests/test_issue_158_listener_deployment.py
+tests/test_wave_gate.py
+
+REPORT FORMAT
+- One numbered finding per defect: a short title; severity P0–P3; the plan section or acceptance criterion it concerns; `file:line` evidence; what the implementation does versus what the plan requires; the failure it causes. Prefer a concrete reproduction or a named test that should fail. Do not report style.
+- Then a line starting `Reviewed files:` listing the files you actually read.
+- END with a verdict on its OWN FINAL line: exactly 'VERDICT: NO ISSUES' or 'VERDICT: ISSUES FOUND'.

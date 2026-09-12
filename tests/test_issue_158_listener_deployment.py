@@ -1222,6 +1222,7 @@ def test_a_reused_operations_authored_endpoint_is_not_the_accounts(monkeypatch):
     account_id = _ACCOUNT_WSS_OP_ID
     reused = {
         "key": _WSS_OP_KEY, "type": "connector-action", "action": "create",
+        "component_id": account_id,
         "config": {"reference_only": True, "component_id": account_id,
                    "connector_type": "wss", "operation_mode": "listen",
                    "object_name": "wrongIntake158", "operation_type": "EXECUTE",
@@ -1229,13 +1230,24 @@ def test_a_reused_operations_authored_endpoint_is_not_the_accounts(monkeypatch):
     }
     entry = {"results": {_WSS_OP_KEY: {"status": "reused", "component_id": account_id}}}
     assert orchestration._listen_operation_facts_in_build(entry, [reused], account_id) is None
-    # CONTROL: the same config as a CREATE describes the component it creates.
-    created = {
+    # ...and the reuses no DECLARED mode can see (ARCH-158-r2-01): apply records
+    # `reused` for an existing-id `create` under `conflict_policy="reuse"`, and
+    # for a metadata-only update it skipped. Neither carries `reference_only`.
+    policy_reuse = {
         **reused,
         "config": {k: v for k, v in reused["config"].items() if k != "reference_only"},
     }
-    facts = orchestration._listen_operation_facts_in_build(entry, [created], account_id)
-    assert facts and facts["object_name"] == "wrongIntake158"
+    assert orchestration._listen_operation_facts_in_build(entry, [policy_reuse], account_id) is None
+    # CONTROL: the same component, recorded as WRITTEN, describes itself — so
+    # the gate is "apply reused it", not "the reader stopped answering".
+    for status in ("created", "updated"):
+        written = {"results": {_WSS_OP_KEY: {"status": status, "component_id": account_id}}}
+        facts = orchestration._listen_operation_facts_in_build(written, [policy_reuse], account_id)
+        assert facts and facts["object_name"] == "wrongIntake158", status
+    # ...and with no result row at all, the declared mode still excludes a reuse
+    # binding and admits a create.
+    assert orchestration._listen_operation_facts_in_build({}, [reused], account_id) is None
+    assert orchestration._listen_operation_facts_in_build({}, [policy_reuse], account_id)
 
 
 def test_a_stray_listener_stage_is_not_the_entry_of_another_process_kind():
@@ -1265,6 +1277,22 @@ def test_a_stray_listener_stage_is_not_the_entry_of_another_process_kind():
     assert 'actionType="Listen"' not in xml and 'connectorType="database"' in xml
     assert legacy_config_entry(config) == ProcessEntryV1("scheduled")
     assert integration_builder._process_config_has_wss_listen(config) is False
+    # ARCH-158-r2-02: the same rule for a key the builder ignores on the OTHER
+    # side — a facade builder synthesises its start, so a WSS `source` in its
+    # config is not an entry either.
+    wrapper = {
+        "process_kind": "wrapper_subprocess",
+        "process_calls": [{"process_id": "00000000-0000-0000-0000-000000000001"}],
+        "source": {"connector_type": "wss", "action_type": "Listen", "operation_id": "WSSOP"},
+    }
+    from boomi_mcp.categories.components.builders.process_flow_builder import (
+        WrapperSubprocessBuilder,
+    )
+
+    assert WrapperSubprocessBuilder.validate_config(wrapper) is None
+    assert 'actionType="Listen"' not in WrapperSubprocessBuilder.build(wrapper, name="W")
+    assert legacy_config_entry(wrapper) == ProcessEntryV1("scheduled")
+    assert integration_builder._process_config_has_wss_listen(wrapper) is False
     # CONTROL 1: the pipeline builder's own kind still enters on its stage.
     assert legacy_config_entry({"process_kind": "sync_pipeline", "pipeline": stray}) == ProcessEntryV1(
         "listener", "WSSOP"

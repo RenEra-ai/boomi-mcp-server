@@ -1838,6 +1838,27 @@ def _wss_route_method_names():
     return frozenset(module.__all__)
 
 
+def _process_flow_builder_declarations():
+    """The declarations the registered process-flow builders carry, from the classes.
+
+    A #158 row names the key each builder declares its emitted start comes from
+    (`ENTRY_CONFIG_KEY`), so the recognizer can ask instead of modelling. Asked
+    of the registry's own classes rather than hand-listed, like
+    `_wss_route_method_names`.
+    """
+    import importlib
+
+    module = importlib.import_module(
+        "boomi_mcp.categories.components.builders.process_flow_builder"
+    )
+    return frozenset(
+        name
+        for builder in module.PROCESS_FLOW_BUILDERS.values()
+        for name in vars(builder)
+        if name.isupper()
+    )
+
+
 def _listener_resolution_names():
     """The listener-resolution authorities a #158 row names, from the module's exports.
 
@@ -2660,6 +2681,7 @@ def test_diagnostic_codes_named_in_the_audit_ledger_exist():
             - _served_orchestration_error_codes()
             - _wss_route_method_names()
             - _listener_resolution_names()
+            - _process_flow_builder_declarations()
         )
 
     # The two forms are scanned SEPARATELY, not merged, so each can be asserted on
@@ -2947,6 +2969,7 @@ def test_diagnostic_codes_named_in_the_audit_ledger_exist():
             - _orchestration_codes
             - _wss_route_method_names()
             - _listener_resolution_names()
+            - _process_flow_builder_declarations()
         )
         assert unknown_here == set(), (
             "{0} names diagnostic codes the gate cannot emit: {1}".format(

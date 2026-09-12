@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 12287, "minimum_collected": 12287, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 12316, "minimum_collected": 12316, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -12364,3 +12364,32 @@
 {"kind": "test", "id": "pytest-012363", "node_id": "tests/test_issue_158_entry_invariants.py::test_listener_start_claiming_authored_provenance_is_rejected", "state": "active"}
 {"kind": "test", "id": "pytest-012364", "node_id": "tests/test_issue_158_listener_deployment.py::test_a_reused_operations_authored_endpoint_is_not_the_accounts", "state": "active"}
 {"kind": "test", "id": "pytest-012365", "node_id": "tests/test_issue_158_listener_deployment.py::test_a_stray_listener_stage_is_not_the_entry_of_another_process_kind", "state": "active"}
+{"kind": "test", "id": "pytest-012366", "node_id": "tests/test_issue_158_entry_invariants.py::test_every_plan_field_of_a_listener_root_refuses_a_perturbation[start.cfg_node_id]", "state": "active"}
+{"kind": "test", "id": "pytest-012367", "node_id": "tests/test_issue_158_entry_invariants.py::test_every_plan_field_of_a_listener_root_refuses_a_perturbation[start.layout.x]", "state": "active"}
+{"kind": "test", "id": "pytest-012368", "node_id": "tests/test_issue_158_entry_invariants.py::test_every_plan_field_of_a_listener_root_refuses_a_perturbation[start.layout.y]", "state": "active"}
+{"kind": "test", "id": "pytest-012369", "node_id": "tests/test_issue_158_entry_invariants.py::test_every_plan_field_of_a_listener_root_refuses_a_perturbation[start.ordinal]", "state": "active"}
+{"kind": "test", "id": "pytest-012370", "node_id": "tests/test_issue_158_entry_invariants.py::test_every_plan_field_of_a_listener_root_refuses_a_perturbation[start.origin]", "state": "active"}
+{"kind": "test", "id": "pytest-012371", "node_id": "tests/test_issue_158_entry_invariants.py::test_every_plan_field_of_a_listener_root_refuses_a_perturbation[start.shape_id]", "state": "active"}
+{"kind": "test", "id": "pytest-012372", "node_id": "tests/test_issue_158_entry_invariants.py::test_every_plan_field_of_a_listener_root_refuses_a_perturbation[start.source_path]", "state": "active"}
+{"kind": "test", "id": "pytest-012373", "node_id": "tests/test_issue_158_entry_invariants.py::test_every_plan_field_of_a_listener_root_refuses_a_perturbation[start.synthetic_role]", "state": "active"}
+{"kind": "test", "id": "pytest-012374", "node_id": "tests/test_issue_158_entry_invariants.py::test_every_plan_field_of_a_listener_root_refuses_a_perturbation[start.wire0.dragpoint_name]", "state": "active"}
+{"kind": "test", "id": "pytest-012375", "node_id": "tests/test_issue_158_entry_invariants.py::test_every_plan_field_of_a_listener_root_refuses_a_perturbation[start.wire0.local_ordinal]", "state": "active"}
+{"kind": "test", "id": "pytest-012376", "node_id": "tests/test_issue_158_entry_invariants.py::test_every_plan_field_of_a_listener_root_refuses_a_perturbation[start.wire0.provenance]", "state": "active"}
+{"kind": "test", "id": "pytest-012377", "node_id": "tests/test_issue_158_entry_invariants.py::test_every_plan_field_of_a_listener_root_refuses_a_perturbation[start.wire0.to_shape_id]", "state": "active"}
+{"kind": "test", "id": "pytest-012378", "node_id": "tests/test_issue_158_entry_invariants.py::test_every_plan_field_of_a_listener_root_refuses_a_perturbation[start.wire0.x]", "state": "active"}
+{"kind": "test", "id": "pytest-012379", "node_id": "tests/test_issue_158_entry_invariants.py::test_every_plan_field_of_a_listener_root_refuses_a_perturbation[start.wire0.y]", "state": "active"}
+{"kind": "test", "id": "pytest-012380", "node_id": "tests/test_issue_158_entry_invariants.py::test_every_plan_field_of_a_listener_root_refuses_a_perturbation[body.cfg_node_id]", "state": "active"}
+{"kind": "test", "id": "pytest-012381", "node_id": "tests/test_issue_158_entry_invariants.py::test_every_plan_field_of_a_listener_root_refuses_a_perturbation[body.layout.x]", "state": "active"}
+{"kind": "test", "id": "pytest-012382", "node_id": "tests/test_issue_158_entry_invariants.py::test_every_plan_field_of_a_listener_root_refuses_a_perturbation[body.layout.y]", "state": "active"}
+{"kind": "test", "id": "pytest-012383", "node_id": "tests/test_issue_158_entry_invariants.py::test_every_plan_field_of_a_listener_root_refuses_a_perturbation[body.ordinal]", "state": "active"}
+{"kind": "test", "id": "pytest-012384", "node_id": "tests/test_issue_158_entry_invariants.py::test_every_plan_field_of_a_listener_root_refuses_a_perturbation[body.origin]", "state": "active"}
+{"kind": "test", "id": "pytest-012385", "node_id": "tests/test_issue_158_entry_invariants.py::test_every_plan_field_of_a_listener_root_refuses_a_perturbation[body.shape_id]", "state": "active"}
+{"kind": "test", "id": "pytest-012386", "node_id": "tests/test_issue_158_entry_invariants.py::test_every_plan_field_of_a_listener_root_refuses_a_perturbation[body.source_path]", "state": "active"}
+{"kind": "test", "id": "pytest-012387", "node_id": "tests/test_issue_158_entry_invariants.py::test_every_plan_field_of_a_listener_root_refuses_a_perturbation[body.synthetic_role]", "state": "active"}
+{"kind": "test", "id": "pytest-012388", "node_id": "tests/test_issue_158_entry_invariants.py::test_every_plan_field_of_a_listener_root_refuses_a_perturbation[body.wire0.cfg_edge_id]", "state": "active"}
+{"kind": "test", "id": "pytest-012389", "node_id": "tests/test_issue_158_entry_invariants.py::test_every_plan_field_of_a_listener_root_refuses_a_perturbation[body.wire0.dragpoint_name]", "state": "active"}
+{"kind": "test", "id": "pytest-012390", "node_id": "tests/test_issue_158_entry_invariants.py::test_every_plan_field_of_a_listener_root_refuses_a_perturbation[body.wire0.local_ordinal]", "state": "active"}
+{"kind": "test", "id": "pytest-012391", "node_id": "tests/test_issue_158_entry_invariants.py::test_every_plan_field_of_a_listener_root_refuses_a_perturbation[body.wire0.provenance]", "state": "active"}
+{"kind": "test", "id": "pytest-012392", "node_id": "tests/test_issue_158_entry_invariants.py::test_every_plan_field_of_a_listener_root_refuses_a_perturbation[body.wire0.to_shape_id]", "state": "active"}
+{"kind": "test", "id": "pytest-012393", "node_id": "tests/test_issue_158_entry_invariants.py::test_every_plan_field_of_a_listener_root_refuses_a_perturbation[body.wire0.x]", "state": "active"}
+{"kind": "test", "id": "pytest-012394", "node_id": "tests/test_issue_158_entry_invariants.py::test_every_plan_field_of_a_listener_root_refuses_a_perturbation[body.wire0.y]", "state": "active"}

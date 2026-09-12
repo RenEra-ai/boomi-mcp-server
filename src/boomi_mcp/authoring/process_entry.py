@@ -83,23 +83,26 @@ def legacy_config_entry(process_config: Any) -> ProcessEntryV1:
 
     if not isinstance(process_config, Mapping):
         return _SCHEDULED_ENTRY
-    # #158 ARCH-158-r1-01 sibling / ARCH-158-r1-02: the entry is what the process
-    # ENTERS on, so a `pipeline` block belongs to the entry only for the builder
-    # that emits from it. A `database_to_api_sync` config carrying a stray
-    # listener stage emits its scheduled source start, and reading the stage
-    # there reported a listener entry for a process that has none. The
-    # discriminator is the builder registry's own, and a config naming no kind
-    # (the abbreviated recognizer shapes) is read as before.
+    # #158 ARCH-158-r1-02, completed at ARCH-158-r2-02: the entry is what the
+    # process ENTERS on, so a config key belongs to the entry only for the
+    # builder that emits its start from that key — and each builder DECLARES
+    # which key that is. Reading a key the builder ignores reported a listener
+    # entry for a process that has none: a `database_to_api_sync` carrying a
+    # stray listener stage (it emits its source start), and a
+    # `wrapper_subprocess` carrying a stray WSS `source` (it synthesises a
+    # no-action start). A config naming no kind, or an unregistered one, keeps
+    # the permissive reading the abbreviated recognizer fixtures rely on.
     from ..categories.components.builders.process_flow_builder import (
         PROCESS_FLOW_BUILDERS,
-        SyncPipelineBuilder,
     )
 
     kind = str(
         process_config.get("process_kind") or process_config.get("process_type") or ""
     ).strip().lower()
-    pipeline_is_the_entry = kind not in PROCESS_FLOW_BUILDERS or kind == SyncPipelineBuilder.PROCESS_KIND
-    pipeline = process_config.get("pipeline") if pipeline_is_the_entry else None
+    builder = PROCESS_FLOW_BUILDERS.get(kind)
+    entry_key = getattr(builder, "ENTRY_CONFIG_KEY", None) if builder is not None else None
+    reads = (entry_key,) if builder is not None else ("pipeline", "source")
+    pipeline = process_config.get("pipeline") if "pipeline" in reads else None
     if isinstance(pipeline, Mapping):
         for stage in pipeline.get("stages") or []:
             if not isinstance(stage, Mapping):
@@ -113,7 +116,7 @@ def legacy_config_entry(process_config: Any) -> ProcessEntryV1:
                 else None
             )
             return ProcessEntryV1(LISTENER, operation)
-    source = process_config.get("source")
+    source = process_config.get("source") if "source" in reads else None
     if isinstance(source, Mapping):
         action_type = str(source.get("action_type") or "").strip()
         if (

@@ -482,3 +482,96 @@ def test_listener_start_claiming_authored_provenance_is_rejected():
     assert _refusal(
         _with_start(plan, source_path="/body/steps/0"), cfg, symbols
     ).code == _PLAN_INVALID
+
+
+def _perturbed(value):
+    """A wrong-but-well-typed value for `value`, or None when there is none."""
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, float):
+        return value + 999.0
+    if isinstance(value, int):
+        return value + 3
+    if isinstance(value, str):
+        return value + "X"
+    return None
+
+
+def _borrowed(field, nodes, index):
+    """The value this field holds on ANOTHER node of the same plan, or None.
+
+    A field that is None on one node — the synthetic Start carries no
+    `cfg_node_id` and no `source_path`, a body node carries no
+    `synthetic_role` — has no "wrong but well-typed" value of its own, and
+    skipping it left exactly the guards ARCH-158-r2-04 named unproven. The
+    plan itself supplies one: what the field holds where it IS set is a value
+    the model admits, and claiming it here is the forgery under test.
+    """
+    for other, node in enumerate(nodes):
+        if other == index:
+            continue
+        value = getattr(node, field, None)
+        if value is not None and not isinstance(value, (list, tuple)):
+            return value
+    return None
+
+
+def _plan_field_cases():
+    """Every scalar field of the plan's node and wire models, on the synthetic
+    Start and on a body node of a LISTENER plan — the adversarial set DERIVED
+    from the models rather than hand-picked (#158 ARCH-158-r2-04: mutating only
+    dragpoint `y` and only the Start's `source_path` left the dragpoint-`x` and
+    `cfg_node_id` guards unproven, and all 23 cases passed with either removed).
+    """
+    cfg, plan, symbols = _compiled(_listener_doc())
+    cases = []
+    for label, index in (("start", 0), ("body", 1)):
+        node = plan.nodes[index]
+        for name in sorted(type(node).model_fields):
+            value = getattr(node, name)
+            if name == "layout":
+                for axis in sorted(type(value).model_fields):
+                    new_axis = _perturbed(getattr(value, axis))
+                    if new_axis is not None:
+                        cases.append(("{0}.layout.{1}".format(label, axis), index, "layout",
+                                      value.model_copy(update={axis: new_axis})))
+                continue
+            new = _perturbed(value)
+            if new is None and value is None and name not in ("outgoing", "emitter_input"):
+                new = _borrowed(name, plan.nodes, index)
+            if new is not None:
+                cases.append(("{0}.{1}".format(label, name), index, name, new))
+        for wire_index, wire in enumerate(node.outgoing):
+            for name in sorted(type(wire).model_fields):
+                new = _perturbed(getattr(wire, name))
+                if new is None:
+                    continue
+                wires = tuple(
+                    w.model_copy(update={name: new}) if i == wire_index else w
+                    for i, w in enumerate(node.outgoing)
+                )
+                cases.append(
+                    ("{0}.wire{1}.{2}".format(label, wire_index, name), index, "outgoing", wires)
+                )
+    return cfg, plan, symbols, cases
+
+
+_CFG, _PLAN, _SYMBOLS, _FIELD_CASES = _plan_field_cases()
+
+
+@pytest.mark.parametrize(
+    "label,index,field,value",
+    _FIELD_CASES,
+    ids=[case[0] for case in _FIELD_CASES],
+)
+def test_every_plan_field_of_a_listener_root_refuses_a_perturbation(label, index, field, value):
+    """Acceptance criterion 2, per FIELD rather than per hand-picked example:
+    every caller-authored geometry, wiring, identity and provenance value on a
+    fused listener entry — and on a body shape beside it — is re-derived by the
+    compiler, so perturbing any one of them alone is refused."""
+    node = _PLAN.nodes[index].model_copy(update={field: value})
+    nodes = _PLAN.nodes[:index] + (node,) + _PLAN.nodes[index + 1:]
+    diagnostic = _refusal(_PLAN.model_copy(update={"nodes": nodes}), _CFG, _SYMBOLS)
+    assert diagnostic.code in (_PLAN_INVALID, PROCESS_IR_COMPILE_NONDETERMINISTIC), (
+        label, diagnostic.code, diagnostic.message,
+    )

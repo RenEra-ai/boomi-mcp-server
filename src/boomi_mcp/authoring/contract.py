@@ -1027,14 +1027,20 @@ def _listener_inbound_behaviour_oracle() -> Dict[str, Any]:
         "operation-absent": _verdict(None, (), None),
         "operation-unresolved": _verdict("$ref:missing", (), None),
     }
-    # The recognition half: what a listener's operation must BE.
-    for label, overrides in (
+    # The recognition half: what a listener's operation must BE — including
+    # EVERY family spelling the resolver accepts, enumerated from its own table
+    # (#158 ARCH-158-r2-03: fixing every case to `wss` left a change that
+    # refused another accepted alias invisible, exactly as the sampled profile
+    # type did).
+    from ..categories.components.builders.connector_builder import _WSS_ALIASES
+
+    recognition = [
         ("not-an-operation", {"component_type": "connector-settings"}),
         ("non-wss-family", {"connector_type": "rest"}),
         ("non-listen-action", {"action_type": "Execute"}),
         ("carries-a-connection", {"connection_ref": "$ref:conn"}),
-        ("listen", {}),
-    ):
+    ] + [("family-" + alias, {"connector_type": alias}) for alias in sorted(_WSS_ALIASES)]
+    for label, overrides in recognition:
         cases["recognition-" + label] = _verdict("$ref:op", (_symbol(**overrides),), None)
     # The inbound half: every input type the WSS builder admits, against every
     # requested contract, with the binding unbound, bound to EACH profile type
