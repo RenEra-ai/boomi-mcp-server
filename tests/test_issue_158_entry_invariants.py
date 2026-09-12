@@ -497,6 +497,24 @@ def _perturbed(value):
     return None
 
 
+def _borrowed_wire(field, nodes, node_index, wire_index):
+    """The value this wire field holds on ANOTHER wire of the same plan, or None.
+
+    The wire half of `_borrowed` (#158 ARCH-158-r3-01): the synthetic Start's
+    wire carries no `cfg_edge_id`, so a type-only perturbation skipped it and
+    the one hand-written case moved provenance AND the edge id together — the
+    provenance check answered first and the edge-id guard stayed unproven.
+    """
+    for other_index, node in enumerate(nodes):
+        for other_wire, wire in enumerate(node.outgoing):
+            if (other_index, other_wire) == (node_index, wire_index):
+                continue
+            value = getattr(wire, field, None)
+            if value is not None and not isinstance(value, (list, tuple)):
+                return value
+    return None
+
+
 def _borrowed(field, nodes, index):
     """The value this field holds on ANOTHER node of the same plan, or None.
 
@@ -543,7 +561,10 @@ def _plan_field_cases():
                 cases.append(("{0}.{1}".format(label, name), index, name, new))
         for wire_index, wire in enumerate(node.outgoing):
             for name in sorted(type(wire).model_fields):
-                new = _perturbed(getattr(wire, name))
+                value = getattr(wire, name)
+                new = _perturbed(value)
+                if new is None and value is None:
+                    new = _borrowed_wire(name, plan.nodes, index, wire_index)
                 if new is None:
                     continue
                 wires = tuple(

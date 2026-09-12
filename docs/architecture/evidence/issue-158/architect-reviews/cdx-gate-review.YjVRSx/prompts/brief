@@ -1,0 +1,35 @@
+You are the ARCHITECT, in round 3 — the FINAL evaluation — of your implementation review of GitHub issue #158 ("M12.20 — Canonical WSS listener entry and materialization (T7)") in the repository at the current working directory, branch `codex/issue-158`. Read-only: do not modify files, and do NOT call any Boomi MCP tool or any network tool.
+
+WHAT TO REVIEW — the correction delta `1e73f236a2522b8bdbfb7e608f04281cf71443c0..HEAD` (inspect with `git diff 1e73f23..HEAD` and `git log --oneline 1e73f23..HEAD`; the working tree is clean). These are the corrections for your round-2 findings. Judge them against the architect design plan reproduced verbatim below and the issue's acceptance criteria. Do not re-review what earlier rounds passed.
+
+This repository caps the architect review at three evaluations, so this is the last one. Weigh findings accordingly: report what would make the slice WRONG against the plan or its acceptance criteria, and say plainly if what remains is acceptable. If you find nothing that meets that bar, say so — a clean verdict here is a real outcome, not a formality.
+
+YOUR ROUND-2 FINDINGS AND WHAT WAS DONE
+1. Conflict-policy reuse still read discarded endpoint fields. The gate no longer predicts from the declared materialization mode; it reads what APPLY RECORDED — the build's own result row `status` — so every reuse that skips the write is covered, including `_will_reuse_at_apply`'s existing-id `create` under `conflict_policy="reuse"` and the metadata-only update. The declared mode remains the fallback only when no result row exists. The witness's control (which you correctly noted still carried a `reused` result) now records `created`/`updated` for the same component, and covers the policy-reuse row and the no-record fallback. Live A/B: on the fixed tree an existing-id create under a reuse policy records `reused`, resolves the STORED endpoint, probes 200 and reads its record back; the parent probes the authored path and 404s. The operation's stored objectName was re-read three times and never moved, so apply wrote nothing.
+2. Registered wrappers classified from an ignored source. Each process-flow builder now DECLARES the config key its emitted start comes from (`ENTRY_CONFIG_KEY`: `source` for `database_to_api_sync`, `pipeline` for `sync_pipeline`, `None` for the facade `wrapper_subprocess`), and the recognizer reads only that key for a registered kind; a kind-less or unregistered config keeps the permissive reading the abbreviated fixtures rely on. Live A/B: the stray-source wrapper is scheduled on the fixed tree and its ASC route is refused, where the parent reads the account and fails the probe; a CLEAN facade is scheduled on both trees, so the parent's verdict came from the stray key alone.
+3. The revision oracle still sampled listener recognition. The recognition cases now enumerate the resolver's own alias table (`connector_builder._WSS_ALIASES`), one case per accepted spelling. Re-measured: refusing only the `web_services` alias now moves the served revision. Live: both alias spellings compile on both trees, so the aliases are real acceptance cases the digest was blind to.
+4. Required listener adversarials remained incomplete. The adversarial set is now DERIVED from the plan's own models rather than hand-picked: every scalar field of the plan-node and wire models, on the synthetic Start and on a body shape of a listener plan, perturbed alone (29 cases). A field that is `None` where the forgery would set it — the Start's `cfg_node_id` and `source_path`, a body node's `synthetic_role` — takes the value that field holds on another node of the same plan. Per-guard non-vacuity: removing the dragpoint-`x` guard fails 2 cases; removing either half of the synthetic-provenance guard fails 1 and 2 cases respectively.
+
+WHAT TO JUDGE
+- Does each correction hold at the authority the plan names, for the whole case set that authority enumerates — or does the same defect survive one level in again?
+- Do the corrections introduce any new plan deviation, contract change, or runtime regression?
+- Are the remaining recorded dispositions in `docs/architecture/ISSUE_158_AUDIT_LEDGER.md` (including the recurrence records and the follow-up recorded as owed but unfiled, since filing is the owner's call in this repository) consistent with the code?
+- Anything in the slice that would be WRONG to land against the plan or acceptance criteria.
+
+CHANGED FILES IN THIS DELTA (plus archived evidence under docs/architecture/evidence/issue-158/)
+docs/architecture/ISSUE_158_AUDIT_LEDGER.md
+docs/architecture/M12_COMPATIBILITY_INVENTORY.md
+src/boomi_mcp/authoring/contract.py
+src/boomi_mcp/authoring/process_entry.py
+src/boomi_mcp/categories/components/builders/process_flow_builder.py
+src/boomi_mcp/categories/deployment/orchestration.py
+tests/fixtures/m12_12/legacy_reachability_inventory.json
+tests/fixtures/wave_gate/test_nodes.jsonl
+tests/test_issue_158_entry_invariants.py
+tests/test_issue_158_listener_deployment.py
+tests/test_wave_gate.py
+
+REPORT FORMAT
+- One numbered finding per defect: a short title; severity P0–P3; the plan section or acceptance criterion it concerns; `file:line` evidence; what the implementation does versus what the plan requires; the failure it causes. Prefer a concrete reproduction or a named test that should fail. Do not report style.
+- Then a line starting `Reviewed files:` listing the files you actually read.
+- END with a verdict on its OWN FINAL line: exactly 'VERDICT: NO ISSUES' or 'VERDICT: ISSUES FOUND'.

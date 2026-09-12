@@ -1,0 +1,12 @@
+I’ll review the correction delta against the four round-2 findings and the acceptance criteria, including the recorded dispositions. I’ll stay read-only and use no network or Boomi tools.
+I’m applying the repository’s receiving-code-review discipline to verify each correction against the code. The delta is limited to the reported fixes and their evidence; I’m checking the audit ledger and validation records while parallel reviews trace the runtime changes.
+The reuse and builder-key corrections match the runtime paths checked so far. The alias oracle covers all three resolver aliases, and the manifest adds 29 cases without changing existing test identities. I’m checking whether those cases complete the required invariant coverage.
+1. **P2 — Optional wire fields still escape the listener adversarials.** Plan §2 and acceptance criterion 2 require proof of the retained wiring guards. At `tests/test_issue_158_entry_invariants.py:546`, the generator skips `None` wire fields, omitting `start.wire0.cfg_edge_id`. The existing test at line 302 changes both provenance and edge ID, so the earlier provenance check masks the independent guard at `src/boomi_mcp/compiler/process_ir/invariants.py:1618`.
+
+   Confirmed without filesystem changes: removing only that guard in memory admits a synthetic Start wire claiming `cfg_edge_id="e1"`, while **all 52 existing listener-invariant cases still pass**. Extend the absent-value perturbation handling to wires. The runtime guard remains intact; the required acceptance proof—and the ledger’s completeness claim—remains incomplete.
+
+The other three corrections are acceptable. The owner-owed follow-up is explicitly recorded.
+
+Reviewed files: `src/boomi_mcp/authoring/{contract.py,process_entry.py}`; `src/boomi_mcp/categories/components/builders/process_flow_builder.py`; `src/boomi_mcp/categories/deployment/orchestration.py`; `src/boomi_mcp/compiler/process_ir/{contracts.py,invariants.py}`; `tests/{test_issue_158_entry_invariants.py,test_issue_158_listener_deployment.py,test_process_ir_compiler_invariants.py,test_wave_gate.py}`; `tests/fixtures/{wave_gate/test_nodes.jsonl,m12_12/legacy_reachability_inventory.json}`; `docs/architecture/{ISSUE_158_AUDIT_LEDGER.md,M12_COMPATIBILITY_INVENTORY.md,COMPLETION_WORKFLOW_RULES.md}`; the added issue-158 review attestations and evidence index; `agents/reports/2026-09-10-issue-158-s2r10.md`.
+
+VERDICT: ISSUES FOUND
