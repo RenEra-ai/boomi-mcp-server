@@ -2212,41 +2212,47 @@ def _linear_child(filler):
         {"version": "1", "body": {"kind": "sequence", "steps": steps}})
 
 
-def test_a_child_the_walk_truncates_is_INERT_not_exact():
-    """Stage-2 r10 P1. The walk's depth bound is a HANG GUARD, and inheriting it
-    silently turned a partial answer into an exact-looking summary.
+def test_a_long_child_derives_exactly():
+    """Stage-2 r10 P1, re-decided by #184 D12.
 
-    A root sequence has no length bound, so this is an ordinary long child, not
-    a pathological one: past the cutoff the late read vanished from
-    required_reads and the write set stopped at exactly the bound, so a caller
-    declaring the truncated sets — or nothing at all — matched and was TRUSTED.
+    The walk's depth bound was a hang guard, and inheriting it silently turned a
+    partial answer into an exact-looking summary. So until D12 a child past the
+    cutoff was served INERT rather than trusted. The controller is now iterative
+    with no depth bound, so the same long child derives EXACTLY: its late read is
+    required, and nothing past the old cutoff is lost. A root sequence has no
+    length bound, so this is an ordinary long child, not a pathological one.
     """
     from boomi_mcp.authoring.process_ir_effects import derive_subprocess_effect
 
-    # CONTROL: below the bound the late read IS required, so the assertion
-    # below is about truncation and not about long children failing to parse.
     reads, _writes, _replay = derive_subprocess_effect(_linear_child(5)).effect
     assert ("dpp", "LATE") in reads, reads
 
-    assert derive_subprocess_effect(_linear_child(400)).effect is None
+    summary = derive_subprocess_effect(_linear_child(400))
+    assert summary.inert_reason is None, summary
+    reads, _writes, _replay = summary.effect
+    assert ("dpp", "LATE") in reads, reads
 
 
-def test_the_lineage_walk_reports_its_own_truncation():
-    """The flag is set by the walk, not inferred by its caller counting nodes.
+def test_the_lineage_walk_has_no_depth_bound():
+    """#184 D12 withdrew the walk's truncation flag together with its cause.
 
-    A caller that re-derived "was this too deep?" from the node count would be
-    a second model of the walk's own bound — the exact defect class this whole
-    derivation was rewritten to remove.
+    A caller that re-derived "was this too deep?" from the node count would be a
+    second model of the walk's own bound. With no bound there is nothing left to
+    model, and a 400-step child's late read is reported directly.
     """
     from boomi_mcp.compiler.process_ir.contracts import SymbolTableV1
     from boomi_mcp.compiler.process_ir.semantic_validation.context import (
         prepare_validation_context,
     )
-    from boomi_mcp.compiler.process_ir.semantic_validation.lineage import walk_lineage
+    from boomi_mcp.compiler.process_ir.semantic_validation.lineage import (
+        LineageWalkV1,
+        walk_lineage,
+    )
 
+    assert "truncated" not in LineageWalkV1._fields
     empty = SymbolTableV1(symbols=())
-    assert walk_lineage(prepare_validation_context(_linear_child(400), empty)).truncated
-    assert not walk_lineage(prepare_validation_context(_linear_child(5), empty)).truncated
+    walk = walk_lineage(prepare_validation_context(_linear_child(400), empty))
+    assert ("dpp", "LATE") in walk.unestablished_reads, walk.unestablished_reads
 
 
 def test_the_authority_prose_states_provenance_not_the_rule():
@@ -2330,7 +2336,6 @@ def test_every_inert_reason_is_reachable_and_served():
                  "operation_ref": "$ref:GETOP"},
                 {"kind": "map_ref", "map_ref": "$ref:MAP"},
                 {"kind": "return_documents"}]}}),
-        E.INERT_WALK_TRUNCATED: _linear_child(400),
     }
     for token, child in witnesses.items():
         summary = E.derive_subprocess_effect(child)

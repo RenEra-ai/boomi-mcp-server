@@ -687,7 +687,10 @@ INSPECTABLE_CHILD_KINDS = frozenset({
 #: still left the served rule stale with every test green.
 INERT_BARE_REFERENCE = "bare_reference"
 INERT_UNINSPECTABLE_STEP = "uninspectable_step"
-INERT_WALK_TRUNCATED = "walk_truncated"
+# `walk_truncated` was withdrawn by #184 D12. The lineage walk has no depth bound
+# any more, so no child is inert merely for being long. A closed limit is
+# withdrawn rather than reworded, so the token and its served row are removed
+# together.
 
 
 class ChildSummaryV1(NamedTuple):
@@ -754,9 +757,6 @@ def subprocess_inert_reasons() -> Tuple[Tuple[str, str], ...]:
         (INERT_UNINSPECTABLE_STEP,
          "it contains a step whose own state effect is knowable only from a "
          "contract — a map, a scripted data process, or a further call"),
-        (INERT_WALK_TRUNCATED,
-         "it is deep enough that the walk stops at its bound, leaving both "
-         "sets partial rather than exact"),
     )
 
 
@@ -862,14 +862,10 @@ def derive_subprocess_effect(
         walk_lineage(prepared, capabilities) if capabilities is not None
         else walk_lineage(prepared)
     )
-    if walk.truncated:
-        # The walk stopped at its depth bound, so both sets are partial and a
-        # late read or write is simply missing. Publishing them as an exact
-        # summary is the same unsound ACCEPTANCE an exact-empty summary for an
-        # uninspectable child was: a caller declaration matching the truncated
-        # sets would be trusted. A root sequence has no length bound, so this
-        # is reachable by an ordinary long child, not just a pathological one.
-        return ChildSummaryV1(None, INERT_WALK_TRUNCATED)
+    # #184 D12: the walk is iterative with no depth bound, so both sets are exact
+    # for a child of any length. Before it, a long child's walk stopped at depth
+    # 256 and the child was served INERT: publishing a partial set as exact would
+    # have let a caller's matching declaration be trusted.
     return ChildSummaryV1(
         (walk.unestablished_reads, walk.established_at_exit, replay_safe), None)
 

@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 12377, "minimum_collected": 12377, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 12381, "minimum_collected": 12381, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -10365,7 +10365,7 @@
 {"kind": "test", "id": "pytest-010364", "node_id": "tests/test_process_ir_effect_declarations.py::test_a_caller_supplied_profile_index_survives_offline_planning", "state": "active"}
 {"kind": "test", "id": "pytest-010365", "node_id": "tests/test_process_ir_effect_declarations.py::test_a_catch_body_staging_a_cache_is_a_normal_exit", "state": "active"}
 {"kind": "test", "id": "pytest-010366", "node_id": "tests/test_process_ir_effect_declarations.py::test_a_child_map_declaration_unblocks_its_parents_subprocess_declaration", "state": "active"}
-{"kind": "test", "id": "pytest-010367", "node_id": "tests/test_process_ir_effect_declarations.py::test_a_child_the_walk_truncates_is_INERT_not_exact", "state": "active"}
+{"kind": "test", "id": "pytest-010367", "node_id": "tests/test_process_ir_effect_declarations.py::test_a_child_the_walk_truncates_is_INERT_not_exact", "state": "tombstone"}
 {"kind": "test", "id": "pytest-010368", "node_id": "tests/test_process_ir_effect_declarations.py::test_a_child_with_an_uninspectable_step_is_INERT_not_exact_empty", "state": "active"}
 {"kind": "test", "id": "pytest-010369", "node_id": "tests/test_process_ir_effect_declarations.py::test_a_childs_required_read_is_demanded_of_the_caller_not_of_the_child", "state": "active"}
 {"kind": "test", "id": "pytest-010370", "node_id": "tests/test_process_ir_effect_declarations.py::test_a_compile_error_serves_its_registered_codes_not_its_class_name", "state": "active"}
@@ -10475,7 +10475,7 @@
 {"kind": "test", "id": "pytest-010474", "node_id": "tests/test_process_ir_effect_declarations.py::test_the_external_writer_flag_governs_the_EFFECT_not_the_IDENTITY", "state": "active"}
 {"kind": "test", "id": "pytest-010475", "node_id": "tests/test_process_ir_effect_declarations.py::test_the_function_lookup_is_the_builders_own", "state": "active"}
 {"kind": "test", "id": "pytest-010476", "node_id": "tests/test_process_ir_effect_declarations.py::test_the_inspectable_and_opaque_child_kinds_partition_the_vocabulary", "state": "active"}
-{"kind": "test", "id": "pytest-010477", "node_id": "tests/test_process_ir_effect_declarations.py::test_the_lineage_walk_reports_its_own_truncation", "state": "active"}
+{"kind": "test", "id": "pytest-010477", "node_id": "tests/test_process_ir_effect_declarations.py::test_the_lineage_walk_reports_its_own_truncation", "state": "tombstone"}
 {"kind": "test", "id": "pytest-010478", "node_id": "tests/test_process_ir_effect_declarations.py::test_the_name_injection_matches_the_plans_setdefault_form[   -False]", "state": "active"}
 {"kind": "test", "id": "pytest-010479", "node_id": "tests/test_process_ir_effect_declarations.py::test_the_name_injection_matches_the_plans_setdefault_form[-False]", "state": "active"}
 {"kind": "test", "id": "pytest-010480", "node_id": "tests/test_process_ir_effect_declarations.py::test_the_name_injection_matches_the_plans_setdefault_form[0-False]", "state": "active"}
@@ -12454,3 +12454,9 @@
 {"kind": "test", "id": "pytest-012453", "node_id": "tests/test_issue_184_stream_profiles.py::test_a_call_after_a_legacy_source_restores_the_check", "state": "active"}
 {"kind": "test", "id": "pytest-012454", "node_id": "tests/test_issue_184_stream_profiles.py::test_a_call_leg_beside_a_legacy_target_leg_is_still_checked", "state": "active"}
 {"kind": "test", "id": "pytest-012455", "node_id": "tests/test_wave_gate_goldens.py::test_golden_manifest_row[golden-000080]", "state": "active"}
+{"kind": "test", "id": "pytest-012456", "node_id": "tests/test_issue_184_lineage_controller.py::test_a_profile_consumer_past_the_old_depth_bound_is_checked", "state": "active"}
+{"kind": "test", "id": "pytest-012457", "node_id": "tests/test_issue_184_lineage_controller.py::test_a_stale_document_property_past_the_old_depth_bound_is_reported", "state": "active"}
+{"kind": "test", "id": "pytest-012458", "node_id": "tests/test_issue_184_lineage_controller.py::test_a_graph_that_is_not_a_tree_is_a_compiler_defect_not_a_loop", "state": "active"}
+{"kind": "test", "id": "pytest-012459", "node_id": "tests/test_issue_184_lineage_controller.py::test_the_truncation_reason_is_withdrawn_from_the_served_contract", "state": "active"}
+{"kind": "test", "id": "pytest-012460", "node_id": "tests/test_process_ir_effect_declarations.py::test_a_long_child_derives_exactly", "state": "active"}
+{"kind": "test", "id": "pytest-012461", "node_id": "tests/test_process_ir_effect_declarations.py::test_the_lineage_walk_has_no_depth_bound", "state": "active"}

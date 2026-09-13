@@ -41,6 +41,7 @@ from types import MappingProxyType
 from typing import Dict, FrozenSet, List, Mapping, NamedTuple, Optional, Set, Tuple
 
 from ....errors import (
+    PROCESS_IR_COMPILE_INTERNAL,
     PROCESS_IR_SEMANTIC_DYNAMIC_PATH_DDP_NOT_ESTABLISHED,
     PROCESS_IR_SEMANTIC_DYNAMIC_PATH_NO_DYNAMIC_SEGMENT,
     PROCESS_IR_SEMANTIC_DYNAMIC_PATH_PROFILE_BINDING_MISMATCH,
@@ -58,7 +59,7 @@ from ..connector_resolution import (
     _profile_identity as _resolved_profile_identity,
     resolve_connector_call_bindings,
 )
-from ..diagnostics import ProcessIRCompileError
+from ..diagnostics import ProcessIRCompileError, diagnostic
 from .contracts import (
     DEFAULT_VALIDATION_CAPABILITIES,
     ProcessIRValidationCapabilitiesV1,
@@ -626,14 +627,11 @@ class LineageWalkV1(NamedTuple):
     findings: Tuple[ValidationDiagnosticV1, ...]
     unestablished_reads: Tuple[StateKey, ...]
     established_at_exit: Tuple[StateKey, ...]
-    #: Whether the walk hit its depth bound and stopped short of some path.
-    #:
-    #: The bound is a HANG GUARD, and for reporting findings, stopping short
-    #: merely means the deepest nodes go unreported. For any caller that
-    #: TRUSTS the state sets, it means something else entirely: both sets are
-    #: silently partial, so an exact-looking summary omits whatever lay past
-    #: the cutoff. Such a caller must treat a truncated walk as no answer.
-    truncated: bool
+    # #184 D12 withdrew ``truncated``. The walk had a depth bound of 256, and a
+    # caller trusting the state sets had to treat a walk that hit it as no
+    # answer. The controller is now iterative with no depth bound: every node of
+    # the tree is visited exactly once, so both sets are always exact and there is
+    # no partial walk left to report.
 
 
 #: Exit roles that NEVER end the process normally. Everything else does.
@@ -661,9 +659,19 @@ def _walk_lineage(
 ) -> LineageWalkV1:
     """Walk the CFG, tracking established state, and report unproven reads.
 
-    The walk is a depth-first traversal that carries a ``_State`` along each
-    path. It is bounded by ``visited`` on ``(node_id, state fingerprint)`` so a
-    graph the compiler has not yet rejected as cyclic cannot hang it.
+    One ORDERED controller (#184 D12), iterative rather than recursive, with no
+    depth bound. Branch legs run in authored order carrying execution state,
+    Decision arms meet, and a try_catch returns its scope-entry state with the
+    union of both bodies' cache content. The CFG it walks is an invariant-checked
+    tree, so each node is visited exactly once. A visit count above the node count
+    can only mean a graph that is not a tree reached this walk; that is a compiler
+    defect and is raised as one rather than looping.
+
+    The recursive visit it replaced stopped at depth 256 and reported the walk as
+    truncated. Its callers then had to treat both state sets as no answer, and a
+    late map past the cutoff went unchecked — which mattered once the stream
+    profile proof moved into this walk, because the connector walk that used to
+    check maps had no depth bound at all.
     """
     findings: List[ValidationDiagnosticV1] = []
     reported: Set[Tuple[str, str, str]] = set()
@@ -672,9 +680,6 @@ def _walk_lineage(
     # finding, and dropping the second key with the duplicate finding would
     # under-report the dependency set.
     unmet: List[StateKey] = []
-    # A list rather than a flag so the nested `_visit` can set it without a
-    # `nonlocal` declaration, matching how `findings` and `unmet` are handled.
-    truncated: List[bool] = []
     # State at every NORMAL exit — a path ending on `stop` or `return_documents`.
     # A guarantee is what holds however the process finishes, so it is the meet
     # over these, not the state the traversal happens to carry back. An
@@ -1136,14 +1141,13 @@ def _walk_lineage(
 
         return state, stream, legacy
 
-    def _visit(node_id: str, state: _State, depth: int, leg=None, writers=None,
-               on_documents=None, invalidated=None, stream=None, legacy=False) -> _State:
-        node = prepared.node(node_id)
-        if node is None:
-            return state
-        if depth > 256:
-            truncated.append(True)
-            return state
+    def _transfer(node, state, leg, writers, on_documents, invalidated, stream, legacy):
+        """Everything ONE node does to the facts carried on its path, in order.
+
+        Lifted unchanged out of the recursive visit (#184 D12), so the controller
+        below is pure control flow and the transfer rules keep a single statement.
+        Returns the facts the node's successors start from.
+        """
         # Per-path, copy-on-write, and deliberately NOT part of `_State`: it is
         # never merged, so it cannot perturb the meet the whole module rests on.
         writers = writers if writers is not None else {}
@@ -1331,138 +1335,18 @@ def _walk_lineage(
         # --- the stream profile (#184 D2) ----------------------------------
         state, stream, legacy = _advance_stream(node, semantic, state, stream, legacy)
 
-        # --- successors -----------------------------------------------------
-        edges = prepared.successors(node_id)
-        if not edges:
-            # EVERY path end that is not abnormal is a completion. Which ones
-            # a Branch may meet together is decided at the Branch, per
-            # COMPARTMENT — not here, by suppressing some of them.
-            role = node.exit_role
-            if role is not None and role not in _ABNORMAL_EXIT_ROLES:
-                normal_exits.append(state)
-            elif role == "exception":
-                threw.append(node_id)
-            return state
+        return state, writers, on_documents, invalidated, stream, legacy
 
-        if semantic.semantic_kind == "branch":
-            # Legs run SEQUENTIALLY in local-ordinal order. Execution-scoped
-            # writes accumulate from one leg into the next; document state does
-            # not, because each leg re-copies the pre-Branch documents.
-            entry = state.entering_branch_leg()
-            carried = entry
-            recorded_before = len(normal_exits)
-            # Per leg: the state its own completions agree on. Collected here
-            # rather than read off `carried`, because `carried` is built from
-            # CONTINUATIONS and a continuation is a meet — a leg ending in a
-            # Decision with one throwing arm hands back a state missing whatever
-            # only the normal arm wrote.
-            leg_documents = []
-            guaranteed_execution = entry.execution
-            for edge in edges:
-                first = len(normal_exits)
-                leg_end = _visit(
-                    edge.target_node_id,
-                    _State(entry.document, carried.execution, carried.content),
-                    depth + 1,
-                    (node.node_id, edge.leg_ordinal or edge.local_ordinal),
-                    writers,
-                    on_documents,
-                    invalidated,
-                    stream,
-                    legacy,
-                )
-                completions = normal_exits[first:]
-                if completions:
-                    leg_document = completions[0].document
-                    leg_execution = completions[0].execution
-                    for other in completions[1:]:
-                        leg_document = leg_document & other.document
-                        leg_execution = leg_execution & other.execution
-                    leg_documents.append(leg_document)
-                    # every leg RUNS, so what a leg guarantees holds afterwards
-                    guaranteed_execution = guaranteed_execution | leg_execution
-                    # ...including for the NEXT leg. Seeding it from `leg_end`
-                    # used a CONTINUATION, and a continuation is a meet over all
-                    # paths including the abnormal ones: a leg whose only normal
-                    # path writes a key and whose other arm throws handed the
-                    # next leg a state without it, so a later leg reading it was
-                    # reported read-before-write and the summary both REQUIRED
-                    # and GUARANTEED the same key.
-                # the NEXT leg is seeded from the CONTINUATION, which is now
-                # throw-aware at the Decision above. Seeding it from this leg's
-                # normal COMPLETIONS instead looked right and broke sequencing:
-                # a leg ending in a WAITING `process_call` records no completion
-                # — that role is deliberately not a normal exit — so the next
-                # leg stopped seeing the write the call established.
-                # Cache content is taken from the continuation as it stands: it
-                # began from `carried`, so it already holds every earlier leg's
-                # writes, less anything this leg removed outright.
-                carried = _State(
-                    entry.document,
-                    carried.execution | leg_end.execution,
-                    leg_end.content,
-                )
-            # ONE completion per leg that can finish: its own document copies,
-            # and the execution state every leg together guarantees. A leg with
-            # no normal end contributes none, so an all-throwing branch promises
-            # nothing rather than promising the meet of abnormal paths.
-            del normal_exits[recorded_before:]
-            for leg_document in leg_documents:
-                normal_exits.append(_State(leg_document, guaranteed_execution))
-            return carried
+    def _edge_stream(edge, stream):
+        """The stream a try_catch edge starts from.
 
-        if semantic.semantic_kind == "decision":
-            # Arms are EXCLUSIVE. Meet, not union — but only over arms that can
-            # CONTINUE. An arm that only throws carries nothing forward: nothing
-            # downstream runs for the document that took it, so meeting it in
-            # dropped whatever the other arm established for every document that
-            # does continue. When every arm throws there is nothing to meet and
-            # the pre-Decision state stands.
-            results = []
-            for edge in edges:
-                before_normal, before_threw = len(normal_exits), len(threw)
-                arm = _visit(edge.target_node_id, state, depth + 1, leg, writers, on_documents,
-                             invalidated, stream, legacy)
-                only_threw = (
-                    len(threw) > before_threw
-                    and len(normal_exits) == before_normal
-                )
-                if not only_threw:
-                    results.append(arm)
-            if not results:
-                return state
-            merged = results[0]
-            for item in results[1:]:
-                merged = merged.merged_with(item)
-            return merged
-
-        if semantic.semantic_kind == "try_catch":
-            # The catch path forks from SCOPE-ENTRY state plus the caught
-            # document. A write inside the try body may not have happened when
-            # the failure occurred, so it cannot be assumed visible to catch.
-            #
-            # Cache CONTENT is the exception (#184 D5): either body may have
-            # written before the scope ended, so what a cache may hold afterwards
-            # is the union of both, never the scope-entry set alone.
-            content = state.content
-            for edge in edges:
-                edge_stream = stream
-                if edge.kind == "catch" and stream.state not in (STREAM_KNOWN, STREAM_UNKNOWN):
-                    # The platform hands the caught document to the recovery path,
-                    # so documents exist there whatever reached the scope — the
-                    # same fact connector resolution records — but nothing proves
-                    # their profile.
-                    edge_stream = _Stream(STREAM_UNKNOWN, origin="catch")
-                reached = _visit(edge.target_node_id, state, depth + 1, leg, writers,
-                                 on_documents, invalidated, edge_stream, legacy)
-                content = content | reached.content
-            return _State(state.document, state.execution, content)
-
-        result = state
-        for edge in edges:
-            result = _visit(edge.target_node_id, state, depth + 1, leg, writers, on_documents,
-                            invalidated, stream, legacy)
-        return result
+        The platform hands the caught document to the recovery path, so documents
+        exist there whatever reached the scope — the same fact connector
+        resolution records — but nothing proves their profile.
+        """
+        if edge.kind == "catch" and stream.state not in (STREAM_KNOWN, STREAM_UNKNOWN):
+            return _Stream(STREAM_UNKNOWN, origin="catch")
+        return stream
 
     entry_state = _State()
     entry_documents = set()
@@ -1470,8 +1354,225 @@ def _walk_lineage(
         entry_state = entry_state.with_write((key[0], key[1]))
         if key[0] == DDP:
             entry_documents.add((key[0], key[1]))
-    _visit(prepared.cfg.entry_node_id, entry_state, 0,
-           on_documents=frozenset(entry_documents))
+
+    # --- the controller -----------------------------------------------------------
+    # A work stack of frames. A "visit" frame runs one node's transfer and then
+    # either records a path end or pushes a continuation frame for its successors
+    # followed by the first successor's visit. A continuation frame runs when
+    # that successor's whole subtree has been walked, and finds the subtree's
+    # returned state in `returned`, exactly where the recursive visit's return
+    # value used to arrive. Frames therefore run in the recursive visit's order,
+    # and the module-level lists (`normal_exits`, `threw`) see the same sequence
+    # of appends and deletions.
+    visit_bound = len(prepared.cfg.nodes)
+    visits = 0
+    returned = entry_state
+    work = [("visit", prepared.cfg.entry_node_id, (
+        entry_state, None, {}, frozenset(entry_documents), frozenset(),
+        _Stream(STREAM_EMPTY_ENTRY), False,
+    ))]
+    while work:
+        frame = work.pop()
+        tag = frame[0]
+
+        if tag == "visit":
+            _tag, node_id, carried_facts = frame
+            state, leg, writers, on_documents, invalidated, stream, legacy = carried_facts
+            node = prepared.node(node_id)
+            if node is None:
+                returned = state
+                continue
+            visits += 1
+            if visits > visit_bound:
+                # Unreachable for a tree. Raised as the compiler's own defect code:
+                # a report may not carry it, and a loop is not an answer.
+                raise ProcessIRCompileError(
+                    [diagnostic(PROCESS_IR_COMPILE_INTERNAL, "semantic_lowering", "")]
+                )
+            state, writers, on_documents, invalidated, stream, legacy = _transfer(
+                node, state, leg, writers, on_documents, invalidated, stream, legacy
+            )
+            edges = prepared.successors(node_id)
+            if not edges:
+                # EVERY path end that is not abnormal is a completion. Which ones
+                # a Branch may meet together is decided at the Branch, per
+                # COMPARTMENT — not here, by suppressing some of them.
+                role = node.exit_role
+                if role is not None and role not in _ABNORMAL_EXIT_ROLES:
+                    normal_exits.append(state)
+                elif role == "exception":
+                    threw.append(node_id)
+                returned = state
+                continue
+            after = (writers, on_documents, invalidated, stream, legacy)
+            kind = node.semantic.semantic_kind
+
+            if kind == "branch":
+                # Legs run SEQUENTIALLY in local-ordinal order. Execution-scoped
+                # writes accumulate from one leg into the next; document state
+                # does not, because each leg re-copies the pre-Branch documents.
+                entry = state.entering_branch_leg()
+                branch = {
+                    "node": node, "edges": edges, "index": 0, "entry": entry,
+                    "carried": entry, "recorded_before": len(normal_exits),
+                    # Per leg: the state its own completions agree on. Collected
+                    # here rather than read off `carried`, because `carried` is
+                    # built from CONTINUATIONS and a continuation is a meet — a leg
+                    # ending in a Decision with one throwing arm hands back a state
+                    # missing whatever only the normal arm wrote.
+                    "leg_documents": [], "guaranteed": entry.execution,
+                    "first": len(normal_exits), "after": after,
+                }
+                work.append(("branch_leg_done", branch))
+                edge = edges[0]
+                work.append(("visit", edge.target_node_id, (
+                    _State(entry.document, entry.execution, entry.content),
+                    (node.node_id, edge.leg_ordinal or edge.local_ordinal),
+                ) + after))
+                continue
+
+            if kind == "decision":
+                # Arms are EXCLUSIVE. Meet, not union — but only over arms that can
+                # CONTINUE. An arm that only throws carries nothing forward: nothing
+                # downstream runs for the document that took it, so meeting it in
+                # dropped whatever the other arm established for every document
+                # that does continue. When every arm throws there is nothing to
+                # meet and the pre-Decision state stands.
+                decision = {
+                    "edges": edges, "index": 0, "state": state, "leg": leg,
+                    "results": [], "before_normal": len(normal_exits),
+                    "before_threw": len(threw), "after": after,
+                }
+                work.append(("decision_arm_done", decision))
+                work.append(("visit", edges[0].target_node_id, (state, leg) + after))
+                continue
+
+            if kind == "try_catch":
+                # The catch path forks from SCOPE-ENTRY state plus the caught
+                # document. A write inside the try body may not have happened when
+                # the failure occurred, so it cannot be assumed visible to catch.
+                #
+                # Cache CONTENT is the exception (#184 D5): either body may have
+                # written before the scope ended, so what a cache may hold
+                # afterwards is the union of both, never the scope-entry set alone.
+                scope = {
+                    "edges": edges, "index": 0, "state": state, "leg": leg,
+                    "content": state.content, "after": after,
+                }
+                work.append(("try_edge_done", scope))
+                work.append(("visit", edges[0].target_node_id, (
+                    state, leg, writers, on_documents, invalidated,
+                    _edge_stream(edges[0], stream), legacy,
+                )))
+                continue
+
+            sequence = {"edges": edges, "index": 0, "state": state, "leg": leg, "after": after}
+            work.append(("sequential_edge_done", sequence))
+            work.append(("visit", edges[0].target_node_id, (state, leg) + after))
+            continue
+
+        if tag == "branch_leg_done":
+            branch = frame[1]
+            leg_end = returned
+            completions = normal_exits[branch["first"]:]
+            if completions:
+                leg_document = completions[0].document
+                leg_execution = completions[0].execution
+                for other in completions[1:]:
+                    leg_document = leg_document & other.document
+                    leg_execution = leg_execution & other.execution
+                branch["leg_documents"].append(leg_document)
+                # every leg RUNS, so what a leg guarantees holds afterwards
+                branch["guaranteed"] = branch["guaranteed"] | leg_execution
+            # The NEXT leg is seeded from the CONTINUATION, which is throw-aware at
+            # the Decision. Seeding it from this leg's normal COMPLETIONS instead
+            # broke sequencing: a leg ending in a WAITING `process_call` records no
+            # completion — that role is deliberately not a normal exit — so the
+            # next leg stopped seeing the write the call established. Cache content
+            # is taken from the continuation as it stands: it began from `carried`,
+            # so it already holds every earlier leg's writes, less anything this
+            # leg removed outright.
+            carried = branch["carried"]
+            carried = _State(
+                branch["entry"].document,
+                carried.execution | leg_end.execution,
+                leg_end.content,
+            )
+            branch["carried"] = carried
+            branch["index"] += 1
+            if branch["index"] < len(branch["edges"]):
+                edge = branch["edges"][branch["index"]]
+                branch["first"] = len(normal_exits)
+                work.append(("branch_leg_done", branch))
+                work.append(("visit", edge.target_node_id, (
+                    _State(branch["entry"].document, carried.execution, carried.content),
+                    (branch["node"].node_id, edge.leg_ordinal or edge.local_ordinal),
+                ) + branch["after"]))
+                continue
+            # ONE completion per leg that can finish: its own document copies, and
+            # the execution state every leg together guarantees. A leg with no
+            # normal end contributes none, so an all-throwing branch promises
+            # nothing rather than promising the meet of abnormal paths.
+            del normal_exits[branch["recorded_before"]:]
+            for leg_document in branch["leg_documents"]:
+                normal_exits.append(_State(leg_document, branch["guaranteed"]))
+            returned = carried
+            continue
+
+        if tag == "decision_arm_done":
+            decision = frame[1]
+            only_threw = (
+                len(threw) > decision["before_threw"]
+                and len(normal_exits) == decision["before_normal"]
+            )
+            if not only_threw:
+                decision["results"].append(returned)
+            decision["index"] += 1
+            if decision["index"] < len(decision["edges"]):
+                decision["before_normal"] = len(normal_exits)
+                decision["before_threw"] = len(threw)
+                work.append(("decision_arm_done", decision))
+                work.append(("visit", decision["edges"][decision["index"]].target_node_id,
+                             (decision["state"], decision["leg"]) + decision["after"]))
+                continue
+            if not decision["results"]:
+                returned = decision["state"]
+                continue
+            merged = decision["results"][0]
+            for item in decision["results"][1:]:
+                merged = merged.merged_with(item)
+            returned = merged
+            continue
+
+        if tag == "try_edge_done":
+            scope = frame[1]
+            scope["content"] = scope["content"] | returned.content
+            scope["index"] += 1
+            if scope["index"] < len(scope["edges"]):
+                edge = scope["edges"][scope["index"]]
+                writers, on_documents, invalidated, stream, legacy = scope["after"]
+                work.append(("try_edge_done", scope))
+                work.append(("visit", edge.target_node_id, (
+                    scope["state"], scope["leg"], writers, on_documents, invalidated,
+                    _edge_stream(edge, stream), legacy,
+                )))
+                continue
+            returned = _State(scope["state"].document, scope["state"].execution, scope["content"])
+            continue
+
+        if tag == "sequential_edge_done":
+            sequence = frame[1]
+            sequence["index"] += 1
+            if sequence["index"] < len(sequence["edges"]):
+                work.append(("sequential_edge_done", sequence))
+                work.append(("visit", sequence["edges"][sequence["index"]].target_node_id,
+                             (sequence["state"], sequence["leg"]) + sequence["after"]))
+                continue
+            # The last successor's returned state stands, as it did in the recursion.
+            continue
+
+        raise AssertionError("unknown lineage controller frame")  # pragma: no cover
+
     # The MEET over normal exits. Using the traversal's returned state instead
     # answered a different question: `try_catch` hands back its SCOPE-ENTRY
     # state, so a key written on the try path AND on the catch path — a genuine
@@ -1488,7 +1589,6 @@ def _walk_lineage(
             if established is None
             else tuple(sorted(established.document | established.execution))
         ),
-        truncated=bool(truncated),
     )
 
 

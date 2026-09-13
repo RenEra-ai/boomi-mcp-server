@@ -1,0 +1,7 @@
+{
+  "compared": 160,
+  "equal": 152,
+  "old_truncated": 8,
+  "old_truncated_new_superset": 8,
+  "mismatches": 0
+}
