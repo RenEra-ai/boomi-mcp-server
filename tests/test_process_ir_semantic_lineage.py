@@ -1672,19 +1672,23 @@ def test_the_bound_path_diagnostic_names_the_action_that_actually_clears_it():
     clears it, moving the write downstream of the step that drops the property,
     was named nowhere in the served text.
 
-    So the remediation is pinned to the three things that genuinely discharge or
-    fail to discharge this refusal, each of which is measured elsewhere in this
-    file: placement relative to a property-dropping step, the default, and a
+    So the remediation is pinned to the things that genuinely discharge or fail to
+    discharge this refusal, each of which is measured elsewhere in this file:
+    placement relative to the read that hands on other documents, the default, and a
     caller's entry declaration.
+
+    #184 amendment 3 §10 replaced the text verbatim. A cache retrieval now carries the
+    cached writer's provenance (the bounded overlay), so the remedy it names is to
+    rest on that provenance or to write the property AFTER the read. The measured
+    Message exception is no longer part of the served text.
     """
     text = " ".join(
         _served_diagnostic(PROCESS_IR_SEMANTIC_DYNAMIC_PATH_DDP_NOT_ESTABLISHED)
         ["remediation"].lower().split()
     )
-    assert "downstream" in text
-    assert "message does not" in text          # the measured exception
-    assert "default does not discharge" in text
-    assert "process entry" in text             # the caller-declaration case
+    assert "write the property after the read" in text   # the placement remedy
+    assert "proved cached writer provenance" in text      # the overlay remedy
+    assert "defaults and bare established-at-entry declarations do not provide writer proof" in text
     # ...and it no longer states the bare instruction the author has satisfied.
     assert not text.startswith("write the property on every path that reaches the call.")
 
