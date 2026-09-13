@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 12486, "minimum_collected": 12486, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 12493, "minimum_collected": 12493, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -12566,3 +12566,10 @@
 {"kind": "test", "id": "pytest-012565", "node_id": "tests/test_issue_184_passthrough_entry.py::test_canonical_root_entry_returns_the_real_passthrough_form", "state": "active"}
 {"kind": "test", "id": "pytest-012566", "node_id": "tests/test_process_execution_profile.py::test_the_profile_values_are_exactly_three", "state": "active"}
 {"kind": "test", "id": "pytest-012567", "node_id": "tests/test_process_execution_profile.py::test_passthrough_entry_derives_passthrough_even_beside_a_listen_operation", "state": "active"}
+{"kind": "test", "id": "pytest-012568", "node_id": "tests/test_issue_184_caller_entry_stream.py::test_a_consumer_of_the_callers_documents_records_a_requirement_instead_of_failing[document_consuming_first_call]", "state": "active"}
+{"kind": "test", "id": "pytest-012569", "node_id": "tests/test_issue_184_caller_entry_stream.py::test_a_consumer_of_the_callers_documents_records_a_requirement_instead_of_failing[first_map_on_the_callers_documents]", "state": "active"}
+{"kind": "test", "id": "pytest-012570", "node_id": "tests/test_issue_184_caller_entry_stream.py::test_a_consumer_of_the_callers_documents_records_a_requirement_instead_of_failing[profile_source_then_a_call_of_the_same_profile]", "state": "active"}
+{"kind": "test", "id": "pytest-012571", "node_id": "tests/test_issue_184_caller_entry_stream.py::test_a_consumer_of_the_callers_documents_records_a_requirement_instead_of_failing[staging_the_callers_documents]", "state": "active"}
+{"kind": "test", "id": "pytest-012572", "node_id": "tests/test_issue_184_caller_entry_stream.py::test_two_requirements_contradicting_on_one_path_are_refused_inside_the_child", "state": "active"}
+{"kind": "test", "id": "pytest-012573", "node_id": "tests/test_issue_184_caller_entry_stream.py::test_the_same_consumers_on_a_scheduled_root_are_still_refused", "state": "active"}
+{"kind": "test", "id": "pytest-012574", "node_id": "tests/test_issue_184_caller_entry_stream.py::test_the_branch_point_of_the_merge_refused_the_passthrough_consumers", "state": "active"}

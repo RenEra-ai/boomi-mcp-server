@@ -112,6 +112,14 @@ STREAM_ABSENT = "absent"
 STREAM_KNOWN = "known"
 #: Documents whose profile nothing proves.
 STREAM_UNKNOWN = "unknown"
+#: A Data Passthrough root's entry: its caller's documents, as one group (#184
+#: amendment 1). Documents exist, but their profile is whatever each CALLER hands
+#: over. A consumer here therefore does not fail against it; it records what the
+#: child REQUIRES of its callers (``LineageWalkV1.entry_requirements``), and each
+#: call site discharges that requirement. ``identity`` holds the first requirement
+#: recorded on the path, so a later consumer naming another profile on the same
+#: untouched documents is a contradiction inside the child itself.
+STREAM_CALLER_ENTRY = "caller_entry"
 
 #: Stream states in which no from-nothing producer has run on the path.
 NO_PRODUCER_STREAMS: FrozenSet[str] = frozenset(
@@ -627,6 +635,14 @@ class LineageWalkV1(NamedTuple):
     findings: Tuple[ValidationDiagnosticV1, ...]
     unestablished_reads: Tuple[StateKey, ...]
     established_at_exit: Tuple[StateKey, ...]
+    #: #184: what a Data Passthrough root requires of the documents its callers
+    #: hand over — one entry per consumer of those documents, in walk order, each a
+    #: resolved ``(component id, profile type)`` or ``None`` for a consumption whose
+    #: profile nothing states. Empty for every other entry form, and for a
+    #: passthrough root whose paths all replace the caller's documents before
+    #: consuming them. The child contract is derived from it; this walk only
+    #: records it.
+    entry_requirements: Tuple[Optional[Tuple[str, str]], ...] = ()
     # #184 D12 withdrew ``truncated``. The walk had a depth bound of 256, and a
     # caller trusting the state sets had to treat a walk that hit it as no
     # answer. The controller is now iterative with no depth bound: every node of
@@ -692,6 +708,7 @@ def _walk_lineage(
     #: document — so meeting it into the continuation drops whatever the other
     #: arm established for everything that DOES continue.
     threw: List[str] = []
+    entry_requirements: List[Optional[Tuple[str, str]]] = []
     leg_writes = _leg_write_index(prepared, capabilities)
     index = prepared.symbols.build_index()
     # #184: the stream-profile proof needs each call's resolved binding. When a
@@ -1040,12 +1057,22 @@ def _walk_lineage(
                 for position, source in enumerate(semantic.source_values):
                     if getattr(source, "value_type", None) != "profile":
                         continue
-                    if stream.state == STREAM_EMPTY_ENTRY or (
-                        stream.state == STREAM_KNOWN
-                        and _identity(source.profile_ref) != stream.identity
+                    sub_path = "/source_values/{0}/profile_ref".format(position)
+                    identity = _identity(source.profile_ref)
+                    if stream.state == STREAM_CALLER_ENTRY:
+                        entry_requirements.append(identity)
+                        if stream.identity is None:
+                            stream = _Stream(STREAM_CALLER_ENTRY, identity)
+                        elif identity != stream.identity:
+                            mismatch(node, sub_path)
+                    elif stream.state == STREAM_EMPTY_ENTRY or (
+                        stream.state == STREAM_KNOWN and identity != stream.identity
                     ):
-                        mismatch(node, "/source_values/{0}/profile_ref".format(position))
+                        mismatch(node, sub_path)
             return state, stream, legacy
+
+        if kind == "passthrough":
+            return state, _Stream(STREAM_CALLER_ENTRY), legacy
 
         if kind == "connector":
             if semantic.role == "source":
@@ -1071,6 +1098,18 @@ def _walk_lineage(
                 declared = _identity(binding.input_profile_ref)
                 if declared is None or declared != stream.identity:
                     mismatch(stream.origin_node, "/map_ref")
+            if stream.state == STREAM_CALLER_ENTRY and (
+                binding.capability.accepts_input == "documents_required"
+                or binding.input_profile_ref is not None
+            ):
+                # The call consumes the caller's documents: it requires its declared
+                # input profile of them, and an undeclared one states nothing a
+                # caller could discharge.
+                entry_requirements.append(
+                    _identity(binding.input_profile_ref)
+                    if binding.input_profile_ref is not None
+                    else None
+                )
             # A first-class call's output is what flows on, so whatever a legacy
             # source produced upstream no longer reaches the next consumer.
             if not binding.capability.produces_output:
@@ -1089,18 +1128,45 @@ def _walk_lineage(
             target = _identity(symbol.output_profile_ref) if is_map else None
             # A map's source and target profiles are hard component requirements,
             # so an absent one is a mismatch, and so is a stream nothing proves.
-            if checked and (
-                source is None
-                or target is None
-                or stream.state != STREAM_KNOWN
-                or source != stream.identity
-            ):
+            if stream.state == STREAM_CALLER_ENTRY:
+                # On the caller's documents the map's source IS the requirement;
+                # only a contradiction with an earlier requirement on this path is
+                # provable inside the child.
+                entry_requirements.append(source)
+                contradicted = (
+                    source is None
+                    or target is None
+                    or (stream.identity is not None and source != stream.identity)
+                )
+            else:
+                contradicted = (
+                    source is None
+                    or target is None
+                    or stream.state != STREAM_KNOWN
+                    or source != stream.identity
+                )
+            if checked and contradicted:
                 mismatch(node, "/map_ref")
             # The map owns its own input mismatch. Downstream consumers are judged
             # against what it declares it emits, so one wrong map is reported once.
             if target is None:
                 return state, _Stream(STREAM_UNKNOWN, origin="map"), legacy
             return state, _Stream(STREAM_KNOWN, target, "map", node), legacy
+
+        if kind == "cache_put" and stream.state == STREAM_CALLER_ENTRY:
+            # Staging the caller's documents: the cache's declared profile is what
+            # the child requires of them, and an undeclared cache states nothing.
+            cache = index.get(semantic.cache_ref)
+            declared_ref = getattr(cache, "cache_profile_ref", None)
+            declared = _identity(declared_ref) if declared_ref is not None else None
+            entry_requirements.append(declared)
+            if checked and declared is not None and stream.identity is not None and declared != stream.identity:
+                mismatch(node, "/cache_ref")
+            return (
+                state.with_content(semantic.cache_ref, declared),
+                _Stream(STREAM_ABSENT),
+                legacy,
+            )
 
         if kind == "cache_put":
             identity = stream.identity if stream.state == STREAM_KNOWN else None
@@ -1133,6 +1199,11 @@ def _walk_lineage(
             return state, stream, legacy
 
         if _replaces_document_stream(semantic):
+            if stream.state == STREAM_CALLER_ENTRY and kind == "data_process":
+                # A data process reads the caller's documents in a way nothing
+                # states, so it cannot be recorded as requiring nothing of them. A
+                # Message ignores its input's content and records no requirement.
+                entry_requirements.append(None)
             if stream.state in (STREAM_EMPTY_ENTRY, STREAM_TOUCHED_ENTRY):
                 return state, _Stream(STREAM_TOUCHED_ENTRY), legacy
             if stream.state == STREAM_ABSENT:
@@ -1589,6 +1660,7 @@ def _walk_lineage(
             if established is None
             else tuple(sorted(established.document | established.execution))
         ),
+        entry_requirements=tuple(entry_requirements),
     )
 
 

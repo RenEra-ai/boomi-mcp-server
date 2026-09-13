@@ -767,6 +767,15 @@ def _walk_paths(cfg: SemanticCfgV1, index, binding_by_node) -> None:
             state.producer = node
             state.producer_binding = None
             state.blocked_by = None
+        elif kind == "passthrough":
+            # #184 amendment 1. A Data Passthrough root receives its CALLER's
+            # documents as one group, so a consumer after the entry has documents
+            # to act on. Like the listener it states no profile a map could be
+            # compared against here: what the child requires of those documents is
+            # recorded by the lineage controller and discharged at each call site.
+            state.producer = node
+            state.producer_binding = None
+            state.blocked_by = None
         elif kind == "cache_put":
             # Add to Cache consumes the stream. The model already requires a
             # stream-replacing read immediately after it within the same body.
