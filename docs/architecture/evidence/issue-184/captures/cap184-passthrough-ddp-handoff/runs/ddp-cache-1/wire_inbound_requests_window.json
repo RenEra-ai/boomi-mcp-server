@@ -1,0 +1,45 @@
+[
+  {
+    "client": "172.19.0.1:57990",
+    "start_line": "POST /__E0_184__/E01840913062808/ddp-cache/child/E01840913062808-ddp-cache-c1 HTTP/1.1",
+    "headers": {
+      "content-length": "36",
+      "host": "host.docker.internal:8081",
+      "user-agent": "Apache-HttpClient/4.5.13 (Java/11.0.30)"
+    },
+    "body": "{\"k\":\"E01840913062808-ddp-cache-c1\"}",
+    "body_bytes": 36
+  },
+  {
+    "client": "172.19.0.1:57990",
+    "start_line": "POST /__E0_184__/E01840913062808/ddp-cache/child/E01840913062808-ddp-cache-c2 HTTP/1.1",
+    "headers": {
+      "content-length": "36",
+      "host": "host.docker.internal:8081",
+      "user-agent": "Apache-HttpClient/4.5.13 (Java/11.0.30)"
+    },
+    "body": "{\"k\":\"E01840913062808-ddp-cache-c2\"}",
+    "body_bytes": 36
+  },
+  {
+    "client": "172.19.0.1:57990",
+    "start_line": "POST /__E0_184__/E01840913062808/ddp-cache/child/E01840913062808-ddp-cache-c3 HTTP/1.1",
+    "headers": {
+      "content-length": "36",
+      "host": "host.docker.internal:8081",
+      "user-agent": "Apache-HttpClient/4.5.13 (Java/11.0.30)"
+    },
+    "body": "{\"k\":\"E01840913062808-ddp-cache-c3\"}",
+    "body_bytes": 36
+  },
+  {
+    "client": "172.19.0.1:58000",
+    "start_line": "POST /__E0_184__/E01840913062808/ddp-cache/parent-witness HTTP/1.1",
+    "headers": {
+      "host": "host.docker.internal:8081",
+      "user-agent": "Apache-HttpClient/4.5.13 (Java/11.0.30)"
+    },
+    "body": "",
+    "body_bytes": 0
+  }
+]

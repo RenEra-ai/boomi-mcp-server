@@ -1,0 +1,22 @@
+[
+  {
+    "client": "172.19.0.1:57916",
+    "start_line": "POST /__E0_184__/E01840913062808/dpp-pt/child-read-in/E01840913062808-dpp-pt-parent-set-in HTTP/1.1",
+    "headers": {
+      "host": "host.docker.internal:8081",
+      "user-agent": "Apache-HttpClient/4.5.13 (Java/11.0.30)"
+    },
+    "body": "",
+    "body_bytes": 0
+  },
+  {
+    "client": "172.19.0.1:57918",
+    "start_line": "POST /__E0_184__/E01840913062808/dpp-pt/parent-read-out/E01840913062808-dpp-pt-child-set-out HTTP/1.1",
+    "headers": {
+      "host": "host.docker.internal:8081",
+      "user-agent": "Apache-HttpClient/4.5.13 (Java/11.0.30)"
+    },
+    "body": "",
+    "body_bytes": 0
+  }
+]

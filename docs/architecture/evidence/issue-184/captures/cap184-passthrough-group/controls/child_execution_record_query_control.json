@@ -1,0 +1,69 @@
+{
+  "queried_utc": "2026-09-13T07:18:44.560979+00:00",
+  "rows": {
+    "ch_grp": [
+      {
+        "executionId": "execution-b2df04bd-eb26-4a32-b78c-9253e37a464c-2026.09.13",
+        "executionType": "exec_manual",
+        "status": "COMPLETE",
+        "topLevelExecutionId": null,
+        "inboundDocumentCount": 1,
+        "outboundDocumentCount": 1
+      },
+      {
+        "executionId": "execution-1ac692d3-3b79-4b99-9fbd-734285c618e3-2026.09.13",
+        "executionType": "exec_manual",
+        "status": "COMPLETE",
+        "topLevelExecutionId": null,
+        "inboundDocumentCount": 1,
+        "outboundDocumentCount": 1
+      }
+    ],
+    "ch_cache_pt": [
+      {
+        "executionId": "execution-f4497154-48de-4fe6-8adb-9cf8f9c981a9-2026.09.13",
+        "executionType": "exec_manual",
+        "status": "COMPLETE",
+        "topLevelExecutionId": null,
+        "inboundDocumentCount": 1,
+        "outboundDocumentCount": 0
+      }
+    ],
+    "ch_ddp_pt": [],
+    "ch_ddp_cache": [],
+    "ch_dpp_pt": [],
+    "ch_pfx": [],
+    "ch_nd": [
+      {
+        "executionId": "execution-2bd8f54e-a82f-481d-a379-769482b21756-2026.09.13",
+        "executionType": "sub_process",
+        "status": "COMPLETE",
+        "topLevelExecutionId": "execution-66b8fac6-637a-45bc-ab29-e075a3907e7b-2026.09.13",
+        "inboundDocumentCount": 1,
+        "outboundDocumentCount": 2
+      },
+      {
+        "executionId": "execution-67e001bb-4c6a-4fa0-beaa-b8cc52b4b86f-2026.09.13",
+        "executionType": "sub_process",
+        "status": "COMPLETE",
+        "topLevelExecutionId": "execution-66b8fac6-637a-45bc-ab29-e075a3907e7b-2026.09.13",
+        "inboundDocumentCount": 1,
+        "outboundDocumentCount": 2
+      },
+      {
+        "executionId": "execution-8a3f14ed-a4a6-4c92-a26a-a21047594fa7-2026.09.13",
+        "executionType": "sub_process",
+        "status": "COMPLETE",
+        "topLevelExecutionId": "execution-66b8fac6-637a-45bc-ab29-e075a3907e7b-2026.09.13",
+        "inboundDocumentCount": 1,
+        "outboundDocumentCount": 2
+      }
+    ]
+  },
+  "checks": {
+    "ch_grp_rows_are_exactly_the_two_standalone_runs": true,
+    "ch_cache_pt_rows_are_exactly_its_standalone_run": true,
+    "passthrough_children_never_run_standalone_have_zero_rows": true,
+    "nodata_child_has_sub_process_rows": true
+  }
+}

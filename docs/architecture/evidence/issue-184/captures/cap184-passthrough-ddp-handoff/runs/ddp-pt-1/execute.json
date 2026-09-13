@@ -1,0 +1,23 @@
+{
+  "_success": true,
+  "request_id": "executionrecord-0d9d1576-3db0-4a33-b0e1-2dd531cd5a9f",
+  "process_id": "9a6894b7-6db6-4294-81e9-3ecc35553ee7",
+  "environment_id": "b173ce8a-2d7f-41e3-9d3f-06e45d5b0de9",
+  "atom_id": "a40a3313-1537-47c4-91c7-573a703537c7",
+  "execution_result": {
+    "poll_status": "COMPLETED",
+    "elapsed_seconds": 13.9,
+    "poll_count": 7,
+    "execution_id": "execution-85216237-bc88-4063-8ba5-bfeb364e81e0-2026.09.13",
+    "status": "COMPLETE",
+    "process_name": "_TEST_184E0_pa_ddp_pt_E01840913062808",
+    "atom_name": "renera-local-atom",
+    "execution_time": "2026-09-13T06:38:28Z",
+    "execution_duration": 242,
+    "inbound_document_count": 1,
+    "outbound_document_count": 4,
+    "inbound_error_document_count": 0,
+    "error": null
+  },
+  "execution_id": "execution-85216237-bc88-4063-8ba5-bfeb364e81e0-2026.09.13"
+}

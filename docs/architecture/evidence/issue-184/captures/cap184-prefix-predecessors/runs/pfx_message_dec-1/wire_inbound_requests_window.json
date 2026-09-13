@@ -1,0 +1,13 @@
+[
+  {
+    "client": "172.19.0.1:58960",
+    "start_line": "POST /__E0_184__/E01840913062808/pfx/child HTTP/1.1",
+    "headers": {
+      "content-length": "48",
+      "host": "host.docker.internal:8081",
+      "user-agent": "Apache-HttpClient/4.5.13 (Java/11.0.30)"
+    },
+    "body": "{\"k\": \"E01840913062808-pfx-message-dec-msgkind\"}",
+    "body_bytes": 48
+  }
+]

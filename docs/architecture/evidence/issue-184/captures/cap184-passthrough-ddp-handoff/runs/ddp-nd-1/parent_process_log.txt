@@ -1,0 +1,24 @@
+2026-09-13T06:40:03Z	INFO	initializing...		Executing Process _TEST_184E0_pa_ddp_nd_E01840913062808
+2026-09-13T06:40:03Z	INFO	Start	NoData	Executing Start Shape
+2026-09-13T06:40:03Z	INFO	Start	NoData	1 document(s) found for processing.
+2026-09-13T06:40:03Z	INFO	Start	NoData	Shape executed successfully in 2 ms.
+2026-09-13T06:40:03Z	INFO	Branch		Executing Branch Shape with 1 document(s).
+2026-09-13T06:40:03Z	INFO	Branch		Shape executed successfully in 0 ms.
+2026-09-13T06:40:03Z	INFO	fan-out 3 docs		Executing Data Process Shape with 1 document(s).
+2026-09-13T06:40:03Z	INFO	fan-out 3 docs	[1] Scripting: groovy2	Executing with 1 documents in
+2026-09-13T06:40:03Z	INFO	fan-out 3 docs	[1] Scripting: groovy2	Compiling code source: script_9a5ecbcb_255
+2026-09-13T06:40:03Z	INFO	fan-out 3 docs	[1] Scripting: groovy2	Completed with 3 documents out
+2026-09-13T06:40:03Z	INFO	fan-out 3 docs		Data Process Execution (SCRIPTING) produced 3 documents.
+2026-09-13T06:40:03Z	INFO	fan-out 3 docs		Shape executed successfully in 49 ms.
+2026-09-13T06:40:03Z	INFO	per-document DDP from k		Executing Set Properties Shape with 3 document(s).
+2026-09-13T06:40:03Z	INFO	per-document DDP from k		Shape executed successfully in 7 ms.
+2026-09-13T06:40:03Z	INFO	Process Call	standalone start data, no return data	Executing Process Call Shape with 3 document(s).
+2026-09-13T06:40:03Z	INFO	Process Call	standalone start data, no return data	Executing process '_TEST_184E0_ch_ddp_nd_E01840913062808
+2026-09-13T06:40:03Z	INFO	Process Call	standalone start data, no return data	Executing process '_TEST_184E0_ch_ddp_nd_E01840913062808
+2026-09-13T06:40:03Z	INFO	Process Call	standalone start data, no return data	Executing process '_TEST_184E0_ch_ddp_nd_E01840913062808
+2026-09-13T06:40:03Z	INFO	Process Call	standalone start data, no return data	Shape executed successfully in 3 ms.
+2026-09-13T06:40:03Z	INFO	witness	Sandbox CDS Mock REST (no-auth): officialboomi-X3979C-rest-prod Connector; _TEST_184E0_op_w_ddpnd_E01840913062808	Executing Connector Shape with 1 document(s).
+2026-09-13T06:40:03Z	INFO	witness	Sandbox CDS Mock REST (no-auth): officialboomi-X3979C-rest-prod Connector; _TEST_184E0_op_w_ddpnd_E01840913062808	Shape executed successfully in 7 ms.
+2026-09-13T06:40:03Z	INFO	Stop	continuing process	Executing Stop Shape with 1 document(s).
+2026-09-13T06:40:03Z	INFO	Stop	continuing process	Shape executed successfully in 0 ms.
+2026-09-13T06:40:03Z	INFO	cleanup...		Process execution completed normally.

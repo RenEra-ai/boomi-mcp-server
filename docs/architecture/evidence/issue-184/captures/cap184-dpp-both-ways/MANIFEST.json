@@ -1,0 +1,553 @@
+{
+  "issue": 184,
+  "capture_id": "cap184-dpp-both-ways",
+  "kind": "pre-implementation live evidence (E0) \u2014 no #184 code exists",
+  "account_id": "trainingglebbochkarov-16926N",
+  "branch_point_sha": "cbab28ffc176ddb2378283cf7132eb9c37afc374",
+  "nonce": "E01840913062808",
+  "utc_window": {
+    "start": "2026-09-13T06:30:06.883711+00:00",
+    "end": "2026-09-13T06:47:45.397058+00:00"
+  },
+  "code_imported_from": "pristine worktree wt-cbab28f (detached at the branch point)",
+  "tree_stamps": {
+    "provision_start": {
+      "wt_head": "cbab28ffc176ddb2378283cf7132eb9c37afc374",
+      "wt_head_is_branch_point": true,
+      "wt_tracked_dirty": false,
+      "code_files": 216,
+      "code_sha256": "3f91edaf722e483aa6c0cbad2e30be700e35317cb192a75c3403ec0a071de907"
+    },
+    "provision_end": {
+      "wt_head": "cbab28ffc176ddb2378283cf7132eb9c37afc374",
+      "wt_head_is_branch_point": true,
+      "wt_tracked_dirty": false,
+      "code_files": 216,
+      "code_sha256": "3f91edaf722e483aa6c0cbad2e30be700e35317cb192a75c3403ec0a071de907"
+    },
+    "runs": [
+      "{\"code_files\": 216, \"code_sha256\": \"3f91edaf722e483aa6c0cbad2e30be700e35317cb192a75c3403ec0a071de907\", \"wt_head\": \"cbab28ffc176ddb2378283cf7132eb9c37afc374\", \"wt_head_is_branch_point\": true, \"wt_tracked_dirty\": false}"
+    ]
+  },
+  "counterparty_channels": [
+    "cds-mock uvicorn access log (`docker logs --since <run start> cds-mock`), archived verbatim per run",
+    "AF_PACKET wire capture of TCP :8081 in cds-mock's network namespace (sidecar container cap184-sniff running instruments/sniff184.py; reassembled by instruments/wire184.py), archived per run as wire_inbound_requests_window.json"
+  ],
+  "components": [
+    {
+      "role": "ch_dpp_pt",
+      "id": "8a7924d5-6087-43e0-97f5-7836956c1a6d",
+      "name": "_TEST_184E0_ch_dpp_pt_E01840913062808",
+      "kind": "process",
+      "provenance": [
+        "hand-authored from UI-built live capture tests/fixtures/live_xml/m11/process_doccacheretrieve_loadalldoc_variant.xml (shape1 <passthroughaction/> + <process> option attributes)",
+        "legacy renderer at branch point cbab28f (wt-cbab28f process_emitters/rendering.py)"
+      ],
+      "stored_version": "1",
+      "submitted_sha256": "d7f1c1a352a06378a9778c38f8ca5b6fc4d29b908717739172a789cd770a8dc8",
+      "stored_redacted_sha256": "842e30451cdcab7c62780a6ce798c150a61191b82a391f5a7165fb164fd1f127",
+      "shapes_stored_equal_submitted": true,
+      "process_options_submitted": "allowSimultaneous=\"false\" enableUserLog=\"false\" processLogOnErrorOnly=\"false\" purgeDataImmediately=\"false\" updateRunDates=\"false\" workload=\"general\"",
+      "process_options_stored": "allowSimultaneous=\"false\" enableUserLog=\"false\" processLogOnErrorOnly=\"false\" purgeDataImmediately=\"false\" stopProcessingIfZeroDocuments=\"true\" updateRunDates=\"false\" workload=\"general\"",
+      "processcall_attrs_stored": [],
+      "start_config_stored": [
+        "<passthroughaction/>"
+      ]
+    },
+    {
+      "role": "ch_dpp_nd",
+      "id": "31d5c6cb-d0ce-4cc7-8846-6c9b111b0b17",
+      "name": "_TEST_184E0_ch_dpp_nd_E01840913062808",
+      "kind": "process",
+      "provenance": [
+        "legacy renderer at branch point cbab28f (wt-cbab28f process_emitters/rendering.py)"
+      ],
+      "stored_version": "1",
+      "submitted_sha256": "3e9eff18ec6db80b65a27c22da07bc0f5dfd2467a3ecba1fe060177af288b633",
+      "stored_redacted_sha256": "62df2979c60824d4a3fec6612f841281f6ebf2c392df6421523a5b046f7de4f4",
+      "shapes_stored_equal_submitted": true,
+      "process_options_submitted": "allowSimultaneous=\"false\" enableUserLog=\"false\" processLogOnErrorOnly=\"false\" purgeDataImmediately=\"false\" stopProcessingIfZeroDocuments=\"true\" updateRunDates=\"true\" workload=\"general\"",
+      "process_options_stored": "allowSimultaneous=\"false\" enableUserLog=\"false\" processLogOnErrorOnly=\"false\" purgeDataImmediately=\"false\" stopProcessingIfZeroDocuments=\"true\" updateRunDates=\"true\" workload=\"general\"",
+      "processcall_attrs_stored": [],
+      "start_config_stored": [
+        "<noaction/>"
+      ]
+    },
+    {
+      "role": "pa_dpp_pt",
+      "id": "d7f60a28-51a2-4476-8fba-1d2e90b0764d",
+      "name": "_TEST_184E0_pa_dpp_pt_E01840913062808",
+      "kind": "process",
+      "provenance": [
+        "legacy renderer at branch point cbab28f (wt-cbab28f process_emitters/rendering.py)"
+      ],
+      "stored_version": "1",
+      "submitted_sha256": "dd67a8779884708832cf4152e4b2e00d2724b73dfe596ca38f4952ecc1e00e46",
+      "stored_redacted_sha256": "fecc89814c42c6d0e9dfdac7751304be80f69e49122db0121015d9eacd0845a3",
+      "shapes_stored_equal_submitted": true,
+      "process_options_submitted": "allowSimultaneous=\"false\" enableUserLog=\"false\" processLogOnErrorOnly=\"false\" purgeDataImmediately=\"false\" stopProcessingIfZeroDocuments=\"true\" updateRunDates=\"true\" workload=\"general\"",
+      "process_options_stored": "allowSimultaneous=\"false\" enableUserLog=\"false\" processLogOnErrorOnly=\"false\" purgeDataImmediately=\"false\" stopProcessingIfZeroDocuments=\"true\" updateRunDates=\"true\" workload=\"general\"",
+      "processcall_attrs_stored": [
+        "<processcall abort=\"true\" processId=\"8a7924d5-6087-43e0-97f5-7836956c1a6d\" wait=\"true\">"
+      ],
+      "start_config_stored": [
+        "<noaction/>"
+      ]
+    },
+    {
+      "role": "pa_dpp_nd",
+      "id": "2d22c7b4-c6e4-4d67-bdee-b0e347989e40",
+      "name": "_TEST_184E0_pa_dpp_nd_E01840913062808",
+      "kind": "process",
+      "provenance": [
+        "legacy renderer at branch point cbab28f (wt-cbab28f process_emitters/rendering.py)"
+      ],
+      "stored_version": "1",
+      "submitted_sha256": "167bebf6c66c34f8ece0618054dbcfaf7fba461bbdca79cde0a304ba6b5386d3",
+      "stored_redacted_sha256": "9f6b8ca0c1334ff2a4817d990cdbb1b7f812414f366590d49cdcddf6bf84f726",
+      "shapes_stored_equal_submitted": true,
+      "process_options_submitted": "allowSimultaneous=\"false\" enableUserLog=\"false\" processLogOnErrorOnly=\"false\" purgeDataImmediately=\"false\" stopProcessingIfZeroDocuments=\"true\" updateRunDates=\"true\" workload=\"general\"",
+      "process_options_stored": "allowSimultaneous=\"false\" enableUserLog=\"false\" processLogOnErrorOnly=\"false\" purgeDataImmediately=\"false\" stopProcessingIfZeroDocuments=\"true\" updateRunDates=\"true\" workload=\"general\"",
+      "processcall_attrs_stored": [
+        "<processcall abort=\"true\" processId=\"31d5c6cb-d0ce-4cc7-8846-6c9b111b0b17\" wait=\"true\">"
+      ],
+      "start_config_stored": [
+        "<noaction/>"
+      ]
+    }
+  ],
+  "fixtures_referenced": [
+    {
+      "role": "op_grp_child",
+      "id": "5800bad7-c686-40f7-80b7-9f3d812e1abe",
+      "name": "_TEST_184E0_op_grp_child_E01840913062808",
+      "kind": "connector-action",
+      "provenance": "REST operation raw XML: the #156 oracle p1 shape (live-captured from _QA_FIXTURE_155_G1_src_GET), verb POST, returnApplicationErrors=true; static path '/__E0_184__/E01840913062808/grp/child'",
+      "stored_redacted_sha256": "4821457086261e55d10e6facb07d5c156202edeeb5a6438b7314140bec1ef24b"
+    },
+    {
+      "role": "op_nd_first",
+      "id": "7d63a38d-e6e2-40ed-8b8b-615cfb8b30bd",
+      "name": "_TEST_184E0_op_nd_first_E01840913062808",
+      "kind": "connector-action",
+      "provenance": "REST operation raw XML: the #156 oracle p1 shape (live-captured from _QA_FIXTURE_155_G1_src_GET), verb POST, returnApplicationErrors=true; static path '/__E0_184__/E01840913062808/nd/child-first-step'",
+      "stored_redacted_sha256": "b0bf66a2c4dd0db76c65ae00619a7d322208c6f033238fe096288e05df4706e1"
+    },
+    {
+      "role": "op_nd_msg",
+      "id": "6aa584ad-1d9a-4a3c-b9f2-d3d57080eb94",
+      "name": "_TEST_184E0_op_nd_msg_E01840913062808",
+      "kind": "connector-action",
+      "provenance": "REST operation raw XML: the #156 oracle p1 shape (live-captured from _QA_FIXTURE_155_G1_src_GET), verb POST, returnApplicationErrors=true; static path '/__E0_184__/E01840913062808/nd/child-after-message'",
+      "stored_redacted_sha256": "f1b16f6b4a3dc534aed45c693a886c94d9150a8d4a1852e6d3c61958f836802e"
+    },
+    {
+      "role": "op_blank",
+      "id": "187aa243-5f7a-44a2-be07-4ba92ed32fff",
+      "name": "_TEST_184E0_op_blank_E01840913062808",
+      "kind": "connector-action",
+      "provenance": "REST operation raw XML: the #156 oracle p1 shape (live-captured from _QA_FIXTURE_155_G1_src_GET), verb POST, returnApplicationErrors=true; static path ''",
+      "stored_redacted_sha256": "953a795026916d59c5b9952d9131a0274aa18d6c8791ef560777a00a74acfd53"
+    },
+    {
+      "role": "op_w_ddppt",
+      "id": "4b6fafdc-d17e-41f1-a317-87e15740dc72",
+      "name": "_TEST_184E0_op_w_ddppt_E01840913062808",
+      "kind": "connector-action",
+      "provenance": "REST operation raw XML: the #156 oracle p1 shape (live-captured from _QA_FIXTURE_155_G1_src_GET), verb POST, returnApplicationErrors=true; static path '/__E0_184__/E01840913062808/ddp-pt/parent-witness'",
+      "stored_redacted_sha256": "906451623bccef2e3f36086aed93e9447d6f5c9f4e863ed66ab494f769e52852"
+    },
+    {
+      "role": "op_w_ddpnd",
+      "id": "778214a7-4524-42dd-aec8-687ae01d16d8",
+      "name": "_TEST_184E0_op_w_ddpnd_E01840913062808",
+      "kind": "connector-action",
+      "provenance": "REST operation raw XML: the #156 oracle p1 shape (live-captured from _QA_FIXTURE_155_G1_src_GET), verb POST, returnApplicationErrors=true; static path '/__E0_184__/E01840913062808/ddp-nd/parent-witness'",
+      "stored_redacted_sha256": "87223dafbf872e13ddfcb1036c4c785a45fd73f15cdcbe5b735fb7b65df66da3"
+    },
+    {
+      "role": "op_w_ddpc",
+      "id": "70e8b2eb-7468-433d-a444-d4f8c151bd9a",
+      "name": "_TEST_184E0_op_w_ddpc_E01840913062808",
+      "kind": "connector-action",
+      "provenance": "REST operation raw XML: the #156 oracle p1 shape (live-captured from _QA_FIXTURE_155_G1_src_GET), verb POST, returnApplicationErrors=true; static path '/__E0_184__/E01840913062808/ddp-cache/parent-witness'",
+      "stored_redacted_sha256": "9c43135ed6e13c01ef1c7f35895169ac9d5dcdb790fae1da277f0921b192c0c6"
+    },
+    {
+      "role": "op_w_cache",
+      "id": "d4250153-31d8-4f52-b365-8662fb73c8af",
+      "name": "_TEST_184E0_op_w_cache_E01840913062808",
+      "kind": "connector-action",
+      "provenance": "REST operation raw XML: the #156 oracle p1 shape (live-captured from _QA_FIXTURE_155_G1_src_GET), verb POST, returnApplicationErrors=true; static path '/__E0_184__/E01840913062808/cache/parent-witness'",
+      "stored_redacted_sha256": "546313f8347000a3178df465474dffcbe945e68d4fc0bfc32f7caf604b702a2d"
+    },
+    {
+      "role": "op_cache_pt",
+      "id": "aaa39765-25d6-4374-82ca-2c2b7f7ef4b4",
+      "name": "_TEST_184E0_op_cache_pt_E01840913062808",
+      "kind": "connector-action",
+      "provenance": "REST operation raw XML: the #156 oracle p1 shape (live-captured from _QA_FIXTURE_155_G1_src_GET), verb POST, returnApplicationErrors=true; static path '/__E0_184__/E01840913062808/cache/child-pt'",
+      "stored_redacted_sha256": "54bd23d7937677a09bff0dcf5d06ce50420ed643949cab6b827e85d11a718616"
+    },
+    {
+      "role": "op_cache_nd",
+      "id": "256060fa-2d87-47d4-9861-4c714a4d6740",
+      "name": "_TEST_184E0_op_cache_nd_E01840913062808",
+      "kind": "connector-action",
+      "provenance": "REST operation raw XML: the #156 oracle p1 shape (live-captured from _QA_FIXTURE_155_G1_src_GET), verb POST, returnApplicationErrors=true; static path '/__E0_184__/E01840913062808/cache/child-nd'",
+      "stored_redacted_sha256": "439aaac0c2fbe1f38ddc782ff116848b21bb02ee9651374c27ffba29520cbcbb"
+    },
+    {
+      "role": "op_pfx_child",
+      "id": "1f7fa999-06c8-401a-bd6f-e39beed7b93a",
+      "name": "_TEST_184E0_op_pfx_child_E01840913062808",
+      "kind": "connector-action",
+      "provenance": "REST operation raw XML: the #156 oracle p1 shape (live-captured from _QA_FIXTURE_155_G1_src_GET), verb POST, returnApplicationErrors=true; static path '/__E0_184__/E01840913062808/pfx/child'",
+      "stored_redacted_sha256": "a5ffa9ca081f274db389f65fe8750f19ddce37a6f1f27958b504578b13942697"
+    },
+    {
+      "role": "profile",
+      "id": "61449393-c75f-4ec0-a035-3f841ccc4f18",
+      "name": "_TEST_184E0_profile_E01840913062808",
+      "kind": "profile.json",
+      "provenance": "JSONGeneratedProfileBuilder.build at branch point cbab28f (legacy builder)",
+      "stored_redacted_sha256": "544deb011c0188e8b1b8910447feafbde48b787b6ff9ca9384faf2d4402e5d30"
+    },
+    {
+      "role": "cache",
+      "id": "0370d8d8-2c63-42d7-ae11-9aa5bbf64262",
+      "name": "_TEST_184E0_cache_E01840913062808",
+      "kind": "documentcache",
+      "provenance": "DocumentCacheBuilder.build at branch point cbab28f (legacy builder), enforceSingleLucene=true",
+      "stored_redacted_sha256": "1b7d71a150e551880913b8d84d602efd6c65b5a28d06867e7708c38330c55bad"
+    },
+    {
+      "role": "map",
+      "id": "98db8765-e53e-4821-ad19-77f0049999ce",
+      "name": "_TEST_184E0_map_E01840913062808",
+      "kind": "transform.map",
+      "provenance": "DirectMapBuilder.build at branch point cbab28f (legacy builder)",
+      "stored_redacted_sha256": "2f520af424af695a6d6a6b37af6fe4bb1ebe8ff726623f29a574746cc66656f1"
+    },
+    {
+      "role": "op_w_ddpinproc",
+      "id": "c9c79338-aa78-4d7b-abc4-c7f37d970e5e",
+      "name": "_TEST_184E0_op_w_ddpinproc_E01840913062808",
+      "kind": "connector-action",
+      "provenance": "REST operation raw XML: the #156 oracle p1 shape (live-captured from _QA_FIXTURE_155_G1_src_GET), verb POST, returnApplicationErrors=true; static path '/__E0_184__/E01840913062808/ddp-inproc/parent-witness'",
+      "stored_redacted_sha256": "bba866dffc2cd88318c6e6d634662d0502a3c5421ad88bfb78c0b8b130389825"
+    },
+    {
+      "role": "op_xr_rem_succ",
+      "id": "cb4af994-3da1-44ca-94b3-fa1ba0260a95",
+      "name": "_TEST_184E0_op_xr_rem_succ_E01840913062808",
+      "kind": "connector-action",
+      "provenance": "REST operation raw XML: the #156 oracle p1 shape (live-captured from _QA_FIXTURE_155_G1_src_GET), verb POST, returnApplicationErrors=true; static path '/__E0_184__/E01840913062808/remove-successor/connector'",
+      "stored_redacted_sha256": "4f32984597a51c8e168f79cf0d3e63ac889f978c8a0d9eda8c3230ca0353f640"
+    },
+    {
+      "role": "op_w_xr_rem",
+      "id": "f4812b6b-2d09-4dd1-8986-6186eb1ff534",
+      "name": "_TEST_184E0_op_w_xr_rem_E01840913062808",
+      "kind": "connector-action",
+      "provenance": "REST operation raw XML: the #156 oracle p1 shape (live-captured from _QA_FIXTURE_155_G1_src_GET), verb POST, returnApplicationErrors=true; static path '/__E0_184__/E01840913062808/remove-successor/parent-witness'",
+      "stored_redacted_sha256": "7875ac359358d8f163c2443bc3aa7b78beab385024a8bb2a4fd9a0efa4fdc94d"
+    },
+    {
+      "role": "op_w_xr_lin",
+      "id": "5cc4fb35-98a3-499c-bde6-1f19a06dbca3",
+      "name": "_TEST_184E0_op_w_xr_lin_E01840913062808",
+      "kind": "connector-action",
+      "provenance": "REST operation raw XML: the #156 oracle p1 shape (live-captured from _QA_FIXTURE_155_G1_src_GET), verb POST, returnApplicationErrors=true; static path '/__E0_184__/E01840913062808/ddp-linear/parent-witness'",
+      "stored_redacted_sha256": "715246b5e7f2ccec28e10db32971a621391f3eba8e33f4310086fb043d637694"
+    }
+  ],
+  "deployments": [
+    {
+      "role": "pa_dpp_pt",
+      "component_id": "d7f60a28-51a2-4476-8fba-1d2e90b0764d",
+      "package_id": "47de9beb-0907-464f-bc47-0e1f3f2076b7",
+      "deployment_id": "0d69cacf-9d89-4ede-b1fa-2f6b6272c520",
+      "utc": "2026-09-13T06:31:56.698935+00:00",
+      "package_success": true,
+      "deploy_success": true,
+      "undeploy_success": true,
+      "undeployed": true
+    },
+    {
+      "role": "pa_dpp_nd",
+      "component_id": "2d22c7b4-c6e4-4d67-bdee-b0e347989e40",
+      "package_id": "5e6d2a02-6e62-43ca-a022-21417a3c74c5",
+      "deployment_id": "1aaa5f7d-5a43-4ec1-a142-6a2b3fcf677e",
+      "utc": "2026-09-13T06:31:58.746777+00:00",
+      "package_success": true,
+      "deploy_success": true,
+      "undeploy_success": true,
+      "undeployed": true
+    }
+  ],
+  "runs": [
+    {
+      "run_id": "dpp-pt-1",
+      "root_role": "pa_dpp_pt",
+      "root_id": "d7f60a28-51a2-4476-8fba-1d2e90b0764d",
+      "children": {
+        "ch_dpp_pt": "8a7924d5-6087-43e0-97f5-7836956c1a6d"
+      },
+      "started_utc": "2026-09-13T06:46:10.641904+00:00",
+      "ended_utc": "2026-09-13T06:47:06.489787+00:00",
+      "execution_id": "execution-0850f201-ee89-42d9-85ad-4a1847c3a4be-2026.09.13",
+      "wait_status": "COMPLETE",
+      "parent_record": {
+        "status": "COMPLETE",
+        "executionType": "exec_manual",
+        "inboundDocumentCount": 1,
+        "outboundDocumentCount": 2,
+        "inboundErrorDocumentCount": 0,
+        "message": null,
+        "executionTime": "2026-09-13T06:46:12Z",
+        "executionDuration": [
+          "Long",
+          193
+        ]
+      },
+      "child_records": {
+        "ch_dpp_pt": []
+      },
+      "mock_nonce_lines": [
+        "INFO:     172.19.0.1:57916 - \"POST /__E0_184__/E01840913062808/dpp-pt/child-read-in/E01840913062808-dpp-pt-parent-set-in HTTP/1.1\" 404 Not Found",
+        "INFO:     172.19.0.1:57918 - \"POST /__E0_184__/E01840913062808/dpp-pt/parent-read-out/E01840913062808-dpp-pt-child-set-out HTTP/1.1\" 404 Not Found"
+      ],
+      "wire_nonce_requests": [
+        {
+          "client": "172.19.0.1:57916",
+          "start_line": "POST /__E0_184__/E01840913062808/dpp-pt/child-read-in/E01840913062808-dpp-pt-parent-set-in HTTP/1.1",
+          "headers": {
+            "host": "host.docker.internal:8081",
+            "user-agent": "Apache-HttpClient/4.5.13 (Java/11.0.30)"
+          },
+          "body": "",
+          "body_bytes": 0
+        },
+        {
+          "client": "172.19.0.1:57918",
+          "start_line": "POST /__E0_184__/E01840913062808/dpp-pt/parent-read-out/E01840913062808-dpp-pt-child-set-out HTTP/1.1",
+          "headers": {
+            "host": "host.docker.internal:8081",
+            "user-agent": "Apache-HttpClient/4.5.13 (Java/11.0.30)"
+          },
+          "body": "",
+          "body_bytes": 0
+        }
+      ]
+    },
+    {
+      "run_id": "dpp-nd-1",
+      "root_role": "pa_dpp_nd",
+      "root_id": "2d22c7b4-c6e4-4d67-bdee-b0e347989e40",
+      "children": {
+        "ch_dpp_nd": "31d5c6cb-d0ce-4cc7-8846-6c9b111b0b17"
+      },
+      "started_utc": "2026-09-13T06:47:06.623519+00:00",
+      "ended_utc": "2026-09-13T06:47:45.397058+00:00",
+      "execution_id": "execution-cf34d8dd-e27f-4089-8bf5-beb234794197-2026.09.13",
+      "wait_status": "COMPLETE",
+      "parent_record": {
+        "status": "COMPLETE",
+        "executionType": "exec_manual",
+        "inboundDocumentCount": 1,
+        "outboundDocumentCount": 1,
+        "inboundErrorDocumentCount": 0,
+        "message": null,
+        "executionTime": "2026-09-13T06:47:07Z",
+        "executionDuration": [
+          "Long",
+          267
+        ]
+      },
+      "child_records": {
+        "ch_dpp_nd": [
+          {
+            "executionId": "execution-3ae4a16e-9726-4ca3-8d2f-f72fed7894a2-2026.09.13",
+            "status": "COMPLETE",
+            "executionType": "sub_process",
+            "inboundDocumentCount": 1,
+            "outboundDocumentCount": 1,
+            "inboundErrorDocumentCount": 0,
+            "parentExecutionId": null,
+            "topLevelExecutionId": "execution-cf34d8dd-e27f-4089-8bf5-beb234794197-2026.09.13",
+            "executionTime": "2026-09-13T06:47:07Z",
+            "message": null
+          }
+        ]
+      },
+      "mock_nonce_lines": [
+        "INFO:     172.19.0.1:56432 - \"POST /__E0_184__/E01840913062808/dpp-nd/child-read-in/E01840913062808-dpp-nd-parent-set-in HTTP/1.1\" 404 Not Found",
+        "INFO:     172.19.0.1:56446 - \"POST /__E0_184__/E01840913062808/dpp-nd/parent-read-out/E01840913062808-dpp-nd-child-set-out HTTP/1.1\" 404 Not Found"
+      ],
+      "wire_nonce_requests": [
+        {
+          "client": "172.19.0.1:56432",
+          "start_line": "POST /__E0_184__/E01840913062808/dpp-nd/child-read-in/E01840913062808-dpp-nd-parent-set-in HTTP/1.1",
+          "headers": {
+            "host": "host.docker.internal:8081",
+            "user-agent": "Apache-HttpClient/4.5.13 (Java/11.0.30)"
+          },
+          "body": "",
+          "body_bytes": 0
+        },
+        {
+          "client": "172.19.0.1:56446",
+          "start_line": "POST /__E0_184__/E01840913062808/dpp-nd/parent-read-out/E01840913062808-dpp-nd-child-set-out HTTP/1.1",
+          "headers": {
+            "host": "host.docker.internal:8081",
+            "user-agent": "Apache-HttpClient/4.5.13 (Java/11.0.30)"
+          },
+          "body": "",
+          "body_bytes": 0
+        }
+      ]
+    }
+  ],
+  "verdict": {
+    "rows": [
+      {
+        "row": "DPP both ways with a Data Passthrough child (wait=true)",
+        "verdict": "ADMIT",
+        "checks": {
+          "parent_COMPLETE": true,
+          "child_read_parent_DPP": true,
+          "parent_read_child_DPP_after_call": true,
+          "window_exactly_2_lines": true,
+          "child_no_own_record": true
+        },
+        "observation": "Child's path carried the parent-set DPP; the parent's post-call leg carried the child-set DPP.",
+        "evidence": [
+          "runs/dpp-pt-1/*"
+        ]
+      },
+      {
+        "row": "DPP both ways with a No Data child (wait=true)",
+        "verdict": "ADMIT",
+        "checks": {
+          "parent_COMPLETE": true,
+          "child_read_parent_DPP": true,
+          "parent_read_child_DPP_after_call": true,
+          "window_exactly_2_lines": true,
+          "one_sub_process_record": true
+        },
+        "observation": "Child's path carried the parent-set DPP; the parent's post-call leg carried the child-set DPP.",
+        "evidence": [
+          "runs/dpp-nd-1/*"
+        ]
+      }
+    ]
+  },
+  "artifacts": [
+    {
+      "file": "components/ch_dpp_nd.stored.xml",
+      "sha256": "62df2979c60824d4a3fec6612f841281f6ebf2c392df6421523a5b046f7de4f4",
+      "bytes": 3632
+    },
+    {
+      "file": "components/ch_dpp_nd.submitted.xml",
+      "sha256": "3e9eff18ec6db80b65a27c22da07bc0f5dfd2467a3ecba1fe060177af288b633",
+      "bytes": 3308
+    },
+    {
+      "file": "components/ch_dpp_pt.stored.xml",
+      "sha256": "842e30451cdcab7c62780a6ce798c150a61191b82a391f5a7165fb164fd1f127",
+      "bytes": 3642
+    },
+    {
+      "file": "components/ch_dpp_pt.submitted.xml",
+      "sha256": "d7f1c1a352a06378a9778c38f8ca5b6fc4d29b908717739172a789cd770a8dc8",
+      "bytes": 3281
+    },
+    {
+      "file": "components/pa_dpp_nd.stored.xml",
+      "sha256": "9f6b8ca0c1334ff2a4817d990cdbb1b7f812414f366590d49cdcddf6bf84f726",
+      "bytes": 4295
+    },
+    {
+      "file": "components/pa_dpp_nd.submitted.xml",
+      "sha256": "167bebf6c66c34f8ece0618054dbcfaf7fba461bbdca79cde0a304ba6b5386d3",
+      "bytes": 3971
+    },
+    {
+      "file": "components/pa_dpp_pt.stored.xml",
+      "sha256": "fecc89814c42c6d0e9dfdac7751304be80f69e49122db0121015d9eacd0845a3",
+      "bytes": 4295
+    },
+    {
+      "file": "components/pa_dpp_pt.submitted.xml",
+      "sha256": "dd67a8779884708832cf4152e4b2e00d2724b73dfe596ca38f4952ecc1e00e46",
+      "bytes": 3971
+    },
+    {
+      "file": "runs/dpp-nd-1/child_execution-3ae4a16e-9726-4ca3-8d2f-f72fed7894a2-2026.09.13_process_log.txt",
+      "sha256": "bbc7c8a8c12741039f5f4deceefa17b45d37c445ff8d2d39e91bf5dca6397bfd",
+      "bytes": 1309
+    },
+    {
+      "file": "runs/dpp-nd-1/child_execution_records.json",
+      "sha256": "48a92ae1bf4e4eb2360833d06ea6775420ed2c9d022683f7709b4d6e0b32888f",
+      "bytes": 970
+    },
+    {
+      "file": "runs/dpp-nd-1/execute.json",
+      "sha256": "51b3dd212c87d28ff214cc4214ef8be43e45f77c39480d0011978f8f9b1a8e41",
+      "bytes": 860
+    },
+    {
+      "file": "runs/dpp-nd-1/mock_access_log_window.txt",
+      "sha256": "7b8ced8e130cd7c0578d20e96849a7f1f065c94346a1fe32af274871681086fc",
+      "bytes": 292
+    },
+    {
+      "file": "runs/dpp-nd-1/parent_execution_record.json",
+      "sha256": "c206d830241d03f706898723e01781713368568c1701698d306191bf0cec94bb",
+      "bytes": 744
+    },
+    {
+      "file": "runs/dpp-nd-1/parent_process_log.txt",
+      "sha256": "c24710aa4ffdffe2d861ad3fef805e237ece6e064be9ebb971c03f2e92bf0480",
+      "bytes": 1832
+    },
+    {
+      "file": "runs/dpp-nd-1/wire_inbound_requests_window.json",
+      "sha256": "ce5b9956b5e2b5487ba6b853c67cc10a2c4eaf3fa7454c657f05d139396f6404",
+      "bytes": 662
+    },
+    {
+      "file": "runs/dpp-pt-1/child_execution_records.json",
+      "sha256": "d32d51e4ee3f828f839f269e395e5192ad32819dbbeb67762a1ef542e97774e7",
+      "bytes": 21
+    },
+    {
+      "file": "runs/dpp-pt-1/execute.json",
+      "sha256": "fade1f126075f4c8775f6c456f8b2cdf7b9f011e6136bf6822352ab37e6d3d01",
+      "bytes": 859
+    },
+    {
+      "file": "runs/dpp-pt-1/mock_access_log_window.txt",
+      "sha256": "7282353c0d494488fc26e08cea591ad555facc4205018148f490ed03d11559de",
+      "bytes": 292
+    },
+    {
+      "file": "runs/dpp-pt-1/parent_execution_record.json",
+      "sha256": "5ade931622c4d86f032494ca8b4196dfbf9c7011d9960c7efc1d16c09355fe0a",
+      "bytes": 744
+    },
+    {
+      "file": "runs/dpp-pt-1/parent_process_log.txt",
+      "sha256": "8cadf491f488d155bf7c10f55d39767371e7983b4588f1e3cf8e1fb596c39932",
+      "bytes": 2753
+    },
+    {
+      "file": "runs/dpp-pt-1/wire_inbound_requests_window.json",
+      "sha256": "1522b7622815adb69695d0bf756540147bedfcb72635c627165395b3920d9a46",
+      "bytes": 662
+    }
+  ]
+}

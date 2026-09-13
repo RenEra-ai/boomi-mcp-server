@@ -1,0 +1,451 @@
+{
+  "issue": 184,
+  "capture_id": "cap184-passthrough-wait-true",
+  "kind": "pre-implementation live evidence (E0) \u2014 no #184 code exists",
+  "account_id": "trainingglebbochkarov-16926N",
+  "branch_point_sha": "cbab28ffc176ddb2378283cf7132eb9c37afc374",
+  "nonce": "E01840913062808",
+  "utc_window": {
+    "start": "2026-09-13T06:30:02.208600+00:00",
+    "end": "2026-09-13T06:37:29.280707+00:00"
+  },
+  "code_imported_from": "pristine worktree wt-cbab28f (detached at the branch point)",
+  "tree_stamps": {
+    "provision_start": {
+      "wt_head": "cbab28ffc176ddb2378283cf7132eb9c37afc374",
+      "wt_head_is_branch_point": true,
+      "wt_tracked_dirty": false,
+      "code_files": 216,
+      "code_sha256": "3f91edaf722e483aa6c0cbad2e30be700e35317cb192a75c3403ec0a071de907"
+    },
+    "provision_end": {
+      "wt_head": "cbab28ffc176ddb2378283cf7132eb9c37afc374",
+      "wt_head_is_branch_point": true,
+      "wt_tracked_dirty": false,
+      "code_files": 216,
+      "code_sha256": "3f91edaf722e483aa6c0cbad2e30be700e35317cb192a75c3403ec0a071de907"
+    },
+    "runs": [
+      "{\"code_files\": 216, \"code_sha256\": \"3f91edaf722e483aa6c0cbad2e30be700e35317cb192a75c3403ec0a071de907\", \"wt_head\": \"cbab28ffc176ddb2378283cf7132eb9c37afc374\", \"wt_head_is_branch_point\": true, \"wt_tracked_dirty\": false}"
+    ]
+  },
+  "counterparty_channels": [
+    "cds-mock uvicorn access log (`docker logs --since <run start> cds-mock`), archived verbatim per run",
+    "AF_PACKET wire capture of TCP :8081 in cds-mock's network namespace (sidecar container cap184-sniff running instruments/sniff184.py; reassembled by instruments/wire184.py), archived per run as wire_inbound_requests_window.json"
+  ],
+  "components": [
+    {
+      "role": "ch_grp",
+      "id": "b206749b-7a60-4f9f-a1e7-d17a72ece4ed",
+      "name": "_TEST_184E0_ch_grp_E01840913062808",
+      "kind": "process",
+      "provenance": [
+        "hand-authored from UI-built live capture tests/fixtures/live_xml/m11/process_doccacheretrieve_loadalldoc_variant.xml (shape1 <passthroughaction/> + <process> option attributes)",
+        "legacy renderer at branch point cbab28f (wt-cbab28f process_emitters/rendering.py)"
+      ],
+      "stored_version": "1",
+      "submitted_sha256": "303da4efb591155ac31eb72e0648698586d7bdb8d77a76bcfa7523620b0b8f74",
+      "stored_redacted_sha256": "d62e138a36f8097b417c8c9a8424268494b8a03a5f3aeb1078fbcf7dacf6b77a",
+      "shapes_stored_equal_submitted": true,
+      "process_options_submitted": "allowSimultaneous=\"false\" enableUserLog=\"false\" processLogOnErrorOnly=\"false\" purgeDataImmediately=\"false\" updateRunDates=\"false\" workload=\"general\"",
+      "process_options_stored": "allowSimultaneous=\"false\" enableUserLog=\"false\" processLogOnErrorOnly=\"false\" purgeDataImmediately=\"false\" stopProcessingIfZeroDocuments=\"true\" updateRunDates=\"false\" workload=\"general\"",
+      "processcall_attrs_stored": [],
+      "start_config_stored": [
+        "<passthroughaction/>"
+      ]
+    },
+    {
+      "role": "pa_grp",
+      "id": "414f31aa-1cfc-48a2-a364-13246e3669fb",
+      "name": "_TEST_184E0_pa_grp_E01840913062808",
+      "kind": "process",
+      "provenance": [
+        "legacy renderer at branch point cbab28f (wt-cbab28f process_emitters/rendering.py)",
+        "Groovy fan-out script hand-authored"
+      ],
+      "stored_version": "1",
+      "submitted_sha256": "b8c2df29de893c736e9a352f3390b4e020dfb94df90b54a33ac863c372bfc7f8",
+      "stored_redacted_sha256": "292f2dfab7933b32d48e1ac0eb75a70865e90a0a3378ef9b51279573cc46037d",
+      "shapes_stored_equal_submitted": false,
+      "process_options_submitted": "allowSimultaneous=\"false\" enableUserLog=\"false\" processLogOnErrorOnly=\"false\" purgeDataImmediately=\"false\" stopProcessingIfZeroDocuments=\"true\" updateRunDates=\"true\" workload=\"general\"",
+      "process_options_stored": "allowSimultaneous=\"false\" enableUserLog=\"false\" processLogOnErrorOnly=\"false\" purgeDataImmediately=\"false\" stopProcessingIfZeroDocuments=\"true\" updateRunDates=\"true\" workload=\"general\"",
+      "processcall_attrs_stored": [
+        "<processcall abort=\"true\" processId=\"b206749b-7a60-4f9f-a1e7-d17a72ece4ed\" wait=\"true\">"
+      ],
+      "start_config_stored": [
+        "<noaction/>"
+      ]
+    },
+    {
+      "role": "pa_wf",
+      "id": "32157e2f-3d3d-4c7e-bdc5-7400383e8b3d",
+      "name": "_TEST_184E0_pa_wf_E01840913062808",
+      "kind": "process",
+      "provenance": [
+        "legacy renderer at branch point cbab28f (wt-cbab28f process_emitters/rendering.py)",
+        "Groovy fan-out script hand-authored; wait=false set via render_processcall(wait=False)"
+      ],
+      "stored_version": "1",
+      "submitted_sha256": "12513e1c70887fee0c696ef82fb3b1d90e14607c07ada2a6d839a3a450d861a9",
+      "stored_redacted_sha256": "649e892e2fb99f0c0a676e9046386e7dc695f63c57de131d83a96d1edbad47b8",
+      "shapes_stored_equal_submitted": false,
+      "process_options_submitted": "allowSimultaneous=\"false\" enableUserLog=\"false\" processLogOnErrorOnly=\"false\" purgeDataImmediately=\"false\" stopProcessingIfZeroDocuments=\"true\" updateRunDates=\"true\" workload=\"general\"",
+      "process_options_stored": "allowSimultaneous=\"false\" enableUserLog=\"false\" processLogOnErrorOnly=\"false\" purgeDataImmediately=\"false\" stopProcessingIfZeroDocuments=\"true\" updateRunDates=\"true\" workload=\"general\"",
+      "processcall_attrs_stored": [
+        "<processcall abort=\"true\" processId=\"b206749b-7a60-4f9f-a1e7-d17a72ece4ed\" wait=\"false\">"
+      ],
+      "start_config_stored": [
+        "<noaction/>"
+      ]
+    }
+  ],
+  "fixtures_referenced": [
+    {
+      "role": "op_grp_child",
+      "id": "5800bad7-c686-40f7-80b7-9f3d812e1abe",
+      "name": "_TEST_184E0_op_grp_child_E01840913062808",
+      "kind": "connector-action",
+      "provenance": "REST operation raw XML: the #156 oracle p1 shape (live-captured from _QA_FIXTURE_155_G1_src_GET), verb POST, returnApplicationErrors=true; static path '/__E0_184__/E01840913062808/grp/child'",
+      "stored_redacted_sha256": "4821457086261e55d10e6facb07d5c156202edeeb5a6438b7314140bec1ef24b"
+    },
+    {
+      "role": "op_nd_first",
+      "id": "7d63a38d-e6e2-40ed-8b8b-615cfb8b30bd",
+      "name": "_TEST_184E0_op_nd_first_E01840913062808",
+      "kind": "connector-action",
+      "provenance": "REST operation raw XML: the #156 oracle p1 shape (live-captured from _QA_FIXTURE_155_G1_src_GET), verb POST, returnApplicationErrors=true; static path '/__E0_184__/E01840913062808/nd/child-first-step'",
+      "stored_redacted_sha256": "b0bf66a2c4dd0db76c65ae00619a7d322208c6f033238fe096288e05df4706e1"
+    },
+    {
+      "role": "op_nd_msg",
+      "id": "6aa584ad-1d9a-4a3c-b9f2-d3d57080eb94",
+      "name": "_TEST_184E0_op_nd_msg_E01840913062808",
+      "kind": "connector-action",
+      "provenance": "REST operation raw XML: the #156 oracle p1 shape (live-captured from _QA_FIXTURE_155_G1_src_GET), verb POST, returnApplicationErrors=true; static path '/__E0_184__/E01840913062808/nd/child-after-message'",
+      "stored_redacted_sha256": "f1b16f6b4a3dc534aed45c693a886c94d9150a8d4a1852e6d3c61958f836802e"
+    },
+    {
+      "role": "op_blank",
+      "id": "187aa243-5f7a-44a2-be07-4ba92ed32fff",
+      "name": "_TEST_184E0_op_blank_E01840913062808",
+      "kind": "connector-action",
+      "provenance": "REST operation raw XML: the #156 oracle p1 shape (live-captured from _QA_FIXTURE_155_G1_src_GET), verb POST, returnApplicationErrors=true; static path ''",
+      "stored_redacted_sha256": "953a795026916d59c5b9952d9131a0274aa18d6c8791ef560777a00a74acfd53"
+    },
+    {
+      "role": "op_w_ddppt",
+      "id": "4b6fafdc-d17e-41f1-a317-87e15740dc72",
+      "name": "_TEST_184E0_op_w_ddppt_E01840913062808",
+      "kind": "connector-action",
+      "provenance": "REST operation raw XML: the #156 oracle p1 shape (live-captured from _QA_FIXTURE_155_G1_src_GET), verb POST, returnApplicationErrors=true; static path '/__E0_184__/E01840913062808/ddp-pt/parent-witness'",
+      "stored_redacted_sha256": "906451623bccef2e3f36086aed93e9447d6f5c9f4e863ed66ab494f769e52852"
+    },
+    {
+      "role": "op_w_ddpnd",
+      "id": "778214a7-4524-42dd-aec8-687ae01d16d8",
+      "name": "_TEST_184E0_op_w_ddpnd_E01840913062808",
+      "kind": "connector-action",
+      "provenance": "REST operation raw XML: the #156 oracle p1 shape (live-captured from _QA_FIXTURE_155_G1_src_GET), verb POST, returnApplicationErrors=true; static path '/__E0_184__/E01840913062808/ddp-nd/parent-witness'",
+      "stored_redacted_sha256": "87223dafbf872e13ddfcb1036c4c785a45fd73f15cdcbe5b735fb7b65df66da3"
+    },
+    {
+      "role": "op_w_ddpc",
+      "id": "70e8b2eb-7468-433d-a444-d4f8c151bd9a",
+      "name": "_TEST_184E0_op_w_ddpc_E01840913062808",
+      "kind": "connector-action",
+      "provenance": "REST operation raw XML: the #156 oracle p1 shape (live-captured from _QA_FIXTURE_155_G1_src_GET), verb POST, returnApplicationErrors=true; static path '/__E0_184__/E01840913062808/ddp-cache/parent-witness'",
+      "stored_redacted_sha256": "9c43135ed6e13c01ef1c7f35895169ac9d5dcdb790fae1da277f0921b192c0c6"
+    },
+    {
+      "role": "op_w_cache",
+      "id": "d4250153-31d8-4f52-b365-8662fb73c8af",
+      "name": "_TEST_184E0_op_w_cache_E01840913062808",
+      "kind": "connector-action",
+      "provenance": "REST operation raw XML: the #156 oracle p1 shape (live-captured from _QA_FIXTURE_155_G1_src_GET), verb POST, returnApplicationErrors=true; static path '/__E0_184__/E01840913062808/cache/parent-witness'",
+      "stored_redacted_sha256": "546313f8347000a3178df465474dffcbe945e68d4fc0bfc32f7caf604b702a2d"
+    },
+    {
+      "role": "op_cache_pt",
+      "id": "aaa39765-25d6-4374-82ca-2c2b7f7ef4b4",
+      "name": "_TEST_184E0_op_cache_pt_E01840913062808",
+      "kind": "connector-action",
+      "provenance": "REST operation raw XML: the #156 oracle p1 shape (live-captured from _QA_FIXTURE_155_G1_src_GET), verb POST, returnApplicationErrors=true; static path '/__E0_184__/E01840913062808/cache/child-pt'",
+      "stored_redacted_sha256": "54bd23d7937677a09bff0dcf5d06ce50420ed643949cab6b827e85d11a718616"
+    },
+    {
+      "role": "op_cache_nd",
+      "id": "256060fa-2d87-47d4-9861-4c714a4d6740",
+      "name": "_TEST_184E0_op_cache_nd_E01840913062808",
+      "kind": "connector-action",
+      "provenance": "REST operation raw XML: the #156 oracle p1 shape (live-captured from _QA_FIXTURE_155_G1_src_GET), verb POST, returnApplicationErrors=true; static path '/__E0_184__/E01840913062808/cache/child-nd'",
+      "stored_redacted_sha256": "439aaac0c2fbe1f38ddc782ff116848b21bb02ee9651374c27ffba29520cbcbb"
+    },
+    {
+      "role": "op_pfx_child",
+      "id": "1f7fa999-06c8-401a-bd6f-e39beed7b93a",
+      "name": "_TEST_184E0_op_pfx_child_E01840913062808",
+      "kind": "connector-action",
+      "provenance": "REST operation raw XML: the #156 oracle p1 shape (live-captured from _QA_FIXTURE_155_G1_src_GET), verb POST, returnApplicationErrors=true; static path '/__E0_184__/E01840913062808/pfx/child'",
+      "stored_redacted_sha256": "a5ffa9ca081f274db389f65fe8750f19ddce37a6f1f27958b504578b13942697"
+    },
+    {
+      "role": "profile",
+      "id": "61449393-c75f-4ec0-a035-3f841ccc4f18",
+      "name": "_TEST_184E0_profile_E01840913062808",
+      "kind": "profile.json",
+      "provenance": "JSONGeneratedProfileBuilder.build at branch point cbab28f (legacy builder)",
+      "stored_redacted_sha256": "544deb011c0188e8b1b8910447feafbde48b787b6ff9ca9384faf2d4402e5d30"
+    },
+    {
+      "role": "cache",
+      "id": "0370d8d8-2c63-42d7-ae11-9aa5bbf64262",
+      "name": "_TEST_184E0_cache_E01840913062808",
+      "kind": "documentcache",
+      "provenance": "DocumentCacheBuilder.build at branch point cbab28f (legacy builder), enforceSingleLucene=true",
+      "stored_redacted_sha256": "1b7d71a150e551880913b8d84d602efd6c65b5a28d06867e7708c38330c55bad"
+    },
+    {
+      "role": "map",
+      "id": "98db8765-e53e-4821-ad19-77f0049999ce",
+      "name": "_TEST_184E0_map_E01840913062808",
+      "kind": "transform.map",
+      "provenance": "DirectMapBuilder.build at branch point cbab28f (legacy builder)",
+      "stored_redacted_sha256": "2f520af424af695a6d6a6b37af6fe4bb1ebe8ff726623f29a574746cc66656f1"
+    },
+    {
+      "role": "op_w_ddpinproc",
+      "id": "c9c79338-aa78-4d7b-abc4-c7f37d970e5e",
+      "name": "_TEST_184E0_op_w_ddpinproc_E01840913062808",
+      "kind": "connector-action",
+      "provenance": "REST operation raw XML: the #156 oracle p1 shape (live-captured from _QA_FIXTURE_155_G1_src_GET), verb POST, returnApplicationErrors=true; static path '/__E0_184__/E01840913062808/ddp-inproc/parent-witness'",
+      "stored_redacted_sha256": "bba866dffc2cd88318c6e6d634662d0502a3c5421ad88bfb78c0b8b130389825"
+    },
+    {
+      "role": "op_xr_rem_succ",
+      "id": "cb4af994-3da1-44ca-94b3-fa1ba0260a95",
+      "name": "_TEST_184E0_op_xr_rem_succ_E01840913062808",
+      "kind": "connector-action",
+      "provenance": "REST operation raw XML: the #156 oracle p1 shape (live-captured from _QA_FIXTURE_155_G1_src_GET), verb POST, returnApplicationErrors=true; static path '/__E0_184__/E01840913062808/remove-successor/connector'",
+      "stored_redacted_sha256": "4f32984597a51c8e168f79cf0d3e63ac889f978c8a0d9eda8c3230ca0353f640"
+    },
+    {
+      "role": "op_w_xr_rem",
+      "id": "f4812b6b-2d09-4dd1-8986-6186eb1ff534",
+      "name": "_TEST_184E0_op_w_xr_rem_E01840913062808",
+      "kind": "connector-action",
+      "provenance": "REST operation raw XML: the #156 oracle p1 shape (live-captured from _QA_FIXTURE_155_G1_src_GET), verb POST, returnApplicationErrors=true; static path '/__E0_184__/E01840913062808/remove-successor/parent-witness'",
+      "stored_redacted_sha256": "7875ac359358d8f163c2443bc3aa7b78beab385024a8bb2a4fd9a0efa4fdc94d"
+    },
+    {
+      "role": "op_w_xr_lin",
+      "id": "5cc4fb35-98a3-499c-bde6-1f19a06dbca3",
+      "name": "_TEST_184E0_op_w_xr_lin_E01840913062808",
+      "kind": "connector-action",
+      "provenance": "REST operation raw XML: the #156 oracle p1 shape (live-captured from _QA_FIXTURE_155_G1_src_GET), verb POST, returnApplicationErrors=true; static path '/__E0_184__/E01840913062808/ddp-linear/parent-witness'",
+      "stored_redacted_sha256": "715246b5e7f2ccec28e10db32971a621391f3eba8e33f4310086fb043d637694"
+    }
+  ],
+  "deployments": [
+    {
+      "role": "pa_grp",
+      "component_id": "414f31aa-1cfc-48a2-a364-13246e3669fb",
+      "package_id": "d19c2a62-3d41-42ae-bde3-4895f927aa6d",
+      "deployment_id": "ffdf1816-b36b-4faa-9227-36155ece97fe",
+      "utc": "2026-09-13T06:31:36.045673+00:00",
+      "package_success": true,
+      "deploy_success": true,
+      "undeploy_success": true,
+      "undeployed": true
+    },
+    {
+      "role": "pa_wf",
+      "component_id": "32157e2f-3d3d-4c7e-bdc5-7400383e8b3d",
+      "package_id": "4ebf443c-6cad-4258-beb3-c51121038ac9",
+      "deployment_id": "ca897db0-28b5-4b10-9567-b3e0922907d9",
+      "utc": "2026-09-13T06:31:38.290087+00:00",
+      "package_success": true,
+      "deploy_success": true,
+      "undeploy_success": true,
+      "undeployed": true
+    },
+    {
+      "role": "ch_grp",
+      "component_id": "b206749b-7a60-4f9f-a1e7-d17a72ece4ed",
+      "package_id": "cd3023da-06f9-4993-afc9-cbd28b20d771",
+      "deployment_id": "60ae0893-d0b3-4e28-9f53-7571209aa164",
+      "utc": "2026-09-13T06:32:01.307236+00:00",
+      "package_success": true,
+      "deploy_success": true,
+      "undeploy_success": true,
+      "undeployed": true
+    }
+  ],
+  "runs": [
+    {
+      "run_id": "wf-1",
+      "root_role": "pa_wf",
+      "root_id": "32157e2f-3d3d-4c7e-bdc5-7400383e8b3d",
+      "children": {
+        "ch_grp": "b206749b-7a60-4f9f-a1e7-d17a72ece4ed"
+      },
+      "started_utc": "2026-09-13T06:35:23.810097+00:00",
+      "ended_utc": "2026-09-13T06:37:29.280707+00:00",
+      "execution_id": "execution-d6a5b269-825f-40e2-94fe-41ab154d9902-2026.09.13",
+      "wait_status": "COMPLETE",
+      "parent_record": {
+        "status": "COMPLETE",
+        "executionType": "exec_manual",
+        "inboundDocumentCount": 1,
+        "outboundDocumentCount": 3,
+        "inboundErrorDocumentCount": 0,
+        "message": null,
+        "executionTime": "2026-09-13T06:35:25Z",
+        "executionDuration": [
+          "Long",
+          122
+        ]
+      },
+      "child_records": {
+        "ch_grp": []
+      },
+      "mock_nonce_lines": [
+        "INFO:     172.19.0.1:57038 - \"POST /__E0_184__/E01840913062808/grp/child HTTP/1.1\" 404 Not Found",
+        "INFO:     172.19.0.1:57038 - \"POST /__E0_184__/E01840913062808/grp/child HTTP/1.1\" 404 Not Found",
+        "INFO:     172.19.0.1:57038 - \"POST /__E0_184__/E01840913062808/grp/child HTTP/1.1\" 404 Not Found"
+      ],
+      "wire_nonce_requests": [
+        {
+          "client": "172.19.0.1:57038",
+          "start_line": "POST /__E0_184__/E01840913062808/grp/child HTTP/1.1",
+          "headers": {
+            "content-length": "29",
+            "host": "host.docker.internal:8081",
+            "user-agent": "Apache-HttpClient/4.5.13 (Java/11.0.30)"
+          },
+          "body": "{\"k\":\"E01840913062808-wf-d1\"}",
+          "body_bytes": 29
+        },
+        {
+          "client": "172.19.0.1:57038",
+          "start_line": "POST /__E0_184__/E01840913062808/grp/child HTTP/1.1",
+          "headers": {
+            "content-length": "29",
+            "host": "host.docker.internal:8081",
+            "user-agent": "Apache-HttpClient/4.5.13 (Java/11.0.30)"
+          },
+          "body": "{\"k\":\"E01840913062808-wf-d2\"}",
+          "body_bytes": 29
+        },
+        {
+          "client": "172.19.0.1:57038",
+          "start_line": "POST /__E0_184__/E01840913062808/grp/child HTTP/1.1",
+          "headers": {
+            "content-length": "29",
+            "host": "host.docker.internal:8081",
+            "user-agent": "Apache-HttpClient/4.5.13 (Java/11.0.30)"
+          },
+          "body": "{\"k\":\"E01840913062808-wf-d3\"}",
+          "body_bytes": 29
+        }
+      ]
+    }
+  ],
+  "verdict": {
+    "rows": [
+      {
+        "row": "wait=true against a Data Passthrough child is stored as authored",
+        "verdict": "ADMIT",
+        "checks": {
+          "stored_wait_true": true,
+          "executed_green_grp_1": true
+        },
+        "observation": "Readback of pa_grp: <processcall abort=\"true\" ... wait=\"true\">; grp-1 executed COMPLETE.",
+        "evidence": [
+          "../cap184-passthrough-group/components/pa_grp.stored.xml"
+        ]
+      },
+      {
+        "row": "wait=false against a Data Passthrough child (docs: the Wait box 'cannot be turned off')",
+        "verdict": "OPEN",
+        "checks": {
+          "api_stored_wait_false": true,
+          "parent_COMPLETE": true,
+          "log_asynchronous_launch_with_3_docs": true,
+          "parent_cleanup_waited_for_child": true,
+          "child_passthrough_received_3": true,
+          "mock_window_exactly_3_child_lines": true,
+          "wire_bodies_wf_d1_d3": true,
+          "child_has_NO_own_ExecutionRecord": true,
+          "UI_rendering_observed": false
+        },
+        "observation": "The platform API STORED wait=\"false\" unchanged and EXECUTED it: the Process Call shape launched the child asynchronously with all 3 documents as one group (6 ms shape), the parent's cleanup logged 'Waited for 1 child process(es)' before the parent completed, the child ran inside the parent's log with no ExecutionRecord. NOT observed: what the UI shows/authors for this stored value (browser extension not connected). One run only.",
+        "evidence": [
+          "components/pa_wf.stored.xml",
+          "runs/wf-1/*"
+        ]
+      }
+    ]
+  },
+  "artifacts": [
+    {
+      "file": "components/ch_grp.stored.xml",
+      "sha256": "d62e138a36f8097b417c8c9a8424268494b8a03a5f3aeb1078fbcf7dacf6b77a",
+      "bytes": 1828
+    },
+    {
+      "file": "components/ch_grp.submitted.xml",
+      "sha256": "303da4efb591155ac31eb72e0648698586d7bdb8d77a76bcfa7523620b0b8f74",
+      "bytes": 1467
+    },
+    {
+      "file": "components/pa_grp.stored.xml",
+      "sha256": "292f2dfab7933b32d48e1ac0eb75a70865e90a0a3378ef9b51279573cc46037d",
+      "bytes": 2113
+    },
+    {
+      "file": "components/pa_grp.submitted.xml",
+      "sha256": "b8c2df29de893c736e9a352f3390b4e020dfb94df90b54a33ac863c372bfc7f8",
+      "bytes": 1839
+    },
+    {
+      "file": "components/pa_wf.stored.xml",
+      "sha256": "649e892e2fb99f0c0a676e9046386e7dc695f63c57de131d83a96d1edbad47b8",
+      "bytes": 2112
+    },
+    {
+      "file": "components/pa_wf.submitted.xml",
+      "sha256": "12513e1c70887fee0c696ef82fb3b1d90e14607c07ada2a6d839a3a450d861a9",
+      "bytes": 1838
+    },
+    {
+      "file": "runs/wf-1/child_execution_records.json",
+      "sha256": "3f26aea33ed66624a89a984dfa197d833d9d1e4e5fe285d398ae6c4468d612ee",
+      "bytes": 18
+    },
+    {
+      "file": "runs/wf-1/execute.json",
+      "sha256": "2325cd6b6e4e802a8bbefbd1ea60ff45ca9edd784aef8651303f23bfc7f4509c",
+      "bytes": 856
+    },
+    {
+      "file": "runs/wf-1/mock_access_log_window.txt",
+      "sha256": "e726444784c9992c8a59283058fcb013caadc387c6d364197b57783077888be6",
+      "bytes": 291
+    },
+    {
+      "file": "runs/wf-1/parent_execution_record.json",
+      "sha256": "ea594815fcfad29c0c51fe5bb92270faf1387cefb4613440207b1e4e1e7e1860",
+      "bytes": 740
+    },
+    {
+      "file": "runs/wf-1/parent_process_log.txt",
+      "sha256": "84eae6aa25b312a9eb1ed30e3922c53506423b4026b9566aa6c11a7141abd768",
+      "bytes": 2499
+    },
+    {
+      "file": "runs/wf-1/wire_inbound_requests_window.json",
+      "sha256": "6d844df51dd7b1f239645fa525a34467bd535009a145fd046d5d528d2342923e",
+      "bytes": 1037
+    }
+  ]
+}

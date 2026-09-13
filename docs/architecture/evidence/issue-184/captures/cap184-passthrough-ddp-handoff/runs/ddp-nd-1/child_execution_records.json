@@ -1,0 +1,91 @@
+{
+  "ch_ddp_nd": [
+    {
+      "@type": "ExecutionRecord",
+      "executionId": "execution-3d6192a1-0ddf-47ca-8c91-ae53b9db86ba-2026.09.13",
+      "account": "trainingglebbochkarov-16926N",
+      "executionTime": "2026-09-13T06:40:03Z",
+      "status": "COMPLETE",
+      "executionType": "sub_process",
+      "processName": "_TEST_184E0_ch_ddp_nd_E01840913062808",
+      "processId": "dc8ec982-24e8-47a7-91ce-983ee339f9d4",
+      "atomName": "renera-local-atom",
+      "atomId": "a40a3313-1537-47c4-91c7-573a703537c7",
+      "inboundDocumentCount": 1,
+      "inboundErrorDocumentCount": 0,
+      "outboundDocumentCount": 1,
+      "executionDuration": [
+        "Long",
+        32
+      ],
+      "topLevelExecutionId": "execution-42ae76b0-d29d-4df2-9e88-e6cb09e6aca6-2026.09.13",
+      "inboundDocumentSize": [
+        "Long",
+        0
+      ],
+      "outboundDocumentSize": [
+        "Long",
+        117
+      ],
+      "recordedDate": "2026-09-13T06:40:03Z"
+    },
+    {
+      "@type": "ExecutionRecord",
+      "executionId": "execution-5ad88bb7-41e9-4abd-8723-85f872dccb3e-2026.09.13",
+      "account": "trainingglebbochkarov-16926N",
+      "executionTime": "2026-09-13T06:40:03Z",
+      "status": "COMPLETE",
+      "executionType": "sub_process",
+      "processName": "_TEST_184E0_ch_ddp_nd_E01840913062808",
+      "processId": "dc8ec982-24e8-47a7-91ce-983ee339f9d4",
+      "atomName": "renera-local-atom",
+      "atomId": "a40a3313-1537-47c4-91c7-573a703537c7",
+      "inboundDocumentCount": 1,
+      "inboundErrorDocumentCount": 0,
+      "outboundDocumentCount": 1,
+      "executionDuration": [
+        "Long",
+        19
+      ],
+      "topLevelExecutionId": "execution-42ae76b0-d29d-4df2-9e88-e6cb09e6aca6-2026.09.13",
+      "inboundDocumentSize": [
+        "Long",
+        0
+      ],
+      "outboundDocumentSize": [
+        "Long",
+        117
+      ],
+      "recordedDate": "2026-09-13T06:40:03Z"
+    },
+    {
+      "@type": "ExecutionRecord",
+      "executionId": "execution-ced3741d-99ea-4112-9c55-554575e75191-2026.09.13",
+      "account": "trainingglebbochkarov-16926N",
+      "executionTime": "2026-09-13T06:40:03Z",
+      "status": "COMPLETE",
+      "executionType": "sub_process",
+      "processName": "_TEST_184E0_ch_ddp_nd_E01840913062808",
+      "processId": "dc8ec982-24e8-47a7-91ce-983ee339f9d4",
+      "atomName": "renera-local-atom",
+      "atomId": "a40a3313-1537-47c4-91c7-573a703537c7",
+      "inboundDocumentCount": 1,
+      "inboundErrorDocumentCount": 0,
+      "outboundDocumentCount": 1,
+      "executionDuration": [
+        "Long",
+        27
+      ],
+      "topLevelExecutionId": "execution-42ae76b0-d29d-4df2-9e88-e6cb09e6aca6-2026.09.13",
+      "inboundDocumentSize": [
+        "Long",
+        0
+      ],
+      "outboundDocumentSize": [
+        "Long",
+        117
+      ],
+      "recordedDate": "2026-09-13T06:40:03Z"
+    }
+  ]
+}

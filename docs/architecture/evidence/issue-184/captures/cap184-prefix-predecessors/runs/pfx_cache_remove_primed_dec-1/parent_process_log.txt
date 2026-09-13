@@ -1,0 +1,16 @@
+2026-09-13T07:08:14Z	INFO	initializing...		Executing Process _TEST_184E0_pfx_cache_remove_primed_dec_E01840913062808
+2026-09-13T07:08:14Z	INFO	Start	NoData	Executing Start Shape
+2026-09-13T07:08:14Z	INFO	Start	NoData	1 document(s) found for processing.
+2026-09-13T07:08:14Z	INFO	Start	NoData	Shape executed successfully in 2 ms.
+2026-09-13T07:08:14Z	INFO	Message		Executing Message Shape with 1 document(s).
+2026-09-13T07:08:14Z	INFO	Message		Shape executed successfully in 1 ms.
+2026-09-13T07:08:14Z	INFO	Branch		Executing Branch Shape with 1 document(s).
+2026-09-13T07:08:14Z	INFO	Branch		Shape executed successfully in 0 ms.
+2026-09-13T07:08:14Z	INFO	Document Cache Load		Shape executed successfully in 11 ms.
+2026-09-13T07:08:14Z	INFO	static go equals go		Executing Decision with 1 document(s).
+2026-09-13T07:08:14Z	INFO	static go equals go		Shape executed successfully in 2 ms.
+2026-09-13T07:08:14Z	INFO	Document Cache Remove		Executing Remove from Cache Shape with 1 document(s).
+2026-09-13T07:08:14Z	INFO	Document Cache Remove		Successfully Removed Documents from Cache
+2026-09-13T07:08:14Z	INFO	Document Cache Remove		Shape executed successfully in 2 ms.
+2026-09-13T07:08:14Z	INFO	Document Cache Remove		No documents found. Skipping execution for the Process Call step.
+2026-09-13T07:08:14Z	INFO	cleanup...		Process execution completed normally.

@@ -1,0 +1,2704 @@
+{
+  "issue": 184,
+  "capture_id": "cap184-prefix-predecessors",
+  "kind": "pre-implementation live evidence (E0) \u2014 no #184 code exists",
+  "account_id": "trainingglebbochkarov-16926N",
+  "branch_point_sha": "cbab28ffc176ddb2378283cf7132eb9c37afc374",
+  "nonce": "E01840913062808",
+  "utc_window": {
+    "start": "2026-09-13T06:30:08.146340+00:00",
+    "end": "2026-09-13T07:16:29.236406+00:00"
+  },
+  "code_imported_from": "pristine worktree wt-cbab28f (detached at the branch point)",
+  "tree_stamps": {
+    "provision_start": {
+      "wt_head": "cbab28ffc176ddb2378283cf7132eb9c37afc374",
+      "wt_head_is_branch_point": true,
+      "wt_tracked_dirty": false,
+      "code_files": 216,
+      "code_sha256": "3f91edaf722e483aa6c0cbad2e30be700e35317cb192a75c3403ec0a071de907"
+    },
+    "provision_end": {
+      "wt_head": "cbab28ffc176ddb2378283cf7132eb9c37afc374",
+      "wt_head_is_branch_point": true,
+      "wt_tracked_dirty": false,
+      "code_files": 216,
+      "code_sha256": "3f91edaf722e483aa6c0cbad2e30be700e35317cb192a75c3403ec0a071de907"
+    },
+    "runs": [
+      "{\"code_files\": 216, \"code_sha256\": \"3f91edaf722e483aa6c0cbad2e30be700e35317cb192a75c3403ec0a071de907\", \"wt_head\": \"cbab28ffc176ddb2378283cf7132eb9c37afc374\", \"wt_head_is_branch_point\": true, \"wt_tracked_dirty\": false}"
+    ]
+  },
+  "counterparty_channels": [
+    "cds-mock uvicorn access log (`docker logs --since <run start> cds-mock`), archived verbatim per run",
+    "AF_PACKET wire capture of TCP :8081 in cds-mock's network namespace (sidecar container cap184-sniff running instruments/sniff184.py; reassembled by instruments/wire184.py), archived per run as wire_inbound_requests_window.json"
+  ],
+  "components": [
+    {
+      "role": "ch_pfx",
+      "id": "14092a32-4356-4ff4-bb8a-e0e6f0294b39",
+      "name": "_TEST_184E0_ch_pfx_E01840913062808",
+      "kind": "process",
+      "provenance": [
+        "hand-authored from UI-built live capture tests/fixtures/live_xml/m11/process_doccacheretrieve_loadalldoc_variant.xml (shape1 <passthroughaction/> + <process> option attributes)",
+        "legacy renderer at branch point cbab28f (wt-cbab28f process_emitters/rendering.py)"
+      ],
+      "stored_version": "1",
+      "submitted_sha256": "c309f351edf6c2d38811f15f1153185ef3afa15f9c4317a9164e25e4b4ae07c4",
+      "stored_redacted_sha256": "30c201f2e144eef344b847e9dff040f368faf2f69839ad05fd10aa33218ab8ec",
+      "shapes_stored_equal_submitted": true,
+      "process_options_submitted": "allowSimultaneous=\"false\" enableUserLog=\"false\" processLogOnErrorOnly=\"false\" purgeDataImmediately=\"false\" updateRunDates=\"false\" workload=\"general\"",
+      "process_options_stored": "allowSimultaneous=\"false\" enableUserLog=\"false\" processLogOnErrorOnly=\"false\" purgeDataImmediately=\"false\" stopProcessingIfZeroDocuments=\"true\" updateRunDates=\"false\" workload=\"general\"",
+      "processcall_attrs_stored": [],
+      "start_config_stored": [
+        "<passthroughaction/>"
+      ]
+    },
+    {
+      "role": "pfx_map_br",
+      "id": "1b8825ee-359d-40e1-8f41-c1800d603de3",
+      "name": "_TEST_184E0_pfx_map_br_E01840913062808",
+      "kind": "process",
+      "provenance": [
+        "legacy renderer at branch point cbab28f (wt-cbab28f process_emitters/rendering.py)",
+        "kind shape wired directly into a terminal processcall"
+      ],
+      "stored_version": "1",
+      "submitted_sha256": "03bff1f0e2a61237b975ac500f73e6a50f157ee65fb9d006c9fe5448f492e5f7",
+      "stored_redacted_sha256": "8f10f4f7a60f1f1254b4c6b3ee841a7b674b1c2146383be87b4016eb9b9256e6",
+      "shapes_stored_equal_submitted": false,
+      "process_options_submitted": "allowSimultaneous=\"false\" enableUserLog=\"false\" processLogOnErrorOnly=\"false\" purgeDataImmediately=\"false\" stopProcessingIfZeroDocuments=\"true\" updateRunDates=\"true\" workload=\"general\"",
+      "process_options_stored": "allowSimultaneous=\"false\" enableUserLog=\"false\" processLogOnErrorOnly=\"false\" purgeDataImmediately=\"false\" stopProcessingIfZeroDocuments=\"true\" updateRunDates=\"true\" workload=\"general\"",
+      "processcall_attrs_stored": [
+        "<processcall abort=\"true\" processId=\"14092a32-4356-4ff4-bb8a-e0e6f0294b39\" wait=\"true\">"
+      ],
+      "start_config_stored": [
+        "<noaction/>"
+      ]
+    },
+    {
+      "role": "pfx_map_dec",
+      "id": "839d05f7-9a9f-4ddc-a29f-dfb6225a6b44",
+      "name": "_TEST_184E0_pfx_map_dec_E01840913062808",
+      "kind": "process",
+      "provenance": [
+        "legacy renderer at branch point cbab28f (wt-cbab28f process_emitters/rendering.py)",
+        "kind shape wired directly into a terminal processcall"
+      ],
+      "stored_version": "1",
+      "submitted_sha256": "622016e9ee0d432e2561f64953828e2cca034053247c05b138f0653caf62036c",
+      "stored_redacted_sha256": "c08bdb6201dc53bddf197c17630101dc623e82a50f6bf78fde21a303d7847bf1",
+      "shapes_stored_equal_submitted": false,
+      "process_options_submitted": "allowSimultaneous=\"false\" enableUserLog=\"false\" processLogOnErrorOnly=\"false\" purgeDataImmediately=\"false\" stopProcessingIfZeroDocuments=\"true\" updateRunDates=\"true\" workload=\"general\"",
+      "process_options_stored": "allowSimultaneous=\"false\" enableUserLog=\"false\" processLogOnErrorOnly=\"false\" purgeDataImmediately=\"false\" stopProcessingIfZeroDocuments=\"true\" updateRunDates=\"true\" workload=\"general\"",
+      "processcall_attrs_stored": [
+        "<processcall abort=\"true\" processId=\"14092a32-4356-4ff4-bb8a-e0e6f0294b39\" wait=\"true\">"
+      ],
+      "start_config_stored": [
+        "<noaction/>"
+      ]
+    },
+    {
+      "role": "pfx_set_ddp_br",
+      "id": "cbed804c-1e9e-4ed4-a602-e69a13a3ca6b",
+      "name": "_TEST_184E0_pfx_set_ddp_br_E01840913062808",
+      "kind": "process",
+      "provenance": [
+        "legacy renderer at branch point cbab28f (wt-cbab28f process_emitters/rendering.py)",
+        "kind shape wired directly into a terminal processcall"
+      ],
+      "stored_version": "1",
+      "submitted_sha256": "5de808fd7880ab71af7a8af58f6a4a49ce2a78d5c2fd889e529e5fb2f0ed76b2",
+      "stored_redacted_sha256": "873abf310ea19e4ae02dd1981bf9f0afb7dacbb48fd041f8f316bdca8ac3a872",
+      "shapes_stored_equal_submitted": false,
+      "process_options_submitted": "allowSimultaneous=\"false\" enableUserLog=\"false\" processLogOnErrorOnly=\"false\" purgeDataImmediately=\"false\" stopProcessingIfZeroDocuments=\"true\" updateRunDates=\"true\" workload=\"general\"",
+      "process_options_stored": "allowSimultaneous=\"false\" enableUserLog=\"false\" processLogOnErrorOnly=\"false\" purgeDataImmediately=\"false\" stopProcessingIfZeroDocuments=\"true\" updateRunDates=\"true\" workload=\"general\"",
+      "processcall_attrs_stored": [
+        "<processcall abort=\"true\" processId=\"14092a32-4356-4ff4-bb8a-e0e6f0294b39\" wait=\"true\">"
+      ],
+      "start_config_stored": [
+        "<noaction/>"
+      ]
+    },
+    {
+      "role": "pfx_set_ddp_dec",
+      "id": "ed718b7d-b602-4c49-8834-1be636fb9925",
+      "name": "_TEST_184E0_pfx_set_ddp_dec_E01840913062808",
+      "kind": "process",
+      "provenance": [
+        "legacy renderer at branch point cbab28f (wt-cbab28f process_emitters/rendering.py)",
+        "kind shape wired directly into a terminal processcall"
+      ],
+      "stored_version": "1",
+      "submitted_sha256": "0cd84ca54b35c0430fb4d646c773193c311acdf87fdd0ac8eec881d8177a2610",
+      "stored_redacted_sha256": "a1ce7c77da05c7710a2330ee9e9872fb37f963f9f9ed23251fe81088768e317f",
+      "shapes_stored_equal_submitted": false,
+      "process_options_submitted": "allowSimultaneous=\"false\" enableUserLog=\"false\" processLogOnErrorOnly=\"false\" purgeDataImmediately=\"false\" stopProcessingIfZeroDocuments=\"true\" updateRunDates=\"true\" workload=\"general\"",
+      "process_options_stored": "allowSimultaneous=\"false\" enableUserLog=\"false\" processLogOnErrorOnly=\"false\" purgeDataImmediately=\"false\" stopProcessingIfZeroDocuments=\"true\" updateRunDates=\"true\" workload=\"general\"",
+      "processcall_attrs_stored": [
+        "<processcall abort=\"true\" processId=\"14092a32-4356-4ff4-bb8a-e0e6f0294b39\" wait=\"true\">"
+      ],
+      "start_config_stored": [
+        "<noaction/>"
+      ]
+    },
+    {
+      "role": "pfx_set_dpp_br",
+      "id": "6c3bb7bf-e3b5-4fe3-afb4-d01e714543c3",
+      "name": "_TEST_184E0_pfx_set_dpp_br_E01840913062808",
+      "kind": "process",
+      "provenance": [
+        "legacy renderer at branch point cbab28f (wt-cbab28f process_emitters/rendering.py)",
+        "kind shape wired directly into a terminal processcall"
+      ],
+      "stored_version": "1",
+      "submitted_sha256": "23f0bf614765077f8e574d926417f4c6351c3c0b7fa5869a3b081000f38e6a04",
+      "stored_redacted_sha256": "377a6d33a6f8279323a9307782805b1c37a200d95745bccac05568a254d92d36",
+      "shapes_stored_equal_submitted": false,
+      "process_options_submitted": "allowSimultaneous=\"false\" enableUserLog=\"false\" processLogOnErrorOnly=\"false\" purgeDataImmediately=\"false\" stopProcessingIfZeroDocuments=\"true\" updateRunDates=\"true\" workload=\"general\"",
+      "process_options_stored": "allowSimultaneous=\"false\" enableUserLog=\"false\" processLogOnErrorOnly=\"false\" purgeDataImmediately=\"false\" stopProcessingIfZeroDocuments=\"true\" updateRunDates=\"true\" workload=\"general\"",
+      "processcall_attrs_stored": [
+        "<processcall abort=\"true\" processId=\"14092a32-4356-4ff4-bb8a-e0e6f0294b39\" wait=\"true\">"
+      ],
+      "start_config_stored": [
+        "<noaction/>"
+      ]
+    },
+    {
+      "role": "pfx_set_dpp_dec",
+      "id": "48ebbb4c-c409-4fde-b64d-63aeb02a70fd",
+      "name": "_TEST_184E0_pfx_set_dpp_dec_E01840913062808",
+      "kind": "process",
+      "provenance": [
+        "legacy renderer at branch point cbab28f (wt-cbab28f process_emitters/rendering.py)",
+        "kind shape wired directly into a terminal processcall"
+      ],
+      "stored_version": "1",
+      "submitted_sha256": "638c403605373a343ed5892d702e2bffb3152e2a375cec737d6b4596798ece24",
+      "stored_redacted_sha256": "16559ab3336bd66e329ffb6b38d12f00cb5c690a00f655b98e98e6e2ae311873",
+      "shapes_stored_equal_submitted": false,
+      "process_options_submitted": "allowSimultaneous=\"false\" enableUserLog=\"false\" processLogOnErrorOnly=\"false\" purgeDataImmediately=\"false\" stopProcessingIfZeroDocuments=\"true\" updateRunDates=\"true\" workload=\"general\"",
+      "process_options_stored": "allowSimultaneous=\"false\" enableUserLog=\"false\" processLogOnErrorOnly=\"false\" purgeDataImmediately=\"false\" stopProcessingIfZeroDocuments=\"true\" updateRunDates=\"true\" workload=\"general\"",
+      "processcall_attrs_stored": [
+        "<processcall abort=\"true\" processId=\"14092a32-4356-4ff4-bb8a-e0e6f0294b39\" wait=\"true\">"
+      ],
+      "start_config_stored": [
+        "<noaction/>"
+      ]
+    },
+    {
+      "role": "pfx_cache_retrieve_br",
+      "id": "00488aae-a475-4ba5-a370-c7d96ab0fd33",
+      "name": "_TEST_184E0_pfx_cache_retrieve_br_E01840913062808",
+      "kind": "process",
+      "provenance": [
+        "legacy renderer at branch point cbab28f (wt-cbab28f process_emitters/rendering.py)",
+        "kind shape wired directly into a terminal processcall; cache primed by an earlier Branch leg"
+      ],
+      "stored_version": "1",
+      "submitted_sha256": "b549dd75238b8c14b26aaccae2aa2f131f31da80170d93dce09802fdcb112d58",
+      "stored_redacted_sha256": "6a410eb7a616dd507ef43bdcb3e0533ab7b9a7fd1f2ed177b04c73efc31656ef",
+      "shapes_stored_equal_submitted": false,
+      "process_options_submitted": "allowSimultaneous=\"false\" enableUserLog=\"false\" processLogOnErrorOnly=\"false\" purgeDataImmediately=\"false\" stopProcessingIfZeroDocuments=\"true\" updateRunDates=\"true\" workload=\"general\"",
+      "process_options_stored": "allowSimultaneous=\"false\" enableUserLog=\"false\" processLogOnErrorOnly=\"false\" purgeDataImmediately=\"false\" stopProcessingIfZeroDocuments=\"true\" updateRunDates=\"true\" workload=\"general\"",
+      "processcall_attrs_stored": [
+        "<processcall abort=\"true\" processId=\"14092a32-4356-4ff4-bb8a-e0e6f0294b39\" wait=\"true\">"
+      ],
+      "start_config_stored": [
+        "<noaction/>"
+      ]
+    },
+    {
+      "role": "pfx_cache_retrieve_dec",
+      "id": "82b22d27-bfad-40a8-aff9-06b9671fafea",
+      "name": "_TEST_184E0_pfx_cache_retrieve_dec_E01840913062808",
+      "kind": "process",
+      "provenance": [
+        "legacy renderer at branch point cbab28f (wt-cbab28f process_emitters/rendering.py)",
+        "kind shape wired directly into a terminal processcall; cache primed by an earlier Branch leg"
+      ],
+      "stored_version": "1",
+      "submitted_sha256": "017d9fe0d895b5e61c11804651766e0b668148ea691a177df9f60fcfe1b3c9a5",
+      "stored_redacted_sha256": "ac25584e50bf2823ab76a4910e0d538a8fde114448f0a105fbde819919f044a4",
+      "shapes_stored_equal_submitted": false,
+      "process_options_submitted": "allowSimultaneous=\"false\" enableUserLog=\"false\" processLogOnErrorOnly=\"false\" purgeDataImmediately=\"false\" stopProcessingIfZeroDocuments=\"true\" updateRunDates=\"true\" workload=\"general\"",
+      "process_options_stored": "allowSimultaneous=\"false\" enableUserLog=\"false\" processLogOnErrorOnly=\"false\" purgeDataImmediately=\"false\" stopProcessingIfZeroDocuments=\"true\" updateRunDates=\"true\" workload=\"general\"",
+      "processcall_attrs_stored": [
+        "<processcall abort=\"true\" processId=\"14092a32-4356-4ff4-bb8a-e0e6f0294b39\" wait=\"true\">"
+      ],
+      "start_config_stored": [
+        "<noaction/>"
+      ]
+    },
+    {
+      "role": "pfx_cache_remove_br",
+      "id": "a9078885-1f89-452b-8e0c-6335420285bf",
+      "name": "_TEST_184E0_pfx_cache_remove_br_E01840913062808",
+      "kind": "process",
+      "provenance": [
+        "legacy renderer at branch point cbab28f (wt-cbab28f process_emitters/rendering.py)",
+        "kind shape wired directly into a terminal processcall"
+      ],
+      "stored_version": "1",
+      "submitted_sha256": "40050ee91738ab135f4b563f3b75462d0a89800917d5a47ebc9add38e19ce19f",
+      "stored_redacted_sha256": "61769eb72c46cc326d5bcdfd8948ab92ff2e1030a20a0b264f134ef8afadd96a",
+      "shapes_stored_equal_submitted": false,
+      "process_options_submitted": "allowSimultaneous=\"false\" enableUserLog=\"false\" processLogOnErrorOnly=\"false\" purgeDataImmediately=\"false\" stopProcessingIfZeroDocuments=\"true\" updateRunDates=\"true\" workload=\"general\"",
+      "process_options_stored": "allowSimultaneous=\"false\" enableUserLog=\"false\" processLogOnErrorOnly=\"false\" purgeDataImmediately=\"false\" stopProcessingIfZeroDocuments=\"true\" updateRunDates=\"true\" workload=\"general\"",
+      "processcall_attrs_stored": [
+        "<processcall abort=\"true\" processId=\"14092a32-4356-4ff4-bb8a-e0e6f0294b39\" wait=\"true\">"
+      ],
+      "start_config_stored": [
+        "<noaction/>"
+      ]
+    },
+    {
+      "role": "pfx_cache_remove_dec",
+      "id": "ec12f634-1a0e-48f2-ae6e-faedc66b9342",
+      "name": "_TEST_184E0_pfx_cache_remove_dec_E01840913062808",
+      "kind": "process",
+      "provenance": [
+        "legacy renderer at branch point cbab28f (wt-cbab28f process_emitters/rendering.py)",
+        "kind shape wired directly into a terminal processcall"
+      ],
+      "stored_version": "1",
+      "submitted_sha256": "31f596f26b71e11866288f0ebd012520456e93f305be10e62dcef33834bc9cda",
+      "stored_redacted_sha256": "ece08ef39de7d6fa2f26c87d38be35b492c1efd0fd8c5e854e241c3574c28d5f",
+      "shapes_stored_equal_submitted": false,
+      "process_options_submitted": "allowSimultaneous=\"false\" enableUserLog=\"false\" processLogOnErrorOnly=\"false\" purgeDataImmediately=\"false\" stopProcessingIfZeroDocuments=\"true\" updateRunDates=\"true\" workload=\"general\"",
+      "process_options_stored": "allowSimultaneous=\"false\" enableUserLog=\"false\" processLogOnErrorOnly=\"false\" purgeDataImmediately=\"false\" stopProcessingIfZeroDocuments=\"true\" updateRunDates=\"true\" workload=\"general\"",
+      "processcall_attrs_stored": [
+        "<processcall abort=\"true\" processId=\"14092a32-4356-4ff4-bb8a-e0e6f0294b39\" wait=\"true\">"
+      ],
+      "start_config_stored": [
+        "<noaction/>"
+      ]
+    },
+    {
+      "role": "pfx_flow_control_br",
+      "id": "287c7d97-e3cd-4a4a-b5cb-ff3aa44210bc",
+      "name": "_TEST_184E0_pfx_flow_control_br_E01840913062808",
+      "kind": "process",
+      "provenance": [
+        "legacy renderer at branch point cbab28f (wt-cbab28f process_emitters/rendering.py)",
+        "kind shape wired directly into a terminal processcall"
+      ],
+      "stored_version": "1",
+      "submitted_sha256": "39304b1bd06ee1a94ea61db8151edfc59ea9acba592d1aadf9bc1c7bec744a5d",
+      "stored_redacted_sha256": "3680ed80a7150d3f3d1b54d8fed676ea13cfd884ca6c5eaa070e10ff7442b322",
+      "shapes_stored_equal_submitted": false,
+      "process_options_submitted": "allowSimultaneous=\"false\" enableUserLog=\"false\" processLogOnErrorOnly=\"false\" purgeDataImmediately=\"false\" stopProcessingIfZeroDocuments=\"true\" updateRunDates=\"true\" workload=\"general\"",
+      "process_options_stored": "allowSimultaneous=\"false\" enableUserLog=\"false\" processLogOnErrorOnly=\"false\" purgeDataImmediately=\"false\" stopProcessingIfZeroDocuments=\"true\" updateRunDates=\"true\" workload=\"general\"",
+      "processcall_attrs_stored": [
+        "<processcall abort=\"true\" processId=\"14092a32-4356-4ff4-bb8a-e0e6f0294b39\" wait=\"true\">"
+      ],
+      "start_config_stored": [
+        "<noaction/>"
+      ]
+    },
+    {
+      "role": "pfx_flow_control_dec",
+      "id": "0a1ce81c-264e-418d-ba47-4ff14573006b",
+      "name": "_TEST_184E0_pfx_flow_control_dec_E01840913062808",
+      "kind": "process",
+      "provenance": [
+        "legacy renderer at branch point cbab28f (wt-cbab28f process_emitters/rendering.py)",
+        "kind shape wired directly into a terminal processcall"
+      ],
+      "stored_version": "1",
+      "submitted_sha256": "9a3c1cb8e093f379bde2c0a00bca7d94f9fd6d3827fa2e1b68ce89039fd4d3e2",
+      "stored_redacted_sha256": "a66c9b9f973766b87a0837990ce159866995b0da2dc8f4bd8538b2ff772616ab",
+      "shapes_stored_equal_submitted": false,
+      "process_options_submitted": "allowSimultaneous=\"false\" enableUserLog=\"false\" processLogOnErrorOnly=\"false\" purgeDataImmediately=\"false\" stopProcessingIfZeroDocuments=\"true\" updateRunDates=\"true\" workload=\"general\"",
+      "process_options_stored": "allowSimultaneous=\"false\" enableUserLog=\"false\" processLogOnErrorOnly=\"false\" purgeDataImmediately=\"false\" stopProcessingIfZeroDocuments=\"true\" updateRunDates=\"true\" workload=\"general\"",
+      "processcall_attrs_stored": [
+        "<processcall abort=\"true\" processId=\"14092a32-4356-4ff4-bb8a-e0e6f0294b39\" wait=\"true\">"
+      ],
+      "start_config_stored": [
+        "<noaction/>"
+      ]
+    },
+    {
+      "role": "pfx_message_br",
+      "id": "2d411b9c-8d39-461a-88a6-5e907fc5f466",
+      "name": "_TEST_184E0_pfx_message_br_E01840913062808",
+      "kind": "process",
+      "provenance": [
+        "legacy renderer at branch point cbab28f (wt-cbab28f process_emitters/rendering.py)",
+        "kind shape wired directly into a terminal processcall"
+      ],
+      "stored_version": "1",
+      "submitted_sha256": "176f52d3e18ee9b182c41ac713b13c780f8f724c2fb7b7166ca4a843e9029a92",
+      "stored_redacted_sha256": "8a3e29dfa676c9ba8c324abdda4228f238e38e7a69b2888a8233aeed2d453e1d",
+      "shapes_stored_equal_submitted": false,
+      "process_options_submitted": "allowSimultaneous=\"false\" enableUserLog=\"false\" processLogOnErrorOnly=\"false\" purgeDataImmediately=\"false\" stopProcessingIfZeroDocuments=\"true\" updateRunDates=\"true\" workload=\"general\"",
+      "process_options_stored": "allowSimultaneous=\"false\" enableUserLog=\"false\" processLogOnErrorOnly=\"false\" purgeDataImmediately=\"false\" stopProcessingIfZeroDocuments=\"true\" updateRunDates=\"true\" workload=\"general\"",
+      "processcall_attrs_stored": [
+        "<processcall abort=\"true\" processId=\"14092a32-4356-4ff4-bb8a-e0e6f0294b39\" wait=\"true\">"
+      ],
+      "start_config_stored": [
+        "<noaction/>"
+      ]
+    },
+    {
+      "role": "pfx_message_dec",
+      "id": "bd82576b-ccae-46b0-b0ce-748345f57a73",
+      "name": "_TEST_184E0_pfx_message_dec_E01840913062808",
+      "kind": "process",
+      "provenance": [
+        "legacy renderer at branch point cbab28f (wt-cbab28f process_emitters/rendering.py)",
+        "kind shape wired directly into a terminal processcall"
+      ],
+      "stored_version": "1",
+      "submitted_sha256": "feab374a441a0bd036f698a122d2e88714f31b5e6f28107e5a9e7c8e4b438021",
+      "stored_redacted_sha256": "33884e6bf7e9bf7f3484d14658412dbff9f4a58085406072f71ba8282bb9e01f",
+      "shapes_stored_equal_submitted": false,
+      "process_options_submitted": "allowSimultaneous=\"false\" enableUserLog=\"false\" processLogOnErrorOnly=\"false\" purgeDataImmediately=\"false\" stopProcessingIfZeroDocuments=\"true\" updateRunDates=\"true\" workload=\"general\"",
+      "process_options_stored": "allowSimultaneous=\"false\" enableUserLog=\"false\" processLogOnErrorOnly=\"false\" purgeDataImmediately=\"false\" stopProcessingIfZeroDocuments=\"true\" updateRunDates=\"true\" workload=\"general\"",
+      "processcall_attrs_stored": [
+        "<processcall abort=\"true\" processId=\"14092a32-4356-4ff4-bb8a-e0e6f0294b39\" wait=\"true\">"
+      ],
+      "start_config_stored": [
+        "<noaction/>"
+      ]
+    },
+    {
+      "role": "pfx_data_process_br",
+      "id": "55d0c6bb-599a-4121-ab43-6e8498e8b80a",
+      "name": "_TEST_184E0_pfx_data_process_br_E01840913062808",
+      "kind": "process",
+      "provenance": [
+        "legacy renderer at branch point cbab28f (wt-cbab28f process_emitters/rendering.py)",
+        "kind shape wired directly into a terminal processcall"
+      ],
+      "stored_version": "1",
+      "submitted_sha256": "9fa9c46219dab889266867cb4cfc61a46513f82af3782689d01761e546e0bfd2",
+      "stored_redacted_sha256": "edfe0c393ca4f8a60e43fb942b85f5ac9ae6848069aa4b07a515b4b2946c0e42",
+      "shapes_stored_equal_submitted": false,
+      "process_options_submitted": "allowSimultaneous=\"false\" enableUserLog=\"false\" processLogOnErrorOnly=\"false\" purgeDataImmediately=\"false\" stopProcessingIfZeroDocuments=\"true\" updateRunDates=\"true\" workload=\"general\"",
+      "process_options_stored": "allowSimultaneous=\"false\" enableUserLog=\"false\" processLogOnErrorOnly=\"false\" purgeDataImmediately=\"false\" stopProcessingIfZeroDocuments=\"true\" updateRunDates=\"true\" workload=\"general\"",
+      "processcall_attrs_stored": [
+        "<processcall abort=\"true\" processId=\"14092a32-4356-4ff4-bb8a-e0e6f0294b39\" wait=\"true\">"
+      ],
+      "start_config_stored": [
+        "<noaction/>"
+      ]
+    },
+    {
+      "role": "pfx_data_process_dec",
+      "id": "a4d3cf86-792c-4722-b09a-69998d340490",
+      "name": "_TEST_184E0_pfx_data_process_dec_E01840913062808",
+      "kind": "process",
+      "provenance": [
+        "legacy renderer at branch point cbab28f (wt-cbab28f process_emitters/rendering.py)",
+        "kind shape wired directly into a terminal processcall"
+      ],
+      "stored_version": "1",
+      "submitted_sha256": "eb6fffa837244e6ac361e7ca516d775c941230dcf30be2e4e5cdb267a097167f",
+      "stored_redacted_sha256": "fae688bde8c33e3f49f9e03b914b6897826c627bb0ee7ab17f9b8bc27c4a5b38",
+      "shapes_stored_equal_submitted": false,
+      "process_options_submitted": "allowSimultaneous=\"false\" enableUserLog=\"false\" processLogOnErrorOnly=\"false\" purgeDataImmediately=\"false\" stopProcessingIfZeroDocuments=\"true\" updateRunDates=\"true\" workload=\"general\"",
+      "process_options_stored": "allowSimultaneous=\"false\" enableUserLog=\"false\" processLogOnErrorOnly=\"false\" purgeDataImmediately=\"false\" stopProcessingIfZeroDocuments=\"true\" updateRunDates=\"true\" workload=\"general\"",
+      "processcall_attrs_stored": [
+        "<processcall abort=\"true\" processId=\"14092a32-4356-4ff4-bb8a-e0e6f0294b39\" wait=\"true\">"
+      ],
+      "start_config_stored": [
+        "<noaction/>"
+      ]
+    },
+    {
+      "role": "pfx_cache_remove_primed_br",
+      "id": "9fd71649-e65c-44f9-bbe4-bb35ec75a3b1",
+      "name": "_TEST_184E0_pfx_cache_remove_primed_br_E01840913062808",
+      "kind": "process",
+      "provenance": [
+        "legacy renderer at branch point cbab28f (wt-cbab28f process_emitters/rendering.py)",
+        "ADDED control: cache primed by an earlier Branch leg, remove-all wired directly into a terminal processcall"
+      ],
+      "stored_version": "1",
+      "submitted_sha256": "17b0ee26bcc4c83bf961c1da953bc5fda4ff8768d413755790e75bf0b5da8109",
+      "stored_redacted_sha256": "f50283f7a7fba502e8084df42638cbb6f39308f30cb74c2eba9a0ea2dd90001f",
+      "shapes_stored_equal_submitted": false,
+      "process_options_submitted": "allowSimultaneous=\"false\" enableUserLog=\"false\" processLogOnErrorOnly=\"false\" purgeDataImmediately=\"false\" stopProcessingIfZeroDocuments=\"true\" updateRunDates=\"true\" workload=\"general\"",
+      "process_options_stored": "allowSimultaneous=\"false\" enableUserLog=\"false\" processLogOnErrorOnly=\"false\" purgeDataImmediately=\"false\" stopProcessingIfZeroDocuments=\"true\" updateRunDates=\"true\" workload=\"general\"",
+      "processcall_attrs_stored": [
+        "<processcall abort=\"true\" processId=\"14092a32-4356-4ff4-bb8a-e0e6f0294b39\" wait=\"true\">"
+      ],
+      "start_config_stored": [
+        "<noaction/>"
+      ]
+    },
+    {
+      "role": "pfx_cache_remove_primed_dec",
+      "id": "932a90c1-9e23-4324-8d91-a3b47e9f87a3",
+      "name": "_TEST_184E0_pfx_cache_remove_primed_dec_E01840913062808",
+      "kind": "process",
+      "provenance": [
+        "legacy renderer at branch point cbab28f (wt-cbab28f process_emitters/rendering.py)",
+        "ADDED control: cache primed by an earlier Branch leg, remove-all wired directly into a terminal processcall"
+      ],
+      "stored_version": "1",
+      "submitted_sha256": "c453fdcf668ed31b0676861479b20a385c02b3b313724ddea11a0e94288a4a7b",
+      "stored_redacted_sha256": "975e3dfeb70bca858daa938a49d10e648482c8010c8e6af3529463618b4a091b",
+      "shapes_stored_equal_submitted": false,
+      "process_options_submitted": "allowSimultaneous=\"false\" enableUserLog=\"false\" processLogOnErrorOnly=\"false\" purgeDataImmediately=\"false\" stopProcessingIfZeroDocuments=\"true\" updateRunDates=\"true\" workload=\"general\"",
+      "process_options_stored": "allowSimultaneous=\"false\" enableUserLog=\"false\" processLogOnErrorOnly=\"false\" purgeDataImmediately=\"false\" stopProcessingIfZeroDocuments=\"true\" updateRunDates=\"true\" workload=\"general\"",
+      "processcall_attrs_stored": [
+        "<processcall abort=\"true\" processId=\"14092a32-4356-4ff4-bb8a-e0e6f0294b39\" wait=\"true\">"
+      ],
+      "start_config_stored": [
+        "<noaction/>"
+      ]
+    },
+    {
+      "role": "xr_remove_successor",
+      "id": "1b7aead5-cf62-42f3-8b47-59d83f9b223d",
+      "name": "_TEST_184E0_xr_remove_successor_E01840913062808",
+      "kind": "process",
+      "provenance": [
+        "legacy renderer at branch point cbab28f (wt-cbab28f process_emitters/rendering.py)",
+        "ADDED control: connector successor of doccacheremove"
+      ],
+      "stored_version": "1",
+      "submitted_sha256": "625f5845309a0058f299b8d027e1b0f9e5e28ad0ef2afce65565ea0f0e30aec2",
+      "stored_redacted_sha256": "55d3f00d02eef4bd025208f07a18b27518a955d9624529c593db867ab15012cc",
+      "shapes_stored_equal_submitted": false,
+      "process_options_submitted": "allowSimultaneous=\"false\" enableUserLog=\"false\" processLogOnErrorOnly=\"false\" purgeDataImmediately=\"false\" stopProcessingIfZeroDocuments=\"true\" updateRunDates=\"true\" workload=\"general\"",
+      "process_options_stored": "allowSimultaneous=\"false\" enableUserLog=\"false\" processLogOnErrorOnly=\"false\" purgeDataImmediately=\"false\" stopProcessingIfZeroDocuments=\"true\" updateRunDates=\"true\" workload=\"general\"",
+      "processcall_attrs_stored": [],
+      "start_config_stored": [
+        "<noaction/>"
+      ]
+    }
+  ],
+  "fixtures_referenced": [
+    {
+      "role": "op_grp_child",
+      "id": "5800bad7-c686-40f7-80b7-9f3d812e1abe",
+      "name": "_TEST_184E0_op_grp_child_E01840913062808",
+      "kind": "connector-action",
+      "provenance": "REST operation raw XML: the #156 oracle p1 shape (live-captured from _QA_FIXTURE_155_G1_src_GET), verb POST, returnApplicationErrors=true; static path '/__E0_184__/E01840913062808/grp/child'",
+      "stored_redacted_sha256": "4821457086261e55d10e6facb07d5c156202edeeb5a6438b7314140bec1ef24b"
+    },
+    {
+      "role": "op_nd_first",
+      "id": "7d63a38d-e6e2-40ed-8b8b-615cfb8b30bd",
+      "name": "_TEST_184E0_op_nd_first_E01840913062808",
+      "kind": "connector-action",
+      "provenance": "REST operation raw XML: the #156 oracle p1 shape (live-captured from _QA_FIXTURE_155_G1_src_GET), verb POST, returnApplicationErrors=true; static path '/__E0_184__/E01840913062808/nd/child-first-step'",
+      "stored_redacted_sha256": "b0bf66a2c4dd0db76c65ae00619a7d322208c6f033238fe096288e05df4706e1"
+    },
+    {
+      "role": "op_nd_msg",
+      "id": "6aa584ad-1d9a-4a3c-b9f2-d3d57080eb94",
+      "name": "_TEST_184E0_op_nd_msg_E01840913062808",
+      "kind": "connector-action",
+      "provenance": "REST operation raw XML: the #156 oracle p1 shape (live-captured from _QA_FIXTURE_155_G1_src_GET), verb POST, returnApplicationErrors=true; static path '/__E0_184__/E01840913062808/nd/child-after-message'",
+      "stored_redacted_sha256": "f1b16f6b4a3dc534aed45c693a886c94d9150a8d4a1852e6d3c61958f836802e"
+    },
+    {
+      "role": "op_blank",
+      "id": "187aa243-5f7a-44a2-be07-4ba92ed32fff",
+      "name": "_TEST_184E0_op_blank_E01840913062808",
+      "kind": "connector-action",
+      "provenance": "REST operation raw XML: the #156 oracle p1 shape (live-captured from _QA_FIXTURE_155_G1_src_GET), verb POST, returnApplicationErrors=true; static path ''",
+      "stored_redacted_sha256": "953a795026916d59c5b9952d9131a0274aa18d6c8791ef560777a00a74acfd53"
+    },
+    {
+      "role": "op_w_ddppt",
+      "id": "4b6fafdc-d17e-41f1-a317-87e15740dc72",
+      "name": "_TEST_184E0_op_w_ddppt_E01840913062808",
+      "kind": "connector-action",
+      "provenance": "REST operation raw XML: the #156 oracle p1 shape (live-captured from _QA_FIXTURE_155_G1_src_GET), verb POST, returnApplicationErrors=true; static path '/__E0_184__/E01840913062808/ddp-pt/parent-witness'",
+      "stored_redacted_sha256": "906451623bccef2e3f36086aed93e9447d6f5c9f4e863ed66ab494f769e52852"
+    },
+    {
+      "role": "op_w_ddpnd",
+      "id": "778214a7-4524-42dd-aec8-687ae01d16d8",
+      "name": "_TEST_184E0_op_w_ddpnd_E01840913062808",
+      "kind": "connector-action",
+      "provenance": "REST operation raw XML: the #156 oracle p1 shape (live-captured from _QA_FIXTURE_155_G1_src_GET), verb POST, returnApplicationErrors=true; static path '/__E0_184__/E01840913062808/ddp-nd/parent-witness'",
+      "stored_redacted_sha256": "87223dafbf872e13ddfcb1036c4c785a45fd73f15cdcbe5b735fb7b65df66da3"
+    },
+    {
+      "role": "op_w_ddpc",
+      "id": "70e8b2eb-7468-433d-a444-d4f8c151bd9a",
+      "name": "_TEST_184E0_op_w_ddpc_E01840913062808",
+      "kind": "connector-action",
+      "provenance": "REST operation raw XML: the #156 oracle p1 shape (live-captured from _QA_FIXTURE_155_G1_src_GET), verb POST, returnApplicationErrors=true; static path '/__E0_184__/E01840913062808/ddp-cache/parent-witness'",
+      "stored_redacted_sha256": "9c43135ed6e13c01ef1c7f35895169ac9d5dcdb790fae1da277f0921b192c0c6"
+    },
+    {
+      "role": "op_w_cache",
+      "id": "d4250153-31d8-4f52-b365-8662fb73c8af",
+      "name": "_TEST_184E0_op_w_cache_E01840913062808",
+      "kind": "connector-action",
+      "provenance": "REST operation raw XML: the #156 oracle p1 shape (live-captured from _QA_FIXTURE_155_G1_src_GET), verb POST, returnApplicationErrors=true; static path '/__E0_184__/E01840913062808/cache/parent-witness'",
+      "stored_redacted_sha256": "546313f8347000a3178df465474dffcbe945e68d4fc0bfc32f7caf604b702a2d"
+    },
+    {
+      "role": "op_cache_pt",
+      "id": "aaa39765-25d6-4374-82ca-2c2b7f7ef4b4",
+      "name": "_TEST_184E0_op_cache_pt_E01840913062808",
+      "kind": "connector-action",
+      "provenance": "REST operation raw XML: the #156 oracle p1 shape (live-captured from _QA_FIXTURE_155_G1_src_GET), verb POST, returnApplicationErrors=true; static path '/__E0_184__/E01840913062808/cache/child-pt'",
+      "stored_redacted_sha256": "54bd23d7937677a09bff0dcf5d06ce50420ed643949cab6b827e85d11a718616"
+    },
+    {
+      "role": "op_cache_nd",
+      "id": "256060fa-2d87-47d4-9861-4c714a4d6740",
+      "name": "_TEST_184E0_op_cache_nd_E01840913062808",
+      "kind": "connector-action",
+      "provenance": "REST operation raw XML: the #156 oracle p1 shape (live-captured from _QA_FIXTURE_155_G1_src_GET), verb POST, returnApplicationErrors=true; static path '/__E0_184__/E01840913062808/cache/child-nd'",
+      "stored_redacted_sha256": "439aaac0c2fbe1f38ddc782ff116848b21bb02ee9651374c27ffba29520cbcbb"
+    },
+    {
+      "role": "op_pfx_child",
+      "id": "1f7fa999-06c8-401a-bd6f-e39beed7b93a",
+      "name": "_TEST_184E0_op_pfx_child_E01840913062808",
+      "kind": "connector-action",
+      "provenance": "REST operation raw XML: the #156 oracle p1 shape (live-captured from _QA_FIXTURE_155_G1_src_GET), verb POST, returnApplicationErrors=true; static path '/__E0_184__/E01840913062808/pfx/child'",
+      "stored_redacted_sha256": "a5ffa9ca081f274db389f65fe8750f19ddce37a6f1f27958b504578b13942697"
+    },
+    {
+      "role": "profile",
+      "id": "61449393-c75f-4ec0-a035-3f841ccc4f18",
+      "name": "_TEST_184E0_profile_E01840913062808",
+      "kind": "profile.json",
+      "provenance": "JSONGeneratedProfileBuilder.build at branch point cbab28f (legacy builder)",
+      "stored_redacted_sha256": "544deb011c0188e8b1b8910447feafbde48b787b6ff9ca9384faf2d4402e5d30"
+    },
+    {
+      "role": "cache",
+      "id": "0370d8d8-2c63-42d7-ae11-9aa5bbf64262",
+      "name": "_TEST_184E0_cache_E01840913062808",
+      "kind": "documentcache",
+      "provenance": "DocumentCacheBuilder.build at branch point cbab28f (legacy builder), enforceSingleLucene=true",
+      "stored_redacted_sha256": "1b7d71a150e551880913b8d84d602efd6c65b5a28d06867e7708c38330c55bad"
+    },
+    {
+      "role": "map",
+      "id": "98db8765-e53e-4821-ad19-77f0049999ce",
+      "name": "_TEST_184E0_map_E01840913062808",
+      "kind": "transform.map",
+      "provenance": "DirectMapBuilder.build at branch point cbab28f (legacy builder)",
+      "stored_redacted_sha256": "2f520af424af695a6d6a6b37af6fe4bb1ebe8ff726623f29a574746cc66656f1"
+    },
+    {
+      "role": "op_w_ddpinproc",
+      "id": "c9c79338-aa78-4d7b-abc4-c7f37d970e5e",
+      "name": "_TEST_184E0_op_w_ddpinproc_E01840913062808",
+      "kind": "connector-action",
+      "provenance": "REST operation raw XML: the #156 oracle p1 shape (live-captured from _QA_FIXTURE_155_G1_src_GET), verb POST, returnApplicationErrors=true; static path '/__E0_184__/E01840913062808/ddp-inproc/parent-witness'",
+      "stored_redacted_sha256": "bba866dffc2cd88318c6e6d634662d0502a3c5421ad88bfb78c0b8b130389825"
+    },
+    {
+      "role": "op_xr_rem_succ",
+      "id": "cb4af994-3da1-44ca-94b3-fa1ba0260a95",
+      "name": "_TEST_184E0_op_xr_rem_succ_E01840913062808",
+      "kind": "connector-action",
+      "provenance": "REST operation raw XML: the #156 oracle p1 shape (live-captured from _QA_FIXTURE_155_G1_src_GET), verb POST, returnApplicationErrors=true; static path '/__E0_184__/E01840913062808/remove-successor/connector'",
+      "stored_redacted_sha256": "4f32984597a51c8e168f79cf0d3e63ac889f978c8a0d9eda8c3230ca0353f640"
+    },
+    {
+      "role": "op_w_xr_rem",
+      "id": "f4812b6b-2d09-4dd1-8986-6186eb1ff534",
+      "name": "_TEST_184E0_op_w_xr_rem_E01840913062808",
+      "kind": "connector-action",
+      "provenance": "REST operation raw XML: the #156 oracle p1 shape (live-captured from _QA_FIXTURE_155_G1_src_GET), verb POST, returnApplicationErrors=true; static path '/__E0_184__/E01840913062808/remove-successor/parent-witness'",
+      "stored_redacted_sha256": "7875ac359358d8f163c2443bc3aa7b78beab385024a8bb2a4fd9a0efa4fdc94d"
+    },
+    {
+      "role": "op_w_xr_lin",
+      "id": "5cc4fb35-98a3-499c-bde6-1f19a06dbca3",
+      "name": "_TEST_184E0_op_w_xr_lin_E01840913062808",
+      "kind": "connector-action",
+      "provenance": "REST operation raw XML: the #156 oracle p1 shape (live-captured from _QA_FIXTURE_155_G1_src_GET), verb POST, returnApplicationErrors=true; static path '/__E0_184__/E01840913062808/ddp-linear/parent-witness'",
+      "stored_redacted_sha256": "715246b5e7f2ccec28e10db32971a621391f3eba8e33f4310086fb043d637694"
+    }
+  ],
+  "deployments": [
+    {
+      "role": "pfx_cache_remove_br",
+      "component_id": "a9078885-1f89-452b-8e0c-6335420285bf",
+      "package_id": "d2381a08-4a13-4e30-9701-1026aab65320",
+      "deployment_id": "61ece75d-145f-4855-bfc1-e4a84787cb2a",
+      "utc": "2026-09-13T06:32:03.776023+00:00",
+      "package_success": true,
+      "deploy_success": true,
+      "undeploy_success": true,
+      "undeployed": true
+    },
+    {
+      "role": "pfx_cache_remove_dec",
+      "component_id": "ec12f634-1a0e-48f2-ae6e-faedc66b9342",
+      "package_id": "53adeec1-5fca-4889-84b8-891b1ea9c4a1",
+      "deployment_id": "8be5a193-8a7b-45d0-962e-60d9064b88df",
+      "utc": "2026-09-13T06:32:06.324266+00:00",
+      "package_success": true,
+      "deploy_success": true,
+      "undeploy_success": true,
+      "undeployed": true
+    },
+    {
+      "role": "pfx_cache_retrieve_br",
+      "component_id": "00488aae-a475-4ba5-a370-c7d96ab0fd33",
+      "package_id": "2813c449-2493-467d-82f7-8c2de62889ee",
+      "deployment_id": "8715b87b-5b2e-44fe-bd07-e5bcc769e6ec",
+      "utc": "2026-09-13T06:32:08.866224+00:00",
+      "package_success": true,
+      "deploy_success": true,
+      "undeploy_success": true,
+      "undeployed": true
+    },
+    {
+      "role": "pfx_cache_retrieve_dec",
+      "component_id": "82b22d27-bfad-40a8-aff9-06b9671fafea",
+      "package_id": "90a2af65-f9ad-432a-bf1e-b99fffd282f0",
+      "deployment_id": "e3411e1c-2726-4cab-b2e7-17f161815a21",
+      "utc": "2026-09-13T06:32:11.227897+00:00",
+      "package_success": true,
+      "deploy_success": true,
+      "undeploy_success": true,
+      "undeployed": true
+    },
+    {
+      "role": "pfx_data_process_br",
+      "component_id": "55d0c6bb-599a-4121-ab43-6e8498e8b80a",
+      "package_id": "25816f0d-b6a0-4fb1-946d-7cf4685dc54b",
+      "deployment_id": "251ce972-f6b3-4760-ad06-264c5a04fe47",
+      "utc": "2026-09-13T06:32:13.489156+00:00",
+      "package_success": true,
+      "deploy_success": true,
+      "undeploy_success": true,
+      "undeployed": true
+    },
+    {
+      "role": "pfx_data_process_dec",
+      "component_id": "a4d3cf86-792c-4722-b09a-69998d340490",
+      "package_id": "3442be75-187e-462b-bfae-e5ef9db0c80a",
+      "deployment_id": "b9d8795d-ef8b-454e-9228-2223fc615a5f",
+      "utc": "2026-09-13T06:32:15.325809+00:00",
+      "package_success": true,
+      "deploy_success": true,
+      "undeploy_success": true,
+      "undeployed": true
+    },
+    {
+      "role": "pfx_flow_control_br",
+      "component_id": "287c7d97-e3cd-4a4a-b5cb-ff3aa44210bc",
+      "package_id": "4e8ea732-10c8-4705-ad3c-8add20fe6e24",
+      "deployment_id": "8aa31fed-d2dd-4463-bf97-f64b4fcfad8c",
+      "utc": "2026-09-13T06:32:17.375219+00:00",
+      "package_success": true,
+      "deploy_success": true,
+      "undeploy_success": true,
+      "undeployed": true
+    },
+    {
+      "role": "pfx_flow_control_dec",
+      "component_id": "0a1ce81c-264e-418d-ba47-4ff14573006b",
+      "package_id": "129a4f26-2cb7-4260-b585-69d92d92dc59",
+      "deployment_id": "1b435963-80d6-48e3-9cbd-c5d34502d307",
+      "utc": "2026-09-13T06:32:19.667986+00:00",
+      "package_success": true,
+      "deploy_success": true,
+      "undeploy_success": true,
+      "undeployed": true
+    },
+    {
+      "role": "pfx_map_br",
+      "component_id": "1b8825ee-359d-40e1-8f41-c1800d603de3",
+      "package_id": "1ca82929-f152-4c87-9874-db6bfec845cb",
+      "deployment_id": "be23ec78-4d7a-4848-b3fc-fce433422b78",
+      "utc": "2026-09-13T06:32:21.789977+00:00",
+      "package_success": true,
+      "deploy_success": true,
+      "undeploy_success": true,
+      "undeployed": true
+    },
+    {
+      "role": "pfx_map_dec",
+      "component_id": "839d05f7-9a9f-4ddc-a29f-dfb6225a6b44",
+      "package_id": "9adaf228-ab6a-40f0-8e25-edcd73bca60c",
+      "deployment_id": "99d13afe-ddd4-4f06-81f3-8a6d12b853ea",
+      "utc": "2026-09-13T06:32:24.201881+00:00",
+      "package_success": true,
+      "deploy_success": true,
+      "undeploy_success": true,
+      "undeployed": true
+    },
+    {
+      "role": "pfx_message_br",
+      "component_id": "2d411b9c-8d39-461a-88a6-5e907fc5f466",
+      "package_id": "47ddff5d-b131-4a2f-b1e1-e7dde7135ee3",
+      "deployment_id": "21d3e597-2dfe-4a76-bf2b-346cd2bb3670",
+      "utc": "2026-09-13T06:32:26.363079+00:00",
+      "package_success": true,
+      "deploy_success": true,
+      "undeploy_success": true,
+      "undeployed": true
+    },
+    {
+      "role": "pfx_message_dec",
+      "component_id": "bd82576b-ccae-46b0-b0ce-748345f57a73",
+      "package_id": "eefe317c-8b14-4050-97e1-d95442dc8966",
+      "deployment_id": "91f39d09-68b0-47ed-befb-69958d259803",
+      "utc": "2026-09-13T06:32:28.572032+00:00",
+      "package_success": true,
+      "deploy_success": true,
+      "undeploy_success": true,
+      "undeployed": true
+    },
+    {
+      "role": "pfx_set_ddp_br",
+      "component_id": "cbed804c-1e9e-4ed4-a602-e69a13a3ca6b",
+      "package_id": "f4b89493-933e-4b20-a0a2-cd815cc28db1",
+      "deployment_id": "959ce4b9-5523-4b75-b9af-5937130d89a9",
+      "utc": "2026-09-13T06:32:30.698892+00:00",
+      "package_success": true,
+      "deploy_success": true,
+      "undeploy_success": true,
+      "undeployed": true
+    },
+    {
+      "role": "pfx_set_ddp_dec",
+      "component_id": "ed718b7d-b602-4c49-8834-1be636fb9925",
+      "package_id": "421d2e6c-c990-459b-85c5-1110aeb7c14b",
+      "deployment_id": "63300d63-2376-4c6e-994f-5f5671f1b37d",
+      "utc": "2026-09-13T06:32:32.488081+00:00",
+      "package_success": true,
+      "deploy_success": true,
+      "undeploy_success": true,
+      "undeployed": true
+    },
+    {
+      "role": "pfx_set_dpp_br",
+      "component_id": "6c3bb7bf-e3b5-4fe3-afb4-d01e714543c3",
+      "package_id": "60fa124c-0774-434e-bac7-55d7cc641d53",
+      "deployment_id": "a7c868d0-81f0-4da3-9558-ee10480771d6",
+      "utc": "2026-09-13T06:32:34.983699+00:00",
+      "package_success": true,
+      "deploy_success": true,
+      "undeploy_success": true,
+      "undeployed": true
+    },
+    {
+      "role": "pfx_set_dpp_dec",
+      "component_id": "48ebbb4c-c409-4fde-b64d-63aeb02a70fd",
+      "package_id": "c582078d-5b01-4b91-88df-d990ba7e55ad",
+      "deployment_id": "ceba8674-0378-4011-bfc8-7a843f32948a",
+      "utc": "2026-09-13T06:32:36.729743+00:00",
+      "package_success": true,
+      "deploy_success": true,
+      "undeploy_success": true,
+      "undeployed": true
+    },
+    {
+      "role": "pfx_cache_remove_primed_br",
+      "component_id": "9fd71649-e65c-44f9-bbe4-bb35ec75a3b1",
+      "package_id": "f16fb907-2eeb-4db4-9219-8cc153cd569e",
+      "deployment_id": "4499b57e-a583-462f-8df2-db8d0f9a0405",
+      "utc": "2026-09-13T07:06:57.909388+00:00",
+      "package_success": true,
+      "deploy_success": true,
+      "undeploy_success": true,
+      "undeployed": true
+    },
+    {
+      "role": "pfx_cache_remove_primed_dec",
+      "component_id": "932a90c1-9e23-4324-8d91-a3b47e9f87a3",
+      "package_id": "6767e04e-3bfb-4802-9486-e5c554d6ec58",
+      "deployment_id": "659dcb00-07ce-49f3-9b30-0aa5cd198720",
+      "utc": "2026-09-13T07:07:00.663293+00:00",
+      "package_success": true,
+      "deploy_success": true,
+      "undeploy_success": true,
+      "undeployed": true
+    },
+    {
+      "role": "xr_remove_successor",
+      "component_id": "1b7aead5-cf62-42f3-8b47-59d83f9b223d",
+      "package_id": "bf452d32-6e0e-40d9-bf92-fe2f80839374",
+      "deployment_id": "286d12dc-12dd-4958-bdd9-3afb5afdee51",
+      "utc": "2026-09-13T07:15:33.034539+00:00",
+      "package_success": true,
+      "deploy_success": true,
+      "undeploy_success": true,
+      "undeployed": true
+    }
+  ],
+  "runs": [
+    {
+      "run_id": "pfx_cache_remove_br-1",
+      "root_role": "pfx_cache_remove_br",
+      "root_id": "a9078885-1f89-452b-8e0c-6335420285bf",
+      "children": {
+        "ch_pfx": "14092a32-4356-4ff4-bb8a-e0e6f0294b39"
+      },
+      "started_utc": "2026-09-13T06:50:44.296521+00:00",
+      "ended_utc": "2026-09-13T06:51:38.322151+00:00",
+      "execution_id": "execution-f8f66af5-aa86-469c-a1cb-deae78a6de9b-2026.09.13",
+      "wait_status": "COMPLETE",
+      "parent_record": {
+        "status": "COMPLETE",
+        "executionType": "exec_manual",
+        "inboundDocumentCount": 1,
+        "outboundDocumentCount": 0,
+        "inboundErrorDocumentCount": 0,
+        "message": null,
+        "executionTime": "2026-09-13T06:50:46Z",
+        "executionDuration": [
+          "Long",
+          78
+        ]
+      },
+      "child_records": {
+        "ch_pfx": []
+      },
+      "mock_nonce_lines": [],
+      "wire_nonce_requests": []
+    },
+    {
+      "run_id": "pfx_cache_remove_dec-1",
+      "root_role": "pfx_cache_remove_dec",
+      "root_id": "ec12f634-1a0e-48f2-ae6e-faedc66b9342",
+      "children": {
+        "ch_pfx": "14092a32-4356-4ff4-bb8a-e0e6f0294b39"
+      },
+      "started_utc": "2026-09-13T06:51:38.393627+00:00",
+      "ended_utc": "2026-09-13T06:52:38.938260+00:00",
+      "execution_id": "execution-d10e0af8-dfe1-42a2-a503-342fa59f6cc3-2026.09.13",
+      "wait_status": "COMPLETE",
+      "parent_record": {
+        "status": "COMPLETE",
+        "executionType": "exec_manual",
+        "inboundDocumentCount": 1,
+        "outboundDocumentCount": 0,
+        "inboundErrorDocumentCount": 0,
+        "message": null,
+        "executionTime": "2026-09-13T06:51:39Z",
+        "executionDuration": [
+          "Long",
+          48
+        ]
+      },
+      "child_records": {
+        "ch_pfx": []
+      },
+      "mock_nonce_lines": [],
+      "wire_nonce_requests": []
+    },
+    {
+      "run_id": "pfx_cache_retrieve_br-1",
+      "root_role": "pfx_cache_retrieve_br",
+      "root_id": "00488aae-a475-4ba5-a370-c7d96ab0fd33",
+      "children": {
+        "ch_pfx": "14092a32-4356-4ff4-bb8a-e0e6f0294b39"
+      },
+      "started_utc": "2026-09-13T06:52:38.982817+00:00",
+      "ended_utc": "2026-09-13T06:53:32.439406+00:00",
+      "execution_id": "execution-1889aa91-bfdf-405e-abea-197e31cc3d39-2026.09.13",
+      "wait_status": "COMPLETE",
+      "parent_record": {
+        "status": "COMPLETE",
+        "executionType": "exec_manual",
+        "inboundDocumentCount": 1,
+        "outboundDocumentCount": 1,
+        "inboundErrorDocumentCount": 0,
+        "message": null,
+        "executionTime": "2026-09-13T06:52:39Z",
+        "executionDuration": [
+          "Long",
+          152
+        ]
+      },
+      "child_records": {
+        "ch_pfx": []
+      },
+      "mock_nonce_lines": [
+        "INFO:     172.19.0.1:57030 - \"POST /__E0_184__/E01840913062808/pfx/child HTTP/1.1\" 404 Not Found"
+      ],
+      "wire_nonce_requests": [
+        {
+          "client": "172.19.0.1:57030",
+          "start_line": "POST /__E0_184__/E01840913062808/pfx/child HTTP/1.1",
+          "headers": {
+            "content-length": "46",
+            "host": "host.docker.internal:8081",
+            "user-agent": "Apache-HttpClient/4.5.13 (Java/11.0.30)"
+          },
+          "body": "{\"k\": \"E01840913062808-pfx-cache_retrieve-br\"}",
+          "body_bytes": 46
+        }
+      ]
+    },
+    {
+      "run_id": "pfx_cache_retrieve_dec-1",
+      "root_role": "pfx_cache_retrieve_dec",
+      "root_id": "82b22d27-bfad-40a8-aff9-06b9671fafea",
+      "children": {
+        "ch_pfx": "14092a32-4356-4ff4-bb8a-e0e6f0294b39"
+      },
+      "started_utc": "2026-09-13T06:53:32.495557+00:00",
+      "ended_utc": "2026-09-13T06:54:28.102489+00:00",
+      "execution_id": "execution-258c601f-740c-4107-bd5c-ae0dcc94d694-2026.09.13",
+      "wait_status": "COMPLETE",
+      "parent_record": {
+        "status": "COMPLETE",
+        "executionType": "exec_manual",
+        "inboundDocumentCount": 1,
+        "outboundDocumentCount": 1,
+        "inboundErrorDocumentCount": 0,
+        "message": null,
+        "executionTime": "2026-09-13T06:53:33Z",
+        "executionDuration": [
+          "Long",
+          135
+        ]
+      },
+      "child_records": {
+        "ch_pfx": []
+      },
+      "mock_nonce_lines": [
+        "INFO:     172.19.0.1:65402 - \"POST /__E0_184__/E01840913062808/pfx/child HTTP/1.1\" 404 Not Found"
+      ],
+      "wire_nonce_requests": [
+        {
+          "client": "172.19.0.1:65402",
+          "start_line": "POST /__E0_184__/E01840913062808/pfx/child HTTP/1.1",
+          "headers": {
+            "content-length": "47",
+            "host": "host.docker.internal:8081",
+            "user-agent": "Apache-HttpClient/4.5.13 (Java/11.0.30)"
+          },
+          "body": "{\"k\": \"E01840913062808-pfx-cache_retrieve-dec\"}",
+          "body_bytes": 47
+        }
+      ]
+    },
+    {
+      "run_id": "pfx_data_process_br-1",
+      "root_role": "pfx_data_process_br",
+      "root_id": "55d0c6bb-599a-4121-ab43-6e8498e8b80a",
+      "children": {
+        "ch_pfx": "14092a32-4356-4ff4-bb8a-e0e6f0294b39"
+      },
+      "started_utc": "2026-09-13T06:54:43.758064+00:00",
+      "ended_utc": "2026-09-13T06:55:35.520558+00:00",
+      "execution_id": "execution-77273562-1443-4e52-a851-58379c8d7f97-2026.09.13",
+      "wait_status": "COMPLETE",
+      "parent_record": {
+        "status": "COMPLETE",
+        "executionType": "exec_manual",
+        "inboundDocumentCount": 1,
+        "outboundDocumentCount": 1,
+        "inboundErrorDocumentCount": 0,
+        "message": null,
+        "executionTime": "2026-09-13T06:54:45Z",
+        "executionDuration": [
+          "Long",
+          274
+        ]
+      },
+      "child_records": {
+        "ch_pfx": []
+      },
+      "mock_nonce_lines": [
+        "INFO:     172.19.0.1:62650 - \"POST /__E0_184__/E01840913062808/pfx/child HTTP/1.1\" 404 Not Found"
+      ],
+      "wire_nonce_requests": [
+        {
+          "client": "172.19.0.1:62650",
+          "start_line": "POST /__E0_184__/E01840913062808/pfx/child HTTP/1.1",
+          "headers": {
+            "content-length": "44",
+            "host": "host.docker.internal:8081",
+            "user-agent": "Apache-HttpClient/4.5.13 (Java/11.0.30)"
+          },
+          "body": "{\"k\": \"E01840913062808-pfx-data_process-br\"}",
+          "body_bytes": 44
+        }
+      ]
+    },
+    {
+      "run_id": "pfx_data_process_dec-1",
+      "root_role": "pfx_data_process_dec",
+      "root_id": "a4d3cf86-792c-4722-b09a-69998d340490",
+      "children": {
+        "ch_pfx": "14092a32-4356-4ff4-bb8a-e0e6f0294b39"
+      },
+      "started_utc": "2026-09-13T06:55:35.563435+00:00",
+      "ended_utc": "2026-09-13T06:56:26.660319+00:00",
+      "execution_id": "execution-63a5e6ae-7806-4c8e-a484-a4655741a8c4-2026.09.13",
+      "wait_status": "COMPLETE",
+      "parent_record": {
+        "status": "COMPLETE",
+        "executionType": "exec_manual",
+        "inboundDocumentCount": 1,
+        "outboundDocumentCount": 1,
+        "inboundErrorDocumentCount": 0,
+        "message": null,
+        "executionTime": "2026-09-13T06:55:36Z",
+        "executionDuration": [
+          "Long",
+          87
+        ]
+      },
+      "child_records": {
+        "ch_pfx": []
+      },
+      "mock_nonce_lines": [
+        "INFO:     172.19.0.1:56872 - \"POST /__E0_184__/E01840913062808/pfx/child HTTP/1.1\" 404 Not Found"
+      ],
+      "wire_nonce_requests": [
+        {
+          "client": "172.19.0.1:56872",
+          "start_line": "POST /__E0_184__/E01840913062808/pfx/child HTTP/1.1",
+          "headers": {
+            "content-length": "45",
+            "host": "host.docker.internal:8081",
+            "user-agent": "Apache-HttpClient/4.5.13 (Java/11.0.30)"
+          },
+          "body": "{\"k\": \"E01840913062808-pfx-data_process-dec\"}",
+          "body_bytes": 45
+        }
+      ]
+    },
+    {
+      "run_id": "pfx_flow_control_br-1",
+      "root_role": "pfx_flow_control_br",
+      "root_id": "287c7d97-e3cd-4a4a-b5cb-ff3aa44210bc",
+      "children": {
+        "ch_pfx": "14092a32-4356-4ff4-bb8a-e0e6f0294b39"
+      },
+      "started_utc": "2026-09-13T06:56:26.716574+00:00",
+      "ended_utc": "2026-09-13T06:57:17.928942+00:00",
+      "execution_id": "execution-eae78fd5-9ff8-4f8e-b1f5-16982e3757cc-2026.09.13",
+      "wait_status": "COMPLETE",
+      "parent_record": {
+        "status": "COMPLETE",
+        "executionType": "exec_manual",
+        "inboundDocumentCount": 1,
+        "outboundDocumentCount": 1,
+        "inboundErrorDocumentCount": 0,
+        "message": null,
+        "executionTime": "2026-09-13T06:56:27Z",
+        "executionDuration": [
+          "Long",
+          45
+        ]
+      },
+      "child_records": {
+        "ch_pfx": []
+      },
+      "mock_nonce_lines": [
+        "INFO:     172.19.0.1:59506 - \"POST /__E0_184__/E01840913062808/pfx/child HTTP/1.1\" 404 Not Found"
+      ],
+      "wire_nonce_requests": [
+        {
+          "client": "172.19.0.1:59506",
+          "start_line": "POST /__E0_184__/E01840913062808/pfx/child HTTP/1.1",
+          "headers": {
+            "content-length": "44",
+            "host": "host.docker.internal:8081",
+            "user-agent": "Apache-HttpClient/4.5.13 (Java/11.0.30)"
+          },
+          "body": "{\"k\": \"E01840913062808-pfx-flow_control-br\"}",
+          "body_bytes": 44
+        }
+      ]
+    },
+    {
+      "run_id": "pfx_flow_control_dec-1",
+      "root_role": "pfx_flow_control_dec",
+      "root_id": "0a1ce81c-264e-418d-ba47-4ff14573006b",
+      "children": {
+        "ch_pfx": "14092a32-4356-4ff4-bb8a-e0e6f0294b39"
+      },
+      "started_utc": "2026-09-13T06:57:17.981024+00:00",
+      "ended_utc": "2026-09-13T06:58:17.868582+00:00",
+      "execution_id": "execution-74590f3c-1c79-4548-b312-fe889c0ca81a-2026.09.13",
+      "wait_status": "COMPLETE",
+      "parent_record": {
+        "status": "COMPLETE",
+        "executionType": "exec_manual",
+        "inboundDocumentCount": 1,
+        "outboundDocumentCount": 1,
+        "inboundErrorDocumentCount": 0,
+        "message": null,
+        "executionTime": "2026-09-13T06:57:18Z",
+        "executionDuration": [
+          "Long",
+          45
+        ]
+      },
+      "child_records": {
+        "ch_pfx": []
+      },
+      "mock_nonce_lines": [
+        "INFO:     172.19.0.1:55262 - \"POST /__E0_184__/E01840913062808/pfx/child HTTP/1.1\" 404 Not Found"
+      ],
+      "wire_nonce_requests": [
+        {
+          "client": "172.19.0.1:55262",
+          "start_line": "POST /__E0_184__/E01840913062808/pfx/child HTTP/1.1",
+          "headers": {
+            "content-length": "45",
+            "host": "host.docker.internal:8081",
+            "user-agent": "Apache-HttpClient/4.5.13 (Java/11.0.30)"
+          },
+          "body": "{\"k\": \"E01840913062808-pfx-flow_control-dec\"}",
+          "body_bytes": 45
+        }
+      ]
+    },
+    {
+      "run_id": "pfx_map_br-1",
+      "root_role": "pfx_map_br",
+      "root_id": "1b8825ee-359d-40e1-8f41-c1800d603de3",
+      "children": {
+        "ch_pfx": "14092a32-4356-4ff4-bb8a-e0e6f0294b39"
+      },
+      "started_utc": "2026-09-13T06:58:42.712015+00:00",
+      "ended_utc": "2026-09-13T06:59:46.500915+00:00",
+      "execution_id": "execution-0e13adda-c1d3-4144-b582-b8d671355520-2026.09.13",
+      "wait_status": "COMPLETE",
+      "parent_record": {
+        "status": "COMPLETE",
+        "executionType": "exec_manual",
+        "inboundDocumentCount": 1,
+        "outboundDocumentCount": 1,
+        "inboundErrorDocumentCount": 0,
+        "message": null,
+        "executionTime": "2026-09-13T06:58:44Z",
+        "executionDuration": [
+          "Long",
+          151
+        ]
+      },
+      "child_records": {
+        "ch_pfx": []
+      },
+      "mock_nonce_lines": [
+        "INFO:     172.19.0.1:59266 - \"POST /__E0_184__/E01840913062808/pfx/child HTTP/1.1\" 404 Not Found"
+      ],
+      "wire_nonce_requests": [
+        {
+          "client": "172.19.0.1:59266",
+          "start_line": "POST /__E0_184__/E01840913062808/pfx/child HTTP/1.1",
+          "headers": {
+            "content-length": "42",
+            "host": "host.docker.internal:8081",
+            "user-agent": "Apache-HttpClient/4.5.13 (Java/11.0.30)"
+          },
+          "body": "{\r\n  \"k\" : \"E01840913062808-pfx-map-br\"\r\n}",
+          "body_bytes": 42
+        }
+      ]
+    },
+    {
+      "run_id": "pfx_map_dec-1",
+      "root_role": "pfx_map_dec",
+      "root_id": "839d05f7-9a9f-4ddc-a29f-dfb6225a6b44",
+      "children": {
+        "ch_pfx": "14092a32-4356-4ff4-bb8a-e0e6f0294b39"
+      },
+      "started_utc": "2026-09-13T06:59:46.544061+00:00",
+      "ended_utc": "2026-09-13T07:00:44.558307+00:00",
+      "execution_id": "execution-61beb2d9-6960-4704-9934-b3656f393b49-2026.09.13",
+      "wait_status": "COMPLETE",
+      "parent_record": {
+        "status": "COMPLETE",
+        "executionType": "exec_manual",
+        "inboundDocumentCount": 1,
+        "outboundDocumentCount": 1,
+        "inboundErrorDocumentCount": 0,
+        "message": null,
+        "executionTime": "2026-09-13T06:59:47Z",
+        "executionDuration": [
+          "Long",
+          57
+        ]
+      },
+      "child_records": {
+        "ch_pfx": []
+      },
+      "mock_nonce_lines": [
+        "INFO:     172.19.0.1:65140 - \"POST /__E0_184__/E01840913062808/pfx/child HTTP/1.1\" 404 Not Found"
+      ],
+      "wire_nonce_requests": [
+        {
+          "client": "172.19.0.1:65140",
+          "start_line": "POST /__E0_184__/E01840913062808/pfx/child HTTP/1.1",
+          "headers": {
+            "content-length": "43",
+            "host": "host.docker.internal:8081",
+            "user-agent": "Apache-HttpClient/4.5.13 (Java/11.0.30)"
+          },
+          "body": "{\r\n  \"k\" : \"E01840913062808-pfx-map-dec\"\r\n}",
+          "body_bytes": 43
+        }
+      ]
+    },
+    {
+      "run_id": "pfx_message_br-1",
+      "root_role": "pfx_message_br",
+      "root_id": "2d411b9c-8d39-461a-88a6-5e907fc5f466",
+      "children": {
+        "ch_pfx": "14092a32-4356-4ff4-bb8a-e0e6f0294b39"
+      },
+      "started_utc": "2026-09-13T07:00:44.601031+00:00",
+      "ended_utc": "2026-09-13T07:01:40.634874+00:00",
+      "execution_id": "execution-869df3e4-884d-4e7e-9fdb-63aaaf94b76d-2026.09.13",
+      "wait_status": "COMPLETE",
+      "parent_record": {
+        "status": "COMPLETE",
+        "executionType": "exec_manual",
+        "inboundDocumentCount": 1,
+        "outboundDocumentCount": 1,
+        "inboundErrorDocumentCount": 0,
+        "message": null,
+        "executionTime": "2026-09-13T07:00:45Z",
+        "executionDuration": [
+          "Long",
+          51
+        ]
+      },
+      "child_records": {
+        "ch_pfx": []
+      },
+      "mock_nonce_lines": [
+        "INFO:     172.19.0.1:61046 - \"POST /__E0_184__/E01840913062808/pfx/child HTTP/1.1\" 404 Not Found"
+      ],
+      "wire_nonce_requests": [
+        {
+          "client": "172.19.0.1:61046",
+          "start_line": "POST /__E0_184__/E01840913062808/pfx/child HTTP/1.1",
+          "headers": {
+            "content-length": "47",
+            "host": "host.docker.internal:8081",
+            "user-agent": "Apache-HttpClient/4.5.13 (Java/11.0.30)"
+          },
+          "body": "{\"k\": \"E01840913062808-pfx-message-br-msgkind\"}",
+          "body_bytes": 47
+        }
+      ]
+    },
+    {
+      "run_id": "pfx_message_dec-1",
+      "root_role": "pfx_message_dec",
+      "root_id": "bd82576b-ccae-46b0-b0ce-748345f57a73",
+      "children": {
+        "ch_pfx": "14092a32-4356-4ff4-bb8a-e0e6f0294b39"
+      },
+      "started_utc": "2026-09-13T07:01:40.677385+00:00",
+      "ended_utc": "2026-09-13T07:02:33.694586+00:00",
+      "execution_id": "execution-232ecc94-01e6-4e5d-a8af-1aacd23b964a-2026.09.13",
+      "wait_status": "COMPLETE",
+      "parent_record": {
+        "status": "COMPLETE",
+        "executionType": "exec_manual",
+        "inboundDocumentCount": 1,
+        "outboundDocumentCount": 1,
+        "inboundErrorDocumentCount": 0,
+        "message": null,
+        "executionTime": "2026-09-13T07:01:41Z",
+        "executionDuration": [
+          "Long",
+          40
+        ]
+      },
+      "child_records": {
+        "ch_pfx": []
+      },
+      "mock_nonce_lines": [
+        "INFO:     172.19.0.1:58960 - \"POST /__E0_184__/E01840913062808/pfx/child HTTP/1.1\" 404 Not Found"
+      ],
+      "wire_nonce_requests": [
+        {
+          "client": "172.19.0.1:58960",
+          "start_line": "POST /__E0_184__/E01840913062808/pfx/child HTTP/1.1",
+          "headers": {
+            "content-length": "48",
+            "host": "host.docker.internal:8081",
+            "user-agent": "Apache-HttpClient/4.5.13 (Java/11.0.30)"
+          },
+          "body": "{\"k\": \"E01840913062808-pfx-message-dec-msgkind\"}",
+          "body_bytes": 48
+        }
+      ]
+    },
+    {
+      "run_id": "pfx_set_ddp_br-1",
+      "root_role": "pfx_set_ddp_br",
+      "root_id": "cbed804c-1e9e-4ed4-a602-e69a13a3ca6b",
+      "children": {
+        "ch_pfx": "14092a32-4356-4ff4-bb8a-e0e6f0294b39"
+      },
+      "started_utc": "2026-09-13T07:02:43.848207+00:00",
+      "ended_utc": "2026-09-13T07:03:48.493307+00:00",
+      "execution_id": "execution-f49bea7d-40da-4ed9-9010-baf776b29c34-2026.09.13",
+      "wait_status": "COMPLETE",
+      "parent_record": {
+        "status": "COMPLETE",
+        "executionType": "exec_manual",
+        "inboundDocumentCount": 1,
+        "outboundDocumentCount": 1,
+        "inboundErrorDocumentCount": 0,
+        "message": null,
+        "executionTime": "2026-09-13T07:02:45Z",
+        "executionDuration": [
+          "Long",
+          48
+        ]
+      },
+      "child_records": {
+        "ch_pfx": []
+      },
+      "mock_nonce_lines": [
+        "INFO:     172.19.0.1:58596 - \"POST /__E0_184__/E01840913062808/pfx/child HTTP/1.1\" 404 Not Found"
+      ],
+      "wire_nonce_requests": [
+        {
+          "client": "172.19.0.1:58596",
+          "start_line": "POST /__E0_184__/E01840913062808/pfx/child HTTP/1.1",
+          "headers": {
+            "content-length": "39",
+            "host": "host.docker.internal:8081",
+            "user-agent": "Apache-HttpClient/4.5.13 (Java/11.0.30)"
+          },
+          "body": "{\"k\": \"E01840913062808-pfx-set_ddp-br\"}",
+          "body_bytes": 39
+        }
+      ]
+    },
+    {
+      "run_id": "pfx_set_ddp_dec-1",
+      "root_role": "pfx_set_ddp_dec",
+      "root_id": "ed718b7d-b602-4c49-8834-1be636fb9925",
+      "children": {
+        "ch_pfx": "14092a32-4356-4ff4-bb8a-e0e6f0294b39"
+      },
+      "started_utc": "2026-09-13T07:03:48.533937+00:00",
+      "ended_utc": "2026-09-13T07:04:51.676310+00:00",
+      "execution_id": "execution-2e8943f6-732c-43ec-b3d5-0a434b95a784-2026.09.13",
+      "wait_status": "COMPLETE",
+      "parent_record": {
+        "status": "COMPLETE",
+        "executionType": "exec_manual",
+        "inboundDocumentCount": 1,
+        "outboundDocumentCount": 1,
+        "inboundErrorDocumentCount": 0,
+        "message": null,
+        "executionTime": "2026-09-13T07:03:49Z",
+        "executionDuration": [
+          "Long",
+          60
+        ]
+      },
+      "child_records": {
+        "ch_pfx": []
+      },
+      "mock_nonce_lines": [
+        "INFO:     172.19.0.1:61486 - \"POST /__E0_184__/E01840913062808/pfx/child HTTP/1.1\" 404 Not Found"
+      ],
+      "wire_nonce_requests": [
+        {
+          "client": "172.19.0.1:61486",
+          "start_line": "POST /__E0_184__/E01840913062808/pfx/child HTTP/1.1",
+          "headers": {
+            "content-length": "40",
+            "host": "host.docker.internal:8081",
+            "user-agent": "Apache-HttpClient/4.5.13 (Java/11.0.30)"
+          },
+          "body": "{\"k\": \"E01840913062808-pfx-set_ddp-dec\"}",
+          "body_bytes": 40
+        }
+      ]
+    },
+    {
+      "run_id": "pfx_set_dpp_br-1",
+      "root_role": "pfx_set_dpp_br",
+      "root_id": "6c3bb7bf-e3b5-4fe3-afb4-d01e714543c3",
+      "children": {
+        "ch_pfx": "14092a32-4356-4ff4-bb8a-e0e6f0294b39"
+      },
+      "started_utc": "2026-09-13T07:04:51.720680+00:00",
+      "ended_utc": "2026-09-13T07:05:51.147835+00:00",
+      "execution_id": "execution-13c42851-439e-4dba-911e-bea247cfa053-2026.09.13",
+      "wait_status": "COMPLETE",
+      "parent_record": {
+        "status": "COMPLETE",
+        "executionType": "exec_manual",
+        "inboundDocumentCount": 1,
+        "outboundDocumentCount": 1,
+        "inboundErrorDocumentCount": 0,
+        "message": null,
+        "executionTime": "2026-09-13T07:04:52Z",
+        "executionDuration": [
+          "Long",
+          100
+        ]
+      },
+      "child_records": {
+        "ch_pfx": []
+      },
+      "mock_nonce_lines": [
+        "INFO:     172.19.0.1:59574 - \"POST /__E0_184__/E01840913062808/pfx/child HTTP/1.1\" 404 Not Found"
+      ],
+      "wire_nonce_requests": [
+        {
+          "client": "172.19.0.1:59574",
+          "start_line": "POST /__E0_184__/E01840913062808/pfx/child HTTP/1.1",
+          "headers": {
+            "content-length": "39",
+            "host": "host.docker.internal:8081",
+            "user-agent": "Apache-HttpClient/4.5.13 (Java/11.0.30)"
+          },
+          "body": "{\"k\": \"E01840913062808-pfx-set_dpp-br\"}",
+          "body_bytes": 39
+        }
+      ]
+    },
+    {
+      "run_id": "pfx_set_dpp_dec-1",
+      "root_role": "pfx_set_dpp_dec",
+      "root_id": "48ebbb4c-c409-4fde-b64d-63aeb02a70fd",
+      "children": {
+        "ch_pfx": "14092a32-4356-4ff4-bb8a-e0e6f0294b39"
+      },
+      "started_utc": "2026-09-13T07:05:51.192114+00:00",
+      "ended_utc": "2026-09-13T07:06:52.635655+00:00",
+      "execution_id": "execution-0eefbff6-d0fd-43a2-bc12-181ff2f7416e-2026.09.13",
+      "wait_status": "COMPLETE",
+      "parent_record": {
+        "status": "COMPLETE",
+        "executionType": "exec_manual",
+        "inboundDocumentCount": 1,
+        "outboundDocumentCount": 1,
+        "inboundErrorDocumentCount": 0,
+        "message": null,
+        "executionTime": "2026-09-13T07:05:51Z",
+        "executionDuration": [
+          "Long",
+          51
+        ]
+      },
+      "child_records": {
+        "ch_pfx": []
+      },
+      "mock_nonce_lines": [
+        "INFO:     172.19.0.1:59418 - \"POST /__E0_184__/E01840913062808/pfx/child HTTP/1.1\" 404 Not Found"
+      ],
+      "wire_nonce_requests": [
+        {
+          "client": "172.19.0.1:59418",
+          "start_line": "POST /__E0_184__/E01840913062808/pfx/child HTTP/1.1",
+          "headers": {
+            "content-length": "40",
+            "host": "host.docker.internal:8081",
+            "user-agent": "Apache-HttpClient/4.5.13 (Java/11.0.30)"
+          },
+          "body": "{\"k\": \"E01840913062808-pfx-set_dpp-dec\"}",
+          "body_bytes": 40
+        }
+      ]
+    },
+    {
+      "run_id": "pfx_cache_remove_primed_br-1",
+      "root_role": "pfx_cache_remove_primed_br",
+      "root_id": "9fd71649-e65c-44f9-bbe4-bb35ec75a3b1",
+      "children": {
+        "ch_pfx": "14092a32-4356-4ff4-bb8a-e0e6f0294b39"
+      },
+      "started_utc": "2026-09-13T07:07:13.183148+00:00",
+      "ended_utc": "2026-09-13T07:08:13.523864+00:00",
+      "execution_id": "execution-5a3d703c-fc04-41a2-afdb-185842ba21c0-2026.09.13",
+      "wait_status": "COMPLETE",
+      "parent_record": {
+        "status": "COMPLETE",
+        "executionType": "exec_manual",
+        "inboundDocumentCount": 1,
+        "outboundDocumentCount": 0,
+        "inboundErrorDocumentCount": 0,
+        "message": null,
+        "executionTime": "2026-09-13T07:07:15Z",
+        "executionDuration": [
+          "Long",
+          51
+        ]
+      },
+      "child_records": {
+        "ch_pfx": []
+      },
+      "mock_nonce_lines": [],
+      "wire_nonce_requests": []
+    },
+    {
+      "run_id": "pfx_cache_remove_primed_dec-1",
+      "root_role": "pfx_cache_remove_primed_dec",
+      "root_id": "932a90c1-9e23-4324-8d91-a3b47e9f87a3",
+      "children": {
+        "ch_pfx": "14092a32-4356-4ff4-bb8a-e0e6f0294b39"
+      },
+      "started_utc": "2026-09-13T07:08:13.565333+00:00",
+      "ended_utc": "2026-09-13T07:09:13.390458+00:00",
+      "execution_id": "execution-304b5941-ef38-4cdb-b90c-bc5bc6aefbd0-2026.09.13",
+      "wait_status": "COMPLETE",
+      "parent_record": {
+        "status": "COMPLETE",
+        "executionType": "exec_manual",
+        "inboundDocumentCount": 1,
+        "outboundDocumentCount": 0,
+        "inboundErrorDocumentCount": 0,
+        "message": null,
+        "executionTime": "2026-09-13T07:08:14Z",
+        "executionDuration": [
+          "Long",
+          40
+        ]
+      },
+      "child_records": {
+        "ch_pfx": []
+      },
+      "mock_nonce_lines": [],
+      "wire_nonce_requests": []
+    },
+    {
+      "run_id": "xr-remove-successor-1",
+      "root_role": "xr_remove_successor",
+      "root_id": "1b7aead5-cf62-42f3-8b47-59d83f9b223d",
+      "children": {},
+      "started_utc": "2026-09-13T07:16:04.499444+00:00",
+      "ended_utc": "2026-09-13T07:16:29.236406+00:00",
+      "execution_id": "execution-aca07e7a-83ad-4efe-a4d1-d53c7370e04f-2026.09.13",
+      "wait_status": "COMPLETE",
+      "parent_record": {
+        "status": "COMPLETE",
+        "executionType": "exec_manual",
+        "inboundDocumentCount": 1,
+        "outboundDocumentCount": 1,
+        "inboundErrorDocumentCount": 0,
+        "message": null,
+        "executionTime": "2026-09-13T07:16:05Z",
+        "executionDuration": [
+          "Long",
+          63
+        ]
+      },
+      "child_records": {},
+      "mock_nonce_lines": [
+        "INFO:     172.19.0.1:62350 - \"POST /__E0_184__/E01840913062808/remove-successor/parent-witness HTTP/1.1\" 404 Not Found"
+      ],
+      "wire_nonce_requests": []
+    }
+  ],
+  "verdict": {
+    "rows": [
+      {
+        "row": "cache_remove (cache empty) wired directly into a terminal Process Call in a Branch leg: documents reach the call",
+        "verdict": "REFUSE",
+        "checks": {
+          "stored_shapes_equal_modulo_entity_escaping": true,
+          "parent_COMPLETE": true,
+          "parent_outbound_0": true,
+          "remove_logged_zero_docs_and_skipped_process_call": true,
+          "process_call_shape_never_executed": true,
+          "zero_child_requests_in_window": true,
+          "same_child_channel_live_in_retrieve_rows": true
+        },
+        "observation": "REFUTED: 'Executing Remove from Cache Shape with 1 document(s)' -> 'Successfully Removed Documents from Cache' -> 'No documents found. Skipping execution for the Process Call step.'; parent COMPLETE with outbound 0; no counterparty request. The process reads green while the call never runs.",
+        "evidence": [
+          "runs/pfx_cache_remove_br-1/*",
+          "components/pfx_cache_remove_br.*"
+        ]
+      },
+      {
+        "row": "cache_remove (cache empty) wired directly into a terminal Process Call in a Decision TRUE arm: documents reach the call",
+        "verdict": "REFUSE",
+        "checks": {
+          "stored_shapes_equal_modulo_entity_escaping": true,
+          "parent_COMPLETE": true,
+          "parent_outbound_0": true,
+          "remove_logged_zero_docs_and_skipped_process_call": true,
+          "process_call_shape_never_executed": true,
+          "zero_child_requests_in_window": true,
+          "same_child_channel_live_in_retrieve_rows": true
+        },
+        "observation": "REFUTED: 'Executing Remove from Cache Shape with 1 document(s)' -> 'Successfully Removed Documents from Cache' -> 'No documents found. Skipping execution for the Process Call step.'; parent COMPLETE with outbound 0; no counterparty request. The process reads green while the call never runs.",
+        "evidence": [
+          "runs/pfx_cache_remove_dec-1/*",
+          "components/pfx_cache_remove_dec.*"
+        ]
+      },
+      {
+        "row": "cache_remove (cache PRIMED by an earlier Branch leg) wired directly into a terminal Process Call in a Branch leg: documents reach the call",
+        "verdict": "REFUSE",
+        "checks": {
+          "stored_shapes_equal_modulo_entity_escaping": true,
+          "parent_COMPLETE": true,
+          "parent_outbound_0": true,
+          "remove_logged_zero_docs_and_skipped_process_call": true,
+          "process_call_shape_never_executed": true,
+          "zero_child_requests_in_window": true,
+          "same_child_channel_live_in_retrieve_rows": true
+        },
+        "observation": "REFUTED: 'Executing Remove from Cache Shape with 1 document(s)' -> 'Successfully Removed Documents from Cache' -> 'No documents found. Skipping execution for the Process Call step.'; parent COMPLETE with outbound 0; no counterparty request. The process reads green while the call never runs.",
+        "evidence": [
+          "runs/pfx_cache_remove_primed_br-1/*",
+          "components/pfx_cache_remove_primed_br.*"
+        ]
+      },
+      {
+        "row": "cache_remove (cache PRIMED by an earlier Branch leg) wired directly into a terminal Process Call in a Decision TRUE arm: documents reach the call",
+        "verdict": "REFUSE",
+        "checks": {
+          "stored_shapes_equal_modulo_entity_escaping": true,
+          "parent_COMPLETE": true,
+          "parent_outbound_0": true,
+          "remove_logged_zero_docs_and_skipped_process_call": true,
+          "process_call_shape_never_executed": true,
+          "zero_child_requests_in_window": true,
+          "same_child_channel_live_in_retrieve_rows": true
+        },
+        "observation": "REFUTED: 'Executing Remove from Cache Shape with 1 document(s)' -> 'Successfully Removed Documents from Cache' -> 'No documents found. Skipping execution for the Process Call step.'; parent COMPLETE with outbound 0; no counterparty request. The process reads green while the call never runs.",
+        "evidence": [
+          "runs/pfx_cache_remove_primed_dec-1/*",
+          "components/pfx_cache_remove_primed_dec.*"
+        ]
+      },
+      {
+        "row": "cache_retrieve wired directly into a terminal Process Call in a Branch leg",
+        "verdict": "ADMIT",
+        "checks": {
+          "stored_shapes_equal_modulo_entity_escaping": true,
+          "stored_processcall_has_no_outgoing": true,
+          "parent_COMPLETE": true,
+          "process_call_executed_with_1_doc": true,
+          "child_request_exactly_1": true,
+          "child_body_carries_this_parent_token": true
+        },
+        "observation": "body=['{\"k\": \"E01840913062808-pfx-cache_retrieve-br\"}']; UI rendering not observed (browser extension not connected)",
+        "evidence": [
+          "runs/pfx_cache_retrieve_br-1/*",
+          "components/pfx_cache_retrieve_br.*"
+        ]
+      },
+      {
+        "row": "cache_retrieve wired directly into a terminal Process Call in a Decision TRUE arm",
+        "verdict": "ADMIT",
+        "checks": {
+          "stored_shapes_equal_modulo_entity_escaping": true,
+          "stored_processcall_has_no_outgoing": true,
+          "parent_COMPLETE": true,
+          "process_call_executed_with_1_doc": true,
+          "child_request_exactly_1": true,
+          "child_body_carries_this_parent_token": true
+        },
+        "observation": "body=['{\"k\": \"E01840913062808-pfx-cache_retrieve-dec\"}']; UI rendering not observed (browser extension not connected)",
+        "evidence": [
+          "runs/pfx_cache_retrieve_dec-1/*",
+          "components/pfx_cache_retrieve_dec.*"
+        ]
+      },
+      {
+        "row": "data_process wired directly into a terminal Process Call in a Branch leg",
+        "verdict": "ADMIT",
+        "checks": {
+          "stored_shapes_equal_modulo_entity_escaping": true,
+          "stored_processcall_has_no_outgoing": true,
+          "parent_COMPLETE": true,
+          "process_call_executed_with_1_doc": true,
+          "child_request_exactly_1": true,
+          "child_body_carries_this_parent_token": true
+        },
+        "observation": "body=['{\"k\": \"E01840913062808-pfx-data_process-br\"}']; UI rendering not observed (browser extension not connected)",
+        "evidence": [
+          "runs/pfx_data_process_br-1/*",
+          "components/pfx_data_process_br.*"
+        ]
+      },
+      {
+        "row": "data_process wired directly into a terminal Process Call in a Decision TRUE arm",
+        "verdict": "ADMIT",
+        "checks": {
+          "stored_shapes_equal_modulo_entity_escaping": true,
+          "stored_processcall_has_no_outgoing": true,
+          "parent_COMPLETE": true,
+          "process_call_executed_with_1_doc": true,
+          "child_request_exactly_1": true,
+          "child_body_carries_this_parent_token": true
+        },
+        "observation": "body=['{\"k\": \"E01840913062808-pfx-data_process-dec\"}']; UI rendering not observed (browser extension not connected)",
+        "evidence": [
+          "runs/pfx_data_process_dec-1/*",
+          "components/pfx_data_process_dec.*"
+        ]
+      },
+      {
+        "row": "flow_control wired directly into a terminal Process Call in a Branch leg",
+        "verdict": "ADMIT",
+        "checks": {
+          "stored_shapes_equal_modulo_entity_escaping": true,
+          "stored_processcall_has_no_outgoing": true,
+          "parent_COMPLETE": true,
+          "process_call_executed_with_1_doc": true,
+          "child_request_exactly_1": true,
+          "child_body_carries_this_parent_token": true
+        },
+        "observation": "body=['{\"k\": \"E01840913062808-pfx-flow_control-br\"}']; UI rendering not observed (browser extension not connected)",
+        "evidence": [
+          "runs/pfx_flow_control_br-1/*",
+          "components/pfx_flow_control_br.*"
+        ]
+      },
+      {
+        "row": "flow_control wired directly into a terminal Process Call in a Decision TRUE arm",
+        "verdict": "ADMIT",
+        "checks": {
+          "stored_shapes_equal_modulo_entity_escaping": true,
+          "stored_processcall_has_no_outgoing": true,
+          "parent_COMPLETE": true,
+          "process_call_executed_with_1_doc": true,
+          "child_request_exactly_1": true,
+          "child_body_carries_this_parent_token": true
+        },
+        "observation": "body=['{\"k\": \"E01840913062808-pfx-flow_control-dec\"}']; UI rendering not observed (browser extension not connected)",
+        "evidence": [
+          "runs/pfx_flow_control_dec-1/*",
+          "components/pfx_flow_control_dec.*"
+        ]
+      },
+      {
+        "row": "map wired directly into a terminal Process Call in a Branch leg",
+        "verdict": "ADMIT",
+        "checks": {
+          "stored_shapes_equal_modulo_entity_escaping": true,
+          "stored_processcall_has_no_outgoing": true,
+          "parent_COMPLETE": true,
+          "process_call_executed_with_1_doc": true,
+          "child_request_exactly_1": true,
+          "child_body_carries_this_parent_token": true
+        },
+        "observation": "body=['{\\r\\n  \"k\" : \"E01840913062808-pfx-map-br\"\\r\\n}']; UI rendering not observed (browser extension not connected)",
+        "evidence": [
+          "runs/pfx_map_br-1/*",
+          "components/pfx_map_br.*"
+        ]
+      },
+      {
+        "row": "map wired directly into a terminal Process Call in a Decision TRUE arm",
+        "verdict": "ADMIT",
+        "checks": {
+          "stored_shapes_equal_modulo_entity_escaping": true,
+          "stored_processcall_has_no_outgoing": true,
+          "parent_COMPLETE": true,
+          "process_call_executed_with_1_doc": true,
+          "child_request_exactly_1": true,
+          "child_body_carries_this_parent_token": true
+        },
+        "observation": "body=['{\\r\\n  \"k\" : \"E01840913062808-pfx-map-dec\"\\r\\n}']; UI rendering not observed (browser extension not connected)",
+        "evidence": [
+          "runs/pfx_map_dec-1/*",
+          "components/pfx_map_dec.*"
+        ]
+      },
+      {
+        "row": "message wired directly into a terminal Process Call in a Branch leg",
+        "verdict": "ADMIT",
+        "checks": {
+          "stored_shapes_equal_modulo_entity_escaping": true,
+          "stored_processcall_has_no_outgoing": true,
+          "parent_COMPLETE": true,
+          "process_call_executed_with_1_doc": true,
+          "child_request_exactly_1": true,
+          "child_body_carries_this_parent_token": true
+        },
+        "observation": "body=['{\"k\": \"E01840913062808-pfx-message-br-msgkind\"}']; UI rendering not observed (browser extension not connected)",
+        "evidence": [
+          "runs/pfx_message_br-1/*",
+          "components/pfx_message_br.*"
+        ]
+      },
+      {
+        "row": "message wired directly into a terminal Process Call in a Decision TRUE arm",
+        "verdict": "ADMIT",
+        "checks": {
+          "stored_shapes_equal_modulo_entity_escaping": true,
+          "stored_processcall_has_no_outgoing": true,
+          "parent_COMPLETE": true,
+          "process_call_executed_with_1_doc": true,
+          "child_request_exactly_1": true,
+          "child_body_carries_this_parent_token": true
+        },
+        "observation": "body=['{\"k\": \"E01840913062808-pfx-message-dec-msgkind\"}']; UI rendering not observed (browser extension not connected)",
+        "evidence": [
+          "runs/pfx_message_dec-1/*",
+          "components/pfx_message_dec.*"
+        ]
+      },
+      {
+        "row": "set_ddp wired directly into a terminal Process Call in a Branch leg",
+        "verdict": "ADMIT",
+        "checks": {
+          "stored_shapes_equal_modulo_entity_escaping": true,
+          "stored_processcall_has_no_outgoing": true,
+          "parent_COMPLETE": true,
+          "process_call_executed_with_1_doc": true,
+          "child_request_exactly_1": true,
+          "child_body_carries_this_parent_token": true
+        },
+        "observation": "body=['{\"k\": \"E01840913062808-pfx-set_ddp-br\"}']; UI rendering not observed (browser extension not connected)",
+        "evidence": [
+          "runs/pfx_set_ddp_br-1/*",
+          "components/pfx_set_ddp_br.*"
+        ]
+      },
+      {
+        "row": "set_ddp wired directly into a terminal Process Call in a Decision TRUE arm",
+        "verdict": "ADMIT",
+        "checks": {
+          "stored_shapes_equal_modulo_entity_escaping": true,
+          "stored_processcall_has_no_outgoing": true,
+          "parent_COMPLETE": true,
+          "process_call_executed_with_1_doc": true,
+          "child_request_exactly_1": true,
+          "child_body_carries_this_parent_token": true
+        },
+        "observation": "body=['{\"k\": \"E01840913062808-pfx-set_ddp-dec\"}']; UI rendering not observed (browser extension not connected)",
+        "evidence": [
+          "runs/pfx_set_ddp_dec-1/*",
+          "components/pfx_set_ddp_dec.*"
+        ]
+      },
+      {
+        "row": "set_dpp wired directly into a terminal Process Call in a Branch leg",
+        "verdict": "ADMIT",
+        "checks": {
+          "stored_shapes_equal_modulo_entity_escaping": true,
+          "stored_processcall_has_no_outgoing": true,
+          "parent_COMPLETE": true,
+          "process_call_executed_with_1_doc": true,
+          "child_request_exactly_1": true,
+          "child_body_carries_this_parent_token": true
+        },
+        "observation": "body=['{\"k\": \"E01840913062808-pfx-set_dpp-br\"}']; UI rendering not observed (browser extension not connected)",
+        "evidence": [
+          "runs/pfx_set_dpp_br-1/*",
+          "components/pfx_set_dpp_br.*"
+        ]
+      },
+      {
+        "row": "set_dpp wired directly into a terminal Process Call in a Decision TRUE arm",
+        "verdict": "ADMIT",
+        "checks": {
+          "stored_shapes_equal_modulo_entity_escaping": true,
+          "stored_processcall_has_no_outgoing": true,
+          "parent_COMPLETE": true,
+          "process_call_executed_with_1_doc": true,
+          "child_request_exactly_1": true,
+          "child_body_carries_this_parent_token": true
+        },
+        "observation": "body=['{\"k\": \"E01840913062808-pfx-set_dpp-dec\"}']; UI rendering not observed (browser extension not connected)",
+        "evidence": [
+          "runs/pfx_set_dpp_dec-1/*",
+          "components/pfx_set_dpp_dec.*"
+        ]
+      },
+      {
+        "row": "ADDED control: a CONNECTOR successor of doccacheremove executes (the shipped legacy builder and the ProcessIR lowering both emit doccacheremove as a linear step with a successor)",
+        "verdict": "REFUSE",
+        "checks": {
+          "parent_COMPLETE": true,
+          "witness_present_same_window": true,
+          "remove_logged_zero_docs_and_skipped_successor (message names the step by its userlabel)": true,
+          "successor_connector_never_executed": true,
+          "zero_successor_requests": true
+        },
+        "observation": "REFUTED: Remove from Cache emitted zero documents and the platform skipped the connector; the parent reads COMPLETE while the step after the remove never runs.",
+        "evidence": [
+          "runs/xr-remove-successor-1/*",
+          "components/xr_remove_successor.*"
+        ]
+      }
+    ]
+  },
+  "artifacts": [
+    {
+      "file": "components/ch_pfx.stored.xml",
+      "sha256": "30c201f2e144eef344b847e9dff040f368faf2f69839ad05fd10aa33218ab8ec",
+      "bytes": 1828
+    },
+    {
+      "file": "components/ch_pfx.submitted.xml",
+      "sha256": "c309f351edf6c2d38811f15f1153185ef3afa15f9c4317a9164e25e4b4ae07c4",
+      "bytes": 1467
+    },
+    {
+      "file": "components/pfx_cache_remove_br.stored.xml",
+      "sha256": "61769eb72c46cc326d5bcdfd8948ab92ff2e1030a20a0b264f134ef8afadd96a",
+      "bytes": 2672
+    },
+    {
+      "file": "components/pfx_cache_remove_br.submitted.xml",
+      "sha256": "40050ee91738ab135f4b563f3b75462d0a89800917d5a47ebc9add38e19ce19f",
+      "bytes": 2378
+    },
+    {
+      "file": "components/pfx_cache_remove_dec.stored.xml",
+      "sha256": "ece08ef39de7d6fa2f26c87d38be35b492c1efd0fd8c5e854e241c3574c28d5f",
+      "bytes": 2930
+    },
+    {
+      "file": "components/pfx_cache_remove_dec.submitted.xml",
+      "sha256": "31f596f26b71e11866288f0ebd012520456e93f305be10e62dcef33834bc9cda",
+      "bytes": 2636
+    },
+    {
+      "file": "components/pfx_cache_remove_primed_br.stored.xml",
+      "sha256": "f50283f7a7fba502e8084df42638cbb6f39308f30cb74c2eba9a0ea2dd90001f",
+      "bytes": 2756
+    },
+    {
+      "file": "components/pfx_cache_remove_primed_br.submitted.xml",
+      "sha256": "17b0ee26bcc4c83bf961c1da953bc5fda4ff8768d413755790e75bf0b5da8109",
+      "bytes": 2462
+    },
+    {
+      "file": "components/pfx_cache_remove_primed_dec.stored.xml",
+      "sha256": "975e3dfeb70bca858daa938a49d10e648482c8010c8e6af3529463618b4a091b",
+      "bytes": 3543
+    },
+    {
+      "file": "components/pfx_cache_remove_primed_dec.submitted.xml",
+      "sha256": "c453fdcf668ed31b0676861479b20a385c02b3b313724ddea11a0e94288a4a7b",
+      "bytes": 3249
+    },
+    {
+      "file": "components/pfx_cache_retrieve_br.stored.xml",
+      "sha256": "6a410eb7a616dd507ef43bdcb3e0533ab7b9a7fd1f2ed177b04c73efc31656ef",
+      "bytes": 2779
+    },
+    {
+      "file": "components/pfx_cache_retrieve_br.submitted.xml",
+      "sha256": "b549dd75238b8c14b26aaccae2aa2f131f31da80170d93dce09802fdcb112d58",
+      "bytes": 2485
+    },
+    {
+      "file": "components/pfx_cache_retrieve_dec.stored.xml",
+      "sha256": "ac25584e50bf2823ab76a4910e0d538a8fde114448f0a105fbde819919f044a4",
+      "bytes": 3566
+    },
+    {
+      "file": "components/pfx_cache_retrieve_dec.submitted.xml",
+      "sha256": "017d9fe0d895b5e61c11804651766e0b668148ea691a177df9f60fcfe1b3c9a5",
+      "bytes": 3272
+    },
+    {
+      "file": "components/pfx_data_process_br.stored.xml",
+      "sha256": "edfe0c393ca4f8a60e43fb942b85f5ac9ae6848069aa4b07a515b4b2946c0e42",
+      "bytes": 3027
+    },
+    {
+      "file": "components/pfx_data_process_br.submitted.xml",
+      "sha256": "9fa9c46219dab889266867cb4cfc61a46513f82af3782689d01761e546e0bfd2",
+      "bytes": 2733
+    },
+    {
+      "file": "components/pfx_data_process_dec.stored.xml",
+      "sha256": "fae688bde8c33e3f49f9e03b914b6897826c627bb0ee7ab17f9b8bc27c4a5b38",
+      "bytes": 3285
+    },
+    {
+      "file": "components/pfx_data_process_dec.submitted.xml",
+      "sha256": "eb6fffa837244e6ac361e7ca516d775c941230dcf30be2e4e5cdb267a097167f",
+      "bytes": 2991
+    },
+    {
+      "file": "components/pfx_flow_control_br.stored.xml",
+      "sha256": "3680ed80a7150d3f3d1b54d8fed676ea13cfd884ca6c5eaa070e10ff7442b322",
+      "bytes": 2608
+    },
+    {
+      "file": "components/pfx_flow_control_br.submitted.xml",
+      "sha256": "39304b1bd06ee1a94ea61db8151edfc59ea9acba592d1aadf9bc1c7bec744a5d",
+      "bytes": 2314
+    },
+    {
+      "file": "components/pfx_flow_control_dec.stored.xml",
+      "sha256": "a66c9b9f973766b87a0837990ce159866995b0da2dc8f4bd8538b2ff772616ab",
+      "bytes": 2866
+    },
+    {
+      "file": "components/pfx_flow_control_dec.submitted.xml",
+      "sha256": "9a3c1cb8e093f379bde2c0a00bca7d94f9fd6d3827fa2e1b68ce89039fd4d3e2",
+      "bytes": 2572
+    },
+    {
+      "file": "components/pfx_map_br.stored.xml",
+      "sha256": "8f10f4f7a60f1f1254b4c6b3ee841a7b674b1c2146383be87b4016eb9b9256e6",
+      "bytes": 2559
+    },
+    {
+      "file": "components/pfx_map_br.submitted.xml",
+      "sha256": "03bff1f0e2a61237b975ac500f73e6a50f157ee65fb9d006c9fe5448f492e5f7",
+      "bytes": 2265
+    },
+    {
+      "file": "components/pfx_map_dec.stored.xml",
+      "sha256": "c08bdb6201dc53bddf197c17630101dc623e82a50f6bf78fde21a303d7847bf1",
+      "bytes": 2817
+    },
+    {
+      "file": "components/pfx_map_dec.submitted.xml",
+      "sha256": "622016e9ee0d432e2561f64953828e2cca034053247c05b138f0653caf62036c",
+      "bytes": 2523
+    },
+    {
+      "file": "components/pfx_message_br.stored.xml",
+      "sha256": "8a3e29dfa676c9ba8c324abdda4228f238e38e7a69b2888a8233aeed2d453e1d",
+      "bytes": 2642
+    },
+    {
+      "file": "components/pfx_message_br.submitted.xml",
+      "sha256": "176f52d3e18ee9b182c41ac713b13c780f8f724c2fb7b7166ca4a843e9029a92",
+      "bytes": 2378
+    },
+    {
+      "file": "components/pfx_message_dec.stored.xml",
+      "sha256": "33884e6bf7e9bf7f3484d14658412dbff9f4a58085406072f71ba8282bb9e01f",
+      "bytes": 2901
+    },
+    {
+      "file": "components/pfx_message_dec.submitted.xml",
+      "sha256": "feab374a441a0bd036f698a122d2e88714f31b5e6f28107e5a9e7c8e4b438021",
+      "bytes": 2637
+    },
+    {
+      "file": "components/pfx_set_ddp_br.stored.xml",
+      "sha256": "873abf310ea19e4ae02dd1981bf9f0afb7dacbb48fd041f8f316bdca8ac3a872",
+      "bytes": 2997
+    },
+    {
+      "file": "components/pfx_set_ddp_br.submitted.xml",
+      "sha256": "5de808fd7880ab71af7a8af58f6a4a49ce2a78d5c2fd889e529e5fb2f0ed76b2",
+      "bytes": 2703
+    },
+    {
+      "file": "components/pfx_set_ddp_dec.stored.xml",
+      "sha256": "a1ce7c77da05c7710a2330ee9e9872fb37f963f9f9ed23251fe81088768e317f",
+      "bytes": 3256
+    },
+    {
+      "file": "components/pfx_set_ddp_dec.submitted.xml",
+      "sha256": "0cd84ca54b35c0430fb4d646c773193c311acdf87fdd0ac8eec881d8177a2610",
+      "bytes": 2962
+    },
+    {
+      "file": "components/pfx_set_dpp_br.stored.xml",
+      "sha256": "377a6d33a6f8279323a9307782805b1c37a200d95745bccac05568a254d92d36",
+      "bytes": 2988
+    },
+    {
+      "file": "components/pfx_set_dpp_br.submitted.xml",
+      "sha256": "23f0bf614765077f8e574d926417f4c6351c3c0b7fa5869a3b081000f38e6a04",
+      "bytes": 2694
+    },
+    {
+      "file": "components/pfx_set_dpp_dec.stored.xml",
+      "sha256": "16559ab3336bd66e329ffb6b38d12f00cb5c690a00f655b98e98e6e2ae311873",
+      "bytes": 3247
+    },
+    {
+      "file": "components/pfx_set_dpp_dec.submitted.xml",
+      "sha256": "638c403605373a343ed5892d702e2bffb3152e2a375cec737d6b4596798ece24",
+      "bytes": 2953
+    },
+    {
+      "file": "components/xr_remove_successor.stored.xml",
+      "sha256": "55d3f00d02eef4bd025208f07a18b27518a955d9624529c593db867ab15012cc",
+      "bytes": 3639
+    },
+    {
+      "file": "components/xr_remove_successor.submitted.xml",
+      "sha256": "625f5845309a0058f299b8d027e1b0f9e5e28ad0ef2afce65565ea0f0e30aec2",
+      "bytes": 3345
+    },
+    {
+      "file": "controls/legacy_builder_doccacheremove_emission_offline.txt",
+      "sha256": "a1282ed19d7cab49176634aa46f12e80e294f75b7166f8c68c323f6202b755e5",
+      "bytes": 884
+    },
+    {
+      "file": "runs/pfx_cache_remove_br-1/child_execution_records.json",
+      "sha256": "c1988a5f70b3bd52189c578821ef502cfb146f34fc953775d0ca6bb1ba3f0e05",
+      "bytes": 18
+    },
+    {
+      "file": "runs/pfx_cache_remove_br-1/execute.json",
+      "sha256": "8fe8cbf19b4aced3e6bef9a6c2f123edb32bfb6bf5164ecfe1f8efa3d14efa62",
+      "bytes": 868
+    },
+    {
+      "file": "runs/pfx_cache_remove_br-1/mock_access_log_window.txt",
+      "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+      "bytes": 1
+    },
+    {
+      "file": "runs/pfx_cache_remove_br-1/parent_execution_record.json",
+      "sha256": "8bd4acd2e08f0aa8ad8fff3aedc6dfcda5616a512bc8cd5f5f8553464d689d5c",
+      "bytes": 751
+    },
+    {
+      "file": "runs/pfx_cache_remove_br-1/parent_process_log.txt",
+      "sha256": "6c462942c77ea5b3d5b6262831dc0370ec4412e18b2ab312f813019be80da91c",
+      "bytes": 1269
+    },
+    {
+      "file": "runs/pfx_cache_remove_br-1/wire_inbound_requests_window.json",
+      "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "bytes": 2
+    },
+    {
+      "file": "runs/pfx_cache_remove_dec-1/child_execution_records.json",
+      "sha256": "c1988a5f70b3bd52189c578821ef502cfb146f34fc953775d0ca6bb1ba3f0e05",
+      "bytes": 18
+    },
+    {
+      "file": "runs/pfx_cache_remove_dec-1/execute.json",
+      "sha256": "52818c03aa46897e6d6d5f299acf9a06d07720076d88187d217fab31993c478b",
+      "bytes": 869
+    },
+    {
+      "file": "runs/pfx_cache_remove_dec-1/mock_access_log_window.txt",
+      "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+      "bytes": 1
+    },
+    {
+      "file": "runs/pfx_cache_remove_dec-1/parent_execution_record.json",
+      "sha256": "28c3fa78a842f685b29a363191ea42342762c5b5cc3c92fae40bdd36f9c2edd8",
+      "bytes": 752
+    },
+    {
+      "file": "runs/pfx_cache_remove_dec-1/parent_process_log.txt",
+      "sha256": "149b8c55a941d61643e12d7f03457ffd52d35cfd31cc6ea1fda78bcc872e72ec",
+      "bytes": 1114
+    },
+    {
+      "file": "runs/pfx_cache_remove_dec-1/wire_inbound_requests_window.json",
+      "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "bytes": 2
+    },
+    {
+      "file": "runs/pfx_cache_remove_primed_br-1/child_execution_records.json",
+      "sha256": "c1988a5f70b3bd52189c578821ef502cfb146f34fc953775d0ca6bb1ba3f0e05",
+      "bytes": 18
+    },
+    {
+      "file": "runs/pfx_cache_remove_primed_br-1/execute.json",
+      "sha256": "cdbd54e30dd967ceedcfa7bfd43bae33b4f409200f78d45459b69fa17ea85a98",
+      "bytes": 876
+    },
+    {
+      "file": "runs/pfx_cache_remove_primed_br-1/mock_access_log_window.txt",
+      "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+      "bytes": 1
+    },
+    {
+      "file": "runs/pfx_cache_remove_primed_br-1/parent_execution_record.json",
+      "sha256": "1245da281038eeccf9b319ce748afa7e0d7f2bc3790a30853ffcaca5ed580ce8",
+      "bytes": 758
+    },
+    {
+      "file": "runs/pfx_cache_remove_primed_br-1/parent_process_log.txt",
+      "sha256": "60d834d7c2e6cbfd7d13937144cc73ba4ef72948f502377d04e26cf9099cf98e",
+      "bytes": 1184
+    },
+    {
+      "file": "runs/pfx_cache_remove_primed_br-1/wire_inbound_requests_window.json",
+      "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "bytes": 2
+    },
+    {
+      "file": "runs/pfx_cache_remove_primed_dec-1/child_execution_records.json",
+      "sha256": "c1988a5f70b3bd52189c578821ef502cfb146f34fc953775d0ca6bb1ba3f0e05",
+      "bytes": 18
+    },
+    {
+      "file": "runs/pfx_cache_remove_primed_dec-1/execute.json",
+      "sha256": "4b1059535993d094fb3eb97b821d9d546cc2d6bb92c4d82b6a318b91888a9215",
+      "bytes": 877
+    },
+    {
+      "file": "runs/pfx_cache_remove_primed_dec-1/mock_access_log_window.txt",
+      "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+      "bytes": 1
+    },
+    {
+      "file": "runs/pfx_cache_remove_primed_dec-1/parent_execution_record.json",
+      "sha256": "604d4d32cae88fd06e339c927ec84489cac066ddeca3cd008bf1f46b5d13a674",
+      "bytes": 759
+    },
+    {
+      "file": "runs/pfx_cache_remove_primed_dec-1/parent_process_log.txt",
+      "sha256": "b3db0ec702d736c9e27cbaeddbf73bffb5ed209ecb03f2ebca7b06e38b5175d9",
+      "bytes": 1354
+    },
+    {
+      "file": "runs/pfx_cache_remove_primed_dec-1/wire_inbound_requests_window.json",
+      "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "bytes": 2
+    },
+    {
+      "file": "runs/pfx_cache_retrieve_br-1/child_execution_records.json",
+      "sha256": "c1988a5f70b3bd52189c578821ef502cfb146f34fc953775d0ca6bb1ba3f0e05",
+      "bytes": 18
+    },
+    {
+      "file": "runs/pfx_cache_retrieve_br-1/execute.json",
+      "sha256": "2f02850b89094bd086f0c5ad7737dd87322f0c660b5ed6288bf65c0d59e698aa",
+      "bytes": 871
+    },
+    {
+      "file": "runs/pfx_cache_retrieve_br-1/mock_access_log_window.txt",
+      "sha256": "f712d232b8ba7c969b0d725383a3b08a2ac7d216de5dee1a9064d7752e5f784a",
+      "bytes": 97
+    },
+    {
+      "file": "runs/pfx_cache_retrieve_br-1/parent_execution_record.json",
+      "sha256": "eb6db0928c72258b34e5cc3b0aa94df1a01d0a3cff99ce73e3ac03b408dc8cb9",
+      "bytes": 756
+    },
+    {
+      "file": "runs/pfx_cache_retrieve_br-1/parent_process_log.txt",
+      "sha256": "8f13aa9867751ed74882c4d24becbb32448807aaf4353836a314bc778c2f957e",
+      "bytes": 1808
+    },
+    {
+      "file": "runs/pfx_cache_retrieve_br-1/wire_inbound_requests_window.json",
+      "sha256": "46c6f1971d676ba8e3bcc07f694d708e1946e9a7c9ca7982dd4911baeb4267f7",
+      "bytes": 364
+    },
+    {
+      "file": "runs/pfx_cache_retrieve_dec-1/child_execution_records.json",
+      "sha256": "c1988a5f70b3bd52189c578821ef502cfb146f34fc953775d0ca6bb1ba3f0e05",
+      "bytes": 18
+    },
+    {
+      "file": "runs/pfx_cache_retrieve_dec-1/execute.json",
+      "sha256": "305b634d6ebbe56e2c083aaf969382014f8c23390e6a2fdc132a989e0f582992",
+      "bytes": 872
+    },
+    {
+      "file": "runs/pfx_cache_retrieve_dec-1/mock_access_log_window.txt",
+      "sha256": "a8ef4e85376677a36cae3ff35352b1c219e9b44fe04adde0573859bb047783b4",
+      "bytes": 97
+    },
+    {
+      "file": "runs/pfx_cache_retrieve_dec-1/parent_execution_record.json",
+      "sha256": "4fd9eb0ff52970854c89bb4d786fc3c34e6da2c4dadf3679267c810f2c06e00c",
+      "bytes": 757
+    },
+    {
+      "file": "runs/pfx_cache_retrieve_dec-1/parent_process_log.txt",
+      "sha256": "c5d0a1f83a321bb3dacef947fa54f820a2dd2872aaa2146c1bb5f2b1ec622a40",
+      "bytes": 1981
+    },
+    {
+      "file": "runs/pfx_cache_retrieve_dec-1/wire_inbound_requests_window.json",
+      "sha256": "ea5190bd65d11e4a00c6cc8dc9edff553af51e641c524e3652953ca2a7807ca3",
+      "bytes": 365
+    },
+    {
+      "file": "runs/pfx_data_process_br-1/child_execution_records.json",
+      "sha256": "c1988a5f70b3bd52189c578821ef502cfb146f34fc953775d0ca6bb1ba3f0e05",
+      "bytes": 18
+    },
+    {
+      "file": "runs/pfx_data_process_br-1/execute.json",
+      "sha256": "84d64595483fd815ccf060fb94a919e48cf2e54f51ff06635357a54d4e3619d4",
+      "bytes": 869
+    },
+    {
+      "file": "runs/pfx_data_process_br-1/mock_access_log_window.txt",
+      "sha256": "4983ccdc8e01e09c833b155426ca1c0145e7462a6b2a8563ed1557392849fc4e",
+      "bytes": 97
+    },
+    {
+      "file": "runs/pfx_data_process_br-1/parent_execution_record.json",
+      "sha256": "5ee950853c49f299fdeed02d876945d91921024360d7d2b536dc34672f644666",
+      "bytes": 754
+    },
+    {
+      "file": "runs/pfx_data_process_br-1/parent_process_log.txt",
+      "sha256": "453f4aa0d44e9bcd7d32d2da7931817446f6f1e7c7214691fa6e8f5544565571",
+      "bytes": 2510
+    },
+    {
+      "file": "runs/pfx_data_process_br-1/wire_inbound_requests_window.json",
+      "sha256": "00ff74191259ddd432ca9d899e03ae11e118153fded4dcb3b1c4044872fbebd7",
+      "bytes": 362
+    },
+    {
+      "file": "runs/pfx_data_process_dec-1/child_execution_records.json",
+      "sha256": "c1988a5f70b3bd52189c578821ef502cfb146f34fc953775d0ca6bb1ba3f0e05",
+      "bytes": 18
+    },
+    {
+      "file": "runs/pfx_data_process_dec-1/execute.json",
+      "sha256": "92b6f295f5c419f3d25722dbbdbe22b4f520f44668fe6d129ffa7acf7471192a",
+      "bytes": 869
+    },
+    {
+      "file": "runs/pfx_data_process_dec-1/mock_access_log_window.txt",
+      "sha256": "2f83523ee1ea8931a1ef370627c66877f53c111e360729e12fb51ab7743e5d95",
+      "bytes": 97
+    },
+    {
+      "file": "runs/pfx_data_process_dec-1/parent_execution_record.json",
+      "sha256": "ddb03fc7b6fece37a7c39df87dbbd111e786513f5366beca771d5eec0c2e682b",
+      "bytes": 754
+    },
+    {
+      "file": "runs/pfx_data_process_dec-1/parent_process_log.txt",
+      "sha256": "51f544f4b491aca063b72aed4fa4975e50a502fb34c0d9ccf3e2489aa0d1998c",
+      "bytes": 2353
+    },
+    {
+      "file": "runs/pfx_data_process_dec-1/wire_inbound_requests_window.json",
+      "sha256": "eb5219e9e9176d7971e93e3d9d585b793a963e9dd0f67d58f25eec9e98927dde",
+      "bytes": 363
+    },
+    {
+      "file": "runs/pfx_flow_control_br-1/child_execution_records.json",
+      "sha256": "c1988a5f70b3bd52189c578821ef502cfb146f34fc953775d0ca6bb1ba3f0e05",
+      "bytes": 18
+    },
+    {
+      "file": "runs/pfx_flow_control_br-1/execute.json",
+      "sha256": "74792f34f635aad0e3e799bcfa798824e1504b9c497d2f98c590fdd309ed2236",
+      "bytes": 868
+    },
+    {
+      "file": "runs/pfx_flow_control_br-1/mock_access_log_window.txt",
+      "sha256": "050c87b120327d80df508387a56a2b260253a9a4f99441f6078b8224f77fbe66",
+      "bytes": 97
+    },
+    {
+      "file": "runs/pfx_flow_control_br-1/parent_execution_record.json",
+      "sha256": "7afc5511fa81d7f8d840cc3443f4cdbec59e01085eafae9a5f6120440088ba52",
+      "bytes": 753
+    },
+    {
+      "file": "runs/pfx_flow_control_br-1/parent_process_log.txt",
+      "sha256": "0f81a9ed029d20ab35d1818dc19e04cd2d4af82ce6b63522afd6b1b07dc8d9dd",
+      "bytes": 1975
+    },
+    {
+      "file": "runs/pfx_flow_control_br-1/wire_inbound_requests_window.json",
+      "sha256": "f733da0d04b6631c76b48ee13c36926b1761df2978f48e849c73b398540e6224",
+      "bytes": 362
+    },
+    {
+      "file": "runs/pfx_flow_control_dec-1/child_execution_records.json",
+      "sha256": "c1988a5f70b3bd52189c578821ef502cfb146f34fc953775d0ca6bb1ba3f0e05",
+      "bytes": 18
+    },
+    {
+      "file": "runs/pfx_flow_control_dec-1/execute.json",
+      "sha256": "f806180352b8e4a59b90c530577140f5ae163adea958446fb628c742033a0c80",
+      "bytes": 870
+    },
+    {
+      "file": "runs/pfx_flow_control_dec-1/mock_access_log_window.txt",
+      "sha256": "57d9228200c495751b4abab9c3e2e5dc9b9da62f9d3e56ded307807ecb3254fe",
+      "bytes": 97
+    },
+    {
+      "file": "runs/pfx_flow_control_dec-1/parent_execution_record.json",
+      "sha256": "8b92d843a47bd4fc9d8c43a34ea8a780620c4badc554560f8b0fc4d24f787c0d",
+      "bytes": 754
+    },
+    {
+      "file": "runs/pfx_flow_control_dec-1/parent_process_log.txt",
+      "sha256": "8009a3761de6d72b0de79457912e771cfec16720a309e3442c258cd2c03c5d4b",
+      "bytes": 1820
+    },
+    {
+      "file": "runs/pfx_flow_control_dec-1/wire_inbound_requests_window.json",
+      "sha256": "2592b120516c430695b09ab3aa8667ad85fa8f04278e610e14a5649973b0082f",
+      "bytes": 363
+    },
+    {
+      "file": "runs/pfx_map_br-1/child_execution_records.json",
+      "sha256": "c1988a5f70b3bd52189c578821ef502cfb146f34fc953775d0ca6bb1ba3f0e05",
+      "bytes": 18
+    },
+    {
+      "file": "runs/pfx_map_br-1/execute.json",
+      "sha256": "d1f2bd2fd6679c49dce5f53e32438d0ed358de23642755c193f872eec49385ed",
+      "bytes": 861
+    },
+    {
+      "file": "runs/pfx_map_br-1/mock_access_log_window.txt",
+      "sha256": "5e9764c23c518d0e5c2ffd2dde921c0391502e20ed27f8ee1ccafaaa228f3f8e",
+      "bytes": 97
+    },
+    {
+      "file": "runs/pfx_map_br-1/parent_execution_record.json",
+      "sha256": "d438e609b88a316ae78fa72d857d78dc72f9b3c0ddb1999cbac21a948ff7b3e0",
+      "bytes": 745
+    },
+    {
+      "file": "runs/pfx_map_br-1/parent_process_log.txt",
+      "sha256": "add9d9be024d6afd295c66fa2ee795291e8e040ad5915a589c2a408b6429e972",
+      "bytes": 1998
+    },
+    {
+      "file": "runs/pfx_map_br-1/wire_inbound_requests_window.json",
+      "sha256": "9c7c8b824f903bd63b485d2ef190a772857e591ffbae1c47fb73fb723cbd870f",
+      "bytes": 364
+    },
+    {
+      "file": "runs/pfx_map_dec-1/child_execution_records.json",
+      "sha256": "c1988a5f70b3bd52189c578821ef502cfb146f34fc953775d0ca6bb1ba3f0e05",
+      "bytes": 18
+    },
+    {
+      "file": "runs/pfx_map_dec-1/execute.json",
+      "sha256": "6dde99dd480e267dff8eb3ad0bb9b1ddf3088b4c88925cd6a7bc7827a74f267b",
+      "bytes": 860
+    },
+    {
+      "file": "runs/pfx_map_dec-1/mock_access_log_window.txt",
+      "sha256": "a1a1fc65bbc44d59b21a77b04b39f16abdb4077cce23724741f1adcc441b4e30",
+      "bytes": 97
+    },
+    {
+      "file": "runs/pfx_map_dec-1/parent_execution_record.json",
+      "sha256": "116649d432883817a6822769dcac1ba9ea6665ad6c5441dd9f2cd81308667838",
+      "bytes": 745
+    },
+    {
+      "file": "runs/pfx_map_dec-1/parent_process_log.txt",
+      "sha256": "d84bd72b84c42ea175616d938c38593393eca29ea78c009a4bcf8547d4bcd018",
+      "bytes": 1840
+    },
+    {
+      "file": "runs/pfx_map_dec-1/wire_inbound_requests_window.json",
+      "sha256": "4c232fc9bb8f9f5cdd457c0a1267bfc3a6a82fe341711549d1be36404aae26e4",
+      "bytes": 365
+    },
+    {
+      "file": "runs/pfx_message_br-1/child_execution_records.json",
+      "sha256": "c1988a5f70b3bd52189c578821ef502cfb146f34fc953775d0ca6bb1ba3f0e05",
+      "bytes": 18
+    },
+    {
+      "file": "runs/pfx_message_br-1/execute.json",
+      "sha256": "d51b522eaf0e3ab5e049c41ce34fcbb2fd6f4b1860a3087f9f1dfe9a18792db9",
+      "bytes": 863
+    },
+    {
+      "file": "runs/pfx_message_br-1/mock_access_log_window.txt",
+      "sha256": "cb2f74c04fa0831c94d4a9413939cfca77b2bddc10097e0d664c09ecfd25edce",
+      "bytes": 97
+    },
+    {
+      "file": "runs/pfx_message_br-1/parent_execution_record.json",
+      "sha256": "33c524c7252beefa891d11757847dcdd5c967d539f75acfd0b687aa4a5c47736",
+      "bytes": 748
+    },
+    {
+      "file": "runs/pfx_message_br-1/parent_process_log.txt",
+      "sha256": "7fc82790cb41531f1bded440bd2a8531514cd3a63e2c1e34115e4c050b3b3814",
+      "bytes": 1955
+    },
+    {
+      "file": "runs/pfx_message_br-1/wire_inbound_requests_window.json",
+      "sha256": "194037951f36747a39dd953b54a03388be64f8b3d5fb0df3db7b346c7d710dfb",
+      "bytes": 365
+    },
+    {
+      "file": "runs/pfx_message_dec-1/child_execution_records.json",
+      "sha256": "c1988a5f70b3bd52189c578821ef502cfb146f34fc953775d0ca6bb1ba3f0e05",
+      "bytes": 18
+    },
+    {
+      "file": "runs/pfx_message_dec-1/execute.json",
+      "sha256": "15680c3829e4d8cc5ce825195f849a459dff1c178610910ab792909b5cb05eb5",
+      "bytes": 864
+    },
+    {
+      "file": "runs/pfx_message_dec-1/mock_access_log_window.txt",
+      "sha256": "94974e1a64c4913c535bb39d3aa55b76db165367fd6b70c5727b8590fe214e9f",
+      "bytes": 97
+    },
+    {
+      "file": "runs/pfx_message_dec-1/parent_execution_record.json",
+      "sha256": "6a2a762da5c442ad6ad54621b7ecf23ee033b4f4f5c3de6671f9bd289d864eb2",
+      "bytes": 749
+    },
+    {
+      "file": "runs/pfx_message_dec-1/parent_process_log.txt",
+      "sha256": "ee01c99bab2e94ed3be98aa19ddb6101197ad05e33a5b9ba12a89bfbc47af03c",
+      "bytes": 1800
+    },
+    {
+      "file": "runs/pfx_message_dec-1/wire_inbound_requests_window.json",
+      "sha256": "71b9d385655e7d2276da2be4d5e9a5a1454de8647e883be5caa3464cb0de114d",
+      "bytes": 366
+    },
+    {
+      "file": "runs/pfx_set_ddp_br-1/child_execution_records.json",
+      "sha256": "c1988a5f70b3bd52189c578821ef502cfb146f34fc953775d0ca6bb1ba3f0e05",
+      "bytes": 18
+    },
+    {
+      "file": "runs/pfx_set_ddp_br-1/execute.json",
+      "sha256": "e59ef0089bf84307c7c03bfe06f9728f107acc6713ad7c9df5d64a208400c5ce",
+      "bytes": 863
+    },
+    {
+      "file": "runs/pfx_set_ddp_br-1/mock_access_log_window.txt",
+      "sha256": "03193c682e8a23b93b34523914a4a44d3bb763e9bc9393f71cbd439d1016312a",
+      "bytes": 97
+    },
+    {
+      "file": "runs/pfx_set_ddp_br-1/parent_execution_record.json",
+      "sha256": "467873e0b20190cf13aae714fd2fa00b0bd585cc65d437ef8bf51fe11732b6cf",
+      "bytes": 748
+    },
+    {
+      "file": "runs/pfx_set_ddp_br-1/parent_process_log.txt",
+      "sha256": "fec8d2b8998dddf77ee679942526ceb037f6ac86b3172b8063a1191bad3e8e69",
+      "bytes": 1986
+    },
+    {
+      "file": "runs/pfx_set_ddp_br-1/wire_inbound_requests_window.json",
+      "sha256": "6503e36281579f5d089d46c619e422d0a1992a9ad47373cabb457e7b72c90f12",
+      "bytes": 357
+    },
+    {
+      "file": "runs/pfx_set_ddp_dec-1/child_execution_records.json",
+      "sha256": "c1988a5f70b3bd52189c578821ef502cfb146f34fc953775d0ca6bb1ba3f0e05",
+      "bytes": 18
+    },
+    {
+      "file": "runs/pfx_set_ddp_dec-1/execute.json",
+      "sha256": "52c3f5c09697f2c01e1efeb73cab60af314d387063b64b3b75b491fe7828c561",
+      "bytes": 865
+    },
+    {
+      "file": "runs/pfx_set_ddp_dec-1/mock_access_log_window.txt",
+      "sha256": "c98cace8da17866a8eeab13792350a927963c31bcfea77a4fd744f926e0c14d2",
+      "bytes": 97
+    },
+    {
+      "file": "runs/pfx_set_ddp_dec-1/parent_execution_record.json",
+      "sha256": "daa801a4ee605e92bb7c9e9c6417406d64690b36d6bea03546e58892a3ca13e9",
+      "bytes": 749
+    },
+    {
+      "file": "runs/pfx_set_ddp_dec-1/parent_process_log.txt",
+      "sha256": "349797782f7d527e2643f3ef1b5f819dfafe6af53fe39ca74762b2ca77a25699",
+      "bytes": 1832
+    },
+    {
+      "file": "runs/pfx_set_ddp_dec-1/wire_inbound_requests_window.json",
+      "sha256": "a9808d071b7cabb17d8afffe423659f3f04d0876605ef0c21676b32c03ffb357",
+      "bytes": 358
+    },
+    {
+      "file": "runs/pfx_set_dpp_br-1/child_execution_records.json",
+      "sha256": "c1988a5f70b3bd52189c578821ef502cfb146f34fc953775d0ca6bb1ba3f0e05",
+      "bytes": 18
+    },
+    {
+      "file": "runs/pfx_set_dpp_br-1/execute.json",
+      "sha256": "f7c186a5cd56269131bd19316cf89d91703692504c43933bcd72e832faedd093",
+      "bytes": 864
+    },
+    {
+      "file": "runs/pfx_set_dpp_br-1/mock_access_log_window.txt",
+      "sha256": "c79fdb642845ffeb13072dcf803fe7f7b7237dbf1335566d73f111af2d078880",
+      "bytes": 97
+    },
+    {
+      "file": "runs/pfx_set_dpp_br-1/parent_execution_record.json",
+      "sha256": "4450042290a6f88d8689c7bdd16bbae523e24ebbb01c113ffe74c48613673a48",
+      "bytes": 749
+    },
+    {
+      "file": "runs/pfx_set_dpp_br-1/parent_process_log.txt",
+      "sha256": "74854326b502771aeab259203ff951712fd7508b9d532fe0940e315d11485628",
+      "bytes": 1987
+    },
+    {
+      "file": "runs/pfx_set_dpp_br-1/wire_inbound_requests_window.json",
+      "sha256": "007017c9d62903ef7565636d35037051f1913610edb1f5f7da736bc268360798",
+      "bytes": 357
+    },
+    {
+      "file": "runs/pfx_set_dpp_dec-1/child_execution_records.json",
+      "sha256": "c1988a5f70b3bd52189c578821ef502cfb146f34fc953775d0ca6bb1ba3f0e05",
+      "bytes": 18
+    },
+    {
+      "file": "runs/pfx_set_dpp_dec-1/execute.json",
+      "sha256": "d6eb8946555763fbdb534e444fad7b65638df4271cb706563f1213eb79cb0999",
+      "bytes": 864
+    },
+    {
+      "file": "runs/pfx_set_dpp_dec-1/mock_access_log_window.txt",
+      "sha256": "3b8d7440193a058847cf2dd3bdf7cffbe7c18f60f97bd5e0eae6c69b44630320",
+      "bytes": 97
+    },
+    {
+      "file": "runs/pfx_set_dpp_dec-1/parent_execution_record.json",
+      "sha256": "ab72e07519aa66897fb76fa243b1682eea9e621e2961ce90e24f50c2e4a1bc8e",
+      "bytes": 749
+    },
+    {
+      "file": "runs/pfx_set_dpp_dec-1/parent_process_log.txt",
+      "sha256": "3dca481bf813f75f7fbcb1237cddc7f908aa020b90f748b59f81ce1492c6476e",
+      "bytes": 1831
+    },
+    {
+      "file": "runs/pfx_set_dpp_dec-1/wire_inbound_requests_window.json",
+      "sha256": "b4741f9a059ed4a40c994461b42cec3db6c54219b9bca7ab1853e444a754eff2",
+      "bytes": 358
+    },
+    {
+      "file": "runs/xr-remove-successor-1/child_execution_records.json",
+      "sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "bytes": 2
+    },
+    {
+      "file": "runs/xr-remove-successor-1/execute.json",
+      "sha256": "f5f426d4a74296ced10a86b75f5445f35547ffa23036e5de8b0406df91e3d61c",
+      "bytes": 868
+    },
+    {
+      "file": "runs/xr-remove-successor-1/mock_access_log_window.txt",
+      "sha256": "838c51f86f01e5fcf15a7f35d0369aabe2ee6fffc5df494c0cd039e72d49e8ad",
+      "bytes": 119
+    },
+    {
+      "file": "runs/xr-remove-successor-1/parent_execution_record.json",
+      "sha256": "9721c2ad88d8a2394305a6ba6f36498661cfb20bf7d3c658328d9e811081c0e1",
+      "bytes": 753
+    },
+    {
+      "file": "runs/xr-remove-successor-1/parent_process_log.txt",
+      "sha256": "0f5c2e80da0b78b6ebe49f5050f15c32b0299b9457a1676fc7a3d0d2fd0ffea5",
+      "bytes": 1657
+    },
+    {
+      "file": "runs/xr-remove-successor-1/wire_inbound_requests_window.json",
+      "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "bytes": 2
+    }
+  ]
+}

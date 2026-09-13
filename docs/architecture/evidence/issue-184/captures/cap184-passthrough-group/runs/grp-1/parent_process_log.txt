@@ -1,0 +1,18 @@
+2026-09-13T06:32:58Z	INFO	initializing...		Executing Process _TEST_184E0_pa_grp_E01840913062808
+2026-09-13T06:32:58Z	INFO	Start	NoData	Executing Start Shape
+2026-09-13T06:32:58Z	INFO	Start	NoData	1 document(s) found for processing.
+2026-09-13T06:32:58Z	INFO	Start	NoData	Shape executed successfully in 32 ms.
+2026-09-13T06:32:58Z	INFO	fan-out 3 docs		Executing Data Process Shape with 1 document(s).
+2026-09-13T06:33:01Z	INFO	fan-out 3 docs	[1] Scripting: groovy2	Executing with 1 documents in
+2026-09-13T06:33:01Z	INFO	fan-out 3 docs	[1] Scripting: groovy2	Compiling code source: script_e2f7b4c9_252
+2026-09-13T06:33:01Z	INFO	fan-out 3 docs	[1] Scripting: groovy2	Completed with 3 documents out
+2026-09-13T06:33:01Z	INFO	fan-out 3 docs		Data Process Execution (SCRIPTING) produced 3 documents.
+2026-09-13T06:33:01Z	INFO	fan-out 3 docs		Shape executed successfully in 2851 ms.
+2026-09-13T06:33:01Z	INFO	Process Call	passing in start data, no return data	Executing Process Call Shape with 3 document(s).
+2026-09-13T06:33:01Z	INFO	Process Call	passing in start data, no return data	Executing process _TEST_184E0_ch_grp_E01840913062808
+2026-09-13T06:33:01Z	INFO	Process Call	passing in start data, no return data	Shape executed successfully in 242 ms.
+2026-09-13T06:33:02Z	INFO	Connector	Sandbox CDS Mock REST (no-auth): officialboomi-X3979C-rest-prod Connector; _TEST_184E0_op_grp_child_E01840913062808	Executing Connector Shape with 3 document(s).
+2026-09-13T06:33:02Z	INFO	Connector	Sandbox CDS Mock REST (no-auth): officialboomi-X3979C-rest-prod Connector; _TEST_184E0_op_grp_child_E01840913062808	Shape executed successfully in 152 ms.
+2026-09-13T06:33:02Z	INFO	Stop	continuing process	Executing Stop Shape with 3 document(s).
+2026-09-13T06:33:02Z	INFO	Stop	continuing process	Shape executed successfully in 0 ms.
+2026-09-13T06:33:02Z	INFO	cleanup...		Process execution completed normally.

@@ -1,0 +1,33 @@
+2026-09-13T06:43:23Z	INFO	initializing...		Executing Process _TEST_184E0_pa_cache_E01840913062808
+2026-09-13T06:43:23Z	INFO	Start	NoData	Executing Start Shape
+2026-09-13T06:43:23Z	INFO	Start	NoData	1 document(s) found for processing.
+2026-09-13T06:43:23Z	INFO	Start	NoData	Shape executed successfully in 18 ms.
+2026-09-13T06:43:23Z	INFO	Branch		Executing Branch Shape with 1 document(s).
+2026-09-13T06:43:23Z	INFO	Branch		Shape executed successfully in 0 ms.
+2026-09-13T06:43:23Z	INFO	fan-out 3 cache docs		Executing Data Process Shape with 1 document(s).
+2026-09-13T06:43:23Z	INFO	fan-out 3 cache docs	[1] Scripting: groovy2	Executing with 1 documents in
+2026-09-13T06:43:23Z	INFO	fan-out 3 cache docs	[1] Scripting: groovy2	Compiling code source: script_70f857ed_254
+2026-09-13T06:43:23Z	INFO	fan-out 3 cache docs	[1] Scripting: groovy2	Completed with 3 documents out
+2026-09-13T06:43:23Z	INFO	fan-out 3 cache docs		Data Process Execution (SCRIPTING) produced 3 documents.
+2026-09-13T06:43:23Z	INFO	fan-out 3 cache docs		Shape executed successfully in 148 ms.
+2026-09-13T06:43:23Z	INFO	Document Cache Load		Shape executed successfully in 35 ms.
+2026-09-13T06:43:23Z	INFO	Message		Executing Message Shape with 1 document(s).
+2026-09-13T06:43:23Z	INFO	Message		Shape executed successfully in 4 ms.
+2026-09-13T06:43:23Z	INFO	Process Call	passing in start data, no return data	Executing Process Call Shape with 1 document(s).
+2026-09-13T06:43:23Z	INFO	Process Call	passing in start data, no return data	Executing process _TEST_184E0_ch_cache_pt_E01840913062808
+2026-09-13T06:43:23Z	INFO	Process Call	passing in start data, no return data	Shape executed successfully in 16 ms.
+2026-09-13T06:43:23Z	INFO	Document Cache Retrieve		Shape executed successfully in 16 ms.
+2026-09-13T06:43:23Z	INFO	Connector	Sandbox CDS Mock REST (no-auth): officialboomi-X3979C-rest-prod Connector; _TEST_184E0_op_cache_pt_E01840913062808	Executing Connector Shape with 3 document(s).
+2026-09-13T06:43:23Z	INFO	Connector	Sandbox CDS Mock REST (no-auth): officialboomi-X3979C-rest-prod Connector; _TEST_184E0_op_cache_pt_E01840913062808	Shape executed successfully in 47 ms.
+2026-09-13T06:43:23Z	INFO	Stop	continuing process	Executing Stop Shape with 3 document(s).
+2026-09-13T06:43:23Z	INFO	Stop	continuing process	Shape executed successfully in 1 ms.
+2026-09-13T06:43:23Z	INFO	Message		Executing Message Shape with 1 document(s).
+2026-09-13T06:43:23Z	INFO	Message		Shape executed successfully in 2 ms.
+2026-09-13T06:43:23Z	INFO	Process Call	standalone start data, no return data	Executing Process Call Shape with 1 document(s).
+2026-09-13T06:43:23Z	INFO	Process Call	standalone start data, no return data	Executing process '_TEST_184E0_ch_cache_nd_E01840913062808
+2026-09-13T06:43:23Z	INFO	Process Call	standalone start data, no return data	Shape executed successfully in 2 ms.
+2026-09-13T06:43:23Z	INFO	witness	Sandbox CDS Mock REST (no-auth): officialboomi-X3979C-rest-prod Connector; _TEST_184E0_op_w_cache_E01840913062808	Executing Connector Shape with 1 document(s).
+2026-09-13T06:43:23Z	INFO	witness	Sandbox CDS Mock REST (no-auth): officialboomi-X3979C-rest-prod Connector; _TEST_184E0_op_w_cache_E01840913062808	Shape executed successfully in 13 ms.
+2026-09-13T06:43:23Z	INFO	Stop	continuing process	Executing Stop Shape with 1 document(s).
+2026-09-13T06:43:23Z	INFO	Stop	continuing process	Shape executed successfully in 1 ms.
+2026-09-13T06:43:23Z	INFO	cleanup...		Process execution completed normally.

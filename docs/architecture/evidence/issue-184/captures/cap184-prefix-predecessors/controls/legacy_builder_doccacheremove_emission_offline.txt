@@ -1,0 +1,20 @@
+== mode=message validate_err=None
+   shape1   start              -> ['shape2']
+   shape2   connectoraction    -> ['shape3']
+   shape3   message            -> ['shape4']
+   shape4   connectoraction    -> ['shape5']
+   shape5   stop               -> []
+== mode=doccacheremove validate_err=None
+   shape1   start              -> ['shape2']
+   shape2   connectoraction    -> ['shape3']
+   shape3   doccacheremove     -> ['shape4']
+   shape4   connectoraction    -> ['shape5']
+   shape5   stop               -> []
+== mode=doccacheretrieve validate_err=None
+   shape1   start              -> ['shape2']
+   shape2   connectoraction    -> ['shape3']
+   shape3   doccacheretrieve   -> ['shape4']
+   shape4   connectoraction    -> ['shape5']
+   shape5   stop               -> []
+control (message has a forward successor): True
+doccacheremove forward successor: [('doccacheremove', ['shape4'])]
