@@ -209,6 +209,7 @@ never sits uncommitted or unlisted across a validation boundary.
 | L0 pre-baseline oracle commit review | `docs/architecture/evidence/issue-184/commit-reviews/cdx-review.w3jzMM/` | collected commit review |
 | `golden-000072` replacement survivor freeze (the recorded transform of the archived `cap155-e1-source-dynamic-path` capture) | `docs/architecture/evidence/issue-184/oracle/source_dynamic_path_dpp.MANIFEST.json` | recorded transform of a proven-operable capture |
 | D12 controller refactor differential | `docs/architecture/evidence/issue-184/sweeps/d12-controller/` | measurement |
+| A8 canonical golden freeze (the recorded slice of the pre-baseline legacy oracle, with no id substitution) | `docs/architecture/evidence/issue-184/oracle/both_sides_dynamic_path.MANIFEST.json` | recorded transform of the frozen oracle |
 
 ## Final-tree validation (filled at close; every roster gate current on the FINAL sha)
 

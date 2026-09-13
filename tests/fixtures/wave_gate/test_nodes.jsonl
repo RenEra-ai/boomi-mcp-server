@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 12519, "minimum_collected": 12519, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 12526, "minimum_collected": 12526, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -12611,3 +12611,10 @@
 {"kind": "test", "id": "pytest-012610", "node_id": "tests/test_issue_184_native_sequences.py::test_a_try_catch_terminated_root_keeps_both_old_rules", "state": "active"}
 {"kind": "test", "id": "pytest-012611", "node_id": "tests/test_issue_184_native_sequences.py::test_the_branch_point_refused_the_admitted_root_and_prefix_forms", "state": "active"}
 {"kind": "test", "id": "pytest-012612", "node_id": "tests/test_issue_184_native_sequences.py::test_the_root_read_kinds_are_the_connector_walks_document_producers", "state": "active"}
+{"kind": "test", "id": "pytest-012613", "node_id": "tests/test_issue_184_cutover.py::test_the_canonical_render_emits_the_frozen_oracles_shapes_byte_for_byte", "state": "active"}
+{"kind": "test", "id": "pytest-012614", "node_id": "tests/test_issue_184_cutover.py::test_the_oracle_binds_a_path_on_both_connectors_with_the_target_writer_after_the_map", "state": "active"}
+{"kind": "test", "id": "pytest-012615", "node_id": "tests/test_issue_184_cutover.py::test_the_map_transforms_the_read_profile_into_the_request_profile", "state": "active"}
+{"kind": "test", "id": "pytest-012616", "node_id": "tests/test_issue_184_cutover.py::test_the_hoisted_writer_form_is_refused_on_the_empty_scheduled_entry", "state": "active"}
+{"kind": "test", "id": "pytest-012617", "node_id": "tests/test_issue_184_cutover.py::test_the_no_map_both_bound_form_compiles_but_is_not_the_oracle", "state": "active"}
+{"kind": "test", "id": "pytest-012618", "node_id": "tests/test_issue_184_cutover.py::test_a_target_writer_reading_the_pre_map_profile_is_refused", "state": "active"}
+{"kind": "test", "id": "pytest-012619", "node_id": "tests/test_wave_gate_goldens.py::test_golden_manifest_row[golden-000081]", "state": "active"}

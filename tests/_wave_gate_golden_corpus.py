@@ -1310,7 +1310,47 @@ def _issue155_case(name):
     return render
 
 
-def _issue184_case(name):
+def issue184_symbols():
+    """Symbols for the #184 A8 canonical case, with the frozen legacy oracle's ids.
+
+    A separate table on purpose: the mapped both-sides spelling needs the GET's
+    response profile and the PATCH's request profile to be DIFFERENT identities, with
+    the map transforming one into the other. ``issue155_symbols()`` binds every call
+    and the map to one profile, which would let a wrong map read the right profile
+    and pass. The component ids are the ones the oracle's config names (`RCONN`/`ROP`,
+    `CONN-UUID`/`OP-UUID`, `MAP-UUID`, `PROFILE-REQUEST`), so the canonical render
+    can be byte-compared with the legacy one.
+    """
+    from boomi_mcp.compiler.process_ir import connector_capabilities as CC
+    from boomi_mcp.compiler.process_ir.contracts import ComponentSymbolV1, SymbolTableV1
+
+    rest = CC.REST_FAMILY
+    return SymbolTableV1(
+        symbols=[
+            ComponentSymbolV1(ref="$ref:RCONN", component_id="RCONN",
+                              component_type="connector-settings", connector_type=rest),
+            ComponentSymbolV1(ref="$ref:ROP", component_id="ROP",
+                              component_type="connector-action", connector_type=rest,
+                              action_type="GET", connection_ref="$ref:RCONN",
+                              output_profile_ref="$ref:PREAD"),
+            ComponentSymbolV1(ref="$ref:CONN", component_id="CONN-UUID",
+                              component_type="connector-settings", connector_type=rest),
+            ComponentSymbolV1(ref="$ref:OP", component_id="OP-UUID",
+                              component_type="connector-action", connector_type=rest,
+                              action_type="PATCH", connection_ref="$ref:CONN",
+                              input_profile_ref="$ref:PREQ"),
+            ComponentSymbolV1(ref="$ref:MAP", component_id="MAP-UUID",
+                              component_type="transform.map",
+                              input_profile_ref="$ref:PREAD", output_profile_ref="$ref:PREQ"),
+            ComponentSymbolV1(ref="$ref:PREAD", component_id="PROFILE-READ",
+                              component_type="profile.json"),
+            ComponentSymbolV1(ref="$ref:PREQ", component_id="PROFILE-REQUEST",
+                              component_type="profile.json"),
+        ]
+    )
+
+
+def _issue184_case(name, symbols_factory=None):
     """#184 canonical cases, rendered exactly as the #155 ones are.
 
     ``issue155_symbols()`` on purpose: the replacement survivor's expected bytes are
@@ -1326,7 +1366,7 @@ def _issue184_case(name):
             (_HERE / "fixtures" / "process_ir" / "issue184" / (name + ".json"))
             .read_text(encoding="utf-8")
         )
-        symbols = issue155_symbols()
+        symbols = (symbols_factory or issue155_symbols)()
         _cfg, plan = error_compile(doc, symbols)
         return emit_process(plan, symbols).process_xml
 
@@ -1966,6 +2006,11 @@ def _build_registry():
         # entry, which #184 refuses. Its safe replacement keeps the source role and
         # composes the path from a run-supplied process property instead.
         "issue184:source_dynamic_path_dpp": ("process-xml-v1", _issue184_case("source_dynamic_path_dpp")),
+        # #184 A8: the canonical mapped both-sides dynamic path, byte-compared with the
+        # legacy oracle `dynamic_path:both_sides` (golden-000079) it retires.
+        "issue184:both_sides_dynamic_path": (
+            "process-xml-v1", _issue184_case("both_sides_dynamic_path", symbols_factory=issue184_symbols)
+        ),
         "issue155:target_dynamic_path_profile": ("process-xml-v1", _issue155_case("target_dynamic_path_profile")),
         "issue155:target_dynamic_path_ddp": ("process-xml-v1", _issue155_case("target_dynamic_path_ddp")),
         # H3 — #180 the effect-declaration channel, through the PUBLIC chain

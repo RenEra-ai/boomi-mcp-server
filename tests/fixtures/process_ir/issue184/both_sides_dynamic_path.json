@@ -1,0 +1,62 @@
+{
+ "body": {
+  "kind": "sequence",
+  "steps": [
+   {
+    "kind": "set_ddp",
+    "name": "DDP_PATH_SOURCE",
+    "source_values": [
+     {
+      "value": "/v1/customers/",
+      "value_type": "static"
+     },
+     {
+      "default_value": "",
+      "property_name": "seed_id",
+      "value_type": "dpp"
+     }
+    ]
+   },
+   {
+    "kind": "connector_call",
+    "operation_ref": "$ref:ROP",
+    "path_binding": {
+     "property_name": "DDP_PATH_SOURCE"
+    }
+   },
+   {
+    "kind": "map_ref",
+    "map_ref": "$ref:MAP"
+   },
+   {
+    "kind": "set_ddp",
+    "name": "DDP_PATH_TARGET",
+    "source_values": [
+     {
+      "value": "/v1/requests/",
+      "value_type": "static"
+     },
+     {
+      "element_id": "3",
+      "element_name": "requestId (Root/Object/requestId)",
+      "profile_ref": "$ref:PREQ",
+      "profile_type": "profile.json",
+      "value_type": "profile"
+     }
+    ]
+   },
+   {
+    "kind": "connector_call",
+    "operation_ref": "$ref:OP",
+    "path_binding": {
+     "property_name": "DDP_PATH_TARGET",
+     "request_profile_ref": "$ref:PREQ"
+    }
+   },
+   {
+    "kind": "stop"
+   }
+  ]
+ },
+ "version": "1"
+}

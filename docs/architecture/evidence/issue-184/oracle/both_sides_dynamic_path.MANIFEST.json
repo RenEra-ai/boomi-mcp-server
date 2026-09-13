@@ -1,0 +1,14 @@
+{
+  "fixture": "tests/fixtures/process_ir/issue184/both_sides_dynamic_path.json",
+  "fixture_sha256": "7e217f6c38c481774052666e20e87d64fce85810fd9df23f52da5e654355e633",
+  "golden": "tests/fixtures/golden_xml/issue184_both_sides_dynamic_path.xml",
+  "golden_bytes": 3916,
+  "golden_sha256": "13d64939bb283887049bf82d4c197f3d10f489c0d001a053e1a863d0509ba048",
+  "interpreter": "3.12.13",
+  "oracle": "tests/fixtures/golden_xml/dynamic_path_both_sides.xml",
+  "oracle_sha256": "633a197f3b67a0773a828acb378451d64183ca63a8c5ef60ddb095bbc053aede",
+  "purpose": "#184 A8 canonical golden, cut from the pre-baseline legacy oracle",
+  "shapes_slice_sha256": "0e4448de9b33dc12c8ef08e7e2db6a0912448269539d6a2f7dc29327a57b4825",
+  "substitutions": [],
+  "wrapper": "<process xmlns=\"\"> + shapes + </process>"
+}
