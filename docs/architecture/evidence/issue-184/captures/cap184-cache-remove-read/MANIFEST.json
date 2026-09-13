@@ -1,0 +1,281 @@
+{
+  "issue": 184,
+  "round": "e1",
+  "capture_id": "cap184-cache-remove-read",
+  "kind": "live confirmation evidence for QA-184-e0-01/02/03 \u2014 no #184 code imported",
+  "account_id": "trainingglebbochkarov-16926N",
+  "branch_point_sha": "cbab28ffc176ddb2378283cf7132eb9c37afc374",
+  "nonce": "E11840913073745",
+  "utc_window": {
+    "start": "2026-09-13T07:37:48.972125+00:00",
+    "end": "2026-09-13T07:41:14.252460+00:00"
+  },
+  "code_imported_from": "pristine worktree wt-cbab28f (detached at the branch point)",
+  "tree_stamps": {
+    "provision_start": {
+      "wt_head": "cbab28ffc176ddb2378283cf7132eb9c37afc374",
+      "wt_head_is_branch_point": true,
+      "wt_tracked_dirty": false,
+      "code_files": 216,
+      "code_sha256": "3f91edaf722e483aa6c0cbad2e30be700e35317cb192a75c3403ec0a071de907"
+    },
+    "provision_end": {
+      "wt_head": "cbab28ffc176ddb2378283cf7132eb9c37afc374",
+      "wt_head_is_branch_point": true,
+      "wt_tracked_dirty": false,
+      "code_files": 216,
+      "code_sha256": "3f91edaf722e483aa6c0cbad2e30be700e35317cb192a75c3403ec0a071de907"
+    },
+    "runs": [
+      "{\"code_files\": 216, \"code_sha256\": \"3f91edaf722e483aa6c0cbad2e30be700e35317cb192a75c3403ec0a071de907\", \"wt_head\": \"cbab28ffc176ddb2378283cf7132eb9c37afc374\", \"wt_head_is_branch_point\": true, \"wt_tracked_dirty\": false}"
+    ]
+  },
+  "counterparty_channels": [
+    "cds-mock access log (docker logs --since <run start>), verbatim per run",
+    "sidecar AF_PACKET capture of TCP :8081 in cds-mock's netns (cap184-sniff), reassembled per run; positive control body E1CTRL-body-canary-1"
+  ],
+  "reused_e0_fixtures": {
+    "e0_cache": {
+      "id": "0370d8d8-2c63-42d7-ae11-9aa5bbf64262",
+      "stored_redacted_sha256": "1b7d71a150e551880913b8d84d602efd6c65b5a28d06867e7708c38330c55bad",
+      "version": "1",
+      "archived": {
+        "file": "reused/e0_cache.stored.xml",
+        "sha256": "1b7d71a150e551880913b8d84d602efd6c65b5a28d06867e7708c38330c55bad",
+        "bytes": 948
+      }
+    },
+    "e0_profile": {
+      "id": "61449393-c75f-4ec0-a035-3f841ccc4f18",
+      "stored_redacted_sha256": "544deb011c0188e8b1b8910447feafbde48b787b6ff9ca9384faf2d4402e5d30",
+      "version": "1",
+      "archived": {
+        "file": "reused/e0_profile.stored.xml",
+        "sha256": "544deb011c0188e8b1b8910447feafbde48b787b6ff9ca9384faf2d4402e5d30",
+        "bytes": 1174
+      }
+    },
+    "e0_op_blank": {
+      "id": "187aa243-5f7a-44a2-be07-4ba92ed32fff",
+      "stored_redacted_sha256": "953a795026916d59c5b9952d9131a0274aa18d6c8791ef560777a00a74acfd53",
+      "version": "1",
+      "archived": {
+        "file": "reused/e0_op_blank.stored.xml",
+        "sha256": "953a795026916d59c5b9952d9131a0274aa18d6c8791ef560777a00a74acfd53",
+        "bytes": 1296
+      }
+    }
+  },
+  "components": [
+    {
+      "role": "op_w_rr",
+      "id": "077bbfb3-9ed8-4a3b-90a1-3bdd30adaf9b",
+      "name": "_TEST_184E1_op_w_rr_E11840913073745",
+      "kind": "connector-action",
+      "provenance": "REST operation raw XML: the #156 oracle p1 shape (live-captured from _QA_FIXTURE_155_G1_src_GET), verb POST, returnApplicationErrors=true; static path '/__E1_184__/E11840913073745/rr/witness'",
+      "stored_version": "1",
+      "submitted_sha256": "c6d25e8540d5b212f436768e2972f84c22c60eb3f1050e0fb5945cdf51d87593",
+      "stored_redacted_sha256": "8e11eefac6df9fa397578ee96d1cec8d4a8b49353a66cf0f718f048d3e661f43",
+      "shapes_stored_equal_submitted_modulo_entities": null,
+      "shapes_stored_byte_equal": null
+    },
+    {
+      "role": "op_rr_after",
+      "id": "53189b4a-7c9c-4e74-9685-93eb94b1d11b",
+      "name": "_TEST_184E1_op_rr_after_E11840913073745",
+      "kind": "connector-action",
+      "provenance": "REST operation raw XML: the #156 oracle p1 shape (live-captured from _QA_FIXTURE_155_G1_src_GET), verb POST, returnApplicationErrors=true; static path '/__E1_184__/E11840913073745/rr/after-retrieve'",
+      "stored_version": "1",
+      "submitted_sha256": "ca3d0021fdc3b8072f3e6f0ae5e61e0c648c21278345b09cf6b9125c5dd49986",
+      "stored_redacted_sha256": "582278da0a86feb51f0ef6dcd7bcef8f90e5383b6537e6bd1409c85864859544",
+      "shapes_stored_equal_submitted_modulo_entities": null,
+      "shapes_stored_byte_equal": null
+    },
+    {
+      "role": "rr_remove_then_retrieve",
+      "id": "b0664928-6977-4a44-94b7-00bdd6b15065",
+      "name": "_TEST_184E1_rr_remove_then_retrieve_E11840913073745",
+      "kind": "process",
+      "provenance": [
+        "legacy renderer at branch point cbab28f (wt-cbab28f process_emitters/rendering.py)",
+        "Remove(all) -> Retrieve(all) -> connector; cache primed in Branch leg 2"
+      ],
+      "stored_version": "1",
+      "submitted_sha256": "e280d0e24d251be42f222a2fdde1b878332d9b6eed986c0229ed1512c3cf601b",
+      "stored_redacted_sha256": "251522c4678abe2a491713e7811d9fd3200b9ad08ac9008b5a64dfbb30e028bc",
+      "shapes_stored_equal_submitted_modulo_entities": true,
+      "shapes_stored_byte_equal": false
+    }
+  ],
+  "deployments": [
+    {
+      "role": "rr_remove_then_retrieve",
+      "component_id": "b0664928-6977-4a44-94b7-00bdd6b15065",
+      "package_id": "1927b3b4-7129-4734-8919-0cf12aceca42",
+      "deployment_id": "9c27e24c-4639-4f67-9235-9f64019d3cf2",
+      "utc": "2026-09-13T07:38:54.529522+00:00",
+      "package_success": true,
+      "deploy_success": true,
+      "undeploy_success": true,
+      "undeployed": true
+    }
+  ],
+  "licensing_standard_test": {
+    "licensing_before": {
+      "purchased": 3,
+      "used": 3
+    },
+    "licensing_after_deploy": {
+      "purchased": 3,
+      "used": 3
+    },
+    "licensing_after_teardown": {
+      "enterprise": {
+        "purchased": 0,
+        "used": 0
+      },
+      "enterprise_test": {
+        "purchased": 0,
+        "used": 0
+      },
+      "small_business": {
+        "purchased": 0,
+        "used": 0
+      },
+      "small_business_test": {
+        "purchased": 0,
+        "used": 0
+      },
+      "standard": {
+        "purchased": 3,
+        "used": 0
+      },
+      "standard_test": {
+        "purchased": 3,
+        "used": 3
+      },
+      "trading_partner": {
+        "purchased": 3,
+        "used": 0
+      },
+      "trading_partner_test": {
+        "purchased": 3,
+        "used": 0
+      }
+    }
+  },
+  "runs": [
+    {
+      "run_id": "rr",
+      "root_role": "rr_remove_then_retrieve",
+      "root_id": "b0664928-6977-4a44-94b7-00bdd6b15065",
+      "started_utc": "2026-09-13T07:40:47.411362+00:00",
+      "ended_utc": "2026-09-13T07:41:14.252460+00:00",
+      "execution_id": "execution-453fb164-a4e0-4d06-aeac-90761e27709d-2026.09.13",
+      "record": {
+        "status": "COMPLETE",
+        "executionType": "exec_manual",
+        "inboundDocumentCount": 1,
+        "outboundDocumentCount": 1,
+        "inboundErrorDocumentCount": 0,
+        "message": null,
+        "executionTime": "2026-09-13T07:40:48Z"
+      },
+      "mock_window": [
+        "INFO:     172.19.0.1:55562 - \"POST /__E1_184__/E11840913073745/rr/witness HTTP/1.1\" 404 Not Found"
+      ],
+      "wire": [
+        {
+          "client": "172.19.0.1:55562",
+          "start_line": "POST /__E1_184__/E11840913073745/rr/witness HTTP/1.1",
+          "body": "",
+          "body_bytes": 0
+        }
+      ],
+      "skip_lines": [
+        "2026-09-13T07:40:48Z\tINFO\tDocument Cache Remove\t\tNo documents found. Skipping execution for the Document Cache Retrieve step."
+      ]
+    }
+  ],
+  "verdict": {
+    "rows": [
+      {
+        "row": "Remove from Cache(all) -> Retrieve from Cache(all) -> connector, cache primed in an earlier leg: the retrieve runs",
+        "verdict": "REFUTE",
+        "checks": {
+          "status_COMPLETE": true,
+          "remove_skip_line_present": true,
+          "retrieve_never_executed": true,
+          "mock_window_is_exactly_the_witness": true,
+          "no_after_retrieve_request": true
+        },
+        "observation": "REFUTED: 'Document Cache Remove\t\tNo documents found. Skipping execution for the Document Cache Retrieve step.'.",
+        "evidence": [
+          "runs/rr/*"
+        ]
+      }
+    ]
+  },
+  "artifacts": [
+    {
+      "file": "components/op_rr_after.stored.xml",
+      "sha256": "582278da0a86feb51f0ef6dcd7bcef8f90e5383b6537e6bd1409c85864859544",
+      "bytes": 1344
+    },
+    {
+      "file": "components/op_rr_after.submitted.xml",
+      "sha256": "ca3d0021fdc3b8072f3e6f0ae5e61e0c648c21278345b09cf6b9125c5dd49986",
+      "bytes": 989
+    },
+    {
+      "file": "components/op_w_rr.stored.xml",
+      "sha256": "8e11eefac6df9fa397578ee96d1cec8d4a8b49353a66cf0f718f048d3e661f43",
+      "bytes": 1333
+    },
+    {
+      "file": "components/op_w_rr.submitted.xml",
+      "sha256": "c6d25e8540d5b212f436768e2972f84c22c60eb3f1050e0fb5945cdf51d87593",
+      "bytes": 978
+    },
+    {
+      "file": "components/rr_remove_then_retrieve.stored.xml",
+      "sha256": "251522c4678abe2a491713e7811d9fd3200b9ad08ac9008b5a64dfbb30e028bc",
+      "bytes": 4693
+    },
+    {
+      "file": "components/rr_remove_then_retrieve.submitted.xml",
+      "sha256": "e280d0e24d251be42f222a2fdde1b878332d9b6eed986c0229ed1512c3cf601b",
+      "bytes": 4429
+    },
+    {
+      "file": "runs/rr/execute.json",
+      "sha256": "d06eea97f69ddc1e891f7faa90e89db71d6c8ecc1f8eab35b3c4f4dda3597c62",
+      "bytes": 873
+    },
+    {
+      "file": "runs/rr/execution_record.json",
+      "sha256": "52ca3fcf8c5e03d09357cc53d0fb49dd46bd5771c142b43672fe6c4b158f2dd4",
+      "bytes": 757
+    },
+    {
+      "file": "runs/rr/mock_access_log_window.txt",
+      "sha256": "981c100ff3c4dc3aa3422149e2eeea3c914db07a04f485f92a80b761682ac83f",
+      "bytes": 98
+    },
+    {
+      "file": "runs/rr/process_log.txt",
+      "sha256": "48f60f2225ff6aed5be0708d3f1698f71996b88264c42356a73a535e2ef4462b",
+      "bytes": 1894
+    },
+    {
+      "file": "runs/rr/process_log_skip_lines.txt",
+      "sha256": "47b38c49810cb4813c9adbb0a33e529616c529814f52b1d1b7d3a2f26a8e738f",
+      "bytes": 126
+    },
+    {
+      "file": "runs/rr/wire_inbound_requests_window.json",
+      "sha256": "1f928dd8e6a4059cd68d191a3d15908990ea8896db8b09e6f7a73ad7460f1ea9",
+      "bytes": 155
+    }
+  ]
+}

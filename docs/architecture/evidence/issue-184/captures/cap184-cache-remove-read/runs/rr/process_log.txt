@@ -1,0 +1,20 @@
+2026-09-13T07:40:48Z	INFO	initializing...		Executing Process _TEST_184E1_rr_remove_then_retrieve_E11840913073745
+2026-09-13T07:40:48Z	INFO	Start	NoData	Executing Start Shape
+2026-09-13T07:40:48Z	INFO	Start	NoData	1 document(s) found for processing.
+2026-09-13T07:40:48Z	INFO	Start	NoData	Shape executed successfully in 4 ms.
+2026-09-13T07:40:48Z	INFO	Branch		Executing Branch Shape with 1 document(s).
+2026-09-13T07:40:48Z	INFO	Branch		Shape executed successfully in 0 ms.
+2026-09-13T07:40:48Z	INFO	witness	Sandbox CDS Mock REST (no-auth): officialboomi-X3979C-rest-prod Connector; _TEST_184E1_op_w_rr_E11840913073745	Executing Connector Shape with 1 document(s).
+2026-09-13T07:40:48Z	INFO	witness	Sandbox CDS Mock REST (no-auth): officialboomi-X3979C-rest-prod Connector; _TEST_184E1_op_w_rr_E11840913073745	Shape executed successfully in 11 ms.
+2026-09-13T07:40:48Z	INFO	Stop	continuing process	Executing Stop Shape with 1 document(s).
+2026-09-13T07:40:48Z	INFO	Stop	continuing process	Shape executed successfully in 0 ms.
+2026-09-13T07:40:48Z	INFO	Message		Executing Message Shape with 1 document(s).
+2026-09-13T07:40:48Z	INFO	Message		Shape executed successfully in 0 ms.
+2026-09-13T07:40:48Z	INFO	Document Cache Load		Shape executed successfully in 11 ms.
+2026-09-13T07:40:48Z	INFO	Message		Executing Message Shape with 1 document(s).
+2026-09-13T07:40:48Z	INFO	Message		Shape executed successfully in 0 ms.
+2026-09-13T07:40:48Z	INFO	Document Cache Remove		Executing Remove from Cache Shape with 1 document(s).
+2026-09-13T07:40:48Z	INFO	Document Cache Remove		Successfully Removed Documents from Cache
+2026-09-13T07:40:48Z	INFO	Document Cache Remove		Shape executed successfully in 2 ms.
+2026-09-13T07:40:48Z	INFO	Document Cache Remove		No documents found. Skipping execution for the Document Cache Retrieve step.
+2026-09-13T07:40:48Z	INFO	cleanup...		Process execution completed normally.

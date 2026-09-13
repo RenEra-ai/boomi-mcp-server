@@ -1,0 +1,12 @@
+{
+  "capture_id": "cap184-send-then-read",
+  "verdict": "OPEN",
+  "executed": false,
+  "recorded_utc": "2026-09-13T07:46:23.001414+00:00",
+  "reason": [
+    "No cheap NON-PRODUCING operation exists on this sandbox stack.",
+    "Every REST Client call through connection 2fe488e4 returns a response document (all e0/e1 connector shapes passed a document on, including 404 responses), so a REST op is not a non-producing step.",
+    "The only sink-type candidate is a Database Send through 'Sandbox MSSQL Expert (jtds)' 9a2e06c1: it needs a dbwrite profile and DatabaseSendAction operation with no live capture on this account, process-level connection extension overrides (the base connection holds 'SET IN EXTENSION' placeholders), and a separate measurement that the Send really emits zero documents before the row could be read.",
+    "Not measured: whether a Retrieve from Cache placed after a non-producing connector runs."
+  ]
+}

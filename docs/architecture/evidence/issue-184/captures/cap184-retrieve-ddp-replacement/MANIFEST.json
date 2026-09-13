@@ -1,0 +1,698 @@
+{
+  "issue": 184,
+  "round": "e1",
+  "capture_id": "cap184-retrieve-ddp-replacement",
+  "kind": "live confirmation evidence for QA-184-e0-01/02/03 \u2014 no #184 code imported",
+  "account_id": "trainingglebbochkarov-16926N",
+  "branch_point_sha": "cbab28ffc176ddb2378283cf7132eb9c37afc374",
+  "nonce": "E11840913073745",
+  "utc_window": {
+    "start": "2026-09-13T07:37:49.441835+00:00",
+    "end": "2026-09-13T07:43:36.259379+00:00"
+  },
+  "code_imported_from": "pristine worktree wt-cbab28f (detached at the branch point)",
+  "tree_stamps": {
+    "provision_start": {
+      "wt_head": "cbab28ffc176ddb2378283cf7132eb9c37afc374",
+      "wt_head_is_branch_point": true,
+      "wt_tracked_dirty": false,
+      "code_files": 216,
+      "code_sha256": "3f91edaf722e483aa6c0cbad2e30be700e35317cb192a75c3403ec0a071de907"
+    },
+    "provision_end": {
+      "wt_head": "cbab28ffc176ddb2378283cf7132eb9c37afc374",
+      "wt_head_is_branch_point": true,
+      "wt_tracked_dirty": false,
+      "code_files": 216,
+      "code_sha256": "3f91edaf722e483aa6c0cbad2e30be700e35317cb192a75c3403ec0a071de907"
+    },
+    "runs": [
+      "{\"code_files\": 216, \"code_sha256\": \"3f91edaf722e483aa6c0cbad2e30be700e35317cb192a75c3403ec0a071de907\", \"wt_head\": \"cbab28ffc176ddb2378283cf7132eb9c37afc374\", \"wt_head_is_branch_point\": true, \"wt_tracked_dirty\": false}"
+    ]
+  },
+  "counterparty_channels": [
+    "cds-mock access log (docker logs --since <run start>), verbatim per run",
+    "sidecar AF_PACKET capture of TCP :8081 in cds-mock's netns (cap184-sniff), reassembled per run; positive control body E1CTRL-body-canary-1"
+  ],
+  "reused_e0_fixtures": {
+    "e0_cache": {
+      "id": "0370d8d8-2c63-42d7-ae11-9aa5bbf64262",
+      "stored_redacted_sha256": "1b7d71a150e551880913b8d84d602efd6c65b5a28d06867e7708c38330c55bad",
+      "version": "1",
+      "archived": {
+        "file": "reused/e0_cache.stored.xml",
+        "sha256": "1b7d71a150e551880913b8d84d602efd6c65b5a28d06867e7708c38330c55bad",
+        "bytes": 948
+      }
+    },
+    "e0_profile": {
+      "id": "61449393-c75f-4ec0-a035-3f841ccc4f18",
+      "stored_redacted_sha256": "544deb011c0188e8b1b8910447feafbde48b787b6ff9ca9384faf2d4402e5d30",
+      "version": "1",
+      "archived": {
+        "file": "reused/e0_profile.stored.xml",
+        "sha256": "544deb011c0188e8b1b8910447feafbde48b787b6ff9ca9384faf2d4402e5d30",
+        "bytes": 1174
+      }
+    },
+    "e0_op_blank": {
+      "id": "187aa243-5f7a-44a2-be07-4ba92ed32fff",
+      "stored_redacted_sha256": "953a795026916d59c5b9952d9131a0274aa18d6c8791ef560777a00a74acfd53",
+      "version": "1",
+      "archived": {
+        "file": "reused/e0_op_blank.stored.xml",
+        "sha256": "953a795026916d59c5b9952d9131a0274aa18d6c8791ef560777a00a74acfd53",
+        "bytes": 1296
+      }
+    }
+  },
+  "components": [
+    {
+      "role": "op_w_r1",
+      "id": "a9b343f4-8707-4631-a432-2d08ba3fc125",
+      "name": "_TEST_184E1_op_w_r1_E11840913073745",
+      "kind": "connector-action",
+      "provenance": "REST operation raw XML: the #156 oracle p1 shape (live-captured from _QA_FIXTURE_155_G1_src_GET), verb POST, returnApplicationErrors=true; static path '/__E1_184__/E11840913073745/r1/witness'",
+      "stored_version": "1",
+      "submitted_sha256": "95f25d0dbddfd56d8e813ce01872211035923995ba71563bce6bf50b9ebbdf91",
+      "stored_redacted_sha256": "e4cbf9a472ac39d516d817996d8f28900dc2eac541f2bed77d5d35193f92abc5",
+      "shapes_stored_equal_submitted_modulo_entities": null,
+      "shapes_stored_byte_equal": null
+    },
+    {
+      "role": "op_w_r2",
+      "id": "4af7cdcf-a293-49ce-af35-c10bac90e653",
+      "name": "_TEST_184E1_op_w_r2_E11840913073745",
+      "kind": "connector-action",
+      "provenance": "REST operation raw XML: the #156 oracle p1 shape (live-captured from _QA_FIXTURE_155_G1_src_GET), verb POST, returnApplicationErrors=true; static path '/__E1_184__/E11840913073745/r2/witness'",
+      "stored_version": "1",
+      "submitted_sha256": "8475cc21ee81fed6ca0074fc33b3b0c7fabc711f12e1e24361e2f20d1e801c1b",
+      "stored_redacted_sha256": "230aaae406b97617e7330e0ab4d892e147393f98ea4a77baf5bd3a2490a7b50e",
+      "shapes_stored_equal_submitted_modulo_entities": null,
+      "shapes_stored_byte_equal": null
+    },
+    {
+      "role": "op_w_r3",
+      "id": "0820efbb-e2df-4952-a26d-dcd68c80523c",
+      "name": "_TEST_184E1_op_w_r3_E11840913073745",
+      "kind": "connector-action",
+      "provenance": "REST operation raw XML: the #156 oracle p1 shape (live-captured from _QA_FIXTURE_155_G1_src_GET), verb POST, returnApplicationErrors=true; static path '/__E1_184__/E11840913073745/r3/witness'",
+      "stored_version": "1",
+      "submitted_sha256": "d3644e25bf02f03c9747dde53aa63e9692e7b34a2e9b8206c92c03f19eb4b3c7",
+      "stored_redacted_sha256": "679bbf86cda67520f149be11f740384783b298efd19ba578f452d5d0f4e87815",
+      "shapes_stored_equal_submitted_modulo_entities": null,
+      "shapes_stored_byte_equal": null
+    },
+    {
+      "role": "op_w_r4",
+      "id": "570c42d0-488b-4d20-80d2-fc235856a13e",
+      "name": "_TEST_184E1_op_w_r4_E11840913073745",
+      "kind": "connector-action",
+      "provenance": "REST operation raw XML: the #156 oracle p1 shape (live-captured from _QA_FIXTURE_155_G1_src_GET), verb POST, returnApplicationErrors=true; static path '/__E1_184__/E11840913073745/r4/witness'",
+      "stored_version": "1",
+      "submitted_sha256": "ef708efb37be633673e39735dcf34555bc1eabe71fa166fe984a957ee4246487",
+      "stored_redacted_sha256": "5f3227257469c386b648723fd39ed4eeb3b4663fa2ebc934d6d38358ac03484a",
+      "shapes_stored_equal_submitted_modulo_entities": null,
+      "shapes_stored_byte_equal": null
+    },
+    {
+      "role": "r1_ddp_replacement",
+      "id": "3b2e566a-50f8-4e6c-875d-02a37b43bc9f",
+      "name": "_TEST_184E1_r1_ddp_replacement_E11840913073745",
+      "kind": "process",
+      "provenance": [
+        "legacy renderer at branch point cbab28f (wt-cbab28f process_emitters/rendering.py)",
+        "cached doc carries X=cached; current doc sets X=current before the retrieve"
+      ],
+      "stored_version": "1",
+      "submitted_sha256": "d640f7c2ed44b420c6e194d2ad88591c7e0ba5def42669919741f300ea05316f",
+      "stored_redacted_sha256": "7da7458386efb35e05c35e59e66054c48b91f60164dbb7d7be67a5b1b551ed53",
+      "shapes_stored_equal_submitted_modulo_entities": true,
+      "shapes_stored_byte_equal": false
+    },
+    {
+      "role": "r2_ddp_replacement",
+      "id": "489aca99-07a4-4742-b586-2f62b216f7dd",
+      "name": "_TEST_184E1_r2_ddp_replacement_E11840913073745",
+      "kind": "process",
+      "provenance": [
+        "legacy renderer at branch point cbab28f (wt-cbab28f process_emitters/rendering.py)",
+        "cached doc carries NO X; current doc sets X=current before the retrieve"
+      ],
+      "stored_version": "1",
+      "submitted_sha256": "3024bc7b7b5fe197e59605ad142ee3e50f4900776e5fea379db03f136bbf947a",
+      "stored_redacted_sha256": "463faf53fb8e50d4fdae5ec2771dd42e3aa2acc838dcd03b080923df28ef3a13",
+      "shapes_stored_equal_submitted_modulo_entities": true,
+      "shapes_stored_byte_equal": false
+    },
+    {
+      "role": "r3_ddp_replacement",
+      "id": "9877a38a-13af-42c6-b845-b5dcc929916b",
+      "name": "_TEST_184E1_r3_ddp_replacement_E11840913073745",
+      "kind": "process",
+      "provenance": [
+        "legacy renderer at branch point cbab28f (wt-cbab28f process_emitters/rendering.py)",
+        "control: cached doc carries X=cached; current doc sets nothing"
+      ],
+      "stored_version": "1",
+      "submitted_sha256": "cd19efc812456f613db2822a5c6a48cad1b5ce7d78b3f069a73bebfa7c239b22",
+      "stored_redacted_sha256": "e45c4bc3ea6331dfd5f4bd3e96eb219703b91ac74ff8de28c7ec2c34235d6058",
+      "shapes_stored_equal_submitted_modulo_entities": true,
+      "shapes_stored_byte_equal": false
+    },
+    {
+      "role": "r4_ddp_replacement",
+      "id": "d80bb12c-9b75-4ca1-935a-7c184411cd2d",
+      "name": "_TEST_184E1_r4_ddp_replacement_E11840913073745",
+      "kind": "process",
+      "provenance": [
+        "legacy renderer at branch point cbab28f (wt-cbab28f process_emitters/rendering.py)",
+        "as r1 plus Y=current set only on the current doc; X and Y each bound on a connector in a Branch after the retrieve"
+      ],
+      "stored_version": "1",
+      "submitted_sha256": "dfc5e41a8c5568ccc6bb576d3edab3c84c05ef0f979086bf2c8c95a53a0fbe93",
+      "stored_redacted_sha256": "1f465f81a822c225ffbf338c292e7efb574ce36e46151de5c9e61dd6ea618a97",
+      "shapes_stored_equal_submitted_modulo_entities": true,
+      "shapes_stored_byte_equal": false
+    }
+  ],
+  "deployments": [
+    {
+      "role": "r1_ddp_replacement",
+      "component_id": "3b2e566a-50f8-4e6c-875d-02a37b43bc9f",
+      "package_id": "484ba3c4-b94b-4db0-bd27-6bc8dc5fbaf7",
+      "deployment_id": "4f3a3ec6-04a0-4e81-b455-300c92a02931",
+      "utc": "2026-09-13T07:38:56.708879+00:00",
+      "package_success": true,
+      "deploy_success": true,
+      "undeploy_success": true,
+      "undeployed": true
+    },
+    {
+      "role": "r2_ddp_replacement",
+      "component_id": "489aca99-07a4-4742-b586-2f62b216f7dd",
+      "package_id": "5afb7a0c-3582-4134-b85c-06225c1a88b1",
+      "deployment_id": "06da81a6-5bba-4874-8b59-61acdb00f44f",
+      "utc": "2026-09-13T07:38:58.549666+00:00",
+      "package_success": true,
+      "deploy_success": true,
+      "undeploy_success": true,
+      "undeployed": true
+    },
+    {
+      "role": "r3_ddp_replacement",
+      "component_id": "9877a38a-13af-42c6-b845-b5dcc929916b",
+      "package_id": "38fcff21-2433-4c22-8481-d8121752a6a9",
+      "deployment_id": "44bc5326-cb22-44a0-8ffb-f314fdfb4390",
+      "utc": "2026-09-13T07:39:00.933072+00:00",
+      "package_success": true,
+      "deploy_success": true,
+      "undeploy_success": true,
+      "undeployed": true
+    },
+    {
+      "role": "r4_ddp_replacement",
+      "component_id": "d80bb12c-9b75-4ca1-935a-7c184411cd2d",
+      "package_id": "0829ea0b-1d3f-4290-8407-73475df563c5",
+      "deployment_id": "3786baf7-5625-4de1-be20-19fd7f94000f",
+      "utc": "2026-09-13T07:39:03.073555+00:00",
+      "package_success": true,
+      "deploy_success": true,
+      "undeploy_success": true,
+      "undeployed": true
+    }
+  ],
+  "licensing_standard_test": {
+    "licensing_before": {
+      "purchased": 3,
+      "used": 3
+    },
+    "licensing_after_deploy": {
+      "purchased": 3,
+      "used": 3
+    },
+    "licensing_after_teardown": {
+      "enterprise": {
+        "purchased": 0,
+        "used": 0
+      },
+      "enterprise_test": {
+        "purchased": 0,
+        "used": 0
+      },
+      "small_business": {
+        "purchased": 0,
+        "used": 0
+      },
+      "small_business_test": {
+        "purchased": 0,
+        "used": 0
+      },
+      "standard": {
+        "purchased": 3,
+        "used": 0
+      },
+      "standard_test": {
+        "purchased": 3,
+        "used": 3
+      },
+      "trading_partner": {
+        "purchased": 3,
+        "used": 0
+      },
+      "trading_partner_test": {
+        "purchased": 3,
+        "used": 0
+      }
+    }
+  },
+  "runs": [
+    {
+      "run_id": "r1",
+      "root_role": "r1_ddp_replacement",
+      "root_id": "3b2e566a-50f8-4e6c-875d-02a37b43bc9f",
+      "started_utc": "2026-09-13T07:41:55.431515+00:00",
+      "ended_utc": "2026-09-13T07:42:28.214095+00:00",
+      "execution_id": "execution-42daad4c-1e97-4af7-ab7d-e4a96520c907-2026.09.13",
+      "record": {
+        "status": "COMPLETE",
+        "executionType": "exec_manual",
+        "inboundDocumentCount": 1,
+        "outboundDocumentCount": 2,
+        "inboundErrorDocumentCount": 0,
+        "message": null,
+        "executionTime": "2026-09-13T07:41:56Z"
+      },
+      "mock_window": [
+        "INFO:     172.19.0.1:62950 - \"POST /__E1_184__/E11840913073745/r1/witness HTTP/1.1\" 404 Not Found",
+        "INFO:     172.19.0.1:62960 - \"POST /__E1_184__/E11840913073745/r1/X-cached HTTP/1.1\" 404 Not Found"
+      ],
+      "wire": [
+        {
+          "client": "172.19.0.1:62950",
+          "start_line": "POST /__E1_184__/E11840913073745/r1/witness HTTP/1.1",
+          "body": "",
+          "body_bytes": 0
+        },
+        {
+          "client": "172.19.0.1:62960",
+          "start_line": "POST /__E1_184__/E11840913073745/r1/X-cached HTTP/1.1",
+          "body": "{\"k\": \"E11840913073745-r1-cached\"}",
+          "body_bytes": 34
+        }
+      ],
+      "skip_lines": []
+    },
+    {
+      "run_id": "r2",
+      "root_role": "r2_ddp_replacement",
+      "root_id": "489aca99-07a4-4742-b586-2f62b216f7dd",
+      "started_utc": "2026-09-13T07:42:28.272736+00:00",
+      "ended_utc": "2026-09-13T07:42:53.665270+00:00",
+      "execution_id": "execution-7ae5f2dc-2d83-48b5-80e8-f113b9bb8043-2026.09.13",
+      "record": {
+        "status": "COMPLETE",
+        "executionType": "exec_manual",
+        "inboundDocumentCount": 1,
+        "outboundDocumentCount": 2,
+        "inboundErrorDocumentCount": 0,
+        "message": null,
+        "executionTime": "2026-09-13T07:42:28Z"
+      },
+      "mock_window": [
+        "INFO:     172.19.0.1:60718 - \"POST /__E1_184__/E11840913073745/r2/witness HTTP/1.1\" 404 Not Found",
+        "INFO:     172.19.0.1:60726 - \"POST /__E1_184__/E11840913073745/r2/X-current HTTP/1.1\" 404 Not Found"
+      ],
+      "wire": [
+        {
+          "client": "172.19.0.1:60718",
+          "start_line": "POST /__E1_184__/E11840913073745/r2/witness HTTP/1.1",
+          "body": "",
+          "body_bytes": 0
+        },
+        {
+          "client": "172.19.0.1:60726",
+          "start_line": "POST /__E1_184__/E11840913073745/r2/X-current HTTP/1.1",
+          "body": "{\"k\": \"E11840913073745-r2-cached\"}",
+          "body_bytes": 34
+        }
+      ],
+      "skip_lines": []
+    },
+    {
+      "run_id": "r3",
+      "root_role": "r3_ddp_replacement",
+      "root_id": "9877a38a-13af-42c6-b845-b5dcc929916b",
+      "started_utc": "2026-09-13T07:42:53.722701+00:00",
+      "ended_utc": "2026-09-13T07:43:13.867233+00:00",
+      "execution_id": "execution-0e8c7f77-8835-4476-b52e-1e399f01ed04-2026.09.13",
+      "record": {
+        "status": "COMPLETE",
+        "executionType": "exec_manual",
+        "inboundDocumentCount": 1,
+        "outboundDocumentCount": 2,
+        "inboundErrorDocumentCount": 0,
+        "message": null,
+        "executionTime": "2026-09-13T07:42:54Z"
+      },
+      "mock_window": [
+        "INFO:     172.19.0.1:62390 - \"POST /__E1_184__/E11840913073745/r3/witness HTTP/1.1\" 404 Not Found",
+        "INFO:     172.19.0.1:62396 - \"POST /__E1_184__/E11840913073745/r3/X-cached HTTP/1.1\" 404 Not Found"
+      ],
+      "wire": [
+        {
+          "client": "172.19.0.1:62390",
+          "start_line": "POST /__E1_184__/E11840913073745/r3/witness HTTP/1.1",
+          "body": "",
+          "body_bytes": 0
+        },
+        {
+          "client": "172.19.0.1:62396",
+          "start_line": "POST /__E1_184__/E11840913073745/r3/X-cached HTTP/1.1",
+          "body": "{\"k\": \"E11840913073745-r3-cached\"}",
+          "body_bytes": 34
+        }
+      ],
+      "skip_lines": []
+    },
+    {
+      "run_id": "r4",
+      "root_role": "r4_ddp_replacement",
+      "root_id": "d80bb12c-9b75-4ca1-935a-7c184411cd2d",
+      "started_utc": "2026-09-13T07:43:13.923140+00:00",
+      "ended_utc": "2026-09-13T07:43:36.259379+00:00",
+      "execution_id": "execution-e691172d-2060-4766-94bc-34c066081c88-2026.09.13",
+      "record": {
+        "status": "COMPLETE",
+        "executionType": "exec_manual",
+        "inboundDocumentCount": 1,
+        "outboundDocumentCount": 3,
+        "inboundErrorDocumentCount": 0,
+        "message": null,
+        "executionTime": "2026-09-13T07:43:14Z"
+      },
+      "mock_window": [
+        "INFO:     172.19.0.1:62338 - \"POST /__E1_184__/E11840913073745/r4/witness HTTP/1.1\" 404 Not Found",
+        "INFO:     172.19.0.1:62342 - \"POST /__E1_184__/E11840913073745/r4/X-cached HTTP/1.1\" 404 Not Found",
+        "INFO:     172.19.0.1:62344 - \"POST /__E1_184__/E11840913073745/r4/Y-current HTTP/1.1\" 404 Not Found"
+      ],
+      "wire": [
+        {
+          "client": "172.19.0.1:62338",
+          "start_line": "POST /__E1_184__/E11840913073745/r4/witness HTTP/1.1",
+          "body": "",
+          "body_bytes": 0
+        },
+        {
+          "client": "172.19.0.1:62342",
+          "start_line": "POST /__E1_184__/E11840913073745/r4/X-cached HTTP/1.1",
+          "body": "{\"k\": \"E11840913073745-r4-cached\"}",
+          "body_bytes": 34
+        },
+        {
+          "client": "172.19.0.1:62344",
+          "start_line": "POST /__E1_184__/E11840913073745/r4/Y-current HTTP/1.1",
+          "body": "{\"k\": \"E11840913073745-r4-cached\"}",
+          "body_bytes": 34
+        }
+      ],
+      "skip_lines": []
+    }
+  ],
+  "verdict": {
+    "rows": [
+      {
+        "row": "R1 cached doc X=cached, current doc X=current -> the retrieved document's X is the CACHED value",
+        "verdict": "ADMIT",
+        "checks": {
+          "status_COMPLETE": true,
+          "mock_has_X-cached": true,
+          "mock_has_no_X-current_and_no_POST_root": true,
+          "exactly_one_bound_request_and_its_body_is_the_CACHED_document": true,
+          "witness_present": true
+        },
+        "observation": "wire: ['POST /__E1_184__/E11840913073745/r1/X-cached HTTP/1.1'] body ['{\"k\": \"E11840913073745-r1-cached\"}']",
+        "evidence": [
+          "runs/r1/*"
+        ]
+      },
+      {
+        "row": "R2 cached doc has NO X, current doc X=current -> the retrieved document's X is the CURRENT value (not empty)",
+        "verdict": "ADMIT",
+        "checks": {
+          "status_COMPLETE": true,
+          "mock_has_X-current": true,
+          "mock_has_no_X-cached_and_no_POST_root": true,
+          "exactly_one_bound_request_and_its_body_is_the_CACHED_document": true,
+          "witness_present": true
+        },
+        "observation": "wire: ['POST /__E1_184__/E11840913073745/r2/X-current HTTP/1.1'] body ['{\"k\": \"E11840913073745-r2-cached\"}']",
+        "evidence": [
+          "runs/r2/*"
+        ]
+      },
+      {
+        "row": "R3 control (repeats e0): cached doc X=cached, current doc sets nothing -> X is the CACHED value",
+        "verdict": "ADMIT",
+        "checks": {
+          "status_COMPLETE": true,
+          "mock_has_X-cached": true,
+          "mock_has_no_X-current_and_no_POST_root": true,
+          "exactly_one_bound_request_and_its_body_is_the_CACHED_document": true,
+          "witness_present": true
+        },
+        "observation": "wire: ['POST /__E1_184__/E11840913073745/r3/X-cached HTTP/1.1'] body ['{\"k\": \"E11840913073745-r3-cached\"}']",
+        "evidence": [
+          "runs/r3/*"
+        ]
+      },
+      {
+        "row": "R4 as R1 plus Y=current set ONLY on the current doc -> X is CACHED and Y SURVIVES the retrieve",
+        "verdict": "ADMIT",
+        "checks": {
+          "status_COMPLETE": true,
+          "X_request_is_X-cached": true,
+          "Y_request_is_Y-current": true,
+          "both_bodies_are_the_cached_document": true,
+          "no_POST_root": true,
+          "witness_present": true
+        },
+        "observation": "X reached the wire as X-cached and Y as Y-current, both on the cached document's body.",
+        "evidence": [
+          "runs/r4/*"
+        ]
+      },
+      {
+        "row": "Rule scope: N current documents x M cached documents (which current document's properties each retrieved document inherits)",
+        "verdict": "OPEN",
+        "checks": {
+          "measured": false
+        },
+        "observation": "Every R run retrieved exactly 1 cached document for exactly 1 current document.",
+        "evidence": []
+      }
+    ]
+  },
+  "artifacts": [
+    {
+      "file": "components/op_w_r1.stored.xml",
+      "sha256": "e4cbf9a472ac39d516d817996d8f28900dc2eac541f2bed77d5d35193f92abc5",
+      "bytes": 1333
+    },
+    {
+      "file": "components/op_w_r1.submitted.xml",
+      "sha256": "95f25d0dbddfd56d8e813ce01872211035923995ba71563bce6bf50b9ebbdf91",
+      "bytes": 978
+    },
+    {
+      "file": "components/op_w_r2.stored.xml",
+      "sha256": "230aaae406b97617e7330e0ab4d892e147393f98ea4a77baf5bd3a2490a7b50e",
+      "bytes": 1333
+    },
+    {
+      "file": "components/op_w_r2.submitted.xml",
+      "sha256": "8475cc21ee81fed6ca0074fc33b3b0c7fabc711f12e1e24361e2f20d1e801c1b",
+      "bytes": 978
+    },
+    {
+      "file": "components/op_w_r3.stored.xml",
+      "sha256": "679bbf86cda67520f149be11f740384783b298efd19ba578f452d5d0f4e87815",
+      "bytes": 1333
+    },
+    {
+      "file": "components/op_w_r3.submitted.xml",
+      "sha256": "d3644e25bf02f03c9747dde53aa63e9692e7b34a2e9b8206c92c03f19eb4b3c7",
+      "bytes": 978
+    },
+    {
+      "file": "components/op_w_r4.stored.xml",
+      "sha256": "5f3227257469c386b648723fd39ed4eeb3b4663fa2ebc934d6d38358ac03484a",
+      "bytes": 1333
+    },
+    {
+      "file": "components/op_w_r4.submitted.xml",
+      "sha256": "ef708efb37be633673e39735dcf34555bc1eabe71fa166fe984a957ee4246487",
+      "bytes": 978
+    },
+    {
+      "file": "components/r1_ddp_replacement.stored.xml",
+      "sha256": "7da7458386efb35e05c35e59e66054c48b91f60164dbb7d7be67a5b1b551ed53",
+      "bytes": 5979
+    },
+    {
+      "file": "components/r1_ddp_replacement.submitted.xml",
+      "sha256": "d640f7c2ed44b420c6e194d2ad88591c7e0ba5def42669919741f300ea05316f",
+      "bytes": 5715
+    },
+    {
+      "file": "components/r2_ddp_replacement.stored.xml",
+      "sha256": "463faf53fb8e50d4fdae5ec2771dd42e3aa2acc838dcd03b080923df28ef3a13",
+      "bytes": 5262
+    },
+    {
+      "file": "components/r2_ddp_replacement.submitted.xml",
+      "sha256": "3024bc7b7b5fe197e59605ad142ee3e50f4900776e5fea379db03f136bbf947a",
+      "bytes": 4998
+    },
+    {
+      "file": "components/r3_ddp_replacement.stored.xml",
+      "sha256": "e45c4bc3ea6331dfd5f4bd3e96eb219703b91ac74ff8de28c7ec2c34235d6058",
+      "bytes": 5255
+    },
+    {
+      "file": "components/r3_ddp_replacement.submitted.xml",
+      "sha256": "cd19efc812456f613db2822a5c6a48cad1b5ce7d78b3f069a73bebfa7c239b22",
+      "bytes": 4991
+    },
+    {
+      "file": "components/r4_ddp_replacement.stored.xml",
+      "sha256": "1f465f81a822c225ffbf338c292e7efb574ce36e46151de5c9e61dd6ea618a97",
+      "bytes": 8031
+    },
+    {
+      "file": "components/r4_ddp_replacement.submitted.xml",
+      "sha256": "dfc5e41a8c5568ccc6bb576d3edab3c84c05ef0f979086bf2c8c95a53a0fbe93",
+      "bytes": 7767
+    },
+    {
+      "file": "runs/r1/execute.json",
+      "sha256": "145377ffc9b9865be9f45222af3048a2923fef23e6c8aa003b68020ccfd7af1c",
+      "bytes": 868
+    },
+    {
+      "file": "runs/r1/execution_record.json",
+      "sha256": "820a82486f61c629963c587d0febd4f35dcd1beb2695a716cd195ffa6f78b0a3",
+      "bytes": 752
+    },
+    {
+      "file": "runs/r1/mock_access_log_window.txt",
+      "sha256": "978af3fc8c65fda5d1879ba42636912efa2de21372c55896f05083fbfdf89c52",
+      "bytes": 197
+    },
+    {
+      "file": "runs/r1/process_log.txt",
+      "sha256": "d3ee4264bf8c4d9f22ada69a237562fa734e35f583bfa4533cc38b0865009ecf",
+      "bytes": 2455
+    },
+    {
+      "file": "runs/r1/process_log_skip_lines.txt",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "file": "runs/r1/wire_inbound_requests_window.json",
+      "sha256": "eda2d1453e887340c494d5229828b4b6adadacf685613779ab4692b33dc1af9f",
+      "bytes": 348
+    },
+    {
+      "file": "runs/r2/execute.json",
+      "sha256": "b07100af36bc7868b4c008bd5b8598c0d14be98b2114a479c83ca31a60212879",
+      "bytes": 867
+    },
+    {
+      "file": "runs/r2/execution_record.json",
+      "sha256": "16af858e0cfb0c2f1cea52ee493f035797ee5ed5f7f86673ba467051b91a7a6c",
+      "bytes": 752
+    },
+    {
+      "file": "runs/r2/mock_access_log_window.txt",
+      "sha256": "46403a9505f9d863bed89c0fc5b6330139add95e435437a8c4ce1a65d98bc8ad",
+      "bytes": 198
+    },
+    {
+      "file": "runs/r2/process_log.txt",
+      "sha256": "ad96b04d4a33382c500db34bb11fbb862e3f90eab0fae75616acc33cca24e5f6",
+      "bytes": 2290
+    },
+    {
+      "file": "runs/r2/process_log_skip_lines.txt",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "file": "runs/r2/wire_inbound_requests_window.json",
+      "sha256": "657deace07bb3a653f8f195025f043e36e5e4aa42a2717c6fd77cbabf24afdd4",
+      "bytes": 349
+    },
+    {
+      "file": "runs/r3/execute.json",
+      "sha256": "8805cff6b8b9350569c420fefe5a1ae447402f126b7df12e7a2a9b7659f7e479",
+      "bytes": 867
+    },
+    {
+      "file": "runs/r3/execution_record.json",
+      "sha256": "c60267f2d40e465ad225005eb58a8c71e9ce1d8d5e63ba5c51d861aecb8e1199",
+      "bytes": 752
+    },
+    {
+      "file": "runs/r3/mock_access_log_window.txt",
+      "sha256": "92fafa7098a9b69e6bfad7283f9509d8c3cf1d80ee1b3a5d70e760f7e4e33841",
+      "bytes": 197
+    },
+    {
+      "file": "runs/r3/process_log.txt",
+      "sha256": "1ad80308e0abc011db53cf0748c8fe6398e8bc89600330b2f552c5dd52645abb",
+      "bytes": 2289
+    },
+    {
+      "file": "runs/r3/process_log_skip_lines.txt",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "file": "runs/r3/wire_inbound_requests_window.json",
+      "sha256": "2f1d9940cb01a97a238e1d4beced3d1f63b18dd94ef125b3b420292962532196",
+      "bytes": 348
+    },
+    {
+      "file": "runs/r4/execute.json",
+      "sha256": "cd39be3b05e485efe1e676d049f366a9dc98f30ce287fcbb18422945ba508cf8",
+      "bytes": 867
+    },
+    {
+      "file": "runs/r4/execution_record.json",
+      "sha256": "88db3401e3999b2c161fbe351833566c6dafc0fa8c4c2562d05d05700e380472",
+      "bytes": 752
+    },
+    {
+      "file": "runs/r4/mock_access_log_window.txt",
+      "sha256": "300ea0f5712614a498e9713c3ca0aa6d15cdc0142f115073357b8c25d7d238ea",
+      "bytes": 297
+    },
+    {
+      "file": "runs/r4/process_log.txt",
+      "sha256": "ab3d29870800d64c84f79a6bd491aca747bcecdf2976a7b4ff90696f1ec182e3",
+      "bytes": 3355
+    },
+    {
+      "file": "runs/r4/process_log_skip_lines.txt",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "file": "runs/r4/wire_inbound_requests_window.json",
+      "sha256": "9bb55bb7231dc228a40e391aa84bb9b72cf95244030bafb2127bc083e048a412",
+      "bytes": 542
+    }
+  ]
+}

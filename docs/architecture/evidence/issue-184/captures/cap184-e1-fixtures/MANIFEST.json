@@ -1,0 +1,177 @@
+{
+  "issue": 184,
+  "round": "e1",
+  "capture_id": "cap184-e1-fixtures",
+  "kind": "live confirmation evidence for QA-184-e0-01/02/03 \u2014 no #184 code imported",
+  "account_id": "trainingglebbochkarov-16926N",
+  "branch_point_sha": "cbab28ffc176ddb2378283cf7132eb9c37afc374",
+  "nonce": "E11840913073745",
+  "utc_window": {
+    "start": null,
+    "end": null
+  },
+  "code_imported_from": "pristine worktree wt-cbab28f (detached at the branch point)",
+  "tree_stamps": {
+    "provision_start": {
+      "wt_head": "cbab28ffc176ddb2378283cf7132eb9c37afc374",
+      "wt_head_is_branch_point": true,
+      "wt_tracked_dirty": false,
+      "code_files": 216,
+      "code_sha256": "3f91edaf722e483aa6c0cbad2e30be700e35317cb192a75c3403ec0a071de907"
+    },
+    "provision_end": {
+      "wt_head": "cbab28ffc176ddb2378283cf7132eb9c37afc374",
+      "wt_head_is_branch_point": true,
+      "wt_tracked_dirty": false,
+      "code_files": 216,
+      "code_sha256": "3f91edaf722e483aa6c0cbad2e30be700e35317cb192a75c3403ec0a071de907"
+    },
+    "runs": []
+  },
+  "counterparty_channels": [
+    "cds-mock access log (docker logs --since <run start>), verbatim per run",
+    "sidecar AF_PACKET capture of TCP :8081 in cds-mock's netns (cap184-sniff), reassembled per run; positive control body E1CTRL-body-canary-1"
+  ],
+  "reused_e0_fixtures": {
+    "e0_cache": {
+      "id": "0370d8d8-2c63-42d7-ae11-9aa5bbf64262",
+      "stored_redacted_sha256": "1b7d71a150e551880913b8d84d602efd6c65b5a28d06867e7708c38330c55bad",
+      "version": "1",
+      "archived": {
+        "file": "reused/e0_cache.stored.xml",
+        "sha256": "1b7d71a150e551880913b8d84d602efd6c65b5a28d06867e7708c38330c55bad",
+        "bytes": 948
+      }
+    },
+    "e0_profile": {
+      "id": "61449393-c75f-4ec0-a035-3f841ccc4f18",
+      "stored_redacted_sha256": "544deb011c0188e8b1b8910447feafbde48b787b6ff9ca9384faf2d4402e5d30",
+      "version": "1",
+      "archived": {
+        "file": "reused/e0_profile.stored.xml",
+        "sha256": "544deb011c0188e8b1b8910447feafbde48b787b6ff9ca9384faf2d4402e5d30",
+        "bytes": 1174
+      }
+    },
+    "e0_op_blank": {
+      "id": "187aa243-5f7a-44a2-be07-4ba92ed32fff",
+      "stored_redacted_sha256": "953a795026916d59c5b9952d9131a0274aa18d6c8791ef560777a00a74acfd53",
+      "version": "1",
+      "archived": {
+        "file": "reused/e0_op_blank.stored.xml",
+        "sha256": "953a795026916d59c5b9952d9131a0274aa18d6c8791ef560777a00a74acfd53",
+        "bytes": 1296
+      }
+    }
+  },
+  "components": [],
+  "deployments": [],
+  "licensing_standard_test": {
+    "licensing_before": {
+      "purchased": 3,
+      "used": 3
+    },
+    "licensing_after_deploy": {
+      "purchased": 3,
+      "used": 3
+    },
+    "licensing_after_teardown": {
+      "enterprise": {
+        "purchased": 0,
+        "used": 0
+      },
+      "enterprise_test": {
+        "purchased": 0,
+        "used": 0
+      },
+      "small_business": {
+        "purchased": 0,
+        "used": 0
+      },
+      "small_business_test": {
+        "purchased": 0,
+        "used": 0
+      },
+      "standard": {
+        "purchased": 3,
+        "used": 0
+      },
+      "standard_test": {
+        "purchased": 3,
+        "used": 3
+      },
+      "trading_partner": {
+        "purchased": 3,
+        "used": 0
+      },
+      "trading_partner_test": {
+        "purchased": 3,
+        "used": 0
+      }
+    }
+  },
+  "runs": [],
+  "verdict": null,
+  "artifacts": [
+    {
+      "file": "instruments/g184.py",
+      "sha256": "04477728831f3b4f074b8344dd0d5cba1a1cc2a735720b8ce21a0dfd0fbc9ecf",
+      "bytes": 8592
+    },
+    {
+      "file": "instruments/g184x.py",
+      "sha256": "6a21632127cb87cb1180a626c67c441a9b745d6f1cdccc04a4ce178f23c297ab",
+      "bytes": 1307
+    },
+    {
+      "file": "instruments/lib184.py",
+      "sha256": "82602d5f9092ec9e970038b72a9ac1715c658586f82224ffee8bf9bab9c6692c",
+      "bytes": 9415
+    },
+    {
+      "file": "instruments/p20_provision.py",
+      "sha256": "8866800828028532499535f5ed56511dc895fe17a930176d10a6868270f158b5",
+      "bytes": 11670
+    },
+    {
+      "file": "instruments/p22_run.py",
+      "sha256": "72fd8ffa3a3a3863696417645116338654372fdc980f471c35d69c8305d1c654",
+      "bytes": 4473
+    },
+    {
+      "file": "instruments/p23_verdicts.py",
+      "sha256": "fa1ee2fe7376ec84c6bac553a81628d8ed3042a98fe8124c2f031ce19fbd9ae8",
+      "bytes": 8549
+    },
+    {
+      "file": "instruments/sniff184.py",
+      "sha256": "1c3a0fa94b07a3448435c238817bf433e3be17417e6ddaf71ae5b7c748ef9eb7",
+      "bytes": 1679
+    },
+    {
+      "file": "instruments/wire184.py",
+      "sha256": "ac9ca4359b9185e47c276854ea0e563d87ed64bf9e2cc78073a84e1ecd740c04",
+      "bytes": 2972
+    },
+    {
+      "file": "reused/e0_cache.stored.xml",
+      "sha256": "1b7d71a150e551880913b8d84d602efd6c65b5a28d06867e7708c38330c55bad",
+      "bytes": 948
+    },
+    {
+      "file": "reused/e0_op_blank.stored.xml",
+      "sha256": "953a795026916d59c5b9952d9131a0274aa18d6c8791ef560777a00a74acfd53",
+      "bytes": 1296
+    },
+    {
+      "file": "reused/e0_profile.stored.xml",
+      "sha256": "544deb011c0188e8b1b8910447feafbde48b787b6ff9ca9384faf2d4402e5d30",
+      "bytes": 1174
+    },
+    {
+      "file": "wire_raw/wire.jsonl",
+      "sha256": "e150388710dc2570b41e83ee654258b3f0db87dff178bae2b745d2081f53e5b1",
+      "bytes": 29389
+    }
+  ]
+}

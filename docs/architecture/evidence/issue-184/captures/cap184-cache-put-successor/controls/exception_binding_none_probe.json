@@ -1,0 +1,81 @@
+{
+  "utc": "2026-09-13T07:45:53.888518+00:00",
+  "offline_legacy_none": {
+    "config": {
+      "process_kind": "database_to_api_sync",
+      "source": {
+        "connector_type": "database",
+        "connection_id": "9a2e06c1-e4ac-42b3-9db2-31991f9113fd",
+        "operation_id": "cacbde23-8bbf-4ba4-8595-356c53e423e5",
+        "action_type": "Get"
+      },
+      "transform": {
+        "mode": "passthrough"
+      },
+      "target": {
+        "connector_type": "rest",
+        "connection_id": "2fe488e4-3169-4529-9515-d854570c8ffc",
+        "operation_id": "7c996b6e-34aa-4d58-bbce-d661c393bb6a",
+        "action_type": "POST"
+      },
+      "reliability": {
+        "retry_count": 0,
+        "catch_exception": {
+          "message_template": "caught without binding",
+          "parameter_source": "none"
+        }
+      }
+    },
+    "validate_error": null,
+    "exception_elements": [
+      "<exception stopProcessReturnSingleDoc=\"false\" stopsingledoc=\"false\" title=\"\"><exMessage>caught without binding</exMessage></exception>"
+    ],
+    "has_exParameters": [
+      false
+    ]
+  },
+  "offline_legacy_caught_error": {
+    "config": {
+      "process_kind": "database_to_api_sync",
+      "source": {
+        "connector_type": "database",
+        "connection_id": "9a2e06c1-e4ac-42b3-9db2-31991f9113fd",
+        "operation_id": "cacbde23-8bbf-4ba4-8595-356c53e423e5",
+        "action_type": "Get"
+      },
+      "transform": {
+        "mode": "passthrough"
+      },
+      "target": {
+        "connector_type": "rest",
+        "connection_id": "2fe488e4-3169-4529-9515-d854570c8ffc",
+        "operation_id": "7c996b6e-34aa-4d58-bbce-d661c393bb6a",
+        "action_type": "POST"
+      },
+      "reliability": {
+        "retry_count": 0,
+        "catch_exception": {
+          "message_template": "caught {1}",
+          "parameter_source": "caught_error"
+        }
+      }
+    },
+    "validate_error": null,
+    "exception_elements": [
+      "<exception stopProcessReturnSingleDoc=\"false\" stopsingledoc=\"false\" title=\"\"><exMessage>caught {1}</exMessage><exParameters><parametervalue key=\"0\" valueType=\"track\"><trackparameter defaultValue=\"\" propertyId=\"meta.base.catcherrorsmessage\" propertyName=\"Base - Try/Catch Message\"/></parametervalue></exParameters></exception>"
+    ],
+    "has_exParameters": [
+      true
+    ]
+  },
+  "live_create_binding_none": {
+    "submitted_sha256": "5ccb03989cc6717bc5db638ba42d004e6b27a8c775a98f69dee3673c0b2c232c",
+    "has_exParameters": false,
+    "envelope": {
+      "_success": false,
+      "error": "Failed to create component: Create failed: HTTP 400 \u2014 The provided XML is not valid. To create a component, provide a valid XML payload. Details: cvc-complex-type.2.4.b: The content of element 'exception' is not complete. One of '{exParameters}' is expected.",
+      "exception_type": "Exception"
+    },
+    "component_id_if_created": null
+  }
+}

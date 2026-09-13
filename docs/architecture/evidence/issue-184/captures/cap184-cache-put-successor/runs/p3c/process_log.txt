@@ -1,0 +1,31 @@
+2026-09-13T07:40:27Z	FINE	initializing...		Loading Process Model _TEST_184E1_p3c_catch_exception_control_E11840913073745
+2026-09-13T07:40:27Z	INFO	initializing...		Executing Process _TEST_184E1_p3c_catch_exception_control_E11840913073745
+2026-09-13T07:40:27Z	INFO	Start	NoData	Executing Start Shape
+2026-09-13T07:40:27Z	INFO	Start	NoData	1 document(s) found for processing.
+2026-09-13T07:40:27Z	INFO	Start	NoData	Shape executed successfully in 1 ms.
+2026-09-13T07:40:27Z	INFO	Branch		Executing Branch Shape with 1 document(s).
+2026-09-13T07:40:27Z	INFO	Branch		Shape executed successfully in 0 ms.
+2026-09-13T07:40:27Z	INFO	witness	Sandbox CDS Mock REST (no-auth): officialboomi-X3979C-rest-prod Connector; _TEST_184E1_op_w_p3c_E11840913073745	Executing Connector Shape with 1 document(s).
+2026-09-13T07:40:27Z	INFO	witness	Sandbox CDS Mock REST (no-auth): officialboomi-X3979C-rest-prod Connector; _TEST_184E1_op_w_p3c_E11840913073745	Shape executed successfully in 5 ms.
+2026-09-13T07:40:27Z	INFO	Stop	continuing process	Executing Stop Shape with 1 document(s).
+2026-09-13T07:40:27Z	INFO	Stop	continuing process	Shape executed successfully in 1 ms.
+2026-09-13T07:40:27Z	INFO	Message		Executing Message Shape with 1 document(s).
+2026-09-13T07:40:27Z	INFO	Message		Shape executed successfully in 1 ms.
+2026-09-13T07:40:27Z	INFO	Try/Catch all errors (no retry) - route caught documents to the failure handler		Executing Try/Catch Shape with 1 document(s).
+2026-09-13T07:40:27Z	INFO	Try/Catch all errors (no retry) - route caught documents to the failure handler		Launching Try/Catch Shape fiber f_0 as execution-a116854e-64c5-48b8-a5c2-6ee6a429bab6-2026.09.13 with 1 document(s).
+2026-09-13T07:40:27Z	INFO	Try/Catch all errors (no retry) - route caught documents to the failure handler		Completed Try/Catch initial execution (shape6)
+2026-09-13T07:40:27Z	INFO	initializing...		Executing Process _TEST_184E1_p3c_catch_exception_control_E11840913073745 (Continuation f_0)
+2026-09-13T07:40:27Z	INFO	Try/Catch all errors (no retry) - route caught documents to the failure handler		Executing Try/Catch Shape continuation as f_0 with 1 document(s).
+2026-09-13T07:40:27Z	INFO	Try/Catch all errors (no retry) - route caught documents to the failure handler		Shape executed successfully in 1 ms.
+2026-09-13T07:40:27Z	INFO	protected connector fails	Sandbox CDS Mock REST (no-auth): officialboomi-X3979C-rest-prod Connector; _TEST_184E1_op_fail_E11840913073745	Executing Connector Shape with 1 document(s).
+2026-09-13T07:40:27Z	INFO	protected connector fails	Sandbox CDS Mock REST (no-auth): officialboomi-X3979C-rest-prod Connector; _TEST_184E1_op_fail_E11840913073745	Shape executed with errors in 10 ms.
+2026-09-13T07:40:27Z	INFO	Stop	continuing process	Executing Stop Shape with 1 document(s).
+2026-09-13T07:40:27Z	INFO	Stop	continuing process	Shape executed successfully in 0 ms.
+2026-09-13T07:40:27Z	WARNING	cleanup...		_TEST_184E1_p3c_catch_exception_control_E11840913073745 (Continuation f_0) encountered 1 document error(s)
+2026-09-13T07:40:27Z	INFO	cleanup...		Process execution completed normally.
+2026-09-13T07:40:27Z	WARNING	Try/Catch all errors (no retry) - route caught documents to the failure handler		Try/Catch Shape sending 1 document(s) down error path
+2026-09-13T07:40:27Z	INFO	Try/Catch all errors (no retry) - route caught documents to the failure handler		Shape executed successfully in 2 ms.
+2026-09-13T07:40:27Z	INFO	E1 deliberate exception		Executing Exception Shape with 1 document(s).
+2026-09-13T07:40:27Z	SEVERE	E1 deliberate exception		Process terminating -- some documents reached an exception which is set to halt all documents: caught E11840913073745-p3c: [404] Not Found
+2026-09-13T07:40:27Z	INFO	E1 deliberate exception		Shape executed with errors in 4 ms.
+2026-09-13T07:40:27Z	INFO	cleanup...		Errors occurred in process.

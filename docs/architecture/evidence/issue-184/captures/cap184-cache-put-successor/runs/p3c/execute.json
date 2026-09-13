@@ -1,0 +1,24 @@
+{
+  "_success": false,
+  "request_id": "executionrecord-dbc2d714-d8bf-4fa1-a246-bcb43d9e8554",
+  "process_id": "74df2545-a6d6-401d-b9d7-95f0e194f189",
+  "environment_id": "b173ce8a-2d7f-41e3-9d3f-06e45d5b0de9",
+  "atom_id": "a40a3313-1537-47c4-91c7-573a703537c7",
+  "execution_result": {
+    "poll_status": "COMPLETED",
+    "elapsed_seconds": 7.0,
+    "poll_count": 4,
+    "execution_id": "execution-f5ded039-d157-422e-8cd4-6d99cb2e9046-2026.09.13",
+    "status": "ERROR",
+    "process_name": "_TEST_184E1_p3c_catch_exception_control_E11840913073745",
+    "atom_name": "renera-local-atom",
+    "execution_time": "2026-09-13T07:40:27Z",
+    "execution_duration": 68,
+    "inbound_document_count": 1,
+    "outbound_document_count": 1,
+    "inbound_error_document_count": 1,
+    "error": null
+  },
+  "execution_id": "execution-f5ded039-d157-422e-8cd4-6d99cb2e9046-2026.09.13",
+  "error": "Execution ended with status: ERROR"
+}

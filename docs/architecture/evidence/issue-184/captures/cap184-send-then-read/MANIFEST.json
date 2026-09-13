@@ -1,0 +1,136 @@
+{
+  "issue": 184,
+  "round": "e1",
+  "capture_id": "cap184-send-then-read",
+  "kind": "live confirmation evidence for QA-184-e0-01/02/03 \u2014 no #184 code imported",
+  "account_id": "trainingglebbochkarov-16926N",
+  "branch_point_sha": "cbab28ffc176ddb2378283cf7132eb9c37afc374",
+  "nonce": "E11840913073745",
+  "utc_window": {
+    "start": null,
+    "end": null
+  },
+  "code_imported_from": "pristine worktree wt-cbab28f (detached at the branch point)",
+  "tree_stamps": {
+    "provision_start": {
+      "wt_head": "cbab28ffc176ddb2378283cf7132eb9c37afc374",
+      "wt_head_is_branch_point": true,
+      "wt_tracked_dirty": false,
+      "code_files": 216,
+      "code_sha256": "3f91edaf722e483aa6c0cbad2e30be700e35317cb192a75c3403ec0a071de907"
+    },
+    "provision_end": {
+      "wt_head": "cbab28ffc176ddb2378283cf7132eb9c37afc374",
+      "wt_head_is_branch_point": true,
+      "wt_tracked_dirty": false,
+      "code_files": 216,
+      "code_sha256": "3f91edaf722e483aa6c0cbad2e30be700e35317cb192a75c3403ec0a071de907"
+    },
+    "runs": []
+  },
+  "counterparty_channels": [
+    "cds-mock access log (docker logs --since <run start>), verbatim per run",
+    "sidecar AF_PACKET capture of TCP :8081 in cds-mock's netns (cap184-sniff), reassembled per run; positive control body E1CTRL-body-canary-1"
+  ],
+  "reused_e0_fixtures": {
+    "e0_cache": {
+      "id": "0370d8d8-2c63-42d7-ae11-9aa5bbf64262",
+      "stored_redacted_sha256": "1b7d71a150e551880913b8d84d602efd6c65b5a28d06867e7708c38330c55bad",
+      "version": "1",
+      "archived": {
+        "file": "reused/e0_cache.stored.xml",
+        "sha256": "1b7d71a150e551880913b8d84d602efd6c65b5a28d06867e7708c38330c55bad",
+        "bytes": 948
+      }
+    },
+    "e0_profile": {
+      "id": "61449393-c75f-4ec0-a035-3f841ccc4f18",
+      "stored_redacted_sha256": "544deb011c0188e8b1b8910447feafbde48b787b6ff9ca9384faf2d4402e5d30",
+      "version": "1",
+      "archived": {
+        "file": "reused/e0_profile.stored.xml",
+        "sha256": "544deb011c0188e8b1b8910447feafbde48b787b6ff9ca9384faf2d4402e5d30",
+        "bytes": 1174
+      }
+    },
+    "e0_op_blank": {
+      "id": "187aa243-5f7a-44a2-be07-4ba92ed32fff",
+      "stored_redacted_sha256": "953a795026916d59c5b9952d9131a0274aa18d6c8791ef560777a00a74acfd53",
+      "version": "1",
+      "archived": {
+        "file": "reused/e0_op_blank.stored.xml",
+        "sha256": "953a795026916d59c5b9952d9131a0274aa18d6c8791ef560777a00a74acfd53",
+        "bytes": 1296
+      }
+    }
+  },
+  "components": [],
+  "deployments": [],
+  "licensing_standard_test": {
+    "licensing_before": {
+      "purchased": 3,
+      "used": 3
+    },
+    "licensing_after_deploy": {
+      "purchased": 3,
+      "used": 3
+    },
+    "licensing_after_teardown": {
+      "enterprise": {
+        "purchased": 0,
+        "used": 0
+      },
+      "enterprise_test": {
+        "purchased": 0,
+        "used": 0
+      },
+      "small_business": {
+        "purchased": 0,
+        "used": 0
+      },
+      "small_business_test": {
+        "purchased": 0,
+        "used": 0
+      },
+      "standard": {
+        "purchased": 3,
+        "used": 0
+      },
+      "standard_test": {
+        "purchased": 3,
+        "used": 3
+      },
+      "trading_partner": {
+        "purchased": 3,
+        "used": 0
+      },
+      "trading_partner_test": {
+        "purchased": 3,
+        "used": 0
+      }
+    }
+  },
+  "runs": [],
+  "verdict": {
+    "rows": [
+      {
+        "row": "non-producing connector -> Retrieve from Cache (primed) -> witness: the retrieve runs",
+        "verdict": "OPEN",
+        "checks": {
+          "measured": false
+        },
+        "observation": "Not executed: no cheap non-producing operation on this stack (see RECORD.json).",
+        "evidence": [
+          "RECORD.json"
+        ]
+      }
+    ]
+  },
+  "artifacts": [
+    {
+      "file": "RECORD.json",
+      "sha256": "6f4117a7db23aee9fe6e86fc1860a35e0a8fd2e70a6a11c8c53272023be6971c",
+      "bytes": 933
+    }
+  ]
+}
