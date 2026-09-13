@@ -901,7 +901,7 @@ def test_exception_terminal_after_dlq_route():
 
 def test_exception_connector_scope_throws_on_both_legs():
     cfg = _exc_config(
-        {"message_template": "boom", "parameter_source": "none"},
+        {"message_template": "boom {1}", "parameter_source": "caught_error"},
         scope="connector",
     )
     _root, shapes = _parse_shapes(ProcessFlowBuilder.build(cfg, name="P"))

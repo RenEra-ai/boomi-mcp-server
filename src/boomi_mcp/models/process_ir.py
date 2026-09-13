@@ -1723,21 +1723,37 @@ class ReturnDocumentsNodeV1(_ProcessIRBase):
 class ExceptionNodeV1(_ProcessIRBase):
     """Terminal Exception throw. No ``label`` — parity with the legacy
     exception step key set (title/message_template/stop_single_document/
-    parameter_source only)."""
+    parameter_source only). ``parameter_source`` binds the ``{1}`` placeholder in the
+    message; a message with no binding is not supported, because the platform requires
+    the parameter block."""
 
     kind: Literal["exception"]
     message_template: str = Field(..., min_length=1)
     title: Optional[str] = None
     stop_single_document: StrictBool = False
-    parameter_source: Literal["caught_error", "current_document", "none"] = "caught_error"
+    parameter_source: Literal["caught_error", "current_document"] = "caught_error"
+
+    @field_validator("parameter_source", mode="before")
+    @classmethod
+    def _refuse_unbound_exception(cls, value):
+        # #184 amendment 3 §9 (ledger row E1-184-02): `none` emitted an Exception with
+        # no parameter block, and the platform refuses that component on create
+        # (HTTP 400, measured). Refused BY NAME rather than as an unknown literal, so
+        # the caller learns why a value this contract used to accept is gone.
+        if value == "none":
+            raise _capability_error(
+                "parameter_source 'none' is not supported: the platform requires an "
+                "Exception parameter block — bind {1} to caught_error or current_document"
+            )
+        return value
 
     @model_validator(mode="after")
     def _placeholder_rules(self) -> "ExceptionNodeV1":
         if not self.message_template.strip():
             raise _cardinality_error("message_template must be a non-blank string")
-        if self.parameter_source != "none" and "{1}" not in self.message_template:
+        if "{1}" not in self.message_template:
             raise _cardinality_error(
-                "message_template must contain the {1} placeholder when parameter_source binds a value"
+                "message_template must contain the {1} placeholder that parameter_source binds"
             )
         return self
 

@@ -858,7 +858,7 @@ def test_builder_catch_exception_connector_scope_is_clean():
     from boomi_mcp.categories.components.builders import ProcessFlowBuilder
     xml = ProcessFlowBuilder.build(
         _exception_process_config(
-            {"message_template": "boom", "parameter_source": "none"}, scope="connector"
+            {"message_template": "boom {1}", "parameter_source": "caught_error"}, scope="connector"
         ),
         name="P",
     )

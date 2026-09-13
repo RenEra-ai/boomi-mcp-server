@@ -1169,7 +1169,31 @@ def test_whitespace_only_property_source_name_rejected():
 def test_exception_placeholder_required_when_binding():
     err = parse_error(doc(source(), exception(message_template="no placeholder")))
     assert err.diagnostics[0].code == PROCESS_IR_SCHEMA_INVALID_CARDINALITY
-    parse_process_ir_v1(doc(source(), exception(message_template="static", parameter_source="none")))
+    # #184 amendment 3 §9: the unbound form is refused by name, not admitted.
+    err = parse_error(doc(source(), exception(message_template="static", parameter_source="none")))
+    assert (err.diagnostics[0].code, err.diagnostics[0].path) == (
+        "PROCESS_IR_CAPABILITY_UNSUPPORTED", "/body/steps/1/parameter_source",
+    ), err.diagnostics
+
+
+def test_exception_parameter_source_none_is_refused_at_both_entry_points():
+    """Parsed JSON and a mutated exported model hand the compiler the same refusal
+    (#178 reparse), and the served schema no longer offers the value."""
+    from boomi_mcp.compiler.process_ir.diagnostics import ProcessIRCompileError
+    from boomi_mcp.compiler.process_ir.pipeline import compile_process_ir_v1
+    from boomi_mcp.compiler.process_ir.contracts import SymbolTableV1
+
+    ir = parse_process_ir_v1(doc(source(), exception(message_template="halt {1}")))
+    forged = ir.model_copy(deep=True)
+    object.__setattr__(forged.body.steps[1], "parameter_source", "none")
+    with pytest.raises((ProcessIRCompileError, ProcessIRValidationError)) as exc:
+        compile_process_ir_v1(forged, SymbolTableV1(symbols=()))
+    assert ("PROCESS_IR_CAPABILITY_UNSUPPORTED", "/body/steps/1/parameter_source") in [
+        (d.code, d.path) for d in exc.value.diagnostics
+    ], exc.value.diagnostics
+    schema = process_ir_v1_json_schema()
+    enum = schema["$defs"]["ExceptionNodeV1"]["properties"]["parameter_source"]["enum"]
+    assert set(enum) == {"caught_error", "current_document"}, enum
 
 
 # ---------------------------------------------------------------------------

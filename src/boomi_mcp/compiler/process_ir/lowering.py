@@ -1192,20 +1192,22 @@ def _exception_binding(parameter_source: str):
 
     The plan calls for a resolved "Exception binding", not a raw enum: #138
     should only have to serialise it. Mirrors ``_emit_exception_parameters``
-    (builder :6164) — ``none`` emits nothing, ``current_document`` a bare
-    current parametervalue, ``caught_error`` the fixed Try/Catch message token.
+    (builder :6164) — ``current_document`` a bare current parametervalue,
+    ``caught_error`` the fixed Try/Catch message token. #184 amendment 3 §9 withdrew
+    ``none``.
     """
     from .contracts import (
         _CaughtErrorBindingV1,
         _CurrentDocumentBindingV1,
-        _NoExceptionBindingV1,
     )
 
-    if parameter_source == "none":
-        return _NoExceptionBindingV1()
     if parameter_source == "current_document":
         return _CurrentDocumentBindingV1()
-    return _CaughtErrorBindingV1()
+    if parameter_source == "caught_error":
+        return _CaughtErrorBindingV1()
+    # The model refuses every other source, so reaching here is a compiler defect,
+    # never a caller mistake to map silently onto a supported binding.
+    raise ValueError("unsupported exception parameter_source")
 
 
 def _transition(

@@ -16,7 +16,9 @@ Determinism / byte-parity rules (do not "clean up"):
   spellings (``<parameters/>``, ``<dragpoints/>``), child order and the absence
   of a trailing newline are all load-bearing — the goldens compare raw bytes.
 * Renderers never reserialize through ``ElementTree``; they build strings.
-* Renderers are PURE: they raise nothing and validate nothing. The legacy
+* Renderers are PURE: they raise nothing and validate nothing, with one exception:
+  a closed-vocabulary dispatch raises on a value outside its vocabulary instead of
+  rendering another value's bytes (``render_exception_parameters``). The legacy
   adapters (``legacy.py``) keep the historical ``BuilderValidationError``
   bypass-guards; the ProcessIR registry does its own fail-closed preflight.
 
@@ -191,7 +193,7 @@ class RenderDecisionValue:
 class RenderExceptionBinding:
     """A resolved Exception ``<exParameters>`` binding (issue #108).
 
-    ``kind`` is one of ``none`` / ``current_document`` / ``caught_error``.
+    ``kind`` is ``current_document`` or ``caught_error``.
     """
 
     kind: str
@@ -852,12 +854,16 @@ def render_notify(ctx: ShapeRenderContext, *, level: str, message: str) -> str:
 
 def render_exception_parameters(binding: RenderExceptionBinding) -> str:
     """Emit the ``<exParameters>`` binding for the single ``{1}`` placeholder
-    (issue #108). ``none`` emits nothing; ``current_document`` binds the current
-    document; ``caught_error`` binds the Try/Catch message token."""
-    if binding.kind == "none":
-        return ""
+    (issue #108). ``current_document`` binds the current document; ``caught_error``
+    binds the Try/Catch message token.
+
+    #184 amendment 3 §9: any other kind RAISES. ``none`` used to render no block,
+    which the platform refuses on create, and an unknown kind fell through to the
+    caught-error bytes."""
     if binding.kind == "current_document":
         return '<exParameters><parametervalue key="0" valueType="current"/></exParameters>'
+    if binding.kind != "caught_error":
+        raise ValueError("unsupported exception parameter binding")
     return (
         '<exParameters>'
         '<parametervalue key="0" valueType="track">'

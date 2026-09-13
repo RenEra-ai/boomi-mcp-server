@@ -1512,16 +1512,17 @@ class TestThrowException:
             )
 
     def test_validation_requires_placeholder_when_source_binds(self):
-        # caught_error/current_document need {1}; none does not (matches the
-        # builder's _validate_catch_exception contract).
+        # Every supported source binds {1} (matches the builder's
+        # _validate_catch_exception contract). #184 amendment 3 §9 withdrew `none`: the
+        # platform refuses an Exception with no parameter block.
         with pytest.raises(ValidationError):
             ThrowExceptionPrimitive.validate_parameters(
                 {"message_template": "no placeholder", "parameter_source": "caught_error"}
             )
-        params = ThrowExceptionPrimitive.validate_parameters(
-            {"message_template": "static halt", "parameter_source": "none"}
-        )
-        assert params.parameter_source == "none"
+        with pytest.raises(ValidationError):
+            ThrowExceptionPrimitive.validate_parameters(
+                {"message_template": "static halt", "parameter_source": "none"}
+            )
 
 
 _BRANCH_LEG = {

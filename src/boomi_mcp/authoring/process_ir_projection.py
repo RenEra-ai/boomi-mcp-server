@@ -743,8 +743,10 @@ _NODE_FACTS: Mapping[str, Mapping[str, Any]] = {
         "category": "terminal",
         "title": "Exception",
         "summary": (
-            "Terminal throw. The message template must carry the {1} placeholder "
-            "whenever parameter_source binds a value."
+            "Terminal throw. parameter_source binds the message template's {1} "
+            "placeholder to the caught error or the current document, so the template "
+            "must carry {1}. A static message with no binding is refused: the platform "
+            "requires the parameter block."
         ),
         _ORDERING: ("An exception terminates its path; nothing may follow it.",),
         _DOCS: ("required", "none", "per_document"),

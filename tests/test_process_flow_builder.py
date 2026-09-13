@@ -2260,13 +2260,19 @@ def test_catch_exception_caught_error_track_binding():
 
 
 def test_catch_exception_none_omits_exparameters():
+    """#184 amendment 3 §9 (ledger row E1-184-02): `none` emitted an Exception with no
+    `<exParameters>`, and the platform refuses that component on create (HTTP 400,
+    measured). The value is now refused at plan time, and on the validate-bypass build
+    path, at `parameter_source`. The name is kept because it is a registered node id."""
     cfg = _base_config(
         **_exception_reliability(parameter_source="none", message_template="static halt")
     )
-    xml = ProcessFlowBuilder.build(cfg, name="P")
-    _root, _process, shapes = _parse_process(xml)
-    ex = next(s for s in shapes if s.attrib["shapetype"] == "exception")
-    assert ex.find("configuration/exception/exParameters") is None
+    refusal = ("PROCESS_EXCEPTION_CONFIG_INVALID", "reliability.catch_exception.parameter_source")
+    err = ProcessFlowBuilder.validate_config(cfg, depends_on=[])
+    assert err is not None and (err.error_code, err.field) == refusal, err
+    with pytest.raises(BuilderValidationError) as exc:
+        ProcessFlowBuilder.build(cfg, name="P")
+    assert (exc.value.error_code, exc.value.field) == refusal
 
 
 def test_catch_exception_stop_single_document_true():
@@ -2388,11 +2394,13 @@ def test_catch_exception_rejects_non_string_title():
 
 
 def test_catch_exception_requires_placeholder_when_source_binds():
-    # caught_error/current_document need {1}; none does not.
+    # Every supported source binds {1}. `none` is refused at its own field first
+    # (#184 amendment 3 §9), so it never reaches the placeholder rule.
     err = _exc_err({"message_template": "no placeholder", "parameter_source": "caught_error"})
     assert err is not None and err.error_code == "PROCESS_EXCEPTION_CONFIG_INVALID"
     assert err.field == "reliability.catch_exception.message_template"
-    assert _exc_err({"message_template": "no placeholder", "parameter_source": "none"}) is None
+    err = _exc_err({"message_template": "no placeholder", "parameter_source": "none"})
+    assert err is not None and err.field == "reliability.catch_exception.parameter_source"
 
 
 def test_build_bypass_guard_raises_for_invalid_catch_exception():
@@ -3744,7 +3752,8 @@ def test_flow_sequence_rejects_sibling_try_catch_reliability():
 
 def test_flow_sequence_rejects_return_documents_with_control():
     err = _seq_err(
-        [{"kind": "exception", "title": "x", "message_template": "y", "parameter_source": "none"}],
+        [{"kind": "exception", "title": "x", "message_template": "y {1}",
+          "parameter_source": "caught_error"}],
         return_documents={"enabled": True},
     )
     assert err.error_code == "PROCESS_FLOW_SEQUENCE_CONFIG_INVALID"

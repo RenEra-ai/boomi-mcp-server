@@ -445,10 +445,11 @@ _CATCH_NOTIFY_ALLOWED_KEYS = frozenset({"level", "message_template"})
 # parameter_source binds the single ``{1}`` placeholder in the message:
 #   * caught_error     -> a track binding to meta.base.catcherrorsmessage (the
 #                         platform caught-error message — same token Notify uses);
-#   * current_document -> valueType="current" (the live default — the current doc);
-#   * none             -> no <exParameters> (a static message, no {1}).
+#   * current_document -> valueType="current" (the live default — the current doc).
+# #184 amendment 3 §9 withdrew ``none``: it emitted no <exParameters>, and the platform
+# refuses that component on create (HTTP 400, ledger row E1-184-02).
 _SUPPORTED_EXCEPTION_PARAMETER_SOURCES = frozenset(
-    {"caught_error", "current_document", "none"}
+    {"caught_error", "current_document"}
 )
 _CATCH_EXCEPTION_ALLOWED_KEYS = frozenset(
     {"title", "message_template", "stop_single_document", "parameter_source"}
@@ -3129,8 +3130,8 @@ def _validate_catch_exception(value: Any) -> Optional[BuilderValidationError]:
     ``_SUPPORTED_EXCEPTION_PARAMETER_SOURCES`` (default ``caught_error``). When the
     parameter source binds a value (``caught_error`` / ``current_document``) the
     message must carry the ``{1}`` placeholder so the bound value actually renders
-    (mirrors the catch_notify token requirement); ``none`` carries a static message
-    with no parameters. Unknown keys are rejected so a typo is not silently dropped
+    (mirrors the catch_notify token requirement). ``none`` was withdrawn (#184
+    amendment 3 §9): the platform refuses an Exception with no parameter block. Unknown keys are rejected so a typo is not silently dropped
     (matches the dataprocess / return_documents strictness and the
     ThrowExceptionPrimitive's ``extra='forbid'`` model). A catch_exception is the
     terminal throw on the catch leg — no Stop follows it.
@@ -3187,16 +3188,19 @@ def _validate_catch_exception(value: Any) -> Optional[BuilderValidationError]:
             f"{sorted(_SUPPORTED_EXCEPTION_PARAMETER_SOURCES)}.",
             error_code="PROCESS_EXCEPTION_CONFIG_INVALID",
             field="reliability.catch_exception.parameter_source",
-            hint="caught_error binds the Try/Catch error; current_document binds the current document; none omits parameters.",
+            hint=(
+                "caught_error binds the Try/Catch error; current_document binds the "
+                "current document. 'none' is not supported: the platform refuses an "
+                "Exception with no parameter block."
+            ),
         )
-    source = str(parameter_source or "caught_error")
-    if source != "none" and "{1}" not in template:
+    if "{1}" not in template:
         return BuilderValidationError(
             "reliability.catch_exception.message_template must contain the {1} "
-            "placeholder when parameter_source binds a value.",
+            "placeholder that parameter_source binds.",
             error_code="PROCESS_EXCEPTION_CONFIG_INVALID",
             field="reliability.catch_exception.message_template",
-            hint="Include {1} so the bound parameter_source value renders, or set parameter_source='none'.",
+            hint="Include {1} so the bound parameter_source value renders.",
         )
     return None
 

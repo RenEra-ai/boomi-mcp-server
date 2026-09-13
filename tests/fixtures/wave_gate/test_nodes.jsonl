@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 12566, "minimum_collected": 12566, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 12571, "minimum_collected": 12571, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -12658,3 +12658,8 @@
 {"kind": "test", "id": "pytest-012657", "node_id": "tests/test_issue_184_ddp_invalidation.py::test_several_cohorts_meet_their_guarantees_and_union_their_writers", "state": "active"}
 {"kind": "test", "id": "pytest-012658", "node_id": "tests/test_issue_184_ddp_invalidation.py::test_an_external_writer_contributes_an_unknown_cohort", "state": "active"}
 {"kind": "test", "id": "pytest-012659", "node_id": "tests/test_issue_184_ddp_invalidation.py::test_an_empty_cache_guarantees_nothing", "state": "active"}
+{"kind": "test", "id": "pytest-012660", "node_id": "tests/test_process_emitter_registry.py::test_a_forged_exception_source_is_refused_not_mapped_to_caught_error[none]", "state": "active"}
+{"kind": "test", "id": "pytest-012661", "node_id": "tests/test_process_emitter_registry.py::test_a_forged_exception_source_is_refused_not_mapped_to_caught_error[bogus]", "state": "active"}
+{"kind": "test", "id": "pytest-012662", "node_id": "tests/test_process_emitter_registry.py::test_a_forged_exception_source_is_refused_not_mapped_to_caught_error[]", "state": "active"}
+{"kind": "test", "id": "pytest-012663", "node_id": "tests/test_process_emitter_registry.py::test_the_exception_renderer_refuses_a_kind_outside_its_vocabulary", "state": "active"}
+{"kind": "test", "id": "pytest-012664", "node_id": "tests/test_process_ir_models.py::test_exception_parameter_source_none_is_refused_at_both_entry_points", "state": "active"}

@@ -395,9 +395,9 @@ def test_decision_track_operand_requires_property_id():
 
 def test_exception_binding_must_agree_with_parameter_source():
     exc_input = ExceptionInputV1(
-        message_template="boom",
-        parameter_source="none",           # says no binding...
-        binding={"binding": "caught_error"},  # ...but binding disagrees
+        message_template="boom {1}",
+        parameter_source="current_document",  # says the current document...
+        binding={"binding": "caught_error"},   # ...but the binding disagrees
     )
     start = _node(1, StartNoActionInputV1(), outgoing=(_t(1, 1, "shape2"),), origin="synthetic", role="start")
     node = _node(2, exc_input, outgoing=())
@@ -405,6 +405,44 @@ def test_exception_binding_must_agree_with_parameter_source():
     with pytest.raises(ProcessIRCompileError) as exc:
         R.emit_process(plan, SymbolTableV1(symbols=()))
     assert PROCESS_IR_COMPILE_EMITTER_INPUT_INVALID in [d.code for d in exc.value.diagnostics]
+
+
+@pytest.mark.parametrize("forged_source", ["none", "bogus", ""])
+def test_a_forged_exception_source_is_refused_not_mapped_to_caught_error(forged_source):
+    """#184 amendment 3 §9: the preflight used to map any source other than
+    none/current_document onto the caught-error binding, so a forged input rendered
+    a binding nobody authored. The input is built with `model_construct` because a
+    validated input cannot carry these values at all."""
+    from boomi_mcp.compiler.process_ir.contracts import _CaughtErrorBindingV1
+
+    exc_input = ExceptionInputV1.model_construct(
+        message_template="boom {1}",
+        title="",
+        stop_single_document=False,
+        parameter_source=forged_source,
+        binding=_CaughtErrorBindingV1(),
+    )
+    start = _node(1, StartNoActionInputV1(), outgoing=(_t(1, 1, "shape2"),), origin="synthetic", role="start")
+    node = _node(2, exc_input, outgoing=())
+    plan = EmissionPlanV1(entry_shape_id="shape1", nodes=(start, node), terminal_shape_ids=("shape2",))
+    with pytest.raises(ProcessIRCompileError) as exc:
+        R.emit_process(plan, SymbolTableV1(symbols=()))
+    assert PROCESS_IR_COMPILE_EMITTER_INPUT_INVALID in [d.code for d in exc.value.diagnostics]
+
+
+def test_the_exception_renderer_refuses_a_kind_outside_its_vocabulary():
+    """The shared renderer both adapters use no longer renders an empty block for
+    `none`, or the caught-error bytes for an unknown kind."""
+    from boomi_mcp.categories.components.builders.process_emitters.rendering import (
+        RenderExceptionBinding,
+        render_exception_parameters,
+    )
+
+    assert "valueType=\"track\"" in render_exception_parameters(RenderExceptionBinding(kind="caught_error"))
+    assert "valueType=\"current\"" in render_exception_parameters(RenderExceptionBinding(kind="current_document"))
+    for kind in ("none", "bogus"):
+        with pytest.raises(ValueError):
+            render_exception_parameters(RenderExceptionBinding(kind=kind))
 
 
 def test_registry_mapping_is_immutable():

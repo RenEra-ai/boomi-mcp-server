@@ -712,14 +712,14 @@ def _pre_start_passthrough(inp) -> Optional[str]:
 
 
 def _pre_exception(inp) -> Optional[str]:
-    # The resolved ``binding`` and the legacy ``parameter_source`` must agree — the
-    # legacy emitter derives the exParameters form from parameter_source, so an
-    # inconsistent pair would emit a binding that disagrees with the authored
-    # source. Mirror the legacy mapping (anything but none/current_document ->
-    # caught_error).
-    src = str(inp.parameter_source or "caught_error").strip().lower()
-    expected = src if src in ("none", "current_document") else "caught_error"
-    if inp.binding.binding != expected:
+    # The resolved ``binding`` and the authored ``parameter_source`` must agree, and
+    # both must name a SUPPORTED source. #184 amendment 3 §9: a forged or unknown
+    # source used to be mapped onto the caught-error binding, and `none` rendered an
+    # Exception the platform refuses on create. Both are refused here now.
+    src = "caught_error" if inp.parameter_source is None else str(inp.parameter_source).strip().lower()
+    if src not in ("caught_error", "current_document"):
+        return "unsupported exception parameter_source"
+    if getattr(inp.binding, "binding", None) != src:
         return "exception binding disagrees with parameter_source"
     return None
 

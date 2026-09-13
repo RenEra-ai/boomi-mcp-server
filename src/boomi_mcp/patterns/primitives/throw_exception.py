@@ -43,8 +43,9 @@ class ThrowExceptionParameters(BaseModel):
 
     ``message_template`` is the error text; use the ``{1}`` placeholder for the
     value bound by ``parameter_source`` (``caught_error`` = the platform Try/Catch
-    error message; ``current_document`` = the current document; ``none`` = a
-    static message with no parameter). ``stop_single_document`` true fails only the
+    error message; ``current_document`` = the current document). A message with no
+    binding is not supported: the platform requires the parameter block
+    (#184 amendment 3 §9). ``stop_single_document`` true fails only the
     document that reached the Exception (others continue); false (default) halts the
     whole process. ``title`` (optional) is the alert subject / process-log title.
     """
@@ -62,9 +63,9 @@ class ThrowExceptionParameters(BaseModel):
         default=False,
         description="true fails only the reaching document; false (default) halts the whole process.",
     )
-    parameter_source: Literal["caught_error", "current_document", "none"] = Field(
+    parameter_source: Literal["caught_error", "current_document"] = Field(
         default="caught_error",
-        description="Binds {1}: 'caught_error', 'current_document', or 'none'.",
+        description="Binds {1}: 'caught_error' or 'current_document'.",
     )
 
     # Mirror ProcessFlowBuilder._validate_catch_exception so a primitive that
@@ -80,11 +81,10 @@ class ThrowExceptionParameters(BaseModel):
 
     @model_validator(mode="after")
     def _require_placeholder_when_bound(self) -> "ThrowExceptionParameters":
-        if self.parameter_source != "none" and "{1}" not in self.message_template:
+        if "{1}" not in self.message_template:
             raise ValueError(
-                "message_template must contain the {1} placeholder when "
-                "parameter_source binds a value (caught_error / current_document); "
-                "use parameter_source='none' for a static message."
+                "message_template must contain the {1} placeholder that "
+                "parameter_source binds (caught_error / current_document)."
             )
         return self
 

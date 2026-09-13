@@ -1272,10 +1272,8 @@ from ...models.process_ir_tokens import (  # noqa: E402  (re-export)
 )
 
 
-class _NoExceptionBindingV1(_CompilerModel):
-    binding: Literal["none"] = "none"
-
-
+# #184 amendment 3 §9 withdrew the `none` binding: it rendered no parameter block,
+# which the platform refuses on create.
 class _CurrentDocumentBindingV1(_CompilerModel):
     binding: Literal["current_document"] = "current_document"
     key: int = 0
@@ -1293,7 +1291,6 @@ class _CaughtErrorBindingV1(_CompilerModel):
 
 ExceptionBindingV1 = Annotated[
     Union[
-        _NoExceptionBindingV1,
         _CurrentDocumentBindingV1,
         _CaughtErrorBindingV1,
     ],
