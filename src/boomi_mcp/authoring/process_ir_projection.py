@@ -327,6 +327,41 @@ _NODE_FACTS: Mapping[str, Mapping[str, Any]] = {
         ),
         _STAGES: ("author", "plan"),
     },
+    # #184. The Data Passthrough entry.
+    "passthrough": {
+        "category": "entry",
+        "title": "Passthrough (Data Passthrough entry)",
+        "summary": (
+            "The entry of a process started by a parent process's Process Call, "
+            "working on the parent's documents. Authors only an optional label — no "
+            "connector, no profile the incoming documents must match, and no "
+            "process-level options: the options a passthrough process needs are "
+            "derived from this node and are never authored separately."
+        ),
+        _ORDERING: (
+            "A passthrough is the first step of its process and appears exactly "
+            "once; a process cannot have both a passthrough and a listener entry.",
+            "After the passthrough come linear and connector_call steps ending in a "
+            "stop, return_documents, branch or decision, or exactly one process_call "
+            "and nothing else. The steps need not begin with a document producer, "
+            "because the calling process supplies the documents. A source, target, "
+            "try_catch or exception is not available in a passthrough process, and "
+            "no step may follow a branch or decision.",
+            "When a parent's Process Call starts it, the documents that reach that "
+            "call arrive together, as one group, in a single execution of this "
+            "process.",
+            "Passthrough calls require wait=true: the calling Process Call waits for "
+            "the passthrough process to finish. Each newly admitted invocation "
+            "combination also requires archived runtime evidence.",
+            "Run on its own, on a schedule, a passthrough process starts with a "
+            "single empty document instead, exactly as a process with no explicit "
+            "entry does.",
+        ),
+        _DOCS: ("none", "documents", "all_documents"),
+        _CAPS: ("passthrough_entry",),
+        _RELATED: ("semantic_rule.listener.entry_authority",),
+        _STAGES: ("author", "plan"),
+    },
     "source": {
         "category": "connector",
         "title": "Source endpoint",
@@ -868,13 +903,19 @@ _SEMANTIC_RULES: Tuple[Tuple[str, str, str, str, Tuple[str, ...], Tuple[str, ...
         "semantic_rule.listener.entry_authority",
         "structure",
         "The compiler owns how a process starts",
-        "Every process has exactly one compiler-synthesized start, in one of two "
-        "forms: scheduled, or listener when the first step is a listener entry. "
-        "A listener is fused with that start, and the process-level options a "
-        "listener needs follow from it. No caller authors the start, its "
-        "position, its wiring or those options.",
-        ("listener",),
-        ("node.listener", "capability.listener_entry"),
+        "Every process has exactly one compiler-synthesized start, in one of three "
+        "forms: scheduled; listener when the first step is a listener entry; or "
+        "passthrough when the first step is a passthrough entry. A listener or a "
+        "passthrough is fused with that start, and the process-level options that "
+        "entry needs follow from it. No caller authors the start, its position, "
+        "its wiring or those options.",
+        ("listener", "passthrough"),
+        (
+            "node.listener",
+            "node.passthrough",
+            "capability.listener_entry",
+            "capability.passthrough_entry",
+        ),
     ),
     (
         "semantic_rule.listener.composition",

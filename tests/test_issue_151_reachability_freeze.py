@@ -207,7 +207,7 @@ def _direct_corpus():
     for name in sorted(root):
         docs.append(("process_ir_v1.json::%s" % name, root[name], "root"))
     for sub, tag in (("rich_control", "rich"), ("error_handling", "error"),
-                     ("listener", "listener")):
+                     ("listener", "listener"), ("passthrough", "passthrough")):
         for path in sorted((_FIXTURES / sub).glob("*.json")):
             docs.append(("%s/%s" % (sub, path.name),
                          json.loads(path.read_text()), tag))
@@ -241,6 +241,13 @@ def _direct_route_keys():
 
             _cfg, plan = compile_process_ir_v1(
                 parse_process_ir_v1(doc), _listener_symbols())
+        elif tag == "passthrough":
+            # #184: a passthrough document names no component at all — its entry
+            # authors only a label — so it compiles against an EMPTY table. A new
+            # passthrough document that does reference a component fails here
+            # rather than silently contributing no route.
+            _cfg, plan = compile_process_ir_v1(
+                parse_process_ir_v1(doc), SymbolTableV1(symbols=()))
         else:
             _cfg, plan = corpus.error_compile(doc)
         keys |= _plan_keys(plan, where)

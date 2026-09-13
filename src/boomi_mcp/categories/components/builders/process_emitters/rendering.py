@@ -349,6 +349,24 @@ def render_start_noaction(ctx: ShapeRenderContext) -> str:
     )
 
 
+def render_start_passthrough(ctx: ShapeRenderContext, *, userlabel: str) -> str:
+    """Data Passthrough start shape (#184).
+
+    The no-action Start's shape and dragpoint conventions, carrying the entry's
+    escaped label and the ``passthroughaction`` configuration of a UI-built
+    passthrough process capture.
+    """
+    dragpoints = render_dragpoints(ctx.transitions)
+    userlabel = _escape_xml(userlabel or "")
+    return (
+        f'<shape image="start" name="{ctx.shape_id}" shapetype="start" '
+        f'userlabel="{userlabel}" x="{ctx.x}" y="{ctx.y}">'
+        '<configuration><passthroughaction/></configuration>'
+        f'<dragpoints>{dragpoints}</dragpoints>'
+        '</shape>'
+    )
+
+
 def render_start_listen(ctx: ShapeRenderContext, *, userlabel: str, operation_id: str) -> str:
     """WSS Listen start shape (M6, #12).
 

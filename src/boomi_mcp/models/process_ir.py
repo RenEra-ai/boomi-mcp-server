@@ -1294,6 +1294,32 @@ class ListenerEntryNodeV1(_ProcessIRBase):
     inbound_validation: Optional[InboundValidationV1] = None
 
 
+class PassthroughEntryNodeV1(_ProcessIRBase):
+    """The Data Passthrough entry of a process started by a parent process (#184).
+
+    Marks a process that is started by a parent process's Process Call and works
+    on the parent's documents. The documents that reach that Process Call arrive
+    together, as ONE group, in a single execution of this process, and the call
+    must wait for that execution to finish. Run on its own — on a schedule — the
+    same process starts with a single empty document instead, as a process with
+    no explicit entry does.
+
+    It is the FIRST root step and appears exactly once; it cannot sit inside a
+    control body, and a process cannot have both a passthrough and a listener
+    entry. It authors nothing but an optional label: no connector, no profile the
+    incoming documents must match, and no process-level options. The options that
+    follow from this entry are derived from it and are never authored separately.
+
+    A passthrough process continues with linear and connector_call steps ending in
+    a stop or return_documents terminal, or in a branch or decision; or it is
+    exactly this entry followed by one process_call. A source, target, try_catch or
+    exception step is not available in a passthrough process.
+    """
+
+    kind: Literal["passthrough"]
+    label: Optional[str] = None
+
+
 # #142 M12.7. Idempotency evidence for a RETRIED connector call.
 #
 # Evidence never AUTHORIZES a retry on its own — the connector registry's
@@ -2098,7 +2124,15 @@ def process_call_root_verdict(kinds):
     which entry point it called.
 
     Returns ``(reason, at, message)`` or ``None`` when the root is legal.
+
+    #184: a leading ``passthrough`` entry is NOT a step on the call's path. The
+    compiler fuses it with the process start, so ``[passthrough, process_call]``
+    is the exact singleton, and every index this verdict names is the AUTHORED
+    one — a prefix step after the entry is reported at its own position, never
+    shifted onto the entry. Every other root is judged exactly as before.
     """
+    entry_offset = 1 if kinds[:1] == ["passthrough"] else 0
+    kinds = kinds[entry_offset:]
     if kinds == ["process_call"] or "process_call" not in kinds:
         return None
     # PRECEDENCE, not just a shared implementation. A control node followed by
@@ -2128,7 +2162,7 @@ def process_call_root_verdict(kinds):
     # the validator. This form is total — the singleton returned above, so at
     # least two steps remain and an index other than the first call exists.
     first_call = kinds.index("process_call")
-    offending = next(i for i in range(len(kinds)) if i != first_call)
+    offending = next(i for i in range(len(kinds)) if i != first_call) + entry_offset
     return (
         PLACEMENT_ROOT_SINGLETON,
         ("steps", offending),
@@ -2138,9 +2172,62 @@ def process_call_root_verdict(kinds):
     )
 
 
+#: #184. The root node kinds that declare how a process is STARTED — the
+#: explicit entries. A root holds at most one, as its first step. Closed and
+#: deliberately small: each member is fused with the process start by the
+#: compiler's entry policy, which pins the same set from its side.
+EXPLICIT_ENTRY_KINDS = frozenset({"listener", "passthrough"})
+
+#: #184. THE reason an explicit entry is misplaced, for every entry kind. #158
+#: named it for the listener; the name below is kept as an alias so the listener
+#: renderers keep reading the one reason rather than a copy of it.
+ENTRY_PLACEMENT_POSITION = "entry_position"
+
 #: #158. The two ways a listener entry can be misplaced, as verdict reasons.
-LISTENER_PLACEMENT_POSITION = "listener_position"
+LISTENER_PLACEMENT_POSITION = ENTRY_PLACEMENT_POSITION
 LISTENER_PLACEMENT_COMPOSITION = "listener_composition"
+
+
+def explicit_entry_root_verdict(kinds):
+    """THE authority on where an EXPLICIT ENTRY may sit (#158, shared by #184).
+
+    A root may hold one explicit entry — a ``listener`` or a ``passthrough`` —
+    and only as its first step. Every misplacement is one reason,
+    :data:`ENTRY_PLACEMENT_POSITION`, located at the offending entry step:
+
+    * an entry after any other step;
+    * a second entry of the same kind;
+    * a listener and a passthrough in one root — whichever comes second is the
+      misplaced one, because a process is started exactly one way.
+
+    Same contract as :func:`listener_root_verdict`: ``(reason, at, message)`` or
+    ``None``. The listener verdict and the passthrough grammar in the model, and
+    ``body_capabilities`` in the compiler, all RENDER this rather than deciding,
+    so both public entry points serve one identity for one misplaced entry.
+    """
+    for index, kind in enumerate(kinds):
+        if index == 0 or kind not in EXPLICIT_ENTRY_KINDS:
+            continue
+        first = kinds[0]
+        if first in EXPLICIT_ENTRY_KINDS and first != kind:
+            message = (
+                "a process has one explicit entry — a listener or a passthrough, "
+                "never both (step {0} is a {1} after a {2} entry)".format(
+                    index, kind, first
+                )
+            )
+        elif kind == "listener":
+            message = (
+                "a listener is the entry of its flow — it may appear only as the "
+                "first root step, exactly once (step {0})".format(index)
+            )
+        else:
+            message = (
+                "a passthrough is the entry of its process — it may appear only as "
+                "the first root step, exactly once (step {0})".format(index)
+            )
+        return (ENTRY_PLACEMENT_POSITION, ("steps", index), message)
+    return None
 
 #: Root kinds a listener flow may never contain. The listener is the flow's
 #: entry, so a second entry (``source``) is meaningless, and the rest are the
@@ -2179,14 +2266,12 @@ def listener_root_verdict(kinds):
     """
     if "listener" not in kinds:
         return None
-    for index, kind in enumerate(kinds):
-        if kind == "listener" and index != 0:
-            return (
-                LISTENER_PLACEMENT_POSITION,
-                ("steps", index),
-                "a listener is the entry of its flow — it may appear only as the "
-                "first root step, exactly once (step {0})".format(index),
-            )
+    # #184: position is the SHARED explicit-entry rule, so a listener beside a
+    # passthrough is refused here with the same identity the passthrough grammar
+    # serves for the reverse order.
+    position = explicit_entry_root_verdict(kinds)
+    if position is not None:
+        return position
     for index, kind in enumerate(kinds):
         if kind in LISTENER_EXCLUDED_ROOT_KINDS:
             return (
@@ -2881,6 +2966,9 @@ PROCESS_IR_V1_MAX_CONTROL_DEPTH = 2
 ProcessNodeV1 = Annotated[
     Union[
         ListenerEntryNodeV1,
+        # #184. Root-only, like the listener: a member of THIS union and of no
+        # control-body union, so a nested passthrough is a body-slot refusal.
+        PassthroughEntryNodeV1,
         SourceEndpointV1,
         TargetEndpointV1,
         ConnectorCallNodeV1,
@@ -3194,6 +3282,126 @@ def _check_listener_root(steps: List[Any]) -> None:
     _check_cache_put_followed_by_read(steps, context="listener flow steps")
 
 
+#: #184. Root kinds a passthrough process may never contain, as a step or as its
+#: terminal. The entry already supplies the documents, so a second entry
+#: (``source``) is meaningless and a ``target`` endpoint belongs to the legacy
+#: source/target dialect a passthrough root is not written in. ``try_catch`` and
+#: ``exception`` were never an evidenced passthrough composition, so they stay
+#: refused rather than admitted on no evidence. A ``listener`` is a misplaced
+#: ENTRY, refused by :func:`explicit_entry_root_verdict` with its own identity,
+#: and ``notify``/``continue`` by the shared never-admitted table.
+PASSTHROUGH_EXCLUDED_ROOT_KINDS = frozenset({"source", "target", "try_catch", "exception"})
+
+#: #184. The terminals a passthrough root's step run may end on. A control ends
+#: the root by fanning out; ``stop`` and ``return_documents`` end it outright.
+PASSTHROUGH_ROOT_TERMINAL_KINDS = frozenset(
+    {"stop", "return_documents", "branch", "decision"}
+)
+
+
+def _check_passthrough_root(steps: List[Any]) -> None:
+    """The passthrough process's grammar (#184). Every rule is a refusal a caller can act on.
+
+    The entry is a ``passthrough`` node at step 0. After it, exactly one of:
+
+    * PROCESS-CALL form — ``passthrough, process_call``. The entry is fused with
+      the process start, so this is the root process call's exact singleton; any
+      other step beside the call (a prefix, a suffix, a second call) is refused by
+      :func:`process_call_root_verdict` with its existing identity, and a
+      connector beside it by the same verdict's mixing reason.
+    * CONTROL form — ``passthrough, branch`` or ``passthrough, decision``.
+    * LINEAR form — ``passthrough, S*, T`` where every ``S`` is a linear step or a
+      ``connector_call`` and ``T`` is ``stop``, ``return_documents``, ``branch``
+      or ``decision``. The steps need not begin with a document producer — the
+      calling process supplies the documents — so a ``map_ref`` needs no
+      bracketing calls here. The existing ``cache_put`` rules apply unchanged: a
+      mid-run ``cache_put`` is followed by a stream-replacing cache read, and a
+      trailing one is refused.
+
+    Refused, in this order, so a caller is told about the mistake they made rather
+    than a consequence of it:
+
+    1. ``notify``/``continue`` anywhere — the shared never-admitted table;
+    2. a misplaced or second explicit entry, a listener included —
+       ``PROCESS_IR_SCHEMA_INVALID_CARDINALITY`` at that entry step;
+    3. ``source``, ``target``, ``try_catch`` or ``exception`` —
+       ``PROCESS_IR_CAPABILITY_UNSUPPORTED`` at that step;
+    4. an entry with nothing after it — ``PROCESS_IR_SCHEMA_INVALID_CARDINALITY``;
+    5. any step after a ``branch``/``decision`` — the control-continuation rule,
+       with the identity it has on every root;
+    6. a ``process_call`` that is not the singleton — the root process-call verdict;
+    7. a last step that is not a terminal above — ``PROCESS_IR_SCHEMA_INVALID_CARDINALITY``;
+    8. a non-linear, non-``connector_call`` step before the terminal —
+       ``PROCESS_IR_CAPABILITY_UNSUPPORTED`` at that step;
+    9. the ``cache_put`` rules.
+
+    ``body_capabilities`` runs this same function over a mutated model handed to
+    the compiler, so the two public entry points serve one identity per mistake.
+    """
+    kinds = [getattr(step, "kind", None) for step in steps]
+    _check_root_kinds_never_admitted(steps)
+
+    verdict = explicit_entry_root_verdict(kinds)
+    if verdict is not None:
+        _reason, at, message = verdict
+        raise _cardinality_error(message, at=at)
+
+    for index, kind in enumerate(kinds[1:], start=1):
+        if kind in PASSTHROUGH_EXCLUDED_ROOT_KINDS:
+            raise _capability_error(
+                "a passthrough process may not contain {0} (step {1}) — it admits "
+                "linear and connector_call steps ending in a stop, return_documents, "
+                "branch or decision, or exactly one process_call after the "
+                "entry".format(kind, index),
+                at=("steps", index),
+            )
+
+    if len(kinds) < 2:
+        raise _cardinality_error(
+            "a passthrough entry must be followed by its process's steps and a "
+            "terminal, or by exactly one process_call"
+        )
+
+    for kind in kinds[1:-1]:
+        if kind in ("branch", "decision"):
+            raise _continuation_error(
+                "no step may follow a branch or decision — control nodes are "
+                "terminal fan-out in ProcessIR v1 "
+                "(continuation_after_branch_or_decision is gated)"
+            )
+
+    if "process_call" in kinds:
+        call_verdict = process_call_root_verdict(kinds)
+        if call_verdict is None:
+            return
+        reason, at, message = call_verdict
+        if reason == PLACEMENT_ROOT_CONNECTOR_MIXING:
+            raise _capability_error(message)
+        raise _return_path_binding_error(message, at=at)
+
+    if kinds[-1] not in PASSTHROUGH_ROOT_TERMINAL_KINDS:
+        raise _cardinality_error(
+            "a passthrough process must end in a stop, return_documents, branch or "
+            "decision terminal, or be the entry followed by exactly one process_call"
+        )
+    for index, kind in enumerate(kinds[1:-1], start=1):
+        if kind not in _ROOT_LINEAR_KINDS and kind != "connector_call":
+            raise _capability_error(
+                "a passthrough process may contain only linear and connector_call "
+                "steps before its terminal (step {0})".format(index),
+                at=("steps", index),
+            )
+    _check_cache_put_followed_by_read(steps, context="passthrough process steps")
+    _check_trailing_cache_put(
+        steps[:-1], steps[-1],
+        allowed_terminals=frozenset(),
+        message=(
+            "a trailing cache_put in a passthrough process must be followed by a "
+            "stream-replacing cache read, not by the terminal"
+        ),
+    )
+
+
 class SequenceNodeV1(_ProcessIRBase):
     """Ordered root sequence. Local structural rules mirror today's builder:
 
@@ -3217,6 +3425,10 @@ class SequenceNodeV1(_ProcessIRBase):
     - a LISTENER flow (#158) starts with exactly one ``listener`` and continues
       either with linear steps, a ``target`` and a ``stop``, or with
       ``connector_call`` steps ending on a call before a ``stop``;
+    - a PASSTHROUGH process (#184) starts with exactly one ``passthrough`` and
+      continues with linear and ``connector_call`` steps ending in ``stop``,
+      ``return_documents``, ``branch`` or ``decision``, or with exactly one
+      ``process_call``;
     - ``cache_put`` must be immediately followed by a stream-replacing cache
       read (never by the target/terminal).
     """
@@ -3245,6 +3457,15 @@ class SequenceNodeV1(_ProcessIRBase):
         # be told a connector flow "must start with the source endpoint".
         if "listener" in kinds:
             _check_listener_root(self.steps)
+            return self
+
+        # #184. A PASSTHROUGH root has its own grammar too, for the listener's
+        # reason: every branch below assumes an entry that is a source or a call,
+        # and would judge `[passthrough, map_ref, stop]` by a grammar it is not
+        # written in. After the listener branch, so a root holding both is refused
+        # by the shared explicit-entry verdict whichever comes first.
+        if "passthrough" in kinds:
+            _check_passthrough_root(self.steps)
             return self
 
         # #156 T5. SERIALIZED CONNECTOR REGIONS, matched exactly and checked
@@ -3579,6 +3800,11 @@ PROCESS_IR_V1_CAPABILITIES: Mapping[str, str] = MappingProxyType(
         # compiler fuses with the process start, and from which it derives the
         # listener process options. Its error scope stays gated below.
         "listener_entry": "supported",  # #158
+        # #184. The Data Passthrough entry: a root-only ``passthrough`` node the
+        # compiler fuses with the process start, and from which it derives the
+        # passthrough process options — the attribute set of a UI-built
+        # passthrough process capture.
+        "passthrough_entry": "supported",  # #184
         "mixed_connector_execution": "supported",  # #140 — many calls per path
         # Still GATED after #141 and #175: ProcessCall and connector execution may
         # not share one root-to-leaf path. #175 admits ProcessCall as the TERMINAL
@@ -3755,6 +3981,7 @@ _DISCRIMINATOR_TAGS = frozenset(
     {
         "sequence",
         "listener",
+        "passthrough",
         "source",
         "target",
         "connector_call",

@@ -87,12 +87,28 @@ LISTENER_PROCESS_OPTIONS = (
     'workload="general"'
 )
 
+#: Data Passthrough process options (#184) — the exact six attributes of the
+#: ``<process>`` open tag of a UI-built passthrough process capture
+#: (``tests/fixtures/live_xml/m11/process_doccacheretrieve_loadalldoc_variant.xml``,
+#: recorded as UI-built and causally independent in #175's Stage-1 QA round-4
+#: evidence): ``allowSimultaneous="false"`` and ``updateRunDates="false"``. NOTE:
+#: that capture omits ``stopProcessingIfZeroDocuments`` entirely — do not add it.
+PASSTHROUGH_PROCESS_OPTIONS = (
+    'allowSimultaneous="false" '
+    'enableUserLog="false" '
+    'processLogOnErrorOnly="false" '
+    'purgeDataImmediately="false" '
+    'updateRunDates="false" '
+    'workload="general"'
+)
+
 #: Execution profile -> the exact ``<process>`` attribute bytes. A MAPPING keyed
 #: by the recorded profile, never a re-derivation: the materializer's whole
 #: contract is that it consumes the compiler's decision.
 _PROFILE_OPTIONS = {
     "scheduled": DEFAULT_PROCESS_OPTIONS,
     "listener": LISTENER_PROCESS_OPTIONS,
+    "passthrough": PASSTHROUGH_PROCESS_OPTIONS,
 }
 
 
@@ -463,6 +479,7 @@ class ProcessComponentMaterializer:
 __all__ = [
     "DEFAULT_PROCESS_OPTIONS",
     "LISTENER_PROCESS_OPTIONS",
+    "PASSTHROUGH_PROCESS_OPTIONS",
     "ProcessComponentMaterializer",
     "assemble_component_xml",
     "extension_bindings_from_legacy_config",

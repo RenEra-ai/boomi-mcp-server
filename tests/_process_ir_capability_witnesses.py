@@ -1041,6 +1041,83 @@ def _w_listener_entry():
     )
 
 
+#: #184. The UI-built Data Passthrough capture: its `<process>` open tag and its
+#: Start's `<configuration>` are the byte authority for the passthrough entry.
+#: Committed long before #184 and recorded as UI-built and causally independent
+#: in `docs/architecture/evidence/issue-175/stage1-qa-round-4.md`.
+PASSTHROUGH_UI_CAPTURE = (
+    _ROOT / "tests" / "fixtures" / "live_xml" / "m11"
+    / "process_doccacheretrieve_loadalldoc_variant.xml"
+)
+
+
+def _w_passthrough_entry():
+    """Admission of the passthrough entry, anchored to the UI-built capture.
+
+    The document is INLINE — no frozen passthrough ProcessIR document exists — so it is
+    declared `PROVENANCE_INLINE_ADMISSION`. What it is checked AGAINST is not inline: the
+    emitted Start's `<configuration>` and the materialized option bytes are compared with
+    the capture's own, read from the file.
+    """
+    import re
+
+    label = "Process Patches from Cache"
+    document = _doc(
+        [
+            {"kind": "passthrough", "label": label},
+            {"kind": "message", "text": "x"},
+            {"kind": "stop"},
+        ]
+    )
+
+    def run():
+        from boomi_mcp.categories.components.process_component_materializer import (
+            process_options_for_profile,
+        )
+        from boomi_mcp.compiler.process_ir.contracts import SymbolTableV1
+        from boomi_mcp.compiler.process_ir.emitter_registry import emit_process
+        from boomi_mcp.compiler.process_ir.execution_profile import (
+            derive_process_execution_profile,
+        )
+
+        symbols = SymbolTableV1(symbols=())
+        cfg, plan = _compiles(document, symbols)
+        shapes = emit_process(plan, symbols).shape_xml_parts
+        profile = derive_process_execution_profile(cfg, symbols)
+        return plan, shapes, profile, process_options_for_profile(profile)
+
+    def observe(result):
+        plan, shapes, profile, options = result
+        start = plan.nodes[0]
+        assert (start.shape_id, start.emitter_input.emitter_kind) == (
+            "shape1", "start_passthrough",
+        ), (start.shape_id, start.emitter_input.emitter_kind)
+        assert profile == "passthrough", profile
+        capture = PASSTHROUGH_UI_CAPTURE.read_text(encoding="utf-8")
+        captured_start = re.search(
+            r'<shape image="start" name="shape1"[^>]*>(<configuration>.*?</configuration>)',
+            capture,
+        )
+        emitted_start = re.match(
+            r'<shape image="start" name="shape1"[^>]*userlabel="([^"]*)"[^>]*>'
+            r"(<configuration>.*?</configuration>)",
+            shapes[0],
+        )
+        assert captured_start and emitted_start, shapes[0]
+        assert emitted_start.group(2) == captured_start.group(1), emitted_start.group(2)
+        assert emitted_start.group(1) == label
+        captured_options = re.search(r'<process xmlns="" ([^>]*)>', capture).group(1)
+        assert options == captured_options, options
+
+    return CapabilityWitness(
+        "passthrough_entry",
+        "admits",
+        PROVENANCE_INLINE_ADMISSION,
+        run,
+        observe,
+    )
+
+
 def _w_nested_try_catch():
     inner = {
         "kind": "try_catch",
@@ -1537,6 +1614,7 @@ _ENTRIES: Tuple[object, ...] = (
     _w_catch_failure_trigger_selection(),
     _w_listener_entry(),
     _w_listener_error_scope(),
+    _w_passthrough_entry(),
     _w_nested_try_catch(),
     _w_keyed_cache(),
     _w_definedparameter_property_source(),

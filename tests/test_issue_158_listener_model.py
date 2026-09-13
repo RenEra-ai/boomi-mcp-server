@@ -275,8 +275,13 @@ def test_the_served_listener_entries_agree_with_their_runtime_authorities():
     ):
         assert entry_id in entries, entry_id
 
-    assert set(ENTRY_FORMS) == {"scheduled", "listener"}
-    assert entry_form_rows() == (("listener", "listener"), ("scheduled", "scheduled"))
+    # #184 added the third form, the Data Passthrough entry.
+    assert set(ENTRY_FORMS) == {"scheduled", "listener", "passthrough"}
+    assert entry_form_rows() == (
+        ("listener", "listener"),
+        ("passthrough", "passthrough"),
+        ("scheduled", "scheduled"),
+    )
     authority = entries["semantic_rule.listener.entry_authority"].summary.lower()
     assert "exactly one" in authority
     for form in ENTRY_FORMS:

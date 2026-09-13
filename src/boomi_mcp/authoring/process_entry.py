@@ -30,9 +30,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Mapping, Optional
 
-#: The two forms, named as the compiler's entry policy names them.
+#: The three forms, named as the compiler's entry policy names them.
 SCHEDULED = "scheduled"
 LISTENER = "listener"
+#: #184. A Data Passthrough root: started by a parent's Process Call. It carries
+#: no operation reference, and it is never a listener.
+PASSTHROUGH = "passthrough"
 
 
 class RecordedEntryUnreadable(ValueError):
@@ -51,7 +54,9 @@ class ProcessEntryV1:
 
     ``operation_ref`` is the reference as authored — a ``$ref:KEY`` token or a
     literal component id — or ``None`` when the entry names none (a legacy
-    listener stage with a blank id). A scheduled entry never carries one.
+    listener stage with a blank id). A scheduled or passthrough entry never
+    carries one. ``is_listener`` is EXACT equality with the listener form, so no
+    other form — a passthrough included — is ever treated as one.
     """
 
     form: str
@@ -134,9 +139,17 @@ def canonical_root_entry(process_ir: Any) -> ProcessEntryV1:
     parsed (so a recorded dict is re-validated rather than trusted) and lowered;
     the entry policy then classifies the CFG's own entry node. Raises
     :class:`RecordedEntryUnreadable` when the IR cannot be parsed or lowered.
+
+    #184: the form returned is the REAL compiler-derived one — ``scheduled``,
+    ``listener`` or ``passthrough`` — never a collapse of every non-listener root
+    to scheduled. A passthrough entry carries no operation reference.
     """
     from ..compiler.process_ir.diagnostics import ProcessIRCompileError
-    from ..compiler.process_ir.entry_policy import LISTENER_SEMANTIC_KIND, classify_entry
+    from ..compiler.process_ir.entry_policy import (
+        LISTENER_SEMANTIC_KIND,
+        PASSTHROUGH as POLICY_PASSTHROUGH,
+        classify_entry,
+    )
     from ..compiler.process_ir.lowering import lower_process_ir_to_cfg
     from ..models.process_ir import (
         ProcessIRV1,
@@ -155,7 +168,10 @@ def canonical_root_entry(process_ir: Any) -> ProcessEntryV1:
         raise RecordedEntryUnreadable(
             "the recorded process root no longer parses as ProcessIR"
         ) from exc
-    if classify_entry(cfg) != LISTENER:
+    form = classify_entry(cfg)
+    if form == POLICY_PASSTHROUGH:
+        return ProcessEntryV1(PASSTHROUGH)
+    if form != LISTENER:
         return _SCHEDULED_ENTRY
     entry = next(node for node in cfg.nodes if node.node_id == cfg.entry_node_id)
     if entry.semantic.semantic_kind != LISTENER_SEMANTIC_KIND:  # pragma: no cover
@@ -165,6 +181,7 @@ def canonical_root_entry(process_ir: Any) -> ProcessEntryV1:
 
 __all__ = [
     "LISTENER",
+    "PASSTHROUGH",
     "SCHEDULED",
     "ProcessEntryV1",
     "RecordedEntryUnreadable",

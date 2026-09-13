@@ -1217,6 +1217,8 @@ def test_schema_closed_discriminated_union():
         # #158. The listener entry: a root-only kind, admitted ONLY as the first
         # root step and refused in every control body by the body unions.
         "listener",
+        # #184. The Data Passthrough entry: root-only for the listener's reason.
+        "passthrough",
     }
 
 
@@ -1430,6 +1432,8 @@ def test_capability_manifest_immutable_and_complete():
         # #158: the operation-only inbound entry, fused with the process Start.
         "listener_entry",
         "mixed_connector_execution",
+        # #184: the label-only Data Passthrough entry, fused with the process Start.
+        "passthrough_entry",
         "recovery_process_call",
         "rich_branch_decision_bodies",
         "scoped_try_catch",
@@ -1456,8 +1460,8 @@ def test_every_process_ir_def_has_a_non_empty_description():
     """
     defs = process_ir_v1_json_schema()["$defs"]
     # #156 added NotifyNodeV1 and ContinueNodeV1; #158 added ListenerEntryNodeV1
-    # and InboundValidationV1.
-    assert len(defs) == 44
+    # and InboundValidationV1; #184 added PassthroughEntryNodeV1.
+    assert len(defs) == 45
     undescribed = sorted(name for name, body in defs.items() if not body.get("description"))
     assert undescribed == []
 

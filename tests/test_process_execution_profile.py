@@ -35,6 +35,7 @@ from boomi_mcp.compiler.process_ir.contracts import (  # noqa: E402
 )
 from boomi_mcp.compiler.process_ir.execution_profile import (  # noqa: E402
     LISTENER,
+    PASSTHROUGH,
     SCHEDULED,
     derive_process_execution_profile,
 )
@@ -188,6 +189,25 @@ def test_a_symbol_with_no_connector_family_is_scheduled():
     assert derive_process_execution_profile(cfg, symbols) == SCHEDULED
 
 
-def test_the_profile_values_are_exactly_two():
-    """Closed set: a third value would mean a third ``<process>`` attribute set."""
-    assert {SCHEDULED, LISTENER} == {"scheduled", "listener"}
+def test_the_profile_values_are_exactly_three():
+    """Closed set: a fourth value would mean a fourth ``<process>`` attribute set.
+
+    #184 added ``passthrough`` — the Data Passthrough entry — as the third.
+    """
+    assert {SCHEDULED, LISTENER, PASSTHROUGH} == {"scheduled", "listener", "passthrough"}
+
+
+def test_passthrough_entry_derives_passthrough_even_beside_a_listen_operation():
+    """The #184 witness over a graph the compiler really produces: a passthrough
+    root compiled against a table that ALSO holds a genuine WSS Listen operation
+    classifies as passthrough — never listener, never scheduled."""
+    _listener_ir, symbols = _listener_root_and_symbols()
+    ir = parse_process_ir_v1({"version": "1", "body": {"kind": "sequence", "steps": [
+        {"kind": "passthrough"},
+        {"kind": "message", "text": "prepared"},
+        {"kind": "stop"},
+    ]}})
+    cfg, plan = compile_process_ir_v1(ir, symbols)
+    assert any(s.action_type == "Listen" for s in symbols.symbols)
+    assert plan.nodes[0].emitter_input.emitter_kind == "start_passthrough"
+    assert derive_process_execution_profile(cfg, symbols) == PASSTHROUGH

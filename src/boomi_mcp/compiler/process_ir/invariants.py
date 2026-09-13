@@ -62,7 +62,11 @@ from .contracts import (
     shape_x,
 )
 from .diagnostics import raise_compile_error
-from .entry_policy import derive_process_entry, start_emitter_input
+from .entry_policy import (
+    FUSED_ENTRY_SEMANTIC_KINDS,
+    derive_process_entry,
+    start_emitter_input,
+)
 from .error_handling import catch_region_node_ids, derive_error_regions
 
 _SEMANTIC_PHASE = "semantic_lowering"
@@ -127,8 +131,10 @@ _ROUTED_TARGET_PATH = re.compile(r"(?:/legs/\d+|/true_arm)/terminal$")
 _CACHE_STAGE_PATH = re.compile(r"(?:/legs/\d+|/catch_body)/terminal$")
 
 # #158: the only authored position a listener entry can hold — the first root
-# step. The model enforces it; this pins the CFG to the same fact.
-_LISTENER_ENTRY_PATH = "/body/steps/0"
+# step. The model enforces it; this pins the CFG to the same fact. #184: the same
+# position for every explicit entry, a passthrough included.
+_EXPLICIT_ENTRY_PATH = "/body/steps/0"
+_LISTENER_ENTRY_PATH = _EXPLICIT_ENTRY_PATH
 
 # Emitter-input fields that must name a component resolved through the symbol
 # table. Anything here that is absent from the table means the plan carries a
@@ -476,27 +482,37 @@ def check_cfg_invariants(cfg: SemanticCfgV1) -> None:
     # from the first root step. Anywhere else it would put a Start in the middle
     # of a flow; twice, it would make two. Re-derived here from the graph rather
     # than trusted from lowering, like every other role this checker verifies.
-    listeners = [node for node in nodes if node.semantic.semantic_kind == "listener"]
-    listener_rooted = False
-    if listeners:
+    # #184 GENERALISED this to every EXPLICIT entry — a listener or a passthrough,
+    # the set the entry policy derives — so the two kinds share one rule: one
+    # explicit entry, the single CFG entry node, lowered from the first root step.
+    # A listener and a passthrough in one graph are two explicit entries, and the
+    # second is the misplaced one.
+    explicit_entries = [
+        node for node in nodes
+        if node.semantic.semantic_kind in FUSED_ENTRY_SEMANTIC_KINDS
+    ]
+    entry_rooted_kind = None
+    if explicit_entries:
         misplaced = next(
             (
                 node
-                for node in listeners
+                for node in explicit_entries
                 if node.node_id != cfg.entry_node_id
-                or node.source_path != _LISTENER_ENTRY_PATH
+                or node.source_path != _EXPLICIT_ENTRY_PATH
             ),
-            listeners[1] if len(listeners) > 1 else None,
+            explicit_entries[1] if len(explicit_entries) > 1 else None,
         )
         if misplaced is not None:
             raise _fail(
                 PROCESS_IR_COMPILE_INTERNAL,
                 _SEMANTIC_PHASE,
                 misplaced.source_path,
-                "a listener must be the single CFG entry node at the first root step",
+                "a {0} must be the single CFG entry node at the first root step".format(
+                    misplaced.semantic.semantic_kind
+                ),
                 misplaced.node_id,
             )
-        listener_rooted = True
+        entry_rooted_kind = explicit_entries[0].semantic.semantic_kind
 
     calls = [
         node for node in nodes if node.semantic.semantic_kind == "connector_call"
@@ -540,16 +556,17 @@ def check_cfg_invariants(cfg: SemanticCfgV1) -> None:
             )
         # #158: under a listener the LISTENER is the flow's entry, so every call
         # is downstream of the inbound request and none may carry the role —
-        # emitting one as the source-read key would start the flow twice.
+        # emitting one as the source-read key would start the flow twice. #184:
+        # the same under a passthrough, whose documents come from the caller.
         expected_entry = (
             root_calls_by_ordinal[0]
-            if root_calls_by_ordinal and not listener_rooted
+            if root_calls_by_ordinal and entry_rooted_kind is None
             else None
         )
         if expected_entry is None:
-            # Every call is nested in a control body, or the flow enters on a
-            # listener: no call is the flow's connector entry, so no call may
-            # carry the role.
+            # Every call is nested in a control body, or the flow enters on an
+            # explicit entry: no call is the flow's connector entry, so no call
+            # may carry the role.
             if entries:
                 raise _fail(
                     PROCESS_IR_COMPILE_INTERNAL,
@@ -557,8 +574,8 @@ def check_cfg_invariants(cfg: SemanticCfgV1) -> None:
                     entries[0].source_path,
                     (
                         "no connector call may carry the entry call role in a "
-                        "flow that enters on a listener"
-                        if listener_rooted
+                        "flow that enters on a {0}".format(entry_rooted_kind)
+                        if entry_rooted_kind is not None
                         else "only a root-sequence connector call may carry the "
                         "entry call role"
                     ),

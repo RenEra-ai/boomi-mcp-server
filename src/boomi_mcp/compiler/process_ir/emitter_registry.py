@@ -79,6 +79,7 @@ from .contracts import (
     SetPropertiesStepInputV1,
     StartListenInputV1,
     StartNoActionInputV1,
+    StartPassthroughInputV1,
     StopInputV1,
     SymbolTableV1,
 )
@@ -324,6 +325,13 @@ def _emit_start_listen(inp, ctx):
         _shape_context(ctx.node),
         userlabel=inp.userlabel,
         operation_id=inp.operation_id,
+    )
+
+
+def _emit_start_passthrough(inp, ctx):
+    # #184: the no-action Start's renderer family, carrying the passthrough action.
+    return rendering.render_start_passthrough(
+        _shape_context(ctx.node), userlabel=inp.userlabel
     )
 
 
@@ -685,6 +693,14 @@ def _pre_start_listen(inp) -> Optional[str]:
     return None
 
 
+def _pre_start_passthrough(inp) -> Optional[str]:
+    # #184: TYPE FIRST, as for the listener Start — a `model_construct`-ed input
+    # skips validation, and the label is the only value this Start renders.
+    if not isinstance(inp.userlabel, str):
+        return "passthrough start userlabel is not a string"
+    return None
+
+
 def _pre_exception(inp) -> Optional[str]:
     # The resolved ``binding`` and the legacy ``parameter_source`` must agree — the
     # legacy emitter derives the exParameters form from parameter_source, so an
@@ -699,9 +715,9 @@ def _pre_exception(inp) -> Optional[str]:
 
 
 # ---------------------------------------------------------------------------
-# Default registrations (20 discriminator keys; 19 model classes — the connector
+# Default registrations (21 discriminator keys; 20 model classes — the connector
 # source/target keys share one renderer). #142 added ``catcherrors``; #156 added
-# ``notify``; #158 added ``start_listen``.
+# ``notify``; #158 added ``start_listen``; #184 added ``start_passthrough``.
 # ---------------------------------------------------------------------------
 
 _REGISTRATIONS: Tuple[EmitterRegistration, ...] = (
@@ -710,6 +726,10 @@ _REGISTRATIONS: Tuple[EmitterRegistration, ...] = (
     # same single outgoing wire as the no-action Start; it differs only in the
     # Listen action it carries, and needs the operation symbol that action names.
     EmitterRegistration("start_listen", StartListenInputV1, "start", CAPABILITY_PROCESS_IR_V1, EXACT_ONE, _req_start_listen, _emit_start_listen, _pre_start_listen),
+    # #184, the TWENTY-FIRST key: the fused Data Passthrough Start. Same shape
+    # type and single outgoing wire as the no-action Start; it names no component,
+    # so it requires no symbol.
+    EmitterRegistration("start_passthrough", StartPassthroughInputV1, "start", CAPABILITY_PROCESS_IR_V1, EXACT_ONE, _no_requirements, _emit_start_passthrough, _pre_start_passthrough),
     EmitterRegistration("connectoraction_source", ConnectorActionInputV1, "connectoraction", CAPABILITY_PROCESS_IR_V1, EXACT_ONE, _req_connector, _emit_connector),
     EmitterRegistration("connectoraction_target", ConnectorActionInputV1, "connectoraction", CAPABILITY_PROCESS_IR_V1, EXACT_ONE, _req_connector, _emit_connector),
     EmitterRegistration("message", MessageInputV1, "message", CAPABILITY_PROCESS_IR_V1, EXACT_ONE, _no_requirements, _emit_message),

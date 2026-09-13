@@ -295,7 +295,7 @@ class ProcessComponentMaterializationPlanV1(_PlanModel):
     #: reference. Making the field required would refuse that plan for no reason
     #: while closing nothing the validator does not already close.
     unresolved_symbol_slots: Tuple[ProcessComponentSymbolSlotV1, ...] = ()
-    execution_profile: Literal["scheduled", "listener"]
+    execution_profile: Literal["scheduled", "listener", "passthrough"]
     conflict_policy: Literal["reuse", "clone", "fail"]
     preservation_policy: ProcessPreservationPolicyV1
     # The DIGEST AUTHORITY, imported rather than respelled (§6 AR3-09): plain

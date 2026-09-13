@@ -4204,7 +4204,8 @@ def test_the_compiler_revision_covers_the_execution_profile_derivation():
     # NON-DEGENERACY, before any mutation: both answers occur, and the listener
     # answer comes from the listener entry and nowhere else.
     assert oracle != "unavailable" and oracle["cases"], oracle
-    assert set(oracle["cases"].values()) == {"scheduled", "listener"}, oracle
+    # #184 added the third answer, the Data Passthrough entry.
+    assert set(oracle["cases"].values()) == {"scheduled", "listener", "passthrough"}, oracle
     listener_rows = sorted(k for k, v in oracle["cases"].items() if v == "listener")
     assert listener_rows and all("listener" in row for row in listener_rows), listener_rows
 
@@ -5086,7 +5087,10 @@ def test_the_served_revision_binds_multi_symbol_family_lookup():
         by_id = {getattr(n, "node_id", None): n for n in (cfg.nodes or ())}
         entry = by_id.get(cfg.entry_node_id)
         kind = getattr(getattr(entry, "semantic", None), "semantic_kind", None)
-        return ep.LISTENER if kind == "listener" else ep.SCHEDULED
+        # #184: the third explicit entry, so this stays an EQUIVALENT rule.
+        return {"listener": ep.LISTENER, "passthrough": ep.PASSTHROUGH}.get(
+            kind, ep.SCHEDULED
+        )
 
     def _index_built_and_ignored(cfg, symbols):
         symbols.build_index()

@@ -896,6 +896,18 @@ class ListenerSemanticV1(_CompilerModel):
     inbound_validation: Optional[Literal["profile_bound"]] = None
 
 
+class PassthroughSemanticV1(_CompilerModel):
+    """The Data Passthrough entry (#184): its authored label, and nothing else.
+
+    No operation, connection or profile: the authored node names none, so a copy
+    here would be a field nobody may set. The entry policy fuses this node with
+    the synthesized Start exactly as it fuses a listener.
+    """
+
+    semantic_kind: Literal["passthrough"] = "passthrough"
+    label: Optional[str] = None
+
+
 class StopSemanticV1(_CompilerModel):
     semantic_kind: Literal["stop"] = "stop"
 
@@ -908,6 +920,7 @@ class ReturnDocumentsSemanticV1(_CompilerModel):
 CfgSemanticV1 = Annotated[
     Union[
         ListenerSemanticV1,
+        PassthroughSemanticV1,
         ConnectorSemanticV1,
         ConnectorCallSemanticV1,
         MessageSemanticV1,
@@ -1105,6 +1118,18 @@ class StartListenInputV1(_CompilerModel):
 
     emitter_kind: Literal["start_listen"] = "start_listen"
     operation_id: str = Field(..., min_length=1)
+    userlabel: str = ""
+
+
+class StartPassthroughInputV1(_CompilerModel):
+    """The fused Data Passthrough start (#184).
+
+    Synthetic like :class:`StartNoActionInputV1` — the compiler builds it from the
+    passthrough entry, and no caller authors it. It carries the entry's label and
+    nothing else: no operation, connection, profile or geometry.
+    """
+
+    emitter_kind: Literal["start_passthrough"] = "start_passthrough"
     userlabel: str = ""
 
 
@@ -1317,6 +1342,7 @@ EmitterInputV1 = Annotated[
     Union[
         StartNoActionInputV1,
         StartListenInputV1,
+        StartPassthroughInputV1,
         ConnectorActionInputV1,
         MessageInputV1,
         MapInputV1,
@@ -1468,6 +1494,7 @@ __all__: List[str] = [
     "ConnectorActionInputV1",
     "ConnectorSemanticV1",
     "ListenerSemanticV1",
+    "PassthroughSemanticV1",
     "DataProcessInputV1",
     "DataProcessOpSemanticV1",
     "DataProcessSemanticV1",
@@ -1506,6 +1533,7 @@ __all__: List[str] = [
     "SetPropertySemanticV1",
     "StartListenInputV1",
     "StartNoActionInputV1",
+    "StartPassthroughInputV1",
     "StopInputV1",
     "StopSemanticV1",
     "SymbolTableV1",

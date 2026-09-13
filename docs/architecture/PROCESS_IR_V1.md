@@ -67,6 +67,7 @@ Root sequence (`SequenceNodeV1.steps`, discriminated on `kind`):
 | Kind | Model | Notes / defaults (all grounded in the frozen builder grammar) |
 |---|---|---|
 | `listener` | `ListenerEntryNodeV1` | **#158**: `operation_ref` + optional `label` + optional `inbound_validation`. **No `connection_ref`** — refused with `PROCESS_IR_SCHEMA_LISTENER_CONNECTION_FORBIDDEN`. First root step, exactly once; see §3d |
+| `passthrough` | `PassthroughEntryNodeV1` | **#184**: optional `label` only. First root step, exactly once, never beside a `listener` (`PROCESS_IR_SCHEMA_INVALID_CARDINALITY` at the misplaced entry). Followed by linear and `connector_call` steps ending in `stop`/`return_documents`/`branch`/`decision`, or by exactly one `process_call`; `source`/`target`/`try_catch`/`exception` are `PROCESS_IR_CAPABILITY_UNSUPPORTED` at that step. Fused with the Start as `start_passthrough`; execution profile `passthrough` |
 | `source` | `SourceEndpointV1` | `connection_ref`, `operation_ref`, optional `label`; first step of a connector flow |
 | `target` | `TargetEndpointV1` | same fields; success terminal position only |
 | `connector_call` | `ConnectorCallNodeV1` | **#140**: `operation_ref` + optional `action` assertion + optional `label`. No `connection_ref` — see below |
@@ -458,6 +459,7 @@ Published as the immutable `PROCESS_IR_V1_CAPABILITIES` manifest (not an authore
 | `dynamic_path` — binding a connector call's per-document request path to a dynamic document property | **supported** | #155 (shipped) — the family publishes which locations it binds; the writer composing the path is checked on every reaching path |
 | `source_replay_policy` — explicitly accepting that a retried process-scope region replays its own document producer | **supported** | #155 (shipped) — an acknowledgement, never a relaxation: the write-safety rules are checked independently and unchanged |
 | `listener_entry` — the §3d `listener` node: an operation-only inbound-HTTP entry the compiler fuses with the process Start | **supported** | #158 (shipped) |
+| `passthrough_entry` — the `passthrough` node: a label-only Data Passthrough entry the compiler fuses with the process Start, deriving the six-attribute passthrough `<process>` options of a UI-built capture | **supported** | #184 |
 | `listener_error_scope` | gated | #142 — a listener flow still refuses reliability composition (#158 ships the entry, not its error scope) |
 | `nested_try_catch` | gated | #142 — composition rewrites the outer error selection (capture §G6) |
 | `parallel_branch_execution` — Branch legs executing concurrently | **unsupported** | #146 — legs are ordered and sequential by construction; concurrency is different semantics, not more speed |

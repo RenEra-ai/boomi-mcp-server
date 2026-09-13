@@ -27,21 +27,22 @@ apply's re-derivation are unchanged — only the authority moved.
 from __future__ import annotations
 
 from .contracts import SemanticCfgV1, SymbolTableV1
-from .entry_policy import LISTENER, SCHEDULED, classify_entry
+from .entry_policy import LISTENER, PASSTHROUGH, SCHEDULED, classify_entry
 
-#: The two execution profiles a process can have. CLOSED: a third value would
-#: have to mean a third ``<process>`` attribute set, and the materializer maps
+#: The three execution profiles a process can have. CLOSED: a fourth value would
+#: have to mean a fourth ``<process>`` attribute set, and the materializer maps
 #: this value straight onto exact option bytes.
-ProcessExecutionProfile = str  # Literal["scheduled", "listener"] at the call sites
+ProcessExecutionProfile = str  # Literal["scheduled", "listener", "passthrough"] at the call sites
 
 
 def derive_process_execution_profile(
     cfg: SemanticCfgV1, symbols: SymbolTableV1
 ) -> str:
-    """``"scheduled"`` or ``"listener"``, derived from the CFG entry node.
+    """``"scheduled"``, ``"listener"`` or ``"passthrough"``, derived from the CFG entry node.
 
     The rule, stated once, in the entry policy: a process is a LISTENER when its
-    entry node is the authored listener entry. Everything else is scheduled —
+    entry node is the authored listener entry, and a PASSTHROUGH (#184) when its
+    entry node is the authored passthrough entry. Everything else is scheduled —
     including a graph whose entry is a message, a branch, or a connector call, and
     including one whose symbol table happens to contain a Web Services Server
     operation that the entry does not listen on. Classification never consults an
@@ -61,6 +62,7 @@ def derive_process_execution_profile(
 
 __all__ = [
     "LISTENER",
+    "PASSTHROUGH",
     "SCHEDULED",
     "derive_process_execution_profile",
 ]

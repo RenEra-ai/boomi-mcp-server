@@ -1537,6 +1537,21 @@ def _execution_profile_behaviour_oracle() -> Dict[str, Any]:
         _padded(_symbol, _symbol("$ref:op", "database"), "database",
                 position=1, arity=4),
     )
+    # #184. The PASSTHROUGH direction, with listener-family decoys: a passthrough
+    # entry whose table holds a genuine Listen operation — referenced by an
+    # operation field the entry does not own — stays a passthrough, so a rule that
+    # lets a Listen symbol decide flips it to listener here.
+    cases["passthrough-entry-listener-table"] = _classify(
+        _node({"semantic_kind": "passthrough", "operation_ref": "$ref:op"}),
+        _padded(_symbol, _symbol("$ref:op", families[0] if families else "wss", "Listen"),
+                families[-1] if families else "wss", position=2, arity=3),
+    )
+    # ...and a passthrough node the CFG does not name as its entry is not the
+    # process's entry: a rule reading the first node instead says passthrough.
+    cases["passthrough-entry-id-names-no-node"] = _classify(
+        _node({"semantic_kind": "passthrough"}),
+        entry_id="somewhere-else",
+    )
     # The SCHEDULED direction, per decoy family and per connector role: the
     # pre-#158 rule classified a `source` whose operation is a listener family as
     # a listener; the entry policy never does. Each family gets a single-symbol
@@ -1556,9 +1571,20 @@ def _execution_profile_behaviour_oracle() -> Dict[str, Any]:
                         _symbol("$ref:op", "  " + family.upper() + "  ", "Listen"),
                         family, position=_position, arity=_arity),
             )
+    from ..categories.components.process_component_materializer import (
+        process_options_for_profile,
+    )
+
+    profiles = sorted({module.SCHEDULED, module.LISTENER, module.PASSTHROUGH})
     return {
-        "profiles": sorted({module.SCHEDULED, module.LISTENER}),
+        "profiles": profiles,
         "cases": dict(sorted(cases.items())),
+        # #184: the option bytes each profile materializes with, read through the
+        # materializer's own mapping — so a change to any profile's bytes, the
+        # passthrough set included, moves the revision a caller binds to.
+        "process_options": {
+            profile: process_options_for_profile(profile) for profile in profiles
+        },
     }
 
 

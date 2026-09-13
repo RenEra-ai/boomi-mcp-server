@@ -534,14 +534,17 @@ def _borrowed(field, nodes, index):
     return None
 
 
-def _plan_field_cases():
+def _plan_field_cases(doc=None):
     """Every scalar field of the plan's node and wire models, on the synthetic
     Start and on a body node of a LISTENER plan — the adversarial set DERIVED
     from the models rather than hand-picked (#158 ARCH-158-r2-04: mutating only
     dragpoint `y` and only the Start's `source_path` left the dragpoint-`x` and
     `cfg_node_id` guards unproven, and all 23 cases passed with either removed).
+
+    #184: ``doc`` lets the same derivation run over another fused entry — the
+    passthrough suite passes its own root — so the case set is shared, not copied.
     """
-    cfg, plan, symbols = _compiled(_listener_doc())
+    cfg, plan, symbols = _compiled(doc if doc is not None else _listener_doc())
     cases = []
     for label, index in (("start", 0), ("body", 1)):
         node = plan.nodes[index]

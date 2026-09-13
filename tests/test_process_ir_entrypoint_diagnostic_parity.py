@@ -185,6 +185,9 @@ def _atom(kind):
         # #158. Operation-only: a listener has no connection, and the model
         # refuses one outright.
         "listener": {"operation_ref": _REF},
+        # #184. Label-only and every field optional: a passthrough authors no
+        # component, profile or options.
+        "passthrough": {},
     }
     return {"kind": kind, **simple[kind]}
 

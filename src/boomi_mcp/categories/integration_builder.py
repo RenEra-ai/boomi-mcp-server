@@ -7904,6 +7904,7 @@ def _materializer_revision() -> str:
     from .components.process_component_materializer import (
         DEFAULT_PROCESS_OPTIONS,
         LISTENER_PROCESS_OPTIONS,
+        PASSTHROUGH_PROCESS_OPTIONS,
         assemble_component_xml,
         render_process_overrides,
     )
@@ -7913,6 +7914,9 @@ def _materializer_revision() -> str:
             "wire_version": _MATERIALIZER_WIRE_VERSION,
             "scheduled_options": DEFAULT_PROCESS_OPTIONS,
             "listener_options": LISTENER_PROCESS_OPTIONS,
+            # #184: the third profile's bytes, so changing them moves the plan
+            # fingerprint exactly as changing either of the other two does.
+            "passthrough_options": PASSTHROUGH_PROCESS_OPTIONS,
             # The layouts themselves, exercised on fixed inputs. Hashing the
             # OUTPUT rather than the source keeps this a behaviour fingerprint:
             # a comment change leaves it still, a layout change moves it.

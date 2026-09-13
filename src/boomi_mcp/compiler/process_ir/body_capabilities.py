@@ -95,6 +95,7 @@ from ...models.process_ir import (
     PLACEMENT_RECOVERY_FLAGS,
     _CUSTOM_ERROR_CODES,
     _check_no_orphan_continue,
+    _check_passthrough_root,
     _check_serialized_region_chain,
     _is_serialized_region_chain,
     listener_root_verdict,
@@ -827,6 +828,29 @@ def _check_listener_placement(ir: ProcessIRV1) -> None:
     )
 
 
+def _check_passthrough_placement(ir: ProcessIRV1) -> None:
+    """Re-check a PASSTHROUGH root's grammar, independently of the model (#184).
+
+    The same mutable-model defence as :func:`_check_listener_placement`, and
+    stronger in one respect: the WHOLE passthrough grammar is the model's own
+    ``_check_passthrough_root``, run here and translated, not a second copy — so
+    every refusal it makes (entry position, composition, the continuation and root
+    process-call rules it defers to, the cache rules) carries one code and one
+    pointer at both entry points. A passthrough is a ROOT-ONLY kind, so a nested
+    one never reaches this: the body unions do not admit it at all.
+
+    Ordered after the listener check and before the Try/Catch and process-call
+    placement checks, mirroring the parser: a root holding a listener is judged by
+    the listener's verdict (which refuses a passthrough beside it), and a
+    passthrough root is judged by its own grammar before any rule written for a
+    source- or call-entered root can answer for it.
+    """
+    steps = list(ir.body.steps)
+    if "passthrough" not in [getattr(step, "kind", None) for step in steps]:
+        return
+    _as_compile_error(_check_passthrough_root, steps)
+
+
 def validate_body_capabilities(ir: ProcessIRV1) -> None:
     """Check every control-body slot and the control-depth bound.
 
@@ -837,6 +861,7 @@ def validate_body_capabilities(ir: ProcessIRV1) -> None:
     so no pre-#141 dialect changes behaviour.
     """
     _check_listener_placement(ir)
+    _check_passthrough_placement(ir)
     _check_try_catch_placement(ir)
     _check_process_call_placement(ir)
     root_kinds = [getattr(step, "kind", None) for step in ir.body.steps]

@@ -104,11 +104,11 @@ def _map_symbols(component_id="MAP", component_type="transform.map"):
 
 
 def test_registry_covers_discriminator_exactly():
-    # 19 model classes, 20 discriminator keys (connector source + target share a
+    # 20 model classes, 21 discriminator keys (connector source + target share a
     # model). #142 added ``catcherrors``; #156 added ``notify``; #158 added
-    # ``start_listen``.
+    # ``start_listen``; #184 added ``start_passthrough``.
     assert R.registry_keys() == R.discriminator_keys()
-    assert len(R.registry_keys()) == 20
+    assert len(R.registry_keys()) == 21
 
 
 def test_connector_roles_share_one_renderer():
