@@ -1,0 +1,28 @@
+{"form": "root_call_map_map_call", "parse": [["PROCESS_IR_SCHEMA_INVALID_CARDINALITY", "/body"]]}
+{"form": "root_call_map_stop", "parse": [["PROCESS_IR_SCHEMA_INVALID_CARDINALITY", "/body"]]}
+{"form": "root_cacheget_map_call", "parse": [["PROCESS_IR_SCHEMA_INVALID_CARDINALITY", "/body"]]}
+{"form": "root_call_setddp_stop", "parse": [["PROCESS_IR_CAPABILITY_UNSUPPORTED", "/body"]]}
+{"form": "root_call_put_get_stop", "parse": [["PROCESS_IR_CAPABILITY_UNSUPPORTED", "/body"]]}
+{"form": "root_linear_cacheget_map_stop", "parse": [["PROCESS_IR_SCHEMA_INVALID_CARDINALITY", "/body"]]}
+{"form": "root_linear_message_stop", "parse": [["PROCESS_IR_SCHEMA_INVALID_CARDINALITY", "/body"]]}
+{"form": "leg_prefix_cget_map_ddp_pc", "parse": [["PROCESS_IR_CAPABILITY_PROCESS_CALL_RETURN_PATH_BINDING_UNSUPPORTED", "/body/steps/0/legs/1/terminal"]]}
+{"form": "leg_prefix_ddp_pc", "parse": [["PROCESS_IR_CAPABILITY_PROCESS_CALL_RETURN_PATH_BINDING_UNSUPPORTED", "/body/steps/0/legs/1/terminal"]]}
+{"form": "true_arm_prefix_cget_pc", "parse": [["PROCESS_IR_CAPABILITY_PROCESS_CALL_RETURN_PATH_BINDING_UNSUPPORTED", "/body/steps/0/legs/1/terminal/true_arm/terminal"]]}
+{"form": "root_prefixed_call", "parse": [["PROCESS_IR_CAPABILITY_PROCESS_CALL_RETURN_PATH_BINDING_UNSUPPORTED", "/body/steps/0"]]}
+{"form": "leg_call_map_map_put", "parse": "ok", "compile": [["PROCESS_IR_SEMANTIC_PROFILE_MISMATCH", "/body/steps/0/legs/0/steps/1/map_ref", "semantic_lowering"]]}
+{"form": "leg_call_map_put", "parse": "ok", "compile": [["PROCESS_IR_SEMANTIC_PROFILE_MISMATCH", "/body/steps/0/legs/0/steps/1/map_ref", "semantic_lowering"]]}
+{"form": "leg_call_map_call_map_stop", "parse": "ok", "compile": [["PROCESS_IR_SEMANTIC_PROFILE_MISMATCH", "/body/steps/0/legs/0/steps/3/map_ref", "semantic_lowering"]]}
+{"form": "cache_origin_map_wrong_profile", "parse": "ok", "compile": "ok+emit"}
+{"form": "cache_origin_map_right_profile", "parse": "ok", "compile": "ok+emit"}
+{"form": "absent_stream_maps_in_legs", "parse": "ok", "compile": "ok+emit"}
+{"form": "absent_stream_map_put", "parse": "ok", "compile": "ok+emit"}
+{"form": "message_then_patch", "parse": "ok", "compile": [["PROCESS_IR_SEMANTIC_CARDINALITY_MISMATCH", "/body/steps/1/operation_ref", "semantic_lowering"]]}
+{"form": "leg_get_map_pc", "parse": [["PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY", "/body/steps/0/legs/0/steps/0"]]}
+{"form": "stale_ddp_after_cacheget", "parse": "ok", "compile": "ok+emit"}
+{"form": "eval155_legacy_spine", "parse": [["PROCESS_IR_SCHEMA_INVALID_CARDINALITY", "/body"]]}
+{"form": "eval155_hoisted", "parse": "ok", "compile": "ok+emit"}
+{"form": "ref_staging_skeleton", "parse": "ok", "compile": "ok+emit"}
+{"form": "ref_decision_arm_prefix", "parse": "ok", "compile": "ok+emit"}
+{"form": "ref_reversed_legs", "parse": "ok", "compile": [["PROCESS_IR_SEMANTIC_LINEAGE_BRANCH_ORDER_INVALID", "/body/steps/0/legs/0/steps/0", "semantic_lowering"]]}
+{"form": "ref_producer_prefix_root", "parse": "ok", "compile": "ok+emit"}
+{"form": "ref_empty_prefix_pc_sibling_connector", "parse": "ok", "compile": "ok+emit"}
