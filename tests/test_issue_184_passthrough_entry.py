@@ -87,6 +87,7 @@ from boomi_mcp.compiler.process_ir.lowering import (
 from boomi_mcp.compiler.process_ir.pipeline import compile_process_ir_v1
 from boomi_mcp.errors import (
     PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY,
+    PROCESS_IR_CAPABILITY_PROCESS_CALL_PLACEMENT_UNSUPPORTED,
     PROCESS_IR_CAPABILITY_PROCESS_CALL_RETURN_PATH_BINDING_UNSUPPORTED,
     PROCESS_IR_CAPABILITY_UNSUPPORTED,
     PROCESS_IR_COMPILE_EMISSION_PLAN_INVALID,
@@ -266,6 +267,9 @@ _CARD = PROCESS_IR_SCHEMA_INVALID_CARDINALITY
 _CAP = PROCESS_IR_CAPABILITY_UNSUPPORTED
 _CONTINUATION = PROCESS_IR_SEMANTIC_CONTROL_CONTINUATION_UNSUPPORTED
 _ROOT_CALL = PROCESS_IR_CAPABILITY_PROCESS_CALL_RETURN_PATH_BINDING_UNSUPPORTED
+#: #184 split the root process-call verdict: a step authored BEFORE the call is a
+#: placement refusal, a step after it keeps the return-path code.
+_ROOT_PREFIX = PROCESS_IR_CAPABILITY_PROCESS_CALL_PLACEMENT_UNSUPPORTED
 
 _REFUSED = [
     # (id, steps, code, pointer)
@@ -288,8 +292,8 @@ _REFUSED = [
     ("step-after-decision", [P, DEC, MSG, S], _CONTINUATION, "/body"),
     ("call-after-branch", [P, BR, PC], _CONTINUATION, "/body"),
     # -- the root process-call verdict ---------------------------------------
-    ("prefix-before-call", [P, MSG, PC], _ROOT_CALL, "/body/steps/1"),
-    ("two-step-prefix-before-call", [P, SET_DDP, MSG, PC], _ROOT_CALL, "/body/steps/1"),
+    ("prefix-before-call", [P, MSG, PC], _ROOT_PREFIX, "/body/steps/1"),
+    ("two-step-prefix-before-call", [P, SET_DDP, MSG, PC], _ROOT_PREFIX, "/body/steps/1"),
     ("suffix-after-call", [P, PC, S], _ROOT_CALL, "/body/steps/2"),
     ("two-calls", [P, PC, PC], _ROOT_CALL, "/body/steps/2"),
     ("connector-beside-call", [P, CALL, PC], _CAP, "/body"),

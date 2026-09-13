@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 12493, "minimum_collected": 12493, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 12519, "minimum_collected": 12519, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -5664,7 +5664,7 @@
 {"kind": "test", "id": "pytest-005663", "node_id": "tests/test_process_ir_models.py::test_a_connector_call_sequence_may_terminate_in_a_control[branch]", "state": "active"}
 {"kind": "test", "id": "pytest-005664", "node_id": "tests/test_process_ir_models.py::test_a_connector_call_sequence_may_terminate_in_a_control[decision]", "state": "active"}
 {"kind": "test", "id": "pytest-005665", "node_id": "tests/test_process_ir_models.py::test_a_connector_call_sequence_still_rejects_an_exception_terminal", "state": "active"}
-{"kind": "test", "id": "pytest-005666", "node_id": "tests/test_process_ir_models.py::test_a_map_may_not_directly_precede_a_control_terminal", "state": "active"}
+{"kind": "test", "id": "pytest-005666", "node_id": "tests/test_process_ir_models.py::test_a_map_may_not_directly_precede_a_control_terminal", "state": "tombstone"}
 {"kind": "test", "id": "pytest-005667", "node_id": "tests/test_process_ir_models.py::test_an_unknown_discriminator_is_still_an_unknown_node", "state": "active"}
 {"kind": "test", "id": "pytest-005668", "node_id": "tests/test_process_ir_models.py::test_branch_25_legs_accepted", "state": "active"}
 {"kind": "test", "id": "pytest-005669", "node_id": "tests/test_process_ir_models.py::test_branch_description_states_ordered_sequential_leg_execution", "state": "active"}
@@ -5694,13 +5694,13 @@
 {"kind": "test", "id": "pytest-005693", "node_id": "tests/test_process_ir_models.py::test_connector_call_secret_shaped_fields_are_capability_gated_not_unknown[password]", "state": "active"}
 {"kind": "test", "id": "pytest-005694", "node_id": "tests/test_process_ir_models.py::test_connector_call_sequence_parses_with_multiple_calls_and_a_map", "state": "active"}
 {"kind": "test", "id": "pytest-005695", "node_id": "tests/test_process_ir_models.py::test_connector_call_sequence_rules[steps0-PROCESS_IR_SCHEMA_INVALID_CARDINALITY]", "state": "active"}
-{"kind": "test", "id": "pytest-005696", "node_id": "tests/test_process_ir_models.py::test_connector_call_sequence_rules[steps1-PROCESS_IR_SCHEMA_INVALID_CARDINALITY]", "state": "active"}
-{"kind": "test", "id": "pytest-005697", "node_id": "tests/test_process_ir_models.py::test_connector_call_sequence_rules[steps2-PROCESS_IR_SCHEMA_INVALID_CARDINALITY]", "state": "active"}
-{"kind": "test", "id": "pytest-005698", "node_id": "tests/test_process_ir_models.py::test_connector_call_sequence_rules[steps3-PROCESS_IR_SCHEMA_INVALID_CARDINALITY]", "state": "active"}
-{"kind": "test", "id": "pytest-005699", "node_id": "tests/test_process_ir_models.py::test_connector_call_sequence_rules[steps4-PROCESS_IR_CAPABILITY_UNSUPPORTED]", "state": "active"}
-{"kind": "test", "id": "pytest-005700", "node_id": "tests/test_process_ir_models.py::test_connector_call_sequence_rules[steps5-PROCESS_IR_CAPABILITY_UNSUPPORTED]", "state": "active"}
-{"kind": "test", "id": "pytest-005701", "node_id": "tests/test_process_ir_models.py::test_connector_call_sequence_rules[steps6-PROCESS_IR_CAPABILITY_UNSUPPORTED]", "state": "active"}
-{"kind": "test", "id": "pytest-005702", "node_id": "tests/test_process_ir_models.py::test_connector_call_sequence_rules[steps7-PROCESS_IR_CAPABILITY_UNSUPPORTED]", "state": "active"}
+{"kind": "test", "id": "pytest-005696", "node_id": "tests/test_process_ir_models.py::test_connector_call_sequence_rules[steps1-PROCESS_IR_SCHEMA_INVALID_CARDINALITY]", "state": "tombstone"}
+{"kind": "test", "id": "pytest-005697", "node_id": "tests/test_process_ir_models.py::test_connector_call_sequence_rules[steps2-PROCESS_IR_SCHEMA_INVALID_CARDINALITY]", "state": "tombstone"}
+{"kind": "test", "id": "pytest-005698", "node_id": "tests/test_process_ir_models.py::test_connector_call_sequence_rules[steps3-PROCESS_IR_SCHEMA_INVALID_CARDINALITY]", "state": "tombstone"}
+{"kind": "test", "id": "pytest-005699", "node_id": "tests/test_process_ir_models.py::test_connector_call_sequence_rules[steps4-PROCESS_IR_CAPABILITY_UNSUPPORTED]", "state": "tombstone"}
+{"kind": "test", "id": "pytest-005700", "node_id": "tests/test_process_ir_models.py::test_connector_call_sequence_rules[steps5-PROCESS_IR_CAPABILITY_UNSUPPORTED]", "state": "tombstone"}
+{"kind": "test", "id": "pytest-005701", "node_id": "tests/test_process_ir_models.py::test_connector_call_sequence_rules[steps6-PROCESS_IR_CAPABILITY_UNSUPPORTED]", "state": "tombstone"}
+{"kind": "test", "id": "pytest-005702", "node_id": "tests/test_process_ir_models.py::test_connector_call_sequence_rules[steps7-PROCESS_IR_CAPABILITY_UNSUPPORTED]", "state": "tombstone"}
 {"kind": "test", "id": "pytest-005703", "node_id": "tests/test_process_ir_models.py::test_connector_call_sequence_rules[steps8-PROCESS_IR_CAPABILITY_UNSUPPORTED]", "state": "tombstone"}
 {"kind": "test", "id": "pytest-005704", "node_id": "tests/test_process_ir_models.py::test_control_vocabulary_parses_and_roundtrips", "state": "active"}
 {"kind": "test", "id": "pytest-005705", "node_id": "tests/test_process_ir_models.py::test_defaults_expand_to_current_parity_values", "state": "active"}
@@ -10200,7 +10200,7 @@
 {"kind": "test", "id": "pytest-010199", "node_id": "tests/test_process_ir_models.py::test_every_illegal_process_call_root_returns_a_typed_diagnostic[steps0-/body/steps/1-an all-call chain with NO trailing terminal]", "state": "active"}
 {"kind": "test", "id": "pytest-010200", "node_id": "tests/test_process_ir_models.py::test_every_illegal_process_call_root_returns_a_typed_diagnostic[steps1-/body/steps/1-three calls, no terminal]", "state": "active"}
 {"kind": "test", "id": "pytest-010201", "node_id": "tests/test_process_ir_models.py::test_every_illegal_process_call_root_returns_a_typed_diagnostic[steps2-/body/steps/1-a call chain WITH a trailing stop]", "state": "active"}
-{"kind": "test", "id": "pytest-010202", "node_id": "tests/test_process_ir_models.py::test_every_illegal_process_call_root_returns_a_typed_diagnostic[steps3-/body/steps/0-a step BEFORE the call]", "state": "active"}
+{"kind": "test", "id": "pytest-010202", "node_id": "tests/test_process_ir_models.py::test_every_illegal_process_call_root_returns_a_typed_diagnostic[steps3-/body/steps/0-a step BEFORE the call]", "state": "tombstone"}
 {"kind": "test", "id": "pytest-010203", "node_id": "tests/test_integration_builder.py::test_apply_refuses_the_catch_composition_without_executing_anything", "state": "active"}
 {"kind": "test", "id": "pytest-010204", "node_id": "tests/test_process_graph_verifier.py::test_a_populated_declaration_is_not_judged_here[None-no identifier at all]", "state": "active"}
 {"kind": "test", "id": "pytest-010205", "node_id": "tests/test_process_graph_verifier.py::test_a_populated_declaration_is_not_judged_here[shapeXXX-identifier names an undeclared path]", "state": "active"}
@@ -10503,9 +10503,9 @@
 {"kind": "test", "id": "pytest-010502", "node_id": "tests/test_process_ir_effect_declarations.py::test_the_served_contract_states_where_each_effect_content_comes_from", "state": "active"}
 {"kind": "test", "id": "pytest-010503", "node_id": "tests/test_process_ir_effect_declarations.py::test_the_vocabulary_is_read_from_the_builders_not_restated", "state": "active"}
 {"kind": "test", "id": "pytest-010504", "node_id": "tests/test_process_ir_effect_declarations.py::test_two_declarations_naming_one_component_are_a_finding_not_a_crash", "state": "active"}
-{"kind": "test", "id": "pytest-010505", "node_id": "tests/test_process_ir_models.py::test_connector_call_sequence_rules[steps10-PROCESS_IR_SCHEMA_INVALID_CARDINALITY]", "state": "active"}
-{"kind": "test", "id": "pytest-010506", "node_id": "tests/test_process_ir_models.py::test_connector_call_sequence_rules[steps8-PROCESS_IR_SCHEMA_INVALID_CARDINALITY]", "state": "active"}
-{"kind": "test", "id": "pytest-010507", "node_id": "tests/test_process_ir_models.py::test_connector_call_sequence_rules[steps9-PROCESS_IR_SCHEMA_INVALID_CARDINALITY]", "state": "active"}
+{"kind": "test", "id": "pytest-010505", "node_id": "tests/test_process_ir_models.py::test_connector_call_sequence_rules[steps10-PROCESS_IR_SCHEMA_INVALID_CARDINALITY]", "state": "tombstone"}
+{"kind": "test", "id": "pytest-010506", "node_id": "tests/test_process_ir_models.py::test_connector_call_sequence_rules[steps8-PROCESS_IR_SCHEMA_INVALID_CARDINALITY]", "state": "tombstone"}
+{"kind": "test", "id": "pytest-010507", "node_id": "tests/test_process_ir_models.py::test_connector_call_sequence_rules[steps9-PROCESS_IR_SCHEMA_INVALID_CARDINALITY]", "state": "tombstone"}
 {"kind": "test", "id": "pytest-010508", "node_id": "tests/test_process_ir_models.py::test_linear_steps_are_admitted_before_and_between_connector_calls[steps0]", "state": "active"}
 {"kind": "test", "id": "pytest-010509", "node_id": "tests/test_process_ir_models.py::test_linear_steps_are_admitted_before_and_between_connector_calls[steps1]", "state": "active"}
 {"kind": "test", "id": "pytest-010510", "node_id": "tests/test_process_ir_models.py::test_linear_steps_are_admitted_before_and_between_connector_calls[steps2]", "state": "active"}
@@ -12573,3 +12573,41 @@
 {"kind": "test", "id": "pytest-012572", "node_id": "tests/test_issue_184_caller_entry_stream.py::test_two_requirements_contradicting_on_one_path_are_refused_inside_the_child", "state": "active"}
 {"kind": "test", "id": "pytest-012573", "node_id": "tests/test_issue_184_caller_entry_stream.py::test_the_same_consumers_on_a_scheduled_root_are_still_refused", "state": "active"}
 {"kind": "test", "id": "pytest-012574", "node_id": "tests/test_issue_184_caller_entry_stream.py::test_the_branch_point_of_the_merge_refused_the_passthrough_consumers", "state": "active"}
+{"kind": "test", "id": "pytest-012575", "node_id": "tests/test_process_ir_models.py::test_connector_call_sequence_rules[steps1-PROCESS_IR_CAPABILITY_UNSUPPORTED]", "state": "active"}
+{"kind": "test", "id": "pytest-012576", "node_id": "tests/test_process_ir_models.py::test_connector_call_sequence_rules[steps2-PROCESS_IR_CAPABILITY_UNSUPPORTED]", "state": "active"}
+{"kind": "test", "id": "pytest-012577", "node_id": "tests/test_process_ir_models.py::test_connector_call_sequence_rules[steps3-PROCESS_IR_CAPABILITY_UNSUPPORTED]", "state": "active"}
+{"kind": "test", "id": "pytest-012578", "node_id": "tests/test_process_ir_models.py::test_connector_call_sequence_rules[steps4-PROCESS_IR_SCHEMA_INVALID_CARDINALITY]", "state": "active"}
+{"kind": "test", "id": "pytest-012579", "node_id": "tests/test_process_ir_models.py::test_connector_call_sequence_rules[steps5-PROCESS_IR_SCHEMA_INVALID_CARDINALITY]", "state": "active"}
+{"kind": "test", "id": "pytest-012580", "node_id": "tests/test_process_ir_models.py::test_root_sequences_the_bracketing_rules_used_to_refuse_now_parse[steps0]", "state": "active"}
+{"kind": "test", "id": "pytest-012581", "node_id": "tests/test_process_ir_models.py::test_root_sequences_the_bracketing_rules_used_to_refuse_now_parse[steps1]", "state": "active"}
+{"kind": "test", "id": "pytest-012582", "node_id": "tests/test_process_ir_models.py::test_root_sequences_the_bracketing_rules_used_to_refuse_now_parse[steps2]", "state": "active"}
+{"kind": "test", "id": "pytest-012583", "node_id": "tests/test_process_ir_models.py::test_root_sequences_the_bracketing_rules_used_to_refuse_now_parse[steps3]", "state": "active"}
+{"kind": "test", "id": "pytest-012584", "node_id": "tests/test_process_ir_models.py::test_root_sequences_the_bracketing_rules_used_to_refuse_now_parse[steps4]", "state": "active"}
+{"kind": "test", "id": "pytest-012585", "node_id": "tests/test_process_ir_models.py::test_a_map_may_directly_precede_a_control_terminal", "state": "active"}
+{"kind": "test", "id": "pytest-012586", "node_id": "tests/test_process_ir_models.py::test_a_step_before_a_root_process_call_is_a_placement_refusal", "state": "active"}
+{"kind": "test", "id": "pytest-012587", "node_id": "tests/test_issue_184_native_sequences.py::test_the_attested_prefix_table_is_the_captured_admissions_exactly", "state": "active"}
+{"kind": "test", "id": "pytest-012588", "node_id": "tests/test_issue_184_native_sequences.py::test_an_attested_prefix_before_a_terminal_call_parses[set_ddp-_leg_with_prefix-branch leg]", "state": "active"}
+{"kind": "test", "id": "pytest-012589", "node_id": "tests/test_issue_184_native_sequences.py::test_an_attested_prefix_before_a_terminal_call_parses[set_ddp-_arm_with_prefix-true arm]", "state": "active"}
+{"kind": "test", "id": "pytest-012590", "node_id": "tests/test_issue_184_native_sequences.py::test_an_attested_prefix_before_a_terminal_call_parses[set_dpp-_leg_with_prefix-branch leg]", "state": "active"}
+{"kind": "test", "id": "pytest-012591", "node_id": "tests/test_issue_184_native_sequences.py::test_an_attested_prefix_before_a_terminal_call_parses[set_dpp-_arm_with_prefix-true arm]", "state": "active"}
+{"kind": "test", "id": "pytest-012592", "node_id": "tests/test_issue_184_native_sequences.py::test_an_attested_prefix_before_a_terminal_call_parses[message-_leg_with_prefix-branch leg]", "state": "active"}
+{"kind": "test", "id": "pytest-012593", "node_id": "tests/test_issue_184_native_sequences.py::test_an_attested_prefix_before_a_terminal_call_parses[message-_arm_with_prefix-true arm]", "state": "active"}
+{"kind": "test", "id": "pytest-012594", "node_id": "tests/test_issue_184_native_sequences.py::test_an_attested_prefix_before_a_terminal_call_parses[read_map_writer-_leg_with_prefix-branch leg]", "state": "active"}
+{"kind": "test", "id": "pytest-012595", "node_id": "tests/test_issue_184_native_sequences.py::test_an_attested_prefix_before_a_terminal_call_parses[read_map_writer-_arm_with_prefix-true arm]", "state": "active"}
+{"kind": "test", "id": "pytest-012596", "node_id": "tests/test_issue_184_native_sequences.py::test_a_prefix_ending_on_an_unattested_predecessor_is_refused_at_the_terminal[_leg_with_prefix-/body/steps/0/legs/0/terminal]", "state": "active"}
+{"kind": "test", "id": "pytest-012597", "node_id": "tests/test_issue_184_native_sequences.py::test_a_prefix_ending_on_an_unattested_predecessor_is_refused_at_the_terminal[_arm_with_prefix-/body/steps/0/true_arm/terminal]", "state": "active"}
+{"kind": "test", "id": "pytest-012598", "node_id": "tests/test_issue_184_native_sequences.py::test_a_connector_in_the_prefix_keeps_the_mixing_refusal", "state": "active"}
+{"kind": "test", "id": "pytest-012599", "node_id": "tests/test_issue_184_native_sequences.py::test_a_connector_above_a_prefixed_terminal_call_answers_at_the_terminal", "state": "active"}
+{"kind": "test", "id": "pytest-012600", "node_id": "tests/test_issue_184_native_sequences.py::test_a_root_prefix_before_a_call_moves_to_the_placement_code_and_a_successor_keeps_its_code", "state": "active"}
+{"kind": "test", "id": "pytest-012601", "node_id": "tests/test_issue_184_native_sequences.py::test_a_native_root_the_branch_point_refused_now_parses[consecutive_root_maps]", "state": "active"}
+{"kind": "test", "id": "pytest-012602", "node_id": "tests/test_issue_184_native_sequences.py::test_a_native_root_the_branch_point_refused_now_parses[root_map_suffix]", "state": "active"}
+{"kind": "test", "id": "pytest-012603", "node_id": "tests/test_issue_184_native_sequences.py::test_a_native_root_the_branch_point_refused_now_parses[root_property_suffix]", "state": "active"}
+{"kind": "test", "id": "pytest-012604", "node_id": "tests/test_issue_184_native_sequences.py::test_a_native_root_the_branch_point_refused_now_parses[call_free_root_led_by_a_cache_read]", "state": "active"}
+{"kind": "test", "id": "pytest-012605", "node_id": "tests/test_issue_184_native_sequences.py::test_a_native_root_the_branch_point_refused_now_parses[call_free_root_returning_documents]", "state": "active"}
+{"kind": "test", "id": "pytest-012606", "node_id": "tests/test_issue_184_native_sequences.py::test_the_negative_neighbours_keep_their_refusals[call_free_root_with_no_producer]", "state": "active"}
+{"kind": "test", "id": "pytest-012607", "node_id": "tests/test_issue_184_native_sequences.py::test_the_negative_neighbours_keep_their_refusals[call_free_root_not_led_by_the_read]", "state": "active"}
+{"kind": "test", "id": "pytest-012608", "node_id": "tests/test_issue_184_native_sequences.py::test_the_negative_neighbours_keep_their_refusals[cache_write_adjacency_unchanged]", "state": "active"}
+{"kind": "test", "id": "pytest-012609", "node_id": "tests/test_issue_184_native_sequences.py::test_the_negative_neighbours_keep_their_refusals[producer_prefix_before_a_call_still_admitted]", "state": "active"}
+{"kind": "test", "id": "pytest-012610", "node_id": "tests/test_issue_184_native_sequences.py::test_a_try_catch_terminated_root_keeps_both_old_rules", "state": "active"}
+{"kind": "test", "id": "pytest-012611", "node_id": "tests/test_issue_184_native_sequences.py::test_the_branch_point_refused_the_admitted_root_and_prefix_forms", "state": "active"}
+{"kind": "test", "id": "pytest-012612", "node_id": "tests/test_issue_184_native_sequences.py::test_the_root_read_kinds_are_the_connector_walks_document_producers", "state": "active"}

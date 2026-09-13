@@ -721,9 +721,13 @@ def test_the_gate_fails_when_the_structural_fix_is_removed(monkeypatch):
     # "these differ somehow".
     assert parser[0] == "REFUSED" and compiler[0] == "REFUSED", (parser, compiler)
     assert parser[1][0] == "PROCESS_IR_SCHEMA_INVALID_CARDINALITY", parser
+    # #184: a prefix before a terminal call is now admitted after an attested direct
+    # predecessor. The probe's leg ends on a `cache_put`, which is not one, so the
+    # unfixed compiler serves the placement code — measured with the re-parse
+    # removed. The divergence the witness exists to catch is unchanged.
     assert (
         compiler[1][0]
-        == "PROCESS_IR_CAPABILITY_PROCESS_CALL_RETURN_PATH_BINDING_UNSUPPORTED"
+        == "PROCESS_IR_CAPABILITY_PROCESS_CALL_PLACEMENT_UNSUPPORTED"
     ), compiler
     assert parser[1][0] != compiler[1][0]
     # The witness must be BROAD, not a single lucky cell: the unfixed compiler
@@ -785,7 +789,13 @@ def _corpus_connector_above_leg_terminal_call():
 
 
 def _corpus_connector_above_leg_prefix_terminal_call():
-    """Row 5, PREFIX reading — a CODE divergence rather than a message one."""
+    """Row 5, PREFIX reading — a CODE divergence rather than a message one.
+
+    #184: at `cbab28f` this row served the return-path code at the terminal, because a
+    prefix before a terminal call was refused outright. #184 admits an attested
+    predecessor (`set_dpp` is one), so the body-local rule no longer answers, and the
+    whole-document mixing walk does: a connector sits upstream of the call.
+    """
     ir = parse_process_ir_v1(_carrier(bc.BRANCH_LEG, "connector_above"))
     leg = ir.body.steps[1].legs[0]
     leg.steps = [NODE.validate_python(_atom("set_dpp"))]
@@ -847,10 +857,10 @@ CORPUS = [
     (
         "root-connector-branch-process-call-terminal-with-prefix",
         _corpus_connector_above_leg_prefix_terminal_call,
-        "PROCESS_IR_CAPABILITY_PROCESS_CALL_RETURN_PATH_BINDING_UNSUPPORTED",
+        "PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY",
         "/body/steps/1/legs/0/terminal",
         (
-            "a process_call branch leg terminal admits no preceding steps — a call whose child returns no documents ends the path it is on, and a prefix before it is not attested"
+            "a process_call may not share a root-to-leaf path with a connector step — a connector runs upstream of this body (process_call_connector_mixing is gated)"
         ),
     ),
 ]

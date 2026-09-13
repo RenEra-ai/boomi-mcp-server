@@ -266,6 +266,14 @@ PROCESS_IR_CAPABILITY_EFFECT_CONTRACT_INVALID = (
 PROCESS_IR_CAPABILITY_PROCESS_CALL_RETURN_PATH_BINDING_UNSUPPORTED = (
     "PROCESS_IR_CAPABILITY_PROCESS_CALL_RETURN_PATH_BINDING_UNSUPPORTED"
 )
+# #184: a terminal process call placed after a composition that is not admitted —
+# a step prefix in a context, or after a direct predecessor, no live capture
+# attests; a prefix before a root call; or a hand-off whose child input contract
+# cannot be proved. Distinct from the return-path code: the call IS the terminal
+# of its path, and what is unsupported is what precedes it or what it hands on.
+PROCESS_IR_CAPABILITY_PROCESS_CALL_PLACEMENT_UNSUPPORTED = (
+    "PROCESS_IR_CAPABILITY_PROCESS_CALL_PLACEMENT_UNSUPPORTED"
+)
 
 # State lineage: document-scoped (DDP) vs execution-scoped (DPP/cache).
 PROCESS_IR_SEMANTIC_LINEAGE_PROPERTY_READ_BEFORE_WRITE = (
@@ -1569,6 +1577,18 @@ ERROR_TAXONOMY: Dict[str, ErrorCodeSpec] = {
                 "is gated as process_call_return_path_binding."
             ),
             owner="#175",
+        ),
+        ErrorCodeSpec(
+            code=PROCESS_IR_CAPABILITY_PROCESS_CALL_PLACEMENT_UNSUPPORTED,
+            category="process_ir",
+            retryable=False,
+            summary=(
+                "A terminal process call is placed after a composition ProcessIR v1 "
+                "does not admit: a step prefix in a body context, or after a direct "
+                "predecessor, that no live capture attests; a prefix before a root "
+                "call; or a hand-off whose child input contract cannot be proved."
+            ),
+            owner="#184",
         ),
         ErrorCodeSpec(
             code=PROCESS_IR_SEMANTIC_LINEAGE_PROPERTY_READ_BEFORE_WRITE,

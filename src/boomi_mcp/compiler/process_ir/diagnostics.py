@@ -28,6 +28,7 @@ from ...errors import (
     PROCESS_IR_REFERENCE_LISTENER_OPERATION_INVALID,
     PROCESS_IR_SEMANTIC_LISTENER_INBOUND_CONTRACT_UNSATISFIED,
     PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY,
+    PROCESS_IR_CAPABILITY_PROCESS_CALL_PLACEMENT_UNSUPPORTED,
     PROCESS_IR_CAPABILITY_PROCESS_CALL_RETURN_PATH_BINDING_UNSUPPORTED,
     PROCESS_IR_COMPILE_ERROR_REGION_INVALID,
     PROCESS_IR_SEMANTIC_CATCH_UNTERMINATED,
@@ -124,6 +125,18 @@ _REMEDIATION = {
         "Use a node kind this body slot admits. The admitted set for each slot is "
         "published at get_schema_template(schema_name='process_ir_authoring', "
         "category='placement'); a kind absent from a slot is rejected outright."
+    ),
+    # --- #184 -------------------------------------------------------------
+    PROCESS_IR_CAPABILITY_PROCESS_CALL_PLACEMENT_UNSUPPORTED: (
+        "Author the process call as the terminal of a branch leg or a decision "
+        "true-arm, and end the steps before it on a direct predecessor that live "
+        "captures attest for that context; the admitted predecessors are "
+        "published at get_schema_template(schema_name='process_ir_authoring', "
+        "category='placement'). A root sequence admits no step before a call, so "
+        "move the prefix into a branch leg. When the refusal names the call "
+        "itself, the called process must accept what this path hands it: see "
+        "get_schema_template(schema_name='process_ir_authoring', "
+        "node_kind='process_call')."
     ),
     # --- #175 -------------------------------------------------------------
     PROCESS_IR_CAPABILITY_PROCESS_CALL_RETURN_PATH_BINDING_UNSUPPORTED: (
@@ -357,6 +370,9 @@ _MESSAGES = {
     ),
     PROCESS_IR_CAPABILITY_PROCESS_CALL_RETURN_PATH_BINDING_UNSUPPORTED: (
         "a process call may not be followed by another node in ProcessIR v1"
+    ),
+    PROCESS_IR_CAPABILITY_PROCESS_CALL_PLACEMENT_UNSUPPORTED: (
+        "a process call is placed after a composition ProcessIR v1 does not admit"
     ),
     PROCESS_IR_SEMANTIC_RETRY_SOURCE_REEXECUTION: (
         "a positive retry count would re-run the flow's document source"

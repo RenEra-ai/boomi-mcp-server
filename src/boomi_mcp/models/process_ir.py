@@ -86,6 +86,7 @@ from ..errors import (
     PROCESS_IR_CAPABILITY_ERROR_SCOPE_UNSUPPORTED,
     PROCESS_IR_CAPABILITY_LISTENER_COMPOSITION_UNSUPPORTED,
     PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY,
+    PROCESS_IR_CAPABILITY_PROCESS_CALL_PLACEMENT_UNSUPPORTED,
     PROCESS_IR_CAPABILITY_PROCESS_CALL_RETURN_PATH_BINDING_UNSUPPORTED,
     PROCESS_IR_CAPABILITY_UNSUPPORTED,
     PROCESS_IR_REFERENCE_IDEMPOTENCY_CONTRACT_INVALID_FORMAT,
@@ -805,6 +806,23 @@ def _return_path_binding_error(
     """
     return PydanticCustomError(  # noqa: EM101
         "process_ir_capability_process_call_return_path_binding_unsupported",
+        message,
+        {"offending_path": tuple(at)} if at else None,
+    )
+
+
+def _process_call_placement_error(
+    message: str, *, at: Tuple[Any, ...] = ()
+) -> PydanticCustomError:
+    """#184: a terminal process call placed after a composition that is not admitted.
+
+    Distinct from ``_return_path_binding_error``: the call IS the terminal of its
+    path, so nothing is asked to continue past it. What is unsupported is what
+    precedes it — a step prefix in a context, or after a direct predecessor, no
+    live capture attests, or a prefix before a root call.
+    """
+    return PydanticCustomError(  # noqa: EM101
+        "process_ir_capability_process_call_placement_unsupported",
         message,
         {"offending_path": tuple(at)} if at else None,
     )
@@ -2067,6 +2085,8 @@ def _check_process_call_terminal_form(
         raise _body_kind_error(message, at=at)
     if reason == PLACEMENT_RECOVERY_FLAGS:
         raise _recovery_process_call_error(message, at=at)
+    if reason == PLACEMENT_PREFIX:
+        raise _process_call_placement_error(message, at=at)
     raise _return_path_binding_error(message, at=at)
 
 
@@ -2103,9 +2123,61 @@ PROCESS_CALL_PLACEMENT_CONTEXT_LABELS: Mapping[str, str] = MappingProxyType({
     "catch_body": "catch body",
 })
 
+#: The body context each placement label names — derived from the one table above,
+#: so a verdict that receives the rendered label can recover the context key.
+_PROCESS_CALL_CONTEXT_BY_LABEL: Mapping[str, str] = MappingProxyType(
+    {label: key for key, label in PROCESS_CALL_PLACEMENT_CONTEXT_LABELS.items()}
+)
+
+#: #184 D10. The body contexts in which a step prefix before a terminal process
+#: call can be admitted at all: the two slots whose terminal union admits the call
+#: and in which the prefix was captured live. The catch body keeps its own
+#: notify-only recovery rule; the Decision false arm and the try body admit no call.
+PROCESS_CALL_PREFIX_CONTEXTS: FrozenSet[str] = frozenset({"branch_leg", "decision_true_arm"})
+
+#: #184 D10, amendment 2. The ADMITTED prefix compositions, as
+#: `(context, direct predecessor kind, child entry form)`. Evidence, not a guess:
+#: every row is a run in `docs/architecture/evidence/issue-184/captures/
+#: cap184-prefix-predecessors/` whose child request carried the parent's token,
+#: bound to that capture in both directions by
+#: `tests/test_issue_184_native_sequences.py`. The capture's child is a Data
+#: Passthrough child called with wait=true, so only that form is admitted; a No Data
+#: child after a prefix stays unmeasured. The capture's cache retrieve row covers
+#: both authored cache-read kinds, which lower to the same platform step. Measured
+#: and refused: `cache_remove`, whose successor the platform skips (ledger
+#: E0-184-01).
+PROCESS_CALL_ATTESTED_PREDECESSORS: FrozenSet[Tuple[str, str, str]] = frozenset({
+    ("branch_leg", "map_ref", "passthrough"),
+    ("branch_leg", "set_ddp", "passthrough"),
+    ("branch_leg", "set_dpp", "passthrough"),
+    ("branch_leg", "cache_get", "passthrough"),
+    ("branch_leg", "document_cache_retrieve", "passthrough"),
+    ("branch_leg", "flow_control", "passthrough"),
+    ("branch_leg", "message", "passthrough"),
+    ("branch_leg", "data_process", "passthrough"),
+    ("decision_true_arm", "map_ref", "passthrough"),
+    ("decision_true_arm", "set_ddp", "passthrough"),
+    ("decision_true_arm", "set_dpp", "passthrough"),
+    ("decision_true_arm", "cache_get", "passthrough"),
+    ("decision_true_arm", "document_cache_retrieve", "passthrough"),
+    ("decision_true_arm", "flow_control", "passthrough"),
+    ("decision_true_arm", "message", "passthrough"),
+    ("decision_true_arm", "data_process", "passthrough"),
+})
+
+#: What the PARSER can check: the context and the direct predecessor. The child's
+#: entry form needs the child, so the compiler's child contract checks that half.
+_ATTESTED_PREFIX_PAIRS: FrozenSet[Tuple[str, str]] = frozenset(
+    (context, kind) for context, kind, _form in PROCESS_CALL_ATTESTED_PREDECESSORS
+)
+
 
 PLACEMENT_ROOT_CONNECTOR_MIXING = "root_connector_mixing"
 PLACEMENT_ROOT_SINGLETON = "root_singleton"
+#: #184: a step authored BEFORE a root call. Split from the singleton reason, which
+#: keeps the steps authored after the call: a prefix is a placement question with
+#: its own code, a successor asks the call to continue.
+PLACEMENT_ROOT_PREFIX = "root_prefix"
 
 
 def process_call_root_verdict(kinds):
@@ -2162,7 +2234,19 @@ def process_call_root_verdict(kinds):
     # the validator. This form is total — the singleton returned above, so at
     # least two steps remain and an index other than the first call exists.
     first_call = kinds.index("process_call")
-    offending = next(i for i in range(len(kinds)) if i != first_call) + entry_offset
+    offending = next(i for i in range(len(kinds)) if i != first_call)
+    if offending < first_call:
+        # #184: a step BEFORE the root call. A prefix is a placement question —
+        # admitted only inside a branch leg or a decision true-arm — not a request
+        # to continue past the call.
+        return (
+            PLACEMENT_ROOT_PREFIX,
+            ("steps", offending + entry_offset),
+            "a root process_call admits no preceding step — a step prefix before a "
+            "call is admitted only in a branch leg or a decision true-arm "
+            "(step {0})".format(offending + entry_offset),
+        )
+    offending += entry_offset
     return (
         PLACEMENT_ROOT_SINGLETON,
         ("steps", offending),
@@ -2359,13 +2443,27 @@ def process_call_placement_verdict(
             "process_call_connector_mixing is gated)".format(context, connector_index),
         )
     if steps and not recovery:
-        return (
-            PLACEMENT_PREFIX,
-            ("terminal",),
-            "a process_call {0} terminal admits no preceding steps — a call whose "
-            "child returns no documents ends the path it is on, and a prefix before "
-            "it is not attested".format(context),
-        )
+        # #184 D10. A prefix is admitted in an attested context after an attested
+        # direct predecessor — the step that hands the call its documents is the
+        # one the platform wiring depends on. The kinds interpolated below are the
+        # closed node discriminators, never authored values.
+        key = _PROCESS_CALL_CONTEXT_BY_LABEL.get(context)
+        predecessor = getattr(steps[-1], "kind", None)
+        if key in PROCESS_CALL_PREFIX_CONTEXTS and (key, predecessor) in _ATTESTED_PREFIX_PAIRS:
+            return None
+        if key not in PROCESS_CALL_PREFIX_CONTEXTS:
+            message = (
+                "a process_call {0} terminal admits no preceding steps — a step "
+                "prefix before a call is admitted only in a branch leg or a "
+                "decision true-arm".format(context)
+            )
+        else:
+            message = (
+                "a process_call {0} terminal admits a step prefix only after an "
+                "attested direct predecessor — {1} immediately before the call is "
+                "not attested".format(context, predecessor)
+            )
+        return (PLACEMENT_PREFIX, ("terminal",), message)
     if recovery:
         # #156 T5. The recovery leg is the ONE place a prefix is attested, and
         # only the notify prefix: the live capture (issue-156 B2) runs
@@ -2379,9 +2477,11 @@ def process_call_placement_verdict(
             None,
         )
         if offending is not None:
+            # #184 A6: the residual refusal points at the terminal, like every
+            # other prefix refusal; the message keeps the offending step index.
             return (
                 PLACEMENT_PREFIX,
-                ("steps", offending),
+                ("terminal",),
                 "a process_call {0} terminal admits only notify steps before it — "
                 "a recovery hand-off may log the caught error first, and nothing "
                 "else is attested ahead of the call (step {1})".format(
@@ -3017,6 +3117,13 @@ _ROOT_CONTROL_TERMINAL_KINDS = frozenset({"branch", "decision", "exception"})
 #: reaches the root sequence automatically instead of silently lacking a row.
 _ROOT_LINEAR_KINDS = frozenset(LINEAR_BODY_KINDS)
 
+#: #184 D8. The kinds a call-free linear root may start with: the cache reads, whose
+#: served document semantics replace the stream with all documents. Pinned in both
+#: directions to the connector walk's document-producer set and to the served
+#: contract by `tests/test_issue_184_native_sequences.py`; the model cannot import
+#: the compiler, so the pin is what keeps the two statements one.
+ROOT_ENTRY_READ_KINDS: FrozenSet[str] = frozenset({"cache_get", "document_cache_retrieve"})
+
 
 def _is_serialized_region_chain(steps: List[Any]) -> bool:
     """Does this root have the SHAPE of a serialized connector-region chain?
@@ -3377,6 +3484,8 @@ def _check_passthrough_root(steps: List[Any]) -> None:
         reason, at, message = call_verdict
         if reason == PLACEMENT_ROOT_CONNECTOR_MIXING:
             raise _capability_error(message)
+        if reason == PLACEMENT_ROOT_PREFIX:
+            raise _process_call_placement_error(message, at=at)
         raise _return_path_binding_error(message, at=at)
 
     if kinds[-1] not in PASSTHROUGH_ROOT_TERMINAL_KINDS:
@@ -3562,6 +3671,8 @@ class SequenceNodeV1(_ProcessIRBase):
             reason, at, message = verdict
             if reason == PLACEMENT_ROOT_CONNECTOR_MIXING:
                 raise _capability_error(message)
+            if reason == PLACEMENT_ROOT_PREFIX:
+                raise _process_call_placement_error(message, at=at)
             raise _return_path_binding_error(message, at=at)
         # Connector-call flow (#140). Checked BEFORE the source/target branch so
         # the two legacy branches above and the legacy branch below keep their
@@ -3623,53 +3734,62 @@ class SequenceNodeV1(_ProcessIRBase):
                         "a connector_call sequence may contain only connector_call "
                         "and linear steps before its terminal"
                     )
-            # Every map must be BRACKETED by calls. A trailing or doubled map has
-            # no following call, so the map's destination profile could not be
-            # checked against anything — and an unbounded-on-one-side map is
-            # exactly the profile-continuity hole this node kind exists to close.
-            #
-            # #154 made the PREDECESSOR half explicit. It used to be implied by
-            # two now-relaxed facts — that step 0 was a call and that the only
-            # other admitted kind was ``map_ref`` — so with a linear prefix
-            # admitted, ``[set_dpp, map_ref, connector_call]`` would otherwise
-            # satisfy the follower rule with nothing bracketing the map's source
-            # side.
-            for i, kind in enumerate(body):
-                if kind != "map_ref":
-                    continue
-                if i + 1 >= len(body) or body[i + 1] != "connector_call":
-                    raise _cardinality_error(
-                        "a map_ref in a connector_call sequence must be immediately "
-                        "followed by a connector_call"
+            # #184: neither half of the old map bracketing, nor the end-on-call
+            # rule, holds in general any more. A map's profiles are proved against
+            # the stream that actually reaches it (the lineage controller); a map on
+            # no stream is refused by the connector walk; and a linear suffix after
+            # the last call is ordinary native work. Both old rules are kept
+            # VERBATIM for a sequence ending in a connector-scoped try_catch (D11):
+            # the error-context compositions stay bounded by what #142 and #156
+            # captured, and nothing there is widened.
+            if kinds[-1] == "try_catch":
+                # Every map must be BRACKETED by calls. A trailing or doubled map has
+                # no following call, so the map's destination profile could not be
+                # checked against anything — and an unbounded-on-one-side map is
+                # exactly the profile-continuity hole this node kind exists to close.
+                #
+                # #154 made the PREDECESSOR half explicit. It used to be implied by
+                # two now-relaxed facts — that step 0 was a call and that the only
+                # other admitted kind was ``map_ref`` — so with a linear prefix
+                # admitted, ``[set_dpp, map_ref, connector_call]`` would otherwise
+                # satisfy the follower rule with nothing bracketing the map's source
+                # side.
+                for i, kind in enumerate(body):
+                    if kind != "map_ref":
+                        continue
+                    if i + 1 >= len(body) or body[i + 1] != "connector_call":
+                        raise _cardinality_error(
+                            "a map_ref in a connector_call sequence must be immediately "
+                            "followed by a connector_call"
+                        )
+                    if i == 0 or body[i - 1] != "connector_call":
+                        raise _cardinality_error(
+                            "a map_ref in a connector_call sequence must be immediately "
+                            "preceded by a connector_call"
+                        )
+                # No "contains at least one call" check appears here, and its absence
+                # is derived rather than forgotten (QA-154-r1-06): this branch is
+                # entered only when `connector_call` is in `kinds`, and the terminal
+                # allowlist above admits no `connector_call` — so a call in `kinds` is
+                # necessarily a call in `body`. A guard that cannot fire is not a
+                # guard; the terminal check is what actually rejects `[connector_call]`.
+                #
+                # The sequence must END on a call (before its terminal). #154 admits a
+                # linear PREFIX and linear steps BETWEEN calls, but not a linear
+                # SUFFIX: the steps after the last call would run on documents no
+                # further call consumes, and no evidence covers that shape.
+                #
+                # ORDERED AFTER the map rules deliberately. ``[call, map_ref, stop]``
+                # is a trailing MAP, and it was rejected before this issue with
+                # PROCESS_IR_SCHEMA_INVALID_CARDINALITY. It is also, incidentally, a
+                # sequence that does not end on a call — so a suffix check placed
+                # first would answer for it and silently change a shipped diagnostic
+                # for a shape #154 does not widen.
+                if body[-1] != "connector_call":
+                    raise _capability_error(
+                        "a connector_call sequence must end on a connector_call before "
+                        "its terminal — linear steps after the last call are unsupported"
                     )
-                if i == 0 or body[i - 1] != "connector_call":
-                    raise _cardinality_error(
-                        "a map_ref in a connector_call sequence must be immediately "
-                        "preceded by a connector_call"
-                    )
-            # No "contains at least one call" check appears here, and its absence
-            # is derived rather than forgotten (QA-154-r1-06): this branch is
-            # entered only when `connector_call` is in `kinds`, and the terminal
-            # allowlist above admits no `connector_call` — so a call in `kinds` is
-            # necessarily a call in `body`. A guard that cannot fire is not a
-            # guard; the terminal check is what actually rejects `[connector_call]`.
-            #
-            # The sequence must END on a call (before its terminal). #154 admits a
-            # linear PREFIX and linear steps BETWEEN calls, but not a linear
-            # SUFFIX: the steps after the last call would run on documents no
-            # further call consumes, and no evidence covers that shape.
-            #
-            # ORDERED AFTER the map rules deliberately. ``[call, map_ref, stop]``
-            # is a trailing MAP, and it was rejected before this issue with
-            # PROCESS_IR_SCHEMA_INVALID_CARDINALITY. It is also, incidentally, a
-            # sequence that does not end on a call — so a suffix check placed
-            # first would answer for it and silently change a shipped diagnostic
-            # for a shape #154 does not widen.
-            if body[-1] != "connector_call":
-                raise _capability_error(
-                    "a connector_call sequence must end on a connector_call before "
-                    "its terminal — linear steps after the last call are unsupported"
-                )
             # #154: the mid-list consume guard never reached this branch, because
             # it returns before the legacy source/target branch that calls it. A
             # ``cache_put`` was previously unauthorable here (not a permitted
@@ -3684,6 +3804,36 @@ class SequenceNodeV1(_ProcessIRBase):
                 message=(
                     "a trailing cache_put in a connector_call sequence must be "
                     "followed by a stream-replacing cache read, not by the terminal"
+                ),
+            )
+            return self
+
+        # #184 D8. A call-free LINEAR root: a cache read, then linear steps, ending
+        # on stop or return_documents. The scheduled start's single empty document
+        # triggers the read (measured: a standalone run logs the retrieve executing
+        # against the cache), so the read is the flow's first producer. Every other
+        # call-free linear root — `[message, stop]` — has nothing producing
+        # documents and keeps the source-endpoint refusal below.
+        if (
+            kinds[0] in ROOT_ENTRY_READ_KINDS
+            and not any(kind in _CONNECTOR_KINDS for kind in kinds)
+            and kinds[-1] in ("stop", "return_documents")
+        ):
+            for kind in kinds[:-1]:
+                if kind not in _ROOT_LINEAR_KINDS:
+                    raise _capability_error(
+                        "a call-free linear sequence may contain only linear steps "
+                        "before its terminal"
+                    )
+            _check_cache_put_followed_by_read(
+                self.steps, context="linear sequence steps"
+            )
+            _check_trailing_cache_put(
+                self.steps[:-1], self.steps[-1],
+                allowed_terminals=frozenset(),
+                message=(
+                    "a trailing cache_put in a linear sequence must be followed by a "
+                    "stream-replacing cache read, not by the terminal"
                 ),
             )
             return self
@@ -4122,6 +4272,17 @@ _REMEDIATION = {
         "capability is published as process_call_return_path_binding at "
         "get_schema_template(schema_name='process_ir_authoring', category='capability')."
     ),
+    PROCESS_IR_CAPABILITY_PROCESS_CALL_PLACEMENT_UNSUPPORTED: (
+        "Author the process call as the terminal of a branch leg or a decision "
+        "true-arm, and end the steps before it on a direct predecessor that live "
+        "captures attest for that context; the admitted predecessors are "
+        "published at get_schema_template(schema_name='process_ir_authoring', "
+        "category='placement'). A root sequence admits no step before a call, so "
+        "move the prefix into a branch leg. When the refusal names the call "
+        "itself, the called process must accept what this path hands it: see "
+        "get_schema_template(schema_name='process_ir_authoring', "
+        "node_kind='process_call')."
+    ),
     PROCESS_IR_SEMANTIC_NESTING_LIMIT: (
         "Reduce Branch/Decision nesting to at most "
         "PROCESS_IR_V1_MAX_CONTROL_DEPTH levels, or move the deeper routing into a "
@@ -4191,6 +4352,10 @@ _CUSTOM_ERROR_CODES = {
     "process_ir_capability_process_call_return_path_binding_unsupported": (
         PROCESS_IR_CAPABILITY_PROCESS_CALL_RETURN_PATH_BINDING_UNSUPPORTED
     ),
+    # #184
+    "process_ir_capability_process_call_placement_unsupported": (
+        PROCESS_IR_CAPABILITY_PROCESS_CALL_PLACEMENT_UNSUPPORTED
+    ),
     # #158
     "process_ir_capability_listener_composition_unsupported": (
         PROCESS_IR_CAPABILITY_LISTENER_COMPOSITION_UNSUPPORTED
@@ -4224,6 +4389,9 @@ _MESSAGES = {
     PROCESS_IR_SEMANTIC_RECOVERY_PROCESS_CALL_INVALID: "a recovery process_call is not authored wait=true and abort_on_error=true",
     PROCESS_IR_CAPABILITY_PROCESS_CALL_RETURN_PATH_BINDING_UNSUPPORTED: (
         "a process call may not be followed by another node in ProcessIR v1"
+    ),
+    PROCESS_IR_CAPABILITY_PROCESS_CALL_PLACEMENT_UNSUPPORTED: (
+        "a process call is placed after a composition ProcessIR v1 does not admit"
     ),
     PROCESS_IR_SCHEMA_LISTENER_CONNECTION_FORBIDDEN: (
         "a listener authors only its operation — connection_ref is not accepted"

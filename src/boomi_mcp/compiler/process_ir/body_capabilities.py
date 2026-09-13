@@ -72,6 +72,7 @@ from ...errors import (
     PROCESS_IR_CAPABILITY_UNSUPPORTED,
     PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY,
     PROCESS_IR_SEMANTIC_RECOVERY_PROCESS_CALL_INVALID,
+    PROCESS_IR_CAPABILITY_PROCESS_CALL_PLACEMENT_UNSUPPORTED,
     PROCESS_IR_CAPABILITY_PROCESS_CALL_RETURN_PATH_BINDING_UNSUPPORTED,
     PROCESS_IR_SEMANTIC_CATCH_UNTERMINATED,
     PROCESS_IR_SEMANTIC_NESTING_LIMIT,
@@ -92,7 +93,9 @@ from ...models.process_ir import (
     ProcessIRV1,
     TryCatchCatchBodyV1,
     TryCatchTryBodyV1,
+    PLACEMENT_PREFIX,
     PLACEMENT_RECOVERY_FLAGS,
+    PLACEMENT_ROOT_PREFIX,
     _CUSTOM_ERROR_CODES,
     _check_no_orphan_continue,
     _check_passthrough_root,
@@ -436,6 +439,13 @@ def _walk_body(
         if reason == PLACEMENT_RECOVERY_FLAGS:
             raise raise_compile_error(
                 PROCESS_IR_SEMANTIC_RECOVERY_PROCESS_CALL_INVALID,
+                _SEMANTIC_PHASE,
+                _join(path, *at),
+                message=message,
+            )
+        if reason == PLACEMENT_PREFIX:
+            raise raise_compile_error(
+                PROCESS_IR_CAPABILITY_PROCESS_CALL_PLACEMENT_UNSUPPORTED,
                 _SEMANTIC_PHASE,
                 _join(path, *at),
                 message=message,
@@ -792,6 +802,13 @@ def _check_process_call_placement(ir: ProcessIRV1) -> None:
         # what live QA measured before this was unified.
         raise raise_compile_error(
             PROCESS_IR_CAPABILITY_UNSUPPORTED,
+            _SEMANTIC_PHASE,
+            _join("/body", *at),
+            message=message,
+        )
+    if reason == PLACEMENT_ROOT_PREFIX:
+        raise raise_compile_error(
+            PROCESS_IR_CAPABILITY_PROCESS_CALL_PLACEMENT_UNSUPPORTED,
             _SEMANTIC_PHASE,
             _join("/body", *at),
             message=message,

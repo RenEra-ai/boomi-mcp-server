@@ -20,6 +20,7 @@ if _src not in sys.path:
 import boomi_mcp.models as models
 from boomi_mcp.errors import (
     PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY,
+    PROCESS_IR_CAPABILITY_PROCESS_CALL_PLACEMENT_UNSUPPORTED,
     PROCESS_IR_CAPABILITY_PROCESS_CALL_RETURN_PATH_BINDING_UNSUPPORTED,
     PROCESS_IR_CAPABILITY_UNSUPPORTED,
     PROCESS_IR_REFERENCE_INVALID_FORMAT,
@@ -704,8 +705,11 @@ def test_process_call_is_a_branch_leg_terminal_not_a_step():  # #141, amended by
         == PROCESS_IR_CAPABILITY_PROCESS_CALL_RETURN_PATH_BINDING_UNSUPPORTED
     ), codes_of(err)
 
-    # F8 — a terminal call with a non-connector prefix. The prefix is unattested:
-    # the capture shows the control edge landing directly on the call.
+    # F8, re-decided by #184 (D10). A terminal call after an ATTESTED direct
+    # predecessor parses: capture `cap184-prefix-predecessors` ran a Message wired
+    # straight into the call and the child received the parent's token. A predecessor
+    # that capture refused — a cache remove, whose successor the platform skips —
+    # keeps a refusal, now under the placement code at the terminal.
     with_prefix = {
         "kind": "branch",
         "legs": [
@@ -713,10 +717,19 @@ def test_process_call_is_a_branch_leg_terminal_not_a_step():  # #141, amended by
             {"steps": [message()], "terminal": {"kind": "stop"}},
         ],
     }
-    err = parse_error({"version": "1", "body": {"kind": "sequence", "steps": [with_prefix]}})
-    assert (
-        err.diagnostics[0].code
-        == PROCESS_IR_CAPABILITY_PROCESS_CALL_RETURN_PATH_BINDING_UNSUPPORTED
+    parse_process_ir_v1({"version": "1", "body": {"kind": "sequence", "steps": [with_prefix]}})
+    unattested = {
+        "kind": "branch",
+        "legs": [
+            {"steps": [{"kind": "cache_remove", "cache_ref": "$ref:c"}],
+             "terminal": {"kind": "process_call", "process_ref": "x"}},
+            {"steps": [message()], "terminal": {"kind": "stop"}},
+        ],
+    }
+    err = parse_error({"version": "1", "body": {"kind": "sequence", "steps": [unattested]}})
+    assert codes_of(err)[0] == (
+        PROCESS_IR_CAPABILITY_PROCESS_CALL_PLACEMENT_UNSUPPORTED,
+        "/body/steps/0/legs/0/terminal",
     ), codes_of(err)
 
 
@@ -824,17 +837,6 @@ def test_connector_call_return_documents_terminal_is_allowed():
 @pytest.mark.parametrize(
     "steps,expect_code",
     [
-        # a map has no producer before it
-        ([{"kind": "map_ref", "map_ref": "$ref:m"}, call(), {"kind": "stop"}],
-         PROCESS_IR_SCHEMA_INVALID_CARDINALITY),
-        # a trailing map has no consumer after it, so its target profile is
-        # unverifiable — the whole reason maps must be bracketed
-        ([call(), {"kind": "map_ref", "map_ref": "$ref:m"}, {"kind": "stop"}],
-         PROCESS_IR_SCHEMA_INVALID_CARDINALITY),
-        # two maps in a row: the first one's target has no call to check against
-        ([call(), {"kind": "map_ref", "map_ref": "$ref:m"},
-          {"kind": "map_ref", "map_ref": "$ref:m2"}, call(), {"kind": "stop"}],
-         PROCESS_IR_SCHEMA_INVALID_CARDINALITY),
         # no terminal at all
         ([call(), call()], PROCESS_IR_SCHEMA_INVALID_CARDINALITY),
         # a target/stop terminal pair belongs to the legacy dialect
@@ -843,10 +845,6 @@ def test_connector_call_return_documents_terminal_is_allowed():
         # process_call mixing stays gated (that is what mixed_connector_execution names)
         ([call(), {"kind": "process_call", "process_ref": "p"}, {"kind": "stop"}],
          PROCESS_IR_CAPABILITY_UNSUPPORTED),
-        # #154 item 5 admits the LINEAR vocabulary between calls, but the
-        # sequence must still end ON a call: steps after the last call would run
-        # on documents no further call consumes.
-        ([call(), call(), message(), {"kind": "stop"}], PROCESS_IR_CAPABILITY_UNSUPPORTED),
         ([{"kind": "set_dpp", "name": "p",
            "source_values": [{"value_type": "static", "value": "v"}]},
           {"kind": "stop"}],
@@ -855,17 +853,33 @@ def test_connector_call_return_documents_terminal_is_allowed():
         # reach this branch too — it did not before #154.
         ([call(), {"kind": "cache_put", "cache_ref": "$ref:c"}, call(), {"kind": "stop"}],
          PROCESS_IR_SCHEMA_INVALID_CARDINALITY),
-        # a map still needs a call on BOTH sides; with a linear prefix admitted,
-        # the predecessor half is no longer implied by "step 0 is a call".
-        ([{"kind": "set_dpp", "name": "p",
-           "source_values": [{"value_type": "static", "value": "v"}]},
-          {"kind": "map_ref", "map_ref": "$ref:m"}, call(), {"kind": "stop"}],
-         PROCESS_IR_SCHEMA_INVALID_CARDINALITY),
     ],
 )
 def test_connector_call_sequence_rules(steps, expect_code):
     err = parse_error(doc(*steps))
     assert err.diagnostics[0].code == expect_code, codes_of(err)
+
+
+@pytest.mark.parametrize(
+    "steps",
+    [
+        # #184 removed both halves of root map bracketing and the end-on-call rule.
+        # These rows were refused above until then. A map's profiles are now proved
+        # against the stream that reaches it, and a map with nothing producing
+        # before it is refused at COMPILE by the document-existence walk
+        # (`tests/test_issue_184_absent_stream.py`), not by the parser.
+        [{"kind": "map_ref", "map_ref": "$ref:m"}, call(), {"kind": "stop"}],
+        [call(), {"kind": "map_ref", "map_ref": "$ref:m"}, {"kind": "stop"}],
+        [call(), {"kind": "map_ref", "map_ref": "$ref:m"},
+         {"kind": "map_ref", "map_ref": "$ref:m2"}, call(), {"kind": "stop"}],
+        [call(), call(), message(), {"kind": "stop"}],
+        [{"kind": "set_dpp", "name": "p",
+          "source_values": [{"value_type": "static", "value": "v"}]},
+         {"kind": "map_ref", "map_ref": "$ref:m"}, call(), {"kind": "stop"}],
+    ],
+)
+def test_root_sequences_the_bracketing_rules_used_to_refuse_now_parse(steps):
+    parse_process_ir_v1(doc(*steps))
 
 
 @pytest.mark.parametrize(
@@ -925,14 +939,15 @@ def test_a_connector_call_sequence_still_rejects_an_exception_terminal():
     assert err.diagnostics[0].code == PROCESS_IR_SCHEMA_INVALID_CARDINALITY
 
 
-def test_a_map_may_not_directly_precede_a_control_terminal():
-    """#140's bracketing guarantee survives the widening.
+def test_a_map_may_directly_precede_a_control_terminal():
+    """#184 D7 replaced #140's bracketing guarantee with the stream-profile proof.
 
-    A map immediately before the control has no downstream call in the ROOT body
-    to check its target profile against — the exact continuity hole map
-    bracketing exists to close — so it stays rejected.
+    A map immediately before a Branch or Decision hands its target profile into
+    every leg, and the lineage controller checks each leg's first consumer against
+    it (`tests/test_issue_184_stream_profiles.py`). The root body no longer needs a
+    downstream call to compare the map's target with.
     """
-    err = parse_error(
+    ir = parse_process_ir_v1(
         doc(
             call(),
             {"kind": "map_ref", "map_ref": "$ref:m"},
@@ -942,7 +957,7 @@ def test_a_map_may_not_directly_precede_a_control_terminal():
             ]),
         )
     )
-    assert err.diagnostics[0].code == PROCESS_IR_SCHEMA_INVALID_CARDINALITY
+    assert [step.kind for step in ir.body.steps] == ["connector_call", "map_ref", "branch"]
 
 
 def test_connector_call_is_authorable_in_control_bodies():  # #141
@@ -1518,6 +1533,18 @@ def test_flow_control_description_states_batching_without_configurable_paralleli
     assert "threading" not in lowered
 
 
+def test_a_step_before_a_root_process_call_is_a_placement_refusal():
+    """#184 split the root singleton refusal. A step AUTHORED BEFORE the call is a
+    placement question — a prefix is admitted only inside a branch leg or a decision
+    true-arm — so it is served the placement code at its own step. A step after the
+    call still asks the call to continue and keeps the return-path code (below)."""
+    err = parse_error({"version": "1", "body": {"kind": "sequence", "steps": [
+        message(), {"kind": "process_call", "process_ref": "a"}]}})
+    assert codes_of(err)[0] == (
+        PROCESS_IR_CAPABILITY_PROCESS_CALL_PLACEMENT_UNSUPPORTED, "/body/steps/0"
+    ), codes_of(err)
+
+
 @pytest.mark.parametrize(
     "steps,expected_pointer,label",
     [
@@ -1532,8 +1559,6 @@ def test_flow_control_description_states_batching_without_configurable_paralleli
           {"kind": "process_call", "process_ref": "b"},
           {"kind": "stop"}],
          "/body/steps/1", "a call chain WITH a trailing stop"),
-        ([message(), {"kind": "process_call", "process_ref": "a"}],
-         "/body/steps/0", "a step BEFORE the call"),
     ],
 )
 def test_every_illegal_process_call_root_returns_a_typed_diagnostic(
