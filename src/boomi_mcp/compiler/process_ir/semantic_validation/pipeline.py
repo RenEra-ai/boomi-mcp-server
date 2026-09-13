@@ -194,6 +194,9 @@ def _collect_capability_findings(
     for index, item in enumerate(capabilities.subprocess_summaries):
         if item.process_ref not in process_refs:
             _unbound("subprocess_summaries", index, "subprocess")
+    for index, item in enumerate(capabilities.child_entry_contracts):
+        if item.process_ref not in process_refs:
+            _unbound("child_entry_contracts", index, "subprocess")
     # An unbound external-writer contract is the MOST important one to report:
     # it is a trusted proof that downgrades a blocking finding, so a typo in the
     # cache ref would silently leave the payload validated on the strength of a

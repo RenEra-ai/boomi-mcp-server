@@ -124,6 +124,10 @@ LISTENER_ENDPOINT_UNRESOLVED = "LISTENER_ENDPOINT_UNRESOLVED"
 # every call to such a route (HTTP 405, measured), so it is refused before any
 # package exists rather than deployed and then failing verification.
 LISTENER_ASC_ROUTE_UNCALLABLE = "LISTENER_ASC_ROUTE_UNCALLABLE"
+# #184 amendment 3 §8: the compiler's entry-context code, served unchanged here — a
+# passthrough root run directly starts as No Data, so a test run or a schedule of one
+# that needs a caller is refused before anything is packaged.
+PROCESS_IR_CAPABILITY_ENTRY_CONTEXT_UNSUPPORTED = "PROCESS_IR_CAPABILITY_ENTRY_CONTEXT_UNSUPPORTED"
 
 # Package/deploy stage error codes (issue #61).
 BOOMI_CLIENT_REQUIRED = "BOOMI_CLIENT_REQUIRED"
@@ -892,6 +896,103 @@ def _uncallable_route_refusal(
             "endpoint_path": listener_meta.get("endpoint_path"),
         },
     )
+
+
+#: The requirement flags a recorded passthrough entry can carry, as served tokens.
+_STANDALONE_REQUIREMENT_FLAGS = (
+    ("consumes_caller_documents", "caller_documents"),
+    ("caller_composed_paths", "caller_composed_request_paths"),
+    ("caller_document_properties", "caller_document_properties"),
+    ("caller_cache_contents", "caller_cache_contents"),
+)
+
+
+def _unmet_standalone_requirements(record: Any, supplied: Any) -> List[str]:
+    """The served tokens a direct run of a passthrough root cannot satisfy."""
+    if not isinstance(record, dict) or not record.get("derived"):
+        return ["entry_contract_not_recorded"]
+    unmet = [token for flag, token in _STANDALONE_REQUIREMENT_FLAGS if record.get(flag)]
+    required = record.get("dynamic_process_properties") or []
+    if any(name not in supplied for name in required):
+        unmet.append("dynamic_process_properties")
+    return unmet
+
+
+def _standalone_entry_refusal(
+    build_id: str,
+    target: ResolvedBuildTarget,
+    *,
+    run_test: bool,
+    normalized_schedule: Optional[Dict[str, Any]],
+    test_dynamic_properties: Optional[Dict[str, Any]],
+) -> Optional[OrchestrateDeployError]:
+    """Refuse running a passthrough root directly while it needs a caller (#184 amendment 3 §8).
+
+    Executed directly, a Data Passthrough process runs as No Data with one empty
+    document and no inherited properties or cache (capture
+    `cap184-passthrough-standalone`). A called contract is therefore no evidence that a
+    test run or a schedule works. The requirements are the ones recorded with the
+    typed build; a test run may supply dynamic process properties, a schedule supplies
+    none. Package and deployment without either stay available.
+    """
+    from ...authoring.process_entry import PASSTHROUGH, RecordedEntryUnreadable
+
+    scheduled = bool(normalized_schedule) and (
+        normalized_schedule.get("mode") in _SCHEDULE_SCHEDULED_MODES
+    )
+    if not (run_test or scheduled):
+        return None
+    entry = integration_builder._BUILD_REGISTRY.get(build_id)
+    entry = entry if isinstance(entry, dict) else {}
+    spec = entry.get("spec") if isinstance(entry.get("spec"), dict) else {}
+    roots = [
+        root
+        for root in _deployment_root_candidates(
+            _process_roots(
+                spec.get("components") if isinstance(spec.get("components"), list) else [],
+                _recorded_process_units(spec) or [],
+            )
+        )
+        if root.key == target.process_key
+    ]
+    if len(roots) != 1:
+        return None
+    try:
+        form = _root_entry(roots[0]).form
+    except RecordedEntryUnreadable:
+        return None
+    if form != PASSTHROUGH:
+        return None
+    authoring = entry.get("authoring") if isinstance(entry.get("authoring"), dict) else {}
+    records = authoring.get("standalone_entry") if isinstance(authoring.get("standalone_entry"), dict) else {}
+    record = records.get(target.process_key)
+    contexts = []
+    if run_test:
+        contexts.append(("run_test", set(test_dynamic_properties or {})))
+    if scheduled:
+        contexts.append(("schedule_override", set()))
+    for field, supplied in contexts:
+        unmet = _unmet_standalone_requirements(record, supplied)
+        if not unmet:
+            continue
+        return _error(
+            PROCESS_IR_CAPABILITY_ENTRY_CONTEXT_UNSUPPORTED,
+            (
+                f"Build '{build_id}' deploys a Data Passthrough process that requires "
+                f"what only a caller supplies ({', '.join(unmet)}). Run directly — as a "
+                "test run or on a schedule — it starts as No Data, with one empty "
+                "document and nothing a caller would hand it, so nothing was deployed. "
+                "Run it through its caller, or deploy it without run_test and without "
+                "a schedule."
+            ),
+            field=field,
+            details={
+                "build_id": build_id,
+                "process_key": target.process_key,
+                "requirements": unmet,
+            },
+        )
+    return None
 
 
 def _reused_listener_entry_mismatch(
@@ -5299,6 +5400,15 @@ def orchestrate_deploy_action(
     # whenever the build carries the facts that decide it; a build whose
     # operation is read from the account is checked again after that read.
     uncallable = _uncallable_route_refusal(build_id, target, listener_meta)
+    if uncallable is None:
+        # #184 amendment 3 §8: in BOTH runs, before any SDK call.
+        uncallable = _standalone_entry_refusal(
+            build_id,
+            target,
+            run_test=bool(run_test),
+            normalized_schedule=normalized_schedule,
+            test_dynamic_properties=request.test_dynamic_properties,
+        )
     if uncallable is not None:
         return _error_response(
             uncallable.message,

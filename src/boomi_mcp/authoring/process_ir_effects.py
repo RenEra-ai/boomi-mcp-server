@@ -902,6 +902,235 @@ def _declared(effect) -> Tuple[tuple, tuple, bool]:
     )
 
 
+# ---------------------------------------------------------------------------
+# #184 amendment 3 §8: child entry contracts, derived without any declaration
+# ---------------------------------------------------------------------------
+
+
+def derive_child_entry_facts(child_ir: Any, symbols: Any, capabilities: Any = None) -> Dict[str, Any]:
+    """The entry-contract fields ONE process presents to its callers (#184 amendment 3 §8).
+
+    Read off the compiler's own lineage walk, over the process's own trusted context
+    and the symbols it is compiled against, so a profile requirement resolves. No
+    declaration is needed and none is trusted: this states what a caller OWES, never
+    what the child establishes for it.
+
+    - A listener cannot be called, so its entry is ``unknown``.
+    - A No Data child receives one empty document per invocation. It states no
+      document requirement, and its document-property reads stay its own defects.
+    - A passthrough child requires what each consumer of the incoming documents names
+      (``None`` for a consumption nothing states; a single ``None`` when the profile
+      proof could not run), and every bound request path only the caller can compose.
+    """
+    from ..compiler.process_ir.entry_policy import LISTENER, PASSTHROUGH, classify_entry
+    from ..compiler.process_ir.semantic_validation.context import (
+        prepare_validation_context,
+    )
+    from ..compiler.process_ir.semantic_validation.lineage import (
+        _trusted_effects,
+        walk_lineage,
+    )
+
+    base = capabilities or DEFAULT_VALIDATION_CAPABILITIES
+    prepared = prepare_validation_context(child_ir, symbols)
+    form = classify_entry(prepared.cfg)
+    if form == LISTENER:
+        return {"entry_form": "unknown"}
+    walk = walk_lineage(prepared, base)
+    known = True
+    mutated = set()
+    for node in prepared.cfg.nodes:
+        semantic = node.semantic
+        kind = semantic.semantic_kind
+        if kind == "set_property" and semantic.scope != "ddp":
+            mutated.add((semantic.scope, semantic.name))
+        elif kind in ("cache_put", "cache_remove"):
+            mutated.add(("cache", semantic.cache_ref))
+        elif kind == "process_call":
+            contract = base.child_entry_contract(semantic.process_ref)
+            if contract is None or not contract.state_known:
+                known = False
+            else:
+                mutated.update((key[0], key[1]) for key in contract.mutated_state)
+        elif kind in CONTRACT_GATED_CHILD_KINDS:
+            if not _node_is_inspectable(semantic, base):
+                known = False
+            for effect in _trusted_effects(semantic, base):
+                mutated.update((key[0], key[1]) for key in effect.writes if key[0] != "ddp")
+    facts: Dict[str, Any] = {
+        "state_known": known,
+        "mutated_state": tuple(sorted(mutated)) if known else (),
+    }
+    reads = tuple(sorted({(key[0], key[1]) for key in walk.unestablished_reads}))
+    if form != PASSTHROUGH:
+        facts.update(
+            entry_form="scheduled",
+            required_reads=tuple(key for key in reads if key[0] != "ddp"),
+        )
+        return facts
+    facts.update(
+        entry_form="passthrough",
+        required_reads=reads,
+        document_requirements=(
+            tuple(walk.entry_requirement_refs) if walk.profile_proof else (None,)
+        ),
+        required_writers=_caller_composed_paths(prepared, base, walk),
+    )
+    return facts
+
+
+def _caller_composed_paths(prepared: Any, capabilities: Any, walk: Any) -> Tuple[Tuple[str, Optional[str]], ...]:
+    """The bound request paths of a passthrough child that only its caller can compose.
+
+    MEASURED on the child's own walk rather than modelled beside it: a binding refused as
+    not established is a caller obligation exactly when seeding its property as
+    caller-composed clears that refusal. A step between the entry and the binding that
+    hands on other documents drops the seeded writer like any other, so its refusal
+    stands and stays the child's own defect.
+    """
+    from ..compiler.process_ir.semantic_validation.lineage import walk_lineage
+    from ..errors import PROCESS_IR_SEMANTIC_DYNAMIC_PATH_DDP_NOT_ESTABLISHED as _NOT_ESTABLISHED
+
+    refused = {item.path for item in walk.findings if item.code == _NOT_ESTABLISHED}
+    candidates = []
+    for node in prepared.cfg.nodes:
+        binding = getattr(node.semantic, "path_binding", None)
+        pointer = node.source_path + "/path_binding"
+        if binding is not None and pointer in refused:
+            candidates.append((pointer, binding.property_name, binding.request_profile_ref))
+    if not candidates:
+        return ()
+    seeded = capabilities.model_copy(update={
+        "caller_supplied_writers": tuple(sorted({("ddp", name) for _p, name, _r in candidates})),
+    })
+    still = {
+        item.path
+        for item in walk_lineage(prepared, seeded).findings
+        if item.code == _NOT_ESTABLISHED
+    }
+    return tuple(sorted(
+        {(name, ref) for pointer, name, ref in candidates if pointer not in still},
+        key=lambda row: (row[0], row[1] or ""),
+    ))
+
+
+def _respelled(facts: Mapping[str, Any], parent_ir: Any, symbols: Any) -> Dict[str, Any]:
+    """A child's cache keys, spelled as the CALLER names the same cache component.
+
+    Lineage keys a cache by its authored ref, so a child and a caller naming one cache
+    through two aliases would otherwise disagree about whether it is written.
+    """
+    spellings: Dict[str, str] = {}
+    for node in _iter_nodes(parent_ir.body):
+        ref = getattr(node, "cache_ref", None)
+        if isinstance(ref, str) and ref:
+            for alias in sorted(_aliases(symbols, ref)):
+                spellings.setdefault(alias, ref)
+
+    def respell(keys):
+        return tuple(sorted({
+            (scope, spellings.get(name, name) if scope == "cache" else name)
+            for scope, name in keys
+        }))
+
+    out = dict(facts)
+    for field in ("required_reads", "mutated_state"):
+        if field in out:
+            out[field] = respell(out[field])
+    return out
+
+
+def _entry_contract_bindings(process_roots, symbols, symbols_for) -> Dict[str, tuple]:
+    """Per root: ``(child contract rows, seeded reads, caller-composed writers, own contract, form)``.
+
+    Children are derived before their callers, so a grandchild's contract reaches the
+    child's own walk. The members of a call cycle have no derivable entry and are
+    ``unknown``. A call whose target is not a root of this request binds no row, so its
+    admission treats the child as unknown. Only a root another root CALLS is validated
+    under its callers' obligations; every call discharges them on its own.
+    """
+    from ..compiler.process_ir.semantic_validation.contracts import (
+        ChildEntryContractV1,
+        ProcessIRValidationCapabilitiesV1,
+    )
+
+    roots = dict(process_roots)
+
+    def _child_key(ref):
+        for alias in sorted(_aliases(symbols, ref)):
+            bare = alias[len("$ref:"):] if alias.startswith("$ref:") else alias
+            if bare in roots:
+                return bare
+        return None
+
+    calls = {
+        key: {ref: _child_key(ref) for ref in sorted(_occurrences(ir)["process_ref"])}
+        for key, ir in process_roots
+    }
+    ordered: List[str] = []
+    progressed = True
+    while progressed:
+        progressed = False
+        for key in sorted(roots):
+            targets = {child for child in calls[key].values() if child is not None}
+            if key not in ordered and targets <= set(ordered):
+                ordered.append(key)
+                progressed = True
+    facts: Dict[str, Dict[str, Any]] = {}
+
+    def _rows(key):
+        return tuple(
+            ChildEntryContractV1(process_ref=ref, **_respelled(facts[child], roots[key], symbols))
+            for ref, child in sorted(calls[key].items())
+            if child in facts
+        )
+
+    for key in ordered:
+        own = ProcessIRValidationCapabilitiesV1(child_entry_contracts=_rows(key))
+        facts[key] = derive_child_entry_facts(roots[key], symbols_for(key, roots[key]), own)
+    for key in roots:
+        facts.setdefault(key, {"entry_form": "unknown"})
+    called = {child for targets in calls.values() for child in targets.values() if child is not None}
+    bindings: Dict[str, tuple] = {}
+    for key in roots:
+        own = facts[key]
+        is_called = key in called
+        bindings[key] = (
+            _rows(key),
+            tuple(own.get("required_reads", ())) if is_called else (),
+            tuple(sorted({("ddp", name) for name, _ref in own.get("required_writers", ())}))
+            if is_called else (),
+            ChildEntryContractV1(process_ref="$ref:" + key, **own)
+            if own.get("entry_form") == "passthrough" else None,
+            own.get("entry_form"),
+        )
+    return bindings
+
+
+def _binds(binding: tuple) -> bool:
+    rows, reads, writers, entry, _form = binding
+    return bool(rows or reads or writers or entry is not None)
+
+
+def _with_entry_contracts(capabilities: Any, binding: tuple) -> Any:
+    from ..compiler.process_ir.semantic_validation.contracts import (
+        ProcessIRValidationCapabilitiesV1,
+    )
+
+    rows, reads, writers, entry, _form = binding
+    fields = {
+        name: getattr(capabilities, name)
+        for name in ProcessIRValidationCapabilitiesV1.model_fields
+    }
+    fields.update(
+        child_entry_contracts=rows,
+        established_at_entry=tuple(sorted(set(capabilities.established_at_entry) | set(reads))),
+        caller_supplied_writers=writers,
+        entry_contract=entry,
+    )
+    return ProcessIRValidationCapabilitiesV1(**fields)
+
+
 def resolve_process_ir_effect_declarations(
     process_roots: Sequence[Tuple[str, Any]],
     declarations: Any,
@@ -911,11 +1140,15 @@ def resolve_process_ir_effect_declarations(
     script_registry: Optional[Mapping] = None,
     conflict_policy: str = "reuse",
     literal_indexes: Optional[Mapping[str, Any]] = None,
+    symbols_for: Optional[Any] = None,
 ) -> EffectResolutionV1:
     """Verify identity, derive content server-side, and build per-root context.
 
-    ``declarations`` may be ``None`` — the ordinary case — and then every root
-    gets ``None`` for capabilities, which is byte-identical to the pre-#154 path.
+    ``declarations`` may be ``None`` — the ordinary case. #184 amendment 3 §8: child
+    entry contracts are derived either way, so a root gets ``None`` only when no
+    contract, obligation or passthrough entry binds in it — which, for a request with
+    no call and no passthrough root, is byte-identical to the pre-#154 path.
+    ``symbols_for(key, root)`` returns the symbols a root is compiled against.
     """
     from ..compiler.process_ir.semantic_validation.contracts import (
         ExternalWriterContractV1,
@@ -926,8 +1159,22 @@ def resolve_process_ir_effect_declarations(
     )
     from .vetted_scripts import lookup_vetted_script
 
+    entry_bindings = _entry_contract_bindings(
+        process_roots, symbols, symbols_for or (lambda _key, _root: symbols)
+    )
     if declarations is None:
-        return EffectResolutionV1({key: None for key, _ir in process_roots}, (), ())
+        return EffectResolutionV1(
+            {
+                key: (
+                    _with_entry_contracts(ProcessIRValidationCapabilitiesV1(), entry_bindings[key])
+                    if _binds(entry_bindings[key])
+                    else None
+                )
+                for key, _ir in process_roots
+            },
+            (),
+            (),
+        )
 
     findings: List[EffectAuthorityFindingV1] = []
     inert: List[str] = []
@@ -1177,7 +1424,12 @@ def resolve_process_ir_effect_declarations(
         # required read reported read-before-write against itself, so no request
         # carrying a non-empty required-reads summary could ever plan.
         if derived[0]:
-            entry_state.setdefault(child_key, set()).update(derived[0])
+            # #184 amendment 3 §8: a No Data child receives no caller documents, so its
+            # document-property reads are its own defects, never a caller's obligation.
+            passthrough = child_key in entry_bindings and entry_bindings[child_key][4] == "passthrough"
+            entry_state.setdefault(child_key, set()).update(
+                key for key in derived[0] if passthrough or key[0] != "ddp"
+            )
 
     if findings:
         # ALL-OR-NOTHING on error. A partially trusted context is a context whose
@@ -1201,6 +1453,7 @@ def resolve_process_ir_effect_declarations(
             ),
             established_at_entry=tuple(sorted(entry_state.get(key, ()))),
         )
+        per_root[key] = _with_entry_contracts(per_root[key], entry_bindings[key])
     return EffectResolutionV1(per_root, (), inert)
 
 

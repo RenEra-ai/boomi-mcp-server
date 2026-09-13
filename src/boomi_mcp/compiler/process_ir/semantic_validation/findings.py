@@ -23,6 +23,7 @@ from ....errors import (
     LEGACY_ADAPTER_EXEMPTION_STANDALONE_CACHE_READ,
     LEGACY_ADAPTER_EXEMPTION_SUBPROCESS_SUMMARY,
     PROCESS_IR_CAPABILITY_EFFECT_CONTRACT_INVALID,
+    PROCESS_IR_CAPABILITY_ENTRY_CONTEXT_UNSUPPORTED,
     PROCESS_IR_REFERENCE_COMPONENT_NOT_FOUND,
     PROCESS_IR_REFERENCE_COMPONENT_TYPE_MISMATCH,
     PROCESS_IR_SEMANTIC_LINEAGE_AMBIGUOUS_LAST_WRITE,
@@ -51,6 +52,10 @@ _MESSAGES: Dict[str, str] = {
     ),
     PROCESS_IR_CAPABILITY_EFFECT_CONTRACT_INVALID: (
         "a typed effect contract is malformed or bound to the wrong component"
+    ),
+    # #184 amendment 3 §8: raised by lineage when a call discharges its child's contract.
+    PROCESS_IR_CAPABILITY_ENTRY_CONTEXT_UNSUPPORTED: (
+        "a process is invoked in an entry context ProcessIR v1 does not admit"
     ),
     PROCESS_IR_SEMANTIC_LINEAGE_PROPERTY_READ_BEFORE_WRITE: (
         "a property or cache key is read before any write establishes it"
@@ -120,6 +125,13 @@ _REMEDIATION: Dict[str, str] = {
     PROCESS_IR_CAPABILITY_EFFECT_CONTRACT_INVALID: (
         "Bind the effect contract to the component it describes; a script "
         "contract must carry the digest of the exact source it covers."
+    ),
+    PROCESS_IR_CAPABILITY_ENTRY_CONTEXT_UNSUPPORTED: (
+        "Call a Data Passthrough child with wait=true: it receives the arriving "
+        "documents as one group only through a waiting call. A passthrough process "
+        "run directly (a test run or a schedule) starts as No Data, with one empty "
+        "document and nothing a caller supplies, so run it through its caller or "
+        "remove what it requires of one."
     ),
     PROCESS_IR_SEMANTIC_LINEAGE_PROPERTY_READ_BEFORE_WRITE: (
         "Write the property or cache key on every path that reaches this read, "

@@ -11219,11 +11219,49 @@ def _authoring_build_provenance(
             "digest": _live_component_digest(boomi_client, component_id),
         }
 
-    return {
+    record = {
         "provenance": provenance.model_dump(mode="json"),
         "revision_binding": compile_result.revision_binding.model_dump(mode="json"),
         "live_component_fingerprints": live,
     }
+    # #184 amendment 3 §8: recorded only when the build has a passthrough root, so
+    # every other typed build keeps exactly its keys.
+    standalone = _standalone_entry_records(bundle)
+    if standalone:
+        record["standalone_entry"] = standalone
+    return record
+
+
+def _standalone_entry_records(bundle) -> Dict[str, Any]:
+    """What each passthrough root requires of a caller, per process key (#184 amendment 3 §8).
+
+    Read off the entry contract its plan was compiled under. A passthrough process run
+    directly starts as No Data with one empty document (capture
+    `cap184-passthrough-standalone`), so deployment orchestration refuses a direct test
+    run or schedule of one that needs a caller, before anything is mutated. Counts and
+    closed flags, plus the dynamic process property names a test run could supply.
+    """
+    records: Dict[str, Any] = {}
+    plans = getattr(bundle, "materialization_plans", None) or {}
+    for key in sorted(plans):
+        plan = plans[key]
+        if getattr(plan, "execution_profile", None) != "passthrough":
+            continue
+        capabilities = getattr(plan, "effect_capabilities", None)
+        contract = getattr(capabilities, "entry_contract", None) if capabilities is not None else None
+        if contract is None:
+            records[key] = {"derived": False}
+            continue
+        reads = [(scope, name) for scope, name in contract.required_reads]
+        records[key] = {
+            "derived": True,
+            "consumes_caller_documents": bool(contract.document_requirements),
+            "caller_composed_paths": len(contract.required_writers),
+            "caller_document_properties": sum(1 for scope, _name in reads if scope == "ddp"),
+            "caller_cache_contents": sum(1 for scope, _name in reads if scope == "cache"),
+            "dynamic_process_properties": sorted({name for scope, name in reads if scope == "dpp"}),
+        }
+    return records
 
 
 def _verify_build(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:

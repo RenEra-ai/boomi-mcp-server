@@ -1763,6 +1763,11 @@ def _validate_processes(
         # when the index is None. A map the plan refuses could therefore derive
         # a trusted effect.
         literal_indexes=literal_indexes,
+        # #184 amendment 3 §8: a child's entry contract is derived against the symbols
+        # that child root is compiled with, so its profile requirements resolve.
+        symbols_for=lambda key, root: project_grants_for_root(
+            root, symbols, process_root_ref=key, snapshot=snapshot
+        ),
     )
     for finding in resolution.findings:
         errors += 1

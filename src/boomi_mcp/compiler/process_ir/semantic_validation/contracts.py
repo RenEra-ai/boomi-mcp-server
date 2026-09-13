@@ -406,6 +406,41 @@ class SubprocessSummaryV1(_ValidationModel):
     effect: StateEffectV1
 
 
+class ChildEntryContractV1(_ValidationModel):
+    """What ONE called child requires of every invocation (#184 amendment 3 §8).
+
+    Derived by the server for every inspectable child in the request, whether or not
+    anything was declared, and discharged by each call on its own: facts from two
+    parents are never combined. Separate from ``SubprocessSummaryV1``, which is a
+    caller's declared effect the server verifies and the only way a child's writes
+    establish anything downstream.
+
+    - ``entry_form``: ``passthrough`` receives the arriving documents as one group;
+      ``scheduled`` (No Data) receives one empty document per arriving document;
+      ``unknown`` when the child's entry cannot be derived (a listener, a cycle).
+    - ``document_requirements``: per consumer of a passthrough child's incoming
+      documents, the AUTHORED profile ref it requires, or None where nothing states
+      one. Refs, not resolved ids, so the contract survives placeholder-to-real-id
+      conversion; each call resolves them against its own symbols.
+    - ``required_reads``: state keys the child reads before establishing them. A No
+      Data child's document properties are not among them: they cannot arrive.
+    - ``required_writers``: document properties a passthrough child's bound request
+      path composes from the caller's documents, with the request profile ref the
+      binding names. The caller's writer must pass the binding checks at the call.
+    - ``mutated_state``: execution-scoped keys the child may write or remove.
+    - ``state_known``: False when some step's state effects are unknown; then
+      ``mutated_state`` is incomplete and proves nothing.
+    """
+
+    process_ref: str
+    entry_form: Literal["passthrough", "scheduled", "unknown"]
+    document_requirements: Tuple[Optional[str], ...] = ()
+    required_reads: Tuple[Tuple[str, str], ...] = ()
+    required_writers: Tuple[Tuple[str, Optional[str]], ...] = ()
+    mutated_state: Tuple[Tuple[str, str], ...] = ()
+    state_known: bool = False
+
+
 class ProcessIRValidationCapabilitiesV1(_ValidationModel):
     """The trusted context a validation run is given.
 
@@ -434,13 +469,26 @@ class ProcessIRValidationCapabilitiesV1(_ValidationModel):
     #: the parent, and nothing supplies them but the server's own derivation
     #: from this very child.
     established_at_entry: Tuple[Tuple[str, str], ...] = ()
+    #: #184 amendment 3 §8: the entry contract of each child this process calls that
+    #: the server could derive, one row per authored spelling.
+    child_entry_contracts: Tuple[ChildEntryContractV1, ...] = ()
+    #: #184 amendment 3 §8: document properties a CALLED passthrough child's bound
+    #: request paths compose from its caller's documents. The child is validated as
+    #: though a writer composed each one, because every call proves that writer
+    #: against the child's binding; a bare established key never does.
+    caller_supplied_writers: Tuple[Tuple[str, str], ...] = ()
+    #: #184 amendment 3 §8: the contract THIS process presents to its callers, derived
+    #: for a passthrough root. Recorded with the build so a direct test run or a
+    #: schedule, which starts the process as No Data, is refused before any mutation.
+    entry_contract: Optional[ChildEntryContractV1] = None
 
     def writes_cache_externally(self, cache_ref: str) -> bool:
         """Whether a typed contract vouches for an outside writer of this cache."""
         return any(item.cache_ref == cache_ref for item in self.external_writers)
 
     @field_validator(
-        "map_effects", "script_effects", "subprocess_summaries", "external_writers"
+        "map_effects", "script_effects", "subprocess_summaries", "external_writers",
+        "child_entry_contracts",
     )
     @classmethod
     def _binding_keys_are_unique(cls, value):
@@ -484,6 +532,12 @@ class ProcessIRValidationCapabilitiesV1(_ValidationModel):
         for item in self.subprocess_summaries:
             if item.process_ref == process_ref:
                 return item.effect
+        return None
+
+    def child_entry_contract(self, process_ref: str) -> Optional["ChildEntryContractV1"]:
+        for item in self.child_entry_contracts:
+            if item.process_ref == process_ref:
+                return item
         return None
 
 

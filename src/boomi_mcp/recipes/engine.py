@@ -1890,6 +1890,11 @@ def _compile_processes(
         symbols,
         components,
         child_roots={"$ref:" + key: root for key, root in composed.process_roots},
+        # #184 amendment 3 §8: each child's entry contract is derived against the
+        # symbols that root is compiled with, exactly as on the authoring path.
+        symbols_for=lambda key, root: project_grants_for_root(
+            root, symbols, process_root_ref=key
+        ),
         # #154 (QA-154-r2-02). Pinning this to the default made a recipe intent's
         # DECLARED policy invisible to substitutability. The direction was
         # conservative — `reuse` is the strictest — but a policy that is ignored

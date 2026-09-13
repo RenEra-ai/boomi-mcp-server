@@ -2163,41 +2163,53 @@ _PROCESS_CALL_CONTEXT_BY_LABEL: Mapping[str, str] = MappingProxyType(
 #: notify-only recovery rule; the Decision false arm and the try body admit no call.
 PROCESS_CALL_PREFIX_CONTEXTS: FrozenSet[str] = frozenset({"branch_leg", "decision_true_arm"})
 
-#: #184 D10, amendment 2. The ADMITTED prefix compositions, as
-#: `(context, direct predecessor kind, child entry form)`. Evidence, not a guess:
-#: every row is a run in `docs/architecture/evidence/issue-184/captures/
-#: cap184-prefix-predecessors/` whose child request carried the parent's token,
-#: bound to that capture in both directions by
-#: `tests/test_issue_184_native_sequences.py`. The capture's child is a Data
-#: Passthrough child called with wait=true, so only that form is admitted; a No Data
-#: child after a prefix stays unmeasured. The capture's cache retrieve row covers
-#: both authored cache-read kinds, which lower to the same platform step. Measured
-#: and refused: `cache_remove`, whose successor the platform skips (ledger
-#: E0-184-01).
-PROCESS_CALL_ATTESTED_PREDECESSORS: FrozenSet[Tuple[str, str, str]] = frozenset({
-    ("branch_leg", "map_ref", "passthrough"),
-    ("branch_leg", "set_ddp", "passthrough"),
-    ("branch_leg", "set_dpp", "passthrough"),
-    ("branch_leg", "cache_get", "passthrough"),
-    ("branch_leg", "document_cache_retrieve", "passthrough"),
-    ("branch_leg", "flow_control", "passthrough"),
-    ("branch_leg", "message", "passthrough"),
-    ("branch_leg", "data_process", "passthrough"),
-    ("decision_true_arm", "map_ref", "passthrough"),
-    ("decision_true_arm", "set_ddp", "passthrough"),
-    ("decision_true_arm", "set_dpp", "passthrough"),
-    ("decision_true_arm", "cache_get", "passthrough"),
-    ("decision_true_arm", "document_cache_retrieve", "passthrough"),
-    ("decision_true_arm", "flow_control", "passthrough"),
-    ("decision_true_arm", "message", "passthrough"),
-    ("decision_true_arm", "data_process", "passthrough"),
+#: #184 D10, amendment 3 §8. The ADMITTED prefix compositions, as the whole
+#: evidence key `(context, direct predecessor kind, child entry form, wait)`.
+#: Evidence, not a guess: every row is a run in
+#: `docs/architecture/evidence/issue-184/captures/cap184-prefix-predecessors/` whose
+#: child request carried the parent's token, bound to that capture in both
+#: directions by `tests/test_issue_184_native_sequences.py`. The capture's child is a
+#: Data Passthrough child called with wait=true, so only that form and that wait are
+#: admitted: a No Data child after a prefix stays unmeasured, and a passthrough call
+#: with wait=false is refused under its own entry-context code. The capture's cache
+#: retrieve row covers both authored cache-read kinds, which lower to the same
+#: platform step. Measured and refused: `cache_remove`, whose successor the platform
+#: skips (ledger E0-184-01).
+PROCESS_CALL_ATTESTED_PREDECESSORS: FrozenSet[Tuple[str, str, str, bool]] = frozenset({
+    ("branch_leg", "map_ref", "passthrough", True),
+    ("branch_leg", "set_ddp", "passthrough", True),
+    ("branch_leg", "set_dpp", "passthrough", True),
+    ("branch_leg", "cache_get", "passthrough", True),
+    ("branch_leg", "document_cache_retrieve", "passthrough", True),
+    ("branch_leg", "flow_control", "passthrough", True),
+    ("branch_leg", "message", "passthrough", True),
+    ("branch_leg", "data_process", "passthrough", True),
+    ("decision_true_arm", "map_ref", "passthrough", True),
+    ("decision_true_arm", "set_ddp", "passthrough", True),
+    ("decision_true_arm", "set_dpp", "passthrough", True),
+    ("decision_true_arm", "cache_get", "passthrough", True),
+    ("decision_true_arm", "document_cache_retrieve", "passthrough", True),
+    ("decision_true_arm", "flow_control", "passthrough", True),
+    ("decision_true_arm", "message", "passthrough", True),
+    ("decision_true_arm", "data_process", "passthrough", True),
 })
 
 #: What the PARSER can check: the context and the direct predecessor. The child's
-#: entry form needs the child, so the compiler's child contract checks that half.
+#: entry form needs the child, so lineage checks the whole key against the child's
+#: derived entry contract through :func:`process_call_prefix_admitted`.
 _ATTESTED_PREFIX_PAIRS: FrozenSet[Tuple[str, str]] = frozenset(
-    (context, kind) for context, kind, _form in PROCESS_CALL_ATTESTED_PREDECESSORS
+    (context, kind) for context, kind, _form, _wait in PROCESS_CALL_ATTESTED_PREDECESSORS
 )
+
+
+def process_call_prefix_admitted(context, predecessor, entry_form, wait) -> bool:
+    """Whether the WHOLE prefix evidence key is attested (#184 amendment 3 §8).
+
+    One lookup for both halves: the parser asks the ``(context, predecessor)``
+    projection above, and lineage asks this once the call's child entry form is
+    known. A child with no derivable contract (``entry_form=None``) is never admitted.
+    """
+    return (context, predecessor, entry_form, wait) in PROCESS_CALL_ATTESTED_PREDECESSORS
 
 
 PLACEMENT_ROOT_CONNECTOR_MIXING = "root_connector_mixing"

@@ -79,14 +79,15 @@ def test_the_attested_prefix_table_is_the_captured_admissions_exactly():
     refused_by_capture = {key for key, verdicts in captured.items() if "REFUSE" in verdicts}
     assert refused_by_capture, "no refused row — the negative half of the binding would be vacuous"
 
-    table = {(context, kind) for context, kind, _form in model.PROCESS_CALL_ATTESTED_PREDECESSORS}
+    table = {(context, kind) for context, kind, _form, _wait in model.PROCESS_CALL_ATTESTED_PREDECESSORS}
     assert table == admitted_by_capture, {
         "admitted_without_a_capture": sorted(table - admitted_by_capture),
         "captured_but_not_admitted": sorted(admitted_by_capture - table),
     }
     assert not (table & refused_by_capture), sorted(table & refused_by_capture)
-    # The capture's child is a Data Passthrough child: only that form is admitted.
-    assert {form for _c, _k, form in model.PROCESS_CALL_ATTESTED_PREDECESSORS} == {"passthrough"}
+    # The capture's child is a Data Passthrough child called with wait=true: only that
+    # form and that wait are admitted (#184 amendment 3 §8).
+    assert {(form, wait) for _c, _k, form, wait in model.PROCESS_CALL_ATTESTED_PREDECESSORS} == {("passthrough", True)}
     assert {context for context, _kind in table} == set(model.PROCESS_CALL_PREFIX_CONTEXTS)
 
 
@@ -156,7 +157,7 @@ def test_a_prefix_ending_on_an_unattested_predecessor_is_refused_at_the_terminal
     assert diagnostics[:1] == [(PROCESS_IR_SCHEMA_INVALID_CARDINALITY, cache_pointer)], diagnostics
     assert (PROCESS_IR_CAPABILITY_PROCESS_CALL_PLACEMENT_UNSUPPORTED, terminal_pointer) not in diagnostics[:1]
     assert not any(
-        kind == "cache_remove" for _context, kind, _form in model.PROCESS_CALL_ATTESTED_PREDECESSORS
+        kind == "cache_remove" for _context, kind, _form, _wait in model.PROCESS_CALL_ATTESTED_PREDECESSORS
     )
 
 

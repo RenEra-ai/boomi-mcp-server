@@ -274,6 +274,12 @@ PROCESS_IR_CAPABILITY_PROCESS_CALL_RETURN_PATH_BINDING_UNSUPPORTED = (
 PROCESS_IR_CAPABILITY_PROCESS_CALL_PLACEMENT_UNSUPPORTED = (
     "PROCESS_IR_CAPABILITY_PROCESS_CALL_PLACEMENT_UNSUPPORTED"
 )
+# #184 amendment 3 §8: a process invoked in an entry context that is not admitted — a
+# Data Passthrough child called without waiting, or a passthrough process run
+# directly (a test run or a schedule) while it requires what only a caller supplies.
+PROCESS_IR_CAPABILITY_ENTRY_CONTEXT_UNSUPPORTED = (
+    "PROCESS_IR_CAPABILITY_ENTRY_CONTEXT_UNSUPPORTED"
+)
 
 # State lineage: document-scoped (DDP) vs execution-scoped (DPP/cache).
 PROCESS_IR_SEMANTIC_LINEAGE_PROPERTY_READ_BEFORE_WRITE = (
@@ -1587,6 +1593,17 @@ ERROR_TAXONOMY: Dict[str, ErrorCodeSpec] = {
                 "does not admit: a step prefix in a body context, or after a direct "
                 "predecessor, that no live capture attests; a prefix before a root "
                 "call; or a hand-off whose child input contract cannot be proved."
+            ),
+            owner="#184",
+        ),
+        ErrorCodeSpec(
+            code=PROCESS_IR_CAPABILITY_ENTRY_CONTEXT_UNSUPPORTED,
+            category="process_ir",
+            retryable=False,
+            summary=(
+                "A process is invoked in an entry context ProcessIR v1 does not admit: "
+                "a Data Passthrough child called with wait=false, or a passthrough "
+                "process run directly while it requires what only a caller supplies."
             ),
             owner="#184",
         ),

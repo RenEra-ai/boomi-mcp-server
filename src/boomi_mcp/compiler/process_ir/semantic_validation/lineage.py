@@ -41,6 +41,8 @@ from types import MappingProxyType
 from typing import Any, Dict, FrozenSet, List, Mapping, NamedTuple, Optional, Set, Tuple
 
 from ....errors import (
+    PROCESS_IR_CAPABILITY_ENTRY_CONTEXT_UNSUPPORTED,
+    PROCESS_IR_CAPABILITY_PROCESS_CALL_PLACEMENT_UNSUPPORTED,
     PROCESS_IR_COMPILE_INTERNAL,
     PROCESS_IR_SEMANTIC_DYNAMIC_PATH_DDP_NOT_ESTABLISHED,
     PROCESS_IR_SEMANTIC_DYNAMIC_PATH_NO_DYNAMIC_SEGMENT,
@@ -59,6 +61,7 @@ from ..connector_resolution import (
     _profile_identity as _resolved_profile_identity,
     resolve_connector_call_bindings,
 )
+from ....models.process_ir import process_call_prefix_admitted
 from ....models.process_ir_document_semantics import (
     TRIGGERED_REPLACEMENT_SEMANTIC_KINDS,
     ZERO_EMISSION_SEMANTIC_KINDS,
@@ -77,6 +80,8 @@ _LINEAGE_PHASE = "lineage"
 #: #184: the stream-profile proof reports #140's profile code, under the phase the
 #: flow collector already files that code under, so the two sort together.
 _PROFILE_PHASE = "profile"
+#: #184 amendment 3 §8: a call's admission against its child's entry contract.
+_CAPABILITY_PHASE = "capability"
 
 #: Scope tokens. Kept as plain strings (not an enum) because they are also
 #: evidence values, and the evidence vocabulary is lowercase tokens.
@@ -105,6 +110,57 @@ COUNT_UNKNOWN = "unknown"
 #: sibling leg or on a cached document a whole-cache removal later cleared. Its name
 #: is ``None``, which no authored property can spell.
 CACHE_TRANSFER_UNPROVED = (DDP, None)
+#: #184 amendment 3 §8. The writer token of a document property a CALLED passthrough
+#: child's caller composes. Its record is ``None``: that writer is checked at every
+#: call, against this child's binding, and never here.
+CALLER_WRITER = "caller-writer"
+
+
+class _InheritedBinding(NamedTuple):
+    """A passthrough child's bound request path, as a caller checks it (#184 amendment 3 §8)."""
+
+    property_name: str
+    request_profile_ref: Optional[str]
+
+
+def _authored_at(ir, pointer: str):
+    """The authored node a CFG ``source_path`` names, or None when it names none."""
+    current = ir
+    for token in pointer.split("/")[1:]:
+        try:
+            if isinstance(current, (list, tuple)):
+                current = current[int(token)]
+            else:
+                current = getattr(current, token)
+        except (AttributeError, IndexError, ValueError, TypeError):
+            return None
+    return current
+
+
+def _call_prefix(ir, call_path: str) -> Tuple[Optional[str], Optional[str]]:
+    """``(body context, direct predecessor kind)`` of the steps before a terminal call.
+
+    ``(None, None)`` when the call's OWN body authors no step before it. Only that
+    body is a prefix: a call whose body is empty keeps the legacy empty-prefix
+    placement even under a Branch or Decision that follows native work (amendment 1
+    rule 4; the #141 capture attests ``decision -> true -> processcall`` after a leg
+    step). The interposition erases no obligation: the child's contract is still
+    discharged at the call (rule 3).
+    """
+    if not call_path.endswith("/terminal"):
+        return None, None
+    body_path = call_path[: -len("/terminal")]
+    tokens = body_path.split("/")
+    if len(tokens) >= 2 and tokens[-2] == "legs":
+        context = "branch_leg"
+    elif tokens[-1] == "true_arm":
+        context = "decision_true_arm"
+    else:
+        return None, None
+    steps = list(getattr(_authored_at(ir, body_path), "steps", ()) or ())
+    if not steps:
+        return None, None
+    return context, getattr(steps[-1], "kind", None)
 
 
 class _Cohort(NamedTuple):
@@ -820,6 +876,12 @@ class LineageWalkV1(NamedTuple):
     #: consuming them. The child contract is derived from it; this walk only
     #: records it.
     entry_requirements: Tuple[Optional[Tuple[str, str]], ...] = ()
+    #: #184 amendment 3 §8: the same consumers as the AUTHORED profile refs (None
+    #: where nothing names one), which is what a child contract carries.
+    entry_requirement_refs: Tuple[Optional[str], ...] = ()
+    #: False when the stream-profile proof was skipped because a connector binding
+    #: did not resolve: then neither requirement list is complete.
+    profile_proof: bool = True
     # #184 D12 withdrew ``truncated``. The walk had a depth bound of 256, and a
     # caller trusting the state sets had to treat a walk that hit it as no
     # answer. The controller is now iterative with no depth bound: every node of
@@ -886,11 +948,18 @@ def _walk_lineage(
     #: arm established for everything that DOES continue.
     threw: List[str] = []
     entry_requirements: List[Optional[Tuple[str, str]]] = []
+    entry_requirement_refs: List[Optional[str]] = []
     #: #184 amendment 3 §7: writer token -> (the writing node's semantic, its unmet
     #: property reads), captured when the writer ran. The CFG is a tree, so each
     #: writer runs once, and a cached document's writer facts stay facts about it.
     writer_records: Dict[str, Tuple[Any, tuple]] = {}
     leg_writes = _leg_write_index(prepared, capabilities)
+    #: Every document cache this process names, for a child that may write one.
+    cache_refs = sorted({
+        node.semantic.cache_ref
+        for node in prepared.cfg.nodes
+        if isinstance(getattr(node.semantic, "cache_ref", None), str) and node.semantic.cache_ref
+    })
     index = prepared.symbols.build_index()
     # #184: the stream-profile proof needs each call's resolved binding. When a
     # binding does not resolve, connector resolution already reports that defect
@@ -1118,6 +1187,15 @@ def _walk_lineage(
         binding = getattr(semantic, "path_binding", None)
         if binding is None:
             return
+        _check_bound_key(node, binding, state, writers, "/path_binding")
+
+    def _check_bound_key(node, binding, state, writers, sub_path) -> None:
+        """The binding rule for ONE bound property, reported at ``sub_path``.
+
+        Shared by a request path bound in this process and by a call discharging a
+        passthrough child's bound path (#184 amendment 3 §8). The call reports at its
+        own ``/process_ref``, because the binding it checks lives in the child.
+        """
         # Evidence stays STRUCTURAL. The property name is caller-authored text,
         # and evidence is served — the node's own source_path already points the
         # author at the binding, so naming it here would buy nothing and leak.
@@ -1134,15 +1212,19 @@ def _walk_lineage(
                 PROCESS_IR_SEMANTIC_DYNAMIC_PATH_DDP_NOT_ESTABLISHED,
                 node,
                 evidence=(("state_scope", DDP),),
-                sub_path="/path_binding",
+                sub_path=sub_path,
             )
             return
         for token in alternatives:
-            if not _check_one_writer(node, binding, writer_records[token]):
+            if not _check_one_writer(node, binding, writer_records[token], sub_path):
                 return
 
-    def _check_one_writer(node, binding, writer) -> bool:
+    def _check_one_writer(node, binding, writer, sub_path) -> bool:
         """The composition checks for ONE possible writer; False once one is reported."""
+        if writer is None:
+            # CALLER_WRITER: a called passthrough child's caller composes this
+            # property, and every call checks that composition against this binding.
+            return True
         writer_semantic, unmet_reads = writer
         if unmet_reads:
             # The writer itself composes from a property nothing established.
@@ -1153,7 +1235,7 @@ def _walk_lineage(
                 PROCESS_IR_SEMANTIC_DYNAMIC_PATH_DDP_NOT_ESTABLISHED,
                 node,
                 evidence=(("state_scope", unmet_reads[0][0]),),
-                sub_path="/path_binding",
+                sub_path=sub_path,
             )
             return False
         sources = tuple(getattr(writer_semantic, "source_values", ()) or ())
@@ -1162,7 +1244,7 @@ def _walk_lineage(
                 PROCESS_IR_SEMANTIC_DYNAMIC_PATH_NO_DYNAMIC_SEGMENT,
                 node,
                 evidence=(("state_scope", DDP),),
-                sub_path="/path_binding",
+                sub_path=sub_path,
             )
             return False
         # The profile pairing is a biconditional, and it is what makes the
@@ -1187,7 +1269,7 @@ def _walk_lineage(
                 PROCESS_IR_SEMANTIC_DYNAMIC_PATH_PROFILE_BINDING_MISMATCH,
                 node,
                 evidence=(("reader_count", len(pairs)),),
-                sub_path="/path_binding",
+                sub_path=sub_path,
             )
             return False
         declared = _profile_identity(binding.request_profile_ref)
@@ -1197,7 +1279,7 @@ def _walk_lineage(
                 PROCESS_IR_SEMANTIC_DYNAMIC_PATH_PROFILE_BINDING_MISMATCH,
                 node,
                 evidence=(("reader_count", len(pairs)),),
-                sub_path="/path_binding",
+                sub_path=sub_path,
             )
             return False
         return True
@@ -1253,6 +1335,7 @@ def _walk_lineage(
                     identity = _identity(source.profile_ref)
                     if stream.state == STREAM_CALLER_ENTRY:
                         entry_requirements.append(identity)
+                        entry_requirement_refs.append(source.profile_ref)
                         if stream.identity is None:
                             stream = _Stream(STREAM_CALLER_ENTRY, identity)
                         elif identity != stream.identity:
@@ -1261,6 +1344,28 @@ def _walk_lineage(
                         stream.state == STREAM_KNOWN and identity != stream.identity
                     ):
                         mismatch(node, sub_path)
+            return state, stream, legacy
+
+        if kind == "process_call":
+            # #184 amendment 3 §8: a waiting call hands a Data Passthrough child the
+            # documents reaching it, so every consumer its contract records is a
+            # requirement of THIS stream. A consumer nothing states (None) proves
+            # nothing here and is left to the call's admission check.
+            contract = capabilities.child_entry_contract(semantic.process_ref)
+            if checked and contract is not None and contract.entry_form == "passthrough" and semantic.wait:
+                for ref in contract.document_requirements:
+                    if ref is None:
+                        continue
+                    required = _identity(ref)
+                    if stream.state == STREAM_CALLER_ENTRY:
+                        entry_requirements.append(required)
+                        entry_requirement_refs.append(ref)
+                        if stream.identity is None:
+                            stream = _Stream(STREAM_CALLER_ENTRY, required)
+                        elif required != stream.identity:
+                            mismatch(node, "/process_ref")
+                    elif stream.state != STREAM_KNOWN or required is None or required != stream.identity:
+                        mismatch(node, "/process_ref")
             return state, stream, legacy
 
         if kind == "passthrough":
@@ -1302,6 +1407,7 @@ def _walk_lineage(
                     if binding.input_profile_ref is not None
                     else None
                 )
+                entry_requirement_refs.append(binding.input_profile_ref)
             # A first-class call's output is what flows on, so whatever a legacy
             # source produced upstream no longer reaches the next consumer.
             if not binding.capability.produces_output:
@@ -1325,6 +1431,7 @@ def _walk_lineage(
                 # only a contradiction with an earlier requirement on this path is
                 # provable inside the child.
                 entry_requirements.append(source)
+                entry_requirement_refs.append(symbol.input_profile_ref if is_map else None)
                 contradicted = (
                     source is None
                     or target is None
@@ -1352,6 +1459,7 @@ def _walk_lineage(
             declared_ref = getattr(cache, "cache_profile_ref", None)
             declared = _identity(declared_ref) if declared_ref is not None else None
             entry_requirements.append(declared)
+            entry_requirement_refs.append(declared_ref)
             if checked and declared is not None and stream.identity is not None and declared != stream.identity:
                 mismatch(node, "/cache_ref")
             return (
@@ -1404,6 +1512,7 @@ def _walk_lineage(
                 # states, so it cannot be recorded as requiring nothing of them. A
                 # Message ignores its input's content and records no requirement.
                 entry_requirements.append(None)
+                entry_requirement_refs.append(None)
             if stream.state in (STREAM_EMPTY_ENTRY, STREAM_TOUCHED_ENTRY):
                 return state, _Stream(STREAM_TOUCHED_ENTRY), legacy
             if stream.state == STREAM_ABSENT:
@@ -1411,6 +1520,85 @@ def _walk_lineage(
             return state, _Stream(STREAM_UNKNOWN, origin="opaque"), legacy
 
         return state, stream, legacy
+
+    def _cache_identity(ref):
+        symbol = prepared.symbol(ref)
+        return getattr(symbol, "component_id", None) or ref
+
+    def _child_may_write_caches(state, contract):
+        """What a child's cache writes may leave in this execution's caches.
+
+        A child shares its caller's document caches (capture `cap184-shared-cache`),
+        and what it stores carries a profile and a property cohort this process cannot
+        see. A contract with known state names the caches it writes; any other child
+        may write any cache this process names.
+        """
+        if contract is not None and contract.state_known:
+            written = {_cache_identity(key[1]) for key in contract.mutated_state if key[0] == CACHE}
+            targets = [ref for ref in cache_refs if _cache_identity(ref) in written]
+        else:
+            targets = list(cache_refs)
+        for ref in targets:
+            state = state.with_content(ref, None).with_cohort(ref, UNKNOWN_COHORT)
+        return state
+
+    def _discharge_child_contract(node, semantic, state, leg, writers, invalidated, stream):
+        """Everything ONE call owes its child's entry contract (#184 amendment 3 §8).
+
+        Each call discharges its own row, so two parents' facts never combine. The
+        document-profile half is checked with the stream proof, in `_advance_stream`.
+        Returns the state after the call, which differs only in what the child may
+        have put in a cache.
+        """
+        contract = capabilities.child_entry_contract(semantic.process_ref)
+        form = contract.entry_form if contract is not None else None
+        context, predecessor = _call_prefix(prepared.ir, node.source_path)
+        if form == "passthrough" and not semantic.wait:
+            _report(
+                PROCESS_IR_CAPABILITY_ENTRY_CONTEXT_UNSUPPORTED,
+                node,
+                sub_path="/wait",
+                phase=_CAPABILITY_PHASE,
+            )
+        elif predecessor is not None and (
+            not process_call_prefix_admitted(context, predecessor, form, semantic.wait)
+            or None in contract.document_requirements
+        ):
+            # Native work before a call is a verified hand-off: admitted only for an
+            # attested evidence key, into a child that states everything it consumes.
+            _report(
+                PROCESS_IR_CAPABILITY_PROCESS_CALL_PLACEMENT_UNSUPPORTED,
+                node,
+                phase=_CAPABILITY_PHASE,
+            )
+        if contract is None or form == "unknown":
+            return _child_may_write_caches(state, None)
+        if form == "passthrough":
+            for name, request_profile_ref in contract.required_writers:
+                _check_bound_key(
+                    node, _InheritedBinding(name, request_profile_ref), state, writers,
+                    "/process_ref",
+                )
+        for raw in contract.required_reads:
+            key = (raw[0], raw[1])
+            if state.establishes(key):
+                continue
+            _classify_unmet_read(
+                node, semantic, key, leg, extra=(("effect_kind", "subprocess"),),
+                invalidated=invalidated,
+            )
+        if form == "scheduled" and stream.count != COUNT_ONE:
+            shared = {(key[0], key[1]) for key in contract.required_reads}
+            mutated = {(key[0], key[1]) for key in contract.mutated_state}
+            if shared and (not contract.state_known or shared & mutated):
+                # A No Data child runs once per arriving document, so a later run may
+                # find the shared state an earlier run changed (amendment 1 rule 8).
+                _report(
+                    PROCESS_IR_CAPABILITY_PROCESS_CALL_PLACEMENT_UNSUPPORTED,
+                    node,
+                    phase=_CAPABILITY_PHASE,
+                )
+        return _child_may_write_caches(state, contract)
 
     def _transfer(node, state, leg, writers, on_documents, invalidated, stream, legacy):
         """Everything ONE node does to the facts carried on its path, in order.
@@ -1584,6 +1772,10 @@ def _walk_lineage(
         # --- a bound request path, against this path's reaching writer -------
         _check_path_binding(node, semantic, state, writers)
 
+        # --- a child's entry contract, discharged by THIS call (#184 amendment 3 §8)
+        if semantic.semantic_kind == "process_call":
+            state = _discharge_child_contract(node, semantic, state, leg, writers, invalidated, stream)
+
         # A step that replaces the document stream ends every reaching writer's
         # claim: the documents leaving it never carried those properties. Applied
         # AFTER the check above so a binding ON the replacing node still sees the
@@ -1662,6 +1854,16 @@ def _walk_lineage(
         entry_state = entry_state.with_write((key[0], key[1]))
         if key[0] == DDP:
             entry_documents.add((key[0], key[1]))
+    # #184 amendment 3 §8: a called passthrough child's caller composes these, and each
+    # call proves that writer against this child's binding.
+    entry_writers: Dict[StateKey, Tuple[str, ...]] = {}
+    for key in capabilities.caller_supplied_writers:
+        inherited = (DDP, key[1])
+        entry_state = entry_state.with_write(inherited)
+        entry_documents.add(inherited)
+        entry_writers[inherited] = (CALLER_WRITER,)
+    if entry_writers:
+        writer_records[CALLER_WRITER] = None
 
     # --- the controller -----------------------------------------------------------
     # A work stack of frames. A "visit" frame runs one node's transfer and then
@@ -1676,7 +1878,7 @@ def _walk_lineage(
     visits = 0
     returned = entry_state
     work = [("visit", prepared.cfg.entry_node_id, (
-        entry_state, None, {}, frozenset(entry_documents), frozenset(),
+        entry_state, None, dict(entry_writers), frozenset(entry_documents), frozenset(),
         _Stream(STREAM_EMPTY_ENTRY, count=COUNT_ONE), False,
     ))]
     while work:
@@ -1902,6 +2104,8 @@ def _walk_lineage(
             else tuple(sorted(established.document | established.execution))
         ),
         entry_requirements=tuple(entry_requirements),
+        entry_requirement_refs=tuple(entry_requirement_refs),
+        profile_proof=profile_proof,
     )
 
 
