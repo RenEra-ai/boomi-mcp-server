@@ -58,7 +58,7 @@ canonical row when it lands.
 
 | Golden | Case | Parity oracle |
 | --- | --- | --- |
-| `golden-000072` | `issue155:source_dynamic_path_profile` | `<shapes>` byte-equal to `dynamic_path_source_role_profile.xml` (golden-000071) |
+| `golden-000072` | `issue155:source_dynamic_path_profile` | `<shapes>` byte-equal to `dynamic_path_source_role_profile.xml` (golden-000071) — **TOMBSTONED by #184**, see below |
 | `golden-000073` | `issue155:target_dynamic_path_profile` | `<shapes>` byte-equal to `dynamic_path_target_profile.xml` (golden-000015) |
 | `golden-000074` | `issue155:target_dynamic_path_ddp` | none — canonical-only, see below |
 
@@ -85,3 +85,26 @@ document property established by an upstream writer. It pins canonical bytes onl
 one. The cutover must not read golden-000014's absence from the canonical set as a coverage gap —
 the canonical chain is deliberately stricter here, which is the issue's stated intent
 ("a segment referencing a DDP requires a set_ddp upstream on every path to the connector call").
+
+### `golden-000072` retired by #184 — an unsafe survivor, recorded
+
+`golden-000072`'s first writer reads the profile element `clientId` before anything on the path
+produces a document. Under a scheduled start the entry document is the empty No Data document
+(official Start shape documentation), so that read addresses nothing. #184 refuses it with
+`PROCESS_IR_SEMANTIC_PROFILE_MISMATCH` at `/body/steps/0/source_values/1/profile_ref`
+(`.codex/plans/issue-184-amendment-2.md` §4). The input JSON stays in this directory as the refusal
+witness (`tests/test_issue_184_stream_profiles.py`).
+
+The row is tombstoned and its XML deleted; its pytest node stays active and now checks the
+retirement. This follows the unsafe-oracle precedent above (`golden-000014` → `golden-000074`):
+the document was outside A9's *valid-survivor* protection, so no acceptance-policy amendment was
+needed. Its safe replacement is `golden-000080` (`issue184:source_dynamic_path_dpp`,
+`tests/fixtures/process_ir/issue184/PROVENANCE.md`). That replacement keeps the scheduled source
+role and composes the path from the run-supplied process property `key`, exactly as capture
+`cap155-e1-source-dynamic-path` executed it.
+
+**Correction to the placement attestation above.** That capture attests the source-role PREFIX
+placement and a DPP-driven path. It does **not** attest a profile-valued source on the entry
+document: the stored writer's second segment is `valueType="process"`, not a profile element.
+`golden-000071` stays byte-identical as a **legacy transitional oracle**. It is not proof that its
+profile-valued entry read is valid.

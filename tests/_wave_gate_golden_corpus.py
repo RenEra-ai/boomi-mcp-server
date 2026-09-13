@@ -1310,6 +1310,29 @@ def _issue155_case(name):
     return render
 
 
+def _issue184_case(name):
+    """#184 canonical cases, rendered exactly as the #155 ones are.
+
+    ``issue155_symbols()`` on purpose: the replacement survivor's expected bytes are
+    cut from the live #155 capture with its platform ids substituted by THESE symbol
+    ids (``RCONN``/``ROP`` on the GET, ``CONN-UUID``/``OP-UUID`` on the PATCH —
+    ``docs/architecture/evidence/issue-184/oracle/source_dynamic_path_dpp.MANIFEST.json``),
+    so the case must resolve through the same table.
+    """
+    def render():
+        from boomi_mcp.compiler.process_ir.emitter_registry import emit_process
+
+        doc = json.loads(
+            (_HERE / "fixtures" / "process_ir" / "issue184" / (name + ".json"))
+            .read_text(encoding="utf-8")
+        )
+        symbols = issue155_symbols()
+        _cfg, plan = error_compile(doc, symbols)
+        return emit_process(plan, symbols).process_xml
+
+    return render
+
+
 def _issue180_effect_case(case):
     """#180: an effect-declaration golden, rendered through the PUBLIC chain.
 
@@ -1938,7 +1961,11 @@ def _build_registry():
         "issue154:catch_cache_put_exception": ("process-xml-v1", _issue154_case("catch_cache_put_exception")),
         "issue154:connector_linear_interleave": ("process-xml-v1", _issue154_case("connector_linear_interleave")),
         # H4 — #155 the canonical per-document request path, both connector roles
-        "issue155:source_dynamic_path_profile": ("process-xml-v1", _issue155_case("source_dynamic_path_profile")),
+        # #184 amendment 2 §5: `issue155:source_dynamic_path_profile` (golden-000072) is
+        # retired — its first writer reads a profile element off the empty scheduled
+        # entry, which #184 refuses. Its safe replacement keeps the source role and
+        # composes the path from a run-supplied process property instead.
+        "issue184:source_dynamic_path_dpp": ("process-xml-v1", _issue184_case("source_dynamic_path_dpp")),
         "issue155:target_dynamic_path_profile": ("process-xml-v1", _issue155_case("target_dynamic_path_profile")),
         "issue155:target_dynamic_path_ddp": ("process-xml-v1", _issue155_case("target_dynamic_path_ddp")),
         # H3 — #180 the effect-declaration channel, through the PUBLIC chain

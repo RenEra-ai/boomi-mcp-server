@@ -50,7 +50,15 @@ from ....errors import (
     PROCESS_IR_SEMANTIC_LINEAGE_EFFECT_UNKNOWN,
     PROCESS_IR_SEMANTIC_LINEAGE_EXTERNAL_WRITER_ASSUMED,
     PROCESS_IR_SEMANTIC_LINEAGE_PROPERTY_READ_BEFORE_WRITE,
+    PROCESS_IR_SEMANTIC_PROFILE_MISMATCH,
 )
+from ..connector_resolution import (
+    MAP_COMPONENT_TYPE,
+    _canonical_type,
+    _profile_identity as _resolved_profile_identity,
+    resolve_connector_call_bindings,
+)
+from ..diagnostics import ProcessIRCompileError
 from .contracts import (
     DEFAULT_VALIDATION_CAPABILITIES,
     ProcessIRValidationCapabilitiesV1,
@@ -61,6 +69,9 @@ from .context import PreparedProcessValidationV1
 from .findings import finding
 
 _LINEAGE_PHASE = "lineage"
+#: #184: the stream-profile proof reports #140's profile code, under the phase the
+#: flow collector already files that code under, so the two sort together.
+_PROFILE_PHASE = "profile"
 
 #: Scope tokens. Kept as plain strings (not an enum) because they are also
 #: evidence values, and the evidence vocabulary is lowercase tokens.
@@ -70,6 +81,53 @@ CACHE = "cache"
 
 #: A key identifying one piece of state: its scope plus its name.
 StateKey = Tuple[str, str]
+
+#: ``(cache_ref, profile identity or None)``: one thing a document cache may hold.
+CacheContentFact = Tuple[str, Optional[Tuple[str, str]]]
+
+
+# ---------------------------------------------------------------------------
+# #184 D2: the profile of the documents on one path
+# ---------------------------------------------------------------------------
+#
+# Carried per path beside the property lattice, never merged: control nodes end
+# the path they sit on, so a Branch leg or Decision arm inherits the stream that
+# reached the control and nothing flows back out of it. Document EXISTENCE is a
+# separate fact owned by connector resolution (`_walk_paths.producer`); the states
+# here are chosen so the two agree — the three no-producer states below are
+# exactly the points at which that walk has no producer.
+
+#: The single empty document a scheduled (No Data) start supplies. It can trigger
+#: one execution of what follows, but it carries no payload: nothing can be read
+#: out of it by profile.
+STREAM_EMPTY_ENTRY = "empty_entry"
+#: That same document after a per-document step (a Message, a Data Process)
+#: rewrote it without any from-nothing producer running. Still no producer, but
+#: its content is no longer provably empty.
+STREAM_TOUCHED_ENTRY = "touched_entry"
+#: No documents: a cache write consumed the stream, or a call returned none.
+STREAM_ABSENT = "absent"
+#: Documents of one resolved profile identity, with the node that established it.
+STREAM_KNOWN = "known"
+#: Documents whose profile nothing proves.
+STREAM_UNKNOWN = "unknown"
+
+#: Stream states in which no from-nothing producer has run on the path.
+NO_PRODUCER_STREAMS: FrozenSet[str] = frozenset(
+    {STREAM_EMPTY_ENTRY, STREAM_TOUCHED_ENTRY, STREAM_ABSENT}
+)
+
+
+class _Stream(NamedTuple):
+    state: str
+    #: ``(component id, profile type)`` when ``state`` is known, else None.
+    identity: Optional[Tuple[str, str]] = None
+    #: ``call``, ``listener``, ``map`` or ``cache`` for a known stream; a reason
+    #: token (``undeclared``, ``opaque``, ``legacy``, ``cache``, ``catch``) otherwise.
+    origin: Optional[str] = None
+    #: The CFG node that established a known stream — a map's own pointer is
+    #: where a mismatch with the call it feeds is reported.
+    origin_node: object = None
 
 
 #: The visibility model this module ENFORCES, stated once as data (#146).
@@ -158,20 +216,45 @@ class _State:
     from :data:`STATE_VISIBILITY_V1`, not restated here.
     """
 
-    __slots__ = ("document", "execution")
+    __slots__ = ("document", "execution", "content")
 
     def __init__(
         self,
         document: Optional[FrozenSet[StateKey]] = None,
         execution: Optional[FrozenSet[StateKey]] = None,
+        content: "Optional[FrozenSet[CacheContentFact]]" = None,
     ) -> None:
         self.document: FrozenSet[StateKey] = document or frozenset()
         self.execution: FrozenSet[StateKey] = execution or frozenset()
+        #: #184 D5: what each document cache MAY contain, as
+        #: ``(cache_ref, profile identity)`` pairs, where an identity of ``None``
+        #: marks content of unknown profile. Execution-scoped like the cache
+        #: itself, but a MAY set, not a must set: Add to Cache appends, so every
+        #: write adds and nothing but a whole-cache removal takes away. It
+        #: therefore converges by UNION — the opposite of the two compartments
+        #: above — because a write on one Decision arm may have happened, and a
+        #: read after the merge must not claim that write's profile is absent.
+        self.content: "FrozenSet[CacheContentFact]" = content or frozenset()
 
     def with_write(self, key: StateKey) -> "_State":
         if key[0] in _DOCUMENT_LIFETIME_SCOPES:
-            return _State(self.document | {key}, self.execution)
-        return _State(self.document, self.execution | {key})
+            return _State(self.document | {key}, self.execution, self.content)
+        return _State(self.document, self.execution | {key}, self.content)
+
+    def with_content(self, cache_ref: str, identity) -> "_State":
+        """This cache may now also hold documents of ``identity`` (None: unknown)."""
+        return _State(self.document, self.execution, self.content | {(cache_ref, identity)})
+
+    def without_content(self, cache_ref: str) -> "_State":
+        """A whole-cache removal: nothing written before it is still there."""
+        return _State(
+            self.document,
+            self.execution,
+            frozenset(fact for fact in self.content if fact[0] != cache_ref),
+        )
+
+    def content_of(self, cache_ref: str) -> "FrozenSet[Optional[Tuple[str, str]]]":
+        return frozenset(fact[1] for fact in self.content if fact[0] == cache_ref)
 
     def establishes(self, key: StateKey) -> bool:
         compartment = (
@@ -187,7 +270,7 @@ class _State:
         every copy. Execution state survives too, and additionally accumulates
         across legs — see ``collect_lineage_findings``.
         """
-        return _State(self.document, self.execution)
+        return _State(self.document, self.execution, self.content)
 
     def merged_with(self, other: "_State") -> "_State":
         """Meet over converging paths: only what BOTH establish survives.
@@ -196,9 +279,15 @@ class _State:
         only; after the merge that property is established on one path and not
         the other, so it is not established at all. Union here would be the
         single easiest way to make this whole module unsound.
+
+        Cache CONTENT is the exception and merges by union (see ``content``):
+        it records what a read may hand on, and dropping a possibility is the
+        unsound direction there.
         """
         return _State(
-            self.document & other.document, self.execution & other.execution
+            self.document & other.document,
+            self.execution & other.execution,
+            self.content | other.content,
         )
 
 
@@ -374,7 +463,7 @@ def _drop_replaced_document_keys(state: "_State", keep) -> "Tuple[_State, Frozen
     """
     dropped = frozenset(key for key in state.document if key not in keep)
     return (
-        _State(state.document - dropped, state.execution),
+        _State(state.document - dropped, state.execution, state.content),
         frozenset(key for key in dropped if key[0] == DDP),
     )
 
@@ -577,7 +666,7 @@ def _walk_lineage(
     graph the compiler has not yet rejected as cyclic cannot hang it.
     """
     findings: List[ValidationDiagnosticV1] = []
-    reported: Set[Tuple[str, str]] = set()
+    reported: Set[Tuple[str, str, str]] = set()
     # Every unestablished read, recorded BEFORE `_report` dedups by
     # (code, node): two different keys unmet at one node collapse to a single
     # finding, and dropping the second key with the duplicate finding would
@@ -599,8 +688,74 @@ def _walk_lineage(
     #: arm established for everything that DOES continue.
     threw: List[str] = []
     leg_writes = _leg_write_index(prepared, capabilities)
+    index = prepared.symbols.build_index()
+    # #184: the stream-profile proof needs each call's resolved binding. When a
+    # binding does not resolve, connector resolution already reports that defect
+    # in the flow phase, and a profile verdict built on a guessed binding would
+    # only add noise beside it — so the proof is skipped for the whole document.
+    try:
+        bindings = {
+            binding.node_id: binding
+            for binding in resolve_connector_call_bindings(prepared.cfg, prepared.symbols)
+        }
+        profile_proof = True
+    except ProcessIRCompileError:
+        bindings = {}
+        profile_proof = False
+    # A call that DECLARES a profile ref naming something other than a profile
+    # component is refused by connector resolution at that call's `/operation_ref`
+    # (#140), the symbol that is actually wrong. Judging the map it feeds against
+    # the resulting unknown stream would add a second finding downstream for the
+    # same wrong symbol, so the proof stands down for the document, exactly as it
+    # does for a call that does not resolve.
+    if profile_proof and any(
+        ref is not None and _resolved_profile_identity(index, ref) is None
+        for binding in bindings.values()
+        for ref in (binding.input_profile_ref, binding.output_profile_ref)
+    ):
+        profile_proof = False
 
-    def _report(code: str, node, severity="error", evidence=(), sub_path="") -> None:
+    # #184: the named legacy exemption belongs to the DIALECT, and is never inferred
+    # from a missing connector call. A consumer is exempt in two cases:
+    # - the documents reaching it were last produced by a legacy `source` endpoint
+    #   (tracked per path, and cleared by a first-class call, after which the stream
+    #   is provable again); or
+    # - every document it handles can only end at a legacy `target` endpoint: its
+    #   subtree holds a legacy target and no connector call.
+    # The second case keeps the shipped listener spine `[listener, map_ref, target,
+    # stop]` exactly as #158 shipped it. Goldens 000022/040/041/078 render that
+    # spine from adapter symbols that declare no profile at all, so nothing about
+    # those maps is provable either way. A sibling leg that runs a connector call
+    # stays checked, because the model admits a call leg and a target leg side by
+    # side under a control-only root.
+    legacy_target_below: Dict[str, bool] = {}
+    connector_call_below: Dict[str, bool] = {}
+    preorder: List[str] = []
+    pending = [prepared.cfg.entry_node_id]
+    visited_ids: Set[str] = set()
+    while pending:
+        current = pending.pop()
+        if current in visited_ids or prepared.node(current) is None:
+            continue
+        visited_ids.add(current)
+        preorder.append(current)
+        pending.extend(edge.target_node_id for edge in prepared.successors(current))
+    # The CFG is a tree, so a reversed pre-order visits every child before its parent.
+    for current in reversed(preorder):
+        here = prepared.node(current).semantic
+        target_here = here.semantic_kind == "connector" and getattr(here, "role", None) == "target"
+        call_here = here.semantic_kind == "connector_call"
+        for edge in prepared.successors(current):
+            target_here = target_here or legacy_target_below.get(edge.target_node_id, False)
+            call_here = call_here or connector_call_below.get(edge.target_node_id, False)
+        legacy_target_below[current] = target_here
+        connector_call_below[current] = call_here
+
+    def _feeds_only_a_legacy_target(node_id: str) -> bool:
+        return legacy_target_below.get(node_id, False) and not connector_call_below.get(node_id, False)
+
+    def _report(code: str, node, severity="error", evidence=(), sub_path="",
+                phase=_LINEAGE_PHASE) -> None:
         # One finding per (code, node). The report dedups too, but stopping the
         # duplicate here keeps a diamond-shaped graph from generating the same
         # finding once per path.
@@ -612,7 +767,12 @@ def _walk_lineage(
         # on purpose: the served-text scanner pins how many places construct a
         # finding from a dynamic code, and a second construction site is exactly
         # the drift that pin exists to catch.
-        key = (code, node.node_id)
+        #
+        # The dedup key carries `sub_path` (#184): one Set Properties step can
+        # hold several profile sources, each mismatching at its own
+        # `/source_values/<i>/profile_ref`, and keying on the node alone kept the
+        # first and silently dropped the rest.
+        key = (code, node.node_id, sub_path)
         if key in reported:
             return
         reported.add(key)
@@ -620,7 +780,7 @@ def _walk_lineage(
             finding(
                 code,
                 severity,
-                _LINEAGE_PHASE,
+                phase,
                 node.source_path + sub_path,
                 evidence=evidence,
                 internal_node_id=node.node_id,
@@ -828,8 +988,156 @@ def _walk_lineage(
                 sub_path="/path_binding",
             )
 
+    def _identity(ref):
+        """A profile ref as the resolved ``(component id, profile type)`` identity.
+
+        The connector module's own resolver, so a map, a call and a cache agree
+        about what "the same profile" means — resolved component id, and only for
+        a real profile component. The nested ``_profile_identity`` above answers
+        the bound-path rule's narrower question and is left as it is.
+        """
+        return _resolved_profile_identity(index, ref)
+
+    def _advance_stream(node, semantic, state, stream, legacy):
+        """Check this node's profile consumers against the reaching stream, then step it (#184 D2).
+
+        Returns ``(state, stream, legacy)``; ``state`` changes only in its cache
+        content. ``legacy`` is on while the reaching documents were last produced
+        by a legacy ``source`` endpoint, and a first-class call turns it off again.
+        Together with ``_feeds_only_a_legacy_target`` it scopes the named legacy
+        exemption. That dialect's maps and property writers were never
+        profile-checked, and they keep the exemption rather than being judged
+        against a stream a legacy endpoint cannot state.
+
+        A consumer on a no-producer stream is left to connector resolution, which
+        refuses it as a cardinality defect (#184 A4). Reporting a profile verdict
+        beside that would name a symptom of the same root cause. The one exception
+        is a profile-valued source on the untouched scheduled entry: the empty No
+        Data document carries no payload, so no element can be read out of it by
+        profile (amendment 2 §4). That holds whether or not anything downstream
+        needs documents.
+        """
+        if not profile_proof:
+            return state, stream, legacy
+        kind = semantic.semantic_kind
+        checked = not (legacy or _feeds_only_a_legacy_target(node.node_id))
+
+        def mismatch(at_node, sub_path):
+            _report(
+                PROCESS_IR_SEMANTIC_PROFILE_MISMATCH,
+                at_node,
+                sub_path=sub_path,
+                phase=_PROFILE_PHASE,
+            )
+
+        if kind == "set_property":
+            if checked:
+                for position, source in enumerate(semantic.source_values):
+                    if getattr(source, "value_type", None) != "profile":
+                        continue
+                    if stream.state == STREAM_EMPTY_ENTRY or (
+                        stream.state == STREAM_KNOWN
+                        and _identity(source.profile_ref) != stream.identity
+                    ):
+                        mismatch(node, "/source_values/{0}/profile_ref".format(position))
+            return state, stream, legacy
+
+        if kind == "connector":
+            if semantic.role == "source":
+                return state, _Stream(STREAM_UNKNOWN, origin="legacy"), True
+            return state, stream, legacy
+
+        if kind == "listener":
+            operation = index.get(semantic.operation_ref) if semantic.operation_ref else None
+            identity = _identity(getattr(operation, "input_profile_ref", None))
+            if identity is None:
+                return state, _Stream(STREAM_UNKNOWN, origin="undeclared"), legacy
+            return state, _Stream(STREAM_KNOWN, identity, "listener", node), legacy
+
+        if kind == "connector_call":
+            binding = bindings[node.node_id]
+            # A map's target must be what the call it feeds declares it accepts.
+            # Only a MAP origin is compared: call-to-call equality stays unchecked
+            # (D4), because connector request and response profiles are documented
+            # as non-validating, and a cache's content may itself be a call's
+            # output. The mismatch is reported at the map, which is where #140
+            # always reported it.
+            if checked and stream.state == STREAM_KNOWN and stream.origin == "map":
+                declared = _identity(binding.input_profile_ref)
+                if declared is None or declared != stream.identity:
+                    mismatch(stream.origin_node, "/map_ref")
+            # A first-class call's output is what flows on, so whatever a legacy
+            # source produced upstream no longer reaches the next consumer.
+            if not binding.capability.produces_output:
+                return state, _Stream(STREAM_ABSENT), False
+            output = _identity(binding.output_profile_ref)
+            if output is None:
+                return state, _Stream(STREAM_UNKNOWN, origin="undeclared"), False
+            return state, _Stream(STREAM_KNOWN, output, "call", node), False
+
+        if kind == "map":
+            if stream.state in NO_PRODUCER_STREAMS:
+                return state, stream, legacy
+            symbol = index.get(semantic.map_ref) if semantic.map_ref else None
+            is_map = symbol is not None and _canonical_type(symbol) == MAP_COMPONENT_TYPE
+            source = _identity(symbol.input_profile_ref) if is_map else None
+            target = _identity(symbol.output_profile_ref) if is_map else None
+            # A map's source and target profiles are hard component requirements,
+            # so an absent one is a mismatch, and so is a stream nothing proves.
+            if checked and (
+                source is None
+                or target is None
+                or stream.state != STREAM_KNOWN
+                or source != stream.identity
+            ):
+                mismatch(node, "/map_ref")
+            # The map owns its own input mismatch. Downstream consumers are judged
+            # against what it declares it emits, so one wrong map is reported once.
+            if target is None:
+                return state, _Stream(STREAM_UNKNOWN, origin="map"), legacy
+            return state, _Stream(STREAM_KNOWN, target, "map", node), legacy
+
+        if kind == "cache_put":
+            identity = stream.identity if stream.state == STREAM_KNOWN else None
+            if checked and identity is not None:
+                cache = index.get(semantic.cache_ref)
+                declared_ref = getattr(cache, "cache_profile_ref", None)
+                if declared_ref is not None and _identity(declared_ref) != identity:
+                    mismatch(node, "/cache_ref")
+            # Add to Cache consumes the stream: the model requires a read next.
+            return (
+                state.with_content(semantic.cache_ref, identity),
+                _Stream(STREAM_ABSENT),
+                legacy,
+            )
+
+        cache_reads = [key[1] for key, _default, _strict in _reads_of(semantic) if key[0] == CACHE]
+        if cache_reads:
+            if getattr(semantic, "external_writer", False):
+                # An outside writer's content has no profile this process can see
+                # (D6); the declared cache profile is not a substitute for it.
+                state = state.with_content(cache_reads[0], None)
+            contents = state.content_of(cache_reads[0])
+            if len(contents) == 1 and None not in contents:
+                return state, _Stream(STREAM_KNOWN, next(iter(contents)), "cache", node), legacy
+            return state, _Stream(STREAM_UNKNOWN, origin="cache"), legacy
+
+        if kind == "cache_remove":
+            if getattr(semantic, "remove_all_documents", False):
+                return state.without_content(semantic.cache_ref), stream, legacy
+            return state, stream, legacy
+
+        if _replaces_document_stream(semantic):
+            if stream.state in (STREAM_EMPTY_ENTRY, STREAM_TOUCHED_ENTRY):
+                return state, _Stream(STREAM_TOUCHED_ENTRY), legacy
+            if stream.state == STREAM_ABSENT:
+                return state, stream, legacy
+            return state, _Stream(STREAM_UNKNOWN, origin="opaque"), legacy
+
+        return state, stream, legacy
+
     def _visit(node_id: str, state: _State, depth: int, leg=None, writers=None,
-               on_documents=None, invalidated=None) -> _State:
+               on_documents=None, invalidated=None, stream=None, legacy=False) -> _State:
         node = prepared.node(node_id)
         if node is None:
             return state
@@ -847,6 +1155,9 @@ def _walk_lineage(
         # and nothing has re-written since. Per path and never merged, like
         # `writers`; it only decides how an unmet read of such a key is reported.
         invalidated = invalidated if invalidated is not None else frozenset()
+        # #184 D2: the profile of the documents reaching this node, per path and
+        # never merged. A scheduled root starts from the empty No Data document.
+        stream = stream if stream is not None else _Stream(STREAM_EMPTY_ENTRY)
         # What THIS node establishes, kept separately: a node that replaces the
         # stream still writes onto the documents it emits, so its own writes
         # must survive its own replacement.
@@ -905,6 +1216,14 @@ def _walk_lineage(
             # contract ON THIS NODE — one data_process can carry several
             # contracted scripts and they run in sequence, so the walk over
             # them has to be sequential too.
+            # #184 D5: a contract that writes a cache declares WHICH cache, never
+            # the profile of what it stores, so that cache may now hold content of
+            # unknown profile. Recorded whether or not the effect establishes
+            # downstream: a fire-and-forget child may still have written by the
+            # time a later read runs, and this is a MAY set.
+            for key in effect.writes:
+                if key[0] == CACHE:
+                    state = state.with_content(key[1], None)
             if not establishes:
                 continue
             for key in effect.writes:
@@ -1009,6 +1328,9 @@ def _walk_lineage(
             state, dropped = _drop_replaced_document_keys(state, established_here)
             invalidated = invalidated | dropped
 
+        # --- the stream profile (#184 D2) ----------------------------------
+        state, stream, legacy = _advance_stream(node, semantic, state, stream, legacy)
+
         # --- successors -----------------------------------------------------
         edges = prepared.successors(node_id)
         if not edges:
@@ -1040,12 +1362,14 @@ def _walk_lineage(
                 first = len(normal_exits)
                 leg_end = _visit(
                     edge.target_node_id,
-                    _State(entry.document, carried.execution),
+                    _State(entry.document, carried.execution, carried.content),
                     depth + 1,
                     (node.node_id, edge.leg_ordinal or edge.local_ordinal),
                     writers,
                     on_documents,
                     invalidated,
+                    stream,
+                    legacy,
                 )
                 completions = normal_exits[first:]
                 if completions:
@@ -1070,8 +1394,13 @@ def _walk_lineage(
                 # a leg ending in a WAITING `process_call` records no completion
                 # — that role is deliberately not a normal exit — so the next
                 # leg stopped seeing the write the call established.
+                # Cache content is taken from the continuation as it stands: it
+                # began from `carried`, so it already holds every earlier leg's
+                # writes, less anything this leg removed outright.
                 carried = _State(
-                    entry.document, carried.execution | leg_end.execution
+                    entry.document,
+                    carried.execution | leg_end.execution,
+                    leg_end.content,
                 )
             # ONE completion per leg that can finish: its own document copies,
             # and the execution state every leg together guarantees. A leg with
@@ -1092,7 +1421,8 @@ def _walk_lineage(
             results = []
             for edge in edges:
                 before_normal, before_threw = len(normal_exits), len(threw)
-                arm = _visit(edge.target_node_id, state, depth + 1, leg, writers, on_documents, invalidated)
+                arm = _visit(edge.target_node_id, state, depth + 1, leg, writers, on_documents,
+                             invalidated, stream, legacy)
                 only_threw = (
                     len(threw) > before_threw
                     and len(normal_exits) == before_normal
@@ -1110,13 +1440,28 @@ def _walk_lineage(
             # The catch path forks from SCOPE-ENTRY state plus the caught
             # document. A write inside the try body may not have happened when
             # the failure occurred, so it cannot be assumed visible to catch.
+            #
+            # Cache CONTENT is the exception (#184 D5): either body may have
+            # written before the scope ended, so what a cache may hold afterwards
+            # is the union of both, never the scope-entry set alone.
+            content = state.content
             for edge in edges:
-                _visit(edge.target_node_id, state, depth + 1, leg, writers, on_documents, invalidated)
-            return state
+                edge_stream = stream
+                if edge.kind == "catch" and stream.state not in (STREAM_KNOWN, STREAM_UNKNOWN):
+                    # The platform hands the caught document to the recovery path,
+                    # so documents exist there whatever reached the scope — the
+                    # same fact connector resolution records — but nothing proves
+                    # their profile.
+                    edge_stream = _Stream(STREAM_UNKNOWN, origin="catch")
+                reached = _visit(edge.target_node_id, state, depth + 1, leg, writers,
+                                 on_documents, invalidated, edge_stream, legacy)
+                content = content | reached.content
+            return _State(state.document, state.execution, content)
 
         result = state
         for edge in edges:
-            result = _visit(edge.target_node_id, state, depth + 1, leg, writers, on_documents, invalidated)
+            result = _visit(edge.target_node_id, state, depth + 1, leg, writers, on_documents,
+                            invalidated, stream, legacy)
         return result
 
     entry_state = _State()

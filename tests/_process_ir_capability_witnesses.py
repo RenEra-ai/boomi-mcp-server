@@ -1329,11 +1329,19 @@ def _w_verified_write_replay_safety():
 
 
 def _w_dynamic_path():
-    # The source ROLE: a linear writer, then the first connector_call bound to it.
-    # No frozen fixture exists for the canonical form — #155 introduces it — so the
-    # document is inline and declared as such.
+    # A profile-composed request path, bound on the call that consumes the documents
+    # the writer reads from. No frozen fixture exists for the canonical form — #155
+    # introduces it — so the document is inline and declared as such.
+    #
+    # #184: this witness used to put the writer FIRST, reading profile element 3 off
+    # the empty No Data start document, which addresses nothing and is now refused
+    # (amendment 2 §4). The writer now sits after `GETOP`, whose declared response
+    # profile is the one it reads. The source-role spelling that the platform
+    # attests composes its path from a run-supplied process property instead; it is
+    # golden-000080.
     doc = _doc(
         [
+            {"kind": "connector_call", "operation_ref": "$ref:GETOP"},
             {
                 "kind": "set_ddp",
                 "name": "DDP_PATH_CLIENTS",

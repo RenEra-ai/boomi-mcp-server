@@ -43,3 +43,27 @@ render.
 **What does NOT count as discharge** (issue #184 A8): a green compile of the hoisted-writer or
 no-map form; a spelling whose target writer reads the pre-map profile; expected bytes regenerated
 from the new compiler; a fixture without this provenance.
+
+## `issue184:source_dynamic_path_dpp` — golden-000072's safe replacement survivor (amendment 2 §5)
+
+| Field | Value |
+| --- | --- |
+| Expected file | `tests/fixtures/golden_xml/issue184_source_dynamic_path_dpp.xml` |
+| Manifest row | `golden-000080`, owner `#184`, disposition `survivor`, renderer `process-xml-v1` (appended; `golden-000072` tombstoned in the same change, so the active floor is unchanged at 79) |
+| Provenance class | **live capture of an artifact proven operable**: `cap155-e1-source-dynamic-path` executed COMPLETE with one inbound and two outbound documents (`execution-b91fb002-0a98-4e51-b9fb-ad503ea01241-2026.08.26`), and the counterparty log records the composed GET path |
+| Source bytes | `docs/architecture/evidence/issue-155/captures/cap155-e1-source-dynamic-path/stored_process.xml`, the platform's STORED process, sha256 `c3355a59e6813707a02a9d75b4856d59d28d9de3dbd57adf5ee368a0f9d5f17b` |
+| Transform | `docs/architecture/evidence/issue-184/oracle/freeze_source_dynamic_path_dpp.py`: slice `<shapes>`; substitute the platform ids per shape (GET `RCONN`/`ROP`, PATCH `CONN-UUID`/`OP-UUID`, each asserted to occur once); wrap as `<process xmlns="">…</process>` |
+| Record | `docs/architecture/evidence/issue-184/oracle/source_dynamic_path_dpp.MANIFEST.json` |
+| sha256 | `56ffde0818b2f6d3fe364a39a015f9ddd1c05c04e407802398a261a691dc502f` (2491 bytes) |
+| Authored input | `tests/fixtures/process_ir/issue184/source_dynamic_path_dpp.json`, written by the same script from a literal whose field names come from the stored shapes: a static segment, then a `dpp` segment `key` with an empty default (`processpropertydefaultvalue=""`), and a path binding naming `DDP_PATH_CLIENTS` with no request profile (the stored GET carries no `parameter-profile`) |
+| Symbols | `issue155_symbols()`, whose ids are the substitution targets |
+
+**Never regenerated from the compiler.** The canonical render was compared against these bytes
+before they were committed, and matched. The render is the thing under test; the capture is the
+oracle.
+
+**What it retires.** `golden-000072` read a profile element off the empty scheduled entry document,
+which #184 refuses. This replacement keeps the source-role spine that the capture attests
+(`start → documentproperties → connectoraction GET{Path} → connectoraction PATCH → stop`). It
+composes the path from a run-supplied dynamic process property, the driver the platform actually
+ran.

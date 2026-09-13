@@ -1,0 +1,37 @@
+{
+ "body": {
+  "kind": "sequence",
+  "steps": [
+   {
+    "kind": "set_ddp",
+    "name": "DDP_PATH_CLIENTS",
+    "source_values": [
+     {
+      "value": "/admin/cdscm/api/v1/clients/",
+      "value_type": "static"
+     },
+     {
+      "default_value": "",
+      "property_name": "key",
+      "value_type": "dpp"
+     }
+    ]
+   },
+   {
+    "kind": "connector_call",
+    "operation_ref": "$ref:ROP",
+    "path_binding": {
+     "property_name": "DDP_PATH_CLIENTS"
+    }
+   },
+   {
+    "kind": "connector_call",
+    "operation_ref": "$ref:OP"
+   },
+   {
+    "kind": "stop"
+   }
+  ]
+ },
+ "version": "1"
+}

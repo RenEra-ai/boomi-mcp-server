@@ -107,6 +107,21 @@ PINNED_DELEGATION_SITES = {
     ): (1, "the body of the `_fail` wrapper, forwarding into `raise_compile_error`"),
     (
         "src/boomi_mcp/compiler/process_ir/pipeline.py",
+        "diagnostic",
+        "Attribute(value=Name(id='item', ctx=Load()), attr='code', ctx=Load())",
+    ): (
+        1,
+        "#184 `_enforce_semantic_report._restore`. The lineage controller now raises "
+        "#140's profile code at maps, cache writes and property sources that "
+        "connector resolution never visits, so the gate has no delegated original to "
+        "recover that code's text from. The code comes off a report finding the gate "
+        "already holds and is re-served through the `diagnostic` factory, which "
+        "selects static text by code. Only a code with no validation-table text "
+        "reaches this call, and the compiler table serves every such code the "
+        "semantic layer emits, which `_SATISFYING_TABLES['semantic']` admits.",
+    ),
+    (
+        "src/boomi_mcp/compiler/process_ir/pipeline.py",
         "CompilerDiagnostic",
         "Attribute(value=Name(id='item', ctx=Load()), attr='code', ctx=Load())",
     ): (1, "`_compile_error_from_validation` re-serves a code carried by an already-validated finding. Both sites are checkable rather than trusted: the one at `:274` REFUSES any code absent from the parser's own served set (`code not in authored`, `pipeline.py:267`) before constructing, and the one at `:124` forwards `item.code` from a report the parser produced"),

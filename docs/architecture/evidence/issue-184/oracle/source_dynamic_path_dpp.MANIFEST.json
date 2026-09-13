@@ -1,0 +1,36 @@
+{
+  "capture": "docs/architecture/evidence/issue-155/captures/cap155-e1-source-dynamic-path/stored_process.xml",
+  "capture_execution": "execution-b91fb002-0a98-4e51-b9fb-ad503ea01241-2026.08.26 (COMPLETE, 1 in / 2 out)",
+  "capture_sha256": "c3355a59e6813707a02a9d75b4856d59d28d9de3dbd57adf5ee368a0f9d5f17b",
+  "fixture": "tests/fixtures/process_ir/issue184/source_dynamic_path_dpp.json",
+  "fixture_sha256": "d3ea00938fd22820eb67833f977394ede2d9fd15c91cb5d075e74773b394a0ce",
+  "golden": "tests/fixtures/golden_xml/issue184_source_dynamic_path_dpp.xml",
+  "golden_bytes": 2491,
+  "golden_sha256": "56ffde0818b2f6d3fe364a39a015f9ddd1c05c04e407802398a261a691dc502f",
+  "interpreter": "3.12.13",
+  "purpose": "golden-000072 replacement survivor (#184 amendment 2 \u00a75)",
+  "shapes_slice_sha256": "38fdcd1f04724a642447708918d514348b71ae3e841a0dbf8e9f3702b8ec52df",
+  "substitutions": [
+    {
+      "from": "connectionId=\"c4281346-83e9-4026-856d-ede718ec68a0\"",
+      "shape": "shape3",
+      "to": "connectionId=\"RCONN\""
+    },
+    {
+      "from": "operationId=\"547becc5-c291-4f6a-a739-a4c845ad4493\"",
+      "shape": "shape3",
+      "to": "operationId=\"ROP\""
+    },
+    {
+      "from": "connectionId=\"c4281346-83e9-4026-856d-ede718ec68a0\"",
+      "shape": "shape4",
+      "to": "connectionId=\"CONN-UUID\""
+    },
+    {
+      "from": "operationId=\"5717df63-0e55-4d9a-ab87-54cb193c8fd2\"",
+      "shape": "shape4",
+      "to": "operationId=\"OP-UUID\""
+    }
+  ],
+  "wrapper": "<process xmlns=\"\"> + shapes + </process>"
+}

@@ -499,6 +499,7 @@ class _PathState:
 
     __slots__ = (
         "producer", "producer_binding", "blocked_by", "pending_map", "map_upstream", "saw_call",
+        "error_context",
     )
 
     def __init__(
@@ -509,6 +510,7 @@ class _PathState:
         pending_map=None,
         map_upstream=None,
         saw_call=False,
+        error_context=False,
     ):
         #: truthy when SOMETHING upstream on this path yields documents — a
         #: producing connector_call, a legacy source endpoint, or a cache read.
@@ -530,6 +532,13 @@ class _PathState:
         #: from a pure legacy source/target flow (where a map never had a
         #: call-to-call profile pair to check and never did before #141).
         self.saw_call = saw_call
+        #: #184 D11: whether this path has passed a ``try_catch``. The map
+        #: bracketing rule below is kept verbatim for protected and recovery bodies
+        #: only. Everywhere else a map's profiles are proved by the stream-profile
+        #: fact the lineage controller carries down the path, which checks each
+        #: map against what actually reaches it rather than demanding that a
+        #: connector call sit on both sides.
+        self.error_context = error_context
 
     def copy(self) -> "_PathState":
         return _PathState(
@@ -539,6 +548,7 @@ class _PathState:
             self.pending_map,
             self.map_upstream,
             self.saw_call,
+            self.error_context,
         )
 
 
@@ -697,7 +707,15 @@ def _walk_paths(cfg: SemanticCfgV1, index, binding_by_node) -> None:
             state.producer_binding = binding if capability.produces_output else None
             state.blocked_by = None if capability.produces_output else binding
 
-        elif kind == "map":
+        elif kind == "map" and state.error_context:
+            # #184 D11: only inside a protected or recovery body. Everywhere else
+            # the lineage controller proves a map against the profile of the
+            # stream that reaches it — a call's output, an earlier map's target, a
+            # cache's single reaching content profile — so neither half of the
+            # adjacency demanded below is needed there, and the demand refused
+            # correctly profiled chains such as two maps in a row or a map that
+            # stages into a cache.
+            #
             # ``producer_binding`` is cleared below by every non-call node, so
             # reaching here with one set means the map's IMMEDIATE predecessor was
             # a producing call. That immediacy is the contract: without it
@@ -772,6 +790,11 @@ def _walk_paths(cfg: SemanticCfgV1, index, binding_by_node) -> None:
             # profile-checked at all. ``producer`` ("do documents exist on this
             # path") is a different question and deliberately survives more.
             state.producer_binding = None
+
+        if kind == "try_catch":
+            # #184 D11: both the protected and the recovery body keep the map
+            # bracketing rule, and so does whatever a continuing handler chains to.
+            state.error_context = True
 
         successors = outgoing.get(node_id, ())
         for position, edge in enumerate(successors):

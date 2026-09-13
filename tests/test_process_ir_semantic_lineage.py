@@ -1284,6 +1284,7 @@ def _dynpath_symbols_with_profile_alias():
     from boomi_mcp.compiler.process_ir.contracts import ComponentSymbolV1
 
     base = _dynpath_symbols()
+    rest = "officialboomi-X3979C-rest-prod"
     return SymbolTableV1(
         symbols=list(base.symbols)
         + [
@@ -1291,9 +1292,22 @@ def _dynpath_symbols_with_profile_alias():
                               component_type="profile.json"),
             ComponentSymbolV1(ref="$ref:PROF_OTHER", component_id="P2",
                               component_type="profile.json"),
+            # #184: a producer of PROF-profiled documents. A writer that reads a
+            # profile element needs documents of that profile to read it from;
+            # on the empty scheduled entry the read addresses nothing and is
+            # refused (amendment 2 §4), which is not what the alias tests test.
+            ComponentSymbolV1(ref="$ref:SEEDOP", component_id="S",
+                              component_type="connector-action", connector_type=rest,
+                              action_type="GET", connection_ref="$ref:CONN",
+                              output_profile_ref="$ref:PROF"),
         ],
         idempotency_contracts=base.idempotency_contracts,
     )
+
+
+#: #184: the alias tests' writer reads profile elements, so it sits on documents
+#: that carry that profile.
+_SEED = {"kind": "connector_call", "operation_ref": "$ref:SEEDOP"}
 
 
 def _dynpath_codes_aliased(steps):
@@ -1329,7 +1343,7 @@ def test_two_refs_naming_one_profile_component_agree(writer_ref, binding_ref):
               "source_values": [_STATIC, _profile_source(writer_ref)]}
     bound = {"kind": "connector_call", "operation_ref": "$ref:GETOP",
              "path_binding": {"property_name": "P", "request_profile_ref": binding_ref}}
-    assert _dynpath_codes_aliased([writer, bound, {"kind": "stop"}]) == ()
+    assert _dynpath_codes_aliased([_SEED, writer, bound, {"kind": "stop"}]) == ()
 
 
 def test_several_sources_aliased_to_one_profile_are_one_profile():
@@ -1338,7 +1352,7 @@ def test_several_sources_aliased_to_one_profile_are_one_profile():
         _STATIC, _profile_source("$ref:PROF"), _profile_source("$ref:PROF_ALIAS")]}
     bound = {"kind": "connector_call", "operation_ref": "$ref:GETOP",
              "path_binding": {"property_name": "P", "request_profile_ref": "$ref:PROF"}}
-    assert _dynpath_codes_aliased([writer, bound, {"kind": "stop"}]) == ()
+    assert _dynpath_codes_aliased([_SEED, writer, bound, {"kind": "stop"}]) == ()
 
 
 @pytest.mark.parametrize(

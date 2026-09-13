@@ -113,14 +113,25 @@ def _enforce_semantic_report(ir, cfg, symbols, policy, capabilities) -> None:
     if not report.errors:
         return
     delegated = _connector_metadata(cfg, symbols)
+    from .semantic_validation.findings import registered_codes
+
+    finding_codes = frozenset(registered_codes())
 
     def _restore(item):
         """The delegated original where there is one, else the report finding.
 
         #140/#142 own their codes AND their wording; this gate only changes the
         presentation, so anything it can hand back verbatim it does.
+
+        #184: the lineage controller now raises #140's profile code on its own,
+        at maps and cache writes connector resolution never visits, so there is
+        no delegated original to recover. Such a code has no text in the
+        validation tables, so its static compiler text is rebuilt here, by code,
+        rather than serving the generic fallback.
         """
         origin = delegated.get((item.code, item.path))
+        if origin is None and item.code not in finding_codes:
+            origin = diagnostic(item.code, "semantic_lowering", item.path)
         return CompilerDiagnostic(
             code=item.code,
             phase=origin.phase if origin else "semantic_lowering",

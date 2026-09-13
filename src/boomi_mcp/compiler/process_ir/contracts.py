@@ -216,6 +216,14 @@ class ComponentSymbolV1(_CompilerModel):
     #: rather than guessing. Carried rather than derived for the same reason —
     #: reading the component would break this layer's purity.
     input_document_type: Optional[str] = None
+    #: #184. The profile a DOCUMENT CACHE declares for its entries, on the cache
+    #: symbol. A write whose documents provably carry a different profile is
+    #: refused at the write. It validates in-process writes only and never
+    #: substitutes for a writer: what a read hands on is decided by the writes
+    #: that reach it, so a declaration with no reaching writer proves nothing
+    #: about the content. A ref like the other profile refs, with the profile
+    #: symbol's own ``component_type`` as the profile kind.
+    cache_profile_ref: Optional[str] = None
 
     @field_validator("ref", "component_id", "component_type")
     @classmethod
@@ -226,7 +234,7 @@ class ComponentSymbolV1(_CompilerModel):
 
     @field_validator(
         "connection_ref", "input_profile_ref", "output_profile_ref",
-        "input_document_type",
+        "input_document_type", "cache_profile_ref",
     )
     @classmethod
     def _optional_ref_shape(cls, value: Optional[str]) -> Optional[str]:

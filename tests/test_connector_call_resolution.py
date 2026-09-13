@@ -141,6 +141,11 @@ def test_component_symbol_optional_field_set_is_pinned():
         # which the listener's `profile_bound` inbound contract is proven from;
         # the snapshot or the structured config fills it, never the compiler.
         "input_document_type",
+        # #184. The profile a document cache declares for its entries, on the
+        # cache symbol. It validates in-process cache writes against the stream
+        # profile and never substitutes for a writer; the symbol builder fills it
+        # from the cache's configuration, never the compiler.
+        "cache_profile_ref",
     }
     # Every optional field must actually default, or a pre-#140 caller's symbol
     # construction would break.

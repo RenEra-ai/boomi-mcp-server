@@ -1017,9 +1017,14 @@ def test_every_map_in_a_body_is_validated_or_rejected():
     terminal was dropped — either way the compiler claimed to have "verified
     profiles" for a map it never compared.
 
-    #140 states this rule in the MODEL for a root connector_call sequence ("a
-    map_ref must be immediately followed by a connector_call"); inside a control
-    body a map is an ordinary linear step, so the walk has to state it.
+    #184 keeps the claim and changes how it is earned. Every map is still compared,
+    but against the profile of the stream that actually reaches it, so a map no
+    longer needs a connector call on both sides. Expectations follow from the
+    corpus symbols' declared profiles: `op_rest_get` emits `prof_rest_out`;
+    `map_rest_to_soap` goes `prof_rest_out → prof_soap_in`; `map_rest_to_patch`
+    goes `prof_rest_out → prof_patch_in`; `op_soap_execute` accepts `prof_soap_in`.
+    At the #184 branch point the second and third shapes below were refused
+    outright (the bracketing rule); a map on a stream it contradicts still is.
     """
     def leg_steps(steps):
         return {
@@ -1033,25 +1038,36 @@ def test_every_map_in_a_body_is_validated_or_rejected():
             ]},
         }
 
-    # two maps in a row: the first has no call to be checked against
+    # two maps in a row, the second contradicting the stream the first hands on:
+    # `map_rest_to_patch` reads `prof_rest_out`, but it receives `prof_soap_in`
     codes = codes_for(leg_steps([
         {"kind": "map_ref", "map_ref": "map_rest_to_soap"},
         {"kind": "map_ref", "map_ref": "map_rest_to_patch"},
         call("op_rest_patch", action="PATCH"),
     ]))
-    assert codes[0][0] == PROCESS_IR_SEMANTIC_PROFILE_MISMATCH
+    assert codes[0] == (PROCESS_IR_SEMANTIC_PROFILE_MISMATCH, "/body/steps/1/legs/0/steps/1/map_ref"), codes
 
-    # a map whose successor is the terminal, never a call
-    codes = codes_for(leg_steps([{"kind": "map_ref", "map_ref": "map_rest_to_soap"}]))
-    assert codes[0][0] == PROCESS_IR_SEMANTIC_PROFILE_MISMATCH
-
-    # a map whose successor is some other linear node
+    # a map whose successor is the terminal is CHECKED rather than refused: its
+    # source is the response profile of the call that feeds it, so it compiles...
+    compile_doc(leg_steps([{"kind": "map_ref", "map_ref": "map_rest_to_soap"}]))
+    # ...while a map whose target contradicts the call it feeds is still refused,
+    # at the map: `map_rest_to_patch` emits `prof_patch_in`, and the SOAP call
+    # accepts `prof_soap_in`
     codes = codes_for(leg_steps([
+        {"kind": "map_ref", "map_ref": "map_rest_to_patch"},
+        call("op_soap_execute", action="EXECUTE"),
+    ]))
+    assert codes[0] == (PROCESS_IR_SEMANTIC_PROFILE_MISMATCH, "/body/steps/1/legs/0/steps/0/map_ref"), codes
+
+    # a map followed by another linear node: the map is compared against the call
+    # that feeds it and matches; the Message then replaces the mapped document, so
+    # the call after it receives a stream nothing profiles, and call-to-call
+    # profiles stay unchecked (connector profiles are documented as non-validating)
+    compile_doc(leg_steps([
         {"kind": "map_ref", "map_ref": "map_rest_to_soap"},
         {"kind": "message", "text": "m"},
         call("op_soap_execute", action="EXECUTE"),
     ]))
-    assert codes[0][0] == PROCESS_IR_SEMANTIC_PROFILE_MISMATCH
 
 
 def test_a_legacy_map_beside_non_call_neighbours_stays_unchecked():
