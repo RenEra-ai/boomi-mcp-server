@@ -1,0 +1,1544 @@
+{
+ "purpose": "#184 amendment 3 \u00a71: measured cache rules bound to their deciding live evidence",
+ "rules": [
+  {
+   "controls": [],
+   "rows": [
+    {
+     "capture": "cap184-cache-put-successor",
+     "checks": {
+      "after_retrieve_connector_never_executed": true,
+      "load_skip_line_present": true,
+      "mock_window_is_exactly_the_witness": true,
+      "no_after_retrieve_request_on_wire": true,
+      "retrieve_never_executed": true,
+      "status_COMPLETE": true
+     },
+     "files": [
+      {
+       "file": "captures/cap184-cache-put-successor/runs/p1/execute.json",
+       "sha256": "21e8bd05632726b8da5b4ddca2492cfbe25c84bc489d77d768f9f48222210938"
+      },
+      {
+       "file": "captures/cap184-cache-put-successor/runs/p1/execution_record.json",
+       "sha256": "556d0da28d425c31b9c904bb99f1b3b1258d43fdd32b4099416484919e23d20c"
+      },
+      {
+       "file": "captures/cap184-cache-put-successor/runs/p1/mock_access_log_window.txt",
+       "sha256": "53fb38701cc9da0c14c3c08e17d8585927f42a44f9a6ee10bf69f2fce5e899ef"
+      },
+      {
+       "file": "captures/cap184-cache-put-successor/runs/p1/process_log.txt",
+       "sha256": "328137afece730cb6eb16f55d166567c1e56f0c10b289cc4e4953038b7c07c69"
+      },
+      {
+       "file": "captures/cap184-cache-put-successor/runs/p1/process_log_skip_lines.txt",
+       "sha256": "872df4d4f3fbbee42093c2cc910e2f7414858b8d06f0b7d5e6ed6a285d65a98e"
+      },
+      {
+       "file": "captures/cap184-cache-put-successor/runs/p1/wire_inbound_requests_window.json",
+       "sha256": "51c2ccd7a073678279a836a0ec37d7e8b2943f34b185ac9b2f8fa2bca08022a7"
+      },
+      {
+       "file": "captures/cap184-cache-put-successor/MANIFEST.json",
+       "sha256": "36336d926e85c62c88568b7f972af3c128795a6f4e0c422730389c898e218990"
+      }
+     ],
+     "observation": "REFUTED: 'Document Cache Load\t\tNo documents found. Skipping execution for the Document Cache Retrieve step.' \u2014 neither the retrieve nor the connector ran; the process read COMPLETE; the witness posted in the same execution.",
+     "row": "Linear Add to Cache -> Retrieve(all) -> connector (cache EMPTY before the run): the retrieve and the connector run",
+     "row_index": 0,
+     "verdict": "REFUTE"
+    },
+    {
+     "capture": "cap184-cache-put-successor",
+     "checks": {
+      "after_retrieve_connector_never_executed": true,
+      "load_skip_line_present": true,
+      "mock_window_is_exactly_the_witness": true,
+      "no_after_retrieve_request_on_wire": true,
+      "retrieve_never_executed": true,
+      "status_COMPLETE": true
+     },
+     "files": [
+      {
+       "file": "captures/cap184-cache-put-successor/runs/p2/execute.json",
+       "sha256": "3639a40ec9c2f1563dbbb8ad7262741c7544ebb578b0aa3b4abcea243a788b4f"
+      },
+      {
+       "file": "captures/cap184-cache-put-successor/runs/p2/execution_record.json",
+       "sha256": "5c559e74b1a73e14b2d50c435bf94b5758323a1235f41daff91a1cda9bda281f"
+      },
+      {
+       "file": "captures/cap184-cache-put-successor/runs/p2/mock_access_log_window.txt",
+       "sha256": "01423cc999ab1c51cc10426175a761d26f8bd1807b3c7846767dcb56eddee9e0"
+      },
+      {
+       "file": "captures/cap184-cache-put-successor/runs/p2/process_log.txt",
+       "sha256": "cbea8d4c8629b3ee13bc84cece0718941fe9d73524cd150a0ca29169435ebd35"
+      },
+      {
+       "file": "captures/cap184-cache-put-successor/runs/p2/process_log_skip_lines.txt",
+       "sha256": "2e081b4f70d2906c1ae741e6953ea276e9e1f3fdedd11accd590aa2d743fa18a"
+      },
+      {
+       "file": "captures/cap184-cache-put-successor/runs/p2/wire_inbound_requests_window.json",
+       "sha256": "84956c8e96f8450334a8f2c8b8677597f3bf11c8c3c34dd73712d28e06277c27"
+      },
+      {
+       "file": "captures/cap184-cache-put-successor/MANIFEST.json",
+       "sha256": "36336d926e85c62c88568b7f972af3c128795a6f4e0c422730389c898e218990"
+      }
+     ],
+     "observation": "REFUTED: 'Document Cache Load\t\tNo documents found. Skipping execution for the Document Cache Retrieve step.' \u2014 neither the retrieve nor the connector ran; the process read COMPLETE; the witness posted in the same execution.",
+     "row": "Linear Add to Cache -> Retrieve(all) -> connector (cache PRIMED in an earlier Branch leg): the retrieve and the connector run",
+     "row_index": 1,
+     "verdict": "REFUTE"
+    },
+    {
+     "capture": "cap184-cache-put-successor",
+     "checks": {
+      "catch_path_entered (protected connector request on the wire)": true,
+      "load_skip_line_names_the_exception_step": true,
+      "status_COMPLETE_not_ERROR": true,
+      "witness_present": true
+     },
+     "files": [
+      {
+       "file": "captures/cap184-cache-put-successor/runs/p3/execute.json",
+       "sha256": "33ee4df17628c5af1e27a162ecb1bd8b5bcfca2ca4e248595dbb3d9a977c9243"
+      },
+      {
+       "file": "captures/cap184-cache-put-successor/runs/p3/execution_record.json",
+       "sha256": "7578b32cac813a9b68ff23599b92d586542637296abbc9b5dcf7f0e9af4acf2c"
+      },
+      {
+       "file": "captures/cap184-cache-put-successor/runs/p3/mock_access_log_window.txt",
+       "sha256": "272132487ff2fb54a3631314e8518bae0965459ef708d486344c5028064b957e"
+      },
+      {
+       "file": "captures/cap184-cache-put-successor/runs/p3/process_log.txt",
+       "sha256": "16cd58d8a20ef146e17df612fa5c0fd077b14b56af8f1ec26bfed1520ff5271c"
+      },
+      {
+       "file": "captures/cap184-cache-put-successor/runs/p3/process_log_skip_lines.txt",
+       "sha256": "5c4342459587518013e3972c1fad1a101d9c9c5d877f3af70199098fe48f7362"
+      },
+      {
+       "file": "captures/cap184-cache-put-successor/runs/p3/wire_inbound_requests_window.json",
+       "sha256": "c794030c1ec934020a05ca13cd5d25e7e9db560bb28ae1ce55a601c7af24a5c1"
+      },
+      {
+       "file": "captures/cap184-cache-put-successor/MANIFEST.json",
+       "sha256": "36336d926e85c62c88568b7f972af3c128795a6f4e0c422730389c898e218990"
+      }
+     ],
+     "observation": "REFUTED: the catch path ran (the protected 404 request is on the wire), then 'Document Cache Load\t\tNo documents found. Skipping execution for the E1 deliberate exception step.'. The Exception never fired and the execution reads COMPLETE: the caught error is swallowed.",
+     "row": "Try/Catch catch body 'Add to Cache -> Exception(caught {token}: {1})': the Exception fires",
+     "row_index": 2,
+     "verdict": "REFUTE"
+    },
+    {
+     "capture": "cap184-cache-put-successor",
+     "checks": {
+      "catch_path_entered": true,
+      "message_names_the_exception_and_caught_error": true,
+      "status_ERROR": true,
+      "witness_present": true
+     },
+     "files": [
+      {
+       "file": "captures/cap184-cache-put-successor/runs/p3c/execute.json",
+       "sha256": "15fb86f8800c98995e4676fcbf502d6794a7c8d4b26175d0bcadbcf6f93a6059"
+      },
+      {
+       "file": "captures/cap184-cache-put-successor/runs/p3c/execution_record.json",
+       "sha256": "26a0e21d180ec6a469a4e45cf0bd6f260cb4f8c0487fea68881f55e5f48f1142"
+      },
+      {
+       "file": "captures/cap184-cache-put-successor/runs/p3c/mock_access_log_window.txt",
+       "sha256": "78ef36a1eabbf4e5a27d06b6d05ba5a4386e1c72b49b2ff84b724e94f284e7b3"
+      },
+      {
+       "file": "captures/cap184-cache-put-successor/runs/p3c/process_log.txt",
+       "sha256": "a30725c5928e039d3f4267e3191f8a7103c974c3eceb1c4b68912f394c9b5e00"
+      },
+      {
+       "file": "captures/cap184-cache-put-successor/runs/p3c/process_log_skip_lines.txt",
+       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+       "file": "captures/cap184-cache-put-successor/runs/p3c/wire_inbound_requests_window.json",
+       "sha256": "1157bb6efde86e216c358cbf505d208c478627b4258e45daf95abf8f08f9c16c"
+      },
+      {
+       "file": "captures/cap184-cache-put-successor/MANIFEST.json",
+       "sha256": "36336d926e85c62c88568b7f972af3c128795a6f4e0c422730389c898e218990"
+      }
+     ],
+     "observation": "ERROR, record message: 'Process terminating -- some documents reached an exception which is set to halt all documents: caught E11840913073745-p3c: [404] Not Found' \u2014 proves the Exception shape fires when reached, so p3's COMPLETE is the Add to Cache emitting nothing, not an inert Exception.",
+     "row": "ADDED control: catch body 'Exception(caught {token}: {1})' alone fires",
+     "row_index": 3,
+     "verdict": "ADMIT"
+    }
+   ],
+   "rule": "cache_load.emits_zero_documents",
+   "status": "measured"
+  },
+  {
+   "controls": [],
+   "rows": [
+    {
+     "capture": "cap184-prefix-predecessors",
+     "checks": {
+      "child_body_carries_this_parent_token": true,
+      "child_request_exactly_1": true,
+      "parent_COMPLETE": true,
+      "process_call_executed_with_1_doc": true,
+      "stored_processcall_has_no_outgoing": true,
+      "stored_shapes_equal_modulo_entity_escaping": true
+     },
+     "files": [
+      {
+       "file": "captures/cap184-prefix-predecessors/runs/pfx_cache_retrieve_br-1/child_execution_records.json",
+       "sha256": "c1988a5f70b3bd52189c578821ef502cfb146f34fc953775d0ca6bb1ba3f0e05"
+      },
+      {
+       "file": "captures/cap184-prefix-predecessors/runs/pfx_cache_retrieve_br-1/execute.json",
+       "sha256": "2f02850b89094bd086f0c5ad7737dd87322f0c660b5ed6288bf65c0d59e698aa"
+      },
+      {
+       "file": "captures/cap184-prefix-predecessors/runs/pfx_cache_retrieve_br-1/mock_access_log_window.txt",
+       "sha256": "f712d232b8ba7c969b0d725383a3b08a2ac7d216de5dee1a9064d7752e5f784a"
+      },
+      {
+       "file": "captures/cap184-prefix-predecessors/runs/pfx_cache_retrieve_br-1/parent_execution_record.json",
+       "sha256": "eb6db0928c72258b34e5cc3b0aa94df1a01d0a3cff99ce73e3ac03b408dc8cb9"
+      },
+      {
+       "file": "captures/cap184-prefix-predecessors/runs/pfx_cache_retrieve_br-1/parent_process_log.txt",
+       "sha256": "8f13aa9867751ed74882c4d24becbb32448807aaf4353836a314bc778c2f957e"
+      },
+      {
+       "file": "captures/cap184-prefix-predecessors/runs/pfx_cache_retrieve_br-1/wire_inbound_requests_window.json",
+       "sha256": "46c6f1971d676ba8e3bcc07f694d708e1946e9a7c9ca7982dd4911baeb4267f7"
+      },
+      {
+       "file": "captures/cap184-prefix-predecessors/components/pfx_cache_retrieve_br.stored.xml",
+       "sha256": "6a410eb7a616dd507ef43bdcb3e0533ab7b9a7fd1f2ed177b04c73efc31656ef"
+      },
+      {
+       "file": "captures/cap184-prefix-predecessors/components/pfx_cache_retrieve_br.submitted.xml",
+       "sha256": "b549dd75238b8c14b26aaccae2aa2f131f31da80170d93dce09802fdcb112d58"
+      },
+      {
+       "file": "captures/cap184-prefix-predecessors/MANIFEST.json",
+       "sha256": "11c8a8ab5af953278a9d512b9bcccbb6a945c39c5623f7438e0610a9ac4aceda"
+      }
+     ],
+     "observation": "body=['{\"k\": \"E01840913062808-pfx-cache_retrieve-br\"}']; UI rendering not observed (browser extension not connected)",
+     "row": "cache_retrieve wired directly into a terminal Process Call in a Branch leg",
+     "row_index": 4,
+     "verdict": "ADMIT"
+    },
+    {
+     "capture": "cap184-prefix-predecessors",
+     "checks": {
+      "child_body_carries_this_parent_token": true,
+      "child_request_exactly_1": true,
+      "parent_COMPLETE": true,
+      "process_call_executed_with_1_doc": true,
+      "stored_processcall_has_no_outgoing": true,
+      "stored_shapes_equal_modulo_entity_escaping": true
+     },
+     "files": [
+      {
+       "file": "captures/cap184-prefix-predecessors/runs/pfx_cache_retrieve_dec-1/child_execution_records.json",
+       "sha256": "c1988a5f70b3bd52189c578821ef502cfb146f34fc953775d0ca6bb1ba3f0e05"
+      },
+      {
+       "file": "captures/cap184-prefix-predecessors/runs/pfx_cache_retrieve_dec-1/execute.json",
+       "sha256": "305b634d6ebbe56e2c083aaf969382014f8c23390e6a2fdc132a989e0f582992"
+      },
+      {
+       "file": "captures/cap184-prefix-predecessors/runs/pfx_cache_retrieve_dec-1/mock_access_log_window.txt",
+       "sha256": "a8ef4e85376677a36cae3ff35352b1c219e9b44fe04adde0573859bb047783b4"
+      },
+      {
+       "file": "captures/cap184-prefix-predecessors/runs/pfx_cache_retrieve_dec-1/parent_execution_record.json",
+       "sha256": "4fd9eb0ff52970854c89bb4d786fc3c34e6da2c4dadf3679267c810f2c06e00c"
+      },
+      {
+       "file": "captures/cap184-prefix-predecessors/runs/pfx_cache_retrieve_dec-1/parent_process_log.txt",
+       "sha256": "c5d0a1f83a321bb3dacef947fa54f820a2dd2872aaa2146c1bb5f2b1ec622a40"
+      },
+      {
+       "file": "captures/cap184-prefix-predecessors/runs/pfx_cache_retrieve_dec-1/wire_inbound_requests_window.json",
+       "sha256": "ea5190bd65d11e4a00c6cc8dc9edff553af51e641c524e3652953ca2a7807ca3"
+      },
+      {
+       "file": "captures/cap184-prefix-predecessors/components/pfx_cache_retrieve_dec.stored.xml",
+       "sha256": "ac25584e50bf2823ab76a4910e0d538a8fde114448f0a105fbde819919f044a4"
+      },
+      {
+       "file": "captures/cap184-prefix-predecessors/components/pfx_cache_retrieve_dec.submitted.xml",
+       "sha256": "017d9fe0d895b5e61c11804651766e0b668148ea691a177df9f60fcfe1b3c9a5"
+      },
+      {
+       "file": "captures/cap184-prefix-predecessors/MANIFEST.json",
+       "sha256": "11c8a8ab5af953278a9d512b9bcccbb6a945c39c5623f7438e0610a9ac4aceda"
+      }
+     ],
+     "observation": "body=['{\"k\": \"E01840913062808-pfx-cache_retrieve-dec\"}']; UI rendering not observed (browser extension not connected)",
+     "row": "cache_retrieve wired directly into a terminal Process Call in a Decision TRUE arm",
+     "row_index": 5,
+     "verdict": "ADMIT"
+    },
+    {
+     "capture": "cap184-retrieve-ddp-replacement",
+     "checks": {
+      "exactly_one_bound_request_and_its_body_is_the_CACHED_document": true,
+      "mock_has_X-cached": true,
+      "mock_has_no_X-current_and_no_POST_root": true,
+      "status_COMPLETE": true,
+      "witness_present": true
+     },
+     "files": [
+      {
+       "file": "captures/cap184-retrieve-ddp-replacement/runs/r1/execute.json",
+       "sha256": "145377ffc9b9865be9f45222af3048a2923fef23e6c8aa003b68020ccfd7af1c"
+      },
+      {
+       "file": "captures/cap184-retrieve-ddp-replacement/runs/r1/execution_record.json",
+       "sha256": "820a82486f61c629963c587d0febd4f35dcd1beb2695a716cd195ffa6f78b0a3"
+      },
+      {
+       "file": "captures/cap184-retrieve-ddp-replacement/runs/r1/mock_access_log_window.txt",
+       "sha256": "978af3fc8c65fda5d1879ba42636912efa2de21372c55896f05083fbfdf89c52"
+      },
+      {
+       "file": "captures/cap184-retrieve-ddp-replacement/runs/r1/process_log.txt",
+       "sha256": "d3ee4264bf8c4d9f22ada69a237562fa734e35f583bfa4533cc38b0865009ecf"
+      },
+      {
+       "file": "captures/cap184-retrieve-ddp-replacement/runs/r1/process_log_skip_lines.txt",
+       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+       "file": "captures/cap184-retrieve-ddp-replacement/runs/r1/wire_inbound_requests_window.json",
+       "sha256": "eda2d1453e887340c494d5229828b4b6adadacf685613779ab4692b33dc1af9f"
+      },
+      {
+       "file": "captures/cap184-retrieve-ddp-replacement/MANIFEST.json",
+       "sha256": "f005c72f8a5133395faeff6c6593cc52387bf6e7b38cf4a5c34c5e8ecc8a2510"
+      }
+     ],
+     "observation": "wire: ['POST /__E1_184__/E11840913073745/r1/X-cached HTTP/1.1'] body ['{\"k\": \"E11840913073745-r1-cached\"}']",
+     "row": "R1 cached doc X=cached, current doc X=current -> the retrieved document's X is the CACHED value",
+     "row_index": 0,
+     "verdict": "ADMIT"
+    }
+   ],
+   "rule": "cache_load.terminal_executes",
+   "status": "measured"
+  },
+  {
+   "controls": [
+    {
+     "file": "captures/cap184-prefix-predecessors/controls/legacy_builder_doccacheremove_emission_offline.txt",
+     "sha256": "a1282ed19d7cab49176634aa46f12e80e294f75b7166f8c68c323f6202b755e5"
+    }
+   ],
+   "rows": [
+    {
+     "capture": "cap184-prefix-predecessors",
+     "checks": {
+      "parent_COMPLETE": true,
+      "parent_outbound_0": true,
+      "process_call_shape_never_executed": true,
+      "remove_logged_zero_docs_and_skipped_process_call": true,
+      "same_child_channel_live_in_retrieve_rows": true,
+      "stored_shapes_equal_modulo_entity_escaping": true,
+      "zero_child_requests_in_window": true
+     },
+     "files": [
+      {
+       "file": "captures/cap184-prefix-predecessors/runs/pfx_cache_remove_br-1/child_execution_records.json",
+       "sha256": "c1988a5f70b3bd52189c578821ef502cfb146f34fc953775d0ca6bb1ba3f0e05"
+      },
+      {
+       "file": "captures/cap184-prefix-predecessors/runs/pfx_cache_remove_br-1/execute.json",
+       "sha256": "8fe8cbf19b4aced3e6bef9a6c2f123edb32bfb6bf5164ecfe1f8efa3d14efa62"
+      },
+      {
+       "file": "captures/cap184-prefix-predecessors/runs/pfx_cache_remove_br-1/mock_access_log_window.txt",
+       "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b"
+      },
+      {
+       "file": "captures/cap184-prefix-predecessors/runs/pfx_cache_remove_br-1/parent_execution_record.json",
+       "sha256": "8bd4acd2e08f0aa8ad8fff3aedc6dfcda5616a512bc8cd5f5f8553464d689d5c"
+      },
+      {
+       "file": "captures/cap184-prefix-predecessors/runs/pfx_cache_remove_br-1/parent_process_log.txt",
+       "sha256": "6c462942c77ea5b3d5b6262831dc0370ec4412e18b2ab312f813019be80da91c"
+      },
+      {
+       "file": "captures/cap184-prefix-predecessors/runs/pfx_cache_remove_br-1/wire_inbound_requests_window.json",
+       "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      {
+       "file": "captures/cap184-prefix-predecessors/components/pfx_cache_remove_br.stored.xml",
+       "sha256": "61769eb72c46cc326d5bcdfd8948ab92ff2e1030a20a0b264f134ef8afadd96a"
+      },
+      {
+       "file": "captures/cap184-prefix-predecessors/components/pfx_cache_remove_br.submitted.xml",
+       "sha256": "40050ee91738ab135f4b563f3b75462d0a89800917d5a47ebc9add38e19ce19f"
+      },
+      {
+       "file": "captures/cap184-prefix-predecessors/MANIFEST.json",
+       "sha256": "11c8a8ab5af953278a9d512b9bcccbb6a945c39c5623f7438e0610a9ac4aceda"
+      }
+     ],
+     "observation": "REFUTED: 'Executing Remove from Cache Shape with 1 document(s)' -> 'Successfully Removed Documents from Cache' -> 'No documents found. Skipping execution for the Process Call step.'; parent COMPLETE with outbound 0; no counterparty request. The process reads green while the call never runs.",
+     "row": "cache_remove (cache empty) wired directly into a terminal Process Call in a Branch leg: documents reach the call",
+     "row_index": 0,
+     "verdict": "REFUSE"
+    },
+    {
+     "capture": "cap184-prefix-predecessors",
+     "checks": {
+      "parent_COMPLETE": true,
+      "parent_outbound_0": true,
+      "process_call_shape_never_executed": true,
+      "remove_logged_zero_docs_and_skipped_process_call": true,
+      "same_child_channel_live_in_retrieve_rows": true,
+      "stored_shapes_equal_modulo_entity_escaping": true,
+      "zero_child_requests_in_window": true
+     },
+     "files": [
+      {
+       "file": "captures/cap184-prefix-predecessors/runs/pfx_cache_remove_dec-1/child_execution_records.json",
+       "sha256": "c1988a5f70b3bd52189c578821ef502cfb146f34fc953775d0ca6bb1ba3f0e05"
+      },
+      {
+       "file": "captures/cap184-prefix-predecessors/runs/pfx_cache_remove_dec-1/execute.json",
+       "sha256": "52818c03aa46897e6d6d5f299acf9a06d07720076d88187d217fab31993c478b"
+      },
+      {
+       "file": "captures/cap184-prefix-predecessors/runs/pfx_cache_remove_dec-1/mock_access_log_window.txt",
+       "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b"
+      },
+      {
+       "file": "captures/cap184-prefix-predecessors/runs/pfx_cache_remove_dec-1/parent_execution_record.json",
+       "sha256": "28c3fa78a842f685b29a363191ea42342762c5b5cc3c92fae40bdd36f9c2edd8"
+      },
+      {
+       "file": "captures/cap184-prefix-predecessors/runs/pfx_cache_remove_dec-1/parent_process_log.txt",
+       "sha256": "149b8c55a941d61643e12d7f03457ffd52d35cfd31cc6ea1fda78bcc872e72ec"
+      },
+      {
+       "file": "captures/cap184-prefix-predecessors/runs/pfx_cache_remove_dec-1/wire_inbound_requests_window.json",
+       "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      {
+       "file": "captures/cap184-prefix-predecessors/components/pfx_cache_remove_dec.stored.xml",
+       "sha256": "ece08ef39de7d6fa2f26c87d38be35b492c1efd0fd8c5e854e241c3574c28d5f"
+      },
+      {
+       "file": "captures/cap184-prefix-predecessors/components/pfx_cache_remove_dec.submitted.xml",
+       "sha256": "31f596f26b71e11866288f0ebd012520456e93f305be10e62dcef33834bc9cda"
+      },
+      {
+       "file": "captures/cap184-prefix-predecessors/MANIFEST.json",
+       "sha256": "11c8a8ab5af953278a9d512b9bcccbb6a945c39c5623f7438e0610a9ac4aceda"
+      }
+     ],
+     "observation": "REFUTED: 'Executing Remove from Cache Shape with 1 document(s)' -> 'Successfully Removed Documents from Cache' -> 'No documents found. Skipping execution for the Process Call step.'; parent COMPLETE with outbound 0; no counterparty request. The process reads green while the call never runs.",
+     "row": "cache_remove (cache empty) wired directly into a terminal Process Call in a Decision TRUE arm: documents reach the call",
+     "row_index": 1,
+     "verdict": "REFUSE"
+    },
+    {
+     "capture": "cap184-prefix-predecessors",
+     "checks": {
+      "parent_COMPLETE": true,
+      "parent_outbound_0": true,
+      "process_call_shape_never_executed": true,
+      "remove_logged_zero_docs_and_skipped_process_call": true,
+      "same_child_channel_live_in_retrieve_rows": true,
+      "stored_shapes_equal_modulo_entity_escaping": true,
+      "zero_child_requests_in_window": true
+     },
+     "files": [
+      {
+       "file": "captures/cap184-prefix-predecessors/runs/pfx_cache_remove_primed_br-1/child_execution_records.json",
+       "sha256": "c1988a5f70b3bd52189c578821ef502cfb146f34fc953775d0ca6bb1ba3f0e05"
+      },
+      {
+       "file": "captures/cap184-prefix-predecessors/runs/pfx_cache_remove_primed_br-1/execute.json",
+       "sha256": "cdbd54e30dd967ceedcfa7bfd43bae33b4f409200f78d45459b69fa17ea85a98"
+      },
+      {
+       "file": "captures/cap184-prefix-predecessors/runs/pfx_cache_remove_primed_br-1/mock_access_log_window.txt",
+       "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b"
+      },
+      {
+       "file": "captures/cap184-prefix-predecessors/runs/pfx_cache_remove_primed_br-1/parent_execution_record.json",
+       "sha256": "1245da281038eeccf9b319ce748afa7e0d7f2bc3790a30853ffcaca5ed580ce8"
+      },
+      {
+       "file": "captures/cap184-prefix-predecessors/runs/pfx_cache_remove_primed_br-1/parent_process_log.txt",
+       "sha256": "60d834d7c2e6cbfd7d13937144cc73ba4ef72948f502377d04e26cf9099cf98e"
+      },
+      {
+       "file": "captures/cap184-prefix-predecessors/runs/pfx_cache_remove_primed_br-1/wire_inbound_requests_window.json",
+       "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      {
+       "file": "captures/cap184-prefix-predecessors/components/pfx_cache_remove_primed_br.stored.xml",
+       "sha256": "f50283f7a7fba502e8084df42638cbb6f39308f30cb74c2eba9a0ea2dd90001f"
+      },
+      {
+       "file": "captures/cap184-prefix-predecessors/components/pfx_cache_remove_primed_br.submitted.xml",
+       "sha256": "17b0ee26bcc4c83bf961c1da953bc5fda4ff8768d413755790e75bf0b5da8109"
+      },
+      {
+       "file": "captures/cap184-prefix-predecessors/MANIFEST.json",
+       "sha256": "11c8a8ab5af953278a9d512b9bcccbb6a945c39c5623f7438e0610a9ac4aceda"
+      }
+     ],
+     "observation": "REFUTED: 'Executing Remove from Cache Shape with 1 document(s)' -> 'Successfully Removed Documents from Cache' -> 'No documents found. Skipping execution for the Process Call step.'; parent COMPLETE with outbound 0; no counterparty request. The process reads green while the call never runs.",
+     "row": "cache_remove (cache PRIMED by an earlier Branch leg) wired directly into a terminal Process Call in a Branch leg: documents reach the call",
+     "row_index": 2,
+     "verdict": "REFUSE"
+    },
+    {
+     "capture": "cap184-prefix-predecessors",
+     "checks": {
+      "parent_COMPLETE": true,
+      "parent_outbound_0": true,
+      "process_call_shape_never_executed": true,
+      "remove_logged_zero_docs_and_skipped_process_call": true,
+      "same_child_channel_live_in_retrieve_rows": true,
+      "stored_shapes_equal_modulo_entity_escaping": true,
+      "zero_child_requests_in_window": true
+     },
+     "files": [
+      {
+       "file": "captures/cap184-prefix-predecessors/runs/pfx_cache_remove_primed_dec-1/child_execution_records.json",
+       "sha256": "c1988a5f70b3bd52189c578821ef502cfb146f34fc953775d0ca6bb1ba3f0e05"
+      },
+      {
+       "file": "captures/cap184-prefix-predecessors/runs/pfx_cache_remove_primed_dec-1/execute.json",
+       "sha256": "4b1059535993d094fb3eb97b821d9d546cc2d6bb92c4d82b6a318b91888a9215"
+      },
+      {
+       "file": "captures/cap184-prefix-predecessors/runs/pfx_cache_remove_primed_dec-1/mock_access_log_window.txt",
+       "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b"
+      },
+      {
+       "file": "captures/cap184-prefix-predecessors/runs/pfx_cache_remove_primed_dec-1/parent_execution_record.json",
+       "sha256": "604d4d32cae88fd06e339c927ec84489cac066ddeca3cd008bf1f46b5d13a674"
+      },
+      {
+       "file": "captures/cap184-prefix-predecessors/runs/pfx_cache_remove_primed_dec-1/parent_process_log.txt",
+       "sha256": "b3db0ec702d736c9e27cbaeddbf73bffb5ed209ecb03f2ebca7b06e38b5175d9"
+      },
+      {
+       "file": "captures/cap184-prefix-predecessors/runs/pfx_cache_remove_primed_dec-1/wire_inbound_requests_window.json",
+       "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      {
+       "file": "captures/cap184-prefix-predecessors/components/pfx_cache_remove_primed_dec.stored.xml",
+       "sha256": "975e3dfeb70bca858daa938a49d10e648482c8010c8e6af3529463618b4a091b"
+      },
+      {
+       "file": "captures/cap184-prefix-predecessors/components/pfx_cache_remove_primed_dec.submitted.xml",
+       "sha256": "c453fdcf668ed31b0676861479b20a385c02b3b313724ddea11a0e94288a4a7b"
+      },
+      {
+       "file": "captures/cap184-prefix-predecessors/MANIFEST.json",
+       "sha256": "11c8a8ab5af953278a9d512b9bcccbb6a945c39c5623f7438e0610a9ac4aceda"
+      }
+     ],
+     "observation": "REFUTED: 'Executing Remove from Cache Shape with 1 document(s)' -> 'Successfully Removed Documents from Cache' -> 'No documents found. Skipping execution for the Process Call step.'; parent COMPLETE with outbound 0; no counterparty request. The process reads green while the call never runs.",
+     "row": "cache_remove (cache PRIMED by an earlier Branch leg) wired directly into a terminal Process Call in a Decision TRUE arm: documents reach the call",
+     "row_index": 3,
+     "verdict": "REFUSE"
+    },
+    {
+     "capture": "cap184-prefix-predecessors",
+     "checks": {
+      "parent_COMPLETE": true,
+      "remove_logged_zero_docs_and_skipped_successor (message names the step by its userlabel)": true,
+      "successor_connector_never_executed": true,
+      "witness_present_same_window": true,
+      "zero_successor_requests": true
+     },
+     "files": [
+      {
+       "file": "captures/cap184-prefix-predecessors/runs/xr-remove-successor-1/child_execution_records.json",
+       "sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+      },
+      {
+       "file": "captures/cap184-prefix-predecessors/runs/xr-remove-successor-1/execute.json",
+       "sha256": "f5f426d4a74296ced10a86b75f5445f35547ffa23036e5de8b0406df91e3d61c"
+      },
+      {
+       "file": "captures/cap184-prefix-predecessors/runs/xr-remove-successor-1/mock_access_log_window.txt",
+       "sha256": "838c51f86f01e5fcf15a7f35d0369aabe2ee6fffc5df494c0cd039e72d49e8ad"
+      },
+      {
+       "file": "captures/cap184-prefix-predecessors/runs/xr-remove-successor-1/parent_execution_record.json",
+       "sha256": "9721c2ad88d8a2394305a6ba6f36498661cfb20bf7d3c658328d9e811081c0e1"
+      },
+      {
+       "file": "captures/cap184-prefix-predecessors/runs/xr-remove-successor-1/parent_process_log.txt",
+       "sha256": "0f5c2e80da0b78b6ebe49f5050f15c32b0299b9457a1676fc7a3d0d2fd0ffea5"
+      },
+      {
+       "file": "captures/cap184-prefix-predecessors/runs/xr-remove-successor-1/wire_inbound_requests_window.json",
+       "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      {
+       "file": "captures/cap184-prefix-predecessors/components/xr_remove_successor.stored.xml",
+       "sha256": "55d3f00d02eef4bd025208f07a18b27518a955d9624529c593db867ab15012cc"
+      },
+      {
+       "file": "captures/cap184-prefix-predecessors/components/xr_remove_successor.submitted.xml",
+       "sha256": "625f5845309a0058f299b8d027e1b0f9e5e28ad0ef2afce65565ea0f0e30aec2"
+      },
+      {
+       "file": "captures/cap184-prefix-predecessors/MANIFEST.json",
+       "sha256": "11c8a8ab5af953278a9d512b9bcccbb6a945c39c5623f7438e0610a9ac4aceda"
+      }
+     ],
+     "observation": "REFUTED: Remove from Cache emitted zero documents and the platform skipped the connector; the parent reads COMPLETE while the step after the remove never runs.",
+     "row": "ADDED control: a CONNECTOR successor of doccacheremove executes (the shipped legacy builder and the ProcessIR lowering both emit doccacheremove as a linear step with a successor)",
+     "row_index": 18,
+     "verdict": "REFUSE"
+    },
+    {
+     "capture": "cap184-cache-remove-read",
+     "checks": {
+      "mock_window_is_exactly_the_witness": true,
+      "no_after_retrieve_request": true,
+      "remove_skip_line_present": true,
+      "retrieve_never_executed": true,
+      "status_COMPLETE": true
+     },
+     "files": [
+      {
+       "file": "captures/cap184-cache-remove-read/runs/rr/execute.json",
+       "sha256": "d06eea97f69ddc1e891f7faa90e89db71d6c8ecc1f8eab35b3c4f4dda3597c62"
+      },
+      {
+       "file": "captures/cap184-cache-remove-read/runs/rr/execution_record.json",
+       "sha256": "52ca3fcf8c5e03d09357cc53d0fb49dd46bd5771c142b43672fe6c4b158f2dd4"
+      },
+      {
+       "file": "captures/cap184-cache-remove-read/runs/rr/mock_access_log_window.txt",
+       "sha256": "981c100ff3c4dc3aa3422149e2eeea3c914db07a04f485f92a80b761682ac83f"
+      },
+      {
+       "file": "captures/cap184-cache-remove-read/runs/rr/process_log.txt",
+       "sha256": "48f60f2225ff6aed5be0708d3f1698f71996b88264c42356a73a535e2ef4462b"
+      },
+      {
+       "file": "captures/cap184-cache-remove-read/runs/rr/process_log_skip_lines.txt",
+       "sha256": "47b38c49810cb4813c9adbb0a33e529616c529814f52b1d1b7d3a2f26a8e738f"
+      },
+      {
+       "file": "captures/cap184-cache-remove-read/runs/rr/wire_inbound_requests_window.json",
+       "sha256": "1f928dd8e6a4059cd68d191a3d15908990ea8896db8b09e6f7a73ad7460f1ea9"
+      },
+      {
+       "file": "captures/cap184-cache-remove-read/MANIFEST.json",
+       "sha256": "e9046481548c1bb5b5683e9a36d95ec7a5974a3a2a94df106472b5d989aa143a"
+      }
+     ],
+     "observation": "REFUTED: 'Document Cache Remove\t\tNo documents found. Skipping execution for the Document Cache Retrieve step.'.",
+     "row": "Remove from Cache(all) -> Retrieve from Cache(all) -> connector, cache primed in an earlier leg: the retrieve runs",
+     "row_index": 0,
+     "verdict": "REFUTE"
+    }
+   ],
+   "rule": "cache_remove_all.emits_zero_documents",
+   "status": "measured"
+  },
+  {
+   "controls": [],
+   "rows": [
+    {
+     "capture": "cap184-cache-put-successor",
+     "checks": {
+      "after_retrieve_connector_never_executed": true,
+      "load_skip_line_present": true,
+      "mock_window_is_exactly_the_witness": true,
+      "no_after_retrieve_request_on_wire": true,
+      "retrieve_never_executed": true,
+      "status_COMPLETE": true
+     },
+     "files": [
+      {
+       "file": "captures/cap184-cache-put-successor/runs/p1/execute.json",
+       "sha256": "21e8bd05632726b8da5b4ddca2492cfbe25c84bc489d77d768f9f48222210938"
+      },
+      {
+       "file": "captures/cap184-cache-put-successor/runs/p1/execution_record.json",
+       "sha256": "556d0da28d425c31b9c904bb99f1b3b1258d43fdd32b4099416484919e23d20c"
+      },
+      {
+       "file": "captures/cap184-cache-put-successor/runs/p1/mock_access_log_window.txt",
+       "sha256": "53fb38701cc9da0c14c3c08e17d8585927f42a44f9a6ee10bf69f2fce5e899ef"
+      },
+      {
+       "file": "captures/cap184-cache-put-successor/runs/p1/process_log.txt",
+       "sha256": "328137afece730cb6eb16f55d166567c1e56f0c10b289cc4e4953038b7c07c69"
+      },
+      {
+       "file": "captures/cap184-cache-put-successor/runs/p1/process_log_skip_lines.txt",
+       "sha256": "872df4d4f3fbbee42093c2cc910e2f7414858b8d06f0b7d5e6ed6a285d65a98e"
+      },
+      {
+       "file": "captures/cap184-cache-put-successor/runs/p1/wire_inbound_requests_window.json",
+       "sha256": "51c2ccd7a073678279a836a0ec37d7e8b2943f34b185ac9b2f8fa2bca08022a7"
+      },
+      {
+       "file": "captures/cap184-cache-put-successor/MANIFEST.json",
+       "sha256": "36336d926e85c62c88568b7f972af3c128795a6f4e0c422730389c898e218990"
+      }
+     ],
+     "observation": "REFUTED: 'Document Cache Load\t\tNo documents found. Skipping execution for the Document Cache Retrieve step.' \u2014 neither the retrieve nor the connector ran; the process read COMPLETE; the witness posted in the same execution.",
+     "row": "Linear Add to Cache -> Retrieve(all) -> connector (cache EMPTY before the run): the retrieve and the connector run",
+     "row_index": 0,
+     "verdict": "REFUTE"
+    },
+    {
+     "capture": "cap184-cache-put-successor",
+     "checks": {
+      "after_retrieve_connector_never_executed": true,
+      "load_skip_line_present": true,
+      "mock_window_is_exactly_the_witness": true,
+      "no_after_retrieve_request_on_wire": true,
+      "retrieve_never_executed": true,
+      "status_COMPLETE": true
+     },
+     "files": [
+      {
+       "file": "captures/cap184-cache-put-successor/runs/p2/execute.json",
+       "sha256": "3639a40ec9c2f1563dbbb8ad7262741c7544ebb578b0aa3b4abcea243a788b4f"
+      },
+      {
+       "file": "captures/cap184-cache-put-successor/runs/p2/execution_record.json",
+       "sha256": "5c559e74b1a73e14b2d50c435bf94b5758323a1235f41daff91a1cda9bda281f"
+      },
+      {
+       "file": "captures/cap184-cache-put-successor/runs/p2/mock_access_log_window.txt",
+       "sha256": "01423cc999ab1c51cc10426175a761d26f8bd1807b3c7846767dcb56eddee9e0"
+      },
+      {
+       "file": "captures/cap184-cache-put-successor/runs/p2/process_log.txt",
+       "sha256": "cbea8d4c8629b3ee13bc84cece0718941fe9d73524cd150a0ca29169435ebd35"
+      },
+      {
+       "file": "captures/cap184-cache-put-successor/runs/p2/process_log_skip_lines.txt",
+       "sha256": "2e081b4f70d2906c1ae741e6953ea276e9e1f3fdedd11accd590aa2d743fa18a"
+      },
+      {
+       "file": "captures/cap184-cache-put-successor/runs/p2/wire_inbound_requests_window.json",
+       "sha256": "84956c8e96f8450334a8f2c8b8677597f3bf11c8c3c34dd73712d28e06277c27"
+      },
+      {
+       "file": "captures/cap184-cache-put-successor/MANIFEST.json",
+       "sha256": "36336d926e85c62c88568b7f972af3c128795a6f4e0c422730389c898e218990"
+      }
+     ],
+     "observation": "REFUTED: 'Document Cache Load\t\tNo documents found. Skipping execution for the Document Cache Retrieve step.' \u2014 neither the retrieve nor the connector ran; the process read COMPLETE; the witness posted in the same execution.",
+     "row": "Linear Add to Cache -> Retrieve(all) -> connector (cache PRIMED in an earlier Branch leg): the retrieve and the connector run",
+     "row_index": 1,
+     "verdict": "REFUTE"
+    },
+    {
+     "capture": "cap184-cache-remove-read",
+     "checks": {
+      "mock_window_is_exactly_the_witness": true,
+      "no_after_retrieve_request": true,
+      "remove_skip_line_present": true,
+      "retrieve_never_executed": true,
+      "status_COMPLETE": true
+     },
+     "files": [
+      {
+       "file": "captures/cap184-cache-remove-read/runs/rr/execute.json",
+       "sha256": "d06eea97f69ddc1e891f7faa90e89db71d6c8ecc1f8eab35b3c4f4dda3597c62"
+      },
+      {
+       "file": "captures/cap184-cache-remove-read/runs/rr/execution_record.json",
+       "sha256": "52ca3fcf8c5e03d09357cc53d0fb49dd46bd5771c142b43672fe6c4b158f2dd4"
+      },
+      {
+       "file": "captures/cap184-cache-remove-read/runs/rr/mock_access_log_window.txt",
+       "sha256": "981c100ff3c4dc3aa3422149e2eeea3c914db07a04f485f92a80b761682ac83f"
+      },
+      {
+       "file": "captures/cap184-cache-remove-read/runs/rr/process_log.txt",
+       "sha256": "48f60f2225ff6aed5be0708d3f1698f71996b88264c42356a73a535e2ef4462b"
+      },
+      {
+       "file": "captures/cap184-cache-remove-read/runs/rr/process_log_skip_lines.txt",
+       "sha256": "47b38c49810cb4813c9adbb0a33e529616c529814f52b1d1b7d3a2f26a8e738f"
+      },
+      {
+       "file": "captures/cap184-cache-remove-read/runs/rr/wire_inbound_requests_window.json",
+       "sha256": "1f928dd8e6a4059cd68d191a3d15908990ea8896db8b09e6f7a73ad7460f1ea9"
+      },
+      {
+       "file": "captures/cap184-cache-remove-read/MANIFEST.json",
+       "sha256": "e9046481548c1bb5b5683e9a36d95ec7a5974a3a2a94df106472b5d989aa143a"
+      }
+     ],
+     "observation": "REFUTED: 'Document Cache Remove\t\tNo documents found. Skipping execution for the Document Cache Retrieve step.'.",
+     "row": "Remove from Cache(all) -> Retrieve from Cache(all) -> connector, cache primed in an earlier leg: the retrieve runs",
+     "row_index": 0,
+     "verdict": "REFUTE"
+    },
+    {
+     "capture": "cap184-shared-cache",
+     "checks": {
+      "adjacent_control_run_line_present": true,
+      "both_logs_No_documents_found": true,
+      "sa_nd_COMPLETE_no_lines": true,
+      "sa_pt_COMPLETE_no_lines": true
+     },
+     "files": [
+      {
+       "file": "captures/cap184-shared-cache/runs/cache-sa-pt/child_execution_records.json",
+       "sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+      },
+      {
+       "file": "captures/cap184-shared-cache/runs/cache-sa-pt/execute.json",
+       "sha256": "5d0f92463f3e86012273f3133dbf4690b6463717d37b8f1654ee96469f50a4e5"
+      },
+      {
+       "file": "captures/cap184-shared-cache/runs/cache-sa-pt/mock_access_log_window.txt",
+       "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b"
+      },
+      {
+       "file": "captures/cap184-shared-cache/runs/cache-sa-pt/parent_execution_record.json",
+       "sha256": "f7b950401f0a4f8299ddbfc20a1036917f699065c49aace1cb69957a792d3ea4"
+      },
+      {
+       "file": "captures/cap184-shared-cache/runs/cache-sa-pt/parent_process_log.txt",
+       "sha256": "a30ff36754cf00e15e4ca77e8462f79308cf4acd6387c1bf0862527605cc74f4"
+      },
+      {
+       "file": "captures/cap184-shared-cache/runs/cache-sa-pt/wire_inbound_requests_window.json",
+       "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      {
+       "file": "captures/cap184-shared-cache/runs/cache-sa-nd/child_execution_records.json",
+       "sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+      },
+      {
+       "file": "captures/cap184-shared-cache/runs/cache-sa-nd/execute.json",
+       "sha256": "3276d9902037fbbf613e8d24377e9b5a6b2185b74b2d8abc5c7ace382b1335bb"
+      },
+      {
+       "file": "captures/cap184-shared-cache/runs/cache-sa-nd/mock_access_log_window.txt",
+       "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b"
+      },
+      {
+       "file": "captures/cap184-shared-cache/runs/cache-sa-nd/parent_execution_record.json",
+       "sha256": "245907a4ac38bca22c022d69cf1a9104f73f82b4d0a777a2b167c6f382d0d86a"
+      },
+      {
+       "file": "captures/cap184-shared-cache/runs/cache-sa-nd/parent_process_log.txt",
+       "sha256": "6cc932d75042fa58903ae720a1ef666af528bd5acb1da4f76b66936330d6149d"
+      },
+      {
+       "file": "captures/cap184-shared-cache/runs/cache-sa-nd/wire_inbound_requests_window.json",
+       "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      {
+       "file": "captures/cap184-shared-cache/runs/cache-sa-control/child_execution_records.json",
+       "sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+      },
+      {
+       "file": "captures/cap184-shared-cache/runs/cache-sa-control/execute.json",
+       "sha256": "9fdf3c551fbf5dde81b90215924105e055055238aeaa9755979d7b619ff544e5"
+      },
+      {
+       "file": "captures/cap184-shared-cache/runs/cache-sa-control/mock_access_log_window.txt",
+       "sha256": "a93d5a179c5fb8588125946e675d31b5983f651f2970bc729e75a0f96e8eddd6"
+      },
+      {
+       "file": "captures/cap184-shared-cache/runs/cache-sa-control/parent_execution_record.json",
+       "sha256": "b3027bb7d1063c7ebb3d695a569854ceff31993d11e1e721878153f2dba69e12"
+      },
+      {
+       "file": "captures/cap184-shared-cache/runs/cache-sa-control/parent_process_log.txt",
+       "sha256": "3839afc9cd83680908b83f52e6bd9bb26eddde7351d6a41e4fda8c074ee6b2bd"
+      },
+      {
+       "file": "captures/cap184-shared-cache/runs/cache-sa-control/wire_inbound_requests_window.json",
+       "sha256": "624e9142e15cfba44dc3b2d0c89471a4e831f2cf21d9ba34b5e14f1ac7ed1275"
+      },
+      {
+       "file": "captures/cap184-shared-cache/MANIFEST.json",
+       "sha256": "e9c648eff2f3f962a8443dc5e709d4f8661ad7a89b0212bb0b7b297fd3cb83f9"
+      }
+     ],
+     "observation": "Standalone runs: 'No documents found. Skipping execution for the Connector step.', zero counterparty lines; the control run executed right after posted its line (channel live).",
+     "row": "No carry-over: each child run on its own finds an empty cache",
+     "row_index": 2,
+     "verdict": "ADMIT"
+    }
+   ],
+   "rule": "cache_retrieve.requires_arriving_document",
+   "status": "measured"
+  },
+  {
+   "controls": [],
+   "rows": [
+    {
+     "capture": "cap184-shared-cache",
+     "checks": {
+      "adjacent_control_run_line_present": true,
+      "both_logs_No_documents_found": true,
+      "sa_nd_COMPLETE_no_lines": true,
+      "sa_pt_COMPLETE_no_lines": true
+     },
+     "files": [
+      {
+       "file": "captures/cap184-shared-cache/runs/cache-sa-pt/child_execution_records.json",
+       "sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+      },
+      {
+       "file": "captures/cap184-shared-cache/runs/cache-sa-pt/execute.json",
+       "sha256": "5d0f92463f3e86012273f3133dbf4690b6463717d37b8f1654ee96469f50a4e5"
+      },
+      {
+       "file": "captures/cap184-shared-cache/runs/cache-sa-pt/mock_access_log_window.txt",
+       "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b"
+      },
+      {
+       "file": "captures/cap184-shared-cache/runs/cache-sa-pt/parent_execution_record.json",
+       "sha256": "f7b950401f0a4f8299ddbfc20a1036917f699065c49aace1cb69957a792d3ea4"
+      },
+      {
+       "file": "captures/cap184-shared-cache/runs/cache-sa-pt/parent_process_log.txt",
+       "sha256": "a30ff36754cf00e15e4ca77e8462f79308cf4acd6387c1bf0862527605cc74f4"
+      },
+      {
+       "file": "captures/cap184-shared-cache/runs/cache-sa-pt/wire_inbound_requests_window.json",
+       "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      {
+       "file": "captures/cap184-shared-cache/runs/cache-sa-nd/child_execution_records.json",
+       "sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+      },
+      {
+       "file": "captures/cap184-shared-cache/runs/cache-sa-nd/execute.json",
+       "sha256": "3276d9902037fbbf613e8d24377e9b5a6b2185b74b2d8abc5c7ace382b1335bb"
+      },
+      {
+       "file": "captures/cap184-shared-cache/runs/cache-sa-nd/mock_access_log_window.txt",
+       "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b"
+      },
+      {
+       "file": "captures/cap184-shared-cache/runs/cache-sa-nd/parent_execution_record.json",
+       "sha256": "245907a4ac38bca22c022d69cf1a9104f73f82b4d0a777a2b167c6f382d0d86a"
+      },
+      {
+       "file": "captures/cap184-shared-cache/runs/cache-sa-nd/parent_process_log.txt",
+       "sha256": "6cc932d75042fa58903ae720a1ef666af528bd5acb1da4f76b66936330d6149d"
+      },
+      {
+       "file": "captures/cap184-shared-cache/runs/cache-sa-nd/wire_inbound_requests_window.json",
+       "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      {
+       "file": "captures/cap184-shared-cache/runs/cache-sa-control/child_execution_records.json",
+       "sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+      },
+      {
+       "file": "captures/cap184-shared-cache/runs/cache-sa-control/execute.json",
+       "sha256": "9fdf3c551fbf5dde81b90215924105e055055238aeaa9755979d7b619ff544e5"
+      },
+      {
+       "file": "captures/cap184-shared-cache/runs/cache-sa-control/mock_access_log_window.txt",
+       "sha256": "a93d5a179c5fb8588125946e675d31b5983f651f2970bc729e75a0f96e8eddd6"
+      },
+      {
+       "file": "captures/cap184-shared-cache/runs/cache-sa-control/parent_execution_record.json",
+       "sha256": "b3027bb7d1063c7ebb3d695a569854ceff31993d11e1e721878153f2dba69e12"
+      },
+      {
+       "file": "captures/cap184-shared-cache/runs/cache-sa-control/parent_process_log.txt",
+       "sha256": "3839afc9cd83680908b83f52e6bd9bb26eddde7351d6a41e4fda8c074ee6b2bd"
+      },
+      {
+       "file": "captures/cap184-shared-cache/runs/cache-sa-control/wire_inbound_requests_window.json",
+       "sha256": "624e9142e15cfba44dc3b2d0c89471a4e831f2cf21d9ba34b5e14f1ac7ed1275"
+      },
+      {
+       "file": "captures/cap184-shared-cache/MANIFEST.json",
+       "sha256": "e9c648eff2f3f962a8443dc5e709d4f8661ad7a89b0212bb0b7b297fd3cb83f9"
+      }
+     ],
+     "observation": "Standalone runs: 'No documents found. Skipping execution for the Connector step.', zero counterparty lines; the control run executed right after posted its line (channel live).",
+     "row": "No carry-over: each child run on its own finds an empty cache",
+     "row_index": 2,
+     "verdict": "ADMIT"
+    }
+   ],
+   "rule": "cache_retrieve.empty_cache_emits_no_documents",
+   "status": "measured"
+  },
+  {
+   "controls": [],
+   "rows": [
+    {
+     "capture": "cap184-shared-cache",
+     "checks": {
+      "child_pt_bodies_are_cached_c1_c3": true,
+      "child_pt_no_own_record": true,
+      "not_the_passed_in_callpt_doc": true,
+      "parent_COMPLETE": true
+     },
+     "files": [
+      {
+       "file": "captures/cap184-shared-cache/runs/cache-1/child_execution-809b835e-c5fa-4cf7-a792-e048f927b535-2026.09.13_process_log.txt",
+       "sha256": "ca3b47548b712a92827343169996005b5284578d813ae80591fb4b7c06907614"
+      },
+      {
+       "file": "captures/cap184-shared-cache/runs/cache-1/child_execution_records.json",
+       "sha256": "609dc23a77f58a5d88091a26bb7996c48da0fa97162a97af125b6a20bf3376e9"
+      },
+      {
+       "file": "captures/cap184-shared-cache/runs/cache-1/execute.json",
+       "sha256": "bca667f2a4002a73b23ddda6e5f31435ec78eb609dd318b2ca1d4d431e976afb"
+      },
+      {
+       "file": "captures/cap184-shared-cache/runs/cache-1/mock_access_log_window.txt",
+       "sha256": "84af11c908e377be6a6cc74287184eb1d99a5ef980726fb9d00eec7ce3dfd9ee"
+      },
+      {
+       "file": "captures/cap184-shared-cache/runs/cache-1/parent_execution_record.json",
+       "sha256": "5b43217b87d801f7103263e0a38086a6bff1f237bc2437d51b12765fdb4d3155"
+      },
+      {
+       "file": "captures/cap184-shared-cache/runs/cache-1/parent_process_log.txt",
+       "sha256": "4b0b930210e50962f2116a29275879f83d6b0bcfb2ffdbbf9624abde3983069c"
+      },
+      {
+       "file": "captures/cap184-shared-cache/runs/cache-1/wire_inbound_requests_window.json",
+       "sha256": "828ed7ade53880bff6becb54158a8f53b2d9fa767cabcd7ddeb77829c690a557"
+      },
+      {
+       "file": "captures/cap184-shared-cache/MANIFEST.json",
+       "sha256": "e9c648eff2f3f962a8443dc5e709d4f8661ad7a89b0212bb0b7b297fd3cb83f9"
+      }
+     ],
+     "observation": "Child passthrough (passed 1 doc 'callpt') -> retrieve-all -> 3 requests with the parent's cached c1..c3.",
+     "row": "Data Passthrough child retrieves the parent's document-cache contents",
+     "row_index": 0,
+     "verdict": "ADMIT"
+    },
+    {
+     "capture": "cap184-shared-cache",
+     "checks": {
+      "child_nd_bodies_are_cached_c1_c3": true,
+      "one_sub_process_record_in1_out3": true,
+      "witness_present": true
+     },
+     "files": [
+      {
+       "file": "captures/cap184-shared-cache/runs/cache-1/child_execution-809b835e-c5fa-4cf7-a792-e048f927b535-2026.09.13_process_log.txt",
+       "sha256": "ca3b47548b712a92827343169996005b5284578d813ae80591fb4b7c06907614"
+      },
+      {
+       "file": "captures/cap184-shared-cache/runs/cache-1/child_execution_records.json",
+       "sha256": "609dc23a77f58a5d88091a26bb7996c48da0fa97162a97af125b6a20bf3376e9"
+      },
+      {
+       "file": "captures/cap184-shared-cache/runs/cache-1/execute.json",
+       "sha256": "bca667f2a4002a73b23ddda6e5f31435ec78eb609dd318b2ca1d4d431e976afb"
+      },
+      {
+       "file": "captures/cap184-shared-cache/runs/cache-1/mock_access_log_window.txt",
+       "sha256": "84af11c908e377be6a6cc74287184eb1d99a5ef980726fb9d00eec7ce3dfd9ee"
+      },
+      {
+       "file": "captures/cap184-shared-cache/runs/cache-1/parent_execution_record.json",
+       "sha256": "5b43217b87d801f7103263e0a38086a6bff1f237bc2437d51b12765fdb4d3155"
+      },
+      {
+       "file": "captures/cap184-shared-cache/runs/cache-1/parent_process_log.txt",
+       "sha256": "4b0b930210e50962f2116a29275879f83d6b0bcfb2ffdbbf9624abde3983069c"
+      },
+      {
+       "file": "captures/cap184-shared-cache/runs/cache-1/wire_inbound_requests_window.json",
+       "sha256": "828ed7ade53880bff6becb54158a8f53b2d9fa767cabcd7ddeb77829c690a557"
+      },
+      {
+       "file": "captures/cap184-shared-cache/MANIFEST.json",
+       "sha256": "e9c648eff2f3f962a8443dc5e709d4f8661ad7a89b0212bb0b7b297fd3cb83f9"
+      }
+     ],
+     "observation": "Child sub_process execution retrieved c1..c3 from the parent's cache.",
+     "row": "No Data child (own sub_process execution) retrieves the parent's document-cache contents",
+     "row_index": 1,
+     "verdict": "ADMIT"
+    },
+    {
+     "capture": "cap184-prefix-predecessors",
+     "checks": {
+      "child_body_carries_this_parent_token": true,
+      "child_request_exactly_1": true,
+      "parent_COMPLETE": true,
+      "process_call_executed_with_1_doc": true,
+      "stored_processcall_has_no_outgoing": true,
+      "stored_shapes_equal_modulo_entity_escaping": true
+     },
+     "files": [
+      {
+       "file": "captures/cap184-prefix-predecessors/runs/pfx_cache_retrieve_br-1/child_execution_records.json",
+       "sha256": "c1988a5f70b3bd52189c578821ef502cfb146f34fc953775d0ca6bb1ba3f0e05"
+      },
+      {
+       "file": "captures/cap184-prefix-predecessors/runs/pfx_cache_retrieve_br-1/execute.json",
+       "sha256": "2f02850b89094bd086f0c5ad7737dd87322f0c660b5ed6288bf65c0d59e698aa"
+      },
+      {
+       "file": "captures/cap184-prefix-predecessors/runs/pfx_cache_retrieve_br-1/mock_access_log_window.txt",
+       "sha256": "f712d232b8ba7c969b0d725383a3b08a2ac7d216de5dee1a9064d7752e5f784a"
+      },
+      {
+       "file": "captures/cap184-prefix-predecessors/runs/pfx_cache_retrieve_br-1/parent_execution_record.json",
+       "sha256": "eb6db0928c72258b34e5cc3b0aa94df1a01d0a3cff99ce73e3ac03b408dc8cb9"
+      },
+      {
+       "file": "captures/cap184-prefix-predecessors/runs/pfx_cache_retrieve_br-1/parent_process_log.txt",
+       "sha256": "8f13aa9867751ed74882c4d24becbb32448807aaf4353836a314bc778c2f957e"
+      },
+      {
+       "file": "captures/cap184-prefix-predecessors/runs/pfx_cache_retrieve_br-1/wire_inbound_requests_window.json",
+       "sha256": "46c6f1971d676ba8e3bcc07f694d708e1946e9a7c9ca7982dd4911baeb4267f7"
+      },
+      {
+       "file": "captures/cap184-prefix-predecessors/components/pfx_cache_retrieve_br.stored.xml",
+       "sha256": "6a410eb7a616dd507ef43bdcb3e0533ab7b9a7fd1f2ed177b04c73efc31656ef"
+      },
+      {
+       "file": "captures/cap184-prefix-predecessors/components/pfx_cache_retrieve_br.submitted.xml",
+       "sha256": "b549dd75238b8c14b26aaccae2aa2f131f31da80170d93dce09802fdcb112d58"
+      },
+      {
+       "file": "captures/cap184-prefix-predecessors/MANIFEST.json",
+       "sha256": "11c8a8ab5af953278a9d512b9bcccbb6a945c39c5623f7438e0610a9ac4aceda"
+      }
+     ],
+     "observation": "body=['{\"k\": \"E01840913062808-pfx-cache_retrieve-br\"}']; UI rendering not observed (browser extension not connected)",
+     "row": "cache_retrieve wired directly into a terminal Process Call in a Branch leg",
+     "row_index": 4,
+     "verdict": "ADMIT"
+    },
+    {
+     "capture": "cap184-prefix-predecessors",
+     "checks": {
+      "child_body_carries_this_parent_token": true,
+      "child_request_exactly_1": true,
+      "parent_COMPLETE": true,
+      "process_call_executed_with_1_doc": true,
+      "stored_processcall_has_no_outgoing": true,
+      "stored_shapes_equal_modulo_entity_escaping": true
+     },
+     "files": [
+      {
+       "file": "captures/cap184-prefix-predecessors/runs/pfx_cache_retrieve_dec-1/child_execution_records.json",
+       "sha256": "c1988a5f70b3bd52189c578821ef502cfb146f34fc953775d0ca6bb1ba3f0e05"
+      },
+      {
+       "file": "captures/cap184-prefix-predecessors/runs/pfx_cache_retrieve_dec-1/execute.json",
+       "sha256": "305b634d6ebbe56e2c083aaf969382014f8c23390e6a2fdc132a989e0f582992"
+      },
+      {
+       "file": "captures/cap184-prefix-predecessors/runs/pfx_cache_retrieve_dec-1/mock_access_log_window.txt",
+       "sha256": "a8ef4e85376677a36cae3ff35352b1c219e9b44fe04adde0573859bb047783b4"
+      },
+      {
+       "file": "captures/cap184-prefix-predecessors/runs/pfx_cache_retrieve_dec-1/parent_execution_record.json",
+       "sha256": "4fd9eb0ff52970854c89bb4d786fc3c34e6da2c4dadf3679267c810f2c06e00c"
+      },
+      {
+       "file": "captures/cap184-prefix-predecessors/runs/pfx_cache_retrieve_dec-1/parent_process_log.txt",
+       "sha256": "c5d0a1f83a321bb3dacef947fa54f820a2dd2872aaa2146c1bb5f2b1ec622a40"
+      },
+      {
+       "file": "captures/cap184-prefix-predecessors/runs/pfx_cache_retrieve_dec-1/wire_inbound_requests_window.json",
+       "sha256": "ea5190bd65d11e4a00c6cc8dc9edff553af51e641c524e3652953ca2a7807ca3"
+      },
+      {
+       "file": "captures/cap184-prefix-predecessors/components/pfx_cache_retrieve_dec.stored.xml",
+       "sha256": "ac25584e50bf2823ab76a4910e0d538a8fde114448f0a105fbde819919f044a4"
+      },
+      {
+       "file": "captures/cap184-prefix-predecessors/components/pfx_cache_retrieve_dec.submitted.xml",
+       "sha256": "017d9fe0d895b5e61c11804651766e0b668148ea691a177df9f60fcfe1b3c9a5"
+      },
+      {
+       "file": "captures/cap184-prefix-predecessors/MANIFEST.json",
+       "sha256": "11c8a8ab5af953278a9d512b9bcccbb6a945c39c5623f7438e0610a9ac4aceda"
+      }
+     ],
+     "observation": "body=['{\"k\": \"E01840913062808-pfx-cache_retrieve-dec\"}']; UI rendering not observed (browser extension not connected)",
+     "row": "cache_retrieve wired directly into a terminal Process Call in a Decision TRUE arm",
+     "row_index": 5,
+     "verdict": "ADMIT"
+    },
+    {
+     "capture": "cap184-retrieve-ddp-replacement",
+     "checks": {
+      "exactly_one_bound_request_and_its_body_is_the_CACHED_document": true,
+      "mock_has_X-cached": true,
+      "mock_has_no_X-current_and_no_POST_root": true,
+      "status_COMPLETE": true,
+      "witness_present": true
+     },
+     "files": [
+      {
+       "file": "captures/cap184-retrieve-ddp-replacement/runs/r1/execute.json",
+       "sha256": "145377ffc9b9865be9f45222af3048a2923fef23e6c8aa003b68020ccfd7af1c"
+      },
+      {
+       "file": "captures/cap184-retrieve-ddp-replacement/runs/r1/execution_record.json",
+       "sha256": "820a82486f61c629963c587d0febd4f35dcd1beb2695a716cd195ffa6f78b0a3"
+      },
+      {
+       "file": "captures/cap184-retrieve-ddp-replacement/runs/r1/mock_access_log_window.txt",
+       "sha256": "978af3fc8c65fda5d1879ba42636912efa2de21372c55896f05083fbfdf89c52"
+      },
+      {
+       "file": "captures/cap184-retrieve-ddp-replacement/runs/r1/process_log.txt",
+       "sha256": "d3ee4264bf8c4d9f22ada69a237562fa734e35f583bfa4533cc38b0865009ecf"
+      },
+      {
+       "file": "captures/cap184-retrieve-ddp-replacement/runs/r1/process_log_skip_lines.txt",
+       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+       "file": "captures/cap184-retrieve-ddp-replacement/runs/r1/wire_inbound_requests_window.json",
+       "sha256": "eda2d1453e887340c494d5229828b4b6adadacf685613779ab4692b33dc1af9f"
+      },
+      {
+       "file": "captures/cap184-retrieve-ddp-replacement/MANIFEST.json",
+       "sha256": "f005c72f8a5133395faeff6c6593cc52387bf6e7b38cf4a5c34c5e8ecc8a2510"
+      }
+     ],
+     "observation": "wire: ['POST /__E1_184__/E11840913073745/r1/X-cached HTTP/1.1'] body ['{\"k\": \"E11840913073745-r1-cached\"}']",
+     "row": "R1 cached doc X=cached, current doc X=current -> the retrieved document's X is the CACHED value",
+     "row_index": 0,
+     "verdict": "ADMIT"
+    }
+   ],
+   "rule": "cache_retrieve.replaces_payload_with_cached_documents",
+   "status": "measured"
+  },
+  {
+   "controls": [],
+   "rows": [
+    {
+     "capture": "cap184-retrieve-ddp-replacement",
+     "checks": {
+      "exactly_one_bound_request_and_its_body_is_the_CACHED_document": true,
+      "mock_has_X-cached": true,
+      "mock_has_no_X-current_and_no_POST_root": true,
+      "status_COMPLETE": true,
+      "witness_present": true
+     },
+     "files": [
+      {
+       "file": "captures/cap184-retrieve-ddp-replacement/runs/r1/execute.json",
+       "sha256": "145377ffc9b9865be9f45222af3048a2923fef23e6c8aa003b68020ccfd7af1c"
+      },
+      {
+       "file": "captures/cap184-retrieve-ddp-replacement/runs/r1/execution_record.json",
+       "sha256": "820a82486f61c629963c587d0febd4f35dcd1beb2695a716cd195ffa6f78b0a3"
+      },
+      {
+       "file": "captures/cap184-retrieve-ddp-replacement/runs/r1/mock_access_log_window.txt",
+       "sha256": "978af3fc8c65fda5d1879ba42636912efa2de21372c55896f05083fbfdf89c52"
+      },
+      {
+       "file": "captures/cap184-retrieve-ddp-replacement/runs/r1/process_log.txt",
+       "sha256": "d3ee4264bf8c4d9f22ada69a237562fa734e35f583bfa4533cc38b0865009ecf"
+      },
+      {
+       "file": "captures/cap184-retrieve-ddp-replacement/runs/r1/process_log_skip_lines.txt",
+       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+       "file": "captures/cap184-retrieve-ddp-replacement/runs/r1/wire_inbound_requests_window.json",
+       "sha256": "eda2d1453e887340c494d5229828b4b6adadacf685613779ab4692b33dc1af9f"
+      },
+      {
+       "file": "captures/cap184-retrieve-ddp-replacement/MANIFEST.json",
+       "sha256": "f005c72f8a5133395faeff6c6593cc52387bf6e7b38cf4a5c34c5e8ecc8a2510"
+      }
+     ],
+     "observation": "wire: ['POST /__E1_184__/E11840913073745/r1/X-cached HTTP/1.1'] body ['{\"k\": \"E11840913073745-r1-cached\"}']",
+     "row": "R1 cached doc X=cached, current doc X=current -> the retrieved document's X is the CACHED value",
+     "row_index": 0,
+     "verdict": "ADMIT"
+    },
+    {
+     "capture": "cap184-retrieve-ddp-replacement",
+     "checks": {
+      "exactly_one_bound_request_and_its_body_is_the_CACHED_document": true,
+      "mock_has_X-current": true,
+      "mock_has_no_X-cached_and_no_POST_root": true,
+      "status_COMPLETE": true,
+      "witness_present": true
+     },
+     "files": [
+      {
+       "file": "captures/cap184-retrieve-ddp-replacement/runs/r2/execute.json",
+       "sha256": "b07100af36bc7868b4c008bd5b8598c0d14be98b2114a479c83ca31a60212879"
+      },
+      {
+       "file": "captures/cap184-retrieve-ddp-replacement/runs/r2/execution_record.json",
+       "sha256": "16af858e0cfb0c2f1cea52ee493f035797ee5ed5f7f86673ba467051b91a7a6c"
+      },
+      {
+       "file": "captures/cap184-retrieve-ddp-replacement/runs/r2/mock_access_log_window.txt",
+       "sha256": "46403a9505f9d863bed89c0fc5b6330139add95e435437a8c4ce1a65d98bc8ad"
+      },
+      {
+       "file": "captures/cap184-retrieve-ddp-replacement/runs/r2/process_log.txt",
+       "sha256": "ad96b04d4a33382c500db34bb11fbb862e3f90eab0fae75616acc33cca24e5f6"
+      },
+      {
+       "file": "captures/cap184-retrieve-ddp-replacement/runs/r2/process_log_skip_lines.txt",
+       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+       "file": "captures/cap184-retrieve-ddp-replacement/runs/r2/wire_inbound_requests_window.json",
+       "sha256": "657deace07bb3a653f8f195025f043e36e5e4aa42a2717c6fd77cbabf24afdd4"
+      },
+      {
+       "file": "captures/cap184-retrieve-ddp-replacement/MANIFEST.json",
+       "sha256": "f005c72f8a5133395faeff6c6593cc52387bf6e7b38cf4a5c34c5e8ecc8a2510"
+      }
+     ],
+     "observation": "wire: ['POST /__E1_184__/E11840913073745/r2/X-current HTTP/1.1'] body ['{\"k\": \"E11840913073745-r2-cached\"}']",
+     "row": "R2 cached doc has NO X, current doc X=current -> the retrieved document's X is the CURRENT value (not empty)",
+     "row_index": 1,
+     "verdict": "ADMIT"
+    },
+    {
+     "capture": "cap184-retrieve-ddp-replacement",
+     "checks": {
+      "exactly_one_bound_request_and_its_body_is_the_CACHED_document": true,
+      "mock_has_X-cached": true,
+      "mock_has_no_X-current_and_no_POST_root": true,
+      "status_COMPLETE": true,
+      "witness_present": true
+     },
+     "files": [
+      {
+       "file": "captures/cap184-retrieve-ddp-replacement/runs/r3/execute.json",
+       "sha256": "8805cff6b8b9350569c420fefe5a1ae447402f126b7df12e7a2a9b7659f7e479"
+      },
+      {
+       "file": "captures/cap184-retrieve-ddp-replacement/runs/r3/execution_record.json",
+       "sha256": "c60267f2d40e465ad225005eb58a8c71e9ce1d8d5e63ba5c51d861aecb8e1199"
+      },
+      {
+       "file": "captures/cap184-retrieve-ddp-replacement/runs/r3/mock_access_log_window.txt",
+       "sha256": "92fafa7098a9b69e6bfad7283f9509d8c3cf1d80ee1b3a5d70e760f7e4e33841"
+      },
+      {
+       "file": "captures/cap184-retrieve-ddp-replacement/runs/r3/process_log.txt",
+       "sha256": "1ad80308e0abc011db53cf0748c8fe6398e8bc89600330b2f552c5dd52645abb"
+      },
+      {
+       "file": "captures/cap184-retrieve-ddp-replacement/runs/r3/process_log_skip_lines.txt",
+       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+       "file": "captures/cap184-retrieve-ddp-replacement/runs/r3/wire_inbound_requests_window.json",
+       "sha256": "2f1d9940cb01a97a238e1d4beced3d1f63b18dd94ef125b3b420292962532196"
+      },
+      {
+       "file": "captures/cap184-retrieve-ddp-replacement/MANIFEST.json",
+       "sha256": "f005c72f8a5133395faeff6c6593cc52387bf6e7b38cf4a5c34c5e8ecc8a2510"
+      }
+     ],
+     "observation": "wire: ['POST /__E1_184__/E11840913073745/r3/X-cached HTTP/1.1'] body ['{\"k\": \"E11840913073745-r3-cached\"}']",
+     "row": "R3 control (repeats e0): cached doc X=cached, current doc sets nothing -> X is the CACHED value",
+     "row_index": 2,
+     "verdict": "ADMIT"
+    },
+    {
+     "capture": "cap184-retrieve-ddp-replacement",
+     "checks": {
+      "X_request_is_X-cached": true,
+      "Y_request_is_Y-current": true,
+      "both_bodies_are_the_cached_document": true,
+      "no_POST_root": true,
+      "status_COMPLETE": true,
+      "witness_present": true
+     },
+     "files": [
+      {
+       "file": "captures/cap184-retrieve-ddp-replacement/runs/r4/execute.json",
+       "sha256": "cd39be3b05e485efe1e676d049f366a9dc98f30ce287fcbb18422945ba508cf8"
+      },
+      {
+       "file": "captures/cap184-retrieve-ddp-replacement/runs/r4/execution_record.json",
+       "sha256": "88db3401e3999b2c161fbe351833566c6dafc0fa8c4c2562d05d05700e380472"
+      },
+      {
+       "file": "captures/cap184-retrieve-ddp-replacement/runs/r4/mock_access_log_window.txt",
+       "sha256": "300ea0f5712614a498e9713c3ca0aa6d15cdc0142f115073357b8c25d7d238ea"
+      },
+      {
+       "file": "captures/cap184-retrieve-ddp-replacement/runs/r4/process_log.txt",
+       "sha256": "ab3d29870800d64c84f79a6bd491aca747bcecdf2976a7b4ff90696f1ec182e3"
+      },
+      {
+       "file": "captures/cap184-retrieve-ddp-replacement/runs/r4/process_log_skip_lines.txt",
+       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+       "file": "captures/cap184-retrieve-ddp-replacement/runs/r4/wire_inbound_requests_window.json",
+       "sha256": "9bb55bb7231dc228a40e391aa84bb9b72cf95244030bafb2127bc083e048a412"
+      },
+      {
+       "file": "captures/cap184-retrieve-ddp-replacement/MANIFEST.json",
+       "sha256": "f005c72f8a5133395faeff6c6593cc52387bf6e7b38cf4a5c34c5e8ecc8a2510"
+      }
+     ],
+     "observation": "X reached the wire as X-cached and Y as Y-current, both on the cached document's body.",
+     "row": "R4 as R1 plus Y=current set ONLY on the current doc -> X is CACHED and Y SURVIVES the retrieve",
+     "row_index": 3,
+     "verdict": "ADMIT"
+    },
+    {
+     "capture": "cap184-passthrough-ddp-handoff",
+     "checks": {
+      "3_requests_path_tail_equals_body_k (DDP SURVIVED)": true,
+      "bodies_are_the_CACHED_docs_c1_c3": true,
+      "no_POST_root": true,
+      "parent_COMPLETE": true,
+      "witness_present": true
+     },
+     "files": [
+      {
+       "file": "captures/cap184-passthrough-ddp-handoff/runs/ddp-cache-1/child_execution_records.json",
+       "sha256": "bca94e6c9e1e15a12db237cc75c21ccce6851ceccba1ae77a344bdb3a4562929"
+      },
+      {
+       "file": "captures/cap184-passthrough-ddp-handoff/runs/ddp-cache-1/execute.json",
+       "sha256": "859578d2980f265034caa4013daec99f489ff3355ec7f0306432237b440f4955"
+      },
+      {
+       "file": "captures/cap184-passthrough-ddp-handoff/runs/ddp-cache-1/mock_access_log_window.txt",
+       "sha256": "981007c9747a9425268863748023f6bae252da11980ff4acb4aa02f092a6e9ca"
+      },
+      {
+       "file": "captures/cap184-passthrough-ddp-handoff/runs/ddp-cache-1/parent_execution_record.json",
+       "sha256": "88d0cbf62b9105fc9d8c3698bc0bd0dcb3c55f5a5ec153ec99d6aada3b62509d"
+      },
+      {
+       "file": "captures/cap184-passthrough-ddp-handoff/runs/ddp-cache-1/parent_process_log.txt",
+       "sha256": "f558f8351862112aab18bdf7b75664150f54c8970a57ee8f984dae9cca9621ae"
+      },
+      {
+       "file": "captures/cap184-passthrough-ddp-handoff/runs/ddp-cache-1/wire_inbound_requests_window.json",
+       "sha256": "92ab01cd6d356e8b41b3ece28c20464a3083ad62e77ed5a8a2d6275fcc556829"
+      },
+      {
+       "file": "captures/cap184-passthrough-ddp-handoff/MANIFEST.json",
+       "sha256": "76ade3b978e2f4f61e01ac48e6ef46810e3376e520998be09ca6b02fc8e41760"
+      }
+     ],
+     "observation": "REFUTED in this configuration: the retrieved (cached) documents c1..c3 reached the wire with their own parent-set DDP paths; nothing was lost.",
+     "row": "Dispatch expectation 'child first step = document cache retrieve LOSES the handed-off DDP'",
+     "row_index": 2,
+     "verdict": "REFUSE"
+    }
+   ],
+   "rule": "cache_retrieve.ddp_overlay_one_current_one_cached",
+   "status": "measured"
+  },
+  {
+   "controls": [],
+   "rows": [
+    {
+     "capture": "cap184-retrieve-ddp-replacement",
+     "checks": {
+      "measured": false
+     },
+     "files": [
+      {
+       "file": "captures/cap184-retrieve-ddp-replacement/MANIFEST.json",
+       "sha256": "f005c72f8a5133395faeff6c6593cc52387bf6e7b38cf4a5c34c5e8ecc8a2510"
+      }
+     ],
+     "observation": "Every R run retrieved exactly 1 cached document for exactly 1 current document.",
+     "row": "Rule scope: N current documents x M cached documents (which current document's properties each retrieved document inherits)",
+     "row_index": 4,
+     "verdict": "OPEN"
+    }
+   ],
+   "rule": "cache_retrieve.ddp_overlay_many_current_many_cached",
+   "status": "open"
+  },
+  {
+   "controls": [],
+   "rows": [
+    {
+     "capture": "cap184-send-then-read",
+     "checks": {
+      "measured": false
+     },
+     "files": [
+      {
+       "file": "captures/cap184-send-then-read/RECORD.json",
+       "sha256": "6f4117a7db23aee9fe6e86fc1860a35e0a8fd2e70a6a11c8c53272023be6971c"
+      },
+      {
+       "file": "captures/cap184-send-then-read/MANIFEST.json",
+       "sha256": "37d9af3189dcdb058f212255d413fe739893c23da769777a1c600c0165efa930"
+      }
+     ],
+     "observation": "Not executed: no cheap non-producing operation on this stack (see RECORD.json).",
+     "row": "non-producing connector -> Retrieve from Cache (primed) -> witness: the retrieve runs",
+     "row_index": 0,
+     "verdict": "OPEN"
+    }
+   ],
+   "rule": "cache_retrieve.after_non_producing_call",
+   "status": "open"
+  },
+  {
+   "controls": [
+    {
+     "file": "captures/cap184-cache-put-successor/controls/exception_binding_none_probe.json",
+     "sha256": "7e76a6586e34899c234d5aca3d545d22f9cfc4335809bf81aba80b9c0489e98c"
+    },
+    {
+     "file": "captures/cap184-cache-put-successor/controls/exception_binding_none.submitted.xml",
+     "sha256": "5ccb03989cc6717bc5db638ba42d004e6b27a8c775a98f69dee3673c0b2c232c"
+    }
+   ],
+   "rows": [],
+   "rule": "exception.parameter_source_none_refused_on_create",
+   "status": "measured"
+  }
+ ],
+ "script": "docs/architecture/evidence/issue-184/document_emission/build_capture_index.py",
+ "sums": "docs/architecture/evidence/issue-184/SHA256SUMS"
+}
