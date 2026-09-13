@@ -1,0 +1,96 @@
+{
+  "branch_point": "cbab28ffc176ddb2378283cf7132eb9c37afc374",
+  "interpreter": "3.12.13",
+  "purpose": "#184 amendment 3 \u00a76: canonical terminal cache replacements",
+  "records": [
+    {
+      "authority_checks": [
+        {
+          "authority": "tests/fixtures/live_xml/m11/process_cache_branch_load_remove.xml",
+          "authority_sha256": "ae6a9392a7d7e56bca58338667951f610bec53ddc7338fed7ee6a3f72a07a4a8",
+          "shapetype": "doccacheremove"
+        }
+      ],
+      "basename": "cache_remove_terminal_branch",
+      "branch_point_render_sha256": "e86c4d6e04dcebddf24612e0e3fc07ceed548542e1f72f1fedc496e017275254",
+      "fixture": "tests/fixtures/process_ir/issue184/cache_remove_terminal_branch.json",
+      "fixture_sha256": "e8ca36959a15f0997c3c22a3298ada31404ef65293adee50afdf44347067e7ec",
+      "golden": "tests/fixtures/golden_xml/issue184_cache_remove_terminal_branch.xml",
+      "golden_bytes": 2014,
+      "golden_sha256": "b4b8d4287264e02aade4c2f8bb829efb26231b44817e3e8992aea4a1dea71a12",
+      "retired": "golden-000012",
+      "transform": "removed shape6's single outgoing dragpoint and the final Stop shape7"
+    },
+    {
+      "authority_checks": [
+        {
+          "authority": "docs/architecture/evidence/issue-184/captures/cap184-retrieve-ddp-replacement/components/r1_ddp_replacement.stored.xml",
+          "authority_sha256": "7da7458386efb35e05c35e59e66054c48b91f60164dbb7d7be67a5b1b551ed53",
+          "shapetype": "doccacheload"
+        },
+        {
+          "authority": "docs/architecture/evidence/issue-184/captures/cap184-retrieve-ddp-replacement/components/r1_ddp_replacement.stored.xml",
+          "authority_sha256": "7da7458386efb35e05c35e59e66054c48b91f60164dbb7d7be67a5b1b551ed53",
+          "shapetype": "doccacheretrieve"
+        },
+        {
+          "authority": "tests/fixtures/live_xml/m11/process_cache_branch_load_remove.xml",
+          "authority_sha256": "ae6a9392a7d7e56bca58338667951f610bec53ddc7338fed7ee6a3f72a07a4a8",
+          "shapetype": "doccacheremove"
+        }
+      ],
+      "basename": "cache_stage_read_remove",
+      "branch_point_render_sha256": "5261794531cc0b6cfa28b5bc6b1b3bee2b024fe37c0e7a96d5f417ca326b6f72",
+      "fixture": "tests/fixtures/process_ir/issue184/cache_stage_read_remove.json",
+      "fixture_sha256": "a11ec8c55bc3d9015000082937b5567b7799d47d4e207d328ff7a410e9cb7c30",
+      "golden": "tests/fixtures/golden_xml/issue184_cache_stage_read_remove.xml",
+      "golden_bytes": 2679,
+      "golden_sha256": "2515c16100e6475ed19c9c7471eda9e09fae42f5bb81504ec2aeeb2183e71665",
+      "retired": "golden-000018",
+      "transform": "removed shape8's single outgoing dragpoint and the final Stop shape9"
+    },
+    {
+      "authority_checks": [
+        {
+          "authority": "docs/architecture/evidence/issue-184/captures/cap184-retrieve-ddp-replacement/components/r1_ddp_replacement.stored.xml",
+          "authority_sha256": "7da7458386efb35e05c35e59e66054c48b91f60164dbb7d7be67a5b1b551ed53",
+          "shapetype": "doccacheload"
+        },
+        {
+          "authority": "docs/architecture/evidence/issue-184/captures/cap184-retrieve-ddp-replacement/components/r1_ddp_replacement.stored.xml",
+          "authority_sha256": "7da7458386efb35e05c35e59e66054c48b91f60164dbb7d7be67a5b1b551ed53",
+          "shapetype": "doccacheretrieve"
+        }
+      ],
+      "basename": "cache_stage_read",
+      "branch_point_render_sha256": "e63c53802710b2e7cafa9e68f70d196b40a25da97acbd5250a0ecceb48e7a171",
+      "fixture": "tests/fixtures/process_ir/issue184/cache_stage_read.json",
+      "fixture_sha256": "e752c0168ef9ff224a273134d55ab5e95092042d1cedb833e9f9a5da5e354d2a",
+      "golden": "tests/fixtures/golden_xml/issue184_cache_stage_read.xml",
+      "golden_bytes": 2325,
+      "golden_sha256": "e63c53802710b2e7cafa9e68f70d196b40a25da97acbd5250a0ecceb48e7a171",
+      "retired": "golden-000019",
+      "transform": "none"
+    },
+    {
+      "authority_checks": [
+        {
+          "authority": "docs/architecture/evidence/issue-184/captures/cap184-cache-put-successor/components/p3c_catch_exception_control.stored.xml",
+          "authority_sha256": "5753983de065100e60526d402f337936d65074ec52f0924202a89839362c51fc",
+          "shapetype": "exception"
+        }
+      ],
+      "basename": "catch_exception_without_cache_put",
+      "branch_point_render_sha256": "b01ad9c5b95ff931677bd759e71e8d25edafb550604b5530d83bc613a47465c9",
+      "fixture": "tests/fixtures/process_ir/issue184/catch_exception_without_cache_put.json",
+      "fixture_sha256": "a9d561f895d2aa616cdb2019e44d868edaafd782a29d5ab4e2d58d652bf1a33c",
+      "golden": "tests/fixtures/golden_xml/issue184_catch_exception_without_cache_put.xml",
+      "golden_bytes": 1894,
+      "golden_sha256": "b01ad9c5b95ff931677bd759e71e8d25edafb550604b5530d83bc613a47465c9",
+      "retired": "golden-000066",
+      "transform": "none"
+    }
+  ],
+  "renderer": "compiler + emit_process at the branch point (process-xml-v1)",
+  "symbols": "error_symbols() at the branch point"
+}

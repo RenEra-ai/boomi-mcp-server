@@ -67,3 +67,68 @@ which #184 refuses. This replacement keeps the source-role spine that the captur
 (`start → documentproperties → connectoraction GET{Path} → connectoraction PATCH → stop`). It
 composes the path from a run-supplied dynamic process property, the driver the platform actually
 ran.
+
+## Terminal cache replacements — the seven cache-successor goldens (amendment 3 §6)
+
+**Why they retire.** Add to Cache and all-document Remove from Cache emit zero documents. Any step
+wired after them is skipped, and the run still reads COMPLETE. Evidence:
+`cap184-prefix-predecessors`, `cap184-passthrough-ddp-handoff` (`xr-ddp-cache-linear-1`),
+`cap184-cache-put-successor` and `cap184-cache-remove-read`, all under
+`docs/architecture/evidence/issue-184/captures/`.
+
+A scan of all 80 active goldens found exactly seven rows with an outbound edge from a cache sink
+(ten edges). Each is retired through the manifest's active-to-tombstone transition and replaced
+below. Seven additions minus seven retirements leaves the active floor at 80.
+
+| Retired | Replacement input case / expected file | Source of the expected bytes | sha256 (bytes) |
+| --- | --- | --- | --- |
+| `golden-000012` `process_flow:document_cache_remove` | `issue184:cache_remove_terminal_branch` / `issue184_cache_remove_terminal_branch.xml` | pristine branch-point render of `source → Branch[target; cache_remove → stop]`, then the recorded transform: drop the remove's single outgoing dragpoint and the final Stop `shape7` | `b4b8d4287264e02aade4c2f8bb829efb26231b44817e3e8992aea4a1dea71a12` (2014) |
+| `golden-000018` `process_flow:flow_sequence_cache_load_retrieve_remove` | `issue184:cache_stage_read_remove` / `issue184_cache_stage_read_remove.xml` | pristine render of `source → Branch[cache_put; cache_get → target; cache_remove → stop]`, same transform on `shape8`/`shape9` | `2515c16100e6475ed19c9c7471eda9e09fae42f5bb81504ec2aeeb2183e71665` (2679) |
+| `golden-000019` `process_flow:flow_sequence_cache_put_get` | `issue184:cache_stage_read` / `issue184_cache_stage_read.xml` | pristine render of `source → Branch[cache_put; cache_get → target]`, no transform | `e63c53802710b2e7cafa9e68f70d196b40a25da97acbd5250a0ecceb48e7a171` (2325) |
+| `golden-000066` `issue154:catch_cache_put_exception` | `issue184:catch_exception_without_cache_put` / `issue184_catch_exception_without_cache_put.xml` | pristine render of 000066's input with the catch-body write removed and the message no longer claiming a stage; no transform | `b01ad9c5b95ff931677bd759e71e8d25edafb550604b5530d83bc613a47465c9` (1894) |
+| `golden-000005` `trycatch_dlq:connector_scope_notify` | `trycatch_dlq:connector_scope_notify_terminal` / `issue184_cache_notify_connector_terminal.xml` | byte transform of the immutable pre-change golden: drop both cache outgoing dragpoints and the synthetic Stops `shape10`, `shape13` | `49ed42fbd2d7df0ac668d8e5d58b84bc0bbaff6a3a36343f5f3dafdf36f67658` (5276) |
+| `golden-000059` `trycatch_dlq:notify_document_cache` | `trycatch_dlq:notify_document_cache_terminal` / `issue184_cache_notify_terminal.xml` | same transform, synthetic Stop `shape8` | `dd29439ea851a49d8280d14588eea36a8a622b8f06564ffef65bf9fb8dc5ca2c` (3520) |
+| `golden-000060` `archetype_dlq:notify_document_cache` | `archetype_dlq:notify_document_cache_terminal` / `issue184_cache_notify_archetype_terminal.xml` | same transform, synthetic Stops `shape10`, `shape13` | `cc3b88770710800fb782c4ea73d36a24176bed67617f4f8d2dfc8aaf2829a728` (5826) |
+
+The replacement input-case names for the three notify rows are provisional until the rows are
+registered; the byte records do not depend on them.
+
+**Provenance classes.**
+
+* The **canonical four** are renders by the canonical compiler and `emit_process` imported from a
+  detached worktree of the branch point `cbab28ffc176ddb2378283cf7132eb9c37afc374`. The script
+  asserts the worktree's head, its clean state and the import origin, so the code #184 changes
+  supplies no byte.
+* Every cache and Exception shape in them is also checked, ids and layout aside, against a stored
+  independent artifact:
+  * terminal Add to Cache and the triggered retrieve against `cap184-retrieve-ddp-replacement`
+    `r1_ddp_replacement.stored.xml` (executed COMPLETE; the R1 overlay row was decided on it);
+  * the terminal all-document remove against the platform-authored
+    `tests/fixtures/live_xml/m11/process_cache_branch_load_remove.xml` (#119 census, pre-baseline);
+  * the Exception against the Exception-only control `p3c_catch_exception_control.stored.xml`
+    (executed; the run reads ERROR with the caught message).
+* The terminal-remove form does not exist at the branch point. So the remove renders as the LAST
+  Branch leg, followed by a Stop, and the transform deletes that Stop. It is the final allocated
+  shape, so nothing is renumbered.
+* The **notify three** are byte transforms of the goldens they retire. Those goldens predate this
+  slice. Every substitution is asserted to occur exactly once, with no remaining reference, and
+  each resulting terminal Add to Cache is checked against the same executed R1 capture. Remaining
+  shape ids and coordinates are unchanged, so the removed synthetic slots stay reserved.
+
+**What the replacements do NOT claim.** `catch_exception_without_cache_put` preserves the throwing
+intent; it does not claim stage-and-throw equivalence, which the platform does not provide. The
+original combination stays as a refusal witness. The staged read proves the ordered-Branch
+contract; it makes no claim about N×M property overlay, which stays OPEN.
+
+**Authored inputs.** The canonical four's inputs are written by the same script under
+`tests/fixtures/process_ir/issue184/`, in the NEW spelling: a Branch leg whose terminal is
+`cache_remove`. The notify three keep their existing legacy/archetype configurations, so their
+original routes stay exercised.
+
+**Records.**
+* `docs/architecture/evidence/issue-184/oracle/freeze_terminal_cache_canonical.py` →
+  `terminal_cache_canonical.MANIFEST.json`: branch-point render hashes, transform, golden and
+  fixture hashes, and the authority checks with authority hashes.
+* `docs/architecture/evidence/issue-184/oracle/freeze_terminal_cache_dlq.py` →
+  `terminal_cache_dlq.MANIFEST.json`: source and target hashes, removed shapes, and the
+  terminal-load authority with its hash.

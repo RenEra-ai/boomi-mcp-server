@@ -1,0 +1,38 @@
+{
+ "body": {
+  "kind": "sequence",
+  "steps": [
+   {
+    "connection_ref": "$ref:CONN",
+    "kind": "source",
+    "operation_ref": "$ref:GETOP"
+   },
+   {
+    "kind": "branch",
+    "legs": [
+     {
+      "steps": [],
+      "terminal": {
+       "cache_ref": "$ref:CACHE",
+       "kind": "cache_put"
+      }
+     },
+     {
+      "steps": [
+       {
+        "cache_ref": "$ref:CACHE",
+        "kind": "cache_get"
+       }
+      ],
+      "terminal": {
+       "connection_ref": "$ref:CONN",
+       "kind": "target",
+       "operation_ref": "$ref:PATCHOP"
+      }
+     }
+    ]
+   }
+  ]
+ },
+ "version": "1"
+}
