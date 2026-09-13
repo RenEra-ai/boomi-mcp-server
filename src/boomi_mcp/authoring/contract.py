@@ -1248,6 +1248,33 @@ def _compiler_revision_payload() -> dict:
             _execution_profile_behaviour_oracle,
         ),
         (
+            # #184 amendment 3 §10. The DOCUMENT-EMISSION authority: what each kind
+            # needs to run, what it hands on and how its graph continues. Grammar,
+            # connector resolution, lineage, emission and the legacy builder read it.
+            "document_emission",
+            _document_emission_rows,
+        ),
+        (
+            # #184 amendment 3 §7. The property-survival verdicts and the proved
+            # document count the retrieve overlay's current-document carry needs.
+            "property_survival",
+            lambda: {
+                "cells": sorted(
+                    [cell[0], cell[1] or "", verdict]
+                    for cell, verdict in _import(
+                        "semantic_validation.lineage"
+                    ).PROPERTY_SURVIVAL_V1.items()
+                ),
+                "overlay_count": _import("semantic_validation.lineage").COUNT_ONE,
+            },
+        ),
+        (
+            # #184 amendment 3 §8. The prefix evidence key and the child entry
+            # contract, as the verdicts a fixed set of calls receives.
+            "child_entry_contract",
+            _child_entry_behaviour_oracle,
+        ),
+        (
             "compiler_diagnostic_specs",
             lambda: [
                 dict(spec)
@@ -1289,6 +1316,92 @@ def _compiler_revision() -> str:
     how a row that had stopped loading survived a full suite.
     """
     return sha256_fingerprint(_compiler_revision_payload())
+
+
+def _plain(value):
+    """A hash-order-independent JSON value: sets sorted, tuples as lists."""
+    if isinstance(value, (set, frozenset)):
+        return sorted(_plain(item) for item in value)
+    if isinstance(value, (list, tuple)):
+        return [_plain(item) for item in value]
+    if isinstance(value, dict):
+        return {key: _plain(item) for key, item in sorted(value.items())}
+    return value
+
+
+def _document_emission_rows():
+    """Every document-emission row, as plain data (#184 amendment 3 §10)."""
+    from ..models.process_ir_document_semantics import DOCUMENT_EMISSION_V1
+
+    rows = []
+    for kind in sorted(DOCUMENT_EMISSION_V1):
+        row = DOCUMENT_EMISSION_V1[kind]
+        fields = row._asdict() if hasattr(row, "_asdict") else dict(vars(row))
+        rows.append(_plain(fields))
+    return rows
+
+
+def _child_entry_behaviour_oracle():
+    """The verdicts a fixed set of calls receives, for each child entry form (#184 amendment 3 §8).
+
+    A behaviour oracle rather than a copy of the rules: it plans a parent and a child
+    through the same derivation and discharge the server uses, so a change to either
+    moves the revision even when no table did.
+    """
+    from ..compiler.process_ir.contracts import ComponentSymbolV1, SymbolTableV1
+    from ..compiler.process_ir.semantic_validation.pipeline import validate_process_ir
+    from ..models import process_ir as model
+    from .process_ir_effects import resolve_process_ir_effect_declarations
+
+    symbols = SymbolTableV1(symbols=(
+        ComponentSymbolV1(ref="$ref:P1", component_id="P1", component_type="profile.json"),
+        ComponentSymbolV1(ref="$ref:M11", component_id="M11", component_type="transform.map",
+                          input_profile_ref="$ref:P1", output_profile_ref="$ref:P1"),
+        ComponentSymbolV1(ref="$ref:child", component_id="CHILD", component_type="process"),
+        ComponentSymbolV1(ref="$ref:parent", component_id="PARENT", component_type="process"),
+    ))
+    entry = {"kind": "passthrough"}
+    stop = {"kind": "stop"}
+    mapped = {"kind": "map_ref", "map_ref": "$ref:M11"}
+    children = {
+        "no_data": [{"kind": "decision", "comparison": "equals",
+                     "left": {"value_type": "static", "static_value": "a"},
+                     "right": {"value_type": "static", "static_value": "a"},
+                     "true_arm": {"steps": [{"kind": "message", "text": "m"}], "terminal": stop},
+                     "false_arm": {"steps": [], "terminal": stop}}],
+        "passthrough": [entry, mapped, stop],
+    }
+    verdicts = []
+    for form in sorted(children):
+        child = model.parse_process_ir_v1({"version": "1", "body": {"kind": "sequence", "steps": children[form]}})
+        for wait in (True, False):
+            for prefix in ((), (mapped,)):
+                parent = model.parse_process_ir_v1({"version": "1", "body": {"kind": "sequence", "steps": [
+                    entry,
+                    {"kind": "branch", "legs": [
+                        {"steps": list(prefix), "terminal": {"kind": "process_call", "process_ref": "$ref:child", "wait": wait}},
+                        {"steps": [{"kind": "message", "text": "m"}], "terminal": stop},
+                    ]},
+                ]}})
+                roots = [("parent", parent), ("child", child)]
+                resolution = resolve_process_ir_effect_declarations(
+                    roots, None, symbols, [], child_roots={"$ref:" + key: ir for key, ir in roots})
+                capabilities = resolution.capabilities_by_root.get("parent")
+                report = (
+                    validate_process_ir(parent, symbols, capabilities=capabilities)
+                    if capabilities is not None
+                    else validate_process_ir(parent, symbols)
+                )
+                row = capabilities.child_entry_contract("$ref:child") if capabilities is not None else None
+                verdicts.append([
+                    form, wait, bool(prefix),
+                    sorted([item.code, item.path] for item in report.errors),
+                    None if row is None else row.model_dump(mode="json"),
+                ])
+    return {
+        "prefix_key": sorted(_plain(list(row)) for row in model.PROCESS_CALL_ATTESTED_PREDECESSORS),
+        "verdicts": verdicts,
+    }
 
 
 def _replay_ids():

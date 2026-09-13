@@ -487,3 +487,33 @@ def test_a_direct_run_of_a_passthrough_root_that_needs_a_caller_is_refused_befor
     del _BUILD_REGISTRY[build_id]["authoring"]["standalone_entry"]
     unrecorded = _deploy(build_id, dry_run=True, run_test=True)
     assert unrecorded["errors"][0]["details"]["requirements"] == ["entry_contract_not_recorded"]
+
+
+def test_the_revision_moves_with_child_contract_emission_and_survival_behaviour(monkeypatch):
+    """Amendment 3 §10: a BEHAVIOUR change moves the compiler revision.
+
+    Each perturbation changes what the server accepts, not a sentence: admitting every
+    prefix key, marking a split as keeping document properties, and dropping a
+    document-emission row. The three revision rows read their authorities at call
+    time, so each perturbation is visible, and the baseline returns afterwards.
+    """
+    from types import MappingProxyType
+
+    from boomi_mcp.authoring import contract as authoring_contract
+    from boomi_mcp.models import process_ir_document_semantics as emission
+
+    baseline = authoring_contract._compiler_revision()
+    with monkeypatch.context() as patched:
+        patched.setattr(lineage, "process_call_prefix_admitted", lambda *args: True)
+        assert authoring_contract._compiler_revision() != baseline
+    with monkeypatch.context() as patched:
+        cells = dict(lineage.PROPERTY_SURVIVAL_V1)
+        cells[("data_process", "split_documents")] = "survives"
+        patched.setattr(lineage, "PROPERTY_SURVIVAL_V1", MappingProxyType(cells))
+        assert authoring_contract._compiler_revision() != baseline
+    with monkeypatch.context() as patched:
+        rows = dict(emission.DOCUMENT_EMISSION_V1)
+        rows.pop("stop")
+        patched.setattr(emission, "DOCUMENT_EMISSION_V1", MappingProxyType(rows))
+        assert authoring_contract._compiler_revision() != baseline
+    assert authoring_contract._compiler_revision() == baseline

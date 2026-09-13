@@ -301,6 +301,13 @@ _NODE_FACTS: Mapping[str, Mapping[str, Any]] = {
         _ORDERING: (
             "Steps execute in the authored order, top to bottom.",
             "The root sequence must reach a terminal; an unterminated path is rejected.",
+            "After the last connector call a root may continue with linear steps "
+            "before its terminal, and maps may follow one another; each map is "
+            "checked against the profile of the documents that reach it.",
+            "A root with no connector call may start with a cache read, which the "
+            "scheduled start's single empty document triggers, then continue with "
+            "linear steps and end on stop or return_documents. A root with no call "
+            "and no cache read has nothing producing documents and is refused.",
         ),
         _DOCS: ("optional", "documents", "per_document"),
         _STAGES: ("author", "plan"),
@@ -365,7 +372,9 @@ _NODE_FACTS: Mapping[str, Mapping[str, Any]] = {
             "combination also requires archived runtime evidence.",
             "Run on its own, on a schedule, a passthrough process starts with a "
             "single empty document instead, exactly as a process with no explicit "
-            "entry does.",
+            "entry does. A direct test run or schedule of a passthrough process that "
+            "requires what only a caller supplies is refused before anything is "
+            "deployed.",
         ),
         _DOCS: ("none", "documents", "all_documents"),
         _CAPS: ("passthrough_entry",),
@@ -483,8 +492,14 @@ _NODE_FACTS: Mapping[str, Mapping[str, Any]] = {
             "profiles live in the map component and are never authored here."
         ),
         _ORDERING: (
-            "A map between two connector calls must take the earlier call's "
-            "output profile and produce the later call's input profile.",
+            "A map's source profile must be the profile of the documents that "
+            "reach it: a connector call's declared output profile, an earlier "
+            "map's target profile, or the single profile every cache write reaching "
+            "a cache read stored. A map feeding a connector call must produce that "
+            "call's declared input profile. A map with no documents reaching it is "
+            "refused, and so is one whose incoming profile nothing states.",
+            "In the legacy source/target dialect a map stays unchecked, as it always "
+            "was; that is a named exemption, not a verified profile.",
             "A map's property effects are unknown unless a typed effect contract "
             "declares them, so state written only inside a map is not established.",
         ),
@@ -584,6 +599,11 @@ _NODE_FACTS: Mapping[str, Mapping[str, Any]] = {
             "path receives its own copy of the documents.",
             "Where paths converge, only state written on every incoming path is "
             "established.",
+            "A profile source reads an element of the documents at that point. On a "
+            "scheduled root's empty start document it is refused, because there is "
+            "nothing to read. After a step that produces documents, its profile must "
+            "be the one those documents carry. On a passthrough entry it states what "
+            "the process requires of the documents its callers hand over.",
         ),
         _DOCS: ("required", "documents", "per_document"),
         _RELATED: ("state_visibility.ddp",),
@@ -601,6 +621,11 @@ _NODE_FACTS: Mapping[str, Mapping[str, Any]] = {
             "order, so a later path sees what an earlier one wrote.",
             "Reading in an earlier path what a later path writes is rejected; "
             "reordering the paths is the fix.",
+            "A profile source reads an element of the documents at that point. On a "
+            "scheduled root's empty start document it is refused, because there is "
+            "nothing to read. After a step that produces documents, its profile must "
+            "be the one those documents carry. On a passthrough entry it states what "
+            "the process requires of the documents its callers hand over.",
         ),
         _DOCS: ("required", "documents", "per_document"),
         _RELATED: ("state_visibility.dpp",),
@@ -626,16 +651,37 @@ _NODE_FACTS: Mapping[str, Mapping[str, Any]] = {
             "what the recovery receives.",
             "Nothing may follow a process call. Author it as the terminal of its "
             "path, with no stop after it; a root sequence containing a call holds "
-            "that call and nothing else. Steps before it in the same body are "
-            "refused everywhere except a catch body, which admits notify steps "
-            "ahead of the call.",
+            "that call and nothing else. In a branch path or a decision true arm, "
+            "steps may come before the call only when the step immediately before "
+            "it is one live captures attest there (a map, a property write, a cache "
+            "read, flow control, a message or a data process) and the called "
+            "process is a Data Passthrough process in the same request, called with "
+            "wait=true, whose entry requirements the server derives and checks at "
+            "the call. Steps before a call into a No Data process or into a process "
+            "whose entry cannot be derived are refused. A step before a root call "
+            "is refused. A catch body admits only notify steps ahead of the call.",
             "On a catch body terminal a call must be authored wait=true and "
             "abort_on_error=true. abort_on_error defaults to false, so it has to "
             "be written explicitly; the default is refused, never rewritten.",
             "To run several children, give each its own path — separate branch "
             "paths, or separate wrappers — rather than chaining calls.",
+            "What the called process receives depends on how it starts. A Data "
+            "Passthrough child receives the documents reaching the call as one group, "
+            "in one execution: the profile it consumes is checked against the "
+            "documents arriving at the call, the writers of its bound request paths "
+            "must compose them before the call, and it must be called with wait=true.",
+            "A No Data child, a process with no explicit entry, runs once per arriving "
+            "document, each run on one empty document of its own: the parent's "
+            "documents and their document properties never reach it. Where more than "
+            "one document can reach the call, a No Data child that may change the "
+            "process properties or cache it reads first is refused.",
+            "Both forms share the calling execution's process properties and document "
+            "caches, so state a child reads before writing it must be established "
+            "before the call, and what a child may put in a cache is unknown to later "
+            "reads. A child's writes establish nothing after the call unless a "
+            "verified subprocess effect declaration says so.",
         ),
-        _DOCS: ("required", "documents", "per_document"),
+        _DOCS: ("required", "documents", "unspecified"),
         _CAPS: ("process_call_connector_mixing", "terminal_process_call",
                 "process_call_return_path_binding", "recovery_process_call"),
         _STAGES: ("author", "repair"),
@@ -1166,7 +1212,7 @@ _REVIEWED_PLACEMENT_PROSE: Mapping[str, Tuple[str, ...]] = MappingProxyType({
     "process_call": (
         'To run several children, give each its own path — separate branch paths, or separate wrappers — rather than chaining calls.',
         "A process call may not share a root-to-leaf path with a connector call while that combination is capability-gated; sibling paths are independent and do not count as sharing. A catch body is the one exception: a recovery call is not blocked by a connector that ran upstream of the handler, because that connector's documents are what the recovery receives.",
-        'Nothing may follow a process call. Author it as the terminal of its path, with no stop after it; a root sequence containing a call holds that call and nothing else. Steps before it in the same body are refused everywhere except a catch body, which admits notify steps ahead of the call.',
+        'Nothing may follow a process call. Author it as the terminal of its path, with no stop after it; a root sequence containing a call holds that call and nothing else. In a branch path or a decision true arm, steps may come before the call only when the step immediately before it is one live captures attest there (a map, a property write, a cache read, flow control, a message or a data process) and the called process is a Data Passthrough process in the same request, called with wait=true, whose entry requirements the server derives and checks at the call. Steps before a call into a No Data process or into a process whose entry cannot be derived are refused. A step before a root call is refused. A catch body admits only notify steps ahead of the call.',
         'On a catch body terminal a call must be authored wait=true and abort_on_error=true. abort_on_error defaults to false, so it has to be written explicitly; the default is refused, never rewritten.',
     ),
     # state-ordering semantics; names no admission

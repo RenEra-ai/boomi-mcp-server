@@ -7999,7 +7999,16 @@ _PROCESS_FLOW_PROTOCOLS = {
                 "tracked_by": "#51 follow-up (catch-path classifier wiring)",
             },
         ],
-        "supported_transform_modes": ["passthrough", "message", "map_ref", "dataprocess", "doccacheretrieve", "doccacheremove"],
+        "supported_transform_modes": ["passthrough", "message", "map_ref", "dataprocess", "doccacheretrieve"],
+        # #184 amendment 3 §5: an all-document removal emits zero documents, so no
+        # linear position can precede anything; the mode is refused by name.
+        "refused_transform_modes": {
+            "doccacheremove": (
+                "Refused with PROCESS_DOCCACHE_REMOVE_CONFIG_INVALID: Remove from Cache "
+                "hands on no documents, so nothing after it runs. Author the removal as "
+                "a ProcessIR branch-leg cache_remove terminal."
+            ),
+        },
         "supported_dataprocess_operations": ["custom_scripting", "split_documents", "combine_documents"],
         "dataprocess_authoring": (
             "When a dataprocess transform carries a custom_scripting step, call "

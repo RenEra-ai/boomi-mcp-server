@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 12597, "minimum_collected": 12597, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 12598, "minimum_collected": 12598, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -12689,3 +12689,4 @@
 {"kind": "test", "id": "pytest-012688", "node_id": "tests/test_issue_184_child_entries.py::test_the_public_plan_derives_and_discharges_the_contract_without_declarations", "state": "active"}
 {"kind": "test", "id": "pytest-012689", "node_id": "tests/test_issue_184_child_entries.py::test_a_passthrough_root_records_what_a_direct_run_would_lack", "state": "active"}
 {"kind": "test", "id": "pytest-012690", "node_id": "tests/test_issue_184_child_entries.py::test_a_direct_run_of_a_passthrough_root_that_needs_a_caller_is_refused_before_mutation", "state": "active"}
+{"kind": "test", "id": "pytest-012691", "node_id": "tests/test_issue_184_child_entries.py::test_the_revision_moves_with_child_contract_emission_and_survival_behaviour", "state": "active"}

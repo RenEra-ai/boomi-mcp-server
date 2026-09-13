@@ -2088,7 +2088,9 @@ def _check_process_call_terminal_form(
     field, and no cross-component check, that could establish the child returns
     anything. V1 therefore admits the terminal form ONLY:
 
-    * the call sits in the terminal slot, with an EMPTY step prefix;
+    * the call sits in the terminal slot; a step prefix before it is admitted
+      only on the #184 evidence key (``process_call_placement_verdict`` for the
+      context and predecessor, lineage for the child's entry form and wait);
     * nothing follows it — not a stop, not a nested control node.
 
     ``process_call_connector_mixing`` stays gated PER ROOT-TO-LEAF PATH. Moving
@@ -2577,10 +2579,13 @@ class BranchLegV1(_ProcessIRBase):
     or a nested ``decision``. Neither cache action hands on documents, so each is
     legal only as the terminal; a later leg does the work that follows.
 
-    A ``process_call`` is a TERMINAL, never a step, and admits no step prefix: a
-    call ends the path it is on, because whether execution continues past it is
-    determined by the called process's return-document shapes rather than by this
-    document. Authoring anything after a call is rejected.
+    A ``process_call`` is a TERMINAL, never a step: a call ends the path it is on,
+    because whether execution continues past it is determined by the called
+    process's return-document shapes rather than by this document. Authoring
+    anything after a call is rejected. Steps before it are admitted only when the
+    step immediately before the call is one live captures attest here and the called
+    process is a Data Passthrough process in the same request, called with
+    ``wait=true``; the ``process_ir_authoring`` entry for ``process_call`` states it.
 
     A nested ``branch`` is deliberately ABSENT — a Branch is not a legal Branch-leg
     terminal. Only placements with attested evidence are admitted, and this one
@@ -2657,10 +2662,13 @@ class DecisionTrueArmV1(_ProcessIRBase):
     routed target, a plain ``stop``, an ``exception``, a ``process_call``, or a
     nested ``branch``/``decision``.
 
-    A ``process_call`` is a TERMINAL, never a step, and admits no step prefix: a
-    call ends the path it is on, because whether execution continues past it is
-    determined by the called process's return-document shapes rather than by this
-    document. Authoring anything after a call is rejected.
+    A ``process_call`` is a TERMINAL, never a step: a call ends the path it is on,
+    because whether execution continues past it is determined by the called
+    process's return-document shapes rather than by this document. Authoring
+    anything after a call is rejected. Steps before it are admitted only when the
+    step immediately before the call is one live captures attest here and the called
+    process is a Data Passthrough process in the same request, called with
+    ``wait=true``; the ``process_ir_authoring`` entry for ``process_call`` states it.
 
     This arm admits ``process_call`` and a routed target; the FALSE arm admits
     neither. The asymmetry is deliberate — each placement is admitted only where
@@ -3534,8 +3542,8 @@ class SequenceNodeV1(_ProcessIRBase):
       continues with linear and ``connector_call`` steps ending in ``stop``,
       ``return_documents``, ``branch`` or ``decision``, or with exactly one
       ``process_call``;
-    - ``cache_put`` must be immediately followed by a stream-replacing cache
-      read (never by the target/terminal).
+    - a cache write or an all-document cache removal ENDS its document path:
+      nothing may follow it, and later work reads the cache in a later Branch leg.
     """
 
     kind: Literal["sequence"]
@@ -3932,7 +3940,7 @@ PROCESS_IR_V1_CAPABILITIES: Mapping[str, str] = MappingProxyType(
         "mixed_connector_execution": "supported",  # #140 — many calls per path
         # Still GATED after #141 and #175: ProcessCall and connector execution may
         # not share one root-to-leaf path. #175 admits ProcessCall as the TERMINAL
-        # of a Branch leg / Decision TRUE arm (empty step prefix), reachable only
+        # of a Branch leg / Decision TRUE arm (#184: after an attested prefix), reachable only
         # under a control-only root — so no path ever mixes the two. Sibling legs
         # are independent paths, not a mix. The terminal-slot move is why the gate
         # is now enforced against the terminal as well as the steps.

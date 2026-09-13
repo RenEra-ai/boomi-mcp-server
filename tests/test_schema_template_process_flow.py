@@ -148,8 +148,11 @@ def test_template_example_does_not_use_deferred_fields(template):
 def test_template_supported_transform_modes(template):
     assert set(template["supported_transform_modes"]) == {
         "passthrough", "message", "map_ref", "dataprocess", "doccacheretrieve",
-        "doccacheremove",
     }
+    # #184 amendment 3 §5 (ledger C18): recognised by the builder and refused by name,
+    # so it is published as refused, never as supported.
+    assert set(template["refused_transform_modes"]) == {"doccacheremove"}
+    assert "PROCESS_DOCCACHE_REMOVE_CONFIG_INVALID" in template["refused_transform_modes"]["doccacheremove"]
 
 
 def test_template_documents_doccacheretrieve_surface(template):

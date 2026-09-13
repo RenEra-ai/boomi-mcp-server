@@ -113,10 +113,13 @@ Sequence rules (local/structural — the CFG-aware checks are #137/#143):
   `flow_control`, `return_documents` or `exception` is
   `PROCESS_IR_CAPABILITY_LISTENER_COMPOSITION_UNSUPPORTED`. The placement and composition rule is
   ONE shared verdict (`listener_root_verdict`) rendered by both the parser and the compiler.
-- `cache_put` must be immediately followed by a stream-replacing cache read
-  (`cache_get`/`document_cache_retrieve`); a trailing `cache_put` in a branch leg is expressed
-  as the leg's staging **terminal**, and a decision false-arm may end its steps with
-  `cache_put` only before a `stop` terminal (all legacy consume-guard parity).
+- A cache write or an all-document cache removal **ends its document path** (#184 amendment 3):
+  Add to Cache and Remove from Cache emit zero documents, and the platform skips a step wired after
+  either while the run still reads COMPLETE. An authored successor is refused
+  `PROCESS_IR_SCHEMA_INVALID_CARDINALITY` at the cache node's `/cache_ref`. `cache_put` is a Branch-leg
+  or catch-body **terminal** and a whole-cache `cache_remove` a Branch-leg terminal; later work reads the
+  cache in a separately triggered, later Branch leg. What each kind needs to run and hands on is one
+  authority, `models/process_ir_document_semantics.py`.
 - Branch/Decision **terminalize** their sequence. A node authored after one fails with
   `PROCESS_IR_SEMANTIC_CONTROL_CONTINUATION_UNSUPPORTED` (#141);
   `continuation_after_branch_or_decision` stays gated.
@@ -177,9 +180,11 @@ Deliberate exclusions, all fail-closed on absent evidence: **`branch` as a Branc
 (nested control in a leg is attested only as a *Decision*), **`process_call` on a FALSE arm**
 (attested on TRUE outcomes only, in EITHER slot), and `return_documents` anywhere in a body.
 
-**ProcessCall terminal form (#141 path mode, amended by #175).** A `process_call` is a body's
-TERMINAL, with an EMPTY step prefix, **and no connector may run anywhere upstream on its
-root-to-leaf path**.
+**ProcessCall terminal form (#141 path mode, amended by #175 and #184).** A `process_call` is a
+body's TERMINAL, **and no connector may run anywhere upstream on its root-to-leaf path**. A step
+prefix before it is admitted only on the whole #184 evidence key — a branch leg or decision true
+arm, a direct predecessor live captures attest, a Data Passthrough child whose entry contract the
+server derives, and `wait=true` — and every call discharges its child's contract on its own (§3e).
 
 #141 admitted the call as a *step* and required the body to end in `stop`. That generalised past
 its evidence: the capture attests a control edge landing ON a call, and the trailing `stop` was an
@@ -355,6 +360,26 @@ ProcessIR root whose first step is the `listener` node:
   and no payload is validated at run time. Absent, it adds no requirement.
 - **Composition** is linear only (see the sequence rules above). Reliability composition stays
   gated as `listener_error_scope`.
+
+### 3e. Child entry contracts — #184 amendment 3 §8
+
+The server derives, for every process in a request that another process calls, what an invocation
+must supply. No effect declaration is needed and none is trusted: a contract states what a caller
+OWES, never what the child establishes for it.
+
+| Child entry | What reaches it | What each call must supply |
+|---|---|---|
+| Data Passthrough (`passthrough` entry) | the documents reaching the call, as one group, in one execution | the profile each consumer of those documents requires (`PROCESS_IR_SEMANTIC_PROFILE_MISMATCH` at the call's `/process_ref`); a validated writer for every bound request path that composes from them (the dynamic-path codes at `/process_ref`); `wait=true` (`PROCESS_IR_CAPABILITY_ENTRY_CONTEXT_UNSUPPORTED` at `/wait`) |
+| No Data (no explicit entry) | one empty document of its own per arriving document | nothing from the parent's documents; where several documents can reach the call, a child that may change state it reads first is refused |
+| either | the calling execution's process properties and caches | every state key the child reads before writing it, classified like any read at the call |
+
+A step prefix needs a derived Data Passthrough contract and `wait=true`; a child whose entry cannot
+be derived (not in the request, a listener, a call cycle) and a No Data child refuse a prefix with
+`PROCESS_IR_CAPABILITY_PROCESS_CALL_PLACEMENT_UNSUPPORTED` at `/…/terminal`. An empty-prefix call
+keeps its compatibility placement. Every call adds unknown content to the caches its child may
+write. A called child is validated under its callers' obligations, and a passthrough root that
+needs a caller is refused a direct test run or schedule before deployment mutates anything, because
+run directly it starts as No Data (capture `cap184-passthrough-standalone`).
 
 ## 4. Alias normalization (private codec)
 

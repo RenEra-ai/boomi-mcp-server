@@ -149,14 +149,11 @@ _REMEDIATION: Dict[str, str] = {
         "Add a cache write ahead of this read on the same path."
     ),
     PROCESS_IR_SEMANTIC_DYNAMIC_PATH_DDP_NOT_ESTABLISHED: (
-        "Write the property on every path that reaches the call, DOWNSTREAM of "
-        "any step that hands on documents not carrying it — a split or a cache "
-        "retrieval does, a Message does not — because such a step gives the call "
-        "new documents and a write placed before it establishes nothing here. A "
-        "default does not discharge it either: the property IS the request path, "
-        "so a defaulted value addresses the wrong resource rather than failing. "
-        "Nor does declaring the property established at process entry: with no "
-        "writer in this process there is no composition to check."
+        "Establish a validated writer on every possible document origin reaching "
+        "this call. After cache retrieval, use proved cached writer provenance or a "
+        "supported current-document overlay; otherwise write the property after the "
+        "read. Defaults and bare established-at-entry declarations do not provide "
+        "writer proof."
     ),
     PROCESS_IR_SEMANTIC_DYNAMIC_PATH_NO_DYNAMIC_SEGMENT: (
         "Give the writer at least one non-literal source — a profile element or "
