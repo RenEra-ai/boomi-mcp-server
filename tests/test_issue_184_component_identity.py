@@ -315,3 +315,102 @@ def test_a_declared_id_spelled_like_a_plan_placeholder_binds_nothing():
     # CONTROL: a real declared id still binds.
     real = build_symbol_table(components[:2] + [_spec("bar", "documentcache", component_id="C-9", reference_only=True)])
     assert {symbol.ref: symbol.bound_component_id for symbol in real.symbols}["$ref:bar"] == "C-9"
+
+
+# ---------------------------------------------------------------------------
+# Stage-2 review round r3 (`cdx-review.0m4OoB`), correction batch 4
+# ---------------------------------------------------------------------------
+
+from test_process_ir_effect_declarations import (  # noqa: E402
+    _accepted,
+    _components,
+    _effect,
+    _map_component,
+    _symbols as _effect_symbols,
+)
+
+from boomi_mcp.compiler.process_ir.contracts import SymbolTableV1  # noqa: E402
+from boomi_mcp.compiler.process_ir.semantic_validation.contracts import (  # noqa: E402
+    DEFAULT_VALIDATION_CAPABILITIES,
+)
+from boomi_mcp.models.authoring_workflow import (  # noqa: E402
+    ProcessIREffectDeclarationsV1,
+    ProcessIRMapEffectDeclarationV1,
+)
+
+
+def _declared_map_verdict(alias_key, extra=(), policy="reuse"):
+    """A map the request UPDATES, plus a `reference_only` alias of the same component, and a
+    declaration of the map's effect: `(inert declarations, validation errors)`."""
+    written = _map_component(
+        [_accepted("dynamic_process_property_set", parameters={"property_name": "OUT"})],
+        action="update", component_id="M-1")
+    alias = IntegrationComponentSpec(key=alias_key, type="transform.map", name=alias_key,
+                                     config={"reference_only": True, "component_id": "M-1"})
+    components = _components(written, alias, *extra)
+    built = build_symbol_table(components, conflict_policy=policy)
+    symbols = SymbolTableV1(symbols=tuple(built.symbols) + tuple(
+        symbol for symbol in _effect_symbols().symbols if symbol.ref in ("$ref:CONN", "$ref:GETOP")))
+    root = parse_process_ir_v1({"version": "1", "body": {"kind": "sequence", "steps": [
+        {"kind": "source", "connection_ref": "$ref:CONN", "operation_ref": "$ref:GETOP"},
+        {"kind": "map_ref", "map_ref": "$ref:MAP"},
+        {"kind": "set_dpp", "name": "Y", "source_values": [{"value_type": "dpp", "property_name": "OUT"}]},
+        {"kind": "return_documents"},
+    ]}})
+    declarations = ProcessIREffectDeclarationsV1(map_effects=(ProcessIRMapEffectDeclarationV1(
+        map_ref="$ref:MAP", effect=_effect(writes=[("dpp", "OUT")], replay_safe=True)),))
+    resolution = process_ir_effects.resolve_process_ir_effect_declarations(
+        [("p", root)], declarations, symbols, components, conflict_policy=policy)
+    context = resolution.capabilities_by_root.get("p") or DEFAULT_VALIDATION_CAPABILITIES
+    report = validate_process_ir(root, symbols, capabilities=context)
+    return resolution.inert, [(item.code, item.path) for item in report.errors]
+
+
+@pytest.mark.parametrize("policy", ["reuse", "fail"])
+@pytest.mark.parametrize("alias_key", ["A_REF", "Z_REF"])
+def test_a_map_declaration_derives_from_the_config_apply_writes(alias_key, policy):
+    """CDX-184-r3-01: whichever spelling sorts first, the effect is derived from the update
+    apply writes into the component, so the declaration binds and the later read passes."""
+    assert _declared_map_verdict(alias_key, policy=policy) == ((), [])
+
+
+def test_two_writes_of_one_map_that_disagree_decide_nothing():
+    """Two updates of one map with different configs: neither decides, so the declaration is
+    inert and the read it would have established is refused."""
+    other = _map_component(
+        [_accepted("dynamic_process_property_set", parameters={"property_name": "OTHER"})],
+        key="MAP_TWO", action="update", component_id="M-1")
+    inert, errors = _declared_map_verdict("A_REF", extra=(other,))
+    assert inert == ("/effect_declarations/map_effects/0",)
+    assert ("PROCESS_IR_SEMANTIC_LINEAGE_PROPERTY_READ_BEFORE_WRITE", "/body/steps/2") in errors
+
+
+def test_every_reference_to_a_bound_component_carries_the_written_facts():
+    """The sibling of CDX-184-r3-01: a map's profile facts describe its component, so a
+    `reference_only` alias of a map the request updates carries the update's facts. A
+    component nothing writes, or two writes that disagree, is described by nothing."""
+    components = [
+        _spec("p1", "profile.json"),
+        _spec("p2", "profile.json"),
+        _spec("m12", "transform.map", source_profile_id="$ref:p1", target_profile_id="$ref:p2"),
+        _spec("a_map", "transform.map", component_id="MAP-1", reference_only=True),
+        _spec("b_map", "transform.map", action="update", component_id="MAP-1",
+              source_profile_id="$ref:p1", target_profile_id="$ref:p2"),
+        _spec("r_one", "transform.map", component_id="MAP-2", reference_only=True),
+        _spec("r_two", "transform.map", component_id="MAP-2",
+              source_profile_id="$ref:p1", target_profile_id="$ref:p1"),
+        _spec("u_one", "transform.map", action="update", component_id="MAP-3",
+              source_profile_id="$ref:p1", target_profile_id="$ref:p1"),
+        _spec("u_two", "transform.map", action="update", component_id="MAP-3",
+              source_profile_id="$ref:p2", target_profile_id="$ref:p2"),
+    ]
+    symbols = build_symbol_table(components)
+    facts = {symbol.ref: (symbol.input_profile_ref, symbol.output_profile_ref) for symbol in symbols.symbols}
+    assert facts["$ref:a_map"] == facts["$ref:b_map"] == ("$ref:p1", "$ref:p2")
+    assert facts["$ref:r_one"] == facts["$ref:r_two"] == (None, None)  # reused, nothing written
+    assert facts["$ref:u_one"] == facts["$ref:u_two"] == (None, None)  # two writes disagree
+    ir = parse_process_ir_v1({"version": "1", "body": {"kind": "sequence", "steps": [
+        {"kind": "passthrough"}, {"kind": "map_ref", "map_ref": "$ref:m12"},
+        {"kind": "map_ref", "map_ref": "$ref:a_map"}, {"kind": "stop"}]}})
+    errors = [(item.code, item.path) for item in validate_process_ir(ir, symbols).errors]
+    assert (_MISMATCH, "/body/steps/2/map_ref") in errors, errors

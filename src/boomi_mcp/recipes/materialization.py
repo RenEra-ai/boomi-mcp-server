@@ -228,6 +228,30 @@ def _profile_facts(
     return None, None, None
 
 
+def _bound_component_facts(components, bindings, plan_keys, reused):
+    """``{existing component id: (input, output, cache) profile refs}`` per declared binding (#184).
+
+    Facts describe a COMPONENT, so every reference binding one gets the same ones, read
+    from the config apply writes into it: a bound spec apply does not reuse. With no such
+    spec nothing in hand describes the component, and several that disagree leave it
+    undescribed too, rather than one reference's config deciding for the others (Stage-2
+    review round r3).
+    """
+    written: Dict[str, set] = {}
+    for component in components:
+        bound = bindings.get(component.key)
+        if bound is None:
+            continue
+        written.setdefault(bound, set())
+        if component.key in reused or component_materialization_mode(component) == _REUSE:
+            continue
+        written[bound].add(_profile_facts(component, plan_keys))
+    return {
+        bound: next(iter(facts)) if len(facts) == 1 else (None, None, None)
+        for bound, facts in written.items()
+    }
+
+
 def build_symbol_table(
     components: Sequence[IntegrationComponentSpec],
     *,
@@ -307,6 +331,9 @@ def build_symbol_table(
         if bound not in placeholders
     }
     reused = reused_keys_for_components(components, conflict_policy)
+    # #184: a bound reference carries the facts of the config apply writes into its
+    # component, whichever reference authored that config.
+    component_facts = _bound_component_facts(components, bindings, plan_keys, reused)
     for component in components:
         connector_type, action_type = metadata.get(component.key, (None, None))
         ref = f"{_REF_PREFIX}{component.key}"
@@ -340,8 +367,10 @@ def build_symbol_table(
         # profile a call hands on and accepts, what a map transforms, what a cache
         # declares it holds. The listener's inbound request profile keeps precedence
         # for the listener operation, which is what #158 carries in the same field.
-        input_profile_fact, output_profile_fact, cache_profile_fact = _profile_facts(
-            component, plan_keys, reused=component.key in reused
+        input_profile_fact, output_profile_fact, cache_profile_fact = (
+            component_facts[bindings[component.key]]
+            if component.key in bindings
+            else _profile_facts(component, plan_keys, reused=component.key in reused)
         )
         symbols.append(
             ComponentSymbolV1(

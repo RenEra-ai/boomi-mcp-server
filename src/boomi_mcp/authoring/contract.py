@@ -1430,12 +1430,26 @@ def _component_identity_behaviour_oracle():
     from ..models import process_ir as model
     from ..models.integration_models import IntegrationComponentSpec
     from ..recipes.materialization import build_symbol_table
+    from ..models.authoring_workflow import (
+        ProcessIREffectDeclarationsV1,
+        ProcessIRMapEffectDeclarationV1,
+        ProcessIRStateEffectDeclarationV1,
+        ProcessIRStateReferenceV1,
+    )
     from .process_ir_effects import resolve_process_ir_effect_declarations
 
     def spec(key, component_type, action="create", component_id=None, **config):
         return IntegrationComponentSpec(
             key=key, type=component_type, action=action, name=key,
             component_id=component_id, config=config,
+        )
+
+    def profile(key):
+        return IntegrationComponentSpec(
+            key=key, type="profile.json", action="create", name=key,
+            config={"component_type": "profile.json", "profile_type": "json.generated",
+                    "component_name": key, "root": {"name": "root", "kind": "object", "children": [
+                        {"name": "a", "kind": "simple", "data_type": "character"}]}},
         )
 
     components = [
@@ -1449,7 +1463,30 @@ def _component_identity_behaviour_oracle():
         # One existing cache, named by a reference and by an update declaring its profile.
         spec("d_a", "documentcache", component_id="CACHE-2", reference_only=True),
         spec("d_b", "documentcache", action="update", component_id="CACHE-2", profile_id="$ref:p2"),
+        # One existing map, named by a reference that sorts first and by the update writing it.
+        spec("a_map", "transform.map", component_id="MAP-1", reference_only=True),
+        spec("b_map", "transform.map", action="update", component_id="MAP-1",
+             source_profile_id="$ref:p1", target_profile_id="$ref:p2"),
+        # A function map that writes a process property, named the same two ways.
+        profile("sp"),
+        profile("tp"),
+        spec("f_ref", "transform.map", component_id="FMAP-1", reference_only=True),
+        IntegrationComponentSpec(
+            key="fn_map", type="transform.map", action="update", name="fn_map",
+            component_id="FMAP-1", depends_on=["sp", "tp"],
+            config={"component_name": "fn_map", "map_type": "function",
+                    "source_profile_id": "$ref:sp", "source_profile_type": "profile.json",
+                    "target_profile_id": "$ref:tp", "target_profile_type": "profile.json",
+                    "function_mappings": [{"function_type": "dynamic_process_property_set",
+                                           "inputs": ["root/a"],
+                                           "parameters": {"property_name": "OUT"}}]},
+        ),
     ]
+    declarations = ProcessIREffectDeclarationsV1(map_effects=(ProcessIRMapEffectDeclarationV1(
+        map_ref="$ref:fn_map",
+        effect=ProcessIRStateEffectDeclarationV1(
+            writes=(ProcessIRStateReferenceV1(scope="dpp", name="OUT"),), replay_safe=True),
+    ),))
     stop = {"kind": "stop"}
 
     def mapped(ref):
@@ -1469,6 +1506,15 @@ def _component_identity_behaviour_oracle():
             {"steps": [mapped("$ref:m11")], "terminal": {"kind": "cache_put", "cache_ref": "$ref:d_a"}},
             {"steps": [{"kind": "message", "text": "m"}], "terminal": stop},
         ),
+        "map_through_the_reference": root(
+            {"steps": [mapped("$ref:m12"), mapped("$ref:a_map")], "terminal": stop},
+            {"steps": [{"kind": "message", "text": "m"}], "terminal": stop},
+        ),
+        "declared_map_effect_through_its_writer": root(
+            {"steps": [mapped("$ref:fn_map"), {"kind": "set_dpp", "name": "Y", "source_values": [
+                {"value_type": "dpp", "property_name": "OUT"}]}], "terminal": stop},
+            {"steps": [{"kind": "message", "text": "m"}], "terminal": stop},
+        ),
     }
     verdicts = {}
     for policy in ("clone", "reuse"):
@@ -1476,7 +1522,7 @@ def _component_identity_behaviour_oracle():
         # Each root is validated under the context the effect resolver builds for it, as
         # every production route validates one.
         resolution = resolve_process_ir_effect_declarations(
-            sorted(roots.items()), None, symbols, components, conflict_policy=policy
+            sorted(roots.items()), declarations, symbols, components, conflict_policy=policy
         )
         checked = {}
         for name, ir in sorted(roots.items()):
@@ -1489,9 +1535,11 @@ def _component_identity_behaviour_oracle():
             checked[name] = sorted([item.code, item.path] for item in report.errors)
         verdicts[policy] = {
             "symbols": sorted(
-                [symbol.ref, symbol.bound_component_id or "", symbol.cache_profile_ref or ""]
+                [symbol.ref, symbol.bound_component_id or "", symbol.cache_profile_ref or "",
+                 symbol.input_profile_ref or "", symbol.output_profile_ref or ""]
                 for symbol in symbols.symbols
             ),
+            "inert": list(resolution.inert),
             "roots": checked,
         }
     return verdicts

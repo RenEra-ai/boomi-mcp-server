@@ -3043,3 +3043,10 @@ and `schema_revision` did not move. The §11 tables above were re-spliced from `
 edits above the listed sites moved their `Baseline line` values. Revisions after batch 3:
 `capability_revision` `sha256:ab64fdae…` and `compiler_revision` `sha256:2b14b9bb…`; `schema_revision`
 stays `sha256:c9583e6b…`.
+
+**Stage-2 correction batch 4 (CDX-184-r3-01) re-ran it.** Batch 4 decides a component's facts and its
+effect derivation from the config apply writes into it, for every reference that binds it, and adds two roots
+that observe those rules to the `component_identity` behaviour oracle. The same five served artifacts moved
+again, re-serving the new revisions; the census, the ledger rows, the contract snapshot and `schema_revision`
+did not move, and the §11 tables were re-spliced for moved `Baseline line` values. Revisions after batch 4:
+`capability_revision` `sha256:7d216451…` and `compiler_revision` `sha256:7afb22d7…`; `schema_revision` stays `sha256:c9583e6b…`.

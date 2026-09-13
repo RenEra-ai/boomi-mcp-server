@@ -783,7 +783,10 @@ def test_the_revision_moves_with_component_identity_and_forwarding_behaviour(mon
     oracle rows read their authorities at call time, so each moves the revision."""
     from boomi_mcp.authoring import contract as authoring_contract
     from boomi_mcp.authoring import process_ir_effects
+    import collections
+
     from boomi_mcp.categories import integration_builder
+    from boomi_mcp.recipes import materialization
 
     payload = authoring_contract._compiler_revision_payload()
     for row in ("component_identity", "child_forwarding"):
@@ -795,6 +798,10 @@ def test_the_revision_moves_with_component_identity_and_forwarding_behaviour(mon
         (lineage, "_caches_a_call_may_write", lambda cache_refs, contract: ()),
         (process_ir_effects, "_caller_cache_seeds", lambda requirements, symbols: ()),
         (process_ir_effects, "_caller_composed_paths", lambda prepared, capabilities, walk: ()),
+        # Stage-2 review round r3: the written spec and the facts projected from it.
+        (process_ir_effects, "_written_spec", lambda aliases, components, conflict_policy: None),
+        (materialization, "_bound_component_facts",
+         lambda components, bindings, plan_keys, reused: collections.defaultdict(lambda: (None, None, None))),
     )
     for module, name, replacement in perturbations:
         with monkeypatch.context() as patched:

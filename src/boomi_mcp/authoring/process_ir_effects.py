@@ -270,9 +270,30 @@ def _matched_by_identity(aliases, lookup):
     return None, None
 
 
-def _by_identity(aliases, lookup):
-    """As :func:`_matched_by_identity`, when only the value is needed."""
-    return _matched_by_identity(aliases, lookup)[1]
+def _written_spec(aliases, components, conflict_policy):
+    """The authored spec whose config apply writes into the component ``aliases`` name (#184).
+
+    Several specs may bind one component, and only one the plan cannot substitute is the
+    config the artifact executes. Taking the first alias in sort order let a
+    ``reference_only`` alias decide for an ``update`` of the same component, and a valid
+    declaration went inert (Stage-2 review round r3). With no written spec the first alias's
+    spec answers; it is substitutable, so derivation stays opaque. With several, the first
+    answers only when every written spec carries the same config.
+    """
+    import json
+
+    specs = [
+        spec for spec in (_component(components, alias) for alias in sorted(aliases))
+        if spec is not None
+    ]
+    written = [spec for spec in specs if not _may_be_substituted(spec, conflict_policy)]
+    if not written:
+        return specs[0] if specs else None
+    configs = {
+        json.dumps(getattr(spec, "config", None) or {}, sort_keys=True, default=str)
+        for spec in written
+    }
+    return written[0] if len(configs) == 1 else None
 
 
 def _map_type_vocabularies() -> Tuple[FrozenSet[str], FrozenSet[str]]:
@@ -1246,7 +1267,7 @@ def resolve_process_ir_effect_declarations(
         if symbol is None or getattr(symbol, "component_type", None) != "transform.map":
             findings.append(EffectAuthorityFindingV1(_INVALID, pointer, "unresolved-or-wrong-type"))
             continue
-        spec = _by_identity(alias, lambda ref: _component(components, ref))
+        spec = _written_spec(alias, components, conflict_policy)
         derived = (
             derive_map_effect(
                 getattr(spec, "config", None) or {},
