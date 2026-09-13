@@ -663,6 +663,13 @@ INSPECTABLE_CHILD_KINDS = frozenset({
     # connector-call binding, so the grant path never reaches it.
     "listener",
     "message",
+    # #184: passthrough. INSPECTABLE for the listener's reason: the entry node
+    # itself does no state work — its documents come from the caller. MEASURED
+    # against the same authorities, with and without a label: `_reads_of` and
+    # `_writes_of` both return `()` and `_replay_hazard` returns None, identical
+    # to the listener control. This classifies the ENTRY NODE only; it derives no
+    # child input contract and no caller obligation.
+    "passthrough",
     # #156: notify. INSPECTABLE for exactly the reason `connector` is — it does
     # I/O, and I/O is not state. MEASURED against the lineage authority rather
     # than argued: `_reads_of` and `_writes_of` both return `()` for a notify
