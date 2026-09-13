@@ -231,11 +231,11 @@ def _profile_facts(
 def _bound_component_facts(components, bindings, plan_keys, reused):
     """``{existing component id: (input, output, cache) profile refs}`` per declared binding (#184).
 
-    Facts describe a COMPONENT, so every reference binding one gets the same ones, read
-    from the config apply writes into it: a bound spec apply does not reuse. With no such
-    spec nothing in hand describes the component, and several that disagree leave it
-    undescribed too, rather than one reference's config deciding for the others (Stage-2
-    review round r3).
+    The facts a reference that apply does NOT write takes from the configs apply writes into
+    its component: the ones they all agree on (Stage-2 review round r3). With no written
+    config, or written configs that disagree, such a reference is described by nothing. A
+    written spec is never described through this: it keeps its own facts, so a disagreement
+    stays visible to every check that reads them instead of being erased (round r4).
     """
     written: Dict[str, set] = {}
     for component in components:
@@ -331,8 +331,8 @@ def build_symbol_table(
         if bound not in placeholders
     }
     reused = reused_keys_for_components(components, conflict_policy)
-    # #184: a bound reference carries the facts of the config apply writes into its
-    # component, whichever reference authored that config.
+    # #184: a bound reference apply does not write carries the facts every written config of
+    # its component agrees on. A written spec keeps its own facts (Stage-2 review round r4).
     component_facts = _bound_component_facts(components, bindings, plan_keys, reused)
     for component in components:
         connector_type, action_type = metadata.get(component.key, (None, None))
@@ -370,6 +370,7 @@ def build_symbol_table(
         input_profile_fact, output_profile_fact, cache_profile_fact = (
             component_facts[bindings[component.key]]
             if component.key in bindings
+            and (component.key in reused or component_materialization_mode(component) == _REUSE)
             else _profile_facts(component, plan_keys, reused=component.key in reused)
         )
         symbols.append(

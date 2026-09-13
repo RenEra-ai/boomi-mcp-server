@@ -1452,6 +1452,18 @@ def _component_identity_behaviour_oracle():
                         {"name": "a", "kind": "simple", "data_type": "character"}]}},
         )
 
+    def function_map(key, component_id, property_name):
+        return IntegrationComponentSpec(
+            key=key, type="transform.map", action="update", name=key,
+            component_id=component_id, depends_on=["sp", "tp"],
+            config={"component_name": key, "map_type": "function",
+                    "source_profile_id": "$ref:sp", "source_profile_type": "profile.json",
+                    "target_profile_id": "$ref:tp", "target_profile_type": "profile.json",
+                    "function_mappings": [{"function_type": "dynamic_process_property_set",
+                                           "inputs": ["root/a"],
+                                           "parameters": {"property_name": property_name}}]},
+        )
+
     components = [
         spec("p1", "profile.json"),
         spec("p2", "profile.json"),
@@ -1481,6 +1493,12 @@ def _component_identity_behaviour_oracle():
                                            "inputs": ["root/a"],
                                            "parameters": {"property_name": "OUT"}}]},
         ),
+        # One existing cache that two updates declare differently.
+        spec("e_1", "documentcache", action="update", component_id="CACHE-3", profile_id="$ref:p1"),
+        spec("e_2", "documentcache", action="update", component_id="CACHE-3", profile_id="$ref:p2"),
+        # One existing map that two updates configure with different effects.
+        function_map("fx_1", "FMAP-2", "OUT"),
+        function_map("fx_2", "FMAP-2", "OTHER"),
     ]
     declarations = ProcessIREffectDeclarationsV1(map_effects=(ProcessIRMapEffectDeclarationV1(
         map_ref="$ref:fn_map",
@@ -1510,6 +1528,10 @@ def _component_identity_behaviour_oracle():
             {"steps": [mapped("$ref:m12"), mapped("$ref:a_map")], "terminal": stop},
             {"steps": [{"kind": "message", "text": "m"}], "terminal": stop},
         ),
+        "write_against_two_update_declarations": root(
+            {"steps": [mapped("$ref:m11")], "terminal": {"kind": "cache_put", "cache_ref": "$ref:e_1"}},
+            {"steps": [{"kind": "message", "text": "m"}], "terminal": stop},
+        ),
         "declared_map_effect_through_its_writer": root(
             {"steps": [mapped("$ref:fn_map"), {"kind": "set_dpp", "name": "Y", "source_values": [
                 {"value_type": "dpp", "property_name": "OUT"}]}], "terminal": stop},
@@ -1523,6 +1545,20 @@ def _component_identity_behaviour_oracle():
         # every production route validates one.
         resolution = resolve_process_ir_effect_declarations(
             sorted(roots.items()), declarations, symbols, components, conflict_policy=policy
+        )
+        # A declaration over a component whose written configs derive different effects,
+        # resolved on its own so its refusal does not reach the roots above.
+        ambiguity = resolve_process_ir_effect_declarations(
+            [("ambiguous", root(
+                {"steps": [mapped("$ref:fx_1")], "terminal": stop},
+                {"steps": [{"kind": "message", "text": "m"}], "terminal": stop},
+            ))],
+            ProcessIREffectDeclarationsV1(map_effects=(ProcessIRMapEffectDeclarationV1(
+                map_ref="$ref:fx_1",
+                effect=ProcessIRStateEffectDeclarationV1(
+                    writes=(ProcessIRStateReferenceV1(scope="dpp", name="OUT"),), replay_safe=True),
+            ),)),
+            symbols, components, conflict_policy=policy,
         )
         checked = {}
         for name, ir in sorted(roots.items()):
@@ -1540,6 +1576,9 @@ def _component_identity_behaviour_oracle():
                 for symbol in symbols.symbols
             ),
             "inert": list(resolution.inert),
+            "ambiguous_declaration": sorted(
+                [finding.path, finding.reason] for finding in ambiguity.findings
+            ),
             "roots": checked,
         }
     return verdicts

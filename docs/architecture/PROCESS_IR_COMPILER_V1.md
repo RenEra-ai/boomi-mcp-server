@@ -512,9 +512,13 @@ database family — `SEND` would be a different wire value).
   profiles as optional ("Request Profile … when provided") and this checkout has no per-family
   required-vs-optional evidence; where a profile *is* required (both sides of a map) absence is
   already a mismatch below.
-- **Profile continuity** (`PROCESS_IR_SEMANTIC_PROFILE_MISMATCH`): around every `map_ref`, the map's
-  source profile must be the preceding call's output profile and its target profile the following
-  call's input profile. Compared by **resolved component id** plus normalized profile type, so two
+- **Profile continuity** (`PROCESS_IR_SEMANTIC_PROFILE_MISMATCH`): inside a protected or recovery body,
+  a map's source profile must be the preceding call's output profile and its target profile the
+  following call's input profile. Everywhere else (#184 D11) the lineage phase proves a map against the
+  profile of the stream that reaches it (a call's output, an earlier map's target, or a cache's content).
+  The same code refuses a cache write, a Set Properties profile source and a waited call into a Data
+  Passthrough child whose reaching profile is not the one they require. Compared by **resolved component
+  identity** plus normalized profile type, so two
   refs naming one component (#139B's occurrence-scoped aliases) agree. Two guards keep the comparison
   from being vacuous: an **absent** profile on either side is a mismatch (a map's profiles are hard
   component requirements, and "not declared" cannot satisfy one), and a ref must resolve to an actual

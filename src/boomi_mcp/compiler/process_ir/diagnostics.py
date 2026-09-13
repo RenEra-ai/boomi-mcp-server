@@ -245,8 +245,15 @@ _REMEDIATION = {
         "and leave the policy at 'forbid'."
     ),
     PROCESS_IR_SEMANTIC_PROFILE_MISMATCH: (
-        "Make the map's source profile the preceding call's output profile and its "
-        "target profile the following call's input profile."
+        "Give every step the profile it requires from the documents that reach it. A "
+        "map's source profile is the profile those documents carry: a call's output, an "
+        "earlier map's target, or what a cache holds. Inside an error-handling body its "
+        "target profile is also the following call's input profile. A cache write stores "
+        "the profile its cache declares, a Set Properties profile source names the profile "
+        "that reaches it, and a waited call hands a Data Passthrough child the profile its "
+        "consumers need, including in a cache the child reads first. An operation's profile "
+        "reference must name a profile component. A component named only by reference "
+        "states no profile of its own, so declare the configuration apply writes into it."
     ),
     PROCESS_IR_SEMANTIC_CARDINALITY_MISMATCH: (
         "Order the calls so every document consumer follows a call that produces "
@@ -424,7 +431,8 @@ _MESSAGES = {
         "accepting a replayed producer requires a region that retries"
     ),
     PROCESS_IR_SEMANTIC_PROFILE_MISMATCH: (
-        "a map's profile does not match the connector call adjacent to it"
+        "the documents reaching a map, a cache write, a profile source or a call carry a "
+        "profile other than the one it requires, or one nothing states"
     ),
     PROCESS_IR_SEMANTIC_CARDINALITY_MISMATCH: (
         "a connector call's document cardinality is impossible at its position"

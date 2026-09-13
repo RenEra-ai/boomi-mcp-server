@@ -341,7 +341,7 @@ from boomi_mcp.models.authoring_workflow import (  # noqa: E402
 
 def _declared_map_verdict(alias_key, extra=(), policy="reuse"):
     """A map the request UPDATES, plus a `reference_only` alias of the same component, and a
-    declaration of the map's effect: `(inert declarations, validation errors)`."""
+    declaration of the map's effect: `(finding reasons, inert declarations, validation errors)`."""
     written = _map_component(
         [_accepted("dynamic_process_property_set", parameters={"property_name": "OUT"})],
         action="update", component_id="M-1")
@@ -363,7 +363,11 @@ def _declared_map_verdict(alias_key, extra=(), policy="reuse"):
         [("p", root)], declarations, symbols, components, conflict_policy=policy)
     context = resolution.capabilities_by_root.get("p") or DEFAULT_VALIDATION_CAPABILITIES
     report = validate_process_ir(root, symbols, capabilities=context)
-    return resolution.inert, [(item.code, item.path) for item in report.errors]
+    return (
+        tuple(finding.reason for finding in resolution.findings),
+        resolution.inert,
+        [(item.code, item.path) for item in report.errors],
+    )
 
 
 @pytest.mark.parametrize("policy", ["reuse", "fail"])
@@ -371,18 +375,28 @@ def _declared_map_verdict(alias_key, extra=(), policy="reuse"):
 def test_a_map_declaration_derives_from_the_config_apply_writes(alias_key, policy):
     """CDX-184-r3-01: whichever spelling sorts first, the effect is derived from the update
     apply writes into the component, so the declaration binds and the later read passes."""
-    assert _declared_map_verdict(alias_key, policy=policy) == ((), [])
+    assert _declared_map_verdict(alias_key, policy=policy) == ((), (), [])
 
 
-def test_two_writes_of_one_map_that_disagree_decide_nothing():
-    """Two updates of one map with different configs: neither decides, so the declaration is
-    inert and the read it would have established is refused."""
+def test_two_writes_of_one_map_with_different_effects_refuse_the_declaration():
+    """CDX-184-r4-02: two updates of one map whose configs derive different effects leave the
+    component's effect unknown. The declaration is refused as a mismatch, never made inert,
+    because an inert declaration drops the reads the component really makes."""
     other = _map_component(
         [_accepted("dynamic_process_property_set", parameters={"property_name": "OTHER"})],
         key="MAP_TWO", action="update", component_id="M-1")
-    inert, errors = _declared_map_verdict("A_REF", extra=(other,))
-    assert inert == ("/effect_declarations/map_effects/0",)
-    assert ("PROCESS_IR_SEMANTIC_LINEAGE_PROPERTY_READ_BEFORE_WRITE", "/body/steps/2") in errors
+    findings, inert, _errors = _declared_map_verdict("A_REF", extra=(other,))
+    assert findings == ("content-mismatch",)
+    assert inert == ()
+
+
+def test_two_writes_with_the_same_map_effect_keep_the_declaration():
+    """CDX-184-r4-02: two updates of one map that differ only in metadata derive one effect,
+    so that effect decides and the declaration keeps establishing what the map writes."""
+    renamed = _map_component(
+        [_accepted("dynamic_process_property_set", parameters={"property_name": "OUT"})],
+        key="MAP_TWO", action="update", component_id="M-1", name="another component name")
+    assert _declared_map_verdict("A_REF", extra=(renamed,)) == ((), (), [])
 
 
 def test_every_reference_to_a_bound_component_carries_the_written_facts():
@@ -403,14 +417,106 @@ def test_every_reference_to_a_bound_component_carries_the_written_facts():
               source_profile_id="$ref:p1", target_profile_id="$ref:p1"),
         _spec("u_two", "transform.map", action="update", component_id="MAP-3",
               source_profile_id="$ref:p2", target_profile_id="$ref:p2"),
+        _spec("u_ref", "transform.map", component_id="MAP-3", reference_only=True),
     ]
     symbols = build_symbol_table(components)
     facts = {symbol.ref: (symbol.input_profile_ref, symbol.output_profile_ref) for symbol in symbols.symbols}
     assert facts["$ref:a_map"] == facts["$ref:b_map"] == ("$ref:p1", "$ref:p2")
     assert facts["$ref:r_one"] == facts["$ref:r_two"] == (None, None)  # reused, nothing written
-    assert facts["$ref:u_one"] == facts["$ref:u_two"] == (None, None)  # two writes disagree
+    # Two writes that disagree keep their own facts (Stage-2 review round r4) ...
+    assert facts["$ref:u_one"] == ("$ref:p1", "$ref:p1")
+    assert facts["$ref:u_two"] == ("$ref:p2", "$ref:p2")
+    # ... and a reference nothing agrees on is described by nothing.
+    assert facts["$ref:u_ref"] == (None, None)
     ir = parse_process_ir_v1({"version": "1", "body": {"kind": "sequence", "steps": [
         {"kind": "passthrough"}, {"kind": "map_ref", "map_ref": "$ref:m12"},
         {"kind": "map_ref", "map_ref": "$ref:a_map"}, {"kind": "stop"}]}})
     errors = [(item.code, item.path) for item in validate_process_ir(ir, symbols).errors]
     assert (_MISMATCH, "/body/steps/2/map_ref") in errors, errors
+
+
+# ---------------------------------------------------------------------------
+# Stage-2 review round r4 (`cdx-review.JxcQ6s`), correction batch 5
+# ---------------------------------------------------------------------------
+
+
+def test_two_updates_of_one_cache_that_disagree_check_writes_against_both():
+    """CDX-184-r4-01: two updates declare the same cache with different profiles. Each keeps
+    its declaration, so staging P1 documents is still refused against the P2 one."""
+    components = [
+        _spec("p1", "profile.json"),
+        _spec("p2", "profile.json"),
+        _spec("u1", "documentcache", action="update", component_id="C-1", profile_id="$ref:p1"),
+        _spec("u2", "documentcache", action="update", component_id="C-1", profile_id="$ref:p2"),
+        _spec("m11", "transform.map", source_profile_id="$ref:p1", target_profile_id="$ref:p1"),
+    ]
+    symbols = build_symbol_table(components)
+    ir = parse_process_ir_v1({"version": "1", "body": {"kind": "sequence", "steps": [
+        {"kind": "passthrough"},
+        {"kind": "branch", "legs": [
+            {"steps": [{"kind": "map_ref", "map_ref": "$ref:m11"}],
+             "terminal": {"kind": "cache_put", "cache_ref": "$ref:u1"}},
+            {"steps": [{"kind": "message", "text": "m"}], "terminal": {"kind": "stop"}},
+        ]}]}})
+    errors = [(item.code, item.path) for item in validate_process_ir(ir, symbols).errors]
+    assert (_MISMATCH, "/body/steps/1/legs/0/terminal/cache_ref") in errors, errors
+
+
+def test_a_metadata_only_update_alias_keeps_the_structured_update_facts():
+    """CDX-184-r4-03: an update alias that names only the connector type states no profile. The
+    structured update of the same operation keeps its response profile, so a GET feeding a map
+    of that profile stays admitted."""
+    from boomi_mcp.compiler.process_ir import connector_capabilities
+
+    rest = connector_capabilities.REST_FAMILY
+    components = [
+        _spec("p1", "profile.json"),
+        _spec("p2", "profile.json"),
+        _spec("conn", "connector-settings", connector_type="rest"),
+        _spec("op", "connector-action", action="update", component_id="OP-1", connector_type="rest",
+              connection_ref_key="conn", response_profile_id="$ref:p1"),
+        _spec("op_alias", "connector-action", action="update", component_id="OP-1", connector_type="rest"),
+        _spec("m12", "transform.map", source_profile_id="$ref:p1", target_profile_id="$ref:p2"),
+    ]
+    metadata = {"conn": (rest, None), "op": (rest, "GET"), "op_alias": (rest, "GET")}
+    symbols = build_symbol_table(components, connector_metadata=metadata)
+    ir = parse_process_ir_v1({"version": "1", "body": {"kind": "sequence", "steps": [
+        {"kind": "connector_call", "operation_ref": "$ref:op"},
+        {"kind": "map_ref", "map_ref": "$ref:m12"}, {"kind": "stop"}]}})
+    assert [(item.code, item.path) for item in validate_process_ir(ir, symbols).errors] == []
+    assert {symbol.ref: symbol.output_profile_ref for symbol in symbols.symbols}["$ref:op"] == "$ref:p1"
+
+
+def test_the_served_profile_mismatch_text_names_every_reporting_site():
+    """QA-184-s1-r5-01: the served message, remediation and taxonomy summary for the profile-
+    mismatch code name every kind of site that reports it. The sites are read from the two
+    reporting modules' own source, so a new site fails here until the served text names it."""
+    import re
+
+    from boomi_mcp.compiler.process_ir.diagnostics import compiler_diagnostic_specs
+    from boomi_mcp.errors import ERROR_TAXONOMY
+
+    code = "PROCESS_IR_SEMANTIC_PROFILE_MISMATCH"
+    compiler = _ROOT / "src" / "boomi_mcp" / "compiler" / "process_ir"
+    tails = set()
+    for module in (compiler / "semantic_validation" / "lineage.py", compiler / "connector_resolution.py"):
+        lines = module.read_text(encoding="utf-8").splitlines()
+        for index, line in enumerate(lines):
+            if code in line or "mismatch(" in line or "_profile_failure(" in line:
+                window = "\n".join(lines[max(0, index - 8): index + 8])
+                tails.update(re.findall(r'"(?:\{0\})?(/[a-z_]+(?:/\{0\}/[a-z_]+)?)"', window))
+    keywords = {
+        "/map_ref": "map",
+        "/cache_ref": "cache write",
+        "/process_ref": "call",
+        "/source_values/{0}/profile_ref": "profile source",
+        "/operation_ref": "operation",
+    }
+    # Both directions: every reporting site is one this pin knows, and every word it requires
+    # still stands for a site in the source.
+    assert tails == set(keywords), sorted(tails)
+    served = next(row for row in compiler_diagnostic_specs() if row["code"] == code)
+    text = " ".join((served["message"], served["remediation"], ERROR_TAXONOMY[code].summary)).lower()
+    missing = sorted(tail for tail, word in keywords.items() if word not in text)
+    assert missing == [], missing
+    assert "named only by reference" in served["remediation"]

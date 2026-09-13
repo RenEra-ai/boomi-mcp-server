@@ -1313,8 +1313,10 @@ ERROR_TAXONOMY: Dict[str, ErrorCodeSpec] = {
             category="process_ir",
             retryable=False,
             summary=(
-                "A map_ref's source/target profile does not match the profile of the "
-                "connector call on that side of it."
+                "The documents reaching a map_ref, a cache write, a Set Properties "
+                "profile source or a process call carry a profile other than the one "
+                "that step requires, a required profile is absent, or an operation's "
+                "profile reference names no profile component."
             ),
             owner="#140",
         ),

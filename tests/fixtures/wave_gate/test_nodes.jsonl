@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 12629, "minimum_collected": 12629, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 12633, "minimum_collected": 12633, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -12721,5 +12721,10 @@
 {"kind": "test", "id": "pytest-012720", "node_id": "tests/test_issue_184_component_identity.py::test_a_map_declaration_derives_from_the_config_apply_writes[A_REF-fail]", "state": "active"}
 {"kind": "test", "id": "pytest-012721", "node_id": "tests/test_issue_184_component_identity.py::test_a_map_declaration_derives_from_the_config_apply_writes[Z_REF-reuse]", "state": "active"}
 {"kind": "test", "id": "pytest-012722", "node_id": "tests/test_issue_184_component_identity.py::test_a_map_declaration_derives_from_the_config_apply_writes[Z_REF-fail]", "state": "active"}
-{"kind": "test", "id": "pytest-012723", "node_id": "tests/test_issue_184_component_identity.py::test_two_writes_of_one_map_that_disagree_decide_nothing", "state": "active"}
+{"kind": "test", "id": "pytest-012723", "node_id": "tests/test_issue_184_component_identity.py::test_two_writes_of_one_map_that_disagree_decide_nothing", "state": "tombstone"}
 {"kind": "test", "id": "pytest-012724", "node_id": "tests/test_issue_184_component_identity.py::test_every_reference_to_a_bound_component_carries_the_written_facts", "state": "active"}
+{"kind": "test", "id": "pytest-012725", "node_id": "tests/test_issue_184_component_identity.py::test_two_writes_of_one_map_with_different_effects_refuse_the_declaration", "state": "active"}
+{"kind": "test", "id": "pytest-012726", "node_id": "tests/test_issue_184_component_identity.py::test_two_writes_with_the_same_map_effect_keep_the_declaration", "state": "active"}
+{"kind": "test", "id": "pytest-012727", "node_id": "tests/test_issue_184_component_identity.py::test_two_updates_of_one_cache_that_disagree_check_writes_against_both", "state": "active"}
+{"kind": "test", "id": "pytest-012728", "node_id": "tests/test_issue_184_component_identity.py::test_a_metadata_only_update_alias_keeps_the_structured_update_facts", "state": "active"}
+{"kind": "test", "id": "pytest-012729", "node_id": "tests/test_issue_184_component_identity.py::test_the_served_profile_mismatch_text_names_every_reporting_site", "state": "active"}

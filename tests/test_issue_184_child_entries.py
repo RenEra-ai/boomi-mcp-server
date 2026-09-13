@@ -799,7 +799,8 @@ def test_the_revision_moves_with_component_identity_and_forwarding_behaviour(mon
         (process_ir_effects, "_caller_cache_seeds", lambda requirements, symbols: ()),
         (process_ir_effects, "_caller_composed_paths", lambda prepared, capabilities, walk: ()),
         # Stage-2 review round r3: the written spec and the facts projected from it.
-        (process_ir_effects, "_written_spec", lambda aliases, components, conflict_policy: None),
+        (process_ir_effects, "_written_map_effect",
+         lambda aliases, components, conflict_policy, derive: (None, False)),
         (materialization, "_bound_component_facts",
          lambda components, bindings, plan_keys, reused: collections.defaultdict(lambda: (None, None, None))),
     )

@@ -270,30 +270,28 @@ def _matched_by_identity(aliases, lookup):
     return None, None
 
 
-def _written_spec(aliases, components, conflict_policy):
-    """The authored spec whose config apply writes into the component ``aliases`` name (#184).
+def _written_map_effect(aliases, components, conflict_policy, derive):
+    """``(effect, ambiguous)`` for the component ``aliases`` name, from the configs apply writes (#184).
 
-    Several specs may bind one component, and only one the plan cannot substitute is the
-    config the artifact executes. Taking the first alias in sort order let a
-    ``reference_only`` alias decide for an ``update`` of the same component, and a valid
-    declaration went inert (Stage-2 review round r3). With no written spec the first alias's
-    spec answers; it is substitutable, so derivation stays opaque. With several, the first
-    answers only when every written spec carries the same config.
+    Several specs may bind one component, and only a spec the plan cannot substitute is a
+    config the artifact executes; taking the first alias in sort order let a
+    ``reference_only`` alias decide for an ``update`` (Stage-2 review round r3). Each written
+    spec's effect is derived. Effects that agree decide, whatever else their configs differ
+    in, because a component name changes no state. Effects that disagree leave the
+    component's effect unknown, which is reported as a mismatch rather than made inert: an
+    inert declaration would drop the reads the component really makes (round r4). With no
+    written spec the first alias's spec is derived; it is substitutable, so derivation stays
+    opaque.
     """
-    import json
-
     specs = [
         spec for spec in (_component(components, alias) for alias in sorted(aliases))
         if spec is not None
     ]
     written = [spec for spec in specs if not _may_be_substituted(spec, conflict_policy)]
-    if not written:
-        return specs[0] if specs else None
-    configs = {
-        json.dumps(getattr(spec, "config", None) or {}, sort_keys=True, default=str)
-        for spec in written
-    }
-    return written[0] if len(configs) == 1 else None
+    effects = {derive(spec) for spec in (written or specs[:1])}
+    if len(effects) > 1:
+        return None, True
+    return (next(iter(effects)) if effects else None), False
 
 
 def _map_type_vocabularies() -> Tuple[FrozenSet[str], FrozenSet[str]]:
@@ -1267,21 +1265,24 @@ def resolve_process_ir_effect_declarations(
         if symbol is None or getattr(symbol, "component_type", None) != "transform.map":
             findings.append(EffectAuthorityFindingV1(_INVALID, pointer, "unresolved-or-wrong-type"))
             continue
-        spec = _written_spec(alias, components, conflict_policy)
-        derived = (
-            derive_map_effect(
+        def _derive(spec):
+            return derive_map_effect(
                 getattr(spec, "config", None) or {},
                 substitutable=_may_be_substituted(spec, conflict_policy),
                 name=getattr(spec, "name", None),
                 depends_on=getattr(spec, "depends_on", None) or [],
                 components_by_key={
-                    getattr(item, "key", None): item for item in (components or ())
+                    getattr(component, "key", None): component for component in (components or ())
                 },
                 literal_indexes=literal_indexes,
             )
-            if spec
-            else None
-        )
+
+        derived, ambiguous = _written_map_effect(alias, components, conflict_policy, _derive)
+        if ambiguous:
+            # The written configs disagree about the component's effect, so no declaration
+            # can match what the server derives for it.
+            findings.append(EffectAuthorityFindingV1(_INVALID, pointer, "content-mismatch"))
+            continue
         if derived is None:
             inert.append(pointer)
             continue
