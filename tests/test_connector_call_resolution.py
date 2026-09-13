@@ -146,6 +146,10 @@ def test_component_symbol_optional_field_set_is_pinned():
         # profile and never substitutes for a writer; the symbol builder fills it
         # from the cache's configuration, never the compiler.
         "cache_profile_ref",
+        # #184. The existing component a reference binds to when the component plan
+        # declares that binding. Component identity compares through it, and the symbol
+        # builder fills it from the plan's declared bindings, never the compiler.
+        "bound_component_id",
     }
     # Every optional field must actually default, or a pre-#140 caller's symbol
     # construction would break.

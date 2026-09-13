@@ -1275,6 +1275,20 @@ def _compiler_revision_payload() -> dict:
             _child_entry_behaviour_oracle,
         ),
         (
+            # #184 Stage-2 review round r2. Which references are ONE component, from the
+            # component plan's declared bindings under each conflict policy, and the
+            # cache declarations that component carries, as fixed roots' verdicts.
+            "component_identity",
+            _component_identity_behaviour_oracle,
+        ),
+        (
+            # #184 Stage-2 review round r2. What a forwarding process owes its caller, what
+            # its calls may leave in a shared cache, and how far an effect declaration
+            # reaches, as fixed call chains' verdicts.
+            "child_forwarding",
+            _child_forwarding_behaviour_oracle,
+        ),
+        (
             "compiler_diagnostic_specs",
             lambda: [
                 dict(spec)
@@ -1402,6 +1416,219 @@ def _child_entry_behaviour_oracle():
         "prefix_key": sorted(_plain(list(row)) for row in model.PROCESS_CALL_ATTESTED_PREDECESSORS),
         "verdicts": verdicts,
     }
+
+
+def _component_identity_behaviour_oracle():
+    """How references that bind one component validate, per conflict policy (#184).
+
+    Projects a fixed component plan through the symbol builder every route uses, then
+    validates fixed roots against the result. A change to the declared-binding answer,
+    the identity rule, the reused-config rule or a component's cache declaration moves
+    the revision, which the child-contract oracle's hand-built table cannot see.
+    """
+    from ..compiler.process_ir.semantic_validation.pipeline import validate_process_ir
+    from ..models import process_ir as model
+    from ..models.integration_models import IntegrationComponentSpec
+    from ..recipes.materialization import build_symbol_table
+    from .process_ir_effects import resolve_process_ir_effect_declarations
+
+    def spec(key, component_type, action="create", component_id=None, **config):
+        return IntegrationComponentSpec(
+            key=key, type=component_type, action=action, name=key,
+            component_id=component_id, config=config,
+        )
+
+    components = [
+        spec("p1", "profile.json"),
+        spec("p2", "profile.json"),
+        spec("m11", "transform.map", source_profile_id="$ref:p1", target_profile_id="$ref:p1"),
+        spec("m12", "transform.map", source_profile_id="$ref:p1", target_profile_id="$ref:p2"),
+        # One existing cache, named by a create that names its id and by a reference.
+        spec("c_a", "documentcache", component_id="CACHE-1", profile_id="$ref:p2"),
+        spec("c_b", "documentcache", component_id="CACHE-1", reference_only=True),
+        # One existing cache, named by a reference and by an update declaring its profile.
+        spec("d_a", "documentcache", component_id="CACHE-2", reference_only=True),
+        spec("d_b", "documentcache", action="update", component_id="CACHE-2", profile_id="$ref:p2"),
+    ]
+    stop = {"kind": "stop"}
+
+    def mapped(ref):
+        return {"kind": "map_ref", "map_ref": ref}
+
+    def root(*legs):
+        return model.parse_process_ir_v1({"version": "1", "body": {"kind": "sequence", "steps": [
+            {"kind": "passthrough"}, {"kind": "branch", "legs": list(legs)},
+        ]}})
+
+    roots = {
+        "read_through_the_other_reference": root(
+            {"steps": [mapped("$ref:m12")], "terminal": {"kind": "cache_put", "cache_ref": "$ref:c_b"}},
+            {"steps": [{"kind": "cache_get", "cache_ref": "$ref:c_a"}, mapped("$ref:m11")], "terminal": stop},
+        ),
+        "write_against_the_other_reference_declaration": root(
+            {"steps": [mapped("$ref:m11")], "terminal": {"kind": "cache_put", "cache_ref": "$ref:d_a"}},
+            {"steps": [{"kind": "message", "text": "m"}], "terminal": stop},
+        ),
+    }
+    verdicts = {}
+    for policy in ("clone", "reuse"):
+        symbols = build_symbol_table(components, conflict_policy=policy)
+        # Each root is validated under the context the effect resolver builds for it, as
+        # every production route validates one.
+        resolution = resolve_process_ir_effect_declarations(
+            sorted(roots.items()), None, symbols, components, conflict_policy=policy
+        )
+        checked = {}
+        for name, ir in sorted(roots.items()):
+            context = resolution.capabilities_by_root.get(name)
+            report = (
+                validate_process_ir(ir, symbols, capabilities=context)
+                if context is not None
+                else validate_process_ir(ir, symbols)
+            )
+            checked[name] = sorted([item.code, item.path] for item in report.errors)
+        verdicts[policy] = {
+            "symbols": sorted(
+                [symbol.ref, symbol.bound_component_id or "", symbol.cache_profile_ref or ""]
+                for symbol in symbols.symbols
+            ),
+            "roots": checked,
+        }
+    return verdicts
+
+
+def _child_forwarding_behaviour_oracle():
+    """What forwarding call chains owe and leave behind, as fixed verdicts (#184).
+
+    Each chain is derived and validated through the server's own resolver, so a change
+    to a forwarded obligation, to which shared caches a call may write, or to an effect
+    declaration's reach moves the revision.
+    """
+    from ..compiler.process_ir import connector_capabilities
+    from ..compiler.process_ir.contracts import ComponentSymbolV1, SymbolTableV1
+    from ..compiler.process_ir.semantic_validation.pipeline import validate_process_ir
+    from ..models import process_ir as model
+    from ..models.authoring_workflow import (
+        ProcessIREffectDeclarationsV1,
+        ProcessIRExternalWriterDeclarationV1,
+    )
+    from .process_ir_effects import resolve_process_ir_effect_declarations
+
+    rest = connector_capabilities.REST_FAMILY
+
+    def sym(key, component_type, **fields):
+        return ComponentSymbolV1(
+            ref="$ref:" + key, component_id=key.upper(), component_type=component_type, **fields
+        )
+
+    symbols = SymbolTableV1(symbols=(
+        sym("conn", "connector-settings", connector_type=rest),
+        sym("get", "connector-action", connector_type=rest, action_type="GET", connection_ref="$ref:conn"),
+        sym("get_p1", "connector-action", connector_type=rest, action_type="GET",
+            connection_ref="$ref:conn", output_profile_ref="$ref:p1"),
+        sym("p1", "profile.json"),
+        sym("p2", "profile.json"),
+        sym("m12", "transform.map", input_profile_ref="$ref:p1", output_profile_ref="$ref:p2"),
+        sym("m22", "transform.map", input_profile_ref="$ref:p2", output_profile_ref="$ref:p2"),
+        sym("cache", "documentcache"),
+    ) + tuple(
+        sym(key, "process") for key in ("parent", "mid", "writer", "reader", "bound", "child", "enrich")
+    ))
+    stop = {"kind": "stop"}
+    message = {"kind": "message", "text": "m"}
+    get_p1 = {"kind": "connector_call", "operation_ref": "$ref:get_p1"}
+
+    def doc(*steps):
+        return {"version": "1", "body": {"kind": "sequence", "steps": list(steps)}}
+
+    def legs(*items):
+        return doc({"kind": "branch", "legs": list(items)})
+
+    def call(key):
+        return {"kind": "process_call", "process_ref": "$ref:" + key}
+
+    def put():
+        return {"kind": "cache_put", "cache_ref": "$ref:cache"}
+
+    def dynamic(name):
+        return {"kind": "set_ddp", "name": name, "source_values": [
+            {"value_type": "static", "value": "/c/"},
+            {"value_type": "dpp", "property_name": "key", "default_value": ""},
+        ]}
+
+    def bound(name):
+        return {"kind": "connector_call", "operation_ref": "$ref:get", "path_binding": {"property_name": name}}
+
+    def passthrough(prefix, terminal):
+        return doc({"kind": "passthrough"}, {"kind": "branch", "legs": [
+            {"steps": list(prefix), "terminal": terminal},
+            {"steps": [message], "terminal": stop},
+        ]})
+
+    staged = {"steps": [get_p1, {"kind": "map_ref", "map_ref": "$ref:m12"}], "terminal": put()}
+    reader = doc({"kind": "cache_get", "cache_ref": "$ref:cache"}, {"kind": "map_ref", "map_ref": "$ref:m22"}, stop)
+    chains = {
+        "a_forwarded_cache_requirement": (None, [
+            ("parent", legs(staged, {"steps": [], "terminal": call("mid")})),
+            ("mid", legs({"steps": [message], "terminal": stop}, {"steps": [], "terminal": call("reader")})),
+            ("reader", reader),
+        ]),
+        "a_call_appending_before_a_reader": (None, [
+            ("parent", legs(staged, {"steps": [], "terminal": call("mid")})),
+            ("mid", legs({"steps": [], "terminal": call("writer")}, {"steps": [], "terminal": call("reader")})),
+            ("writer", legs({"steps": [get_p1], "terminal": put()}, {"steps": [message], "terminal": stop})),
+            ("reader", reader),
+        ]),
+        "a_mapping_call_before_a_reader": (None, [
+            ("parent", legs(staged, {"steps": [], "terminal": call("mid")})),
+            ("mid", legs({"steps": [], "terminal": call("enrich")}, {"steps": [], "terminal": call("reader")})),
+            ("enrich", doc(get_p1, {"kind": "map_ref", "map_ref": "$ref:m12"}, stop)),
+            ("reader", reader),
+        ]),
+        "a_writer_the_forwarder_establishes": (None, [
+            ("parent", passthrough([dynamic("Y")], call("mid"))),
+            ("mid", passthrough([dynamic("X")], call("bound"))),
+            ("bound", doc({"kind": "passthrough"}, {"kind": "branch", "legs": [
+                {"steps": [bound("X")], "terminal": stop},
+                {"steps": [bound("Y")], "terminal": stop},
+            ]})),
+        ]),
+        "an_external_writer_child": (
+            ProcessIREffectDeclarationsV1(external_writers=(
+                ProcessIRExternalWriterDeclarationV1(cache_ref="$ref:cache"),
+            )),
+            [
+                ("parent", legs({"steps": [get_p1], "terminal": stop}, {"steps": [], "terminal": call("child")})),
+                ("child", doc(
+                    {"kind": "cache_get", "cache_ref": "$ref:cache", "external_writer": True},
+                    {"kind": "set_dpp", "name": "Z", "source_values": [{"value_type": "static", "value": "v"}]},
+                    stop,
+                )),
+            ],
+        ),
+    }
+    verdicts = {}
+    for name, (declarations, chain) in sorted(chains.items()):
+        parsed = [(key, model.parse_process_ir_v1(document)) for key, document in chain]
+        resolution = resolve_process_ir_effect_declarations(
+            parsed, declarations, symbols, [], child_roots={"$ref:" + key: ir for key, ir in parsed}
+        )
+        roots = {}
+        for key, ir in parsed:
+            context = resolution.capabilities_by_root.get(key)
+            report = (
+                validate_process_ir(ir, symbols, capabilities=context)
+                if context is not None
+                else validate_process_ir(ir, symbols)
+            )
+            roots[key] = {
+                "errors": sorted([item.code, item.path] for item in report.errors),
+                "child_rows": [] if context is None else [
+                    row.model_dump(mode="json") for row in context.child_entry_contracts
+                ],
+            }
+        verdicts[name] = {"resolved": bool(resolution.ok), "roots": roots}
+    return verdicts
 
 
 def _replay_ids():

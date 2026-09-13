@@ -6013,6 +6013,31 @@ def reused_keys_for_components(components, conflict_policy="reuse"):
     )
 
 
+def declared_bindings_for_components(components, conflict_policy="reuse"):
+    """``{key: existing component id}`` for each component apply binds to an id the request NAMES.
+
+    #184. A plan-time symbol table carries one placeholder id per key, so two keys that
+    bind ONE existing component would validate as two. This is the component they
+    share, answered like the reuse set above from DECLARED bindings only: a reuse at
+    apply (``reference_only``, or a ``create`` the policy reuses) and an ``update``,
+    which writes the component it names. A binding only an account read can answer, a
+    name match, is not known here. The id is compared stripped: the ``reference_only``
+    path strips what the author wrote, and the create and update paths hand it back as
+    authored.
+    """
+    reused = reused_keys_for_components(components, conflict_policy)
+    bindings = {}
+    for comp in components:
+        key = getattr(comp, "key", None)
+        if not (isinstance(key, str) and key):
+            continue
+        existing_id = resolve_planner_binding(None, comp, declared_only=True).existing_id
+        existing_id = existing_id.strip() if isinstance(existing_id, str) else None
+        if existing_id and (key in reused or getattr(comp, "action", None) == "update"):
+            bindings[key] = existing_id
+    return bindings
+
+
 def _will_reuse_at_apply(
     *, declared_action, existing_component_id, reference_only, conflict_policy
 ):
@@ -8444,7 +8469,7 @@ def _request_only_resolution(spec):
     )
 
 
-def _build_canonical_symbols(*, spec, resolution):
+def _build_canonical_symbols(*, spec, resolution, conflict_policy):
     """The compile symbol table for one spec. ONE construction, three callers.
 
     The step function, the pre-write plan build and the pre-write dry emit all
@@ -8489,6 +8514,8 @@ def _build_canonical_symbols(*, spec, resolution):
         process_keys=[u.envelope.component_key for u in (spec.processes or ())],
         connector_metadata=declared,
         connector_resolution_snapshot=snapshot,
+        # #184: which declared bindings apply keeps decides component identity.
+        conflict_policy=conflict_policy,
     )
 
 
@@ -8506,7 +8533,7 @@ def _build_canonical_plan(*, spec, unit, conflict_policy: str, resolution):
     from ..authoring.process_materialization import build_materialization_plan
     from ..compiler.process_ir.emitter_registry import emitter_revision
 
-    symbols = _build_canonical_symbols(spec=spec, resolution=resolution)
+    symbols = _build_canonical_symbols(spec=spec, resolution=resolution, conflict_policy=conflict_policy)
     return build_materialization_plan(
         envelope=unit.envelope,
         process_ir=unit.process_ir,
@@ -8861,7 +8888,7 @@ def _execute_canonical_process(
         # against the account, before anything was written. Reading again inside
         # the mutation loop would be a second authority for one fact and would
         # reintroduce the refusal-after-a-write this slice just removed.
-        symbols = _build_canonical_symbols(spec=spec, resolution=resolution)
+        symbols = _build_canonical_symbols(spec=spec, resolution=resolution, conflict_policy=conflict_policy)
         if stored_plan is not None:
             # THE COMPILED PLAN IS EXECUTED, never a rebuild (§6 AR1-01).
             #
@@ -10118,7 +10145,9 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
             # pre-write refusal every other failure in this pass uses.
             _root_symbols = _project_grants_for_root(
                 _pre_plan.process_ir,
-                _build_canonical_symbols(spec=spec, resolution=_resolution),
+                _build_canonical_symbols(
+                    spec=spec, resolution=_resolution, conflict_policy=conflict_policy
+                ),
                 process_root_ref=_pre_plan.envelope.component_key,
                 registry=_replay_registry,
                 snapshot=_resolution,

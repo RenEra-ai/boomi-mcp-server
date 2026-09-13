@@ -224,6 +224,14 @@ class ComponentSymbolV1(_CompilerModel):
     #: about the content. A ref like the other profile refs, with the profile
     #: symbol's own ``component_type`` as the profile kind.
     cache_profile_ref: Optional[str] = None
+    #: #184. The existing component this reference binds to when the component plan
+    #: DECLARES that binding: a reuse by id, a ``reference_only`` id, or an update of a
+    #: named id. A placeholder-backed table gives every reference its own
+    #: ``component_id``, so two references binding ONE existing component would
+    #: otherwise validate as two components, and a cache write through one would not
+    #: reach a read through the other. Compared, never emitted: lowering reads
+    #: ``component_id`` alone. See :func:`component_identity`.
+    bound_component_id: Optional[str] = None
 
     @field_validator("ref", "component_id", "component_type")
     @classmethod
@@ -234,7 +242,7 @@ class ComponentSymbolV1(_CompilerModel):
 
     @field_validator(
         "connection_ref", "input_profile_ref", "output_profile_ref",
-        "input_document_type", "cache_profile_ref",
+        "input_document_type", "cache_profile_ref", "bound_component_id",
     )
     @classmethod
     def _optional_ref_shape(cls, value: Optional[str]) -> Optional[str]:
@@ -250,6 +258,19 @@ class ComponentSymbolV1(_CompilerModel):
                 "surrounding whitespace"
             )
         return value
+
+
+def component_identity(symbol) -> Optional[str]:
+    """The component a symbol names, for deciding whether two references are ONE (#184).
+
+    ``component_id`` is what the emitter writes, and a placeholder-backed table has one
+    per reference. The component plan's declared binding, when it has one, is the
+    component apply binds the reference to, so it decides identity first. Every
+    validation rule that asks "the same component" asks here.
+    """
+    if symbol is None:
+        return None
+    return getattr(symbol, "bound_component_id", None) or getattr(symbol, "component_id", None)
 
 
 class IdempotencyContractSymbolV1(_CompilerModel):
@@ -408,7 +429,8 @@ class SymbolTableV1(_CompilerModel):
 
     Canonicalised by sorting on ``ref`` at construction, so the caller's
     insertion order cannot reach compiler output. Duplicate refs are rejected;
-    two refs sharing one ``component_id`` are allowed (intentional reuse).
+    two refs naming one component (:func:`component_identity`) are allowed
+    (intentional reuse).
 
     A tuple — not a ``Mapping`` — deliberately: the runtime compiler must not
     depend on the test-only ``_process_ir_compat._FrozenMapping``, and tuples are
@@ -1488,6 +1510,7 @@ __all__: List[str] = [
     "CfgSemanticV1",
     "CatchErrorsInputV1",
     "ComponentSymbolV1",
+    "component_identity",
     "ConnectorActionInputV1",
     "ConnectorSemanticV1",
     "ListenerSemanticV1",

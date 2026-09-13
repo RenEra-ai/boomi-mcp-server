@@ -170,17 +170,40 @@ def canonical_cache_refs(symbols: SymbolTableV1) -> Mapping[str, str]:
     one cache component through several refs. Keyed by the authored spelling, a write
     through one alias and a read through another were two caches, so a profile check
     missed a write that lands in the same component (Stage-2 review of #184). The
-    resolved component id is the authority, and its lexicographically first ref is the
-    spelling every fact uses. A ref with no component id stays as authored.
+    component each ref names is the authority: the plan's declared binding before the
+    placeholder id a plan-time table gives every key alone (``component_identity``,
+    QA round r3). Its lexicographically first ref is the spelling every fact uses. A
+    ref with no identity stays as authored.
     """
+    from ..contracts import component_identity
+
     by_component: Dict[str, List[str]] = {}
     for symbol in symbols.symbols:
         if getattr(symbol, "component_type", None) != "documentcache":
             continue
-        component_id = getattr(symbol, "component_id", None)
-        if component_id:
-            by_component.setdefault(component_id, []).append(symbol.ref)
+        identity = component_identity(symbol)
+        if identity:
+            by_component.setdefault(identity, []).append(symbol.ref)
     return {ref: min(refs) for refs in by_component.values() for ref in refs}
+
+
+def canonical_cache_profiles(symbols: SymbolTableV1) -> Mapping[str, tuple]:
+    """Every profile any reference to a cache component declares, by canonical ref (#184).
+
+    The declaration is a fact of the COMPONENT, carried by whichever reference's config
+    stated it; a reused alias states none. Read off the canonical spelling's symbol
+    alone, a write through the alias that declares the profile went unchecked whenever
+    the other spelling sorted first (Stage-2 review round r2).
+    """
+    canonical = canonical_cache_refs(symbols)
+    declared: Dict[str, set] = {}
+    for symbol in symbols.symbols:
+        if getattr(symbol, "component_type", None) != "documentcache":
+            continue
+        profile_ref = getattr(symbol, "cache_profile_ref", None)
+        if profile_ref is not None:
+            declared.setdefault(canonical.get(symbol.ref, symbol.ref), set()).add(profile_ref)
+    return {ref: tuple(sorted(refs)) for ref, refs in declared.items()}
 
 
 def canonical_cache_cfg(cfg: SemanticCfgV1, canonical: Mapping[str, str]) -> SemanticCfgV1:

@@ -1728,6 +1728,8 @@ def _validate_processes(
         ],
         connector_metadata=normalized.connector_metadata,
         connector_resolution_snapshot=snapshot,
+        # #184: which declared bindings apply keeps decides component identity.
+        conflict_policy=conflict_policy or "reuse",
     )
 
     # SEEDED, not merely appended. A diagnostic that contributes no code and no

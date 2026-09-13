@@ -666,7 +666,7 @@ def test_the_wired_apply_comparison_refuses_a_declared_GET_over_an_account_POST(
             build_connector_resolution_snapshot as _snapshot,
         )
 
-        ib._build_canonical_symbols(
+        ib._build_canonical_symbols(conflict_policy="reuse", 
             spec=_Spec(),
             resolution=_snapshot(
                 _Spec.components, live_component_xml=live, reused_keys={'reused_op'}
@@ -676,7 +676,7 @@ def test_the_wired_apply_comparison_refuses_a_declared_GET_over_an_account_POST(
 
     # CONTROL: without the account reading, the same spec builds cleanly — so the
     # refusal comes from the account and not from anything in the request.
-    assert ib._build_canonical_symbols(
+    assert ib._build_canonical_symbols(conflict_policy="reuse", 
         spec=_Spec(), resolution=ib._request_only_resolution(_Spec())
     ) is not None
 
@@ -1717,7 +1717,7 @@ def test_the_unreadable_refusal_reaches_a_caller_under_its_own_code():
         processes = ()
 
     with pytest.raises(ConnectorIdentityError) as raised:
-        ib._build_canonical_symbols(
+        ib._build_canonical_symbols(conflict_policy="reuse", 
             spec=_Spec(), resolution=ib._request_only_resolution(_Spec())
         )
     served, _path = ib._canonical_plan_failure(raised.value)

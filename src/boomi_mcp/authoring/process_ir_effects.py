@@ -187,16 +187,17 @@ def _aliases(symbols: Any, ref: str) -> FrozenSet[str]:
     component id, so an unresolvable ref still reaches its own
     `unresolved-or-wrong-type` finding rather than silently binding wider.
     """
-    symbol = _symbol(symbols, ref)
-    component_id = getattr(symbol, "component_id", None) if symbol else None
-    if not component_id:
+    from ..compiler.process_ir.contracts import component_identity
+
+    identity = component_identity(_symbol(symbols, ref))
+    if not identity:
         return frozenset({ref})
     return frozenset(
         {ref}
         | {
             other.ref
             for other in (getattr(symbols, "symbols", ()) or ())
-            if getattr(other, "component_id", None) == component_id
+            if component_identity(other) == identity
         }
     )
 
@@ -938,6 +939,11 @@ def derive_child_entry_facts(child_ir: Any, symbols: Any, capabilities: Any = No
         return {"entry_form": "unknown"}
     walk = walk_lineage(prepared, base)
     known = True
+    #: Whether every cache this process may write is listed. Only cache steps write a
+    #: cache, so an opaque map or script leaves this True; only a call can hide a cache
+    #: write, when its child's own cache writes are unknown (pre-commit verification of
+    #: Stage-2 correction batch 3).
+    caches_known = True
     mutated = set()
     for node in prepared.cfg.nodes:
         semantic = node.semantic
@@ -948,6 +954,10 @@ def derive_child_entry_facts(child_ir: Any, symbols: Any, capabilities: Any = No
             mutated.add(("cache", semantic.cache_ref))
         elif kind == "process_call":
             contract = base.child_entry_contract(semantic.process_ref)
+            if contract is None or not (contract.state_known or contract.cache_writes_known):
+                caches_known = False
+            else:
+                mutated.update((key[0], key[1]) for key in contract.mutated_state if key[0] == "cache")
             if contract is None or not contract.state_known:
                 known = False
             else:
@@ -959,7 +969,8 @@ def derive_child_entry_facts(child_ir: Any, symbols: Any, capabilities: Any = No
                 mutated.update((key[0], key[1]) for key in effect.writes if key[0] != "ddp")
     facts: Dict[str, Any] = {
         "state_known": known,
-        "mutated_state": tuple(sorted(mutated)) if known else (),
+        "cache_writes_known": known or caches_known,
+        "mutated_state": tuple(sorted(mutated)) if known or caches_known else (),
     }
     reads = tuple(sorted({(key[0], key[1]) for key in walk.unestablished_reads}))
     facts["cache_requirements"] = tuple(sorted(
@@ -994,23 +1005,14 @@ def _caller_composed_paths(prepared: Any, capabilities: Any, walk: Any) -> Tuple
     from ..compiler.process_ir.semantic_validation.lineage import walk_lineage
     from ..errors import PROCESS_IR_SEMANTIC_DYNAMIC_PATH_DDP_NOT_ESTABLISHED as _NOT_ESTABLISHED
 
-    refused = {item.path for item in walk.findings if item.code == _NOT_ESTABLISHED}
-    candidates = []
-    for node in prepared.cfg.nodes:
-        semantic = node.semantic
-        binding = getattr(semantic, "path_binding", None)
-        pointer = node.source_path + "/path_binding"
-        if binding is not None and pointer in refused:
-            candidates.append((pointer, binding.property_name, binding.request_profile_ref))
-        if semantic.semantic_kind == "process_call":
-            # A call discharging a passthrough child's bound path reports at its own
-            # `/process_ref`. When that refusal clears under the seeded writer, the
-            # obligation is this process's caller's, inherited from the child
-            # (Stage-2 review of #184).
-            call_pointer = node.source_path + "/process_ref"
-            contract = capabilities.child_entry_contract(semantic.process_ref)
-            if contract is not None and call_pointer in refused:
-                candidates.extend((call_pointer, name, ref) for name, ref in contract.required_writers)
+    # One row per bound PROPERTY the walk found no writer for, at the pointer reporting
+    # it: this process's own binding, or one a call inherits from its child (Stage-2
+    # review of #184). A call whose child needs X and Y, in a process that writes X
+    # itself, owes the caller Y alone; expanding the call's one refusal to every writer
+    # the child needs made X a caller obligation too (round r2).
+    candidates = sorted(
+        set(walk.unestablished_bindings), key=lambda row: (row[0], row[1], row[2] or "")
+    )
     if not candidates:
         return ()
     seeded = capabilities.model_copy(update={
@@ -1034,6 +1036,8 @@ def _caller_cache_seeds(requirements, symbols) -> Tuple[Tuple[str, str], ...]:
     disagreement or an unstated consumer seeds nothing, so the child keeps its own
     refusal: no caller could satisfy both.
     """
+    from ..compiler.process_ir.contracts import component_identity
+
     by_cache: Dict[str, List[Optional[str]]] = {}
     for cache_ref, profile_ref in requirements:
         by_cache.setdefault(cache_ref, []).append(profile_ref)
@@ -1041,9 +1045,7 @@ def _caller_cache_seeds(requirements, symbols) -> Tuple[Tuple[str, str], ...]:
     for cache_ref, refs in sorted(by_cache.items()):
         if None in refs:
             continue
-        identities = {
-            getattr(_symbol(symbols, ref), "component_id", None) or ref for ref in refs
-        }
+        identities = {component_identity(_symbol(symbols, ref)) or ref for ref in refs}
         if len(identities) == 1:
             seeds.append((cache_ref, sorted(refs)[0]))
     return tuple(seeds)
@@ -1173,6 +1175,7 @@ def resolve_process_ir_effect_declarations(
         ScriptEffectContractV1,
         SubprocessSummaryV1,
     )
+    from ..compiler.process_ir.contracts import component_identity
     from .vetted_scripts import lookup_vetted_script
 
     symbols_for = symbols_for or (lambda _key, _root: symbols)
@@ -1210,7 +1213,7 @@ def resolve_process_ir_effect_declarations(
     def _claim(family: str, ref: str, pointer: str) -> bool:
         """True when this declaration may proceed; records a finding if not."""
         symbol = _symbol(symbols, ref)
-        identity = getattr(symbol, "component_id", None) if symbol else None
+        identity = component_identity(symbol)
         if not identity:
             return True
         seen = claimed.setdefault(family, {})

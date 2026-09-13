@@ -389,9 +389,10 @@ def _profile_identity(
 ) -> Optional[Tuple[str, str]]:
     """``(component id, normalized profile type)`` for a profile reference.
 
-    Compares by resolved COMPONENT ID, not by ref token: two different refs may
-    legitimately name one component (that is exactly what #139B's
-    occurrence-scoped aliases do), and rejecting that would be wrong.
+    Compares by COMPONENT IDENTITY (``contracts.component_identity``), not by ref
+    token: two different refs may legitimately name one component (that is exactly
+    what #139B's occurrence-scoped aliases do, and what two plan keys binding one
+    existing component do, #184), and rejecting that would be wrong.
 
     ``None`` for anything that is not a real profile component. Returning an
     identity for an arbitrary component type would make the continuity check
@@ -405,7 +406,9 @@ def _profile_identity(
     component_type = _canonical_type(symbol)
     if component_type not in PROFILE_COMPONENT_TYPES:
         return None
-    return (symbol.component_id, component_type)
+    from .contracts import component_identity
+
+    return (component_identity(symbol), component_type)
 
 
 def validate_connector_call_semantics(

@@ -181,7 +181,9 @@ def _plan_profile_ref(value, plan_keys) -> Optional[str]:
     return f"{_REF_PREFIX}{key}" if key and key in plan_keys else None
 
 
-def _profile_facts(component, plan_keys) -> Tuple[Optional[str], Optional[str], Optional[str]]:
+def _profile_facts(
+    component, plan_keys, reused=False
+) -> Tuple[Optional[str], Optional[str], Optional[str]]:
     """``(input profile, output profile, cache profile)`` refs a component declares (#184).
 
     Read from the component's own structured config, with the field names its builder
@@ -193,9 +195,11 @@ def _profile_facts(component, plan_keys) -> Tuple[Optional[str], Optional[str], 
     - a document cache's ``profile_id`` (``document_cache_builder``).
 
     A REUSED component's stored profiles are not in hand here, and the requested
-    config of a reuse is not what the account holds, so it contributes nothing.
+    config of a reuse is not what the account holds, so it contributes nothing. That
+    includes a ``create`` apply reuses because it names an existing id (``reused``):
+    its config is discarded exactly like a ``reference_only`` one's.
     """
-    if component_materialization_mode(component) == _REUSE:
+    if reused or component_materialization_mode(component) == _REUSE:
         return None, None, None
     config = component.config or {}
     if not isinstance(config, dict):
@@ -231,6 +235,7 @@ def build_symbol_table(
     connector_metadata: Optional[Mapping[str, Tuple[Optional[str], Optional[str]]]] = None,
     resolver: Callable[[str], str] = placeholder_component_id,
     connector_resolution_snapshot=None,
+    conflict_policy: str = "reuse",
 ):
     """Project components into the compiler's ``SymbolTableV1``.
 
@@ -272,6 +277,11 @@ def build_symbol_table(
 
     Derived here rather than passed in, so both call sites — the authoring
     workflow and the recipe engine — get it from one place.
+
+    ``conflict_policy`` decides which declared bindings apply keeps (#184). Each symbol
+    records the existing component its key binds to, so references binding one
+    component are one component to validation, and a reused component's discarded
+    config contributes no profile facts.
     """
     from ..compiler.process_ir.contracts import ComponentSymbolV1, SymbolTableV1
 
@@ -279,6 +289,24 @@ def build_symbol_table(
     symbols = []
     # #184: the keys a component profile ref may name — this plan's components only.
     plan_keys = {component.key for component in components}
+    # #184: the existing component each key binds to, and the keys apply reuses, from the
+    # builder's own declared-binding authority.
+    from ..categories.integration_builder import (
+        declared_bindings_for_components,
+        reused_keys_for_components,
+    )
+
+    # A declared id spelled like one of this plan's own placeholders names no account
+    # component: compared, it would merge that key with the key the placeholder stands for.
+    placeholders = {
+        placeholder_component_id(f"{_REF_PREFIX}{key}") for key in set(plan_keys) | set(process_keys)
+    }
+    bindings = {
+        key: bound
+        for key, bound in declared_bindings_for_components(components, conflict_policy).items()
+        if bound not in placeholders
+    }
+    reused = reused_keys_for_components(components, conflict_policy)
     for component in components:
         connector_type, action_type = metadata.get(component.key, (None, None))
         ref = f"{_REF_PREFIX}{component.key}"
@@ -313,7 +341,7 @@ def build_symbol_table(
         # declares it holds. The listener's inbound request profile keeps precedence
         # for the listener operation, which is what #158 carries in the same field.
         input_profile_fact, output_profile_fact, cache_profile_fact = _profile_facts(
-            component, plan_keys
+            component, plan_keys, reused=component.key in reused
         )
         symbols.append(
             ComponentSymbolV1(
@@ -328,6 +356,7 @@ def build_symbol_table(
                 input_profile_ref=listener_request_profile or input_profile_fact,
                 output_profile_ref=output_profile_fact,
                 cache_profile_ref=cache_profile_fact,
+                bound_component_id=bindings.get(component.key),
                 input_document_type=listener_input_type,
                 # Tri-state, and absent unless a snapshot actually resolved it: a
                 # caller that builds no snapshot says nothing, and the blank-path

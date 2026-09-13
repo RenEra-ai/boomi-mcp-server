@@ -76,6 +76,7 @@ from .contracts import (
 from .context import (
     PreparedProcessValidationV1,
     canonical_cache_capabilities,
+    canonical_cache_profiles,
     canonical_cache_refs,
 )
 from .findings import finding
@@ -858,6 +859,22 @@ def _opaque_reason(
     return None
 
 
+def _caches_a_call_may_write(cache_refs, contract) -> Tuple[str, ...]:
+    """The caches one call may leave holding content this process cannot see (#184).
+
+    A child whose cache writes are known names every cache it writes, its own children's
+    included, and each is marked whether or not this process names it: a forwarding
+    process that names no cache still hands a later call a cache an earlier call appended
+    to (Stage-2 review round r2). Only a cache step writes a cache, so a child whose
+    other effects are unknown still names them all. Any other child may write every cache
+    this process can observe. Cache refs are canonical here, one spelling per component,
+    so equality is identity.
+    """
+    if contract is not None and (contract.state_known or contract.cache_writes_known):
+        return tuple(sorted({key[1] for key in contract.mutated_state if key[0] == CACHE}))
+    return tuple(cache_refs)
+
+
 class LineageWalkV1(NamedTuple):
     """Everything ONE lineage walk establishes about a process.
 
@@ -893,6 +910,13 @@ class LineageWalkV1(NamedTuple):
     #: #184 amendment 1 rule 6: ``(cache ref, AUTHORED profile ref or None)`` for each
     #: consumer of documents read from a cache no write in this process reached.
     cache_requirement_refs: Tuple[Tuple[str, Optional[str]], ...] = ()
+    #: #184: ``(pointer, property name, request profile ref)`` for each bound request
+    #: path the binding rule found no writer for: this process's own binding at its
+    #: ``/path_binding``, or one a call inherits from its passthrough child at the call's
+    #: ``/process_ref``. One row per PROPERTY where the diagnostic is one per pointer, so a
+    #: caller obligation is derived per property, never by expanding a pointer to every
+    #: binding behind it (Stage-2 review round r2).
+    unestablished_bindings: Tuple[Tuple[str, str, Optional[str]], ...] = ()
     # #184 D12 withdrew ``truncated``. The walk had a depth bound of 256, and a
     # caller trusting the state sets had to treat a walk that hit it as no
     # answer. The controller is now iterative with no depth bound: every node of
@@ -961,18 +985,40 @@ def _walk_lineage(
     entry_requirements: List[Optional[Tuple[str, str]]] = []
     entry_requirement_refs: List[Optional[str]] = []
     cache_requirement_refs: List[Tuple[str, Optional[str]]] = []
+    unestablished_bindings: List[Tuple[str, str, Optional[str]]] = []
     #: #184 amendment 3 §7: writer token -> (the writing node's semantic, its unmet
     #: property reads), captured when the writer ran. The CFG is a tree, so each
     #: writer runs once, and a cached document's writer facts stay facts about it.
     writer_records: Dict[str, Tuple[Any, tuple]] = {}
     leg_writes = _leg_write_index(prepared, capabilities)
-    #: Every document cache this process names, for a child that may write one.
-    cache_refs = sorted({
-        node.semantic.cache_ref
-        for node in prepared.cfg.nodes
-        if isinstance(getattr(node.semantic, "cache_ref", None), str) and node.semantic.cache_ref
-    })
+    #: Every document cache this process can observe, for a child that may write one: the
+    #: caches its own nodes name, the caches its callers filled, and every cache a called
+    #: child's contract names. A forwarding process names no cache of its own, yet a child
+    #: it calls may append to the cache a later child reads (Stage-2 review round r2).
+    cache_refs = sorted(
+        {
+            node.semantic.cache_ref
+            for node in prepared.cfg.nodes
+            if isinstance(getattr(node.semantic, "cache_ref", None), str) and node.semantic.cache_ref
+        }
+        | {cache_ref for cache_ref, _profile in capabilities.caller_cache_contents}
+        | {
+            key[1]
+            for row in capabilities.child_entry_contracts
+            for key in tuple(row.required_reads) + tuple(row.mutated_state)
+            if key[0] == CACHE
+        }
+        | {
+            cache_ref
+            for row in capabilities.child_entry_contracts
+            for cache_ref, _profile in row.cache_requirements
+        }
+    )
     index = prepared.symbols.build_index()
+    from ..contracts import component_identity
+
+    #: #184: every profile a cache component's references declare, by canonical ref.
+    cache_profiles = canonical_cache_profiles(prepared.symbols)
     # #184: the stream-profile proof needs each call's resolved binding. When a
     # binding does not resolve, connector resolution already reports that defect
     # in the flow phase, and a profile verdict built on a guessed binding would
@@ -1172,15 +1218,15 @@ def _walk_lineage(
     def _profile_identity(ref):
         """An authored profile ref as the identity the EMITTER will use.
 
-        The resolved component id when the symbol table knows the ref, and the
-        ref itself when it does not — an unresolvable ref is already reported by
-        the reference phase, and inventing an identity for it here would either
-        collapse two unknown refs into one or make a ref unequal to itself.
+        The component the ref names (``component_identity``) when the symbol table
+        knows the ref, and the ref itself when it does not — an unresolvable ref is
+        already reported by the reference phase, and inventing an identity for it
+        here would either collapse two unknown refs into one or make a ref unequal
+        to itself.
         """
         if ref is None:
             return None
-        symbol = prepared.symbol(ref)
-        return getattr(symbol, "component_id", None) or ref
+        return component_identity(prepared.symbol(ref)) or ref
 
     def _check_path_binding(node, semantic, state, writers) -> None:
         """A bound request path is only as sound as the writer that composes it (#155).
@@ -1220,6 +1266,9 @@ def _walk_lineage(
         # cache retrieval the key may have SEVERAL possible writers, and the path
         # must be sound for every one; an unknown one proves nothing.
         if not state.establishes(key) or not alternatives or UNKNOWN_WRITER in alternatives:
+            unestablished_bindings.append(
+                (node.source_path + sub_path, binding.property_name, binding.request_profile_ref)
+            )
             _report(
                 PROCESS_IR_SEMANTIC_DYNAMIC_PATH_DDP_NOT_ESTABLISHED,
                 node,
@@ -1479,11 +1528,16 @@ def _walk_lineage(
         if kind == "cache_put" and stream.state == STREAM_CALLER_ENTRY:
             # Staging the caller's documents: the cache's declared profile is what
             # the child requires of them, and an undeclared cache states nothing.
-            cache = index.get(semantic.cache_ref)
-            declared_ref = getattr(cache, "cache_profile_ref", None)
+            declared_refs = cache_profiles.get(semantic.cache_ref, ())
+            identities = {_identity(ref) for ref in declared_refs}
+            # Declarations that disagree state no single profile the child requires, and
+            # the staged documents are checked against each of them.
+            declared_ref = declared_refs[0] if len(identities) == 1 else None
             declared = _identity(declared_ref) if declared_ref is not None else None
             _requires(stream, declared, declared_ref)
-            if checked and declared is not None and stream.identity is not None and declared != stream.identity:
+            if checked and stream.identity is not None and any(
+                identity is not None and identity != stream.identity for identity in identities
+            ):
                 mismatch(node, "/cache_ref")
             return (
                 state.with_content(semantic.cache_ref, declared),
@@ -1493,11 +1547,11 @@ def _walk_lineage(
 
         if kind == "cache_put":
             identity = stream.identity if stream.state == STREAM_KNOWN else None
-            if checked and identity is not None:
-                cache = index.get(semantic.cache_ref)
-                declared_ref = getattr(cache, "cache_profile_ref", None)
-                if declared_ref is not None and _identity(declared_ref) != identity:
-                    mismatch(node, "/cache_ref")
+            if checked and identity is not None and any(
+                _identity(declared_ref) != identity
+                for declared_ref in cache_profiles.get(semantic.cache_ref, ())
+            ):
+                mismatch(node, "/cache_ref")
             # Add to Cache hands on no documents: the path ends here.
             return (
                 state.with_content(semantic.cache_ref, identity),
@@ -1553,17 +1607,9 @@ def _walk_lineage(
 
         A child shares its caller's document caches (capture `cap184-shared-cache`),
         and what it stores carries a profile and a property cohort this process cannot
-        see. A contract with known state names the caches it writes; any other child
-        may write any cache this process names.
+        see. Which caches those are is `_caches_a_call_may_write`.
         """
-        if contract is not None and contract.state_known:
-            # Cache refs are canonical here, one spelling per component, so equality is
-            # identity.
-            written = {key[1] for key in contract.mutated_state if key[0] == CACHE}
-            targets = [ref for ref in cache_refs if ref in written]
-        else:
-            targets = list(cache_refs)
-        for ref in targets:
+        for ref in _caches_a_call_may_write(cache_refs, contract):
             state = state.with_content(ref, None).with_cohort(ref, UNKNOWN_COHORT)
         return state
 
@@ -2157,6 +2203,9 @@ def _walk_lineage(
         entry_requirements=tuple(entry_requirements),
         entry_requirement_refs=tuple(entry_requirement_refs),
         cache_requirement_refs=tuple(cache_requirement_refs),
+        unestablished_bindings=tuple(sorted(
+            set(unestablished_bindings), key=lambda row: (row[0], row[1], row[2] or "")
+        )),
         profile_proof=profile_proof,
     )
 

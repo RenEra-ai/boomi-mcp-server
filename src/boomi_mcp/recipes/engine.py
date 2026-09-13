@@ -1877,6 +1877,8 @@ def _compile_processes(
         process_keys=[key for key, _root in composed.process_roots],
         connector_metadata=connector_metadata,
         resolver=resolver,
+        # #184: which declared bindings apply keeps decides component identity.
+        conflict_policy=conflict_policy,
     )
     # #154: resolve once, before any process compiles. A declaration that fails
     # identity or contradicts the server's derivation stops the run rather than

@@ -432,7 +432,12 @@ class ChildEntryContractV1(_ValidationModel):
       caller's writes must have stored exactly that profile (amendment 1 rule 6).
     - ``mutated_state``: execution-scoped keys the child may write or remove.
     - ``state_known``: False when some step's state effects are unknown; then
-      ``mutated_state`` is incomplete and proves nothing.
+      ``mutated_state`` is incomplete and proves nothing about process properties.
+    - ``cache_writes_known``: True when ``mutated_state`` lists every document cache the
+      child may write or remove. Only an Add to Cache or Remove from Cache step writes a
+      cache (no map-function or vetted-script effect row writes one), so a map or script
+      with unknown effects leaves it True. A call to a child whose own cache writes are
+      unknown makes it False. ``state_known`` implies it.
     """
 
     process_ref: str
@@ -443,6 +448,7 @@ class ChildEntryContractV1(_ValidationModel):
     cache_requirements: Tuple[Tuple[str, Optional[str]], ...] = ()
     mutated_state: Tuple[Tuple[str, str], ...] = ()
     state_known: bool = False
+    cache_writes_known: bool = False
 
 
 class ProcessIRValidationCapabilitiesV1(_ValidationModel):

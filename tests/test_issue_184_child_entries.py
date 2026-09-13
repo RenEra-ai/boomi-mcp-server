@@ -73,7 +73,7 @@ _PLACEMENT = PROCESS_IR_CAPABILITY_PROCESS_CALL_PLACEMENT_UNSUPPORTED
 _PROCESS_KEYS = (
     "PARENT", "OTHER_PARENT", "CHILD", "CHILD_P1", "MID", "BOUND", "BOUND_SPLIT",
     "NODATA", "NEEDS_K", "MUTATES_K", "READS_X", "LOOP_A", "LOOP_B", "EXTERNAL",
-    "CACHE_CHILD", "CACHE_CHILD_P1", "MIDP", "EXTCHILD",
+    "CACHE_CHILD", "CACHE_CHILD_P1", "MIDP", "EXTCHILD", "WRITER", "BOUND_XY", "ENRICH", "HIDES",
 )
 
 
@@ -702,3 +702,120 @@ def test_a_forwarding_passthrough_passes_its_childs_bound_path_writer_to_its_cal
         assert _errors(roots, key) == [], key
     missing = [("PARENT", _parent([_SET_Z], _call("MIDP"))), ("MIDP", midp), ("BOUND", _BOUND)]
     assert (PROCESS_IR_SEMANTIC_DYNAMIC_PATH_DDP_NOT_ESTABLISHED, _LEG + "/process_ref") in _errors(missing, "PARENT")
+
+
+# ---------------------------------------------------------------------------
+# Stage-2 review round r2 (`cdx-review.i7DdUD`), correction batch 3
+# ---------------------------------------------------------------------------
+
+
+def _forwarder(first):
+    return _legs({"steps": [], "terminal": _call(first)}, {"steps": [], "terminal": _call("CACHE_CHILD")})
+
+
+_APPENDS_P1 = _legs({"steps": [_GETP1], "terminal": _put("$ref:CACHE")}, {"steps": [_MSG], "terminal": _STOP})
+_FORWARDED_READ = (PROCESS_IR_SEMANTIC_PROFILE_MISMATCH, "/body/steps/0/legs/1/terminal/process_ref")
+
+
+def test_a_call_that_appends_to_a_forwarded_cache_leaves_it_unproved(monkeypatch):
+    """CDX-184-r2-01: MID names no cache. Its first call appends P1 to the cache its caller
+    staged with P2, so the P2 map its second call runs is unproved at that call. A child
+    that is not a root of the request is unknown, and may append just the same."""
+    def roots(first, *extra):
+        return [("PARENT", _stage_then_call("MID")), ("MID", _forwarder(first)),
+                ("CACHE_CHILD", _cache_child("$ref:M22"))] + list(extra)
+
+    assert _FORWARDED_READ in _errors(roots("WRITER", ("WRITER", _APPENDS_P1)), "MID")
+    assert _FORWARDED_READ in _errors(roots("NODATA"), "MID")
+    # CONTROL: a first call that writes nothing leaves the caller's proof standing.
+    assert _errors(roots("NODATA", ("NODATA", _NODATA)), "MID") == []
+    # Non-vacuity: with no cache marked after a call, the appended P1 is invisible again.
+    monkeypatch.setattr(lineage, "_caches_a_call_may_write", lambda cache_refs, contract: ())
+    assert _errors(roots("WRITER", ("WRITER", _APPENDS_P1)), "MID") == []
+
+
+def test_a_cache_declaration_on_either_reference_binds_the_component():
+    """CDX-184-r2-02: the profile is declared on the alias that sorts after the canonical
+    spelling. A P1 write through either reference is refused at the write."""
+    declared = SymbolTableV1(symbols=_symbols().symbols + (ComponentSymbolV1(
+        ref="$ref:CACHE_ZDECL", component_id="CACHE", component_type="documentcache",
+        cache_profile_ref="$ref:P2"),))
+
+    def errors(table, ref, steps):
+        ir = parse_process_ir_v1(_legs(
+            {"steps": steps, "terminal": _put(ref)}, {"steps": [_MSG], "terminal": _STOP}))
+        return [(item.code, item.path) for item in validate_process_ir(ir, table).errors]
+
+    refused = (PROCESS_IR_SEMANTIC_PROFILE_MISMATCH, "/body/steps/0/legs/0/terminal/cache_ref")
+    assert refused in errors(declared, "$ref:CACHE_ZDECL", [_GETP1])
+    assert refused in errors(declared, "$ref:CACHE", [_GETP1])
+    assert errors(declared, "$ref:CACHE", [_GETP1, _MAP]) == []  # CONTROL: P2 documents
+    # Declarations that disagree: a write matching one of them is refused against the other.
+    split = SymbolTableV1(symbols=declared.symbols + (ComponentSymbolV1(
+        ref="$ref:CACHE_ZP1", component_id="CACHE", component_type="documentcache",
+        cache_profile_ref="$ref:P1"),))
+    assert refused in errors(split, "$ref:CACHE", [_GETP1])
+    assert refused in errors(split, "$ref:CACHE", [_GETP1, _MAP])
+
+
+def test_a_forwarder_owes_its_caller_only_the_bound_writers_it_does_not_establish():
+    """CDX-184-r2-03: MIDP composes X itself and calls a child whose paths need X and Y.
+    Its caller owes Y alone, so a caller composing only Y is admitted."""
+    bound_xy = _doc(_ENTRY, {"kind": "branch", "legs": [
+        {"steps": [_BOUND_GET], "terminal": _STOP},
+        {"steps": [dict(_BOUND_GET, path_binding={"property_name": "Y"})], "terminal": _STOP},
+    ]})
+    dynamic_y = dict(_DYNAMIC_X, name="Y")
+    midp = _parent([_DYNAMIC_X], _call("BOUND_XY"))
+    roots = [("PARENT", _parent([dynamic_y], _call("MIDP"))), ("MIDP", midp), ("BOUND_XY", bound_xy)]
+    _irs, resolution = _resolve(roots)
+    assert resolution.capabilities_by_root["PARENT"].child_entry_contract("$ref:MIDP").required_writers == (
+        ("Y", None),)
+    for key in ("PARENT", "MIDP", "BOUND_XY"):
+        assert _errors(roots, key) == [], key
+    # CONTROL: a caller composing only X leaves Y unestablished at its call.
+    only_x = [("PARENT", _parent([_DYNAMIC_X], _call("MIDP"))), ("MIDP", midp), ("BOUND_XY", bound_xy)]
+    assert (PROCESS_IR_SEMANTIC_DYNAMIC_PATH_DDP_NOT_ESTABLISHED, _LEG + "/process_ref") in _errors(only_x, "PARENT")
+
+
+def test_the_revision_moves_with_component_identity_and_forwarding_behaviour(monkeypatch):
+    """CDX-184-r2-04: each perturbation changes a verdict the server returns, and the two
+    oracle rows read their authorities at call time, so each moves the revision."""
+    from boomi_mcp.authoring import contract as authoring_contract
+    from boomi_mcp.authoring import process_ir_effects
+    from boomi_mcp.categories import integration_builder
+
+    payload = authoring_contract._compiler_revision_payload()
+    for row in ("component_identity", "child_forwarding"):
+        assert payload[row] != "unavailable", row
+    baseline = authoring_contract._compiler_revision()
+    perturbations = (
+        (integration_builder, "declared_bindings_for_components", lambda components, conflict_policy="reuse": {}),
+        (lineage, "canonical_cache_profiles", lambda symbols: {}),
+        (lineage, "_caches_a_call_may_write", lambda cache_refs, contract: ()),
+        (process_ir_effects, "_caller_cache_seeds", lambda requirements, symbols: ()),
+        (process_ir_effects, "_caller_composed_paths", lambda prepared, capabilities, walk: ()),
+    )
+    for module, name, replacement in perturbations:
+        with monkeypatch.context() as patched:
+            patched.setattr(module, name, replacement)
+            assert authoring_contract._compiler_revision() != baseline, name
+    assert authoring_contract._compiler_revision() == baseline
+
+
+def test_a_call_whose_unknown_effects_are_a_map_writes_no_unlisted_cache():
+    """SELF-184-03: only a cache step writes a cache, so a child that is opaque only
+    because of a map lists every cache it may write, and a forwarded cache stays proved.
+    Only a call to a child whose own cache writes are unknown can hide one."""
+    enrich = _doc(_GETP1, _MAP, _STOP)
+    roots = [("PARENT", _stage_then_call("MID")), ("MID", _forwarder("ENRICH")), ("ENRICH", enrich),
+             ("CACHE_CHILD", _cache_child("$ref:M22"))]
+    _irs, resolution = _resolve(roots)
+    row = resolution.capabilities_by_root["MID"].child_entry_contract("$ref:ENRICH")
+    assert (row.state_known, row.cache_writes_known) == (False, True), row
+    assert _errors(roots, "MID") == []
+    hides = [("PARENT", _stage_then_call("MID")), ("MID", _forwarder("HIDES")),
+             ("HIDES", _doc(_decision(_call("NODATA")))), ("CACHE_CHILD", _cache_child("$ref:M22"))]
+    _irs, resolution = _resolve(hides)
+    assert resolution.capabilities_by_root["MID"].child_entry_contract("$ref:HIDES").cache_writes_known is False
+    assert _FORWARDED_READ in _errors(hides, "MID")

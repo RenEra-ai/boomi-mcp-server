@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 12607, "minimum_collected": 12607, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 12623, "minimum_collected": 12623, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -12701,3 +12701,19 @@
 {"kind": "test", "id": "pytest-012700", "node_id": "tests/test_issue_184_child_entries.py::test_a_forwarding_passthrough_passes_its_childs_bound_path_writer_to_its_caller", "state": "active"}
 {"kind": "test", "id": "pytest-012701", "node_id": "tests/patterns/test_recipe_preset_parity.py::test_l4_legacy_cache_arm_passes_strictly_once_cache_identity_is_canonical[compose_mixed_cache]", "state": "active"}
 {"kind": "test", "id": "pytest-012702", "node_id": "tests/patterns/test_recipe_preset_parity.py::test_l4_legacy_cache_arm_passes_strictly_once_cache_identity_is_canonical[compose_all_cache]", "state": "active"}
+{"kind": "test", "id": "pytest-012703", "node_id": "tests/test_issue_184_child_entries.py::test_a_call_that_appends_to_a_forwarded_cache_leaves_it_unproved", "state": "active"}
+{"kind": "test", "id": "pytest-012704", "node_id": "tests/test_issue_184_child_entries.py::test_a_cache_declaration_on_either_reference_binds_the_component", "state": "active"}
+{"kind": "test", "id": "pytest-012705", "node_id": "tests/test_issue_184_child_entries.py::test_a_forwarder_owes_its_caller_only_the_bound_writers_it_does_not_establish", "state": "active"}
+{"kind": "test", "id": "pytest-012706", "node_id": "tests/test_issue_184_child_entries.py::test_the_revision_moves_with_component_identity_and_forwarding_behaviour", "state": "active"}
+{"kind": "test", "id": "pytest-012707", "node_id": "tests/test_issue_184_component_identity.py::test_two_specs_binding_one_cache_are_one_cache_on_the_typed_plan_route[create_by_id]", "state": "active"}
+{"kind": "test", "id": "pytest-012708", "node_id": "tests/test_issue_184_component_identity.py::test_two_specs_binding_one_cache_are_one_cache_on_the_typed_plan_route[reference_only]", "state": "active"}
+{"kind": "test", "id": "pytest-012709", "node_id": "tests/test_issue_184_component_identity.py::test_two_new_caches_stay_two_caches_on_the_typed_plan_route", "state": "active"}
+{"kind": "test", "id": "pytest-012710", "node_id": "tests/test_issue_184_component_identity.py::test_a_create_the_clone_policy_copies_is_its_own_cache", "state": "active"}
+{"kind": "test", "id": "pytest-012711", "node_id": "tests/test_issue_184_component_identity.py::test_declared_bindings_follow_the_apply_reuse_predicate", "state": "active"}
+{"kind": "test", "id": "pytest-012712", "node_id": "tests/test_issue_184_component_identity.py::test_a_reused_create_contributes_no_profile_facts", "state": "active"}
+{"kind": "test", "id": "pytest-012713", "node_id": "tests/test_issue_184_component_identity.py::test_a_profile_is_compared_by_the_component_its_references_bind", "state": "active"}
+{"kind": "test", "id": "pytest-012714", "node_id": "tests/test_issue_184_component_identity.py::test_the_effect_resolver_binds_and_seeds_by_component_identity", "state": "active"}
+{"kind": "test", "id": "pytest-012715", "node_id": "tests/test_issue_184_component_identity.py::test_every_production_symbol_table_names_its_conflict_policy", "state": "active"}
+{"kind": "test", "id": "pytest-012716", "node_id": "tests/test_issue_184_child_entries.py::test_a_call_whose_unknown_effects_are_a_map_writes_no_unlisted_cache", "state": "active"}
+{"kind": "test", "id": "pytest-012717", "node_id": "tests/test_issue_184_component_identity.py::test_a_padded_declared_id_binds_like_its_stripped_spelling", "state": "active"}
+{"kind": "test", "id": "pytest-012718", "node_id": "tests/test_issue_184_component_identity.py::test_a_declared_id_spelled_like_a_plan_placeholder_binds_nothing", "state": "active"}
