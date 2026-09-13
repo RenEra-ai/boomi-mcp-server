@@ -163,6 +163,67 @@ def _listener_inbound_facts(component, snapshot) -> Tuple[Optional[str], Optiona
     return wss_listener_inbound_facts(config)
 
 
+def _plan_profile_ref(value, plan_keys) -> Optional[str]:
+    """``$ref:KEY`` when ``value`` names a component of THIS plan, else None (#184).
+
+    A literal component id cannot be classified offline — it may not even be a
+    profile — and #140 refuses a declared profile ref that does not resolve to a
+    profile component. So only a plan reference is carried. Anything else leaves
+    the fact unset, and a proof that needs it fails closed instead of trusting a
+    guess.
+    """
+    if not isinstance(value, str):
+        return None
+    stripped = value.strip()
+    if not stripped.startswith(_REF_PREFIX):
+        return None
+    key = stripped[len(_REF_PREFIX):].strip()
+    return f"{_REF_PREFIX}{key}" if key and key in plan_keys else None
+
+
+def _profile_facts(component, plan_keys) -> Tuple[Optional[str], Optional[str], Optional[str]]:
+    """``(input profile, output profile, cache profile)`` refs a component declares (#184).
+
+    Read from the component's own structured config, with the field names its builder
+    consumes:
+    - a map's ``source_profile_id``/``target_profile_id`` (``map_builder``);
+    - an operation's ``request_profile_id``/``response_profile_id`` (REST and SOAP);
+    - a database operation's ``write_profile_id`` (input) and ``read_profile_id``
+      (output) (``connector_builder``);
+    - a document cache's ``profile_id`` (``document_cache_builder``).
+
+    A REUSED component's stored profiles are not in hand here, and the requested
+    config of a reuse is not what the account holds, so it contributes nothing.
+    """
+    if component_materialization_mode(component) == _REUSE:
+        return None, None, None
+    config = component.config or {}
+    if not isinstance(config, dict):
+        return None, None, None
+    component_type = str(component.type or "").strip()
+    if component_type == "transform.map":
+        return (
+            _plan_profile_ref(config.get("source_profile_id"), plan_keys),
+            _plan_profile_ref(config.get("target_profile_id"), plan_keys),
+            None,
+        )
+    if component_type == "documentcache":
+        return None, None, _plan_profile_ref(config.get("profile_id"), plan_keys)
+    if component_type == "connector-action":
+        inbound = (
+            config.get("request_profile_id")
+            if "request_profile_id" in config
+            else config.get("write_profile_id")
+        )
+        outbound = (
+            config.get("response_profile_id")
+            if "response_profile_id" in config
+            else config.get("read_profile_id")
+        )
+        return _plan_profile_ref(inbound, plan_keys), _plan_profile_ref(outbound, plan_keys), None
+    return None, None, None
+
+
 def build_symbol_table(
     components: Sequence[IntegrationComponentSpec],
     *,
@@ -216,6 +277,8 @@ def build_symbol_table(
 
     metadata = connector_metadata or {}
     symbols = []
+    # #184: the keys a component profile ref may name — this plan's components only.
+    plan_keys = {component.key for component in components}
     for component in components:
         connector_type, action_type = metadata.get(component.key, (None, None))
         ref = f"{_REF_PREFIX}{component.key}"
@@ -245,6 +308,13 @@ def build_symbol_table(
         listener_input_type, listener_request_profile = _listener_inbound_facts(
             component, connector_resolution_snapshot
         )
+        # #184: the profile facts the canonical stream-profile proof reads — which
+        # profile a call hands on and accepts, what a map transforms, what a cache
+        # declares it holds. The listener's inbound request profile keeps precedence
+        # for the listener operation, which is what #158 carries in the same field.
+        input_profile_fact, output_profile_fact, cache_profile_fact = _profile_facts(
+            component, plan_keys
+        )
         symbols.append(
             ComponentSymbolV1(
                 ref=ref,
@@ -255,7 +325,9 @@ def build_symbol_table(
                 connection_ref=(
                     f"{_REF_PREFIX}{connection_ref_key}" if connection_ref_key else None
                 ),
-                input_profile_ref=listener_request_profile,
+                input_profile_ref=listener_request_profile or input_profile_fact,
+                output_profile_ref=output_profile_fact,
+                cache_profile_ref=cache_profile_fact,
                 input_document_type=listener_input_type,
                 # Tri-state, and absent unless a snapshot actually resolved it: a
                 # caller that builds no snapshot says nothing, and the blank-path

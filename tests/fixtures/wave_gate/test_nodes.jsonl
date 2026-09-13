@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 12526, "minimum_collected": 12526, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 12536, "minimum_collected": 12536, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -12618,3 +12618,13 @@
 {"kind": "test", "id": "pytest-012617", "node_id": "tests/test_issue_184_cutover.py::test_the_no_map_both_bound_form_compiles_but_is_not_the_oracle", "state": "active"}
 {"kind": "test", "id": "pytest-012618", "node_id": "tests/test_issue_184_cutover.py::test_a_target_writer_reading_the_pre_map_profile_is_refused", "state": "active"}
 {"kind": "test", "id": "pytest-012619", "node_id": "tests/test_wave_gate_goldens.py::test_golden_manifest_row[golden-000081]", "state": "active"}
+{"kind": "test", "id": "pytest-012620", "node_id": "tests/test_issue_184_symbol_profile_facts.py::test_a_created_map_carries_its_source_and_target_profiles", "state": "active"}
+{"kind": "test", "id": "pytest-012621", "node_id": "tests/test_issue_184_symbol_profile_facts.py::test_a_created_operation_carries_its_request_and_response_profiles[rest_request_and_response]", "state": "active"}
+{"kind": "test", "id": "pytest-012622", "node_id": "tests/test_issue_184_symbol_profile_facts.py::test_a_created_operation_carries_its_request_and_response_profiles[database_get]", "state": "active"}
+{"kind": "test", "id": "pytest-012623", "node_id": "tests/test_issue_184_symbol_profile_facts.py::test_a_created_operation_carries_its_request_and_response_profiles[database_send]", "state": "active"}
+{"kind": "test", "id": "pytest-012624", "node_id": "tests/test_issue_184_symbol_profile_facts.py::test_a_created_cache_carries_its_declared_profile", "state": "active"}
+{"kind": "test", "id": "pytest-012625", "node_id": "tests/test_issue_184_symbol_profile_facts.py::test_a_profile_the_plan_cannot_name_contributes_nothing[literal_id]", "state": "active"}
+{"kind": "test", "id": "pytest-012626", "node_id": "tests/test_issue_184_symbol_profile_facts.py::test_a_profile_the_plan_cannot_name_contributes_nothing[ref_outside_the_plan]", "state": "active"}
+{"kind": "test", "id": "pytest-012627", "node_id": "tests/test_issue_184_symbol_profile_facts.py::test_a_reused_component_contributes_no_profile_facts", "state": "active"}
+{"kind": "test", "id": "pytest-012628", "node_id": "tests/test_issue_184_symbol_profile_facts.py::test_a_public_plan_whose_map_matches_its_calls_compiles", "state": "active"}
+{"kind": "test", "id": "pytest-012629", "node_id": "tests/test_issue_184_symbol_profile_facts.py::test_a_public_plan_whose_map_reads_the_wrong_profile_is_refused_at_the_map", "state": "active"}
