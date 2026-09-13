@@ -1615,6 +1615,15 @@ def test_a_current_value_survives_a_replacement_that_keeps_properties(preserving
 def test_the_survival_table_is_pinned_to_what_was_measured():
     """The table is EVIDENCE, not an opinion, so it is pinned to its capture.
 
+    #184 amendment 3 §7 changed three cells on new measurements:
+    - Both cache reads now read `cache_overlay`. The r17 capture behind "lost" wired
+      the cache load straight into the retrieve, which then never ran (ledger row
+      E0-184-02). A separately triggered retrieve carries the cached document's
+      properties overlaid on the current one's (capture
+      `cap184-retrieve-ddp-replacement` R1–R4).
+    - The split cell reads `unproved`, because its capture never independently proved
+      the split and its successor executed.
+
     Every entry here was read off the wire on the live platform. Changing one
     silently would change which documents this compiler refuses, on no evidence
     — so a change has to come here and be justified against a new measurement.
@@ -1630,9 +1639,9 @@ def test_the_survival_table_is_pinned_to_what_was_measured():
 
     assert dict(PROPERTY_SURVIVAL_V1) == {
         ("message", None): "survives",
-        ("cache_get", None): "lost",
-        ("document_cache_retrieve", None): "lost",
-        ("data_process", "split_documents"): "lost",
+        ("cache_get", None): "cache_overlay",
+        ("document_cache_retrieve", None): "cache_overlay",
+        ("data_process", "split_documents"): "unproved",
         ("data_process", "custom_scripting"): "script_dependent",
         ("data_process", "combine_documents"): "unmeasured",
     }

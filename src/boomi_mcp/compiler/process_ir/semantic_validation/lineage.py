@@ -38,7 +38,7 @@ default back in through the side door.
 from __future__ import annotations
 
 from types import MappingProxyType
-from typing import Dict, FrozenSet, List, Mapping, NamedTuple, Optional, Set, Tuple
+from typing import Any, Dict, FrozenSet, List, Mapping, NamedTuple, Optional, Set, Tuple
 
 from ....errors import (
     PROCESS_IR_COMPILE_INTERNAL,
@@ -89,6 +89,42 @@ StateKey = Tuple[str, str]
 
 #: ``(cache_ref, profile identity or None)``: one thing a document cache may hold.
 CacheContentFact = Tuple[str, Optional[Tuple[str, str]]]
+
+#: #184 amendment 3 §7. A writer TOKEN: the id of the authored property node that
+#: wrote a key, or ``UNKNOWN_WRITER`` when nothing validated establishes who wrote it
+#: (a caller's entry declaration, a contract, an opaque step, an external writer).
+UNKNOWN_WRITER = "unknown-writer"
+#: How many documents a path is PROVED to carry. Only ``one`` licenses the attested
+#: one-current/one-cached overlay; anything else is ``unknown`` and fails closed.
+COUNT_ONE = "one"
+COUNT_UNKNOWN = "unknown"
+#: Carried in a path's ``invalidated`` set once a triggered cache read ran on it. The
+#: documents past that read are the cached ones, so a document property the read does
+#: not guarantee lacks TRANSFER proof there — a read-before-write on the reader's own
+#: path, never a different-copy scope error, even when the only write sits in a
+#: sibling leg or on a cached document a whole-cache removal later cleared. Its name
+#: is ``None``, which no authored property can spell.
+CACHE_TRANSFER_UNPROVED = (DDP, None)
+
+
+class _Cohort(NamedTuple):
+    """What the documents ONE executing Add to Cache stored carry (#184 amendment 3 §7).
+
+    Frozen when the write runs, because a cached document keeps the properties it
+    had then. ``possible`` is ``None`` when something on the writing path could have
+    set a property nothing here names, and ``alternatives`` records, per key, the
+    writer tokens of the ORIGINAL cached document. They are never re-evaluated
+    against another document.
+    """
+
+    guaranteed: FrozenSet[StateKey]
+    possible: Optional[FrozenSet[StateKey]]
+    alternatives: FrozenSet[Tuple[StateKey, str]]
+    count: str
+
+
+#: A cache write nothing here can inspect: a contract, a child, an outside writer.
+UNKNOWN_COHORT = _Cohort(frozenset(), None, frozenset(), COUNT_UNKNOWN)
 
 
 # ---------------------------------------------------------------------------
@@ -147,6 +183,14 @@ class _Stream(NamedTuple):
     #: The CFG node that established a known stream — a map's own pointer is
     #: where a mismatch with the call it feeds is reported.
     origin_node: object = None
+    #: #184 amendment 3 §7: ``one`` only when this path provably carries exactly one
+    #: document. Set by the controller after every step, never inferred from a
+    #: profile, a connector operation or a sample run.
+    count: str = COUNT_UNKNOWN
+    #: #184 amendment 3 §7: True when a step on this path could have set a document
+    #: property nothing in this process names (an uncontracted map or script, or
+    #: documents a caller handed over), so a cached copy's property set is not known.
+    properties_unknown: bool = False
 
 
 #: The visibility model this module ENFORCES, stated once as data (#146).
@@ -235,13 +279,14 @@ class _State:
     from :data:`STATE_VISIBILITY_V1`, not restated here.
     """
 
-    __slots__ = ("document", "execution", "content")
+    __slots__ = ("document", "execution", "content", "cohorts")
 
     def __init__(
         self,
         document: Optional[FrozenSet[StateKey]] = None,
         execution: Optional[FrozenSet[StateKey]] = None,
         content: "Optional[FrozenSet[CacheContentFact]]" = None,
+        cohorts: "Optional[FrozenSet[Tuple[str, _Cohort]]]" = None,
     ) -> None:
         self.document: FrozenSet[StateKey] = document or frozenset()
         self.execution: FrozenSet[StateKey] = execution or frozenset()
@@ -254,15 +299,28 @@ class _State:
         #: above — because a write on one Decision arm may have happened, and a
         #: read after the merge must not claim that write's profile is absent.
         self.content: "FrozenSet[CacheContentFact]" = content or frozenset()
+        #: #184 amendment 3 §7: the property cohorts each cache MAY hold. A MAY set
+        #: exactly like ``content`` — Add to Cache appends, whole-cache removal
+        #: clears, convergence unions — and read by the retrieve overlay.
+        self.cohorts: "FrozenSet[Tuple[str, _Cohort]]" = cohorts or frozenset()
 
     def with_write(self, key: StateKey) -> "_State":
         if key[0] in _DOCUMENT_LIFETIME_SCOPES:
-            return _State(self.document | {key}, self.execution, self.content)
-        return _State(self.document, self.execution | {key}, self.content)
+            return _State(self.document | {key}, self.execution, self.content, self.cohorts)
+        return _State(self.document, self.execution | {key}, self.content, self.cohorts)
 
     def with_content(self, cache_ref: str, identity) -> "_State":
         """This cache may now also hold documents of ``identity`` (None: unknown)."""
-        return _State(self.document, self.execution, self.content | {(cache_ref, identity)})
+        return _State(
+            self.document, self.execution, self.content | {(cache_ref, identity)}, self.cohorts
+        )
+
+    def with_cohort(self, cache_ref: str, cohort: "_Cohort") -> "_State":
+        """This cache may now also hold documents carrying ``cohort``'s properties."""
+        return _State(self.document, self.execution, self.content, self.cohorts | {(cache_ref, cohort)})
+
+    def cohorts_of(self, cache_ref: str) -> "FrozenSet[_Cohort]":
+        return frozenset(fact[1] for fact in self.cohorts if fact[0] == cache_ref)
 
     def without_content(self, cache_ref: str) -> "_State":
         """A whole-cache removal: nothing written before it is still there."""
@@ -270,6 +328,7 @@ class _State:
             self.document,
             self.execution,
             frozenset(fact for fact in self.content if fact[0] != cache_ref),
+            frozenset(fact for fact in self.cohorts if fact[0] != cache_ref),
         )
 
     def content_of(self, cache_ref: str) -> "FrozenSet[Optional[Tuple[str, str]]]":
@@ -289,7 +348,7 @@ class _State:
         every copy. Execution state survives too, and additionally accumulates
         across legs — see ``collect_lineage_findings``.
         """
-        return _State(self.document, self.execution, self.content)
+        return _State(self.document, self.execution, self.content, self.cohorts)
 
     def merged_with(self, other: "_State") -> "_State":
         """Meet over converging paths: only what BOTH establish survives.
@@ -307,6 +366,7 @@ class _State:
             self.document & other.document,
             self.execution & other.execution,
             self.content | other.content,
+            self.cohorts | other.cohorts,
         )
 
 
@@ -422,9 +482,18 @@ DOCUMENT_STREAM_REPLACING_KINDS: FrozenSet[str] = frozenset(
 #: to the SAME pair of platform steps, so they cannot differ.
 PROPERTY_SURVIVAL_V1: Mapping[Tuple[str, Optional[str]], str] = MappingProxyType({
     ("message", None): "survives",
-    ("cache_get", None): "lost",
-    ("document_cache_retrieve", None): "lost",
-    ("data_process", "split_documents"): "lost",
+    # #184 amendment 3 §7 replaced the two "lost" read cells. The r17 capture that
+    # measured them wired the cache load straight into the retrieve, so the retrieve
+    # never ran (ledger row E0-184-02). Measured with a separately triggered
+    # retrieve (capture `cap184-retrieve-ddp-replacement` R1–R4): the retrieved
+    # document carries the cached document's properties overlaid on the current
+    # one's, cached winning a collision. The overlay (`_overlay_cache_read`) owns
+    # these reads, bounded to one current and one cached document. N×M is OPEN.
+    ("cache_get", None): "cache_overlay",
+    ("document_cache_retrieve", None): "cache_overlay",
+    # Relabelled from "lost": the r17 split cell's capture never independently
+    # proved that the split and its successor executed. Still fail-closed.
+    ("data_process", "split_documents"): "unproved",
     # Measured to SURVIVE for the one script exercised — which stored a brand-new
     # stream with an empty properties object and kept the property anyway, so it
     # is not carried the obvious way. Whether another script can drop it is
@@ -437,6 +506,8 @@ PROPERTY_SURVIVAL_V1: Mapping[Tuple[str, Optional[str]], str] = MappingProxyType
 
 #: Only a MEASURED survival preserves the carried set.
 _PROPERTIES_SURVIVE = "survives"
+#: The cache reads' verdict: neither survival nor loss, but the bounded overlay.
+_CACHE_OVERLAY = "cache_overlay"
 
 
 def _replacing_step_operation(semantic) -> Optional[str]:
@@ -462,6 +533,9 @@ def _discards_document_properties(semantic) -> bool:
     verdict = PROPERTY_SURVIVAL_V1.get(
         (semantic.semantic_kind, _replacing_step_operation(semantic))
     )
+    if verdict == _CACHE_OVERLAY:
+        # Not a discard: `_overlay_cache_read` decides what the retrieved documents carry.
+        return False
     return verdict != _PROPERTIES_SURVIVE
 
 
@@ -482,7 +556,7 @@ def _drop_replaced_document_keys(state: "_State", keep) -> "Tuple[_State, Frozen
     """
     dropped = frozenset(key for key in state.document if key not in keep)
     return (
-        _State(state.document - dropped, state.execution, state.content),
+        _State(state.document - dropped, state.execution, state.content, state.cohorts),
         frozenset(key for key in dropped if key[0] == DDP),
     )
 
@@ -501,6 +575,99 @@ def _replaces_document_stream(semantic) -> bool:
     one case whose consequence is a wrong request URL.
     """
     return semantic.semantic_kind in DOCUMENT_STREAM_REPLACING_KINDS
+
+
+#: Steps that hand on exactly the documents they received, one for one. A path's
+#: proved count survives them; every other step makes it unknown.
+_COUNT_PRESERVING_KINDS = frozenset({
+    "set_property", "message", "map", "flow_control", "notify",
+    "branch", "decision", "try_catch", "stop", "return_documents", "exception",
+})
+
+
+def _cohort_at_write(on_documents, writers, stream) -> "_Cohort":
+    """The property cohort an executing Add to Cache stores (#184 amendment 3 §7)."""
+    guaranteed = frozenset(key for key in on_documents if key[0] == DDP)
+    named = guaranteed | frozenset(key for key in writers if key[0] == DDP)
+    alternatives = frozenset(
+        (key, token)
+        for key in named
+        for token in (writers.get(key) or (UNKNOWN_WRITER,))
+    )
+    return _Cohort(
+        guaranteed=guaranteed,
+        possible=None if stream.properties_unknown else named,
+        alternatives=alternatives,
+        count=stream.count,
+    )
+
+
+def _overlay_cache_read(semantic, state, writers, on_documents, invalidated, stream):
+    """A TRIGGERED all-document retrieve, over every cohort the cache may hold (#184 amendment 3 §7).
+
+    For the attested one-current/one-cached case the retrieved document is the cached
+    payload, carrying the cached properties overlaid on the current ones: cached wins
+    a collision, and a current-only name survives. Beyond that bound, measured only as
+    1×1, a current property is NOT carried. Returns ``(state, writers, on_documents,
+    invalidated, count)``.
+
+    - Guarantees: the meet over every possible cohort. A current key joins only
+      under the proved singleton.
+    - Writer alternatives: definite cached presence selects the cached writers,
+      definite absence selects the current ones, and possible presence keeps both
+      plus unknown provenance. A bound path must pass for EVERY alternative.
+    - Invalidation: every document property the path carried and the read does not
+      guarantee, plus ``CACHE_TRANSFER_UNPROVED`` — an unmet read past a retrieve is
+      missing transfer proof, never sibling-scope leakage.
+    """
+    cohorts = set(state.cohorts_of(semantic.cache_ref))
+    if getattr(semantic, "external_writer", False):
+        cohorts.add(UNKNOWN_COHORT)
+    current = frozenset(key for key in on_documents if key[0] == DDP)
+    singleton = (
+        stream.count == COUNT_ONE
+        and len(cohorts) == 1
+        and next(iter(cohorts)).count == COUNT_ONE
+    )
+    carried_current = current if singleton else frozenset()
+    if cohorts:
+        guaranteed = frozenset.intersection(*(c.guaranteed | carried_current for c in cohorts))
+    else:
+        guaranteed = frozenset()
+
+    def cached_tokens(cohort, key):
+        tokens = {token for held, token in cohort.alternatives if held == key}
+        return tokens or {UNKNOWN_WRITER}
+
+    def current_tokens(key):
+        return set(writers.get(key) or (UNKNOWN_WRITER,))
+
+    carried_writers = {}
+    for key in guaranteed:
+        tokens = set()
+        for cohort in cohorts:
+            if key in cohort.guaranteed:
+                tokens |= cached_tokens(cohort, key)
+            elif cohort.possible is None or key in cohort.possible:
+                # possible presence: the cached value may or may not override
+                tokens |= cached_tokens(cohort, key) | current_tokens(key) | {UNKNOWN_WRITER}
+            else:
+                # definite cached absence: the current value survives the overlay
+                tokens |= current_tokens(key)
+        carried_writers[key] = tuple(sorted(tokens))
+
+    writers = {key: value for key, value in writers.items() if key[0] != DDP}
+    writers.update(carried_writers)
+    before = current | frozenset(key for key in state.document if key[0] == DDP)
+    state = _State(
+        frozenset(key for key in state.document if key[0] != DDP) | guaranteed,
+        state.execution,
+        state.content,
+        state.cohorts,
+    )
+    count = next(iter(cohorts)).count if len(cohorts) == 1 else COUNT_UNKNOWN
+    invalidated = invalidated | (before - guaranteed) | {CACHE_TRANSFER_UNPROVED}
+    return state, writers, guaranteed, invalidated, count
 
 
 def _writes_of(semantic) -> Tuple[StateKey, ...]:
@@ -719,6 +886,10 @@ def _walk_lineage(
     #: arm established for everything that DOES continue.
     threw: List[str] = []
     entry_requirements: List[Optional[Tuple[str, str]]] = []
+    #: #184 amendment 3 §7: writer token -> (the writing node's semantic, its unmet
+    #: property reads), captured when the writer ran. The CFG is a tree, so each
+    #: writer runs once, and a cached document's writer facts stay facts about it.
+    writer_records: Dict[str, Tuple[Any, tuple]] = {}
     leg_writes = _leg_write_index(prepared, capabilities)
     index = prepared.symbols.build_index()
     # #184: the stream-profile proof needs each call's resolved binding. When a
@@ -898,6 +1069,7 @@ def _walk_lineage(
         elif (
             scope == DDP
             and key not in invalidated
+            and CACHE_TRANSFER_UNPROVED not in invalidated
             and _written_anywhere(prepared, key, capabilities)
         ):
             # The property IS written in this process, just not on a path
@@ -950,12 +1122,14 @@ def _walk_lineage(
         # and evidence is served — the node's own source_path already points the
         # author at the binding, so naming it here would buy nothing and leak.
         key = (DDP, binding.property_name)
-        writer = writers.get(key)
+        alternatives = writers.get(key) or ()
         # Established, and established by a writer this process can see. A key
         # the CALLER declares established at entry has no writer here, so its
         # composition cannot be checked at all — which is exactly the case the
-        # binding must not be allowed to rest on.
-        if not state.establishes(key) or writer is None:
+        # binding must not be allowed to rest on. #184 amendment 3 §7: after a
+        # cache retrieval the key may have SEVERAL possible writers, and the path
+        # must be sound for every one; an unknown one proves nothing.
+        if not state.establishes(key) or not alternatives or UNKNOWN_WRITER in alternatives:
             _report(
                 PROCESS_IR_SEMANTIC_DYNAMIC_PATH_DDP_NOT_ESTABLISHED,
                 node,
@@ -963,6 +1137,12 @@ def _walk_lineage(
                 sub_path="/path_binding",
             )
             return
+        for token in alternatives:
+            if not _check_one_writer(node, binding, writer_records[token]):
+                return
+
+    def _check_one_writer(node, binding, writer) -> bool:
+        """The composition checks for ONE possible writer; False once one is reported."""
         writer_semantic, unmet_reads = writer
         if unmet_reads:
             # The writer itself composes from a property nothing established.
@@ -975,7 +1155,7 @@ def _walk_lineage(
                 evidence=(("state_scope", unmet_reads[0][0]),),
                 sub_path="/path_binding",
             )
-            return
+            return False
         sources = tuple(getattr(writer_semantic, "source_values", ()) or ())
         if not any(getattr(s, "value_type", None) != "static" for s in sources):
             _report(
@@ -984,7 +1164,7 @@ def _walk_lineage(
                 evidence=(("state_scope", DDP),),
                 sub_path="/path_binding",
             )
-            return
+            return False
         # The profile pairing is a biconditional, and it is what makes the
         # binding's own ``request_profile_ref`` a pinned fact rather than a
         # second copy: the emitted parameter-profile attribute is meaningful
@@ -1009,7 +1189,7 @@ def _walk_lineage(
                 evidence=(("reader_count", len(pairs)),),
                 sub_path="/path_binding",
             )
-            return
+            return False
         declared = _profile_identity(binding.request_profile_ref)
         expected = next(iter(pairs))[0] if pairs else None
         if declared != expected:
@@ -1019,6 +1199,8 @@ def _walk_lineage(
                 evidence=(("reader_count", len(pairs)),),
                 sub_path="/path_binding",
             )
+            return False
+        return True
 
     def _identity(ref):
         """A profile ref as the resolved ``(component id, profile type)`` identity.
@@ -1250,7 +1432,7 @@ def _walk_lineage(
         invalidated = invalidated if invalidated is not None else frozenset()
         # #184 D2: the profile of the documents reaching this node, per path and
         # never merged. A scheduled root starts from the empty No Data document.
-        stream = stream if stream is not None else _Stream(STREAM_EMPTY_ENTRY)
+        stream = stream if stream is not None else _Stream(STREAM_EMPTY_ENTRY, count=COUNT_ONE)
         # What THIS node establishes, kept separately: a node that replaces the
         # stream still writes onto the documents it emits, so its own writes
         # must survive its own replacement.
@@ -1317,6 +1499,7 @@ def _walk_lineage(
             for key in effect.writes:
                 if key[0] == CACHE:
                     state = state.with_content(key[1], None)
+                    state = state.with_cohort(key[1], UNKNOWN_COHORT)
             if not establishes:
                 continue
             for key in effect.writes:
@@ -1390,7 +1573,8 @@ def _walk_lineage(
                     for source in getattr(semantic, "source_values", ()) or ()
                 ):
                     unmet_here = unmet_here + (key,)
-                writers = {**writers, key: (semantic, unmet_here)}
+                writer_records[node.node_id] = (semantic, unmet_here)
+                writers = {**writers, key: (node.node_id,)}
             state = state.with_write(key)
             if key[0] == DDP:
                 on_documents = on_documents | {key}
@@ -1405,7 +1589,28 @@ def _walk_lineage(
         # AFTER the check above so a binding ON the replacing node still sees the
         # writer that reached it, and only to `writers` — `_State` keeps #154's
         # model untouched.
-        if _discards_document_properties(semantic):
+        kind = semantic.semantic_kind
+        count = stream.count
+        properties_unknown = stream.properties_unknown
+        if kind == "cache_put" and stream.state != STREAM_ABSENT:
+            # #184 amendment 3 §7: the cohort the executing write stores, frozen now.
+            state = state.with_cohort(
+                semantic.cache_ref, _cohort_at_write(on_documents, writers, stream)
+            )
+        if kind == "cache_remove" and getattr(semantic, "remove_all_documents", False):
+            state = state.without_content(semantic.cache_ref)
+        if kind in TRIGGERED_REPLACEMENT_SEMANTIC_KINDS:
+            if stream.state == STREAM_ABSENT:
+                count = COUNT_UNKNOWN
+            else:
+                cohorts = state.cohorts_of(semantic.cache_ref)
+                properties_unknown = getattr(semantic, "external_writer", False) or any(
+                    cohort.possible is None for cohort in cohorts
+                )
+                state, writers, on_documents, invalidated, count = _overlay_cache_read(
+                    semantic, state, writers, on_documents, invalidated, stream
+                )
+        elif _discards_document_properties(semantic):
             writers = {
                 key: value for key, value in writers.items() if key[0] != DDP
             }
@@ -1424,6 +1629,17 @@ def _walk_lineage(
         # --- the stream profile (#184 D2) ----------------------------------
         state, stream, legacy = _advance_stream(node, semantic, state, stream, legacy)
 
+        # --- the proved count and property knowledge (#184 amendment 3 §7) ---
+        # Applied after the profile step, which rebuilds the stream, and independent
+        # of whether the profile proof runs at all.
+        if kind in _COUNT_PRESERVING_KINDS or kind in TRIGGERED_REPLACEMENT_SEMANTIC_KINDS:
+            next_count = count
+        else:
+            next_count = COUNT_UNKNOWN
+        if kind == "passthrough" or _opaque_reason(semantic, capabilities) in ("map", "script"):
+            properties_unknown = True
+        stream = stream._replace(count=next_count, properties_unknown=properties_unknown)
+
         return state, writers, on_documents, invalidated, stream, legacy
 
     def _edge_stream(edge, stream):
@@ -1434,7 +1650,10 @@ def _walk_lineage(
         resolution records — but nothing proves their profile.
         """
         if edge.kind == "catch" and stream.state not in (STREAM_KNOWN, STREAM_UNKNOWN):
-            return _Stream(STREAM_UNKNOWN, origin="catch")
+            return _Stream(STREAM_UNKNOWN, origin="catch", properties_unknown=stream.properties_unknown)
+        if edge.kind == "catch":
+            # the caught documents are not proved to be exactly the one that entered
+            return stream._replace(count=COUNT_UNKNOWN)
         return stream
 
     entry_state = _State()
@@ -1458,7 +1677,7 @@ def _walk_lineage(
     returned = entry_state
     work = [("visit", prepared.cfg.entry_node_id, (
         entry_state, None, {}, frozenset(entry_documents), frozenset(),
-        _Stream(STREAM_EMPTY_ENTRY), False,
+        _Stream(STREAM_EMPTY_ENTRY, count=COUNT_ONE), False,
     ))]
     while work:
         frame = work.pop()
@@ -1515,7 +1734,7 @@ def _walk_lineage(
                 work.append(("branch_leg_done", branch))
                 edge = edges[0]
                 work.append(("visit", edge.target_node_id, (
-                    _State(entry.document, entry.execution, entry.content),
+                    _State(entry.document, entry.execution, entry.content, entry.cohorts),
                     (node.node_id, edge.leg_ordinal or edge.local_ordinal),
                 ) + after))
                 continue
@@ -1546,7 +1765,7 @@ def _walk_lineage(
                 # afterwards is the union of both, never the scope-entry set alone.
                 scope = {
                     "edges": edges, "index": 0, "state": state, "leg": leg,
-                    "content": state.content, "after": after,
+                    "content": state.content, "cohorts": state.cohorts, "after": after,
                 }
                 work.append(("try_edge_done", scope))
                 work.append(("visit", edges[0].target_node_id, (
@@ -1586,6 +1805,7 @@ def _walk_lineage(
                 branch["entry"].document,
                 carried.execution | leg_end.execution,
                 leg_end.content,
+                leg_end.cohorts,
             )
             branch["carried"] = carried
             branch["index"] += 1
@@ -1594,7 +1814,7 @@ def _walk_lineage(
                 branch["first"] = len(normal_exits)
                 work.append(("branch_leg_done", branch))
                 work.append(("visit", edge.target_node_id, (
-                    _State(branch["entry"].document, carried.execution, carried.content),
+                    _State(branch["entry"].document, carried.execution, carried.content, carried.cohorts),
                     (branch["node"].node_id, edge.leg_ordinal or edge.local_ordinal),
                 ) + branch["after"]))
                 continue
@@ -1636,6 +1856,7 @@ def _walk_lineage(
         if tag == "try_edge_done":
             scope = frame[1]
             scope["content"] = scope["content"] | returned.content
+            scope["cohorts"] = scope["cohorts"] | returned.cohorts
             scope["index"] += 1
             if scope["index"] < len(scope["edges"]):
                 edge = scope["edges"][scope["index"]]
@@ -1646,7 +1867,9 @@ def _walk_lineage(
                     _edge_stream(edge, stream), legacy,
                 )))
                 continue
-            returned = _State(scope["state"].document, scope["state"].execution, scope["content"])
+            returned = _State(
+                scope["state"].document, scope["state"].execution, scope["content"], scope["cohorts"]
+            )
             continue
 
         if tag == "sequential_edge_done":

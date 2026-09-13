@@ -112,20 +112,22 @@ def test_a_stale_document_property_past_the_old_depth_bound_is_reported():
 
     #184 amendment 3 (measured): Add to Cache hands on ZERO documents, so a read
     authored straight after it never runs. The write TERMINATES leg 1 and the read
-    leads leg 2, whose path — GET, set_ddp, branch, read, 300 fillers, reader — is
-    still deeper than the withdrawn 256-node bound. The property written before the
-    cache round-trip does not reach the read-back documents, so the reader is stale.
+    sits in leg 2, whose path — GET, branch, set_ddp, read, 300 fillers, reader — is
+    still deeper than the withdrawn 256-node bound. The retrieved documents carry
+    what the CACHED documents carried (§7); X is written on the CURRENT documents
+    just before the read, and a GET's document count is unproved, so without a
+    singleton proof X is not carried through the read and the reader is stale.
     """
-    leg_steps = ([{"kind": "cache_get", "cache_ref": "$ref:CACHE"}]
+    leg_steps = ([{"kind": "set_ddp", "name": "X", "source_values": [{"value_type": "static", "value": "v"}]},
+                  {"kind": "cache_get", "cache_ref": "$ref:CACHE"}]
                  + _filler(_PAST_THE_OLD_BOUND)
                  + [{"kind": "set_dpp", "name": "Y", "source_values": [{"value_type": "ddp", "property_name": "X"}]},
                     {"kind": "connector_call", "operation_ref": "$ref:PATCH"}])
     steps = [{"kind": "connector_call", "operation_ref": "$ref:GET"},
-             {"kind": "set_ddp", "name": "X", "source_values": [{"value_type": "static", "value": "v"}]},
              {"kind": "branch", "legs": [
                  {"steps": [], "terminal": {"kind": "cache_put", "cache_ref": "$ref:CACHE"}},
                  {"steps": leg_steps, "terminal": {"kind": "stop"}}]}]
-    pointer = "/body/steps/2/legs/1/steps/{0}".format(1 + _PAST_THE_OLD_BOUND)
+    pointer = "/body/steps/1/legs/1/steps/{0}".format(2 + _PAST_THE_OLD_BOUND)
     diagnostics = _both_routes({"version": "1", "body": {"kind": "sequence", "steps": steps}})
     assert (PROCESS_IR_SEMANTIC_LINEAGE_PROPERTY_READ_BEFORE_WRITE, pointer) in diagnostics, diagnostics
 

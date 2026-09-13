@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 12553, "minimum_collected": 12553, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 12566, "minimum_collected": 12566, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -12645,3 +12645,16 @@
 {"kind": "test", "id": "pytest-012644", "node_id": "tests/test_wave_gate_goldens.py::test_golden_manifest_row[golden-000086]", "state": "active"}
 {"kind": "test", "id": "pytest-012645", "node_id": "tests/test_wave_gate_goldens.py::test_golden_manifest_row[golden-000087]", "state": "active"}
 {"kind": "test", "id": "pytest-012646", "node_id": "tests/test_wave_gate_goldens.py::test_golden_manifest_row[golden-000088]", "state": "active"}
+{"kind": "test", "id": "pytest-012647", "node_id": "tests/test_issue_184_ddp_invalidation.py::test_a_bound_request_path_rests_on_the_cached_writer[cache_get]", "state": "active"}
+{"kind": "test", "id": "pytest-012648", "node_id": "tests/test_issue_184_ddp_invalidation.py::test_a_bound_request_path_rests_on_the_cached_writer[document_cache_retrieve]", "state": "active"}
+{"kind": "test", "id": "pytest-012649", "node_id": "tests/test_issue_184_ddp_invalidation.py::test_a_current_only_property_is_not_carried_without_a_singleton_proof", "state": "active"}
+{"kind": "test", "id": "pytest-012650", "node_id": "tests/test_issue_184_ddp_invalidation.py::test_several_cached_cohorts_guarantee_only_what_every_one_carries", "state": "active"}
+{"kind": "test", "id": "pytest-012651", "node_id": "tests/test_issue_184_ddp_invalidation.py::test_a_bound_path_must_be_sound_for_every_possible_cached_writer", "state": "active"}
+{"kind": "test", "id": "pytest-012652", "node_id": "tests/test_issue_184_ddp_invalidation.py::test_a_whole_cache_removal_clears_the_cached_properties", "state": "active"}
+{"kind": "test", "id": "pytest-012653", "node_id": "tests/test_issue_184_ddp_invalidation.py::test_the_cohort_meet_is_load_bearing", "state": "active"}
+{"kind": "test", "id": "pytest-012654", "node_id": "tests/test_issue_184_ddp_invalidation.py::test_definite_cached_absence_carries_the_current_writer_only_under_a_singleton", "state": "active"}
+{"kind": "test", "id": "pytest-012655", "node_id": "tests/test_issue_184_ddp_invalidation.py::test_definite_cached_presence_selects_the_cached_writer", "state": "active"}
+{"kind": "test", "id": "pytest-012656", "node_id": "tests/test_issue_184_ddp_invalidation.py::test_possible_cached_presence_keeps_both_writers_and_unknown_provenance", "state": "active"}
+{"kind": "test", "id": "pytest-012657", "node_id": "tests/test_issue_184_ddp_invalidation.py::test_several_cohorts_meet_their_guarantees_and_union_their_writers", "state": "active"}
+{"kind": "test", "id": "pytest-012658", "node_id": "tests/test_issue_184_ddp_invalidation.py::test_an_external_writer_contributes_an_unknown_cohort", "state": "active"}
+{"kind": "test", "id": "pytest-012659", "node_id": "tests/test_issue_184_ddp_invalidation.py::test_an_empty_cache_guarantees_nothing", "state": "active"}
