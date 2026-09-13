@@ -411,13 +411,14 @@ def validate_connector_call_semantics(
 ) -> None:
     """Check document cardinality across the calls and profiles around each map.
 
-    Runs only for a connector-call flow; a legacy source/target or process-call
-    CFG produces no bindings and returns immediately, so no existing dialect can
-    change behaviour.
+    Walks EVERY document, including one with no connector-call binding (#184 A4).
+    Before #184 a binding-free document returned here, which left a map or a cache
+    write on an absent stream — a call-free Branch leg, a Decision arm under a
+    control-only root — unchecked, while the same consumer after a producing call
+    was checked. The per-binding profile loop below has nothing to do for such a
+    document, and the walk's legacy map rules key on whether a connector call ran
+    on the path, so a pure legacy source/target flow keeps its unchecked maps.
     """
-    if not bindings:
-        return
-
     index = symbols.build_index()
     binding_by_node = {binding.node_id: binding for binding in bindings}
 
@@ -652,6 +653,23 @@ def _walk_paths(cfg: SemanticCfgV1, index, binding_by_node) -> None:
                 "{0}/map_ref".format(state.pending_map.source_path),
                 state.pending_map.node_id,
             )
+
+        # --- #184 A4: a map or a cache write needs documents to act on ---------
+        # Only a `documents_required` call was gated on "something upstream on this
+        # path produced documents". A map or a cache write on an absent stream — a
+        # call-free Branch leg or Decision arm under a control-only root — compiled
+        # and emitted, although the empty start document carries nothing to
+        # transform or stage. The document-existence authority is `producer`, fed
+        # by a producing call, a legacy source, the listener entry, a caught
+        # document, and `_STREAM_PRODUCING_KINDS` — which is pinned, in both
+        # directions, to the served kinds whose output is stream-replacing AND
+        # all-documents. A `message` or `data_process` is served per-document and is
+        # NOT a from-nothing producer. Placed after the Send gate and the pending-map
+        # rule so a defect those already own keeps its diagnosis.
+        if kind == "map" and state.producer is None:
+            _cardinality_failure("{0}/map_ref".format(node.source_path), node.node_id)
+        if kind == "cache_put" and state.producer is None:
+            _cardinality_failure("{0}/cache_ref".format(node.source_path), node.node_id)
 
         if kind == "connector_call":
             binding = binding_by_node[node_id]
