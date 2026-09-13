@@ -291,17 +291,27 @@ def test_l3_recipe_arm_matches_its_committed_golden(name):
 
 
 @pytest.mark.parametrize("name", ["compose_mixed_cache", "compose_all_cache"])
-def test_l4_legacy_cache_arm_still_requires_its_exemption(name):
-    """The claim's OTHER half.
+def test_l4_legacy_cache_arm_passes_strictly_once_cache_identity_is_canonical(name, monkeypatch):
+    """The claim's OTHER half, re-measured under #184's canonical cache identity.
 
-    The recipe arm passing strictly is only interesting if the legacy arm does
-    not. This asserts the legacy occurrence-aliased arm still fails
-    ``validation_policy=None`` with the lineage code, so "the shared cache ref is
-    what removes the exemption" stays a measured difference rather than a story.
+    The legacy arm spells its one handoff cache through per-occurrence refs, one for
+    the staging put and one for each consuming get, and every one of them resolves
+    to the same documentcache component. Keyed by spelling, the put did not
+    establish the gets, so this arm needed its exemption. #184 keys every cache
+    fact by the resolved component (Stage-2 review finding CDX-184-r1-01, ledger
+    C23), so the legacy arm now passes ``validation_policy=None`` like the recipe
+    arm. The difference was the SPELLING, and disabling the canonical spelling
+    restores the refusal exactly.
     """
+    from boomi_mcp.compiler.process_ir.semantic_validation import context, lineage, pipeline
+
     _spec, process = _spec_and_process(_compose(name)["integration_spec"])
     adapted = adapt_flow_sequence(process.config)
 
+    emit_legacy_result(adapted, resolver=placeholder_component_id, dialect=None)
+
+    for module in (context, pipeline, lineage):
+        monkeypatch.setattr(module, "canonical_cache_refs", lambda symbols: {})
     with pytest.raises(Exception) as excinfo:
         emit_legacy_result(adapted, resolver=placeholder_component_id, dialect=None)
     cause = excinfo.value.__cause__
@@ -310,8 +320,8 @@ def test_l4_legacy_cache_arm_still_requires_its_exemption(name):
         "PROCESS_IR_SEMANTIC_LINEAGE_CACHE_WRITER_MISSING"
     }
 
-    # ... and with the dialect's registered policy it passes, so the failure
-    # above is the EXEMPTION being withheld and not some unrelated breakage.
+    # ... and the dialect's registered policy still accepts it, so the exemption
+    # stays harmless where a spelling-keyed validator would need it.
     emit_legacy_result(
         adapted, resolver=placeholder_component_id, dialect="flow_sequence"
     )

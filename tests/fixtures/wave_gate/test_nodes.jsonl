@@ -709,8 +709,8 @@
 {"kind": "test", "id": "pytest-000708", "node_id": "tests/patterns/test_recipe_preset_parity.py::test_l3_recipe_arm_matches_its_committed_golden[api_to_api_sync_0]", "state": "active"}
 {"kind": "test", "id": "pytest-000709", "node_id": "tests/patterns/test_recipe_preset_parity.py::test_l3_recipe_arm_matches_its_committed_golden[compose_all_cache]", "state": "active"}
 {"kind": "test", "id": "pytest-000710", "node_id": "tests/patterns/test_recipe_preset_parity.py::test_l3_recipe_arm_matches_its_committed_golden[compose_stream]", "state": "active"}
-{"kind": "test", "id": "pytest-000711", "node_id": "tests/patterns/test_recipe_preset_parity.py::test_l4_legacy_cache_arm_still_requires_its_exemption[compose_all_cache]", "state": "active"}
-{"kind": "test", "id": "pytest-000712", "node_id": "tests/patterns/test_recipe_preset_parity.py::test_l4_legacy_cache_arm_still_requires_its_exemption[compose_mixed_cache]", "state": "active"}
+{"kind": "test", "id": "pytest-000711", "node_id": "tests/patterns/test_recipe_preset_parity.py::test_l4_legacy_cache_arm_still_requires_its_exemption[compose_all_cache]", "state": "tombstone"}
+{"kind": "test", "id": "pytest-000712", "node_id": "tests/patterns/test_recipe_preset_parity.py::test_l4_legacy_cache_arm_still_requires_its_exemption[compose_mixed_cache]", "state": "tombstone"}
 {"kind": "test", "id": "pytest-000713", "node_id": "tests/patterns/test_recipe_preset_parity.py::test_l4_recipe_cache_arm_passes_strictly_with_one_shared_reference[compose_all_cache]", "state": "active"}
 {"kind": "test", "id": "pytest-000714", "node_id": "tests/patterns/test_recipe_preset_parity.py::test_l4_recipe_cache_arm_passes_strictly_with_one_shared_reference[compose_mixed_cache]", "state": "active"}
 {"kind": "test", "id": "pytest-000715", "node_id": "tests/patterns/test_recipe_preset_parity.py::test_l4_recipe_stream_arm_uses_no_cache_reference_at_all", "state": "active"}
@@ -12699,3 +12699,5 @@
 {"kind": "test", "id": "pytest-012698", "node_id": "tests/test_issue_184_child_entries.py::test_a_child_whose_declared_external_writer_fills_its_cache_owes_its_caller_nothing", "state": "active"}
 {"kind": "test", "id": "pytest-012699", "node_id": "tests/test_issue_184_child_entries.py::test_a_forwarding_call_passes_its_childs_cache_requirement_to_its_caller", "state": "active"}
 {"kind": "test", "id": "pytest-012700", "node_id": "tests/test_issue_184_child_entries.py::test_a_forwarding_passthrough_passes_its_childs_bound_path_writer_to_its_caller", "state": "active"}
+{"kind": "test", "id": "pytest-012701", "node_id": "tests/patterns/test_recipe_preset_parity.py::test_l4_legacy_cache_arm_passes_strictly_once_cache_identity_is_canonical[compose_mixed_cache]", "state": "active"}
+{"kind": "test", "id": "pytest-012702", "node_id": "tests/patterns/test_recipe_preset_parity.py::test_l4_legacy_cache_arm_passes_strictly_once_cache_identity_is_canonical[compose_all_cache]", "state": "active"}
