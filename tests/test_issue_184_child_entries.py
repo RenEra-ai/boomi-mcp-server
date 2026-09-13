@@ -800,13 +800,24 @@ def test_the_revision_moves_with_component_identity_and_forwarding_behaviour(mon
         (process_ir_effects, "_caller_composed_paths", lambda prepared, capabilities, walk: ()),
         # Stage-2 review round r3: the written spec and the facts projected from it.
         (process_ir_effects, "_written_map_effect",
-         lambda aliases, components, conflict_policy, derive: (None, False)),
+         lambda aliases, components, conflict_policy, derive, canonical: (None, False)),
         (materialization, "_bound_component_facts",
-         lambda components, bindings, plan_keys, reused: collections.defaultdict(lambda: (None, None, None))),
+         lambda components, bindings, plan_keys, writers: collections.defaultdict(lambda: (None, None, None))),
+        # Stage-2 review round r5: the write-conflict refusal and the canonical effect comparison.
+        (integration_builder, "component_write_conflicts", lambda components: {}),
+        (integration_builder, "component_writes_existing", lambda comp: False),
+        (integration_builder, "apply_writes_component_config", lambda comp, conflict_policy: True),
+        (integration_builder, "_binds_as_metadata_only_connector_update", lambda component_type, config: False),
+        (integration_builder, "smart_merge_would_change", lambda config: False),
+        (process_ir_effects, "_canonical_effect", lambda effect, canonical: effect),
     )
     for module, name, replacement in perturbations:
         with monkeypatch.context() as patched:
             patched.setattr(module, name, replacement)
+            # Non-vacuity: a replacement the oracle cannot call would read "unavailable" and move
+            # the revision without changing any verdict.
+            perturbed = authoring_contract._compiler_revision_payload()
+            assert all(perturbed[row] != "unavailable" for row in ("component_identity", "child_forwarding")), name
             assert authoring_contract._compiler_revision() != baseline, name
     assert authoring_contract._compiler_revision() == baseline
 

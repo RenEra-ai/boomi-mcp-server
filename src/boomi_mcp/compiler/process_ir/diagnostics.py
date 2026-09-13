@@ -432,7 +432,8 @@ _MESSAGES = {
     ),
     PROCESS_IR_SEMANTIC_PROFILE_MISMATCH: (
         "the documents reaching a map, a cache write, a profile source or a call carry a "
-        "profile other than the one it requires, or one nothing states"
+        "profile other than the one it requires or one nothing states, or an operation's "
+        "profile reference names no profile component"
     ),
     PROCESS_IR_SEMANTIC_CARDINALITY_MISMATCH: (
         "a connector call's document cardinality is impossible at its position"

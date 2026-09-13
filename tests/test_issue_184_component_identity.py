@@ -29,6 +29,7 @@ for _p in (str(_ROOT), str(_ROOT / "src"), str(_HERE)):
 from boomi_mcp.authoring import process_ir_effects  # noqa: E402
 from boomi_mcp.authoring.workflow import plan_authoring_request_v1  # noqa: E402
 from boomi_mcp.categories.integration_builder import (  # noqa: E402
+    ComponentWriteConflictError,
     declared_bindings_for_components,
 )
 from boomi_mcp.compiler.process_ir.contracts import component_identity  # noqa: E402
@@ -325,8 +326,10 @@ from test_process_ir_effect_declarations import (  # noqa: E402
     _accepted,
     _components,
     _effect,
+    _join,
     _map_component,
     _symbols as _effect_symbols,
+    _valid_map_config,
 )
 
 from boomi_mcp.compiler.process_ir.contracts import SymbolTableV1  # noqa: E402
@@ -378,31 +381,24 @@ def test_a_map_declaration_derives_from_the_config_apply_writes(alias_key, polic
     assert _declared_map_verdict(alias_key, policy=policy) == ((), (), [])
 
 
-def test_two_writes_of_one_map_with_different_effects_refuse_the_declaration():
-    """CDX-184-r4-02: two updates of one map whose configs derive different effects leave the
-    component's effect unknown. The declaration is refused as a mismatch, never made inert,
-    because an inert declaration drops the reads the component really makes."""
+@pytest.mark.parametrize("property_name, over", [("OTHER", {}), ("OUT", {"name": "another component name"})])
+def test_two_writes_of_one_map_refuse_the_request(property_name, over):
+    """CDX-184-r4-02 and CDX-184-r5-01: two updates of one map leave which configuration executes
+    undecided, whether their effects differ or only their metadata does. The request is refused
+    before any fact or effect is derived, so nothing is judged against either configuration."""
     other = _map_component(
-        [_accepted("dynamic_process_property_set", parameters={"property_name": "OTHER"})],
-        key="MAP_TWO", action="update", component_id="M-1")
-    findings, inert, _errors = _declared_map_verdict("A_REF", extra=(other,))
-    assert findings == ("content-mismatch",)
-    assert inert == ()
-
-
-def test_two_writes_with_the_same_map_effect_keep_the_declaration():
-    """CDX-184-r4-02: two updates of one map that differ only in metadata derive one effect,
-    so that effect decides and the declaration keeps establishing what the map writes."""
-    renamed = _map_component(
-        [_accepted("dynamic_process_property_set", parameters={"property_name": "OUT"})],
-        key="MAP_TWO", action="update", component_id="M-1", name="another component name")
-    assert _declared_map_verdict("A_REF", extra=(renamed,)) == ((), (), [])
+        [_accepted("dynamic_process_property_set", parameters={"property_name": property_name})],
+        key="MAP_TWO", action="update", component_id="M-1", **over)
+    with pytest.raises(ComponentWriteConflictError) as refused:
+        _declared_map_verdict("A_REF", extra=(other,))
+    assert (refused.value.code, refused.value.keys) == (
+        "INTEGRATION_COMPONENT_WRITE_CONFLICT", ("MAP", "MAP_TWO"))
 
 
 def test_every_reference_to_a_bound_component_carries_the_written_facts():
     """The sibling of CDX-184-r3-01: a map's profile facts describe its component, so a
     `reference_only` alias of a map the request updates carries the update's facts. A
-    component nothing writes, or two writes that disagree, is described by nothing."""
+    component nothing in the request writes is described by nothing."""
     components = [
         _spec("p1", "profile.json"),
         _spec("p2", "profile.json"),
@@ -413,21 +409,11 @@ def test_every_reference_to_a_bound_component_carries_the_written_facts():
         _spec("r_one", "transform.map", component_id="MAP-2", reference_only=True),
         _spec("r_two", "transform.map", component_id="MAP-2",
               source_profile_id="$ref:p1", target_profile_id="$ref:p1"),
-        _spec("u_one", "transform.map", action="update", component_id="MAP-3",
-              source_profile_id="$ref:p1", target_profile_id="$ref:p1"),
-        _spec("u_two", "transform.map", action="update", component_id="MAP-3",
-              source_profile_id="$ref:p2", target_profile_id="$ref:p2"),
-        _spec("u_ref", "transform.map", component_id="MAP-3", reference_only=True),
     ]
     symbols = build_symbol_table(components)
     facts = {symbol.ref: (symbol.input_profile_ref, symbol.output_profile_ref) for symbol in symbols.symbols}
     assert facts["$ref:a_map"] == facts["$ref:b_map"] == ("$ref:p1", "$ref:p2")
     assert facts["$ref:r_one"] == facts["$ref:r_two"] == (None, None)  # reused, nothing written
-    # Two writes that disagree keep their own facts (Stage-2 review round r4) ...
-    assert facts["$ref:u_one"] == ("$ref:p1", "$ref:p1")
-    assert facts["$ref:u_two"] == ("$ref:p2", "$ref:p2")
-    # ... and a reference nothing agrees on is described by nothing.
-    assert facts["$ref:u_ref"] == (None, None)
     ir = parse_process_ir_v1({"version": "1", "body": {"kind": "sequence", "steps": [
         {"kind": "passthrough"}, {"kind": "map_ref", "map_ref": "$ref:m12"},
         {"kind": "map_ref", "map_ref": "$ref:a_map"}, {"kind": "stop"}]}})
@@ -440,26 +426,391 @@ def test_every_reference_to_a_bound_component_carries_the_written_facts():
 # ---------------------------------------------------------------------------
 
 
-def test_two_updates_of_one_cache_that_disagree_check_writes_against_both():
-    """CDX-184-r4-01: two updates declare the same cache with different profiles. Each keeps
-    its declaration, so staging P1 documents is still refused against the P2 one."""
+_CONFLICT = "INTEGRATION_COMPONENT_WRITE_CONFLICT"
+
+
+@pytest.mark.parametrize("second_id", ["C-1", " C-1 "])
+def test_two_updates_of_one_cache_are_refused_on_every_route(second_id):
+    """CDX-184-r4-01 and CDX-184-r5-01: two updates of one existing cache leave which declaration
+    the cache keeps undecided, so the request is refused, with the same code, on the typed plan,
+    in the recipe engine and in the raw route's pre-write pass. A padded id is the same id."""
+    import types
+
+    from boomi_mcp.authoring.connector_resolution_snapshot import build_connector_resolution_snapshot
+    from boomi_mcp.categories import integration_builder
+    from boomi_mcp.recipes import engine
+    from boomi_mcp.recipes.errors import RecipeError
+
     components = [
         _spec("p1", "profile.json"),
         _spec("p2", "profile.json"),
         _spec("u1", "documentcache", action="update", component_id="C-1", profile_id="$ref:p1"),
-        _spec("u2", "documentcache", action="update", component_id="C-1", profile_id="$ref:p2"),
-        _spec("m11", "transform.map", source_profile_id="$ref:p1", target_profile_id="$ref:p1"),
+        _spec("u2", "documentcache", action="update", component_id=second_id, profile_id="$ref:p2"),
     ]
-    symbols = build_symbol_table(components)
-    ir = parse_process_ir_v1({"version": "1", "body": {"kind": "sequence", "steps": [
-        {"kind": "passthrough"},
-        {"kind": "branch", "legs": [
-            {"steps": [{"kind": "map_ref", "map_ref": "$ref:m11"}],
-             "terminal": {"kind": "cache_put", "cache_ref": "$ref:u1"}},
-            {"steps": [{"kind": "message", "text": "m"}], "terminal": {"kind": "stop"}},
-        ]}]}})
-    errors = [(item.code, item.path) for item in validate_process_ir(ir, symbols).errors]
-    assert (_MISMATCH, "/body/steps/1/legs/0/terminal/cache_ref") in errors, errors
+    with pytest.raises(ComponentWriteConflictError) as refused:
+        build_symbol_table(components)
+    assert (refused.value.code, refused.value.conflicts) == (_CONFLICT, {"C-1": ("u1", "u2")})
+
+    # The raw route: its one symbol builder raises, and its pre-write refusal serves the code.
+    with pytest.raises(ComponentWriteConflictError) as raw:
+        integration_builder._build_canonical_symbols(
+            spec=types.SimpleNamespace(components=components, processes=()),
+            resolution=build_connector_resolution_snapshot(components, declared={}),
+            conflict_policy="reuse",
+        )
+    envelope = integration_builder._pre_write_refusal(raw.value, failed_step="root")
+    assert envelope["error_code"] == _CONFLICT
+    assert "reference_only" in envelope["hint"]
+
+    # The recipe engine: one recipe diagnostic per writing spec.
+    with pytest.raises(RecipeError) as recipe:
+        engine._compile_processes(composed=type("C", (), {"process_roots": ()})(),
+                                  components=components, connector_metadata={}, resolver=None)
+    assert [(item.target, item.cause_codes) for item in recipe.value.diagnostics] == [
+        ("u1", (_CONFLICT,)), ("u2", (_CONFLICT,))]
+
+    # The typed plan, from the served request shape: reported, one error per writing spec.
+    typed = [_profile("p_a", "a1"), _cache("u1", "p_a", "a1", "create_by_id"),
+             _cache("u2", "p_a", "a1", "create_by_id")]
+    for item in typed[1:]:
+        item["action"] = "update"
+    typed[2]["component_id"] = _CACHE_ID if second_id == "C-1" else " " + _CACHE_ID + " "
+    request = AuthoringRequestV1.model_validate({"contract_version": "2", "intent": {
+        "intent_kind": "process_ir", "integration_name": "identity",
+        "units": [{"envelope": {"component_key": "root", "name": "root", "action": "create",
+                                "depends_on": [spec["key"] for spec in typed]},
+                   "process_ir": {"version": "1", "body": {"kind": "sequence", "steps": [
+                       {"kind": "passthrough"}, {"kind": "stop"}]}}}],
+        "components": typed, "conflict_policy": "reuse"}})
+    result = plan_authoring_request_v1(request, profile="qa_profile", account_id="qa_account")[0]
+    assert sorted((error.code, error.subject_id) for error in result.errors) == [
+        (_CONFLICT, "u1"), (_CONFLICT, "u2")]
+
+
+_PROFILE_CONFIG = {"component_type": "profile.json", "profile_type": "json.generated", "root": {
+    "name": "Root", "kind": "object", "children": [{"name": "a", "kind": "simple", "data_type": "character"}]}}
+#: Every branch apply takes for a spec naming an existing id: the create-by-id reuse, clone and
+#: refusal; the planner's `reference_only` create; an update, with `reference_only` in every
+#: spelling; the connector update apply binds because it authors only metadata, and one it writes.
+_APPLY_KINDS = {
+    "create_by_id": ("profile.json", "create", _PROFILE_CONFIG),
+    "create_reference_only": ("profile.json", "create", {"reference_only": True}),
+    "update": ("profile.json", "update", _PROFILE_CONFIG),
+    "update_reference_only": ("profile.json", "update", dict(_PROFILE_CONFIG, reference_only=True)),
+    "update_reference_only_false_string": ("profile.json", "update", dict(_PROFILE_CONFIG, reference_only="false")),
+    "update_reference_only_one": ("profile.json", "update", dict(_PROFILE_CONFIG, reference_only=1)),
+    "connector_metadata_update": ("connector-action", "update", {"connector_type": "rest"}),
+    "connector_renaming_update": ("connector-action", "update", {"connector_type": "rest", "component_name": "renamed"}),
+}
+
+
+def _apply_component(key, kind):
+    component_type, action, config = _APPLY_KINDS[kind]
+    return {"key": key, "type": component_type, "name": key, "action": action, "component_id": "X-1",
+            "config": dict(config)}
+
+
+_OUTCOMES = {}
+
+
+def _apply_outcome(kind, policy):
+    """What apply DOES with one spec of this kind naming the existing id `X-1`: `refused`, or the
+    status it records (`reused`, `created`, `updated`). Offline: only execution is replaced."""
+    import copy
+    from unittest import mock
+
+    from boomi_mcp.categories import integration_builder
+
+    if (kind, policy) in _OUTCOMES:
+        return _OUTCOMES[kind, policy]
+    config = {"dry_run": False, "conflict_policy": policy,
+              "integration_spec": {"name": "outcome", "components": [_apply_component("a", kind)]}}
+
+    def execute(*args, **kwargs):
+        target = kwargs.get("target_id")
+        return {"_success": True, "component_id": target or "NEW", "status": "updated" if target else "created"}
+
+    with mock.patch.object(integration_builder, "paginate_metadata", lambda *a, **k: []), \
+            mock.patch.object(integration_builder, "_execute_component", side_effect=execute):
+        result = integration_builder._apply_plan(mock.MagicMock(), "outcome_profile", copy.deepcopy(config))
+    row = (result.get("results") or {}).get("a") or {}
+    outcome = row.get("status") if result.get("_success") else "refused"
+    if outcome == "updated" and kind == "create_by_id":
+        outcome = "created"  # the clone branch hands the executor the id it copies
+    _OUTCOMES[kind, policy] = outcome
+    return outcome
+
+
+@pytest.mark.parametrize("policy", ["reuse", "clone", "fail"])
+@pytest.mark.parametrize("kind", sorted(_APPLY_KINDS))
+def test_the_write_predicates_agree_with_what_apply_does(kind, policy):
+    """Pre-commit verification of correction batch 6: the predicates are checked against apply's
+    own run, not against a statement of it. A `reference_only` update is WRITTEN."""
+    from boomi_mcp.categories.integration_builder import (
+        apply_writes_component_config,
+        component_writes_existing,
+    )
+
+    outcome = _apply_outcome(kind, policy)
+    assert outcome in ("refused", "reused", "created", "updated"), outcome
+    spec = IntegrationComponentSpec(**_apply_component("a", kind))
+    if outcome != "refused":
+        assert apply_writes_component_config(spec, policy) is (outcome in ("created", "updated")), outcome
+    assert component_writes_existing(spec) is (outcome == "updated"), outcome
+
+
+def test_the_apply_outcomes_cover_every_branch():
+    """Non-vacuity: the kinds above reach every outcome apply records for an existing id."""
+    seen = {_apply_outcome(kind, policy) for kind in _APPLY_KINDS for policy in ("reuse", "clone", "fail")}
+    assert seen == {"refused", "reused", "created", "updated"}, seen
+    assert _apply_outcome("update_reference_only", "reuse") == "updated"
+    assert _apply_outcome("connector_metadata_update", "reuse") == "reused"
+
+
+@pytest.mark.parametrize("policy", ["reuse", "clone", "fail"])
+@pytest.mark.parametrize("first", sorted(_APPLY_KINDS))
+@pytest.mark.parametrize("second", sorted(_APPLY_KINDS))
+def test_a_write_conflict_is_exactly_two_writes_of_one_existing_component(first, second, policy):
+    """The coverage claim, derived from apply: a request is refused exactly when apply would
+    UPDATE the one existing component from both specs."""
+    expected = _apply_outcome(first, policy) == "updated" and _apply_outcome(second, policy) == "updated"
+    components = [IntegrationComponentSpec(**_apply_component("a", first)),
+                  IntegrationComponentSpec(**_apply_component("b", second))]
+    try:
+        build_symbol_table(components, conflict_policy=policy)
+        refused = False
+    except ComponentWriteConflictError:
+        refused = True
+    assert refused is expected
+
+
+def test_a_reference_only_update_is_described_by_its_own_config():
+    """Pre-commit verification of correction batch 6: a `reference_only` update is written, so it
+    keeps its own facts, its map effect is derivable, and a second update of the same id is a
+    write conflict whatever spelling the flag takes."""
+    from boomi_mcp.authoring.process_ir_effects import _may_be_substituted
+
+    alone = build_symbol_table([
+        _spec("p2", "profile.json"),
+        _spec("c", "documentcache", action="update", component_id="C-1", profile_id="$ref:p2", reference_only=True),
+    ])
+    assert {symbol.ref: symbol.cache_profile_ref for symbol in alone.symbols}["$ref:c"] == "$ref:p2"
+    written_map = _spec("m", "transform.map", action="update", component_id="M-1", reference_only=True)
+    assert _may_be_substituted(written_map, "reuse") is False
+    assert _may_be_substituted(_spec("r", "transform.map", component_id="M-1", reference_only=True), "clone") is True
+    for flag in (True, "false", 1):
+        with pytest.raises(ComponentWriteConflictError):
+            build_symbol_table([
+                _spec("p1", "profile.json"), _spec("p2", "profile.json"),
+                _spec("w", "documentcache", action="update", component_id="C-1", profile_id="$ref:p1"),
+                _spec("c", "documentcache", action="update", component_id="C-1", profile_id="$ref:p2",
+                      reference_only=flag),
+            ])
+
+
+def test_a_write_conflict_keeps_every_check_that_needs_no_symbol_table():
+    """Pre-commit verification of correction batch 6: the typed plan still hands a caller
+    everything wrong at once. A literal extension-binding connection id is refused beside the
+    write conflict, and the control without the conflict reports the same relocatability error."""
+    literal = "35813b90-1f42-4dcb-98f5-82d8f96be61d"
+    conn = {"key": "conn", "type": "connector-settings", "name": "conn", "action": "create",
+            "config": {"connector_type": "rest", "component_name": "conn",
+                       "base_url": "https://orders.example.invalid", "auth": "NONE"}}
+    op = {"key": "op", "type": "connector-action", "name": "op", "action": "create", "depends_on": ["conn"],
+          "config": {"connector_type": "rest", "operation_mode": "execute", "component_name": "op",
+                     "connection_ref_key": "conn", "method": "GET", "path": "/v1/things"}}
+    updates = [_profile("p_a", "a1"), _cache("u1", "p_a", "a1", "create_by_id"),
+               _cache("u2", "p_a", "a1", "create_by_id")]
+    for item in updates[1:]:
+        item["action"] = "update"
+
+    def errors(components):
+        request = AuthoringRequestV1.model_validate({"contract_version": "2", "intent": {
+            "intent_kind": "process_ir", "integration_name": "report_all",
+            "units": [{"envelope": {"component_key": "proc", "name": "proc", "action": "create",
+                                    "depends_on": ["conn", "op"], "process_extensions": {"connections": [{
+                                        "connection_id": literal, "connector_type": "rest",
+                                        "fields": [{"id": "url", "label": "x"}]}]}},
+                       "process_ir": {"version": "1", "body": {"kind": "sequence", "steps": [
+                           {"kind": "source", "connection_ref": "$ref:conn", "operation_ref": "$ref:op"},
+                           {"kind": "message", "text": "hello"}, {"kind": "return_documents"}]}}}],
+            "components": components, "conflict_policy": "reuse"}})
+        result = plan_authoring_request_v1(request, profile="qa_profile", account_id="qa_account")[0]
+        return sorted((error.code, error.subject_id, error.path) for error in result.errors)
+
+    relocatable = ("PROCESS_MATERIALIZATION_REFERENCE_NOT_RELOCATABLE", "proc", "/process_extensions/connections/0/connection_id")
+    assert relocatable in errors([conn, op])
+    with_conflict = errors([conn, op] + updates)
+    assert relocatable in with_conflict, with_conflict
+    assert (_CONFLICT, "u1", "") in with_conflict and (_CONFLICT, "u2", "") in with_conflict, with_conflict
+
+
+def test_a_write_conflict_does_not_judge_effect_declarations_without_a_symbol_table():
+    """Second pre-commit verification of correction batch 6: with no symbol table, a correct map and
+    subprocess declaration cannot be judged, so the plan reports the conflict and no declaration
+    mismatch. The control without the conflict admits the same declarations."""
+    def request(conflict):
+        components = [_profile("p_a", "a1"), _profile("p_b", "b2"), _map("m1", "p_a", "p_b", "a1", "b2")]
+        if conflict:
+            updates = [_cache("u1", "p_a", "a1", "create_by_id"), _cache("u2", "p_a", "a1", "create_by_id")]
+            for item in updates:
+                item["action"] = "update"
+            components += updates
+        root = {"version": "1", "body": {"kind": "sequence", "steps": [
+            {"kind": "passthrough"}, {"kind": "branch", "legs": [
+                {"steps": [{"kind": "map_ref", "map_ref": "$ref:m1"}], "terminal": {"kind": "stop"}},
+                {"steps": [{"kind": "message", "text": "m"}],
+                 "terminal": {"kind": "process_call", "process_ref": "$ref:child"}}]}]}}
+        child = {"version": "1", "body": {"kind": "sequence", "steps": [
+            {"kind": "passthrough"}, {"kind": "message", "text": "m"}, {"kind": "return_documents"}]}}
+        return AuthoringRequestV1.model_validate({"contract_version": "2", "intent": {
+            "intent_kind": "process_ir", "integration_name": "declared",
+            "units": [
+                {"envelope": {"component_key": "child", "name": "child", "action": "create"}, "process_ir": child},
+                {"envelope": {"component_key": "root", "name": "root", "action": "create",
+                              "depends_on": [item["key"] for item in components] + ["child"]}, "process_ir": root},
+            ],
+            "components": components, "conflict_policy": "reuse"},
+            "effect_declarations": {
+                "map_effects": [{"map_ref": "$ref:m1", "effect": {"writes": [{"scope": "dpp", "name": "OUT"}],
+                                                                  "replay_safe": True}}],
+                "subprocess_effects": [{"process_ref": "$ref:child", "effect": {"replay_safe": True}}]}})
+
+    def errors(conflict):
+        result = plan_authoring_request_v1(request(conflict), profile="qa_profile", account_id="qa_account")[0]
+        return sorted((error.code, error.subject_id, error.path) for error in result.errors)
+
+    assert errors(False) == []
+    assert errors(True) == [(_CONFLICT, "u1", ""), (_CONFLICT, "u2", "")]
+
+
+def test_a_child_summary_keys_its_caches_by_component():
+    """Pre-commit verification of correction batch 6 (the child-summary sibling of CDX-184-r5-02):
+    a child writing a cache through one reference and reading it back through another requires
+    nothing of its caller, so the truthful declaration binds and an over-read is a mismatch."""
+    from boomi_mcp.authoring.process_ir_effects import derive_subprocess_effect
+    from boomi_mcp.compiler.process_ir.contracts import ComponentSymbolV1
+    from boomi_mcp.models.authoring_workflow import ProcessIRSubprocessEffectDeclarationV1
+
+    def sym(ref, component_id, component_type):
+        return ComponentSymbolV1(ref="$ref:" + ref, component_id=component_id, component_type=component_type)
+
+    symbols = SymbolTableV1(symbols=(sym("CACHE", "C-1", "documentcache"), sym("CACHE_ALIAS", "C-1", "documentcache"),
+                                     sym("PARENT", "P-1", "process"), sym("CHILD", "P-2", "process")))
+    entry = {"kind": "passthrough", "label": "Receive"}
+    message = {"kind": "message", "text": "m"}
+    child = parse_process_ir_v1({"version": "1", "body": {"kind": "sequence", "steps": [entry, {"kind": "branch", "legs": [
+        {"steps": [message], "terminal": {"kind": "cache_put", "cache_ref": "$ref:CACHE"}},
+        {"steps": [{"kind": "cache_get", "cache_ref": "$ref:CACHE_ALIAS"}, message], "terminal": {"kind": "stop"}},
+    ]}]}})
+    parent = parse_process_ir_v1({"version": "1", "body": {"kind": "sequence", "steps": [
+        entry, {"kind": "process_call", "process_ref": "$ref:CHILD"}]}})
+    assert derive_subprocess_effect(child, symbols=symbols).effect[0] == ()
+    # CONTROL: against no table the aliases are two caches, which is what the resolver used to ask.
+    assert derive_subprocess_effect(child).effect[0] == (("cache", "$ref:CACHE_ALIAS"),)
+
+    def findings(declared):
+        roots = [("PARENT", parent), ("CHILD", child)]
+        resolution = process_ir_effects.resolve_process_ir_effect_declarations(
+            roots, ProcessIREffectDeclarationsV1(subprocess_effects=(
+                ProcessIRSubprocessEffectDeclarationV1(process_ref="$ref:CHILD", effect=declared),)),
+            symbols, [], child_roots={"$ref:" + key: ir for key, ir in roots})
+        return [finding.reason for finding in resolution.findings]
+
+    assert findings(_effect(writes=[("cache", "$ref:CACHE")])) == []
+    assert findings(_effect(writes=[("cache", "$ref:CACHE_ALIAS")])) == []
+    assert findings(_effect(reads=[("cache", "$ref:CACHE")], writes=[("cache", "$ref:CACHE")])) == ["content-mismatch"]
+
+
+def test_the_write_conflict_reads_the_bind_predicate_apply_runs():
+    """The non-body connector update apply binds instead of writing (QA-157-r2-01) is decided by
+    ONE predicate, and both apply's bind step and the conflict check call it. A structured update
+    and a metadata-only alias of one operation are one write; two structured updates are two."""
+    import ast
+
+    from boomi_mcp.categories import integration_builder
+
+    tree = ast.parse(Path(integration_builder.__file__).read_text(encoding="utf-8"))
+    callers = set()
+    rules = []
+    for function in (node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)):
+        for node in ast.walk(function):
+            if isinstance(node, ast.Call) and getattr(node.func, "id", None) == "_binds_as_metadata_only_connector_update":
+                callers.add(function.name)
+            if isinstance(node, ast.BoolOp):
+                called = {getattr(item.func, "id", None) for item in ast.walk(node) if isinstance(item, ast.Call)}
+                if {"_is_metadata_only_update", "smart_merge_would_change"} <= called:
+                    rules.append(function.name)
+    # Apply's bind step and the one "apply writes this config" predicate every plan-time
+    # check asks (`component_writes_existing` through it).
+    assert {"_apply_plan", "apply_writes_component_config"} <= callers, callers
+    assert set(rules) == {"_binds_as_metadata_only_connector_update"}, rules
+
+    def op(key, **config):
+        return _spec(key, "connector-action", action="update", component_id="OP-1", connector_type="rest", **config)
+
+    build_symbol_table([op("op", response_profile_id="$ref:p1"), op("alias"), _spec("p1", "profile.json")])
+    with pytest.raises(ComponentWriteConflictError):
+        build_symbol_table([op("op", response_profile_id="$ref:p1"), op("other", response_profile_id="$ref:p1"),
+                            _spec("p1", "profile.json")])
+
+
+def _joined_map_findings(join_ref, declared_ref, alias_id="C-7"):
+    """A map the request updates, joining one existing cache through `join_ref`, with a
+    declaration naming the cache through `declared_ref`: the resolver's finding reasons."""
+    indexes = [{"index_id": 1, "keys": [{"id": 1, "name": "a (Root/a)"}]}]
+
+    def cache(key, component_id):
+        return IntegrationComponentSpec(key=key, type="documentcache", action="create", name=key,
+                                        component_id=component_id, config={
+                                            "component_name": key, "reference_only": True,
+                                            "component_id": component_id, "indexes": indexes})
+
+    config = _valid_map_config("function", document_cache_joins=[_join(document_cache_id=join_ref)],
+                               function_mappings=[_accepted("dynamic_process_property_set")])
+    written = IntegrationComponentSpec(key="MAP", type="transform.map", action="update", component_id="M-7",
+                                       name="MAP", depends_on=["SP", "TP", join_ref[len("$ref:"):]], config=config)
+    components = _components(written, cache("CACHE", "C-7"), cache("CACHE_ALIAS", alias_id))
+    built = build_symbol_table(components)
+    symbols = SymbolTableV1(symbols=tuple(built.symbols) + tuple(
+        symbol for symbol in _effect_symbols().symbols if symbol.ref in ("$ref:CONN", "$ref:GETOP")))
+    root = parse_process_ir_v1({"version": "1", "body": {"kind": "sequence", "steps": [
+        {"kind": "source", "connection_ref": "$ref:CONN", "operation_ref": "$ref:GETOP"},
+        {"kind": "map_ref", "map_ref": "$ref:MAP"}, {"kind": "return_documents"}]}})
+    declarations = ProcessIREffectDeclarationsV1(map_effects=(ProcessIRMapEffectDeclarationV1(
+        map_ref="$ref:MAP", effect=_effect(reads=[("cache", declared_ref)], writes=[("dpp", "OUT")],
+                                           replay_safe=True)),))
+    resolution = process_ir_effects.resolve_process_ir_effect_declarations(
+        [("p", root)], declarations, symbols, components)
+    return tuple(finding.reason for finding in resolution.findings), resolution.inert
+
+
+def test_a_declared_cache_read_is_compared_by_component_not_spelling():
+    """CDX-184-r5-02 and its single-writer sibling: a map joining a cache through one reference
+    and a declaration naming it through another describe one read, so the declaration binds.
+    The control names a different cache and stays a mismatch."""
+    assert _joined_map_findings("$ref:CACHE_ALIAS", "$ref:CACHE") == ((), ())
+    assert _joined_map_findings("$ref:CACHE", "$ref:CACHE_ALIAS") == ((), ())
+    assert _joined_map_findings("$ref:CACHE_ALIAS", "$ref:CACHE", alias_id="C-8") == (("content-mismatch",), ())
+
+
+def test_every_declared_effect_is_compared_in_canonical_cache_spelling():
+    """The sibling sweep for CDX-184-r5-02, read from the resolver's source: every declared effect
+    (map, script and subprocess) reaches its comparison only through `_canonical_effect`."""
+    import ast
+
+    tree = ast.parse(Path(process_ir_effects.__file__).read_text(encoding="utf-8"))
+    parents = {}
+    for node in ast.walk(tree):
+        for child in ast.iter_child_nodes(node):
+            parents[child] = node
+    declared = [node for node in ast.walk(tree)
+                if isinstance(node, ast.Call) and getattr(node.func, "id", None) == "_declared"]
+    # Non-vacuity: the three declaration kinds each compare one.
+    assert len(declared) == 3, len(declared)
+    for call in declared:
+        parent = parents[call]
+        assert isinstance(parent, ast.Call) and getattr(parent.func, "id", None) == "_canonical_effect", call.lineno
 
 
 def test_a_metadata_only_update_alias_keeps_the_structured_update_facts():
@@ -484,7 +835,9 @@ def test_a_metadata_only_update_alias_keeps_the_structured_update_facts():
         {"kind": "connector_call", "operation_ref": "$ref:op"},
         {"kind": "map_ref", "map_ref": "$ref:m12"}, {"kind": "stop"}]}})
     assert [(item.code, item.path) for item in validate_process_ir(ir, symbols).errors] == []
-    assert {symbol.ref: symbol.output_profile_ref for symbol in symbols.symbols}["$ref:op"] == "$ref:p1"
+    outputs = {symbol.ref: symbol.output_profile_ref for symbol in symbols.symbols}
+    # The alias apply binds instead of writing carries the one write's facts (batch 6).
+    assert outputs["$ref:op"] == outputs["$ref:op_alias"] == "$ref:p1"
 
 
 def test_the_served_profile_mismatch_text_names_every_reporting_site():
@@ -516,7 +869,11 @@ def test_the_served_profile_mismatch_text_names_every_reporting_site():
     # still stands for a site in the source.
     assert tails == set(keywords), sorted(tails)
     served = next(row for row in compiler_diagnostic_specs() if row["code"] == code)
-    text = " ".join((served["message"], served["remediation"], ERROR_TAXONOMY[code].summary)).lower()
-    missing = sorted(tail for tail, word in keywords.items() if word not in text)
+    # Each served text on its own (QA-184-s1-r6-01): joined, a site named only by the
+    # remediation passed for a message that omitted it.
+    texts = {"message": served["message"], "remediation": served["remediation"],
+             "summary": ERROR_TAXONOMY[code].summary}
+    missing = sorted((name, tail) for name, text in texts.items()
+                     for tail, word in keywords.items() if word not in text.lower())
     assert missing == [], missing
     assert "named only by reference" in served["remediation"]

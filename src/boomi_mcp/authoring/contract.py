@@ -1452,6 +1452,8 @@ def _component_identity_behaviour_oracle():
                         {"name": "a", "kind": "simple", "data_type": "character"}]}},
         )
 
+    indexes = [{"index_id": 1, "keys": [{"id": 1, "name": "a (Root/a)"}]}]
+
     def function_map(key, component_id, property_name):
         return IntegrationComponentSpec(
             key=key, type="transform.map", action="update", name=key,
@@ -1470,8 +1472,8 @@ def _component_identity_behaviour_oracle():
         spec("m11", "transform.map", source_profile_id="$ref:p1", target_profile_id="$ref:p1"),
         spec("m12", "transform.map", source_profile_id="$ref:p1", target_profile_id="$ref:p2"),
         # One existing cache, named by a create that names its id and by a reference.
-        spec("c_a", "documentcache", component_id="CACHE-1", profile_id="$ref:p2"),
-        spec("c_b", "documentcache", component_id="CACHE-1", reference_only=True),
+        spec("c_a", "documentcache", component_id="CACHE-1", profile_id="$ref:p2", indexes=indexes),
+        spec("c_b", "documentcache", component_id="CACHE-1", reference_only=True, indexes=indexes),
         # One existing cache, named by a reference and by an update declaring its profile.
         spec("d_a", "documentcache", component_id="CACHE-2", reference_only=True),
         spec("d_b", "documentcache", action="update", component_id="CACHE-2", profile_id="$ref:p2"),
@@ -1493,12 +1495,15 @@ def _component_identity_behaviour_oracle():
                                            "inputs": ["root/a"],
                                            "parameters": {"property_name": "OUT"}}]},
         ),
-        # One existing cache that two updates declare differently.
-        spec("e_1", "documentcache", action="update", component_id="CACHE-3", profile_id="$ref:p1"),
-        spec("e_2", "documentcache", action="update", component_id="CACHE-3", profile_id="$ref:p2"),
-        # One existing map that two updates configure with different effects.
-        function_map("fx_1", "FMAP-2", "OUT"),
-        function_map("fx_2", "FMAP-2", "OTHER"),
+        # A map that joins one existing cache through the alias that sorts second.
+        IntegrationComponentSpec(
+            key="fj_map", type="transform.map", action="update", name="fj_map",
+            component_id="FMAP-3", depends_on=["sp", "tp", "c_b"],
+            config=dict(function_map("fj_map", "FMAP-3", "OUT").config, document_cache_joins=[{
+                "document_cache_id": "$ref:c_b", "cache_index": 1, "join_id": 1, "src_parent_key": "1",
+                "key_values": [{"cache_key_id": 1, "cache_key_name": "a (Root/a)", "src_link_key": "2"}],
+            }]),
+        ),
     ]
     declarations = ProcessIREffectDeclarationsV1(map_effects=(ProcessIRMapEffectDeclarationV1(
         map_ref="$ref:fn_map",
@@ -1528,17 +1533,72 @@ def _component_identity_behaviour_oracle():
             {"steps": [mapped("$ref:m12"), mapped("$ref:a_map")], "terminal": stop},
             {"steps": [{"kind": "message", "text": "m"}], "terminal": stop},
         ),
-        "write_against_two_update_declarations": root(
-            {"steps": [mapped("$ref:m11")], "terminal": {"kind": "cache_put", "cache_ref": "$ref:e_1"}},
-            {"steps": [{"kind": "message", "text": "m"}], "terminal": stop},
-        ),
         "declared_map_effect_through_its_writer": root(
             {"steps": [mapped("$ref:fn_map"), {"kind": "set_dpp", "name": "Y", "source_values": [
                 {"value_type": "dpp", "property_name": "OUT"}]}], "terminal": stop},
             {"steps": [{"kind": "message", "text": "m"}], "terminal": stop},
         ),
     }
-    verdicts = {}
+    from ..categories.integration_builder import (
+        ComponentWriteConflictError,
+        apply_writes_component_config,
+        component_writes_existing,
+    )
+
+    # The write predicate over every way a spec names one existing component (Stage-2
+    # correction batch 6): per spec kind and policy, whether apply writes its config and
+    # whether it writes the existing component; per pair of one component family, the
+    # symbol table's verdict (a write conflict, or each reference's facts).
+    kinds = {
+        "cache_create_by_id": ("documentcache", "create", {"profile_id": "$ref:p2"}),
+        "cache_create_reference_only": ("documentcache", "create", {"reference_only": True}),
+        "cache_update": ("documentcache", "update", {"profile_id": "$ref:p1"}),
+        "cache_update_reference_only": ("documentcache", "update",
+                                        {"profile_id": "$ref:p2", "reference_only": True}),
+        # For both connector families: an update apply binds because it authors only
+        # metadata, one that only renames (the smart merge writes it), and one with a body.
+        "connection_metadata_update": ("connector-settings", "update", {"connector_type": "rest"}),
+        "connection_renaming_update": ("connector-settings", "update",
+                                       {"connector_type": "rest", "component_name": "renamed"}),
+        "operation_metadata_update": ("connector-action", "update", {"connector_type": "rest"}),
+        "operation_renaming_update": ("connector-action", "update",
+                                      {"connector_type": "rest", "component_name": "renamed"}),
+        "operation_update": ("connector-action", "update",
+                             {"connector_type": "rest", "response_profile_id": "$ref:p1"}),
+    }
+
+    def kind_spec(key, kind):
+        component_type, action, config = kinds[kind]
+        return spec(key, component_type, action=action, component_id="X-1", **config)
+
+    write_matrix = {}
+    for policy in ("clone", "fail", "reuse"):
+        pairs = {}
+        for first in sorted(kinds):
+            for second in sorted(kinds):
+                if second < first or kinds[first][0] != kinds[second][0]:
+                    continue
+                try:
+                    table = build_symbol_table(
+                        [kind_spec("a", first), kind_spec("b", second),
+                         spec("p1", "profile.json"), spec("p2", "profile.json")],
+                        conflict_policy=policy,
+                    )
+                    pairs[first + "+" + second] = sorted(
+                        [symbol.ref, symbol.cache_profile_ref or "", symbol.output_profile_ref or ""]
+                        for symbol in table.symbols if symbol.ref in ("$ref:a", "$ref:b")
+                    )
+                except ComponentWriteConflictError as conflict:
+                    pairs[first + "+" + second] = [conflict.code, list(conflict.keys)]
+        write_matrix[policy] = {
+            "specs": {
+                kind: [apply_writes_component_config(kind_spec("a", kind), policy),
+                       component_writes_existing(kind_spec("a", kind))]
+                for kind in sorted(kinds)
+            },
+            "pairs": pairs,
+        }
+    verdicts = {"write_matrix": write_matrix}
     for policy in ("clone", "reuse"):
         symbols = build_symbol_table(components, conflict_policy=policy)
         # Each root is validated under the context the effect resolver builds for it, as
@@ -1546,16 +1606,17 @@ def _component_identity_behaviour_oracle():
         resolution = resolve_process_ir_effect_declarations(
             sorted(roots.items()), declarations, symbols, components, conflict_policy=policy
         )
-        # A declaration over a component whose written configs derive different effects,
-        # resolved on its own so its refusal does not reach the roots above.
-        ambiguity = resolve_process_ir_effect_declarations(
-            [("ambiguous", root(
-                {"steps": [mapped("$ref:fx_1")], "terminal": stop},
+        # A declaration naming the cache through the other spelling than the map's join does,
+        # resolved on its own so its verdict does not reach the roots above.
+        joined = resolve_process_ir_effect_declarations(
+            [("joined", root(
+                {"steps": [mapped("$ref:fj_map")], "terminal": stop},
                 {"steps": [{"kind": "message", "text": "m"}], "terminal": stop},
             ))],
             ProcessIREffectDeclarationsV1(map_effects=(ProcessIRMapEffectDeclarationV1(
-                map_ref="$ref:fx_1",
+                map_ref="$ref:fj_map",
                 effect=ProcessIRStateEffectDeclarationV1(
+                    reads=(ProcessIRStateReferenceV1(scope="cache", name="$ref:c_a"),),
                     writes=(ProcessIRStateReferenceV1(scope="dpp", name="OUT"),), replay_safe=True),
             ),)),
             symbols, components, conflict_policy=policy,
@@ -1576,9 +1637,10 @@ def _component_identity_behaviour_oracle():
                 for symbol in symbols.symbols
             ),
             "inert": list(resolution.inert),
-            "ambiguous_declaration": sorted(
-                [finding.path, finding.reason] for finding in ambiguity.findings
-            ),
+            "joined_declaration": {
+                "findings": sorted([finding.path, finding.reason] for finding in joined.findings),
+                "inert": list(joined.inert),
+            },
             "roots": checked,
         }
     return verdicts

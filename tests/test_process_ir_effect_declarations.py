@@ -1019,23 +1019,24 @@ def test_a_reference_only_component_is_substitutable_under_every_policy(policy):
     assert _derive(spec.config, substitutable=True) is None
 
 
-def test_substitutability_uses_the_materialization_authority_not_a_copy():
-    """The rule is ASKED of `component_materialization_mode`, and the constants
-    are imported rather than re-typed.
+def test_substitutability_asks_apply_not_a_copy(monkeypatch):
+    """The rule is ASKED of apply's own answer (`apply_writes_component_config`).
 
-    Both halves were defects in turn: the rule was re-derived and missed
-    `reference_only`, then the first fix compared against the literal `"reuse"`
-    while the constant is `"reuse_reference"` — so it matched nothing and changed
-    nothing.
+    Three defects in turn: the rule was re-derived and missed `reference_only`; the first
+    fix compared against the literal `"reuse"` while the constant is `"reuse_reference"`;
+    and reading the flag through `component_materialization_mode` made a `reference_only`
+    UPDATE opaque although apply writes its config (#184).
     """
-    from boomi_mcp.recipes.materialization import _REUSE, component_materialization_mode
+    from boomi_mcp.authoring.process_ir_effects import _may_be_substituted
+    from boomi_mcp.categories import integration_builder
 
-    assert _REUSE != "reuse", "the literal and the constant differ — that was the bug"
-    spec = IntegrationComponentSpec(
-        key="MAP", type="transform.map", action="create",
+    update = IntegrationComponentSpec(
+        key="MAP", type="transform.map", action="update", component_id="live-1",
         config={"reference_only": True},
     )
-    assert component_materialization_mode(spec) == _REUSE
+    assert _may_be_substituted(update, "reuse") is False
+    monkeypatch.setattr(integration_builder, "apply_writes_component_config", lambda comp, conflict_policy: False)
+    assert _may_be_substituted(update, "reuse") is True
 
 
 @pytest.mark.parametrize(

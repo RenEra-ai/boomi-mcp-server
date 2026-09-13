@@ -182,7 +182,7 @@ def _plan_profile_ref(value, plan_keys) -> Optional[str]:
 
 
 def _profile_facts(
-    component, plan_keys, reused=False
+    component, plan_keys, written=True
 ) -> Tuple[Optional[str], Optional[str], Optional[str]]:
     """``(input profile, output profile, cache profile)`` refs a component declares (#184).
 
@@ -194,12 +194,13 @@ def _profile_facts(
       (output) (``connector_builder``);
     - a document cache's ``profile_id`` (``document_cache_builder``).
 
-    A REUSED component's stored profiles are not in hand here, and the requested
-    config of a reuse is not what the account holds, so it contributes nothing. That
-    includes a ``create`` apply reuses because it names an existing id (``reused``):
-    its config is discarded exactly like a ``reference_only`` one's.
+    A component whose configuration apply does not write contributes nothing: its stored
+    profiles are not in hand here, and the requested config is not what the account holds.
+    ``written`` is apply's own answer (``apply_writes_component_config``): a
+    ``reference_only`` create and a create apply reuses because it names an existing id are
+    discarded, and a ``reference_only`` UPDATE is written like any other update.
     """
-    if reused or component_materialization_mode(component) == _REUSE:
+    if not written:
         return None, None, None
     config = component.config or {}
     if not isinstance(config, dict):
@@ -228,28 +229,23 @@ def _profile_facts(
     return None, None, None
 
 
-def _bound_component_facts(components, bindings, plan_keys, reused):
+def _bound_component_facts(components, bindings, plan_keys, writers):
     """``{existing component id: (input, output, cache) profile refs}`` per declared binding (#184).
 
-    The facts a reference that apply does NOT write takes from the configs apply writes into
-    its component: the ones they all agree on (Stage-2 review round r3). With no written
-    config, or written configs that disagree, such a reference is described by nothing. A
-    written spec is never described through this: it keeps its own facts, so a disagreement
-    stays visible to every check that reads them instead of being erased (round r4).
+    Every reference apply does NOT write takes these from the one spec that writes its
+    component, or takes none when nothing in the request writes it. A request writing one
+    component from two specs is refused before this runs (``component_write_conflicts``,
+    Stage-2 review round r5), so no reference ever chooses between two configurations.
     """
-    written: Dict[str, set] = {}
+    facts: Dict[str, Tuple[Optional[str], Optional[str], Optional[str]]] = {}
     for component in components:
         bound = bindings.get(component.key)
         if bound is None:
             continue
-        written.setdefault(bound, set())
-        if component.key in reused or component_materialization_mode(component) == _REUSE:
-            continue
-        written[bound].add(_profile_facts(component, plan_keys))
-    return {
-        bound: next(iter(facts)) if len(facts) == 1 else (None, None, None)
-        for bound, facts in written.items()
-    }
+        facts.setdefault(bound, (None, None, None))
+        if component.key in writers:
+            facts[bound] = _profile_facts(component, plan_keys)
+    return facts
 
 
 def build_symbol_table(
@@ -313,12 +309,21 @@ def build_symbol_table(
     symbols = []
     # #184: the keys a component profile ref may name — this plan's components only.
     plan_keys = {component.key for component in components}
-    # #184: the existing component each key binds to, and the keys apply reuses, from the
-    # builder's own declared-binding authority.
+    # #184: the existing component each key binds to, whether apply writes each spec's
+    # config, and the specs that write an existing component, all from apply's own answers.
     from ..categories.integration_builder import (
+        ComponentWriteConflictError,
+        apply_writes_component_config,
+        component_write_conflicts,
+        component_writes_existing,
         declared_bindings_for_components,
-        reused_keys_for_components,
     )
+
+    # A request writing one existing component from more than one spec leaves which
+    # configuration executes undecided, so it is refused before anything is described.
+    conflicts = component_write_conflicts(components)
+    if conflicts:
+        raise ComponentWriteConflictError(conflicts)
 
     # A declared id spelled like one of this plan's own placeholders names no account
     # component: compared, it would merge that key with the key the placeholder stands for.
@@ -330,10 +335,13 @@ def build_symbol_table(
         for key, bound in declared_bindings_for_components(components, conflict_policy).items()
         if bound not in placeholders
     }
-    reused = reused_keys_for_components(components, conflict_policy)
-    # #184: a bound reference apply does not write carries the facts every written config of
-    # its component agrees on. A written spec keeps its own facts (Stage-2 review round r4).
-    component_facts = _bound_component_facts(components, bindings, plan_keys, reused)
+    # #184: the one spec that writes a bound component keeps its facts, and every other
+    # reference to that component carries them (Stage-2 review rounds r3 to r5).
+    writers = {
+        component.key for component in components
+        if component.key in bindings and component_writes_existing(component)
+    }
+    component_facts = _bound_component_facts(components, bindings, plan_keys, writers)
     for component in components:
         connector_type, action_type = metadata.get(component.key, (None, None))
         ref = f"{_REF_PREFIX}{component.key}"
@@ -369,9 +377,10 @@ def build_symbol_table(
         # for the listener operation, which is what #158 carries in the same field.
         input_profile_fact, output_profile_fact, cache_profile_fact = (
             component_facts[bindings[component.key]]
-            if component.key in bindings
-            and (component.key in reused or component_materialization_mode(component) == _REUSE)
-            else _profile_facts(component, plan_keys, reused=component.key in reused)
+            if component.key in bindings and component.key not in writers
+            else _profile_facts(
+                component, plan_keys, written=apply_writes_component_config(component, conflict_policy)
+            )
         )
         symbols.append(
             ComponentSymbolV1(

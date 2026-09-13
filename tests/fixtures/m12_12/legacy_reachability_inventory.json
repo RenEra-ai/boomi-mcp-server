@@ -199,7 +199,7 @@
     {
       "census": "component_xml_write",
       "count": 1,
-      "evidence_line": 3307,
+      "evidence_line": 3308,
       "form": "component.update_component_raw(...)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "WR-86ab577f",
@@ -208,7 +208,7 @@
     {
       "census": "component_xml_write",
       "count": 1,
-      "evidence_line": 9050,
+      "evidence_line": 9154,
       "form": "create_component(...)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "WR-c52b7626",
@@ -217,7 +217,7 @@
     {
       "census": "component_xml_write",
       "count": 9,
-      "evidence_line": 3860,
+      "evidence_line": 3861,
       "form": "create_component(...)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "WR-1ee76aa9",
@@ -226,7 +226,7 @@
     {
       "census": "component_xml_write",
       "count": 1,
-      "evidence_line": 4510,
+      "evidence_line": 4511,
       "form": "update_component(...)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "WR-a22eb226",
@@ -865,7 +865,7 @@
     {
       "census": "legacy_semantic_validation",
       "count": 1,
-      "evidence_line": 6411,
+      "evidence_line": 6515,
       "form": "_process_ir_semantic_error(...)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LV-4a3017fe",
@@ -874,7 +874,7 @@
     {
       "census": "legacy_semantic_validation",
       "count": 1,
-      "evidence_line": 6437,
+      "evidence_line": 6541,
       "form": "validate_legacy_process_config(...)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LV-4815adb5",
@@ -1009,7 +1009,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 3073,
+      "evidence_line": 3098,
       "form": "plan_authoring_request_v1(...) [legacy-bearing, src/boomi_mcp/authoring/workflow.py]",
       "path": "src/boomi_mcp/authoring/workflow.py",
       "row_id": "LT-a45c3afb",
@@ -1018,7 +1018,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 2516,
+      "evidence_line": 2541,
       "form": "_legacy_plan_echo(...) [legacy-bearing, src/boomi_mcp/authoring/workflow.py]",
       "path": "src/boomi_mcp/authoring/workflow.py",
       "row_id": "LT-16a15362",
@@ -1027,7 +1027,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 3314,
+      "evidence_line": 3339,
       "form": "compile_authoring_request_v1(...) [legacy-bearing, src/boomi_mcp/authoring/workflow.py]",
       "path": "src/boomi_mcp/authoring/workflow.py",
       "row_id": "LT-f9b9e35e",
@@ -1396,7 +1396,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 9601,
+      "evidence_line": 9705,
       "form": "_build_plan(...) [legacy-bearing, src/boomi_mcp/categories/integration_builder.py]",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LT-d2d552f0",
@@ -1405,7 +1405,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 10487,
+      "evidence_line": 10591,
       "form": "_execute_canonical_process(...) [legacy-bearing, src/boomi_mcp/categories/integration_builder.py]",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LT-21fe473d",
@@ -1414,7 +1414,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 10854,
+      "evidence_line": 10957,
       "form": "_execute_component(...) [legacy-bearing, src/boomi_mcp/categories/integration_builder.py]",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LT-aabdab32",
@@ -1423,7 +1423,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 9563,
+      "evidence_line": 9667,
       "form": "preflight_typed_apply_v1(...) [legacy-bearing, src/boomi_mcp/authoring/workflow.py]",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LT-e0b988c1",
@@ -1432,7 +1432,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 5846,
+      "evidence_line": 5847,
       "form": "_process_component_preflight(...) [legacy-bearing, src/boomi_mcp/categories/integration_builder.py]",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LT-c2b5c918",
@@ -1441,7 +1441,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 6547,
+      "evidence_line": 6651,
       "form": "_authored_process_validation_error(...) [legacy-bearing, src/boomi_mcp/categories/integration_builder.py]",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LT-2de2f7a6",
@@ -1450,7 +1450,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 7500,
+      "evidence_line": 7604,
       "form": "_check_api_service_route_dependencies(...) [legacy-bearing, src/boomi_mcp/categories/integration_builder.py]",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LT-20419861",
@@ -1459,7 +1459,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 7323,
+      "evidence_line": 7427,
       "form": "_process_component_preflight(...) [legacy-bearing, src/boomi_mcp/categories/integration_builder.py]",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LT-a902f4d3",
@@ -1468,7 +1468,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 7645,
+      "evidence_line": 7749,
       "form": "_resolve_preservation_policy(...) [legacy-bearing, src/boomi_mcp/categories/integration_builder.py]",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LT-aa0c9c33",
@@ -1477,7 +1477,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 6526,
+      "evidence_line": 6630,
       "form": "evaluate_pipeline_authority(...) [legacy-bearing, src/boomi_mcp/compiler/process_ir/legacy_adapters/authority.py]",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LT-d3d95fdb",
@@ -1486,7 +1486,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 2194,
+      "evidence_line": 2195,
       "form": "_process_config_has_wss_listen(...) [legacy-bearing, src/boomi_mcp/categories/integration_builder.py]",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LT-152ee5d4",
@@ -1495,7 +1495,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 12096,
+      "evidence_line": 12199,
       "form": "compile_authoring_request_v1(...) [legacy-bearing, src/boomi_mcp/authoring/workflow.py]",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LT-b741b93b",
@@ -1504,7 +1504,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 8994,
+      "evidence_line": 9098,
       "form": "_apply_structured_update(...) [legacy-bearing, src/boomi_mcp/categories/integration_builder.py]",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LT-35437114",
@@ -1513,7 +1513,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 9050,
+      "evidence_line": 9154,
       "form": "create_component(...) [legacy-bearing, src/boomi_mcp/categories/components/manage_component.py]",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LT-3999ba54",
@@ -1522,7 +1522,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 10,
-      "evidence_line": 3871,
+      "evidence_line": 3872,
       "form": "_apply_structured_update(...) [legacy-bearing, src/boomi_mcp/categories/integration_builder.py]",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LT-e2d2ad35",
@@ -1531,7 +1531,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 9,
-      "evidence_line": 3860,
+      "evidence_line": 3861,
       "form": "create_component(...) [legacy-bearing, src/boomi_mcp/categories/components/manage_component.py]",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LT-9d79c02d",
@@ -1540,7 +1540,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 3935,
+      "evidence_line": 3936,
       "form": "create_connector(...) [legacy-bearing, src/boomi_mcp/categories/components/connectors.py]",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LT-49361ab2",
@@ -1549,7 +1549,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 3817,
+      "evidence_line": 3818,
       "form": "get_process_flow_builder(...) [legacy-bearing, src/boomi_mcp/categories/components/builders/process_flow_builder.py]",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LT-056be69b",
@@ -1558,7 +1558,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 4510,
+      "evidence_line": 4511,
       "form": "update_component(...) [legacy-bearing, src/boomi_mcp/categories/components/manage_component.py]",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LT-6c155310",
@@ -1567,7 +1567,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 4013,
+      "evidence_line": 4014,
       "form": "update_connector(...) [legacy-bearing, src/boomi_mcp/categories/components/connectors.py]",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LT-dcac7790",
@@ -1576,7 +1576,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 12034,
+      "evidence_line": 12137,
       "form": "plan_authoring_request_v1(...) [legacy-bearing, src/boomi_mcp/authoring/workflow.py]",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LT-e950b4e0",
@@ -1585,7 +1585,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 6411,
+      "evidence_line": 6515,
       "form": "_process_ir_semantic_error(...) [legacy-bearing, src/boomi_mcp/categories/integration_builder.py]",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LT-9fd56560",
@@ -1594,7 +1594,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 6281,
+      "evidence_line": 6385,
       "form": "get_process_flow_builder(...) [legacy-bearing, src/boomi_mcp/categories/components/builders/process_flow_builder.py]",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LT-79296ce3",
@@ -1603,7 +1603,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 2068,
+      "evidence_line": 2069,
       "form": "legacy_config_entry(...) [legacy-bearing, src/boomi_mcp/authoring/process_entry.py]",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LT-8a433fed",
@@ -1612,7 +1612,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 1407,
+      "evidence_line": 1408,
       "form": "get_process_flow_builder(...) [legacy-bearing, src/boomi_mcp/categories/components/builders/process_flow_builder.py]",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LT-7ad7607e",
@@ -1621,7 +1621,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 12434,
+      "evidence_line": 12537,
       "form": "_apply_plan(...) [legacy-bearing, src/boomi_mcp/categories/integration_builder.py]",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LT-e5bb8b19",
@@ -1630,7 +1630,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 12426,
+      "evidence_line": 12529,
       "form": "_build_plan(...) [legacy-bearing, src/boomi_mcp/categories/integration_builder.py]",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LT-dcb7048c",
@@ -1639,7 +1639,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 12430,
+      "evidence_line": 12533,
       "form": "_compile_authoring(...) [legacy-bearing, src/boomi_mcp/categories/integration_builder.py]",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LT-5ad6792c",
@@ -1648,7 +1648,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 12424,
+      "evidence_line": 12527,
       "form": "_plan_authoring(...) [legacy-bearing, src/boomi_mcp/categories/integration_builder.py]",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LT-b68fe63e",
@@ -1657,7 +1657,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 3423,
+      "evidence_line": 3424,
       "form": "get_process_flow_builder(...) [legacy-bearing, src/boomi_mcp/categories/components/builders/process_flow_builder.py]",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LT-18528039",
@@ -1837,7 +1837,7 @@
     {
       "census": "process_kind_consumer",
       "count": 1,
-      "evidence_line": 5840,
+      "evidence_line": 5841,
       "form": "raw_config.get('process_kind')",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "PC-87a07e6f",
@@ -1846,7 +1846,7 @@
     {
       "census": "process_kind_consumer",
       "count": 1,
-      "evidence_line": 5840,
+      "evidence_line": 5841,
       "form": "raw_config.get('process_type')",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "PC-68ef9ab4",
@@ -1855,7 +1855,7 @@
     {
       "census": "process_kind_consumer",
       "count": 1,
-      "evidence_line": 5283,
+      "evidence_line": 5284,
       "form": "config.get('process_kind')",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "PC-79d659fc",
@@ -1864,7 +1864,7 @@
     {
       "census": "process_kind_consumer",
       "count": 1,
-      "evidence_line": 5283,
+      "evidence_line": 5284,
       "form": "config.get('process_type')",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "PC-f2498867",
@@ -1873,7 +1873,7 @@
     {
       "census": "process_kind_consumer",
       "count": 1,
-      "evidence_line": 6823,
+      "evidence_line": 6927,
       "form": "raw_config.get('process_kind')",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "PC-09078af3",
@@ -1882,7 +1882,7 @@
     {
       "census": "process_kind_consumer",
       "count": 1,
-      "evidence_line": 6823,
+      "evidence_line": 6927,
       "form": "raw_config.get('process_type')",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "PC-5db2f770",
@@ -1891,7 +1891,7 @@
     {
       "census": "process_kind_consumer",
       "count": 1,
-      "evidence_line": 3814,
+      "evidence_line": 3815,
       "form": "payload.get('process_kind')",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "PC-58fea9a9",
@@ -1900,7 +1900,7 @@
     {
       "census": "process_kind_consumer",
       "count": 1,
-      "evidence_line": 3814,
+      "evidence_line": 3815,
       "form": "payload.get('process_type')",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "PC-05d45c93",
@@ -1909,7 +1909,7 @@
     {
       "census": "process_kind_consumer",
       "count": 1,
-      "evidence_line": 4569,
+      "evidence_line": 4570,
       "form": "config.get('process_kind')",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "PC-aedb3466",
@@ -1918,7 +1918,7 @@
     {
       "census": "process_kind_consumer",
       "count": 1,
-      "evidence_line": 4569,
+      "evidence_line": 4570,
       "form": "config.get('process_type')",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "PC-8ee6e9e7",
@@ -1927,7 +1927,7 @@
     {
       "census": "process_kind_consumer",
       "count": 1,
-      "evidence_line": 1399,
+      "evidence_line": 1400,
       "form": "raw_config.get('process_kind')",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "PC-9a5621e0",
@@ -1936,7 +1936,7 @@
     {
       "census": "process_kind_consumer",
       "count": 1,
-      "evidence_line": 1399,
+      "evidence_line": 1400,
       "form": "raw_config.get('process_type')",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "PC-9c8f7161",
@@ -1945,7 +1945,7 @@
     {
       "census": "process_kind_consumer",
       "count": 1,
-      "evidence_line": 577,
+      "evidence_line": 578,
       "form": "cfg.get('process_kind')",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "PC-4f057419",
@@ -1954,7 +1954,7 @@
     {
       "census": "process_kind_consumer",
       "count": 1,
-      "evidence_line": 577,
+      "evidence_line": 578,
       "form": "cfg.get('process_type')",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "PC-e5394969",
@@ -1963,7 +1963,7 @@
     {
       "census": "process_kind_consumer",
       "count": 1,
-      "evidence_line": 741,
+      "evidence_line": 742,
       "form": "cfg.get('process_kind')",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "PC-068525ea",
@@ -1972,7 +1972,7 @@
     {
       "census": "process_kind_consumer",
       "count": 1,
-      "evidence_line": 741,
+      "evidence_line": 742,
       "form": "cfg.get('process_type')",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "PC-7cd64528",
@@ -1981,7 +1981,7 @@
     {
       "census": "process_kind_consumer",
       "count": 1,
-      "evidence_line": 3406,
+      "evidence_line": 3407,
       "form": "payload.get('process_kind')",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "PC-c2d99ca6",
@@ -1990,7 +1990,7 @@
     {
       "census": "process_kind_consumer",
       "count": 1,
-      "evidence_line": 3406,
+      "evidence_line": 3407,
       "form": "payload.get('process_type')",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "PC-c602e0b6",
@@ -2260,7 +2260,7 @@
     {
       "census": "registry_lookup",
       "count": 2,
-      "evidence_line": 3829,
+      "evidence_line": 3830,
       "form": "PROCESS_FLOW_BUILDERS (read)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LR-e040f2d3",
@@ -2269,7 +2269,7 @@
     {
       "census": "registry_lookup",
       "count": 1,
-      "evidence_line": 3817,
+      "evidence_line": 3818,
       "form": "get_process_flow_builder(...)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LR-b9a99717",
@@ -2278,7 +2278,7 @@
     {
       "census": "registry_lookup",
       "count": 2,
-      "evidence_line": 6177,
+      "evidence_line": 6281,
       "form": "PROCESS_FLOW_BUILDERS (read)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LR-b5b7bf83",
@@ -2287,7 +2287,7 @@
     {
       "census": "registry_lookup",
       "count": 1,
-      "evidence_line": 6281,
+      "evidence_line": 6385,
       "form": "get_process_flow_builder(...)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LR-abde9a91",
@@ -2296,7 +2296,7 @@
     {
       "census": "registry_lookup",
       "count": 1,
-      "evidence_line": 1407,
+      "evidence_line": 1408,
       "form": "get_process_flow_builder(...)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LR-78b44ac5",
@@ -2305,7 +2305,7 @@
     {
       "census": "registry_lookup",
       "count": 2,
-      "evidence_line": 3419,
+      "evidence_line": 3420,
       "form": "PROCESS_FLOW_BUILDERS (read)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LR-37438b9f",
@@ -2314,7 +2314,7 @@
     {
       "census": "registry_lookup",
       "count": 1,
-      "evidence_line": 3423,
+      "evidence_line": 3424,
       "form": "get_process_flow_builder(...)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LR-83eea984",
@@ -2341,7 +2341,7 @@
     {
       "census": "renderer_call",
       "count": 1,
-      "evidence_line": 3846,
+      "evidence_line": 3847,
       "form": "<registry-bound>.build(...)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LR-555595d7",
@@ -2350,7 +2350,7 @@
     {
       "census": "renderer_call",
       "count": 1,
-      "evidence_line": 6305,
+      "evidence_line": 6409,
       "form": "<registry-bound>.validate_config(...)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LR-6d57df6a",
@@ -2359,7 +2359,7 @@
     {
       "census": "renderer_call",
       "count": 1,
-      "evidence_line": 6338,
+      "evidence_line": 6442,
       "form": "SyncPipelineBuilder.lower_config(...)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LR-f4bbf547",
@@ -2368,7 +2368,7 @@
     {
       "census": "renderer_call",
       "count": 1,
-      "evidence_line": 3436,
+      "evidence_line": 3437,
       "form": "<registry-bound>.build(...)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LR-896e12cd",
@@ -2782,7 +2782,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 10999,
+      "evidence_line": 11102,
       "form": "'Component' (unclassified Component-endpoint literal)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "UR-37ab9607",
@@ -2791,7 +2791,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 5840,
+      "evidence_line": 5841,
       "form": "'process_kind' (unclassified selector literal)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "UR-552ab0c8",
@@ -2800,7 +2800,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 5840,
+      "evidence_line": 5841,
       "form": "'process_type' (unclassified selector literal)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "UR-efeb1e84",
@@ -2809,7 +2809,7 @@
     {
       "census": "unclassified_reference",
       "count": 2,
-      "evidence_line": 5839,
+      "evidence_line": 5840,
       "form": "process_kind (unclassified selector name)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "UR-91ead14e",
@@ -2818,7 +2818,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 5283,
+      "evidence_line": 5284,
       "form": "'process_kind' (unclassified selector literal)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "UR-bfccf421",
@@ -2827,7 +2827,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 5283,
+      "evidence_line": 5284,
       "form": "'process_type' (unclassified selector literal)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "UR-ad8d292d",
@@ -2836,7 +2836,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 6823,
+      "evidence_line": 6927,
       "form": "'process_kind' (unclassified selector literal)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "UR-9a34a4e3",
@@ -2845,7 +2845,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 6823,
+      "evidence_line": 6927,
       "form": "'process_type' (unclassified selector literal)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "UR-43bc6a4f",
@@ -2854,7 +2854,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 7347,
+      "evidence_line": 7451,
       "form": "ProcessFlowBuilder (unclassified reference)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "UR-257e0ae4",
@@ -2863,7 +2863,7 @@
     {
       "census": "unclassified_reference",
       "count": 2,
-      "evidence_line": 6822,
+      "evidence_line": 6926,
       "form": "process_kind (unclassified selector name)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "UR-f9bf77bc",
@@ -2872,7 +2872,7 @@
     {
       "census": "unclassified_reference",
       "count": 2,
-      "evidence_line": 3814,
+      "evidence_line": 3815,
       "form": "'process_kind' (unclassified selector literal)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "UR-27157a57",
@@ -2881,7 +2881,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 3814,
+      "evidence_line": 3815,
       "form": "'process_type' (unclassified selector literal)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "UR-3ee64ea8",
@@ -2890,7 +2890,7 @@
     {
       "census": "unclassified_reference",
       "count": 4,
-      "evidence_line": 3813,
+      "evidence_line": 3814,
       "form": "process_kind (unclassified selector name)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "UR-289e945f",
@@ -2899,7 +2899,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 6286,
+      "evidence_line": 6390,
       "form": "'process_kind' (unclassified selector literal)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "UR-142ade12",
@@ -2908,7 +2908,7 @@
     {
       "census": "unclassified_reference",
       "count": 4,
-      "evidence_line": 6163,
+      "evidence_line": 6267,
       "form": "ProcessFlowBuilder (unclassified reference)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "UR-62f9bdcd",
@@ -2917,7 +2917,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 6336,
+      "evidence_line": 6440,
       "form": "SyncPipelineBuilder (unclassified reference)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "UR-72bd52b2",
@@ -2926,7 +2926,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 6323,
+      "evidence_line": 6427,
       "form": "WrapperSubprocessBuilder (unclassified reference)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "UR-b4d881e8",
@@ -2935,7 +2935,7 @@
     {
       "census": "unclassified_reference",
       "count": 5,
-      "evidence_line": 6155,
+      "evidence_line": 6259,
       "form": "process_kind (unclassified selector name)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "UR-848e2adc",
@@ -2944,7 +2944,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 6123,
+      "evidence_line": 6227,
       "form": "process_kind (unclassified selector parameter)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "UR-31c89c01",
@@ -2953,7 +2953,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 6437,
+      "evidence_line": 6541,
       "form": "process_kind (unclassified selector name)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "UR-c5ca1bed",
@@ -2962,7 +2962,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 6417,
+      "evidence_line": 6521,
       "form": "process_kind (unclassified selector parameter)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "UR-93745e9b",
@@ -2971,7 +2971,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 4569,
+      "evidence_line": 4570,
       "form": "'process_kind' (unclassified selector literal)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "UR-c0dedee7",
@@ -2980,7 +2980,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 4569,
+      "evidence_line": 4570,
       "form": "'process_type' (unclassified selector literal)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "UR-45fcc23c",
@@ -2989,7 +2989,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 4571,
+      "evidence_line": 4572,
       "form": "ProcessFlowBuilder (unclassified reference)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "UR-352e92e4",
@@ -2998,7 +2998,7 @@
     {
       "census": "unclassified_reference",
       "count": 2,
-      "evidence_line": 4568,
+      "evidence_line": 4569,
       "form": "process_kind (unclassified selector name)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "UR-7719f4b8",
@@ -3007,7 +3007,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 1399,
+      "evidence_line": 1400,
       "form": "'process_kind' (unclassified selector literal)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "UR-9eb05735",
@@ -3016,7 +3016,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 1399,
+      "evidence_line": 1400,
       "form": "'process_type' (unclassified selector literal)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "UR-54f1e91d",
@@ -3025,7 +3025,7 @@
     {
       "census": "unclassified_reference",
       "count": 3,
-      "evidence_line": 1398,
+      "evidence_line": 1399,
       "form": "process_kind (unclassified selector name)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "UR-67617a0c",
@@ -3034,7 +3034,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 5754,
+      "evidence_line": 5755,
       "form": "ProcessFlowBuilder (unclassified reference)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "UR-ac199858",
@@ -3043,7 +3043,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 577,
+      "evidence_line": 578,
       "form": "'process_kind' (unclassified selector literal)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "UR-afae80da",
@@ -3052,7 +3052,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 577,
+      "evidence_line": 578,
       "form": "'process_type' (unclassified selector literal)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "UR-ade5c611",
@@ -3061,7 +3061,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 578,
+      "evidence_line": 579,
       "form": "WrapperSubprocessBuilder (unclassified reference)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "UR-928cd8e9",
@@ -3070,7 +3070,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 741,
+      "evidence_line": 742,
       "form": "'process_kind' (unclassified selector literal)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "UR-09cf6b73",
@@ -3079,7 +3079,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 741,
+      "evidence_line": 742,
       "form": "'process_type' (unclassified selector literal)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "UR-f7a99034",
@@ -3088,7 +3088,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 742,
+      "evidence_line": 743,
       "form": "WrapperSubprocessBuilder (unclassified reference)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "UR-51591344",
@@ -3097,7 +3097,7 @@
     {
       "census": "unclassified_reference",
       "count": 2,
-      "evidence_line": 3406,
+      "evidence_line": 3407,
       "form": "'process_kind' (unclassified selector literal)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "UR-f3da9b48",
@@ -3106,7 +3106,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 3406,
+      "evidence_line": 3407,
       "form": "'process_type' (unclassified selector literal)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "UR-3e5c5362",
@@ -3115,7 +3115,7 @@
     {
       "census": "unclassified_reference",
       "count": 4,
-      "evidence_line": 3405,
+      "evidence_line": 3406,
       "form": "process_kind (unclassified selector name)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "UR-15bbe49f",
@@ -4361,7 +4361,7 @@
     {
       "census": "component_xml_write",
       "disposition": "WRT-build-integration-preservation-merge: preserved, re-homed onto the canonical apply path.",
-      "evidence_line": 3307,
+      "evidence_line": 3308,
       "forms": [
         "component.update_component_raw(...)"
       ],
@@ -4374,7 +4374,7 @@
     {
       "census": "component_xml_write",
       "disposition": "WRT-canonical-process-materialization: unchanged, and it is what the retraction leaves behind: a process root reaches the platform only through a compiled artifact whose plan fingerprint and apply-time mutation attestation are both recorded.",
-      "evidence_line": 9050,
+      "evidence_line": 9154,
       "forms": [
         "create_component(...)"
       ],
@@ -4387,7 +4387,7 @@
     {
       "census": "component_xml_write",
       "disposition": "WRT-build-integration-generic: content guard at BOTH plan and apply boundaries, placed BEFORE all type dispatch (the process and connector arms dispatch before the fall-through ever runs); mutation-tested with an unknown/future declared type. · WRT-build-integration-structured-process: replaced by canonical ProcessIR materialization/apply. · WRT-build-integration-typed-nonprocess: unchanged — the content guard never matches these roots.",
-      "evidence_line": 3860,
+      "evidence_line": 3861,
       "forms": [
         "create_component(...)",
         "update_component(...)"
@@ -4699,7 +4699,7 @@
     {
       "census": "legacy_semantic_validation",
       "disposition": "delete with the legacy semantic shell",
-      "evidence_line": 6411,
+      "evidence_line": 6515,
       "forms": [
         "_process_ir_semantic_error(...)"
       ],
@@ -4712,7 +4712,7 @@
     {
       "census": "legacy_semantic_validation",
       "disposition": "delete with the legacy semantic shell",
-      "evidence_line": 6437,
+      "evidence_line": 6541,
       "forms": [
         "validate_legacy_process_config(...)"
       ],
@@ -4907,7 +4907,7 @@
     {
       "census": "legacy_transitive_call",
       "disposition": "follow the callee's row; this is an edge, not a site",
-      "evidence_line": 3073,
+      "evidence_line": 3098,
       "forms": [
         "plan_authoring_request_v1(...) [legacy-bearing, src/boomi_mcp/authoring/workflow.py]"
       ],
@@ -4920,7 +4920,7 @@
     {
       "census": "legacy_transitive_call",
       "disposition": "follow the callee's row; this is an edge, not a site",
-      "evidence_line": 2516,
+      "evidence_line": 2541,
       "forms": [
         "_legacy_plan_echo(...) [legacy-bearing, src/boomi_mcp/authoring/workflow.py]"
       ],
@@ -4933,7 +4933,7 @@
     {
       "census": "legacy_transitive_call",
       "disposition": "follow the callee's row; this is an edge, not a site",
-      "evidence_line": 3314,
+      "evidence_line": 3339,
       "forms": [
         "compile_authoring_request_v1(...) [legacy-bearing, src/boomi_mcp/authoring/workflow.py]"
       ],
@@ -5310,7 +5310,7 @@
     {
       "census": "legacy_transitive_call",
       "disposition": "follow the callee's row; this is an edge, not a site",
-      "evidence_line": 9563,
+      "evidence_line": 9667,
       "forms": [
         "_build_plan(...) [legacy-bearing, src/boomi_mcp/categories/integration_builder.py]",
         "_execute_canonical_process(...) [legacy-bearing, src/boomi_mcp/categories/integration_builder.py]",
@@ -5326,7 +5326,7 @@
     {
       "census": "legacy_transitive_call",
       "disposition": "follow the callee's row; this is an edge, not a site",
-      "evidence_line": 5846,
+      "evidence_line": 5847,
       "forms": [
         "_process_component_preflight(...) [legacy-bearing, src/boomi_mcp/categories/integration_builder.py]"
       ],
@@ -5339,7 +5339,7 @@
     {
       "census": "legacy_transitive_call",
       "disposition": "follow the callee's row; this is an edge, not a site",
-      "evidence_line": 6526,
+      "evidence_line": 6630,
       "forms": [
         "_authored_process_validation_error(...) [legacy-bearing, src/boomi_mcp/categories/integration_builder.py]",
         "_check_api_service_route_dependencies(...) [legacy-bearing, src/boomi_mcp/categories/integration_builder.py]",
@@ -5356,7 +5356,7 @@
     {
       "census": "legacy_transitive_call",
       "disposition": "follow the callee's row; this is an edge, not a site",
-      "evidence_line": 2194,
+      "evidence_line": 2195,
       "forms": [
         "_process_config_has_wss_listen(...) [legacy-bearing, src/boomi_mcp/categories/integration_builder.py]"
       ],
@@ -5369,7 +5369,7 @@
     {
       "census": "legacy_transitive_call",
       "disposition": "follow the callee's row; this is an edge, not a site",
-      "evidence_line": 12096,
+      "evidence_line": 12199,
       "forms": [
         "compile_authoring_request_v1(...) [legacy-bearing, src/boomi_mcp/authoring/workflow.py]"
       ],
@@ -5382,7 +5382,7 @@
     {
       "census": "legacy_transitive_call",
       "disposition": "follow the callee's row; this is an edge, not a site",
-      "evidence_line": 8994,
+      "evidence_line": 9098,
       "forms": [
         "_apply_structured_update(...) [legacy-bearing, src/boomi_mcp/categories/integration_builder.py]",
         "create_component(...) [legacy-bearing, src/boomi_mcp/categories/components/manage_component.py]"
@@ -5396,7 +5396,7 @@
     {
       "census": "legacy_transitive_call",
       "disposition": "follow the callee's row; this is an edge, not a site",
-      "evidence_line": 3817,
+      "evidence_line": 3818,
       "forms": [
         "_apply_structured_update(...) [legacy-bearing, src/boomi_mcp/categories/integration_builder.py]",
         "create_component(...) [legacy-bearing, src/boomi_mcp/categories/components/manage_component.py]",
@@ -5414,7 +5414,7 @@
     {
       "census": "legacy_transitive_call",
       "disposition": "follow the callee's row; this is an edge, not a site",
-      "evidence_line": 12034,
+      "evidence_line": 12137,
       "forms": [
         "plan_authoring_request_v1(...) [legacy-bearing, src/boomi_mcp/authoring/workflow.py]"
       ],
@@ -5427,7 +5427,7 @@
     {
       "census": "legacy_transitive_call",
       "disposition": "follow the callee's row; this is an edge, not a site",
-      "evidence_line": 6281,
+      "evidence_line": 6385,
       "forms": [
         "_process_ir_semantic_error(...) [legacy-bearing, src/boomi_mcp/categories/integration_builder.py]",
         "get_process_flow_builder(...) [legacy-bearing, src/boomi_mcp/categories/components/builders/process_flow_builder.py]"
@@ -5441,7 +5441,7 @@
     {
       "census": "legacy_transitive_call",
       "disposition": "follow the callee's row; this is an edge, not a site",
-      "evidence_line": 2068,
+      "evidence_line": 2069,
       "forms": [
         "legacy_config_entry(...) [legacy-bearing, src/boomi_mcp/authoring/process_entry.py]"
       ],
@@ -5454,7 +5454,7 @@
     {
       "census": "legacy_transitive_call",
       "disposition": "follow the callee's row; this is an edge, not a site",
-      "evidence_line": 1407,
+      "evidence_line": 1408,
       "forms": [
         "get_process_flow_builder(...) [legacy-bearing, src/boomi_mcp/categories/components/builders/process_flow_builder.py]"
       ],
@@ -5467,7 +5467,7 @@
     {
       "census": "legacy_transitive_call",
       "disposition": "follow the callee's row; this is an edge, not a site",
-      "evidence_line": 12424,
+      "evidence_line": 12527,
       "forms": [
         "_apply_plan(...) [legacy-bearing, src/boomi_mcp/categories/integration_builder.py]",
         "_build_plan(...) [legacy-bearing, src/boomi_mcp/categories/integration_builder.py]",
@@ -5483,7 +5483,7 @@
     {
       "census": "legacy_transitive_call",
       "disposition": "follow the callee's row; this is an edge, not a site",
-      "evidence_line": 3423,
+      "evidence_line": 3424,
       "forms": [
         "get_process_flow_builder(...) [legacy-bearing, src/boomi_mcp/categories/components/builders/process_flow_builder.py]"
       ],
@@ -5683,7 +5683,7 @@
     {
       "census": "process_kind_consumer",
       "disposition": "delete with the legacy consumer",
-      "evidence_line": 5840,
+      "evidence_line": 5841,
       "forms": [
         "raw_config.get('process_kind')",
         "raw_config.get('process_type')"
@@ -5697,7 +5697,7 @@
     {
       "census": "process_kind_consumer",
       "disposition": "delete with the legacy consumer",
-      "evidence_line": 5283,
+      "evidence_line": 5284,
       "forms": [
         "config.get('process_kind')",
         "config.get('process_type')"
@@ -5711,7 +5711,7 @@
     {
       "census": "process_kind_consumer",
       "disposition": "delete with the legacy consumer",
-      "evidence_line": 6823,
+      "evidence_line": 6927,
       "forms": [
         "raw_config.get('process_kind')",
         "raw_config.get('process_type')"
@@ -5725,7 +5725,7 @@
     {
       "census": "process_kind_consumer",
       "disposition": "delete with the legacy consumer",
-      "evidence_line": 3814,
+      "evidence_line": 3815,
       "forms": [
         "payload.get('process_kind')",
         "payload.get('process_type')"
@@ -5739,7 +5739,7 @@
     {
       "census": "process_kind_consumer",
       "disposition": "delete with the legacy consumer",
-      "evidence_line": 4569,
+      "evidence_line": 4570,
       "forms": [
         "config.get('process_kind')",
         "config.get('process_type')"
@@ -5753,7 +5753,7 @@
     {
       "census": "process_kind_consumer",
       "disposition": "delete with the legacy consumer",
-      "evidence_line": 1399,
+      "evidence_line": 1400,
       "forms": [
         "raw_config.get('process_kind')",
         "raw_config.get('process_type')"
@@ -5767,7 +5767,7 @@
     {
       "census": "process_kind_consumer",
       "disposition": "delete with the legacy consumer",
-      "evidence_line": 577,
+      "evidence_line": 578,
       "forms": [
         "cfg.get('process_kind')",
         "cfg.get('process_type')"
@@ -5781,7 +5781,7 @@
     {
       "census": "process_kind_consumer",
       "disposition": "delete with the legacy consumer",
-      "evidence_line": 741,
+      "evidence_line": 742,
       "forms": [
         "cfg.get('process_kind')",
         "cfg.get('process_type')"
@@ -5795,7 +5795,7 @@
     {
       "census": "process_kind_consumer",
       "disposition": "delete with the legacy consumer",
-      "evidence_line": 3406,
+      "evidence_line": 3407,
       "forms": [
         "payload.get('process_kind')",
         "payload.get('process_type')"
@@ -6066,7 +6066,7 @@
     {
       "census": "registry_lookup",
       "disposition": "replace with canonical ProcessIR materialization/apply",
-      "evidence_line": 3817,
+      "evidence_line": 3818,
       "forms": [
         "PROCESS_FLOW_BUILDERS (read)",
         "get_process_flow_builder(...)"
@@ -6080,7 +6080,7 @@
     {
       "census": "registry_lookup",
       "disposition": "replace with canonical ProcessIR materialization/apply",
-      "evidence_line": 6177,
+      "evidence_line": 6281,
       "forms": [
         "PROCESS_FLOW_BUILDERS (read)",
         "get_process_flow_builder(...)"
@@ -6094,7 +6094,7 @@
     {
       "census": "registry_lookup",
       "disposition": "replace with canonical ProcessIR materialization/apply",
-      "evidence_line": 1407,
+      "evidence_line": 1408,
       "forms": [
         "get_process_flow_builder(...)"
       ],
@@ -6107,7 +6107,7 @@
     {
       "census": "registry_lookup",
       "disposition": "replace with canonical ProcessIR materialization/apply",
-      "evidence_line": 3419,
+      "evidence_line": 3420,
       "forms": [
         "PROCESS_FLOW_BUILDERS (read)",
         "get_process_flow_builder(...)"
@@ -6147,7 +6147,7 @@
     {
       "census": "renderer_call",
       "disposition": "replace with canonical ProcessIR materialization/apply",
-      "evidence_line": 3846,
+      "evidence_line": 3847,
       "forms": [
         "<registry-bound>.build(...)"
       ],
@@ -6160,7 +6160,7 @@
     {
       "census": "renderer_call",
       "disposition": "replace with canonical ProcessIR materialization/apply",
-      "evidence_line": 6305,
+      "evidence_line": 6409,
       "forms": [
         "<registry-bound>.validate_config(...)",
         "SyncPipelineBuilder.lower_config(...)"
@@ -6174,7 +6174,7 @@
     {
       "census": "renderer_call",
       "disposition": "replace with canonical ProcessIR materialization/apply",
-      "evidence_line": 3436,
+      "evidence_line": 3437,
       "forms": [
         "<registry-bound>.build(...)"
       ],
@@ -6472,7 +6472,7 @@
     {
       "census": "unclassified_reference",
       "disposition": "residue: a watched name mentioned in a shape the census does not classify",
-      "evidence_line": 10999,
+      "evidence_line": 11102,
       "forms": [
         "'Component' (unclassified Component-endpoint literal)"
       ],
@@ -6485,7 +6485,7 @@
     {
       "census": "unclassified_reference",
       "disposition": "residue: a watched name mentioned in a shape the census does not classify",
-      "evidence_line": 5839,
+      "evidence_line": 5840,
       "forms": [
         "'process_kind' (unclassified selector literal)",
         "'process_type' (unclassified selector literal)",
@@ -6500,7 +6500,7 @@
     {
       "census": "unclassified_reference",
       "disposition": "residue: a watched name mentioned in a shape the census does not classify",
-      "evidence_line": 5283,
+      "evidence_line": 5284,
       "forms": [
         "'process_kind' (unclassified selector literal)",
         "'process_type' (unclassified selector literal)"
@@ -6514,7 +6514,7 @@
     {
       "census": "unclassified_reference",
       "disposition": "residue: a watched name mentioned in a shape the census does not classify",
-      "evidence_line": 6822,
+      "evidence_line": 6926,
       "forms": [
         "'process_kind' (unclassified selector literal)",
         "'process_type' (unclassified selector literal)",
@@ -6530,7 +6530,7 @@
     {
       "census": "unclassified_reference",
       "disposition": "residue: a watched name mentioned in a shape the census does not classify",
-      "evidence_line": 3813,
+      "evidence_line": 3814,
       "forms": [
         "'process_kind' (unclassified selector literal)",
         "'process_type' (unclassified selector literal)",
@@ -6545,7 +6545,7 @@
     {
       "census": "unclassified_reference",
       "disposition": "residue: a watched name mentioned in a shape the census does not classify",
-      "evidence_line": 6123,
+      "evidence_line": 6227,
       "forms": [
         "'process_kind' (unclassified selector literal)",
         "ProcessFlowBuilder (unclassified reference)",
@@ -6563,7 +6563,7 @@
     {
       "census": "unclassified_reference",
       "disposition": "residue: a watched name mentioned in a shape the census does not classify",
-      "evidence_line": 6417,
+      "evidence_line": 6521,
       "forms": [
         "process_kind (unclassified selector name)",
         "process_kind (unclassified selector parameter)"
@@ -6577,7 +6577,7 @@
     {
       "census": "unclassified_reference",
       "disposition": "residue: a watched name mentioned in a shape the census does not classify",
-      "evidence_line": 4568,
+      "evidence_line": 4569,
       "forms": [
         "'process_kind' (unclassified selector literal)",
         "'process_type' (unclassified selector literal)",
@@ -6593,7 +6593,7 @@
     {
       "census": "unclassified_reference",
       "disposition": "residue: a watched name mentioned in a shape the census does not classify",
-      "evidence_line": 1398,
+      "evidence_line": 1399,
       "forms": [
         "'process_kind' (unclassified selector literal)",
         "'process_type' (unclassified selector literal)",
@@ -6608,7 +6608,7 @@
     {
       "census": "unclassified_reference",
       "disposition": "residue: a watched name mentioned in a shape the census does not classify",
-      "evidence_line": 5754,
+      "evidence_line": 5755,
       "forms": [
         "ProcessFlowBuilder (unclassified reference)"
       ],
@@ -6621,7 +6621,7 @@
     {
       "census": "unclassified_reference",
       "disposition": "residue: a watched name mentioned in a shape the census does not classify",
-      "evidence_line": 577,
+      "evidence_line": 578,
       "forms": [
         "'process_kind' (unclassified selector literal)",
         "'process_type' (unclassified selector literal)",
@@ -6636,7 +6636,7 @@
     {
       "census": "unclassified_reference",
       "disposition": "residue: a watched name mentioned in a shape the census does not classify",
-      "evidence_line": 741,
+      "evidence_line": 742,
       "forms": [
         "'process_kind' (unclassified selector literal)",
         "'process_type' (unclassified selector literal)",
@@ -6651,7 +6651,7 @@
     {
       "census": "unclassified_reference",
       "disposition": "residue: a watched name mentioned in a shape the census does not classify",
-      "evidence_line": 3405,
+      "evidence_line": 3406,
       "forms": [
         "'process_kind' (unclassified selector literal)",
         "'process_type' (unclassified selector literal)",
@@ -7678,7 +7678,7 @@
       },
       "producer": "meta_tools.list_capabilities_action()",
       "selector": "authoring_contract",
-      "sha256": "5f48c304bd003d8f2df1e1bd968b1431e252fcb80facc29af3414fb67ee70c33",
+      "sha256": "1e8e9b528fc8824bbb25f55e32ed9808049a6d3c93d2708f4c5f07991c89b0d0",
       "surface_class": "SS-CAPABILITY-CATALOG",
       "value": {
         "actions": [
@@ -7815,11 +7815,11 @@
           }
         ],
         "capability_comparison": {
-          "actual_capability_revision": "sha256:5482101c88ed089ecbeb8257a25caaf06708eafe98e241ba63f657b501273e94",
+          "actual_capability_revision": "sha256:d9e2a714589f9680b023a6626ed7c66172277de75bd424cc7c56dd12a5991ab7",
           "status": "not_requested"
         },
-        "capability_revision": "sha256:5482101c88ed089ecbeb8257a25caaf06708eafe98e241ba63f657b501273e94",
-        "compiler_revision": "sha256:e7eced4d361e3bc10771b1dc88d7cd8b9aebdc89ce56c7f69d34f95b06dd04b3",
+        "capability_revision": "sha256:d9e2a714589f9680b023a6626ed7c66172277de75bd424cc7c56dd12a5991ab7",
+        "compiler_revision": "sha256:af35ed939bcba167347ea92ed8f7515f14960bc5cad6bbe47aa274ca2eb7cc34",
         "contract_version": "2",
         "intent_kinds": [
           "integration_spec",
@@ -8064,7 +8064,7 @@
             "constraint_only",
             "executable_recipe"
           ],
-          "registry_revision": "04c83bb162eba1e5c9af8267b7297169b98038d620aab10e4175f36001450e47",
+          "registry_revision": "7c3180752cb1918f3050eff0bad9bf26d7b4284f8e7f18c369742f30a10eed78",
           "schema_version": "1",
           "source_version": "0.1.0"
         },
@@ -14327,7 +14327,7 @@
       },
       "producer": "meta_tools.get_schema_template_action(...)",
       "selector": "schema_name=AuthoringCompileResultV1",
-      "sha256": "8cb7bfe111b373d659be7de3e299294f68546c7fd1d8d9a008667565846d9048",
+      "sha256": "ceb115e71a0cb43d6a57b72c75c58fb36a7a64996c629d30ce4182e91ad7b291",
       "surface_class": "SS-SCHEMA-TEMPLATES",
       "value": {
         "_success": true,
@@ -18939,8 +18939,8 @@
         "raw_xml_exposed": false,
         "read_only": true,
         "revision_binding": {
-          "capability_revision": "sha256:5482101c88ed089ecbeb8257a25caaf06708eafe98e241ba63f657b501273e94",
-          "compiler_revision": "sha256:e7eced4d361e3bc10771b1dc88d7cd8b9aebdc89ce56c7f69d34f95b06dd04b3",
+          "capability_revision": "sha256:d9e2a714589f9680b023a6626ed7c66172277de75bd424cc7c56dd12a5991ab7",
+          "compiler_revision": "sha256:af35ed939bcba167347ea92ed8f7515f14960bc5cad6bbe47aa274ca2eb7cc34",
           "contract_version": "2",
           "schema_revision": "sha256:c9583e6b971f3461f9dd6c78e0480cd5e2104c249089906154c0f93f4bd158dd"
         },
@@ -18961,7 +18961,7 @@
       },
       "producer": "meta_tools.get_schema_template_action(...)",
       "selector": "schema_name=AuthoringPlanResultV1",
-      "sha256": "784fa8856bf74331db2b6b868ee5d0db7f7bb4bc0481c518fcfa21bb99bf4904",
+      "sha256": "2884672b98923ad5cd950a2a031de646c4cc0aa4e9027b0a7482e46a342c2d56",
       "surface_class": "SS-SCHEMA-TEMPLATES",
       "value": {
         "_success": true,
@@ -23503,8 +23503,8 @@
         "raw_xml_exposed": false,
         "read_only": true,
         "revision_binding": {
-          "capability_revision": "sha256:5482101c88ed089ecbeb8257a25caaf06708eafe98e241ba63f657b501273e94",
-          "compiler_revision": "sha256:e7eced4d361e3bc10771b1dc88d7cd8b9aebdc89ce56c7f69d34f95b06dd04b3",
+          "capability_revision": "sha256:d9e2a714589f9680b023a6626ed7c66172277de75bd424cc7c56dd12a5991ab7",
+          "compiler_revision": "sha256:af35ed939bcba167347ea92ed8f7515f14960bc5cad6bbe47aa274ca2eb7cc34",
           "contract_version": "2",
           "schema_revision": "sha256:c9583e6b971f3461f9dd6c78e0480cd5e2104c249089906154c0f93f4bd158dd"
         },
@@ -23525,7 +23525,7 @@
       },
       "producer": "meta_tools.get_schema_template_action(...)",
       "selector": "schema_name=AuthoringRequestV1",
-      "sha256": "a55f3e38356181d22f92344b81bc3d457037dc429ff89df4e54b0c540a139cca",
+      "sha256": "d004725ee68fcc7e1df5e06c4da980a42fddc2ab5e4541d1af57542f13f62cc8",
       "surface_class": "SS-SCHEMA-TEMPLATES",
       "value": {
         "_success": true,
@@ -27776,8 +27776,8 @@
         "raw_xml_exposed": false,
         "read_only": true,
         "revision_binding": {
-          "capability_revision": "sha256:5482101c88ed089ecbeb8257a25caaf06708eafe98e241ba63f657b501273e94",
-          "compiler_revision": "sha256:e7eced4d361e3bc10771b1dc88d7cd8b9aebdc89ce56c7f69d34f95b06dd04b3",
+          "capability_revision": "sha256:d9e2a714589f9680b023a6626ed7c66172277de75bd424cc7c56dd12a5991ab7",
+          "compiler_revision": "sha256:af35ed939bcba167347ea92ed8f7515f14960bc5cad6bbe47aa274ca2eb7cc34",
           "contract_version": "2",
           "schema_revision": "sha256:c9583e6b971f3461f9dd6c78e0480cd5e2104c249089906154c0f93f4bd158dd"
         },
@@ -41887,7 +41887,7 @@
       "legacy_excerpt": {},
       "producer": "meta_tools.get_schema_template_action(...) [all axes]",
       "selector": "walked_surface_digest",
-      "sha256": "3df136c6a5db0ac2edd050585b5084692d878bf30a7511ca0843a257010d815e",
+      "sha256": "ec5e13aff1ff142d57bdaefa0a30f315b7da8dc80eea600a383098dc1e585eda",
       "surface_class": "SS-SCHEMA-TEMPLATES",
       "value": {
         "resource_type=component": "55ba0a46f10742a5bfa269767c7ba040532f5d7900c7e56953f8e57469ceecf3",
@@ -42169,17 +42169,17 @@
         "resource_type=trading_partner|operation=update|standard=rosettanet": "83537ac74be6088a4607997d0e200d76ec7c6367c900aa9923e823d610dd27e1",
         "resource_type=trading_partner|operation=update|standard=tradacoms": "83537ac74be6088a4607997d0e200d76ec7c6367c900aa9923e823d610dd27e1",
         "resource_type=trading_partner|operation=update|standard=x12": "83537ac74be6088a4607997d0e200d76ec7c6367c900aa9923e823d610dd27e1",
-        "schema_name=AuthoringBuildProvenanceV1": "b86d67d006b109d63e360cab3b67098d299f6be5f61cc4d56747f7f862d7d1cb",
-        "schema_name=AuthoringCompileResultV1": "8cb7bfe111b373d659be7de3e299294f68546c7fd1d8d9a008667565846d9048",
-        "schema_name=AuthoringPlanResultV1": "784fa8856bf74331db2b6b868ee5d0db7f7bb4bc0481c518fcfa21bb99bf4904",
-        "schema_name=AuthoringRequestV1": "a55f3e38356181d22f92344b81bc3d457037dc429ff89df4e54b0c540a139cca",
-        "schema_name=AuthoringRevisionBindingV1": "fb2cbfc6d6a6e37ecf3ce84387337910e4fb94c716f66ec6cb93093ee602563b",
-        "schema_name=DerivedFlowRowV1": "6da6f949fdd62a5e7ba36e7ce3caeedf7875a269be494592366531514b70a54f",
+        "schema_name=AuthoringBuildProvenanceV1": "48c579e81cf657595ca2eda1f1eb6e1df2d1c319e23efa13bde22539974b1fdf",
+        "schema_name=AuthoringCompileResultV1": "ceb115e71a0cb43d6a57b72c75c58fb36a7a64996c629d30ce4182e91ad7b291",
+        "schema_name=AuthoringPlanResultV1": "2884672b98923ad5cd950a2a031de646c4cc0aa4e9027b0a7482e46a342c2d56",
+        "schema_name=AuthoringRequestV1": "d004725ee68fcc7e1df5e06c4da980a42fddc2ab5e4541d1af57542f13f62cc8",
+        "schema_name=AuthoringRevisionBindingV1": "b2bfcc49f3a675de2308dfc3924c168d409326719e4ee60124bbba3964a12b36",
+        "schema_name=DerivedFlowRowV1": "ce7d6fd1b1fea17a760c108cc810fa8ec5a0515e231cd5b8fec54f607b409a6a",
         "schema_name=IntegrationSpecV1": "82b9209bfeb9f1df7252621a644024f969b16921b92e2299e47fe11273770c45",
-        "schema_name=ProcessIRV1": "28e5f10613f5342fc8b8475f9fdd44e4933e8f2a8870d4e8dbf2b356e75917c1",
-        "schema_name=RecordedIntentV1": "22f237dca2bf153c3fb46b416904c4412d378c222df39fc6e1f2071c5f07be79",
-        "schema_name=SystemTopologySpecV1": "a1e67b1ef71a4c9a8776e8388b319bf3aee42cb2db614be185b4fcf21a056741",
-        "schema_name=WatermarkDeclarationV1": "45627168af8d767bfa0b91c937274ceb84907ac34527d9f45f0d4c6fefa22a41",
+        "schema_name=ProcessIRV1": "f9e62c3ee91137b6e86e75280cc49001456db657c156c0116f8c84738a6e84f6",
+        "schema_name=RecordedIntentV1": "038747f7020c6efdf666f9d9fd3cefc441ca54a0cb9897acb7ece5d9a251b09b",
+        "schema_name=SystemTopologySpecV1": "c8a9464c259fc1fb936046e70de8aade649e8c23d5a49e1ad8985f1be06ee602",
+        "schema_name=WatermarkDeclarationV1": "41f08c24f5f3177c8085c07240b9c6431f9eb54486e5ff3c0194826799258c83",
         "schema_name=account_governance": "d0773b315a5b59bad4bbb0021a2468e5cb4d3a85c4dbac216a887f0194a2ecdc",
         "schema_name=api_service": "c7be12ec5b2c503bd54088bd2c7b00adfa435e3f3fc9610bae0b91117657911b",
         "schema_name=archetype:api_to_api_sync": "7e4653429bdfc56d53ecb1c07fb7f477e11c2180c3afdfad94566cab1ca716e7",
@@ -42188,7 +42188,7 @@
         "schema_name=archetype:http_listener_to_db": "89fba5aa6120b1ad51fb0a08eef875365775893a2cbc3572098f04a1ef8b194f",
         "schema_name=archetype:http_listener_to_rest": "31ae8b8ce1479adddbd480d2dc69e07aa9289959bb683002e02628a88ad02e25",
         "schema_name=archetype:stub_minimal_integration": "28f1d13a8568cea1df47bb1b361708d17e490204c7425787999e80df63f4b0fc",
-        "schema_name=authoring_workflow": "6150270b5a9712899f2520d62bb750334ecbec2a25d1bfc32cc9f2d069e8f759",
+        "schema_name=authoring_workflow": "fe7d81fcc7e7697db8796b3c20d6e7a0dff5c1c9a8e0a1761a8849f951f8609a",
         "schema_name=cache_property_authoring": "484017df545d247be99c71ef4be4edf8d47013e565a6e05119c357699229ed6f",
         "schema_name=compose_archetypes": "ec23808a15913ec8ce1d6e510ff941952be25b006a42128216b891d05f1a9d7f",
         "schema_name=design_doctrine": "458e7385ec9ad21c5d8f1d319a1db3252c9c1e017640967bfdc9714c38bb38b5",
@@ -42251,21 +42251,21 @@
         "schema_name=governance_pattern:support_folder_isolation_and_privacy": "4f0b206e14ad2f2272b03dfc8c9575dbcc3d454d28894a42602a9cca546de2ed",
         "schema_name=governance_pattern:tools_utilities_folder_non_integration": "50ddcf761e63e68f305271b4f079d8a7effd9b750726a8be784c2c52993c2cbc",
         "schema_name=governance_pattern:tracked_field_naming_generic_and_unique": "42ae3917d1ddb0f23a9dd0e9083a9106a3ed6c18bc06e740a1c07014830204d1",
-        "schema_name=process_ir_authoring": "c3f36fa72a9caf5a5d6d70495316c884c3e552a27facd288fbfc8a037b2e2533",
+        "schema_name=process_ir_authoring": "780a2ead3dc4d711833e413a6a5c459c4b026dc857855c8fbacbd47b3f5c57c3",
         "schema_name=process_property": "43c9cf66e73fb39b6f1625d00a9a01f876005bfa94b34fb99cb14e0deebe699b",
-        "schema_name=recipe:boomi.adapter.api_to_api_sync@1.0.0": "a0661ce97fbada40cd61d3322e516ab695efaac385185770373d2f192ab6f440",
-        "schema_name=recipe:boomi.adapter.api_to_database_sync@1.0.0": "c19a46e90c839cd5f2c89438b68148e5970159244c5283e97041c9c84e948282",
-        "schema_name=recipe:boomi.adapter.compose_archetypes@1.0.0": "eda0129c56ac975e36cd18f5b074e54ba5c65295e0e683ff5835f0e9294546ea",
-        "schema_name=recipe:boomi.advisory.integration_design@1.0.0": "c11171cd1a6c4bcf7d7b2e3dd8637d195d91d460fb29c7a35aef043325c54f1b",
-        "schema_name=recipe:boomi.archetype.api_to_api_sync@0.1.0": "319f7d41231beafd004e5b1f04a41bf27f3a3ef71b915de22e57fb72aef0e3bd",
-        "schema_name=recipe:boomi.archetype.api_to_database_sync@0.1.0": "893736198a05f6f4cb9db76a94db62743ab1be410351ddf2894381923302d5ee",
-        "schema_name=recipe:boomi.compose.db_rest_fanout@1.0.0": "b9148ce1ff094b7afca6b3b37109b030ab61c122107b0ccbc612732c794774ee",
-        "schema_name=recipe:boomi.constraint.inbound_validate@1.0.0": "334b8e056fda3bae98f544eb6a872c875d11d229e1bad0dd05a3333c27717ece",
+        "schema_name=recipe:boomi.adapter.api_to_api_sync@1.0.0": "9d5e1a85ada022ebabe291b01a5c37909bbed65fb8c39b6c259934fc1c89a16d",
+        "schema_name=recipe:boomi.adapter.api_to_database_sync@1.0.0": "26bd4f878db561583bd2919dc42bcc9e398359091b7231e68e1b12de83a562b7",
+        "schema_name=recipe:boomi.adapter.compose_archetypes@1.0.0": "37a6d88ac3fe1ece7aee8e79e1940f18369813e45efc6f8d7e1ba1db6ea682a2",
+        "schema_name=recipe:boomi.advisory.integration_design@1.0.0": "78c45e02ef429fb1a3771961437aef1c9fb1291ddcaa2fd307b39b4ca3044975",
+        "schema_name=recipe:boomi.archetype.api_to_api_sync@0.1.0": "1714a93fd344869792d8d35c24bb7badfa7334a1192a020b5ac3e7509827dd8a",
+        "schema_name=recipe:boomi.archetype.api_to_database_sync@0.1.0": "5f0a51f1867126ad99d8e5133e1d9c3753dc5c058c3edcc79bbfdddd6e6e7f5c",
+        "schema_name=recipe:boomi.compose.db_rest_fanout@1.0.0": "4eb5338850bde54b113a8b876498fe7285ed297658133565207d0c09b73e3f11",
+        "schema_name=recipe:boomi.constraint.inbound_validate@1.0.0": "effe3df0fb173c05da3a6bad20be37b98b2b2a6f432e80ad4f5535570788d34c",
         "schema_name=recipe_contributions": "a20ecffd41cb2a4d59bebb7c8021a20f7a7d2a11cd3d6fa1d5e1a45e9f7d4cd3",
-        "schema_name=recipe_registry": "2c39dda88a091ada85eb3d2892259de2691deb927d9659a23ab256bb4e41687a",
+        "schema_name=recipe_registry": "a9ef9c070f99dbf3c89aa224862ff4aef9cdacc7b6f740b1471684eebc2598c8",
         "schema_name=script_dataprocess": "86d6cac0e593188c5c6a253e684097dadda0a6c3c331a1d71672c827133af143",
         "schema_name=script_mapping": "165e78ea08d24f54221f6da5973cbe20c7747d1a37f9fde496a42876b594e029",
-        "schema_name=validation_report": "25e88eccd4fe645d65a0624aef8ff4f8f2d48dffa4adf0de780f487b66a61d3b",
+        "schema_name=validation_report": "577d29a83982dd35d1e6571068ac78a4b217721727ab6675c356ba3bd831fb30",
         "schema_name=workflow:build_and_verify_http_listener": "bf6ab2e405f375735cd6aaed29da0dbc6b717909dc1c184ba8dbe341f2b95800",
         "schema_name=workflow:build_integration_from_description": "72a20b29bbaf7a0ce39e06fb8514e13831968332bc5d0373d7f100bd7a943be0",
         "schema_name=workflow:compose_multi_target_integration": "6b04f2d192bcaf817a983a1aefda2f2f7b9674ce1c996737137c7ce8d6b932e0",

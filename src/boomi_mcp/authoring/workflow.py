@@ -1717,30 +1717,53 @@ def _validate_processes(
     # arrives in the same failure set as every other refusal and is reported by
     # the handler that already collects them.
 
-    symbols = build_symbol_table(
-        list(normalized.integration_spec.components),
-        # #153: the roots are participants too. Without them a `$ref` naming
-        # another root resolves to nothing and a complete plan reports a
-        # dangling reference.
-        process_keys=[
-            unit.envelope.component_key
-            for unit in normalized.integration_spec.processes
-        ],
-        connector_metadata=normalized.connector_metadata,
-        connector_resolution_snapshot=snapshot,
-        # #184: which declared bindings apply keeps decides component identity.
-        conflict_policy=conflict_policy or "reuse",
-    )
+    from ..categories.integration_builder import ComponentWriteConflictError
+    from ..compiler.process_ir.contracts import SymbolTableV1
+
+    conflict_diagnostics: List[AuthoringDiagnosticV1] = []
+    try:
+        symbols = build_symbol_table(
+            list(normalized.integration_spec.components),
+            # #153: the roots are participants too. Without them a `$ref` naming
+            # another root resolves to nothing and a complete plan reports a
+            # dangling reference.
+            process_keys=[
+                unit.envelope.component_key
+                for unit in normalized.integration_spec.processes
+            ],
+            connector_metadata=normalized.connector_metadata,
+            connector_resolution_snapshot=snapshot,
+            # #184: which declared bindings apply keeps decides component identity.
+            conflict_policy=conflict_policy or "reuse",
+        )
+    except ComponentWriteConflictError as conflict:
+        # #184: two specs writing one existing component leave which configuration
+        # executes undecided, so there is no symbol table to validate the roots against.
+        # The conflict is reported, one diagnostic per writing spec, and every check below
+        # that needs no table still runs, because this surface hands a caller everything
+        # wrong at once. Compile refuses a plan that carries an error.
+        symbols = None
+        conflict_diagnostics = [
+            _diag(
+                conflict.code,
+                "error",
+                message=str(conflict),
+                subject_kind="component",
+                subject_id=key,
+                remediation=conflict.remediation,
+            )
+            for key in conflict.keys
+        ]
 
     # SEEDED, not merely appended. A diagnostic that contributes no code and no
     # error leaves the served summary saying `is_valid: false` with an empty code
     # list, so a caller classifying by the summary cannot tell WHY — which is the
     # one thing a summary exists to say.
-    errors = len(snapshot_diagnostics)
+    errors = len(snapshot_diagnostics) + len(conflict_diagnostics)
     warnings = 0
     advisories = 0
-    codes: List[str] = [d.code for d in snapshot_diagnostics]
-    diagnostics: List[AuthoringDiagnosticV1] = list(snapshot_diagnostics)
+    codes: List[str] = [d.code for d in snapshot_diagnostics + conflict_diagnostics]
+    diagnostics: List[AuthoringDiagnosticV1] = list(snapshot_diagnostics) + conflict_diagnostics
 
     # #154. Effect declarations are resolved ONCE, here, before any root is
     # validated: identity is checked against the symbol table, effect CONTENT is
@@ -1749,13 +1772,15 @@ def _validate_processes(
     # the pre-#154 argument exactly.
     from .process_ir_effects import resolve_process_ir_effect_declarations
 
+    # #184: with no symbol table (a write conflict) nothing binds and no root is validated.
+    validated_roots = normalized.process_roots if symbols is not None else ()
     resolution = resolve_process_ir_effect_declarations(
-        normalized.process_roots,
-        declarations,
-        symbols,
+        validated_roots,
+        declarations if symbols is not None else None,
+        symbols if symbols is not None else SymbolTableV1(symbols=()),
         list(normalized.integration_spec.components),
         child_roots={
-            "$ref:" + key: root for key, root in normalized.process_roots
+            "$ref:" + key: root for key, root in validated_roots
         },
         conflict_policy=conflict_policy,
         # #179. The plan's own profile indexes. Without them the effect gate
@@ -1786,7 +1811,7 @@ def _validate_processes(
             )
         )
 
-    for component_key, ir in normalized.process_roots:
+    for component_key, ir in validated_roots:
         # Pass the keyword ONLY when this root actually has trusted context.
         # `capabilities=None` would override the strict default rather than fall
         # back to it, which is the opposite of fail-closed.

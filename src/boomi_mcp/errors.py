@@ -479,6 +479,9 @@ PROCESS_COMPONENT_REFERENCE_INVALID_FORMAT = (
 
 # The unified component+process dependency graph.
 INTEGRATION_COMPONENT_KEY_DUPLICATE = "INTEGRATION_COMPONENT_KEY_DUPLICATE"
+#: More than one component spec in one request would WRITE the same existing component
+#: (#184). Apply keeps one configuration, so which one executes is undecided.
+INTEGRATION_COMPONENT_WRITE_CONFLICT = "INTEGRATION_COMPONENT_WRITE_CONFLICT"
 INTEGRATION_DEPENDENCY_NOT_FOUND = "INTEGRATION_DEPENDENCY_NOT_FOUND"
 INTEGRATION_DEPENDENCY_CYCLE = "INTEGRATION_DEPENDENCY_CYCLE"
 INTEGRATION_DEPENDENCY_REQUIRED = "INTEGRATION_DEPENDENCY_REQUIRED"
@@ -2163,6 +2166,16 @@ ERROR_TAXONOMY: Dict[str, ErrorCodeSpec] = {
                 "components / process-envelope namespace."
             ),
             owner="#153",
+        ),
+        ErrorCodeSpec(
+            code=INTEGRATION_COMPONENT_WRITE_CONFLICT,
+            category="integration_dependency",
+            retryable=False,
+            summary=(
+                "More than one component spec in the request would write the same "
+                "existing component, so which configuration executes is undecided."
+            ),
+            owner="#184",
         ),
         ErrorCodeSpec(
             code=INTEGRATION_DEPENDENCY_NOT_FOUND,

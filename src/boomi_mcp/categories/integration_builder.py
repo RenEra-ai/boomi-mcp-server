@@ -232,6 +232,7 @@ from ..errors import (
     AUTHORING_APPLY_VALIDATION_REQUIRED,
     AUTHORING_LIVE_DEPLOYMENT_DRIFT,
     INTEGRATION_COMPONENT_KEY_DUPLICATE,
+    INTEGRATION_COMPONENT_WRITE_CONFLICT,
     INTEGRATION_DEPENDENCY_CYCLE,
     INTEGRATION_DEPENDENCY_NOT_FOUND,
     INTEGRATION_DEPENDENCY_REQUIRED,
@@ -6038,6 +6039,109 @@ def declared_bindings_for_components(components, conflict_policy="reuse"):
     return bindings
 
 
+class ComponentWriteConflictError(ValueError):
+    """More than one component spec in one request would write ONE existing component (#184).
+
+    Carries its served code where ``_canonical_plan_failure`` reads one, so a pre-write
+    pass refuses it with that code.
+    """
+
+    code = INTEGRATION_COMPONENT_WRITE_CONFLICT
+    remediation = (
+        "Author one spec per existing component: merge the configurations into one update, "
+        "and name the component from every other spec with reference_only."
+    )
+
+    def __init__(self, conflicts) -> None:
+        self.conflicts = dict(conflicts)
+        self.keys = tuple(sorted(key for keys in self.conflicts.values() for key in keys))
+        super().__init__(
+            "component specs {0} write an existing component another spec in the request also "
+            "writes; author one spec per existing component".format(", ".join(self.keys))
+        )
+
+
+def _binds_as_metadata_only_connector_update(component_type, config) -> bool:
+    """Whether apply BINDS a connector ``update`` instead of writing it (QA-157-r2-01, #184).
+
+    One definition for apply's bind step and for ``component_writes_existing``: the
+    dispatcher's route test and the smart merge's own field list.
+    """
+    return (
+        component_type in _CONNECTOR_COMPONENT_TYPES
+        and _is_metadata_only_update(config)
+        and not smart_merge_would_change(config)
+    )
+
+
+def apply_writes_component_config(comp, conflict_policy) -> bool:
+    """Whether apply WRITES this spec's own configuration, new or into an existing component (#184).
+
+    Read off apply's own branches, in the order apply takes them, from the request alone:
+
+    - the planner turns a ``reference_only`` CREATE into a reuse, by id or by name
+      (``_build_plan``), and nothing else: a ``reference_only`` UPDATE keeps its action;
+    - ``_will_reuse_at_apply`` reuses a create naming an existing id under ``reuse``;
+    - the bind step binds a connector update authoring only metadata
+      (``_binds_as_metadata_only_connector_update``).
+
+    Everything else is dispatched to ``_execute_component``, which never reads
+    ``reference_only``. Reading the flag instead of these branches made a ``reference_only``
+    update a bind while apply wrote it (pre-commit verification of Stage-2 correction batch
+    6). A binding only an account read answers, a create whose NAME matches an existing
+    component, is answered as the request declares it, as ``reused_keys_for_components`` is.
+    """
+    binding = resolve_planner_binding(None, comp, declared_only=True)
+    if getattr(comp, "action", None) == "create":
+        if binding.reference_only:
+            return False
+        return not _will_reuse_at_apply(
+            declared_action="create",
+            existing_component_id=binding.existing_id,
+            reference_only=False,
+            conflict_policy=conflict_policy,
+        )
+    config = comp.config if isinstance(comp.config, dict) else {}
+    return not _binds_as_metadata_only_connector_update(getattr(comp, "type", None), config)
+
+
+def component_writes_existing(comp) -> bool:
+    """Whether apply WRITES the existing component this spec names (#184).
+
+    An ``update`` naming a component id whose configuration apply writes
+    (``apply_writes_component_config``), with or without ``reference_only``. A ``create``
+    never writes an existing component: it binds one, writes a copy, or is refused.
+    """
+    if getattr(comp, "action", None) != "update":
+        return False
+    existing_id = resolve_planner_binding(None, comp, declared_only=True).existing_id
+    if not (isinstance(existing_id, str) and existing_id.strip()):
+        return False
+    return apply_writes_component_config(comp, "reuse")
+
+
+def component_write_conflicts(components) -> Dict[str, Tuple[str, ...]]:
+    """``{existing component id: spec keys}`` for each component more than one spec writes (#184).
+
+    Apply writes such a component once per spec and keeps one configuration, so which one
+    executes is undecided and nothing can describe it. The request is refused instead of
+    modelled: every earlier attempt to choose between the writes answered a corner of the
+    question and opened the next one (Stage-2 review rounds r3 to r5).
+    """
+    writers: Dict[str, List[str]] = {}
+    for comp in components:
+        key = getattr(comp, "key", None)
+        if not (isinstance(key, str) and key) or not component_writes_existing(comp):
+            continue
+        existing_id = resolve_planner_binding(None, comp, declared_only=True).existing_id.strip()
+        writers.setdefault(existing_id, []).append(key)
+    return {
+        component_id: tuple(sorted(keys))
+        for component_id, keys in sorted(writers.items())
+        if len(keys) > 1
+    }
+
+
 def _will_reuse_at_apply(
     *, declared_action, existing_component_id, reference_only, conflict_policy
 ):
@@ -10811,9 +10915,8 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
             if (
                 comp.action == "update"
                 and target_id
-                and comp.type in _CONNECTOR_COMPONENT_TYPES
-                and _is_metadata_only_update(resolved_config)
-                and not smart_merge_would_change(resolved_config)
+                # #184: the same predicate `component_writes_existing` asks.
+                and _binds_as_metadata_only_connector_update(comp.type, resolved_config)
             ):
                 results[key] = {
                     "status": "reused",

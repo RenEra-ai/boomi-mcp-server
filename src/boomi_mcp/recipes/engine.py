@@ -1865,21 +1865,38 @@ def _compile_processes(
             )
         ) from identity_error
 
-    symbols = build_symbol_table(
-        components,
-        connector_resolution_snapshot=connector_resolution,
-        # #153/#154: the composed roots are participants too. Omitting them does
-        # not fail loudly — reference resolution simply reports the root as
-        # UNRESOLVED — so a recipe-composed `process_call` resolved to nothing
-        # and its truthful subprocess declaration was rejected on identity
-        # before any derivation ran. Every other `build_symbol_table` call site
-        # already passes these; this one was the outlier.
-        process_keys=[key for key, _root in composed.process_roots],
-        connector_metadata=connector_metadata,
-        resolver=resolver,
-        # #184: which declared bindings apply keeps decides component identity.
-        conflict_policy=conflict_policy,
-    )
+    from ..categories.integration_builder import ComponentWriteConflictError
+
+    try:
+        symbols = build_symbol_table(
+            components,
+            connector_resolution_snapshot=connector_resolution,
+            # #153/#154: the composed roots are participants too. Omitting them does
+            # not fail loudly — reference resolution simply reports the root as
+            # UNRESOLVED — so a recipe-composed `process_call` resolved to nothing
+            # and its truthful subprocess declaration was rejected on identity
+            # before any derivation ran. Every other `build_symbol_table` call site
+            # already passes these; this one was the outlier.
+            process_keys=[key for key, _root in composed.process_roots],
+            connector_metadata=connector_metadata,
+            resolver=resolver,
+            # #184: which declared bindings apply keeps decides component identity.
+            conflict_policy=conflict_policy,
+        )
+    except ComponentWriteConflictError as conflict:
+        # #184: one diagnostic per spec that writes a component another spec also writes,
+        # in the shape this module uses for an identity failure above.
+        raise RecipeError(
+            tuple(
+                recipe_diagnostic(
+                    RECIPE_CONSTRAINT_FAILED,
+                    phase="validation",
+                    target=key,
+                    cause_codes=(conflict.code,),
+                )
+                for key in conflict.keys
+            )
+        ) from conflict
     # #154: resolve once, before any process compiles. A declaration that fails
     # identity or contradicts the server's derivation stops the run rather than
     # silently doing nothing — a caller who declared an effect and got the strict

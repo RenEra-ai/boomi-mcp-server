@@ -209,35 +209,25 @@ def _may_be_substituted(spec: Any, conflict_policy: str) -> bool:
     RESOLVES rather than writes is opaque: its live content has not been read and
     is not version-bound.
 
-    ``component_materialization_mode`` is the authority for which of those a spec
-    is, and it is ASKED rather than re-derived. The first version of this function
-    re-implemented it as "update is safe, otherwise depends on the policy" and
-    drifted immediately: it missed ``reference_only``, which that function checks
-    BEFORE ``action`` and which resolves to a reuse **independent of
-    conflict_policy** (``integration_builder`` says so in as many words). So a
-    ``{reference_only: true, map_type: "direct"}`` spec derived a pure,
-    replay-safe effect for a component nobody had read.
+    Apply's own answer decides which of those a spec is, and it is ASKED rather than
+    re-derived (``apply_writes_component_config``). The first version of this function
+    re-implemented it as "update is safe, otherwise depends on the policy" and missed
+    ``reference_only``, which resolves a CREATE to a reuse **independent of
+    conflict_policy**: a ``{reference_only: true, map_type: "direct"}`` spec derived a
+    pure, replay-safe effect for a component nobody had read. The second read the flag
+    through ``component_materialization_mode``, which made a ``reference_only`` UPDATE
+    opaque although apply writes its config (#184).
 
-    The policy overlay is the one thing that function does not model: a plain
-    ``create`` may still COLLIDE and be reused, and only the request's
-    ``conflict_policy`` decides that. ``clone`` writes a suffixed new component
-    and ``fail`` refuses, so both leave the config authoritative.
+    The policy overlay is the one thing a declared answer cannot settle: a plain
+    ``create`` apply would write may still COLLIDE by name and be reused, and only the
+    request's ``conflict_policy`` decides that. ``clone`` writes a suffixed new
+    component and ``fail`` refuses, so both leave the config authoritative.
     """
-    # The module's OWN constants, imported rather than re-typed. The first
-    # attempt at this fix compared against the literal "reuse" while the constant
-    # is "reuse_reference", so it matched nothing and changed nothing — a
-    # hand-copied vocabulary failing exactly the way the hand-copied RULE just
-    # had. Two spellings of one value is the same defect at a smaller scale.
-    from ..recipes.materialization import (
-        _REUSE,
-        _UPDATE,
-        component_materialization_mode,
-    )
+    from ..categories.integration_builder import apply_writes_component_config
 
-    mode = component_materialization_mode(spec)
-    if mode == _REUSE:
+    if not apply_writes_component_config(spec, conflict_policy):
         return True
-    if mode == _UPDATE:
+    if getattr(spec, "action", None) == "update":
         return False
     return conflict_policy == "reuse"
 
@@ -270,7 +260,26 @@ def _matched_by_identity(aliases, lookup):
     return None, None
 
 
-def _written_map_effect(aliases, components, conflict_policy, derive):
+def _canonical_effect(effect, canonical):
+    """``effect`` with every cache key in its canonical spelling, reads and writes sorted (#184).
+
+    Two spellings of one cache are one cache (``canonical_cache_refs``), so an effect is
+    compared by component, never by the reference a map's join or a declaration happened
+    to name (Stage-2 review round r5).
+    """
+    if effect is None:
+        return None
+    reads, writes, replay_safe = effect
+
+    def keys(pairs):
+        return tuple(sorted({
+            (scope, canonical.get(name, name) if scope == "cache" else name) for scope, name in pairs
+        }))
+
+    return keys(reads), keys(writes), bool(replay_safe)
+
+
+def _written_map_effect(aliases, components, conflict_policy, derive, canonical):
     """``(effect, ambiguous)`` for the component ``aliases`` name, from the configs apply writes (#184).
 
     Several specs may bind one component, and only a spec the plan cannot substitute is a
@@ -288,10 +297,10 @@ def _written_map_effect(aliases, components, conflict_policy, derive):
         if spec is not None
     ]
     written = [spec for spec in specs if not _may_be_substituted(spec, conflict_policy)]
-    effects = {derive(spec) for spec in (written or specs[:1])}
-    if len(effects) > 1:
+    derived = [derive(spec) for spec in (written or specs[:1])]
+    if len({_canonical_effect(effect, canonical) for effect in derived}) > 1:
         return None, True
-    return (next(iter(effects)) if effects else None), False
+    return (derived[0] if derived else None), False
 
 
 def _map_type_vocabularies() -> Tuple[FrozenSet[str], FrozenSet[str]]:
@@ -788,7 +797,7 @@ def subprocess_inert_reasons() -> Tuple[Tuple[str, str], ...]:
 
 
 def derive_subprocess_effect(
-    child_ir: Any, *, capabilities: Any = None
+    child_ir: Any, *, capabilities: Any = None, symbols: Any = None
 ) -> ChildSummaryV1:
     """``(required_reads, must_writes, replay_safe)`` derived from a child's own IR.
 
@@ -838,7 +847,14 @@ def derive_subprocess_effect(
     # the public workflow validates the same child immediately afterwards
     # without swallowing, so the request ends in an internal compile failure,
     # not the inert behaviour the contract described.
-    prepared = prepare_validation_context(child_ir, SymbolTableV1(symbols=()))
+    #
+    # #184: against the symbols the child is compiled with, when the caller has them, so
+    # the walk keys every cache by the component it names. Against an empty table a child
+    # that writes a cache through one reference and reads it back through another reported
+    # the read as its caller's obligation (pre-commit verification of correction batch 6).
+    prepared = prepare_validation_context(
+        child_ir, symbols if symbols is not None else SymbolTableV1(symbols=())
+    )
 
     replay_safe = True
     for node in prepared.cfg.nodes:
@@ -1195,6 +1211,7 @@ def resolve_process_ir_effect_declarations(
         SubprocessSummaryV1,
     )
     from ..compiler.process_ir.contracts import component_identity
+    from ..compiler.process_ir.semantic_validation.context import canonical_cache_refs
     from .vetted_scripts import lookup_vetted_script
 
     symbols_for = symbols_for or (lambda _key, _root: symbols)
@@ -1245,6 +1262,7 @@ def resolve_process_ir_effect_declarations(
         return True
 
     map_rows: Dict[str, Any] = {}
+    canonical = canonical_cache_refs(symbols)
     for index, item in enumerate(declarations.map_effects):
         pointer = "/effect_declarations/map_effects/{0}".format(index)
         # One (root, spelling) pair per occurrence: a root may name the same map
@@ -1277,7 +1295,7 @@ def resolve_process_ir_effect_declarations(
                 literal_indexes=literal_indexes,
             )
 
-        derived, ambiguous = _written_map_effect(alias, components, conflict_policy, _derive)
+        derived, ambiguous = _written_map_effect(alias, components, conflict_policy, _derive, canonical)
         if ambiguous:
             # The written configs disagree about the component's effect, so no declaration
             # can match what the server derives for it.
@@ -1286,7 +1304,7 @@ def resolve_process_ir_effect_declarations(
         if derived is None:
             inert.append(pointer)
             continue
-        if _declared(item.effect) != derived:
+        if _canonical_effect(_declared(item.effect), canonical) != _canonical_effect(derived, canonical):
             findings.append(EffectAuthorityFindingV1(_INVALID, pointer, "content-mismatch"))
             continue
         map_rows[item.map_ref] = (bound, [
@@ -1317,7 +1335,7 @@ def resolve_process_ir_effect_declarations(
             inert.append(pointer)
             continue
         derived = (contract.reads, contract.writes, contract.replay_safe)
-        if _declared(item.effect) != derived:
+        if _canonical_effect(_declared(item.effect), canonical) != _canonical_effect(derived, canonical):
             findings.append(EffectAuthorityFindingV1(_INVALID, pointer, "content-mismatch"))
             continue
         script_rows.append(([key for key, _ in matches], ScriptEffectContractV1(
@@ -1455,7 +1473,11 @@ def resolve_process_ir_effect_declarations(
             ),
         )
         summary = (
-            derive_subprocess_effect(child, capabilities=child_capabilities)
+            derive_subprocess_effect(
+                child,
+                capabilities=child_capabilities,
+                symbols=symbols_for(child_key, child) if symbols_for is not None else symbols,
+            )
             if child is not None
             else ChildSummaryV1(None, INERT_BARE_REFERENCE)
         )
@@ -1464,7 +1486,7 @@ def resolve_process_ir_effect_declarations(
             # Inert for the named reason; the served rule enumerates them.
             inert.append(pointer)
             continue
-        if _declared(item.effect) != derived:
+        if _canonical_effect(_declared(item.effect), canonical) != _canonical_effect(derived, canonical):
             findings.append(EffectAuthorityFindingV1(_INVALID, pointer, "content-mismatch"))
             continue
         subprocess_rows.extend(
