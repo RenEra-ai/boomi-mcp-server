@@ -434,3 +434,50 @@ def test_dynamic_path_source_ddp_matches_golden():
     )
     assert xml == (_GOLDEN_DIR / "dynamic_path_source_ddp.xml").read_text()
     assert verify_process_graph(xml)["errors"] == []
+
+
+def test_dynamic_path_both_sides_matches_frozen_oracle():
+    """#184 A8: the legacy renderer's MAPPED both-sides spine, frozen before the step-0 baseline.
+
+    The spine is read off the frozen bytes, not re-derived: start, the source-side Set Properties,
+    the GET carrying one dynamic Path property, the map, the target-side Set Properties, the PATCH
+    carrying one dynamic Path property, stop. Only the PATCH names a request profile, because the
+    source path composes from a run-supplied process property.
+    """
+    import json
+    import re
+
+    config = json.loads(
+        (Path(__file__).resolve().parent / "fixtures" / "process_ir" / "issue184"
+         / "legacy_both_sides_config.json").read_text(encoding="utf-8")
+    )
+    xml = ProcessFlowBuilder.build(
+        config, name="Dynamic Path Both Sides Golden", folder_name="Golden/Fixtures"
+    )
+    assert xml == (_GOLDEN_DIR / "dynamic_path_both_sides.xml").read_text()
+    assert verify_process_graph(xml)["errors"] == []
+    assert ProcessFlowBuilder.validate_config(
+        config, depends_on=[], allow_rest_source=True
+    ) is None
+
+    root = ET.fromstring(xml)
+    shapes = {s.get("name"): s for s in root.iter() if s.tag.endswith("shape")}
+    spine, cursor = [], "shape1"
+    while cursor:
+        shape = shapes[cursor]
+        action = next((e.get("actionType") for e in shape.iter() if e.get("actionType")), None)
+        dynamic = sum(len(list(e)) for e in shape.iter() if e.tag.endswith("dynamicProperties"))
+        spine.append((shape.get("shapetype"), action, dynamic))
+        targets = [d.get("toShape") for d in shape.iter() if d.tag.endswith("dragpoint")]
+        cursor = targets[0] if targets else None
+    assert spine == [
+        ("start", None, 0),
+        ("documentproperties", None, 0),
+        ("connectoraction", "GET", 1),
+        ("map", None, 0),
+        ("documentproperties", None, 0),
+        ("connectoraction", "PATCH", 1),
+        ("stop", None, 0),
+    ]
+    assert len(spine) == len(shapes)
+    assert re.findall(r'parameter-profile="([^"]*)"', xml) == ["PROFILE-REQUEST"]

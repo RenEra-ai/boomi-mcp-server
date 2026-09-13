@@ -706,11 +706,15 @@ def test_every_active_golden_renders_with_all_test_modules_unimportable(tmp_path
     # golden-000071 (#155) joins them deliberately: it renders the LEGACY source-role
     # dynamic path, the spelling #160 deletes, so it retires at that cutover rather
     # than surviving it — the same role the #159 rows carry.
+    # golden-000079 (#184) joins for the same reason: it renders the LEGACY mapped
+    # both-sides dynamic path (`EVAL-155-02`), the oracle #160 verifies against and
+    # then deletes with the legacy renderer.
     assert set(special) == {
         "golden-000056",
         "golden-000057",
         "golden-000060",
         "golden-000071",
+        "golden-000079",
     }, special
     assert set(special) <= set(report["shas"])
 

@@ -618,6 +618,31 @@ def _case_dynamic_path_source_role_profile():
     )
 
 
+def dynpath_both_sides_config():
+    """The MAPPED both-sides spine (#184 A8, `EVAL-155-02`): a REST GET source and a REST PATCH
+    target that BOTH carry a per-document path, with a map between them.
+
+    Read from the committed JSON under ``tests/fixtures/process_ir/issue184/`` rather than spelled
+    as a Python literal here, so the input the oracle was captured from is one file: its provenance
+    (``tests/fixtures/process_ir/issue184/PROVENANCE.md``) records that it is byte-identical to the
+    pre-baseline capture input. The source path composes from the run-supplied process property
+    ``seed_id``; the target path reads a profile element of the MAPPED document, so its request
+    profile is the map's output profile rather than the GET's.
+    """
+    return json.loads(
+        (_HERE / "fixtures" / "process_ir" / "issue184" / "legacy_both_sides_config.json")
+        .read_text(encoding="utf-8")
+    )
+
+
+def _case_dynamic_path_both_sides():
+    return _dynpath_builder().build(
+        dynpath_both_sides_config(),
+        name="Dynamic Path Both Sides Golden",
+        folder_name="Golden/Fixtures",
+    )
+
+
 # ---------------------------------------------------------------------------
 # C. Scoped Try/Catch + DLQ (consumed by tests/test_process_flow_builder_trycatch_dlq.py)
 # ---------------------------------------------------------------------------
@@ -1878,6 +1903,7 @@ def _build_registry():
         "dynamic_path:target_profile": ("process-component-v1", _case_dynamic_path_target_profile),
         "dynamic_path:source_ddp": ("process-component-v1", _case_dynamic_path_source_ddp),
         "dynamic_path:source_role_profile": ("process-component-v1", _case_dynamic_path_source_role_profile),
+        "dynamic_path:both_sides": ("process-component-v1", _case_dynamic_path_both_sides),
         # C — scoped try/catch + DLQ
         "trycatch_dlq:document_cache": ("process-component-v1", _case_try_catch_dlq_document_cache),
         "trycatch_dlq:document_cache_retry2": ("process-component-v1", _case_try_catch_dlq_retry_count_2),

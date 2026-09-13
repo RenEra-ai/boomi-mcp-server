@@ -1,0 +1,57 @@
+{
+  "artifacts": [
+    {
+      "builds_agree": 2,
+      "bytes": 4471,
+      "component_name": "Dynamic Path Both Sides Golden",
+      "folder_name": "Golden/Fixtures",
+      "input": "dynamic_path_both_sides_profile.input.json",
+      "output": "dynamic_path_both_sides_profile.xml",
+      "sha256": "633a197f3b67a0773a828acb378451d64183ca63a8c5ef60ddb095bbc053aede"
+    }
+  ],
+  "branch_point_sha": "cbab28ffc176ddb2378283cf7132eb9c37afc374",
+  "invocation": "capture_both_sides_oracle.py <oracle-extraction> <out-dir>",
+  "issue": 184,
+  "kind": "pre-baseline legacy-oracle capture (EVAL-155-02 mapped both-sides spine)",
+  "provenance": "legacy renderer ProcessFlowBuilder.build at the branch point, executed from a pristine `git archive` extraction of that commit (never the working tree), before any #184 source change",
+  "python": "3.12.13",
+  "spine": [
+    [
+      "start",
+      null,
+      0
+    ],
+    [
+      "documentproperties",
+      null,
+      0
+    ],
+    [
+      "connectoraction",
+      "GET",
+      1
+    ],
+    [
+      "map",
+      null,
+      0
+    ],
+    [
+      "documentproperties",
+      null,
+      0
+    ],
+    [
+      "connectoraction",
+      "PATCH",
+      1
+    ],
+    [
+      "stop",
+      null,
+      0
+    ]
+  ],
+  "validator": "ProcessFlowBuilder.validate_config(allow_rest_source=True) -> None"
+}

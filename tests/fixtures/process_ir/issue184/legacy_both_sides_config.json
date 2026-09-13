@@ -1,0 +1,50 @@
+{
+  "process_kind": "database_to_api_sync",
+  "source": {
+    "action_type": "GET",
+    "connection_id": "RCONN",
+    "connector_type": "rest",
+    "dynamic_path": {
+      "ddp_name": "DDP_PATH_SOURCE",
+      "profile_type": null,
+      "request_profile_id": null,
+      "segments": [
+        {
+          "type": "static",
+          "value": "/v1/customers/"
+        },
+        {
+          "property_name": "seed_id",
+          "type": "dpp"
+        }
+      ]
+    },
+    "operation_id": "ROP"
+  },
+  "target": {
+    "action_type": "PATCH",
+    "connection_id": "CONN-UUID",
+    "connector_type": "rest",
+    "dynamic_path": {
+      "ddp_name": "DDP_PATH_TARGET",
+      "profile_type": "profile.json",
+      "request_profile_id": "PROFILE-REQUEST",
+      "segments": [
+        {
+          "type": "static",
+          "value": "/v1/requests/"
+        },
+        {
+          "element_id": 3,
+          "element_name": "requestId (Root/Object/requestId)",
+          "type": "profile"
+        }
+      ]
+    },
+    "operation_id": "OP-UUID"
+  },
+  "transform": {
+    "map_ref": "MAP-UUID",
+    "mode": "map_ref"
+  }
+}
