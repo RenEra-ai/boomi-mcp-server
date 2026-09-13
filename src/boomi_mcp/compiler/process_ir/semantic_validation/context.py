@@ -149,7 +149,7 @@ def prepare_validation_context(
     # secret included, into a serializer warning before this value-free
     # re-validation ever runs.
     snapshot = ProcessIRV1.model_validate(ir.model_dump(warnings=False))
-    cfg = lower_process_ir_to_cfg(snapshot)
+    cfg = canonical_cache_cfg(lower_process_ir_to_cfg(snapshot), canonical_cache_refs(symbols))
 
     return PreparedProcessValidationV1(
         ir=snapshot,
@@ -160,6 +160,105 @@ def prepare_validation_context(
         incoming=_edge_index(cfg.edges, "target_node_id"),
         symbol_by_ref={symbol.ref: symbol for symbol in symbols.symbols},
     )
+
+
+def canonical_cache_refs(symbols: SymbolTableV1) -> Mapping[str, str]:
+    """Every document-cache ref mapped to ONE spelling per resolved component (#184).
+
+    Validation keys every cache fact by ref: establishment, content profiles, property
+    cohorts, removals, external writers, and child obligations. A symbol table may name
+    one cache component through several refs. Keyed by the authored spelling, a write
+    through one alias and a read through another were two caches, so a profile check
+    missed a write that lands in the same component (Stage-2 review of #184). The
+    resolved component id is the authority, and its lexicographically first ref is the
+    spelling every fact uses. A ref with no component id stays as authored.
+    """
+    by_component: Dict[str, List[str]] = {}
+    for symbol in symbols.symbols:
+        if getattr(symbol, "component_type", None) != "documentcache":
+            continue
+        component_id = getattr(symbol, "component_id", None)
+        if component_id:
+            by_component.setdefault(component_id, []).append(symbol.ref)
+    return {ref: min(refs) for refs in by_component.values() for ref in refs}
+
+
+def canonical_cache_cfg(cfg: SemanticCfgV1, canonical: Mapping[str, str]) -> SemanticCfgV1:
+    """``cfg`` with every node's ``cache_ref`` in its canonical spelling.
+
+    A validation copy: emission keeps the graph the compiler lowered, whose authored
+    spellings resolve to the same components.
+    """
+    if not canonical:
+        return cfg
+    nodes = []
+    changed = False
+    for node in cfg.nodes:
+        ref = getattr(node.semantic, "cache_ref", None)
+        target = canonical.get(ref) if isinstance(ref, str) else None
+        if target is not None and target != ref:
+            node = node.model_copy(
+                update={"semantic": node.semantic.model_copy(update={"cache_ref": target})}
+            )
+            changed = True
+        nodes.append(node)
+    return cfg.model_copy(update={"nodes": tuple(nodes)}) if changed else cfg
+
+
+def canonical_cache_capabilities(capabilities, canonical: Mapping[str, str]):
+    """The trusted context with every cache key in its canonical spelling.
+
+    Idempotent, so every entry to the validation phases applies it without checking
+    whether a caller already did.
+    """
+    if not canonical:
+        return capabilities
+
+    def key(pair):
+        if pair[0] == "cache":
+            return (pair[0], canonical.get(pair[1], pair[1]))
+        return (pair[0], pair[1])
+
+    def keys(pairs):
+        return tuple(key(pair) for pair in pairs)
+
+    def effect(value):
+        return value.model_copy(update={"reads": keys(value.reads), "writes": keys(value.writes)})
+
+    def cache_pairs(pairs):
+        return tuple((canonical.get(ref, ref), second) for ref, second in pairs)
+
+    def contract(row):
+        return row.model_copy(update={
+            "required_reads": keys(row.required_reads),
+            "mutated_state": keys(row.mutated_state),
+            "cache_requirements": cache_pairs(row.cache_requirements),
+        })
+
+    return capabilities.model_copy(update={
+        "map_effects": tuple(
+            row.model_copy(update={"effect": effect(row.effect)}) for row in capabilities.map_effects
+        ),
+        "script_effects": tuple(
+            row.model_copy(update={"effect": effect(row.effect)}) for row in capabilities.script_effects
+        ),
+        "subprocess_summaries": tuple(
+            row.model_copy(update={"effect": effect(row.effect)})
+            for row in capabilities.subprocess_summaries
+        ),
+        "external_writers": tuple(
+            row.model_copy(update={"cache_ref": canonical.get(row.cache_ref, row.cache_ref)})
+            for row in capabilities.external_writers
+        ),
+        "established_at_entry": keys(capabilities.established_at_entry),
+        "child_entry_contracts": tuple(contract(row) for row in capabilities.child_entry_contracts),
+        "caller_cache_contents": cache_pairs(capabilities.caller_cache_contents),
+        "entry_contract": (
+            contract(capabilities.entry_contract)
+            if capabilities.entry_contract is not None
+            else None
+        ),
+    })
 
 
 __all__ = ["PreparedProcessValidationV1", "prepare_validation_context"]

@@ -73,7 +73,11 @@ from .contracts import (
     StateEffectV1,
     ValidationDiagnosticV1,
 )
-from .context import PreparedProcessValidationV1
+from .context import (
+    PreparedProcessValidationV1,
+    canonical_cache_capabilities,
+    canonical_cache_refs,
+)
 from .findings import finding
 
 _LINEAGE_PHASE = "lineage"
@@ -1544,10 +1548,6 @@ def _walk_lineage(
 
         return state, stream, legacy
 
-    def _cache_identity(ref):
-        symbol = prepared.symbol(ref)
-        return getattr(symbol, "component_id", None) or ref
-
     def _child_may_write_caches(state, contract):
         """What a child's cache writes may leave in this execution's caches.
 
@@ -1557,8 +1557,10 @@ def _walk_lineage(
         may write any cache this process names.
         """
         if contract is not None and contract.state_known:
-            written = {_cache_identity(key[1]) for key in contract.mutated_state if key[0] == CACHE}
-            targets = [ref for ref in cache_refs if _cache_identity(ref) in written]
+            # Cache refs are canonical here, one spelling per component, so equality is
+            # identity.
+            written = {key[1] for key in contract.mutated_state if key[0] == CACHE}
+            targets = [ref for ref in cache_refs if ref in written]
         else:
             targets = list(cache_refs)
         for ref in targets:
@@ -1615,9 +1617,15 @@ def _walk_lineage(
             # stored there (capture `cap184-shared-cache`), so the profile the child's
             # consumers need must be exactly what reaches the call (amendment 1 rule 6).
             for cache_ref, profile_ref in contract.cache_requirements:
+                contents = state.content_of(cache_ref)
+                if not contents:
+                    # No write in this process reaches the call, so the cache holds what
+                    # this process's own caller stored. The obligation is inherited and
+                    # recorded exactly as a consumer of that cache records it.
+                    cache_requirement_refs.append((cache_ref, profile_ref))
                 if profile_ref is None:
                     continue
-                if state.content_of(cache_ref) != frozenset({_identity(profile_ref)}):
+                if contents != frozenset({_identity(profile_ref)}):
                     _report(
                         PROCESS_IR_SEMANTIC_PROFILE_MISMATCH,
                         node,
@@ -2170,8 +2178,15 @@ def walk_lineage(
     Exposed so a summary of what a process REQUIRES and GUARANTEES is read off
     the traversal that already models Branch leg ordering, Decision meet and
     the catch fork — rather than re-derived by a second, weaker scan.
+
+    The trusted context is put in the prepared graph's canonical cache spelling here,
+    because a derivation calls this directly rather than through the validation
+    pipeline.
     """
-    return _walk_lineage(prepared, capabilities)
+    return _walk_lineage(
+        prepared,
+        canonical_cache_capabilities(capabilities, canonical_cache_refs(prepared.symbols)),
+    )
 
 
 def _leg_member_index(

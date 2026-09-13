@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 12602, "minimum_collected": 12602, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 12607, "minimum_collected": 12607, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -12694,3 +12694,8 @@
 {"kind": "test", "id": "pytest-012693", "node_id": "tests/test_issue_184_child_entries.py::test_a_caller_whose_writes_store_another_profile_is_refused_at_its_call", "state": "active"}
 {"kind": "test", "id": "pytest-012694", "node_id": "tests/test_issue_184_child_entries.py::test_the_callers_cache_proof_is_load_bearing", "state": "active"}
 {"kind": "test", "id": "pytest-012695", "node_id": "tests/test_issue_184_child_entries.py::test_the_process_call_page_states_the_passthrough_standalone_refusal", "state": "active"}
+{"kind": "test", "id": "pytest-012696", "node_id": "tests/test_issue_184_child_entries.py::test_a_cache_alias_is_the_same_cache_for_every_cache_fact", "state": "active"}
+{"kind": "test", "id": "pytest-012697", "node_id": "tests/test_issue_184_child_entries.py::test_the_canonical_cache_spelling_is_load_bearing", "state": "active"}
+{"kind": "test", "id": "pytest-012698", "node_id": "tests/test_issue_184_child_entries.py::test_a_child_whose_declared_external_writer_fills_its_cache_owes_its_caller_nothing", "state": "active"}
+{"kind": "test", "id": "pytest-012699", "node_id": "tests/test_issue_184_child_entries.py::test_a_forwarding_call_passes_its_childs_cache_requirement_to_its_caller", "state": "active"}
+{"kind": "test", "id": "pytest-012700", "node_id": "tests/test_issue_184_child_entries.py::test_a_forwarding_passthrough_passes_its_childs_bound_path_writer_to_its_caller", "state": "active"}

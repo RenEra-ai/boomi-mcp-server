@@ -73,7 +73,7 @@ _PLACEMENT = PROCESS_IR_CAPABILITY_PROCESS_CALL_PLACEMENT_UNSUPPORTED
 _PROCESS_KEYS = (
     "PARENT", "OTHER_PARENT", "CHILD", "CHILD_P1", "MID", "BOUND", "BOUND_SPLIT",
     "NODATA", "NEEDS_K", "MUTATES_K", "READS_X", "LOOP_A", "LOOP_B", "EXTERNAL",
-    "CACHE_CHILD", "CACHE_CHILD_P1",
+    "CACHE_CHILD", "CACHE_CHILD_P1", "MIDP", "EXTCHILD",
 )
 
 
@@ -96,6 +96,7 @@ def _symbols():
         sym("P1", "PROFILE-ONE", "profile.json"),
         sym("P2", "PROFILE-TWO", "profile.json"),
         sym("CACHE", "CACHE", "documentcache"),
+        sym("CACHE_ALIAS", "CACHE", "documentcache"),
         sym("CHILD_ALIAS", "CHILD-PROC", "process"),
     ) + tuple(sym(key, key + "-PROC", "process") for key in _PROCESS_KEYS))
 
@@ -597,3 +598,107 @@ def test_the_process_call_page_states_the_passthrough_standalone_refusal():
     assert node is not None
     facts = " ".join(node.get("ordering_facts") or ())
     assert "a direct run of one that requires what only a caller supplies is refused" in facts
+
+# ---------------------------------------------------------------------------
+# Stage-2 review round r1 (`cdx-review.PJotK5`), correction batch 2
+# ---------------------------------------------------------------------------
+
+_GETP1 = {"kind": "connector_call", "operation_ref": "$ref:GETP1"}
+
+
+def _legs(*legs):
+    return _doc({"kind": "branch", "legs": list(legs)})
+
+
+def _put(ref):
+    return {"kind": "cache_put", "cache_ref": ref}
+
+
+def _read_cache(ref):
+    return {"kind": "cache_get", "cache_ref": ref}
+
+
+_THROUGH_ALIAS = [("PARENT", _legs(
+    {"steps": [_GETP1, _MAP], "terminal": _put("$ref:CACHE_ALIAS")},
+    {"steps": [_read_cache("$ref:CACHE"), {"kind": "map_ref", "map_ref": "$ref:M22"}], "terminal": _STOP},
+))]
+
+
+def test_a_cache_alias_is_the_same_cache_for_every_cache_fact():
+    """F1: both refs name one documentcache component. A P2 write through the alias
+    makes a P1 map over the other spelling unproved, and a write through the alias
+    alone establishes that read, with its profile."""
+    mixed = [("PARENT", _legs(
+        {"steps": [_GETP1], "terminal": _put("$ref:CACHE")},
+        {"steps": [_GETP1, _MAP], "terminal": _put("$ref:CACHE_ALIAS")},
+        {"steps": [_read_cache("$ref:CACHE"), {"kind": "map_ref", "map_ref": "$ref:M12"}], "terminal": _STOP},
+    ))]
+    assert (PROCESS_IR_SEMANTIC_PROFILE_MISMATCH, "/body/steps/0/legs/2/steps/1/map_ref") in _errors(mixed, "PARENT")
+    assert _errors(_THROUGH_ALIAS, "PARENT") == []
+
+
+def test_the_canonical_cache_spelling_is_load_bearing(monkeypatch):
+    """Non-vacuity: with no canonical spelling, the alias write no longer reaches the read."""
+    from boomi_mcp.compiler.process_ir.semantic_validation import context, pipeline
+
+    assert _errors(_THROUGH_ALIAS, "PARENT") == []
+    for module in (context, pipeline, lineage):
+        monkeypatch.setattr(module, "canonical_cache_refs", lambda symbols: {})
+    codes = {code for code, _path in _errors(_THROUGH_ALIAS, "PARENT")}
+    assert "PROCESS_IR_SEMANTIC_LINEAGE_CACHE_WRITER_MISSING" in codes, codes
+
+
+def test_a_child_whose_declared_external_writer_fills_its_cache_owes_its_caller_nothing():
+    """F2: the child's contract is derived under its own trusted context, so the external
+    writer contract satisfying its read keeps that read off every caller."""
+    from boomi_mcp.models.authoring_workflow import (
+        ProcessIREffectDeclarationsV1,
+        ProcessIRExternalWriterDeclarationV1,
+    )
+
+    child = _doc({"kind": "cache_get", "cache_ref": "$ref:CACHE", "external_writer": True}, _SET_Z, _STOP)
+    parsed = [
+        ("PARENT", parse_process_ir_v1(_doc(_branch([], _call("EXTCHILD"))))),
+        ("EXTCHILD", parse_process_ir_v1(child)),
+    ]
+    declarations = ProcessIREffectDeclarationsV1(external_writers=(
+        ProcessIRExternalWriterDeclarationV1(cache_ref="$ref:CACHE"),))
+    resolution = resolve_process_ir_effect_declarations(
+        parsed, declarations, _symbols(), [], child_roots={"$ref:" + key: ir for key, ir in parsed})
+    assert resolution.ok, resolution.findings
+    row = resolution.capabilities_by_root["PARENT"].child_entry_contract("$ref:EXTCHILD")
+    assert ("cache", "$ref:CACHE") not in row.required_reads, row
+    for key, ir in parsed:
+        report = validate_process_ir(ir, _symbols(), capabilities=_capabilities(resolution, key))
+        assert [(item.code, item.path) for item in report.errors] == [], key
+
+
+def test_a_forwarding_call_passes_its_childs_cache_requirement_to_its_caller():
+    """F3: MID reads nothing itself, so the profile its child needs of the cache is MID's
+    own caller's obligation, carried up and seeded like a consumer's. A caller whose
+    writes store another profile is refused at its own call."""
+    def mid(child_key):
+        return _legs({"steps": [_MSG], "terminal": _STOP}, {"steps": [], "terminal": _call(child_key)})
+
+    roots = [("PARENT", _stage_then_call("MID")), ("MID", mid("CACHE_CHILD")), ("CACHE_CHILD", _cache_child("$ref:M22"))]
+    _irs, resolution = _resolve(roots)
+    assert resolution.capabilities_by_root["PARENT"].child_entry_contract("$ref:MID").cache_requirements == (
+        ("$ref:CACHE", "$ref:P2"),)
+    for key in ("PARENT", "MID", "CACHE_CHILD"):
+        assert _errors(roots, key) == [], key
+    mismatched = [("PARENT", _stage_then_call("MID")), ("MID", mid("CACHE_CHILD_P1")),
+                  ("CACHE_CHILD_P1", _cache_child("$ref:M12"))]
+    assert (PROCESS_IR_SEMANTIC_PROFILE_MISMATCH, "/body/steps/0/legs/1/terminal/process_ref") in _errors(mismatched, "PARENT")
+
+
+def test_a_forwarding_passthrough_passes_its_childs_bound_path_writer_to_its_caller():
+    """F4: MIDP only forwards its caller's documents to BOUND, so the writer BOUND's path
+    needs is MIDP's caller's obligation, carried up and seeded like a binding's own."""
+    midp = _doc(_ENTRY, _call("BOUND"))
+    roots = [("PARENT", _parent([_DYNAMIC_X], _call("MIDP"))), ("MIDP", midp), ("BOUND", _BOUND)]
+    _irs, resolution = _resolve(roots)
+    assert resolution.capabilities_by_root["PARENT"].child_entry_contract("$ref:MIDP").required_writers == (("X", None),)
+    for key in ("PARENT", "MIDP", "BOUND"):
+        assert _errors(roots, key) == [], key
+    missing = [("PARENT", _parent([_SET_Z], _call("MIDP"))), ("MIDP", midp), ("BOUND", _BOUND)]
+    assert (PROCESS_IR_SEMANTIC_DYNAMIC_PATH_DDP_NOT_ESTABLISHED, _LEG + "/process_ref") in _errors(missing, "PARENT")

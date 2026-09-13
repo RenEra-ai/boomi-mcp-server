@@ -997,10 +997,20 @@ def _caller_composed_paths(prepared: Any, capabilities: Any, walk: Any) -> Tuple
     refused = {item.path for item in walk.findings if item.code == _NOT_ESTABLISHED}
     candidates = []
     for node in prepared.cfg.nodes:
-        binding = getattr(node.semantic, "path_binding", None)
+        semantic = node.semantic
+        binding = getattr(semantic, "path_binding", None)
         pointer = node.source_path + "/path_binding"
         if binding is not None and pointer in refused:
             candidates.append((pointer, binding.property_name, binding.request_profile_ref))
+        if semantic.semantic_kind == "process_call":
+            # A call discharging a passthrough child's bound path reports at its own
+            # `/process_ref`. When that refusal clears under the seeded writer, the
+            # obligation is this process's caller's, inherited from the child
+            # (Stage-2 review of #184).
+            call_pointer = node.source_path + "/process_ref"
+            contract = capabilities.child_entry_contract(semantic.process_ref)
+            if contract is not None and call_pointer in refused:
+                candidates.extend((call_pointer, name, ref) for name, ref in contract.required_writers)
     if not candidates:
         return ()
     seeded = capabilities.model_copy(update={
@@ -1015,37 +1025,6 @@ def _caller_composed_paths(prepared: Any, capabilities: Any, walk: Any) -> Tuple
         {(name, ref) for pointer, name, ref in candidates if pointer not in still},
         key=lambda row: (row[0], row[1] or ""),
     ))
-
-
-def _respelled(facts: Mapping[str, Any], parent_ir: Any, symbols: Any) -> Dict[str, Any]:
-    """A child's cache keys, spelled as the CALLER names the same cache component.
-
-    Lineage keys a cache by its authored ref, so a child and a caller naming one cache
-    through two aliases would otherwise disagree about whether it is written.
-    """
-    spellings: Dict[str, str] = {}
-    for node in _iter_nodes(parent_ir.body):
-        ref = getattr(node, "cache_ref", None)
-        if isinstance(ref, str) and ref:
-            for alias in sorted(_aliases(symbols, ref)):
-                spellings.setdefault(alias, ref)
-
-    def respell(keys):
-        return tuple(sorted({
-            (scope, spellings.get(name, name) if scope == "cache" else name)
-            for scope, name in keys
-        }))
-
-    out = dict(facts)
-    for field in ("required_reads", "mutated_state"):
-        if field in out:
-            out[field] = respell(out[field])
-    if "cache_requirements" in out:
-        out["cache_requirements"] = tuple(sorted(
-            {(spellings.get(ref, ref), profile) for ref, profile in out["cache_requirements"]},
-            key=lambda row: (row[0], row[1] or ""),
-        ))
-    return out
 
 
 def _caller_cache_seeds(requirements, symbols) -> Tuple[Tuple[str, str], ...]:
@@ -1070,7 +1049,7 @@ def _caller_cache_seeds(requirements, symbols) -> Tuple[Tuple[str, str], ...]:
     return tuple(seeds)
 
 
-def _entry_contract_bindings(process_roots, symbols, symbols_for) -> Dict[str, tuple]:
+def _entry_contract_bindings(process_roots, symbols, symbols_for, base_for=None) -> Dict[str, tuple]:
     """Per root: ``(child rows, seeded reads, caller-composed writers, own contract, form, cache seeds)``.
 
     Children are derived before their callers, so a grandchild's contract reaches the
@@ -1110,13 +1089,18 @@ def _entry_contract_bindings(process_roots, symbols, symbols_for) -> Dict[str, t
 
     def _rows(key):
         return tuple(
-            ChildEntryContractV1(process_ref=ref, **_respelled(facts[child], roots[key], symbols))
+            ChildEntryContractV1(process_ref=ref, **facts[child])
             for ref, child in sorted(calls[key].items())
             if child in facts
         )
 
     for key in ordered:
-        own = ProcessIRValidationCapabilitiesV1(child_entry_contracts=_rows(key))
+        # The child's OWN trusted context (`base_for`): the map, script and
+        # external-writer rows resolved for that root, so what they establish is never
+        # demanded of a caller.
+        own = ProcessIRValidationCapabilitiesV1(
+            child_entry_contracts=_rows(key), **(base_for(key) if base_for else {})
+        )
         facts[key] = derive_child_entry_facts(roots[key], symbols_for(key, roots[key]), own)
     for key in roots:
         facts.setdefault(key, {"entry_form": "unknown"})
@@ -1191,10 +1175,9 @@ def resolve_process_ir_effect_declarations(
     )
     from .vetted_scripts import lookup_vetted_script
 
-    entry_bindings = _entry_contract_bindings(
-        process_roots, symbols, symbols_for or (lambda _key, _root: symbols)
-    )
+    symbols_for = symbols_for or (lambda _key, _root: symbols)
     if declarations is None:
+        entry_bindings = _entry_contract_bindings(process_roots, symbols, symbols_for)
         return EffectResolutionV1(
             {
                 key: (
@@ -1364,6 +1347,22 @@ def resolve_process_ir_effect_declarations(
             (key, ExternalWriterContractV1(cache_ref=spelling))
             for key, spelling in flagged
         )
+
+    # #184 (Stage-2 review): a child's entry contract is derived under its OWN trusted
+    # context, the rows resolved above for that root, so a cache its declared external
+    # writer fills is not a caller's obligation.
+    def _declared_rows_for(key):
+        return {
+            "map_effects": tuple(
+                row for _bound, rows in map_rows.values() for root_key, row in rows if root_key == key
+            ),
+            "script_effects": tuple(row for bound_keys, row in script_rows if key in bound_keys),
+            "external_writers": tuple(row for root_key, row in writer_rows if root_key == key),
+        }
+
+    entry_bindings = _entry_contract_bindings(
+        process_roots, symbols, symbols_for, base_for=_declared_rows_for
+    )
 
     # --- subprocesses -----------------------------------------------------
     #: Preconditions per CHILD root key, accumulated as summaries are derived.

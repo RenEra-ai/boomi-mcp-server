@@ -41,7 +41,12 @@ from .contracts import (
     ValidationReportV1,
     build_validation_report,
 )
-from .context import PreparedProcessValidationV1, prepare_validation_context
+from .context import (
+    PreparedProcessValidationV1,
+    canonical_cache_capabilities,
+    canonical_cache_refs,
+    prepare_validation_context,
+)
 from .effects import collect_effect_findings
 from .flow import collect_flow_findings
 from .lineage import collect_lineage_findings
@@ -87,7 +92,10 @@ def validate_lowered_process_ir(
     which lowered the pair itself one call earlier.
     """
     from .context import PreparedProcessValidationV1 as _Prepared
-    from .context import _edge_index
+    from .context import _edge_index, canonical_cache_cfg
+
+    # One cache identity per component, exactly as `prepare_validation_context` builds it.
+    cfg = canonical_cache_cfg(cfg, canonical_cache_refs(symbol_table))
 
     prepared = _Prepared(
         ir=ir,
@@ -111,6 +119,9 @@ def _validate_prepared(
     could supply one whose CFG does not correspond to its IR, and every phase
     trusts that correspondence.
     """
+    # #184 (Stage-2 review): the trusted context names caches in the graph's canonical
+    # spelling, so no phase compares an authored alias with the canonical ref.
+    capabilities = canonical_cache_capabilities(capabilities, canonical_cache_refs(prepared.symbols))
     findings: List[ValidationDiagnosticV1] = []
 
     findings.extend(_collect_capability_findings(prepared, capabilities))
