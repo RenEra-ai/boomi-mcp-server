@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 12536, "minimum_collected": 12536, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 12553, "minimum_collected": 12553, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -12628,3 +12628,20 @@
 {"kind": "test", "id": "pytest-012627", "node_id": "tests/test_issue_184_symbol_profile_facts.py::test_a_reused_component_contributes_no_profile_facts", "state": "active"}
 {"kind": "test", "id": "pytest-012628", "node_id": "tests/test_issue_184_symbol_profile_facts.py::test_a_public_plan_whose_map_matches_its_calls_compiles", "state": "active"}
 {"kind": "test", "id": "pytest-012629", "node_id": "tests/test_issue_184_symbol_profile_facts.py::test_a_public_plan_whose_map_reads_the_wrong_profile_is_refused_at_the_map", "state": "active"}
+{"kind": "test", "id": "pytest-012630", "node_id": "tests/test_issue_178_ledger_is_derived_from_its_archive.py::test_a_retired_golden_citation_resolves_only_through_its_tombstone", "state": "active"}
+{"kind": "test", "id": "pytest-012631", "node_id": "tests/test_issue_184_passthrough_entry.py::test_the_every_linear_kind_form_places_every_linear_kind_legally", "state": "active"}
+{"kind": "test", "id": "pytest-012632", "node_id": "tests/test_issue_184_stream_profiles.py::test_the_removal_leg_is_what_erases_the_cache_content", "state": "active"}
+{"kind": "test", "id": "pytest-012633", "node_id": "tests/test_process_ir_authoring_contract_parity.py::test_the_withdrawn_cache_continuation_sentences_are_gone", "state": "active"}
+{"kind": "test", "id": "pytest-012634", "node_id": "tests/test_process_ir_flow_sequence_codec.py::test_withdrawn_linear_cache_chain_is_refused_at_the_successor[cache_load_retrieve_remove]", "state": "active"}
+{"kind": "test", "id": "pytest-012635", "node_id": "tests/test_process_ir_flow_sequence_codec.py::test_withdrawn_linear_cache_chain_is_refused_at_the_successor[cache_put_get]", "state": "active"}
+{"kind": "test", "id": "pytest-012636", "node_id": "tests/test_process_ir_flow_sequence_codec.py::test_withdrawn_linear_cache_chain_is_refused_at_the_successor[full_vocabulary_linear]", "state": "active"}
+{"kind": "test", "id": "pytest-012637", "node_id": "tests/test_process_ir_flow_sequence_codec.py::test_a_removal_has_no_legal_flow_sequence_placement", "state": "active"}
+{"kind": "test", "id": "pytest-012638", "node_id": "tests/test_process_ir_notify_recovery.py::test_the_retired_catch_cache_write_then_stop_spelling_is_refused[golden-000059]", "state": "active"}
+{"kind": "test", "id": "pytest-012639", "node_id": "tests/test_process_ir_notify_recovery.py::test_the_retired_catch_cache_write_then_stop_spelling_is_refused[golden-000005]", "state": "active"}
+{"kind": "test", "id": "pytest-012640", "node_id": "tests/test_wave_gate_goldens.py::test_golden_manifest_row[golden-000082]", "state": "active"}
+{"kind": "test", "id": "pytest-012641", "node_id": "tests/test_wave_gate_goldens.py::test_golden_manifest_row[golden-000083]", "state": "active"}
+{"kind": "test", "id": "pytest-012642", "node_id": "tests/test_wave_gate_goldens.py::test_golden_manifest_row[golden-000084]", "state": "active"}
+{"kind": "test", "id": "pytest-012643", "node_id": "tests/test_wave_gate_goldens.py::test_golden_manifest_row[golden-000085]", "state": "active"}
+{"kind": "test", "id": "pytest-012644", "node_id": "tests/test_wave_gate_goldens.py::test_golden_manifest_row[golden-000086]", "state": "active"}
+{"kind": "test", "id": "pytest-012645", "node_id": "tests/test_wave_gate_goldens.py::test_golden_manifest_row[golden-000087]", "state": "active"}
+{"kind": "test", "id": "pytest-012646", "node_id": "tests/test_wave_gate_goldens.py::test_golden_manifest_row[golden-000088]", "state": "active"}

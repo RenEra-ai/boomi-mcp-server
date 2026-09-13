@@ -298,14 +298,28 @@ def test_flow_cross_type_id_reuse_yields_typed_requirements():
     # #139B: one id used as a map_ref and TWICE as a document_cache_id -> three
     # DISTINCT aliases resolving to the same real id, with the correct type split
     # (was SYMBOL_UNRESOLVED pre-#139B).
+    #
+    # #184 amendment 3: the two cache occurrences were a LINEAR doccacheload ->
+    # doccacheretrieve pair. Add to Cache hands on no documents (measured), so the
+    # read wired after it never runs and the builder now refuses that pair at
+    # flow_sequence[2].kind. The staging write is therefore the terminal of a
+    # target-less branch leg and the read sits in the LATER leg — the legal form.
+    # The id reuse under test is unchanged; only the pointers moved into the legs.
     shared = "cccccccc-cccc-cccc-cccc-cccccccccccc"
     result = adapt_flow_sequence(_flow_cfg(flow_sequence=[
         {"kind": "map_ref", "map_ref": shared},
-        {"kind": "doccacheload", "document_cache_id": shared},
-        {"kind": "doccacheretrieve", "document_cache_id": shared},
+        {"kind": "branch", "legs": [
+            {"steps": [{"kind": "doccacheload", "document_cache_id": shared}]},
+            {"steps": [{"kind": "doccacheretrieve", "document_cache_id": shared}],
+             "target": {"connector_type": "rest", "connection_id": _REST_CONN, "operation_id": _REST_OP, "action_type": "POST", "label": "read"}},
+        ]},
     ]))
     by_ptr = {r.source_pointer: r for r in result.symbol_requirements}
-    ptrs = ["/flow_sequence/0/map_ref", "/flow_sequence/1/document_cache_id", "/flow_sequence/2/document_cache_id"]
+    ptrs = [
+        "/flow_sequence/0/map_ref",
+        "/flow_sequence/1/legs/0/steps/0/document_cache_id",
+        "/flow_sequence/1/legs/1/steps/0/document_cache_id",
+    ]
     # All three occurrences present, distinct aliases, one real id.
     assert {r.ir_ref for p in ptrs for r in [by_ptr[p]]} == {f"$ref:legacy.adapter:{p}" for p in ptrs}
     assert len({by_ptr[p].ir_ref for p in ptrs}) == 3
@@ -348,14 +362,18 @@ def test_flow_aliasing_is_deterministic_across_repeated_adaptations():
     )
 
 
-def test_flow_nested_and_profile_refs_are_path_pinned():
-    # #139B (architect review): every representative nested occurrence aliases to
-    # its EXACT source pointer with the right selector + type — Data Process profile
-    # refs, set-property profile refs, a DECISION arm's nested map + cache refs, and
-    # a nested branch leg target inside the decision's false arm. Each occurrence's
-    # (pointer, legacy_selector, expected_component_type) is pinned explicitly, so a
-    # wrong or omitted nested path would fail (not just self-consistency).
-    result = adapt_flow_sequence(_flow_cfg(flow_sequence=[
+def _nested_flow_sequence():
+    """The nested-reference flow_sequence, built fresh for each consumer.
+
+    #184 amendment 3: the decision's TRUE arm used to chain doccacheload ->
+    doccacheretrieve linearly. Add to Cache hands on no documents (measured), so
+    the read after it never ran and the builder now refuses that chain at the
+    read's ``.kind``. The arm's cache refs therefore sit in the legal ordered-leg
+    form: a target-less staging leg whose terminal is the load, then a later leg
+    that reads and routes to its own target. The nested-path pinning this fixture
+    exists for is unchanged — the cache refs are simply one container deeper.
+    """
+    return [
         {"kind": "dataprocess", "steps": [{"operation": "split_documents", "profile_type": "json", "profile_id": "PROF-DP", "link_element_key": "1", "link_element_name": "n"}]},
         {"kind": "set_ddp", "name": "D", "source_values": [{"value_type": "profile", "element_id": "E", "element_name": "N", "profile_id": "PROF-SP", "profile_type": "profile.json"}]},
         {"kind": "decision", "comparison": "equals",
@@ -363,21 +381,34 @@ def test_flow_nested_and_profile_refs_are_path_pinned():
          "right": {"value_type": "static", "static_value": "A"},
          "true_steps": [
              {"kind": "map_ref", "map_ref": "MAP-DEC"},
-             {"kind": "doccacheload", "document_cache_id": "CACHE-DEC"},
-             {"kind": "doccacheretrieve", "document_cache_id": "CACHE-DEC"},
+             {"kind": "branch", "legs": [
+                 {"steps": [{"kind": "doccacheload", "document_cache_id": "CACHE-DEC"}]},
+                 {"steps": [{"kind": "doccacheretrieve", "document_cache_id": "CACHE-DEC"}], "target": {"connector_type": "rest", "connection_id": _REST_CONN, "operation_id": "op-leg-t0000000000000000000000000", "action_type": "POST", "label": "T"}},
+             ]},
          ],
          "false_steps": [{"kind": "branch", "legs": [
              {"steps": [{"kind": "map_ref", "map_ref": "MAP-A"}], "target": {"connector_type": "rest", "connection_id": _REST_CONN, "operation_id": "op-leg-a0000000000000000000000000", "action_type": "POST", "label": "A"}},
              {"steps": [{"kind": "map_ref", "map_ref": "MAP-B"}], "target": {"connector_type": "rest", "connection_id": "55555555-5555-5555-5555-555555555555", "operation_id": "op-leg-b0000000000000000000000000", "action_type": "POST", "label": "B"}},
          ]}]},
-    ]))
+    ]
+
+
+def test_flow_nested_and_profile_refs_are_path_pinned():
+    # #139B (architect review): every representative nested occurrence aliases to
+    # its EXACT source pointer with the right selector + type — Data Process profile
+    # refs, set-property profile refs, a DECISION arm's nested map + cache refs, and
+    # a nested branch leg target inside the decision's false arm. Each occurrence's
+    # (pointer, legacy_selector, expected_component_type) is pinned explicitly, so a
+    # wrong or omitted nested path would fail (not just self-consistency).
+    result = adapt_flow_sequence(_flow_cfg(flow_sequence=_nested_flow_sequence()))
     by_ptr = {r.source_pointer: r for r in result.symbol_requirements}
     expected = {
         "/flow_sequence/0/steps/0/profile_id": ("PROF-DP", "profile.json"),
         "/flow_sequence/1/source_values/0/profile_id": ("PROF-SP", "profile.json"),
         "/flow_sequence/2/true_steps/0/map_ref": ("MAP-DEC", "transform.map"),
-        "/flow_sequence/2/true_steps/1/document_cache_id": ("CACHE-DEC", "documentcache"),
-        "/flow_sequence/2/true_steps/2/document_cache_id": ("CACHE-DEC", "documentcache"),
+        "/flow_sequence/2/true_steps/1/legs/0/steps/0/document_cache_id": ("CACHE-DEC", "documentcache"),
+        "/flow_sequence/2/true_steps/1/legs/1/steps/0/document_cache_id": ("CACHE-DEC", "documentcache"),
+        "/flow_sequence/2/true_steps/1/legs/1/target/operation_id": ("op-leg-t0000000000000000000000000", "connector-action"),
         "/flow_sequence/2/false_steps/0/legs/0/target/operation_id": ("op-leg-a0000000000000000000000000", "connector-action"),
         "/flow_sequence/2/false_steps/0/legs/1/target/operation_id": ("op-leg-b0000000000000000000000000", "connector-action"),
     }
@@ -393,41 +424,45 @@ def test_flow_nested_and_profile_refs_are_path_pinned():
     # each leg's operation id must sit inside its OWN leg segment (after its map,
     # before the next leg's map). The two profile refs and the decision-arm cache
     # are also present, and no alias leaks.
-    xml = ProcessFlowBuilder.build(_flow_cfg(flow_sequence=[
-        {"kind": "dataprocess", "steps": [{"operation": "split_documents", "profile_type": "json", "profile_id": "PROF-DP", "link_element_key": "1", "link_element_name": "n"}]},
-        {"kind": "set_ddp", "name": "D", "source_values": [{"value_type": "profile", "element_id": "E", "element_name": "N", "profile_id": "PROF-SP", "profile_type": "profile.json"}]},
-        {"kind": "decision", "comparison": "equals",
-         "left": {"value_type": "track", "property_id": "dynamicdocument.D"},
-         "right": {"value_type": "static", "static_value": "A"},
-         "true_steps": [
-             {"kind": "map_ref", "map_ref": "MAP-DEC"},
-             {"kind": "doccacheload", "document_cache_id": "CACHE-DEC"},
-             {"kind": "doccacheretrieve", "document_cache_id": "CACHE-DEC"},
-         ],
-         "false_steps": [{"kind": "branch", "legs": [
-             {"steps": [{"kind": "map_ref", "map_ref": "MAP-A"}], "target": {"connector_type": "rest", "connection_id": _REST_CONN, "operation_id": "op-leg-a0000000000000000000000000", "action_type": "POST", "label": "A"}},
-             {"steps": [{"kind": "map_ref", "map_ref": "MAP-B"}], "target": {"connector_type": "rest", "connection_id": "55555555-5555-5555-5555-555555555555", "operation_id": "op-leg-b0000000000000000000000000", "action_type": "POST", "label": "B"}},
-         ]}]},
-    ]), name="N")
+    xml = ProcessFlowBuilder.build(_flow_cfg(flow_sequence=_nested_flow_sequence()), name="N")
     assert "$ref:legacy.adapter:" not in xml
     assert (
         xml.index("MAP-A") < xml.index("op-leg-a0000000000000000000000000")
         < xml.index("MAP-B") < xml.index("op-leg-b0000000000000000000000000")
     )
     assert "MAP-DEC" in xml and "CACHE-DEC" in xml
+    # The true arm's staging load precedes its reader's target in emitted order.
+    assert (
+        xml.index("MAP-DEC") < xml.index('docCache="CACHE-DEC"')
+        < xml.index("op-leg-t0000000000000000000000000")
+    )
 
 
 def test_flow_connector_metadata_only_on_operation_requirements():
     # #139B: connector_type/action_type are None on every non-connector-action
     # requirement (connections, maps, caches, profiles, processes).
+    #
+    # #184 amendment 3: the cache refs were a linear doccacheload ->
+    # doccacheretrieve pair, which the builder now refuses (Add to Cache hands on
+    # no documents, so the read after it never runs). They sit in the legal
+    # ordered-leg form instead: a staging leg ending at the load, a later leg that
+    # reads and routes to its own target.
     result = adapt_flow_sequence(_flow_cfg(flow_sequence=[
         {"kind": "map_ref", "map_ref": "MAP-1"},
-        {"kind": "doccacheload", "document_cache_id": "CACHE-1"},
-        {"kind": "doccacheretrieve", "document_cache_id": "CACHE-1"},
+        {"kind": "branch", "legs": [
+            {"steps": [{"kind": "doccacheload", "document_cache_id": "CACHE-1"}]},
+            {"steps": [{"kind": "doccacheretrieve", "document_cache_id": "CACHE-1"}],
+             "target": {"connector_type": "rest", "connection_id": _REST_CONN, "operation_id": _REST_OP, "action_type": "POST", "label": "read"}},
+        ]},
     ]))
+    checked_types = set()
     for r in result.symbol_requirements:
         if r.expected_component_type != "connector-action":
             assert r.connector_type is None and r.action_type is None, r.source_pointer
+            checked_types.add(r.expected_component_type)
+    # Non-vacuity: the loop really did inspect a map, both cache occurrences'
+    # type, and a connection — not an empty requirement set.
+    assert {"transform.map", "documentcache", "connector-settings"} <= checked_types
 
 
 def test_flow_live_ref_without_recorded_selector_fails_closed():

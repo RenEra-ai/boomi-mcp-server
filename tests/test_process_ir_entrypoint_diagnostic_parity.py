@@ -808,14 +808,27 @@ def _corpus_connector_above_leg_prefix_terminal_call():
 #: `docs/architecture/evidence/issue-178/baseline-corpus-characterization.md`.
 #: The assertion is that public compile now serves that same triple. Reintroducing
 #: any of the five divergences fails here.
+#:
+#: One row is re-measured rather than baseline: `branch-cache-prefix-process-call-terminal`
+#: (#184 amendment 3, see the row).
 CORPUS = [
     (
         "branch-cache-prefix-process-call-terminal",
         _corpus_branch_cache_prefix_call,
+        # #184 amendment 3 re-measured this row. At `cdd7a3b` the parser blamed the
+        # LEG (`/body/steps/0/legs/0`) with "a trailing cache_put belongs in the leg
+        # terminal (target-less staging leg), not in steps". Add to Cache hands on no
+        # documents, so a cache_put with ANY authored successor, a terminal process
+        # call included, is now refused at the cache node's own `cache_ref`, before
+        # the process-call prefix rule is asked. The triple is still hard-pinned (the
+        # message is not read from the live parser), and both entry points must
+        # still serve it identically.
         "PROCESS_IR_SCHEMA_INVALID_CARDINALITY",
-        "/body/steps/0/legs/0",
+        "/body/steps/0/legs/0/steps/0/cache_ref",
         (
-            "a trailing cache_put belongs in the leg terminal (target-less staging leg), not in steps"
+            "Add to Cache hands on no documents, so nothing authored after it on the "
+            "same path ever runs — author the cache_put as the terminal of a branch "
+            "leg or a catch body, and put the work that follows in a later branch leg"
         ),
     ),
     (

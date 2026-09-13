@@ -156,6 +156,20 @@ _DB_TARGET_ACTION_TYPES = frozenset({"Send"})
 # target — there is no GET/SEND/verb split like REST/DB.
 _SOAP_ACTION_TYPES = frozenset({"EXECUTE"})
 
+from ....models.process_ir_document_semantics import (  # noqa: E402
+    ZERO_EMISSION_EMITTER_KINDS as _ZERO_EMISSION_EMITTER_KINDS,
+    ZERO_EMISSION_KINDS as _ZERO_EMISSION_KINDS,
+)
+
+#: #184 amendment 3. The flow-sequence step kinds that hand on no documents, in both
+#: spellings the legacy vocabulary uses: the authored ``cache_put`` and the emitter
+#: kinds ``doccacheload`` / ``doccacheremove``. Read from the document-emission
+#: authority. The platform skips any step wired after one of these and still reads
+#: the run COMPLETE, so none of them may have a successor.
+_LEGACY_ZERO_EMISSION_KINDS = _ZERO_EMISSION_KINDS | _ZERO_EMISSION_EMITTER_KINDS
+
+# ``doccacheremove`` stays a recognised mode so it is refused BY NAME
+# (``_validate_doccacheremove_transform``) rather than as an unknown mode.
 _SUPPORTED_TRANSFORM_MODES = frozenset(
     {"passthrough", "message", "map_ref", "dataprocess", "doccacheretrieve", "doccacheremove"}
 )
@@ -280,10 +294,14 @@ _DOCCACHE_RETRIEVE_ALLOWED_KEYS = frozenset(
 # so removeAllDocuments=False (and any keyed variant) is rejected
 # PROCESS_DOCCACHE_REMOVE_CONFIG_INVALID until one — never over-claiming the wire
 # shape from docs alone (mirrors the #109 retrieve / dataprocess gates). The live
-# remove shapes sit at branch-leg ends (empty <dragpoints/>); per #110 the
-# builder shape is locked as a linear NON-terminal cache op (one forward
-# dragpoint), mirroring doccacheretrieve. document_cache_id binds the Document
-# Cache component id (a literal id or a $ref:KEY token in depends_on).
+# remove shapes sit at branch-leg ends (empty <dragpoints/>). #110 locked the
+# builder shape as a linear NON-terminal cache op (one forward dragpoint), and
+# #184 amendment 3 measured that wrong: Remove from Cache hands on no documents, so
+# the target wired after it never ran (captures cap184-prefix-predecessors
+# xr-remove-successor, cap184-cache-remove-read). The inline transform is now
+# REFUSED; the terminal remove is authored as a ProcessIR branch-leg terminal.
+# document_cache_id binds the Document Cache component id (a literal id or a
+# $ref:KEY token in depends_on).
 _DOCCACHE_REMOVE_ALLOWED_KEYS = frozenset(
     {"mode", "label", "document_cache_id", "remove_all_documents"}
 )
@@ -312,7 +330,8 @@ _FLOW_SEQUENCE_LINEAR_KINDS = frozenset(
         "dataprocess",
         "doccacheload",
         "doccacheretrieve",
-        "doccacheremove",
+        # `doccacheremove` was withdrawn from this vocabulary (#184 amendment 3,
+        # ledger C18): see `_WITHDRAWN_FLOW_SEQUENCE_KINDS`.
         # Issue #121 M11.2 (epic #118): generic DDP/DPP Set Properties steps.
         # Both lower to the same documentproperties shape the REST dynamic-path
         # helper emits, via the shared generic emitters below.
@@ -327,6 +346,16 @@ _FLOW_SEQUENCE_LINEAR_KINDS = frozenset(
         "cache_get",
     }
 )
+#: #184 amendment 3, ledger C18. Kinds this vocabulary used to author and no longer
+#: does, each refused BY NAME wherever it appears. Remove from Cache hands on no
+#: documents, so every flow_sequence position fails:
+#: - with a successor, the successor never runs;
+#: - as a trailing top-level or TRUE-arm step, the implicit target never runs;
+#: - as a FALSE-arm or branch-leg end, the fall-through Stop or leg target never
+#:   runs, and this surface authors no terminal removal.
+#: A kind no composition admits is not an authorable kind. The terminal removal is
+#: authored in ProcessIR, as a branch-leg `cache_remove`.
+_WITHDRAWN_FLOW_SEQUENCE_KINDS = frozenset({"doccacheremove"})
 _FLOW_SEQUENCE_CONTROL_KINDS = frozenset({"decision", "branch"})
 _FLOW_SEQUENCE_TERMINAL_KINDS = frozenset({"exception"})
 _FLOW_SEQUENCE_ALLOWED_KINDS = (
@@ -343,8 +372,6 @@ _FLOW_SEQUENCE_STEP_KEYS: Dict[str, frozenset] = {
     "doccacheload": _FLOW_SEQUENCE_STEP_COMMON_KEYS | {"document_cache_id"},
     "doccacheretrieve": _FLOW_SEQUENCE_STEP_COMMON_KEYS
     | {"document_cache_id", "empty_cache_behavior", "load_all_documents"},
-    "doccacheremove": _FLOW_SEQUENCE_STEP_COMMON_KEYS
-    | {"document_cache_id", "remove_all_documents"},
     # Issue #121 M11.2: DDP/DPP Set Properties steps. `name` is the bare
     # property name (no dynamicdocument./process. prefix); `source_values` is
     # the ordered value-source list (#120 PropertySourceValue contract);
@@ -1040,11 +1067,11 @@ class ProcessFlowBuilder:
                 },
             ))
         elif transform_mode == "doccacheremove":
-            # Issue #110 M10.6: a process-level Document Cache Remove shape that
-            # clears documents from a Document Cache (the delete half of Document
-            # Cache CRUD). It sits in the same middle-transform slot as
-            # message/map_ref/dataprocess/doccacheretrieve. validate_config has
-            # already proven the config; build() re-reads it total.
+            # Issue #110 M10.6: a process-level Document Cache Remove shape in the
+            # middle-transform slot. #184 amendment 3: validate_config REFUSES this
+            # mode, because the target after the remove never runs. A
+            # validate-bypass call reaches the legacy emitter, whose guard refuses
+            # the successor instead of emitting the dead wire.
             flow.append((
                 "doccacheremove",
                 {
@@ -2743,6 +2770,21 @@ def _validate_doccacheremove_transform(
             field="transform.label",
             hint="Use a string display label for the Document Cache Remove shape.",
         )
+    # #184 amendment 3. Placed AFTER the config checks, so a malformed remove still
+    # reports its own defect. A well-formed one is refused here: this mode wires the
+    # flow's target after the remove, and Remove from Cache hands on no documents,
+    # so the target never runs and the run still reads COMPLETE.
+    return BuilderValidationError(
+        "transform.mode='doccacheremove' is not supported: Remove from Cache hands on "
+        "no documents, so the target wired after it would never run.",
+        error_code="PROCESS_DOCCACHE_REMOVE_CONFIG_INVALID",
+        field="transform.mode",
+        hint=(
+            "Author the removal in ProcessIR as the terminal of a branch leg "
+            "(a leg whose terminal is cache_remove), and put the work that follows "
+            "in a later branch leg."
+        ),
+    )
     return None
 
 
@@ -2815,7 +2857,14 @@ def _process_call_catch_composition_error(
     dlq_mode: str, has_catch_exception: bool
 ) -> Optional[BuilderValidationError]:
     """#175: the ONE definition of which catch-leg compositions a TERMINAL
-    Process Call permits.
+    DLQ route permits — a Process Call, and since #184 amendment 3 an Add to Cache.
+
+    #184 amendment 3 extends it to the document-cache route. Add to Cache hands on
+    no documents, so an Exception after the DLQ cache write never throws. The
+    Exception step is skipped, the run reads COMPLETE, and the caught error is
+    swallowed (capture cap184-cache-put-successor, ledger row E1-184-01). That is
+    the same authored-intent case as the subprocess route, so it gets the same
+    answer: refuse it rather than drop the throw.
 
     An ``error_subprocess_ref`` DLQ route emits a process call, and a call ends
     its path — Boomi projects a call's outbound connection from the CALLED
@@ -2847,6 +2896,18 @@ def _process_call_catch_composition_error(
                 "past a call requires binding the called process's return-document "
                 "shapes, published as the gated capability "
                 "process_call_return_path_binding."
+            ),
+        )
+    if dlq_mode == "document_cache_ref" and has_catch_exception:
+        return BuilderValidationError(
+            "reliability.catch_exception cannot follow a document-cache DLQ route.",
+            error_code="PROCESS_EXCEPTION_CONFIG_INVALID",
+            field="reliability.catch_exception",
+            hint=(
+                "Add to Cache hands on no documents, so an Exception after the DLQ "
+                "cache write never runs: the run reads COMPLETE and the caught error "
+                "is swallowed. Drop catch_exception to stage the caught document, "
+                "or drop the document-cache DLQ route to throw the caught error."
             ),
         )
     return None
@@ -3588,25 +3649,40 @@ def _validate_flow_sequence_config(config: Dict[str, Any]) -> Optional[BuilderVa
     last_kind = (
         str(last_step.get("kind") or "").strip() if isinstance(last_step, dict) else ""
     )
-    if last_kind in ("cache_put", "doccacheload"):
-        # Companion review P1 (+ scoped re-review): the top-level sequence
-        # falls through to the target connector, which would receive an empty
-        # document stream after an Add to Cache (it consumes the documents it
-        # stores) — both the authored cache_put and the legacy doccacheload
-        # kind emit the same shape. Runs AFTER the per-step validators so the
-        # more specific body errors (e.g. a missing document_cache_id) win.
+    if last_kind in _LEGACY_ZERO_EMISSION_KINDS:
+        # The top-level sequence falls through to the target connector (the
+        # IMPLICIT continuation), so the blame is the final consuming cache step.
+        # Runs AFTER the per-step validators so the more specific body errors
+        # (e.g. a missing document_cache_id) win.
         return BuilderValidationError(
-            f"flow_sequence must not END in a {last_kind} — the top-level "
-            "target would receive an empty document stream (Add to Cache "
-            "consumes the documents).",
+            f"flow_sequence must not END in a {last_kind} — it hands on no "
+            "documents, so the top-level target would never run.",
             error_code="PROCESS_FLOW_SEQUENCE_CONFIG_INVALID",
             field=f"flow_sequence[{len(seq) - 1}].kind",
-            hint=(
-                "Follow the cache_put with cache_get/doccacheretrieve, or "
-                "stage inside a target-less branch leg instead."
-            ),
+            hint=_ZERO_EMISSION_FLOW_SEQUENCE_HINT,
         )
     return None
+
+
+def _withdrawn_flow_sequence_kind_error(kind: str, field: str) -> BuilderValidationError:
+    return BuilderValidationError(
+        f"{field}.kind {kind!r} is no longer a flow_sequence step: Remove from Cache "
+        "hands on no documents, so no flow_sequence position lets the steps around it run.",
+        error_code="PROCESS_FLOW_SEQUENCE_CONFIG_INVALID",
+        field=f"{field}.kind",
+        hint=_ZERO_EMISSION_FLOW_SEQUENCE_HINT,
+    )
+
+
+#: #184 amendment 3: the one remediation for a flow-sequence cache step with a
+#: successor. A read straight after a write is no longer a remedy: nothing arrives
+#: to trigger it.
+_ZERO_EMISSION_FLOW_SEQUENCE_HINT = (
+    "Add to Cache and Remove from Cache hand on no documents, so nothing may follow "
+    "them on their path. Stage with a cache_put as the terminal step of a "
+    "target-less branch leg, and read the cache in a later leg. A removal is "
+    "authored in ProcessIR as a branch-leg terminal."
+)
 
 
 def _validate_flow_sequence_steps(
@@ -3644,6 +3720,10 @@ def _validate_flow_sequence_steps(
     control_or_terminal = _FLOW_SEQUENCE_CONTROL_KINDS | _FLOW_SEQUENCE_TERMINAL_KINDS
     for i, step in enumerate(steps):
         kind = str((step.get("kind") if isinstance(step, dict) else "") or "").strip()
+        if kind in _WITHDRAWN_FLOW_SEQUENCE_KINDS:
+            # Before every position rule, so a withdrawn kind has ONE identity
+            # whatever surrounds it.
+            return _withdrawn_flow_sequence_kind_error(kind, f"{field}[{i}]")
         if kind in control_or_terminal:
             if i != last:
                 return BuilderValidationError(
@@ -3664,33 +3744,25 @@ def _validate_flow_sequence_steps(
                     field=f"{field}[{i}].kind",
                     hint="A branch leg is linear in v1; a nested decision is a follow-up.",
                 )
-        # Companion review P1 (#122 follow-up): Add to Cache CONSUMES the
-        # documents it stores, so a cache_put may only be followed (same
-        # path) by a stream-REPLACING retrieve — anything else would run on
-        # an empty document stream while validation reported success.
+        # #184 amendment 3: Add to Cache and Remove from Cache hand on NO
+        # documents, so ANY explicit successor on the same path is skipped while
+        # the run reads COMPLETE — a cache read included, since nothing arrives to
+        # trigger it. The blame is the successor, whose position is wrong.
         consuming_kind = (
             str(step.get("kind") or "").strip() if isinstance(step, dict) else ""
         )
-        if consuming_kind in ("cache_put", "doccacheload"):
-            if i < len(steps) - 1:
-                nxt = steps[i + 1]
-                next_kind = (
-                    str(nxt.get("kind") or "").strip() if isinstance(nxt, dict) else ""
-                )
-                if next_kind not in ("cache_get", "doccacheretrieve"):
-                    return BuilderValidationError(
-                        f"{field}[{i}] {consuming_kind} consumes the documents "
-                        f"it stores — the following step ({next_kind!r}) would "
-                        "receive an empty stream.",
-                        error_code="PROCESS_FLOW_SEQUENCE_CONFIG_INVALID",
-                        field=f"{field}[{i + 1}].kind",
-                        hint=(
-                            "Follow a cache_put with cache_get/doccacheretrieve "
-                            "(which refills the stream from the cache), or make "
-                            "the cache_put the terminal step of a target-less "
-                            "branch leg (the live staging pattern)."
-                        ),
-                    )
+        if consuming_kind in _LEGACY_ZERO_EMISSION_KINDS and i < len(steps) - 1:
+            nxt = steps[i + 1]
+            next_kind = (
+                str(nxt.get("kind") or "").strip() if isinstance(nxt, dict) else ""
+            )
+            return BuilderValidationError(
+                f"{field}[{i}] {consuming_kind} hands on no documents — the "
+                f"following step ({next_kind!r}) would never run.",
+                error_code="PROCESS_FLOW_SEQUENCE_CONFIG_INVALID",
+                field=f"{field}[{i + 1}].kind",
+                hint=_ZERO_EMISSION_FLOW_SEQUENCE_HINT,
+            )
         step_err = _validate_flow_sequence_step(step, f"{field}[{i}]")
         if step_err is not None:
             return step_err
@@ -3707,6 +3779,8 @@ def _validate_flow_sequence_step(step: Any, field: str) -> Optional[BuilderValid
             hint='Each step is {"kind": "...", ...}.',
         )
     kind = str(step.get("kind") or "").strip()
+    if kind in _WITHDRAWN_FLOW_SEQUENCE_KINDS:
+        return _withdrawn_flow_sequence_kind_error(kind, field)
     if kind not in _FLOW_SEQUENCE_ALLOWED_KINDS:
         return BuilderValidationError(
             f"{field}.kind {kind!r} is not supported.",
@@ -4070,23 +4144,42 @@ def _validate_sequence_decision_step(
         and isinstance(true_steps[-1], dict)
         else ""
     )
-    if true_last_kind in ("cache_put", "doccacheload"):
-        # Companion review P1: the TRUE leg falls through to the top-level
-        # target, which would starve after an Add to Cache. (The FALSE leg
-        # falls through to a Stop, so a trailing cache write is harmless there.)
+    if true_last_kind in _LEGACY_ZERO_EMISSION_KINDS:
+        # The TRUE leg falls through to the top-level target (an implicit
+        # continuation), which never runs after a step that hands on nothing.
         return BuilderValidationError(
-            f"{field}.true_steps must not end in a {true_last_kind} — the leg "
-            "falls through to the target, which would receive an empty stream.",
+            f"{field}.true_steps must not end in a {true_last_kind} — it hands on "
+            "no documents, so the target the leg falls through to would never run.",
             error_code="PROCESS_FLOW_SEQUENCE_CONFIG_INVALID",
             field=f"{field}.true_steps[{len(true_steps) - 1}].kind",
-            hint="Follow it with cache_get, or stage in a target-less branch leg.",
+            hint=_ZERO_EMISSION_FLOW_SEQUENCE_HINT,
         )
-    return _validate_flow_sequence_steps(
+    false_err = _validate_flow_sequence_steps(
         step.get("false_steps"),
         f"{field}.false_steps",
         allowed_terminal_controls=frozenset({"branch"}) | _FLOW_SEQUENCE_TERMINAL_KINDS,
         allow_empty=False,
     )
+    if false_err is not None:
+        return false_err
+    false_steps = step.get("false_steps")
+    false_last_kind = (
+        str(false_steps[-1].get("kind") or "").strip()
+        if isinstance(false_steps, list) and false_steps and isinstance(false_steps[-1], dict)
+        else ""
+    )
+    if false_last_kind in _LEGACY_ZERO_EMISSION_KINDS:
+        # #184 amendment 3. The FALSE leg falls through to a Stop. That was once
+        # called harmless after a cache write, but the Stop never runs either: it
+        # is a dead successor on the canvas, the shape this slice removes.
+        return BuilderValidationError(
+            f"{field}.false_steps must not end in a {false_last_kind} — it hands on "
+            "no documents, so the stop the leg falls through to would never run.",
+            error_code="PROCESS_FLOW_SEQUENCE_CONFIG_INVALID",
+            field=f"{field}.false_steps[{len(false_steps) - 1}].kind",
+            hint=_ZERO_EMISSION_FLOW_SEQUENCE_HINT,
+        )
+    return None
 
 
 def _validate_sequence_branch_step(
@@ -4139,21 +4232,25 @@ def _validate_sequence_branch_step(
             and isinstance(leg_steps_list[-1], dict)
             else ""
         )
+        if leg_last_kind in _WITHDRAWN_FLOW_SEQUENCE_KINDS:
+            # Refused by name at the step, whether or not a target follows.
+            return _withdrawn_flow_sequence_kind_error(
+                leg_last_kind, f"{leg_field}.steps[{len(leg_steps_list) - 1}]"
+            )
         if leg_last_kind in ("cache_put", "doccacheload"):
-            # Companion review P1: a staging leg ends AT the Add to Cache
-            # (the live-captured terminal pattern) — a leg target after it
-            # would receive an empty stream, so it must be omitted. Applies
-            # to the legacy doccacheload kind too (same emitted shape).
+            # A staging leg ends AT the Add to Cache (the live-captured terminal
+            # pattern) — a leg target after it would never run, so it must be
+            # omitted. Applies to the legacy doccacheload kind too (same shape).
             if leg_target is not None:
                 return BuilderValidationError(
                     f"{leg_field}.target must be omitted when the leg ends in "
-                    f"a {leg_last_kind} — Add to Cache consumes the documents, "
-                    "so a leg target after it would receive an empty stream.",
+                    f"a {leg_last_kind} — Add to Cache hands on no documents, "
+                    "so a leg target after it would never run.",
                     error_code="PROCESS_FLOW_SEQUENCE_CONFIG_INVALID",
                     field=f"{leg_field}.target",
                     hint=(
                         "Drop the target (the staging leg terminates at the "
-                        "cache write), or follow the cache_put with cache_get."
+                        "cache write), and read the cache in a later leg."
                     ),
                 )
         else:
@@ -4281,10 +4378,11 @@ def _emit_try_catch_shapes(
 
     Without ``catch_notify`` the catch leg is a single terminal
     doccacheload|processcall (byte-for-byte the issue #51/#88 output). With
-    ``catch_notify`` (issue #89) the catch leg becomes
-    ``notify -> dlq route -> catch stop``: the catcherrors Catch dragpoint
-    targets the Notify, the Notify routes to the DLQ shape, and the DLQ shape
-    routes to a catch-row Stop. ``retry_count`` is a validated 0..5 value; for
+    ``catch_notify`` (issue #89) the catch leg becomes ``notify -> dlq route``:
+    the catcherrors Catch dragpoint targets the Notify and the Notify routes to
+    the DLQ shape, which ends the leg. Neither a Process Call (#175) nor an Add to
+    Cache (#184 amendment 3) is followed by a catch-row Stop: the first ends its
+    path, and the second hands on no documents. ``retry_count`` is a validated 0..5 value; for
     counts > 0 the platform applies its built-in wait schedule before each
     retry, then routes the failed documents down the catch leg on exhaust
     (issue #88).
@@ -4426,9 +4524,16 @@ def _emit_catch_leg(
     #    terminal, and silently dropping the Exception would lose the intent, so
     #    the composition is refused instead.
     #
-    # The bare DLQ-only leg and every `document_cache_ref` composition are
-    # untouched: a Document Cache load legitimately continues downstream.
+    # #184 amendment 3 applies the same distinction to the `document_cache_ref`
+    # route, which the rule used to exclude on the premise that a Document Cache
+    # load continues downstream. It does not: Add to Cache hands on no documents.
+    # The notify path's synthetic catch-row Stop after the load is therefore not
+    # emitted, exactly as after a call, and an authored `catch_exception` is
+    # refused by the shared composition check. No index is reserved for the
+    # dropped Stop (ledger C16): later shapes number on, so this builder and the
+    # canonical compiler still emit the same bytes for the same graph.
     dlq_is_process_call = dlq_present and mode == "error_subprocess_ref"
+    dlq_is_cache_sink = dlq_present and mode == "document_cache_ref"
     # EMIT-TIME half of the double gate, asking the SAME function the plan-time
     # validator asks — the two cannot drift into disagreeing about which
     # compositions are legal.
@@ -4440,7 +4545,7 @@ def _emit_catch_leg(
     terminal_kind: Optional[str] = None
     if exception_present:
         terminal_kind = "exception"
-    elif notify_present and not dlq_is_process_call:
+    elif notify_present and not dlq_is_process_call and not dlq_is_cache_sink:
         terminal_kind = "stop"
     terminal_index = terminal_name = None
     if terminal_kind is not None:
@@ -4468,8 +4573,9 @@ def _emit_catch_leg(
         parts.append(_emit_notify(notify_name, catch_notify, notify_next, notify_index))
     if dlq_present:
         # The DLQ route points at the trailing terminal (Exception/Stop) when one
-        # exists, else it is itself terminal (next_name=None).
-        dlq_next_name = terminal_name
+        # exists, else it is itself terminal (next_name=None). A cache sink is
+        # ALWAYS terminal: it hands on no documents.
+        dlq_next_name = None if dlq_is_cache_sink else terminal_name
         if mode == "document_cache_ref":
             cache_id = str(dlq.get("document_cache_id") or "").strip()
             if not cache_id:

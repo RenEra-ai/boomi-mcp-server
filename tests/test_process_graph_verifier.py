@@ -14,10 +14,27 @@ from pathlib import Path
 
 import pytest
 
+from boomi_mcp.categories.components.builders.connector_builder import BuilderValidationError
 from boomi_mcp.categories.components.builders.process_flow_builder import ProcessFlowBuilder
 from boomi_mcp.categories.components.process_graph_verifier import verify_process_graph
 
 _FIXTURES = Path(__file__).parent / "fixtures" / "process_graph"
+_GOLDEN_XML = Path(__file__).parent / "fixtures" / "golden_xml"
+
+
+def _outbound_counts(process_xml: str, shape_type: str):
+    """The number of dragpoints on each shape of ``shape_type``, in document order."""
+    import xml.etree.ElementTree as ET
+
+    def local(tag):
+        return tag.rsplit("}", 1)[-1]
+
+    counts = []
+    for shape in ET.fromstring(process_xml).iter():
+        if local(shape.tag) == "shape" and shape.get("shapetype") == shape_type:
+            dragpoints = [child for child in shape if local(child.tag) == "dragpoints"]
+            counts.append(sum(len(list(d)) for d in dragpoints))
+    return counts
 
 
 def _branch_process_xml(num_extra_legs: int = 1) -> str:
@@ -186,10 +203,10 @@ def test_doccacheretrieve_zero_outbound_is_dead_end():
     assert dead[0]["shape"] == "shape2"
 
 
-def _doccacheremove_process_xml() -> str:
-    """Build a real linear Document Cache Remove process via ProcessFlowBuilder
-    (issue #110 M10.6): start -> source -> doccacheremove -> target -> stop."""
-    cfg = {
+def _doccacheremove_process_config() -> dict:
+    """The linear Document Cache Remove config issue #110 M10.6 built:
+    start -> source -> doccacheremove -> target -> stop."""
+    return {
         "process_kind": "database_to_api_sync",
         "source": {"connector_type": "database", "action_type": "Get",
                    "connection_id": "11111111-1111-1111-1111-111111111111",
@@ -201,26 +218,77 @@ def _doccacheremove_process_xml() -> str:
                    "connection_id": "33333333-3333-3333-3333-333333333333",
                    "operation_id": "44444444-4444-4444-4444-444444444444"},
     }
-    return ProcessFlowBuilder.build(cfg, name="Cache Remove Sync")
+
+
+#: The cache sinks' configurations, for hand-written graphs.
+_CACHE_SINK_CONFIGURATIONS = {
+    "doccacheremove": (
+        '<doccacheremove docCache="CACHE-1" removeAllDocuments="true">'
+        "<cacheKeyValues/></doccacheremove>"
+    ),
+    "doccacheload": '<doccacheload docCache="CACHE-1"/>',
+}
 
 
 def test_doccacheremove_wired_is_clean():
-    """Issue #110 M10.6: a wired Document Cache Remove (a forward edge to the next
-    shape) is a normal linear NON-terminal step and must verify fully clean — it is
-    not classified terminal/branching, so its forward edge passes (mirrors the #109
-    retrieve verifier behavior; the issue locks the verifier as a linear cache op)."""
-    result = verify_process_graph(_doccacheremove_process_xml())
-    assert result["errors"] == [], result["errors"]
-    assert result["warnings"] == [], result["warnings"]
-    # start, source connectoraction, doccacheremove, target connectoraction, stop
-    assert result["shapes_checked"] == 5
+    """#184 amendment 3 reverses #110 M10.6: a WIRED Document Cache Remove is
+    malformed. The name is kept for its node id.
+
+    #110 locked the remove as a linear non-terminal cache op with one forward
+    dragpoint. Measured, an all-document Remove from Cache hands on no documents:
+    the platform skips whatever is wired after it and the run still reads COMPLETE
+    (captures cap184-cache-remove-read, cap184-prefix-predecessors
+    xr-remove-successor). So the builder now refuses the linear config at plan and
+    build time, and the verifier reports the forward edge the #110 builder emitted
+    as TERMINAL_SHAPE_HAS_OUTBOUND on the remove itself. Add to Cache is the same
+    zero-emission sink, so a wired doccacheload is checked on the same graph.
+    """
+    cfg = _doccacheremove_process_config()
+    err = ProcessFlowBuilder.validate_config(cfg)
+    assert err is not None
+    assert (err.error_code, err.field) == (
+        "PROCESS_DOCCACHE_REMOVE_CONFIG_INVALID", "transform.mode",
+    ), err
+    with pytest.raises(BuilderValidationError, match="hands on no documents"):
+        ProcessFlowBuilder.build(cfg, name="Cache Remove Sync")
+
+    for shape_type, configuration in _CACHE_SINK_CONFIGURATIONS.items():
+        # the graph the #110 builder emitted: start -> source -> sink -> target -> stop
+        xml = (
+            '<process xmlns=""><shapes>'
+            '<shape image="start" name="shape1" shapetype="start" x="1" y="1">'
+            '<configuration><noaction/></configuration>'
+            '<dragpoints><dragpoint name="d1" toShape="shape2" x="2" y="2"/></dragpoints></shape>'
+            '<shape image="connectoraction_icon" name="shape2" shapetype="connectoraction" x="2" y="1">'
+            '<configuration/>'
+            '<dragpoints><dragpoint name="d2" toShape="shape3" x="3" y="2"/></dragpoints></shape>'
+            f'<shape image="{shape_type}_icon" name="shape3" shapetype="{shape_type}" x="3" y="1">'
+            f'<configuration>{configuration}</configuration>'
+            '<dragpoints><dragpoint name="d3" toShape="shape4" x="4" y="2"/></dragpoints></shape>'
+            '<shape image="connectoraction_icon" name="shape4" shapetype="connectoraction" x="4" y="1">'
+            '<configuration/>'
+            '<dragpoints><dragpoint name="d4" toShape="shape5" x="5" y="2"/></dragpoints></shape>'
+            '<shape image="stop_icon" name="shape5" shapetype="stop" x="5" y="1">'
+            '<configuration><stop continue="true"/></configuration><dragpoints/></shape>'
+            "</shapes></process>"
+        )
+        result = verify_process_graph(xml)
+        bad = [e for e in result["errors"] if e["code"] == "TERMINAL_SHAPE_HAS_OUTBOUND"]
+        assert [(e["shape"], e["shape_type"]) for e in bad] == [("shape3", shape_type)], result["errors"]
+        assert result["shapes_checked"] == 5
 
 
 def test_doccacheremove_zero_outbound_is_dead_end():
-    """Issue #110 M10.6: a Document Cache Remove with no outbound edge is a
-    NON_TERMINAL_SHAPE_DEAD_END — per #110 the builder shape is a linear
-    non-terminal (NOT classified terminal like doccacheload/returndocuments/
-    exception), so an unwired remove must be flagged."""
+    """#184 amendment 3 reverses #110 M10.6 here too: a Document Cache Remove with
+    NO outbound edge is a TERMINAL sink and verifies clean, with no
+    NON_TERMINAL_SHAPE_DEAD_END. The name is kept for its node id.
+
+    Remove from Cache hands on no documents, so ending the path on it (an empty
+    <dragpoints/>, the platform-stored terminal form) is correct, exactly as for
+    doccacheload. Checked on the minimal hand graph and on the frozen replacement
+    golden `issue184_cache_remove_terminal_branch.xml` (golden-000082), whose second
+    branch leg ends on the remove.
+    """
     xml = (
         '<process xmlns=""><shapes>'
         '<shape image="start" name="shape1" shapetype="start" x="1" y="1">'
@@ -232,10 +300,16 @@ def test_doccacheremove_zero_outbound_is_dead_end():
         "</shapes></process>"
     )
     result = verify_process_graph(xml)
-    codes = _codes(result["errors"])
-    assert "NON_TERMINAL_SHAPE_DEAD_END" in codes
-    dead = [e for e in result["errors"] if e["code"] == "NON_TERMINAL_SHAPE_DEAD_END"]
-    assert dead[0]["shape"] == "shape2"
+    assert result["errors"] == [], result["errors"]
+    assert result["warnings"] == [], result["warnings"]
+    assert result["shapes_checked"] == 2
+
+    golden = (_GOLDEN_XML / "issue184_cache_remove_terminal_branch.xml").read_text(encoding="utf-8")
+    # premise: the golden really ends a path on an unwired remove
+    assert _outbound_counts(golden, "doccacheremove") == [0]
+    result = verify_process_graph(golden)
+    assert result["errors"] == [], result["errors"]
+    assert result["warnings"] == [], result["warnings"]
 
 
 def _flow_control_process_xml() -> str:
@@ -735,16 +809,47 @@ def test_builder_catch_exception_is_clean():
 
 
 def test_builder_catch_exception_with_dlq_and_notify_is_clean():
+    """#184 amendment 3: an Exception after a document-cache DLQ route is REFUSED.
+    The name is kept for its node id.
+
+    Add to Cache hands on no documents, so an Exception wired after the DLQ cache
+    write never throws: the run reads COMPLETE and the caught error is swallowed
+    (capture cap184-cache-put-successor). The builder refuses the composition at
+    plan time and at build time. Each legal half still verifies clean:
+    notify + document-cache DLQ, whose catch leg now ENDS on the cache write with no
+    synthetic Stop after it, and notify + exception without the cache route.
+    """
     from boomi_mcp.categories.components.builders import ProcessFlowBuilder
-    xml = ProcessFlowBuilder.build(
-        _exception_process_config(
+
+    def config(dlq=True, exception=True):
+        cfg = _exception_process_config(
             {"message_template": "halt {1}", "parameter_source": "current_document"},
-            dlq={"mode": "document_cache_ref", "document_cache_id": "CACHE-1"},
+            dlq={"mode": "document_cache_ref", "document_cache_id": "CACHE-1"} if dlq else None,
             catch_notify={"level": "ERROR", "message_template": "f: meta.base.catcherrorsmessage"},
-        ),
-        name="P",
-    )
+        )
+        if not exception:
+            del cfg["reliability"]["catch_exception"]
+        return cfg
+
+    err = ProcessFlowBuilder.validate_config(config())
+    assert err is not None
+    assert (err.error_code, err.field) == (
+        "PROCESS_EXCEPTION_CONFIG_INVALID", "reliability.catch_exception",
+    ), err
+    with pytest.raises(BuilderValidationError):
+        ProcessFlowBuilder.build(config(), name="P")
+
+    # legal half 1: notify + document-cache DLQ, the catch leg ending on the load
+    assert ProcessFlowBuilder.validate_config(config(exception=False)) is None
+    xml = ProcessFlowBuilder.build(config(exception=False), name="P")
+    assert _outbound_counts(xml, "doccacheload") == [0]
     result = verify_process_graph(xml)
+    assert result["errors"] == []
+    assert "CONTROL_BRANCH_BARE_STOP" not in _codes(result["warnings"])
+
+    # legal half 2: notify + exception, no document-cache route
+    assert ProcessFlowBuilder.validate_config(config(dlq=False)) is None
+    result = verify_process_graph(ProcessFlowBuilder.build(config(dlq=False), name="P"))
     assert result["errors"] == []
     assert "CONTROL_BRANCH_BARE_STOP" not in _codes(result["warnings"])
 
@@ -917,14 +1022,61 @@ def test_composed_decision_dataprocess_branch_map_verifies_clean():
 
 
 def test_composed_cache_load_retrieve_remove_verifies_clean():
-    cfg = _fs_base(
+    """#184 amendment 3: the LINEAR load -> retrieve -> remove sequence is REFUSED.
+    The name is kept for its node id.
+
+    Add to Cache hands on no documents, so the retrieve wired after it never runs:
+    a cache read needs an arriving document. The builder blames that first dead
+    successor. The same cache operations still verify clean in their legal
+    ordered-leg form:
+    - the legacy surface composes the staging half (a target-less leg ending on
+      the load, then a later leg reading);
+    - the frozen replacement golden `issue184_cache_stage_read_remove.xml`
+      (golden-000083) carries all three: stage in leg 1, read in leg 2, remove in
+      leg 3.
+    """
+    linear = _fs_base(
         [
             {"kind": "doccacheload", "document_cache_id": "C"},
             {"kind": "doccacheretrieve", "document_cache_id": "C"},
             {"kind": "doccacheremove", "document_cache_id": "C"},
         ]
     )
-    result = verify_process_graph(ProcessFlowBuilder.build(cfg, name="Cache CRUD"))
+    err = ProcessFlowBuilder.validate_config(linear)
+    assert err is not None
+    assert (err.error_code, err.field) == (
+        "PROCESS_FLOW_SEQUENCE_CONFIG_INVALID", "flow_sequence[1].kind",
+    ), err
+    with pytest.raises(BuilderValidationError):
+        ProcessFlowBuilder.build(linear, name="Cache CRUD")
+
+    staged = _fs_base(
+        [
+            {
+                "kind": "branch",
+                "legs": [
+                    {"steps": [{"kind": "doccacheload", "document_cache_id": "C"}]},
+                    {
+                        "steps": [{"kind": "doccacheretrieve", "document_cache_id": "C"}],
+                        "target": _fs_rest("A", "ca", "oa"),
+                    },
+                ],
+            }
+        ]
+    )
+    assert ProcessFlowBuilder.validate_config(staged) is None
+    xml = ProcessFlowBuilder.build(staged, name="Cache CRUD")
+    assert _outbound_counts(xml, "doccacheload") == [0]
+    result = verify_process_graph(xml)
+    assert result["errors"] == []
+    assert result["warnings"] == []
+
+    golden = (_GOLDEN_XML / "issue184_cache_stage_read_remove.xml").read_text(encoding="utf-8")
+    # premise: both sinks end their legs unwired, and the read continues
+    assert _outbound_counts(golden, "doccacheload") == [0]
+    assert _outbound_counts(golden, "doccacheremove") == [0]
+    assert _outbound_counts(golden, "doccacheretrieve") == [1]
+    result = verify_process_graph(golden)
     assert result["errors"] == []
     assert result["warnings"] == []
 

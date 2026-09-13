@@ -23,6 +23,7 @@ if _src not in sys.path:
     sys.path.insert(0, _src)
 
 from boomi_mcp.categories.components.builders.process_flow_builder import (
+    BuilderValidationError,
     ProcessFlowBuilder,
     WrapperSubprocessBuilder,
 )
@@ -114,6 +115,138 @@ def test_serialized_ir_carries_no_connector_metadata(name):
 
 
 # ---------------------------------------------------------------------------
+# #184 amendment 3: the withdrawn LINEAR cache chains, kept as refusal witnesses
+# ---------------------------------------------------------------------------
+
+#: The three compat cases whose pre-amendment content chained a cache write (and,
+#: in two of them, a removal) linearly. Each case NAME stays in the fixture with
+#: legal ordered-leg content; the withdrawn chain is preserved here, pinned to the
+#: pointer that refuses it — the treatment the fixture already gives the withdrawn
+#: multi-call wrapper. Value: (the pre-amendment flow_sequence, index of the step
+#: the builder blames, i.e. the first cache write's successor).
+_WITHDRAWN_LINEAR_CACHE_CHAINS = {
+    "cache_load_retrieve_remove": (
+        [
+            {"kind": "doccacheload", "document_cache_id": "$ref:cache"},
+            {"kind": "doccacheretrieve", "document_cache_id": "$ref:cache",
+             "empty_cache_behavior": "stopprocess", "load_all_documents": True},
+            {"kind": "doccacheremove", "document_cache_id": "$ref:cache",
+             "remove_all_documents": True},
+        ],
+        1,
+    ),
+    "cache_put_get": (
+        [
+            {"kind": "cache_put", "document_cache_id": "$ref:cache"},
+            {"kind": "cache_get", "document_cache_id": "$ref:cache",
+             "empty_cache_behavior": "stopprocess"},
+        ],
+        1,
+    ),
+    "full_vocabulary_linear": (
+        [
+            {"kind": "flow_control", "for_each_count": 10, "label": "batch"},
+            {"kind": "message", "message_text": "sentinel-message"},
+            {"kind": "map_ref", "map_ref": "$ref:map"},
+            {"kind": "dataprocess", "steps": [
+                {"operation": "custom_scripting", "script": "return 1"},
+                {"operation": "split_documents", "profile_type": "json",
+                 "profile_id": "$ref:profile_json", "link_element_key": "lek",
+                 "link_element_name": "len"},
+                {"operation": "combine_documents", "profile_type": "xml",
+                 "profile_id": "$ref:profile_xml", "link_element_key": "lek2",
+                 "link_element_name": "len2", "combine_into_link_element_key": "parent"},
+            ]},
+            {"kind": "set_ddp", "name": "DDP_SENTINEL", "source_values": [
+                {"value_type": "static", "value": "sv"},
+                {"value_type": "current"},
+                {"value_type": "profile", "element_id": "el", "element_name": "eln",
+                 "profile_id": "$ref:profile_props", "profile_type": "profile.json"},
+                {"value_type": "ddp", "property_name": "OTHER_DDP", "default_value": "dv"},
+            ]},
+            {"kind": "set_dpp", "name": "DPP_SENTINEL",
+             "source_values": [{"value_type": "dpp", "property_name": "OTHER_DPP"}],
+             "persist": True},
+            {"kind": "doccacheload", "document_cache_id": "$ref:cache"},
+            {"kind": "doccacheretrieve", "document_cache_id": "$ref:cache"},
+            {"kind": "doccacheremove", "document_cache_id": "$ref:cache"},
+            {"kind": "cache_put", "document_cache_id": "$ref:cache", "label": "stage-write"},
+            {"kind": "cache_get", "document_cache_id": "$ref:cache", "external_writer": True},
+        ],
+        7,
+    ),
+}
+
+
+@pytest.mark.parametrize(
+    "name", sorted(_WITHDRAWN_LINEAR_CACHE_CHAINS), ids=sorted(_WITHDRAWN_LINEAR_CACHE_CHAINS)
+)
+def test_withdrawn_linear_cache_chain_is_refused_at_the_successor(name):
+    """Add to Cache and Remove from Cache hand on no documents (measured): a step
+    wired after one never runs while the run still reads COMPLETE — a cache read
+    included, since nothing arrives to trigger it.
+
+    So each withdrawn chain is refused on all three surfaces a compat case feeds:
+    the builder's validator blames the first write's SUCCESSOR at its ``.kind``,
+    the build path refuses the same way before emitting anything, and the codec
+    cannot represent the chain either — the IR refuses the write's authored
+    successor at the write's own ``cache_ref`` (the source occupies
+    ``/body/steps/0``, so ``flow_sequence[i]`` is ``/body/steps/i+1``).
+    """
+    steps, successor = _WITHDRAWN_LINEAR_CACHE_CHAINS[name]
+    # the blamed step really is the successor of a cache WRITE
+    assert steps[successor - 1]["kind"] in ("doccacheload", "cache_put")
+    config = _linear_config(*copy.deepcopy(steps))
+
+    err = ProcessFlowBuilder.validate_config(
+        copy.deepcopy(config), depends_on=_SHARED["depends_on"]
+    )
+    assert err is not None
+    assert (err.error_code, err.field) == (
+        "PROCESS_FLOW_SEQUENCE_CONFIG_INVALID",
+        f"flow_sequence[{successor}].kind",
+    )
+
+    with pytest.raises(BuilderValidationError) as build_exc:
+        ProcessFlowBuilder.build(copy.deepcopy(config), name="P", folder_name="F")
+    assert (build_exc.value.error_code, build_exc.value.field) == (
+        "PROCESS_FLOW_SEQUENCE_CONFIG_INVALID",
+        f"flow_sequence[{successor}].kind",
+    )
+
+    with pytest.raises(ProcessIRValidationError) as exc_info:
+        legacy_flow_sequence_to_ir(copy.deepcopy(config))
+    assert [(d.code, d.path) for d in exc_info.value.diagnostics] == [
+        ("PROCESS_IR_SCHEMA_INVALID_CARDINALITY", f"/body/steps/{successor}/cache_ref")
+    ]
+
+
+def test_a_removal_has_no_legal_flow_sequence_placement():
+    """Why ``cache_load_retrieve_remove`` could keep its load and retrieve in the
+    ordered-leg form but not its removal: Remove from Cache hands on no documents,
+    and the flow_sequence surface authors no terminal removal. A leg ENDING in a
+    doccacheremove is refused whether or not it carries a target (the target is a
+    successor that never runs; without one the removal itself is blamed), so the
+    removal survives only in ProcessIR, as a branch-leg terminal (golden 000082).
+
+    Ledger C18: because no position admits it, ``doccacheremove`` was withdrawn
+    from the flow_sequence vocabulary and is refused BY NAME at the step itself,
+    one identity whether or not a target follows."""
+    remove = {"kind": "doccacheremove", "document_cache_id": "$ref:cache",
+              "remove_all_documents": True}
+    staging = {"steps": [{"kind": "doccacheload", "document_cache_id": "$ref:cache"}]}
+    for leg, field in (
+        ({"steps": [remove], "target": copy.deepcopy(_SHARED["target_b"])},
+         "flow_sequence[0].legs[1].steps[0].kind"),
+        ({"steps": [remove]}, "flow_sequence[0].legs[1].steps[0].kind"),
+    ):
+        config = _linear_config({"kind": "branch", "legs": [copy.deepcopy(staging), leg]})
+        err = ProcessFlowBuilder.validate_config(config, depends_on=_SHARED["depends_on"])
+        assert err is not None, field
+        assert (err.error_code, err.field) == ("PROCESS_FLOW_SEQUENCE_CONFIG_INVALID", field)
+
+
+# ---------------------------------------------------------------------------
 # Alias + default normalization
 # ---------------------------------------------------------------------------
 
@@ -127,18 +260,44 @@ def _linear_config(*steps):
     }
 
 
+def _staged_write_then_read(write_kind):
+    """A cache write staged in an earlier leg and read in a later one.
+
+    #184 amendment 3: Add to Cache hands on no documents (measured), so a read
+    wired straight after the write never runs and the builder refuses that linear
+    pair at the read's ``.kind``. The legal form stages the write as the terminal
+    of a target-less branch leg and reads in the later leg — legs run in authored
+    order and execution cache state accumulates across them.
+    """
+    return _linear_config(
+        {
+            "kind": "branch",
+            "legs": [
+                {"steps": [{"kind": write_kind, "document_cache_id": "$ref:cache"}]},
+                {
+                    "steps": [{"kind": "doccacheretrieve", "document_cache_id": "$ref:cache"}],
+                    "target": copy.deepcopy(_SHARED["target_b"]),
+                },
+            ],
+        }
+    )
+
+
 def test_doccacheload_alias_normalizes_to_cache_put():
-    legacy_spelling = _linear_config(
-        {"kind": "doccacheload", "document_cache_id": "$ref:cache"},
-        {"kind": "doccacheretrieve", "document_cache_id": "$ref:cache"},
-    )
-    authored_spelling = _linear_config(
-        {"kind": "cache_put", "document_cache_id": "$ref:cache"},
-        {"kind": "doccacheretrieve", "document_cache_id": "$ref:cache"},
-    )
+    legacy_spelling = _staged_write_then_read("doccacheload")
+    authored_spelling = _staged_write_then_read("cache_put")
+    # Both spellings are builder-legal in this form, so the alias is compared on
+    # configs the runtime actually accepts.
+    for config in (legacy_spelling, authored_spelling):
+        assert ProcessFlowBuilder.validate_config(
+            copy.deepcopy(config), depends_on=_SHARED["depends_on"]
+        ) is None
     assert canonical_process_ir_json(
         legacy_flow_sequence_to_ir(legacy_spelling)
     ) == canonical_process_ir_json(legacy_flow_sequence_to_ir(authored_spelling))
+    # ...and the legacy spelling really lands on the staging leg's cache_put terminal.
+    branch = legacy_flow_sequence_to_ir(legacy_spelling).body.steps[-1]
+    assert branch.legs[0].terminal.kind == "cache_put"
 
 
 def test_dataprocess_alias_and_defaults_normalize():
@@ -517,19 +676,30 @@ def test_process_call_field_semantics_enforced(call):
 def test_builder_accepted_normalizations_ride_through():
     # external_writer=null is treated as absent by the builder; a padded
     # comparison is builder-accepted and emitted stripped — both normalize.
+    #
+    # #184 amendment 3: the cache_get used to follow a linear cache_put, which is
+    # refused now (Add to Cache hands on no documents, so nothing arrives to
+    # trigger the read). The put/get scaffolding is in the legal ordered-leg form —
+    # a staging leg ending at the put, a later leg that reads — carried as the
+    # decision's true-arm terminal so the padded decision stays the root's last step.
     config = _linear_config(
-        {"kind": "cache_put", "document_cache_id": "$ref:cache"},
-        {"kind": "cache_get", "document_cache_id": "$ref:cache", "external_writer": None},
         {"kind": "decision", "comparison": " equals ",
          "left": {"value_type": "static", "static_value": ""},
          "right": {"value_type": "static", "static_value": ""},
-         "true_steps": [],
+         "true_steps": [{"kind": "branch", "legs": [
+             {"steps": [{"kind": "cache_put", "document_cache_id": "$ref:cache"}]},
+             {"steps": [{"kind": "cache_get", "document_cache_id": "$ref:cache", "external_writer": None}],
+              "target": copy.deepcopy(_SHARED["target_b"])},
+         ]}],
          "false_steps": [{"kind": "message", "message_text": "f"}]},
     )
     ir = legacy_flow_sequence_to_ir(config)
-    cache_get = next(s for s in ir.body.steps if s.kind == "cache_get")
+    decision = ir.body.steps[-1]
+    cache_get = next(
+        s for leg in decision.true_arm.terminal.legs for s in leg.steps if s.kind == "cache_get"
+    )
     assert cache_get.external_writer is False
-    assert ir.body.steps[-1].comparison == "equals"
+    assert decision.comparison == "equals"
 
 
 def test_context_deep_immutability_and_fallback_key_hygiene():

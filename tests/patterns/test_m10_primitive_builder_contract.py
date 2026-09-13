@@ -12,6 +12,11 @@ into ``validate_config`` so the ``$ref`` reachability path is exercised too.
 
 No deferred shape behavior is introduced — this is coverage only (issue #116
 ratifies the deferrals; see ``.codex/plans/issue-116.md``).
+
+#184 amendment 3: the builder now REFUSES one fragment, the document-cache remove.
+Remove from Cache hands on no documents, so the target its inline transform wires
+after the removal never runs. For that case the parity claim becomes: the primitive
+documents the refusal, and the builder performs it.
 """
 
 from __future__ import annotations
@@ -154,24 +159,44 @@ _CASES = [
     ),
 ]
 
+#: #184 amendment 3: the cases whose fragment the builder REFUSES, with the
+#: ``(error_code, field)`` it refuses them at. The document-cache remove fragment is
+#: an inline transform that wires the flow's target after the removal. Remove from
+#: Cache hands on no documents, so that target never runs (captures
+#: cap184-prefix-predecessors xr-remove-successor, cap184-cache-remove-read). For a
+#: refused case, parity between the layers means the primitive DOCUMENTS the refusal
+#: and the builder performs it.
+_REFUSED = {
+    "document_cache_remove": ("PROCESS_DOCCACHE_REMOVE_CONFIG_INVALID", "transform.mode"),
+}
+
 
 @pytest.mark.parametrize(
-    "primitive,params,expected_depends_on",
-    [(c[1], c[2], c[3]) for c in _CASES],
+    "primitive,params,expected_depends_on,expected_refusal",
+    [(c[1], c[2], c[3], _REFUSED.get(c[0])) for c in _CASES],
     ids=[c[0] for c in _CASES],
 )
 def test_m10_primitive_fragments_pass_process_flow_builder_validation(
-    primitive, params, expected_depends_on
+    primitive, params, expected_depends_on, expected_refusal
 ):
     """Every M10 primitive's validated fragment must merge into a base config
     that ProcessFlowBuilder.validate_config accepts, declaring exactly the $ref
-    dependencies it introduces."""
+    dependencies it introduces, unless both layers agree it is refused.
+
+    #184 amendment 3: the document-cache remove fragment is refused. The layers
+    still may not diverge: the primitive's metadata states the refusal, and the
+    builder refuses with the named code at the named field. The dependencies are
+    declared, so the refusal cannot be a missing $ref."""
+    assert set(_REFUSED) <= {c[0] for c in _CASES}, sorted(set(_REFUSED))
     fragment = _fragment(primitive, params)
 
     assert fragment["depends_on"] == expected_depends_on
 
     cfg = {**_base_process_config(), **fragment["process_config"]}
-    assert (
-        ProcessFlowBuilder.validate_config(cfg, depends_on=fragment["depends_on"])
-        is None
-    )
+    err = ProcessFlowBuilder.validate_config(cfg, depends_on=fragment["depends_on"])
+    if expected_refusal is None:
+        assert err is None
+        return
+    assert err is not None
+    assert (err.error_code, err.field) == expected_refusal
+    assert "refused" in primitive.metadata.description

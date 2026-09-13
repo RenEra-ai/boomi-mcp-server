@@ -246,8 +246,9 @@ def render_dragpoints(transitions: Tuple[RenderTransition, ...]) -> str:
 
 
 def _dragpoints_block(transitions: Tuple[RenderTransition, ...]) -> str:
-    """The conditional block form used by doccacheload / processcall: an empty
-    ``<dragpoints/>`` when terminal (no transitions), else the wrapped children.
+    """The conditional block form used by doccacheload / doccacheremove /
+    processcall: an empty ``<dragpoints/>`` when terminal (no transitions), else
+    the wrapped children.
     """
     if not transitions:
         return "<dragpoints/>"
@@ -603,7 +604,12 @@ def render_doccacheretrieve(
 def render_doccacheremove(
     ctx: ShapeRenderContext, *, userlabel: str, doc_cache_id: str
 ) -> str:
-    dragpoints = render_dragpoints(ctx.transitions)
+    """All-document Remove from Cache. It hands on no documents, so its canonical
+    form is terminal (``<dragpoints/>``), the form the platform stores
+    (``tests/fixtures/live_xml/m11/process_cache_branch_load_remove.xml``). Pure like
+    every renderer here: callers that must refuse a successor do so before
+    rendering (the registry's cardinality preflight, the legacy adapter guard)."""
+    dragpoints_xml = _dragpoints_block(ctx.transitions)
     userlabel = _escape_xml(userlabel or "")
     doc_cache_id = _escape_xml(str(doc_cache_id or "").strip())
     return (
@@ -615,7 +621,7 @@ def render_doccacheremove(
         '<cacheKeyValues/>'
         '</doccacheremove>'
         '</configuration>'
-        f'<dragpoints>{dragpoints}</dragpoints>'
+        f'{dragpoints_xml}'
         '</shape>'
     )
 
@@ -893,8 +899,9 @@ def render_exception(
 
 
 def render_doccacheload(ctx: ShapeRenderContext, *, userlabel: str, doc_cache_id: str) -> str:
-    """Verified document-cache Add-to-Cache shape. Terminal (empty dragpoints) or
-    forward, from ``ctx.transitions``."""
+    """Verified document-cache Add-to-Cache shape. Add to Cache hands on no
+    documents, so its canonical form is terminal (empty dragpoints); callers refuse
+    a successor before rendering."""
     dragpoints_xml = _dragpoints_block(ctx.transitions)
     return (
         f'<shape image="doccacheload_icon" name="{ctx.shape_id}" '

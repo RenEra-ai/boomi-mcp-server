@@ -102,15 +102,20 @@ _PLAN_PHASE = "emission_planning"
 _CONTROL_KINDS = frozenset({"branch", "decision", "try_catch"})
 
 # Which exit roles each semantic kind may carry. A terminal semantic MUST carry
-# its role; a ``target`` is an exit only in a leg/arm position (routed), and a
-# ``cache_put`` only as a target-less staging terminal — hence the ``None``
-# alternative on those two. Everything else may never claim an exit role.
+# its role; a ``target`` is an exit only in a leg/arm position (routed) — hence the
+# ``None`` alternative. Everything else may never claim an exit role.
+#
+# #184 amendment 3: ``cache_put`` and ``cache_remove`` hand on no documents, so
+# neither may be a role-less linear node with a successor. Each MUST carry the
+# terminal cache-action role (``cache_stage``), and the position check below
+# decides where.
 _ALLOWED_EXIT_ROLES = {
     "stop": ("stop",),
     "return_documents": ("return_documents",),
     "exception": ("exception",),
     "connector": (None, "routed_target"),
-    "cache_put": (None, "cache_stage"),
+    "cache_put": ("cache_stage",),
+    "cache_remove": ("cache_stage",),
     # #175. ``None`` is deliberately ABSENT, exactly as for the three terminals
     # above: every process_call node is an exit, so a call leaf that somehow
     # reached the CFG without its role is rejected rather than quietly treated as
@@ -124,11 +129,16 @@ _ALLOWED_EXIT_ROLES = {
 # ``BranchLegV1.terminal`` and ``DecisionTrueArmV1.terminal``.
 _ROUTED_TARGET_PATH = re.compile(r"(?:/legs/\d+|/true_arm)/terminal$")
 
-# ``cache_stage`` is authored as ``BranchLegV1.terminal`` or — since #142 — as a
-# Try/Catch CATCH terminal, the staging sink that hands a caught document to a
-# downstream handler. A TRY terminal is deliberately absent: that body ends only
-# on a plain stop.
-_CACHE_STAGE_PATH = re.compile(r"(?:/legs/\d+|/catch_body)/terminal$")
+# The authored positions that can hold each terminal cache action, keyed by kind so
+# that sharing the role cannot admit a remove where only a put is legal. A staging
+# ``cache_put`` sits in ``BranchLegV1.terminal`` or — since #142 — the Try/Catch
+# CATCH terminal. A whole-cache ``cache_remove`` sits ONLY in
+# ``BranchLegV1.terminal`` (#184 amendment 3). Pinned to the model's terminal
+# unions by ``tests/test_issue_184_document_emission.py``.
+_CACHE_STAGE_PATHS = {
+    "cache_put": re.compile(r"(?:/legs/\d+|/catch_body)/terminal$"),
+    "cache_remove": re.compile(r"/legs/\d+/terminal$"),
+}
 
 # #158: the only authored position a listener entry can hold — the first root
 # step. The model enforces it; this pins the CFG to the same fact. #184: the same
@@ -436,18 +446,20 @@ def check_cfg_invariants(cfg: SemanticCfgV1) -> None:
                 "routed_target is only valid in a branch leg or decision true-arm terminal",
                 node.node_id,
             )
-        # ``cache_stage`` is the target-less staging leg, authored ONLY as
-        # ``BranchLegV1.terminal``. A root or mid-flow cache_put is an ordinary
-        # linear node, so accepting the role there would mark it terminal and
-        # silently truncate the path.
-        if role == "cache_stage" and not _CACHE_STAGE_PATH.search(node.source_path):
-            raise _fail(
-                PROCESS_IR_SEMANTIC_AMBIGUOUS_FLOW,
-                _SEMANTIC_PHASE,
-                node.source_path,
-                "cache_stage is only valid in a branch leg terminal",
-                node.node_id,
-            )
+        # ``cache_stage`` is the terminal cache action. Its position is checked
+        # per kind: a role shared by two kinds must not widen either one's slots.
+        if role == "cache_stage":
+            position = _CACHE_STAGE_PATHS.get(node.semantic.semantic_kind)
+            if position is None or not position.search(node.source_path):
+                raise _fail(
+                    PROCESS_IR_SEMANTIC_AMBIGUOUS_FLOW,
+                    _SEMANTIC_PHASE,
+                    node.source_path,
+                    "the terminal cache action is valid only as a cache_put in a "
+                    "branch leg or catch body terminal, or a cache_remove in a "
+                    "branch leg terminal",
+                    node.node_id,
+                )
 
     # --- connector-call entry role (#140) ----------------------------------
     # ``role`` is compiler-DERIVED from authored position and selects between the

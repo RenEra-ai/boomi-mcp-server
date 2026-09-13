@@ -8028,8 +8028,11 @@ _PROCESS_FLOW_PROTOCOLS = {
         "supported_control_shapes": ["branch", "decision", "flow_control"],
         # Issue #117 M10 follow-up: the step `kind`s a composed flow_sequence
         # accepts — LINEAR (flow_control / message / map_ref / dataprocess /
-        # doccacheload / doccacheretrieve / doccacheremove), CONTROL (decision /
-        # branch, terminalizing in v1), and the TERMINAL exception throw.
+        # doccacheload / doccacheretrieve), CONTROL (decision / branch,
+        # terminalizing in v1), and the TERMINAL exception throw. #184 amendment 3
+        # withdrew doccacheremove: Remove from Cache hands on no documents, so no
+        # flow_sequence position admits it; a removal is a ProcessIR branch-leg
+        # terminal.
         "supported_sequence_kinds": [
             "flow_control",
             "message",
@@ -8037,7 +8040,6 @@ _PROCESS_FLOW_PROTOCOLS = {
             "dataprocess",
             "doccacheload",
             "doccacheretrieve",
-            "doccacheremove",
             # Issue #121 M11.2 (epic #118): generic DDP/DPP Set Properties steps.
             "set_ddp",
             "set_dpp",

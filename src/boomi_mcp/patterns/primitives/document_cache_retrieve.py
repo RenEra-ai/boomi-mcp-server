@@ -112,7 +112,10 @@ class DocumentCacheRetrievePrimitive(PrimitivePattern):
 
     input_contract = PatternIOContract(
         name="document_stream",
-        description="Inbound documents (the retrieve step replaces them with the cached set).",
+        description=(
+            "Inbound documents: at least one must arrive to trigger the retrieve, "
+            "which replaces them with the cached set."
+        ),
     )
     output_contract = PatternIOContract(
         name="cached_document_stream",

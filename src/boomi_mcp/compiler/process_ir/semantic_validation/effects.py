@@ -108,6 +108,10 @@ def _replay_hazard(semantic) -> Optional[str]:
     kind = semantic.semantic_kind
     if kind == "cache_put":
         return "cache_write"
+    if kind == "cache_remove":
+        # #184 amendment 3: a whole-cache removal is a cache mutation too. A retry
+        # re-runs it and clears whatever the protected path wrote in between.
+        return "cache_remove"
     if kind == "set_property" and getattr(semantic, "persist", False):
         # A NON-persisted property dies with the execution, so replaying its
         # write is harmless. Persistence is exactly what makes it a hazard.

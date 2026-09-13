@@ -211,6 +211,18 @@ def _direct_corpus():
         for path in sorted((_FIXTURES / sub).glob("*.json")):
             docs.append(("%s/%s" % (sub, path.name),
                          json.loads(path.read_text()), tag))
+    # #184 amendment 3: every IR fixture the golden corpus registers as an
+    # `issue184:*` case. A cache load or removal is legal only as a terminal now, so
+    # the linear specimens no longer carry one, and these goldens' documents are the
+    # committed specimens that do. Read from the registry, so a fixture that is not
+    # a registered case (the legacy config beside them) never joins.
+    for key in sorted(corpus.CASE_REGISTRY):
+        render = corpus.CASE_REGISTRY[key][1]
+        name = getattr(render, "fixture_name", None)
+        if not key.startswith("issue184:") or name is None:
+            continue
+        path = _FIXTURES / "issue184" / (name + ".json")
+        docs.append(("issue184/%s" % path.name, json.loads(path.read_text()), "issue184"))
     return docs
 
 
@@ -248,6 +260,12 @@ def _direct_route_keys():
             # rather than silently contributing no route.
             _cfg, plan = compile_process_ir_v1(
                 parse_process_ir_v1(doc), SymbolTableV1(symbols=()))
+        elif tag == "issue184":
+            # The symbols table the registered golden renders through, read off
+            # the corpus case itself.
+            name = where.split("/", 1)[1][: -len(".json")]
+            render = corpus.CASE_REGISTRY["issue184:" + name][1]
+            _cfg, plan = corpus.error_compile(doc, render.symbols_factory())
         else:
             _cfg, plan = corpus.error_compile(doc)
         keys |= _plan_keys(plan, where)
@@ -553,7 +571,9 @@ def test_no_emitter_key_is_reachable_only_through_a_deletion_scheduled_route():
 
     # The flow_sequence authoring vocabulary and what it lowers onto.
     fs = legacy[LAR.FLOW_SEQUENCE_DIALECT]
-    assert len(_FLOW_SEQUENCE_ALLOWED_KINDS) >= 14, (
+    # 13 since #184 amendment 3 withdrew `doccacheremove` (ledger C18): Remove from
+    # Cache hands on no documents, and no flow_sequence position admits it.
+    assert len(_FLOW_SEQUENCE_ALLOWED_KINDS) >= 13, (
         "flow_sequence kind union collapsed: %s" % sorted(_FLOW_SEQUENCE_ALLOWED_KINDS))
     assert len(fs) >= 11, (
         "flow_sequence lowered onto fewer emitter keys than the 11 it is known to "

@@ -10,13 +10,20 @@ TWO independent corpora live here; they share no machinery on purpose.
    builder" is never the ONLY oracle. The registry verifier result must also
    match ``verify_process_graph`` on the legacy XML.
 
-   They exercise 17 of the registry's 18 emitter kinds (start, both connector
-   roles, message, map, flowcontrol, dataprocess, doccache load/retrieve/remove,
+   They exercise 16 of the registry's 21 emitter kinds (start, both connector
+   roles, message, map, flowcontrol, dataprocess, doccache load/retrieve,
    set-properties, processcall, branch, decision, exception, stop,
-   returndocuments) — every kind EXCEPT ``catcherrors``, which #142 added and
-   which ``tests/test_process_ir_error_handling.py`` covers. Do NOT restate this
+   returndocuments). Of the five they do not reach, ``catcherrors`` (#142) is
+   covered by ``tests/test_process_ir_error_handling.py``; ``notify``,
+   ``start_listen`` and ``start_passthrough`` arrived later with corpora of their
+   own; and ``doccacheremove`` LEFT this corpus in #184 amendment 3. Remove from
+   Cache hands on no documents, so it is authorable only as a branch-leg
+   terminal, and the legacy ``flow_sequence`` oracle these documents are pinned
+   against refuses every placement of it; its bytes are pinned by golden 000082
+   (``golden_xml/issue184_cache_remove_terminal_branch.xml``). Do NOT restate this
    as "all kinds": the count moves whenever the registry gains a key, and the
-   claim then goes stale silently (it already did once, between #138 and #142).
+   claim then goes stale silently (it did between #138 and #142, and again as the
+   registry grew from 18 to 21 keys).
 
 2. ADAPTER-DIALECT corpus (#139E M12.4). Every currently-canonical NON-listener
    ``sync_pipeline`` chain, from

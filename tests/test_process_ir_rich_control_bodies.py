@@ -569,8 +569,15 @@ _SHIPPED_MATRIX_V1 = {
         "document_cache_retrieve", "flow_control", "map_ref", "message", "set_ddp", "set_dpp",
     },
     # #175 moved `process_call` from the STEP row into the TERMINAL rows.
+    # #184 amendment 3 added `cache_remove` HERE and in no other terminal row. An
+    # all-document Remove from Cache hands on no documents: the platform skips
+    # whatever is wired after it and the run still reads COMPLETE (captures
+    # cap184-cache-remove-read, cap184-prefix-predecessors xr-remove-successor). So
+    # a removal can only END a path, and a branch leg is its one measured terminal
+    # placement. `cache_remove` appearing in the catch terminal row below would mean
+    # the put-only catch staging slot was widened by mistake.
     (bodycaps.BRANCH_LEG, bodycaps.TERMINAL_SLOT): {
-        "target", "cache_put", "stop", "process_call", "decision",
+        "target", "cache_put", "cache_remove", "stop", "process_call", "decision",
     },
     (bodycaps.DECISION_TRUE_ARM, bodycaps.STEP_SLOT): {
         "cache_get", "cache_put", "cache_remove", "connector_call", "data_process",
@@ -994,7 +1001,18 @@ def test_a_send_may_still_be_followed_by_a_stop():
 
 
 def test_a_send_may_be_followed_by_a_stream_replacing_cache_read():
-    """A cache read supplies its own documents, so it genuinely restarts the stream."""
+    """#184 amendment 3: a Send followed by a cache read is now REFUSED, at the Send.
+
+    The name is kept for its node id; its premise is withdrawn. The old reading was
+    that a cache read supplies its own documents and so restarts the stream after
+    a non-producing call. Measured, a cache read runs only when a document ARRIVES,
+    and it never restarts a path that received none. Whether a Send hands on
+    anything a read could run on is still open (cap184-send-then-read), so the
+    refusal is the conservative answer. It blames the Send, exactly as
+    `test_the_send_gate_covers_every_downstream_node` does for every other
+    follower, and `test_a_send_may_still_be_followed_by_a_stop` is the control
+    showing the same leg without the read compiles.
+    """
     doc = {
         "version": "1",
         "body": {"kind": "sequence", "steps": [
@@ -1009,7 +1027,13 @@ def test_a_send_may_be_followed_by_a_stream_replacing_cache_read():
             ]},
         ]},
     }
-    compile_doc(doc, capabilities=external_writer_for("doc_cache"))
+    with pytest.raises(ProcessIRCompileError) as excinfo:
+        compile_doc(doc, capabilities=external_writer_for("doc_cache"))
+    codes = [(item.code, item.path) for item in excinfo.value.diagnostics]
+    assert codes[0] == (
+        PROCESS_IR_SEMANTIC_CARDINALITY_MISMATCH,
+        "/body/steps/1/legs/0/steps/0/operation_ref",
+    ), codes
 
 
 def test_every_map_in_a_body_is_validated_or_rejected():

@@ -1370,6 +1370,11 @@ def _issue184_case(name, symbols_factory=None):
         _cfg, plan = error_compile(doc, symbols)
         return emit_process(plan, symbols).process_xml
 
+    # Read by the #151 reachability freeze, which lowers every registered #184 IR
+    # fixture as a direct-route specimen against the SAME table its golden renders
+    # through, so a specimen never needs a second, hand-kept symbols mapping.
+    render.fixture_name = name
+    render.symbols_factory = symbols_factory or issue155_symbols
     return render
 
 
@@ -1952,16 +1957,20 @@ def _build_registry():
         "process_flow:dataprocess_combine_json": ("process-component-v1", _case_dataprocess_combine_json),
         "process_flow:dataprocess_combine_xml": ("process-component-v1", _case_dataprocess_combine_xml),
         "process_flow:document_cache_retrieve": ("process-component-v1", _case_document_cache_retrieve),
-        "process_flow:document_cache_remove": ("process-component-v1", _case_document_cache_remove),
+        # #184 amendment 3 retired `process_flow:document_cache_remove` (golden-000012):
+        # its target, wired after the Remove from Cache, never runs. The terminal
+        # removal is registered below as `issue184:cache_remove_terminal_branch`.
         "process_flow:return_documents_terminal": ("process-component-v1", _case_return_documents_terminal),
         "process_flow:branch_fanout": ("process-component-v1", _case_branch_fanout),
         "process_flow:decision_conditional": ("process-component-v1", _case_decision_conditional),
         "process_flow:flow_control_batching": ("process-component-v1", _case_flow_control_batching),
         "process_flow:flow_sequence_decision_branch_map": ("process-component-v1", _case_flow_sequence_decision_branch_map),
-        "process_flow:flow_sequence_cache_load_retrieve_remove": ("process-component-v1", _case_flow_sequence_cache_crud),
+        # #184 amendment 3 retired `process_flow:flow_sequence_cache_load_retrieve_remove`
+        # (golden-000018) and `process_flow:flow_sequence_cache_put_get` (golden-000019):
+        # a read wired straight after Add to Cache never runs. The ordered-leg staging
+        # graphs replace them below.
         "process_flow:flow_sequence_exception_terminal": ("process-component-v1", _case_flow_sequence_exception_terminal),
         "process_flow:set_properties_ddp_dpp": ("process-component-v1", _case_set_properties_sequence),
-        "process_flow:flow_sequence_cache_put_get": ("process-component-v1", _case_cache_put_get_sequence),
         # B — dynamic path
         "dynamic_path:target_profile": ("process-component-v1", _case_dynamic_path_target_profile),
         "dynamic_path:source_ddp": ("process-component-v1", _case_dynamic_path_source_ddp),
@@ -1971,8 +1980,11 @@ def _build_registry():
         "trycatch_dlq:document_cache": ("process-component-v1", _case_try_catch_dlq_document_cache),
         "trycatch_dlq:document_cache_retry2": ("process-component-v1", _case_try_catch_dlq_retry_count_2),
         "trycatch_dlq:error_subprocess": ("process-component-v1", _case_try_catch_dlq_error_subprocess),
-        "trycatch_dlq:notify_document_cache": ("process-component-v1", _case_try_catch_notify_dlq_document_cache),
-        "trycatch_dlq:connector_scope_notify": ("process-component-v1", _case_connector_scoped_trycatch_notify),
+        # #184 amendment 3: the same builder configurations, now emitted with the DLQ
+        # cache write as the catch leg's end (golden-000059 and golden-000005 retired
+        # with their dead synthetic Stops).
+        "trycatch_dlq:notify_document_cache_terminal": ("process-component-v1", _case_try_catch_notify_dlq_document_cache),
+        "trycatch_dlq:connector_scope_notify_terminal": ("process-component-v1", _case_connector_scoped_trycatch_notify),
         "trycatch_dlq:exception_catch_path": ("process-component-v1", _case_exception_catch_path),
         # D — listener start
         "sync_pipeline:listener_wss_start": ("process-component-v1", _case_listener_wss_start),
@@ -1998,7 +2010,8 @@ def _build_registry():
         "issue154:try_data_process": ("process-xml-v1", _issue154_case("try_data_process")),
         "issue154:try_return_documents": ("process-xml-v1", _issue154_case("try_return_documents")),
         "issue154:source_target_return_documents": ("process-xml-v1", _issue154_case("source_target_return_documents")),
-        "issue154:catch_cache_put_exception": ("process-xml-v1", _issue154_case("catch_cache_put_exception")),
+        # #184 amendment 3 retired `issue154:catch_cache_put_exception` (golden-000066):
+        # the Exception after the catch-body cache write never throws.
         "issue154:connector_linear_interleave": ("process-xml-v1", _issue154_case("connector_linear_interleave")),
         # H4 — #155 the canonical per-document request path, both connector roles
         # #184 amendment 2 §5: `issue155:source_dynamic_path_profile` (golden-000072) is
@@ -2010,6 +2023,22 @@ def _build_registry():
         # legacy oracle `dynamic_path:both_sides` (golden-000079) it retires.
         "issue184:both_sides_dynamic_path": (
             "process-xml-v1", _issue184_case("both_sides_dynamic_path", symbols_factory=issue184_symbols)
+        ),
+        # #184 amendment 3 §6: the safe replacements for the retired cache-successor
+        # goldens. Expected bytes come from the pristine branch-point compiler, each
+        # cache and Exception shape checked against an executed or platform-authored
+        # capture (`docs/architecture/evidence/issue-184/oracle/terminal_cache_canonical.MANIFEST.json`).
+        "issue184:cache_remove_terminal_branch": (
+            "process-xml-v1", _issue184_case("cache_remove_terminal_branch", symbols_factory=error_symbols)
+        ),
+        "issue184:cache_stage_read_remove": (
+            "process-xml-v1", _issue184_case("cache_stage_read_remove", symbols_factory=error_symbols)
+        ),
+        "issue184:cache_stage_read": (
+            "process-xml-v1", _issue184_case("cache_stage_read", symbols_factory=error_symbols)
+        ),
+        "issue184:catch_exception_without_cache_put": (
+            "process-xml-v1", _issue184_case("catch_exception_without_cache_put", symbols_factory=error_symbols)
         ),
         "issue155:target_dynamic_path_profile": ("process-xml-v1", _issue155_case("target_dynamic_path_profile")),
         "issue155:target_dynamic_path_ddp": ("process-xml-v1", _issue155_case("target_dynamic_path_ddp")),
@@ -2023,7 +2052,8 @@ def _build_registry():
         "recipe:api_to_api_sync_0": ("process-xml-v1", _recipe_case("api_to_api_sync_0")),
         # J — archetype-path DLQ
         "archetype_dlq:document_cache": ("process-component-v1", _case_archetype_dlq_document_cache),
-        "archetype_dlq:notify_document_cache": ("process-component-v1", _case_archetype_notify_dlq_document_cache),
+        # #184 amendment 3: golden-000060 retired with its dead synthetic Stops.
+        "archetype_dlq:notify_document_cache_terminal": ("process-component-v1", _case_archetype_notify_dlq_document_cache),
         # K — the six WSS listener chains register from the parity corpus below
         # under their `listener_chain:*` identities (#158).
     }

@@ -7,11 +7,15 @@ emitted (archived branch-point probe rows ``absent_stream_maps_in_legs`` and
 ``absent_stream_map_put``), although the empty start document carries nothing to
 transform or stage.
 
-Document existence has ONE derived authority: a kind supplies documents regardless
-of its upstream iff its served ``document_semantics`` pair is
+Document existence has ONE derived authority, the document-emission table
+(``boomi_mcp.models.process_ir_document_semantics``). A kind replaces the payload
+with documents it retrieves iff its served ``document_semantics`` pair is
 ``output_documents == "stream_replacing"`` AND ``grouping == "all_documents"``.
-``message`` and ``data_process`` are served per-document and are NOT from-nothing
-producers. The pin below reads the served contract, never a list written here.
+Since #184 amendment 3 such a read runs only when a document ARRIVES (its served
+``input_documents`` is ``required``; measured, a scheduled start's single empty
+document counts) — it never restarts a path a cache write or removal exhausted.
+``message`` and ``data_process`` are served per-document and are NOT producers of
+usable payload. The pin below reads the served contract, never a list written here.
 
 Expected codes and pointers come from the issue's own acceptance text (A4: "refused
 with a stable code at the consumer's pointer") and the branch-point measurement.
@@ -39,6 +43,7 @@ from boomi_mcp.compiler.process_ir.contracts import (  # noqa: E402
 from boomi_mcp.compiler.process_ir.diagnostics import ProcessIRCompileError  # noqa: E402
 from boomi_mcp.compiler.process_ir.pipeline import compile_process_ir_v1  # noqa: E402
 from boomi_mcp.errors import PROCESS_IR_SEMANTIC_CARDINALITY_MISMATCH  # noqa: E402
+from boomi_mcp.models import process_ir_document_semantics as emission  # noqa: E402
 from boomi_mcp.models.process_ir import parse_process_ir_v1  # noqa: E402
 
 _CARD = PROCESS_IR_SEMANTIC_CARDINALITY_MISMATCH
@@ -155,12 +160,21 @@ def test_the_branch_point_compiled_the_absent_stream_probes():
 
 
 def test_the_producer_set_is_the_served_all_document_stream_replacers():
-    """ONE document-existence authority, pinned to the served contract in BOTH directions.
+    """ONE document-emission authority, pinned to the served contract in BOTH directions.
+
+    #184 amendment 3 withdrew the connector walk's own producer list
+    (``_STREAM_PRODUCING_KINDS``): the walk now reads
+    ``TRIGGERED_REPLACEMENT_SEMANTIC_KINDS`` from the document-emission table. That
+    set must be exactly the served kinds whose output is stream-replacing AND
+    all-documents, and each of them must be served as REQUIRING an arriving document
+    (measured: a cache read runs only when a document arrives). A Send may be
+    followed only by a plain ``stop`` — the cache reads left that set, because after
+    a Send nothing arrives to trigger them.
 
     The negative witness makes the exclusion meaningful: `message` and
     `data_process` ARE served as stream-replacing, so a pin on stream replacement
-    alone would admit them as from-nothing producers. Their served grouping is
-    per-document, and that is what keeps them out.
+    alone would admit them. Their served grouping is per-document, and that is what
+    keeps them out.
     """
     from boomi_mcp.authoring.process_ir_projection import process_ir_authoring_revision_payload
 
@@ -175,24 +189,46 @@ def test_the_producer_set_is_the_served_all_document_stream_replacers():
         and docs.get("grouping") == "all_documents"
     }
     assert served, "the served contract published no all-document stream replacer — the pin would be vacuous"
-    assert connector_resolution._STREAM_PRODUCING_KINDS == served, {
-        "only_in_compiler": sorted(connector_resolution._STREAM_PRODUCING_KINDS - served),
-        "only_in_served_contract": sorted(served - connector_resolution._STREAM_PRODUCING_KINDS),
+
+    # The walk consumes the authority itself, not a copy of it.
+    assert connector_resolution.TRIGGERED_REPLACEMENT_SEMANTIC_KINDS is emission.TRIGGERED_REPLACEMENT_SEMANTIC_KINDS
+    walk_kinds = connector_resolution.TRIGGERED_REPLACEMENT_SEMANTIC_KINDS
+    assert walk_kinds == served, {
+        "only_in_compiler": sorted(walk_kinds - served),
+        "only_in_served_contract": sorted(served - walk_kinds),
     }
-    assert connector_resolution._MAY_FOLLOW_NON_PRODUCER == frozenset({"stop"}) | served
+    assert emission.TRIGGERED_REPLACEMENT_KINDS == served, {
+        "only_in_authority": sorted(emission.TRIGGERED_REPLACEMENT_KINDS - served),
+        "only_in_served_contract": sorted(served - emission.TRIGGERED_REPLACEMENT_KINDS),
+    }
+    # The semantic kinds are the served kinds' own rows, not a parallel spelling.
+    assert walk_kinds == {emission.DOCUMENT_EMISSION_V1[kind].semantic_kind for kind in served}
+    for kind in served:
+        assert nodes[kind].get("input_documents") == "required", (kind, nodes[kind])
+        assert emission.DOCUMENT_EMISSION_V1[kind].trigger == emission.TRIGGER_ARRIVING_DOCUMENT, kind
+
+    assert connector_resolution._MAY_FOLLOW_NON_PRODUCER == frozenset({"stop"})
+    assert not (connector_resolution._MAY_FOLLOW_NON_PRODUCER & served)
 
     for per_document in ("message", "data_process"):
         assert nodes[per_document].get("output_documents") == "stream_replacing", nodes[per_document]
         assert nodes[per_document].get("grouping") != "all_documents", nodes[per_document]
-        assert per_document not in connector_resolution._STREAM_PRODUCING_KINDS
+        assert per_document not in walk_kinds
+        assert per_document not in emission.TRIGGERED_REPLACEMENT_KINDS
 
 
 def test_the_producer_set_is_load_bearing_for_the_refusal(monkeypatch):
-    """Non-vacuity: with no from-nothing producer, the cache-read leg's map is refused."""
+    """Non-vacuity: with no triggered replacement kind, the cache-read leg's map is refused.
+
+    The patched name is the one ``connector_resolution`` bound at import from the
+    document-emission authority — patching the leaf module would leave the walk's
+    binding untouched and prove nothing.
+    """
     payload = _doc({"kind": "branch", "legs": [
         {"steps": [_GET], "terminal": _PUT},
         {"steps": [_CGET, _MAP], "terminal": _STOP}]})
     assert _CARD not in {code for code, _path in _diagnostics(payload)}
-    monkeypatch.setattr(connector_resolution, "_STREAM_PRODUCING_KINDS", frozenset())
-    monkeypatch.setattr(connector_resolution, "_MAY_FOLLOW_NON_PRODUCER", frozenset({"stop"}))
+    monkeypatch.setattr(connector_resolution, "TRIGGERED_REPLACEMENT_SEMANTIC_KINDS", frozenset())
     assert (_CARD, "/body/steps/0/legs/1/steps/1/map_ref") in _diagnostics(payload)
+    monkeypatch.undo()
+    assert _CARD not in {code for code, _path in _diagnostics(payload)}

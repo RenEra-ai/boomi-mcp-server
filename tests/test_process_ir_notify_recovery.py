@@ -160,10 +160,17 @@ def test_canonical_notify_equals_the_legacy_emitter_for_the_same_graph(level, te
 
 
 def test_notify_reproduces_the_shipped_golden_shape_bytes():
-    """Byte parity against the FROZEN file, not just against the oracle."""
+    """Byte parity against the FROZEN file, not just against the oracle.
+
+    The file is `issue184_cache_notify_terminal.xml` (`golden-000087`), the
+    replacement for the retired `golden-000059`. #184 amendment 3 removed only
+    the synthetic Stop after the DLQ cache write — Add to Cache hands on zero
+    documents, so nothing after it runs — and the notify shape (`shape6`, wired
+    to the cache write `shape7`) is byte-identical to the retired row's.
+    """
     import re
 
-    golden = GOLDEN / "try_catch_notify_dlq_document_cache.xml"
+    golden = GOLDEN / "issue184_cache_notify_terminal.xml"
     expected = re.search(
         r'<shape [^>]*shapetype="notify".*?</shape>', golden.read_text(), re.S
     ).group(0)
@@ -600,7 +607,7 @@ def _dlq_symbols():
     )
 
 
-#: The canonical authoring of golden-000059's graph.
+#: The canonical authoring of golden-000059's graph, in its #184 spelling.
 #:
 #: Every label is authored, and that is the interesting part: the legacy builder
 #: HARD-DEFAULTS the DLQ cache userlabel to "Route caught errors to DLQ cache"
@@ -609,6 +616,14 @@ def _dlq_symbols():
 #: attribute. A canonical document therefore has to say out loud what the legacy
 #: config left implicit, which is the intended direction: the IR carries the
 #: authored intent, not the builder's defaults.
+#:
+#: #184 amendment 3: the cache write is the catch body's TERMINAL. #156 authored
+#: it as a step followed by a Stop, but Add to Cache hands on zero documents, so
+#: the platform skips anything after it (`cap184-cache-put-successor`) and that
+#: spelling is now refused — see
+#: `test_the_retired_catch_cache_write_then_stop_spelling_is_refused`. The retired
+#: row `golden-000059` is replaced by `golden-000087`
+#: (`issue184_cache_notify_terminal.xml`), whose seven shapes this reproduces.
 _NOTIFY_DLQ_DOCUMENT = {
     "version": "1",
     "body": {
@@ -634,10 +649,9 @@ _NOTIFY_DLQ_DOCUMENT = {
                              "Integration catch path failed. Caught error: "
                              + CAUGHT_ERROR_PROPERTY_ID
                          )},
-                        {"kind": "cache_put", "cache_ref": "$ref:CACHE",
-                         "label": "Route caught errors to DLQ cache"},
                     ],
-                    "terminal": {"kind": "stop"},
+                    "terminal": {"kind": "cache_put", "cache_ref": "$ref:CACHE",
+                                 "label": "Route caught errors to DLQ cache"},
                 },
             }
         ],
@@ -646,18 +660,24 @@ _NOTIFY_DLQ_DOCUMENT = {
 
 
 def test_the_notify_dlq_golden_is_reproduced_from_canonical_ir():
-    """#156's headline acceptance criterion, for `golden-000059`.
+    """#156's headline acceptance criterion, for `golden-000059`'s replacement.
+
+    `golden-000059` is retired (#184 amendment 3: its catch leg wired a Stop
+    after Add to Cache, which hands on zero documents, so the Stop never ran).
+    Its replacement `golden-000087`, `issue184_cache_notify_terminal.xml`, is
+    what is compared now.
 
     The WHOLE `<shapes>` section — start, catcherrors, both connector actions,
-    the success stop, the notify, the DLQ cache write and the recovery stop —
-    byte-for-byte against the frozen file, including geometry, dragpoint names
-    and wiring. Not the notify shape alone: an emitter can be right about its own
-    bytes and still be placed on the wrong row or wired to the wrong shape, and
-    only the full section catches that.
+    the success stop, the notify and the terminal DLQ cache write — byte-for-byte
+    against the frozen file, including geometry, dragpoint names and wiring. Not
+    the notify shape alone: an emitter can be right about its own bytes and still
+    be placed on the wrong row or wired to the wrong shape, and only the full
+    section catches that.
 
-    The golden itself is NOT regenerated. It stays the legacy builder's output,
-    frozen before this slice, which is what makes it an oracle rather than a
-    photograph of the code under test.
+    The golden is NOT regenerated from this compiler. It is a recorded byte
+    transform of the retired legacy golden, frozen before #184's changes
+    (`tests/fixtures/process_ir/issue184/PROVENANCE.md`), which is what keeps it
+    an oracle rather than a photograph of the code under test.
     """
     import re
 
@@ -670,7 +690,7 @@ def test_the_notify_dlq_golden_is_reproduced_from_canonical_ir():
     plan = lowering.lower_cfg_to_emission_plan(cfg, symbols)
     emitted = emit_process(plan, symbols).process_xml
 
-    frozen = (GOLDEN / "try_catch_notify_dlq_document_cache.xml").read_text()
+    frozen = (GOLDEN / "issue184_cache_notify_terminal.xml").read_text()
     expected = re.search(r"<shapes>.*</shapes>", frozen, re.S).group(0)
     actual = re.search(r"<shapes>.*</shapes>", emitted, re.S).group(0)
     assert actual == expected
@@ -683,6 +703,10 @@ def test_the_canonical_notify_dlq_graph_agrees_with_the_legacy_builder():
     the same graph, and requires the two `<shapes>` sections to agree — so a
     change that moved BOTH the golden and the canonical emitter together would
     still be caught here.
+
+    The legacy case is `trycatch_dlq:notify_document_cache_terminal`, the
+    corpus row that replaced the retired `trycatch_dlq:notify_document_cache`:
+    the legacy builder no longer emits a Stop after the DLQ cache write either.
     """
     import re
     import sys as _sys
@@ -695,7 +719,7 @@ def test_the_canonical_notify_dlq_graph_agrees_with_the_legacy_builder():
     from boomi_mcp.compiler.process_ir import lowering
     from boomi_mcp.compiler.process_ir.emitter_registry import emit_process
 
-    legacy_xml = corpus.CASE_REGISTRY["trycatch_dlq:notify_document_cache"][1]()
+    legacy_xml = corpus.CASE_REGISTRY["trycatch_dlq:notify_document_cache_terminal"][1]()
 
     symbols = _dlq_symbols()
     ir = parse_process_ir_v1(_NOTIFY_DLQ_DOCUMENT)
@@ -1327,10 +1351,15 @@ _DLQ_MAP = "88888888-8888-8888-8888-888888888888"
 #:
 #: Region 1 protects the DB read and ends its protected path in `continue`; the
 #: map sits between the handlers; region 2 protects the REST write with
-#: retryCount=2 and terminates. Both recovery legs are notify -> DLQ cache ->
-#: stop. This is the shape that needs `ContinueNodeV1` at all: region 1's
+#: retryCount=2 and terminates. Both recovery legs are notify -> terminal DLQ
+#: cache. This is the shape that needs `ContinueNodeV1` at all: region 1's
 #: protected path has no closing shape in the frozen bytes, it flows into
 #: `shape4 map` and on to `shape5 catcherrors`.
+#:
+#: #184 amendment 3: each catch body's cache write is its TERMINAL. #156 authored
+#: notify -> cache write -> stop, which is now refused (Add to Cache hands on zero
+#: documents, so the Stop never ran). The retired row `golden-000005` is replaced
+#: by `golden-000086` (`issue184_cache_notify_connector_terminal.xml`).
 _CHAIN_DLQ_DOCUMENT = {
     "version": "1",
     "body": {
@@ -1348,10 +1377,9 @@ _CHAIN_DLQ_DOCUMENT = {
                         {"kind": "notify", "level": "ERROR",
                          "message_template": "Integration catch path failed. Caught error: "
                                              + CAUGHT_ERROR_PROPERTY_ID},
-                        {"kind": "cache_put", "cache_ref": "$ref:CACHE",
-                         "label": "Route caught errors to DLQ cache"},
                     ],
-                    "terminal": {"kind": "stop"},
+                    "terminal": {"kind": "cache_put", "cache_ref": "$ref:CACHE",
+                                 "label": "Route caught errors to DLQ cache"},
                 },
             },
             {"kind": "map_ref", "map_ref": "$ref:MAP"},
@@ -1367,10 +1395,9 @@ _CHAIN_DLQ_DOCUMENT = {
                         {"kind": "notify", "level": "ERROR",
                          "message_template": "Integration catch path failed. Caught error: "
                                              + CAUGHT_ERROR_PROPERTY_ID},
-                        {"kind": "cache_put", "cache_ref": "$ref:CACHE",
-                         "label": "Route caught errors to DLQ cache"},
                     ],
-                    "terminal": dict(_STOP),
+                    "terminal": {"kind": "cache_put", "cache_ref": "$ref:CACHE",
+                                 "label": "Route caught errors to DLQ cache"},
                 },
             },
         ],
@@ -1394,19 +1421,24 @@ def _chain_symbols():
 
 
 def test_the_connector_scoped_double_guard_golden_is_reproduced_from_canonical_ir():
-    """#156's OTHER headline acceptance criterion, for `golden-000005`.
+    """#156's OTHER headline acceptance criterion, for `golden-000005`'s replacement.
 
-    The sibling test pins `golden-000059`, the single process-scoped handler.
-    This one pins the double guard, which is the whole reason `ContinueNodeV1`
-    exists — and it had NO permanent pin until the architect review asked for it:
-    the byte equality was measured by hand mid-implementation and never written
-    down, so every later change to region derivation, connector resolution and
-    the plan invariants ran without it.
+    The sibling test pins `golden-000059`'s replacement, the single
+    process-scoped handler. This one pins the double guard, which is the whole
+    reason `ContinueNodeV1` exists — and it had NO permanent pin until the
+    architect review asked for it: the byte equality was measured by hand
+    mid-implementation and never written down, so every later change to region
+    derivation, connector resolution and the plan invariants ran without it.
+
+    `golden-000005` is retired by #184 amendment 3 (a Stop wired after each Add
+    to Cache, which hands on zero documents). Its replacement `golden-000086`,
+    `issue184_cache_notify_connector_terminal.xml`, is compared now: a recorded
+    byte transform of the retired legacy golden, not a render of this compiler.
 
     The whole `<shapes>` section, byte for byte: main spine 1-7 (start,
     catcherrors, DB read, map, catcherrors retryCount=2, REST write, stop) then
-    the two recovery blocks 8-10 and 11-13 on the catch row, including both
-    catcherrors' labelled Try/Catch dragpoints.
+    the two recovery blocks 8-9 and 10-11 on the catch row (notify, terminal DLQ
+    cache write), including both catcherrors' labelled Try/Catch dragpoints.
     """
     import re
 
@@ -1420,9 +1452,63 @@ def test_the_connector_scoped_double_guard_golden_is_reproduced_from_canonical_i
     )
     emitted = emit_process(plan, symbols).process_xml
 
-    frozen = (GOLDEN / "connector_scoped_trycatch_notify_dlq_document_cache.xml").read_text()
+    frozen = (GOLDEN / "issue184_cache_notify_connector_terminal.xml").read_text()
     expected = re.search(r"<shapes>.*</shapes>", frozen, re.S).group(0)
     assert re.search(r"<shapes>.*</shapes>", emitted, re.S).group(0) == expected
+
+
+def _retired_catch_spelling(document):
+    """#156's original spelling of a canonical DLQ document: every catch body's
+    terminal cache write moved back into its steps and followed by a Stop.
+
+    Derived from the live document rather than retyped, so the refusal witness
+    below and the byte pins above can never be about different graphs.
+    """
+    import copy
+
+    retired = copy.deepcopy(document)
+    moved = []
+    for index, step in enumerate(retired["body"]["steps"]):
+        if step["kind"] != "try_catch":
+            continue
+        catch = step["catch_body"]
+        assert catch["terminal"]["kind"] == "cache_put", catch
+        moved.append(
+            "/body/steps/{0}/catch_body/steps/{1}/cache_ref".format(
+                index, len(catch["steps"])
+            )
+        )
+        catch["steps"].append(catch["terminal"])
+        catch["terminal"] = {"kind": "stop"}
+    return retired, moved
+
+
+@pytest.mark.parametrize("case", ["golden-000059", "golden-000005"])
+def test_the_retired_catch_cache_write_then_stop_spelling_is_refused(case):
+    """The refusal witness for the spelling the retired goldens encoded.
+
+    #156 authored each DLQ catch body as `[notify, cache_put]` + a `stop`
+    terminal. Measured on the platform (#184 amendment 3,
+    `cap184-cache-put-successor`): Add to Cache hands on zero documents, so the
+    Stop after it is skipped and the run still reads COMPLETE. The spelling is
+    therefore refused at EVERY catch body's cache node, on its `/cache_ref`,
+    with `PROCESS_IR_SCHEMA_INVALID_CARDINALITY`.
+
+    The control is the same document with the cache write as the catch
+    terminal: it parses, so the refusal is about the successor and nothing else.
+    """
+    document = _notify_golden_cases()[case][0]
+    parse_process_ir_v1(document)  # the control: terminal cache write parses
+
+    retired, cache_refs = _retired_catch_spelling(document)
+    assert cache_refs, "no catch body was rewritten — the witness would be vacuous"
+    assert all(ref.endswith("/catch_body/steps/1/cache_ref") for ref in cache_refs)
+    with pytest.raises(ProcessIRValidationError) as excinfo:
+        parse_process_ir_v1(retired)
+    served = sorted((d.code, d.path) for d in excinfo.value.diagnostics)
+    assert served == sorted(
+        ("PROCESS_IR_SCHEMA_INVALID_CARDINALITY", ref) for ref in cache_refs
+    ), served
 
 
 # ---------------------------------------------------------------------------
@@ -1439,6 +1525,14 @@ def test_the_connector_scoped_double_guard_golden_is_reproduced_from_canonical_i
 # comparison was leaving 579 bytes unchecked — the `bns:Component` wrapper and
 # all seven process-level attributes, which is exactly the "envelope metadata"
 # the plan names.
+#
+# #184 amendment 3 retired both rows (a Stop wired after Add to Cache, which
+# hands on zero documents). The pins below keep the ids `golden-000059` and
+# `golden-000005` as their parametrize ids — they are registered node ids — but
+# those ids NAME THE RETIRED ROWS; what is compared is each one's replacement:
+# `issue184_cache_notify_terminal.xml` (`golden-000087`, shapes 2941 of 3520
+# bytes) and `issue184_cache_notify_connector_terminal.xml` (`golden-000086`,
+# 4697 of 5276). The envelope is still the same 579 bytes.
 #
 # WHAT THIS ROUTE DOES AND DOES NOT PROVE, because the distinction is the whole
 # reason the deferred row stays deferred: it runs parse -> lower -> lower ->
@@ -1497,18 +1591,20 @@ def _notify_golden_cases():
         _sys.path.insert(0, _tests)
     import _wave_gate_golden_corpus as corpus
 
+    # Keyed by the RETIRED row ids (they are the pins' node ids); each value's
+    # file is that row's #184 replacement, which is what every pin compares.
     return {
         "golden-000059": (
             _NOTIFY_DLQ_DOCUMENT,
             _dlq_symbols(),
             corpus.NOTIFY_DLQ_GOLDEN_NAME,
-            "try_catch_notify_dlq_document_cache.xml",
+            "issue184_cache_notify_terminal.xml",
         ),
         "golden-000005": (
             _CHAIN_DLQ_DOCUMENT,
             _chain_symbols(),
             corpus.CONNECTOR_SCOPE_NOTIFY_GOLDEN_NAME,
-            "connector_scoped_trycatch_notify_dlq_document_cache.xml",
+            "issue184_cache_notify_connector_terminal.xml",
         ),
     }
 
@@ -1518,10 +1614,12 @@ def test_the_notify_golden_reproduces_as_a_complete_file(case):
     """Plan line 293: COMPLETE emitted fixture bytes against the frozen file.
 
     Not the shapes section, not a normalized comparison, not a subset — the
-    whole file, compared as bytes against the fixture frozen before this slice's
-    baseline. The goldens are NOT regenerated: they stay the legacy builder's
-    output, which is what makes them an oracle rather than a photograph of the
-    code under test.
+    whole file, compared as bytes. The id names the retired row; the file is its
+    #184 replacement (`issue184_cache_notify_terminal.xml` for `golden-000059`,
+    `issue184_cache_notify_connector_terminal.xml` for `golden-000005`). The
+    replacements are NOT regenerated from this compiler: each is a recorded byte
+    transform of the retired legacy golden, which is what keeps them an oracle
+    rather than a photograph of the code under test.
     """
     document, symbols, name, filename = _notify_golden_cases()[case]
     produced, _ = _materialized_component(document, symbols, name=name)
@@ -1536,6 +1634,8 @@ def test_the_complete_file_pin_is_not_satisfied_by_the_shapes_alone(case):
     would be asserting nothing about materialization and the envelope claim
     would be hollow. It does not: the emitter's own output carries no
     `bns:Component` wrapper and none of the process attributes.
+
+    The id names the retired row; the frozen file is its #184 replacement.
     """
     document, symbols, name, filename = _notify_golden_cases()[case]
     _, emitted = _materialized_component(document, symbols, name=name)
@@ -1552,6 +1652,9 @@ def test_every_emitted_shape_part_reaches_the_complete_file(case):
     A materializer that silently dropped or truncated its input would still
     satisfy a single equality if the golden happened to match what it kept.
     Dropping the last shape part must break the match, for every golden.
+
+    The id names the retired row; the frozen file is its #184 replacement, whose
+    last part is now the terminal DLQ cache write.
     """
     from boomi_mcp.categories.components.process_component_materializer import (
         ProcessComponentMaterializer,
@@ -1593,6 +1696,8 @@ def test_the_envelope_inputs_are_load_bearing(case):
     The name and the execution profile both reach the emitted bytes, so a pin
     that passed under the wrong one would be comparing something other than the
     fixture it names. Both are perturbed here, one at a time.
+
+    The id names the retired row; the frozen file is its #184 replacement.
     """
     from boomi_mcp.categories.components.process_component_materializer import (
         ProcessComponentMaterializer,
@@ -1634,6 +1739,9 @@ def test_the_execution_profile_in_the_pin_is_derived_not_chosen():
     `scheduled` is not a literal anybody picked: the compiler's own profile
     authority returns it for both documents. Pinning that here is what stops the
     complete-file tests above from quietly becoming hand-set-envelope tests.
+
+    The names are the retired rows' ids; the documents are their #184 spellings
+    (catch-terminal cache write), the ones the replacement files reproduce.
     """
     from boomi_mcp.compiler.process_ir import lowering
     from boomi_mcp.compiler.process_ir.execution_profile import (
@@ -1733,6 +1841,14 @@ def test_the_notify_goldens_cannot_take_the_canonical_corpus_route_yet():
     Exactly one region is retried — the REST-write region, count 2. The other
     region and `golden-000059`'s handler are both count 0; any non-zero count
     trips the same gate.
+
+    These per-golden measurements were taken on the rows #184 amendment 3 later
+    retired and on #156's catch spelling (cache write, then Stop). The
+    replacements `golden-000087` and `golden-000086` still render through the
+    legacy builder and still drive the same REST POST target, so the capability
+    refusal asserted below blocks them identically; the "sufficient" and
+    "not sufficient" verdicts above have NOT been re-measured on the
+    catch-terminal spelling, and must be when the row lands.
 
     This test exists so the claim is checkable rather than asserted, and so it
     FAILS the day a REST write intent is registered — at which point this

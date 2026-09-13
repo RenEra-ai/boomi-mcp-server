@@ -131,14 +131,33 @@ def test_an_attested_prefix_before_a_terminal_call_parses(builder, label, prefix
     assert _diagnostics(builder(*prefix)) == []
 
 
-@pytest.mark.parametrize("builder,pointer", [
-    (_leg_with_prefix, "/body/steps/0/legs/0/terminal"),
-    (_arm_with_prefix, "/body/steps/0/true_arm/terminal"),
+@pytest.mark.parametrize("builder,terminal_pointer,cache_pointer", [
+    # Explicit ids keep the node ids the wave gate registered for the two-value form.
+    pytest.param(_leg_with_prefix, "/body/steps/0/legs/0/terminal",
+                 "/body/steps/0/legs/0/steps/0/cache_ref",
+                 id="_leg_with_prefix-/body/steps/0/legs/0/terminal"),
+    pytest.param(_arm_with_prefix, "/body/steps/0/true_arm/terminal",
+                 "/body/steps/0/true_arm/steps/0/cache_ref",
+                 id="_arm_with_prefix-/body/steps/0/true_arm/terminal"),
 ])
-def test_a_prefix_ending_on_an_unattested_predecessor_is_refused_at_the_terminal(builder, pointer):
-    """A cache remove hands the call nothing (measured, ledger E0-184-01)."""
+def test_a_prefix_ending_on_an_unattested_predecessor_is_refused_at_the_terminal(
+    builder, terminal_pointer, cache_pointer
+):
+    """A cache remove hands the call nothing (measured, ledger E0-184-01).
+
+    #184 amendment 3: an all-document Remove from Cache hands on ZERO documents, so
+    ANY authored successor on its path — the terminal process call included — never
+    runs. That is now refused by the zero-emission rule at the remove's own
+    ``/cache_ref``, reported BEFORE the process-call prefix rule could answer at the
+    terminal. The prefix stays out of the attested table either way (the capture's
+    cache-remove rows are REFUSE).
+    """
     diagnostics = _diagnostics(builder({"kind": "cache_remove", "cache_ref": "$ref:C"}))
-    assert diagnostics[:1] == [(PROCESS_IR_CAPABILITY_PROCESS_CALL_PLACEMENT_UNSUPPORTED, pointer)], diagnostics
+    assert diagnostics[:1] == [(PROCESS_IR_SCHEMA_INVALID_CARDINALITY, cache_pointer)], diagnostics
+    assert (PROCESS_IR_CAPABILITY_PROCESS_CALL_PLACEMENT_UNSUPPORTED, terminal_pointer) not in diagnostics[:1]
+    assert not any(
+        kind == "cache_remove" for _context, kind, _form in model.PROCESS_CALL_ATTESTED_PREDECESSORS
+    )
 
 
 def test_a_connector_in_the_prefix_keeps_the_mixing_refusal():
@@ -232,5 +251,31 @@ def test_the_branch_point_refused_the_admitted_root_and_prefix_forms():
 
 
 def test_the_root_read_kinds_are_the_connector_walks_document_producers():
-    """ONE statement of which reads may lead a call-free root, pinned both ways."""
-    assert model.ROOT_ENTRY_READ_KINDS == connector_resolution._STREAM_PRODUCING_KINDS
+    """ONE statement of which reads may lead a call-free root, pinned both ways.
+
+    #184 amendment 3 withdrew the connector walk's own ``_STREAM_PRODUCING_KINDS``:
+    the model's root-read kinds and the walk's triggered reads are both read from
+    the document-emission authority, and that authority is pinned to the served
+    contract's all-document stream replacers.
+    """
+    from boomi_mcp.authoring.process_ir_projection import process_ir_authoring_revision_payload
+    from boomi_mcp.models import process_ir_document_semantics as emission
+
+    assert model.ROOT_ENTRY_READ_KINDS is emission.TRIGGERED_REPLACEMENT_KINDS
+    assert model.ROOT_ENTRY_READ_KINDS == emission.TRIGGERED_REPLACEMENT_KINDS
+    served = {
+        entry["subject"]
+        for entry in process_ir_authoring_revision_payload()["entries"]
+        if entry.get("entry_type") == "node"
+        and (entry.get("document_semantics") or {}).get("output_documents") == "stream_replacing"
+        and (entry.get("document_semantics") or {}).get("grouping") == "all_documents"
+    }
+    assert served, "the served contract published no all-document stream replacer — the pin would be vacuous"
+    assert model.ROOT_ENTRY_READ_KINDS == served, {
+        "only_in_model": sorted(model.ROOT_ENTRY_READ_KINDS - served),
+        "only_in_served_contract": sorted(served - model.ROOT_ENTRY_READ_KINDS),
+    }
+    # The connector walk's triggered reads are the same rows' semantic kinds.
+    assert connector_resolution.TRIGGERED_REPLACEMENT_SEMANTIC_KINDS == {
+        emission.DOCUMENT_EMISSION_V1[kind].semantic_kind for kind in model.ROOT_ENTRY_READ_KINDS
+    }

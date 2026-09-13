@@ -25,6 +25,7 @@ from ...errors import (
     PROCESS_IR_COMPILE_EMISSION_PLAN_INVALID,
 )
 from ...models.process_ir import ProcessIRV1
+from ...models.process_ir_document_semantics import ZERO_EMISSION_KINDS
 from .connector_capabilities import canonicalize_connector_metadata
 from .contracts import (
     CATCH_DRAGPOINT_Y,
@@ -547,7 +548,10 @@ def _lower_terminal(
     # no Stop after it, so the emission plan owns the synthetic one.
     if kind == "target" and routed:
         exit_role = "routed_target"
-    elif kind == "cache_put":
+    elif kind in ZERO_EMISSION_KINDS:
+        # #184 amendment 3: the terminal cache action. A staging cache_put and a
+        # whole-cache cache_remove hand on no documents, so each ends its path
+        # with no outgoing edge and no synthetic stop.
         exit_role = "cache_stage"
     else:
         exit_role = _EXIT_KINDS.get(kind)

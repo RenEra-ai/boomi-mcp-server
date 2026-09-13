@@ -59,6 +59,10 @@ from ..connector_resolution import (
     _profile_identity as _resolved_profile_identity,
     resolve_connector_call_bindings,
 )
+from ....models.process_ir_document_semantics import (
+    TRIGGERED_REPLACEMENT_SEMANTIC_KINDS,
+    ZERO_EMISSION_SEMANTIC_KINDS,
+)
 from ..diagnostics import ProcessIRCompileError, diagnostic
 from .contracts import (
     DEFAULT_VALIDATION_CAPABILITIES,
@@ -93,10 +97,15 @@ CacheContentFact = Tuple[str, Optional[Tuple[str, str]]]
 #
 # Carried per path beside the property lattice, never merged: control nodes end
 # the path they sit on, so a Branch leg or Decision arm inherits the stream that
-# reached the control and nothing flows back out of it. Document EXISTENCE is a
+# reached the control and nothing flows back out of it. USABLE PAYLOAD is a
 # separate fact owned by connector resolution (`_walk_paths.producer`); the states
 # here are chosen so the two agree — the three no-producer states below are
 # exactly the points at which that walk has no producer.
+#
+# #184 amendment 3 separates that from the TRIGGER. The two entry states still
+# deliver one document that makes the next step run; only `absent` delivers
+# nothing at all. What each step hands on is read from the document-emission
+# authority.
 
 #: The single empty document a scheduled (No Data) start supplies. It can trigger
 #: one execution of what follows, but it carries no payload: nothing can be read
@@ -106,7 +115,8 @@ STREAM_EMPTY_ENTRY = "empty_entry"
 #: rewrote it without any from-nothing producer running. Still no producer, but
 #: its content is no longer provably empty.
 STREAM_TOUCHED_ENTRY = "touched_entry"
-#: No documents: a cache write consumed the stream, or a call returned none.
+#: No documents at all, not even a trigger: a cache write or an all-document
+#: removal handed on none, or a call returned none.
 STREAM_ABSENT = "absent"
 #: Documents of one resolved profile identity, with the node that established it.
 STREAM_KNOWN = "known"
@@ -1175,7 +1185,7 @@ def _walk_lineage(
                 declared_ref = getattr(cache, "cache_profile_ref", None)
                 if declared_ref is not None and _identity(declared_ref) != identity:
                     mismatch(node, "/cache_ref")
-            # Add to Cache consumes the stream: the model requires a read next.
+            # Add to Cache hands on no documents: the path ends here.
             return (
                 state.with_content(semantic.cache_ref, identity),
                 _Stream(STREAM_ABSENT),
@@ -1183,7 +1193,11 @@ def _walk_lineage(
             )
 
         cache_reads = [key[1] for key, _default, _strict in _reads_of(semantic) if key[0] == CACHE]
-        if cache_reads:
+        if cache_reads and kind in TRIGGERED_REPLACEMENT_SEMANTIC_KINDS:
+            if stream.state == STREAM_ABSENT:
+                # Nothing arrives, so the read never runs: it cannot invent a
+                # stream after a path its documents were consumed on.
+                return state, stream, legacy
             if getattr(semantic, "external_writer", False):
                 # An outside writer's content has no profile this process can see
                 # (D6); the declared cache profile is not a substitute for it.
@@ -1194,8 +1208,12 @@ def _walk_lineage(
             return state, _Stream(STREAM_UNKNOWN, origin="cache"), legacy
 
         if kind == "cache_remove":
+            # Whole-cache removal clears the cache's content, and hands on no
+            # documents: the path ends here, exactly as after a cache write.
             if getattr(semantic, "remove_all_documents", False):
-                return state.without_content(semantic.cache_ref), stream, legacy
+                state = state.without_content(semantic.cache_ref)
+            if kind in ZERO_EMISSION_SEMANTIC_KINDS:
+                return state, _Stream(STREAM_ABSENT), legacy
             return state, stream, legacy
 
         if _replaces_document_stream(semantic):

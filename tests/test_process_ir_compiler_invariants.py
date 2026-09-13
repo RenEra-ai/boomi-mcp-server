@@ -1513,25 +1513,49 @@ def test_branch_leg_must_target_its_own_leg():
 
 
 def test_cache_stage_is_rejected_outside_a_branch_leg_terminal():
-    """A root or mid-flow cache_put marked ``cache_stage`` would truncate the path."""
-    from boomi_mcp.compiler.process_ir.contracts import CachePutSemanticV1
+    """A root or mid-flow cache_put marked ``cache_stage`` would truncate the path.
 
-    cfg = SemanticCfgV1(
-        entry_node_id="n1",
-        nodes=(
-            _node(
-                1,
-                CachePutSemanticV1(cache_ref="$ref:cache"),
-                path="/body/steps/0",
-                exit_role="cache_stage",
-            ),
-        ),
-        edges=(),
-        exit_node_ids=("n1",),
+    #184 amendment 3: ``cache_put`` and ``cache_remove`` both hand on no documents,
+    so both carry the terminal cache-action role, but their legal slots DIFFER. A
+    put may end a branch leg or a catch body. A remove may end only a branch leg.
+    The position is therefore checked per kind, and sharing one role must not let
+    a remove into the catch terminal. The message names both placements.
+    """
+    from boomi_mcp.compiler.process_ir.contracts import (
+        CachePutSemanticV1,
+        CacheRemoveSemanticV1,
     )
-    diagnostic = _raises(check_cfg_invariants, cfg)
+
+    def _staged(semantic, path):
+        return SemanticCfgV1(
+            entry_node_id="n1",
+            nodes=(_node(1, semantic, path=path, exit_role="cache_stage"),),
+            edges=(),
+            exit_node_ids=("n1",),
+        )
+
+    message = (
+        "the terminal cache action is valid only as a cache_put in a branch leg or "
+        "catch body terminal, or a cache_remove in a branch leg terminal"
+    )
+    put = CachePutSemanticV1(cache_ref="$ref:cache")
+    remove = CacheRemoveSemanticV1(cache_ref="$ref:cache", remove_all_documents=True)
+
+    diagnostic = _raises(check_cfg_invariants, _staged(put, "/body/steps/0"))
     assert diagnostic.code == PROCESS_IR_SEMANTIC_AMBIGUOUS_FLOW
-    assert diagnostic.message == "cache_stage is only valid in a branch leg terminal"
+    assert diagnostic.message == message
+
+    # A cache_remove in a CATCH BODY terminal is refused, at that terminal...
+    catch_terminal = "/body/steps/0/catch_body/terminal"
+    diagnostic = _raises(check_cfg_invariants, _staged(remove, catch_terminal))
+    assert diagnostic.code == PROCESS_IR_SEMANTIC_AMBIGUOUS_FLOW
+    assert diagnostic.path == catch_terminal
+    assert diagnostic.message == message
+    # ...CONTROL: the same position admits a cache_put, so the refusal above is
+    # decided by the kind rather than by the slot...
+    check_cfg_invariants(_staged(put, catch_terminal))
+    # ...and a cache_remove is admitted in its one legal slot.
+    check_cfg_invariants(_staged(remove, "/body/steps/0/legs/1/terminal"))
 
 
 def test_cache_stage_accepted_in_a_branch_leg_terminal():

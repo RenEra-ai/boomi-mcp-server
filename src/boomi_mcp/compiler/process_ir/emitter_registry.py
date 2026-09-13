@@ -56,6 +56,7 @@ from ...errors import (
     PROCESS_IR_COMPILE_XML_INVALID,
 )
 from ...models.process_ir import template_defeats_caught_error_binding
+from ...models.process_ir_document_semantics import ZERO_EMISSION_EMITTER_KINDS
 from ...models.process_ir_tokens import CAUGHT_ERROR_PROPERTY_ID, NOTIFY_LEVELS
 from .contracts import (
     BranchInputV1,
@@ -141,8 +142,9 @@ class SymbolRequirement:
 class OutgoingCardinality:
     """Allowed outgoing-edge count for a node kind.
 
-    ``kind`` is ``exact`` (``value`` edges), ``branch`` (``num_branches`` edges),
-    or ``zero_or_one`` (a terminal-or-continuing cache-load).
+    ``kind`` is ``exact`` (``value`` edges) or ``branch`` (``num_branches`` edges).
+    #184 amendment 3 withdrew ``zero_or_one``: its only user was a cache load
+    allowed to continue, and a cache load hands on no documents.
     """
 
     kind: str
@@ -153,7 +155,15 @@ EXACT_ONE = OutgoingCardinality("exact", 1)
 EXACT_ZERO = OutgoingCardinality("exact", 0)
 EXACT_TWO = OutgoingCardinality("exact", 2)
 BRANCH = OutgoingCardinality("branch")
-ZERO_OR_ONE = OutgoingCardinality("zero_or_one")
+
+
+def _cache_cardinality(key: str) -> OutgoingCardinality:
+    """A cache step's outgoing wires, read from the document-emission authority.
+
+    A step that hands on zero documents has no successor to wire; a retrieve has
+    its one configured successor.
+    """
+    return EXACT_ZERO if key in ZERO_EMISSION_EMITTER_KINDS else EXACT_ONE
 
 
 @dataclass(frozen=True, slots=True)
@@ -736,16 +746,17 @@ _REGISTRATIONS: Tuple[EmitterRegistration, ...] = (
     EmitterRegistration("map", MapInputV1, "map", CAPABILITY_PROCESS_IR_V1, EXACT_ONE, _req_map, _emit_map),
     EmitterRegistration("flowcontrol", FlowControlInputV1, "flowcontrol", CAPABILITY_PROCESS_IR_V1, EXACT_ONE, _no_requirements, _emit_flowcontrol),
     EmitterRegistration("dataprocess", DataProcessInputV1, "dataprocess", CAPABILITY_PROCESS_IR_V1, EXACT_ONE, _req_dataprocess, _emit_dataprocess, _pre_dataprocess),
-    EmitterRegistration("doccacheload", DocCacheLoadInputV1, "doccacheload", CAPABILITY_PROCESS_IR_V1, ZERO_OR_ONE, _req_cache, _emit_doccacheload),
-    EmitterRegistration("doccacheretrieve", DocCacheRetrieveInputV1, "doccacheretrieve", CAPABILITY_PROCESS_IR_V1, EXACT_ONE, _req_cache, _emit_doccacheretrieve, _pre_doccacheretrieve),
-    EmitterRegistration("doccacheremove", DocCacheRemoveInputV1, "doccacheremove", CAPABILITY_PROCESS_IR_V1, EXACT_ONE, _req_cache, _emit_doccacheremove, _pre_doccacheremove),
+    EmitterRegistration("doccacheload", DocCacheLoadInputV1, "doccacheload", CAPABILITY_PROCESS_IR_V1, _cache_cardinality("doccacheload"), _req_cache, _emit_doccacheload),
+    EmitterRegistration("doccacheretrieve", DocCacheRetrieveInputV1, "doccacheretrieve", CAPABILITY_PROCESS_IR_V1, _cache_cardinality("doccacheretrieve"), _req_cache, _emit_doccacheretrieve, _pre_doccacheretrieve),
+    EmitterRegistration("doccacheremove", DocCacheRemoveInputV1, "doccacheremove", CAPABILITY_PROCESS_IR_V1, _cache_cardinality("doccacheremove"), _req_cache, _emit_doccacheremove, _pre_doccacheremove),
     EmitterRegistration("setproperties_step", SetPropertiesStepInputV1, "documentproperties", CAPABILITY_PROCESS_IR_V1, EXACT_ONE, _req_setproperties, _emit_setproperties),
     # #175: EXACT_ZERO, not EXACT_ONE. A process call ends its path — the platform
     # projects a call's outbound connection from the CALLED process's
     # return-document shapes, and V1 declares none — so a plan node carrying an
     # outgoing transition is malformed and is refused here, the last canonical
-    # boundary before bytes. ZERO_OR_ONE would be the dangerous spelling: it would
-    # keep emitting exactly the shape this issue exists to remove.
+    # boundary before bytes. A terminal-or-continuing cardinality would be the
+    # dangerous spelling: it would keep emitting exactly the shape this issue
+    # exists to remove.
     EmitterRegistration("processcall", ProcessCallInputV1, "processcall", CAPABILITY_PROCESS_IR_V1, EXACT_ZERO, _req_process, _emit_processcall),
     EmitterRegistration("branch", BranchInputV1, "branch", CAPABILITY_PROCESS_IR_V1, BRANCH, _no_requirements, _emit_branch),
     EmitterRegistration("decision", DecisionInputV1, "decision", CAPABILITY_PROCESS_IR_V1, EXACT_TWO, _no_requirements, _emit_decision, _pre_decision),
@@ -832,8 +843,6 @@ def _cardinality_ok(card: OutgoingCardinality, inp, node: EmissionNodeV1) -> boo
         return n == card.value
     if card.kind == "branch":
         return n == inp.num_branches
-    if card.kind == "zero_or_one":
-        return n in (0, 1)
     return False
 
 

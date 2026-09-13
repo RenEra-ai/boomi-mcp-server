@@ -390,12 +390,22 @@ def test_flow_cross_type_id_reuse_builds_byte_faithfully():
     # document_cache_id was `PROCESS_IR_COMPILE_SYMBOL_UNRESOLVED` before role
     # scoping; now the two aliases resolve to the same real id with distinct types,
     # so it builds byte-faithfully — the real id appears in both mapId and docCache.
+    #
+    # #184 amendment 3: the cache pair used to be a LINEAR doccacheload ->
+    # doccacheretrieve. Add to Cache hands on no documents (measured), so the read
+    # after it never ran and the builder now refuses that chain at the read's
+    # `.kind`. The staging load is the terminal of a target-less branch leg and the
+    # read sits in the later leg — the legal form. The cross-type reuse and the
+    # byte-faithfulness oracle are unchanged.
     shared = "cccccccc-cccc-cccc-cccc-cccccccccccc"
     _D_MAP, _D_CACHE = "d5d50000-0000-0000-0000-00000000ma01", "d5d50000-0000-0000-0000-00000000ca01"
     steps = lambda m, c: [
         {"kind": "map_ref", "map_ref": m},
-        {"kind": "doccacheload", "document_cache_id": c},
-        {"kind": "doccacheretrieve", "document_cache_id": c},
+        {"kind": "branch", "legs": [
+            {"steps": [{"kind": "doccacheload", "document_cache_id": c}]},
+            {"steps": [{"kind": "doccacheretrieve", "document_cache_id": c}],
+             "target": {"connector_type": "rest", "connection_id": _REST_CONN, "operation_id": _REST_OP, "action_type": "POST", "label": "read"}},
+        ]},
     ]
     shared_cfg = _base_flow(flow_sequence=steps(shared, shared))
     control_cfg = _base_flow(flow_sequence=steps(_D_MAP, _D_CACHE))

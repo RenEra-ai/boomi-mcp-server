@@ -296,12 +296,31 @@ def test_the_linear_golden_has_one_genuine_read_before_write():
     default_value to accept absence" remediation). Asserting "every golden is
     clean" would have forced the rule to be weakened to fit a fixture that was
     never lineage-checked.
+
+    #184 amendment 3 removed the golden's LINEAR cache write and removal: Add to
+    Cache and Remove from Cache hand on no documents (measured), so nothing after
+    them on their path runs and a linear one is refused. That leaves the golden's
+    two cache READS with no writer in this process, and each is reported as
+    ``…CACHE_WRITER_MISSING`` — genuine for the same reason as the property read:
+    an empty cache hands on no documents. The cache_get's ``external_writer: true``
+    is an authored claim, not a proof; with no bound external-writer contract it
+    does not downgrade (see
+    ``test_an_unbound_external_writer_contract_is_reported_and_does_not_downgrade``).
+    The read-before-write is still exactly one, at its shifted position.
     """
     ir = parse_process_ir_v1(GOLDEN_DOCS["linear_flow"])
     report = validate_process_ir(ir, _symbols_for(ir))
-    assert [f.code for f in report.errors] == [
-        PROCESS_IR_SEMANTIC_LINEAGE_PROPERTY_READ_BEFORE_WRITE
+    assert [(f.code, f.path) for f in report.errors] == [
+        ("PROCESS_IR_SEMANTIC_LINEAGE_CACHE_WRITER_MISSING", "/body/steps/5"),
+        ("PROCESS_IR_SEMANTIC_LINEAGE_CACHE_WRITER_MISSING", "/body/steps/6"),
+        (PROCESS_IR_SEMANTIC_LINEAGE_PROPERTY_READ_BEFORE_WRITE, "/body/steps/7"),
     ]
+    # the reads the writer-missing findings name are the two cache reads
+    reads = [ir.body.steps[5].kind, ir.body.steps[6].kind]
+    assert reads == ["cache_get", "document_cache_retrieve"]
+    assert [f.code for f in report.errors].count(
+        PROCESS_IR_SEMANTIC_LINEAGE_PROPERTY_READ_BEFORE_WRITE
+    ) == 1
 
 
 def test_a_sentinel_value_never_reaches_the_serialized_report():

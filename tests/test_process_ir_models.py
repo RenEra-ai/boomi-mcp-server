@@ -167,9 +167,35 @@ def parse_error(payload) -> ProcessIRValidationError:
 
 
 def test_linear_full_vocabulary_parses_and_roundtrips():
-    ir = parse_process_ir_v1(linear_doc(*LINEAR_NODES))
+    """Every linear node kind parses and round-trips, each in a LEGAL placement.
+
+    #184 amendment 3: `cache_put` and `cache_remove` hand on no documents, so
+    neither may have an authored successor on its path. Each is admitted only as a
+    terminal, and a branch leg may end on either. The zero-emission kinds therefore
+    ride as leg terminals of a closing fan-out instead of sitting mid-sequence.
+    Every other linear kind keeps its place between the source and that fan-out,
+    and the target keeps its coverage as the third leg's terminal.
+    """
+    from boomi_mcp.models.process_ir_document_semantics import ZERO_EMISSION_KINDS
+
+    steps = [node for node in LINEAR_NODES if node["kind"] not in ZERO_EMISSION_KINDS]
+    fan_out = {
+        "kind": "branch",
+        "legs": [
+            {"steps": [], "terminal": {"kind": "cache_put", "cache_ref": "$ref:cache"}},
+            {"steps": [], "terminal": {"kind": "cache_remove", "cache_ref": "$ref:cache"}},
+            {"steps": [], "terminal": target()},
+        ],
+    }
+    ir = parse_process_ir_v1(doc(source(), *steps, fan_out))
     dumped = ir.model_dump(mode="json")
     assert ProcessIRV1.model_validate(dumped) == ir
+    # Non-vacuity: the document still carries every linear kind, the zero-emission
+    # ones included, so moving them to terminals dropped no coverage.
+    covered = {step.kind for step in ir.body.steps}
+    covered |= {leg.terminal.kind for leg in ir.body.steps[-1].legs}
+    expected = {node["kind"] for node in LINEAR_NODES} | set(ZERO_EMISSION_KINDS)
+    assert expected <= covered, sorted(expected - covered)
 
 
 def test_control_vocabulary_parses_and_roundtrips():
@@ -619,13 +645,40 @@ def test_true_arm_trailing_cache_put_rejected():
 
 
 def test_false_arm_trailing_cache_put_allowed_only_before_stop():
-    ok = decision(false_arm={"steps": [{"kind": "cache_put", "cache_ref": "$ref:c"}], "terminal": {"kind": "stop"}})
-    parse_process_ir_v1(doc(source(), ok))
-    bad = decision(
-        false_arm={"steps": [{"kind": "cache_put", "cache_ref": "$ref:c"}], "terminal": exception()}
+    """#184 amendment 3: a trailing false-arm `cache_put` is refused before EVERY
+    terminal, a stop included. The name is kept for its node id.
+
+    The stop allowance assumed a stop after a cache write was harmless. Add to
+    Cache hands on no documents, so that stop never runs either: it is a dead
+    successor on the canvas. Both forms are refused at the cache node's own
+    `cache_ref`. The legal way to stage from a false arm is a branch terminal whose
+    leg ends on the write.
+    """
+    put = {"kind": "cache_put", "cache_ref": "$ref:c"}
+    pointer = "/body/steps/1/false_arm/steps/0/cache_ref"
+
+    before_stop = decision(false_arm={"steps": [dict(put)], "terminal": {"kind": "stop"}})
+    err = parse_error(doc(source(), before_stop))
+    assert codes_of(err)[0] == (PROCESS_IR_SCHEMA_INVALID_CARDINALITY, pointer), codes_of(err)
+
+    before_exception = decision(false_arm={"steps": [dict(put)], "terminal": exception()})
+    err = parse_error(doc(source(), before_exception))
+    assert codes_of(err)[0] == (PROCESS_IR_SCHEMA_INVALID_CARDINALITY, pointer), codes_of(err)
+
+    # CONTROL: the same write as a branch-leg TERMINAL under the false arm parses.
+    staged = decision(
+        false_arm={
+            "steps": [],
+            "terminal": branch(
+                legs=[
+                    {"steps": [], "terminal": dict(put)},
+                    {"steps": [message()], "terminal": {"kind": "stop"}},
+                ]
+            ),
+        }
     )
-    err = parse_error(doc(source(), bad))
-    assert err.diagnostics[0].code == PROCESS_IR_SCHEMA_INVALID_CARDINALITY
+    ir = parse_process_ir_v1(doc(source(), staged))
+    assert ir.body.steps[1].false_arm.terminal.legs[0].terminal.kind == "cache_put"
 
 
 def test_nested_decision_is_supported(): # #141
@@ -709,7 +762,10 @@ def test_process_call_is_a_branch_leg_terminal_not_a_step():  # #141, amended by
     # predecessor parses: capture `cap184-prefix-predecessors` ran a Message wired
     # straight into the call and the child received the parent's token. A predecessor
     # that capture refused — a cache remove, whose successor the platform skips —
-    # keeps a refusal, now under the placement code at the terminal.
+    # keeps a refusal. #184 amendment 3 moved it off the placement code at the
+    # terminal: Remove from Cache hands on no documents, so a remove with ANY
+    # authored successor is refused at its own `cache_ref` by the zero-emission
+    # verdict, which answers before the process-call prefix rule is asked.
     with_prefix = {
         "kind": "branch",
         "legs": [
@@ -728,8 +784,8 @@ def test_process_call_is_a_branch_leg_terminal_not_a_step():  # #141, amended by
     }
     err = parse_error({"version": "1", "body": {"kind": "sequence", "steps": [unattested]}})
     assert codes_of(err)[0] == (
-        PROCESS_IR_CAPABILITY_PROCESS_CALL_PLACEMENT_UNSUPPORTED,
-        "/body/steps/0/legs/0/terminal",
+        PROCESS_IR_SCHEMA_INVALID_CARDINALITY,
+        "/body/steps/0/legs/0/steps/0/cache_ref",
     ), codes_of(err)
 
 
@@ -883,25 +939,45 @@ def test_root_sequences_the_bracketing_rules_used_to_refuse_now_parse(steps):
 
 
 @pytest.mark.parametrize(
-    "steps",
+    "steps,refused_at",
     [
         # the issue's own probe shape
-        (call(), {"kind": "set_ddp", "name": "d",
-                  "source_values": [{"value_type": "static", "value": "v"}]},
-         call(), {"kind": "stop"}),
+        pytest.param(
+            (call(), {"kind": "set_ddp", "name": "d",
+                      "source_values": [{"value_type": "static", "value": "v"}]},
+             call(), {"kind": "stop"}),
+            None,
+            id="steps0",
+        ),
         # a linear PREFIX: property preparation before the entry read
-        ({"kind": "set_dpp", "name": "p",
-          "source_values": [{"value_type": "static", "value": "v"}]},
-         call(), call(), {"kind": "stop"}),
-        (call(), message(), call(), {"kind": "stop"}),
-        # cache_put admitted, with its adjacency rule satisfied
-        (call(), {"kind": "cache_put", "cache_ref": "$ref:c"},
-         {"kind": "cache_get", "cache_ref": "$ref:c"}, call(), {"kind": "stop"}),
+        pytest.param(
+            ({"kind": "set_dpp", "name": "p",
+              "source_values": [{"value_type": "static", "value": "v"}]},
+             call(), call(), {"kind": "stop"}),
+            None,
+            id="steps1",
+        ),
+        pytest.param((call(), message(), call(), {"kind": "stop"}), None, id="steps2"),
+        # #184 amendment 3: this case used to admit `cache_put` between calls with
+        # its "adjacency rule" (a read straight after the write) satisfied. That
+        # rule is withdrawn. Add to Cache hands on no documents, so the read after
+        # it never runs, and the write with a successor is refused at its own
+        # `cache_ref`. The id is kept.
+        pytest.param(
+            (call(), {"kind": "cache_put", "cache_ref": "$ref:c"},
+             {"kind": "cache_get", "cache_ref": "$ref:c"}, call(), {"kind": "stop"}),
+            "/body/steps/1/cache_ref",
+            id="steps3",
+        ),
     ],
 )
-def test_linear_steps_are_admitted_before_and_between_connector_calls(steps):
+def test_linear_steps_are_admitted_before_and_between_connector_calls(steps, refused_at):
     """#154 item 5. The legacy builder emits Set Properties around its reads;
     a generalized call sequence could not express that at all before this."""
+    if refused_at is not None:
+        err = parse_error(doc(*steps))
+        assert codes_of(err)[0] == (PROCESS_IR_SCHEMA_INVALID_CARDINALITY, refused_at), codes_of(err)
+        return
     ir = parse_process_ir_v1(doc(*steps))
     assert ir.body.steps[-1].kind == "stop"
 
@@ -1151,7 +1227,21 @@ def test_diagnostics_sorted_and_deterministic():
 
 
 def test_canonical_json_deterministic_across_runs():
-    payload = linear_doc(*LINEAR_NODES)
+    """Canonical JSON must not depend on the payload object's identity or a JSON
+    round trip of it.
+
+    #184 amendment 3: ``LINEAR_NODES`` still lists every node kind, but Add to
+    Cache and Remove from Cache hand on no documents (measured), so a linear
+    ``cache_put``/``cache_remove`` with a successor is refused at parse. The pin
+    is taken over the LEGAL linear chain — the zero-emission kinds dropped by the
+    document-emission authority, not by a hand list — which is exactly the
+    ``linear_flow`` golden document.
+    """
+    from boomi_mcp.models.process_ir_document_semantics import ZERO_EMISSION_KINDS
+
+    legal = [node for node in LINEAR_NODES if node["kind"] not in ZERO_EMISSION_KINDS]
+    assert len(legal) == len(LINEAR_NODES) - 2  # exactly the put and the removal left
+    payload = linear_doc(*legal)
     first = canonical_process_ir_json(parse_process_ir_v1(payload))
     second = canonical_process_ir_json(parse_process_ir_v1(json.loads(json.dumps(payload))))
     assert first == second
@@ -1263,7 +1353,13 @@ def test_schema_carries_no_layout_cfg_or_open_config_vocabulary():
 
 def golden_documents():
     """The committed full-vocabulary canonical documents (see fixtures/process_ir)."""
-    linear_flow = parse_process_ir_v1(linear_doc(*LINEAR_NODES))
+    from boomi_mcp.models.process_ir_document_semantics import ZERO_EMISSION_KINDS
+
+    linear_flow = parse_process_ir_v1(linear_doc(*[
+        # #184 amendment 3: a cache write or removal hands on no documents, so neither
+        # may sit mid-sequence; the linear golden carries the legal linear kinds.
+        node for node in LINEAR_NODES if node["kind"] not in ZERO_EMISSION_KINDS
+    ]))
     control_flow = parse_process_ir_v1(
         doc(
             source(),

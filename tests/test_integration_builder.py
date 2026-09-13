@@ -4363,10 +4363,15 @@ class TestBuildPlanProcessFlowRefTypes:
 
     @patch(_PATCH_TARGET)
     def test_doccacheremove_ref_wrong_type_errors(self, mock_pag):
-        # Issue #110 M10.6: transform.document_cache_id $ref pointing at a REST
-        # connector-settings (not a Document Cache) is caught at plan time — the
-        # same generalized slot rule as the #109 retrieve binding (both
-        # doccacheretrieve and doccacheremove require a Document Cache target).
+        # Issue #110 M10.6 pinned the Document Cache slot rule for the remove
+        # binding here. #184 amendment 3 refuses the inline remove transform
+        # itself: Remove from Cache hands on no documents, so the target wired
+        # after it never runs (captures cap184-prefix-predecessors
+        # xr-remove-successor, cap184-cache-remove-read). Plan-time validation
+        # reports that refusal before any ref-type check, so a wrong-typed binding
+        # still fails the plan, now at transform.mode. The generalized slot rule
+        # stays covered by test_doccacheretrieve_ref_wrong_type_errors, which
+        # shares it.
         mock_pag.return_value = []
         bad = _process_flow_comp(transform={
             "mode": "doccacheremove",
@@ -4379,17 +4384,23 @@ class TestBuildPlanProcessFlowRefTypes:
             _stub_dep_comp("target_rest_operation"),
             bad,
         ]
-        ve = next(s for s in _build_plan(MagicMock(), _build_config(components))["steps"]
-                  if s["key"] == "main_process")["validation_error"]
-        assert ve["error_code"] == "PROCESS_REF_TYPE_MISMATCH"
-        assert ve["field"] == "transform.document_cache_id"
-        assert ve["details"]["expected_role"] == "Document Cache"
-        assert ve["details"]["actual_role"] == "REST Client connector-settings"
+        step = next(s for s in _build_plan(MagicMock(), _build_config(components))["steps"]
+                    if s["key"] == "main_process")
+        assert step["planned_action"] == "error_process_validation"
+        ve = step["validation_error"]
+        assert ve["error_code"] == "PROCESS_DOCCACHE_REMOVE_CONFIG_INVALID"
+        assert ve["field"] == "transform.mode"
 
     @patch(_PATCH_TARGET)
     def test_doccacheremove_ref_correct_type_plans_clean(self, mock_pag):
-        # Issue #110 M10.6: transform.document_cache_id $ref pointing at a real
-        # Document Cache passes the type check and plans cleanly.
+        # Issue #110 M10.6: a transform.document_cache_id $ref pointing at a real
+        # Document Cache passed the type check and planned clean. #184 amendment 3
+        # refuses the inline remove transform whatever it binds: Remove from Cache
+        # hands on no documents, so the target wired after it never runs (captures
+        # cap184-prefix-predecessors xr-remove-successor,
+        # cap184-cache-remove-read). A correctly typed binding therefore no longer
+        # plans. It fails validation before anything is created, at
+        # transform.mode, and not as a ref-type mismatch.
         mock_pag.return_value = []
         good = _process_flow_comp(
             depends_on=("db_connection", "db_query_operation",
@@ -4408,8 +4419,10 @@ class TestBuildPlanProcessFlowRefTypes:
         ]
         process_step = next(s for s in _build_plan(MagicMock(), _build_config(components))["steps"]
                             if s["key"] == "main_process")
-        assert process_step.get("validation_error") is None
-        assert process_step["planned_action"] == "create"
+        assert process_step["planned_action"] == "error_process_validation"
+        ve = process_step["validation_error"]
+        assert ve["error_code"] == "PROCESS_DOCCACHE_REMOVE_CONFIG_INVALID"
+        assert ve["field"] == "transform.mode"
 
     @patch(_PATCH_TARGET)
     def test_dlq_error_subprocess_ref_correct_type_plans_clean(self, mock_pag):
@@ -7958,17 +7971,47 @@ class TestMapJoinCacheReaderLineage:
 
     @patch(_PATCH_TARGET)
     def test_joined_map_with_upstream_cache_put_plans_clean(self, mock_pag):
+        # #184 amendment 3: the upstream writer is staged in an EARLIER Branch leg,
+        # the only legal staging shape. Add to Cache hands on no documents, so the
+        # old trunk spelling (cache_put -> cache_get -> map_ref) is refused
+        # structurally before lineage runs; that is asserted first. Leg 1 ends on
+        # the cache_put, and leg 2 map_refs the joined map, whose cache join must
+        # resolve to that writer. Reversing the legs puts the reader first, and
+        # the plan must then fail, so the writer is what makes it clean.
         mock_pag.return_value = []
-        plan = _build_plan(MagicMock(), _build_config(self._components(
-            [
-                {"kind": "cache_put", "document_cache_id": "$ref:lookup_cache"},
-                {"kind": "cache_get", "document_cache_id": "$ref:lookup_cache"},
-                {"kind": "map_ref", "map_ref": "$ref:join_map"},
-            ],
-            process_deps=["join_map", "lookup_cache"],
-        )))
-        step = next(s for s in plan["steps"] if s["key"] == "join_process")
+        target = {
+            "connector_type": "rest",
+            "connection_id": "33333333-3333-3333-3333-333333333333",
+            "operation_id": "44444444-4444-4444-4444-444444444444",
+            "action_type": "POST",
+        }
+        writer_leg = {"steps": [{"kind": "cache_put", "document_cache_id": "$ref:lookup_cache"}]}
+        reader_leg = {"steps": [{"kind": "map_ref", "map_ref": "$ref:join_map"}], "target": target}
+
+        def _join_step(flow_sequence):
+            plan = _build_plan(MagicMock(), _build_config(self._components(
+                flow_sequence, process_deps=["join_map", "lookup_cache"],
+            )))
+            return next(s for s in plan["steps"] if s["key"] == "join_process")
+
+        linear = _join_step([
+            {"kind": "cache_put", "document_cache_id": "$ref:lookup_cache"},
+            {"kind": "cache_get", "document_cache_id": "$ref:lookup_cache"},
+            {"kind": "map_ref", "map_ref": "$ref:join_map"},
+        ])
+        assert linear["planned_action"] == "error_process_validation"
+        assert linear["validation_error"]["error_code"] == "PROCESS_FLOW_SEQUENCE_CONFIG_INVALID"
+        assert linear["validation_error"]["field"] == "flow_sequence[1].kind"
+
+        step = _join_step([{"kind": "branch", "legs": [writer_leg, reader_leg]}])
         assert step["planned_action"] == "create", step.get("validation_error")
+
+        reversed_legs = _join_step([{"kind": "branch", "legs": [reader_leg, writer_leg]}])
+        assert reversed_legs["planned_action"] == "error_process_validation"
+        assert (
+            reversed_legs["validation_error"]["error_code"]
+            == "PROCESS_LINEAGE_BRANCH_ORDER_INVALID"
+        )
 
     @patch(_PATCH_TARGET)
     def test_joined_map_external_writer_opt_out_plans_clean(self, mock_pag):

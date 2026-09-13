@@ -782,7 +782,8 @@ def test_template_documents_flow_sequence_surface(template):
         "dataprocess",
         "doccacheload",
         "doccacheretrieve",
-        "doccacheremove",
+        # #184 amendment 3 (ledger C18): doccacheremove withdrawn — Remove from
+        # Cache hands on no documents and no flow_sequence position admits it.
         # Issue #121 M11.2: generic DDP/DPP Set Properties steps.
         "set_ddp",
         "set_dpp",

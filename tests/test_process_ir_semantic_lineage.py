@@ -273,10 +273,12 @@ def test_a_missing_write_outside_any_branch_is_still_read_before_write():
 def test_an_earlier_leg_cache_write_reaches_a_later_leg():
     """Cache is execution-scoped like DPP, so leg 0's write reaches leg 1.
 
-    Leg 0 reads its own cache immediately after writing it because the schema
-    requires a cache_put to be followed by a stream-replacing read — it may not
-    feed a terminal directly. That extra read is a schema obligation, not part
-    of what this test is asserting.
+    #184 amendment 3: Add to Cache hands on no documents, so leg 0 ENDS on its
+    `cache_put` (the leg terminal) and nothing on that path reads after it. The
+    read lives in leg 1. Legs run in authored order and execution cache state
+    accumulates across them. The earlier form read the cache inside leg 0 straight
+    after the write, a successor the platform never runs, and the schema now
+    refuses it.
     """
     _get = {
         "kind": "cache_get",
@@ -284,13 +286,30 @@ def test_an_earlier_leg_cache_write_reaches_a_later_leg():
         "empty_cache_behavior": "stopprocess",
         "external_writer": False,
     }
-    doc = _branch_doc(
-        [
-            [{"kind": "cache_put", "cache_ref": "$ref:c"}, dict(_get)],
-            [dict(_get)],
-        ]
-    )
+
+    def _staged(first_leg):
+        return {
+            "version": "1",
+            "body": {
+                "kind": "sequence",
+                "steps": [
+                    {
+                        "kind": "branch",
+                        "legs": [
+                            first_leg,
+                            {"steps": [dict(_get)], "terminal": {"kind": "stop"}},
+                        ],
+                    }
+                ],
+            },
+        }
+
+    doc = _staged({"steps": [], "terminal": {"kind": "cache_put", "cache_ref": "$ref:c"}})
     assert PROCESS_IR_SEMANTIC_LINEAGE_CACHE_WRITER_MISSING not in _codes(doc)
+    # CONTROL: the same later-leg read with no earlier-leg write IS reported, so
+    # the absence above is the leg 0 write reaching leg 1.
+    unwritten = _staged({"steps": [{"kind": "message", "text": "x"}], "terminal": {"kind": "stop"}})
+    assert PROCESS_IR_SEMANTIC_LINEAGE_CACHE_WRITER_MISSING in _codes(unwritten)
 
 
 # ---------------------------------------------------------------------------

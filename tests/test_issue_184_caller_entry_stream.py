@@ -112,9 +112,14 @@ _ADMITTED = [
                  id="first_map_on_the_callers_documents"),
     pytest.param(_doc(_ENTRY, _writer("P2"), _PATCH, _STOP), (_P2, _P2),
                  id="profile_source_then_a_call_of_the_same_profile"),
-    pytest.param(_doc(_ENTRY, {"kind": "cache_put", "cache_ref": "$ref:CACHE_P1"},
-                      {"kind": "cache_get", "cache_ref": "$ref:CACHE_P1"}, _STOP), (_P1,),
-                 id="staging_the_callers_documents"),
+    # #184 amendment 3 (measured): Add to Cache hands on ZERO documents, so a read
+    # authored straight after it never runs. The caller's documents are staged by a
+    # cache_put that TERMINATES leg 1, and a LATER leg reads them back. The staging
+    # write still consumes the caller's documents and records its declared profile.
+    pytest.param(_doc(_ENTRY, {"kind": "branch", "legs": [
+        {"steps": [], "terminal": {"kind": "cache_put", "cache_ref": "$ref:CACHE_P1"}},
+        {"steps": [{"kind": "cache_get", "cache_ref": "$ref:CACHE_P1"}], "terminal": _STOP},
+    ]}), (_P1,), id="staging_the_callers_documents"),
 ]
 
 

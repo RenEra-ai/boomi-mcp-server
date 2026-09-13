@@ -478,11 +478,13 @@ def test_no_case_factory_hands_module_state_to_a_helper_by_reference():
         entry for entry in with_containers
         if entry[0].startswith("pfb_") or entry[0] == "_pfb_build"
     ]
-    assert len(pfb_calls) >= 55, (
+    # #184 amendment 3 retired three legacy flow-builder cases (golden-000012/018/019)
+    # and re-measured: flow-builder 49, overall 122. The floors stay just under those.
+    assert len(pfb_calls) >= 45, (
         "only {0} flow-builder corpus calls carried a container; the "
         "interception is not reaching the config builders".format(len(pfb_calls))
     )
-    assert len(with_containers) >= 105, (
+    assert len(with_containers) >= 113, (
         "only {0} recorded corpus calls carried a container; the interception "
         "is not reaching the render path".format(len(with_containers))
     )
@@ -709,12 +711,15 @@ def test_every_active_golden_renders_with_all_test_modules_unimportable(tmp_path
     # golden-000079 (#184) joins for the same reason: it renders the LEGACY mapped
     # both-sides dynamic path (`EVAL-155-02`), the oracle #160 verifies against and
     # then deletes with the legacy renderer.
+    # golden-000088 (#184 amendment 3) replaces golden-000060 in the #159 role: the
+    # same archetype notify/DLQ configuration, emitted with the cache write as the
+    # catch leg's end. golden-000060 is tombstoned, so it no longer renders at all.
     assert set(special) == {
         "golden-000056",
         "golden-000057",
-        "golden-000060",
         "golden-000071",
         "golden-000079",
+        "golden-000088",
     }, special
     assert set(special) <= set(report["shas"])
 

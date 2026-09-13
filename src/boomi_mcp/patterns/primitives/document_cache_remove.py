@@ -20,6 +20,12 @@ It emits NO standalone components (``emit_components`` -> ``[]``); the remove
 step lives inline on the process shape, so the primitive only contributes a
 ``process_config`` fragment plus the ``depends_on`` keys its ``document_cache_id``
 ``$ref`` references (so the merged process passes ``MISSING_PROCESS_DEPENDENCY``).
+
+#184 amendment 3: Remove from Cache hands on NO documents. The inline transform
+this fragment declares wires the flow's target after the removal, and that
+target never runs, so ``ProcessFlowBuilder`` now REFUSES the fragment with
+``PROCESS_DOCCACHE_REMOVE_CONFIG_INVALID``. A removal is authored in ProcessIR as
+the terminal of a branch leg. Keyed removal stays refused.
 """
 
 from __future__ import annotations
@@ -90,16 +96,20 @@ class DocumentCacheRemovePrimitive(PrimitivePattern):
         kind=PatternKind.PRIMITIVE,
         description=(
             "Declare a Document Cache Remove shape (the delete half of Document "
-            "Cache CRUD) as a transform fragment: clear documents from a Document "
-            "Cache. v1 removes all cached documents; keyed/index removal is "
-            "deferred."
+            "Cache CRUD) as a transform fragment: clear all documents from a "
+            "Document Cache. Remove from Cache hands on no documents, so it ends "
+            "its path; the inline transform composition, which wires the target "
+            "after it, is refused. Author the removal as a ProcessIR branch-leg "
+            "terminal instead. Keyed/index removal is deferred."
         ),
         tags=["transform", "document-cache", "remove"],
         use_cases=[
-            "Clear a Document Cache between runs or branch legs",
-            "Reset cached reference data before re-populating it",
+            "Clear a Document Cache within an execution, as the terminal of a branch "
+            "leg, before a later leg re-populates it",
         ],
         not_for=[
+            "Running further steps after the removal on the same path (it hands on "
+            "no documents)",
             "Populating a cache (use the Add to Cache step / DLQ cache route)",
             "Reading a cache (use the Document Cache Retrieve step / #109)",
             "Keyed/index removal by cache key (deferred pending a live capture)",
@@ -109,11 +119,11 @@ class DocumentCacheRemovePrimitive(PrimitivePattern):
 
     input_contract = PatternIOContract(
         name="document_stream",
-        description="Inbound documents (the remove step clears the cache, documents pass through).",
+        description="Inbound documents trigger the removal of every cached document.",
     )
     output_contract = PatternIOContract(
         name="document_stream",
-        description="Documents continue downstream after the cache is cleared.",
+        description="No documents continue: the removal ends its path.",
     )
     required_builders = ["ProcessFlowBuilder"]
 

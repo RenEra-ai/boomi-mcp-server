@@ -462,17 +462,68 @@ def _gitignored(paths):
     return set(out.stdout.split())
 
 
+def _tombstoned_golden_files():
+    """The expected files of TOMBSTONED golden-manifest rows.
+
+    #184 amendment 3 retired seven cache-successor goldens. The closed #156 ledger
+    cites two of their files by path, and that citation was TRUE when written. A
+    tombstone row keeps the artifact's path, and `test_golden_manifest_row`
+    asserts the file is really gone, so the manifest is the authority that the
+    artifact existed and was deliberately retired. A citation of such a path
+    therefore resolves THROUGH the manifest, the same way a gitignored report
+    resolves through `.gitignore`. It is not a missing artifact.
+
+    Derived, never listed. It grows only when a golden is really retired through
+    the append-only manifest, and never lets the frozen baseline below grow.
+    """
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("_wave_gate_for_178", _ROOT / "scripts" / "wave_gate.py")
+    gate = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(gate)
+    manifest = gate.parse_manifest((_ROOT / gate.GOLDENS_MANIFEST).read_bytes(), "goldens")
+    return {row["expected_file"] for row in manifest.rows if row["state"] == "tombstone"}
+
+
+def _resolves_through_a_tombstone(path, tombstoned):
+    return any(retired == path or retired.endswith("/" + path) for retired in tombstoned)
+
+
 def _unresolvable_ledger_paths():
     suffixes = _tracked_path_suffixes()
+    tombstoned = _tombstoned_golden_files()
     offenders = {}
     for ledger in sorted((_ROOT / "docs" / "architecture").glob("ISSUE_*_AUDIT_LEDGER.md")):
         issue = re.search(r"ISSUE_(\d+)_", ledger.name).group(1)
         cited = set(_PATH_CITATION.findall(ledger.read_text(encoding="utf-8")))
         missing = {path for path in cited if path not in suffixes}
         missing -= _gitignored(missing)
+        missing = {path for path in missing if not _resolves_through_a_tombstone(path, tombstoned)}
         if missing:
             offenders[issue] = sorted(missing)
     return offenders
+
+
+def test_a_retired_golden_citation_resolves_only_through_its_tombstone(monkeypatch):
+    """Non-vacuity for the tombstone rule, in both directions.
+
+    - The rule is load-bearing: with the tombstone set emptied, the #156 ledger's
+      two citations of the retired notify/DLQ goldens are reported again.
+    - It is narrow: every exempted path is really absent from disk. A tombstone
+      naming a file that still exists would be caught by the golden manifest
+      test, and is refused here too.
+    """
+    tombstoned = _tombstoned_golden_files()
+    assert tombstoned, "no tombstoned golden — the rule would be vacuous"
+    for path in tombstoned:
+        assert not (_ROOT / path).exists(), path
+    assert _unresolvable_ledger_paths().get("156") is None
+    import sys as _sys
+
+    monkeypatch.setattr(_sys.modules[__name__], "_tombstoned_golden_files", lambda: set())
+    reported = _unresolvable_ledger_paths().get("156") or []
+    assert "tests/fixtures/golden_xml/try_catch_notify_dlq_document_cache.xml" in reported, reported
+    assert "tests/fixtures/golden_xml/connector_scoped_trycatch_notify_dlq_document_cache.xml" in reported, reported
 
 
 def test_no_ledger_names_an_in_repo_artifact_that_does_not_exist():

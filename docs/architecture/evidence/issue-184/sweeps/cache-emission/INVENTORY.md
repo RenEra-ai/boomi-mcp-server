@@ -223,3 +223,32 @@ terminal. It matches the fact and is kept.
 **Coverage claim.** The claim covers the discovered finite vocabulary: the ProcessIR node kinds, the
 emitter kinds, and the legacy transform and flow-sequence kinds. It covers the evidence cases
 indexed in `CAPTURE_INDEX.json`, not every possible platform operation.
+
+## Structural batch outcome (amendment 3 step 2)
+
+Final dispositions, measured on the tree that carries the batch. Every `authority` row above now
+queries `models/process_ir_document_semantics.py`, and every `fix` row is corrected in place.
+Where the result differs from the planned row, it is named here.
+
+| Area | Outcome |
+| --- | --- |
+| Model grammar | One verdict, `terminal_cache_action_verdict`, at every context in heading 1. It refuses a zero-emission step with an authored successor, with `PROCESS_IR_SCHEMA_INVALID_CARDINALITY` at that step's `/cache_ref`. The write-then-read rule and the trailing-cache-put table and check are withdrawn. The admitting slots named in the refusal are read off the terminal unions. `BranchLegV1.terminal` admits `CacheRemoveNodeV1`. `ROOT_ENTRY_READ_KINDS` is the authority's `TRIGGERED_REPLACEMENT_KINDS` |
+| Connector walk | A read replaces the payload only when not exhausted. Zero-emission kinds clear the producer and exhaust the path. `_MAY_FOLLOW_NON_PRODUCER` is `{"stop"}`, so a Send before a read is refused at the Send's `/operation_ref` |
+| Lineage | Put and remove give `absent`. A read on an absent stream invents nothing. The retrieve property transfer is the separate step-3 batch (§7) |
+| Lowering, invariants, registry | A zero-emission terminal carries `cache_stage`. The role is required for put and remove, with positions per kind: remove in branch legs only. Load and remove are `EXACT_ZERO`, and `ZERO_OR_ONE` is removed |
+| Rendering | **Deviation.** Amendment 3 §4 says the renderer rejects outgoing transitions. `rendering.py` is PURE by its module contract, so the refusal lives in the registry's `EXACT_ZERO` preflight and in the legacy emitter guards (`legacy._emit_doccacheload`, `legacy._emit_doccacheremove`). `render_doccacheremove` renders the terminal `<dragpoints/>` form |
+| Graph verifier | Load and remove are terminal and always terminal, read from the authority. An outbound edge is `TERMINAL_SHAPE_HAS_OUTBOUND` |
+| Effects | `cache_remove` is a retry-replay hazard (`effect_kind` `cache_remove`) and makes a child replay-unsafe |
+| Legacy builder | The `transform.mode="doccacheremove"` refusal is at `transform.mode`. Flow-sequence successors of a load or put are refused at the successor's `.kind`; an implicit continuation is refused at the cache step's `.kind`. `document_cache_ref` combined with `catch_exception` is refused through the shared composition check. The DLQ synthetic Stop is dropped **without a reserved slot (ledger C16)**. `doccacheremove` is **withdrawn from the flow_sequence vocabulary and refused by name (ledger C18)** |
+| Primitives | Put, remove and retrieve metadata state terminal consumption and trigger dependence. Remove documents its refused inline composition |
+| Served contract | The cache node summaries carry the exact §10 cache summary. The document semantics set the reads' input to `required` and the removal to `consumed`. The derived document-emission fact replaces the trailing-cache-put sentence. The flow_sequence served kind list drops `doccacheremove`. The remaining §10 prose (process_call and child text, DDP remediation, `PROCESS_IR_V1.md`, meta-tools legacy prose, doctrine, companion docs) is step 6 |
+| Goldens | 000005, 000012, 000018, 000019, 000059, 000060 and 000066 are tombstoned, and 000082–000088 are registered. The active floor is 80. The #178 ledger-citation guard resolves retired paths through their tombstones (ledger C17) |
+| Tests | Every test named in heading 12 asserts the measured behaviour under its original node id, or is repointed to a replacement golden. Expected bytes that changed were re-frozen only from the pristine branch-point worktree |
+
+**Non-vacuity witnesses** for the structural rule:
+- the refusal of every linear put→read, put→exception and remove→call form, at both entry points
+  (`tests/test_process_ir_models.py`, `tests/test_issue_184_native_sequences.py`,
+  `tests/test_process_ir_entrypoint_diagnostic_parity.py`);
+- the byte-exact replacement goldens;
+- the #151 direct-corpus specimen coverage for `cache_remove`;
+- the C17 tombstone test.

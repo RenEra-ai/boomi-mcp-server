@@ -45,11 +45,17 @@ _GOLDEN = (
     / "try_catch_dlq_document_cache_archetype.xml"
 )
 
+# #184 amendment 3: golden-000060 (`try_catch_notify_dlq_document_cache_archetype.xml`)
+# is retired. Each connector's catch leg ran notify -> doccacheload -> Stop, and Add
+# to Cache hands on no documents, so neither Stop ever ran. The replacement
+# golden-000088 was frozen independently of this builder, as a byte transform of the
+# retired golden (tests/fixtures/process_ir/issue184/PROVENANCE.md). Never
+# regenerate it here.
 _NOTIFY_GOLDEN = (
     Path(__file__).resolve().parent.parent
     / "fixtures"
     / "golden_xml"
-    / "try_catch_notify_dlq_document_cache_archetype.xml"
+    / "issue184_cache_notify_archetype_terminal.xml"
 )
 
 _CATCH_NOTIFY = _corpus.ARCH_CATCH_NOTIFY
@@ -464,10 +470,16 @@ def test_archetype_notify_shape_sequence():
     root = ET.fromstring(_build_archetype_process_xml(spec, name="Archetype Notify DLQ Golden"))
     shapes = root.find("bns:object/process", NS).find("shapes").findall("shape")
     # Issue #99 G1: connector scope — each connector's catch leg is the full
-    # notify -> dlq route -> catch stop sequence (one per connector).
+    # notify -> dlq route sequence (one per connector). #184 amendment 3: no
+    # catch-row Stop follows either DLQ cache load. Add to Cache hands on no
+    # documents, so a Stop wired after it never ran (cap184-cache-put-successor).
     assert [s.attrib["shapetype"] for s in shapes] == [
         "start", "catcherrors", "connectoraction", "map", "catcherrors",
         "connectoraction", "stop",
-        "notify", "doccacheload", "stop",
-        "notify", "doccacheload", "stop",
+        "notify", "doccacheload",
+        "notify", "doccacheload",
     ]
+    loads = [s for s in shapes if s.attrib["shapetype"] == "doccacheload"]
+    assert len(loads) == 2
+    for load in loads:
+        assert list(load.find("dragpoints")) == []

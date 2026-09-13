@@ -56,11 +56,17 @@ _CACHE_ID = _corpus.DLQ_CACHE_ID
 _PROC_ID = _corpus.DLQ_PROC_ID
 
 
+# #184 amendment 3: golden-000059 (`try_catch_notify_dlq_document_cache.xml`) is
+# retired. Its catch leg ran notify -> doccacheload -> Stop, and Add to Cache hands
+# on no documents, so that Stop never ran (captures cap184-cache-put-successor,
+# cap184-prefix-predecessors). The replacement golden-000087 was frozen independently
+# of this builder, as a byte transform of the retired golden that drops the dead
+# Stop (tests/fixtures/process_ir/issue184/PROVENANCE.md). Never regenerate it here.
 _NOTIFY_FIXTURE = (
     Path(__file__).resolve().parent
     / "fixtures"
     / "golden_xml"
-    / "try_catch_notify_dlq_document_cache.xml"
+    / "issue184_cache_notify_terminal.xml"
 )
 
 _NOTIFY_TOKEN = _corpus.DLQ_NOTIFY_TOKEN
@@ -430,7 +436,13 @@ def test_no_reliability_build_has_no_catcherrors():
 
 def test_notify_document_cache_matches_golden_fixture():
     """The canonical document_cache_ref + catch_notify build must match the
-    committed golden (C14N-compared, like the no-notify golden)."""
+    committed golden byte for byte.
+
+    #184 amendment 3 repoints this at the replacement golden-000087. The retired
+    golden wired the DLQ cache load to a trailing catch-row Stop that never ran,
+    because Add to Cache hands on no documents. The replacement ends the catch leg
+    on the load. It was frozen independently of this builder
+    (tests/fixtures/process_ir/issue184/PROVENANCE.md)."""
     cfg = _config(
         {"mode": "document_cache_ref", "document_cache_id": _CACHE_ID},
         catch_notify=_CATCH_NOTIFY,
@@ -447,12 +459,15 @@ def test_notify_document_cache_shape_sequence():
         catch_notify=_CATCH_NOTIFY,
     )
     _, shapes = _parse_shapes(ProcessFlowBuilder.build(cfg, name="N"))
-    # Catch leg becomes notify -> dlq route -> catch stop, appended after the
-    # Try-path stop.
+    # Catch leg becomes notify -> dlq route, appended after the Try-path stop.
+    # #184 amendment 3: no catch-row Stop follows the DLQ cache load. Add to Cache
+    # hands on no documents, so a Stop wired after it never ran
+    # (cap184-cache-put-successor). The load ends the leg.
     assert _by_type(shapes) == [
         "start", "catcherrors", "connectoraction", "connectoraction",
-        "stop", "notify", "doccacheload", "stop",
+        "stop", "notify", "doccacheload",
     ]
+    assert list(shapes[-1].find("dragpoints")) == []
 
 
 def test_notify_error_subprocess_shape_sequence():
@@ -474,6 +489,7 @@ def test_notify_error_subprocess_shape_sequence():
 
 
 def test_notify_catch_leg_wiring_resolves():
+    routes_seen = set()
     for dlq in (
         {"mode": "document_cache_ref", "document_cache_id": _CACHE_ID},
         {"mode": "error_subprocess_ref", "process_id": _PROC_ID},
@@ -493,28 +509,24 @@ def test_notify_catch_leg_wiring_resolves():
         notify_dps = list(notify.find("dragpoints"))
         assert len(notify_dps) == 1
         assert notify_dps[0].attrib["toShape"] == dlq_route.attrib["name"]
-        # #175: what follows the DLQ route depends on WHICH route it is, and the
-        # discriminator is the platform's own rule, not a preference. A Document
-        # Cache load legitimately continues downstream, so it keeps its catch-row
-        # Stop; a process call ends its path, so it has no outgoing edge and no
-        # Stop is emitted after it.
-        dlq_dps = list(dlq_route.find("dragpoints"))
-        if dlq_route.attrib["shapetype"] == "processcall":
-            assert dlq_dps == []
-            assert len(shapes) == 7
-        else:
-            assert dlq_route.attrib["shapetype"] == "doccacheload"
-            catch_stop = shapes[7]
-            assert len(dlq_dps) == 1
-            assert dlq_dps[0].attrib["toShape"] == catch_stop.attrib["name"]
-            # Catch Stop is terminal and on the catch row.
-            assert catch_stop.attrib["shapetype"] == "stop"
-            assert catch_stop.attrib["y"] == "456.0"
-            assert list(catch_stop.find("dragpoints")) == []
+        # #175 made the process-call route terminal: a call ends its path, so no
+        # Stop is emitted after it. #184 amendment 3 measured the same outcome for
+        # the Document Cache load, which #175 had excluded on the premise that it
+        # continues downstream. It does not: Add to Cache hands on no documents, so
+        # the catch-row Stop that used to follow it never ran
+        # (cap184-cache-put-successor). Both DLQ routes now end the leg, and the
+        # only Stop left is the Try-path one.
+        assert dlq_route.attrib["shapetype"] in ("processcall", "doccacheload")
+        routes_seen.add(dlq_route.attrib["shapetype"])
+        assert list(dlq_route.find("dragpoints")) == []
+        assert len(shapes) == 7
+        assert _by_type(shapes).count("stop") == 1
         # Every dragpoint target resolves.
         for shape in shapes:
             for dp in shape.find("dragpoints"):
                 assert dp.attrib["toShape"] in by_name
+    # Both routes really were exercised, so the shared assertions are not vacuous.
+    assert routes_seen == {"processcall", "doccacheload"}
 
 
 def test_notify_config_is_verified_shape():
@@ -576,7 +588,9 @@ def test_notify_with_retry_still_emits_bounded_retry():
     cfg["reliability"]["retry_count"] = 3
     _, shapes = _parse_shapes(ProcessFlowBuilder.build(cfg, name="N"))
     assert shapes[1].find("configuration/catcherrors").attrib["retryCount"] == "3"
-    assert _by_type(shapes)[5:] == ["notify", "doccacheload", "stop"]
+    # #184 amendment 3: the DLQ cache load ends the catch leg; no Stop follows it.
+    assert _by_type(shapes)[5:] == ["notify", "doccacheload"]
+    assert list(shapes[-1].find("dragpoints")) == []
 
 
 class TestNotifyValidation:
@@ -671,11 +685,17 @@ class TestNotifyValidation:
 # retry no longer re-executes the source read.
 # ---------------------------------------------------------------------------
 
+# #184 amendment 3: golden-000005 (`connector_scoped_trycatch_notify_dlq_document_cache.xml`)
+# is retired. Both connector catch legs ran notify -> doccacheload -> Stop, and Add to
+# Cache hands on no documents, so neither Stop ever ran. The replacement golden-000086
+# was frozen independently of this builder, as a byte transform of the retired
+# golden: both Stops dropped, later shapes renumbered with no reserved slot
+# (tests/fixtures/process_ir/issue184/PROVENANCE.md). Never regenerate it here.
 _CONNECTOR_SCOPE_FIXTURE = (
     Path(__file__).resolve().parent
     / "fixtures"
     / "golden_xml"
-    / "connector_scoped_trycatch_notify_dlq_document_cache.xml"
+    / "issue184_cache_notify_connector_terminal.xml"
 )
 
 _connector_config = _corpus.dlq_connector_config
@@ -683,7 +703,10 @@ _connector_config = _corpus.dlq_connector_config
 
 def test_connector_scope_matches_golden_fixture():
     """The canonical connector-scoped build (map + document_cache + retry 2 +
-    Notify — the #91 production pattern) must match the committed golden."""
+    Notify — the #91 production pattern) must match the committed golden.
+
+    #184 amendment 3 repoints it at the replacement golden-000086, whose catch legs
+    end on the DLQ cache load with no trailing Stop."""
     cfg = _connector_config(retry_count=2, catch_notify=_CATCH_NOTIFY)
     emitted = ProcessFlowBuilder.build(
         cfg, name="Connector Scope DLQ Golden", folder_name="Golden/Fixtures"
@@ -854,20 +877,26 @@ def test_exception_catch_path_matches_golden_fixture():
 
 
 def test_exception_terminal_after_dlq_route():
+    """#184 amendment 3: an Exception after the document-cache DLQ route is REFUSED.
+
+    This test used to pin the catch leg ``doccacheload -> exception``. The platform
+    measured that this Exception never throws. Add to Cache hands on no documents,
+    so the step after it is skipped, the run reads COMPLETE, and the caught error is
+    swallowed (capture cap184-cache-put-successor, ledger row E1-184-01). The
+    composition fails typed at plan time and again at build. That is the same answer
+    #175 gives an Exception after an error-subprocess call. Without the DLQ route
+    the exception terminal still emits (``test_exception_catch_path_matches_golden_fixture``).
+    """
     cfg = _exc_config(
         {"message_template": "halt {1}", "parameter_source": "current_document"},
         dlq={"mode": "document_cache_ref", "document_cache_id": _CACHE_ID},
     )
-    _root, shapes = _parse_shapes(ProcessFlowBuilder.build(cfg, name="P"))
-    types = _by_type(shapes)
-    # catch leg: doccacheload -> exception (exception is the leg terminal).
-    assert "doccacheload" in types and "exception" in types
-    dlq_shape = next(s for s in shapes if s.attrib["shapetype"] == "doccacheload")
-    ex = next(s for s in shapes if s.attrib["shapetype"] == "exception")
-    dp = dlq_shape.find("dragpoints/dragpoint")
-    assert dp is not None and dp.attrib["toShape"] == ex.attrib["name"]
-    # Only the normal Try-path Stop remains; the catch leg throws (no catch Stop).
-    assert types.count("stop") == 1
+    refusal = ("PROCESS_EXCEPTION_CONFIG_INVALID", "reliability.catch_exception")
+    err = ProcessFlowBuilder.validate_config(cfg, depends_on=[])
+    assert err is not None and (err.error_code, err.field) == refusal
+    with pytest.raises(BuilderValidationError) as exc:
+        ProcessFlowBuilder.build(cfg, name="P")
+    assert (exc.value.error_code, exc.value.field) == refusal
 
 
 def test_exception_connector_scope_throws_on_both_legs():
@@ -968,26 +997,44 @@ def test_an_exception_after_an_error_subprocess_call_is_refused(notify, label):
     [(False, False, "bare"), (True, False, "notify"), (False, True, "exception")],
 )
 def test_the_document_cache_dlq_route_is_untouched(notify, exception, label):
-    """The over-firing control, and the discriminator for the rule itself.
+    """The document-cache DLQ route against the terminal-route rule.
 
-    A Document Cache load legitimately continues downstream — it is deliberately
-    excluded from the always-terminal set — so the SAME trailing shapes that make
-    the process-call compositions fail must leave this route exactly as it was.
-    A guard keyed on "something followed a shape", rather than on the declared
-    return path, would break all three of these.
+    #175 excluded this route from the always-terminal set, on the premise that a
+    Document Cache load continues downstream. #184 amendment 3 measured the
+    opposite: Add to Cache hands on no documents, so any step after it is skipped
+    and the run still reads COMPLETE (captures cap184-cache-put-successor,
+    cap184-prefix-predecessors). The route now gets the process call's treatment:
+
+    * ``bare`` and ``notify``: the load IS the leg's end. It has no outgoing edge,
+      no trailing Stop follows it, and the graph verifies clean.
+    * ``exception``: an authored throw after the load could never fire. The
+      composition is refused at plan time and at build, with or without a notify,
+      instead of silently swallowing the caught error.
     """
+    if exception:
+        refusal = ("PROCESS_EXCEPTION_CONFIG_INVALID", "reliability.catch_exception")
+        for with_notify in (False, True):
+            cfg = _dlq_cfg({"mode": "document_cache_ref", "document_cache_id": _CACHE_ID},
+                           notify=with_notify, exception=True)
+            err = ProcessFlowBuilder.validate_config(cfg)
+            assert err is not None and (err.error_code, err.field) == refusal, (label, with_notify)
+            with pytest.raises(BuilderValidationError) as excinfo:
+                ProcessFlowBuilder.build(cfg, name="N")
+            assert (excinfo.value.error_code, excinfo.value.field) == refusal, (label, with_notify)
+        return
+
     xml = ProcessFlowBuilder.build(
         _dlq_cfg({"mode": "document_cache_ref", "document_cache_id": _CACHE_ID},
                  notify=notify, exception=exception),
         name="N",
     )
-    assert _orphan_shapes(xml) == [], label
-    types = _by_type(_parse_shapes(xml)[1])
-    assert "doccacheload" in types, label
-    # The cache route keeps whatever terminal its composition implies: none at
-    # all when it is itself the end of the leg, else the Stop or the Exception.
-    expected_last = "doccacheload" if not (notify or exception) else ("exception" if exception else "stop")
-    assert types[-1] == expected_last, (label, types)
+    assert verify_process_graph(xml)["errors"] == [], label
+    shapes = _parse_shapes(xml)[1]
+    types = _by_type(shapes)
+    assert types[-1] == "doccacheload", (label, types)
+    assert list(shapes[-1].find("dragpoints")) == [], label
+    # The only Stop is the Try-path one; nothing follows the load.
+    assert types.count("stop") == 1, (label, types)
 
 
 # ---------------------------------------------------------------------------

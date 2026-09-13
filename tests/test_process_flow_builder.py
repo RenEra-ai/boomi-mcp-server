@@ -968,59 +968,113 @@ def test_doccacheretrieve_composes_with_try_catch_wrapper():
 # Document Cache Remove transform (issue #110 M10.6)
 # ---------------------------------------------------------------------------
 
+# #184 amendment 3: golden-000012 (`document_cache_remove.xml`, the linear
+# source -> remove -> target build) is retired. The replacement golden-000082 places
+# the all-document remove as a Branch-leg terminal. It was frozen from a pristine
+# branch-point render, never from this builder
+# (tests/fixtures/process_ir/issue184/PROVENANCE.md). Never regenerate it here.
 _DOCCACHE_REMOVE_GOLDEN = (
     Path(__file__).resolve().parent
     / "fixtures"
     / "golden_xml"
-    / "document_cache_remove.xml"
+    / "issue184_cache_remove_terminal_branch.xml"
 )
 
 
 _doccacheremove_config = _corpus.pfb_doccacheremove_config
 
 
+def _assert_doccacheremove_mode_refused(err):
+    """#184 amendment 3: a well-formed inline remove transform is refused BY NAME.
+
+    Remove from Cache hands on no documents. The target this mode wires after it
+    never runs, and the run still reads COMPLETE (captures cap184-prefix-predecessors
+    xr-remove-successor and cap184-cache-remove-read).
+    """
+    assert err is not None
+    assert err.error_code == "PROCESS_DOCCACHE_REMOVE_CONFIG_INVALID", err.error_code
+    assert err.field == "transform.mode", err.field
+
+
+def _frozen_shape(golden_text, shapetype):
+    """The single ``<shape>`` element of ``shapetype`` in a frozen golden, verbatim."""
+    import re
+
+    found = re.findall(
+        r'<shape [^>]*shapetype="%s"[^>]*>.*?</shape>' % re.escape(shapetype),
+        golden_text,
+        flags=re.S,
+    )
+    assert len(found) == 1, (shapetype, len(found))
+    return found[0]
+
+
 def test_doccacheremove_inserts_linear_shape_between_source_and_target():
-    xml = ProcessFlowBuilder.build(_doccacheremove_config(), name="Cache Remove Sync")
-    _, _, shapes = _parse_process(xml)
-    assert [s.attrib["shapetype"] for s in shapes] == [
-        "start", "connectoraction", "doccacheremove", "connectoraction", "stop",
-    ]
-    dcr = shapes[2]
-    assert dcr.attrib["image"] == "doccacheremove_icon"
-    assert dcr.attrib["userlabel"] == "Clear Status Cache"
-    cfg = dcr.find("configuration/doccacheremove")
-    assert cfg.attrib["docCache"] == _DOCCACHE_ID
-    assert cfg.attrib["removeAllDocuments"] == "true"
-    # Remove carries NO emptyCacheBehavior / loadAllDoc (those are retrieve-only).
-    assert "emptyCacheBehavior" not in cfg.attrib
-    assert "loadAllDoc" not in cfg.attrib
-    # All-document remove emits an empty <cacheKeyValues/> (keyed removal deferred).
-    key_values = cfg.find("cacheKeyValues")
-    assert key_values is not None and list(key_values) == []
-    # Linear, non-terminal: exactly one forward dragpoint to the next shape.
-    dragpoints = dcr.find("dragpoints")
-    assert [dp.attrib["toShape"] for dp in dragpoints] == ["shape4"]
+    """#184 amendment 3: the linear source -> remove -> target insertion is REFUSED.
+
+    #110 locked this shape as a linear non-terminal step with one forward edge to the
+    target. The platform measured otherwise: Remove from Cache hands on no documents,
+    so the target never ran while the run read COMPLETE. Both sites refuse it:
+    ``validate_config`` at plan time, and the legacy emitter's guard on a
+    validate-bypass build, so the dead wire is never emitted.
+    """
+    cfg = _doccacheremove_config()
+    _assert_doccacheremove_mode_refused(ProcessFlowBuilder.validate_config(cfg, depends_on=[]))
+    with pytest.raises(BuilderValidationError) as exc:
+        ProcessFlowBuilder.build(cfg, name="Cache Remove Sync")
+    _assert_doccacheremove_mode_refused(exc.value)
 
 
 def test_doccacheremove_matches_golden_fixture():
-    """Byte-exact golden (issue #110 g): the docCache/removeAllDocuments attribute
-    order and the empty <cacheKeyValues/> child are load-bearing and must match the
-    live capture byte-for-byte."""
-    emitted = ProcessFlowBuilder.build(
-        _doccacheremove_config(), name="DocumentCacheRemove Sync"
+    """Byte-exact remove shape (issue #110 g), repointed by #184 amendment 3.
+
+    The docCache/removeAllDocuments attribute order and the empty
+    ``<cacheKeyValues/>`` child stay load-bearing. The retired golden-000012 froze
+    them inside the linear build that is now refused. The replacement golden-000082
+    freezes them on a Branch-leg terminal remove with empty ``<dragpoints/>``, the
+    platform-stored terminal form. Two byte gates hold:
+
+    * the canonical render of the replacement's authored input equals the frozen
+      bytes;
+    * this builder's own remove emitter, asked for the terminal form, emits the
+      frozen remove shape byte for byte. No legacy config reaches that emitter any
+      more, so this gate is what keeps it pinned.
+    """
+    from src.boomi_mcp.categories.components.builders import process_flow_builder as _pfb
+
+    _assert_doccacheremove_mode_refused(
+        ProcessFlowBuilder.validate_config(_doccacheremove_config(), depends_on=[])
     )
-    assert emitted == _DOCCACHE_REMOVE_GOLDEN.read_text()
+    golden = _DOCCACHE_REMOVE_GOLDEN.read_text()
+    assert _corpus._issue184_case(
+        "cache_remove_terminal_branch", symbols_factory=_corpus.error_symbols
+    )() == golden
+    frozen = _frozen_shape(golden, "doccacheremove")
+    shape = ET.fromstring(frozen)
+    assert list(shape.find("dragpoints")) == []
+    emitted = _pfb._emit_doccacheremove(
+        shape.attrib["name"],
+        {"document_cache_id": shape.find("configuration/doccacheremove").attrib["docCache"]},
+        None,
+        int(shape.attrib["name"][len("shape"):]),
+    )
+    assert emitted == frozen
 
 
 def test_doccacheremove_accepts_ref_document_cache_id():
+    """#184 amendment 3: a $ref binding no longer makes the inline remove plannable.
+
+    The mode is refused whether or not the dependency is declared. The mode refusal
+    runs before the generic ref-reachability walk, so an undeclared $ref is not what
+    the caller hears about. Either way nothing is created, because the composition
+    can never run its target.
+    """
     cfg = _doccacheremove_config()
     cfg["transform"]["document_cache_id"] = "$ref:MyCache"
-    # Reachable when declared in depends_on...
-    assert ProcessFlowBuilder.validate_config(cfg, depends_on=["MyCache"]) is None
-    # ...and MISSING_PROCESS_DEPENDENCY when not (generic ref-reachability walk).
-    err = ProcessFlowBuilder.validate_config(cfg, depends_on=[])
-    assert err is not None
-    assert err.error_code == "MISSING_PROCESS_DEPENDENCY"
+    _assert_doccacheremove_mode_refused(
+        ProcessFlowBuilder.validate_config(cfg, depends_on=["MyCache"])
+    )
+    _assert_doccacheremove_mode_refused(ProcessFlowBuilder.validate_config(cfg, depends_on=[]))
 
 
 def test_doccacheremove_rejects_missing_document_cache_id():
@@ -1072,6 +1126,15 @@ def test_doccacheremove_rejects_retrieve_only_keys():
 
 
 def test_doccacheremove_xml_escapes_label_and_cache_id():
+    """#184 amendment 3: the inline transform carrying these values is refused. The
+    remove emitter's escaping stays pinned, on its terminal form.
+
+    ``test_doccacheremove_matches_golden_fixture`` proves that form equals the
+    frozen remove shape byte for byte. Here the emitter gets hostile text for that
+    form, and its output must parse back to the raw values.
+    """
+    from src.boomi_mcp.categories.components.builders import process_flow_builder as _pfb
+
     cfg = _base_config(
         transform={
             "mode": "doccacheremove",
@@ -1079,12 +1142,21 @@ def test_doccacheremove_xml_escapes_label_and_cache_id():
             "document_cache_id": "CACHE&<1>",
         }
     )
-    xml = ProcessFlowBuilder.build(cfg, name="N")
-    _, _, shapes = _parse_process(xml)
-    dcr = next(s for s in shapes if s.attrib["shapetype"] == "doccacheremove")
+    _assert_doccacheremove_mode_refused(ProcessFlowBuilder.validate_config(cfg, depends_on=[]))
+    with pytest.raises(BuilderValidationError) as exc:
+        ProcessFlowBuilder.build(cfg, name="N")
+    _assert_doccacheremove_mode_refused(exc.value)
+
+    dcr = ET.fromstring(
+        _pfb._emit_doccacheremove(
+            "shape3", {"userlabel": "A & B <remove>", "document_cache_id": "CACHE&<1>"}, None, 3
+        )
+    )
+    assert dcr.attrib["shapetype"] == "doccacheremove"
     # Round-trips back through the parser to the raw text (well-formed escaping).
     assert dcr.attrib["userlabel"] == "A & B <remove>"
     assert dcr.find("configuration/doccacheremove").attrib["docCache"] == "CACHE&<1>"
+    assert list(dcr.find("dragpoints")) == []
 
 
 def test_doccacheremove_build_bypass_empty_cache_id_raises():
@@ -1128,24 +1200,24 @@ def test_doccacheremove_build_bypass_non_bool_remove_all_raises():
 
 
 def test_doccacheremove_composes_with_try_catch_wrapper():
-    # The remove shape sits in the middle-transform slot, so it composes with the
-    # verified Try/Catch + DLQ wrapper unchanged (the wrapped chain still contains
-    # exactly one doccacheremove, non-terminal, between source and target).
+    """#184 amendment 3: the verified Try/Catch + DLQ wrapper does not make the
+    inline remove legal.
+
+    The wrapper protects the chain. It does not change what Remove from Cache hands
+    on, which is no documents, so the target after the remove still never runs.
+    Both sites refuse the wrapped composition. The DLQ dependency is declared, so
+    the refusal is the mode itself, not a missing $ref.
+    """
     cfg = _doccacheremove_config(
         reliability={
             "retry_count": 1,
             "dlq": {"mode": "document_cache_ref", "document_cache_id": "$ref:DLQ"},
         }
     )
-    err = ProcessFlowBuilder.validate_config(cfg, depends_on=["DLQ"])
-    assert err is None
-    xml = ProcessFlowBuilder.build(cfg, name="Wrapped Remove")
-    _, _, shapes = _parse_process(xml)
-    removes = [s for s in shapes if s.attrib["shapetype"] == "doccacheremove"]
-    assert len(removes) == 1
-    # Wrapped in a Try/Catch (catcherrors present) and the remove still forwards.
-    assert any(s.attrib["shapetype"] == "catcherrors" for s in shapes)
-    assert list(removes[0].find("dragpoints")) != []
+    _assert_doccacheremove_mode_refused(ProcessFlowBuilder.validate_config(cfg, depends_on=["DLQ"]))
+    with pytest.raises(BuilderValidationError) as exc:
+        ProcessFlowBuilder.build(cfg, name="Wrapped Remove")
+    _assert_doccacheremove_mode_refused(exc.value)
 
 
 # ---------------------------------------------------------------------------
@@ -2206,20 +2278,50 @@ def test_catch_exception_stop_single_document_true():
 
 
 def test_catch_exception_with_notify_and_dlq_composes():
-    # notify -> dlq route -> exception; retry_count > 0 allowed with the leg.
+    """#184 amendment 3: notify -> document-cache DLQ -> exception no longer composes.
+
+    Add to Cache hands on no documents, so an Exception after the DLQ cache write
+    never throws. The run reads COMPLETE and the caught error is swallowed (capture
+    cap184-cache-put-successor). An authored catch_exception is intent, so the
+    composition is refused rather than silently dropping the throw, at both sites.
+    The refusal is specific to the combination: each remedy the hint names plans and
+    builds, with retry_count > 0 still allowed.
+    """
+    import copy
+
     cfg = _base_config(reliability={
         "retry_count": 2,
         "dlq": {"mode": "document_cache_ref", "document_cache_id": "CACHE-1"},
         "catch_notify": {"level": "ERROR", "message_template": "f: meta.base.catcherrorsmessage"},
         "catch_exception": {"message_template": "halt: {1}", "parameter_source": "caught_error"},
     })
-    assert ProcessFlowBuilder.validate_config(cfg, depends_on=[]) is None
-    xml = ProcessFlowBuilder.build(cfg, name="P")
-    _root, _process, shapes = _parse_process(xml)
+    refusal = ("PROCESS_EXCEPTION_CONFIG_INVALID", "reliability.catch_exception")
+    err = ProcessFlowBuilder.validate_config(cfg, depends_on=[])
+    assert err is not None and (err.error_code, err.field) == refusal
+    with pytest.raises(BuilderValidationError) as exc:
+        ProcessFlowBuilder.build(cfg, name="P")
+    assert (exc.value.error_code, exc.value.field) == refusal
+
+    # Remedy 1: drop catch_exception. Notify runs, then the DLQ cache write ends the leg.
+    staged = copy.deepcopy(cfg)
+    del staged["reliability"]["catch_exception"]
+    assert ProcessFlowBuilder.validate_config(staged, depends_on=[]) is None
+    _root, _process, shapes = _parse_process(ProcessFlowBuilder.build(staged, name="P"))
     types = [s.attrib["shapetype"] for s in shapes]
-    # The catch leg ends in exception (no catch-row Stop after the DLQ route).
-    assert types.count("exception") == 1
-    assert "notify" in types and "doccacheload" in types
+    assert types[-2:] == ["notify", "doccacheload"]
+    assert list(shapes[-1].find("dragpoints")) == []
+    assert types.count("stop") == 1
+
+    # Remedy 2: drop the document-cache DLQ route, and the notify that requires one.
+    # The catch leg throws.
+    throwing = copy.deepcopy(cfg)
+    del throwing["reliability"]["dlq"]
+    del throwing["reliability"]["catch_notify"]
+    assert ProcessFlowBuilder.validate_config(throwing, depends_on=[]) is None
+    _root, _process, shapes = _parse_process(ProcessFlowBuilder.build(throwing, name="P"))
+    types = [s.attrib["shapetype"] for s in shapes]
+    assert types.count("exception") == 1 and types[-1] == "exception"
+    assert "doccacheload" not in types
     # Exactly one Stop (the normal Try-path terminal); the catch leg throws instead.
     assert types.count("stop") == 1
 
@@ -3260,7 +3362,12 @@ def test_dynamic_path_profile_ref_requires_depends_on():
 # ---------------------------------------------------------------------------
 
 _FLOW_SEQ_DECISION_BRANCH_GOLDEN = _GOLDEN_DIR / "flow_sequence_decision_branch_map.xml"
-_FLOW_SEQ_CACHE_CRUD_GOLDEN = _GOLDEN_DIR / "flow_sequence_cache_load_retrieve_remove.xml"
+# #184 amendment 3: golden-000018 (`flow_sequence_cache_load_retrieve_remove.xml`, a
+# linear load -> retrieve -> remove) is retired. The replacement golden-000083 stages
+# in ordered Branch legs: a terminal load, then retrieve -> target, then a terminal
+# remove. It was frozen from a pristine branch-point render, never from this builder
+# (tests/fixtures/process_ir/issue184/PROVENANCE.md).
+_FLOW_SEQ_CACHE_CRUD_GOLDEN = _GOLDEN_DIR / "issue184_cache_stage_read_remove.xml"
 _FLOW_SEQ_EXCEPTION_GOLDEN = _GOLDEN_DIR / "flow_sequence_exception_terminal.xml"
 
 _rest_target = _corpus.pfb_rest_target
@@ -3335,27 +3442,108 @@ def test_flow_sequence_decision_branch_map_verifies_clean():
 
 # --- acceptance bullet 2: cache load -> retrieve -> remove ---
 
+def _assert_cache_successor_refused(err, field):
+    """#184 amendment 3: a flow-sequence step placed after a cache write or removal.
+
+    Add to Cache and Remove from Cache hand on no documents. A step wired after
+    either never runs, and the run still reads COMPLETE (captures
+    cap184-cache-put-successor, cap184-prefix-predecessors,
+    cap184-cache-remove-read). A cache read is no exception: nothing arrives to
+    trigger it. The blame lands on the misplaced position.
+    """
+    assert err is not None
+    assert err.error_code == "PROCESS_FLOW_SEQUENCE_CONFIG_INVALID", err.error_code
+    assert err.field == field, err.field
+    assert "hands on no documents" in str(err)
+
+
 def test_flow_sequence_cache_load_retrieve_remove():
+    """#184 amendment 3: the linear load -> retrieve -> remove chain is refused at
+    both sites, on the retrieve that follows the load.
+
+    The same cache work staged legally: the load ends its own Branch leg, and a
+    LATER leg reads the cache (legs run in authored order, each with its own copy of
+    the documents). That form keeps what this test pinned about the load — main
+    row, label, cache id — and the load now has no forward edge. A legacy leg may
+    not end in the removal either; ProcessIR authors a removal as a Branch-leg
+    terminal (see the golden test below).
+    """
+    import copy
+
     cfg = _cache_crud_config()
-    assert ProcessFlowBuilder.validate_config(cfg, depends_on=[]) is None
-    xml = ProcessFlowBuilder.build(cfg, name="Cache CRUD")
-    _, _, shapes = _parse_process(xml)
+    _assert_cache_successor_refused(
+        ProcessFlowBuilder.validate_config(cfg, depends_on=[]), "flow_sequence[1].kind"
+    )
+    with pytest.raises(BuilderValidationError) as exc:
+        ProcessFlowBuilder.build(cfg, name="Cache CRUD")
+    _assert_cache_successor_refused(exc.value, "flow_sequence[1].kind")
+
+    load_step, retrieve_step, remove_step = cfg["flow_sequence"]
+    staged = _seq_config([
+        {
+            "kind": "branch",
+            "legs": [
+                {"steps": [copy.deepcopy(load_step)]},
+                {"steps": [copy.deepcopy(retrieve_step)], "target": _rest_target(label="consume")},
+            ],
+        }
+    ])
+    assert ProcessFlowBuilder.validate_config(staged, depends_on=[]) is None
+    _, _, shapes = _parse_process(ProcessFlowBuilder.build(staged, name="Cache CRUD"))
     assert [s.attrib["shapetype"] for s in shapes] == [
-        "start", "connectoraction", "doccacheload", "doccacheretrieve",
-        "doccacheremove", "connectoraction", "stop",
+        "start", "connectoraction", "branch", "doccacheload", "doccacheretrieve",
+        "connectoraction", "stop",
     ]
     load = next(s for s in shapes if s.attrib["shapetype"] == "doccacheload")
-    # Add-to-Cache sits on the MAIN row (not the catch row) and forwards.
+    # Add-to-Cache sits on the MAIN row (not the catch row) and ends its leg.
     assert load.attrib["y"] == "96.0"
     assert load.attrib["userlabel"] == "Add to cache"
     assert load.find("configuration/doccacheload").attrib["docCache"] == "CACHE-1"
-    dp = load.find("dragpoints/dragpoint")
-    assert dp is not None and dp.get("toShape")  # non-terminal: has a forward edge
+    assert load.find("dragpoints/dragpoint") is None  # terminal: no forward edge
+    retrieve = next(s for s in shapes if s.attrib["shapetype"] == "doccacheretrieve")
+    assert retrieve.attrib["userlabel"] == "Read cache"
+    assert retrieve.find("dragpoints/dragpoint") is not None  # the read forwards
+
+    with_remove = copy.deepcopy(staged)
+    with_remove["flow_sequence"][0]["legs"].append({"steps": [copy.deepcopy(remove_step)]})
+    _assert_cache_successor_refused(
+        ProcessFlowBuilder.validate_config(with_remove, depends_on=[]),
+        "flow_sequence[0].legs[2].steps[0].kind",
+    )
 
 
 def test_flow_sequence_cache_load_retrieve_remove_matches_golden_fixture():
-    emitted = ProcessFlowBuilder.build(_cache_crud_config(), name="Flow Sequence Cache Load Retrieve Remove")
-    assert emitted == _FLOW_SEQ_CACHE_CRUD_GOLDEN.read_text()
+    """Byte gate for the cache CRUD staging graph, repointed by #184 amendment 3.
+
+    The retired golden-000018 froze the linear chain that is now refused. The
+    replacement golden-000083 was frozen independently as
+    Branch[terminal load; retrieve -> target; terminal remove]. Three checks:
+
+    * the canonical render of its authored input equals the frozen bytes;
+    * its load and remove shapes carry no outgoing edge;
+    * this builder's remove emitter reproduces the frozen remove shape byte for byte.
+    """
+    from src.boomi_mcp.categories.components.builders import process_flow_builder as _pfb
+
+    _assert_cache_successor_refused(
+        ProcessFlowBuilder.validate_config(_cache_crud_config(), depends_on=[]),
+        "flow_sequence[1].kind",
+    )
+    golden = _FLOW_SEQ_CACHE_CRUD_GOLDEN.read_text()
+    assert _corpus._issue184_case(
+        "cache_stage_read_remove", symbols_factory=_corpus.error_symbols
+    )() == golden
+    for shapetype in ("doccacheload", "doccacheremove"):
+        frozen = ET.fromstring(_frozen_shape(golden, shapetype))
+        assert list(frozen.find("dragpoints")) == [], shapetype
+    frozen_remove = _frozen_shape(golden, "doccacheremove")
+    remove = ET.fromstring(frozen_remove)
+    assert _pfb._emit_doccacheremove(
+        remove.attrib["name"],
+        {"document_cache_id": remove.find("configuration/doccacheremove").attrib["docCache"]},
+        None,
+        int(remove.attrib["name"][len("shape"):]),
+    ) == frozen_remove
 
 
 # --- exception terminal ---
@@ -4036,30 +4224,81 @@ def test_set_dpp_step_non_bool_persist_rejected():
 # Issue #122 M11.3 (epic #118) — authored cache_put / cache_get steps
 # ---------------------------------------------------------------------------
 
-_CACHE_PUT_GET_GOLDEN = _GOLDEN_DIR / "flow_sequence_cache_put_get.xml"
+# #184 amendment 3: golden-000019 (`flow_sequence_cache_put_get.xml`, a linear
+# cache_put -> cache_get) is retired. The replacement golden-000084 stages in ordered
+# Branch legs: a terminal cache_put, then cache_get -> target. It was frozen from a
+# pristine branch-point render, never from this builder
+# (tests/fixtures/process_ir/issue184/PROVENANCE.md).
+_CACHE_PUT_GET_GOLDEN = _GOLDEN_DIR / "issue184_cache_stage_read.xml"
 
 
 _cache_put_get_config = _corpus.pfb_cache_put_get_config
 
 
+def _staged_put_get_config():
+    """The legal ordered-leg form of ``_cache_put_get_config``: leg 1 ends on the
+    cache_put, and leg 2 reads the cache before its target."""
+    import copy
+
+    put_step, get_step = copy.deepcopy(_cache_put_get_config()["flow_sequence"])
+    return _seq_config([
+        {
+            "kind": "branch",
+            "legs": [
+                {"steps": [put_step]},
+                {"steps": [get_step], "target": _rest_target(label="consume")},
+            ],
+        }
+    ])
+
+
 def test_cache_put_get_sequence_matches_golden_fixture():
+    """Byte gate for the cache put/get staging graph, repointed by #184 amendment 3.
+
+    The linear cache_put -> cache_get sequence is refused at both sites: Add to
+    Cache hands on no documents, so nothing arrives to trigger the read. The
+    replacement golden-000084 was frozen independently as
+    Branch[terminal cache_put; cache_get -> target]. The canonical render of its
+    authored input must equal those bytes. In them the load has no outgoing edge
+    and the retrieve forwards.
+    """
     cfg = _cache_put_get_config()
-    assert ProcessFlowBuilder.validate_config(cfg, depends_on=[]) is None
-    emitted = ProcessFlowBuilder.build(cfg, name="Flow Sequence Cache Put Get")
-    assert emitted == _CACHE_PUT_GET_GOLDEN.read_text()
+    _assert_cache_successor_refused(
+        ProcessFlowBuilder.validate_config(cfg, depends_on=[]), "flow_sequence[1].kind"
+    )
+    with pytest.raises(BuilderValidationError) as exc:
+        ProcessFlowBuilder.build(cfg, name="Flow Sequence Cache Put Get")
+    _assert_cache_successor_refused(exc.value, "flow_sequence[1].kind")
+
+    golden = _CACHE_PUT_GET_GOLDEN.read_text()
+    assert _corpus._issue184_case(
+        "cache_stage_read", symbols_factory=_corpus.error_symbols
+    )() == golden
+    assert list(ET.fromstring(_frozen_shape(golden, "doccacheload")).find("dragpoints")) == []
+    assert list(ET.fromstring(_frozen_shape(golden, "doccacheretrieve")).find("dragpoints")) != []
 
 
 def test_cache_put_lowers_to_doccacheload_and_cache_get_to_retrieve():
-    xml = ProcessFlowBuilder.build(_cache_put_get_config(), name="X")
+    """cache_put lowers to doccacheload, and cache_get to the all-document retrieve.
+
+    #184 amendment 3: the linear put -> get spelling is refused (see the golden test
+    above), so the lowering is pinned on the legal ordered-leg form. The leg-1 load
+    ends its leg, and the leg-2 retrieve forwards to the target.
+    """
+    cfg = _staged_put_get_config()
+    assert ProcessFlowBuilder.validate_config(cfg, depends_on=[]) is None
+    xml = ProcessFlowBuilder.build(cfg, name="X")
     _, _, shapes = _parse_process(xml)
     assert [s.attrib["shapetype"] for s in shapes] == [
-        "start", "connectoraction", "doccacheload", "doccacheretrieve",
+        "start", "connectoraction", "branch", "doccacheload", "doccacheretrieve",
         "connectoraction", "stop",
     ]
-    load = shapes[2]
+    load = shapes[3]
     assert load.attrib["userlabel"] == "Stage rows"
     assert load.find("configuration/doccacheload").attrib["docCache"] == "CACHE-1"
-    retrieve = shapes[3].find("configuration/doccacheretrieve")
+    assert list(load.find("dragpoints")) == []
+    assert shapes[4].attrib["userlabel"] == "Read staged rows"
+    retrieve = shapes[4].find("configuration/doccacheretrieve")
     # The authored cache_get emits the byte-locked all-document retrieve.
     assert retrieve.attrib["docCache"] == "CACHE-1"
     assert retrieve.attrib["loadAllDoc"] == "true"
@@ -4107,21 +4346,31 @@ def test_cache_get_load_all_documents_true_allowed():
     assert err is None
 
 
-# --- companion review P1 (#122 follow-up): cache_put consumes documents ------
+# --- companion review P1 (#122 follow-up), corrected by #184 amendment 3: -----
+# --- cache_put hands on no documents, so nothing may follow it on its path ----
 
 
 def test_cache_put_followed_by_non_retrieve_rejected():
-    err = ProcessFlowBuilder.validate_config(
-        _seq_config(
-            [
-                {"kind": "cache_put", "document_cache_id": "CACHE-1"},
-                {"kind": "message", "message_text": "starved"},
-            ]
+    """A step after a cache_put is refused, and the misplaced step is blamed.
+
+    #184 amendment 3 kept this refusal and withdrew its exemption. The old rule let a
+    stream-replacing retrieve follow the write. Add to Cache hands on no documents,
+    though, so nothing arrives to trigger a retrieve after it
+    (cap184-cache-put-successor). Both successors are refused at the same position.
+    """
+    for successor in (
+        {"kind": "message", "message_text": "starved"},
+        {"kind": "cache_get", "document_cache_id": "CACHE-1"},
+    ):
+        err = ProcessFlowBuilder.validate_config(
+            _seq_config(
+                [
+                    {"kind": "cache_put", "document_cache_id": "CACHE-1"},
+                    successor,
+                ]
+            )
         )
-    )
-    assert err is not None
-    assert err.error_code == "PROCESS_FLOW_SEQUENCE_CONFIG_INVALID"
-    assert "consumes" in str(err)
+        _assert_cache_successor_refused(err, "flow_sequence[1].kind")
 
 
 def test_top_level_trailing_cache_put_rejected():
@@ -4154,23 +4403,30 @@ def test_decision_true_leg_trailing_cache_put_rejected():
 
 
 def test_decision_false_leg_trailing_cache_put_allowed():
-    # The FALSE leg falls through to a Stop — no document consumer after the
-    # write, so the staging pattern is harmless there.
-    err = ProcessFlowBuilder.validate_config(
-        _seq_config(
-            [
-                {
-                    "kind": "decision",
-                    "comparison": "equals",
-                    "left": {"value_type": "track", "property_id": "dynamicdocument.DDP_S"},
-                    "right": {"value_type": "static", "static_value": "GO"},
-                    "true_steps": [],
-                    "false_steps": [{"kind": "cache_put", "document_cache_id": "CACHE-1"}],
-                }
-            ]
-        )
+    """#184 amendment 3: a FALSE leg ending in a cache_put is now REFUSED.
+
+    The FALSE leg falls through to a Stop. The old rule called a trailing write
+    harmless there, since no document consumer follows it. But the Stop is still a
+    successor, and a step after one that hands on no documents never runs: it is a
+    dead shape on the canvas. Both sites refuse the leg, at its last step.
+    """
+    cfg = _seq_config(
+        [
+            {
+                "kind": "decision",
+                "comparison": "equals",
+                "left": {"value_type": "track", "property_id": "dynamicdocument.DDP_S"},
+                "right": {"value_type": "static", "static_value": "GO"},
+                "true_steps": [],
+                "false_steps": [{"kind": "cache_put", "document_cache_id": "CACHE-1"}],
+            }
+        ]
     )
-    assert err is None
+    field = "flow_sequence[0].false_steps[0].kind"
+    _assert_cache_successor_refused(ProcessFlowBuilder.validate_config(cfg, depends_on=[]), field)
+    with pytest.raises(BuilderValidationError) as exc:
+        ProcessFlowBuilder.build(cfg, name="False Leg Stage")
+    _assert_cache_successor_refused(exc.value, field)
 
 
 def test_branch_staging_leg_with_target_rejected():
@@ -4229,17 +4485,23 @@ def test_branch_staging_leg_emits_terminal_doccacheload():
 
 
 def test_doccacheload_followed_by_non_retrieve_rejected():
-    err = ProcessFlowBuilder.validate_config(
-        _seq_config(
-            [
-                {"kind": "doccacheload", "document_cache_id": "CACHE-1"},
-                {"kind": "message", "message_text": "starved"},
-            ]
+    """The legacy ``doccacheload`` kind gets the same refusal as ``cache_put``: it
+    emits the same Add to Cache shape, which hands on no documents (#184 amendment
+    3). A retrieve successor is refused too, at the same position."""
+    for successor in (
+        {"kind": "message", "message_text": "starved"},
+        {"kind": "doccacheretrieve", "document_cache_id": "CACHE-1"},
+    ):
+        err = ProcessFlowBuilder.validate_config(
+            _seq_config(
+                [
+                    {"kind": "doccacheload", "document_cache_id": "CACHE-1"},
+                    successor,
+                ]
+            )
         )
-    )
-    assert err is not None
-    assert err.error_code == "PROCESS_FLOW_SEQUENCE_CONFIG_INVALID"
-    assert "doccacheload consumes" in str(err)
+        _assert_cache_successor_refused(err, "flow_sequence[1].kind")
+        assert "doccacheload hands on no documents" in str(err)
 
 
 def test_top_level_trailing_doccacheload_rejected():
@@ -4251,10 +4513,20 @@ def test_top_level_trailing_doccacheload_rejected():
 
 
 def test_m10_load_retrieve_remove_chain_still_valid():
-    # The byte-locked #117 composition stays green: a load followed by a
-    # stream-replacing retrieve satisfies the consumption contract.
+    """#184 amendment 3: the #117 load -> retrieve -> remove chain is no longer valid.
+
+    It was byte-locked on the premise that a stream-replacing retrieve refills the
+    stream after a load. The platform measured otherwise. Add to Cache hands on no
+    documents, so the retrieve is never triggered, and the removal after it never
+    runs either (captures cap184-cache-put-successor, cap184-cache-remove-read). The
+    chain is refused at its first misplaced step. Its golden-000018 is retired, and
+    the legal staging form is golden-000083
+    (``test_flow_sequence_cache_load_retrieve_remove_matches_golden_fixture``).
+    """
     cfg = _cache_crud_config()
-    assert ProcessFlowBuilder.validate_config(cfg, depends_on=[]) is None
+    _assert_cache_successor_refused(
+        ProcessFlowBuilder.validate_config(cfg, depends_on=[]), "flow_sequence[1].kind"
+    )
 
 
 def test_branch_staging_leg_doccacheload_target_rules():

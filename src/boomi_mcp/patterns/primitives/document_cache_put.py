@@ -60,8 +60,9 @@ class DocumentCachePutPrimitive(PrimitivePattern):
         description=(
             "Declare a success-path Document Cache write as an authored "
             "cache_put flow-sequence step (lowers to the Add to Cache shape): "
-            "store the current documents so a later step, branch leg, or map "
-            "join can read them back within the same execution."
+            "store the arriving documents so a later branch leg or a map join "
+            "can read them back within the same execution. Add to Cache hands "
+            "on no documents, so it ends its path."
         ),
         tags=["cache", "document-cache", "put", "handoff"],
         use_cases=[
@@ -81,7 +82,10 @@ class DocumentCachePutPrimitive(PrimitivePattern):
     )
     output_contract = PatternIOContract(
         name="cached_document_stream",
-        description="The cache write is a terminal-ish sink on its row; documents live in the cache.",
+        description=(
+            "No documents continue on this path: Add to Cache ends it, and the "
+            "documents live in the cache for a later branch leg to read."
+        ),
     )
     required_builders = ["ProcessFlowBuilder"]
 

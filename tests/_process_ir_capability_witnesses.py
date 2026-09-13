@@ -1153,8 +1153,15 @@ def _w_nested_try_catch():
 
 def _w_keyed_cache():
     def _carrier():
-        # A cleanly COMPILING document: the `cache_put` upstream satisfies the cache-writer
-        # rule, so the only thing the mutation changes is the gated field.
+        # A cleanly COMPILING document: leg 0's terminal `cache_put` satisfies the
+        # cache-writer rule for the read in leg 1, so the only thing the mutation changes
+        # is the gated field.
+        #
+        # #184 amendment 3: this carrier used to write and read on ONE path (`cache_put`
+        # then `document_cache_retrieve`). Add to Cache hands on no documents, so that
+        # read never runs and the model refuses it. The legal staging form ends an
+        # earlier branch leg on the write and reads in a later leg, which runs after it
+        # on the accumulated execution cache state.
         return _doc(
             [
                 {
@@ -1162,23 +1169,37 @@ def _w_keyed_cache():
                     "connection_ref": "$ref:CONN",
                     "operation_ref": "$ref:GETOP",
                 },
-                {"kind": "cache_put", "cache_ref": "$ref:CACHE"},
-                {"kind": "document_cache_retrieve", "cache_ref": "$ref:CACHE"},
                 {
-                    "kind": "target",
-                    "connection_ref": "$ref:DBCONN",
-                    "operation_ref": "$ref:DBSEND",
+                    "kind": "branch",
+                    "legs": [
+                        {
+                            "steps": [],
+                            "terminal": {"kind": "cache_put", "cache_ref": "$ref:CACHE"},
+                        },
+                        {
+                            "steps": [
+                                {"kind": "document_cache_retrieve", "cache_ref": "$ref:CACHE"}
+                            ],
+                            "terminal": {
+                                "kind": "target",
+                                "connection_ref": "$ref:DBCONN",
+                                "operation_ref": "$ref:DBSEND",
+                            },
+                        },
+                    ],
                 },
-                {"kind": "stop"},
             ]
         )
 
     def mutate():
         clean = _compile_refusal_for_model(_parse(_carrier()))
         model = _parse(_carrier())
-        model.body.steps[2].load_all_documents = False
+        model.body.steps[1].legs[1].steps[0].load_all_documents = False
         return model, clean, (
-            ("PROCESS_IR_CAPABILITY_UNSUPPORTED", "/body/steps/2/load_all_documents"),
+            (
+                "PROCESS_IR_CAPABILITY_UNSUPPORTED",
+                "/body/steps/1/legs/1/steps/0/load_all_documents",
+            ),
         )
 
     return _parser_gated(

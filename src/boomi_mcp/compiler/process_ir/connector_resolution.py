@@ -51,6 +51,10 @@ from .connector_capabilities import (
     lookup_capability,
     lookup_connector_family_capability,
 )
+from ...models.process_ir_document_semantics import (
+    TRIGGERED_REPLACEMENT_SEMANTIC_KINDS,
+    ZERO_EMISSION_SEMANTIC_KINDS,
+)
 from .contracts import ComponentSymbolV1, SemanticCfgV1, SymbolTableV1, _CompilerModel
 from .diagnostics import raise_compile_error
 from .error_handling import validate_error_handling
@@ -454,15 +458,13 @@ def validate_connector_call_semantics(
 # Per-path dataflow (#141 M12.6)
 # ---------------------------------------------------------------------------
 
-#: Nodes that REPLACE the document stream, so a call downstream of one has
-#: documents regardless of what came before.
-_STREAM_PRODUCING_KINDS = frozenset({"cache_get", "document_cache_retrieve"})
-
-#: The only kinds that may follow a call which produces no documents: a plain
-#: ``stop`` (consumes nothing, just ends the path) and a stream-replacing read
-#: (supplies its own documents). Everything else would be emitted downstream of a
-#: shape that hands it nothing.
-_MAY_FOLLOW_NON_PRODUCER = frozenset({"stop"}) | _STREAM_PRODUCING_KINDS
+#: The only kind that may follow a call which produces no documents: a plain
+#: ``stop``, the inert termination convention of the legacy ``[target, stop]``
+#: shape. It is not evidence that the Stop executes. #184 amendment 3 removed the
+#: cache reads from this set: a read runs only when a document ARRIVES
+#: (the document-emission authority), so after a Send it would never run.
+#: `cap184-send-then-read` stays OPEN, and the refusal is conservative.
+_MAY_FOLLOW_NON_PRODUCER = frozenset({"stop"})
 
 #: Kinds that do NOT break a map's pairing with its upstream call. A connector
 #: call sets the pairing; Branch/Decision merely route the documents onward
@@ -499,7 +501,7 @@ class _PathState:
 
     __slots__ = (
         "producer", "producer_binding", "blocked_by", "pending_map", "map_upstream", "saw_call",
-        "error_context",
+        "error_context", "exhausted",
     )
 
     def __init__(
@@ -511,10 +513,12 @@ class _PathState:
         map_upstream=None,
         saw_call=False,
         error_context=False,
+        exhausted=False,
     ):
-        #: truthy when SOMETHING upstream on this path yields documents — a
-        #: producing connector_call, a legacy source endpoint, or a cache read.
-        #: Used only for the documents_required check, which does not care which.
+        #: truthy when SOMETHING upstream on this path yields usable payload — a
+        #: producing connector_call, a legacy source endpoint, an entry that
+        #: supplies documents, or a TRIGGERED cache read.
+        #: Used only for the usable-payload checks, which do not care which.
         self.producer = producer
         #: the upstream producer WHEN it is a connector-call binding. Kept apart
         #: from ``producer`` because only a binding carries profile refs: a legacy
@@ -539,6 +543,12 @@ class _PathState:
         #: map against what actually reaches it rather than demanding that a
         #: connector call sit on both sides.
         self.error_context = error_context
+        #: #184 amendment 3: a step that hands on zero documents (Add to Cache, an
+        #: all-document Remove from Cache) ran on this path, so NO document arrives
+        #: at anything after it — not even a trigger. Distinct from ``producer is
+        #: None``: a scheduled start supplies no usable payload, but its single
+        #: empty document still triggers a cache read.
+        self.exhausted = exhausted
 
     def copy(self) -> "_PathState":
         return _PathState(
@@ -549,6 +559,7 @@ class _PathState:
             self.map_upstream,
             self.saw_call,
             self.error_context,
+            self.exhausted,
         )
 
 
@@ -618,10 +629,9 @@ def _walk_paths(cfg: SemanticCfgV1, index, binding_by_node) -> None:
         # now put a message, a routed target, a nested control or a cache write
         # after a Send, none of which could ever execute.
         #
-        # Only two things may legally follow: a plain ``stop`` (it consumes
-        # nothing and merely ends the path — the legacy [target, stop] shape), and
-        # a stream-replacing cache read, which supplies its own documents and so
-        # genuinely restarts the stream.
+        # Only a plain ``stop`` may follow — the legacy [target, stop] shape. A
+        # cache read is refused here too: it needs an arriving document, so it
+        # cannot restart the stream (#184 amendment 3).
         if state.blocked_by is not None and kind not in _MAY_FOLLOW_NON_PRODUCER:
             # Blame the SEND — the node whose position is wrong, since it must be
             # last on its path — EXCEPT for a Return Documents terminal, where
@@ -664,18 +674,19 @@ def _walk_paths(cfg: SemanticCfgV1, index, binding_by_node) -> None:
                 state.pending_map.node_id,
             )
 
-        # --- #184 A4: a map or a cache write needs documents to act on ---------
+        # --- #184 A4: a map or a cache write needs usable payload ---------------
         # Only a `documents_required` call was gated on "something upstream on this
-        # path produced documents". A map or a cache write on an absent stream — a
-        # call-free Branch leg or Decision arm under a control-only root — compiled
-        # and emitted, although the empty start document carries nothing to
-        # transform or stage. The document-existence authority is `producer`, fed
-        # by a producing call, a legacy source, the listener entry, a caught
-        # document, and `_STREAM_PRODUCING_KINDS` — which is pinned, in both
-        # directions, to the served kinds whose output is stream-replacing AND
-        # all-documents. A `message` or `data_process` is served per-document and is
-        # NOT a from-nothing producer. Placed after the Send gate and the pending-map
-        # rule so a defect those already own keeps its diagnosis.
+        # path produced documents". A map or a cache write with no usable payload —
+        # a call-free Branch leg or Decision arm under a control-only root —
+        # compiled and emitted, although the empty start document carries nothing
+        # to transform or stage. This is the compiler's USABLE-PAYLOAD requirement,
+        # not a claim that a scheduled start emits zero documents: its single empty
+        # document still triggers what follows. `producer` is fed by a producing
+        # call, a legacy source, the listener and passthrough entries, a caught
+        # document, and a TRIGGERED cache read (the document-emission authority).
+        # A `message` or `data_process` gains no from-zero producer admission.
+        # Placed after the Send gate and the pending-map rule so a defect those
+        # already own keeps its diagnosis.
         if kind == "map" and state.producer is None:
             _cardinality_failure("{0}/map_ref".format(node.source_path), node.node_id)
         if kind == "cache_put" and state.producer is None:
@@ -755,10 +766,14 @@ def _walk_paths(cfg: SemanticCfgV1, index, binding_by_node) -> None:
                 state.producer_binding = None
                 state.blocked_by = None
 
-        elif kind in _STREAM_PRODUCING_KINDS:
-            state.producer = node
-            state.producer_binding = None
-            state.blocked_by = None
+        elif kind in TRIGGERED_REPLACEMENT_SEMANTIC_KINDS:
+            # A read replaces the payload ONLY when a document triggers it. On a
+            # path a cache write or removal exhausted, nothing arrives and the read
+            # never runs; the model refuses that authored successor, so this is the
+            # walk agreeing with it rather than inventing a stream.
+            if not state.exhausted:
+                state.producer = node
+                state.producer_binding = None
         elif kind == "listener":
             # #158. The inbound request IS the flow's documents, so a
             # documents-required call downstream of a listener has input. Like a
@@ -776,11 +791,13 @@ def _walk_paths(cfg: SemanticCfgV1, index, binding_by_node) -> None:
             state.producer = node
             state.producer_binding = None
             state.blocked_by = None
-        elif kind == "cache_put":
-            # Add to Cache consumes the stream. The model already requires a
-            # stream-replacing read immediately after it within the same body.
+        elif kind in ZERO_EMISSION_SEMANTIC_KINDS:
+            # Add to Cache and an all-document Remove from Cache hand on NO
+            # documents, so the path ends here; the model refuses any authored
+            # successor at the cache node's `/cache_ref`.
             state.producer = None
             state.producer_binding = None
+            state.exhausted = True
 
         if node.exit_role == "return_documents" and state.blocked_by is not None:
             # ``stop`` merely ends the path, but Return Documents RETURNS the

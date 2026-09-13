@@ -280,6 +280,16 @@ _CODES = "diagnostic_codes"
 _RELATED = "related_entry_ids"
 _STAGES = "workflow_stages"
 
+#: #184 amendment 3 §10, verbatim. The measured document behaviour of every cache
+#: step, stated once and appended to each cache entry's summary.
+_CACHE_EMISSION_SUMMARY = (
+    "Cache reads require an arriving document, including the scheduled Start's "
+    "empty document. Add to Cache and all-document Remove from Cache emit zero "
+    "documents and end their document path. Place later work in another ordered "
+    "Branch leg. A triggered retrieve supplies cached payloads; an empty cache "
+    "supplies no successor documents."
+)
+
 _NODE_FACTS: Mapping[str, Mapping[str, Any]] = {
     "sequence": {
         "category": "structure",
@@ -501,17 +511,11 @@ _NODE_FACTS: Mapping[str, Mapping[str, Any]] = {
     "cache_put": {
         "category": "state",
         "title": "Cache put (add to cache)",
-        # The POSITION-INDEPENDENT half only. The trailing-step rule differs by
-        # body and is DERIVED into an ordering fact
-        # (`_derived_trailing_cache_put_fact`); stating it here as well produced a
-        # served entry that contradicted its own ordering fact for the bodies
-        # #154 widened. A summary that restates a rule it does not own is the same
-        # duplicate-authority defect in prose form.
+        # #184 amendment 3 §10. Where a cache action may sit is DERIVED into the
+        # placement fact, and what it hands on into the document-emission fact;
+        # the summary states the measured behaviour and names no slot.
         "summary": (
-            "Writes the stream into a document cache and CONSUMES it. A cache_put "
-            "in a MID-LIST step position must be followed immediately by a "
-            "stream-replacing cache read; as the last step the rule depends on "
-            "the body's terminal — see this entry's ordering facts."
+            "Stores the arriving documents in a document cache. " + _CACHE_EMISSION_SUMMARY
         ),
         _ORDERING: (),
         _DOCS: ("required", "consumed", "all_documents"),
@@ -522,13 +526,12 @@ _NODE_FACTS: Mapping[str, Mapping[str, Any]] = {
         "category": "state",
         "title": "Document cache retrieve",
         "summary": (
-            "Legacy all-document cache read. Replaces the stream with the cached "
-            "documents."
+            "Legacy all-document cache read. " + _CACHE_EMISSION_SUMMARY
         ),
         _ORDERING: (
             "Retrieval is all-document; keyed or indexed retrieval is capability-gated.",
         ),
-        _DOCS: ("optional", "stream_replacing", "all_documents"),
+        _DOCS: ("required", "stream_replacing", "all_documents"),
         _CAPS: ("keyed_cache",),
         _RELATED: ("state_visibility.cache",),
         _STAGES: ("author",),
@@ -542,15 +545,16 @@ _NODE_FACTS: Mapping[str, Mapping[str, Any]] = {
             "because nothing in the artifact can confirm an outside writer. "
             "Combined with a verified external-writer declaration it downgrades "
             "the missing-writer error to a named warning, so the assumption stays "
-            "visible in the record rather than passing silently."
+            "visible in the record rather than passing silently. "
+            + _CACHE_EMISSION_SUMMARY
         ),
         _ORDERING: (
-            "A cache read with no preceding write on the same path is reported "
-            "unless the node authors external_writer AND a verified capability "
-            "vouches for that writer. The declaration alone never suppresses "
-            "it — both factors are required.",
+            "A cache read that no earlier write reaches is reported unless the node "
+            "authors external_writer AND a verified capability vouches for that "
+            "writer. The declaration alone never suppresses it — both factors are "
+            "required.",
         ),
-        _DOCS: ("optional", "stream_replacing", "all_documents"),
+        _DOCS: ("required", "stream_replacing", "all_documents"),
         _CAPS: ("keyed_cache",),
         _RELATED: ("state_visibility.cache",),
         _STAGES: ("author", "repair"),
@@ -559,13 +563,11 @@ _NODE_FACTS: Mapping[str, Mapping[str, Any]] = {
         "category": "state",
         "title": "Cache remove",
         "summary": (
-            "Removes ALL documents from a cache. Keyed removal is capability-gated."
+            "Removes ALL documents from a cache. Keyed removal is capability-gated. "
+            + _CACHE_EMISSION_SUMMARY
         ),
-        _ORDERING: (
-            "Removal acts on the cache, not on the document stream flowing through "
-            "this path.",
-        ),
-        _DOCS: ("optional", "documents", "all_documents"),
+        _ORDERING: (),
+        _DOCS: ("required", "consumed", "all_documents"),
         _CAPS: ("keyed_cache",),
         _RELATED: ("state_visibility.cache",),
         _STAGES: ("author",),
@@ -1207,35 +1209,34 @@ def _assert_no_hand_written_placement_claim(kind: str, facts: Tuple[str, ...]) -
             )
 
 
-def _derived_trailing_cache_put_fact(kind: str) -> Tuple[str, ...]:
-    """Where a trailing ``cache_put`` is tolerated, read off the model's table.
+def _derived_document_emission_fact(kind: str) -> Tuple[str, ...]:
+    """What a step hands on, read off the document-emission authority (#184 amendment 3).
 
-    Same reason as the placement sentence: the rule lives in
-    ``TRAILING_CACHE_PUT_TERMINALS`` and a hand-written description of it is a
-    second copy that goes stale the first time a slot changes — which is exactly
-    what #154 item 4 did to the previous sentence.
+    Replaces the trailing-cache-put sentence, whose table authorized a stop or an
+    exception after a cache write that the platform then skips. The kinds are read
+    from the authority, so a step whose emission changes cannot leave a served
+    sentence describing the old behaviour.
     """
-    if kind != "cache_put":
-        return ()
-    from ..models.process_ir import TRAILING_CACHE_PUT_TERMINALS
-    from ..compiler.process_ir.body_capabilities import PUBLIC_BODY_CONTEXTS
+    from ..models.process_ir_document_semantics import (
+        STEP_DISPLAY_NAMES,
+        TRIGGERED_REPLACEMENT_KINDS,
+        ZERO_EMISSION_KINDS,
+    )
 
-    tolerated = sorted(
-        "{0} ({1})".format(PUBLIC_BODY_CONTEXTS[context], "/".join(sorted(terminals)))
-        for context, terminals in TRAILING_CACHE_PUT_TERMINALS.items()
-        if terminals
-    )
-    if not tolerated:
+    if kind in ZERO_EMISSION_KINDS:
         return (
-            "A cache_put in a MID-LIST step position must be followed immediately "
-            "by a stream-replacing cache read; no body tolerates it as the last "
-            "step.",
+            "{0} hands on no documents, so nothing may follow a {1} on its path: "
+            "author it only as a terminal, and do the work that follows in a later "
+            "ordered branch leg.".format(STEP_DISPLAY_NAMES[kind], kind),
         )
-    return (
-        "A cache_put in a MID-LIST step position must be followed immediately by "
-        "a stream-replacing cache read. As the LAST step it is tolerated only "
-        "where the terminal cannot need the stream: {0}.".format(", ".join(tolerated)),
-    )
+    if kind in TRIGGERED_REPLACEMENT_KINDS:
+        return (
+            "A {0} runs only when a document arrives, and a scheduled start's single "
+            "empty document counts. It hands on the cached documents; an empty cache "
+            "hands on none. It never restarts a path whose documents a cache write "
+            "or removal consumed.".format(kind),
+        )
+    return ()
 
 
 def _hand_written_ordering(kind, facts) -> Tuple[str, ...]:
@@ -1322,7 +1323,7 @@ def _node_entries(
                 ),
                 ordering_facts=(
                     _hand_written_ordering(kind, facts)
-                    + _derived_trailing_cache_put_fact(kind)
+                    + _derived_document_emission_fact(kind)
                     + _derived_placement_fact(kind, placements_by_kind.get(kind, []))
                 ),
                 required_references=tuple(

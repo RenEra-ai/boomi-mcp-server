@@ -426,25 +426,47 @@ def test_inv_doccacheretrieve_all_documents_linear():
 def test_inv_doccacheremove_all_documents_linear():
     # Issue #110 M10.6: the all-document Document Cache Remove shape always emits
     # removeAllDocuments="true" with an empty <cacheKeyValues/>, the live attribute
-    # order (docCache, removeAllDocuments — no emptyCacheBehavior/loadAllDoc),
-    # image="doccacheremove_icon", and a forward (non-empty) dragpoint — it is a
-    # normal linear NON-terminal step. Guaranteed by construction:
-    # _emit_doccacheremove emits exactly this form and never a keyed/index removal
-    # (deferred).
-    xml = ProcessFlowBuilder.build(
-        _process_config(
-            transform={
-                "mode": "doccacheremove",
-                "label": "Clear Cache",
-                "document_cache_id": "CACHE-1",
-            }
-        ),
-        name="P",
+    # order (docCache, removeAllDocuments — no emptyCacheBehavior/loadAllDoc), and
+    # image="doccacheremove_icon". Guaranteed by construction: _emit_doccacheremove
+    # emits exactly this form and never a keyed/index removal (deferred).
+    #
+    # #184 amendment 3 withdrew the "linear NON-terminal step" half. Remove from
+    # Cache hands on no documents, so a successor wired after it never runs
+    # (captures cap184-prefix-predecessors xr-remove-successor,
+    # cap184-cache-remove-read). The invariant is now TERMINAL, enforced three ways:
+    # * the shape carries empty <dragpoints/>, the platform-stored form;
+    # * the inline transform that wired a target after the remove is refused;
+    # * the emitter refuses a successor on the validate-bypass path.
+    import pytest
+
+    from boomi_mcp.categories.components.builders import process_flow_builder as _pfb
+    from boomi_mcp.categories.components.builders.connector_builder import (
+        BuilderValidationError,
     )
-    shapes = _parse_process_shapes(xml)
-    dcr = next(s for s in shapes if s.attrib["shapetype"] == "doccacheremove")
+
+    refusal = ("PROCESS_DOCCACHE_REMOVE_CONFIG_INVALID", "transform.mode")
+    config = _process_config(
+        transform={
+            "mode": "doccacheremove",
+            "label": "Clear Cache",
+            "document_cache_id": "CACHE-1",
+        }
+    )
+    err = ProcessFlowBuilder.validate_config(config, depends_on=[])
+    assert err is not None and (err.error_code, err.field) == refusal
+    with pytest.raises(BuilderValidationError) as built:
+        ProcessFlowBuilder.build(config, name="P")
+    assert (built.value.error_code, built.value.field) == refusal
+
+    dcr = ET.fromstring(
+        _pfb._emit_doccacheremove(
+            "shape3", {"userlabel": "Clear Cache", "document_cache_id": "CACHE-1"}, None, 3
+        )
+    )
+    assert dcr.attrib["shapetype"] == "doccacheremove"
     assert dcr.attrib["image"] == "doccacheremove_icon"
     cfg = dcr.find("configuration/doccacheremove")
+    assert list(cfg.attrib) == ["docCache", "removeAllDocuments"]
     assert cfg.attrib["removeAllDocuments"] == "true"
     assert cfg.attrib["docCache"] == "CACHE-1"
     # Remove carries NO emptyCacheBehavior / loadAllDoc (those are retrieve-only).
@@ -453,9 +475,13 @@ def test_inv_doccacheremove_all_documents_linear():
     # Empty cache-key set (all-document remove; keyed removal deferred).
     key_values = cfg.find("cacheKeyValues")
     assert key_values is not None and list(key_values) == []
-    # NON-terminal: exactly one forward dragpoint.
+    # TERMINAL: no outgoing dragpoint...
     dragpoints = dcr.find("dragpoints")
-    assert dragpoints is not None and len(list(dragpoints)) == 1
+    assert dragpoints is not None and len(list(dragpoints)) == 0
+    # ...and a successor cannot be wired even when the validator is bypassed.
+    with pytest.raises(BuilderValidationError) as wired:
+        _pfb._emit_doccacheremove("shape3", {"document_cache_id": "CACHE-1"}, "shape4", 3)
+    assert wired.value.error_code == "PROCESS_DOCCACHE_REMOVE_CONFIG_INVALID"
 
 
 def test_inv_flowcontrol_batching_thread_only_linear():
@@ -1110,7 +1136,7 @@ INVARIANT_DISPOSITIONS: List[Dict[str, str]] = [
     },
     {
         "id": "doccacheremove_linear",
-        "invariant": 'Document Cache Remove all-documents form — removeAllDocuments="true", empty <cacheKeyValues/>, attribute order docCache/removeAllDocuments (no emptyCacheBehavior/loadAllDoc), image="doccacheremove_icon", linear NON-terminal (one forward dragpoint)',
+        "invariant": 'Document Cache Remove all-documents form — removeAllDocuments="true", empty <cacheKeyValues/>, attribute order docCache/removeAllDocuments (no emptyCacheBehavior/loadAllDoc), image="doccacheremove_icon", TERMINAL (empty <dragpoints/>; a successor is refused — #184 amendment 3: Remove from Cache hands on no documents)',
         "emitter": "process_flow_builder._emit_doccacheremove (issue #110 M10.6)",
         "disposition": "guaranteed-by-construction",
         "test": "test_inv_doccacheremove_all_documents_linear",

@@ -77,8 +77,9 @@ def _read_dpp(via_name, dpp_name, **source_extra):
 
 
 def _branch(*leg_step_lists):
-    # Per the companion-review P1 contract: a leg ending in cache_put is a
-    # target-less staging leg (Add to Cache consumes the documents).
+    # A leg ending in cache_put is a target-less staging leg: Add to Cache hands
+    # on no documents, so a leg target after it would never run (#184
+    # amendment 3).
     legs = []
     for steps in leg_step_lists:
         steps = list(steps)
@@ -241,13 +242,42 @@ def test_cache_get_external_writer_passes():
 
 
 def test_cache_ids_must_match_verbatim():
-    seq = [
-        {"kind": "cache_put", "document_cache_id": "CACHE-A"},
-        {"kind": "cache_get", "document_cache_id": "CACHE-B"},
+    """A cache read resolves its writer by the verbatim cache id.
+
+    #184 amendment 3: the writer and the reader now sit in ordered Branch legs, the
+    only legal staging shape. Add to Cache hands on no documents, so a read straight
+    after the write on one path is refused structurally, before lineage runs. The
+    same legs with a matching id plan clean, so the id mismatch alone is what fails.
+    """
+    linear = _err(
+        [
+            {"kind": "cache_put", "document_cache_id": "CACHE-A"},
+            {"kind": "cache_get", "document_cache_id": "CACHE-B"},
+        ]
+    )
+    assert linear is not None
+    assert (linear.error_code, linear.field) == (
+        "PROCESS_FLOW_SEQUENCE_CONFIG_INVALID",
+        "flow_sequence[1].kind",
+    )
+
+    mismatched = [
+        _branch(
+            [{"kind": "cache_put", "document_cache_id": "CACHE-A"}],
+            [{"kind": "cache_get", "document_cache_id": "CACHE-B"}],
+        )
     ]
-    err = _err(seq)
+    err = _err(mismatched)
     assert err is not None
     assert err.error_code == "PROCESS_LINEAGE_CACHE_WRITER_MISSING"
+
+    matched = [
+        _branch(
+            [{"kind": "cache_put", "document_cache_id": "CACHE-A"}],
+            [{"kind": "cache_get", "document_cache_id": "CACHE-A"}],
+        )
+    ]
+    assert _err(matched) is None
 
 
 # --- exclusive (decision) paths ----------------------------------------------

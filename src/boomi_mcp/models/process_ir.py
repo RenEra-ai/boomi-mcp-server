@@ -37,7 +37,7 @@ Contract highlights (ADR-001 §6/§7/§9/§11):
   separators) so golden JSON/schema tests are byte-stable.
 
 Structural rules encoded here are the LOCAL rules the legacy builder enforces
-per steps-list (ordering, terminal position, the Add-to-Cache consume guard,
+per steps-list (ordering, terminal position, the terminal cache-action verdict,
 branch leg bounds). CFG-aware semantics (reachability, lineage) stay with
 #137/#143 per ADR-001 §3.
 """
@@ -103,6 +103,11 @@ from ..errors import (
     PROCESS_IR_SEMANTIC_RECOVERY_PROCESS_CALL_INVALID,
     PROCESS_IR_SEMANTIC_CONTROL_CONTINUATION_UNSUPPORTED,
     PROCESS_IR_SEMANTIC_NESTING_LIMIT,
+)
+from .process_ir_document_semantics import (
+    STEP_DISPLAY_NAMES,
+    TRIGGERED_REPLACEMENT_KINDS,
+    ZERO_EMISSION_KINDS,
 )
 from .process_ir_tokens import CAUGHT_ERROR_PROPERTY_ID, NOTIFY_LEVELS
 
@@ -1495,18 +1500,14 @@ class DataProcessNodeV1(_ProcessIRBase):
 
 
 class CachePutNodeV1(_ProcessIRBase):
-    """Add to Cache write. CONSUMES the document stream.
+    """Add to Cache: stores the arriving documents in a document cache and hands on NONE.
 
-    A ``cache_put`` in a mid-list step position must be followed immediately by a
-    stream-replacing cache read, because whatever comes next would otherwise
-    receive nothing.
-
-    As the LAST step of a body the rule relaxes exactly where the terminal cannot
-    need the stream — a Decision false arm ending in ``stop``, and a Catch body
-    ending in ``stop`` or ``exception`` (#154 item 4: stage the caught document,
-    then end the path). Every other body still rejects it; the authoritative,
-    generated statement is the ``process_ir_authoring`` entry ``node.cache_put``,
-    derived from ``TRAILING_CACHE_PUT_TERMINALS`` rather than restated here.
+    Nothing authored after a ``cache_put`` on the same path ever runs — the
+    platform skips a step that receives no documents, and the run still reads
+    COMPLETE. A ``cache_put`` is therefore authored only in a terminal slot that
+    admits it, and the work that reads the cache belongs in a later Branch leg,
+    which receives its own copy of the documents. The authoritative, generated
+    statement is the ``process_ir_authoring`` entry ``node.cache_put``.
     """
 
     kind: Literal["cache_put"]
@@ -1540,6 +1541,11 @@ class CacheGetNodeV1(_ProcessIRBase):
     """Authored all-document cache read, and the CANONICAL spelling for reading a
     cache this process does not write (#154 item 9).
 
+    A read runs only when a document arrives — a scheduled start's single empty
+    document counts — and hands on the cached documents in place of what arrived.
+    An empty cache hands on none. A read never restarts a path whose documents were
+    consumed.
+
     ``external_writer`` carries the authored lineage assertion that the cache is
     populated outside this process. It is an ASSERTION, not evidence: an outside
     writer is not present in the artifact, so nothing the compiler can inspect
@@ -1567,8 +1573,8 @@ class CacheRemoveNodeV1(_ProcessIRBase):
     verified wire shape exists for it (see the ``process_ir_authoring`` entry
     ``capability.keyed_cache``).
 
-    The step operates on the cache, not on the document stream — it neither
-    consumes nor replaces the documents flowing through this path.
+    The step hands on NO documents: nothing authored after it on the same path ever
+    runs. It is therefore authored only in a terminal slot that admits it.
     """
 
     kind: Literal["cache_remove"]
@@ -1982,71 +1988,77 @@ BranchLegStepV1 = ControlBodyStepV1
 DecisionTrueArmStepV1 = ControlBodyStepV1
 DecisionFalseArmStepV1 = ControlBodyStepV1
 
-_CACHE_READ_KINDS = ("cache_get", "document_cache_retrieve")
+def terminal_cache_action_verdict(
+    steps: List[Any], *, followed: bool
+) -> Optional[Tuple[Tuple[Any, ...], str]]:
+    """The ONE continuation verdict for a step that emits zero documents (#184 amendment 3 §2).
 
+    Add to Cache and an all-document Remove from Cache hand on no documents, so
+    the platform skips whatever is wired after them and the run still reads
+    COMPLETE (ledger rows E0-184-01, E0-184-03, E1-184-01). Such a step may have NO
+    authored successor on its path — not a cache read, not a stop or an exception,
+    not a connector, a property step, a control or a process call. Its only legal
+    placement is a terminal slot whose union admits it.
 
-def _check_cache_put_followed_by_read(steps: List[Any], *, context: str) -> None:
-    """Add to Cache consumes the stream: a mid-list cache_put must be followed
-    by a stream-replacing cache read (legacy consume guard)."""
-    for i, step in enumerate(steps[:-1]):
-        if getattr(step, "kind", None) == "cache_put":
-            if getattr(steps[i + 1], "kind", None) not in _CACHE_READ_KINDS:
-                raise _cardinality_error(
-                    f"cache_put in {context} must be immediately followed by "
-                    "cache_get or document_cache_retrieve (Add to Cache consumes the documents)"
-                )
+    It replaces three rules whose premises authorized the dead edge: a cache read
+    required straight after a write, a stop or exception tolerated after a
+    trailing write, and a remove that passed documents on. Which kinds qualify is
+    read from the document-emission authority, never listed here.
 
-
-#: Which body terminals tolerate a trailing ``cache_put`` in the STEP list.
-#:
-#: ONE authority (#154). The rule had five hand-written copies; collapsing them
-#: onto :func:`_check_trailing_cache_put` removed four, and this table removes the
-#: last duplicate — the served prose that described the rule in words. The
-#: projection derives its sentence from here, so a slot that gains or loses a
-#: tolerated terminal cannot leave a served sentence asserting the old rule.
-#:
-#: Keyed by the same context names ``body_capabilities`` uses, so the two tables
-#: are joinable rather than merely parallel.
-TRAILING_CACHE_PUT_TERMINALS: Mapping[str, FrozenSet[str]] = MappingProxyType(
-    {
-        "branch_leg": frozenset(),
-        "decision_true_arm": frozenset(),
-        "decision_false_arm": frozenset({"stop"}),
-        "try_body": frozenset(),
-        "catch_body": frozenset({"stop", "exception"}),
-    }
-)
-
-
-def _check_trailing_cache_put(
-    steps: List[Any], terminal: Any, *, allowed_terminals: FrozenSet[str], message: str
-) -> None:
-    """A trailing ``cache_put`` hands the TERMINAL an emptied stream.
-
-    ONE authority for a rule that had five hand-written copies (#154). Add to
-    Cache consumes the documents, so a ``cache_put`` in the last STEP position is
-    only meaningful when the terminal does not need a stream to do its job —
-    which is a property of the terminal KIND, not of the body. Every body
-    therefore states the same rule and differs only in which terminals qualify:
-
-    * Branch leg, Decision TRUE arm, Try body — no terminal qualifies. Each ends
-      on something that consumes documents (a routed ``target``, a
-      ``return_documents``, a ``stop`` that must have work to stop).
-    * Decision FALSE arm — ``stop``: the reject route deliberately drops the
-      documents it staged.
-    * Catch body — ``stop`` or ``exception``: staging a caught document and THEN
-      ending the path is the recovery shape the legacy builder emits (DLQ write
-      followed by stop, or by an explicit throw).
-
-    ``_check_cache_put_followed_by_read`` owns the complementary MID-list rule and
-    deliberately ignores the last element, so the two guards partition the
-    positions between them with no overlap and no gap.
+    ``followed`` says whether the LAST element of ``steps`` has an authored
+    successor on the same path. That is true for a body with its own terminal
+    slot, and false for a root sequence, whose last element IS its terminal. The
+    pointer is the consuming node's own ``cache_ref``, and one function renders it
+    for parsed JSON and for a re-parsed exported or mutated model alike.
     """
-    if not steps or getattr(steps[-1], "kind", None) != "cache_put":
-        return
-    if getattr(terminal, "kind", None) in allowed_terminals:
-        return
-    raise _cardinality_error(message)
+    followed_count = len(steps) if followed else len(steps) - 1
+    for index in range(followed_count):
+        kind = getattr(steps[index], "kind", None)
+        if kind in ZERO_EMISSION_KINDS:
+            return (("steps", index, "cache_ref"), _zero_emission_message(kind))
+    return None
+
+
+def _zero_emission_message(kind: str) -> str:
+    slots = [
+        label
+        for label, model in _terminal_slot_models()
+        if kind in _terminal_kinds_of(model)
+    ]
+    return (
+        "{0} hands on no documents, so nothing authored after it on the same path "
+        "ever runs — author the {1} as the terminal of {2}, and put the work that "
+        "follows in a later branch leg".format(
+            STEP_DISPLAY_NAMES[kind], kind, " or ".join(slots)
+        )
+    )
+
+
+def _terminal_slot_models():
+    """The body slots with a ``terminal``, named as their placement contexts are.
+
+    Resolved at call time: the models are defined below this verdict.
+    """
+    return (
+        ("a branch leg", BranchLegV1),
+        ("a decision true-arm", DecisionTrueArmV1),
+        ("a decision false-arm", DecisionFalseArmV1),
+        ("a try body", TryCatchTryBodyV1),
+        ("a catch body", TryCatchCatchBodyV1),
+    )
+
+
+def _terminal_kinds_of(model: Any) -> FrozenSet[str]:
+    """The ``kind`` literals a model's ``terminal`` union admits, read from the union."""
+    members = get_args(model.model_fields["terminal"].annotation)
+    return frozenset(get_args(member.model_fields["kind"].annotation)[0] for member in members)
+
+
+def _check_terminal_cache_actions(steps: List[Any], *, followed: bool) -> None:
+    verdict = terminal_cache_action_verdict(steps, followed=followed)
+    if verdict is not None:
+        at, message = verdict
+        raise _cardinality_error(message, at=at)
 
 
 def _check_process_call_terminal_form(
@@ -2533,7 +2545,9 @@ class BranchLegV1(_ProcessIRBase):
 
     Steps are the linear vocabulary plus ``connector_call``; the terminal is a
     routed target endpoint, a target-less staging ``cache_put`` (the staging
-    pattern), a plain ``stop``, a ``process_call``, or a nested ``decision``.
+    pattern), a whole-cache ``cache_remove``, a plain ``stop``, a ``process_call``,
+    or a nested ``decision``. Neither cache action hands on documents, so each is
+    legal only as the terminal; a later leg does the work that follows.
 
     A ``process_call`` is a TERMINAL, never a step, and admits no step prefix: a
     call ends the path it is on, because whether execution continues past it is
@@ -2557,6 +2571,7 @@ class BranchLegV1(_ProcessIRBase):
         Union[
             TargetEndpointV1,
             CachePutNodeV1,
+            CacheRemoveNodeV1,
             StopNodeV1,
             ProcessCallNodeV1,
             "DecisionNodeV1",
@@ -2566,12 +2581,9 @@ class BranchLegV1(_ProcessIRBase):
 
     @model_validator(mode="after")
     def _leg_rules(self) -> "BranchLegV1":
-        _check_cache_put_followed_by_read(self.steps, context="branch leg steps")
-        _check_trailing_cache_put(
-            self.steps, self.terminal,
-            allowed_terminals=TRAILING_CACHE_PUT_TERMINALS["branch_leg"],
-            message="a trailing cache_put belongs in the leg terminal (target-less staging leg), not in steps",
-        )
+        # Before prefix admission: a call after a cache action never runs, so the
+        # cache action is the mistake to report, not the call's predecessor.
+        _check_terminal_cache_actions(self.steps, followed=True)
         _check_process_call_terminal_form(
             self.steps, self.terminal,
             context=PROCESS_CALL_PLACEMENT_CONTEXT_LABELS["branch_leg"],
@@ -2647,12 +2659,7 @@ class DecisionTrueArmV1(_ProcessIRBase):
 
     @model_validator(mode="after")
     def _arm_rules(self) -> "DecisionTrueArmV1":
-        _check_cache_put_followed_by_read(self.steps, context="decision true-arm steps")
-        _check_trailing_cache_put(
-            self.steps, self.terminal,
-            allowed_terminals=TRAILING_CACHE_PUT_TERMINALS["decision_true_arm"],
-            message="decision true-arm steps must not end in cache_put — the arm terminal would receive an empty stream",
-        )
+        _check_terminal_cache_actions(self.steps, followed=True)
         _check_process_call_terminal_form(
             self.steps, self.terminal,
             context=PROCESS_CALL_PLACEMENT_CONTEXT_LABELS["decision_true_arm"],
@@ -2691,12 +2698,7 @@ class DecisionFalseArmV1(_ProcessIRBase):
 
     @model_validator(mode="after")
     def _arm_rules(self) -> "DecisionFalseArmV1":
-        _check_cache_put_followed_by_read(self.steps, context="decision false-arm steps")
-        _check_trailing_cache_put(
-            self.steps, self.terminal,
-            allowed_terminals=TRAILING_CACHE_PUT_TERMINALS["decision_false_arm"],
-            message="decision false-arm steps may end in cache_put only when the arm terminal is a stop",
-        )
+        _check_terminal_cache_actions(self.steps, followed=True)
         return self
 
 
@@ -2891,15 +2893,7 @@ class TryCatchTryBodyV1(_ProcessIRBase):
 
     @model_validator(mode="after")
     def _try_body_rules(self) -> "TryCatchTryBodyV1":
-        _check_cache_put_followed_by_read(self.steps, context="try body steps")
-        _check_trailing_cache_put(
-            self.steps, self.terminal,
-            allowed_terminals=TRAILING_CACHE_PUT_TERMINALS["try_body"],
-            message=(
-                "a trailing cache_put in a try body must be followed by a "
-                "stream-replacing cache read, not by the terminal"
-            ),
-        )
+        _check_terminal_cache_actions(self.steps, followed=True)
         return self
 
 
@@ -2925,21 +2919,13 @@ class TryCatchCatchBodyV1(_ProcessIRBase):
 
     @model_validator(mode="after")
     def _catch_body_rules(self) -> "TryCatchCatchBodyV1":
-        _check_cache_put_followed_by_read(self.steps, context="catch body steps")
-        # #154. The recovery shape the legacy builder emits is "stage the caught
-        # document, then end the path" — a DLQ write followed by a stop, or by an
-        # explicit throw. Both were unauthorable: a lone `[cache_put]` was
-        # rejected outright, so the write had to be moved into the terminal, which
-        # cannot express the write-THEN-exception ordering at all.
-        _check_trailing_cache_put(
-            self.steps, self.terminal,
-            allowed_terminals=TRAILING_CACHE_PUT_TERMINALS["catch_body"],
-            message=(
-                "catch body steps may end in cache_put only when the catch terminal "
-                "is a stop or an exception — any other terminal would receive an "
-                "empty stream"
-            ),
-        )
+        # #184 amendment 3. #154 admitted "stage the caught document, then stop or
+        # throw" as steps `[cache_put]` before a stop or exception terminal. Live
+        # capture E1-184-01 shows the throw never happens: Add to Cache hands on
+        # no documents, the Exception is skipped, and the run reads COMPLETE with
+        # the caught error swallowed. Staging now ends the catch path in its
+        # terminal slot, and a catch that must raise ends in the exception alone.
+        _check_terminal_cache_actions(self.steps, followed=True)
         _check_stop_terminal_has_work(self.steps, self.terminal, context="catch body")
         # #156 T5. The recovery hand-off: a caught document handed to another
         # process. RECOVERY=TRUE is what admits a `notify` prefix before the
@@ -3117,12 +3103,11 @@ _ROOT_CONTROL_TERMINAL_KINDS = frozenset({"branch", "decision", "exception"})
 #: reaches the root sequence automatically instead of silently lacking a row.
 _ROOT_LINEAR_KINDS = frozenset(LINEAR_BODY_KINDS)
 
-#: #184 D8. The kinds a call-free linear root may start with: the cache reads, whose
-#: served document semantics replace the stream with all documents. Pinned in both
-#: directions to the connector walk's document-producer set and to the served
-#: contract by `tests/test_issue_184_native_sequences.py`; the model cannot import
-#: the compiler, so the pin is what keeps the two statements one.
-ROOT_ENTRY_READ_KINDS: FrozenSet[str] = frozenset({"cache_get", "document_cache_retrieve"})
+#: #184 D8, amended by amendment 3. The kinds a call-free linear root may start with:
+#: the reads the scheduled start's single empty document triggers, which then hand
+#: on the cached documents. Read from the document-emission authority, which the
+#: connector walk and the lineage controller consult too.
+ROOT_ENTRY_READ_KINDS: FrozenSet[str] = TRIGGERED_REPLACEMENT_KINDS
 
 
 def _is_serialized_region_chain(steps: List[Any]) -> bool:
@@ -3240,7 +3225,7 @@ def _check_serialized_region_chain(steps: List[Any]) -> None:
     # followed by a two-handler chain was accepted, because Add-to-Cache consumes
     # the stream and nothing re-checked it. Widening a grammar must not narrow
     # what the grammar it widened still enforces.
-    _check_cache_put_followed_by_read(steps, context="sequence steps")
+    _check_terminal_cache_actions(steps, followed=False)
 
     # A map must SEPARATE two handlers — never doubled, never trailing. The
     # captured graph puts exactly one between the guards, and a map with no
@@ -3357,15 +3342,7 @@ def _check_listener_root(steps: List[Any]) -> None:
                 "a listener flow must end on a connector_call before its stop — "
                 "linear steps after the last call are unsupported"
             )
-        _check_cache_put_followed_by_read(steps, context="listener flow steps")
-        _check_trailing_cache_put(
-            steps[:-1], steps[-1],
-            allowed_terminals=frozenset(),
-            message=(
-                "a trailing cache_put in a listener flow must be followed by a "
-                "stream-replacing cache read, not by the terminal"
-            ),
-        )
+        _check_terminal_cache_actions(steps, followed=False)
         return
 
     if not body or body[-1] != "target":
@@ -3386,7 +3363,7 @@ def _check_listener_root(steps: List[Any]) -> None:
                 "(step {0})".format(index),
                 at=("steps", index),
             )
-    _check_cache_put_followed_by_read(steps, context="listener flow steps")
+    _check_terminal_cache_actions(steps, followed=False)
 
 
 #: #184. Root kinds a passthrough process may never contain, as a step or as its
@@ -3421,9 +3398,8 @@ def _check_passthrough_root(steps: List[Any]) -> None:
       ``connector_call`` and ``T`` is ``stop``, ``return_documents``, ``branch``
       or ``decision``. The steps need not begin with a document producer — the
       calling process supplies the documents — so a ``map_ref`` needs no
-      bracketing calls here. The existing ``cache_put`` rules apply unchanged: a
-      mid-run ``cache_put`` is followed by a stream-replacing cache read, and a
-      trailing one is refused.
+      bracketing calls here. A ``cache_put`` or ``cache_remove`` hands on no
+      documents, so neither may appear before the terminal.
 
     Refused, in this order, so a caller is told about the mistake they made rather
     than a consequence of it:
@@ -3440,7 +3416,7 @@ def _check_passthrough_root(steps: List[Any]) -> None:
     7. a last step that is not a terminal above — ``PROCESS_IR_SCHEMA_INVALID_CARDINALITY``;
     8. a non-linear, non-``connector_call`` step before the terminal —
        ``PROCESS_IR_CAPABILITY_UNSUPPORTED`` at that step;
-    9. the ``cache_put`` rules.
+    9. the terminal cache-action verdict.
 
     ``body_capabilities`` runs this same function over a mutated model handed to
     the compiler, so the two public entry points serve one identity per mistake.
@@ -3500,15 +3476,7 @@ def _check_passthrough_root(steps: List[Any]) -> None:
                 "steps before its terminal (step {0})".format(index),
                 at=("steps", index),
             )
-    _check_cache_put_followed_by_read(steps, context="passthrough process steps")
-    _check_trailing_cache_put(
-        steps[:-1], steps[-1],
-        allowed_terminals=frozenset(),
-        message=(
-            "a trailing cache_put in a passthrough process must be followed by a "
-            "stream-replacing cache read, not by the terminal"
-        ),
-    )
+    _check_terminal_cache_actions(steps, followed=False)
 
 
 class SequenceNodeV1(_ProcessIRBase):
@@ -3790,30 +3758,18 @@ class SequenceNodeV1(_ProcessIRBase):
                         "a connector_call sequence must end on a connector_call before "
                         "its terminal — linear steps after the last call are unsupported"
                     )
-            # #154: the mid-list consume guard never reached this branch, because
-            # it returns before the legacy source/target branch that calls it. A
-            # ``cache_put`` was previously unauthorable here (not a permitted
-            # kind), so admitting the linear vocabulary admits it with no
-            # adjacency rule at all unless it is checked here too.
-            _check_cache_put_followed_by_read(
-                self.steps, context="connector_call sequence steps"
-            )
-            _check_trailing_cache_put(
-                self.steps[:-1], self.steps[-1],
-                allowed_terminals=frozenset(),
-                message=(
-                    "a trailing cache_put in a connector_call sequence must be "
-                    "followed by a stream-replacing cache read, not by the terminal"
-                ),
-            )
+            # #154: this branch returns before the legacy source/target branch,
+            # so the cache rule must be checked here too or a linear cache action
+            # would be admitted with no rule at all.
+            _check_terminal_cache_actions(self.steps, followed=False)
             return self
 
         # #184 D8. A call-free LINEAR root: a cache read, then linear steps, ending
         # on stop or return_documents. The scheduled start's single empty document
         # triggers the read (measured: a standalone run logs the retrieve executing
-        # against the cache), so the read is the flow's first producer. Every other
-        # call-free linear root — `[message, stop]` — has nothing producing
-        # documents and keeps the source-endpoint refusal below.
+        # against the cache), and the read hands on the cached documents. Every
+        # other call-free linear root — `[message, stop]` — has nothing supplying
+        # payload and keeps the source-endpoint refusal below.
         if (
             kinds[0] in ROOT_ENTRY_READ_KINDS
             and not any(kind in _CONNECTOR_KINDS for kind in kinds)
@@ -3825,17 +3781,7 @@ class SequenceNodeV1(_ProcessIRBase):
                         "a call-free linear sequence may contain only linear steps "
                         "before its terminal"
                     )
-            _check_cache_put_followed_by_read(
-                self.steps, context="linear sequence steps"
-            )
-            _check_trailing_cache_put(
-                self.steps[:-1], self.steps[-1],
-                allowed_terminals=frozenset(),
-                message=(
-                    "a trailing cache_put in a linear sequence must be followed by a "
-                    "stream-replacing cache read, not by the terminal"
-                ),
-            )
+            _check_terminal_cache_actions(self.steps, followed=False)
             return self
 
         # Connector flow: source first.
@@ -3892,9 +3838,9 @@ class SequenceNodeV1(_ProcessIRBase):
                     f"{kind} may appear only in the terminal position of its sequence"
                 )
 
-        # The followed-by guard also rejects a cache_put feeding the terminal
-        # (target/return_documents/control are not stream-replacing reads).
-        _check_cache_put_followed_by_read(self.steps, context="sequence steps")
+        # A cache action feeding the target, the terminal or a later step hands
+        # them nothing.
+        _check_terminal_cache_actions(self.steps, followed=False)
         return self
 
 

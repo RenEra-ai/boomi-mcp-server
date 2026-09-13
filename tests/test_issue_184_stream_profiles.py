@@ -134,6 +134,10 @@ def _branch(*legs):
         {"kind": "branch", "legs": list(legs)}]}}
 
 
+#: A leg whose TERMINAL removes every document from `CACHE` (its only legal placement).
+_REMOVAL_LEG = _leg([], {"kind": "cache_remove", "cache_ref": "$ref:CACHE"})
+
+
 def _both_routes(payload, capabilities=None):
     """(code, path) pairs from BOTH compile entry points, asserted identical."""
     routes = []
@@ -186,10 +190,11 @@ _REFUSED = [
     pytest.param(
         _branch(_leg([_call("GET"), {"kind": "message", "text": "m"}, _map("M12")]), _OK_LEG),
         "/body/steps/0/legs/0/steps/2/map_ref", None, id="message_erases_the_profile"),
+    # #184 amendment 3 (measured): an all-document Remove from Cache hands on ZERO
+    # documents, so it TERMINATES its own leg and a LATER leg reads the cache.
     pytest.param(
-        _branch(_leg([_call("GET")], _put()),
-                _leg([{"kind": "cache_remove", "cache_ref": "$ref:CACHE"}, _read(), _map("M12")])),
-        "/body/steps/0/legs/1/steps/2/map_ref", None, id="whole_cache_removal_erases_content"),
+        _branch(_leg([_call("GET")], _put()), _REMOVAL_LEG, _leg([_read(), _map("M12")])),
+        "/body/steps/0/legs/2/steps/1/map_ref", None, id="whole_cache_removal_erases_content"),
     pytest.param(
         _branch(_leg([_call("GET"), _map("M1_")]), _OK_LEG),
         "/body/steps/0/legs/0/steps/1/map_ref", None, id="map_without_a_target_profile"),
@@ -266,6 +271,18 @@ def test_several_mismatching_sources_on_one_step_are_each_reported():
     for position in (0, 1):
         pointer = "/body/steps/0/legs/0/steps/1/source_values/{0}/profile_ref".format(position)
         assert (_PROFILE, pointer) in diagnostics, diagnostics
+
+
+def test_the_removal_leg_is_what_erases_the_cache_content():
+    """Non-vacuity of `whole_cache_removal_erases_content`: the same write leg and
+    read leg WITHOUT the terminal-removal leg between them prove the map, so the
+    refusal is the removal's erasure of the stored content and nothing else."""
+    pointer = "/body/steps/0/legs/2/steps/1/map_ref"
+    with_removal = _both_routes(
+        _branch(_leg([_call("GET")], _put()), _REMOVAL_LEG, _leg([_read(), _map("M12")])))
+    assert (_PROFILE, pointer) in with_removal, with_removal
+    without_removal = _both_routes(_branch(_leg([_call("GET")], _put()), _leg([_read(), _map("M12")])))
+    assert _PROFILE not in {code for code, _path in without_removal}, without_removal
 
 
 def test_the_cache_content_fact_is_load_bearing(monkeypatch):

@@ -368,7 +368,20 @@ def _emit_doccacheremove(
                 "cacheKeyValues). Keyed/index removal is deferred."
             ),
         )
-    ctx = linear_ctx(shape_name, shape_index, [next_name])
+    if next_name is not None:
+        # #184 amendment 3, the validate-bypass guard. Remove from Cache hands on
+        # no documents, so a successor wired after it would never run; the
+        # validator refuses the composition, and this refuses it on the bypass.
+        raise BuilderValidationError(
+            "A Document Cache Remove cannot have a successor: it hands on no documents.",
+            error_code="PROCESS_DOCCACHE_REMOVE_CONFIG_INVALID",
+            field="transform.mode",
+            hint=(
+                "Author the removal in ProcessIR as the terminal of a branch leg, and "
+                "put the work that follows in a later branch leg."
+            ),
+        )
+    ctx = linear_ctx(shape_name, shape_index, [])
     return rendering.render_doccacheremove(
         ctx, userlabel=params.get("userlabel") or "", doc_cache_id=doc_cache_id
     )
@@ -737,9 +750,16 @@ def _emit_doccacheload(
     dragpoint_y: float = _CATCH_DRAGPOINT_Y,
     userlabel: str = "Route caught errors to DLQ cache",
 ) -> str:
-    transitions = (
-        linear_transitions(shape_index, [next_name], y=dragpoint_y) if next_name else ()
-    )
+    if next_name is not None:
+        # #184 amendment 3: Add to Cache hands on no documents, so a wire to a
+        # successor is a dead edge the platform never follows.
+        raise BuilderValidationError(
+            "An Add to Cache step cannot have a successor: it hands on no documents.",
+            error_code="PROCESS_XML_VALIDATION_FAILED",
+            field="reliability.dlq.mode",
+            hint="End the catch leg on the DLQ cache write.",
+        )
+    transitions = ()
     ctx = ShapeRenderContext(
         shape_id=shape_name, x=_shape_x(shape_index), y=y, transitions=transitions
     )

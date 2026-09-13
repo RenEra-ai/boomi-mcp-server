@@ -1798,17 +1798,48 @@ def test_a_subprocess_read_the_child_satisfies_is_not_required_of_the_caller():
 
 
 def test_a_subprocess_that_writes_a_cache_is_not_replay_safe():
-    """§6 P1(c). Re-running the child would write the cache twice."""
+    """§6 P1(c). Re-running the child would write the cache twice.
+
+    #184 amendment 3: a child that writes a cache must stage the write as a branch
+    leg (or catch) TERMINAL. Add to Cache hands on no documents, so the earlier
+    child's `cache_put` then `cache_get` on one path ran a read that never executes,
+    and the model now refuses it. The read moves to a later leg.
+
+    A second, connector-free pair pins the verdict to the cache write itself: a
+    connector makes a child replay-unsafe on its own, so the source-led child could
+    never show that the write mattered.
+    """
     from boomi_mcp.authoring.process_ir_effects import derive_subprocess_effect
 
     child = parse_process_ir_v1({"version": "1", "body": {"kind": "sequence", "steps": [
         {"kind": "source", "connection_ref": "$ref:CONN", "operation_ref": "$ref:GETOP"},
-        {"kind": "cache_put", "cache_ref": "$ref:DC"},
-        {"kind": "cache_get", "cache_ref": "$ref:DC"},
-        {"kind": "return_documents"}]}})
+        {"kind": "branch", "legs": [
+            {"steps": [], "terminal": {"kind": "cache_put", "cache_ref": "$ref:DC"}},
+            {"steps": [{"kind": "cache_get", "cache_ref": "$ref:DC"}],
+             "terminal": {"kind": "stop"}},
+        ]}]}})
     _reads, writes, replay_safe = derive_subprocess_effect(child).effect
     assert ("cache", "$ref:DC") in writes
     assert replay_safe is False
+
+    def _connector_free(first_leg_terminal):
+        return parse_process_ir_v1({"version": "1", "body": {"kind": "sequence", "steps": [
+            {"kind": "branch", "legs": [
+                {"steps": [{"kind": "message", "text": "stage"}],
+                 "terminal": first_leg_terminal},
+                {"steps": [{"kind": "message", "text": "m"}], "terminal": {"kind": "stop"}},
+            ]}]}})
+
+    _reads, writes, replay_safe = derive_subprocess_effect(
+        _connector_free({"kind": "cache_put", "cache_ref": "$ref:DC"})).effect
+    assert ("cache", "$ref:DC") in writes
+    assert replay_safe is False
+    # CONTROL: the same connector-free child ending that leg on a stop instead is
+    # replay-safe, so the verdict above comes from the cache write.
+    _reads, writes, replay_safe = derive_subprocess_effect(
+        _connector_free({"kind": "stop"})).effect
+    assert ("cache", "$ref:DC") not in writes
+    assert replay_safe is True
 
 
 def test_a_child_with_an_uninspectable_step_is_INERT_not_exact_empty():
@@ -2888,22 +2919,28 @@ def test_the_exit_role_partition_is_total():
 
 
 def _catch_terminal_child(catch_terminal_is_cache_put, catch_writes_k):
-    """The catch-body fixture, with its terminal and writes varied."""
+    """The catch-body fixture, with its terminal and writes varied.
+
+    #184 amendment 3 retired the carrier this used to read,
+    `issue154/catch_cache_put_exception.json`: its catch body had a `cache_put` STEP
+    before the `exception` terminal. Add to Cache hands on no documents, so that
+    exception never throws, and the model now refuses the shape. The replacement
+    fixture is the same try/catch with an EMPTY catch prefix before the `exception`.
+    The staging variant authors the `cache_put` as the catch TERMINAL, the only
+    legal catch placement for a cache write.
+    """
     import copy as _copy
     import json as _json
 
     fixture = _json.loads(io_read(
-        "tests/fixtures/process_ir/issue154/catch_cache_put_exception.json"))
+        "tests/fixtures/process_ir/issue184/catch_exception_without_cache_put.json"))
     write_k = {"kind": "set_dpp", "name": "K",
                "source_values": [{"value_type": "static", "value": "v"}]}
     doc = _copy.deepcopy(fixture)
     node = doc["body"]["steps"][0]
     node["try_body"]["steps"].append(write_k)
     if catch_terminal_is_cache_put:
-        staged = [s for s in node["catch_body"]["steps"] if s.get("kind") == "cache_put"][0]
-        node["catch_body"]["terminal"] = staged
-        node["catch_body"]["steps"] = [
-            s for s in node["catch_body"]["steps"] if s.get("kind") != "cache_put"]
+        node["catch_body"]["terminal"] = {"kind": "cache_put", "cache_ref": "$ref:CACHE"}
     if catch_writes_k:
         node["catch_body"]["steps"].append(write_k)
     return parse_process_ir_v1(doc)
@@ -2942,10 +2979,19 @@ def test_an_exception_terminal_is_not_a_normal_exit():
     """
     from boomi_mcp.authoring.process_ir_effects import derive_subprocess_effect
 
-    # catch terminal stays `exception` (the fixture's own shape)
-    _reads, writes, _replay = derive_subprocess_effect(
-        _catch_terminal_child(False, False)).effect
+    # catch terminal stays `exception` (the fixture's own shape). #184 amendment 3:
+    # the catch body is now LEGAL, an empty prefix before the exception, because
+    # the retired carrier's `cache_put` step made that exception unreachable.
+    child = _catch_terminal_child(False, False)
+    catch_body = child.body.steps[0].catch_body
+    assert catch_body.terminal.kind == "exception" and not catch_body.steps, catch_body
+    _reads, writes, _replay = derive_subprocess_effect(child).effect
     assert ("dpp", "K") in writes, writes
+    # CONTROL: the same child with a normal-exit catch terminal meets `K` away, so
+    # the guarantee above is decided by the exception terminal being excluded.
+    _reads, writes, _replay = derive_subprocess_effect(
+        _catch_terminal_child(True, False)).effect
+    assert ("dpp", "K") not in writes, writes
 
 
 def test_the_exit_rule_holds_on_every_shape_at_once():

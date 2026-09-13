@@ -171,25 +171,42 @@ def _shapetypes_from_parts(parts):
     return {shape.attrib["shapetype"] for shape in root}
 
 
+_CATCH_DLQ_CACHE = {"mode": "document_cache_ref", "document_cache_id": "CACHE-1"}
+_CATCH_NOTIFY = {
+    "level": "ERROR",
+    "message_template": "failed: " + pfb._NOTIFY_CAUGHT_ERROR_TOKEN,
+}
+_CATCH_EXCEPTION = {
+    "title": "Halt",
+    "message_template": "halting: {1}",
+    "parameter_source": "caught_error",
+}
+
+
 def _emit_full_catch_shapetypes():
-    """Drive the real Try/Catch emitter (notify + DLQ + Exception throw) and return
-    all shapetypes produced — covers the catch-path-only shapes
-    catcherrors/notify/doccacheload AND the M10.4 exception terminal (issue #108)."""
-    parts = pfb._emit_try_catch_shapes(
+    """Drive the real Try/Catch emitter and return all shapetypes produced — covers
+    the catch-path-only shapes catcherrors/notify/doccacheload AND the M10.4
+    exception terminal (issue #108).
+
+    #184 amendment 3: one catch leg can no longer carry all four. Add to Cache
+    hands on no documents, so an Exception after the DLQ cache write never throws:
+    the run reads COMPLETE and the caught error is swallowed (capture
+    cap184-cache-put-successor). That composition is refused. Two legal legs cover
+    the same set: notify -> DLQ cache write, and a bare Exception throw.
+    """
+    notify_to_cache = pfb._emit_try_catch_shapes(
         _catch_flow(),
-        {"mode": "document_cache_ref", "document_cache_id": "CACHE-1"},
+        dict(_CATCH_DLQ_CACHE),
         retry_count=0,
-        catch_notify={
-            "level": "ERROR",
-            "message_template": "failed: " + pfb._NOTIFY_CAUGHT_ERROR_TOKEN,
-        },
-        catch_exception={
-            "title": "Halt",
-            "message_template": "halting: {1}",
-            "parameter_source": "caught_error",
-        },
+        catch_notify=dict(_CATCH_NOTIFY),
     )
-    return _shapetypes_from_parts(parts)
+    bare_throw = pfb._emit_try_catch_shapes(
+        _catch_flow(),
+        {"mode": "disabled"},
+        retry_count=0,
+        catch_exception=dict(_CATCH_EXCEPTION),
+    )
+    return _shapetypes_from_parts(notify_to_cache) | _shapetypes_from_parts(bare_throw)
 
 
 def _emit_branch_shapetypes():
@@ -289,7 +306,22 @@ def test_every_emittable_entry_is_backed_by_a_real_emitter():
     branch, not a name coincidence). Catch-path-only entries are proven by the
     real Try/Catch emission producing their shapetype; the Branch fan-out (issue
     #112) is proven by the real ``_emit_branch_shapes`` emission.
+
+    #184 amendment 3: a dispatch kind whose step hands on no documents is emitted in
+    its TERMINAL form, with no successor. Its emitter refuses a successor, so the
+    old linear call would prove nothing about the registry. Which kinds those are is
+    read from the document-emission authority, not a hand list. The terminal branch
+    is asserted to have run, and its successor refusal is asserted too.
     """
+    import pytest
+
+    from boomi_mcp.categories.components.builders.connector_builder import (
+        BuilderValidationError,
+    )
+    from boomi_mcp.models.process_ir_document_semantics import (
+        ZERO_EMISSION_EMITTER_KINDS,
+    )
+
     dispatch = _flow_dispatch_kinds()
     # Non-dispatch emission categories: catch-path-only shapes (catcherrors /
     # notify / doccacheload / exception), the Branch fan-out shape, and the
@@ -299,13 +331,21 @@ def test_every_emittable_entry_is_backed_by_a_real_emitter():
         | _emit_branch_shapetypes()
         | _emit_decision_shapetypes()
     )
+    terminal_dispatch_seen = set()
     for shapetype, entry in EMITTABLE_SHAPE_REGISTRY.items():
         if not entry["emittable"]:
             continue
         emitter_kind = entry["emitter_kind"]
         if emitter_kind in dispatch:
             params = _FLOW_PARAMS[emitter_kind]
-            xml = pfb._emit_flow_shape(emitter_kind, params, "shape1", "shape2", 1)
+            if emitter_kind in ZERO_EMISSION_EMITTER_KINDS:
+                xml = pfb._emit_flow_shape(emitter_kind, params, "shape1", None, 1)
+                assert list(ET.fromstring(xml).find("dragpoints")) == [], emitter_kind
+                with pytest.raises(BuilderValidationError):
+                    pfb._emit_flow_shape(emitter_kind, params, "shape1", "shape2", 1)
+                terminal_dispatch_seen.add(emitter_kind)
+            else:
+                xml = pfb._emit_flow_shape(emitter_kind, params, "shape1", "shape2", 1)
             produced = ET.fromstring(xml).attrib["shapetype"]
             assert produced == shapetype, (
                 f"registry shapetype {shapetype!r} (emitter_kind {emitter_kind!r}) "
@@ -316,11 +356,25 @@ def test_every_emittable_entry_is_backed_by_a_real_emitter():
                 f"{shapetype!r} marked emittable but no real emitter produces it "
                 f"(emitter_kind {emitter_kind!r})"
             )
+    # Every zero-emission dispatch kind went through the terminal branch, and at
+    # least one did, so the branch is not dead code in this test.
+    assert terminal_dispatch_seen == set(ZERO_EMISSION_EMITTER_KINDS & dispatch)
+    assert terminal_dispatch_seen, "no zero-emission dispatch kind was exercised"
 
 
 def test_catch_path_shapes_match_registry():
     """catcherrors/notify/doccacheload are emitted by the real catch leg, and for
-    these the registry ``emitter_kind`` equals the emitted shapetype token."""
+    these the registry ``emitter_kind`` equals the emitted shapetype token.
+
+    #184 amendment 3: the shapes come from two legal catch legs. The single leg that
+    used to carry all four (notify -> DLQ cache write -> Exception) is refused, and
+    that refusal is asserted here, so the split is forced and not a preference."""
+    import pytest
+
+    from boomi_mcp.categories.components.builders.connector_builder import (
+        BuilderValidationError,
+    )
+
     catch_shapetypes = _emit_full_catch_shapetypes()
     # Issue #108 M10.4: ``exception`` joins the catch-path-only shapes — it is the
     # catch-leg terminal throw, not a _emit_flow_shape dispatch kind.
@@ -329,6 +383,19 @@ def test_catch_path_shapes_match_registry():
         entry = EMITTABLE_SHAPE_REGISTRY[shapetype]
         assert entry["emittable"] is True
         assert entry["emitter_kind"] == shapetype
+
+    with pytest.raises(BuilderValidationError) as refused:
+        pfb._emit_try_catch_shapes(
+            _catch_flow(),
+            dict(_CATCH_DLQ_CACHE),
+            retry_count=0,
+            catch_notify=dict(_CATCH_NOTIFY),
+            catch_exception=dict(_CATCH_EXCEPTION),
+        )
+    assert (refused.value.error_code, refused.value.field) == (
+        "PROCESS_EXCEPTION_CONFIG_INVALID",
+        "reliability.catch_exception",
+    )
 
 
 def test_branch_shape_matches_registry():

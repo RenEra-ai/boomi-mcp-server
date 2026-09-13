@@ -13,6 +13,7 @@
   },
   "cases": {
     "full_vocabulary_linear": {
+      "_comment": "#184 amendment 3: Add to Cache (doccacheload / cache_put) and Remove from Cache (doccacheremove) hand on no documents, so nothing authored after them on their path runs; this linear case chained all three, which the builder now refuses at flow_sequence[7].kind. The linear chain keeps only the steps that are legal in a linear position, including both cache READ spellings (a read is triggered and hands on the cached documents). The cache writes are covered in their legal staging-leg form by cache_put_get, cache_load_retrieve_remove, decision_branch_map and root_branch_staging; the withdrawn linear chain is preserved as a refusal witness in tests/test_process_ir_flow_sequence_codec.py.",
       "config": {
         "process_kind": "database_to_api_sync",
         "source": "@source",
@@ -33,10 +34,7 @@
             {"value_type": "ddp", "property_name": "OTHER_DDP", "default_value": "dv"}
           ]},
           {"kind": "set_dpp", "name": "DPP_SENTINEL", "source_values": [{"value_type": "dpp", "property_name": "OTHER_DPP"}], "persist": true},
-          {"kind": "doccacheload", "document_cache_id": "$ref:cache"},
-          {"kind": "doccacheretrieve", "document_cache_id": "$ref:cache"},
-          {"kind": "doccacheremove", "document_cache_id": "$ref:cache"},
-          {"kind": "cache_put", "document_cache_id": "$ref:cache", "label": "stage-write"},
+          {"kind": "doccacheretrieve", "document_cache_id": "$ref:cache", "label": "stage-read"},
           {"kind": "cache_get", "document_cache_id": "$ref:cache", "external_writer": true}
         ]
       }
@@ -63,16 +61,19 @@
       }
     },
     "cache_load_retrieve_remove": {
+      "_comment": "#184 amendment 3: this case chained doccacheload -> doccacheretrieve -> doccacheremove linearly. Add to Cache hands on no documents, so the read after it never ran (the builder refuses it at flow_sequence[1].kind), and Remove from Cache hands on none either. The legacy-spelled load and the explicit-default retrieve are kept in the legal ordered-leg form: a target-less staging leg ending at the load, then a later leg that reads and routes to its own target (legs run in authored order). The removal has NO legal flow_sequence placement at all — a leg ending in doccacheremove is refused too; ProcessIR authors it as a branch-leg terminal (golden 000082) — so it is preserved only as a refusal witness in tests/test_process_ir_flow_sequence_codec.py.",
       "config": {
         "process_kind": "database_to_api_sync",
         "source": "@source",
         "target": "@target",
         "flow_sequence": [
-          {"kind": "doccacheload", "document_cache_id": "$ref:cache"},
-          {"kind": "doccacheretrieve", "document_cache_id": "$ref:cache", "empty_cache_behavior": "stopprocess", "load_all_documents": true},
-          {"kind": "doccacheremove", "document_cache_id": "$ref:cache", "remove_all_documents": true}
+          {"kind": "branch", "legs": [
+            {"steps": [{"kind": "doccacheload", "document_cache_id": "$ref:cache"}]},
+            {"steps": [{"kind": "doccacheretrieve", "document_cache_id": "$ref:cache", "empty_cache_behavior": "stopprocess", "load_all_documents": true}], "target": "@target_b"}
+          ]}
         ]
-      }
+      },
+      "needs_fallback_target": true
     },
     "exception_terminal": {
       "config": {
@@ -98,15 +99,19 @@
       }
     },
     "cache_put_get": {
+      "_comment": "#184 amendment 3: this case chained cache_put -> cache_get linearly, which the builder now refuses at flow_sequence[1].kind (Add to Cache hands on no documents, so nothing arrives to trigger the read). The same put/get pair is kept in the legal ordered-leg form: a target-less staging leg ending at the cache_put, then a later leg whose cache_get reads what the earlier leg staged. The withdrawn linear pair is preserved as a refusal witness in tests/test_process_ir_flow_sequence_codec.py.",
       "config": {
         "process_kind": "database_to_api_sync",
         "source": "@source",
         "target": "@target",
         "flow_sequence": [
-          {"kind": "cache_put", "document_cache_id": "$ref:cache"},
-          {"kind": "cache_get", "document_cache_id": "$ref:cache", "empty_cache_behavior": "stopprocess"}
+          {"kind": "branch", "legs": [
+            {"steps": [{"kind": "cache_put", "document_cache_id": "$ref:cache"}]},
+            {"steps": [{"kind": "cache_get", "document_cache_id": "$ref:cache", "empty_cache_behavior": "stopprocess"}], "target": "@target_b"}
+          ]}
         ]
-      }
+      },
+      "needs_fallback_target": true
     },
     "linear_return_documents": {
       "config": {

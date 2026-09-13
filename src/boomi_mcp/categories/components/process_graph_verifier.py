@@ -32,27 +32,29 @@ from __future__ import annotations
 import xml.etree.ElementTree as ET
 from typing import Any, Dict, List, Optional
 
+from ...models.process_ir_document_semantics import ZERO_EMISSION_EMITTER_KINDS
+
 
 # Shape types that legitimately have no outbound edge (process sinks).
-# ``doccacheload`` is a terminal DLQ sink emitted by today's builder for
-# ``dlq.mode="document_cache_ref"`` catch legs without notify — it ends the leg
-# with an empty ``<dragpoints/>`` and must not be flagged as a dead end.
 # ``exception`` (throw a user-defined error) terminates document/process
 # execution on unhappy paths and is always authored with an empty
 # ``<dragpoints/>`` (see boomi_companion .../steps/exception_step.md: "Exception
 # is a terminal shape"); it is common in escape-hatch process XML, which is
 # exactly what this pass verifies.
-_TERMINAL_SHAPE_TYPES = frozenset({"stop", "returndocuments", "doccacheload", "exception"})
+#
+# #184 amendment 3: ``doccacheload`` and an all-document ``doccacheremove`` hand
+# on zero documents — the platform skips whatever is wired after them while the
+# run reads COMPLETE — so both are terminal sinks. Read from the document-emission
+# authority rather than listed here.
+_TERMINAL_SHAPE_TYPES = frozenset({"stop", "returndocuments", "exception"}) | ZERO_EMISSION_EMITTER_KINDS
 
 # Shape types that ALWAYS end the path — an outbound dragpoint to a real shape
-# is malformed (documents would flow past a terminal). Narrower than
-# ``_TERMINAL_SHAPE_TYPES``: ``doccacheload`` is excluded because a Document
-# Cache load can legitimately continue downstream in hand-authored/live XML,
-# and ``processcall`` is conditionally terminal (handled by ``_is_terminal``).
-# ``processcall`` stays out of this set because its continuation is legal when
-# the child declares return paths; the illegal half — no declared return path
-# yet an outgoing dragpoint — is Pass 2a′, which reports its own code.
-_ALWAYS_TERMINAL_SHAPE_TYPES = frozenset({"stop", "returndocuments", "exception"})
+# is malformed (documents would flow past a terminal, or, for the cache sinks,
+# nothing flows at all and the successor never runs). ``processcall`` stays out
+# of this set because its continuation is legal when the child declares return
+# paths; the illegal half — no declared return path yet an outgoing dragpoint —
+# is Pass 2a′, which reports its own code.
+_ALWAYS_TERMINAL_SHAPE_TYPES = frozenset({"stop", "returndocuments", "exception"}) | ZERO_EMISSION_EMITTER_KINDS
 
 # Shape types whose outputs are explicit branch outputs that must be wired.
 _BRANCHING_SHAPE_TYPES = frozenset({"branch", "decision", "route"})
@@ -178,7 +180,8 @@ def _processcall_return_path_keys(shape: ET.Element) -> set:
 def _is_terminal(shape: ET.Element, shape_type: str) -> bool:
     """A shape that legitimately needs no outbound edge.
 
-    Terminals: ``stop``, ``returndocuments``, ``doccacheload``, and a
+    Terminals: ``stop``, ``returndocuments``, ``exception``, the cache sinks
+    ``doccacheload`` and ``doccacheremove``, and a
     ``processcall`` whose ``configuration/processcall/returnpaths`` is absent or
     has no child elements (i.e. it does not return to a downstream path).
     """
@@ -583,9 +586,10 @@ def verify_process_graph(process_xml: str) -> Dict[str, Any]:
                             f"{stype.capitalize()} shape '{name}' routes a branch "
                             f"directly into Stop shape '{target_name}'; rejected "
                             "documents are dropped with no trace.",
-                            "Route the rejected branch through a Message, Notify, "
-                            "Return Documents, or Document Cache before the Stop so "
-                            "the documents remain traceable.",
+                            "Route the rejected branch through a Message or Notify "
+                            "before the Stop, or end it on Return Documents or an "
+                            "Add to Cache step instead of the Stop, so the documents "
+                            "remain traceable.",
                         )
                     )
 

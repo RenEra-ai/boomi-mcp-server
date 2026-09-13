@@ -843,7 +843,9 @@ def derive_subprocess_effect(
         # binding needs the symbol table a child summary does not carry.
         # Claiming replay-safety without that evidence is the unsound
         # direction; withholding it costs a missed opportunity.
-        if kind in ("cache_put", "connector", "connector_call"):
+        # #184 amendment 3: a whole-cache removal mutates the cache just as a
+        # write does, so replaying the child would clear it again.
+        if kind in ("cache_put", "cache_remove", "connector", "connector_call"):
             replay_safe = False
         elif kind == "set_property" and getattr(semantic, "persist", False):
             replay_safe = False

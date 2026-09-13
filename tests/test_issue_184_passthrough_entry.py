@@ -106,6 +106,7 @@ from boomi_mcp.models.process_ir import (
     process_call_root_verdict,
     process_ir_v1_json_schema,
 )
+from boomi_mcp.models.process_ir_document_semantics import ZERO_EMISSION_KINDS
 from boomi_mcp.recipes.materialization import build_symbol_table
 
 from _process_ir_entrypoint_differential import diagnostic_vector, measure_entrypoints
@@ -199,15 +200,40 @@ def _doc(steps):
 
 
 def _every_linear_kind():
-    """Every linear kind, in a run the cache rules accept: a cache_put is
-    immediately followed by a stream-replacing read. DERIVED from the model's
-    linear union, so a linear kind added later is exercised here too."""
-    run = []
-    for kind in LINEAR_BODY_KINDS:
-        run.append(_atom(kind))
-        if kind == "cache_put":
-            run.append(_atom("cache_get"))
-    return run
+    """Every linear kind, in a form the cache rules accept. DERIVED from the model's
+    linear union and the document-emission authority, so a linear kind added later
+    is exercised here too.
+
+    #184 amendment 3 (measured): Add to Cache and an all-document Remove from Cache
+    hand on ZERO documents, so nothing authored after either on the same path ever
+    runs. Every other linear kind forms the root run; each zero-emission kind is the
+    TERMINAL of its own branch leg (its only legal root-reachable placement), and a
+    LATER leg reads the cache. The branch ends the root."""
+    run = [_atom(kind) for kind in LINEAR_BODY_KINDS if kind not in ZERO_EMISSION_KINDS]
+    legs = [
+        {"steps": [], "terminal": _atom(kind)}
+        for kind in LINEAR_BODY_KINDS if kind in ZERO_EMISSION_KINDS
+    ]
+    legs.append({"steps": [_atom("cache_get")], "terminal": copy.deepcopy(S)})
+    return run + [{"kind": "branch", "legs": legs}]
+
+
+def test_the_every_linear_kind_form_places_every_linear_kind_legally():
+    """NON-VACUITY of the ``every-linear-kind`` row: it holds every linear kind,
+    every zero-emission kind only as a branch-leg terminal, and at least one of them
+    (so the terminal placement is really exercised)."""
+    form = _every_linear_kind()
+    *run, branch = form
+    assert branch["kind"] == "branch"
+    run_kinds = [step["kind"] for step in run]
+    terminal_kinds = [leg["terminal"]["kind"] for leg in branch["legs"]]
+    leg_step_kinds = [step["kind"] for leg in branch["legs"] for step in leg["steps"]]
+    zero_emission_linear = set(LINEAR_BODY_KINDS) & ZERO_EMISSION_KINDS
+    assert zero_emission_linear, "no zero-emission linear kind — the leg-terminal placement is vacuous"
+    assert set(run_kinds) | set(terminal_kinds) | set(leg_step_kinds) >= set(LINEAR_BODY_KINDS)
+    assert not (set(run_kinds) & ZERO_EMISSION_KINDS)
+    assert not (set(leg_step_kinds) & ZERO_EMISSION_KINDS)
+    assert zero_emission_linear <= set(terminal_kinds)
 
 
 def _carrier(steps):
@@ -245,7 +271,7 @@ _ADMITTED = [
     ("consecutive-maps-no-producer", [P, MAP, MAP, S]),
     ("call-then-trailing-map", [P, CALL, MAP, S]),
     ("map-then-call-return", [P, MAP, CALL, RD]),
-    ("every-linear-kind", [P] + _every_linear_kind() + [S]),
+    ("every-linear-kind", [P] + _every_linear_kind()),
     ("linear-and-call-then-branch", [P, SET_DDP, CALL, BR]),
     ("map-then-decision", [P, MAP, DEC]),
     ("labelled", [dict(P, label="Receive <prepared> & \"docs\""), S]),
@@ -302,10 +328,13 @@ _REFUSED = [
     ("ends-on-a-call", [P, CALL], _CARD, "/body"),
     ("stop-mid-run", [P, S, MSG, S], _CAP, "/body/steps/1"),
     ("return-documents-mid-run", [P, RD, S], _CAP, "/body/steps/1"),
-    # -- the cache rules, unchanged ------------------------------------------
-    ("cache-put-not-followed-by-read", [P, CACHE_PUT, MSG, S], _CARD, "/body"),
-    ("trailing-cache-put", [P, MSG, CACHE_PUT, S], _CARD, "/body"),
-    ("trailing-cache-put-before-branch", [P, CACHE_PUT, BR], _CARD, "/body"),
+    # -- the cache rules (#184 amendment 3) ---------------------------------
+    # Add to Cache hands on ZERO documents (measured), so ANY authored successor on
+    # its path is refused at the cache_put's own `/cache_ref` — one identity for a
+    # following message, a trailing stop and a following branch alike.
+    ("cache-put-not-followed-by-read", [P, CACHE_PUT, MSG, S], _CARD, "/body/steps/1/cache_ref"),
+    ("trailing-cache-put", [P, MSG, CACHE_PUT, S], _CARD, "/body/steps/2/cache_ref"),
+    ("trailing-cache-put-before-branch", [P, CACHE_PUT, BR], _CARD, "/body/steps/1/cache_ref"),
 ]
 
 

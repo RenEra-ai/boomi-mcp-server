@@ -1505,20 +1505,43 @@ def test_the_two_sentences_this_slice_falsified_are_gone():
 
 
 def test_the_trailing_cache_put_sentence_derives_from_the_model_table():
-    from boomi_mcp.models.process_ir import TRAILING_CACHE_PUT_TERMINALS
+    """#184 amendment 3 withdrew the table this name refers to.
 
-    fact = next(
-        f for f in _node_entries_by_id()["node.cache_put"].ordering_facts
-        if "tolerated only where" in f
+    `TRAILING_CACHE_PUT_TERMINALS` tolerated a stop or an exception after a
+    trailing cache write, and live captures show the platform skips both. The
+    served sentence it generated is gone with it. What a cache step hands on is
+    now derived from the document-emission authority, and this pin holds that
+    derivation to the authority in both directions:
+    - every zero-emission kind carries the "hands on no documents" fact, naming
+      its platform step;
+    - every triggered-replacement kind carries the "runs only when a document
+      arrives" fact;
+    - no other node carries either sentence.
+    """
+    import boomi_mcp.models.process_ir as model
+    from boomi_mcp.models.process_ir_document_semantics import (
+        STEP_DISPLAY_NAMES,
+        TRIGGERED_REPLACEMENT_KINDS,
+        ZERO_EMISSION_KINDS,
     )
-    tolerating = {c for c, t in TRAILING_CACHE_PUT_TERMINALS.items() if t}
-    assert tolerating, "no context tolerates it — the assertion would be vacuous"
-    for context in tolerating:
-        for terminal in TRAILING_CACHE_PUT_TERMINALS[context]:
-            assert terminal in fact, (context, terminal, fact)
-    # a context that tolerates NOTHING must not be advertised as tolerating
-    for context in set(TRAILING_CACHE_PUT_TERMINALS) - tolerating:
-        assert context not in fact, (context, fact)
+
+    assert not hasattr(model, "TRAILING_CACHE_PUT_TERMINALS")
+    assert ZERO_EMISSION_KINDS and TRIGGERED_REPLACEMENT_KINDS, "an empty kind set would make this vacuous"
+    entries = _node_entries_by_id()
+    zero_marker = "hands on no documents, so nothing may follow"
+    trigger_marker = "runs only when a document arrives"
+    for entry_id, entry in entries.items():
+        kind = entry_id[len("node."):]
+        zero = [f for f in entry.ordering_facts if zero_marker in f]
+        trigger = [f for f in entry.ordering_facts if trigger_marker in f]
+        if kind in ZERO_EMISSION_KINDS:
+            assert len(zero) == 1 and STEP_DISPLAY_NAMES[kind] in zero[0], (kind, entry.ordering_facts)
+        else:
+            assert not zero, (kind, zero)
+        if kind in TRIGGERED_REPLACEMENT_KINDS:
+            assert len(trigger) == 1, (kind, entry.ordering_facts)
+        else:
+            assert not trigger, (kind, trigger)
 
 
 def test_an_unreviewed_placement_sentence_fails_the_build():
@@ -1575,14 +1598,49 @@ def test_the_cache_put_summary_does_not_contradict_its_ordering_facts():
     caller cannot tell which sentence to believe, and the machine-readable
     ordering fact is the one that matches enforcement.
     """
+    from boomi_mcp.authoring.process_ir_projection import _CACHE_EMISSION_SUMMARY
+
     entry = _node_entries_by_id()["node.cache_put"]
-    # the summary must scope its unconditional claim to MID-LIST
-    assert "MID-LIST" in entry.summary
-    # ...and must not restate the trailing rule it does not own
-    assert "Branch path terminal" not in entry.summary
-    trailing = [f for f in entry.ordering_facts if "LAST step" in f]
-    assert len(trailing) == 1, entry.ordering_facts
-    assert "MID-LIST" in trailing[0]
+    # #184 amendment 3: one measured statement. Every cache entry carries the exact
+    # amendment 3 §10 summary, and nothing in the entry revives the position rules
+    # the platform refuted: a read straight after the write, and a stop or exception
+    # tolerated after a trailing write.
+    assert _CACHE_EMISSION_SUMMARY in entry.summary
+    text = " ".join((entry.summary,) + tuple(entry.ordering_facts))
+    for withdrawn in ("MID-LIST", "must be followed immediately", "tolerated only", "LAST step"):
+        assert withdrawn not in text, (withdrawn, text)
+    # the one ordering fact that says where it may sit is the derived one
+    assert len([f for f in entry.ordering_facts if "hands on no documents" in f]) == 1, entry.ordering_facts
+    for kind in ("cache_get", "document_cache_retrieve", "cache_remove"):
+        assert _CACHE_EMISSION_SUMMARY in _node_entries_by_id()["node." + kind].summary, kind
+
+
+def test_the_withdrawn_cache_continuation_sentences_are_gone():
+    """#184 amendment 3: served sentences the live captures refuted.
+
+    - Add to Cache hands on no documents, so a read straight after it never runs.
+    - Remove from Cache does not pass documents through.
+    - A cache read needs an arriving document; it is not an optional-input
+      producer.
+
+    The live projection must carry none of the old claims, and the served
+    document semantics must say the reads require input and the removal consumes.
+    """
+    blob = " ".join(
+        " ".join((entry.summary,) + tuple(entry.ordering_facts))
+        for entry in _node_entries_by_id().values()
+    )
+    for sentence in (
+        "must be followed immediately by a stream-replacing cache read",
+        "Removal acts on the cache, not on the document stream",
+        "CONSUMES it. A cache_put in a MID-LIST step position",
+    ):
+        assert sentence not in blob, sentence
+    entries = _node_entries_by_id()
+    for kind in ("cache_get", "document_cache_retrieve"):
+        assert entries["node." + kind].document_semantics.input_documents == "required", kind
+    assert entries["node.cache_remove"].document_semantics.output_documents == "consumed"
+    assert entries["node.cache_put"].document_semantics.output_documents == "consumed"
 
 
 # ---------------------------------------------------------------------------
