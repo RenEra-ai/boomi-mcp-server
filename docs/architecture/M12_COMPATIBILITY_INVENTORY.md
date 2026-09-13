@@ -3016,9 +3016,17 @@ rebaseline looks like 2 275 changed leaves.
 
   | Revision | Branch point | Rebaseline tree |
   |---|---|---|
-  | `capability_revision` | `sha256:a38f2fa9…` | `sha256:216157b9…` |
-  | `compiler_revision` | `sha256:6d855b5b…` | `sha256:b4191e37…` |
+  | `capability_revision` | `sha256:a38f2fa9…` | `sha256:b36632fa…` |
+  | `compiler_revision` | `sha256:6d855b5b…` | `sha256:c8fc23ab…` |
   | `schema_revision` | `sha256:f3908622…` | `sha256:c9583e6b…` |
 
   A later correction that moves them re-runs this rebaseline, and the #184 audit ledger records the
   final values.
+
+**Stage-1 correction batch 1 (QA-184-s1-r1-01, -02) re-ran it.** Batch 1 carries typed cache
+requirements across the child boundary and adds the passthrough standalone-run sentence to the
+process_call page. Five served artifacts moved again: `SS-CAPABILITY-CATALOG:authoring_contract`, the
+`AuthoringRequestV1`, `AuthoringPlanResultV1` and `AuthoringCompileResultV1` schema templates, and
+`SS-SCHEMA-TEMPLATES:walked_surface_digest`. The census, the ledger rows and `schema_revision` did not
+move. The revisions above are the batch-1 values; the step-6 rebaseline had read `sha256:216157b9…`
+(capability) and `sha256:b4191e37…` (compiler).

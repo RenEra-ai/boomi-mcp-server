@@ -427,6 +427,9 @@ class ChildEntryContractV1(_ValidationModel):
     - ``required_writers``: document properties a passthrough child's bound request
       path composes from the caller's documents, with the request profile ref the
       binding names. The caller's writer must pass the binding checks at the call.
+    - ``cache_requirements``: per consumer of documents the child reads from a cache
+      no write in the child reached, ``(cache ref, AUTHORED profile ref or None)``. A
+      caller's writes must have stored exactly that profile (amendment 1 rule 6).
     - ``mutated_state``: execution-scoped keys the child may write or remove.
     - ``state_known``: False when some step's state effects are unknown; then
       ``mutated_state`` is incomplete and proves nothing.
@@ -437,6 +440,7 @@ class ChildEntryContractV1(_ValidationModel):
     document_requirements: Tuple[Optional[str], ...] = ()
     required_reads: Tuple[Tuple[str, str], ...] = ()
     required_writers: Tuple[Tuple[str, Optional[str]], ...] = ()
+    cache_requirements: Tuple[Tuple[str, Optional[str]], ...] = ()
     mutated_state: Tuple[Tuple[str, str], ...] = ()
     state_known: bool = False
 
@@ -477,6 +481,10 @@ class ProcessIRValidationCapabilitiesV1(_ValidationModel):
     #: though a writer composed each one, because every call proves that writer
     #: against the child's binding; a bare established key never does.
     caller_supplied_writers: Tuple[Tuple[str, str], ...] = ()
+    #: #184 amendment 1 rule 6: for a CALLED child, the profile each cache it reads
+    #: first holds, as ``(cache ref, profile ref)``. Seeded as that cache's content only
+    #: when every consumer names one profile; every call proves it against its writes.
+    caller_cache_contents: Tuple[Tuple[str, str], ...] = ()
     #: #184 amendment 3 §8: the contract THIS process presents to its callers, derived
     #: for a passthrough root. Recorded with the build so a direct test run or a
     #: schedule, which starts the process as No Data, is refused before any mutation.

@@ -73,6 +73,7 @@ _PLACEMENT = PROCESS_IR_CAPABILITY_PROCESS_CALL_PLACEMENT_UNSUPPORTED
 _PROCESS_KEYS = (
     "PARENT", "OTHER_PARENT", "CHILD", "CHILD_P1", "MID", "BOUND", "BOUND_SPLIT",
     "NODATA", "NEEDS_K", "MUTATES_K", "READS_X", "LOOP_A", "LOOP_B", "EXTERNAL",
+    "CACHE_CHILD", "CACHE_CHILD_P1",
 )
 
 
@@ -86,6 +87,8 @@ def _symbols():
         sym("RCONN", "RCONN", "connector-settings", connector_type=rest),
         sym("GET", "GETOP", "connector-action", connector_type=rest, action_type="GET",
             connection_ref="$ref:RCONN"),
+        sym("GETP1", "GETP1OP", "connector-action", connector_type=rest, action_type="GET",
+            connection_ref="$ref:RCONN", output_profile_ref="$ref:P1"),
         sym("PATCH", "PATCHOP", "connector-action", connector_type=rest, action_type="PATCH",
             connection_ref="$ref:RCONN", input_profile_ref="$ref:P2"),
         sym("M12", "M12", "transform.map", input_profile_ref="$ref:P1", output_profile_ref="$ref:P2"),
@@ -517,3 +520,80 @@ def test_the_revision_moves_with_child_contract_emission_and_survival_behaviour(
         patched.setattr(emission, "DOCUMENT_EMISSION_V1", MappingProxyType(rows))
         assert authoring_contract._compiler_revision() != baseline
     assert authoring_contract._compiler_revision() == baseline
+
+# ---------------------------------------------------------------------------
+# QA-184-s1-r1-02: typed cache requirements across the child boundary (amendment 1 rule 6)
+# ---------------------------------------------------------------------------
+
+
+def _stage_then_call(child_key):
+    """A scheduled parent: one leg stages P2 documents in CACHE, the next calls the child."""
+    return _doc({"kind": "branch", "legs": [
+        {"steps": [{"kind": "connector_call", "operation_ref": "$ref:GETP1"}, _MAP],
+         "terminal": {"kind": "cache_put", "cache_ref": "$ref:CACHE"}},
+        {"steps": [], "terminal": _call(child_key)},
+    ]})
+
+
+def _cache_child(map_ref):
+    return _doc({"kind": "cache_get", "cache_ref": "$ref:CACHE"},
+                {"kind": "map_ref", "map_ref": map_ref}, _STOP)
+
+
+def test_a_childs_cache_consumer_is_proved_against_each_callers_writes():
+    """The QA reproduction: a No Data child `[cache_get, map_ref, stop]` whose caller's
+    writes store the map's source profile is admitted. Alone it stays refused: nothing in
+    it proves what the cache holds (amendment 3's matrix row for that root)."""
+    roots = [("PARENT", _stage_then_call("CACHE_CHILD")), ("CACHE_CHILD", _cache_child("$ref:M22"))]
+    irs, resolution = _resolve(roots)
+    row = resolution.capabilities_by_root["PARENT"].child_entry_contract("$ref:CACHE_CHILD")
+    assert row.cache_requirements == (("$ref:CACHE", "$ref:P2"),), row
+    assert resolution.capabilities_by_root["CACHE_CHILD"].caller_cache_contents == (("$ref:CACHE", "$ref:P2"),)
+    assert _errors(roots, "PARENT") == []
+    assert _errors(roots, "CACHE_CHILD") == []
+    assert _compile_errors(roots, "CACHE_CHILD") == []
+    standalone = validate_process_ir(irs["CACHE_CHILD"], _symbols())
+    assert (PROCESS_IR_SEMANTIC_PROFILE_MISMATCH, "/body/steps/1/map_ref") in [
+        (item.code, item.path) for item in standalone.errors]
+
+
+def test_a_caller_whose_writes_store_another_profile_is_refused_at_its_call():
+    """The child needs P1 of the cache and this caller stored P2. The child is valid under
+    its requirement; the call that cannot meet it is the one refused."""
+    roots = [("PARENT", _stage_then_call("CACHE_CHILD_P1")), ("CACHE_CHILD_P1", _cache_child("$ref:M12"))]
+    assert (PROCESS_IR_SEMANTIC_PROFILE_MISMATCH, "/body/steps/0/legs/1/terminal/process_ref") in _errors(roots, "PARENT")
+    assert _errors(roots, "CACHE_CHILD_P1") == []
+
+
+def test_the_callers_cache_proof_is_load_bearing(monkeypatch):
+    """Non-vacuity: without the seeded content the called child is refused at its map."""
+    roots = [("PARENT", _stage_then_call("CACHE_CHILD")), ("CACHE_CHILD", _cache_child("$ref:M22"))]
+    assert _errors(roots, "CACHE_CHILD") == []
+    from boomi_mcp.authoring import process_ir_effects
+
+    monkeypatch.setattr(process_ir_effects, "_caller_cache_seeds", lambda requirements, symbols: ())
+    assert (PROCESS_IR_SEMANTIC_PROFILE_MISMATCH, "/body/steps/1/map_ref") in _errors(roots, "CACHE_CHILD")
+
+
+def _entry_by_id(value, entry_id):
+    """The served contract entry with this id, wherever the payload nests it."""
+    if isinstance(value, dict):
+        if value.get("contract_entry_id") == entry_id:
+            return value
+        value = list(value.values())
+    if isinstance(value, list):
+        for item in value:
+            found = _entry_by_id(item, entry_id)
+            if found is not None:
+                return found
+    return None
+
+
+def test_the_process_call_page_states_the_passthrough_standalone_refusal():
+    """QA-184-s1-r1-01: the node page a caller reads for calls states it too."""
+    from boomi_mcp.authoring.process_ir_projection import process_ir_authoring_revision_payload
+
+    node = _entry_by_id(process_ir_authoring_revision_payload(), "node.process_call")
+    assert node is not None
+    facts = " ".join(node.get("ordering_facts") or ())
+    assert "a direct run of one that requires what only a caller supplies is refused" in facts

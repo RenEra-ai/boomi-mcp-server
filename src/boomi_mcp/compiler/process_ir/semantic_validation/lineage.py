@@ -247,6 +247,10 @@ class _Stream(NamedTuple):
     #: property nothing in this process names (an uncontracted map or script, or
     #: documents a caller handed over), so a cached copy's property set is not known.
     properties_unknown: bool = False
+    #: #184 amendment 1 rule 6: the cache these documents were read from when no write
+    #: in this process reached the read, so only a caller can have filled it. A
+    #: consumer of them records what it needs of that cache instead of a caller entry.
+    caller_cache: Optional[str] = None
 
 
 #: The visibility model this module ENFORCES, stated once as data (#146).
@@ -882,6 +886,9 @@ class LineageWalkV1(NamedTuple):
     #: False when the stream-profile proof was skipped because a connector binding
     #: did not resolve: then neither requirement list is complete.
     profile_proof: bool = True
+    #: #184 amendment 1 rule 6: ``(cache ref, AUTHORED profile ref or None)`` for each
+    #: consumer of documents read from a cache no write in this process reached.
+    cache_requirement_refs: Tuple[Tuple[str, Optional[str]], ...] = ()
     # #184 D12 withdrew ``truncated``. The walk had a depth bound of 256, and a
     # caller trusting the state sets had to treat a walk that hit it as no
     # answer. The controller is now iterative with no depth bound: every node of
@@ -949,6 +956,7 @@ def _walk_lineage(
     threw: List[str] = []
     entry_requirements: List[Optional[Tuple[str, str]]] = []
     entry_requirement_refs: List[Optional[str]] = []
+    cache_requirement_refs: List[Tuple[str, Optional[str]]] = []
     #: #184 amendment 3 §7: writer token -> (the writing node's semantic, its unmet
     #: property reads), captured when the writer ran. The CFG is a tree, so each
     #: writer runs once, and a cached document's writer facts stay facts about it.
@@ -1294,6 +1302,20 @@ def _walk_lineage(
         """
         return _resolved_profile_identity(index, ref)
 
+    def _requires(stream, identity, ref):
+        """Record what a consumer needs of documents this process cannot prove.
+
+        Documents a caller handed over (a passthrough entry) state a requirement of
+        that caller. Documents read from a cache no write in this process reached state
+        a requirement of whoever filled the cache, which only a caller can be. Any
+        other stream records nothing: the consumer is checked against it instead.
+        """
+        if stream.state == STREAM_CALLER_ENTRY:
+            entry_requirements.append(identity)
+            entry_requirement_refs.append(ref)
+        elif stream.caller_cache is not None:
+            cache_requirement_refs.append((stream.caller_cache, ref))
+
     def _advance_stream(node, semantic, state, stream, legacy):
         """Check this node's profile consumers against the reaching stream, then step it (#184 D2).
 
@@ -1333,9 +1355,8 @@ def _walk_lineage(
                         continue
                     sub_path = "/source_values/{0}/profile_ref".format(position)
                     identity = _identity(source.profile_ref)
+                    _requires(stream, identity, source.profile_ref)
                     if stream.state == STREAM_CALLER_ENTRY:
-                        entry_requirements.append(identity)
-                        entry_requirement_refs.append(source.profile_ref)
                         if stream.identity is None:
                             stream = _Stream(STREAM_CALLER_ENTRY, identity)
                         elif identity != stream.identity:
@@ -1357,9 +1378,8 @@ def _walk_lineage(
                     if ref is None:
                         continue
                     required = _identity(ref)
+                    _requires(stream, required, ref)
                     if stream.state == STREAM_CALLER_ENTRY:
-                        entry_requirements.append(required)
-                        entry_requirement_refs.append(ref)
                         if stream.identity is None:
                             stream = _Stream(STREAM_CALLER_ENTRY, required)
                         elif required != stream.identity:
@@ -1395,19 +1415,20 @@ def _walk_lineage(
                 declared = _identity(binding.input_profile_ref)
                 if declared is None or declared != stream.identity:
                     mismatch(stream.origin_node, "/map_ref")
-            if stream.state == STREAM_CALLER_ENTRY and (
+            if (
                 binding.capability.accepts_input == "documents_required"
                 or binding.input_profile_ref is not None
             ):
-                # The call consumes the caller's documents: it requires its declared
-                # input profile of them, and an undeclared one states nothing a
-                # caller could discharge.
-                entry_requirements.append(
+                # The call consumes the documents: on a caller's documents it requires
+                # its declared input profile of them, and an undeclared one states
+                # nothing a caller could discharge.
+                _requires(
+                    stream,
                     _identity(binding.input_profile_ref)
                     if binding.input_profile_ref is not None
-                    else None
+                    else None,
+                    binding.input_profile_ref,
                 )
-                entry_requirement_refs.append(binding.input_profile_ref)
             # A first-class call's output is what flows on, so whatever a legacy
             # source produced upstream no longer reaches the next consumer.
             if not binding.capability.produces_output:
@@ -1426,12 +1447,11 @@ def _walk_lineage(
             target = _identity(symbol.output_profile_ref) if is_map else None
             # A map's source and target profiles are hard component requirements,
             # so an absent one is a mismatch, and so is a stream nothing proves.
+            _requires(stream, source, symbol.input_profile_ref if is_map else None)
             if stream.state == STREAM_CALLER_ENTRY:
                 # On the caller's documents the map's source IS the requirement;
                 # only a contradiction with an earlier requirement on this path is
                 # provable inside the child.
-                entry_requirements.append(source)
-                entry_requirement_refs.append(symbol.input_profile_ref if is_map else None)
                 contradicted = (
                     source is None
                     or target is None
@@ -1458,8 +1478,7 @@ def _walk_lineage(
             cache = index.get(semantic.cache_ref)
             declared_ref = getattr(cache, "cache_profile_ref", None)
             declared = _identity(declared_ref) if declared_ref is not None else None
-            entry_requirements.append(declared)
-            entry_requirement_refs.append(declared_ref)
+            _requires(stream, declared, declared_ref)
             if checked and declared is not None and stream.identity is not None and declared != stream.identity:
                 mismatch(node, "/cache_ref")
             return (
@@ -1495,6 +1514,11 @@ def _walk_lineage(
             contents = state.content_of(cache_reads[0])
             if len(contents) == 1 and None not in contents:
                 return state, _Stream(STREAM_KNOWN, next(iter(contents)), "cache", node), legacy
+            if not contents and not getattr(semantic, "external_writer", False):
+                # No write in this process reaches the read, so a caller filled the
+                # cache or nothing did. The consumer is still refused here, and records
+                # what it needs so every call can prove it (amendment 1 rule 6).
+                return state, _Stream(STREAM_UNKNOWN, origin="cache", caller_cache=cache_reads[0]), legacy
             return state, _Stream(STREAM_UNKNOWN, origin="cache"), legacy
 
         if kind == "cache_remove":
@@ -1507,12 +1531,11 @@ def _walk_lineage(
             return state, stream, legacy
 
         if _replaces_document_stream(semantic):
-            if stream.state == STREAM_CALLER_ENTRY and kind == "data_process":
-                # A data process reads the caller's documents in a way nothing
-                # states, so it cannot be recorded as requiring nothing of them. A
-                # Message ignores its input's content and records no requirement.
-                entry_requirements.append(None)
-                entry_requirement_refs.append(None)
+            if kind == "data_process":
+                # A data process reads unproved documents in a way nothing states, so
+                # it cannot be recorded as requiring nothing of them. A Message ignores
+                # its input's content and records no requirement.
+                _requires(stream, None, None)
             if stream.state in (STREAM_EMPTY_ENTRY, STREAM_TOUCHED_ENTRY):
                 return state, _Stream(STREAM_TOUCHED_ENTRY), legacy
             if stream.state == STREAM_ABSENT:
@@ -1587,6 +1610,20 @@ def _walk_lineage(
                 node, semantic, key, leg, extra=(("effect_kind", "subprocess"),),
                 invalidated=invalidated,
             )
+        if profile_proof:
+            # A cache the child reads before writing it holds what THIS execution
+            # stored there (capture `cap184-shared-cache`), so the profile the child's
+            # consumers need must be exactly what reaches the call (amendment 1 rule 6).
+            for cache_ref, profile_ref in contract.cache_requirements:
+                if profile_ref is None:
+                    continue
+                if state.content_of(cache_ref) != frozenset({_identity(profile_ref)}):
+                    _report(
+                        PROCESS_IR_SEMANTIC_PROFILE_MISMATCH,
+                        node,
+                        sub_path="/process_ref",
+                        phase=_PROFILE_PHASE,
+                    )
         if form == "scheduled" and stream.count != COUNT_ONE:
             shared = {(key[0], key[1]) for key in contract.required_reads}
             mutated = {(key[0], key[1]) for key in contract.mutated_state}
@@ -1864,6 +1901,12 @@ def _walk_lineage(
         entry_writers[inherited] = (CALLER_WRITER,)
     if entry_writers:
         writer_records[CALLER_WRITER] = None
+    # #184 amendment 1 rule 6: a called child's first-read caches hold what its callers
+    # stored, which every call proves; their property cohorts stay unknown.
+    for cache_ref, profile_ref in capabilities.caller_cache_contents:
+        entry_state = entry_state.with_content(cache_ref, _identity(profile_ref)).with_cohort(
+            cache_ref, UNKNOWN_COHORT
+        )
 
     # --- the controller -----------------------------------------------------------
     # A work stack of frames. A "visit" frame runs one node's transfer and then
@@ -2105,6 +2148,7 @@ def _walk_lineage(
         ),
         entry_requirements=tuple(entry_requirements),
         entry_requirement_refs=tuple(entry_requirement_refs),
+        cache_requirement_refs=tuple(cache_requirement_refs),
         profile_proof=profile_proof,
     )
 

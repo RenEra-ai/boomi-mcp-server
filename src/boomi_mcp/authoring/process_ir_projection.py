@@ -669,7 +669,10 @@ _NODE_FACTS: Mapping[str, Mapping[str, Any]] = {
             "Passthrough child receives the documents reaching the call as one group, "
             "in one execution: the profile it consumes is checked against the "
             "documents arriving at the call, the writers of its bound request paths "
-            "must compose them before the call, and it must be called with wait=true.",
+            "must compose them before the call, and it must be called with wait=true. "
+            "Run directly, as a test run or on a schedule, a passthrough process "
+            "starts as No Data instead, so a direct run of one that requires what only "
+            "a caller supplies is refused before anything is deployed.",
             "A No Data child, a process with no explicit entry, runs once per arriving "
             "document, each run on one empty document of its own: the parent's "
             "documents and their document properties never reach it. Where more than "
@@ -678,8 +681,10 @@ _NODE_FACTS: Mapping[str, Mapping[str, Any]] = {
             "Both forms share the calling execution's process properties and document "
             "caches, so state a child reads before writing it must be established "
             "before the call, and what a child may put in a cache is unknown to later "
-            "reads. A child's writes establish nothing after the call unless a "
-            "verified subprocess effect declaration says so.",
+            "reads. A child that consumes a cache it reads before writing it is checked "
+            "at the call against the profile the caller's own writes stored there. A "
+            "child's writes establish nothing after the call unless a verified "
+            "subprocess effect declaration says so.",
         ),
         _DOCS: ("required", "documents", "unspecified"),
         _CAPS: ("process_call_connector_mixing", "terminal_process_call",

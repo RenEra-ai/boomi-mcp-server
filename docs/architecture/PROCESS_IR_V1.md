@@ -371,7 +371,7 @@ OWES, never what the child establishes for it.
 |---|---|---|
 | Data Passthrough (`passthrough` entry) | the documents reaching the call, as one group, in one execution | the profile each consumer of those documents requires (`PROCESS_IR_SEMANTIC_PROFILE_MISMATCH` at the call's `/process_ref`); a validated writer for every bound request path that composes from them (the dynamic-path codes at `/process_ref`); `wait=true` (`PROCESS_IR_CAPABILITY_ENTRY_CONTEXT_UNSUPPORTED` at `/wait`) |
 | No Data (no explicit entry) | one empty document of its own per arriving document | nothing from the parent's documents; where several documents can reach the call, a child that may change state it reads first is refused |
-| either | the calling execution's process properties and caches | every state key the child reads before writing it, classified like any read at the call |
+| either | the calling execution's process properties and caches | every state key the child reads before writing it, classified like any read at the call; and, for a cache the child reads before writing it, the one profile its consumers require of the caller's writes there (`PROCESS_IR_SEMANTIC_PROFILE_MISMATCH` at `/process_ref`) |
 
 A step prefix needs a derived Data Passthrough contract and `wait=true`; a child whose entry cannot
 be derived (not in the request, a listener, a call cycle) and a No Data child refuse a prefix with

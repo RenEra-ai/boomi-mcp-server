@@ -962,6 +962,9 @@ def derive_child_entry_facts(child_ir: Any, symbols: Any, capabilities: Any = No
         "mutated_state": tuple(sorted(mutated)) if known else (),
     }
     reads = tuple(sorted({(key[0], key[1]) for key in walk.unestablished_reads}))
+    facts["cache_requirements"] = tuple(sorted(
+        set(walk.cache_requirement_refs), key=lambda row: (row[0], row[1] or "")
+    ))
     if form != PASSTHROUGH:
         facts.update(
             entry_form="scheduled",
@@ -1037,11 +1040,38 @@ def _respelled(facts: Mapping[str, Any], parent_ir: Any, symbols: Any) -> Dict[s
     for field in ("required_reads", "mutated_state"):
         if field in out:
             out[field] = respell(out[field])
+    if "cache_requirements" in out:
+        out["cache_requirements"] = tuple(sorted(
+            {(spellings.get(ref, ref), profile) for ref, profile in out["cache_requirements"]},
+            key=lambda row: (row[0], row[1] or ""),
+        ))
     return out
 
 
+def _caller_cache_seeds(requirements, symbols) -> Tuple[Tuple[str, str], ...]:
+    """The cache contents a CALLED child may be validated under (#184 amendment 1 rule 6).
+
+    One seed per cache whose consumers all name a profile, and the same component. A
+    disagreement or an unstated consumer seeds nothing, so the child keeps its own
+    refusal: no caller could satisfy both.
+    """
+    by_cache: Dict[str, List[Optional[str]]] = {}
+    for cache_ref, profile_ref in requirements:
+        by_cache.setdefault(cache_ref, []).append(profile_ref)
+    seeds = []
+    for cache_ref, refs in sorted(by_cache.items()):
+        if None in refs:
+            continue
+        identities = {
+            getattr(_symbol(symbols, ref), "component_id", None) or ref for ref in refs
+        }
+        if len(identities) == 1:
+            seeds.append((cache_ref, sorted(refs)[0]))
+    return tuple(seeds)
+
+
 def _entry_contract_bindings(process_roots, symbols, symbols_for) -> Dict[str, tuple]:
-    """Per root: ``(child contract rows, seeded reads, caller-composed writers, own contract, form)``.
+    """Per root: ``(child rows, seeded reads, caller-composed writers, own contract, form, cache seeds)``.
 
     Children are derived before their callers, so a grandchild's contract reaches the
     child's own walk. The members of a call cycle have no derivable entry and are
@@ -1103,13 +1133,14 @@ def _entry_contract_bindings(process_roots, symbols, symbols_for) -> Dict[str, t
             ChildEntryContractV1(process_ref="$ref:" + key, **own)
             if own.get("entry_form") == "passthrough" else None,
             own.get("entry_form"),
+            _caller_cache_seeds(own.get("cache_requirements", ()), symbols) if is_called else (),
         )
     return bindings
 
 
 def _binds(binding: tuple) -> bool:
-    rows, reads, writers, entry, _form = binding
-    return bool(rows or reads or writers or entry is not None)
+    rows, reads, writers, entry, _form, cache_seeds = binding
+    return bool(rows or reads or writers or cache_seeds or entry is not None)
 
 
 def _with_entry_contracts(capabilities: Any, binding: tuple) -> Any:
@@ -1117,7 +1148,7 @@ def _with_entry_contracts(capabilities: Any, binding: tuple) -> Any:
         ProcessIRValidationCapabilitiesV1,
     )
 
-    rows, reads, writers, entry, _form = binding
+    rows, reads, writers, entry, _form, cache_seeds = binding
     fields = {
         name: getattr(capabilities, name)
         for name in ProcessIRValidationCapabilitiesV1.model_fields
@@ -1126,6 +1157,7 @@ def _with_entry_contracts(capabilities: Any, binding: tuple) -> Any:
         child_entry_contracts=rows,
         established_at_entry=tuple(sorted(set(capabilities.established_at_entry) | set(reads))),
         caller_supplied_writers=writers,
+        caller_cache_contents=cache_seeds,
         entry_contract=entry,
     )
     return ProcessIRValidationCapabilitiesV1(**fields)
