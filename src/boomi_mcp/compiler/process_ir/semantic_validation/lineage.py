@@ -357,6 +357,28 @@ def _discards_document_properties(semantic) -> bool:
     return verdict != _PROPERTIES_SURVIVE
 
 
+def _drop_replaced_document_keys(state: "_State", keep) -> "Tuple[_State, FrozenSet[StateKey]]":
+    """The lattice state after a step whose documents do not carry the old properties (#184 A5).
+
+    Returns ``(state without the dropped document-scoped keys, the dropped DDP keys)``.
+    ``keep`` is what the replacing node itself established on the documents it emits,
+    which survives its own replacement — the same exception the carried set applies.
+
+    Before #184 only the reaching-writer map and the carried set were emptied at such
+    a step; the general lattice was left alone, so an ORDINARY read of a property the
+    new documents never carried validated silently and only a bound request path was
+    refused. Which steps invalidate is not decided here: the caller asks
+    ``_discards_document_properties``, which reads the measured property-survival
+    table. A named function rather than inline code so the drop has one definition a
+    test can disable to prove it is load-bearing.
+    """
+    dropped = frozenset(key for key in state.document if key not in keep)
+    return (
+        _State(state.document - dropped, state.execution),
+        frozenset(key for key in dropped if key[0] == DDP),
+    )
+
+
 def _replaces_document_stream(semantic) -> bool:
     """Does this node hand downstream steps DIFFERENT documents than it received? (#155)
 
@@ -605,7 +627,7 @@ def _walk_lineage(
             )
         )
 
-    def _classify_unmet_read(node, semantic, key, leg, extra=()) -> None:
+    def _classify_unmet_read(node, semantic, key, leg, extra=(), invalidated=frozenset()) -> None:
         """Report ONE unestablished read under the sharpest code that fits.
 
         Shared by both read paths. The refinements below are what make a
@@ -615,6 +637,13 @@ def _walk_lineage(
         while an identical authored read got ``…BRANCH_ORDER_INVALID`` made the
         diagnostic depend on the reader's provenance, which is the mirror image
         of the writer-side asymmetry fixed alongside it.
+
+        ``invalidated`` (#184) holds the document-scoped keys a stream-replacing
+        step on THIS path dropped. A read of one is a read before any write the
+        current documents carry, and is reported as exactly that: the property WAS
+        written in this process, so without this the refinement below would call
+        it a different-document-copy scope error, which sends the author looking
+        at sibling paths for a defect that sits on their own.
         """
         scope, _name = key
         # A read a typed contract vouches for an OUTSIDE writer of is not the
@@ -674,7 +703,11 @@ def _walk_lineage(
                     node,
                     evidence=(("state_scope", CACHE),) + extra,
                 )
-        elif scope == DDP and _written_anywhere(prepared, key, capabilities):
+        elif (
+            scope == DDP
+            and key not in invalidated
+            and _written_anywhere(prepared, key, capabilities)
+        ):
             # The property IS written in this process, just not on a path
             # that reaches here. For a DDP that is specifically a scope
             # error — the write landed on a different document copy — and
@@ -796,7 +829,7 @@ def _walk_lineage(
             )
 
     def _visit(node_id: str, state: _State, depth: int, leg=None, writers=None,
-               on_documents=None) -> _State:
+               on_documents=None, invalidated=None) -> _State:
         node = prepared.node(node_id)
         if node is None:
             return state
@@ -810,6 +843,10 @@ def _walk_lineage(
         # One notion, fed by every channel that establishes a key and emptied
         # by the one event that invalidates them — see `_check_path_binding`.
         on_documents = on_documents if on_documents is not None else frozenset()
+        # #184: document-scoped keys a stream-replacing step on THIS path dropped
+        # and nothing has re-written since. Per path and never merged, like
+        # `writers`; it only decides how an unmet read of such a key is reported.
+        invalidated = invalidated if invalidated is not None else frozenset()
         # What THIS node establishes, kept separately: a node that replaces the
         # stream still writes onto the documents it emits, so its own writes
         # must survive its own replacement.
@@ -827,7 +864,7 @@ def _walk_lineage(
                 prepared, key, capabilities
             ):
                 continue
-            _classify_unmet_read(node, semantic, key, leg)
+            _classify_unmet_read(node, semantic, key, leg, invalidated=invalidated)
 
         # --- a trusted contract's declared READS are dependencies -----------
         # Applying only its writes made a contract that READS unwritten state
@@ -861,7 +898,8 @@ def _walk_lineage(
                 if state.establishes(key):
                     continue
                 _classify_unmet_read(
-                    node, semantic, key, leg, extra=(("effect_kind", "declared_read"),)
+                    node, semantic, key, leg, extra=(("effect_kind", "declared_read"),),
+                    invalidated=invalidated,
                 )
             # A trusted contract contributes EXACT writes, visible to the next
             # contract ON THIS NODE — one data_process can carry several
@@ -874,6 +912,7 @@ def _walk_lineage(
                 if key[0] == DDP:
                     on_documents = on_documents | {(key[0], key[1])}
                     established_here.add((key[0], key[1]))
+                    invalidated = invalidated - {(key[0], key[1])}
 
         # --- opaque effects contribute uncertainty, never proof -------------
         opaque = _opaque_reason(semantic, capabilities)
@@ -944,6 +983,7 @@ def _walk_lineage(
             if key[0] == DDP:
                 on_documents = on_documents | {key}
                 established_here.add(key)
+                invalidated = invalidated - {key}
 
         # --- a bound request path, against this path's reaching writer -------
         _check_path_binding(node, semantic, state, writers)
@@ -963,6 +1003,11 @@ def _walk_lineage(
             # the documents it emits, so discarding its own declaration here
             # refused a document whose value genuinely survives.
             on_documents = frozenset(established_here)
+            # #184 A5: the general lattice follows the documents too, with the same
+            # exception, and the dropped keys are remembered on this path so an
+            # unmet read of one is reported as read-before-write.
+            state, dropped = _drop_replaced_document_keys(state, established_here)
+            invalidated = invalidated | dropped
 
         # --- successors -----------------------------------------------------
         edges = prepared.successors(node_id)
@@ -1000,6 +1045,7 @@ def _walk_lineage(
                     (node.node_id, edge.leg_ordinal or edge.local_ordinal),
                     writers,
                     on_documents,
+                    invalidated,
                 )
                 completions = normal_exits[first:]
                 if completions:
@@ -1046,7 +1092,7 @@ def _walk_lineage(
             results = []
             for edge in edges:
                 before_normal, before_threw = len(normal_exits), len(threw)
-                arm = _visit(edge.target_node_id, state, depth + 1, leg, writers, on_documents)
+                arm = _visit(edge.target_node_id, state, depth + 1, leg, writers, on_documents, invalidated)
                 only_threw = (
                     len(threw) > before_threw
                     and len(normal_exits) == before_normal
@@ -1065,12 +1111,12 @@ def _walk_lineage(
             # document. A write inside the try body may not have happened when
             # the failure occurred, so it cannot be assumed visible to catch.
             for edge in edges:
-                _visit(edge.target_node_id, state, depth + 1, leg, writers, on_documents)
+                _visit(edge.target_node_id, state, depth + 1, leg, writers, on_documents, invalidated)
             return state
 
         result = state
         for edge in edges:
-            result = _visit(edge.target_node_id, state, depth + 1, leg, writers, on_documents)
+            result = _visit(edge.target_node_id, state, depth + 1, leg, writers, on_documents, invalidated)
         return result
 
     entry_state = _State()
