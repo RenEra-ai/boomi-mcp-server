@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 12887, "minimum_collected": 12887, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 12888, "minimum_collected": 12888, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -13185,3 +13185,4 @@
 {"kind": "test", "id": "pytest-013184", "node_id": "tests/test_issue_184_component_identity.py::test_an_unbuildable_component_plan_blocks_only_an_identity_the_account_decides", "state": "tombstone"}
 {"kind": "test", "id": "pytest-013185", "node_id": "tests/test_issue_184_component_identity.py::test_an_unbuildable_component_plan_is_served_as_unjudged", "state": "active"}
 {"kind": "test", "id": "pytest-013186", "node_id": "tests/test_issue_184_component_identity.py::test_every_identity_decision_of_the_plan_route_moves_the_compiler_revision", "state": "active"}
+{"kind": "test", "id": "pytest-013187", "node_id": "tests/test_issue_184_component_identity.py::test_apply_refuses_a_binding_it_could_not_confirm_against_the_account", "state": "active"}

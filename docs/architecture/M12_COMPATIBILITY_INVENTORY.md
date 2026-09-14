@@ -1,6 +1,12 @@
 # M12 Compatibility Inventory
 
-**Status:** evolving — this file is the M12 migration ledger and is UPDATED as M12 issues land
+**Status:** 
+**Stage-2 correction batch 13 (QA-184-s1-r13-01) re-ran it.** Batch 13 makes a typed apply refuse when its own
+recompile could not build the component plan from the account, so a binding is never confirmed against an
+account that did not answer. The census, the ledger rows and `schema_revision` did not move, and the §11
+tables were re-spliced for moved `Baseline line` values. Revisions after batch 13: `capability_revision`
+`sha256:522cbf7d…` and `compiler_revision` `sha256:99a0c28d…`; `schema_revision` stays `sha256:c9583e6b…`.
+evolving — this file is the M12 migration ledger and is UPDATED as M12 issues land
 (unlike [ADR-001](ADR-001-process-ir-authority.md), which is immutable once accepted).
 **Measured baseline:** 2026-07-13, extended with review-round re-measurements dated inline as
 2026-07-14 (issue #135, epic #134). Every `file:line` below was read and verified against the
@@ -2098,9 +2104,9 @@ rather than aspirational.
 | LG-ceea4ac3 | legacy_transitive_call | server.py | prepare_component_edit | 1 | 1997 | #160 | follow the callee's row; this is an edge, not a site |
 | LG-334a4633 | legacy_transitive_call | server.py | search_marketplace_recipes | 1 | 2319 | #160 | follow the callee's row; this is an edge, not a site |
 | LG-af3aef13 | legacy_transitive_call | src/boomi_mcp/authoring/workflow.py | _legacy_plan_echo | 1 | 1283 | #160 | follow the callee's row; this is an edge, not a site |
-| LG-b7cd58ae | legacy_transitive_call | src/boomi_mcp/authoring/workflow.py | compile_authoring_request_v1 | 1 | 3151 | #160 | follow the callee's row; this is an edge, not a site |
-| LG-14572d6c | legacy_transitive_call | src/boomi_mcp/authoring/workflow.py | plan_authoring_request_v1 | 2 | 2521 | #160 | follow the callee's row; this is an edge, not a site |
-| LG-f57fd778 | legacy_transitive_call | src/boomi_mcp/authoring/workflow.py | preflight_typed_apply_v1 | 1 | 3392 | #160 | follow the callee's row; this is an edge, not a site |
+| LG-b7cd58ae | legacy_transitive_call | src/boomi_mcp/authoring/workflow.py | compile_authoring_request_v1 | 1 | 3156 | #160 | follow the callee's row; this is an edge, not a site |
+| LG-14572d6c | legacy_transitive_call | src/boomi_mcp/authoring/workflow.py | plan_authoring_request_v1 | 2 | 2525 | #160 | follow the callee's row; this is an edge, not a site |
+| LG-f57fd778 | legacy_transitive_call | src/boomi_mcp/authoring/workflow.py | preflight_typed_apply_v1 | 1 | 3397 | #160 | follow the callee's row; this is an edge, not a site |
 | LG-3f49de44 | legacy_transitive_call | src/boomi_mcp/categories/components/analyze_component.py | analyze_component_action | 1 | 949 | #160 | follow the callee's row; this is an edge, not a site |
 | LG-bb10b9ca | legacy_transitive_call | src/boomi_mcp/categories/components/builders/process_flow_builder.py | ProcessFlowBuilder.build | 3 | 1117 | #160 | follow the callee's row; this is an edge, not a site |
 | LG-a4d26b62 | legacy_transitive_call | src/boomi_mcp/categories/components/builders/process_flow_builder.py | _emit_branch_shapes | 2 | 3404 | #160 | follow the callee's row; this is an edge, not a site |

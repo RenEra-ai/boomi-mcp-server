@@ -2497,6 +2497,10 @@ class _PlanInternals:
     #: the resolution rather than redoing it, so the artifact cannot be compiled
     #: under a different context than the one validation reported against.
     effect_capabilities: Optional[Mapping[str, Any]] = None
+    #: #184 (QA-184-s1-r13-01): an account was in hand and the component plan could not be built from
+    #: it. By the owner decision of 2026-09-14 plan and compile degrade in that state, but a typed apply
+    #: must not confirm a binding against an account that did not answer.
+    component_plan_unjudged: bool = False
 
 
 def plan_authoring_request_v1(
@@ -2805,6 +2809,7 @@ def plan_authoring_request_v1(
         plan_hash=plan_hash,
         effect_capabilities=effect_capabilities,
         connector_resolution_snapshot=resolution_snapshot,
+        component_plan_unjudged=boomi_client is not None and component_plan is None,
     )
     return result, internals
 
@@ -3416,6 +3421,30 @@ def preflight_typed_apply_v1(
             )
             + exc.diagnostics,
         ) from None
+
+    # #184 (QA-184-s1-r13-01): the recompile that confirms this binding degraded, because the component
+    # plan could not be built from the account. Its hash was computed from declared ids, like the one this
+    # apply may carry, so the comparison below would pass while the write loop binds from whatever the
+    # account answers next. Plan and compile degrade by the owner decision of 2026-09-14; a mutation does not.
+    if internals.component_plan_unjudged:
+        raise AuthoringWorkflowError(
+            AUTHORING_APPLY_VALIDATION_REQUIRED,
+            (
+                _diag(
+                    AUTHORING_APPLY_VALIDATION_REQUIRED,
+                    "error",
+                    message=(
+                        "Apply could not build the component plan from the account, so it could "
+                        "not confirm the binding this apply carries; nothing was mutated."
+                    ),
+                    subject_kind="binding",
+                    subject_id="component_plan",
+                    remediation=(
+                        "Apply again once the account's component metadata can be read."
+                    ),
+                ),
+            ),
+        )
 
     binding = compile_result.revision_binding
 

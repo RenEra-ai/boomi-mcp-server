@@ -1666,6 +1666,91 @@ def test_an_unbuildable_component_plan_is_served_as_unjudged():
     assert writes == [], writes
 
 
+def test_apply_refuses_a_binding_it_could_not_confirm_against_the_account():
+    """QA-184-s1-r13-01. A typed apply confirms its binding by compiling again. By the owner decision of 2026-09-14
+    that compile degrades when the component plan cannot be built from the account. So when the name listing failed
+    only inside apply's own recompile, the recompile reproduced a hash compiled while the account was unreadable,
+    and the write loop then bound from the account that answered again.
+    - Now the recompile's unbuilt component plan refuses the apply before any binding is compared, with nothing
+      written.
+    - CONTROL: the same binding with a listing that never fails inside the recompile, and a healthy compile applied
+      to a healthy account, both reach their writes.
+    Offline: only the name listing, the metadata listing and component execution are replaced."""
+    import copy
+    import json
+    from unittest import mock
+
+    from boomi_mcp.authoring.workflow import compile_authoring_request_v1
+    from boomi_mcp.categories import integration_builder
+
+    request = _route_request([_profile("p_a", "a1"), _named(_cache("c_a", "p_a", "a1", "new"))])
+    rows = [{"component_id": _CACHE_ID, "name": _STORED, "type": "documentcache", "folder_name": "f"}]
+    real = integration_builder._resolve_existing_components
+    client = mock.MagicMock()
+    account_id = integration_builder._client_account_id(client)
+
+    def in_recompile():
+        frame = sys._getframe()
+        while frame is not None:
+            if frame.f_code.co_name == "preflight_typed_apply_v1":
+                return True
+            frame = frame.f_back
+        return False
+
+    def unreadable(_client, _comp):
+        raise ConnectionError("the component metadata listing failed")
+
+    def split(listed_client, comp):
+        if in_recompile():
+            raise ConnectionError("the component metadata listing failed during apply's recompile")
+        return real(listed_client, comp)
+
+    def listing(resolver):
+        return (mock.patch.object(integration_builder, "_resolve_existing_components", resolver),
+                mock.patch.object(integration_builder, "paginate_metadata", lambda *a, **k: [dict(r) for r in rows]))
+
+    def compiled_with(resolver):
+        names, metadata = listing(resolver)
+        with names, metadata:
+            return compile_authoring_request_v1(request, boomi_client=client, profile="qa", account_id=account_id)[0]
+
+    def applied_with(binding, resolver):
+        payload = request.model_dump(mode="json")
+        payload["expected_capability_revision"] = binding.revision_binding.capability_revision
+        payload["expected_compile_hash"] = binding.revision_binding.compile_hash
+        writes = []
+
+        def execute(*args, **kwargs):
+            comp = kwargs.get("comp") or (args[1] if len(args) > 1 else None)
+            writes.append(getattr(comp, "key", None))
+            target = kwargs.get("target_id")
+            return {"_success": True, "component_id": target or "NEW-" + str(len(writes)),
+                    "status": "updated" if target else "created"}
+
+        names, metadata = listing(resolver)
+        with names, metadata, mock.patch.object(integration_builder, "_execute_component", side_effect=execute):
+            try:
+                result = integration_builder._apply_plan(
+                    mock.MagicMock(), "qa", copy.deepcopy({"dry_run": False, "authoring_request": payload}))
+            except Exception:  # noqa: BLE001 - past the pre-write pass the offline harness cannot create a process
+                result = {"_success": False, "error_code": None}
+        return result, writes
+
+    degraded = compiled_with(unreadable)
+    healthy = compiled_with(real)
+    assert degraded.revision_binding.compile_hash != healthy.revision_binding.compile_hash, (
+        "the unreadable account must compile a different binding, or the split window proves nothing")
+
+    refused, writes = applied_with(degraded, split)
+    assert writes == [], writes
+    assert refused.get("error_code") == "AUTHORING_APPLY_VALIDATION_REQUIRED", refused
+    assert "could not build the component plan from the account" in json.dumps(refused), refused
+
+    # CONTROL: the binding and account the refusal needs are real. A healthy compile applied to the healthy account
+    # writes, so the refusal above is the unbuilt component plan and not the harness.
+    assert applied_with(healthy, real)[1], "a healthy apply of a healthy binding must reach its writes"
+
+
 def test_every_identity_decision_of_the_plan_route_moves_the_compiler_revision():
     """CDX-184-r11-01, the structural half. The revision oracle and its perturbations were hand-listed, and each
     batch that added an identity reading to the typed plan's route left it uncovered: the served compiler revision
