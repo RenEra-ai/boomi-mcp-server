@@ -6012,7 +6012,39 @@ def resolve_final_component_names(boomi_client, spec, conflict_policy, keys=None
     return final
 
 
-def reused_keys_for_components(components, conflict_policy="reuse"):
+def _bound_existing_id(comp, existing_ids=None):
+    """The existing component id this spec binds, as the planner binding answers it (#184).
+
+    ``existing_ids`` is a route's answer WITH the account, keyed by spec key: the component plan apply
+    builds (``planned_existing_ids``), which the typed plan and compile read too. A key it carries is
+    answered from it, including an answer that binds nothing. Any other key is answered from the request
+    alone (``declared_only``), which knows a declared id and never a name match (QA-184-s1-r10-01).
+    """
+    key = getattr(comp, "key", None)
+    if existing_ids is not None and isinstance(key, str) and key in existing_ids:
+        return canonical_component_id(existing_ids[key])
+    return resolve_planner_binding(None, comp, declared_only=True).existing_id
+
+
+def planned_existing_ids(planned):
+    """``{key: existing component id}`` from a ``_build_plan`` result: apply's binding of every spec (#184).
+
+    The one resolution apply acts on, made with the account over the normalized spec: a declared id in any
+    spelling, an exact-name match, a clone's source. Apply hands it to the symbol table before its first write.
+    The typed plan and compile hand in the same map from the component plan they already run for the
+    component-plan lint, so plan, compile and apply judge one binding (QA-184-s1-r10-01). ``None`` when there
+    is no successful plan to read, and each spec's declared id answers.
+    """
+    if not isinstance(planned, dict) or not planned.get("_success"):
+        return None
+    return {
+        step["key"]: step.get("existing_component_id")
+        for step in (planned.get("steps") or ())
+        if isinstance(step, dict) and isinstance(step.get("key"), str)
+    }
+
+
+def reused_keys_for_components(components, conflict_policy="reuse", existing_ids=None):
     """The reuse answer for a bare component sequence, from DECLARED bindings only.
 
     The recipe engine holds resolved components and no spec, and it had no
@@ -6021,24 +6053,23 @@ def reused_keys_for_components(components, conflict_policy="reuse"):
     direct route and through `run_recipes` (architect evaluation 2, finding 1).
     It also has a contract — shared with archetype composition — that it touches
     no account, so only a DECLARED binding is knowable here. That is the safe
-    direction anyway: an unanswered binding is judged rather than skipped.
+    direction anyway: an unanswered binding is judged rather than skipped. A route that resolved
+    bindings with the account hands them in as ``existing_ids``, and they answer the keys they carry.
     """
-    existing_ids = {}
+    bound = {}
     for comp in components:
         key = getattr(comp, "key", None)
         if not (isinstance(key, str) and key):
             continue
-        existing_ids[key] = resolve_planner_binding(
-            None, comp, declared_only=True
-        ).existing_id
+        bound[key] = _bound_existing_id(comp, existing_ids)
     return _keys_reused_at_apply(
         components=list(components),
-        existing_ids=existing_ids,
+        existing_ids=bound,
         conflict_policy=conflict_policy,
     )
 
 
-def declared_bindings_for_components(components, conflict_policy="reuse"):
+def declared_bindings_for_components(components, conflict_policy="reuse", existing_ids=None):
     """``{key: existing component id}`` for each component apply binds to an id the request NAMES.
 
     #184. A plan-time symbol table carries one placeholder id per key, so two keys that
@@ -6046,17 +6077,18 @@ def declared_bindings_for_components(components, conflict_policy="reuse"):
     share, answered like the reuse set above from DECLARED bindings only: a reuse at
     apply (``reference_only``, or a ``create`` the policy reuses) and an ``update``,
     which writes the component it names. A binding only an account read can answer, a
-    name match, is not known here. The id is the planner binding's canonical spelling
+    name match, is known only where the route resolved it with the account and hands it in as
+    ``existing_ids`` (QA-184-s1-r10-01). The id is the planner binding's canonical spelling
     (``canonical_component_id``), so ids differing only in surrounding whitespace or GUID
     letter case bind one component.
     """
-    reused = reused_keys_for_components(components, conflict_policy)
+    reused = reused_keys_for_components(components, conflict_policy, existing_ids=existing_ids)
     bindings = {}
     for comp in components:
         key = getattr(comp, "key", None)
         if not (isinstance(key, str) and key):
             continue
-        existing_id = resolve_planner_binding(None, comp, declared_only=True).existing_id
+        existing_id = _bound_existing_id(comp, existing_ids)
         existing_id = existing_id.strip() if isinstance(existing_id, str) else None
         if existing_id and (key in reused or getattr(comp, "action", None) == "update"):
             bindings[key] = existing_id
@@ -6099,7 +6131,7 @@ def _binds_as_metadata_only_connector_update(component_type, config) -> bool:
     )
 
 
-def apply_writes_component_config(comp, conflict_policy) -> bool:
+def apply_writes_component_config(comp, conflict_policy, existing_ids=None) -> bool:
     """Whether apply WRITES this spec's own configuration, new or into an existing component (#184).
 
     Read off apply's own branches, in the order apply takes them, from the request alone:
@@ -6113,16 +6145,17 @@ def apply_writes_component_config(comp, conflict_policy) -> bool:
     Everything else is dispatched to ``_execute_component``, which never reads
     ``reference_only``. Reading the flag instead of these branches made a ``reference_only``
     update a bind while apply wrote it (pre-commit verification of Stage-2 correction batch
-    6). A binding only an account read answers, a create whose NAME matches an existing
-    component, is answered as the request declares it, as ``reused_keys_for_components`` is.
+    6). A create whose NAME matches an existing component is reused like one naming its id where the
+    route resolved the binding with the account (``existing_ids``), so its discarded configuration
+    describes nothing (QA-184-s1-r10-01).
     """
-    binding = resolve_planner_binding(None, comp, declared_only=True)
+    reference_only = resolve_planner_binding(None, comp, declared_only=True).reference_only
     if getattr(comp, "action", None) == "create":
-        if binding.reference_only:
+        if reference_only:
             return False
         return not _will_reuse_at_apply(
             declared_action="create",
-            existing_component_id=binding.existing_id,
+            existing_component_id=_bound_existing_id(comp, existing_ids),
             reference_only=False,
             conflict_policy=conflict_policy,
         )
@@ -6130,22 +6163,24 @@ def apply_writes_component_config(comp, conflict_policy) -> bool:
     return not _binds_as_metadata_only_connector_update(getattr(comp, "type", None), config)
 
 
-def component_writes_existing(comp) -> bool:
+def component_writes_existing(comp, existing_ids=None) -> bool:
     """Whether apply WRITES the existing component this spec names (#184).
 
-    An ``update`` naming a component id whose configuration apply writes
+    An ``update`` naming a component whose configuration apply writes
     (``apply_writes_component_config``), with or without ``reference_only``. A ``create``
-    never writes an existing component: it binds one, writes a copy, or is refused.
+    never writes an existing component: it binds one, writes a copy, or is refused. The component
+    is the planner binding's (``_bound_existing_id``), so an update bound by name counts where the
+    route resolved it with the account.
     """
     if getattr(comp, "action", None) != "update":
         return False
-    existing_id = resolve_planner_binding(None, comp, declared_only=True).existing_id
+    existing_id = _bound_existing_id(comp, existing_ids)
     if not (isinstance(existing_id, str) and existing_id.strip()):
         return False
-    return apply_writes_component_config(comp, "reuse")
+    return apply_writes_component_config(comp, "reuse", existing_ids=existing_ids)
 
 
-def component_write_conflicts(components, conflict_policy="reuse") -> Dict[str, Tuple[str, ...]]:
+def component_write_conflicts(components, conflict_policy="reuse", existing_ids=None) -> Dict[str, Tuple[str, ...]]:
     """``{existing component id: spec keys}`` for each WRITTEN component more than one spec names (#184).
 
     A request that writes an existing component is described, for that component, by the
@@ -6157,8 +6192,12 @@ def component_write_conflicts(components, conflict_policy="reuse") -> Dict[str, 
     and which it keeps (rounds r7 and r8, QA rounds r7 and r9). The request is refused
     instead, so the question cannot be written. Specs naming a component nothing in the
     request writes are unaffected: each describes the component as the account stores it.
+
+    A spec names a component through the planner binding: its declared id, or the exact-name match
+    apply binds, where the route resolved it with the account and hands it in as ``existing_ids``
+    (QA-184-s1-r10-01).
     """
-    bindings = declared_bindings_for_components(components, conflict_policy)
+    bindings = declared_bindings_for_components(components, conflict_policy, existing_ids=existing_ids)
     named: Dict[str, List[str]] = {}
     written = set()
     for comp in components:
@@ -6167,7 +6206,7 @@ def component_write_conflicts(components, conflict_policy="reuse") -> Dict[str, 
         if bound is None:
             continue
         named.setdefault(bound, []).append(key)
-        if component_writes_existing(comp):
+        if component_writes_existing(comp, existing_ids=existing_ids):
             written.add(bound)
     return {
         component_id: tuple(sorted(keys))
@@ -8607,12 +8646,16 @@ def _request_only_resolution(spec):
     )
 
 
-def _build_canonical_symbols(*, spec, resolution, conflict_policy):
+def _build_canonical_symbols(*, spec, resolution, conflict_policy, existing_ids):
     """The compile symbol table for one spec. ONE construction, three callers.
 
     The step function, the pre-write plan build and the pre-write dry emit all
     need it, and three copies of the same three arguments is how the two halves
     of a pair drift apart.
+
+    ``existing_ids`` is apply's own binding of every spec, resolved with the account in ``_build_plan``,
+    and it is REQUIRED like ``resolution``. The write-conflict check and component identity read it, so a
+    spec apply binds by name is the component it binds (QA-184-s1-r10-01).
     """
     from ..authoring.connector_resolution_snapshot import (
         assert_declared_matches_resolved,
@@ -8652,12 +8695,14 @@ def _build_canonical_symbols(*, spec, resolution, conflict_policy):
         process_keys=[u.envelope.component_key for u in (spec.processes or ())],
         connector_metadata=declared,
         connector_resolution_snapshot=snapshot,
-        # #184: which declared bindings apply keeps decides component identity.
+        # #184: which bindings apply keeps decides component identity, and apply's own binding of
+        # every spec, resolved with the account, answers which component each names.
         conflict_policy=conflict_policy,
+        existing_ids=existing_ids,
     )
 
 
-def _build_canonical_plan(*, spec, unit, conflict_policy: str, resolution):
+def _build_canonical_plan(*, spec, unit, conflict_policy: str, resolution, existing_ids):
     """Build ONE canonical root's materialization plan from the request alone.
 
     The single place the RAW route's plan is constructed (§6 AR3-02). It is
@@ -8671,7 +8716,9 @@ def _build_canonical_plan(*, spec, unit, conflict_policy: str, resolution):
     from ..authoring.process_materialization import build_materialization_plan
     from ..compiler.process_ir.emitter_registry import emitter_revision
 
-    symbols = _build_canonical_symbols(spec=spec, resolution=resolution, conflict_policy=conflict_policy)
+    symbols = _build_canonical_symbols(
+        spec=spec, resolution=resolution, conflict_policy=conflict_policy, existing_ids=existing_ids
+    )
     return build_materialization_plan(
         envelope=unit.envelope,
         process_ir=unit.process_ir,
@@ -8869,6 +8916,9 @@ def _execute_canonical_process(
     #: do without, and a default is exactly how a caller forgets it silently. A
     #: caller with no account context asks for one explicitly.
     resolution,
+    #: Apply's binding of every spec (``_build_plan``), which component identity reads
+    #: (QA-184-s1-r10-01). No default, for the reason ``resolution`` has none.
+    existing_ids,
     #: The grants THIS root's calls were authorised by, projected in the
     #: pre-write pass. Empty for every root that carries no replay evidence,
     #: which is every root until evidence is ingested.
@@ -9026,7 +9076,9 @@ def _execute_canonical_process(
         # against the account, before anything was written. Reading again inside
         # the mutation loop would be a second authority for one fact and would
         # reintroduce the refusal-after-a-write this slice just removed.
-        symbols = _build_canonical_symbols(spec=spec, resolution=resolution, conflict_policy=conflict_policy)
+        symbols = _build_canonical_symbols(
+            spec=spec, resolution=resolution, conflict_policy=conflict_policy, existing_ids=existing_ids
+        )
         if stored_plan is not None:
             # THE COMPILED PLAN IS EXECUTED, never a rebuild (§6 AR1-01).
             #
@@ -9055,7 +9107,7 @@ def _execute_canonical_process(
             # function directly. Building here is the only option.
             plan = _build_canonical_plan(
                 spec=spec, unit=unit, conflict_policy=conflict_policy,
-                resolution=resolution,
+                resolution=resolution, existing_ids=existing_ids,
             )
         xml = materialize_canonical_process_xml(
             plan=plan,
@@ -9911,7 +9963,7 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
     conflict_policy = planned["conflict_policy"]
     execution_order = planned["execution_order"]
     components_by_key = {comp.key: comp for comp in spec.components}
-    existing_ids = {step["key"]: step["existing_component_id"] for step in planned["steps"]}
+    existing_ids = planned_existing_ids(planned)
     # Issue #95 M7.5: re-resolve literal existing-profile UUID indexes (supplied
     # or live-discovered) so a validated literal-UUID transform.map also RENDERS
     # at apply — keeps plan and apply from diverging.
@@ -10249,6 +10301,7 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
                     unit=_unit,
                     conflict_policy=conflict_policy,
                     resolution=_resolution,
+                    existing_ids=existing_ids,
                 )
             # ...and EMIT it dry (QA-153-r15-02): several request-decidable
             # refusals live in the emitter, not the compiler, so compiling
@@ -10284,7 +10337,8 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
             _root_symbols = _project_grants_for_root(
                 _pre_plan.process_ir,
                 _build_canonical_symbols(
-                    spec=spec, resolution=_resolution, conflict_policy=conflict_policy
+                    spec=spec, resolution=_resolution, conflict_policy=conflict_policy,
+                    existing_ids=existing_ids,
                 ),
                 process_root_ref=_pre_plan.envelope.component_key,
                 registry=_replay_registry,
@@ -10629,6 +10683,7 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
                     spec=spec,
                     conflict_policy=conflict_policy,
                     existing_id=existing_ids.get(key),
+                    existing_ids=existing_ids,
                     id_registry=id_registry,
                     # The CONNECTED account, exactly as preflight and verify
                     # derive it (§6 AR1-05a). `config.get("account_id")` let a

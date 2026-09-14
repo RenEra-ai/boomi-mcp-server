@@ -1670,7 +1670,37 @@ def _component_identity_behaviour_oracle():
         )
 
     fact_sources = {"own": described(own), "beside_writer": described(beside_writer)}
-    verdicts = {"write_matrix": write_matrix, "guid_spellings": guid_spellings, "fact_sources": fact_sources}
+    # Correction batch 10: a binding the route resolved with the account (a name match, or a name that
+    # matches nothing) decides component identity, write conflicts and whether a create's configuration is
+    # written. The map stands in for the component plan an account answers.
+    by_name = shared + [
+        spec("stored_update", "documentcache", action="update", component_id="0370d8d8-2c63-42d7-ae11-9aa5bbf64262",
+             profile_id="$ref:p1"),
+        spec("named_create", "documentcache", profile_id="$ref:p1"),
+        spec("named_reference", "documentcache", reference_only=True),
+        spec("unmatched_create", "documentcache", profile_id="$ref:p1"),
+    ]
+    account = {"named_create": "0370D8D8-2C63-42D7-AE11-9AA5BBF64262",
+               "named_reference": "0370d8d8-2c63-42d7-ae11-9aa5bbf64262", "unmatched_create": None}
+
+    def bound(components):
+        try:
+            table = build_symbol_table(
+                components, conflict_policy="reuse", existing_ids=account,
+                connector_metadata=_connector_metadata_from_components(components),
+            )
+        except ComponentWriteConflictError as conflict:
+            return [conflict.code, sorted(conflict.conflicts.items())]
+        return sorted(
+            [symbol.ref, symbol.bound_component_id or "", symbol.cache_profile_ref or ""] for symbol in table.symbols
+        )
+
+    named_bindings = {
+        "beside_writer": bound(by_name),
+        "writerless": bound([component for component in by_name if component.key != "stored_update"]),
+    }
+    verdicts = {"write_matrix": write_matrix, "guid_spellings": guid_spellings, "fact_sources": fact_sources,
+                "named_bindings": named_bindings}
     for policy in ("clone", "reuse"):
         symbols = build_symbol_table(components, conflict_policy=policy)
         # Each root is validated under the context the effect resolver builds for it, as

@@ -649,8 +649,9 @@ def test_the_legacy_component_plan_echo_cannot_restore_withheld_roots(spy, monke
     watermark = "M12_15_ECHO_RESTORE_WATERMARK"
     doc = copy.deepcopy(UNRESOLVABLE_IR_DOC) if False else None
 
-    def _echo(normalized, request, boomi_client):
-        # Exactly what a live client produces: the NORMALIZED spec, roots and all.
+    def _echo(normalized, request, boomi_client, planned=None, *, raw=False):
+        # Exactly what a live client produces: the NORMALIZED spec, roots and all. The typed plan
+        # asks for the same component plan `raw` before validation and hands it back (#184).
         return {
             "_success": True,
             "integration_spec": normalized.integration_spec.model_dump(mode="json"),

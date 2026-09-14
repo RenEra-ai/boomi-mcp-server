@@ -1240,10 +1240,17 @@ def build_topology_relations(
 # above): the ownership closure and the legacy plan echo read ONE walker.
 
 
+#: No component plan was handed in, so ``_legacy_plan_echo`` runs one itself.
+_UNPLANNED = object()
+
+
 def _legacy_plan_echo(
     normalized: _NormalizedIntent,
     request: AuthoringRequestV1,
     boomi_client: Any,
+    planned: Any = _UNPLANNED,
+    *,
+    raw: bool = False,
 ) -> Optional[Dict[str, Any]]:
     """Run the LEGACY component-plan lint over the typed component plan.
 
@@ -1260,21 +1267,30 @@ def _legacy_plan_echo(
 
     Returns ``None`` when there is no client to plan against; the caller then
     reports the lint as unavailable rather than as clean.
-    """
-    if boomi_client is None:
-        return None
-    try:
-        from ..categories.integration_builder import _build_plan
 
-        result = _build_plan(
-            boomi_client,
-            {
-                "integration_spec": normalized.integration_spec.model_dump(mode="json"),
-                "conflict_policy": request.intent.conflict_policy,
-            },
-        )
-    except Exception:  # noqa: BLE001 — the lint is evidence, never the gate
-        return None
+    The plan it runs is the one apply builds (``_build_plan`` over the same dumped spec and bound
+    conflict policy), so its bindings are apply's own (#184). With ``raw`` it returns that plan itself,
+    refused or not, for validation to read its bindings (QA-184-s1-r10-01); ``planned`` hands the same
+    result back to the lint, so the account is asked once per plan.
+    """
+    if planned is _UNPLANNED:
+        if boomi_client is None:
+            return None
+        try:
+            from ..categories.integration_builder import _build_plan
+
+            planned = _build_plan(
+                boomi_client,
+                {
+                    "integration_spec": normalized.integration_spec.model_dump(mode="json"),
+                    "conflict_policy": request.intent.conflict_policy,
+                },
+            )
+        except Exception:  # noqa: BLE001 — the lint is evidence, never the gate
+            return None
+    result = planned
+    if raw or result is None:
+        return result
 
     # A FAILED legacy plan is not a lint that ran clean. It returns no
     # `integration_spec`, so treating it as success left `spec_preview` as the
@@ -1573,6 +1589,7 @@ def _validate_processes(
     conflict_policy: str = "reuse",
     literal_indexes: Any = None,
     boomi_client: Any = None,
+    existing_ids: Any = None,
 ) -> Tuple[ValidationReportSummaryV1, Tuple[AuthoringDiagnosticV1, ...], Any, Any, Any, Any, Any, Any]:
     """Run the unified #143 semantic validator over every authored process.
 
@@ -1634,7 +1651,7 @@ def _validate_processes(
         from ..categories.integration_builder import reused_keys_for_components
 
         _snapshot_reused = reused_keys_for_components(
-            normalized.integration_spec.components, conflict_policy or "reuse"
+            normalized.integration_spec.components, conflict_policy or "reuse", existing_ids=existing_ids
         ) & set(_declared_live)
         # THE ACCOUNT, threaded. Without it the snapshot carries no account scope,
         # and the registry corroboration SKIPS its account check whenever that
@@ -1735,6 +1752,9 @@ def _validate_processes(
             connector_resolution_snapshot=snapshot,
             # #184: which declared bindings apply keeps decides component identity.
             conflict_policy=conflict_policy or "reuse",
+            # QA-184-s1-r10-01: apply's binding of every spec, from the component plan this route runs
+            # for its lint, so a spec bound by name is the component apply binds.
+            existing_ids=existing_ids,
         )
     except ComponentWriteConflictError as conflict:
         # #184: two specs writing one existing component leave which configuration
@@ -2493,6 +2513,11 @@ def plan_authoring_request_v1(
         )
 
     normalized = _normalize_intent(request)
+    # The component plan apply builds, run once: validation judges component identity by its bindings
+    # (QA-184-s1-r10-01), and the component-plan lint below reads the same result.
+    from ..categories.integration_builder import planned_existing_ids
+
+    component_plan = _legacy_plan_echo(normalized, request, boomi_client, raw=True)
     (
         validation,
         validation_diagnostics,
@@ -2508,6 +2533,7 @@ def plan_authoring_request_v1(
         request.intent.conflict_policy,
         literal_indexes=_literal_profile_indexes(boomi_client, normalized),
         boomi_client=boomi_client,
+        existing_ids=planned_existing_ids(component_plan),
     )
     topology_diagnostics = _validate_topology(request, normalized, profile)
     decisions, decision_diagnostics = _evaluate_decisions(request, normalized)
@@ -2538,7 +2564,7 @@ def plan_authoring_request_v1(
     # The LEGACY component-plan lint, reused. It supplies the redacted spec echo
     # and the duplicate-connection / base-URL / folder / name warnings that a
     # reimplementation silently lacked (issue #146 QA, bugs #401 and #402).
-    legacy = _legacy_plan_echo(normalized, request, boomi_client)
+    legacy = _legacy_plan_echo(normalized, request, boomi_client, planned=component_plan)
     legacy_warnings: Tuple[AuthoringDiagnosticV1, ...] = ()
     if legacy is not None:
         # A step the legacy planner marked `error_*` CANNOT execute — that is

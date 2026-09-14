@@ -518,7 +518,7 @@ def test_submitted_wss_xml_without_listen_element_is_refused():
         processes = ()
 
     with pytest.raises(ConnectorIdentityError) as raised:
-        integration_builder._build_canonical_symbols(conflict_policy="reuse", 
+        integration_builder._build_canonical_symbols(conflict_policy="reuse", existing_ids={}, 
             spec=_Spec(), resolution=integration_builder._request_only_resolution(_Spec())
         )
     served, _path = integration_builder._canonical_plan_failure(raised.value)

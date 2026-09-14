@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 12873, "minimum_collected": 12873, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 12885, "minimum_collected": 12885, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -13170,3 +13170,15 @@
 {"kind": "test", "id": "pytest-013169", "node_id": "tests/test_issue_184_component_identity.py::test_every_symbol_is_described_by_its_own_spec", "state": "active"}
 {"kind": "test", "id": "pytest-013170", "node_id": "tests/test_issue_184_component_identity.py::test_a_listener_named_beside_its_writer_is_refused", "state": "active"}
 {"kind": "test", "id": "pytest-013171", "node_id": "tests/test_issue_184_component_identity.py::test_the_round_r8_shapes_are_refused_before_any_fact_is_read", "state": "active"}
+{"kind": "test", "id": "pytest-013172", "node_id": "tests/test_issue_184_component_identity.py::test_a_name_bound_spec_beside_its_writer_is_refused_on_the_typed_plan", "state": "active"}
+{"kind": "test", "id": "pytest-013173", "node_id": "tests/test_issue_184_component_identity.py::test_apply_binds_a_name_bound_spec_to_the_written_component_before_any_write", "state": "active"}
+{"kind": "test", "id": "pytest-013174", "node_id": "tests/test_issue_184_component_identity.py::test_a_binding_the_account_answers_decides_identity_conflicts_and_the_written_configuration", "state": "active"}
+{"kind": "test", "id": "pytest-013175", "node_id": "tests/test_issue_184_component_identity.py::test_plan_compile_and_apply_judge_one_binding[exact_name]", "state": "active"}
+{"kind": "test", "id": "pytest-013176", "node_id": "tests/test_issue_184_component_identity.py::test_plan_compile_and_apply_judge_one_binding[name_matches_nothing]", "state": "active"}
+{"kind": "test", "id": "pytest-013177", "node_id": "tests/test_issue_184_component_identity.py::test_plan_compile_and_apply_judge_one_binding[padded_name]", "state": "active"}
+{"kind": "test", "id": "pytest-013178", "node_id": "tests/test_issue_184_component_identity.py::test_plan_compile_and_apply_judge_one_binding[type_case]", "state": "active"}
+{"kind": "test", "id": "pytest-013179", "node_id": "tests/test_issue_184_component_identity.py::test_plan_compile_and_apply_judge_one_binding[wrapper]", "state": "active"}
+{"kind": "test", "id": "pytest-013180", "node_id": "tests/test_issue_184_component_identity.py::test_plan_compile_and_apply_judge_one_binding[writer_by_name]", "state": "active"}
+{"kind": "test", "id": "pytest-013181", "node_id": "tests/test_issue_184_component_identity.py::test_plan_compile_and_apply_judge_one_binding[writerless_mixed]", "state": "active"}
+{"kind": "test", "id": "pytest-013182", "node_id": "tests/test_issue_184_component_identity.py::test_plan_compile_and_apply_judge_one_binding[writerless_through_alias]", "state": "active"}
+{"kind": "test", "id": "pytest-013183", "node_id": "tests/test_issue_184_component_identity.py::test_every_identity_reading_takes_the_bindings_its_route_resolved", "state": "active"}

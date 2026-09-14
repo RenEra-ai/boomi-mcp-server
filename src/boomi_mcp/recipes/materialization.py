@@ -197,8 +197,8 @@ def _profile_facts(
     A component whose configuration apply does not write contributes nothing: its stored
     profiles are not in hand here, and the requested config is not what the account holds.
     ``written`` is apply's own answer (``apply_writes_component_config``): a
-    ``reference_only`` create and a create apply reuses because it names an existing id are
-    discarded, and a ``reference_only`` UPDATE is written like any other update.
+    ``reference_only`` create and a create apply reuses, because it names an existing id or matches one
+    by name where the route resolved it, are discarded, and a ``reference_only`` UPDATE is written like any other update.
     """
     if not written:
         return None, None, None
@@ -237,6 +237,7 @@ def build_symbol_table(
     resolver: Callable[[str], str] = placeholder_component_id,
     connector_resolution_snapshot=None,
     conflict_policy: str = "reuse",
+    existing_ids: Optional[Mapping[str, Optional[str]]] = None,
 ):
     """Project components into the compiler's ``SymbolTableV1``.
 
@@ -283,6 +284,12 @@ def build_symbol_table(
     records the existing component its key binds to, so references binding one
     component are one component to validation, and a reused component's discarded
     config contributes no profile facts.
+
+    ``existing_ids`` is the route's binding of each spec WITH the account, where it has one: apply's own
+    plan, read by the typed plan and compile from the same component plan (``planned_existing_ids``). Without
+    it only a declared id binds,
+    which is all a route that touches no account can know (the recipe engine, archetype composition); such
+    a request is bound again at apply, before any write (QA-184-s1-r10-01).
     """
     from ..compiler.process_ir.contracts import ComponentSymbolV1, SymbolTableV1
 
@@ -301,7 +308,7 @@ def build_symbol_table(
 
     # An existing component the request writes may be named by that one spec only, so no
     # symbol is ever described by another spec's configuration (Stage-2 review round r8).
-    conflicts = component_write_conflicts(components, conflict_policy)
+    conflicts = component_write_conflicts(components, conflict_policy, existing_ids=existing_ids)
     if conflicts:
         raise ComponentWriteConflictError(conflicts)
 
@@ -312,7 +319,9 @@ def build_symbol_table(
     }
     bindings = {
         key: bound
-        for key, bound in declared_bindings_for_components(components, conflict_policy).items()
+        for key, bound in declared_bindings_for_components(
+            components, conflict_policy, existing_ids=existing_ids
+        ).items()
         if bound not in placeholders
     }
     # #184: every symbol is described by its own spec. A written component is named by its
@@ -352,7 +361,8 @@ def build_symbol_table(
         # declares it holds. The listener's inbound request profile keeps precedence
         # for the listener operation, which is what #158 carries in the same field.
         input_profile_fact, output_profile_fact, cache_profile_fact = _profile_facts(
-            component, plan_keys, written=apply_writes_component_config(component, conflict_policy)
+            component, plan_keys,
+            written=apply_writes_component_config(component, conflict_policy, existing_ids=existing_ids),
         )
         symbols.append(
             ComponentSymbolV1(

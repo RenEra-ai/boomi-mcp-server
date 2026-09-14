@@ -793,7 +793,8 @@ def test_the_revision_moves_with_component_identity_and_forwarding_behaviour(mon
         assert payload[row] != "unavailable", row
     baseline = authoring_contract._compiler_revision()
     perturbations = (
-        (integration_builder, "declared_bindings_for_components", lambda components, conflict_policy="reuse": {}),
+        (integration_builder, "declared_bindings_for_components",
+         lambda components, conflict_policy="reuse", existing_ids=None: {}),
         (lineage, "canonical_cache_profiles", lambda symbols: {}),
         (lineage, "_caches_a_call_may_write", lambda cache_refs, contract: ()),
         (process_ir_effects, "_caller_cache_seeds", lambda requirements, symbols: ()),
@@ -805,9 +806,14 @@ def test_the_revision_moves_with_component_identity_and_forwarding_behaviour(mon
         (integration_builder, "canonical_component_id",
          lambda value: value.strip() if isinstance(value, str) and value.strip() else None),
         # Stage-2 review round r5: the write-conflict refusal and the canonical effect comparison.
-        (integration_builder, "component_write_conflicts", lambda components, conflict_policy="reuse": {}),
-        (integration_builder, "component_writes_existing", lambda comp: False),
-        (integration_builder, "apply_writes_component_config", lambda comp, conflict_policy: True),
+        (integration_builder, "component_write_conflicts",
+         lambda components, conflict_policy="reuse", existing_ids=None: {}),
+        (integration_builder, "component_writes_existing", lambda comp, existing_ids=None: False),
+        # Correction batch 10: the binding a route resolved with the account, ignored for the declared one.
+        (integration_builder, "_bound_existing_id",
+         lambda comp, existing_ids=None: integration_builder.resolve_planner_binding(
+             None, comp, declared_only=True).existing_id),
+        (integration_builder, "apply_writes_component_config", lambda comp, conflict_policy, existing_ids=None: True),
         (integration_builder, "_binds_as_metadata_only_connector_update", lambda component_type, config: False),
         (integration_builder, "smart_merge_would_change", lambda config: False),
         (process_ir_effects, "_canonical_effect", lambda effect, canonical: effect),

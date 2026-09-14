@@ -465,6 +465,7 @@ def test_two_updates_of_one_cache_are_refused_on_every_route(second_id):
             spec=types.SimpleNamespace(components=components, processes=()),
             resolution=build_connector_resolution_snapshot(components, declared={}),
             conflict_policy="reuse",
+            existing_ids={},
         )
     envelope = integration_builder._pre_write_refusal(raw.value, failed_step="root")
     assert envelope["error_code"] == _CONFLICT
@@ -967,6 +968,7 @@ def test_guid_case_spellings_are_refused_on_the_typed_plan_and_the_raw_route():
             spec=types.SimpleNamespace(components=components, processes=()),
             resolution=build_connector_resolution_snapshot(components, declared={}),
             conflict_policy="reuse",
+            existing_ids={},
         )
     assert integration_builder._pre_write_refusal(raw.value, failed_step="root")["error_code"] == _CONFLICT
 
@@ -1261,3 +1263,319 @@ def test_the_round_r8_shapes_are_refused_before_any_fact_is_read():
     assert "PROCESS_IR_CAPABILITY_CONNECTOR_ACTION_UNSUPPORTED" not in codes, codes
 
 
+# ---------------------------------------------------------------------------
+# Correction batch 10: a spec bound by NAME (QA-184-s1-r10-01)
+# ---------------------------------------------------------------------------
+
+_STORED = "stored cache"
+
+
+def _named_candidates(name_to_id):
+    """`_resolve_existing_components` answering by exact name, as the account does, recording each read."""
+    calls = []
+
+    def resolve(_client, comp):
+        calls.append(comp.key)
+        component_id = name_to_id.get(comp.name)
+        return [{"component_id": component_id, "name": comp.name}] if component_id else []
+
+    return resolve, calls
+
+
+def _by_name_components():
+    return [
+        _spec("p1", "profile.json"),
+        _spec("writer", "documentcache", action="update", component_id=_CACHE_ID, profile_id="$ref:p1"),
+        IntegrationComponentSpec(key="by_name", type="documentcache", action="create", name=_STORED,
+                                 config={"profile_id": "$ref:p1"}),
+        IntegrationComponentSpec(key="reference_by_name", type="documentcache", action="create", name=_STORED,
+                                 config={"reference_only": True}),
+    ]
+
+
+def _by_name_request_components():
+    typed = [_profile("p_a", "a1"), _cache("u1", "p_a", "a1", "create_by_id"), _cache("u2", "p_a", "a1", "new")]
+    typed[1]["action"] = "update"
+    typed[2]["name"] = typed[2]["config"]["component_name"] = _STORED
+    return typed
+
+
+def test_a_name_bound_spec_beside_its_writer_is_refused_on_the_typed_plan():
+    """QA-184-s1-r10-01 on the route a caller reaches: with the account, a cache named by name beside the update of
+    that cache reports the write conflict for both specs; a name the account does not hold binds nothing."""
+    from unittest import mock
+
+    from boomi_mcp.categories import integration_builder
+
+    typed = _by_name_request_components()
+    request = AuthoringRequestV1.model_validate({"contract_version": "2", "intent": {
+        "intent_kind": "process_ir", "integration_name": "by_name",
+        "units": [{"envelope": {"component_key": "root", "name": "root", "action": "create",
+                                "depends_on": [spec["key"] for spec in typed]},
+                   "process_ir": {"version": "1", "body": {"kind": "sequence", "steps": [
+                       {"kind": "passthrough"}, {"kind": "stop"}]}}}],
+        "components": typed, "conflict_policy": "reuse"}})
+
+    def conflicts(name_to_id):
+        resolve, _calls = _named_candidates(name_to_id)
+        with mock.patch.object(integration_builder, "_resolve_existing_components", resolve), \
+                mock.patch.object(integration_builder, "paginate_metadata", lambda *a, **k: []):
+            result = plan_authoring_request_v1(
+                request, boomi_client=mock.MagicMock(), profile="qa_profile", account_id="qa_account")[0]
+        return sorted((error.code, error.subject_id) for error in result.errors if error.code == _CONFLICT)
+
+    assert conflicts({_STORED: _CACHE_ID}) == [(_CONFLICT, "u1"), (_CONFLICT, "u2")]
+    assert conflicts({}) == []
+
+
+def test_apply_binds_a_name_bound_spec_to_the_written_component_before_any_write():
+    """QA-184-s1-r10-01 at apply: `_build_plan` resolves every spec with the account, and the canonical symbol table
+    built from that plan, as `_apply_plan` builds it before its first write, refuses the conflict with its code."""
+    import types
+    from unittest import mock
+
+    from boomi_mcp.authoring.connector_resolution_snapshot import build_connector_resolution_snapshot
+    from boomi_mcp.categories import integration_builder
+
+    raw = _by_name_request_components()
+    config = {"conflict_policy": "reuse", "integration_spec": {"name": "by_name", "components": raw}}
+    rows = [{"component_id": _CACHE_ID, "name": _STORED, "type": "documentcache"}]
+    with mock.patch.object(integration_builder, "paginate_metadata", lambda *a, **k: [dict(row) for row in rows]):
+        planned = integration_builder._build_plan(mock.MagicMock(), config)
+    assert planned.get("_success"), planned
+    existing_ids = {step["key"]: step["existing_component_id"] for step in planned["steps"]}
+    assert existing_ids["u2"] == _CACHE_ID, existing_ids
+    components = [IntegrationComponentSpec(**spec) for spec in raw]
+    spec = types.SimpleNamespace(components=components, processes=())
+    with pytest.raises(ComponentWriteConflictError) as refused:
+        integration_builder._build_canonical_symbols(
+            spec=spec, resolution=build_connector_resolution_snapshot(components, declared={}),
+            conflict_policy="reuse", existing_ids=existing_ids)
+    assert refused.value.conflicts == {_CACHE_ID: ("u1", "u2")}
+    assert integration_builder._pre_write_refusal(refused.value, failed_step="root")["error_code"] == _CONFLICT
+    # CONTROL: the same symbol table from apply's plan when the name matches nothing.
+    with mock.patch.object(integration_builder, "paginate_metadata", lambda *a, **k: []):
+        unmatched = integration_builder._build_plan(mock.MagicMock(), config)
+    integration_builder._build_canonical_symbols(
+        spec=spec, resolution=build_connector_resolution_snapshot(components, declared={}),
+        conflict_policy="reuse", existing_ids={step["key"]: step["existing_component_id"] for step in unmatched["steps"]})
+
+
+def test_a_binding_the_account_answers_decides_identity_conflicts_and_the_written_configuration():
+    """QA-184-s1-r10-01 and the pre-commit verification of correction batch 10. The route's binding map, as
+    apply's component plan answers it, decides three things. The first is which component a spec bound by
+    name is, which makes a write conflict beside the writer. The second is that a create reused by name
+    contributes nothing from its discarded configuration. The third is that an update bound only by name
+    writes that component. Without the map, only declared ids bind."""
+    from boomi_mcp.categories import integration_builder
+
+    components = _by_name_components()
+    account = {"by_name": _CACHE_ID.upper(), "reference_by_name": _CACHE_ID}
+    with pytest.raises(ComponentWriteConflictError) as refused:
+        build_symbol_table(components, existing_ids=account)
+    assert refused.value.conflicts == {_CACHE_ID: ("by_name", "reference_by_name", "writer")}
+    with pytest.raises(ComponentWriteConflictError) as cloned:
+        build_symbol_table(components, conflict_policy="clone", existing_ids=account)
+    assert cloned.value.conflicts == {_CACHE_ID: ("reference_by_name", "writer")}
+    build_symbol_table(components)  # the request alone cannot see a name match
+
+    writerless = [component for component in components if component.key != "writer"]
+    symbols = {symbol.ref: symbol for symbol in build_symbol_table(writerless, existing_ids=account).symbols}
+    assert (symbols["$ref:by_name"].bound_component_id, symbols["$ref:by_name"].cache_profile_ref) == (_CACHE_ID, None)
+    assert symbols["$ref:reference_by_name"].bound_component_id == _CACHE_ID
+    by_name = next(component for component in components if component.key == "by_name")
+    assert integration_builder.apply_writes_component_config(by_name, "reuse") is True
+    assert integration_builder.apply_writes_component_config(by_name, "reuse", existing_ids=account) is False
+    assert integration_builder.apply_writes_component_config(by_name, "clone", existing_ids=account) is True
+    unmatched = build_symbol_table(writerless, existing_ids={"by_name": None, "reference_by_name": None}).symbols
+    assert {symbol.ref: symbol.cache_profile_ref for symbol in unmatched}["$ref:by_name"] == "$ref:p1"
+
+    update_by_name = IntegrationComponentSpec(key="update_by_name", type="documentcache", action="update",
+                                              name=_STORED, config={"profile_id": "$ref:p1"})
+    assert integration_builder.component_writes_existing(update_by_name) is False
+    assert integration_builder.component_writes_existing(update_by_name, existing_ids={"update_by_name": _CACHE_ID})
+    reference = _spec("reference", "documentcache", component_id=_CACHE_ID, reference_only=True)
+    with pytest.raises(ComponentWriteConflictError) as by_name_writer:
+        build_symbol_table([_spec("p1", "profile.json"), update_by_name, reference],
+                           existing_ids={"update_by_name": _CACHE_ID})
+    assert by_name_writer.value.conflicts == {_CACHE_ID: ("reference", "update_by_name")}
+
+
+_CONN = {"key": "conn", "type": "connector-settings", "name": "probe conn", "action": "create",
+         "config": {"connector_type": "rest", "component_name": "probe conn",
+                    "base_url": "http://host.docker.internal:8081", "auth": "NONE"}}
+
+
+def _named(spec, name=_STORED):
+    spec["name"] = name
+    spec["config"]["component_name"] = name.strip()
+    return spec
+
+
+def _route_request(components, ir=None):
+    ir = ir or {"version": "1", "body": {"kind": "sequence", "steps": [{"kind": "passthrough"}, {"kind": "stop"}]}}
+    return AuthoringRequestV1.model_validate({"contract_version": "2", "intent": {
+        "intent_kind": "process_ir", "integration_name": "routes",
+        "units": [{"envelope": {"component_key": "root", "name": "root", "action": "create",
+                                "depends_on": [spec["key"] for spec in components]},
+                   "process_ir": ir}],
+        "components": components, "conflict_policy": "reuse"}})
+
+
+def _writer_beside(second):
+    writer = _cache("u1", "p_a", "a1", "create_by_id")
+    writer["action"] = "update"
+    return [_profile("p_a", "a1"), writer, second]
+
+
+def _route_cases():
+    padded = _named(_cache("u2", "p_a", "a1", "new"), " " + _STORED + " ")
+    typecase = _named(_cache("u2", "p_a", "a1", "new"))
+    typecase["type"] = "DocumentCache"
+    wrapper = {"key": "u2", "type": "component", "name": _STORED, "action": "create",
+               "config": {"type": "documentcache", "reference_only": True}}
+    writer_by_name = _named(_cache("u1", "p_a", "a1", "new"))
+    writer_by_name["action"] = "update"
+    through_alias = [_CONN, _profile("p_client", "key"), _get("op_get1", "1bdb1503-2807-4771-b1b7-8689be8f8e0a"),
+                     _profile("p_a", "a1"), _profile("p_b", "b2"), _map("m1", "p_client", "p_a", "key", "a1"),
+                     _map("m2", "p_a", "p_b", "a1", "b2"),
+                     _named(_cache("c_a", "p_a", "a1", "new")), _named(_cache("c_alias", "p_a", "a1", "new"))]
+    mixed = [_CONN, _profile("p_client", "key"), _get("op_get1", "1bdb1503-2807-4771-b1b7-8689be8f8e0a"),
+             _get("op_get2", "97ef6619-0f72-41bf-9b29-dba25de5f9da"), _profile("p_a", "a1"), _profile("p_b", "b2"),
+             _map("m1", "p_client", "p_a", "key", "a1"), _map("m2", "p_a", "p_b", "a1", "b2"),
+             _named(_cache("c_a", "p_a", "a1", "new")), _cache("c_alias", "p_client", "key", "reference_only")]
+    return {
+        "exact_name": (_route_request(_writer_beside(_named(_cache("u2", "p_a", "a1", "new")))), _CONFLICT),
+        "padded_name": (_route_request(_writer_beside(padded)), _CONFLICT),
+        "type_case": (_route_request(_writer_beside(typecase)), _CONFLICT),
+        "wrapper": (_route_request(_writer_beside(wrapper)), _CONFLICT),
+        "writer_by_name": (_route_request([_profile("p_a", "a1"), writer_by_name,
+                                           _cache("c_ref", "p_a", "a1", "reference_only")]), _CONFLICT),
+        "name_matches_nothing": (_route_request(_writer_beside(_named(_cache("u2", "p_a", "a1", "new"), "another"))),
+                                 None),
+        "writerless_through_alias": (_route_request(through_alias, _THROUGH_ALIAS), None),
+        "writerless_mixed": (_route_request(mixed, _MIXED), _MISMATCH),
+    }
+
+
+@pytest.mark.parametrize("case", sorted(_route_cases()))
+def test_plan_compile_and_apply_judge_one_binding(case):
+    """Pre-commit verification of correction batch 10: the typed plan, compile, the raw apply and the typed
+    apply read the one component plan apply builds with the account, so they agree on every spelling of a
+    name binding the verification confirmed. The spellings are a padded name, a type in another case, a
+    wrapper spec, an update bound by name, and requests with no writer at all. A refusal happens before any
+    component is written. An admitted request passes the pre-write pass and reaches its writes. Offline: only
+    the account's metadata listing and component execution are replaced."""
+    import copy
+    from unittest import mock
+
+    from boomi_mcp.authoring.workflow import _normalize_intent, compile_authoring_request_v1
+    from boomi_mcp.categories import integration_builder
+
+    request, refusal = _route_cases()[case]
+    rows = [{"component_id": _CACHE_ID, "name": _STORED, "type": "documentcache", "folder_name": "f"}]
+    writes = []
+
+    def execute(*args, **kwargs):
+        comp = kwargs.get("comp") or (args[1] if len(args) > 1 else None)
+        writes.append(getattr(comp, "key", None))
+        target = kwargs.get("target_id")
+        return {"_success": True, "component_id": target or "NEW-" + str(len(writes)),
+                "status": "updated" if target else "created"}
+
+    def account():
+        return (mock.patch.object(integration_builder, "paginate_metadata", lambda *a, **k: [dict(r) for r in rows]),
+                mock.patch.object(integration_builder, "_execute_component", side_effect=execute))
+
+    def applied(config):
+        del writes[:]
+        listing, executor = account()
+        with listing, executor:
+            try:
+                result = integration_builder._apply_plan(mock.MagicMock(), "qa", copy.deepcopy(config))
+            except Exception:  # noqa: BLE001 - past the pre-write pass the offline harness cannot create a process
+                result = {"_success": False, "error_code": None}
+        return ("refused", result.get("error_code")) if not writes else ("wrote",)
+
+    listing, executor = account()
+    with listing, executor:
+        planned = plan_authoring_request_v1(request, boomi_client=mock.MagicMock(), profile="qa",
+                                            account_id="qa_account")[0]
+    plan_codes = {code for error in planned.errors for code in (error.code, *error.cause_codes)}
+    raw = applied({"dry_run": False, "conflict_policy": "reuse",
+                   "integration_spec": _normalize_intent(request).integration_spec.model_dump(mode="json")})
+    if refusal is None:
+        assert not planned.errors, plan_codes
+        assert raw == ("wrote",), raw
+        client = mock.MagicMock()
+        listing, executor = account()
+        with listing, executor:
+            compiled = compile_authoring_request_v1(request, boomi_client=client, profile="qa",
+                                                    account_id=integration_builder._client_account_id(client))[0]
+        payload = request.model_dump(mode="json")
+        payload["expected_capability_revision"] = compiled.revision_binding.capability_revision
+        payload["expected_compile_hash"] = compiled.revision_binding.compile_hash
+        assert applied({"dry_run": False, "authoring_request": payload}) == ("wrote",)
+    else:
+        assert refusal in plan_codes, plan_codes
+        assert raw == ("refused", refusal), raw
+        listing, executor = account()
+        with listing, executor, pytest.raises(Exception) as blocked:
+            compile_authoring_request_v1(request, boomi_client=mock.MagicMock(), profile="qa",
+                                         account_id="qa_account")
+        assert refusal in {code for diagnostic in getattr(blocked.value, "diagnostics", ())
+                           for code in (diagnostic.code, *diagnostic.cause_codes)}, blocked.value
+
+
+def test_every_identity_reading_takes_the_bindings_its_route_resolved():
+    """Correction batch 10, the sibling sweep read from the source.
+
+    - Every call of an identity reading passes the route's bindings (`existing_ids`): the binding itself, the
+      reuse set, the declared bindings, whether an update writes an existing component, the write-conflict
+      check, whether apply writes a spec's configuration, and the symbol table.
+    - The exceptions are three modules. The recipe engine and the revision oracle touch no account by contract,
+      and effect derivation holds no plan: for a create under `reuse` it already answers "may be substituted",
+      whatever the binding.
+    - The declared-only planner binding is read for its id by `_bound_existing_id` alone.
+    - `apply_writes_component_config` reads only its `reference_only` flag.
+    - Both account-holding routes build the map from their component plan."""
+    import ast
+
+    from boomi_mcp.categories import integration_builder
+
+    src = Path(integration_builder.__file__).resolve().parents[1]
+    readings = {"_bound_existing_id", "reused_keys_for_components", "declared_bindings_for_components",
+                "component_writes_existing", "component_write_conflicts", "apply_writes_component_config",
+                "build_symbol_table"}
+    exempt = {"recipes/engine.py", "authoring/contract.py", "authoring/process_ir_effects.py"}
+
+    def calls(path):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        parents = {child: node for node in ast.walk(tree) for child in ast.iter_child_nodes(node)}
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            called = node.func.id if isinstance(node.func, ast.Name) else getattr(node.func, "attr", None)
+            owner = node
+            while owner in parents and not isinstance(owner, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                owner = parents[owner]
+            yield called, (owner.name if isinstance(owner, ast.FunctionDef) else "<module>"), node, parents.get(node)
+
+    unbound, declared, planned, seen = [], set(), set(), 0
+    for path in sorted(src.rglob("*.py")):
+        rel = path.relative_to(src).as_posix()
+        for called, owner, call, parent in calls(path):
+            if called in readings:
+                seen += 1
+                passes = any(keyword.arg == "existing_ids" for keyword in call.keywords) or (
+                    called == "_bound_existing_id" and len(call.args) >= 2)
+                if not passes and rel not in exempt:
+                    unbound.append("{0}:{1}:{2}".format(rel, owner, called))
+            if called == "resolve_planner_binding" and any(k.arg == "declared_only" for k in call.keywords):
+                declared.add((owner, parent.attr if isinstance(parent, ast.Attribute) else None))
+            if called == "planned_existing_ids":
+                planned.add(owner)
+    assert unbound == [], unbound
+    assert declared == {("_bound_existing_id", "existing_id"), ("apply_writes_component_config", "reference_only")}, declared
+    assert planned >= {"_apply_plan", "plan_authoring_request_v1"}, planned
+    assert seen > 20, seen
