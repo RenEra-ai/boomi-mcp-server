@@ -229,29 +229,6 @@ def _profile_facts(
     return None, None, None
 
 
-def _fact_source(component, bindings, writers, writer_for):
-    """The spec whose configuration describes ``component`` in the symbol table (#184).
-
-    A reference apply does not write is described by the one spec in the request that
-    writes its component (Stage-2 review rounds r3 to r5, QA round r7). Every other spec,
-    and a reference to a component nothing in the request writes, describes itself.
-    """
-    if component.key in bindings and component.key not in writers:
-        return writer_for.get(bindings[component.key], component)
-    return component
-
-
-def _overlay(stated, own):
-    """Each fact the writing spec STATES, else the reference's own (#184).
-
-    A writer describes its component only in what its config states. A spec that only
-    renames an operation states no action, profile or path, and the table cannot read
-    those from it; the reference's own statement stays the evidence, as it was before a
-    writer was consulted at all (Stage-2 review round r7). ``None`` means not stated.
-    """
-    return tuple(stated_fact if stated_fact is not None else own_fact for stated_fact, own_fact in zip(stated, own))
-
-
 def build_symbol_table(
     components: Sequence[IntegrationComponentSpec],
     *,
@@ -314,18 +291,17 @@ def build_symbol_table(
     # #184: the keys a component profile ref may name — this plan's components only.
     plan_keys = {component.key for component in components}
     # #184: the existing component each key binds to, whether apply writes each spec's
-    # config, and the specs that write an existing component, all from apply's own answers.
+    # config, and the written components more than one spec names, all from apply's answers.
     from ..categories.integration_builder import (
         ComponentWriteConflictError,
         apply_writes_component_config,
         component_write_conflicts,
-        component_writes_existing,
         declared_bindings_for_components,
     )
 
-    # A request writing one existing component from more than one spec leaves which
-    # configuration executes undecided, so it is refused before anything is described.
-    conflicts = component_write_conflicts(components)
+    # An existing component the request writes may be named by that one spec only, so no
+    # symbol is ever described by another spec's configuration (Stage-2 review round r8).
+    conflicts = component_write_conflicts(components, conflict_policy)
     if conflicts:
         raise ComponentWriteConflictError(conflicts)
 
@@ -339,23 +315,11 @@ def build_symbol_table(
         for key, bound in declared_bindings_for_components(components, conflict_policy).items()
         if bound not in placeholders
     }
-    # #184: the one spec that writes a bound component is the SOURCE of every component fact
-    # of each reference to that component apply does not write: its connector family and
-    # action, listener facts, profile facts and path-binding requirement (Stage-2 review
-    # rounds r3 to r5, QA round r7). A step's connection is not a component fact; see below. A request writing one component from two
-    # specs is refused above, so no reference chooses between configurations, and a
-    # reference to a component nothing in the request writes is its own source.
-    writers = {
-        component.key for component in components
-        if component.key in bindings and component_writes_existing(component)
-    }
-    writer_for = {bindings[component.key]: component for component in components if component.key in writers}
+    # #184: every symbol is described by its own spec. A written component is named by its
+    # writer alone (refused above otherwise), and specs naming a component nothing in the
+    # request writes each describe it as the account stores it.
     for component in components:
-        source = _fact_source(component, bindings, writers, writer_for)
-        # The writer's STATED facts over the reference's own (`_overlay`, Stage-2 review round r7).
-        connector_type, action_type = _overlay(
-            metadata.get(source.key, (None, None)), metadata.get(component.key, (None, None))
-        )
+        connector_type, action_type = metadata.get(component.key, (None, None))
         ref = f"{_REF_PREFIX}{component.key}"
         # NORMALIZED, and only used when it yields a usable key. The value
         # is plain caller config with no upstream normalization, so interpolating
@@ -373,31 +337,22 @@ def build_symbol_table(
         # version read `connection_key`, which appears in NO production path:
         # only in hand-written clean-room fixtures, which is why they passed
         # while every plan a primitive builds still failed resolution.
-        # The operation->connection edge is a fact of the STEP, not of the component: Boomi
-        # binds a connection to an operation at the process connector step, and the operation
-        # XML apply writes never embeds it (`integration_builder`). So a reference that names
-        # a connection keeps its own, and only one naming none takes the writing spec's
-        # (pre-commit verification of correction batch 7).
         raw_connection_ref_key = (component.config or {}).get("connection_ref_key")
-        if not (isinstance(raw_connection_ref_key, str) and raw_connection_ref_key.strip()):
-            raw_connection_ref_key = (source.config or {}).get("connection_ref_key")
         connection_ref_key = (
             raw_connection_ref_key.strip() if isinstance(raw_connection_ref_key, str) else ""
         )
         # #158: a listener operation's inbound facts, for the requested inbound
         # contract. Carried on the symbol the listener entry resolves; `None` for
         # every other component.
-        listener_input_type, listener_request_profile = _overlay(
-            _listener_inbound_facts(source, connector_resolution_snapshot),
-            _listener_inbound_facts(component, connector_resolution_snapshot),
+        listener_input_type, listener_request_profile = _listener_inbound_facts(
+            component, connector_resolution_snapshot
         )
         # #184: the profile facts the canonical stream-profile proof reads — which
         # profile a call hands on and accepts, what a map transforms, what a cache
         # declares it holds. The listener's inbound request profile keeps precedence
         # for the listener operation, which is what #158 carries in the same field.
-        input_profile_fact, output_profile_fact, cache_profile_fact = _overlay(
-            _profile_facts(source, plan_keys, written=apply_writes_component_config(source, conflict_policy)),
-            _profile_facts(component, plan_keys, written=apply_writes_component_config(component, conflict_policy)),
+        input_profile_fact, output_profile_fact, cache_profile_fact = _profile_facts(
+            component, plan_keys, written=apply_writes_component_config(component, conflict_policy)
         )
         symbols.append(
             ComponentSymbolV1(
@@ -419,10 +374,9 @@ def build_symbol_table(
                 # refusal only speaks on an explicit True. Populating this is what
                 # keeps the field from being the inert addition the architecture
                 # note rejects `dependency_refs` for.
-                requires_path_binding=_overlay(
-                    (_requires_path_binding(connector_resolution_snapshot, source.key),),
-                    (_requires_path_binding(connector_resolution_snapshot, component.key),),
-                )[0],
+                requires_path_binding=_requires_path_binding(
+                    connector_resolution_snapshot, component.key
+                ),
             )
         )
 

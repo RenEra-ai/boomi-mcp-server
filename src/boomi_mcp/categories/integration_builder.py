@@ -6064,7 +6064,7 @@ def declared_bindings_for_components(components, conflict_policy="reuse"):
 
 
 class ComponentWriteConflictError(ValueError):
-    """More than one component spec in one request would write ONE existing component (#184).
+    """An existing component the request writes is named by more than one of its specs (#184).
 
     Carries its served code where ``_canonical_plan_failure`` reads one, so a pre-write
     pass refuses it with that code.
@@ -6072,16 +6072,17 @@ class ComponentWriteConflictError(ValueError):
 
     code = INTEGRATION_COMPONENT_WRITE_CONFLICT
     remediation = (
-        "Author one spec per existing component: merge the configurations into one update, "
-        "and name the component from every other spec with reference_only."
+        "Name an existing component the request writes through the one spec that writes it: "
+        "merge the other specs naming it into that spec, and use that spec's key wherever the "
+        "component is referenced."
     )
 
     def __init__(self, conflicts) -> None:
         self.conflicts = dict(conflicts)
         self.keys = tuple(sorted(key for keys in self.conflicts.values() for key in keys))
         super().__init__(
-            "component specs {0} write an existing component another spec in the request also "
-            "writes; author one spec per existing component".format(", ".join(self.keys))
+            "component specs {0} name an existing component that one of them writes; name it "
+            "through the writing spec only".format(", ".join(self.keys))
         )
 
 
@@ -6144,25 +6145,34 @@ def component_writes_existing(comp) -> bool:
     return apply_writes_component_config(comp, "reuse")
 
 
-def component_write_conflicts(components) -> Dict[str, Tuple[str, ...]]:
-    """``{existing component id: spec keys}`` for each component more than one spec writes (#184).
+def component_write_conflicts(components, conflict_policy="reuse") -> Dict[str, Tuple[str, ...]]:
+    """``{existing component id: spec keys}`` for each WRITTEN component more than one spec names (#184).
 
-    Apply writes such a component once per spec and keeps one configuration, so which one
-    executes is undecided and nothing can describe it. The request is refused instead of
-    modelled: every earlier attempt to choose between the writes answered a corner of the
-    question and opened the next one (Stage-2 review rounds r3 to r5).
+    A request that writes an existing component is described, for that component, by the
+    one spec that writes it. A second spec naming the same component (another write, a
+    ``reference_only`` spec, a create the policy reuses, a connector update apply binds)
+    would describe it differently. Every attempt to decide which description the executed
+    component matches answered one corner and opened the next: which of two writes wins
+    (Stage-2 review rounds r3 to r5), then which facts a reference borrows from the writer
+    and which it keeps (rounds r7 and r8, QA rounds r7 and r9). The request is refused
+    instead, so the question cannot be written. Specs naming a component nothing in the
+    request writes are unaffected: each describes the component as the account stores it.
     """
-    writers: Dict[str, List[str]] = {}
+    bindings = declared_bindings_for_components(components, conflict_policy)
+    named: Dict[str, List[str]] = {}
+    written = set()
     for comp in components:
         key = getattr(comp, "key", None)
-        if not (isinstance(key, str) and key) or not component_writes_existing(comp):
+        bound = bindings.get(key) if isinstance(key, str) and key else None
+        if bound is None:
             continue
-        existing_id = resolve_planner_binding(None, comp, declared_only=True).existing_id.strip()
-        writers.setdefault(existing_id, []).append(key)
+        named.setdefault(bound, []).append(key)
+        if component_writes_existing(comp):
+            written.add(bound)
     return {
         component_id: tuple(sorted(keys))
-        for component_id, keys in sorted(writers.items())
-        if len(keys) > 1
+        for component_id, keys in sorted(named.items())
+        if component_id in written and len(keys) > 1
     }
 
 

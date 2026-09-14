@@ -479,8 +479,8 @@ PROCESS_COMPONENT_REFERENCE_INVALID_FORMAT = (
 
 # The unified component+process dependency graph.
 INTEGRATION_COMPONENT_KEY_DUPLICATE = "INTEGRATION_COMPONENT_KEY_DUPLICATE"
-#: More than one component spec in one request would WRITE the same existing component
-#: (#184). Apply keeps one configuration, so which one executes is undecided.
+#: An existing component one spec in the request WRITES is named by another spec as well
+#: (#184): the specs would describe that component differently, so only the writer may name it.
 INTEGRATION_COMPONENT_WRITE_CONFLICT = "INTEGRATION_COMPONENT_WRITE_CONFLICT"
 INTEGRATION_DEPENDENCY_NOT_FOUND = "INTEGRATION_DEPENDENCY_NOT_FOUND"
 INTEGRATION_DEPENDENCY_CYCLE = "INTEGRATION_DEPENDENCY_CYCLE"
@@ -2172,8 +2172,9 @@ ERROR_TAXONOMY: Dict[str, ErrorCodeSpec] = {
             category="integration_dependency",
             retryable=False,
             summary=(
-                "More than one component spec in the request would write the same "
-                "existing component, so which configuration executes is undecided."
+                "An existing component that one spec in the request writes is named by "
+                "another spec as well, so the specs would describe it differently; only the "
+                "writing spec may name it."
             ),
             owner="#184",
         ),

@@ -3025,7 +3025,10 @@ def _finding_rows(text):
 # real finding ids, and without it the revision/supersession machinery skipped
 # every one of them — so a QA row's revision could never be declared (#153 §6
 # evaluation-2 ledger pass, where six disposition revisions included two QA rows).
-_FINDING_ID_RE = r"(?:INH-)?[A-Z][A-Za-z0-9]*-?\d*(?:-r\d+)?-\d+[a-z]?"
+# The `(?:-s\d+)?` segment covers the staged QA shape (`QA-184-s1-r7-02`), for the same
+# reason: without it no check parsed those rows, so five committed QA rows of #184 were
+# edited in place with the append-only check green (SELF-184-18).
+_FINDING_ID_RE = r"(?:INH-)?[A-Z][A-Za-z0-9]*-?\d*(?:-s\d+)?(?:-r\d+)?-\d+[a-z]?"
 #: The same shape with a MANDATORY trailing letter: a revision id. Derived by
 #: dropping the optional-suffix marker, and asserted rather than sliced blind —
 #: positional slicing would silently change meaning if the shape ever gained a

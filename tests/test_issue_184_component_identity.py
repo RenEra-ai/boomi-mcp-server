@@ -342,15 +342,16 @@ from boomi_mcp.models.authoring_workflow import (  # noqa: E402
 )
 
 
-def _declared_map_verdict(alias_key, extra=(), policy="reuse"):
-    """A map the request UPDATES, plus a `reference_only` alias of the same component, and a
+def _declared_map_verdict(alias_key=None, extra=(), policy="reuse"):
+    """A map the request UPDATES, an optional `reference_only` alias of the same component, and a
     declaration of the map's effect: `(finding reasons, inert declarations, validation errors)`."""
     written = _map_component(
         [_accepted("dynamic_process_property_set", parameters={"property_name": "OUT"})],
         action="update", component_id="M-1")
-    alias = IntegrationComponentSpec(key=alias_key, type="transform.map", name=alias_key,
-                                     config={"reference_only": True, "component_id": "M-1"})
-    components = _components(written, alias, *extra)
+    aliases = () if alias_key is None else (IntegrationComponentSpec(
+        key=alias_key, type="transform.map", name=alias_key,
+        config={"reference_only": True, "component_id": "M-1"}),)
+    components = _components(written, *aliases, *extra)
     built = build_symbol_table(components, conflict_policy=policy)
     symbols = SymbolTableV1(symbols=tuple(built.symbols) + tuple(
         symbol for symbol in _effect_symbols().symbols if symbol.ref in ("$ref:CONN", "$ref:GETOP")))
@@ -376,9 +377,13 @@ def _declared_map_verdict(alias_key, extra=(), policy="reuse"):
 @pytest.mark.parametrize("policy", ["reuse", "fail"])
 @pytest.mark.parametrize("alias_key", ["A_REF", "Z_REF"])
 def test_a_map_declaration_derives_from_the_config_apply_writes(alias_key, policy):
-    """CDX-184-r3-01: whichever spelling sorts first, the effect is derived from the update
-    apply writes into the component, so the declaration binds and the later read passes."""
-    assert _declared_map_verdict(alias_key, policy=policy) == ((), (), [])
+    """CDX-184-r3-01, under correction batch 9: the map the request updates derives its declared effect
+    from the config apply writes, so the declaration binds and the later read passes. An alias naming the
+    same component beside it is refused as a written component named twice, whichever spelling sorts first."""
+    assert _declared_map_verdict(policy=policy) == ((), (), [])
+    with pytest.raises(ComponentWriteConflictError) as refused:
+        _declared_map_verdict(alias_key, policy=policy)
+    assert refused.value.conflicts == {"M-1": tuple(sorted((alias_key, "MAP")))}
 
 
 @pytest.mark.parametrize("property_name, over", [("OTHER", {}), ("OUT", {"name": "another component name"})])
@@ -390,33 +395,36 @@ def test_two_writes_of_one_map_refuse_the_request(property_name, over):
         [_accepted("dynamic_process_property_set", parameters={"property_name": property_name})],
         key="MAP_TWO", action="update", component_id="M-1", **over)
     with pytest.raises(ComponentWriteConflictError) as refused:
-        _declared_map_verdict("A_REF", extra=(other,))
+        _declared_map_verdict(extra=(other,))
     assert (refused.value.code, refused.value.keys) == (
         "INTEGRATION_COMPONENT_WRITE_CONFLICT", ("MAP", "MAP_TWO"))
 
 
-def test_every_reference_to_a_bound_component_carries_the_written_facts():
-    """The sibling of CDX-184-r3-01: a map's profile facts describe its component, so a
-    `reference_only` alias of a map the request updates carries the update's facts. A
-    component nothing in the request writes is described by nothing."""
-    components = [
-        _spec("p1", "profile.json"),
-        _spec("p2", "profile.json"),
-        _spec("m12", "transform.map", source_profile_id="$ref:p1", target_profile_id="$ref:p2"),
-        _spec("a_map", "transform.map", component_id="MAP-1", reference_only=True),
-        _spec("b_map", "transform.map", action="update", component_id="MAP-1",
-              source_profile_id="$ref:p1", target_profile_id="$ref:p2"),
+def test_a_written_component_is_named_by_its_writer_only():
+    """Stage-2 review round r8 and QA round r9 (correction batch 9): a component the request writes is named
+    by that one spec. A `reference_only` spec or a reused create naming it beside the writer is refused,
+    whichever spelling sorts first. Specs naming a component nothing in the request writes are unaffected,
+    and each describes itself."""
+    written = _spec("b_map", "transform.map", action="update", component_id="MAP-1",
+                    source_profile_id="$ref:p1", target_profile_id="$ref:p2")
+    base = [_spec("p1", "profile.json"), _spec("p2", "profile.json"),
+            _spec("m12", "transform.map", source_profile_id="$ref:p1", target_profile_id="$ref:p2")]
+    for other in (_spec("a_map", "transform.map", component_id="MAP-1", reference_only=True),
+                  _spec("a_map", "transform.map", component_id="MAP-1")):
+        with pytest.raises(ComponentWriteConflictError) as refused:
+            build_symbol_table(base + [other, written])
+        assert refused.value.conflicts == {"MAP-1": ("a_map", "b_map")}
+    symbols = build_symbol_table(base + [
+        written,
         _spec("r_one", "transform.map", component_id="MAP-2", reference_only=True),
-        _spec("r_two", "transform.map", component_id="MAP-2",
-              source_profile_id="$ref:p1", target_profile_id="$ref:p1"),
-    ]
-    symbols = build_symbol_table(components)
+        _spec("r_two", "transform.map", component_id="MAP-2", source_profile_id="$ref:p1", target_profile_id="$ref:p1"),
+    ])
     facts = {symbol.ref: (symbol.input_profile_ref, symbol.output_profile_ref) for symbol in symbols.symbols}
-    assert facts["$ref:a_map"] == facts["$ref:b_map"] == ("$ref:p1", "$ref:p2")
-    assert facts["$ref:r_one"] == facts["$ref:r_two"] == (None, None)  # reused, nothing written
+    assert facts["$ref:b_map"] == ("$ref:p1", "$ref:p2")
+    assert facts["$ref:r_one"] == facts["$ref:r_two"] == (None, None)  # nothing in the request writes MAP-2
     ir = parse_process_ir_v1({"version": "1", "body": {"kind": "sequence", "steps": [
         {"kind": "passthrough"}, {"kind": "map_ref", "map_ref": "$ref:m12"},
-        {"kind": "map_ref", "map_ref": "$ref:a_map"}, {"kind": "stop"}]}})
+        {"kind": "map_ref", "map_ref": "$ref:b_map"}, {"kind": "stop"}]}})
     errors = [(item.code, item.path) for item in validate_process_ir(ir, symbols).errors]
     assert (_MISMATCH, "/body/steps/2/map_ref") in errors, errors
 
@@ -460,7 +468,7 @@ def test_two_updates_of_one_cache_are_refused_on_every_route(second_id):
         )
     envelope = integration_builder._pre_write_refusal(raw.value, failed_step="root")
     assert envelope["error_code"] == _CONFLICT
-    assert "reference_only" in envelope["hint"]
+    assert "the one spec that writes it" in envelope["hint"]
 
     # The recipe engine: one recipe diagnostic per writing spec.
     with pytest.raises(RecipeError) as recipe:
@@ -570,10 +578,11 @@ def test_the_apply_outcomes_cover_every_branch():
 @pytest.mark.parametrize("policy", ["reuse", "clone", "fail"])
 @pytest.mark.parametrize("first", sorted(_APPLY_KINDS))
 @pytest.mark.parametrize("second", sorted(_APPLY_KINDS))
-def test_a_write_conflict_is_exactly_two_writes_of_one_existing_component(first, second, policy):
-    """The coverage claim, derived from apply: a request is refused exactly when apply would
-    UPDATE the one existing component from both specs."""
-    expected = _apply_outcome(first, policy) == "updated" and _apply_outcome(second, policy) == "updated"
+def test_a_write_conflict_is_a_written_component_named_twice(first, second, policy):
+    """The coverage claim, derived from apply (correction batch 9): a request is refused exactly when apply
+    binds or writes the one existing component from both specs and writes it from at least one."""
+    outcomes = (_apply_outcome(first, policy), _apply_outcome(second, policy))
+    expected = all(outcome in ("updated", "reused") for outcome in outcomes) and "updated" in outcomes
     components = [IntegrationComponentSpec(**_apply_component("a", first)),
                   IntegrationComponentSpec(**_apply_component("b", second))]
     try:
@@ -581,7 +590,7 @@ def test_a_write_conflict_is_exactly_two_writes_of_one_existing_component(first,
         refused = False
     except ComponentWriteConflictError:
         refused = True
-    assert refused is expected
+    assert refused is expected, outcomes
 
 
 def test_a_reference_only_update_is_described_by_its_own_config():
@@ -723,9 +732,10 @@ def test_a_child_summary_keys_its_caches_by_component():
 
 
 def test_the_write_conflict_reads_the_bind_predicate_apply_runs():
-    """The non-body connector update apply binds instead of writing (QA-157-r2-01) is decided by
-    ONE predicate, and both apply's bind step and the conflict check call it. A structured update
-    and a metadata-only alias of one operation are one write; two structured updates are two."""
+    """The non-body connector update apply binds instead of writing (QA-157-r2-01) is decided by ONE
+    predicate, and both apply's bind step and the write predicate call it. A metadata-only update alone
+    binds and is admitted; beside a write of the same operation it is a second spec naming a written
+    component, and so is a second write (correction batch 9)."""
     import ast
 
     from boomi_mcp.categories import integration_builder
@@ -749,10 +759,10 @@ def test_the_write_conflict_reads_the_bind_predicate_apply_runs():
     def op(key, **config):
         return _spec(key, "connector-action", action="update", component_id="OP-1", connector_type="rest", **config)
 
-    build_symbol_table([op("op", response_profile_id="$ref:p1"), op("alias"), _spec("p1", "profile.json")])
-    with pytest.raises(ComponentWriteConflictError):
-        build_symbol_table([op("op", response_profile_id="$ref:p1"), op("other", response_profile_id="$ref:p1"),
-                            _spec("p1", "profile.json")])
+    build_symbol_table([op("alias"), _spec("p1", "profile.json")])
+    for second in (op("alias"), op("other", response_profile_id="$ref:p1")):
+        with pytest.raises(ComponentWriteConflictError):
+            build_symbol_table([op("op", response_profile_id="$ref:p1"), second, _spec("p1", "profile.json")])
 
 
 def _joined_map_findings(join_ref, declared_ref, alias_id="C-7"):
@@ -813,37 +823,34 @@ def test_every_declared_effect_is_compared_in_canonical_cache_spelling():
         assert isinstance(parent, ast.Call) and getattr(parent.func, "id", None) == "_canonical_effect", call.lineno
 
 
-def test_a_metadata_only_update_alias_keeps_the_structured_update_facts():
-    """CDX-184-r4-03: an update alias that names only the connector type states no profile. The
-    structured update of the same operation keeps its response profile, so a GET feeding a map
-    of that profile stays admitted."""
+def test_a_metadata_only_alias_beside_the_operation_update_is_refused():
+    """CDX-184-r4-03 and QA-184-s1-r7-02, under correction batch 9: an update alias naming only the connector
+    type binds the operation the structured update writes, so the pair is a written component named twice and
+    is refused. The structured update alone admits a GET feeding a map of its profile; the alias alone states
+    no action, so a call through it is still refused."""
     from boomi_mcp.compiler.process_ir import connector_capabilities
 
     rest = connector_capabilities.REST_FAMILY
-    components = [
-        _spec("p1", "profile.json"),
-        _spec("p2", "profile.json"),
-        _spec("conn", "connector-settings", connector_type="rest"),
-        _spec("op", "connector-action", action="update", component_id="OP-1", connector_type="rest",
-              connection_ref_key="conn", response_profile_id="$ref:p1"),
-        _spec("op_alias", "connector-action", action="update", component_id="OP-1", connector_type="rest"),
-        _spec("m12", "transform.map", source_profile_id="$ref:p1", target_profile_id="$ref:p2"),
-    ]
-    # The alias declares no action of its own: its config names only the connector type.
+    base = [_spec("p1", "profile.json"), _spec("p2", "profile.json"),
+            _spec("conn", "connector-settings", connector_type="rest"),
+            _spec("m12", "transform.map", source_profile_id="$ref:p1", target_profile_id="$ref:p2")]
+    op = _spec("op", "connector-action", action="update", component_id="OP-1", connector_type="rest",
+               connection_ref_key="conn", response_profile_id="$ref:p1")
+    alias = _spec("op_alias", "connector-action", action="update", component_id="OP-1", connector_type="rest")
     metadata = {"conn": (rest, None), "op": (rest, "GET")}
-    symbols = build_symbol_table(components, connector_metadata=metadata)
-    ir = parse_process_ir_v1({"version": "1", "body": {"kind": "sequence", "steps": [
-        {"kind": "connector_call", "operation_ref": "$ref:op"},
-        {"kind": "map_ref", "map_ref": "$ref:m12"}, {"kind": "stop"}]}})
-    assert [(item.code, item.path) for item in validate_process_ir(ir, symbols).errors] == []
-    outputs = {symbol.ref: symbol.output_profile_ref for symbol in symbols.symbols}
-    # The alias apply binds instead of writing carries the one write's facts (batch 6).
-    assert outputs["$ref:op"] == outputs["$ref:op_alias"] == "$ref:p1"
-    # A call THROUGH the alias is judged by the writing spec's connector facts too (QA-184-s1-r7-02).
-    through_alias = parse_process_ir_v1({"version": "1", "body": {"kind": "sequence", "steps": [
-        {"kind": "connector_call", "operation_ref": "$ref:op_alias"},
-        {"kind": "map_ref", "map_ref": "$ref:m12"}, {"kind": "stop"}]}})
-    assert [(item.code, item.path) for item in validate_process_ir(through_alias, symbols).errors] == []
+    with pytest.raises(ComponentWriteConflictError) as refused:
+        build_symbol_table(base + [op, alias], connector_metadata=metadata)
+    assert refused.value.conflicts == {"OP-1": ("op", "op_alias")}
+
+    def errors(components, operation_ref):
+        ir = parse_process_ir_v1({"version": "1", "body": {"kind": "sequence", "steps": [
+            {"kind": "connector_call", "operation_ref": operation_ref},
+            {"kind": "map_ref", "map_ref": "$ref:m12"}, {"kind": "stop"}]}})
+        table = build_symbol_table(components, connector_metadata=metadata)
+        return [(item.code, item.path) for item in validate_process_ir(ir, table).errors]
+
+    assert errors(base + [op], "$ref:op") == []
+    assert errors(base + [alias], "$ref:op_alias") != []
 
 
 def test_the_served_profile_mismatch_text_names_every_reporting_site():
@@ -1019,51 +1026,60 @@ def test_every_declared_component_id_reaches_the_builder_through_the_canonical_a
     assert sorted(uses) == ["canonical"] * 6 + ["echo"], uses
 
 
-def test_a_reference_apply_does_not_write_carries_every_fact_of_the_writing_spec():
-    """QA-184-s1-r7-02: every symbol fact of a reference apply does not write is read from the spec
-    that writes its component, including the connector facts a call is judged by and the snapshot's
-    path-binding requirement. The fact fields are read from the symbol model itself, so a fact added
-    later is covered without editing this test."""
+def test_every_symbol_is_described_by_its_own_spec():
+    """Correction batch 9, as an invariant over the symbol model: every field of each symbol equals the same
+    field with that spec alone in the table, so no spec's configuration describes another. Three references
+    naming one operation nothing in the request writes keep their own facts, including the connection each
+    names and the path-binding requirement the snapshot reads for each. The fields are read from the model,
+    so a fact added later is covered."""
     from types import SimpleNamespace
 
     from boomi_mcp.authoring.workflow import _connector_metadata_from_components
     from boomi_mcp.compiler.process_ir.contracts import ComponentSymbolV1
 
     operation_id = "66ff8c9e-9c83-48d7-8ec8-921783ced17a"
-    writer_config = dict(connector_type="rest", operation_mode="execute", method="GET",
-                         connection_ref_key="conn", response_profile_id="$ref:p1")
-    components = [
-        _spec("p1", "profile.json"), _spec("p2", "profile.json"),
-        _spec("conn", "connector-settings", connector_type="rest"),
-        _spec("op", "connector-action", action="update", component_id=operation_id, **writer_config),
+    base = [_spec("p1", "profile.json"), _spec("conn_a", "connector-settings", connector_type="rest"),
+            _spec("conn_b", "connector-settings", connector_type="rest")]
+    references = [
+        _spec("op_get", "connector-action", component_id=operation_id, reference_only=True, connector_type="rest",
+              operation_mode="execute", method="GET", connection_ref_key="conn_a", response_profile_id="$ref:p1"),
         _spec("op_alias", "connector-action", action="update", component_id=operation_id.upper(), connector_type="rest"),
-        _spec("op_ref", "connector-action", component_id=operation_id, reference_only=True),
+        _spec("op_other", "connector-action", component_id=operation_id, reference_only=True, connector_type="rest",
+              operation_mode="execute", method="POST", connection_ref_key="conn_b"),
     ]
-    dynamic = SimpleNamespace(component_key="op", route_state="dynamic", family="rest",
-                              listener_input_type=None, listener_request_profile=None)
-    snapshot = SimpleNamespace(lookup=lambda key: dynamic if key == "op" else None)
-    table = build_symbol_table(components, connector_metadata=_connector_metadata_from_components(components),
-                               connector_resolution_snapshot=snapshot)
-    symbols = {symbol.ref: symbol for symbol in table.symbols}
-    facts = sorted(set(ComponentSymbolV1.model_fields) - {"ref", "component_id"})
-    writer = symbols["$ref:op"]
-    # Non-vacuity: the writer states every kind of fact the call is judged by.
-    assert writer.connector_type and writer.action_type
-    assert (writer.connection_ref, writer.output_profile_ref, writer.requires_path_binding) == ("$ref:conn", "$ref:p1", True)
-    for ref in ("$ref:op_alias", "$ref:op_ref"):
-        assert {name: getattr(symbols[ref], name) for name in facts} == {name: getattr(writer, name) for name in facts}, ref
-    # CONTROL: with nothing in the request writing the operation, a reference states only its own facts.
-    alone = {symbol.ref: symbol for symbol in build_symbol_table(
-        components[:3] + components[5:], connector_metadata=_connector_metadata_from_components(components[:3] + components[5:]),
-        connector_resolution_snapshot=snapshot).symbols}
-    assert (alone["$ref:op_ref"].action_type, alone["$ref:op_ref"].connection_ref) == (None, None)
+    routes = {"op_get": "dynamic", "op_other": "static"}
+
+    def lookup(key):
+        if key not in routes:
+            return None
+        return SimpleNamespace(component_key=key, route_state=routes[key], family="rest",
+                               listener_input_type=None, listener_request_profile=None)
+
+    snapshot = SimpleNamespace(lookup=lookup)
+    fields = sorted(set(ComponentSymbolV1.model_fields) - {"ref", "component_id"})
+
+    def table(components):
+        return {symbol.ref: symbol for symbol in build_symbol_table(
+            components, connector_metadata=_connector_metadata_from_components(components),
+            connector_resolution_snapshot=snapshot).symbols}
+
+    combined = table(base + references)
+    for reference in references:
+        alone = table(base + [reference])["$ref:" + reference.key]
+        assert {name: getattr(combined["$ref:" + reference.key], name) for name in fields} == {
+            name: getattr(alone, name) for name in fields}, reference.key
+    keys = ("op_get", "op_alias", "op_other")
+    # Non-vacuity: the three name one component and still differ in their own facts.
+    assert len({combined["$ref:" + key].bound_component_id for key in keys}) == 1
+    assert [combined["$ref:" + key].action_type for key in keys] == ["GET", None, "POST"]
+    assert [combined["$ref:" + key].connection_ref for key in ("op_get", "op_other")] == ["$ref:conn_a", "$ref:conn_b"]
+    assert [combined["$ref:" + key].requires_path_binding for key in ("op_get", "op_other")] == [True, False]
 
 
 def test_a_reference_names_its_own_connection():
-    """Pre-commit verification of correction batch 7: the operation->connection edge is a fact of the
-    STEP, never of the component. The builder emits identical operation XML whichever connection is
-    named, so a reference naming a connection keeps its own, and only one naming none takes the
-    writing spec's."""
+    """Pre-commit verification of correction batch 7, under correction batch 9: the operation->connection edge
+    is a fact of the STEP. The builder emits identical operation XML whichever connection is named, so each
+    reference keeps the connection it names, and an operation the request writes is named by its writer alone."""
     from boomi_mcp.authoring.workflow import _connector_metadata_from_components
     from boomi_mcp.categories.components.builders.connector_builder import RestClientOperationBuilder
 
@@ -1075,67 +1091,59 @@ def test_a_reference_names_its_own_connection():
             == RestClientOperationBuilder().build(**dict(config, connection_ref_key="conn_b")))
 
     operation_id = "66ff8c9e-9c83-48d7-8ec8-921783ced17a"
-    components = [
-        _spec("p1", "profile.json"),
-        _spec("conn_a", "connector-settings", connector_type="rest"),
-        _spec("conn_b", "connector-settings", connector_type="rest"),
-        _spec("op", "connector-action", action="update", component_id=operation_id, connector_type="rest",
-              operation_mode="execute", method="GET", connection_ref_key="conn_a", response_profile_id="$ref:p1"),
-        _spec("op_ref", "connector-action", component_id=operation_id.upper(), reference_only=True,
-              connection_ref_key="conn_b"),
-        _spec("op_alias", "connector-action", action="update", component_id=operation_id, connector_type="rest"),
+    base = [_spec("conn_a", "connector-settings", connector_type="rest"),
+            _spec("conn_b", "connector-settings", connector_type="rest")]
+    references = [
+        _spec("op_a", "connector-action", component_id=operation_id, reference_only=True, connector_type="rest",
+              operation_mode="execute", method="GET", connection_ref_key="conn_a"),
+        _spec("op_b", "connector-action", component_id=operation_id.upper(), reference_only=True, connector_type="rest",
+              operation_mode="execute", method="GET", connection_ref_key="conn_b"),
     ]
     symbols = {symbol.ref: symbol for symbol in build_symbol_table(
-        components, connector_metadata=_connector_metadata_from_components(components)).symbols}
-    assert [symbols[ref].connection_ref for ref in ("$ref:op", "$ref:op_ref", "$ref:op_alias")] == [
-        "$ref:conn_a", "$ref:conn_b", "$ref:conn_a"]
-    # The component facts still come from the writer.
-    assert symbols["$ref:op_ref"].action_type == symbols["$ref:op"].action_type == "GET"
+        base + references, connector_metadata=_connector_metadata_from_components(base + references)).symbols}
+    assert [symbols["$ref:op_a"].connection_ref, symbols["$ref:op_b"].connection_ref] == ["$ref:conn_a", "$ref:conn_b"]
+    writer = _spec("op", "connector-action", action="update", component_id=operation_id, connector_type="rest",
+                   operation_mode="execute", method="GET", connection_ref_key="conn_a")
+    with pytest.raises(ComponentWriteConflictError):
+        build_symbol_table(base + references + [writer])
 
 
-def test_a_listener_reference_carries_the_writing_spec_listener_facts():
-    """Pre-commit verification of correction batch 7: a WSS listener operation's inbound facts are
-    facts of the component apply writes, so a metadata-only alias and a reference_only spec (spelling
-    the GUID in upper case) carry the writer's, compared field by field over the symbol model."""
-    from boomi_mcp.authoring.workflow import _connector_metadata_from_components
-    from boomi_mcp.compiler.process_ir.contracts import ComponentSymbolV1
-
+def test_a_listener_named_beside_its_writer_is_refused():
+    """Stage-2 review round r8 (the cleared listener profile), under correction batch 9: a WSS listener update
+    that omits its request profile clears it at apply, and no other spec may name that listener beside it,
+    whichever case its GUID is spelled in."""
     listener_id = "66ff8c9e-9c83-48d7-8ec8-921783ced17a"
-    components = [
-        _spec("p1", "profile.json"),
-        _spec("op", "connector-action", action="update", component_id=listener_id, connector_type="wss",
-              operation_mode="listen", input_type="multidata", request_profile="$ref:p1"),
-        _spec("op_alias", "connector-action", action="update", component_id=listener_id.upper(), connector_type="wss"),
-        _spec("op_ref", "connector-action", component_id=listener_id.upper(), reference_only=True),
-    ]
-    symbols = {symbol.ref: symbol for symbol in build_symbol_table(
-        components, connector_metadata=_connector_metadata_from_components(components)).symbols}
-    writer = symbols["$ref:op"]
-    # Non-vacuity: the writer states listener facts.
-    assert (writer.input_document_type, writer.input_profile_ref) == ("multidata", "$ref:p1")
-    facts = sorted(set(ComponentSymbolV1.model_fields) - {"ref", "component_id"})
-    for ref in ("$ref:op_alias", "$ref:op_ref"):
-        assert {name: getattr(symbols[ref], name) for name in facts} == {name: getattr(writer, name) for name in facts}, ref
+    writer = _spec("op", "connector-action", action="update", component_id=listener_id, connector_type="wss",
+                   operation_mode="listen", input_type="singlejson")
+    reference = _spec("op_ref", "connector-action", component_id=listener_id.upper(), reference_only=True,
+                      connector_type="wss")
+    with pytest.raises(ComponentWriteConflictError) as refused:
+        build_symbol_table([writer, reference])
+    assert refused.value.conflicts == {listener_id: ("op", "op_ref")}
 
 
 def test_a_reference_only_spec_spelling_a_guid_in_upper_case_binds_the_component():
-    """Pre-commit verification of correction batch 7: the planner binding's reference_only branch reads
-    the canonical id too, so a reference_only update spelling the GUID in upper case beside an update of
-    it is a write conflict, and a reference_only create spelling it that way, at the top level or in its
-    config, binds the component and carries the writer's facts."""
+    """Pre-commit verification of correction batch 7, under correction batch 9: the planner binding's
+    reference_only branch reads the canonical id. A reference_only update or create spelling the GUID in upper
+    case, at the top level or in its config, beside an update of it names the written component twice. Two
+    reference_only spellings of a component nothing in the request writes bind it once and are admitted."""
     upper = _GUID.upper()
     writer = _spec("w", "documentcache", action="update", component_id=_GUID, profile_id="$ref:p1")
-    with pytest.raises(ComponentWriteConflictError) as refused:
-        build_symbol_table([_spec("p1", "profile.json"), writer,
-                            _spec("r", "documentcache", action="update", component_id=upper, reference_only=True)])
-    assert refused.value.conflicts == {_GUID: ("r", "w")}
     for reference in (
+        _spec("r", "documentcache", action="update", component_id=upper, reference_only=True),
         _spec("r", "documentcache", component_id=upper, reference_only=True),
         IntegrationComponentSpec(key="r", type="documentcache", name="r",
                                  config={"reference_only": True, "component_id": upper}),
     ):
-        symbols = {symbol.ref: symbol for symbol in build_symbol_table([_spec("p1", "profile.json"), writer, reference]).symbols}
-        assert (symbols["$ref:r"].bound_component_id, symbols["$ref:r"].cache_profile_ref) == (_GUID, "$ref:p1")
+        with pytest.raises(ComponentWriteConflictError) as refused:
+            build_symbol_table([_spec("p1", "profile.json"), writer, reference])
+        assert refused.value.conflicts == {_GUID: ("r", "w")}
+    symbols = {symbol.ref: symbol for symbol in build_symbol_table([
+        _spec("r", "documentcache", component_id=upper, reference_only=True),
+        IntegrationComponentSpec(key="s", type="documentcache", name="s",
+                                 config={"reference_only": True, "component_id": _GUID}),
+    ]).symbols}
+    assert symbols["$ref:r"].bound_component_id == symbols["$ref:s"].bound_component_id == _GUID
 
 
 def test_a_blank_update_id_names_nothing_at_plan_and_at_apply():
@@ -1219,75 +1227,37 @@ def test_a_connection_binding_spelling_one_guid_two_ways_names_one_component():
 # ---------------------------------------------------------------------------
 
 
-def test_a_writer_that_states_no_fact_leaves_a_reference_its_own():
-    """CDX-184-r7-01: a spec that only renames an operation writes it but states no action, so a
-    reference_only alias declaring GET keeps its own action and a call through it is not refused as
-    an unsupported action. A writer that DOES state an action decides it."""
+def test_the_round_r8_shapes_are_refused_before_any_fact_is_read():
+    """Stage-2 review rounds r7 and r8 and QA round r9 (correction batch 9). Each shape named one existing
+    component through a writer and a reference, and every rule for which spec describes it was wrong for one
+    of them. The request is now refused before any fact is read:
+    - a rename-only operation update beside a reference_only spec of the same operation;
+    - a raw-XML operation update beside a reference declaring GET;
+    - a listener update that clears its request profile beside a reference of the old listener.
+    Alone, the reference keeps its own declared action, and a call through it is not refused as an
+    unsupported action."""
     from boomi_mcp.authoring.workflow import _connector_metadata_from_components
 
     operation_id = "66ff8c9e-9c83-48d7-8ec8-921783ced17a"
+    conn = _spec("conn", "connector-settings", connector_type="rest")
     reference = _spec("op_ref", "connector-action", component_id=operation_id, reference_only=True,
                       connector_type="rest", operation_mode="execute", method="GET", connection_ref_key="conn")
-
-    def symbols_with(writer_config):
-        components = [_spec("conn", "connector-settings", connector_type="rest"),
-                      _spec("op", "connector-action", action="update", component_id=operation_id, **writer_config),
-                      reference]
-        table = build_symbol_table(components, connector_metadata=_connector_metadata_from_components(components))
-        return table, {symbol.ref: symbol for symbol in table.symbols}
-
-    table, symbols = symbols_with({"connector_type": "rest", "component_name": "renamed"})
-    assert (symbols["$ref:op"].action_type, symbols["$ref:op_ref"].action_type) == (None, "GET")
+    writers = (
+        _spec("op", "connector-action", action="update", component_id=operation_id, connector_type="rest",
+              component_name="renamed"),
+        _spec("op", "connector-action", action="update", component_id=operation_id, connector_type="rest",
+              xml="<submitted/>"),
+        _spec("op", "connector-action", action="update", component_id=operation_id, connector_type="wss",
+              operation_mode="listen", input_type="singlejson"),
+    )
+    for writer in writers:
+        with pytest.raises(ComponentWriteConflictError) as refused:
+            build_symbol_table([conn, writer, reference])
+        assert refused.value.conflicts == {operation_id: ("op", "op_ref")}
+    alone = build_symbol_table([conn, reference], connector_metadata=_connector_metadata_from_components([conn, reference]))
     call = parse_process_ir_v1({"version": "1", "body": {"kind": "sequence", "steps": [
         {"kind": "connector_call", "operation_ref": "$ref:op_ref"}, {"kind": "stop"}]}})
-    codes = [item.code for item in validate_process_ir(call, table).errors]
+    codes = [item.code for item in validate_process_ir(call, alone).errors]
     assert "PROCESS_IR_CAPABILITY_CONNECTOR_ACTION_UNSUPPORTED" not in codes, codes
-    # CONTROL: a writer stating an action decides it for every reference.
-    _table, symbols = symbols_with({"connector_type": "rest", "operation_mode": "execute", "method": "POST",
-                                    "connection_ref_key": "conn"})
-    assert symbols["$ref:op_ref"].action_type == symbols["$ref:op"].action_type != "GET"
 
 
-def test_each_reference_fact_is_the_writers_stated_fact_else_its_own():
-    """CDX-184-r7-01, as an invariant over the symbol model: for every fact field, a reference apply does
-    not write carries the writing spec's value where the writer states one, and otherwise the value it
-    has on its own, measured with the writer absent. The connection is the step's own and is checked by
-    `test_a_reference_names_its_own_connection`."""
-    from boomi_mcp.authoring.workflow import _connector_metadata_from_components
-    from boomi_mcp.compiler.process_ir.contracts import ComponentSymbolV1
-
-    operation_id = "66ff8c9e-9c83-48d7-8ec8-921783ced17a"
-    writers = {
-        "renaming": _spec("op", "connector-action", action="update", component_id=operation_id,
-                          connector_type="rest", component_name="renamed"),
-        "structured": _spec("op", "connector-action", action="update", component_id=operation_id,
-                            connector_type="rest", operation_mode="execute", method="GET",
-                            response_profile_id="$ref:p1"),
-    }
-    references = [
-        _spec("op_ref", "connector-action", component_id=operation_id.upper(), reference_only=True,
-              connector_type="rest", operation_mode="execute", method="POST", request_profile_id="$ref:p2"),
-        _spec("op_alias", "connector-action", action="update", component_id=operation_id, connector_type="rest"),
-    ]
-    base = [_spec("p1", "profile.json"), _spec("p2", "profile.json")]
-    fields = sorted(set(ComponentSymbolV1.model_fields)
-                    - {"ref", "component_id", "bound_component_id", "component_type", "connection_ref"})
-
-    def table(components):
-        return {symbol.ref: symbol for symbol in build_symbol_table(
-            components, connector_metadata=_connector_metadata_from_components(components)).symbols}
-
-    stated_any = set()
-    for name, writer in writers.items():
-        combined = table(base + [writer] + references)
-        writer_alone = table(base + [writer])["$ref:op"]
-        for reference in references:
-            own = table(base + [reference])["$ref:" + reference.key]
-            for field in fields:
-                stated = getattr(writer_alone, field)
-                if stated is not None:
-                    stated_any.add(field)
-                expected = stated if stated is not None else getattr(own, field)
-                assert getattr(combined["$ref:" + reference.key], field) == expected, (name, reference.key, field)
-    # Non-vacuity: the structured writer states the action and a profile, the renaming one does not.
-    assert {"action_type", "output_profile_ref"} <= stated_any

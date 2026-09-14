@@ -804,12 +804,8 @@ def test_the_revision_moves_with_component_identity_and_forwarding_behaviour(mon
         # QA round r7: the canonical component id every binding and write-conflict check reads.
         (integration_builder, "canonical_component_id",
          lambda value: value.strip() if isinstance(value, str) and value.strip() else None),
-        # Pre-commit verification of batch 7: which spec describes a reference.
-        (materialization, "_fact_source", lambda component, bindings, writers, writer_for: component),
-        # Stage-2 review round r7: a writer's unstated fact leaves the reference its own.
-        (materialization, "_overlay", lambda stated, own: tuple(stated)),
         # Stage-2 review round r5: the write-conflict refusal and the canonical effect comparison.
-        (integration_builder, "component_write_conflicts", lambda components: {}),
+        (integration_builder, "component_write_conflicts", lambda components, conflict_policy="reuse": {}),
         (integration_builder, "component_writes_existing", lambda comp: False),
         (integration_builder, "apply_writes_component_config", lambda comp, conflict_policy: True),
         (integration_builder, "_binds_as_metadata_only_connector_update", lambda component_type, config: False),

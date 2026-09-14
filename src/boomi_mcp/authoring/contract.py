@@ -1474,17 +1474,14 @@ def _component_identity_behaviour_oracle():
         # One existing cache, named by a create that names its id and by a reference.
         spec("c_a", "documentcache", component_id="CACHE-1", profile_id="$ref:p2", indexes=indexes),
         spec("c_b", "documentcache", component_id="CACHE-1", reference_only=True, indexes=indexes),
-        # One existing cache, named by a reference and by an update declaring its profile.
-        spec("d_a", "documentcache", component_id="CACHE-2", reference_only=True),
+        # One existing cache the request updates, declaring its profile.
         spec("d_b", "documentcache", action="update", component_id="CACHE-2", profile_id="$ref:p2"),
-        # One existing map, named by a reference that sorts first and by the update writing it.
-        spec("a_map", "transform.map", component_id="MAP-1", reference_only=True),
+        # One existing map the request updates.
         spec("b_map", "transform.map", action="update", component_id="MAP-1",
              source_profile_id="$ref:p1", target_profile_id="$ref:p2"),
-        # A function map that writes a process property, named the same two ways.
+        # A function map that writes a process property.
         profile("sp"),
         profile("tp"),
-        spec("f_ref", "transform.map", component_id="FMAP-1", reference_only=True),
         IntegrationComponentSpec(
             key="fn_map", type="transform.map", action="update", name="fn_map",
             component_id="FMAP-1", depends_on=["sp", "tp"],
@@ -1525,12 +1522,12 @@ def _component_identity_behaviour_oracle():
             {"steps": [mapped("$ref:m12")], "terminal": {"kind": "cache_put", "cache_ref": "$ref:c_b"}},
             {"steps": [{"kind": "cache_get", "cache_ref": "$ref:c_a"}, mapped("$ref:m11")], "terminal": stop},
         ),
-        "write_against_the_other_reference_declaration": root(
-            {"steps": [mapped("$ref:m11")], "terminal": {"kind": "cache_put", "cache_ref": "$ref:d_a"}},
+        "write_against_the_update_declaration": root(
+            {"steps": [mapped("$ref:m11")], "terminal": {"kind": "cache_put", "cache_ref": "$ref:d_b"}},
             {"steps": [{"kind": "message", "text": "m"}], "terminal": stop},
         ),
-        "map_through_the_reference": root(
-            {"steps": [mapped("$ref:m12"), mapped("$ref:a_map")], "terminal": stop},
+        "map_through_the_update": root(
+            {"steps": [mapped("$ref:m12"), mapped("$ref:b_map")], "terminal": stop},
             {"steps": [{"kind": "message", "text": "m"}], "terminal": stop},
         ),
         "declared_map_effect_through_its_writer": root(
@@ -1618,44 +1615,61 @@ def _component_identity_behaviour_oracle():
         guid_spellings = []
     except ComponentWriteConflictError as conflict:
         guid_spellings = [conflict.code, sorted(conflict.conflicts.items())]
-    # Where each symbol fact of a reference comes from (correction batch 7): an operation and a
-    # WSS listener, each written by one spec and named through a metadata-only alias or a
-    # reference_only spec spelling its GUID in upper case; one reference names its own connection.
+    # Where each symbol fact comes from (correction batch 9). Specs naming a component nothing in
+    # the request writes are each described by their own config: an operation named by two
+    # reference_only specs in two GUID spellings and by a metadata-only alias apply only binds, and a
+    # WSS listener named by two reference_only specs. A reference beside the spec that writes its
+    # component is refused, whatever the writer states (an operation, a listener, a rename).
     from ..compiler.process_ir.contracts import ComponentSymbolV1
 
-    sources = [
+    shared = [
         spec("p1", "profile.json"),
         spec("conn_a", "connector-settings", connector_type="rest"),
         spec("conn_b", "connector-settings", connector_type="rest"),
-        spec("rest_op", "connector-action", action="update", component_id="0370d8d8-2c63-42d7-ae11-9aa5bbf64262",
+    ]
+    own = shared + [
+        spec("rest_get", "connector-action", component_id="0370d8d8-2c63-42d7-ae11-9aa5bbf64262", reference_only=True,
              connector_type="rest", operation_mode="execute", method="GET", connection_ref_key="conn_a",
              response_profile_id="$ref:p1"),
         spec("rest_alias", "connector-action", action="update",
              component_id="0370D8D8-2C63-42D7-AE11-9AA5BBF64262", connector_type="rest"),
+        spec("rest_post", "connector-action", component_id="0370D8D8-2C63-42D7-AE11-9AA5BBF64262",
+             reference_only=True, connector_type="rest", operation_mode="execute", method="POST",
+             connection_ref_key="conn_b"),
+        spec("wss_json", "connector-action", component_id="66ff8c9e-9c83-48d7-8ec8-921783ced17a", reference_only=True,
+             connector_type="wss", operation_mode="listen", input_type="singlejson", request_profile="$ref:p1"),
+        spec("wss_ref", "connector-action", component_id="66FF8C9E-9C83-48D7-8EC8-921783CED17A", reference_only=True),
+    ]
+    beside_writer = shared + [
+        spec("rest_op", "connector-action", action="update", component_id="0370d8d8-2c63-42d7-ae11-9aa5bbf64262",
+             connector_type="rest", operation_mode="execute", method="GET", connection_ref_key="conn_a",
+             response_profile_id="$ref:p1"),
         spec("rest_ref", "connector-action", component_id="0370D8D8-2C63-42D7-AE11-9AA5BBF64262",
              reference_only=True, connection_ref_key="conn_b"),
         spec("wss_op", "connector-action", action="update", component_id="66ff8c9e-9c83-48d7-8ec8-921783ced17a",
              connector_type="wss", operation_mode="listen", input_type="multidata", request_profile="$ref:p1"),
         spec("wss_ref", "connector-action", component_id="66FF8C9E-9C83-48D7-8EC8-921783CED17A", reference_only=True),
-        # A writer that only renames an operation states no action, so its reference keeps its own.
         spec("ren_op", "connector-action", action="update", component_id="2d6c9d51-6c0c-4273-8ad6-54605e018d9f",
              connector_type="rest", component_name="renamed"),
         spec("ren_ref", "connector-action", component_id="2D6C9D51-6C0C-4273-8AD6-54605E018D9F", reference_only=True,
              connector_type="rest", operation_mode="execute", method="GET", connection_ref_key="conn_b"),
     ]
-    try:
-        source_table = build_symbol_table(
-            sources, conflict_policy="reuse", connector_metadata=_connector_metadata_from_components(sources)
-        )
-    except ComponentWriteConflictError as conflict:
-        # A rule under which one of these references writes too is a verdict, not an unavailable row.
-        fact_sources = [conflict.code, sorted(conflict.conflicts.items())]
-    else:
-        source_fields = sorted(set(ComponentSymbolV1.model_fields) - {"component_id"})
-        fact_sources = sorted(
+    source_fields = sorted(set(ComponentSymbolV1.model_fields) - {"component_id"})
+
+    def described(components):
+        try:
+            table = build_symbol_table(
+                components, conflict_policy="reuse", connector_metadata=_connector_metadata_from_components(components)
+            )
+        except ComponentWriteConflictError as conflict:
+            # A refusal is a verdict, not an unavailable row.
+            return [conflict.code, sorted(conflict.conflicts.items())]
+        return sorted(
             [str(getattr(symbol, name) if getattr(symbol, name) is not None else "") for name in source_fields]
-            for symbol in source_table.symbols
+            for symbol in table.symbols
         )
+
+    fact_sources = {"own": described(own), "beside_writer": described(beside_writer)}
     verdicts = {"write_matrix": write_matrix, "guid_spellings": guid_spellings, "fact_sources": fact_sources}
     for policy in ("clone", "reuse"):
         symbols = build_symbol_table(components, conflict_policy=policy)
