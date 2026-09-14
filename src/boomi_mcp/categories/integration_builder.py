@@ -5883,28 +5883,6 @@ class _PlannerBinding(NamedTuple):
     candidates: Tuple[Dict[str, Any], ...]
 
 
-def _planner_binding_request(comp):
-    """``(reference_only, declared id, name)``: what a spec's binding reads from the request (#184).
-
-    The request half of ``resolve_planner_binding``, so a reading that must not touch the account asks the
-    same precedence rule instead of restating it.
-    """
-    config = comp.config if isinstance(comp.config, dict) else {}
-    reference_only = bool(config.get("reference_only"))
-    # #184: every declared id is its canonical spelling (`canonical_component_id`), so two
-    # spellings of one component bind, conflict and are written as one.
-    effective_component_id = canonical_component_id(comp.component_id)
-    effective_name = comp.name
-    if reference_only:
-        # Top-level then config, treating blank / whitespace as absent so a "  "
-        # id/name cannot become a fake reuse target.
-        effective_component_id = canonical_component_id(_first_nonblank_str(
-            comp.component_id, config.get("component_id")
-        ))
-        effective_name = _first_nonblank_str(comp.name, config.get("component_name"))
-    return reference_only, effective_component_id, effective_name
-
-
 def resolve_planner_binding(boomi_client, comp, *, declared_only=False) -> "_PlannerBinding":
     """WHICH existing component, if any, this spec entry binds to. THE resolution.
 
@@ -5927,7 +5905,19 @@ def resolve_planner_binding(boomi_client, comp, *, declared_only=False) -> "_Pla
     the recipe engine. It shares this function's precedence rule rather than
     re-stating it, which is the whole reason this function exists.
     """
-    reference_only, effective_component_id, effective_name = _planner_binding_request(comp)
+    config = comp.config if isinstance(comp.config, dict) else {}
+    reference_only = bool(config.get("reference_only"))
+    # #184: every declared id is its canonical spelling (`canonical_component_id`), so two
+    # spellings of one component bind, conflict and are written as one.
+    effective_component_id = canonical_component_id(comp.component_id)
+    effective_name = comp.name
+    if reference_only:
+        # Top-level then config, treating blank / whitespace as absent so a "  "
+        # id/name cannot become a fake reuse target.
+        effective_component_id = canonical_component_id(_first_nonblank_str(
+            comp.component_id, config.get("component_id")
+        ))
+        effective_name = _first_nonblank_str(comp.name, config.get("component_name"))
     if effective_component_id:
         return _PlannerBinding(reference_only, effective_component_id, ())
     if declared_only:
@@ -6052,59 +6042,6 @@ def planned_existing_ids(planned):
         for step in (planned.get("steps") or ())
         if isinstance(step, dict) and isinstance(step.get("key"), str)
     }
-
-
-def component_identity_waits_on_the_account(config) -> bool:
-    """Whether a verdict on component identity waits on a binding only an account read answers (#184).
-
-    QA-184-s1-r11-01: when the component plan cannot be built, the typed plan cannot know which existing
-    component a spec bound by name is. That changes a verdict only where two specs could turn out to be one
-    component:
-    - a spec only an account read binds, beside a spec bound by a declared id of the same metadata type,
-      because any declared component of that type may be the one the name matches;
-    - two such specs of one metadata type and one name, because one stored component answers both.
-
-    Specs of different types, or of one type with different names, never name one component, because a
-    component has one type and one name. The answer is read from the request alone, through the pieces apply
-    uses:
-    - its normalization (``_normalize_to_spec``);
-    - the metadata type a name is listed under (``_metadata_type_for_component``);
-    - the planner binding's request reading (``_planner_binding_request``);
-    - its reuse predicate (``_will_reuse_at_apply``);
-    - the declared bindings.
-
-    A request whose components cannot be normalized is not judged here, so it waits on the account.
-    """
-    try:
-        spec = _normalize_to_spec(config)
-    except Exception:  # noqa: BLE001 - components that cannot be read leave identity unjudged
-        return True
-    policy = str(config.get("conflict_policy") or "reuse")
-    components = list(spec.components or ())
-    # The declared answer, deliberately: this runs when the account's answer is missing.
-    declared = declared_bindings_for_components(components, policy, existing_ids=None)
-    declared_types = {_metadata_type_for_component(comp) for comp in components if comp.key in declared}
-    declared_types.discard(None)
-    by_name = []
-    for comp in components:
-        reference_only, declared_id, name = _planner_binding_request(comp)
-        if declared_id or not (isinstance(name, str) and name):
-            continue
-        metadata_type = _metadata_type_for_component(comp)
-        if not metadata_type:
-            continue
-        # Only a spec apply would BIND by its name counts: an update writes the component its name matches, a
-        # `reference_only` spec reuses it, and a create is reused only where the policy reuses a match.
-        if comp.action == "update" or reference_only or _will_reuse_at_apply(
-            declared_action=comp.action,
-            existing_component_id="matched by name",
-            reference_only=False,
-            conflict_policy=policy,
-        ):
-            by_name.append((metadata_type, name))
-    if any(metadata_type in declared_types for metadata_type, _name in by_name):
-        return True
-    return len(set(by_name)) < len(by_name)
 
 
 def reused_keys_for_components(components, conflict_policy="reuse", existing_ids=None):

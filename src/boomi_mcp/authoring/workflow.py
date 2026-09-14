@@ -1244,20 +1244,6 @@ def build_topology_relations(
 _UNPLANNED = object()
 
 
-def _identity_waits_on_the_account(normalized: _NormalizedIntent, request: AuthoringRequestV1) -> bool:
-    """Whether this intent's component identity waits on the component plan's account answer (#184).
-
-    Asked of the builder over the same dumped spec and bound conflict policy the component plan reads.
-    """
-    from ..categories.integration_builder import component_identity_waits_on_the_account
-
-    return component_identity_waits_on_the_account(
-        {
-            "integration_spec": normalized.integration_spec.model_dump(mode="json"),
-            "conflict_policy": request.intent.conflict_policy,
-        }
-    )
-
 
 def _legacy_plan_echo(
     normalized: _NormalizedIntent,
@@ -2668,28 +2654,31 @@ def plan_authoring_request_v1(
             )
             for warning in (legacy.get("warnings") or ())
         )
-    elif boomi_client is not None and _identity_waits_on_the_account(normalized, request):
-        # #184 (QA-184-s1-r11-01): with an account in hand the component plan was attempted
-        # and could not be built. Where component identity waits on its bindings (which specs
-        # name one existing component, and every write conflict that follows), validation could
-        # not judge the request. Reading the failure as "no binding" admitted a conflict that
-        # apply refuses, so the plan blocks there and compile issues no binding. A request whose
-        # identity cannot depend on the account (distinct names, say) compiles as before.
-        errors = sort_authoring_diagnostics(
-            errors
-            + (
-                _diag(
-                    AUTHORING_COMPILE_BLOCKED,
-                    "error",
-                    message=(
-                        "The component plan could not be built from the account, so which "
-                        "specs name one existing component, and every refusal that depends "
-                        "on it, could not be judged."
-                    ),
-                    subject_kind="component_plan",
-                    remediation="Re-plan once the account's component metadata can be read.",
+    elif boomi_client is not None:
+        # #184 (QA-184-s1-r11-01, QA-184-s1-r12-01; owner decision 2026-09-14): with an account in
+        # hand the component plan was attempted and could not be built. That plan decides its
+        # lint warnings and every verdict that rests on the account: which existing component each
+        # spec names, a write conflict, an ambiguous or colliding name, the profile facts of a
+        # create it reuses. Validation judged the request from declared ids instead. The owner's
+        # decision is that plan and compile keep working while the account is unreadable, so the
+        # plan says exactly what was not judged rather than refusing. Apply compiles again against
+        # the account and refuses a binding the account decides differently.
+        legacy_warnings = (
+            _diag(
+                AUTHORING_COMPILE_BLOCKED,
+                "advisory",
+                message=(
+                    "The component plan could not be built from the account, so its warnings "
+                    "and every verdict it decides were not judged: which existing component "
+                    "each spec names, write conflicts, ambiguous or colliding names, and the "
+                    "profile facts of a create it reuses. Declared ids were used instead, and "
+                    "apply refuses a binding the account decides differently."
                 ),
-            )
+                subject_kind="component_plan",
+                remediation=(
+                    "Re-plan once the account's component metadata can be read, before applying."
+                ),
+            ),
         )
     else:
         # Not silence — an explicit statement that the lint did not run. Reporting

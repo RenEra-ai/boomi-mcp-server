@@ -1540,6 +1540,7 @@ def _component_identity_behaviour_oracle():
         ComponentWriteConflictError,
         apply_writes_component_config,
         component_writes_existing,
+        planned_existing_ids,
     )
     from .workflow import _connector_metadata_from_components
 
@@ -1680,8 +1681,12 @@ def _component_identity_behaviour_oracle():
         spec("named_reference", "documentcache", reference_only=True),
         spec("unmatched_create", "documentcache", profile_id="$ref:p1"),
     ]
-    account = {"named_create": "0370D8D8-2C63-42D7-AE11-9AA5BBF64262",
-               "named_reference": "0370d8d8-2c63-42d7-ae11-9aa5bbf64262", "unmatched_create": None}
+    # Read through the plan route's own reading of a component plan (`planned_existing_ids`, CDX-184-r11-01).
+    account = planned_existing_ids({"_success": True, "steps": [
+        {"key": "named_create", "existing_component_id": "0370D8D8-2C63-42D7-AE11-9AA5BBF64262"},
+        {"key": "named_reference", "existing_component_id": "0370d8d8-2c63-42d7-ae11-9aa5bbf64262"},
+        {"key": "unmatched_create", "existing_component_id": None},
+    ]})
 
     def bound(components):
         try:

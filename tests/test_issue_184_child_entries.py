@@ -817,6 +817,11 @@ def test_the_revision_moves_with_component_identity_and_forwarding_behaviour(mon
         (integration_builder, "_binds_as_metadata_only_connector_update", lambda component_type, config: False),
         (integration_builder, "smart_merge_would_change", lambda config: False),
         (process_ir_effects, "_canonical_effect", lambda effect, canonical: effect),
+        # Correction batch 12 (CDX-184-r11-01): the plan route's identity readings. The guard
+        # `test_every_identity_decision_of_the_plan_route_moves_the_compiler_revision` requires every one.
+        (integration_builder, "reused_keys_for_components",
+         lambda components, conflict_policy="reuse", existing_ids=None: set()),
+        (integration_builder, "planned_existing_ids", lambda planned: None),
     )
     for module, name, replacement in perturbations:
         with monkeypatch.context() as patched:

@@ -1581,16 +1581,19 @@ def test_every_identity_reading_takes_the_bindings_its_route_resolved():
     assert seen > 20, seen
 
 
-def test_an_unbuildable_component_plan_blocks_only_an_identity_the_account_decides():
-    """QA-184-s1-r11-01 and the clean-room contract. With an account in hand, the component plan could not be
-    built because the name listing failed.
-    - Where component identity waits on that answer, the plan blocks and compile issues no binding: a writer
-      beside a spec bound by name, a spec bound by name beside a reference by id, and two creates sharing one
-      name.
-    - Where it cannot, because distinct names can never share a component or a copy binds nothing, the plan
-      compiles as before. That is the account-free route the clean-room suite relies on.
-    - Without a client, nothing is attempted and nothing blocks.
-    Offline: only the name listing fails; a lookup by id answers empty."""
+def test_an_unbuildable_component_plan_is_served_as_unjudged():
+    """QA-184-s1-r11-01, QA-184-s1-r12-01 and the owner decision of 2026-09-14.
+
+    With an account in hand, the component plan could not be built because the name listing failed. The owner's
+    decision is that plan and compile keep working while the account is unreadable. So nothing blocks, and the
+    plan serves one advisory naming every verdict that plan decides and nobody judged. That covers a single create
+    under `fail`, whose collision only the account decides, as well as a writer beside a name.
+    - The binding compiled then is compiled again at apply against the readable account, which refuses it with no
+      write, because the account decides the name conflict the degraded plan could not see.
+    - Without a client the plan says only that the lint did not run.
+    - A working account serves neither advisory.
+    Offline: only the name listing fails, and a lookup by id answers empty."""
+    import copy
     from unittest import mock
 
     from boomi_mcp.authoring.workflow import compile_authoring_request_v1
@@ -1607,39 +1610,126 @@ def test_an_unbuildable_component_plan_blocks_only_an_identity_the_account_decid
 
     writer = _cache("u1", "p_a", "a1", "create_by_id")
     writer["action"] = "update"
-    beside_writer = [_profile("p_a", "a1"), writer, _named(_cache("u2", "p_a", "a1", "new"))]
-    beside_reference = [_profile("p_a", "a1"), _cache("c_ref", "p_a", "a1", "reference_only"),
-                        _named(_cache("c_a", "p_a", "a1", "new"))]
-    one_name = [_profile("p_a", "a1"), _named(_cache("c_a", "p_a", "a1", "new")),
-                _named(_cache("c_b", "p_a", "a1", "new"))]
-    distinct_names = [_profile("p_a", "a1"), _named(_cache("c_a", "p_a", "a1", "new"), "first cache"),
-                      _named(_cache("c_b", "p_a", "a1", "new"), "second cache")]
+    beside_writer = request([_profile("p_a", "a1"), writer, _named(_cache("u2", "p_a", "a1", "new"))])
+    single_under_fail = request([_profile("p_a", "a1"), _named(_cache("c_a", "p_a", "a1", "new"))], policy="fail")
 
     def unreadable(_client, _comp):
         raise ConnectionError("the component metadata listing failed")
 
-    def unjudged(diagnostics):
-        return [diagnostic for diagnostic in diagnostics
-                if diagnostic.code == "AUTHORING_COMPILE_BLOCKED" and diagnostic.subject_kind == "component_plan"
-                and diagnostic.severity == "error"]
+    def component_plan(diagnostics):
+        return [d for d in diagnostics if d.code == "AUTHORING_COMPILE_BLOCKED" and d.subject_kind == "component_plan"]
+
+    def listing(resolver):
+        return (mock.patch.object(integration_builder, "_resolve_existing_components", resolver),
+                mock.patch.object(integration_builder, "paginate_metadata", lambda *a, **k: []))
 
     def planned(req, client=True, resolver=unreadable):
-        listing = mock.patch.object(integration_builder, "_resolve_existing_components", resolver)
-        by_id = mock.patch.object(integration_builder, "paginate_metadata", lambda *a, **k: [])
-        with listing, by_id:
+        names, by_id = listing(resolver)
+        with names, by_id:
             return plan_authoring_request_v1(req, boomi_client=mock.MagicMock() if client else None,
                                              profile="qa", account_id="qa_account")[0]
 
-    for components in (beside_writer, beside_reference, one_name):
-        assert unjudged(planned(request(components)).errors), [spec["key"] for spec in components]
-    with mock.patch.object(integration_builder, "_resolve_existing_components", unreadable), \
-            mock.patch.object(integration_builder, "paginate_metadata", lambda *a, **k: []), \
-            pytest.raises(Exception) as blocked:
-        compile_authoring_request_v1(request(beside_writer), boomi_client=mock.MagicMock(), profile="qa",
-                                     account_id="qa_account")
-    assert unjudged(getattr(blocked.value, "diagnostics", ())), blocked.value
+    for req in (beside_writer, single_under_fail):
+        served = planned(req)
+        assert not component_plan(served.errors), served.errors
+        (advisory,) = component_plan(served.warnings)
+        assert advisory.severity == "advisory"
+        for verdict in ("could not be built from the account", "which existing component each spec names",
+                        "write conflicts", "ambiguous or colliding names", "profile facts",
+                        "apply refuses a binding the account decides differently"):
+            assert verdict in advisory.message, (verdict, advisory.message)
 
-    assert not unjudged(planned(request(distinct_names)).errors)
-    assert not unjudged(planned(request(beside_writer, policy="clone")).errors)
-    assert not unjudged(planned(request(beside_writer), client=False).errors)
-    assert not unjudged(planned(request(beside_writer), resolver=lambda _client, _comp: []).errors)
+    # Without a client the lint simply did not run; a working account serves no component-plan advisory at all.
+    (offline,) = component_plan(planned(beside_writer, client=False).warnings)
+    assert "did not run" in offline.message and "could not be built" not in offline.message
+    # (Its component-plan lint ran, so its own warnings may be served; what must be absent is the unjudged advisory.)
+    assert not [d for d in component_plan(planned(beside_writer, resolver=lambda _client, _comp: []).warnings)
+                if d.severity == "advisory"]
+
+    # The guard the advisory names: the binding compiled while the listing failed is refused at apply once the
+    # account answers, before any write.
+    names, by_id = listing(unreadable)
+    with names, by_id:
+        compiled = compile_authoring_request_v1(beside_writer, boomi_client=mock.MagicMock(), profile="qa",
+                                                account_id="qa_account")[0]
+    payload = beside_writer.model_dump(mode="json")
+    payload["expected_capability_revision"] = compiled.revision_binding.capability_revision
+    payload["expected_compile_hash"] = compiled.revision_binding.compile_hash
+    rows = [{"component_id": _CACHE_ID, "name": _STORED, "type": "documentcache", "folder_name": "f"}]
+    writes = []
+    with mock.patch.object(integration_builder, "paginate_metadata", lambda *a, **k: [dict(r) for r in rows]), \
+            mock.patch.object(integration_builder, "_execute_component",
+                              side_effect=lambda *a, **k: writes.append(k.get("target_id")) or {"_success": True}):
+        applied = integration_builder._apply_plan(
+            mock.MagicMock(), "qa", copy.deepcopy({"dry_run": False, "authoring_request": payload}))
+    assert applied.get("_success") is False, applied
+    assert writes == [], writes
+
+
+def test_every_identity_decision_of_the_plan_route_moves_the_compiler_revision():
+    """CDX-184-r11-01, the structural half. The revision oracle and its perturbations were hand-listed, and each
+    batch that added an identity reading to the typed plan's route left it uncovered: the served compiler revision
+    stayed identical while plan and compile acceptance changed (SELF-184-28, then CDX-184-r11-01).
+
+    The set is now derived from the source: every function the validation route imports from the builder, in
+    `build_symbol_table`, `_validate_processes` and `plan_authoring_request_v1`. Each must be reached by the
+    revision oracle, called directly or through `build_symbol_table`, and perturbed in
+    `test_the_revision_moves_with_component_identity_and_forwarding_behaviour`, which asserts that every
+    perturbation moves the revision. The exceptions are the error class and `_client_account_id`, which names the
+    account a resolution describes and decides no verdict."""
+    import ast
+
+    from boomi_mcp.categories import integration_builder
+
+    src = Path(integration_builder.__file__).resolve().parents[1]
+    route = {"authoring/workflow.py": {"_validate_processes", "plan_authoring_request_v1"},
+             "recipes/materialization.py": {"build_symbol_table"}}
+    exempt = {"ComponentWriteConflictError", "_client_account_id"}
+
+    def functions(path):
+        return {node.name: node for node in ast.walk(ast.parse(path.read_text(encoding="utf-8")))
+                if isinstance(node, ast.FunctionDef)}
+
+    def builder_imports(node):
+        return {alias.name for inner in ast.walk(node) if isinstance(inner, ast.ImportFrom)
+                and (inner.module or "").endswith("integration_builder") for alias in inner.names}
+
+    decisions = set()
+    for path, names in route.items():
+        defined = functions(src / path)
+        for name in names:
+            decisions |= builder_imports(defined[name])
+    decisions -= exempt
+
+    oracle = functions(src / "authoring" / "contract.py")["_component_identity_behaviour_oracle"]
+    called = {inner.func.id for inner in ast.walk(oracle)
+              if isinstance(inner, ast.Call) and isinstance(inner.func, ast.Name)}
+    reached = builder_imports(oracle) & called
+    if "build_symbol_table" in called:
+        reached |= builder_imports(functions(src / "recipes" / "materialization.py")["build_symbol_table"])
+    # Closed over the builder's own calls: a reading reached only through another builder function (the reuse
+    # set, through the declared bindings) is still exercised by the oracle.
+    builder = functions(src / "categories" / "integration_builder.py")
+    frontier = set(reached)
+    while frontier:
+        name = frontier.pop()
+        for inner in ast.walk(builder[name]) if name in builder else ():
+            if isinstance(inner, ast.Call) and isinstance(inner.func, ast.Name) and inner.func.id in builder \
+                    and inner.func.id not in reached:
+                reached.add(inner.func.id)
+                frontier.add(inner.func.id)
+    assert decisions - reached == set(), sorted(decisions - reached)
+
+    revision_test = functions(src.parents[1] / "tests" / "test_issue_184_child_entries.py")[
+        "test_the_revision_moves_with_component_identity_and_forwarding_behaviour"]
+    perturbed = {
+        element.elts[1].value
+        for element in ast.walk(revision_test)
+        if isinstance(element, ast.Tuple) and len(element.elts) == 3
+        and isinstance(element.elts[0], ast.Name) and element.elts[0].id == "integration_builder"
+        and isinstance(element.elts[1], ast.Constant)
+    }
+    assert decisions - perturbed == set(), sorted(decisions - perturbed)
+    # Non-vacuity: the derivation sees the reading batch 10 added, and the perturbation parse sees its rows.
+    assert {"planned_existing_ids", "reused_keys_for_components"} <= decisions, decisions
+    assert len(perturbed) >= 8, perturbed
