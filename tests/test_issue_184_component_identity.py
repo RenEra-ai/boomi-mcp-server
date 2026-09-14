@@ -1212,3 +1212,82 @@ def test_a_connection_binding_spelling_one_guid_two_ways_names_one_component():
     with pytest.raises(Exception) as refused:
         _refuse_contradictory_identity(component, config, "conn")
     assert getattr(refused.value, "code", None) == GOVERNANCE_CONNECTION_BINDING_CONFLICT
+
+
+# ---------------------------------------------------------------------------
+# Stage-2 review round r7 (`cdx-review.7pic9D`), correction batch 8
+# ---------------------------------------------------------------------------
+
+
+def test_a_writer_that_states_no_fact_leaves_a_reference_its_own():
+    """CDX-184-r7-01: a spec that only renames an operation writes it but states no action, so a
+    reference_only alias declaring GET keeps its own action and a call through it is not refused as
+    an unsupported action. A writer that DOES state an action decides it."""
+    from boomi_mcp.authoring.workflow import _connector_metadata_from_components
+
+    operation_id = "66ff8c9e-9c83-48d7-8ec8-921783ced17a"
+    reference = _spec("op_ref", "connector-action", component_id=operation_id, reference_only=True,
+                      connector_type="rest", operation_mode="execute", method="GET", connection_ref_key="conn")
+
+    def symbols_with(writer_config):
+        components = [_spec("conn", "connector-settings", connector_type="rest"),
+                      _spec("op", "connector-action", action="update", component_id=operation_id, **writer_config),
+                      reference]
+        table = build_symbol_table(components, connector_metadata=_connector_metadata_from_components(components))
+        return table, {symbol.ref: symbol for symbol in table.symbols}
+
+    table, symbols = symbols_with({"connector_type": "rest", "component_name": "renamed"})
+    assert (symbols["$ref:op"].action_type, symbols["$ref:op_ref"].action_type) == (None, "GET")
+    call = parse_process_ir_v1({"version": "1", "body": {"kind": "sequence", "steps": [
+        {"kind": "connector_call", "operation_ref": "$ref:op_ref"}, {"kind": "stop"}]}})
+    codes = [item.code for item in validate_process_ir(call, table).errors]
+    assert "PROCESS_IR_CAPABILITY_CONNECTOR_ACTION_UNSUPPORTED" not in codes, codes
+    # CONTROL: a writer stating an action decides it for every reference.
+    _table, symbols = symbols_with({"connector_type": "rest", "operation_mode": "execute", "method": "POST",
+                                    "connection_ref_key": "conn"})
+    assert symbols["$ref:op_ref"].action_type == symbols["$ref:op"].action_type != "GET"
+
+
+def test_each_reference_fact_is_the_writers_stated_fact_else_its_own():
+    """CDX-184-r7-01, as an invariant over the symbol model: for every fact field, a reference apply does
+    not write carries the writing spec's value where the writer states one, and otherwise the value it
+    has on its own, measured with the writer absent. The connection is the step's own and is checked by
+    `test_a_reference_names_its_own_connection`."""
+    from boomi_mcp.authoring.workflow import _connector_metadata_from_components
+    from boomi_mcp.compiler.process_ir.contracts import ComponentSymbolV1
+
+    operation_id = "66ff8c9e-9c83-48d7-8ec8-921783ced17a"
+    writers = {
+        "renaming": _spec("op", "connector-action", action="update", component_id=operation_id,
+                          connector_type="rest", component_name="renamed"),
+        "structured": _spec("op", "connector-action", action="update", component_id=operation_id,
+                            connector_type="rest", operation_mode="execute", method="GET",
+                            response_profile_id="$ref:p1"),
+    }
+    references = [
+        _spec("op_ref", "connector-action", component_id=operation_id.upper(), reference_only=True,
+              connector_type="rest", operation_mode="execute", method="POST", request_profile_id="$ref:p2"),
+        _spec("op_alias", "connector-action", action="update", component_id=operation_id, connector_type="rest"),
+    ]
+    base = [_spec("p1", "profile.json"), _spec("p2", "profile.json")]
+    fields = sorted(set(ComponentSymbolV1.model_fields)
+                    - {"ref", "component_id", "bound_component_id", "component_type", "connection_ref"})
+
+    def table(components):
+        return {symbol.ref: symbol for symbol in build_symbol_table(
+            components, connector_metadata=_connector_metadata_from_components(components)).symbols}
+
+    stated_any = set()
+    for name, writer in writers.items():
+        combined = table(base + [writer] + references)
+        writer_alone = table(base + [writer])["$ref:op"]
+        for reference in references:
+            own = table(base + [reference])["$ref:" + reference.key]
+            for field in fields:
+                stated = getattr(writer_alone, field)
+                if stated is not None:
+                    stated_any.add(field)
+                expected = stated if stated is not None else getattr(own, field)
+                assert getattr(combined["$ref:" + reference.key], field) == expected, (name, reference.key, field)
+    # Non-vacuity: the structured writer states the action and a profile, the renaming one does not.
+    assert {"action_type", "output_profile_ref"} <= stated_any

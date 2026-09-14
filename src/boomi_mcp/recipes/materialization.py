@@ -241,6 +241,17 @@ def _fact_source(component, bindings, writers, writer_for):
     return component
 
 
+def _overlay(stated, own):
+    """Each fact the writing spec STATES, else the reference's own (#184).
+
+    A writer describes its component only in what its config states. A spec that only
+    renames an operation states no action, profile or path, and the table cannot read
+    those from it; the reference's own statement stays the evidence, as it was before a
+    writer was consulted at all (Stage-2 review round r7). ``None`` means not stated.
+    """
+    return tuple(stated_fact if stated_fact is not None else own_fact for stated_fact, own_fact in zip(stated, own))
+
+
 def build_symbol_table(
     components: Sequence[IntegrationComponentSpec],
     *,
@@ -341,7 +352,10 @@ def build_symbol_table(
     writer_for = {bindings[component.key]: component for component in components if component.key in writers}
     for component in components:
         source = _fact_source(component, bindings, writers, writer_for)
-        connector_type, action_type = metadata.get(source.key, (None, None))
+        # The writer's STATED facts over the reference's own (`_overlay`, Stage-2 review round r7).
+        connector_type, action_type = _overlay(
+            metadata.get(source.key, (None, None)), metadata.get(component.key, (None, None))
+        )
         ref = f"{_REF_PREFIX}{component.key}"
         # NORMALIZED, and only used when it yields a usable key. The value
         # is plain caller config with no upstream normalization, so interpolating
@@ -373,15 +387,17 @@ def build_symbol_table(
         # #158: a listener operation's inbound facts, for the requested inbound
         # contract. Carried on the symbol the listener entry resolves; `None` for
         # every other component.
-        listener_input_type, listener_request_profile = _listener_inbound_facts(
-            source, connector_resolution_snapshot
+        listener_input_type, listener_request_profile = _overlay(
+            _listener_inbound_facts(source, connector_resolution_snapshot),
+            _listener_inbound_facts(component, connector_resolution_snapshot),
         )
         # #184: the profile facts the canonical stream-profile proof reads — which
         # profile a call hands on and accepts, what a map transforms, what a cache
         # declares it holds. The listener's inbound request profile keeps precedence
         # for the listener operation, which is what #158 carries in the same field.
-        input_profile_fact, output_profile_fact, cache_profile_fact = _profile_facts(
-            source, plan_keys, written=apply_writes_component_config(source, conflict_policy)
+        input_profile_fact, output_profile_fact, cache_profile_fact = _overlay(
+            _profile_facts(source, plan_keys, written=apply_writes_component_config(source, conflict_policy)),
+            _profile_facts(component, plan_keys, written=apply_writes_component_config(component, conflict_policy)),
         )
         symbols.append(
             ComponentSymbolV1(
@@ -403,9 +419,10 @@ def build_symbol_table(
                 # refusal only speaks on an explicit True. Populating this is what
                 # keeps the field from being the inert addition the architecture
                 # note rejects `dependency_refs` for.
-                requires_path_binding=_requires_path_binding(
-                    connector_resolution_snapshot, source.key
-                ),
+                requires_path_binding=_overlay(
+                    (_requires_path_binding(connector_resolution_snapshot, source.key),),
+                    (_requires_path_binding(connector_resolution_snapshot, component.key),),
+                )[0],
             )
         )
 

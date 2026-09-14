@@ -1637,6 +1637,11 @@ def _component_identity_behaviour_oracle():
         spec("wss_op", "connector-action", action="update", component_id="66ff8c9e-9c83-48d7-8ec8-921783ced17a",
              connector_type="wss", operation_mode="listen", input_type="multidata", request_profile="$ref:p1"),
         spec("wss_ref", "connector-action", component_id="66FF8C9E-9C83-48D7-8EC8-921783CED17A", reference_only=True),
+        # A writer that only renames an operation states no action, so its reference keeps its own.
+        spec("ren_op", "connector-action", action="update", component_id="2d6c9d51-6c0c-4273-8ad6-54605e018d9f",
+             connector_type="rest", component_name="renamed"),
+        spec("ren_ref", "connector-action", component_id="2D6C9D51-6C0C-4273-8AD6-54605E018D9F", reference_only=True,
+             connector_type="rest", operation_mode="execute", method="GET", connection_ref_key="conn_b"),
     ]
     try:
         source_table = build_symbol_table(

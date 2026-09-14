@@ -3076,3 +3076,9 @@ lowercase), and computes every symbol fact of a reference apply does not write f
 its component. The census, the ledger rows and `schema_revision` did not move, and the §11 tables were
 re-spliced for moved `Baseline line` values. Revisions after batch 7: `capability_revision` `sha256:f019272a…` and
 `compiler_revision` `sha256:73c10cb4…`; `schema_revision` stays `sha256:c9583e6b…`.
+
+**Stage-2 correction batch 8 (CDX-184-r7-01) re-ran it.** Batch 8 describes a reference apply does not write
+by the writing spec only in the facts that spec states, and otherwise by the reference's own. The census, the
+ledger rows and `schema_revision` did not move, and the §11 tables were re-spliced for moved `Baseline line`
+values. Revisions after batch 8: `capability_revision` `sha256:e335b266…` and `compiler_revision` `sha256:21b961d0…`;
+`schema_revision` stays `sha256:c9583e6b…`.
