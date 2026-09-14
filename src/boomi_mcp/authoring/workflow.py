@@ -1244,6 +1244,21 @@ def build_topology_relations(
 _UNPLANNED = object()
 
 
+def _identity_waits_on_the_account(normalized: _NormalizedIntent, request: AuthoringRequestV1) -> bool:
+    """Whether this intent's component identity waits on the component plan's account answer (#184).
+
+    Asked of the builder over the same dumped spec and bound conflict policy the component plan reads.
+    """
+    from ..categories.integration_builder import component_identity_waits_on_the_account
+
+    return component_identity_waits_on_the_account(
+        {
+            "integration_spec": normalized.integration_spec.model_dump(mode="json"),
+            "conflict_policy": request.intent.conflict_policy,
+        }
+    )
+
+
 def _legacy_plan_echo(
     normalized: _NormalizedIntent,
     request: AuthoringRequestV1,
@@ -2652,6 +2667,29 @@ def plan_authoring_request_v1(
                 cause_codes=("LEGACY_PLAN_WARNING",),
             )
             for warning in (legacy.get("warnings") or ())
+        )
+    elif boomi_client is not None and _identity_waits_on_the_account(normalized, request):
+        # #184 (QA-184-s1-r11-01): with an account in hand the component plan was attempted
+        # and could not be built. Where component identity waits on its bindings (which specs
+        # name one existing component, and every write conflict that follows), validation could
+        # not judge the request. Reading the failure as "no binding" admitted a conflict that
+        # apply refuses, so the plan blocks there and compile issues no binding. A request whose
+        # identity cannot depend on the account (distinct names, say) compiles as before.
+        errors = sort_authoring_diagnostics(
+            errors
+            + (
+                _diag(
+                    AUTHORING_COMPILE_BLOCKED,
+                    "error",
+                    message=(
+                        "The component plan could not be built from the account, so which "
+                        "specs name one existing component, and every refusal that depends "
+                        "on it, could not be judged."
+                    ),
+                    subject_kind="component_plan",
+                    remediation="Re-plan once the account's component metadata can be read.",
+                ),
+            )
         )
     else:
         # Not silence — an explicit statement that the lint did not run. Reporting

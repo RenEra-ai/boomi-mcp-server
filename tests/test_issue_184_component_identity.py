@@ -1579,3 +1579,67 @@ def test_every_identity_reading_takes_the_bindings_its_route_resolved():
     assert declared == {("_bound_existing_id", "existing_id"), ("apply_writes_component_config", "reference_only")}, declared
     assert planned >= {"_apply_plan", "plan_authoring_request_v1"}, planned
     assert seen > 20, seen
+
+
+def test_an_unbuildable_component_plan_blocks_only_an_identity_the_account_decides():
+    """QA-184-s1-r11-01 and the clean-room contract. With an account in hand, the component plan could not be
+    built because the name listing failed.
+    - Where component identity waits on that answer, the plan blocks and compile issues no binding: a writer
+      beside a spec bound by name, a spec bound by name beside a reference by id, and two creates sharing one
+      name.
+    - Where it cannot, because distinct names can never share a component or a copy binds nothing, the plan
+      compiles as before. That is the account-free route the clean-room suite relies on.
+    - Without a client, nothing is attempted and nothing blocks.
+    Offline: only the name listing fails; a lookup by id answers empty."""
+    from unittest import mock
+
+    from boomi_mcp.authoring.workflow import compile_authoring_request_v1
+    from boomi_mcp.categories import integration_builder
+
+    def request(components, policy="reuse"):
+        return AuthoringRequestV1.model_validate({"contract_version": "2", "intent": {
+            "intent_kind": "process_ir", "integration_name": "unjudged",
+            "units": [{"envelope": {"component_key": "root", "name": "root", "action": "create",
+                                    "depends_on": [spec["key"] for spec in components]},
+                       "process_ir": {"version": "1", "body": {"kind": "sequence", "steps": [
+                           {"kind": "passthrough"}, {"kind": "stop"}]}}}],
+            "components": components, "conflict_policy": policy}})
+
+    writer = _cache("u1", "p_a", "a1", "create_by_id")
+    writer["action"] = "update"
+    beside_writer = [_profile("p_a", "a1"), writer, _named(_cache("u2", "p_a", "a1", "new"))]
+    beside_reference = [_profile("p_a", "a1"), _cache("c_ref", "p_a", "a1", "reference_only"),
+                        _named(_cache("c_a", "p_a", "a1", "new"))]
+    one_name = [_profile("p_a", "a1"), _named(_cache("c_a", "p_a", "a1", "new")),
+                _named(_cache("c_b", "p_a", "a1", "new"))]
+    distinct_names = [_profile("p_a", "a1"), _named(_cache("c_a", "p_a", "a1", "new"), "first cache"),
+                      _named(_cache("c_b", "p_a", "a1", "new"), "second cache")]
+
+    def unreadable(_client, _comp):
+        raise ConnectionError("the component metadata listing failed")
+
+    def unjudged(diagnostics):
+        return [diagnostic for diagnostic in diagnostics
+                if diagnostic.code == "AUTHORING_COMPILE_BLOCKED" and diagnostic.subject_kind == "component_plan"
+                and diagnostic.severity == "error"]
+
+    def planned(req, client=True, resolver=unreadable):
+        listing = mock.patch.object(integration_builder, "_resolve_existing_components", resolver)
+        by_id = mock.patch.object(integration_builder, "paginate_metadata", lambda *a, **k: [])
+        with listing, by_id:
+            return plan_authoring_request_v1(req, boomi_client=mock.MagicMock() if client else None,
+                                             profile="qa", account_id="qa_account")[0]
+
+    for components in (beside_writer, beside_reference, one_name):
+        assert unjudged(planned(request(components)).errors), [spec["key"] for spec in components]
+    with mock.patch.object(integration_builder, "_resolve_existing_components", unreadable), \
+            mock.patch.object(integration_builder, "paginate_metadata", lambda *a, **k: []), \
+            pytest.raises(Exception) as blocked:
+        compile_authoring_request_v1(request(beside_writer), boomi_client=mock.MagicMock(), profile="qa",
+                                     account_id="qa_account")
+    assert unjudged(getattr(blocked.value, "diagnostics", ())), blocked.value
+
+    assert not unjudged(planned(request(distinct_names)).errors)
+    assert not unjudged(planned(request(beside_writer, policy="clone")).errors)
+    assert not unjudged(planned(request(beside_writer), client=False).errors)
+    assert not unjudged(planned(request(beside_writer), resolver=lambda _client, _comp: []).errors)
