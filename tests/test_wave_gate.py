@@ -6168,6 +6168,16 @@ def test_audit_ledger_attestations_have_durable_matching_evidence():
         # Aborted and collected `failed`; no `last-reviewed-sha` was written, so
         # the retry re-reviews the same delta.
         "commit-reviews/cdx-review.qwXEHm": "failed",
+        # #184 Stage-2 review round r8: three attempts over the SAME delta (`fea4fb9..ee9cb3e`),
+        # each terminal and empty ("Reviewer failed to output a response") in its first minute.
+        # Diagnosed in scratch clones rather than assumed: a review of an unrelated repository, a
+        # re-review of the already-reviewed round-r7 delta, and each half of the batch-8 delta all
+        # ran normally, while the whole delta failed again. The collector recorded each `failed`,
+        # so no `last-reviewed-sha` was written and the anchor stayed `fea4fb9`. None is an
+        # evaluation.
+        "commit-reviews/cdx-review.HWuQrk": "failed",
+        "commit-reviews/cdx-review.VCcV3W": "failed",
+        "commit-reviews/cdx-review.W6MI81": "failed",
         # refused start — never an evaluation; carries only start.json+refusal.json
         "architect-reviews/cdx-gate-review.TnpZpj": "refused",
         # #153 §6 evaluation 6, FIRST attempt: STUCK — 963 events over ~3 minutes,
