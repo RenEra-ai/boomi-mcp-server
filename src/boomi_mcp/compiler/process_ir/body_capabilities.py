@@ -105,6 +105,7 @@ from ...models.process_ir import (
     process_call_placement_verdict,
     process_call_root_verdict,
 )
+from ...models.process_ir_document_semantics import ZERO_EMISSION_KINDS
 from .diagnostics import _MESSAGES, _REMEDIATION, raise_compile_error
 
 _SEMANTIC_PHASE = "semantic_lowering"
@@ -921,12 +922,52 @@ PUBLIC_BODY_CONTEXTS: Mapping[str, str] = MappingProxyType(
 )
 
 
+def _followed_slot(context: str, slot: str) -> bool:
+    """Does every node this slot holds have an authored successor on its own path?
+
+    A body's step slot does whenever the body's ``terminal`` is a REQUIRED field:
+    the terminal follows the last step, and each earlier step is followed by the
+    next. Read from the model field that defines the body's terminal, so a body
+    whose terminal became optional would stop withholding anything. A terminal slot
+    is the end of its path and is never followed.
+    """
+    if slot != STEP_SLOT:
+        return False
+    model, field_name = BODY_SLOT_AUTHORITIES_V1[(context, TERMINAL_SLOT)]
+    return model.model_fields[field_name].is_required()
+
+
+def _withheld_kinds(context: str, slot: str) -> FrozenSet[str]:
+    """The type-admitted kinds no compilable document can place in this slot.
+
+    A kind that hands on zero documents may have no authored successor on its
+    path: the document-emission authority's ``ZERO_EMISSION_KINDS``, whose rows
+    state ``result`` consumes and ``continuation`` none. A followed slot therefore
+    withholds every such kind its union admits. The model still TYPE-admits the
+    kind there, and it is the terminal cache-action verdict that refuses it:
+    ``PROCESS_IR_SCHEMA_INVALID_CARDINALITY`` at the step, at both entry points.
+    """
+    if not _followed_slot(context, slot):
+        return frozenset()
+    return frozenset(BODY_CAPABILITIES_V1[(context, slot)]) & ZERO_EMISSION_KINDS
+
+
 def body_placement_rows() -> Tuple[Tuple[str, str, Tuple[str, ...]], ...]:
-    """The closed matrix as sorted public data: (context, slot, admitted kinds).
+    """The served placements as sorted public data: (context, slot, kinds a document can compile with).
 
     Contexts are the PUBLIC names (see :data:`PUBLIC_BODY_CONTEXTS`); kinds are
     the authored discriminators, which are already public vocabulary. Sorted so
     the projection — and therefore ``compiler_revision`` — is deterministic.
+
+    The rows are :data:`BODY_CAPABILITIES_V1` minus what :func:`_withheld_kinds`
+    withholds, and the two differ on purpose. The matrix is TYPE admission, derived
+    from the model unions. Validation reads it (``is_allowed``, the parse-order
+    diagnostics), and it still admits a cache write or a whole-cache removal in
+    every step slot, because the slot's union is not what refuses them there: the
+    terminal cache-action verdict is. Serving the matrix told authors that ten step
+    placements were supported although every document placing them is refused
+    (#184 QA-184-s1-r14-01). The served rows state what compiles; the withheld
+    remainder is :func:`withheld_body_placement_rows`.
 
     What this deliberately does NOT emit is the complement: the denied triples
     are not enumerated, because the registry is an ALLOWLIST and absence is the
@@ -936,8 +977,32 @@ def body_placement_rows() -> Tuple[Tuple[str, str, Tuple[str, ...]], ...]:
     """
     return tuple(
         sorted(
-            (PUBLIC_BODY_CONTEXTS[context], slot, tuple(sorted(kinds)))
+            (
+                PUBLIC_BODY_CONTEXTS[context],
+                slot,
+                tuple(sorted(frozenset(kinds) - _withheld_kinds(context, slot))),
+            )
             for (context, slot), kinds in BODY_CAPABILITIES_V1.items()
+        )
+    )
+
+
+def withheld_body_placement_rows() -> Tuple[Tuple[str, str, Tuple[str, ...]], ...]:
+    """(context, slot, withheld kinds) for every slot that withholds a type-admitted kind.
+
+    The exact remainder of :data:`BODY_CAPABILITIES_V1` that
+    :func:`body_placement_rows` does not serve, with the same public context names
+    and ordering. A placement entry reads it to state the refusal code a withheld
+    kind actually receives, which is not the body-placement code a kind absent from
+    the union receives.
+    """
+    return tuple(
+        sorted(
+            (PUBLIC_BODY_CONTEXTS[context], slot, tuple(sorted(withheld)))
+            for (context, slot), withheld in (
+                (key, _withheld_kinds(*key)) for key in BODY_CAPABILITIES_V1
+            )
+            if withheld
         )
     )
 
@@ -953,6 +1018,7 @@ __all__ = [
     "TERMINAL_SLOT",
     "TRY_BODY",
     "body_placement_rows",
+    "withheld_body_placement_rows",
     "is_allowed",
     "registry_kinds",
     "validate_body_capabilities",

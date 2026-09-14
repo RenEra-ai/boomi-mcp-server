@@ -519,10 +519,12 @@ def test_model_validator_parity_for_set_dpp_name():
 
 
 def test_model_validator_parity_for_try_trailing_cache_put():
-    """``TryCatchTryBodyV1._try_body_rules`` — a try body ending on a cache_put.
+    """``TryCatchTryBodyV1._try_body_rules`` — a try body with a cache_put among its steps.
 
-    A ``cache_put`` must be followed by a stream-replacing read, so it may not
-    be the last thing in the protected body.
+    #184 amendment 3: Add to Cache hands on no documents, so nothing authored may
+    follow it on its path. A try body's steps are always followed by its terminal,
+    and the try terminal union admits no cache action, so a ``cache_put`` in a try
+    body is refused wherever it sits, at the step's own ``cache_ref``.
 
     The fixture is deliberately valid in every OTHER respect, which took two
     corrections to get right (QA Bug #184). ``retry_count`` is not an input

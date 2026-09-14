@@ -79,6 +79,10 @@ RULES = {
         "cap184-cache-put-successor/controls/exception_binding_none_probe.json",
         "cap184-cache-put-successor/controls/exception_binding_none.submitted.xml",
     ]),
+    "start.scheduled_supplies_one_empty_document": ("measured", [
+        ("cap184-passthrough-standalone", 0, "ADMIT"),
+        ("cap184-nodata-per-document", 0, "ADMIT"),
+    ], []),
 }
 
 

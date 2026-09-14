@@ -6,6 +6,13 @@ recompile could not build the component plan from the account, so a binding is n
 account that did not answer. The census, the ledger rows and `schema_revision` did not move, and the §11
 tables were re-spliced for moved `Baseline line` values. Revisions after batch 13: `capability_revision`
 `sha256:522cbf7d…` and `compiler_revision` `sha256:99a0c28d…`; `schema_revision` stays `sha256:c9583e6b…`.
+
+**Stage-2 correction batch 14 (QA-184-s1-r14-01 and the document-emission witnesses) re-ran it.** Batch 14
+serves only the control-body placements a document can compile with, adds the planned document-emission test
+module, binds the scheduled start's measured rule in the capture index and cites the two non-emission measured
+rules at their source authorities. The census, the ledger rows and `schema_revision` did not move, and the §11
+tables were re-spliced for moved `Baseline line` values. Revisions after batch 14:
+`capability_revision` `sha256:05d6312b…` and `compiler_revision` `sha256:bd4429f9…`; `schema_revision` stays `sha256:c9583e6b…`.
 evolving — this file is the M12 migration ledger and is UPDATED as M12 issues land
 (unlike [ADR-001](ADR-001-process-ir-authority.md), which is immutable once accepted).
 **Measured baseline:** 2026-07-13, extended with review-round re-measurements dated inline as
@@ -2286,7 +2293,7 @@ example producers are globbed, never enumerated: a sixth example is a diff, not 
 | LG-e846e889 | process_kind_producer | src/boomi_mcp/categories/meta_tools.py | <module> | 6 | 7752 | #160 | retract the served legacy guidance / guard the raw route |
 | LG-275fe665 | process_kind_producer | src/boomi_mcp/compiler/process_ir/legacy_adapters/authority.py | _canonical_core | 1 | 230 | #151 | re-home onto the neutral extraction |
 | LG-826a5241 | process_kind_producer | src/boomi_mcp/compiler/process_ir/legacy_adapters/authority.py | _core_from_authored_pipeline | 1 | 256 | #151 | re-home onto the neutral extraction |
-| LG-036eebde | process_kind_producer | src/boomi_mcp/models/_process_ir_compat.py | ir_to_legacy_flow_sequence | 2 | 1100 | #159 | migrate the compatibility codec, then delete |
+| LG-036eebde | process_kind_producer | src/boomi_mcp/models/_process_ir_compat.py | ir_to_legacy_flow_sequence | 2 | 1113 | #159 | migrate the compatibility codec, then delete |
 | LG-135ab897 | process_kind_producer | src/boomi_mcp/patterns/archetypes/api_to_api_sync.py | ApiToApiSyncArchetype.emit_spec | 1 | 800 | #159 | migrate the archetype to canonical ProcessIR |
 | LG-6bbdfefd | process_kind_producer | src/boomi_mcp/patterns/archetypes/api_to_api_sync.py | _build_main_process | 2 | 310 | #159 | migrate the archetype to canonical ProcessIR |
 | LG-dc90b5ae | process_kind_producer | src/boomi_mcp/patterns/archetypes/api_to_database_sync.py | ApiToDatabaseSyncArchetype.emit_spec | 1 | 883 | #159 | migrate the archetype to canonical ProcessIR |

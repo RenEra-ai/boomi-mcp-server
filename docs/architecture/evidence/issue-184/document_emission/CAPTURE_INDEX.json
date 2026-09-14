@@ -1537,6 +1537,116 @@
    "rows": [],
    "rule": "exception.parameter_source_none_refused_on_create",
    "status": "measured"
+  },
+  {
+   "controls": [],
+   "rows": [
+    {
+     "capture": "cap184-passthrough-standalone",
+     "checks": {
+      "COMPLETE_exec_manual": true,
+      "no_Passthrough_shape_line": true,
+      "one_request_empty_body": true,
+      "start_logged_NoData_1_document": true
+     },
+     "files": [
+      {
+       "file": "captures/cap184-passthrough-standalone/runs/sa-1/child_execution_records.json",
+       "sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+      },
+      {
+       "file": "captures/cap184-passthrough-standalone/runs/sa-1/execute.json",
+       "sha256": "28d9c5fb64517413039213c2b7aec3d5ad01e2688e4601a4fbe7d332b3a148b9"
+      },
+      {
+       "file": "captures/cap184-passthrough-standalone/runs/sa-1/mock_access_log_window.txt",
+       "sha256": "b71ef6ff1e1d6d1bb9b009eb2374d4e2b73959e4885f60c333f53d43af8d8dc6"
+      },
+      {
+       "file": "captures/cap184-passthrough-standalone/runs/sa-1/parent_execution_record.json",
+       "sha256": "c8ce666b250c5205451f0423f24bf2105e6bc498d2eab89439adb7fec3341d91"
+      },
+      {
+       "file": "captures/cap184-passthrough-standalone/runs/sa-1/parent_process_log.txt",
+       "sha256": "677ea1be8865643a126fe2752d9b3474ef7f73a26c36b07fc7010bfa06c814f6"
+      },
+      {
+       "file": "captures/cap184-passthrough-standalone/runs/sa-1/wire_inbound_requests_window.json",
+       "sha256": "e41f175ef35947316f297bf1fe34b7541726ba7a52d27ffa1af6bd16352be789"
+      },
+      {
+       "file": "captures/cap184-passthrough-standalone/MANIFEST.json",
+       "sha256": "533139eadee68e5f42edab0bc874f9918509bb0bf372714fd792f866718b30fc"
+      }
+     ],
+     "observation": "Start logged 'NoData ... 1 document(s) found'; the first step's request body was empty (0 bytes).",
+     "row": "Data Passthrough process executed directly runs as No Data (one empty document)",
+     "row_index": 0,
+     "verdict": "ADMIT"
+    },
+    {
+     "capture": "cap184-nodata-per-document",
+     "checks": {
+      "after_message_bodies_are_message": true,
+      "all_sub_process_COMPLETE_top_is_parent": true,
+      "each_child_inbound_1": true,
+      "each_child_log_NoData_1_document": true,
+      "first_step_bodies_all_empty": true,
+      "mock_3_first_step_3_after_message_only": true,
+      "parent_COMPLETE": true,
+      "parent_log_standalone_start_data_3_invocations": true,
+      "three_child_records": true
+     },
+     "files": [
+      {
+       "file": "captures/cap184-nodata-per-document/runs/nd-1/child_execution-2bd8f54e-a82f-481d-a379-769482b21756-2026.09.13_process_log.txt",
+       "sha256": "610d0f5013e60a22bdbfd9f47217732c92a0205c9cd87fd35712b3423f3d1131"
+      },
+      {
+       "file": "captures/cap184-nodata-per-document/runs/nd-1/child_execution-67e001bb-4c6a-4fa0-beaa-b8cc52b4b86f-2026.09.13_process_log.txt",
+       "sha256": "ef180ef8a12428ae7aafdc2a9b013aebfe264c2bab43fa86465167b39bd53a30"
+      },
+      {
+       "file": "captures/cap184-nodata-per-document/runs/nd-1/child_execution-8a3f14ed-a4a6-4c92-a26a-a21047594fa7-2026.09.13_process_log.txt",
+       "sha256": "cde9c60ca484f7cd324435f367bf8454dbf18583c1994317c3d82eaefea67ba4"
+      },
+      {
+       "file": "captures/cap184-nodata-per-document/runs/nd-1/child_execution_records.json",
+       "sha256": "4de2c3035e9283e14640532dd3e82df9c71f2bda0e94a864bafd4e47ed9b7f63"
+      },
+      {
+       "file": "captures/cap184-nodata-per-document/runs/nd-1/execute.json",
+       "sha256": "30b1b537ed218a1db7da0b7557e76bb5fc825f084a52b0bc97f171609670f97d"
+      },
+      {
+       "file": "captures/cap184-nodata-per-document/runs/nd-1/mock_access_log_window.txt",
+       "sha256": "9f1a79f859a3819483446860a3472862daeb836e72c570c9a8243efc95fa6a71"
+      },
+      {
+       "file": "captures/cap184-nodata-per-document/runs/nd-1/parent_execution_record.json",
+       "sha256": "f9e01a32b3de8cd75733fbd74bd8e9f31784f2a1116f561969fb4d65681f3a62"
+      },
+      {
+       "file": "captures/cap184-nodata-per-document/runs/nd-1/parent_process_log.txt",
+       "sha256": "eec4fcbccd65aca55035ca3bf8d5389c7bdfdca8d3dd78d03f85d23b2f30e073"
+      },
+      {
+       "file": "captures/cap184-nodata-per-document/runs/nd-1/wire_inbound_requests_window.json",
+       "sha256": "6e238c75f57418ee4d140177098d84b80558a3908048a08c01dead3b76f6dfa6"
+      },
+      {
+       "file": "captures/cap184-nodata-per-document/MANIFEST.json",
+       "sha256": "db6658dc73e39c7936102e9ef66704a7d9a531f309925230d5a4b88258a5c758"
+      }
+     ],
+     "observation": "3 sub_process ExecutionRecords (topLevelExecutionId = parent, in=1 out=2 each); parent log 'standalone start data' with 3 'Executing process' lines; each child's first connector sent an EMPTY body (0 bytes) x3.",
+     "row": "No Data child: one child execution per parent document, each starting with one EMPTY document",
+     "row_index": 0,
+     "verdict": "ADMIT"
+    }
+   ],
+   "rule": "start.scheduled_supplies_one_empty_document",
+   "status": "measured"
   }
  ],
  "script": "docs/architecture/evidence/issue-184/document_emission/build_capture_index.py",

@@ -1736,10 +1736,10 @@ class ExceptionNodeV1(_ProcessIRBase):
     @field_validator("parameter_source", mode="before")
     @classmethod
     def _refuse_unbound_exception(cls, value):
-        # #184 amendment 3 §9 (ledger row E1-184-02): `none` emitted an Exception with
-        # no parameter block, and the platform refuses that component on create
-        # (HTTP 400, measured). Refused BY NAME rather than as an unknown literal, so
-        # the caller learns why a value this contract used to accept is gone.
+        # #184 amendment 3 §9 (ledger row E1-184-02; capture rule
+        # `exception.parameter_source_none_refused_on_create`): `none` emitted an Exception
+        # with no parameter block, and the platform refuses that component on create (HTTP
+        # 400, measured). Refused BY NAME, so the caller learns why a once-accepted value is gone.
         if value == "none":
             raise _capability_error(
                 "parameter_source 'none' is not supported: the platform requires an "

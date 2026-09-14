@@ -1070,9 +1070,22 @@ def _branch_to_legacy(node: Any, context: ConnectorResolutionContextV1) -> Dict[
             legs.append(
                 {"steps": steps, "target": _resolve_binding(leg.terminal, context, "")}
             )
-        else:  # staging cache_put terminal — target omitted
+        elif leg.terminal.kind == "cache_put":
+            # Staging cache_put terminal — target omitted. The one target-less leg the
+            # legacy dialect has: `_convert_branch_step` reads it back, and nothing else.
             steps.append(_linear_node_to_legacy(leg.terminal))
             legs.append({"steps": steps})
+        else:
+            # #184 amendment 3, on the #175 precedent: any other terminal (a whole-cache
+            # removal among them) has no legacy form. Serializing it anyway yields a
+            # config the builder and the reverse codec both refuse — a lossy reverse trip
+            # is how a withdrawn capability comes back through the side door.
+            raise _reject(
+                PROCESS_IR_SCHEMA_INVALID,
+                "",
+                "a branch leg ending in {0} has no legacy flow_sequence form — a target-less "
+                "leg must end in a cache_put staging write".format(leg.terminal.kind),
+            )
     out: Dict[str, Any] = {"kind": "branch", "legs": legs}
     return _legacy_label(node, out)
 

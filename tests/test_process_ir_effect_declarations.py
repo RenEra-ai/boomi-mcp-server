@@ -1843,6 +1843,33 @@ def test_a_subprocess_that_writes_a_cache_is_not_replay_safe():
     assert replay_safe is True
 
 
+def test_a_subprocess_that_removes_a_cache_is_not_replay_safe():
+    """#184 amendment 3: a whole-cache removal mutates the cache as a write does, so
+    re-running the child would clear it again.
+
+    A removal establishes no content, so the must-write set stays empty and only the
+    replay verdict moves. Connector-free for the reason the cache-write test gives: a
+    connector makes a child replay-unsafe on its own. The removal is a Branch-leg
+    TERMINAL, its only legal placement; the control ends the same leg on a stop.
+    """
+    from boomi_mcp.authoring.process_ir_effects import derive_subprocess_effect
+
+    def _child(first_leg_terminal):
+        return parse_process_ir_v1({"version": "1", "body": {"kind": "sequence", "steps": [
+            {"kind": "branch", "legs": [
+                {"steps": [{"kind": "message", "text": "stage"}], "terminal": first_leg_terminal},
+                {"steps": [{"kind": "message", "text": "m"}], "terminal": {"kind": "stop"}},
+            ]}]}})
+
+    _reads, writes, replay_safe = derive_subprocess_effect(
+        _child({"kind": "cache_remove", "cache_ref": "$ref:DC"})).effect
+    assert writes == ()
+    assert replay_safe is False
+    _reads, writes, replay_safe = derive_subprocess_effect(_child({"kind": "stop"})).effect
+    assert writes == ()
+    assert replay_safe is True
+
+
 def test_a_child_with_an_uninspectable_step_is_INERT_not_exact_empty():
     """§6 P1(d). An exact-empty summary for an uninspectable child was an unsound
     ACCEPTANCE — it asserted "this child touches nothing" about contents nobody

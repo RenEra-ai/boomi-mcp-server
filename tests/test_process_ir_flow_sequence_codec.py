@@ -40,6 +40,7 @@ from boomi_mcp.models._process_ir_compat import (
 from boomi_mcp.models.process_ir import (
     ProcessIRValidationError,
     canonical_process_ir_json,
+    parse_process_ir_v1,
 )
 
 FIXTURE_PATH = (
@@ -281,6 +282,31 @@ def _staged_write_then_read(write_kind):
             ],
         }
     )
+
+
+def test_a_terminal_cache_remove_has_no_reverse_trip():
+    """#184 amendment 3: the IR→legacy codec refuses a Branch-leg terminal with no legacy form.
+
+    The legacy dialect's only target-less leg ends in a cache_put staging write;
+    ``legacy_flow_sequence_to_ir`` refuses any other. A terminal ``cache_remove`` was
+    serialized anyway, as a target-less leg ending in ``doccacheremove``. The builder
+    refuses that leg by name and the reverse codec cannot read it back. It is now refused
+    at the reverse trip itself, following the #175 precedent. The control: the same leg
+    ending in its ``cache_put`` round-trips equal.
+    """
+    config = _staged_write_then_read("cache_put")
+    ir1, _legacy2, ir2 = roundtrip(copy.deepcopy(config), with_fallback=True)
+    assert canonical_process_ir_json(ir1) == canonical_process_ir_json(ir2)
+
+    payload = json.loads(canonical_process_ir_json(ir1))
+    leg = payload["body"]["steps"][-1]["legs"][0]
+    assert leg["terminal"]["kind"] == "cache_put", leg
+    leg["terminal"]["kind"] = "cache_remove"
+    removal = parse_process_ir_v1(payload)  # a legal IR document: a Branch leg may end on a removal
+    with pytest.raises(ProcessIRValidationError) as excinfo:
+        ir_to_legacy_flow_sequence(removal, build_context(with_fallback=True))
+    assert [(d.code, d.path) for d in excinfo.value.diagnostics] == [(PROCESS_IR_SCHEMA_INVALID, "")]
+    assert "cache_remove" in excinfo.value.diagnostics[0].message
 
 
 def test_doccacheload_alias_normalizes_to_cache_put():

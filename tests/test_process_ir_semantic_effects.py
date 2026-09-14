@@ -93,6 +93,16 @@ def test_a_cache_write_is_a_replay_hazard():
     assert _replay_hazard(_S()) == "cache_write"
 
 
+def test_a_cache_removal_is_a_replay_hazard():
+    """#184 amendment 3: a whole-cache removal is a cache mutation, as a write is. A
+    retry re-runs it and clears whatever the protected path wrote in between."""
+
+    class _S:
+        semantic_kind = "cache_remove"
+
+    assert _replay_hazard(_S()) == "cache_remove"
+
+
 def test_a_persisted_property_write_is_a_replay_hazard():
     class _S:
         semantic_kind = "set_property"

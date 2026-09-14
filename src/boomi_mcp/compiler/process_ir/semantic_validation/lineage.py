@@ -549,11 +549,11 @@ PROPERTY_SURVIVAL_V1: Mapping[Tuple[str, Optional[str]], str] = MappingProxyType
     ("message", None): "survives",
     # #184 amendment 3 §7 replaced the two "lost" read cells. The r17 capture that
     # measured them wired the cache load straight into the retrieve, so the retrieve
-    # never ran (ledger row E0-184-02). Measured with a separately triggered
-    # retrieve (capture `cap184-retrieve-ddp-replacement` R1–R4): the retrieved
-    # document carries the cached document's properties overlaid on the current
-    # one's, cached winning a collision. The overlay (`_overlay_cache_read`) owns
-    # these reads, bounded to one current and one cached document. N×M is OPEN.
+    # never ran (ledger row E0-184-02). Measured with a separately triggered retrieve
+    # (capture `cap184-retrieve-ddp-replacement` R1–R4, capture rule
+    # `cache_retrieve.ddp_overlay_one_current_one_cached`): the retrieved document carries
+    # the cached document's properties overlaid on the current one's, cached winning a
+    # collision; `_overlay_cache_read` owns these reads, bounded to 1×1. N×M is OPEN.
     ("cache_get", None): "cache_overlay",
     ("document_cache_retrieve", None): "cache_overlay",
     # Relabelled from "lost": the r17 split cell's capture never independently
@@ -1539,9 +1539,10 @@ def _walk_lineage(
                 identity is not None and identity != stream.identity for identity in identities
             ):
                 mismatch(node, "/cache_ref")
+            # What the step hands on is the document-emission authority's, as for a removal.
             return (
                 state.with_content(semantic.cache_ref, declared),
-                _Stream(STREAM_ABSENT),
+                _Stream(STREAM_ABSENT) if kind in ZERO_EMISSION_SEMANTIC_KINDS else stream,
                 legacy,
             )
 
@@ -1552,10 +1553,11 @@ def _walk_lineage(
                 for declared_ref in cache_profiles.get(semantic.cache_ref, ())
             ):
                 mismatch(node, "/cache_ref")
-            # Add to Cache hands on no documents: the path ends here.
+            # Add to Cache hands on no documents, as the document-emission authority
+            # states: the path ends here.
             return (
                 state.with_content(semantic.cache_ref, identity),
-                _Stream(STREAM_ABSENT),
+                _Stream(STREAM_ABSENT) if kind in ZERO_EMISSION_SEMANTIC_KINDS else stream,
                 legacy,
             )
 

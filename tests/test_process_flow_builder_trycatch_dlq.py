@@ -1037,6 +1037,27 @@ def test_the_document_cache_dlq_route_is_untouched(notify, exception, label):
     assert types.count("stop") == 1, (label, types)
 
 
+def test_the_legacy_add_to_cache_emitter_refuses_a_successor():
+    """#184 amendment 3: the guard in ``process_emitters.legacy._emit_doccacheload``.
+
+    Add to Cache hands on no documents, so a wire to a successor is a dead edge the
+    platform never follows. The builder never passes one (its DLQ leg ends on the
+    load, pinned above), so the guard is reached only by calling the emitter. With a
+    successor it refuses. Without one it renders the terminal ``<dragpoints/>`` form.
+    """
+    from src.boomi_mcp.categories.components.builders.process_emitters import legacy as _legacy
+
+    with pytest.raises(BuilderValidationError) as excinfo:
+        _legacy._emit_doccacheload("shape9", _CACHE_ID, 9, next_name="shape10")
+    assert (excinfo.value.error_code, excinfo.value.field) == (
+        "PROCESS_XML_VALIDATION_FAILED", "reliability.dlq.mode")
+    assert "hands on no documents" in str(excinfo.value)
+
+    shape = ET.fromstring(_legacy._emit_doccacheload("shape9", _CACHE_ID, 9))
+    assert shape.get("shapetype") == "doccacheload"
+    assert list(shape.find("dragpoints")) == []
+
+
 # ---------------------------------------------------------------------------
 # #175 QA-175-r1-01 — the two enforcement sites must agree, over the WHOLE
 # composition matrix rather than over the one pair that was reported.

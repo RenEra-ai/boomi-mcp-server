@@ -44,6 +44,7 @@ from boomi_mcp.compiler.process_ir.body_capabilities import (  # noqa: E402
     BODY_CAPABILITIES_V1,
     PUBLIC_BODY_CONTEXTS,
     body_placement_rows,
+    withheld_body_placement_rows,
 )
 from boomi_mcp.compiler.process_ir.connector_capabilities import (  # noqa: E402
     CONNECTOR_CALL_CAPABILITIES_V1,
@@ -133,12 +134,24 @@ def test_placement_entries_equal_the_body_registry_rows():
 
 
 def test_placement_admitted_kinds_equal_the_registry_in_both_directions():
+    """The served kinds are the registry's in both directions, minus exactly what a slot withholds.
+
+    #184 QA-184-s1-r14-01. The registry type-admits a zero-emission kind in every step
+    slot, and the terminal cache-action verdict refuses it there. The served rows
+    withhold it, and ``withheld_body_placement_rows`` states the remainder. The served
+    kinds and the withheld kinds are disjoint, and together they are the registry exactly.
+    """
     by_id = {
         e.subject: set(e.node_kinds) for e in entries() if e.entry_type == "placement"
     }
+    withheld = {
+        f"{context}.{slot}": set(kinds) for context, slot, kinds in withheld_body_placement_rows()
+    }
+    assert set(withheld) <= set(by_id), sorted(set(withheld) - set(by_id))
     for (context, slot), kinds in BODY_CAPABILITIES_V1.items():
         key = f"{PUBLIC_BODY_CONTEXTS[context]}.{slot}"
-        assert by_id[key] == set(kinds), key
+        assert not (by_id[key] & withheld.get(key, set())), key
+        assert by_id[key] | withheld.get(key, set()) == set(kinds), key
 
 
 def test_the_public_body_context_map_is_total_and_injective():
@@ -1464,7 +1477,11 @@ def test_every_node_entry_carries_a_derived_placement_fact():
 
 
 def test_the_derived_placement_fact_agrees_with_the_matrix():
-    """BOTH directions, per node, against the enforcement table itself."""
+    """BOTH directions, per node, against the served placement rows.
+
+    Those rows are the enforcement table minus what a slot withholds (#184), so the
+    sentence names exactly the placements a document can compile with.
+    """
     from boomi_mcp.compiler.process_ir import body_capabilities as bodycaps
 
     expected = {}
