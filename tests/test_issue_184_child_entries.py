@@ -801,8 +801,11 @@ def test_the_revision_moves_with_component_identity_and_forwarding_behaviour(mon
         # Stage-2 review round r3: the written spec and the facts projected from it.
         (process_ir_effects, "_written_map_effect",
          lambda aliases, components, conflict_policy, derive, canonical: (None, False)),
-        (materialization, "_bound_component_facts",
-         lambda components, bindings, plan_keys, writers: collections.defaultdict(lambda: (None, None, None))),
+        # QA round r7: the canonical component id every binding and write-conflict check reads.
+        (integration_builder, "canonical_component_id",
+         lambda value: value.strip() if isinstance(value, str) and value.strip() else None),
+        # Pre-commit verification of batch 7: which spec describes a reference.
+        (materialization, "_fact_source", lambda component, bindings, writers, writer_for: component),
         # Stage-2 review round r5: the write-conflict refusal and the canonical effect comparison.
         (integration_builder, "component_write_conflicts", lambda components: {}),
         (integration_builder, "component_writes_existing", lambda comp: False),

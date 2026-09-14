@@ -1544,6 +1544,7 @@ def _component_identity_behaviour_oracle():
         apply_writes_component_config,
         component_writes_existing,
     )
+    from .workflow import _connector_metadata_from_components
 
     # The write predicate over every way a spec names one existing component (Stage-2
     # correction batch 6): per spec kind and policy, whether apply writes its config and
@@ -1564,7 +1565,8 @@ def _component_identity_behaviour_oracle():
         "operation_renaming_update": ("connector-action", "update",
                                       {"connector_type": "rest", "component_name": "renamed"}),
         "operation_update": ("connector-action", "update",
-                             {"connector_type": "rest", "response_profile_id": "$ref:p1"}),
+                             {"connector_type": "rest", "operation_mode": "execute", "method": "GET",
+                              "connection_ref_key": "conn", "response_profile_id": "$ref:p1"}),
     }
 
     def kind_spec(key, kind):
@@ -1578,14 +1580,19 @@ def _component_identity_behaviour_oracle():
             for second in sorted(kinds):
                 if second < first or kinds[first][0] != kinds[second][0]:
                     continue
+                pair = [kind_spec("a", first), kind_spec("b", second),
+                        spec("p1", "profile.json"), spec("p2", "profile.json")]
                 try:
                     table = build_symbol_table(
-                        [kind_spec("a", first), kind_spec("b", second),
-                         spec("p1", "profile.json"), spec("p2", "profile.json")],
+                        pair,
                         conflict_policy=policy,
+                        # The family and action each spec's own config declares, as every
+                        # production route derives them.
+                        connector_metadata=_connector_metadata_from_components(pair),
                     )
                     pairs[first + "+" + second] = sorted(
-                        [symbol.ref, symbol.cache_profile_ref or "", symbol.output_profile_ref or ""]
+                        [symbol.ref, symbol.cache_profile_ref or "", symbol.output_profile_ref or "",
+                         symbol.connector_type or "", symbol.action_type or "", symbol.connection_ref or ""]
                         for symbol in table.symbols if symbol.ref in ("$ref:a", "$ref:b")
                     )
                 except ComponentWriteConflictError as conflict:
@@ -1598,7 +1605,53 @@ def _component_identity_behaviour_oracle():
             },
             "pairs": pairs,
         }
-    verdicts = {"write_matrix": write_matrix}
+    # One existing component named by two spellings of its GUID: one component, so two
+    # updates of it are a write conflict (QA-184-s1-r7-01).
+    try:
+        build_symbol_table([
+            spec("g_lower", "documentcache", action="update",
+                 component_id="0370d8d8-2c63-42d7-ae11-9aa5bbf64262", profile_id="$ref:p1"),
+            spec("g_upper", "documentcache", action="update",
+                 component_id=" 0370D8D8-2C63-42D7-AE11-9AA5BBF64262 ", profile_id="$ref:p1"),
+            spec("p1", "profile.json"),
+        ], conflict_policy="reuse")
+        guid_spellings = []
+    except ComponentWriteConflictError as conflict:
+        guid_spellings = [conflict.code, sorted(conflict.conflicts.items())]
+    # Where each symbol fact of a reference comes from (correction batch 7): an operation and a
+    # WSS listener, each written by one spec and named through a metadata-only alias or a
+    # reference_only spec spelling its GUID in upper case; one reference names its own connection.
+    from ..compiler.process_ir.contracts import ComponentSymbolV1
+
+    sources = [
+        spec("p1", "profile.json"),
+        spec("conn_a", "connector-settings", connector_type="rest"),
+        spec("conn_b", "connector-settings", connector_type="rest"),
+        spec("rest_op", "connector-action", action="update", component_id="0370d8d8-2c63-42d7-ae11-9aa5bbf64262",
+             connector_type="rest", operation_mode="execute", method="GET", connection_ref_key="conn_a",
+             response_profile_id="$ref:p1"),
+        spec("rest_alias", "connector-action", action="update",
+             component_id="0370D8D8-2C63-42D7-AE11-9AA5BBF64262", connector_type="rest"),
+        spec("rest_ref", "connector-action", component_id="0370D8D8-2C63-42D7-AE11-9AA5BBF64262",
+             reference_only=True, connection_ref_key="conn_b"),
+        spec("wss_op", "connector-action", action="update", component_id="66ff8c9e-9c83-48d7-8ec8-921783ced17a",
+             connector_type="wss", operation_mode="listen", input_type="multidata", request_profile="$ref:p1"),
+        spec("wss_ref", "connector-action", component_id="66FF8C9E-9C83-48D7-8EC8-921783CED17A", reference_only=True),
+    ]
+    try:
+        source_table = build_symbol_table(
+            sources, conflict_policy="reuse", connector_metadata=_connector_metadata_from_components(sources)
+        )
+    except ComponentWriteConflictError as conflict:
+        # A rule under which one of these references writes too is a verdict, not an unavailable row.
+        fact_sources = [conflict.code, sorted(conflict.conflicts.items())]
+    else:
+        source_fields = sorted(set(ComponentSymbolV1.model_fields) - {"component_id"})
+        fact_sources = sorted(
+            [str(getattr(symbol, name) if getattr(symbol, name) is not None else "") for name in source_fields]
+            for symbol in source_table.symbols
+        )
+    verdicts = {"write_matrix": write_matrix, "guid_spellings": guid_spellings, "fact_sources": fact_sources}
     for policy in ("clone", "reuse"):
         symbols = build_symbol_table(components, conflict_policy=policy)
         # Each root is validated under the context the effect resolver builds for it, as

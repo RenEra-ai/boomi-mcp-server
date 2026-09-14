@@ -829,7 +829,8 @@ def test_a_metadata_only_update_alias_keeps_the_structured_update_facts():
         _spec("op_alias", "connector-action", action="update", component_id="OP-1", connector_type="rest"),
         _spec("m12", "transform.map", source_profile_id="$ref:p1", target_profile_id="$ref:p2"),
     ]
-    metadata = {"conn": (rest, None), "op": (rest, "GET"), "op_alias": (rest, "GET")}
+    # The alias declares no action of its own: its config names only the connector type.
+    metadata = {"conn": (rest, None), "op": (rest, "GET")}
     symbols = build_symbol_table(components, connector_metadata=metadata)
     ir = parse_process_ir_v1({"version": "1", "body": {"kind": "sequence", "steps": [
         {"kind": "connector_call", "operation_ref": "$ref:op"},
@@ -838,6 +839,11 @@ def test_a_metadata_only_update_alias_keeps_the_structured_update_facts():
     outputs = {symbol.ref: symbol.output_profile_ref for symbol in symbols.symbols}
     # The alias apply binds instead of writing carries the one write's facts (batch 6).
     assert outputs["$ref:op"] == outputs["$ref:op_alias"] == "$ref:p1"
+    # A call THROUGH the alias is judged by the writing spec's connector facts too (QA-184-s1-r7-02).
+    through_alias = parse_process_ir_v1({"version": "1", "body": {"kind": "sequence", "steps": [
+        {"kind": "connector_call", "operation_ref": "$ref:op_alias"},
+        {"kind": "map_ref", "map_ref": "$ref:m12"}, {"kind": "stop"}]}})
+    assert [(item.code, item.path) for item in validate_process_ir(through_alias, symbols).errors] == []
 
 
 def test_the_served_profile_mismatch_text_names_every_reporting_site():
@@ -877,3 +883,332 @@ def test_the_served_profile_mismatch_text_names_every_reporting_site():
                      for tail, word in keywords.items() if word not in text.lower())
     assert missing == [], missing
     assert "named only by reference" in served["remediation"]
+
+
+# ---------------------------------------------------------------------------
+# QA round r7 (`agents/reports/2026-09-13-issue-184-stage2-r7.md`), correction batch 7
+# ---------------------------------------------------------------------------
+
+
+def test_a_component_id_has_one_canonical_spelling():
+    """QA-184-s1-r7-01: the platform returns a component GUID in lowercase and reads it in any case,
+    so a GUID is compared and sent lowercase; whitespace is not part of an id (SELF-184-02), and a
+    blank value names nothing. Any other value is kept as written."""
+    from boomi_mcp.categories.integration_builder import canonical_component_id
+
+    upper = "675C81CF-41C8-4CDA-B650-537966A67A6E"
+    assert canonical_component_id(" " + upper + " ") == upper.lower()
+    assert canonical_component_id(upper.lower()) == upper.lower()
+    assert canonical_component_id(" C-1 ") == "C-1"
+    assert canonical_component_id("Not-A-Guid") == "Not-A-Guid"
+    assert canonical_component_id("   ") is None
+    assert canonical_component_id(None) is None
+    assert canonical_component_id(5) is None
+
+
+_GUID = "675c81cf-41c8-4cda-b650-537966a67a6e"
+
+
+@pytest.mark.parametrize("family", ["map", "cache", "operation"])
+def test_ids_differing_only_in_guid_case_name_one_component(family):
+    """QA-184-s1-r7-01: two updates naming one existing component through two spellings of its GUID
+    are two writes of ONE component, in every family the refusal covers; different GUIDs are not."""
+    def update(key, component_id):
+        if family == "map":
+            return _spec(key, "transform.map", action="update", component_id=component_id,
+                         source_profile_id="$ref:p1", target_profile_id="$ref:p1")
+        if family == "cache":
+            return _spec(key, "documentcache", action="update", component_id=component_id, profile_id="$ref:p1")
+        return _spec(key, "connector-action", action="update", component_id=component_id, connector_type="rest",
+                     operation_mode="execute", method="GET", response_profile_id="$ref:p1")
+
+    with pytest.raises(ComponentWriteConflictError) as refused:
+        build_symbol_table([_spec("p1", "profile.json"), update("a", _GUID), update("b", " " + _GUID.upper() + " ")])
+    assert refused.value.conflicts == {_GUID: ("a", "b")}
+    # CONTROL: a different GUID is a different component.
+    build_symbol_table([_spec("p1", "profile.json"), update("a", _GUID),
+                        update("b", "0370D8D8-2C63-42D7-AE11-9AA5BBF64262")])
+
+
+def test_guid_case_spellings_are_refused_on_the_typed_plan_and_the_raw_route():
+    """QA-184-s1-r7-01, on the routes a caller reaches: the typed plan reports the write conflict, and
+    the raw route's pre-write refusal serves it, so nothing is written."""
+    import types
+
+    from boomi_mcp.authoring.connector_resolution_snapshot import build_connector_resolution_snapshot
+    from boomi_mcp.categories import integration_builder
+
+    typed = [_profile("p_a", "a1"), _cache("u1", "p_a", "a1", "create_by_id"), _cache("u2", "p_a", "a1", "create_by_id")]
+    for item in typed[1:]:
+        item["action"] = "update"
+    typed[2]["component_id"] = _CACHE_ID.upper()
+    request = AuthoringRequestV1.model_validate({"contract_version": "2", "intent": {
+        "intent_kind": "process_ir", "integration_name": "guid_case",
+        "units": [{"envelope": {"component_key": "root", "name": "root", "action": "create",
+                                "depends_on": [spec["key"] for spec in typed]},
+                   "process_ir": {"version": "1", "body": {"kind": "sequence", "steps": [
+                       {"kind": "passthrough"}, {"kind": "stop"}]}}}],
+        "components": typed, "conflict_policy": "reuse"}})
+    result = plan_authoring_request_v1(request, profile="qa_profile", account_id="qa_account")[0]
+    assert sorted((error.code, error.subject_id) for error in result.errors) == [(_CONFLICT, "u1"), (_CONFLICT, "u2")]
+
+    components = [_spec("p1", "profile.json"),
+                  _spec("u1", "documentcache", action="update", component_id=_GUID, profile_id="$ref:p1"),
+                  _spec("u2", "documentcache", action="update", component_id=_GUID.upper(), profile_id="$ref:p1")]
+    with pytest.raises(ComponentWriteConflictError) as raw:
+        integration_builder._build_canonical_symbols(
+            spec=types.SimpleNamespace(components=components, processes=()),
+            resolution=build_connector_resolution_snapshot(components, declared={}),
+            conflict_policy="reuse",
+        )
+    assert integration_builder._pre_write_refusal(raw.value, failed_step="root")["error_code"] == _CONFLICT
+
+
+def test_apply_sends_an_update_to_the_canonical_component_id():
+    """QA-184-s1-r7-01: the platform refuses an update whose URL id differs in case from the
+    component's own, so apply sends the update to the canonical id (measured by running apply
+    offline; only execution is replaced)."""
+    import copy
+    from unittest import mock
+
+    from boomi_mcp.categories import integration_builder
+
+    config = {"dry_run": False, "conflict_policy": "reuse", "integration_spec": {"name": "canonical", "components": [
+        {"key": "a", "type": "profile.json", "name": "a", "action": "update",
+         "component_id": " " + _GUID.upper() + " ", "config": dict(_PROFILE_CONFIG)}]}}
+    targets = []
+
+    def execute(*args, **kwargs):
+        targets.append(kwargs.get("target_id"))
+        return {"_success": True, "component_id": kwargs.get("target_id"), "status": "updated"}
+
+    with mock.patch.object(integration_builder, "paginate_metadata", lambda *a, **k: []), \
+            mock.patch.object(integration_builder, "_execute_component", side_effect=execute):
+        result = integration_builder._apply_plan(mock.MagicMock(), "canonical_profile", copy.deepcopy(config))
+    assert result.get("_success"), result
+    assert targets == [_GUID]
+    assert result["results"]["a"]["component_id"] == _GUID
+
+
+def test_every_declared_component_id_reaches_the_builder_through_the_canonical_authority():
+    """QA-184-s1-r7-01, the sibling sweep read from the builder's source: every place a spec's or a
+    process envelope's declared id is bound, compared or sent goes through `canonical_component_id`.
+    The one other use echoes what the author wrote into the served plan step."""
+    import ast
+
+    from boomi_mcp.categories import integration_builder
+
+    tree = ast.parse(Path(integration_builder.__file__).read_text(encoding="utf-8"))
+    parents = {child: node for node in ast.walk(tree) for child in ast.iter_child_nodes(node)}
+    uses = []
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Attribute) and node.attr == "component_id"
+                and isinstance(node.value, ast.Name) and node.value.id in ("comp", "envelope")):
+            continue
+        parent = parents[node]
+        if isinstance(parent, ast.Call) and getattr(parent.func, "id", None) == "_first_nonblank_str":
+            parent = parents[parent]
+        if isinstance(parent, ast.Call) and getattr(parent.func, "id", None) == "canonical_component_id":
+            uses.append("canonical")
+        elif isinstance(parent, ast.Dict):
+            uses.append("echo")
+        else:
+            uses.append("raw line {0}".format(node.lineno))
+    # Non-vacuity: the planner binding (both branches), the plan's update-target check, the apply
+    # target, and a canonical root's plan and execute targets.
+    assert sorted(uses) == ["canonical"] * 6 + ["echo"], uses
+
+
+def test_a_reference_apply_does_not_write_carries_every_fact_of_the_writing_spec():
+    """QA-184-s1-r7-02: every symbol fact of a reference apply does not write is read from the spec
+    that writes its component, including the connector facts a call is judged by and the snapshot's
+    path-binding requirement. The fact fields are read from the symbol model itself, so a fact added
+    later is covered without editing this test."""
+    from types import SimpleNamespace
+
+    from boomi_mcp.authoring.workflow import _connector_metadata_from_components
+    from boomi_mcp.compiler.process_ir.contracts import ComponentSymbolV1
+
+    operation_id = "66ff8c9e-9c83-48d7-8ec8-921783ced17a"
+    writer_config = dict(connector_type="rest", operation_mode="execute", method="GET",
+                         connection_ref_key="conn", response_profile_id="$ref:p1")
+    components = [
+        _spec("p1", "profile.json"), _spec("p2", "profile.json"),
+        _spec("conn", "connector-settings", connector_type="rest"),
+        _spec("op", "connector-action", action="update", component_id=operation_id, **writer_config),
+        _spec("op_alias", "connector-action", action="update", component_id=operation_id.upper(), connector_type="rest"),
+        _spec("op_ref", "connector-action", component_id=operation_id, reference_only=True),
+    ]
+    dynamic = SimpleNamespace(component_key="op", route_state="dynamic", family="rest",
+                              listener_input_type=None, listener_request_profile=None)
+    snapshot = SimpleNamespace(lookup=lambda key: dynamic if key == "op" else None)
+    table = build_symbol_table(components, connector_metadata=_connector_metadata_from_components(components),
+                               connector_resolution_snapshot=snapshot)
+    symbols = {symbol.ref: symbol for symbol in table.symbols}
+    facts = sorted(set(ComponentSymbolV1.model_fields) - {"ref", "component_id"})
+    writer = symbols["$ref:op"]
+    # Non-vacuity: the writer states every kind of fact the call is judged by.
+    assert writer.connector_type and writer.action_type
+    assert (writer.connection_ref, writer.output_profile_ref, writer.requires_path_binding) == ("$ref:conn", "$ref:p1", True)
+    for ref in ("$ref:op_alias", "$ref:op_ref"):
+        assert {name: getattr(symbols[ref], name) for name in facts} == {name: getattr(writer, name) for name in facts}, ref
+    # CONTROL: with nothing in the request writing the operation, a reference states only its own facts.
+    alone = {symbol.ref: symbol for symbol in build_symbol_table(
+        components[:3] + components[5:], connector_metadata=_connector_metadata_from_components(components[:3] + components[5:]),
+        connector_resolution_snapshot=snapshot).symbols}
+    assert (alone["$ref:op_ref"].action_type, alone["$ref:op_ref"].connection_ref) == (None, None)
+
+
+def test_a_reference_names_its_own_connection():
+    """Pre-commit verification of correction batch 7: the operation->connection edge is a fact of the
+    STEP, never of the component. The builder emits identical operation XML whichever connection is
+    named, so a reference naming a connection keeps its own, and only one naming none takes the
+    writing spec's."""
+    from boomi_mcp.authoring.workflow import _connector_metadata_from_components
+    from boomi_mcp.categories.components.builders.connector_builder import RestClientOperationBuilder
+
+    config = {"component_type": "connector-action", "connector_type": "rest", "operation_mode": "execute",
+              "component_name": "op", "method": "GET", "path": "/v1/things",
+              "response_profile_id": "profile-guid-1", "response_profile_type": "json"}
+    # The authority: what apply writes into the operation does not depend on the connection.
+    assert (RestClientOperationBuilder().build(**dict(config, connection_ref_key="conn_a"))
+            == RestClientOperationBuilder().build(**dict(config, connection_ref_key="conn_b")))
+
+    operation_id = "66ff8c9e-9c83-48d7-8ec8-921783ced17a"
+    components = [
+        _spec("p1", "profile.json"),
+        _spec("conn_a", "connector-settings", connector_type="rest"),
+        _spec("conn_b", "connector-settings", connector_type="rest"),
+        _spec("op", "connector-action", action="update", component_id=operation_id, connector_type="rest",
+              operation_mode="execute", method="GET", connection_ref_key="conn_a", response_profile_id="$ref:p1"),
+        _spec("op_ref", "connector-action", component_id=operation_id.upper(), reference_only=True,
+              connection_ref_key="conn_b"),
+        _spec("op_alias", "connector-action", action="update", component_id=operation_id, connector_type="rest"),
+    ]
+    symbols = {symbol.ref: symbol for symbol in build_symbol_table(
+        components, connector_metadata=_connector_metadata_from_components(components)).symbols}
+    assert [symbols[ref].connection_ref for ref in ("$ref:op", "$ref:op_ref", "$ref:op_alias")] == [
+        "$ref:conn_a", "$ref:conn_b", "$ref:conn_a"]
+    # The component facts still come from the writer.
+    assert symbols["$ref:op_ref"].action_type == symbols["$ref:op"].action_type == "GET"
+
+
+def test_a_listener_reference_carries_the_writing_spec_listener_facts():
+    """Pre-commit verification of correction batch 7: a WSS listener operation's inbound facts are
+    facts of the component apply writes, so a metadata-only alias and a reference_only spec (spelling
+    the GUID in upper case) carry the writer's, compared field by field over the symbol model."""
+    from boomi_mcp.authoring.workflow import _connector_metadata_from_components
+    from boomi_mcp.compiler.process_ir.contracts import ComponentSymbolV1
+
+    listener_id = "66ff8c9e-9c83-48d7-8ec8-921783ced17a"
+    components = [
+        _spec("p1", "profile.json"),
+        _spec("op", "connector-action", action="update", component_id=listener_id, connector_type="wss",
+              operation_mode="listen", input_type="multidata", request_profile="$ref:p1"),
+        _spec("op_alias", "connector-action", action="update", component_id=listener_id.upper(), connector_type="wss"),
+        _spec("op_ref", "connector-action", component_id=listener_id.upper(), reference_only=True),
+    ]
+    symbols = {symbol.ref: symbol for symbol in build_symbol_table(
+        components, connector_metadata=_connector_metadata_from_components(components)).symbols}
+    writer = symbols["$ref:op"]
+    # Non-vacuity: the writer states listener facts.
+    assert (writer.input_document_type, writer.input_profile_ref) == ("multidata", "$ref:p1")
+    facts = sorted(set(ComponentSymbolV1.model_fields) - {"ref", "component_id"})
+    for ref in ("$ref:op_alias", "$ref:op_ref"):
+        assert {name: getattr(symbols[ref], name) for name in facts} == {name: getattr(writer, name) for name in facts}, ref
+
+
+def test_a_reference_only_spec_spelling_a_guid_in_upper_case_binds_the_component():
+    """Pre-commit verification of correction batch 7: the planner binding's reference_only branch reads
+    the canonical id too, so a reference_only update spelling the GUID in upper case beside an update of
+    it is a write conflict, and a reference_only create spelling it that way, at the top level or in its
+    config, binds the component and carries the writer's facts."""
+    upper = _GUID.upper()
+    writer = _spec("w", "documentcache", action="update", component_id=_GUID, profile_id="$ref:p1")
+    with pytest.raises(ComponentWriteConflictError) as refused:
+        build_symbol_table([_spec("p1", "profile.json"), writer,
+                            _spec("r", "documentcache", action="update", component_id=upper, reference_only=True)])
+    assert refused.value.conflicts == {_GUID: ("r", "w")}
+    for reference in (
+        _spec("r", "documentcache", component_id=upper, reference_only=True),
+        IntegrationComponentSpec(key="r", type="documentcache", name="r",
+                                 config={"reference_only": True, "component_id": upper}),
+    ):
+        symbols = {symbol.ref: symbol for symbol in build_symbol_table([_spec("p1", "profile.json"), writer, reference]).symbols}
+        assert (symbols["$ref:r"].bound_component_id, symbols["$ref:r"].cache_profile_ref) == (_GUID, "$ref:p1")
+
+
+def test_a_blank_update_id_names_nothing_at_plan_and_at_apply():
+    """Pre-commit verification of correction batch 7: a blank top-level id names nothing, so an update
+    naming no resolvable target plans `error_missing_target` and apply executes nothing (measured by
+    running the plan and apply offline)."""
+    import copy
+    from unittest import mock
+
+    from boomi_mcp.categories import integration_builder
+
+    config = {"dry_run": False, "conflict_policy": "reuse", "integration_spec": {"name": "blank", "components": [
+        {"key": "a", "type": "profile.json", "name": "a", "action": "update", "component_id": "   ",
+         "config": dict(_PROFILE_CONFIG)}]}}
+    calls = []
+    with mock.patch.object(integration_builder, "paginate_metadata", lambda *a, **k: []), \
+            mock.patch.object(integration_builder, "_execute_component",
+                              side_effect=lambda *a, **k: calls.append(k) or {"_success": True}):
+        plan = integration_builder._build_plan(mock.MagicMock(), copy.deepcopy(config))
+        result = integration_builder._apply_plan(mock.MagicMock(), "blank_profile", copy.deepcopy(config))
+    assert [(step.get("key"), step.get("planned_action")) for step in plan.get("steps") or []] == [("a", "error_missing_target")]
+    assert result.get("_success") is False and calls == []
+
+
+def test_a_canonical_root_update_reads_its_target_by_the_canonical_id():
+    """Pre-commit verification of correction batch 7: a canonical process root updated by an upper-case
+    GUID reads and writes its live target by the canonical id, through the public dispatcher with only
+    the network boundary faked (the #153 end-to-end harness). The live read is made to fail, so nothing
+    is written."""
+    from unittest.mock import MagicMock, patch
+
+    import test_issue_153_canonical_apply_e2e as e2e
+    from _m12_11_support import appliable_process_unit
+    from boomi_mcp.categories.integration_builder import build_integration_action
+
+    unit = appliable_process_unit(component_id=_GUID.upper())
+    unit = unit.model_copy(update={"envelope": unit.envelope.model_copy(update={"action": "update"})})
+    with patch(e2e._PAGINATE) as paginate:
+        paginate.return_value = []
+        payload = e2e._bound_payload(e2e.process_ir_request(units=(unit,)))
+    reads = []
+
+    def get_xml(_client, component_id, *_args, **_kwargs):
+        reads.append(component_id)
+        if isinstance(component_id, str) and component_id.strip().lower() == _GUID:
+            raise RuntimeError("the live component cannot be read")
+        return {"type": "connector-settings", "xml": e2e._LIVE_COMPONENT_XML}
+
+    with patch(e2e._PAGINATE) as paginate, patch(e2e._EXECUTE) as execute, patch(e2e._GET_XML) as read:
+        paginate.return_value = []
+        execute.side_effect = lambda *a, **k: {"_success": True, "component_id": "cid-1"}
+        read.side_effect = get_xml
+        build_integration_action(MagicMock(), e2e._PROFILE, "apply", config={"authoring_request": payload, "dry_run": False})
+    target_reads = [value for value in reads if isinstance(value, str) and value.strip().lower() == _GUID]
+    assert target_reads and set(target_reads) == {_GUID}, reads
+
+
+def test_a_connection_binding_spelling_one_guid_two_ways_names_one_component():
+    """Pre-commit verification of correction batch 7 (the governance sibling): a connection binding's
+    top-level and config ids are compared in canonical spelling, so two spellings of one GUID are one
+    component. Two different ids are still a binding conflict. Asked of the governance check itself,
+    which the typed plan runs before anything else about the binding."""
+    from boomi_mcp.authoring.governance import _refuse_contradictory_identity
+    from boomi_mcp.errors import GOVERNANCE_CONNECTION_BINDING_CONFLICT
+
+    def binding(top_level, in_config):
+        config = {"connector_type": "rest", "base_url": "https://x.invalid", "component_id": in_config}
+        return IntegrationComponentSpec(key="conn", type="connector-settings", name="conn",
+                                        component_id=top_level, config=config), config
+
+    component, config = binding(_GUID, " " + _GUID.upper() + " ")
+    _refuse_contradictory_identity(component, config, "conn")
+    component, config = binding(_GUID, "0370D8D8-2C63-42D7-AE11-9AA5BBF64262")
+    with pytest.raises(Exception) as refused:
+        _refuse_contradictory_identity(component, config, "conn")
+    assert getattr(refused.value, "code", None) == GOVERNANCE_CONNECTION_BINDING_CONFLICT

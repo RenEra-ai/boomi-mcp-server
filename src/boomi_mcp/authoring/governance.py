@@ -661,9 +661,12 @@ def _refuse_contradictory_identity(component, config, key: str) -> None:
     passed untouched, while apply under the reuse policy resolved it to the
     first (architect review, item 3).
     """
-    top_id = component.component_id.strip() if isinstance(component.component_id, str) else ""
-    cfg_id = config.get("component_id")
-    cfg_id = cfg_id.strip() if isinstance(cfg_id, str) else ""
+    # #184: compared in the one canonical spelling, so two spellings of one GUID name one
+    # component (`canonical_component_id`, QA-184-s1-r7-01).
+    from ..categories.integration_builder import canonical_component_id
+
+    top_id = canonical_component_id(component.component_id) or ""
+    cfg_id = canonical_component_id(config.get("component_id")) or ""
     if top_id and cfg_id and top_id != cfg_id:
         raise _refuse(
             GOVERNANCE_CONNECTION_BINDING_CONFLICT,

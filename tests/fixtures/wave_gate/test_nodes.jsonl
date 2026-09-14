@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 12858, "minimum_collected": 12858, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 12872, "minimum_collected": 12872, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -12957,3 +12957,17 @@
 {"kind": "test", "id": "pytest-012956", "node_id": "tests/test_issue_184_component_identity.py::test_a_declared_cache_read_is_compared_by_component_not_spelling", "state": "active"}
 {"kind": "test", "id": "pytest-012957", "node_id": "tests/test_issue_184_component_identity.py::test_every_declared_effect_is_compared_in_canonical_cache_spelling", "state": "active"}
 {"kind": "test", "id": "pytest-012958", "node_id": "tests/test_process_ir_effect_declarations.py::test_substitutability_asks_apply_not_a_copy", "state": "active"}
+{"kind": "test", "id": "pytest-012959", "node_id": "tests/test_issue_184_component_identity.py::test_a_component_id_has_one_canonical_spelling", "state": "active"}
+{"kind": "test", "id": "pytest-012960", "node_id": "tests/test_issue_184_component_identity.py::test_ids_differing_only_in_guid_case_name_one_component[map]", "state": "active"}
+{"kind": "test", "id": "pytest-012961", "node_id": "tests/test_issue_184_component_identity.py::test_ids_differing_only_in_guid_case_name_one_component[cache]", "state": "active"}
+{"kind": "test", "id": "pytest-012962", "node_id": "tests/test_issue_184_component_identity.py::test_ids_differing_only_in_guid_case_name_one_component[operation]", "state": "active"}
+{"kind": "test", "id": "pytest-012963", "node_id": "tests/test_issue_184_component_identity.py::test_guid_case_spellings_are_refused_on_the_typed_plan_and_the_raw_route", "state": "active"}
+{"kind": "test", "id": "pytest-012964", "node_id": "tests/test_issue_184_component_identity.py::test_apply_sends_an_update_to_the_canonical_component_id", "state": "active"}
+{"kind": "test", "id": "pytest-012965", "node_id": "tests/test_issue_184_component_identity.py::test_every_declared_component_id_reaches_the_builder_through_the_canonical_authority", "state": "active"}
+{"kind": "test", "id": "pytest-012966", "node_id": "tests/test_issue_184_component_identity.py::test_a_reference_apply_does_not_write_carries_every_fact_of_the_writing_spec", "state": "active"}
+{"kind": "test", "id": "pytest-012967", "node_id": "tests/test_issue_184_component_identity.py::test_a_reference_names_its_own_connection", "state": "active"}
+{"kind": "test", "id": "pytest-012968", "node_id": "tests/test_issue_184_component_identity.py::test_a_listener_reference_carries_the_writing_spec_listener_facts", "state": "active"}
+{"kind": "test", "id": "pytest-012969", "node_id": "tests/test_issue_184_component_identity.py::test_a_reference_only_spec_spelling_a_guid_in_upper_case_binds_the_component", "state": "active"}
+{"kind": "test", "id": "pytest-012970", "node_id": "tests/test_issue_184_component_identity.py::test_a_blank_update_id_names_nothing_at_plan_and_at_apply", "state": "active"}
+{"kind": "test", "id": "pytest-012971", "node_id": "tests/test_issue_184_component_identity.py::test_a_canonical_root_update_reads_its_target_by_the_canonical_id", "state": "active"}
+{"kind": "test", "id": "pytest-012972", "node_id": "tests/test_issue_184_component_identity.py::test_a_connection_binding_spelling_one_guid_two_ways_names_one_component", "state": "active"}

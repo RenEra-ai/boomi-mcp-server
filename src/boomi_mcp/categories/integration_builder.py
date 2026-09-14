@@ -5853,6 +5853,28 @@ def _authored_process_validation_error(
     )
 
 
+def canonical_component_id(value) -> Optional[str]:
+    """The platform's spelling of a declared component id, or None when it names nothing (#184).
+
+    ONE authority for every place a declared id is bound, compared or sent. Surrounding
+    whitespace is not part of an id (SELF-184-02), and a blank value names nothing. A
+    component id is a GUID the platform returns in lowercase and reads in any case, but it
+    refuses an update whose URL id differs in case from the component's own
+    (QA-184-s1-r7-01), so a GUID is compared and sent lowercase. Any other value is kept as
+    written. Whether a value IS a component id is the replay registry's one language
+    (``connector_replay.ids``), asked of its lowercase spelling.
+    """
+    from boomi_mcp.connector_replay.ids import is_boomi_component_id
+
+    if not isinstance(value, str):
+        return None
+    value = value.strip()
+    if not value:
+        return None
+    lowered = value.lower()
+    return lowered if is_boomi_component_id(lowered) else value
+
+
 class _PlannerBinding(NamedTuple):
     """What the planner resolves for one spec entry, before any action is chosen."""
 
@@ -5885,14 +5907,16 @@ def resolve_planner_binding(boomi_client, comp, *, declared_only=False) -> "_Pla
     """
     config = comp.config if isinstance(comp.config, dict) else {}
     reference_only = bool(config.get("reference_only"))
-    effective_component_id = comp.component_id
+    # #184: every declared id is its canonical spelling (`canonical_component_id`), so two
+    # spellings of one component bind, conflict and are written as one.
+    effective_component_id = canonical_component_id(comp.component_id)
     effective_name = comp.name
     if reference_only:
         # Top-level then config, treating blank / whitespace as absent so a "  "
         # id/name cannot become a fake reuse target.
-        effective_component_id = _first_nonblank_str(
+        effective_component_id = canonical_component_id(_first_nonblank_str(
             comp.component_id, config.get("component_id")
-        )
+        ))
         effective_name = _first_nonblank_str(comp.name, config.get("component_name"))
     if effective_component_id:
         return _PlannerBinding(reference_only, effective_component_id, ())
@@ -6022,9 +6046,9 @@ def declared_bindings_for_components(components, conflict_policy="reuse"):
     share, answered like the reuse set above from DECLARED bindings only: a reuse at
     apply (``reference_only``, or a ``create`` the policy reuses) and an ``update``,
     which writes the component it names. A binding only an account read can answer, a
-    name match, is not known here. The id is compared stripped: the ``reference_only``
-    path strips what the author wrote, and the create and update paths hand it back as
-    authored.
+    name match, is not known here. The id is the planner binding's canonical spelling
+    (``canonical_component_id``), so ids differing only in surrounding whitespace or GUID
+    letter case bind one component.
     """
     reused = reused_keys_for_components(components, conflict_policy)
     bindings = {}
@@ -6753,7 +6777,7 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
             # update-by-name could only fail after its dependencies had mutated,
             # and a create ignored `reuse`/`fail`/`clone` against a live process
             # of the same name and simply created another one.
-            canonical_existing_id = envelope.component_id
+            canonical_existing_id = canonical_component_id(envelope.component_id)
             canonical_action = envelope.action
             candidates: List[Dict[str, Any]] = []
             if not canonical_existing_id and envelope.name:
@@ -6907,7 +6931,7 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
                 else:
                     planned_action = "error_if_exists"
 
-        elif comp.action == "update" and not comp.component_id:
+        elif comp.action == "update" and not canonical_component_id(comp.component_id):
             if len(candidates) > 1:
                 planned_action = "error_ambiguous_match"
             elif len(candidates) == 0:
@@ -8936,7 +8960,7 @@ def _execute_canonical_process(
     # component, could only be expressed by renaming an artifact the plan had
     # already fingerprinted under the original name. Deciding here means the
     # plan describes what will actually be built (Codex round 1).
-    target_id = envelope.component_id or existing_id
+    target_id = canonical_component_id(envelope.component_id) or existing_id
     if envelope.action == "create" and existing_id and conflict_policy == "reuse":
         # No mutation happens, so no mutation attestation is recorded — an
         # attestation for a write that never occurred would be a false entry.
@@ -10890,7 +10914,8 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
                     )
                 resolved_config = _apply_clone_suffix(comp, resolved_config)
 
-            target_id = comp.component_id or existing_id
+            # #184: the canonical id, so the update is sent to the component's own spelling.
+            target_id = canonical_component_id(comp.component_id) or existing_id
             # AN UPDATE THAT WOULD WRITE NOTHING IS A BIND, DECIDED BEFORE THE
             # LOOP CAN LEAVE A PARTIAL APPLY BEHIND (QA-157-r2-01).
             #

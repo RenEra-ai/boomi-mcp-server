@@ -229,23 +229,16 @@ def _profile_facts(
     return None, None, None
 
 
-def _bound_component_facts(components, bindings, plan_keys, writers):
-    """``{existing component id: (input, output, cache) profile refs}`` per declared binding (#184).
+def _fact_source(component, bindings, writers, writer_for):
+    """The spec whose configuration describes ``component`` in the symbol table (#184).
 
-    Every reference apply does NOT write takes these from the one spec that writes its
-    component, or takes none when nothing in the request writes it. A request writing one
-    component from two specs is refused before this runs (``component_write_conflicts``,
-    Stage-2 review round r5), so no reference ever chooses between two configurations.
+    A reference apply does not write is described by the one spec in the request that
+    writes its component (Stage-2 review rounds r3 to r5, QA round r7). Every other spec,
+    and a reference to a component nothing in the request writes, describes itself.
     """
-    facts: Dict[str, Tuple[Optional[str], Optional[str], Optional[str]]] = {}
-    for component in components:
-        bound = bindings.get(component.key)
-        if bound is None:
-            continue
-        facts.setdefault(bound, (None, None, None))
-        if component.key in writers:
-            facts[bound] = _profile_facts(component, plan_keys)
-    return facts
+    if component.key in bindings and component.key not in writers:
+        return writer_for.get(bindings[component.key], component)
+    return component
 
 
 def build_symbol_table(
@@ -335,15 +328,20 @@ def build_symbol_table(
         for key, bound in declared_bindings_for_components(components, conflict_policy).items()
         if bound not in placeholders
     }
-    # #184: the one spec that writes a bound component keeps its facts, and every other
-    # reference to that component carries them (Stage-2 review rounds r3 to r5).
+    # #184: the one spec that writes a bound component is the SOURCE of every component fact
+    # of each reference to that component apply does not write: its connector family and
+    # action, listener facts, profile facts and path-binding requirement (Stage-2 review
+    # rounds r3 to r5, QA round r7). A step's connection is not a component fact; see below. A request writing one component from two
+    # specs is refused above, so no reference chooses between configurations, and a
+    # reference to a component nothing in the request writes is its own source.
     writers = {
         component.key for component in components
         if component.key in bindings and component_writes_existing(component)
     }
-    component_facts = _bound_component_facts(components, bindings, plan_keys, writers)
+    writer_for = {bindings[component.key]: component for component in components if component.key in writers}
     for component in components:
-        connector_type, action_type = metadata.get(component.key, (None, None))
+        source = _fact_source(component, bindings, writers, writer_for)
+        connector_type, action_type = metadata.get(source.key, (None, None))
         ref = f"{_REF_PREFIX}{component.key}"
         # NORMALIZED, and only used when it yields a usable key. The value
         # is plain caller config with no upstream normalization, so interpolating
@@ -361,7 +359,14 @@ def build_symbol_table(
         # version read `connection_key`, which appears in NO production path:
         # only in hand-written clean-room fixtures, which is why they passed
         # while every plan a primitive builds still failed resolution.
+        # The operation->connection edge is a fact of the STEP, not of the component: Boomi
+        # binds a connection to an operation at the process connector step, and the operation
+        # XML apply writes never embeds it (`integration_builder`). So a reference that names
+        # a connection keeps its own, and only one naming none takes the writing spec's
+        # (pre-commit verification of correction batch 7).
         raw_connection_ref_key = (component.config or {}).get("connection_ref_key")
+        if not (isinstance(raw_connection_ref_key, str) and raw_connection_ref_key.strip()):
+            raw_connection_ref_key = (source.config or {}).get("connection_ref_key")
         connection_ref_key = (
             raw_connection_ref_key.strip() if isinstance(raw_connection_ref_key, str) else ""
         )
@@ -369,18 +374,14 @@ def build_symbol_table(
         # contract. Carried on the symbol the listener entry resolves; `None` for
         # every other component.
         listener_input_type, listener_request_profile = _listener_inbound_facts(
-            component, connector_resolution_snapshot
+            source, connector_resolution_snapshot
         )
         # #184: the profile facts the canonical stream-profile proof reads — which
         # profile a call hands on and accepts, what a map transforms, what a cache
         # declares it holds. The listener's inbound request profile keeps precedence
         # for the listener operation, which is what #158 carries in the same field.
-        input_profile_fact, output_profile_fact, cache_profile_fact = (
-            component_facts[bindings[component.key]]
-            if component.key in bindings and component.key not in writers
-            else _profile_facts(
-                component, plan_keys, written=apply_writes_component_config(component, conflict_policy)
-            )
+        input_profile_fact, output_profile_fact, cache_profile_fact = _profile_facts(
+            source, plan_keys, written=apply_writes_component_config(source, conflict_policy)
         )
         symbols.append(
             ComponentSymbolV1(
@@ -403,7 +404,7 @@ def build_symbol_table(
                 # keeps the field from being the inert addition the architecture
                 # note rejects `dependency_refs` for.
                 requires_path_binding=_requires_path_binding(
-                    connector_resolution_snapshot, component.key
+                    connector_resolution_snapshot, source.key
                 ),
             )
         )
