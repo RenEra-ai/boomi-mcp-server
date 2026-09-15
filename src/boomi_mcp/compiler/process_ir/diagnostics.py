@@ -101,12 +101,28 @@ _NODE_LEAF_SEGMENTS = frozenset({"terminal"})
 _REMEDIATION = {
     # --- #141 M12.6 -------------------------------------------------------
     PROCESS_IR_SCHEMA_BRANCH_CARDINALITY: (
-        "A Branch must declare between 2 and 25 legs — the platform's own "
-        "documented bound on Branch paths."
+        # SELF-184-37: registered for the compile path's re-served parse
+        # diagnostics, so this layer serves the parser's words for the parser's rule
+        # (`test_a_translated_code_serves_the_parsers_remediation`).
+        "A Branch must declare between 2 and 25 legs (the platform's documented bound)."
     ),
     PROCESS_IR_SEMANTIC_CONTROL_CONTINUATION_UNSUPPORTED: (
-        "Move the steps that followed the branch/decision into every leg or arm. "
-        "Control nodes are terminal fan-out in ProcessIR v1; nothing may follow one."
+        # SELF-184-37. This layer serves the code for the model's SHARED rules, run
+        # through `body_capabilities._as_compile_error`: the passthrough root's
+        # branch/decision rule, which cites continuation_after_branch_or_decision,
+        # and `_check_no_orphan_continue`. The branch-only text told an orphan
+        # `continue` to move steps into every leg or arm (measured on a mutated
+        # lone handler). The rules are the parser's, so the text is the parser's.
+        "After a branch or decision, move the steps that followed it into every "
+        "leg or arm — ProcessIR v1 emits no continuation after a control node. "
+        "After a try_catch the same holds, with one exception: connector-scoped "
+        "handlers may run in sequence, and a handler that is followed by another "
+        "one ends its protected path in continue instead of a terminal. A "
+        "continue anywhere else — on the last handler, on a lone handler, or as a "
+        "root step — has no next region to reach and is refused. "
+        "Continuation after a branch or decision is the gated capability "
+        "continuation_after_branch_or_decision; its published state is at "
+        "get_schema_template(schema_name='process_ir_authoring', category='capability')."
     ),
     PROCESS_IR_SEMANTIC_JOIN_UNSUPPORTED: (
         "Give each divergent path its own terminal. ProcessIR v1 emits no join or "
@@ -122,9 +138,19 @@ _REMEDIATION = {
         "divergent path must terminate independently."
     ),
     PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY: (
+        # SELF-184-37. Slot admission AND the `process_call_connector_mixing` gate
+        # raise this code here (`body_capabilities._check` and `_walk_body`), so the
+        # one remediation answers both. Identical to the parser's text: the same
+        # two rules raise it at both layers.
         "Use a node kind this body slot admits. The admitted set for each slot is "
         "published at get_schema_template(schema_name='process_ir_authoring', "
-        "category='placement'); a kind absent from a slot is rejected outright."
+        "category='placement'); a kind absent from a slot is rejected, so absence is "
+        "the rule, not an omission. This code also refuses a process_call and a "
+        "connector step on one root-to-leaf path, even where the slot admits both "
+        "kinds, because process_call_connector_mixing is gated — its published state "
+        "is at get_schema_template(schema_name='process_ir_authoring', "
+        "category='capability'). For that refusal, move the connector work to its "
+        "own path, or into the called process."
     ),
     # --- #184 -------------------------------------------------------------
     PROCESS_IR_CAPABILITY_PROCESS_CALL_PLACEMENT_UNSUPPORTED: (
@@ -176,9 +202,23 @@ _REMEDIATION = {
         "this is a compiler defect — please report it."
     ),
     PROCESS_IR_CAPABILITY_UNSUPPORTED: (
-        "This construct is capability-gated in ProcessIR v1. Fetch its published "
-        "state at get_schema_template(schema_name='process_ir_authoring', "
-        "category='capability') — 'gated' means not yet, 'unsupported' means never."
+        # SELF-184-37. This layer serves the code for model rules it renders or
+        # translates (the root mixing verdict, the passthrough and serialized-chain
+        # grammars) and for one rule of its own, a listener-family operation on a
+        # source step (`lowering`). One text covers all of them, and it is the
+        # parser's text too; the old one said only "capability-gated".
+        "The referenced construct is capability-gated or unsupported in ProcessIR v1. "
+        "Fetch its published state with "
+        "get_schema_template(schema_name='process_ir_authoring', category='capability') — "
+        "'gated' means not yet, 'unsupported' means never, and only the latter needs a "
+        "different design. "
+        "In a root sequence this code also refuses a process_call on one path with a "
+        "connector step, because process_call_connector_mixing is gated; to author the "
+        "flow now, move the connector work to its own path, or into the called process. "
+        "When the plan compiles, a Web Services Server operation authored as a source "
+        "step is refused under this code as well: author it as the process's listener "
+        "entry, described at "
+        "get_schema_template(schema_name='process_ir_authoring', node_kind='listener')."
     ),
     PROCESS_IR_COMPILE_EMITTER_MISSING: (
         "This node kind has no registered emitter at the current capability level; "
@@ -286,9 +326,20 @@ _REMEDIATION = {
     ),
     # --- #142 M12.7 -------------------------------------------------------
     PROCESS_IR_CAPABILITY_ERROR_SCOPE_UNSUPPORTED: (
+        # SELF-184-37. Served here for the model's serialized-chain rule (run
+        # through `_as_compile_error`) AND for this layer's own placement and
+        # try-body checks, so one text covers every rule raising the code at either
+        # layer; it is the parser's text too. The old text named neither the chain
+        # nor the try-body shape rules.
         "Use a supported error scope in its verified placement: a process scope as "
-        "the sole root step, or a connector scope as the last step of a "
-        "connector-call sequence."
+        "the sole root step, a connector scope as the last step of a "
+        "connector-call sequence, or connector scopes throughout a serialized "
+        "chain of handlers; outside such a chain, no step may follow a try_catch. "
+        "Shape the try body for its scope and end it in its terminal: a "
+        "process-scoped body begins with the connector_call that produces the "
+        "flow's documents, and a connector-scoped body is optional set_ddp/set_dpp "
+        "steps followed by exactly the one connector_call it protects. See "
+        "get_schema_template(schema_name='process_ir_authoring', node_kind='try_catch')."
     ),
     PROCESS_IR_SEMANTIC_RETRY_SOURCE_REEXECUTION: (
         "Set the retry count to zero, or protect a call that runs downstream of the "
@@ -316,8 +367,16 @@ _REMEDIATION = {
         "Every caught document must reach a terminal."
     ),
     PROCESS_IR_SCHEMA_INVALID_CARDINALITY: (
-        "Check the step counts and ordering against the node's own rules — a list "
-        "bound or a required neighbour is not satisfied."
+        # SELF-184-37: this layer serves the code only for the model's rules it
+        # renders or translates (the explicit-entry position verdict, the passthrough
+        # and serialized-chain grammars), so it serves the parser's words for them.
+        "Fix the list bound or step ordering at the referenced path. The exact "
+        "bounds are in the node's own definition in "
+        "get_schema_template(schema_name='ProcessIRV1'); the behavioural rules of "
+        "a control-body slot are at get_schema_template("
+        "schema_name='process_ir_authoring', category='placement'), and a "
+        "root-sequence rule is on the node kind's own page, which get_schema_template("
+        "schema_name='process_ir_authoring') returns when node_kind names that kind."
     ),
     PROCESS_IR_SEMANTIC_RECOVERY_PROCESS_CALL_INVALID: (
         "Author the recovery call with wait=true and abort_on_error=true. abort_on_error defaults to false, so it must be written explicitly: the parent has to observe a failed hand-off rather than complete over it."

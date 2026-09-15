@@ -18,6 +18,7 @@ adding a code without registering its text fails HERE, at the seam, rather than 
 slices later in a review.
 """
 
+import re
 import sys
 from pathlib import Path
 
@@ -845,3 +846,272 @@ def test_the_legacy_adapter_boundary_raises_no_canonical_diagnostic():
             if name not in source:
                 stale.append((relative, name))
     assert stale == [], stale
+
+
+# ---------------------------------------------------------------------------
+# SELF-184-37: a served remediation names every gate its code's raisers cite
+# ---------------------------------------------------------------------------
+
+#: Capability-citing literals in the scanned modules that are NOT message text, keyed by
+#: `(path, literal)` (line numbers churn) and mapped to why. `capability_citations` reports
+#: every citing literal it cannot place at a raise site, and this table is compared with that
+#: set whole: a new citation the reader cannot read fails, and a stale entry must be retired.
+CAPABILITY_CITATIONS_NOT_MESSAGE_TEXT = {
+    (
+        "src/boomi_mcp/compiler/process_ir/error_handling.py",
+        "{0}/retry/source_replay_policy",
+    ): (
+        "a JSON-pointer template naming the authored `source_replay_policy` field. It is "
+        "the PATH argument of its raise sites, never their message text"
+    ),
+}
+
+_MIXING_GATE = "process_call_connector_mixing"
+_BODY_PLACEMENT_CODE = "PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY"
+
+#: The two texts SELF-184-37 replaced, verbatim, for the faithful revert mutant.
+_SLOT_ONLY_REMEDIATION = {
+    "parser": (
+        "Use a node kind this body slot admits. The admitted set for each slot is "
+        "published at "
+        "get_schema_template(schema_name='process_ir_authoring', category='placement'); "
+        "a kind absent from a slot is rejected, so absence is the rule, not an omission."
+    ),
+    "compiler": (
+        "Use a node kind this body slot admits. The admitted set for each slot is "
+        "published at get_schema_template(schema_name='process_ir_authoring', "
+        "category='placement'); a kind absent from a slot is rejected outright."
+    ),
+}
+
+
+def _names(capability, text):
+    """Whole-token match, the same rule `capability_citations` uses for a citation."""
+    return re.search(
+        r"(?<![A-Za-z0-9_])" + re.escape(capability) + r"(?![A-Za-z0-9_])", text or ""
+    ) is not None
+
+
+def _gate_citations():
+    """`(pairs, capabilities)` read from source, with the reader's fail-closed half asserted."""
+    from _process_ir_diagnostic_emissions import capability_citations
+    from boomi_mcp.models.process_ir import PROCESS_IR_V1_CAPABILITIES
+
+    capabilities = frozenset(PROCESS_IR_V1_CAPABILITIES)
+    assert capabilities, "no capability table — the census would be vacuous"
+    pairs, unassociated = capability_citations(capabilities)
+    observed = {(path, text) for path, _lineno, text in unassociated}
+    pinned = set(CAPABILITY_CITATIONS_NOT_MESSAGE_TEXT)
+    assert observed == pinned, {
+        "unplaced (a citation the reader cannot place at a raise site)": sorted(
+            observed - pinned),
+        "pinned but gone (retire the entry)": sorted(pinned - observed),
+    }
+    return pairs, capabilities
+
+
+def _check_every_remediation_names_its_gates(pairs, capabilities):
+    """`[(code, layer, capability)]` omissions, asserted empty; returns the pairs it checked."""
+    from _process_ir_diagnostic_emissions import producer_of
+
+    # Floor, and the anti-vacuity anchor: the SELF-184-37 pair itself, raised at BOTH
+    # layers, and served by both layers' tables.
+    sites = pairs.get(_BODY_PLACEMENT_CODE, {}).get(_MIXING_GATE, frozenset())
+    assert {producer_of(path) for path, _lineno in sites} >= {"parser", "compiler"}, sorted(sites)
+
+    layers = _by_layer()
+    checked = set()
+    missing = []
+    for code, cited in pairs.items():
+        tables = [layer for layer in ("parser", "compiler", "semantic") if code in layers[layer]]
+        assert tables, ("a gate-citing code no table serves", code)
+        for capability in cited:
+            assert capability in capabilities, capability
+            for layer in tables:
+                checked.add((code, layer, capability))
+                if not _names(capability, layers[layer][code]["remediation"]):
+                    missing.append((code, layer, capability))
+    assert {(_BODY_PLACEMENT_CODE, "parser", _MIXING_GATE),
+            (_BODY_PLACEMENT_CODE, "compiler", _MIXING_GATE)} <= checked, sorted(checked)
+    assert sorted(missing) == [], sorted(missing)
+    return checked
+
+
+def test_every_code_remediation_names_every_gate_its_raisers_cite():
+    """SELF-184-37: every served remediation names each capability gate its code's raisers cite.
+
+    `PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY` has two raising rules: slot admission,
+    and the `process_call_connector_mixing` gate, which keeps the code by recorded #141/#175
+    design. Its one remediation described only slot admission, so a mixing refusal told its
+    author to "use a node kind this body slot admits" about a kind the slot does admit.
+
+    Both sides are derived. `capability_citations` scans the model and compiler modules for
+    raise sites and verdict renderers, and the gate names come from
+    `PROCESS_IR_V1_CAPABILITIES`. Every served table the code appears in is checked
+    separately, parser and compiler, the way `_by_layer` keeps them. The floor is the
+    SELF-184-37 pair itself, raised at both layers. The reader's fail-closed half is in
+    `_gate_citations`: a citing literal it cannot place is reported, not dropped.
+    """
+    pairs, capabilities = _gate_citations()
+    checked = _check_every_remediation_names_its_gates(pairs, capabilities)
+    # Every derived pair was looked up in every table serving its code: the authority's
+    # own size, not a floor.
+    layers = _by_layer()
+    expected = {
+        (code, layer, capability)
+        for code, cited in pairs.items() for capability in cited
+        for layer in ("parser", "compiler", "semantic") if code in layers[layer]
+    }
+    assert checked == expected, sorted(expected ^ checked)
+
+
+def test_a_reverted_remediation_fails_the_gate_citation_invariant(monkeypatch):
+    """Mutants against `test_every_code_remediation_names_every_gate_its_raisers_cite`.
+
+    1. Faithful revert: each table's SELF-184-37 remediation restored to its slot-only text,
+       one table at a time. The invariant names exactly that `(code, layer, gate)`.
+    2. Derived: for every `(code, gate)` pair the scan finds and every table serving the
+       code, the gate's name erased from that one remediation. Each fails naming its triple.
+
+    Patched at `_REMEDIATION` in `boomi_mcp.models.process_ir` and
+    `boomi_mcp.compiler.process_ir.diagnostics`, which the served spec accessors read at
+    call time. The unmutated control passes before and after each.
+    """
+    from boomi_mcp.compiler.process_ir import diagnostics
+    from boomi_mcp.compiler.process_ir.semantic_validation import findings
+    from boomi_mcp.models import process_ir as parser_module
+
+    modules = {"parser": parser_module, "compiler": diagnostics, "semantic": findings}
+    pairs, capabilities = _gate_citations()
+    _check_every_remediation_names_its_gates(pairs, capabilities)
+
+    def expect(layer, code, text, capability):
+        table = dict(modules[layer]._REMEDIATION)
+        table[code] = text
+        monkeypatch.setattr(modules[layer], "_REMEDIATION", table)
+        with pytest.raises(AssertionError) as caught:
+            _check_every_remediation_names_its_gates(pairs, capabilities)
+        assert repr((code, layer, capability)) in str(caught.value), str(caught.value)[:1500]
+        monkeypatch.undo()
+        _check_every_remediation_names_its_gates(pairs, capabilities)
+
+    for layer, text in _SLOT_ONLY_REMEDIATION.items():
+        expect(layer, _BODY_PLACEMENT_CODE, text, _MIXING_GATE)
+
+    derived = 0
+    for code, cited in pairs.items():
+        for capability in cited:
+            for layer, module in modules.items():
+                if code not in module._REMEDIATION:
+                    continue
+                erased = re.sub(
+                    r"(?<![A-Za-z0-9_])" + re.escape(capability) + r"(?![A-Za-z0-9_])",
+                    "this capability", module._REMEDIATION[code])
+                expect(layer, code, erased, capability)
+                derived += 1
+    assert derived >= 2, derived
+
+
+# ---------------------------------------------------------------------------
+# SELF-184-37, second instance: a code the compiler serves by translating a
+# shared model rule serves the parser's words
+# ---------------------------------------------------------------------------
+
+#: Translated codes whose two served remediations may differ, each with the reason no
+#: single text can cover every rule raising the code. Compared whole with the codes measured
+#: unequal, so it fails when that set grows and when an entry goes stale (now equal, or no
+#: longer translated). Empty: every translated code serves one text.
+TRANSLATED_CODES_WITH_LAYER_TEXT = {}
+
+#: The derivation's size when the test was written. A floor, never the authority: the
+#: authority is `compiler_translated_codes()`, and a new translated code simply joins it.
+_TRANSLATED_CODE_FLOOR = 10
+
+
+def _translated_codes():
+    """The derived set, with the reader's own non-vacuity asserted."""
+    from _process_ir_diagnostic_emissions import compiler_translated_codes
+
+    derived = compiler_translated_codes()
+    assert derived["unreadable"] == (), derived["unreadable"]
+    translated = derived["translated"]
+    assert len(translated) >= _TRANSLATED_CODE_FLOOR, sorted(translated)
+    by_mechanism = {}
+    for code, mechanisms in translated.items():
+        for mechanism in mechanisms:
+            by_mechanism.setdefault(mechanism.split(" ", 1)[0], set()).add(code)
+    # Every mechanism contributes, so none of the three arms is vacuous...
+    assert set(by_mechanism) == {"renders", "translates", "registered"}, sorted(by_mechanism)
+    # ...and the registered arm IS the allowance this file already pins in both directions.
+    assert by_mechanism["registered"] == set(COMPILER_REGISTERED_PARSE_CODES), sorted(
+        by_mechanism["registered"])
+    return derived
+
+
+def _check_translated_codes_serve_the_parsers_remediation(derived):
+    layers = _by_layer()
+    unequal = []
+    for code in derived["translated"]:
+        assert code in layers["parser"] and code in layers["compiler"], code
+        if layers["compiler"][code]["remediation"] != layers["parser"][code]["remediation"]:
+            unequal.append(code)
+    pinned = set(TRANSLATED_CODES_WITH_LAYER_TEXT)
+    assert set(unequal) == pinned, {
+        "unequal and not exempted": sorted(set(unequal) - pinned),
+        "exempted but equal or no longer translated (retire it)": sorted(pinned - set(unequal)),
+    }
+    blank = sorted(code for code, reason in TRANSLATED_CODES_WITH_LAYER_TEXT.items()
+                   if not reason.strip())
+    assert blank == [], blank
+
+
+def test_a_translated_code_serves_the_parsers_remediation(monkeypatch):
+    """SELF-184-37, second instance: a code the compiler serves for a MODEL rule serves the
+    parser's remediation, word for word.
+
+    The compiler served `PROCESS_IR_SEMANTIC_CONTROL_CONTINUATION_UNSUPPORTED` for the
+    model's own orphan-`continue` rule, run through `_as_compile_error`, under a remediation
+    that described only continuation after a branch or decision. Measured at `73b9d3d` and
+    at the batch baseline `8048836`. The rule is the parser's, so the text is too, which is
+    the layer rule `diagnostics._MESSAGES` states: where the fact is genuinely identical at
+    both layers, the wording is identical too.
+
+    The set is derived, not listed. `compiler_translated_codes()` reads three mechanisms
+    from source: a compiler function rendering a model verdict, a translator re-raising a
+    model rule's refusal, and a code the compiler table registers that no compiler module
+    raises. The registered arm is checked against `COMPILER_REGISTERED_PARSE_CODES`, and
+    each arm must contribute. A translated code that a compiler-only rule also raises
+    (`native`) keeps one text as well, worded to cover those rules.
+    `TRANSLATED_CODES_WITH_LAYER_TEXT` would hold a code where that is infeasible, and it is
+    compared whole.
+
+    Mutant, in-file: each translated code's compiler text changed alone must fail the check.
+
+    COVERAGE BOUND. Two properties are decided mechanically: a remediation names every
+    capability gate its raisers cite
+    (`test_every_code_remediation_names_every_gate_its_raisers_cite`), and a translated code
+    serves one text at both layers (this test). Neither decides whether a remediation's
+    WORDING fits every rule that raises its code. That is a claim about English, and a
+    reader over English cannot make it, as the projection says of its own guard over
+    `_REVIEWED_PLACEMENT_PROSE`. The unified texts were written against the raising rules
+    this derivation lists; that comparison is review, not a guard.
+    """
+    from boomi_mcp.compiler.process_ir import diagnostics
+
+    derived = _translated_codes()
+    _check_translated_codes_serve_the_parsers_remediation(derived)
+    # The compiler-only rules the one text must also cover are found, not assumed away.
+    assert {
+        "PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY",
+        "PROCESS_IR_CAPABILITY_ERROR_SCOPE_UNSUPPORTED",
+    } <= set(derived["native"]), sorted(derived["native"])
+
+    for code in derived["translated"]:
+        table = dict(diagnostics._REMEDIATION)
+        table[code] = table[code] + " Edited on this layer only."
+        monkeypatch.setattr(diagnostics, "_REMEDIATION", table)
+        with pytest.raises(AssertionError) as caught:
+            _check_translated_codes_serve_the_parsers_remediation(derived)
+        assert repr(code) in str(caught.value), str(caught.value)[:1500]
+        monkeypatch.undo()
+        _check_translated_codes_serve_the_parsers_remediation(derived)

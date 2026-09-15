@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 13007, "minimum_collected": 13007, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 13012, "minimum_collected": 13012, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -13306,3 +13306,8 @@
 {"kind": "test", "id": "pytest-013305", "node_id": "tests/test_issue_184_document_emission.py::test_a_cardinality_refusal_cites_no_placement_entry", "state": "active"}
 {"kind": "test", "id": "pytest-013306", "node_id": "tests/test_issue_184_document_emission.py::test_a_placement_entry_is_cited_only_by_a_refusal_in_its_slot", "state": "active"}
 {"kind": "test", "id": "pytest-013307", "node_id": "tests/test_issue_184_document_emission.py::test_mutant_citation_rules_are_caught", "state": "active"}
+{"kind": "test", "id": "pytest-013308", "node_id": "tests/test_issue_184_document_emission.py::test_a_mixing_refusal_serves_a_remediation_naming_the_gate", "state": "active"}
+{"kind": "test", "id": "pytest-013309", "node_id": "tests/test_issue_184_document_emission.py::test_a_continuation_refusal_serves_one_remediation_at_both_layers", "state": "active"}
+{"kind": "test", "id": "pytest-013310", "node_id": "tests/test_process_ir_served_text_enforcement.py::test_every_code_remediation_names_every_gate_its_raisers_cite", "state": "active"}
+{"kind": "test", "id": "pytest-013311", "node_id": "tests/test_process_ir_served_text_enforcement.py::test_a_reverted_remediation_fails_the_gate_citation_invariant", "state": "active"}
+{"kind": "test", "id": "pytest-013312", "node_id": "tests/test_process_ir_served_text_enforcement.py::test_a_translated_code_serves_the_parsers_remediation", "state": "active"}

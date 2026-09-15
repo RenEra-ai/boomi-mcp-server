@@ -4187,9 +4187,11 @@ _REMEDIATION = {
     PROCESS_IR_SCHEMA_INVALID_CARDINALITY: (
         "Fix the list bound or step ordering at the referenced path. The exact "
         "bounds are in the node's own definition in "
-        "get_schema_template(schema_name='ProcessIRV1'); the behavioural rules "
-        "for the node kind at that path are at get_schema_template("
-        "schema_name='process_ir_authoring', category='placement')."
+        "get_schema_template(schema_name='ProcessIRV1'); the behavioural rules of "
+        "a control-body slot are at get_schema_template("
+        "schema_name='process_ir_authoring', category='placement'), and a "
+        "root-sequence rule is on the node kind's own page, which get_schema_template("
+        "schema_name='process_ir_authoring') returns when node_kind names that kind."
     ),
     PROCESS_IR_SCHEMA_VERSION_UNSUPPORTED: (
         "Set version to the supported ProcessIR version '1'."
@@ -4222,29 +4224,60 @@ _REMEDIATION = {
         "get_schema_template(schema_name='ProcessIRV1')."
     ),
     PROCESS_IR_CAPABILITY_UNSUPPORTED: (
+        # SELF-184-37. A root sequence's mixing refusal is served under this code
+        # (`process_call_root_verdict`), so a sentence names the gate and its
+        # remedy. The compiler also raises the code for one rule the parser cannot
+        # see, a listener-family operation resolved on a source step
+        # (`lowering`), so the last sentence covers that. One text, served by both
+        # tables.
         "The referenced construct is capability-gated or unsupported in ProcessIR v1. "
         "Fetch its published state with "
         "get_schema_template(schema_name='process_ir_authoring', category='capability') — "
         "'gated' means not yet, 'unsupported' means never, and only the latter needs a "
-        "different design."
+        "different design. "
+        "In a root sequence this code also refuses a process_call on one path with a "
+        "connector step, because process_call_connector_mixing is gated; to author the "
+        "flow now, move the connector work to its own path, or into the called process. "
+        "When the plan compiles, a Web Services Server operation authored as a source "
+        "step is refused under this code as well: author it as the process's listener "
+        "entry, described at "
+        "get_schema_template(schema_name='process_ir_authoring', node_kind='listener')."
     ),
     PROCESS_IR_SCHEMA_BRANCH_CARDINALITY: (
         "A Branch must declare between 2 and 25 legs (the platform's documented bound)."
     ),
     PROCESS_IR_SEMANTIC_CONTROL_CONTINUATION_UNSUPPORTED: (
+        # SELF-184-37: the branch/decision refusal cites its gate by name, so the
+        # last sentence names it and where its state is published. Same words as
+        # the compiler's table.
         "After a branch or decision, move the steps that followed it into every "
         "leg or arm — ProcessIR v1 emits no continuation after a control node. "
         "After a try_catch the same holds, with one exception: connector-scoped "
         "handlers may run in sequence, and a handler that is followed by another "
         "one ends its protected path in continue instead of a terminal. A "
         "continue anywhere else — on the last handler, on a lone handler, or as a "
-        "root step — has no next region to reach and is refused."
+        "root step — has no next region to reach and is refused. "
+        "Continuation after a branch or decision is the gated capability "
+        "continuation_after_branch_or_decision; its published state is at "
+        "get_schema_template(schema_name='process_ir_authoring', category='capability')."
     ),
     PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY: (
+        # SELF-184-37. TWO rules raise this code: slot admission, and the
+        # `process_call_connector_mixing` gate on a root-to-leaf path, which keeps
+        # this code by recorded #141/#175 design. The slot-only text told a mixing
+        # refusal to use a kind the slot admits, about a kind the slot DOES admit.
+        # Worded identically in the compiler's table, because the fact is the same
+        # at both layers.
         "Use a node kind this body slot admits. The admitted set for each slot is "
         "published at "
         "get_schema_template(schema_name='process_ir_authoring', category='placement'); "
-        "a kind absent from a slot is rejected, so absence is the rule, not an omission."
+        "a kind absent from a slot is rejected, so absence is the rule, not an omission. "
+        "This code also refuses a process_call and a connector step on one "
+        "root-to-leaf path, even where the slot admits both kinds, because "
+        "process_call_connector_mixing is gated — its published state is at "
+        "get_schema_template(schema_name='process_ir_authoring', category='capability'). "
+        "For that refusal, move the connector work to its own path, or into the "
+        "called process."
     ),
     PROCESS_IR_CAPABILITY_PROCESS_CALL_RETURN_PATH_BINDING_UNSUPPORTED: (
         "Author the process call as the TERMINAL of its path and remove whatever "
@@ -4275,10 +4308,18 @@ _REMEDIATION = {
         "documented bound), or omit retry entirely for no retry."
     ),
     PROCESS_IR_CAPABILITY_ERROR_SCOPE_UNSUPPORTED: (
+        # SELF-184-37: the try-body shape rules raise this code at both layers and
+        # the text named none of them; the compiler also raises it when a step
+        # follows a try_catch. One text covers every rule raising the code, and the
+        # compiler's table serves the same words.
         "Use a supported error scope in its verified placement: a process scope as "
         "the sole root step, a connector scope as the last step of a "
         "connector-call sequence, or connector scopes throughout a serialized "
-        "chain of handlers. See "
+        "chain of handlers; outside such a chain, no step may follow a try_catch. "
+        "Shape the try body for its scope and end it in its terminal: a "
+        "process-scoped body begins with the connector_call that produces the "
+        "flow's documents, and a connector-scoped body is optional set_ddp/set_dpp "
+        "steps followed by exactly the one connector_call it protects. See "
         "get_schema_template(schema_name='process_ir_authoring', node_kind='try_catch')."
     ),
     PROCESS_IR_SEMANTIC_CATCH_UNTERMINATED: (

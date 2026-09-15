@@ -987,7 +987,8 @@ def _emitter_input_for(node: CfgNodeV1, symbols: Mapping[str, Any]) -> Any:
         # The legacy entry for a listener FUSES start + connector into one
         # ``start_listen`` shape; this compiler always emits the
         # start_noaction + connectoraction pair, so a listener source would be
-        # silently mis-shaped. Fail closed until #140 adds the entry policy.
+        # silently mis-shaped. A listener-family operation is authored as the
+        # process's listener entry (#158), never as a source step, so it stays refused.
         # Matched on the CANONICAL, case-folded family so that ``WSS``,
         # ``  wss  `` and the spelled-out aliases cannot slip past an exact
         # lowercase comparison against the raw symbol value.

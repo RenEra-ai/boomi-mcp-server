@@ -3070,14 +3070,11 @@ again, re-serving the new revisions; the census, the ledger rows, the contract s
 did not move, and the §11 tables were re-spliced for moved `Baseline line` values. Revisions after batch 4:
 `capability_revision` `sha256:7d216451…` and `compiler_revision` `sha256:7afb22d7…`; `schema_revision` stays `sha256:c9583e6b…`.
 
-**Stage-2 correction batch 5 (CDX-184-r4-01..03, QA-184-s1-r5-01) re-ran it.** Batch 5 keeps a written
-spec's own facts, gives a reference apply does not write only the facts every written config agrees on,
-and refuses a map effect declaration whose written configs derive different effects. It also restates the
-served `PROCESS_IR_SEMANTIC_PROFILE_MISMATCH` message, remediation and taxonomy summary so they name every
-site that reports the code, which moves the authoring contract snapshot as well. The census, the ledger
-rows and `schema_revision` did not move, and the §11 tables were re-spliced for moved `Baseline line`
-values. Revisions after batch 5: `capability_revision` `sha256:5482101c…` and `compiler_revision` `sha256:e7eced4d…`;
-`schema_revision` stays `sha256:c9583e6b…`.
+**Stage-2 correction batch 16 (SELF-184-37) re-ran it.** Batch 16 makes the body-placement code's served
+remediation name both rules that raise it, slot admission and the connector/process-call mixing gate. The census,
+the ledger rows and `schema_revision` did not move, and the §11 tables were re-spliced for moved `Baseline line`
+values. Revisions after batch 16: `capability_revision` `sha256:ac27d76d…` and `compiler_revision` `sha256:42a1b1ba…`; `schema_revision`
+stays `sha256:c9583e6b…`.
 
 **Stage-2 correction batch 6 (CDX-184-r5-01..02, QA-184-s1-r6-01) re-ran it.** Batch 6 refuses a request
 in which more than one component spec writes one existing component, with the new served code

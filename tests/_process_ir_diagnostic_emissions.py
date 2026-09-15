@@ -69,7 +69,9 @@ __all__ = [
     "DIAGNOSTIC_CONSTRUCTORS",
     "EMISSION_ROOTS",
     "PINNED_SINKS",
+    "capability_citations",
     "collect_emissions",
+    "compiler_translated_codes",
     "pinned_sink_definitions",
     "producer_of",
     "referenced_codes",
@@ -751,3 +753,667 @@ def collect_emissions():
         ),
         tuple(sorted(unresolved)),
     )
+
+
+
+# ---------------------------------------------------------------------------
+# SELF-184-37: the gates each code's raisers cite, and the codes the compiler
+# serves by translating a shared model rule
+# ---------------------------------------------------------------------------
+
+#: The producers whose raise sites take their remediation from a served table. The graph
+#: verifier serves its own text inline (`verifier_issue_sites`), so it is not one of them.
+_TABLE_PRODUCERS = ("parser", "compiler", "semantic")
+
+
+def _docstring_ids(tree):
+    ids = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            body = node.body
+            if (
+                body
+                and isinstance(body[0], ast.Expr)
+                and isinstance(body[0].value, ast.Constant)
+                and isinstance(body[0].value.value, str)
+            ):
+                ids.add(id(body[0].value))
+    return ids
+
+
+def _keyword(call, name):
+    for keyword in call.keywords:
+        if keyword.arg == name:
+            return keyword.value
+    return None
+
+
+def _argument(call, index, name):
+    if index is not None and len(call.args) > index:
+        return call.args[index]
+    return _keyword(call, name)
+
+
+def _positional_index(function, name):
+    positional = list(function.args.posonlyargs) + list(function.args.args)
+    for index, arg in enumerate(positional):
+        if arg.arg == name:
+            return index
+    return None
+
+
+def _reason_test(test, reason):
+    """The constant NAME in `reason == NAME`, else None."""
+    if (
+        isinstance(test, ast.Compare)
+        and isinstance(test.left, ast.Name)
+        and test.left.id == reason
+        and len(test.ops) == 1
+        and isinstance(test.ops[0], ast.Eq)
+        and isinstance(test.comparators[0], ast.Name)
+    ):
+        return test.comparators[0].id
+    return None
+
+
+def _statement_blocks(function):
+    """Every statement list inside `function`, its own body included."""
+    for node in ast.walk(function):
+        for field in ("body", "orelse", "finalbody"):
+            block = getattr(node, field, None)
+            if isinstance(block, list) and block and isinstance(block[0], ast.stmt):
+                yield block
+        for handler in getattr(node, "handlers", ()) or ():
+            yield handler.body
+
+
+class _SourceIndex:
+    """One read of the table-serving producers, shared by the two SELF-184-37 readers.
+
+    `capability_citations` and `compiler_translated_codes` must agree on what a raise site,
+    a verdict and a verdict's renderer are, so both read them here. Every form is a closed
+    one, in the stance of `collect_emissions`, and a shape outside them is reported by the
+    reader using it rather than guessed:
+
+    * a RAISE SITE is a pinned sink or one-hop wrapper (code resolved as `collect_emissions`
+      resolves it), a `PydanticCustomError` whose tag the parser's `_CUSTOM_ERROR_CODES`
+      routes, or a local helper returning such an error built from one of its own
+      parameters (`_body_kind_error`);
+    * a VERDICT is a function returning `(REASON, at, message)` with `REASON` a module
+      constant, or one returning another verdict's result unchanged;
+    * a RENDERER unpacks a verdict into three names and answers with the statements that
+      follow, up to its first plain `raise`: an `if reason == REASON: raise ...` arm, a
+      conditional code `A if reason == REASON else B`, or that final `raise`. Reasons are
+      compared by VALUE through `ALIAS = NAME` chains, because the compiler's listener
+      renderer tests `LISTENER_PLACEMENT_POSITION`, an alias of the
+      `ENTRY_PLACEMENT_POSITION` the verdict returns.
+    """
+
+    def __init__(self):
+        import importlib
+
+        self.routing = importlib.import_module("boomi_mcp.models.process_ir")._CUSTOM_ERROR_CODES
+        self.known_codes = set(_ERROR_CONSTANTS.values())
+        self.modules = []
+        for path in _iter_files():
+            relative = str(path.relative_to(_ROOT))
+            if _producer(relative) in _TABLE_PRODUCERS:
+                self.modules.append((relative, _ModuleScan(path, path.read_text())))
+        self.parser = next(r for r, _scan in self.modules if _producer(r) == "parser")
+
+        # Module-level string constants as NODES (a message may name one defined in another
+        # scanned module, and the node is what gets marked), and each constant's VALUE.
+        self.module_constants = {}
+        self.global_constants = {}
+        self.functions = {}
+        literal_values = {}
+        aliases = {}
+        for relative, scan in self.modules:
+            own = {}
+            for statement in scan.tree.body:
+                if not (
+                    isinstance(statement, ast.Assign)
+                    and len(statement.targets) == 1
+                    and isinstance(statement.targets[0], ast.Name)
+                ):
+                    continue
+                name, value = statement.targets[0].id, statement.value
+                if isinstance(value, ast.Constant) and isinstance(value.value, str):
+                    own[name] = value
+                    self.global_constants.setdefault(name, []).append(value)
+                    literal_values.setdefault(name, value.value)
+                elif isinstance(value, ast.Name):
+                    aliases.setdefault(name, value.id)
+            self.module_constants[relative] = own
+            self.functions[relative] = {
+                node.name: node
+                for node in ast.walk(scan.tree)
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            }
+        self.values = dict(literal_values)
+        for name in aliases:
+            target, seen = name, set()
+            while target in aliases and target not in seen:
+                seen.add(target)
+                target = aliases[target]
+            if target in literal_values:
+                self.values[name] = literal_values[target]
+
+        self.helpers = self._helpers()
+        self.sink_message = self._sink_message()
+        self.verdicts, self.delegates_to = self._verdicts()
+        self.renderers = self._renderers()
+
+    def _helpers(self):
+        """`{name: (code, parameter index, parameter name)}` for error-building helpers."""
+        helpers = {}
+        for relative, _scan in self.modules:
+            for name, function in self.functions[relative].items():
+                returns = [
+                    node.value for node in ast.walk(function)
+                    if isinstance(node, ast.Return) and node.value is not None
+                ]
+                shapes = set()
+                for value in returns:
+                    if not (
+                        isinstance(value, ast.Call)
+                        and _called_name(value) == "PydanticCustomError"
+                        and len(value.args) >= 2
+                        and isinstance(value.args[0], ast.Constant)
+                        and value.args[0].value in self.routing
+                        and isinstance(value.args[1], ast.Name)
+                    ):
+                        shapes = None
+                        break
+                    shapes.add((self.routing[value.args[0].value], value.args[1].id))
+                if shapes and len(shapes) == 1:
+                    code, parameter = next(iter(shapes))
+                    index = _positional_index(function, parameter)
+                    if index is not None or parameter in {a.arg for a in function.args.kwonlyargs}:
+                        helpers[name] = (code, index, parameter)
+        return helpers
+
+    def _sink_message(self):
+        """Where each sink takes its message, read from the sink's own signature."""
+        found = {}
+        for relative, scan in self.modules:
+            for name, function in self.functions[relative].items():
+                if name not in scan.sinks:
+                    continue
+                every = (
+                    list(function.args.posonlyargs)
+                    + list(function.args.args)
+                    + list(function.args.kwonlyargs)
+                )
+                if any(arg.arg == "message" for arg in every):
+                    found[name] = _positional_index(function, "message")
+        return found
+
+    def site(self, call, scan):
+        """`(kind, codes, code expression, message expression)` for a raise site, else None.
+
+        `kind` is `pydantic`, `helper` or `sink`.
+        """
+        name = _called_name(call)
+        if name == "PydanticCustomError":
+            if (
+                len(call.args) >= 2
+                and isinstance(call.args[0], ast.Constant)
+                and call.args[0].value in self.routing
+            ):
+                return "pydantic", (self.routing[call.args[0].value],), None, call.args[1]
+            return None
+        if name in self.helpers:
+            code, index, parameter = self.helpers[name]
+            return "helper", (code,), None, _argument(call, index, parameter)
+        if name in scan.sinks:
+            expression = call.args[0] if call.args else _keyword(call, "code")
+            if expression is None or id(expression) in scan.excluded:
+                return None
+            resolved = scan.resolve(expression) or ()
+            codes = tuple(code for code in resolved if code in self.known_codes)
+            return "sink", codes, expression, _argument(call, self.sink_message.get(name), "message")
+        return None
+
+    def texts(self, expression, scope, relative, seen=frozenset()):
+        """The literal nodes a message expression is made of, over the closed forms only."""
+        if expression is None:
+            return []
+        if isinstance(expression, ast.Constant):
+            return [expression] if isinstance(expression.value, str) else []
+        if isinstance(expression, ast.JoinedStr):
+            return [part for part in expression.values if isinstance(part, ast.Constant)]
+        if isinstance(expression, ast.BinOp) and isinstance(expression.op, ast.Add):
+            return (self.texts(expression.left, scope, relative, seen)
+                    + self.texts(expression.right, scope, relative, seen))
+        if isinstance(expression, ast.IfExp):
+            return (self.texts(expression.body, scope, relative, seen)
+                    + self.texts(expression.orelse, scope, relative, seen))
+        if isinstance(expression, ast.Call):
+            if isinstance(expression.func, ast.Attribute) and expression.func.attr == "format":
+                return self.texts(expression.func.value, scope, relative, seen)
+            name = _called_name(expression)
+            helper = (
+                self.functions[relative].get(name)
+                if isinstance(expression.func, ast.Name) else None
+            )
+            if helper is not None and ("call", name) not in seen:
+                out = []
+                for node in ast.walk(helper):
+                    if isinstance(node, ast.Return) and node.value is not None:
+                        out += self.texts(node.value, helper, relative, seen | {("call", name)})
+                return out
+            return []
+        if isinstance(expression, ast.Name):
+            name = expression.id
+            if name in seen:
+                return []
+            if scope is not None:
+                bound = [
+                    node.value for node in ast.walk(scope)
+                    if isinstance(node, ast.Assign)
+                    and any(isinstance(t, ast.Name) and t.id == name for t in node.targets)
+                ]
+                if bound:
+                    out = []
+                    for value in bound:
+                        out += self.texts(value, scope, relative, seen | {name})
+                    return out
+            if name in self.module_constants[relative]:
+                return [self.module_constants[relative][name]]
+            return list(self.global_constants.get(name, ()))
+        return []
+
+    def _verdicts(self):
+        """`({name: (path, function, [(reason, message)])}, {delegator: {verdict}})`."""
+        verdicts = {}
+        for relative, _scan in self.modules:
+            own = self.module_constants[relative]
+            for name, function in self.functions[relative].items():
+                rows = [
+                    (node.value.elts[0].id, node.value.elts[2])
+                    for node in ast.walk(function)
+                    if isinstance(node, ast.Return)
+                    and isinstance(node.value, ast.Tuple)
+                    and len(node.value.elts) == 3
+                    and isinstance(node.value.elts[0], ast.Name)
+                    and node.value.elts[0].id in own
+                ]
+                if rows:
+                    verdicts[name] = (relative, function, rows)
+        delegates_to = {}
+        for relative, _scan in self.modules:
+            for name, function in self.functions[relative].items():
+                for node in ast.walk(function):
+                    if not (isinstance(node, ast.Return) and isinstance(node.value, ast.Name)):
+                        continue
+                    for bound in ast.walk(function):
+                        if (
+                            isinstance(bound, ast.Assign)
+                            and any(isinstance(t, ast.Name) and t.id == node.value.id
+                                    for t in bound.targets)
+                            and isinstance(bound.value, ast.Call)
+                            and _called_name(bound.value) in verdicts
+                        ):
+                            delegates_to.setdefault(name, set()).add(_called_name(bound.value))
+        return verdicts, delegates_to
+
+    def verdict_of(self, value, function):
+        """The verdict an unpacked value comes from, or None."""
+        if isinstance(value, ast.Call) and _called_name(value) in self.verdicts:
+            return _called_name(value)
+        if isinstance(value, ast.Name):
+            sources = {
+                _called_name(call)
+                for bound in ast.walk(function)
+                if isinstance(bound, ast.Assign)
+                and any(isinstance(t, ast.Name) and t.id == value.id for t in bound.targets)
+                for call in ast.walk(bound.value)
+                if isinstance(call, ast.Call) and _called_name(call) in self.verdicts
+            }
+            if len(sources) == 1:
+                return next(iter(sources))
+        return None
+
+    def _renderers(self):
+        """`{verdict: [(path, scan, function, reason name, following statements)]}`."""
+        renderers = {}
+        for relative, scan in self.modules:
+            for name, function in self.functions[relative].items():
+                for block in _statement_blocks(function):
+                    for index, statement in enumerate(block):
+                        if not (
+                            isinstance(statement, ast.Assign)
+                            and len(statement.targets) == 1
+                            and isinstance(statement.targets[0], ast.Tuple)
+                            and len(statement.targets[0].elts) == 3
+                            and all(isinstance(e, ast.Name) for e in statement.targets[0].elts)
+                        ):
+                            continue
+                        verdict = self.verdict_of(statement.value, function)
+                        if verdict is None:
+                            continue
+                        row = (relative, scan, name, statement.targets[0].elts[0].id,
+                               block[index + 1:])
+                        if all(row[:4] != other[:4] for other in renderers.get(verdict, ())):
+                            renderers.setdefault(verdict, []).append(row)
+        return renderers
+
+    def renderers_of(self, verdict, seen=frozenset()):
+        """Every renderer of `verdict`, including those of a verdict that delegates to it."""
+        found = list(self.renderers.get(verdict, ()))
+        for delegator in sorted(n for n, targets in self.delegates_to.items() if verdict in targets):
+            if delegator not in seen:
+                found += self.renderers_of(delegator, seen | {verdict})
+        return found
+
+    def reasons_of(self, verdict, seen=frozenset()):
+        """Every reason `verdict` can return, its delegates' reasons included."""
+        reasons = {constant for constant, _message in self.verdicts.get(verdict, (0, 0, ()))[2]}
+        for delegate in self.delegates_to.get(verdict, ()):
+            if delegate not in seen:
+                reasons |= self.reasons_of(delegate, seen | {verdict})
+        return reasons
+
+    def _same(self, left, right):
+        return self.values.get(left, left) == self.values.get(right, right)
+
+    @staticmethod
+    def render_block(following):
+        """The statements a renderer answers with: up to and including its first plain `raise`."""
+        block = []
+        for statement in following:
+            block.append(statement)
+            if isinstance(statement, ast.Raise):
+                break
+        return block
+
+    def raised_codes(self, statement, scan, reason, constant):
+        call = statement.exc if isinstance(statement, ast.Raise) else None
+        if not isinstance(call, ast.Call):
+            return ()
+        found = self.site(call, scan)
+        if found is None:
+            return ()
+        _kind, codes, expression, _message = found
+        if isinstance(expression, ast.IfExp):
+            guard = _reason_test(expression.test, reason)
+            if guard is not None:
+                branch = expression.body if self._same(guard, constant) else expression.orelse
+                return tuple(c for c in (scan.resolve(branch) or ()) if c in self.known_codes)
+        return codes
+
+    def rendered_codes(self, following, scan, reason, constant):
+        """The codes one renderer serves for `constant`, or () when it cannot be read."""
+        explicit = []
+        for statement in self.render_block(following):
+            guard = _reason_test(statement.test, reason) if isinstance(statement, ast.If) else None
+            if guard is not None:
+                arm = statement.body if self._same(guard, constant) else statement.orelse
+                for node in arm:
+                    for raised in ast.walk(node):
+                        if isinstance(raised, ast.Raise):
+                            explicit += self.raised_codes(raised, scan, reason, constant)
+                continue
+            if isinstance(statement, ast.Raise):
+                return tuple(explicit) or self.raised_codes(statement, scan, reason, constant)
+        return tuple(explicit)
+
+    def translators(self):
+        """`{name: parameter index}` for functions outside the parser that call one of their own
+        parameters inside a `try` and, on `PydanticCustomError`, raise through a sink
+        (`body_capabilities._as_compile_error`). Found by shape, never by name."""
+        found = {}
+        for relative, scan in self.modules:
+            if _producer(relative) == "parser":
+                continue
+            for name, function in self.functions[relative].items():
+                parameters = [a.arg for a in list(function.args.posonlyargs) + list(function.args.args)]
+                for node in ast.walk(function):
+                    if not isinstance(node, ast.Try):
+                        continue
+                    handlers = [
+                        h for h in node.handlers
+                        if isinstance(h.type, ast.Name) and h.type.id == "PydanticCustomError"
+                    ]
+                    if not any(
+                        isinstance(c, ast.Call) and _called_name(c) in scan.sinks
+                        for h in handlers for c in ast.walk(h)
+                    ):
+                        continue
+                    called = {
+                        c.func.id
+                        for statement in node.body for c in ast.walk(statement)
+                        if isinstance(c, ast.Call) and isinstance(c.func, ast.Name)
+                        and c.func.id in parameters
+                    }
+                    if len(called) == 1:
+                        found[name] = parameters.index(next(iter(called)))
+        return found
+
+    def model_rule_codes(self, name):
+        """Every code a parser function can raise as a `PydanticCustomError`, through the
+        parser functions it calls by name. Over-approximate: a code it MAY raise counts."""
+        functions = self.functions[self.parser]
+        scan = dict(self.modules)[self.parser]
+        codes, stack, seen = set(), [name], set()
+        while stack:
+            current = stack.pop()
+            if current in seen or current not in functions:
+                continue
+            seen.add(current)
+            for node in ast.walk(functions[current]):
+                if not isinstance(node, ast.Call):
+                    continue
+                if isinstance(node.func, ast.Name) and node.func.id in functions:
+                    stack.append(node.func.id)
+                found = self.site(node, scan)
+                if found is not None and found[0] in ("pydantic", "helper"):
+                    codes.update(found[1])
+        return codes
+
+
+def capability_citations(capabilities):
+    """`(pairs, unassociated)`: the capability names each code's raise sites cite, from source.
+
+    SELF-184-37. `PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY` is raised by two rules, slot
+    admission and the `process_call_connector_mixing` gate, and served one remediation that
+    described only the first. A mixing refusal told its author to use a kind the slot admits,
+    about a kind the slot does admit. The defect is a remediation that omits a gate its own
+    raisers cite, and that is readable from source without running anything: a raise site's
+    message names the gate, and the served remediation for its code does not.
+
+    `capabilities` is the served capability table's key set. The caller passes it, so this
+    module keeps no copy. A literal CITES a capability when the name appears in it as a whole
+    token.
+
+    Two closed forms place a literal at a raise site (`_SourceIndex` defines them):
+
+    1. the literal is part of the MESSAGE argument of a raise site;
+    2. the literal is the message of a VERDICT, rendered by each function that unpacks the
+       verdict under the code its reason selects.
+
+    Message text is read through literals, f-strings, `+`, `.format()`, conditionals, module
+    constants (across the scanned modules), local assignments and one-hop local helpers that
+    return text. A capability-citing literal the reader cannot place is returned in
+    `unassociated` rather than dropped, and so is a renderer it cannot read. The caller pins
+    that set whole.
+
+    Returns:
+
+    * `pairs`: `{code: {capability: frozenset({(path, lineno), ...})}}`;
+    * `unassociated`: sorted `(path, lineno, text)` rows. Docstrings, the served text tables
+      (`_MESSAGES`/`_REMEDIATION`), and a literal that IS a capability name (the table's own
+      keys) are not message text and are never collected.
+    """
+    names = sorted(capabilities, key=len, reverse=True)
+    assert names, "no capability names given; the census would be vacuous"
+    token = re.compile(
+        r"(?<![A-Za-z0-9_])(" + "|".join(re.escape(name) for name in names) + r")(?![A-Za-z0-9_])"
+    )
+    index = _SourceIndex()
+    associated = {}
+
+    def associate(nodes, codes, relative):
+        for node in nodes:
+            if token.search(node.value):
+                associated.setdefault(id(node), (relative, node, set()))[2].update(codes)
+
+    # Form 1: the message argument of a raise site.
+    for relative, scan in index.modules:
+        for node in ast.walk(scan.tree):
+            if not isinstance(node, ast.Call):
+                continue
+            found = index.site(node, scan)
+            if found is None:
+                continue
+            _kind, codes, _expression, message = found
+            if codes and message is not None:
+                associate(index.texts(message, scan.enclosing.get(id(node)), relative),
+                          codes, relative)
+
+    # Form 2: a verdict's message, rendered under the code its reason selects.
+    unreadable = []
+    for verdict, (relative, function, rows) in sorted(index.verdicts.items()):
+        for constant, message in rows:
+            nodes = [n for n in index.texts(message, function, relative) if token.search(n.value)]
+            if not nodes:
+                continue
+            for r_relative, r_scan, r_name, reason, following in index.renderers_of(verdict):
+                codes = index.rendered_codes(following, r_scan, reason, constant)
+                if not codes:
+                    unreadable.append((r_relative, 0, "renderer {0} of {1} for {2}".format(
+                        r_name, verdict, constant)))
+                    continue
+                associate(nodes, codes, relative)
+
+    pairs = {}
+    for relative, node, codes in associated.values():
+        for code in codes:
+            for capability in token.findall(node.value):
+                pairs.setdefault(code, {}).setdefault(capability, set()).add(
+                    (relative, node.lineno))
+
+    unassociated = list(unreadable)
+    for relative, scan in index.modules:
+        docstrings = _docstring_ids(scan.tree)
+        for node in ast.walk(scan.tree):
+            if (
+                isinstance(node, ast.Constant)
+                and isinstance(node.value, str)
+                and id(node) not in docstrings
+                and id(node) not in scan.excluded
+                and node.value not in capabilities
+                and token.search(node.value)
+                and id(node) not in associated
+            ):
+                unassociated.append((relative, node.lineno, node.value))
+
+    return (
+        MappingProxyType({
+            code: MappingProxyType({cap: frozenset(sites) for cap, sites in sorted(caps.items())})
+            for code, caps in sorted(pairs.items())
+        }),
+        tuple(sorted(unassociated)),
+    )
+
+
+def compiler_translated_codes():
+    """The codes the COMPILER serves by translating a shared model rule, read from source.
+
+    SELF-184-37, second instance. The compiler served
+    `PROCESS_IR_SEMANTIC_CONTROL_CONTINUATION_UNSUPPORTED` for the model's own orphan-`continue`
+    rule under its branch-only remediation. The rule is the parser's, so the text must be the
+    parser's too. Three mechanisms put a model rule's refusal on a compiler diagnostic:
+
+    1. a compiler function RENDERS a model verdict (`_SourceIndex` defines renderer): it
+       raises the code the verdict's reason selects;
+    2. a TRANSLATOR runs a model rule and re-raises its `PydanticCustomError` as a compile
+       diagnostic (`_as_compile_error`, found by shape). Every code the rule can raise, through
+       the parser functions it calls, is translated when the compiler table serves it. For any
+       other code the translator re-raises the model's own error, reported under `raw`;
+    3. a code the compiler table REGISTERS and no compiler module raises. It is registered for
+       the compile path's re-served parse diagnostics, the set the served-text test pins as
+       `COMPILER_REGISTERED_PARSE_CODES`.
+
+    Returns a mapping with:
+
+    * `translated`: `{code: (mechanism, ...)}`;
+    * `native`: `{code: ((path, lineno), ...)}`, compiler- and semantic-layer raise sites of a
+      translated code that render no model verdict. They are the code's compiler-only rules;
+    * `raw`: `{code: (mechanism, ...)}`;
+    * `unreadable`: rows the reader could not read. The caller asserts it is empty.
+    """
+    import importlib
+
+    table = importlib.import_module("boomi_mcp.compiler.process_ir.diagnostics")
+    served = {
+        code for code in table._REMEDIATION
+        if table._MESSAGES.get(code) and table._REMEDIATION.get(code)
+    }
+    index = _SourceIndex()
+    translated, raw, unreadable, render_calls = {}, {}, [], set()
+
+    for verdict in sorted(index.verdicts):
+        reasons = sorted(index.reasons_of(verdict))
+        for relative, scan, name, reason, following in index.renderers_of(verdict):
+            if _producer(relative) == "parser":
+                continue
+            for statement in index.render_block(following):
+                for node in ast.walk(statement):
+                    if isinstance(node, ast.Raise) and isinstance(node.exc, ast.Call):
+                        render_calls.add(id(node.exc))
+            for constant in reasons:
+                codes = index.rendered_codes(following, scan, reason, constant)
+                if not codes:
+                    unreadable.append((relative, name, "{0} for {1}".format(verdict, constant)))
+                for code in codes:
+                    translated.setdefault(code, set()).add(
+                        "renders {0} ({1}) in {2}".format(verdict, constant, name))
+
+    translators = index.translators()
+    if not translators:
+        unreadable.append(("", "", "no translator found"))
+    parser_functions = index.functions[index.parser]
+    for relative, scan in index.modules:
+        if _producer(relative) == "parser":
+            continue
+        for node in ast.walk(scan.tree):
+            if not (isinstance(node, ast.Call) and _called_name(node) in translators):
+                continue
+            position = translators[_called_name(node)]
+            rule = node.args[position] if len(node.args) > position else None
+            if not (isinstance(rule, ast.Name) and rule.id in parser_functions):
+                unreadable.append((relative, str(node.lineno), "translator argument"))
+                continue
+            for code in index.model_rule_codes(rule.id):
+                (translated if code in served else raw).setdefault(code, set()).add(
+                    "translates {0}".format(rule.id))
+
+    emitted, _unresolved = collect_emissions()
+    for code in set(table._REMEDIATION) - set(emitted["compiler"]):
+        translated.setdefault(code, set()).add("registered for re-served parse diagnostics")
+
+    native = {}
+    for relative, scan in index.modules:
+        if _producer(relative) == "parser":
+            continue
+        for node in ast.walk(scan.tree):
+            if not isinstance(node, ast.Call) or id(node) in render_calls:
+                continue
+            found = index.site(node, scan)
+            if found is None or found[0] != "sink":
+                continue
+            for code in found[1]:
+                if code in translated:
+                    native.setdefault(code, set()).add((relative, node.lineno))
+
+    def freeze(mapping):
+        return MappingProxyType({key: tuple(sorted(value)) for key, value in sorted(mapping.items())})
+
+    return MappingProxyType({
+        "translated": freeze(translated),
+        "native": freeze(native),
+        "raw": freeze(raw),
+        "unreadable": tuple(sorted(unreadable, key=str)),
+    })

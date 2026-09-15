@@ -85,10 +85,12 @@ from boomi_mcp.compiler.process_ir.contracts import (  # noqa: E402
 from boomi_mcp.compiler.process_ir.diagnostics import ProcessIRCompileError  # noqa: E402
 from boomi_mcp.errors import (  # noqa: E402
     PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY,
+    PROCESS_IR_CAPABILITY_UNSUPPORTED,
     PROCESS_IR_COMPILE_EMITTER_INPUT_INVALID,
     PROCESS_IR_SCHEMA_INVALID_CARDINALITY,
     PROCESS_IR_SEMANTIC_AMBIGUOUS_FLOW,
     PROCESS_IR_SEMANTIC_CARDINALITY_MISMATCH,
+    PROCESS_IR_SEMANTIC_CONTROL_CONTINUATION_UNSUPPORTED,
     PROCESS_IR_SEMANTIC_PROFILE_MISMATCH,
 )
 from boomi_mcp.models import process_ir as model  # noqa: E402
@@ -2072,3 +2074,151 @@ def test_mutant_outgoing_cache_wire_in_registry_is_caught(monkeypatch):
     monkeypatch.undo()
     _check_registry_cardinality_is_the_rows_continuation()
     _check_an_outgoing_cache_wire_is_refused_before_bytes()
+
+
+# ---------------------------------------------------------------------------
+# SELF-184-37: a gate-citing refusal serves a remediation naming the gate
+# ---------------------------------------------------------------------------
+
+_MIXING_GATE = "process_call_connector_mixing"
+_CONTINUATION_GATE = "continuation_after_branch_or_decision"
+
+#: Which served table each route reads. A parse refusal is served verbatim by the plan and
+#: compile routes, and by ``compile_process_ir_v1``, which re-parses first (#178). The
+#: compiler's own body-capability pass serves the compiler's table.
+_ROUTE_LAYER = {
+    "plan": "parser",
+    "compile": "parser",
+    "compile_process_ir_v1": "parser",
+    "body_capabilities": "compiler",
+}
+
+
+def _table_remediation(layer, code):
+    from boomi_mcp.compiler.process_ir import diagnostics
+
+    return (model if layer == "parser" else diagnostics)._REMEDIATION[code]
+
+
+def _served_refusals(ir):
+    """``[(route, code, path, message, remediation)]`` for one refused document, every route."""
+    sys.path.insert(0, str(_ROOT / "tests"))
+    from _m12_11_support import process_ir_request
+
+    from boomi_mcp.categories import integration_builder
+
+    raw = process_ir_request().model_dump(mode="json")
+    raw["intent"]["units"][0]["process_ir"]["body"] = ir.model_dump(mode="json", warnings=False)["body"]
+    rows = []
+    for route, action in (("plan", integration_builder._plan_authoring),
+                          ("compile", integration_builder._compile_authoring)):
+        served = action(None, "qa_profile", {"authoring_request": copy.deepcopy(raw)})
+        assert served.get("_success") is False, (route, served.get("error"))
+        for item in served.get("authoring_diagnostics") or ():
+            rows.append((route, item["code"], item["path"], item["message"], item["remediation"]))
+    for route, run in (("compile_process_ir_v1", lambda: pipeline.compile_process_ir_v1(ir, _symbols())),
+                       ("body_capabilities", lambda: bc.validate_body_capabilities(ir))):
+        with pytest.raises(ProcessIRCompileError) as exc:
+            run()
+        for diagnostic in exc.value.diagnostics:
+            rows.append((route, diagnostic.code, diagnostic.path, diagnostic.message,
+                         diagnostic.remediation))
+    assert {row[0] for row in rows} == set(_ROUTE_LAYER), rows
+    return rows
+
+
+def _root_connector_mixing():
+    """A root sequence with a connector step before a process_call, past the parser."""
+    return _root_model([_GET, _CALL_TERMINAL])
+
+
+def _check_served_gate_remediation(label, factory, pointer, code, cited_gate, named_gates):
+    """Every route serves ``code`` at ``pointer`` with its own table's text naming ``named_gates``."""
+    for route, row_code, path, message, remediation in _served_refusals(factory()):
+        where = (label, route)
+        assert row_code == code and path.endswith(pointer), (where, row_code, path, pointer)
+        # The witness is the rule it claims to be: the message cites the gate, or, for a
+        # genuine slot-admission refusal, cites none.
+        if cited_gate is None:
+            assert _MIXING_GATE not in message, (where, message)
+        else:
+            assert cited_gate in message, (where, message)
+        assert remediation == _table_remediation(_ROUTE_LAYER[route], code), (where, remediation)
+        for gate in named_gates:
+            assert gate in remediation, (where, gate, remediation)
+        assert "category='capability'" in remediation, (where, remediation)
+
+
+def test_a_mixing_refusal_serves_a_remediation_naming_the_gate():
+    """SELF-184-37: every mixing refusal, and a slot refusal, serves a remediation naming the gate.
+
+    ``PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY`` is raised by slot admission and by the
+    ``process_call_connector_mixing`` gate, and its served remediation described only the
+    first. Measured through the served ``build_integration`` plan and compile routes,
+    ``compile_process_ir_v1``, and the compiler's own body-capability pass:
+
+    * a same-body mixing refusal, two cross-nesting ones (a Branch leg and a Decision
+      TRUE-arm terminal under a root connector), and a recovery-leg one (a connector before
+      the catch body's recovery call);
+    * a genuine slot-admission refusal, whose message cites no gate;
+    * a ROOT-sequence mixing refusal, which the root verdict serves under
+      ``PROCESS_IR_CAPABILITY_UNSUPPORTED``.
+
+    Each route serves its own table's text, the text names the gate and the capability
+    category, and the body code's text still points at the placement category. The two
+    layers word the body code identically, because the same two rules raise it at both.
+    """
+    code = PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY
+    assert _table_remediation("parser", code) == _table_remediation("compiler", code)
+    assert "category='placement'" in _table_remediation("parser", code)
+
+    documents = {label: (factory, pointer) for label, factory, pointer, _slot in _placement_refusal_documents()}
+    mixing = ("mixing same body", "mixing cross-nesting leg", "mixing cross-nesting true arm",
+              "recovery connector before the call")
+    genuine = next(label for label in documents if label.startswith("placement "))
+    for label in mixing + (genuine,):
+        factory, pointer = documents[label]
+        _check_served_gate_remediation(label, factory, pointer, code,
+                                       None if label == genuine else _MIXING_GATE, (_MIXING_GATE,))
+    _check_served_gate_remediation("root connector mixing", _root_connector_mixing, "/body",
+                                   PROCESS_IR_CAPABILITY_UNSUPPORTED, _MIXING_GATE,
+                                   (_MIXING_GATE,))
+
+
+def _passthrough_continuation():
+    """A passthrough root with a step after its Branch, past the parser."""
+    ir = parse_process_ir_v1(_doc({"kind": "passthrough"}, _atom("branch")))
+    ir.body.steps = [_NODE.validate_python(copy.deepcopy(step))
+                     for step in ({"kind": "passthrough"}, _atom("branch"), _DPP)]
+    return ir
+
+
+def _orphan_continue():
+    """A lone connector-scoped handler ending its protected path in continue, past the parser."""
+    catch = {"steps": [_MSG], "terminal": _STOP}
+    ir = parse_process_ir_v1(_doc(
+        {"kind": "try_catch", "scope": "connector", "retry": {"count": 0},
+         "try_body": {"steps": [_GET], "terminal": {"kind": "continue"}}, "catch_body": catch},
+        {"kind": "map_ref", "map_ref": "$ref:MAP"},
+        {"kind": "try_catch", "scope": "connector", "retry": {"count": 0},
+         "try_body": {"steps": [_PATCH], "terminal": _STOP}, "catch_body": catch}))
+    ir.body.steps = ir.body.steps[:1]
+    return ir
+
+
+def test_a_continuation_refusal_serves_one_remediation_at_both_layers():
+    """SELF-184-37, same class: ``PROCESS_IR_SEMANTIC_CONTROL_CONTINUATION_UNSUPPORTED``.
+
+    Two shared model rules raise the code on both entry points: the passthrough root's
+    branch/decision rule, whose message cites ``continuation_after_branch_or_decision``, and
+    the orphan-``continue`` rule. The compiler renders both through ``_as_compile_error``
+    with its own table, which named no gate and gave only the branch/decision remedy, so a
+    lone handler ending in ``continue`` was told to move steps into every leg or arm. Every
+    route now serves one text, naming the gate.
+    """
+    code = PROCESS_IR_SEMANTIC_CONTROL_CONTINUATION_UNSUPPORTED
+    assert _table_remediation("parser", code) == _table_remediation("compiler", code)
+    _check_served_gate_remediation("passthrough continuation", _passthrough_continuation, "/body",
+                                   code, _CONTINUATION_GATE, (_CONTINUATION_GATE,))
+    _check_served_gate_remediation("orphan continue", _orphan_continue, "/body",
+                                   code, None, (_CONTINUATION_GATE,))
