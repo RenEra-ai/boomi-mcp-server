@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 13004, "minimum_collected": 13004, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 13007, "minimum_collected": 13007, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -13277,7 +13277,7 @@
 {"kind": "test", "id": "pytest-013276", "node_id": "tests/test_issue_184_document_emission.py::test_the_compile_route_refuses_a_forged_cache_terminal_outside_its_union[cache_put]", "state": "active"}
 {"kind": "test", "id": "pytest-013277", "node_id": "tests/test_issue_184_document_emission.py::test_the_compile_route_refuses_a_forged_cache_terminal_outside_its_union[cache_remove]", "state": "active"}
 {"kind": "test", "id": "pytest-013278", "node_id": "tests/test_issue_184_document_emission.py::test_served_placements_are_the_placements_that_compile", "state": "active"}
-{"kind": "test", "id": "pytest-013279", "node_id": "tests/test_issue_184_document_emission.py::test_served_placement_entries_name_the_code_a_withheld_kind_gets", "state": "active"}
+{"kind": "test", "id": "pytest-013279", "node_id": "tests/test_issue_184_document_emission.py::test_served_placement_entries_name_the_code_a_withheld_kind_gets", "state": "tombstone"}
 {"kind": "test", "id": "pytest-013280", "node_id": "tests/test_issue_184_document_emission.py::test_mutant_a_zero_emission_kind_served_in_a_step_slot_is_caught", "state": "active"}
 {"kind": "test", "id": "pytest-013281", "node_id": "tests/test_issue_184_document_emission.py::test_every_zero_emission_kind_has_an_admitted_terminal", "state": "active"}
 {"kind": "test", "id": "pytest-013282", "node_id": "tests/test_issue_184_document_emission.py::test_a_terminal_cache_action_compiles_with_no_outgoing_wire[branch_leg-cache_put]", "state": "active"}
@@ -13302,3 +13302,7 @@
 {"kind": "test", "id": "pytest-013301", "node_id": "tests/test_process_ir_effect_declarations.py::test_a_subprocess_that_removes_a_cache_is_not_replay_safe", "state": "active"}
 {"kind": "test", "id": "pytest-013302", "node_id": "tests/test_process_ir_flow_sequence_codec.py::test_a_terminal_cache_remove_has_no_reverse_trip", "state": "active"}
 {"kind": "test", "id": "pytest-013303", "node_id": "tests/test_process_ir_semantic_effects.py::test_a_cache_removal_is_a_replay_hazard", "state": "active"}
+{"kind": "test", "id": "pytest-013304", "node_id": "tests/test_issue_184_document_emission.py::test_served_node_pages_follow_the_served_rows", "state": "active"}
+{"kind": "test", "id": "pytest-013305", "node_id": "tests/test_issue_184_document_emission.py::test_a_cardinality_refusal_cites_no_placement_entry", "state": "active"}
+{"kind": "test", "id": "pytest-013306", "node_id": "tests/test_issue_184_document_emission.py::test_a_placement_entry_is_cited_only_by_a_refusal_in_its_slot", "state": "active"}
+{"kind": "test", "id": "pytest-013307", "node_id": "tests/test_issue_184_document_emission.py::test_mutant_citation_rules_are_caught", "state": "active"}

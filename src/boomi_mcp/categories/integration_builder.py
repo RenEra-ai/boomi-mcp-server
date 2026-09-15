@@ -12179,7 +12179,7 @@ def _reject_invalid_process_ir(exc, action: str) -> Dict[str, Any]:
                 "path": d["path"],
                 "message": d["message"],
                 "remediation": d["remediation"],
-                "authoring_contract_entry_ids": list(_contract_ids_for(d["code"])),
+                "authoring_contract_entry_ids": list(_contract_ids_for(d["code"], d["path"])),
             }
             for d in sorted(diagnostics, key=lambda d: (d["path"], d["code"]))
         ],

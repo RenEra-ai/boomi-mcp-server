@@ -135,9 +135,6 @@ class ProjectionSourcesV1(NamedTuple):
     schema_defs: Mapping[str, Any]
     capability_rows: Mapping[str, str]
     placement_rows: Tuple[Tuple[str, str, Tuple[str, ...]], ...]
-    #: #184: the type-admitted kinds each slot withholds from ``placement_rows``,
-    #: because no document placing them there compiles.
-    withheld_placement_rows: Tuple[Tuple[str, str, Tuple[str, ...]], ...]
     connector_rows: Tuple[Mapping[str, Any], ...]
     retry_rules: Tuple[Mapping[str, Any], ...]
     state_visibility: Tuple[Mapping[str, Any], ...]
@@ -152,10 +149,7 @@ class ProjectionSourcesV1(NamedTuple):
 
 def collect_projection_sources() -> ProjectionSourcesV1:
     """Read every authority once. All compiler imports are function-local."""
-    from ..compiler.process_ir.body_capabilities import (
-        body_placement_rows,
-        withheld_body_placement_rows,
-    )
+    from ..compiler.process_ir.body_capabilities import body_placement_rows
     from ..compiler.process_ir.connector_capabilities import connector_capability_rows
     from ..compiler.process_ir.diagnostics import compiler_diagnostic_specs
     from ..compiler.process_ir.error_handling import retry_rule_specs
@@ -187,7 +181,6 @@ def collect_projection_sources() -> ProjectionSourcesV1:
         schema_defs=process_ir_v1_json_schema().get("$defs", {}),
         capability_rows=dict(PROCESS_IR_V1_CAPABILITIES),
         placement_rows=body_placement_rows(),
-        withheld_placement_rows=withheld_body_placement_rows(),
         connector_rows=connector_capability_rows(),
         retry_rules=retry_rule_specs(),
         state_visibility=state_visibility_rows(),
@@ -1446,14 +1439,17 @@ def _placement_entries(
     sources: ProjectionSourcesV1,
 ) -> List[ProcessIRAuthoringContractEntryV1]:
     canonical, _ = _canonical_state("body_placement_registry", "admitted")
-    # #184: a slot that withholds a type-admitted kind refuses it with the
-    # cardinality code, not the body-placement code; the entry names both.
-    withheld = {(context, slot): kinds for context, slot, kinds in sources.withheld_placement_rows}
+    # A placement entry names ONLY the body-placement code (#184 QA-184-s1-r15-01).
+    # `authoring_contract_entry_ids_for_diagnostic` cites every entry that names a
+    # diagnostic's code, and a placement entry only when the refusal lies in its slot. So a
+    # slot entry may name only the code the placement registry's own check raises. The
+    # cardinality code is raised by many rules no placement entry decides (an empty try
+    # body, a root terminal rule, a root cache successor), and naming it here cited the
+    # step entries on refusals they do not explain. A withheld cache step's own refusal is
+    # stated on its node page (nothing may follow it) and in its refusal message.
+    codes = ("PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY",)
     entries = []
     for context, slot, kinds in sources.placement_rows:
-        codes = ("PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY",)
-        if withheld.get((context, slot)):
-            codes += ("PROCESS_IR_SCHEMA_INVALID_CARDINALITY",)
         entries.append(
             ProcessIRAuthoringContractEntryV1(
                 contract_entry_id=f"placement.{context}.{slot}",
@@ -2623,19 +2619,46 @@ def build_process_ir_authoring_index() -> Dict[str, Any]:
     }
 
 
-def authoring_contract_entry_ids_for_diagnostic(code: str) -> Tuple[str, ...]:
-    """Every entry that names ``code``, sorted.
+def authoring_contract_entry_ids_for_diagnostic(
+    code: str, path: Optional[str] = None
+) -> Tuple[str, ...]:
+    """The entries that explain a diagnostic with ``code`` at ``path``, sorted.
+
+    Every entry that names ``code``, with one exception. A ``placement.*`` entry is cited
+    only when the diagnostic's ``path`` lies in that entry's own slot: the INNERMOST
+    control-body slot the pointer passes through, read by
+    ``body_capabilities.placement_slot_of_pointer`` from the model fields. A path that
+    lies in no slot cites no placement entry, and neither does an omitted path.
+
+    Why (#184, defect class ``code-keyed-citation-widened``): citations derived from a
+    code alone cited every placement entry naming that code. Every
+    ``PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY`` refusal therefore cited all ten,
+    wherever it was raised and whichever rule raised it. A connector/process_call
+    mixing refusal and a recovery-prefix refusal carry the same code, and the pointer
+    cannot tell them from a slot-union refusal. They cite the entry of the slot the
+    refused node sits in, as a slot-union refusal does. The served entries themselves
+    are unchanged; only this per-diagnostic selection narrows.
 
     This is what turns a diagnostic into a repair: the response carries the ids,
     and every one of them resolves through the public selector.
     """
     if not code:
         return ()
+    from ..compiler.process_ir import body_capabilities
+
+    own_slot = body_capabilities.placement_slot_of_pointer(path)
     return tuple(
         sorted(
             entry.contract_entry_id
             for entry in build_process_ir_authoring_entries()
             if code in entry.diagnostic_codes
+            and (
+                entry.entry_type != "placement"
+                or (
+                    own_slot is not None
+                    and [(item.context, item.slot) for item in entry.placements] == [own_slot]
+                )
+            )
         )
     )
 

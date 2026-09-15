@@ -60,6 +60,7 @@ from typing import (
     FrozenSet,
     List,
     Mapping,
+    Optional,
     Tuple,
     Union,
     get_args,
@@ -91,6 +92,7 @@ from ...models.process_ir import (
     DecisionFalseArmV1,
     DecisionTrueArmV1,
     ProcessIRV1,
+    ProcessNodeV1,
     TryCatchCatchBodyV1,
     TryCatchTryBodyV1,
     PLACEMENT_PREFIX,
@@ -992,9 +994,10 @@ def withheld_body_placement_rows() -> Tuple[Tuple[str, str, Tuple[str, ...]], ..
 
     The exact remainder of :data:`BODY_CAPABILITIES_V1` that
     :func:`body_placement_rows` does not serve, with the same public context names
-    and ordering. A placement entry reads it to state the refusal code a withheld
-    kind actually receives, which is not the body-placement code a kind absent from
-    the union receives.
+    and ordering. No served surface reads it. The authoring-contract parity test and
+    the #184 document-emission tests read it to check that the served rows and this
+    remainder partition the matrix exactly. A placement entry does NOT read it: an
+    entry names only the body-placement code (#184 QA-184-s1-r15-01).
     """
     return tuple(
         sorted(
@@ -1005,6 +1008,110 @@ def withheld_body_placement_rows() -> Tuple[Tuple[str, str, Tuple[str, ...]], ..
             if withheld
         )
     )
+
+
+def _annotation_models(annotation: Any) -> Tuple[Tuple[Any, bool], ...]:
+    """Every ``(model class, held in a list)`` a field annotation can hold."""
+    origin = get_origin(annotation)
+    if origin is Annotated:
+        return _annotation_models(get_args(annotation)[0])
+    if origin is Union or origin is _UNION_TYPE:
+        return tuple(item for member in get_args(annotation) for item in _annotation_models(member))
+    if origin in (list, tuple, collections.abc.Sequence):
+        args = get_args(annotation)
+        return tuple((model, True) for model, _listed in _annotation_models(args[0])) if args else ()
+    if isinstance(annotation, type) and hasattr(annotation, "model_fields"):
+        return ((annotation, False),)
+    return ()
+
+
+def _derive_body_pointer_grammar() -> Tuple[
+    Mapping[str, Tuple[str, bool]], Mapping[str, Mapping[str, str]]
+]:
+    """How an authored JSON pointer names a control-body slot, read from the models.
+
+    Returns two maps:
+
+    * pointer segment -> (context, whether an index follows). The segments are the
+      field names through which a control node holds a body model. Every model
+      reachable from ``ProcessNodeV1`` is walked, so a Decision nested in a Branch
+      leg is covered.
+    * context -> {field name: slot}. The field names are the ones
+      :data:`BODY_SLOT_AUTHORITIES_V1` names for that context's model.
+
+    Nothing here is hand-listed: a renamed field or a new body model changes the
+    grammar with it. Two contexts claiming one segment is refused.
+    """
+    context_of_model: Dict[Any, str] = {}
+    slots_of_context: Dict[str, Dict[str, str]] = {}
+    for (context, slot), (model, field_name) in BODY_SLOT_AUTHORITIES_V1.items():
+        if context_of_model.setdefault(model, context) != context:
+            raise RuntimeError("body model {0} serves two contexts".format(model.__name__))
+        slots_of_context.setdefault(context, {})[field_name] = slot
+    segments: Dict[str, Tuple[str, bool]] = {}
+    pending = list(get_args(get_args(ProcessNodeV1)[0]))
+    seen = set()
+    while pending:
+        model = pending.pop()
+        if model in seen:
+            continue
+        seen.add(model)
+        for field_name, field in model.model_fields.items():
+            for inner, listed in _annotation_models(field.annotation):
+                if inner in context_of_model:
+                    claim = (context_of_model[inner], listed)
+                    if segments.setdefault(field_name, claim) != claim:
+                        raise RuntimeError("pointer segment {0!r} names two body contexts".format(field_name))
+                if inner not in seen:
+                    pending.append(inner)
+    if set(context_of_model.values()) - {context for context, _listed in segments.values()}:
+        raise RuntimeError("a body context is held by no control-node field")
+    return MappingProxyType(segments), MappingProxyType(
+        {context: MappingProxyType(fields) for context, fields in slots_of_context.items()}
+    )
+
+
+_BODY_POINTER_SEGMENTS, _BODY_SLOT_FIELDS = _derive_body_pointer_grammar()
+
+
+def body_slots_of_pointer(pointer: Optional[str]) -> Tuple[Tuple[str, str], ...]:
+    """Every control-body slot an authored JSON pointer lies in, outermost first.
+
+    Each item is ``(public context, slot)``. A slot is named by a body segment (with
+    its index, for a list of bodies) followed by one of that body's slot fields. So
+    ``/body/steps/0/legs/1/terminal/true_arm/steps/2`` lies in ``branch_path
+    terminal`` and then in ``decision_true_arm step``. The pointer may carry any prefix
+    (a request-rooted ``/intent/units/0/process_ir/...``) and any suffix (a field of
+    the node in the slot). A pointer that names no slot yields nothing.
+    """
+    if not pointer:
+        return ()
+    parts = [part.replace("~1", "/").replace("~0", "~") for part in pointer.split("/")[1:]]
+    found = []
+    index = 0
+    while index < len(parts):
+        claim = _BODY_POINTER_SEGMENTS.get(parts[index])
+        if claim is not None:
+            context, listed = claim
+            field_at = index + 1
+            if listed:
+                field_at = index + 2 if index + 1 < len(parts) and parts[index + 1].isdigit() else len(parts)
+            if field_at < len(parts) and parts[field_at] in _BODY_SLOT_FIELDS[context]:
+                found.append((PUBLIC_BODY_CONTEXTS[context], _BODY_SLOT_FIELDS[context][parts[field_at]]))
+                index = field_at + 1
+                continue
+        index += 1
+    return tuple(found)
+
+
+def placement_slot_of_pointer(pointer: Optional[str]) -> Optional[Tuple[str, str]]:
+    """The INNERMOST control-body slot a pointer lies in, as ``(public context, slot)``, or None.
+
+    The slot whose placement entry a diagnostic at ``pointer`` may cite: the node
+    the diagnostic refuses sits there (#184, ``code-keyed-citation-widened``).
+    """
+    slots = body_slots_of_pointer(pointer)
+    return slots[-1] if slots else None
 
 
 __all__ = [
@@ -1018,6 +1125,8 @@ __all__ = [
     "TERMINAL_SLOT",
     "TRY_BODY",
     "body_placement_rows",
+    "body_slots_of_pointer",
+    "placement_slot_of_pointer",
     "withheld_body_placement_rows",
     "is_allowed",
     "registry_kinds",

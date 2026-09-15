@@ -1045,21 +1045,22 @@ def test_served_placements_are_the_placements_that_compile():
     _check_served_placements_are_the_placements_that_compile()
 
 
-def _check_served_placement_entries():
+def test_served_node_pages_follow_the_served_rows():
+    """The node pages agree with the withholding.
+
+    No placement entry lists a kind its slot withholds. Each zero-emission node serves
+    only terminal placements, and its derived "Control-body placement" sentence names
+    exactly those.
+    """
     from boomi_mcp.authoring.process_ir_projection import build_process_ir_authoring_entries
 
     served = {entry.contract_entry_id: entry for entry in build_process_ir_authoring_entries()}
     withheld = {(context, slot): kinds for context, slot, kinds in bc.withheld_body_placement_rows()}
-    placements = [entry for entry in served.values() if entry.entry_type == "placement"]
-    naming_cardinality = 0
-    for entry in placements:
-        context, slot = entry.subject.split(".")
-        assert PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY in entry.diagnostic_codes, entry.contract_entry_id
-        names = PROCESS_IR_SCHEMA_INVALID_CARDINALITY in entry.diagnostic_codes
-        assert names == bool(withheld.get((context, slot))), (entry.contract_entry_id, entry.diagnostic_codes)
-        assert not set(entry.node_kinds) & set(withheld.get((context, slot), ())), entry.contract_entry_id
-        naming_cardinality += names
-    assert 0 < naming_cardinality < len(placements), naming_cardinality
+    assert withheld, "nothing is withheld — the check below would be vacuous"
+    for entry in served.values():
+        if entry.entry_type == "placement":
+            context, slot = entry.subject.split(".")
+            assert not set(entry.node_kinds) & set(withheld.get((context, slot), ())), entry.contract_entry_id
     for kind in sorted(emission.ZERO_EMISSION_KINDS):
         node = served["node." + kind]
         assert node.placements and {p.slot for p in node.placements} == {bc.TERMINAL_SLOT}, node.placements
@@ -1068,27 +1069,402 @@ def _check_served_placement_entries():
         assert named in fact, (kind, fact)
 
 
-def test_served_placement_entries_name_the_code_a_withheld_kind_gets():
-    """The served placement entries stay true after the withholding.
+#: The three refusals QA-184-s1-r15-01 measured citing five placement entries. Each is a
+#: ``PROCESS_IR_SCHEMA_INVALID_CARDINALITY`` refusal, and only the first is a
+#: control-body step placement at all. The references are the ones the
+#: ``_m12_11_support`` components declare.
+_WITNESS_SOURCE = {"kind": "source", "connection_ref": "$ref:db_conn", "operation_ref": "$ref:db_op"}
+_WITNESS_TARGET = {"kind": "target", "connection_ref": "$ref:api_conn", "operation_ref": "$ref:api_op"}
+_WITNESS_CALL = {"kind": "connector_call", "operation_ref": "$ref:api_op"}
+_CACHE = "$ref:cache"
 
-    A slot that withholds a type-admitted kind refuses that kind with
-    ``PROCESS_IR_SCHEMA_INVALID_CARDINALITY``, measured in ``test_body_placement_matrix``.
-    Its entry therefore names that code beside the body-placement code, and an entry
-    that withholds nothing does not. The choice is read from the withheld rows, never
-    from the slot name. Each zero-emission node serves only terminal placements, and its
-    derived "Control-body placement" sentence names exactly those.
+
+def _witness_withheld_cache_step():
+    body = {"kind": "sequence", "steps": [_WITNESS_SOURCE, {"kind": "branch", "legs": [
+        {"steps": [{"kind": "cache_remove", "cache_ref": _CACHE}], "terminal": {"kind": "stop"}},
+        {"steps": [_MSG], "terminal": _WITNESS_TARGET}]}]}
+
+    def model(ir):
+        ir.body.steps = [_NODE.validate_python(copy.deepcopy(_WITNESS_SOURCE)), _NODE.validate_python({
+            "kind": "branch", "legs": [{"steps": [_MSG], "terminal": _STOP},
+                                       {"steps": [_MSG], "terminal": _WITNESS_TARGET}]})]
+        ir.body.steps[1].legs[0].steps = [_NODE.validate_python({"kind": "cache_remove", "cache_ref": _CACHE})]
+
+    return body, model, "/body/steps/1/legs/0/steps/0/cache_ref"
+
+
+def _witness_empty_process_scoped_try_body():
+    body = {"kind": "sequence", "steps": [{"kind": "try_catch", "scope": "process",
+            "try_body": {"steps": [], "terminal": _STOP},
+            "catch_body": {"steps": [_MSG], "terminal": _STOP}}]}
+
+    def model(ir):
+        ir.body.steps = [_NODE.validate_python({"kind": "try_catch", "scope": "process",
+                                                "try_body": {"steps": [_WITNESS_CALL], "terminal": _STOP},
+                                                "catch_body": {"steps": [_MSG], "terminal": _STOP}})]
+        ir.body.steps[0].try_body.steps = []
+
+    return body, model, "/body/steps/0/try_body/steps"
+
+
+def _witness_root_sequence_cache_successor():
+    steps = [_WITNESS_CALL, {"kind": "cache_put", "cache_ref": _CACHE},
+             {"kind": "cache_get", "cache_ref": _CACHE}, _STOP]
+    body = {"kind": "sequence", "steps": steps}
+
+    def model(ir):
+        ir.body.steps = [_NODE.validate_python(copy.deepcopy(step)) for step in steps]
+
+    return body, model, "/body/steps/1/cache_ref"
+
+
+_CARDINALITY_WITNESSES = {
+    "withheld_cache_step": _witness_withheld_cache_step,
+    "empty_process_scoped_try_body": _witness_empty_process_scoped_try_body,
+    "root_sequence_cache_successor": _witness_root_sequence_cache_successor,
+}
+_CARDINALITY_CITATION = ("diagnostic.process_ir_schema_invalid_cardinality",)
+
+
+def _served_cardinality_citations():
+    """``[(route, case, code, path, cited ids, expected pointer)]`` for every witness.
+
+    Parse entry point: the served ``build_integration`` plan and compile routes
+    (``integration_builder._plan_authoring`` / ``_compile_authoring``). A refused
+    ProcessIR in the request is served there as ``authoring_diagnostics`` with
+    ``authoring_contract_entry_ids``. Compile entry point: ``compile_process_ir_v1``
+    on a model mutated after parsing, cited through ``workflow._contract_ids_for``,
+    the helper the workflow's compile path uses.
     """
-    _check_served_placement_entries()
+    sys.path.insert(0, str(_ROOT / "tests"))
+    from _m12_11_support import process_ir_request
+
+    from boomi_mcp.authoring.workflow import _contract_ids_for
+    from boomi_mcp.categories import integration_builder
+
+    base = process_ir_request().model_dump(mode="json")
+    rows = []
+    for case, witness in _CARDINALITY_WITNESSES.items():
+        body, mutate, pointer = witness()
+        raw = copy.deepcopy(base)
+        raw["intent"]["units"][0]["process_ir"]["body"] = copy.deepcopy(body)
+        for route, action in (("plan", integration_builder._plan_authoring),
+                              ("compile", integration_builder._compile_authoring)):
+            served = action(None, "qa_profile", {"authoring_request": copy.deepcopy(raw)})
+            assert served.get("_success") is False, (route, case, served.get("error"))
+            for item in served.get("authoring_diagnostics") or ():
+                rows.append((route, case, item["code"], item["path"],
+                             tuple(item["authoring_contract_entry_ids"]), pointer))
+        ir = parse_process_ir_v1(copy.deepcopy(base["intent"]["units"][0]["process_ir"]))
+        mutate(ir)
+        with pytest.raises(ProcessIRCompileError) as exc:
+            pipeline.compile_process_ir_v1(ir, _symbols())
+        for diagnostic in exc.value.diagnostics:
+            rows.append(("compile_process_ir_v1", case, diagnostic.code, diagnostic.path,
+                         tuple(_contract_ids_for(diagnostic.code, diagnostic.path)), pointer))
+    return rows
+
+
+def _check_a_cardinality_refusal_cites_no_placement_entry():
+    from boomi_mcp.authoring.process_ir_projection import build_process_ir_authoring_entries
+
+    served = {entry.contract_entry_id: entry for entry in build_process_ir_authoring_entries()}
+    assert _CARD in served[_CARDINALITY_CITATION[0]].diagnostic_codes
+    rows = _served_cardinality_citations()
+    routes = {"plan", "compile", "compile_process_ir_v1"}
+    assert {(route, case) for route, case, *_rest in rows} == {
+        (route, case) for route in routes for case in _CARDINALITY_WITNESSES}, rows
+    for route, case, code, path, ids, pointer in rows:
+        assert code == _CARD and path.endswith(pointer), (route, case, code, path, pointer)
+        assert ids == _CARDINALITY_CITATION, (route, case, ids)
+
+
+def test_a_cardinality_refusal_cites_no_placement_entry():
+    """A cardinality refusal cites the cardinality diagnostic entry, and nothing else.
+
+    QA-184-s1-r15-01. Citations are derived from a code alone. When the five
+    ``placement.<ctx>.step`` entries named ``PROCESS_IR_SCHEMA_INVALID_CARDINALITY``,
+    every cardinality refusal cited them, including refusals no placement entry decides.
+    Measured through both entry points: a withheld cache step in a Branch leg, an empty
+    process-scoped try body, and a root-sequence cache successor each serve exactly
+    ``("diagnostic.process_ir_schema_invalid_cardinality",)``.
+    """
+    _check_a_cardinality_refusal_cites_no_placement_entry()
+
+
+def _placement_refusal_code():
+    """The code the placement registry's own check raises, read from ``body_capabilities._check``."""
+    tree = ast.parse(Path(bc.__file__).read_text(encoding="utf-8"))
+    check = next(node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "_check")
+    assert "is_allowed" in _called(check), "the placement check no longer consults the registry"
+    raises = [node for node in ast.walk(check)
+              if isinstance(node, ast.Call) and getattr(node.func, "id", None) == "raise_compile_error"]
+    assert len(raises) == 1 and isinstance(raises[0].args[0], ast.Name), raises
+    return getattr(bc, raises[0].args[0].id)
+
+
+_CALL_TERMINAL = {"kind": "process_call", "process_ref": "$ref:CHILD", "wait": True, "abort_on_error": True}
+
+
+def _placement_entry_for(slot_pair, served):
+    """The id of the served placement entry whose own placement is ``(public context, slot)``."""
+    matches = [entry.contract_entry_id for entry in served.values() if entry.entry_type == "placement"
+               and [(item.context, item.slot) for item in entry.placements] == [slot_pair]]
+    assert len(matches) == 1, (slot_pair, matches)
+    return matches[0]
+
+
+def _nested_true_arm_terminal(kind):
+    """A Decision as a Branch-leg terminal, with ``kind`` as its TRUE-arm terminal."""
+    ir = parse_process_ir_v1(_body_carrier(bc.BRANCH_LEG))
+    leg = ir.body.steps[0].legs[0]
+    leg.terminal = _NODE.validate_python(_atom("decision"))
+    leg.terminal.true_arm.terminal = _NODE.validate_python(_atom(kind))
+    return ir
+
+
+def _mixing_same_body():
+    ir = _root_model([{"kind": "branch", "legs": [
+        {"steps": [_MSG], "terminal": _CALL_TERMINAL}, {"steps": [_MSG], "terminal": _STOP}]}])
+    ir.body.steps[0].legs[0].steps = [_NODE.validate_python(copy.deepcopy(_GET))]
+    return ir
+
+
+def _mixing_cross_nesting_leg():
+    return _root_model([_GET, {"kind": "branch", "legs": [
+        {"steps": [_DPP], "terminal": _CALL_TERMINAL}, {"steps": [_MSG], "terminal": _STOP}]}])
+
+
+def _mixing_cross_nesting_true_arm():
+    decision = _atom("decision")
+    decision["true_arm"] = {"steps": [_MSG], "terminal": _CALL_TERMINAL}
+    return _root_model([_GET, decision])
+
+
+def _recovery_connector_before_the_call():
+    ir = _root_model([{"kind": "try_catch", "scope": "process",
+                       "try_body": {"steps": [_GET], "terminal": _STOP},
+                       "catch_body": {"steps": [], "terminal": _CALL_TERMINAL}}])
+    ir.body.steps[0].catch_body.steps = [_NODE.validate_python(copy.deepcopy(_GET))]
+    return ir
+
+
+@functools.lru_cache(maxsize=1)
+def _placement_refusal_documents():
+    """``((label, model factory, pointer, (public context, slot)), ...)`` for the placement witness.
+
+    * One GENUINE placement refusal per matrix slot. The kind is the first, in sorted
+      order, that the slot's union does not admit and that the parser refuses with the
+      placement code at that slot. The slot is the matrix cell itself, never parsed
+      back out of the pointer.
+    * A nested genuine refusal (a Decision TRUE-arm terminal inside a Branch-leg
+      terminal), whose innermost slot differs from the enclosing one.
+    * The four measured mixing and recovery refusals, each at a node that sits in the
+      slot recorded beside it.
+    """
+    code = _placement_refusal_code()
+    kinds = sorted(set(process_ir_v1_node_kinds()) - {"sequence"})
+    documents = []
+    for (context, slot), admitted in sorted(bc.BODY_CAPABILITIES_V1.items()):
+        body = _body_pointer(context)
+        pointer = ("{0}/steps/{1}".format(body, len(_anchor(context))) if slot == bc.STEP_SLOT
+                   else body + "/terminal")
+        chosen = None
+        for kind in kinds:
+            if kind in admitted:
+                continue
+            if slot == bc.STEP_SLOT:
+                factory = functools.partial(lambda c, k: _body_model(c, [_atom(k)], _atom("stop")), context, kind)
+            else:
+                factory = functools.partial(lambda c, k: _body_model(c, [_MSG], _atom(k)), context, kind)
+            if _first(_verdict(factory())) == (code, pointer):
+                chosen = (kind, factory)
+                break
+        assert chosen is not None, (context, slot, "no kind is refused by placement at this slot")
+        documents.append(("placement {0} {1} ({2})".format(context, slot, chosen[0]), chosen[1], pointer,
+                          (bc.PUBLIC_BODY_CONTEXTS[context], slot)))
+    nested_pointer = _body_pointer(bc.BRANCH_LEG) + "/terminal/true_arm/terminal"
+    nested_kind = next(kind for kind in kinds
+                       if kind not in bc.BODY_CAPABILITIES_V1[(bc.DECISION_TRUE_ARM, bc.TERMINAL_SLOT)]
+                       and _first(_verdict(_nested_true_arm_terminal(kind))) == (code, nested_pointer))
+    documents.append(("placement nested true-arm terminal ({0})".format(nested_kind),
+                      functools.partial(_nested_true_arm_terminal, nested_kind), nested_pointer,
+                      (bc.PUBLIC_BODY_CONTEXTS[bc.DECISION_TRUE_ARM], bc.TERMINAL_SLOT)))
+    documents += [
+        ("mixing same body", _mixing_same_body, "/body/steps/0/legs/0/steps/0",
+         (bc.PUBLIC_BODY_CONTEXTS[bc.BRANCH_LEG], bc.STEP_SLOT)),
+        ("mixing cross-nesting leg", _mixing_cross_nesting_leg, "/body/steps/1/legs/0/terminal",
+         (bc.PUBLIC_BODY_CONTEXTS[bc.BRANCH_LEG], bc.TERMINAL_SLOT)),
+        ("mixing cross-nesting true arm", _mixing_cross_nesting_true_arm, "/body/steps/1/true_arm/terminal",
+         (bc.PUBLIC_BODY_CONTEXTS[bc.DECISION_TRUE_ARM], bc.TERMINAL_SLOT)),
+        ("recovery connector before the call", _recovery_connector_before_the_call,
+         "/body/steps/0/catch_body/steps/0", (bc.PUBLIC_BODY_CONTEXTS[bc.CATCH_BODY], bc.STEP_SLOT)),
+    ]
+    return tuple(documents)
+
+
+def _citations_through_every_route(model):
+    """``[(route, code, path, cited ids)]`` for one refused document.
+
+    Served ``build_integration`` plan and compile routes (a parse refusal served as
+    ``authoring_diagnostics``), and ``compile_process_ir_v1`` on the model itself,
+    cited through ``workflow._contract_ids_for`` with the diagnostic's own path.
+    """
+    sys.path.insert(0, str(_ROOT / "tests"))
+    from _m12_11_support import process_ir_request
+
+    from boomi_mcp.authoring.workflow import _contract_ids_for
+    from boomi_mcp.categories import integration_builder
+
+    raw = process_ir_request().model_dump(mode="json")
+    raw["intent"]["units"][0]["process_ir"]["body"] = model.model_dump(mode="json", warnings=False)["body"]
+    rows = []
+    for route, action in (("plan", integration_builder._plan_authoring),
+                          ("compile", integration_builder._compile_authoring)):
+        served = action(None, "qa_profile", {"authoring_request": copy.deepcopy(raw)})
+        assert served.get("_success") is False, (route, served.get("error"))
+        for item in served.get("authoring_diagnostics") or ():
+            rows.append((route, item["code"], item["path"], tuple(item["authoring_contract_entry_ids"])))
+    with pytest.raises(ProcessIRCompileError) as exc:
+        pipeline.compile_process_ir_v1(model, _symbols())
+    for diagnostic in exc.value.diagnostics:
+        rows.append(("compile_process_ir_v1", diagnostic.code, diagnostic.path,
+                     tuple(_contract_ids_for(diagnostic.code, diagnostic.path))))
+    return rows
+
+
+def _check_a_placement_entry_is_cited_only_by_a_refusal_in_its_slot():
+    from boomi_mcp.authoring.process_ir_projection import (
+        authoring_contract_entry_ids_for_diagnostic,
+        build_process_ir_authoring_entries,
+    )
+
+    served = {entry.contract_entry_id: entry for entry in build_process_ir_authoring_entries()}
+    code = _placement_refusal_code()
+    placement_ids = {entry_id for entry_id, entry in served.items() if entry.entry_type == "placement"}
+    for entry_id in placement_ids:
+        assert set(served[entry_id].diagnostic_codes) == {code}, (entry_id, served[entry_id].diagnostic_codes)
+
+    def expected(diagnostic_code, slot_pair):
+        ids = {entry_id for entry_id, entry in served.items()
+               if diagnostic_code in entry.diagnostic_codes and entry.entry_type != "placement"}
+        if slot_pair is not None:
+            own = _placement_entry_for(slot_pair, served)
+            if diagnostic_code in served[own].diagnostic_codes:
+                ids.add(own)
+        return tuple(sorted(ids))
+
+    documents = _placement_refusal_documents()
+    assert len([d for d in documents if d[0].startswith("placement ")]) == len(bc.BODY_CAPABILITIES_V1) + 1
+    cited_slots = set()
+    all_rows = []
+    for label, factory, pointer, slot_pair in documents:
+        rows = _citations_through_every_route(factory())
+        assert {route for route, *_rest in rows} == {"plan", "compile", "compile_process_ir_v1"}, (label, rows)
+        for route, row_code, path, ids in rows:
+            assert row_code == code and path.endswith(pointer), (label, route, row_code, path, pointer)
+            assert ids == expected(code, slot_pair), (label, route, ids)
+            cited_slots.add(slot_pair)
+            all_rows.append((path, ids))
+    assert len(cited_slots) == len(bc.BODY_CAPABILITIES_V1), sorted(cited_slots)
+    for _route, _case, _code, path, ids, _pointer in _served_cardinality_citations():
+        all_rows.append((path, ids))
+
+    # The general invariant, over every refusal above: a cited placement entry is the
+    # entry of the innermost slot its pointer lies in (read by the sibling accessor).
+    for path, ids in all_rows:
+        slots = bc.body_slots_of_pointer(path)
+        allowed = {_placement_entry_for(slots[-1], served)} if slots else set()
+        assert set(ids) & placement_ids <= allowed, (path, ids)
+
+    # A pointer that lies in no control-body slot cites no placement entry. No public
+    # refusal carrying the placement code is raised outside a slot (every raise site
+    # joins a body path with a slot field), so this half is asserted by the rule.
+    for path in (None, "", "/body", "/body/steps/1", "/intent/units/0/process_ir/body/steps/0/try_body"):
+        ids = authoring_contract_entry_ids_for_diagnostic(code, path)
+        assert ids == expected(code, None) and not set(ids) & placement_ids, (path, ids)
+
+
+def test_a_placement_entry_is_cited_only_by_a_refusal_in_its_slot():
+    """A ``placement.<context>.<slot>`` entry is cited only by a refusal located in that slot.
+
+    Defect class ``code-keyed-citation-widened``, second instance. Citations derived from
+    a code alone cited all ten placement entries on every
+    ``PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY`` refusal. Measured through the
+    served plan and compile routes and ``compile_process_ir_v1``:
+
+    * a genuine placement refusal in each of the ten matrix slots cites its diagnostic
+      entry plus exactly that slot's entry, including a nested case where the innermost
+      slot differs from the enclosing one;
+    * the four measured mixing and recovery refusals cite exactly the entry of the slot
+      the refused node sits in;
+    * across every refusal here and the three cardinality witnesses, each cited
+      placement entry is the one for the innermost slot of its pointer;
+    * a pointer in no slot, or no pointer, cites no placement entry.
+
+    The served entries still name only the placement code, the one
+    ``body_capabilities._check`` raises.
+    """
+    _check_a_placement_entry_is_cited_only_by_a_refusal_in_its_slot()
+
+
+def test_mutant_citation_rules_are_caught(monkeypatch):
+    """Two measured mutants against the per-diagnostic citation rule.
+
+    1. Code-only citation (the old rule): patched at
+       ``process_ir_projection.authoring_contract_entry_ids_for_diagnostic``, which
+       ``workflow._contract_ids_for`` imports at call time. Every placement entry naming
+       the code is cited again.
+    2. The OUTERMOST slot instead of the innermost: patched at
+       ``body_capabilities.placement_slot_of_pointer``, which the projection reads at call
+       time. The nested refusal cites the Branch-leg terminal entry.
+
+    Each makes ``test_a_placement_entry_is_cited_only_by_a_refusal_in_its_slot`` fail.
+    The unmutated control passes before and after each.
+    """
+    from boomi_mcp.authoring import process_ir_projection as projection
+
+    _check_a_placement_entry_is_cited_only_by_a_refusal_in_its_slot()
+
+    def code_only(code, path=None):
+        if not code:
+            return ()
+        return tuple(sorted(entry.contract_entry_id for entry in projection.build_process_ir_authoring_entries()
+                            if code in entry.diagnostic_codes))
+
+    monkeypatch.setattr(projection, "authoring_contract_entry_ids_for_diagnostic", code_only)
+    _expect_failure(_check_a_placement_entry_is_cited_only_by_a_refusal_in_its_slot)
+    monkeypatch.undo()
+    _check_a_placement_entry_is_cited_only_by_a_refusal_in_its_slot()
+
+    def outermost(pointer):
+        slots = bc.body_slots_of_pointer(pointer)
+        return slots[0] if slots else None
+
+    monkeypatch.setattr(bc, "placement_slot_of_pointer", outermost)
+    _expect_failure(_check_a_placement_entry_is_cited_only_by_a_refusal_in_its_slot)
+    monkeypatch.undo()
+    _check_a_placement_entry_is_cited_only_by_a_refusal_in_its_slot()
 
 
 def test_mutant_a_zero_emission_kind_served_in_a_step_slot_is_caught(monkeypatch):
-    """Mutant: ``body_capabilities`` stops withholding one zero-emission kind.
+    """Two measured mutants against the served placements.
 
-    Patched where ``body_placement_rows`` reads the authority, the module-level
-    ``ZERO_EMISSION_KINDS`` binding in ``compiler/process_ir/body_capabilities.py``.
-    The kind returns to every served step slot. The compile measurement is unchanged,
-    so ``test_served_placements_are_the_placements_that_compile`` fails.
+    1. ``body_capabilities`` stops withholding one zero-emission kind. Patched where
+       ``body_placement_rows`` reads the authority, the module-level
+       ``ZERO_EMISSION_KINDS`` binding in ``compiler/process_ir/body_capabilities.py``.
+       The kind returns to every served step slot, and
+       ``test_served_placements_are_the_placements_that_compile`` fails.
+    2. The step entries name ``PROCESS_IR_SCHEMA_INVALID_CARDINALITY`` again (batch 14's
+       R14-M2 shape, reversed). Patched where ``_build`` reads it: the builder in
+       ``process_ir_projection._BUILDERS``, a tuple bound at import, so patching the
+       module-level ``_placement_entries`` name reaches nothing (measured). The
+       projection cache is reset on both sides. Every cardinality refusal then cites
+       the five step entries, and
+       ``test_a_cardinality_refusal_cites_no_placement_entry`` fails.
     """
+    from boomi_mcp.authoring import process_ir_projection as projection
+
     _compiling_placements()
     _check_served_placements_are_the_placements_that_compile()
     restored = sorted(emission.ZERO_EMISSION_KINDS)[0]
@@ -1097,6 +1473,30 @@ def test_mutant_a_zero_emission_kind_served_in_a_step_slot_is_caught(monkeypatch
     _expect_failure(_check_served_placements_are_the_placements_that_compile)
     monkeypatch.undo()
     _check_served_placements_are_the_placements_that_compile()
+
+    _check_a_cardinality_refusal_cites_no_placement_entry()
+    real_placement_entries = projection._placement_entries
+
+    def naming_the_cardinality_code(sources):
+        return [
+            entry.model_copy(update={"diagnostic_codes": tuple(entry.diagnostic_codes) + (_CARD,)})
+            if entry.subject.endswith("." + bc.STEP_SLOT) else entry
+            for entry in real_placement_entries(sources)
+        ]
+
+    assert sum(builder is real_placement_entries for builder in projection._BUILDERS) == 1
+    monkeypatch.setattr(projection, "_BUILDERS", tuple(
+        naming_the_cardinality_code if builder is real_placement_entries else builder
+        for builder in projection._BUILDERS))
+    projection.reset_process_ir_authoring_cache()
+    try:
+        assert any(_CARD in e.diagnostic_codes for e in projection.build_process_ir_authoring_entries()
+                   if e.entry_type == "placement"), "the mutant did not reach the served entries"
+        _expect_failure(_check_a_cardinality_refusal_cites_no_placement_entry)
+    finally:
+        monkeypatch.undo()
+        projection.reset_process_ir_authoring_cache()
+    _check_a_cardinality_refusal_cites_no_placement_entry()
 
 
 # ---------------------------------------------------------------------------

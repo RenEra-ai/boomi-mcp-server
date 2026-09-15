@@ -221,8 +221,12 @@ def _compile_message(diagnostic: Any) -> str:
     return own or _COMPILE_GENERIC_MESSAGE
 
 
-def _contract_ids_for(code: str) -> Tuple[str, ...]:
-    """The served authoring entries that explain ``code``.
+def _contract_ids_for(code: str, path: Optional[str] = None) -> Tuple[str, ...]:
+    """The served authoring entries that explain ``code`` at ``path``.
+
+    ``path`` is the diagnostic's own pointer. A placement entry is cited only when it
+    lies in that entry's slot (see ``authoring_contract_entry_ids_for_diagnostic``);
+    without a path, no placement entry is cited.
 
     Best-effort: a diagnostic must still reach the caller if the projection
     cannot be built, because the diagnostic is the thing that blocks their
@@ -231,7 +235,7 @@ def _contract_ids_for(code: str) -> Tuple[str, ...]:
     try:
         from .process_ir_projection import authoring_contract_entry_ids_for_diagnostic
 
-        return authoring_contract_entry_ids_for_diagnostic(code)
+        return authoring_contract_entry_ids_for_diagnostic(code, path)
     except Exception:  # noqa: BLE001 — advisory citation, never fatal
         return ()
 
@@ -1888,7 +1892,7 @@ def _validate_processes(
                         cause_codes=(finding.code,),
                         node_identity=getattr(finding, "node_identity", "") or "",
                         evidence=_safe_evidence(finding),
-                        authoring_contract_entry_ids=_contract_ids_for(finding.code),
+                        authoring_contract_entry_ids=_contract_ids_for(finding.code, finding.path),
                     )
                 )
 
@@ -3032,7 +3036,8 @@ def build_artifact_descriptors(
                         cause_codes=(getattr(diagnostic, "code", "") or "",),
                         node_identity=getattr(diagnostic, "node_identity", "") or "",
                         authoring_contract_entry_ids=_contract_ids_for(
-                            getattr(diagnostic, "code", "") or ""
+                            getattr(diagnostic, "code", "") or "",
+                            getattr(diagnostic, "path", "") or "",
                         ),
                     )
                     for diagnostic in (exc.diagnostics or ())
