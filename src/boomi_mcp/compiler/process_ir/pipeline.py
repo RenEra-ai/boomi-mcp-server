@@ -125,9 +125,11 @@ def _enforce_semantic_report(ir, cfg, symbols, policy, capabilities) -> None:
 
         #184: the lineage controller now raises #140's profile code on its own,
         at maps and cache writes connector resolution never visits, so there is
-        no delegated original to recover. Such a code has no text in the
-        validation tables, so its static compiler text is rebuilt here, by code,
-        rather than serving the generic fallback.
+        no delegated original to recover. Since QA-184-s1-r17-02 the validation
+        tables carry the compiler's words for every compiler-owned code the
+        validator raises (`findings._COMPILER_WORDED_CODES`), so the report
+        finding already holds them. The rebuild below is reached only by a code
+        outside the validation tables, and serves its static compiler text by code.
         """
         origin = delegated.get((item.code, item.path))
         if origin is None and item.code not in finding_codes:

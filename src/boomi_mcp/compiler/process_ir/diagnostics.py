@@ -67,6 +67,7 @@ from ...errors import (
     PROCESS_IR_SEMANTIC_UNREACHABLE,
     PROCESS_IR_SCHEMA_INVALID_CARDINALITY,
 )
+from ...models.process_ir import PROCESS_IR_V1_MAX_CONTROL_DEPTH
 
 CompilerPhase = Literal[
     "schema",
@@ -129,13 +130,18 @@ _REMEDIATION = {
         "merge, so a node may have at most one predecessor."
     ),
     PROCESS_IR_SEMANTIC_NESTING_LIMIT: (
-        "Reduce Branch/Decision nesting to at most the documented control depth, or "
-        "move the deeper routing into a subprocess. This is a ProcessIR v1 compiler "
-        "bound, not a Boomi platform limit."
+        # QA-184-s1-r17-01: `body_capabilities._walk_control` and
+        # `invariants._check_control_depth` restate the model's own bound, so the
+        # fact is the parser's and so are the words, with the bound's VALUE. The
+        # old text named "the documented control depth" and documented it nowhere.
+        "Reduce Branch/Decision nesting to at most {0} levels, or move the deeper "
+        "routing into a subprocess. This is a ProcessIR v1 compiler bound, not a "
+        "Boomi platform limit.".format(PROCESS_IR_V1_MAX_CONTROL_DEPTH)
     ),
     PROCESS_IR_SEMANTIC_UNTERMINATED_PATH: (
-        "End every Branch leg and Decision outcome in its own terminal; each "
-        "divergent path must terminate independently."
+        "End every Branch leg, Decision outcome and Try/Catch path (the protected "
+        "path and the catch body) in its own terminal; each divergent path must "
+        "terminate independently."
     ),
     PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY: (
         # SELF-184-37. Slot admission AND the `process_call_connector_mixing` gate
@@ -362,9 +368,12 @@ _REMEDIATION = {
         "voided by a version advance; that surface is what tells the two apart."
     ),
     PROCESS_IR_SEMANTIC_CATCH_UNTERMINATED: (
-        "End the catch body with a stop, an exception, a staging cache write, or a "
-        "process_call that hands the caught document to a recovery process. "
-        "Every caught document must reach a terminal."
+        # QA-184-s1-r17-01: `body_capabilities._walk_try_catch` restates the model's
+        # own catch-terminal rule, so this is the parser's text, naming the terminal
+        # set by node kind: stop, exception, cache_put, process_call.
+        "End the catch body with a stop, an exception, a staging cache_put, or a "
+        "process_call that hands the caught document to a recovery process — "
+        "every caught document must reach a terminal."
     ),
     PROCESS_IR_SCHEMA_INVALID_CARDINALITY: (
         # SELF-184-37: this layer serves the code only for the model's rules it
@@ -556,6 +565,26 @@ class CompilerDiagnostic(BaseModel):
     )
 
 
+#: What a factory serves for a code its own table does not register. Shared by
+#: `findings.finding`, so the two factories cannot drift apart.
+#:
+#: QA-184-s1-r17-02: the previous text asked the caller to substitute "<the id this
+#: diagnostic serves in authoring_contract_entry_ids>" into a call, which no caller
+#: can paste (#451), and it was served for real on the typed plan route for every
+#: compiler-owned code the semantic validator raised. Every code a factory can be
+#: handed now has an entry (`test_every_raised_code_serves_its_own_table_text`), so
+#: reaching this text means the server raised a code with no registered text, which
+#: is what it says. It stays true for any code, because it names no rule. It keeps
+#: the entry-id route, one call rather than a category sweep that pages at twenty
+#: entries, with the argument named in words instead of a placeholder.
+_UNREGISTERED_CODE_REMEDIATION = (
+    "No remediation is registered for this code at the layer that raised it, which "
+    "is a server defect: please report it with the code and the authored path. Any "
+    "id this diagnostic carries in authoring_contract_entry_ids resolves when passed "
+    "as authoring_entry_id to get_schema_template(schema_name='process_ir_authoring')."
+)
+
+
 def diagnostic(
     code: str,
     phase: CompilerPhase,
@@ -571,16 +600,7 @@ def diagnostic(
         path=path,
         node_identity=node_identity_for(path),
         message=message or _MESSAGES.get(code, "compiler rejected the payload"),
-        remediation=_REMEDIATION.get(
-            code,
-            "Fetch this code's authoring rule with "
-            "get_schema_template(schema_name='process_ir_authoring', "
-            "authoring_entry_id=<the id this diagnostic serves in "
-            "authoring_contract_entry_ids>). The category sweep this used to name "
-            "pages at twenty of sixty-five entries, so following it literally left "
-            "most diagnostics off the first page of their own remediation's route; "
-            "the entry id resolves in one call and the diagnostic already carries it.",
-        ),
+        remediation=_REMEDIATION.get(code, _UNREGISTERED_CODE_REMEDIATION),
         internal_node_id=internal_node_id,
     )
 

@@ -3086,7 +3086,25 @@ def test_the_label_legend_is_published_once_per_page_not_per_entry():
 
     page = query_process_ir_authoring_contract(category="diagnostic", limit=50)
     assert page.diagnostic_label_legend == DIAGNOSTIC_LABEL_LEGEND
-    assert page.returned_entry_count == 50, page.returned_entry_count
+    # The saving in ENTRIES, measured on this page rather than quoted. This line said
+    # `== 50`, and that figure moved once served entries grew by their true attribution
+    # (QA-184-s1-r17-02 added the semantic validator's source and the plan stage to the
+    # codes it raises), as the note above predicted. The property is what the move bought:
+    # carrying its own copy of the legend, each of this page's entries would push
+    # entries off the page.
+    sizes = [
+        len(json.dumps(entry.model_dump(mode="json"), sort_keys=True, separators=(",", ":")))
+        for entry in page.entries
+    ]
+    assert len(sizes) == page.returned_entry_count and sizes, page.returned_entry_count
+    assert sum(sizes) <= PROCESS_IR_AUTHORING_BYTE_BUDGET, sum(sizes)
+    with_legend, used = 0, 0
+    for size in sizes:
+        if used + size + len(DIAGNOSTIC_LABEL_LEGEND) > PROCESS_IR_AUTHORING_BYTE_BUDGET:
+            break
+        used += size + len(DIAGNOSTIC_LABEL_LEGEND)
+        with_legend += 1
+    assert with_legend < page.returned_entry_count, (with_legend, page.returned_entry_count)
 
     # What per-entry repetition WOULD cost today, measured rather than quoted.
     diagnostics = [

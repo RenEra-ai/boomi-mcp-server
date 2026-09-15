@@ -84,6 +84,7 @@ from boomi_mcp.compiler.process_ir.contracts import (  # noqa: E402
 )
 from boomi_mcp.compiler.process_ir.diagnostics import ProcessIRCompileError  # noqa: E402
 from boomi_mcp.errors import (  # noqa: E402
+    PROCESS_IR_CAPABILITY_CONNECTOR_ACTION_UNSUPPORTED,
     PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY,
     PROCESS_IR_CAPABILITY_UNSUPPORTED,
     PROCESS_IR_COMPILE_EMITTER_INPUT_INVALID,
@@ -91,6 +92,7 @@ from boomi_mcp.errors import (  # noqa: E402
     PROCESS_IR_SEMANTIC_AMBIGUOUS_FLOW,
     PROCESS_IR_SEMANTIC_CARDINALITY_MISMATCH,
     PROCESS_IR_SEMANTIC_CONTROL_CONTINUATION_UNSUPPORTED,
+    PROCESS_IR_SEMANTIC_NESTING_LIMIT,
     PROCESS_IR_SEMANTIC_PROFILE_MISMATCH,
 )
 from boomi_mcp.models import process_ir as model  # noqa: E402
@@ -2222,3 +2224,268 @@ def test_a_continuation_refusal_serves_one_remediation_at_both_layers():
                                    code, _CONTINUATION_GATE, (_CONTINUATION_GATE,))
     _check_served_gate_remediation("orphan continue", _orphan_continue, "/body",
                                    code, None, (_CONTINUATION_GATE,))
+
+
+# ---------------------------------------------------------------------------
+# QA-184-s1-r17-01 / -02: the typed routes serve each code's own table text
+# ---------------------------------------------------------------------------
+
+#: Any angle-bracketed token, the #451 shape: a served text a caller pastes must not carry
+#: a placeholder for the caller to substitute.
+_PLACEHOLDER = re.compile(r"<[^<>\n]+>")
+
+#: What the two table factories serve as the MESSAGE for a code their table lacks.
+_GENERIC_MESSAGES = ("compiler rejected the payload", "semantic validation rejected the payload")
+
+
+def _typed_request(doc, components=None, depends_on=None):
+    """The #146 typed request over the fixture plan, with ``doc`` as the process's root."""
+    sys.path.insert(0, str(_ROOT / "tests"))
+    from _m12_11_support import process_ir_request
+
+    raw = process_ir_request().model_dump(mode="json")
+    unit = raw["intent"]["units"][0]
+    unit["process_ir"] = copy.deepcopy(doc)
+    if components is not None:
+        raw["intent"]["components"] = copy.deepcopy(components)
+    if depends_on is not None:
+        unit["envelope"]["depends_on"] = list(depends_on)
+    return raw
+
+
+def _typed_rows(raw):
+    """``([(route, code, path, message, remediation)], [(route, envelope)])`` for one refused
+    request on the typed plan and compile routes.
+
+    A parse refusal is served in the rejection envelope's ``authoring_diagnostics`` under its
+    own code. A semantic refusal is served under ``cause_codes``: in the plan result's
+    ``errors``, since plan succeeds and reports it, or in the compile rejection's
+    ``authoring_diagnostics``.
+    """
+    from boomi_mcp.categories import integration_builder
+
+    rows, envelopes = [], []
+    for route, action in (("plan", integration_builder._plan_authoring),
+                          ("compile", integration_builder._compile_authoring)):
+        served = action(None, "qa_profile", {"authoring_request": copy.deepcopy(raw)})
+        envelopes.append((route, served))
+        items = list(served.get("authoring_diagnostics") or ()) + list(
+            (served.get("authoring_result") or {}).get("errors") or ())
+        assert items, (route, served)
+        for item in items:
+            for code in item.get("cause_codes") or (item["code"],):
+                rows.append((route, code, item["path"], item["message"], item["remediation"]))
+    return rows, envelopes
+
+
+def _one_table_text(code):
+    """The remediation every table serving ``code`` agrees on."""
+    from boomi_mcp.compiler.process_ir import diagnostics
+    from boomi_mcp.compiler.process_ir.semantic_validation import findings
+
+    texts = {
+        layer: module._REMEDIATION[code]
+        for layer, module in (("parser", model), ("compiler", diagnostics), ("semantic", findings))
+        if code in module._REMEDIATION
+    }
+    assert texts and len(set(texts.values())) == 1, (code, texts)
+    return next(iter(texts.values()))
+
+
+def _check_served_table_text(label, rows, code, pointer):
+    """Both typed routes serve ``code`` at ``pointer`` with its one table text."""
+    from boomi_mcp.compiler.process_ir import diagnostics
+
+    text = _one_table_text(code)
+    matching = [row for row in rows if row[1] == code and row[2].endswith(pointer)]
+    assert {row[0] for row in matching} == {"plan", "compile"}, (label, code, pointer, rows)
+    for route, _code, path, message, remediation in matching:
+        where = (label, route, path)
+        assert remediation == text, (where, remediation)
+        assert remediation != diagnostics._UNREGISTERED_CODE_REMEDIATION, where
+        assert message not in _GENERIC_MESSAGES, (where, message)
+        for served in (message, remediation):
+            assert not _PLACEHOLDER.search(served), (where, served)
+    return matching
+
+
+def _nested_decisions(depth):
+    """A Decision chain ``depth`` deep through true-arm terminals, each arm a DDP write."""
+    terminal = dict(_STOP)
+    for _level in range(depth):
+        terminal = {
+            "kind": "decision", "comparison": "equals",
+            "left": {"value_type": "static", "static_value": "a"},
+            "right": {"value_type": "static", "static_value": "a"},
+            "true_arm": {"steps": [dict(_DPP)], "terminal": terminal},
+            "false_arm": {"steps": [dict(_DPP)], "terminal": dict(_STOP)},
+        }
+    return terminal
+
+
+def _nesting_document(depth):
+    return _doc({"kind": "source", "connection_ref": "$ref:db_conn", "operation_ref": "$ref:db_op"},
+                _nested_decisions(depth))
+
+
+def _check_nesting_witness():
+    from _process_ir_diagnostic_emissions import internal_constant_names
+    from boomi_mcp.compiler.process_ir import diagnostics
+
+    code = PROCESS_IR_SEMANTIC_NESTING_LIMIT
+    bound = model.PROCESS_IR_V1_MAX_CONTROL_DEPTH
+    rows, envelopes = _typed_rows(_typed_request(_nesting_document(bound + 1)))
+    pointer = "/body/steps/1" + "/true_arm/terminal" * bound
+    matching = _check_served_table_text("nesting", rows, code, pointer)
+    text = _one_table_text(code)
+    assert "at most {0} levels".format(bound) in text, text
+    named = sorted(name for name in internal_constant_names() if name in text)
+    assert named == [], named
+    for route, _code, _path, message, _remediation in matching:
+        assert "of {0}".format(bound) in message, (route, message)
+    # The rejection envelope's hint sits beside the remediation and is pasted the same way.
+    for route, served in envelopes:
+        assert not _PLACEHOLDER.search(served.get("hint") or ""), (route, served.get("hint"))
+
+    # The compiler's own depth rule, reached by a model mutated past the parser.
+    ir = parse_process_ir_v1(_nesting_document(bound))
+    innermost = ir.body.steps[1]
+    for _level in range(bound - 1):
+        innermost = innermost.true_arm.terminal
+    innermost.true_arm.terminal = _NODE.validate_python(_nested_decisions(1))
+    with pytest.raises(ProcessIRCompileError) as exc:
+        bc.validate_body_capabilities(ir)
+    served = [item for item in exc.value.diagnostics if item.code == code]
+    assert [item.path for item in served] == [pointer], exc.value.diagnostics
+    assert served[0].remediation == text == diagnostics._REMEDIATION[code]
+
+
+def test_the_nesting_refusal_serves_its_bound_as_a_value():
+    """QA-184-s1-r17-01, served witness: the nesting refusal serves the bound as a value.
+
+    ``PROCESS_IR_SEMANTIC_NESTING_LIMIT``'s parser remediation said "at most
+    PROCESS_IR_V1_MAX_CONTROL_DEPTH levels", a module constant's NAME, while the message
+    beside it said "maximum control depth of 2"; the compiler's said "the documented control
+    depth". A Decision chain one deeper than the bound goes through ``build_integration``'s
+    typed plan and compile routes. Both serve one text, which states the bound's value,
+    names no internal constant and carries no placeholder, and the envelope's hint carries
+    none either. The compiler's own depth rule, reached by a model mutated past the parser,
+    serves the same words.
+    """
+    _check_nesting_witness()
+
+
+#: Spelled as `test_issue_158_listener_compile._components` spells a native WSS listen
+#: operation: the family and mode the builder writes, and nothing it derives.
+_WSS_LISTEN = {
+    "key": "wss_op", "type": "connector-action", "name": "Inbound", "action": "create",
+    "config": {"connector_type": "wss", "operation_mode": "listen",
+               "object_name": "orders", "component_name": "Inbound"},
+}
+
+
+def _profile(key, field):
+    return {"key": key, "type": "profile.json", "name": key, "action": "create", "config": {
+        "component_type": "profile.json", "profile_type": "json.generated", "component_name": key,
+        "root": {"name": "Root", "kind": "object", "children": [
+            {"name": field, "kind": "simple", "data_type": "character", "required": False}]}}}
+
+
+def _profile_mismatch_request():
+    """A map whose source profile contradicts the documents a GET hands it."""
+    components = [
+        {"key": "conn", "type": "connector-settings", "name": "conn", "action": "create",
+         "config": {"connector_type": "rest", "component_name": "conn",
+                    "base_url": "https://orders.example.invalid", "auth": "NONE"}},
+        _profile("p_client", "key"),
+        _profile("p_a", "a1"),
+        _profile("p_b", "b2"),
+        {"key": "op_get", "type": "connector-action", "name": "op_get", "action": "create",
+         "depends_on": ["conn", "p_client"], "config": {
+             "component_type": "connector-action", "connector_type": "rest",
+             "operation_mode": "execute", "component_name": "op_get",
+             "connection_ref_key": "conn", "method": "GET", "path": "/v1/things",
+             "response_profile_id": "$ref:p_client", "response_profile_type": "json"}},
+        {"key": "m_ab", "type": "transform.map", "name": "m_ab", "action": "create",
+         "depends_on": ["p_a", "p_b"], "config": {
+             "component_type": "transform.map", "map_type": "direct", "component_name": "m_ab",
+             "source_profile_id": "$ref:p_a", "source_profile_type": "profile.json",
+             "target_profile_id": "$ref:p_b", "target_profile_type": "profile.json",
+             "field_mappings": [{"source_path": "Root/a1", "target_path": "Root/b2"}]}},
+    ]
+    doc = _doc({"kind": "connector_call", "operation_ref": "$ref:op_get"},
+               {"kind": "map_ref", "map_ref": "$ref:m_ab"}, _STOP)
+    return _typed_request(doc, components, [spec["key"] for spec in components])
+
+
+def _check_semantic_witnesses():
+    from boomi_mcp.compiler.process_ir import diagnostics
+    from boomi_mcp.compiler.process_ir.semantic_validation import findings
+
+    cases = (
+        ("profile mismatch", _profile_mismatch_request(), PROCESS_IR_SEMANTIC_PROFILE_MISMATCH,
+         "/body/steps/1/map_ref"),
+        ("wss source step",
+         _typed_request(_doc({"kind": "connector_call", "operation_ref": "$ref:wss_op"}, _STOP),
+                        [_WSS_LISTEN], ["wss_op"]),
+         PROCESS_IR_CAPABILITY_CONNECTOR_ACTION_UNSUPPORTED, "/body/steps/0/operation_ref"),
+    )
+    for label, raw, code, pointer in cases:
+        rows, _envelopes = _typed_rows(raw)
+        for route, _code, _path, message, _remediation in _check_served_table_text(
+                label, rows, code, pointer):
+            assert message == findings._MESSAGES[code] == diagnostics._MESSAGES[code], (
+                label, route, message)
+    # The WSS source step reaches the listener remedy the catalog publishes for the code.
+    assert "node_kind='listener'" in _one_table_text(PROCESS_IR_CAPABILITY_CONNECTOR_ACTION_UNSUPPORTED)
+
+
+def test_a_semantic_refusal_serves_its_table_text_on_the_typed_routes():
+    """QA-184-s1-r17-02, served witness: the validator's refusals serve their table text.
+
+    The semantic validator raised ``PROCESS_IR_SEMANTIC_PROFILE_MISMATCH`` and
+    ``PROCESS_IR_CAPABILITY_CONNECTOR_ACTION_UNSUPPORTED`` with no entry in its own tables,
+    so both typed routes served "semantic validation rejected the payload" and a fallback
+    carrying an angle-bracket placeholder, while the catalog published the compiler's words
+    for each code. Measured at ``f1ed254`` on both routes for the two documents below: a map
+    whose source profile contradicts the GET's documents, and a Web Services Server listen
+    operation authored as a source step. Both now serve the one text the compiler's and the
+    validator's tables agree on, with the compiler's message and no placeholder, and the WSS
+    refusal names the listener remedy.
+    """
+    _check_semantic_witnesses()
+
+
+def test_a_missing_table_entry_fails_the_served_witnesses(monkeypatch):
+    """Mutants against the two served witnesses, each followed by the unmutated control.
+
+    1. The validator's tables without the compiler-worded rows, as at ``f1ed254``: both typed
+       routes serve the fallback, and the witness fails.
+    2. The parser's nesting remediation restored to the constant's name: the two tables
+       disagree, and the witness fails.
+    """
+    from boomi_mcp.compiler.process_ir.semantic_validation import findings
+
+    worded = set(findings._COMPILER_WORDED_CODES)
+    monkeypatch.setattr(findings, "_MESSAGES",
+                        {c: t for c, t in findings._MESSAGES.items() if c not in worded})
+    monkeypatch.setattr(findings, "_REMEDIATION",
+                        {c: t for c, t in findings._REMEDIATION.items() if c not in worded})
+    with pytest.raises(AssertionError) as caught:
+        _check_semantic_witnesses()
+    assert "profile mismatch" in str(caught.value), str(caught.value)[:1500]
+    monkeypatch.undo()
+    _check_semantic_witnesses()
+
+    table = dict(model._REMEDIATION)
+    table[PROCESS_IR_SEMANTIC_NESTING_LIMIT] = (
+        "Reduce Branch/Decision nesting to at most "
+        "PROCESS_IR_V1_MAX_CONTROL_DEPTH levels, or move the deeper routing into a "
+        "subprocess. This is a ProcessIR v1 compiler bound, not a Boomi platform limit."
+    )
+    monkeypatch.setattr(model, "_REMEDIATION", table)
+    with pytest.raises(AssertionError) as caught:
+        _check_nesting_witness()
+    assert PROCESS_IR_SEMANTIC_NESTING_LIMIT in str(caught.value), str(caught.value)[:1500]
+    monkeypatch.undo()
+    _check_nesting_witness()

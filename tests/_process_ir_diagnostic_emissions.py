@@ -69,12 +69,20 @@ __all__ = [
     "DIAGNOSTIC_CONSTRUCTORS",
     "EMISSION_ROOTS",
     "PINNED_SINKS",
+    "TABLE_FACTORIES",
     "capability_citations",
     "collect_emissions",
     "compiler_translated_codes",
+    "forward_owner_codes",
+    "internal_constant_names",
     "pinned_sink_definitions",
     "producer_of",
+    "raising_methods",
     "referenced_codes",
+    "routed_emissions",
+    "table_factory_reads",
+    "table_routes",
+    "translation_sites",
     "unresolvable_forward_arguments",
     "runtime_forward_defaults",
     "verifier_issue_call_count",
@@ -1417,3 +1425,505 @@ def compiler_translated_codes():
         "raw": freeze(raw),
         "unreadable": tuple(sorted(unreadable, key=str)),
     })
+
+
+# ---------------------------------------------------------------------------
+# QA-184-s1-r17-02: the served TABLE each raise site reads, and the codes a
+# translated compile refusal can carry
+# ---------------------------------------------------------------------------
+
+#: The factories that select a diagnostic's text BY CODE from a served table, and the
+#: layer whose `_MESSAGES`/`_REMEDIATION` each reads. A served diagnostic's text is
+#: decided by the factory it went through, not by the module that called it, so
+#: `routed_emissions()` assigns each raise site to its factory's table.
+#: `collect_emissions` buckets by MODULE instead, which is right for "is this code served
+#: somewhere" and wrong for "which text does this call serve": a `finding()` and a
+#: `diagnostic()` in one semantic module land in one bucket, the served-text guards let
+#: the compiler's table satisfy both, and the validator served its generic fallback for
+#: every compiler-owned code it raised while those guards stayed green.
+#: Pinned by definition like `PINNED_SINKS`; `table_factory_reads()` proves each factory
+#: still reads both of its module's tables.
+TABLE_FACTORIES = (
+    ("src/boomi_mcp/models/process_ir.py", "_diagnostic", "parser"),
+    ("src/boomi_mcp/compiler/process_ir/diagnostics.py", "diagnostic", "compiler"),
+    ("src/boomi_mcp/compiler/process_ir/semantic_validation/findings.py", "finding", "semantic"),
+)
+
+
+def table_factory_reads():
+    """`{(path, factory): frozenset(table names)}`: the registry tables each factory loads.
+
+    The anti-vacuity anchor for the routing below. A factory that stopped reading its
+    tables would leave every route pointing at text nothing selects.
+    """
+    found = {}
+    for relative, name, _layer in TABLE_FACTORIES:
+        tree = ast.parse((_ROOT / relative).read_text())
+        loads = set()
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == name:
+                loads.update(
+                    sub.id for sub in ast.walk(node)
+                    if isinstance(sub, ast.Name) and sub.id in _REGISTRY_TABLES
+                )
+        found[(relative, name)] = frozenset(loads)
+    return MappingProxyType(found)
+
+
+def _route(routes, relative, name):
+    return routes.get((relative, name)) or routes.get((None, name)) or frozenset()
+
+
+def table_routes():
+    """`(scans, routes)`: every sink whose calls reach a table factory, and which table.
+
+    `routes` maps `(None, name)` for a pinned sink, which is called across modules by name,
+    and `(path, name)` for a module's own one-hop wrapper, to the frozen set of layers its
+    calls reach. Derived to a fixpoint from each sink's definition body, never listed:
+    `raise_compile_error` reaches `diagnostic`, `internal_defect` and `invariants._fail`
+    reach `raise_compile_error`, lineage's `_report` reaches `finding`. A model constructor
+    (`CompilerDiagnostic(...)`) reaches no table, because its caller supplies the text, and
+    every such call is a pinned delegation site already.
+    """
+    scans = tuple(
+        (str(path.relative_to(_ROOT)), _ModuleScan(path, path.read_text()))
+        for path in _iter_files()
+    )
+    pinned = {name for _path, name in PINNED_SINKS}
+    routes = {(None, name): {layer} for _path, name, layer in TABLE_FACTORIES}
+    definitions = []
+    for relative, scan in scans:
+        for node in ast.walk(scan.tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name in scan.sinks:
+                key = (None, node.name) if node.name in pinned else (relative, node.name)
+                definitions.append((relative, key, node))
+    while True:
+        changed = False
+        for relative, key, node in definitions:
+            reached = set()
+            for call in ast.walk(node):
+                if isinstance(call, ast.Call) and _called_name(call) != node.name:
+                    reached |= set(_route(routes, relative, _called_name(call)))
+            current = routes.setdefault(key, set())
+            if not reached <= current:
+                current |= reached
+                changed = True
+        if not changed:
+            break
+    return scans, MappingProxyType(
+        {key: frozenset(value) for key, value in routes.items() if value}
+    )
+
+
+def routed_emissions():
+    """`(codes, dynamic, ambiguous)`: what each table-reading factory is handed, from source.
+
+    * `codes`: `{layer: {code: frozenset((path, lineno), ...)}}` for every call into a
+      routed sink whose code resolves, by the closed forms `collect_emissions` reads;
+    * `dynamic`: sorted `(path, lineno, sink, dump, kind, layer)` for every call whose code
+      does not resolve. `kind` is `definition` when the call forwards the FIRST parameter
+      of an enclosing routed sink: that is the wrapper's own body, and its call sites carry
+      the codes. Every other such call is a `site`, whose codes the caller must derive;
+    * `ambiguous`: sinks reaching more than one table. The caller asserts it is empty
+      rather than guessing which text such a call serves.
+    """
+    scans, routes = table_routes()
+    codes = {layer: {} for _path, _name, layer in TABLE_FACTORIES}
+    dynamic = []
+    for relative, scan in scans:
+        for node in ast.walk(scan.tree):
+            if not isinstance(node, ast.Call):
+                continue
+            name = _called_name(node)
+            layers = _route(routes, relative, name)
+            if not layers:
+                continue
+            argument = _argument(node, 0, "code")
+            if argument is None or id(argument) in scan.excluded:
+                continue
+            resolved = scan.resolve(argument)
+            if resolved is not None:
+                for layer in layers:
+                    for code in resolved:
+                        codes[layer].setdefault(code, set()).add((relative, node.lineno))
+                continue
+            forward = scan.forwarded_parameter(node, argument)
+            kind = "site"
+            if forward is not None and forward[1] == 0 and _route(routes, relative, forward[0].name):
+                kind = "definition"
+            for layer in sorted(layers):
+                dynamic.append((relative, node.lineno, name, ast.dump(argument), kind, layer))
+    ambiguous = sorted(
+        (str(key), tuple(sorted(value))) for key, value in routes.items() if len(value) > 1
+    )
+    return (
+        MappingProxyType({
+            layer: MappingProxyType(
+                {code: frozenset(sites) for code, sites in sorted(found.items())})
+            for layer, found in codes.items()
+        }),
+        tuple(sorted(dynamic)),
+        tuple(ambiguous),
+    )
+
+
+def _module_file(relative, level, module):
+    """The repository path of the module an import names, or None when there is no file."""
+    if level:
+        base = pathlib.PurePosixPath(relative).parent
+        for _step in range(level - 1):
+            base = base.parent
+    else:
+        base = pathlib.PurePosixPath("src")
+    parts = module.split(".") if module else []
+    candidates = [base.joinpath(*parts).with_suffix(".py")] if parts else []
+    candidates.append(base.joinpath(*parts, "__init__.py"))
+    for candidate in candidates:
+        if (_ROOT / candidate).is_file():
+            return str(candidate)
+    return None
+
+
+def _imports_of(relative, tree, scanned):
+    """`{local name: (module path, name or None)}` for every import of a scanned module or of
+    a name in one. `name` is None when the local name binds the module itself."""
+    bound = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            target = _module_file(relative, node.level, node.module)
+            for alias in node.names:
+                local = alias.asname or alias.name
+                if target in scanned:
+                    bound[local] = (target, alias.name)
+                    continue
+                dotted = "{0}.{1}".format(node.module, alias.name) if node.module else alias.name
+                submodule = _module_file(relative, node.level, dotted)
+                if submodule in scanned:
+                    bound[local] = (submodule, None)
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                target = _module_file(relative, 0, alias.name)
+                if alias.asname and target in scanned:
+                    bound[alias.asname] = (target, None)
+    return bound
+
+
+class _CallIndex:
+    """Functions and imports of the scanned modules, for a by-name walk of what a function
+    can reach. The walk follows a function NAMED in a body (called or passed along), in
+    its own module or imported from a scanned one, and a function reached through an
+    imported module's attribute. It does not follow a method: `raising_methods()` reports
+    every method holding a compile-table sink call, and the caller asserts there is none,
+    so that limit is a checked fact rather than an assumption."""
+
+    def __init__(self, scans, routes):
+        self.scans = dict(scans)
+        self.routes = routes
+        self.functions = {relative: {} for relative in self.scans}
+        for relative, scan in scans:
+            for node in ast.walk(scan.tree):
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    self.functions[relative].setdefault(node.name, []).append(node)
+        scanned = set(self.scans)
+        self.imports = {
+            relative: _imports_of(relative, scan.tree, scanned) for relative, scan in scans
+        }
+
+    def target(self, relative, name):
+        if name in self.functions[relative]:
+            return (relative, name)
+        bound = self.imports[relative].get(name)
+        if bound and bound[1] is not None and bound[1] in self.functions.get(bound[0], {}):
+            return bound
+        return None
+
+    def raising_walk(self, starts, layer):
+        """`(codes, unreadable, reached)` for the functions reachable from `starts`.
+
+        `codes` maps every code a `layer`-routed sink call resolves to onto its sites; a
+        call the reader cannot resolve is `unreadable`, unless it is a routed wrapper's own
+        body forwarding its first parameter.
+        """
+        codes, unreadable, seen = {}, [], set()
+        stack = sorted(starts)
+        while stack:
+            relative, name = stack.pop()
+            if (relative, name) in seen:
+                continue
+            seen.add((relative, name))
+            scan = self.scans[relative]
+            for function in self.functions[relative].get(name, ()):
+                for node in ast.walk(function):
+                    if isinstance(node, ast.Call):
+                        sink = _called_name(node)
+                        if layer in _route(self.routes, relative, sink):
+                            argument = _argument(node, 0, "code")
+                            resolved = scan.resolve(argument) if argument is not None else None
+                            if resolved is not None:
+                                for code in resolved:
+                                    codes.setdefault(code, set()).add((relative, node.lineno))
+                                continue
+                            forward = (
+                                scan.forwarded_parameter(node, argument)
+                                if argument is not None else None
+                            )
+                            if not (
+                                forward is not None and forward[1] == 0
+                                and _route(self.routes, relative, forward[0].name)
+                            ):
+                                unreadable.append((relative, node.lineno, sink,
+                                                   ast.dump(argument) if argument else ""))
+                    elif isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
+                        found = self.target(relative, node.id)
+                        if found is not None:
+                            stack.append(found)
+                    elif isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
+                        bound = self.imports[relative].get(node.value.id)
+                        if (
+                            bound and bound[1] is None
+                            and node.attr in self.functions.get(bound[0], {})
+                        ):
+                            stack.append((bound[0], node.attr))
+        return (
+            MappingProxyType({code: frozenset(sites) for code, sites in sorted(codes.items())}),
+            tuple(sorted(unreadable)),
+            frozenset(seen),
+        )
+
+
+def raising_methods(layer="compiler"):
+    """Sorted `(path, class, method)` for every method holding a `layer`-routed sink call.
+
+    The limit `_CallIndex.raising_walk` states: a method is not followed, so a method that
+    raised would hide its codes from the walk. The caller asserts this is empty.
+    """
+    scans, routes = table_routes()
+    found = set()
+    for relative, scan in scans:
+        for owner in ast.walk(scan.tree):
+            if not isinstance(owner, ast.ClassDef):
+                continue
+            for method in owner.body:
+                if not isinstance(method, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    continue
+                if any(
+                    isinstance(node, ast.Call)
+                    and layer in _route(routes, relative, _called_name(node))
+                    for node in ast.walk(method)
+                ):
+                    found.add((relative, owner.name, method.name))
+    return tuple(sorted(found))
+
+
+def _catches(handler, name):
+    kinds = handler.type.elts if isinstance(handler.type, ast.Tuple) else [handler.type]
+    return any(isinstance(kind, ast.Name) and kind.id == name for kind in kinds)
+
+
+def _is_diagnostics_of(expression, name):
+    return (
+        isinstance(expression, ast.Attribute)
+        and expression.attr == "diagnostics"
+        and isinstance(expression.value, ast.Name)
+        and expression.value.id == name
+    )
+
+
+def _reraised_prefixes(handler):
+    """Code prefixes a handler re-raises instead of translating: the string arguments of
+    `.startswith(...)` in the test of an `if` whose body is a bare `raise`."""
+    prefixes = set()
+    for node in ast.walk(handler):
+        if not (
+            isinstance(node, ast.If)
+            and any(isinstance(item, ast.Raise) and item.exc is None for item in node.body)
+        ):
+            continue
+        for call in ast.walk(node.test):
+            if (
+                isinstance(call, ast.Call)
+                and isinstance(call.func, ast.Attribute)
+                and call.func.attr == "startswith"
+            ):
+                prefixes.update(
+                    arg.value for arg in call.args
+                    if isinstance(arg, ast.Constant) and isinstance(arg.value, str)
+                )
+    return tuple(sorted(prefixes))
+
+
+def translation_sites():
+    """Every call that re-serves a CAUGHT compile refusal's own codes through a table factory.
+
+    QA-184-s1-r17-02. `flow.collect_connector_flow_findings` runs
+    `connector_resolution.validate_connector_calls` and hands each diagnostic of the
+    `ProcessIRCompileError` it raises to `finding(item.code, ...)`, which selects text from
+    the SEMANTIC tables. That call's code resolves from nothing, so the reader pins it, and
+    its pinned reason said it "introduces no code of its own". It carries every code the
+    caught refusal can, and the semantic tables registered none of them.
+
+    The shape is closed: a `try` whose handler catches `ProcessIRCompileError` as a name and
+    calls a routed sink with `<item>.code`, `<item>` iterating `<name>.diagnostics`. The
+    codes are those `_CallIndex.raising_walk` finds for the compile table from every
+    function the `try` body calls by name, less the prefixes the handler re-raises
+    (`_reraised_prefixes`). An over-approximation: a code the walk MAY reach counts.
+
+    Returns `{(path, lineno): mapping}` with `layer`, `sink`, `starts`, `raisable`,
+    `reraised_prefixes`, `codes` and `unreadable`.
+    """
+    scans, routes = table_routes()
+    index = _CallIndex(scans, routes)
+    sites = {}
+    for relative, scan in scans:
+        for node in ast.walk(scan.tree):
+            if not isinstance(node, ast.Try):
+                continue
+            for handler in node.handlers:
+                if not (handler.name and handler.type is not None
+                        and _catches(handler, "ProcessIRCompileError")):
+                    continue
+                iterated = set()
+                for sub in ast.walk(handler):
+                    for generator in getattr(sub, "generators", ()) or ():
+                        if (_is_diagnostics_of(generator.iter, handler.name)
+                                and isinstance(generator.target, ast.Name)):
+                            iterated.add(generator.target.id)
+                    if (isinstance(sub, ast.For) and _is_diagnostics_of(sub.iter, handler.name)
+                            and isinstance(sub.target, ast.Name)):
+                        iterated.add(sub.target.id)
+                calls = []
+                for sub in ast.walk(handler):
+                    if not isinstance(sub, ast.Call):
+                        continue
+                    layers = _route(routes, relative, _called_name(sub))
+                    argument = _argument(sub, 0, "code")
+                    if (
+                        layers and isinstance(argument, ast.Attribute)
+                        and argument.attr == "code"
+                        and isinstance(argument.value, ast.Name)
+                        and argument.value.id in iterated
+                    ):
+                        calls.append((sub, _called_name(sub), layers))
+                if not calls:
+                    continue
+                starts = set()
+                for statement in node.body:
+                    for call in ast.walk(statement):
+                        if isinstance(call, ast.Call) and isinstance(call.func, ast.Name):
+                            found = index.target(relative, call.func.id)
+                            if found is not None:
+                                starts.add(found)
+                raisable, unreadable, _reached = index.raising_walk(starts, "compiler")
+                prefixes = _reraised_prefixes(handler)
+                for call, sink, layers in calls:
+                    sites[(relative, call.lineno)] = MappingProxyType({
+                        "layer": tuple(sorted(layers)),
+                        "sink": sink,
+                        "starts": tuple(sorted(starts)),
+                        "raisable": frozenset(raisable),
+                        "reraised_prefixes": prefixes,
+                        "codes": frozenset(
+                            code for code in raisable if not code.startswith(prefixes)),
+                        "unreadable": unreadable,
+                    })
+    return MappingProxyType(sites)
+
+
+def forward_owner_codes():
+    """The codes reaching each call that forwards a NON-first parameter into a routed sink.
+
+    `{(path, sink, dump): {"owner", "parameter", "codes"}}`. The codes are the owner's
+    runtime default, read by `runtime_forward_defaults()`, plus the argument each call site
+    of the owner passes, which `unresolvable_forward_arguments()` requires to be a plain
+    constant: it lists any site that is not, and the caller asserts that list is empty.
+    """
+    scans, routes = table_routes()
+    defaults, _unreadable = runtime_forward_defaults()
+    found = {}
+    for relative, scan in scans:
+        owners = {}
+        for node in ast.walk(scan.tree):
+            if not isinstance(node, ast.Call) or not _route(routes, relative, _called_name(node)):
+                continue
+            argument = _argument(node, 0, "code")
+            if argument is None or scan.resolve(argument) is not None:
+                continue
+            forward = scan.forwarded_parameter(node, argument)
+            if forward is None:
+                continue
+            owner, index, param = forward
+            if index == 0 and _route(routes, relative, owner.name):
+                continue  # a routed wrapper's own body: its call sites are the emissions
+            key = (relative, _called_name(node), ast.dump(argument))
+            owners[owner.name] = (key, index, param)
+            codes = set()
+            default = defaults.get((relative, owner.name, param))
+            if default:
+                codes.add(default)
+            found[key] = {"owner": owner.name, "parameter": param, "codes": codes,
+                          "unreadable": []}
+        for node in ast.walk(scan.tree):
+            if not isinstance(node, ast.Call) or _called_name(node) not in owners:
+                continue
+            key, index, param = owners[_called_name(node)]
+            # Reported, never dropped: an argument this reader cannot read would otherwise
+            # vanish from the code set, which is the fail-open shape this module refuses.
+            if any(isinstance(a, ast.Starred) for a in node.args) or any(
+                k.arg is None for k in node.keywords
+            ):
+                found[key]["unreadable"].append((node.lineno, "unpacked arguments"))
+                continue
+            supplied = _argument(node, index, param)
+            if supplied is None:
+                continue
+            resolved = scan.resolve(supplied)
+            if resolved is None:
+                found[key]["unreadable"].append((node.lineno, ast.dump(supplied)))
+            else:
+                found[key]["codes"].update(resolved)
+    return MappingProxyType({
+        key: MappingProxyType(dict(value, codes=frozenset(value["codes"]),
+                                   unreadable=tuple(value["unreadable"])))
+        for key, value in sorted(found.items())
+    })
+
+
+#: An UPPER_SNAKE binding name: two or more segments, with optional leading underscores.
+#: One-segment names are excluded on purpose, because words such as `JSON` or `XML` are
+#: ordinary prose in a remediation and would be false matches.
+_INTERNAL_NAME = re.compile(r"^_*[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+$")
+
+
+def _module_level_targets(statements):
+    """Every name a module binds by assignment at module level, including inside a
+    module-level `if`, `try`, `with` or `for` (never inside a function or class body)."""
+    for statement in statements:
+        if isinstance(statement, ast.Assign):
+            for target in statement.targets:
+                if isinstance(target, ast.Name):
+                    yield target.id
+        elif isinstance(statement, ast.AnnAssign) and isinstance(statement.target, ast.Name):
+            yield statement.target.id
+        elif isinstance(statement, (ast.If, ast.For, ast.While, ast.With, ast.Try)):
+            for field in ("body", "orelse", "finalbody"):
+                yield from _module_level_targets(getattr(statement, field, None) or ())
+            for handler in getattr(statement, "handlers", ()) or ():
+                yield from _module_level_targets(handler.body)
+
+
+def internal_constant_names():
+    """`{name: frozenset(paths)}` for every module-level UPPER_SNAKE binding in the scanned
+    modules, read from source.
+
+    QA-184-s1-r17-01. The nesting remediation told its reader to reduce nesting "to at most
+    PROCESS_IR_V1_MAX_CONTROL_DEPTH levels": a module constant's NAME, which no served page
+    resolves, in place of its value. The case set is every such name the scanned modules
+    bind, so a new constant is covered the moment it is defined.
+    """
+    names = {}
+    for path in _iter_files():
+        relative = str(path.relative_to(_ROOT))
+        for name in _module_level_targets(ast.parse(path.read_text()).body):
+            if _INTERNAL_NAME.match(name):
+                names.setdefault(name, set()).add(relative)
+    return MappingProxyType({name: frozenset(paths) for name, paths in sorted(names.items())})

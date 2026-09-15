@@ -22,10 +22,20 @@ from ....errors import (
     LEGACY_ADAPTER_EXEMPTION_OPAQUE_STATE_WRITER,
     LEGACY_ADAPTER_EXEMPTION_STANDALONE_CACHE_READ,
     LEGACY_ADAPTER_EXEMPTION_SUBPROCESS_SUMMARY,
+    PROCESS_IR_CAPABILITY_CONNECTOR_ACTION_UNSUPPORTED,
+    PROCESS_IR_CAPABILITY_DYNAMIC_PATH_UNSUPPORTED,
     PROCESS_IR_CAPABILITY_EFFECT_CONTRACT_INVALID,
     PROCESS_IR_CAPABILITY_ENTRY_CONTEXT_UNSUPPORTED,
+    PROCESS_IR_CAPABILITY_PROCESS_CALL_PLACEMENT_UNSUPPORTED,
     PROCESS_IR_REFERENCE_COMPONENT_NOT_FOUND,
     PROCESS_IR_REFERENCE_COMPONENT_TYPE_MISMATCH,
+    PROCESS_IR_REFERENCE_CONNECTION_MISMATCH,
+    PROCESS_IR_REFERENCE_CONNECTION_NOT_FOUND,
+    PROCESS_IR_REFERENCE_LISTENER_OPERATION_INVALID,
+    PROCESS_IR_REFERENCE_OPERATION_NOT_FOUND,
+    PROCESS_IR_SEMANTIC_CARDINALITY_MISMATCH,
+    PROCESS_IR_SEMANTIC_DYNAMIC_PATH_REQUIRED,
+    PROCESS_IR_SEMANTIC_IDEMPOTENCY_EVIDENCE_MISSING,
     PROCESS_IR_SEMANTIC_LINEAGE_AMBIGUOUS_LAST_WRITE,
     PROCESS_IR_SEMANTIC_LINEAGE_BRANCH_ORDER_INVALID,
     PROCESS_IR_SEMANTIC_DYNAMIC_PATH_DDP_NOT_ESTABLISHED,
@@ -36,11 +46,25 @@ from ....errors import (
     PROCESS_IR_SEMANTIC_LINEAGE_EFFECT_UNKNOWN,
     PROCESS_IR_SEMANTIC_LINEAGE_EXTERNAL_WRITER_ASSUMED,
     PROCESS_IR_SEMANTIC_LINEAGE_PROPERTY_READ_BEFORE_WRITE,
+    PROCESS_IR_SEMANTIC_LISTENER_INBOUND_CONTRACT_UNSATISFIED,
+    PROCESS_IR_SEMANTIC_MISSING_TERMINAL,
+    PROCESS_IR_SEMANTIC_PROFILE_MISMATCH,
     PROCESS_IR_SEMANTIC_RETRY_EFFECT_UNSAFE,
+    PROCESS_IR_SEMANTIC_RETRY_NON_IDEMPOTENT_WRITE,
+    PROCESS_IR_SEMANTIC_RETRY_SOURCE_POLICY_REQUIRES_RETRY,
+    PROCESS_IR_SEMANTIC_RETRY_SOURCE_POLICY_SCOPE_INVALID,
+    PROCESS_IR_SEMANTIC_RETRY_SOURCE_REEXECUTION,
     PROCESS_IR_SEMANTIC_SIDE_EFFECT_ORDERING_UNKNOWN,
     PROCESS_IR_SEMANTIC_SIDE_EFFECT_ORDERING_UNSAFE,
+    PROCESS_IR_SEMANTIC_UNREACHABLE,
+    PROCESS_IR_SEMANTIC_UNTERMINATED_PATH,
 )
-from ..diagnostics import node_identity_for
+from ..diagnostics import (
+    _MESSAGES as _COMPILER_MESSAGES,
+    _REMEDIATION as _COMPILER_REMEDIATION,
+    _UNREGISTERED_CODE_REMEDIATION,
+    node_identity_for,
+)
 from .contracts import ValidationDiagnosticV1, ValidationEvidenceV1
 
 _MESSAGES: Dict[str, str] = {
@@ -213,6 +237,55 @@ _REMEDIATION: Dict[str, str] = {
     ),
 }
 
+#: QA-184-s1-r17-02. Codes this validator raises whose RULE, and so whose words,
+#: are the compiler's. `finding()` selects text from THIS module's tables only, so
+#: without an entry here each of them reached the typed plan route with the generic
+#: fallback, while the served contract published the compiler's words for the code
+#: and the compile route (`pipeline._restore`) served them. The text is READ from
+#: the compiler's tables when this module loads, never copied, so the two layers
+#: cannot drift. A code whose semantic rule decides a different fact needs text of
+#: its own in the tables above, not a row here.
+#:
+#: The set is checked from source in both directions by
+#: `tests/test_process_ir_served_text_enforcement.py`: every code a `finding()` call
+#: can carry has an entry (`test_every_raised_code_serves_its_own_table_text`), and
+#: no entry exists for a code it cannot carry
+#: (`test_the_served_code_set_is_exactly_what_the_authorities_account_for`).
+_COMPILER_WORDED_CODES: Tuple[str, ...] = (
+    # Translated verbatim from `connector_resolution.validate_connector_calls` by
+    # `flow.collect_connector_flow_findings`, which re-raises the
+    # `PROCESS_IR_COMPILE_*` family instead of translating it.
+    PROCESS_IR_CAPABILITY_CONNECTOR_ACTION_UNSUPPORTED,
+    PROCESS_IR_CAPABILITY_DYNAMIC_PATH_UNSUPPORTED,
+    PROCESS_IR_REFERENCE_CONNECTION_MISMATCH,
+    PROCESS_IR_REFERENCE_CONNECTION_NOT_FOUND,
+    PROCESS_IR_REFERENCE_LISTENER_OPERATION_INVALID,
+    PROCESS_IR_REFERENCE_OPERATION_NOT_FOUND,
+    PROCESS_IR_SEMANTIC_CARDINALITY_MISMATCH,
+    PROCESS_IR_SEMANTIC_DYNAMIC_PATH_REQUIRED,
+    PROCESS_IR_SEMANTIC_IDEMPOTENCY_EVIDENCE_MISSING,
+    PROCESS_IR_SEMANTIC_LISTENER_INBOUND_CONTRACT_UNSATISFIED,
+    PROCESS_IR_SEMANTIC_RETRY_NON_IDEMPOTENT_WRITE,
+    PROCESS_IR_SEMANTIC_RETRY_SOURCE_POLICY_REQUIRES_RETRY,
+    PROCESS_IR_SEMANTIC_RETRY_SOURCE_POLICY_SCOPE_INVALID,
+    PROCESS_IR_SEMANTIC_RETRY_SOURCE_REEXECUTION,
+    # Translated as above AND raised by lineage's own profile checks at maps, cache
+    # writes, profile sources and calls, every one of which the compiler's text names.
+    PROCESS_IR_SEMANTIC_PROFILE_MISMATCH,
+    # Raised by this validator's ports of the compiler's own rules: the flow walks
+    # (`flow.collect_reachability_findings` and `collect_terminal_findings`, the walks
+    # `invariants` runs on the same graph) and lineage's No Data placement check at a
+    # call, which the compiler's text covers where the refusal names the call itself.
+    PROCESS_IR_CAPABILITY_PROCESS_CALL_PLACEMENT_UNSUPPORTED,
+    PROCESS_IR_SEMANTIC_MISSING_TERMINAL,
+    PROCESS_IR_SEMANTIC_UNREACHABLE,
+    PROCESS_IR_SEMANTIC_UNTERMINATED_PATH,
+)
+_MESSAGES.update({code: _COMPILER_MESSAGES[code] for code in _COMPILER_WORDED_CODES})
+_REMEDIATION.update(
+    {code: _COMPILER_REMEDIATION[code] for code in _COMPILER_WORDED_CODES}
+)
+
 
 def finding(
     code: str,
@@ -236,16 +309,9 @@ def finding(
         path=path,
         node_identity=node_identity_for(path),
         message=_MESSAGES.get(code, "semantic validation rejected the payload"),
-        remediation=_REMEDIATION.get(
-            code,
-            "Fetch this code's authoring rule with "
-            "get_schema_template(schema_name='process_ir_authoring', "
-            "authoring_entry_id=<the id this diagnostic serves in "
-            "authoring_contract_entry_ids>). The category sweep this used to name "
-            "pages at twenty of sixty-five entries, so following it literally left "
-            "most diagnostics off the first page of their own remediation's route; "
-            "the entry id resolves in one call and the diagnostic already carries it.",
-        ),
+        # Shared with the compiler's factory rather than copied: see
+        # `diagnostics._UNREGISTERED_CODE_REMEDIATION`.
+        remediation=_REMEDIATION.get(code, _UNREGISTERED_CODE_REMEDIATION),
         evidence=tuple(
             ValidationEvidenceV1(key=key, value=value) for key, value in evidence
         ),

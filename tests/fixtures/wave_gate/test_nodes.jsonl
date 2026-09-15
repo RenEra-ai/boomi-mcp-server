@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 13012, "minimum_collected": 13012, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 13023, "minimum_collected": 13023, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -13311,3 +13311,14 @@
 {"kind": "test", "id": "pytest-013310", "node_id": "tests/test_process_ir_served_text_enforcement.py::test_every_code_remediation_names_every_gate_its_raisers_cite", "state": "active"}
 {"kind": "test", "id": "pytest-013311", "node_id": "tests/test_process_ir_served_text_enforcement.py::test_a_reverted_remediation_fails_the_gate_citation_invariant", "state": "active"}
 {"kind": "test", "id": "pytest-013312", "node_id": "tests/test_process_ir_served_text_enforcement.py::test_a_translated_code_serves_the_parsers_remediation", "state": "active"}
+{"kind": "test", "id": "pytest-013313", "node_id": "tests/test_issue_184_document_emission.py::test_the_nesting_refusal_serves_its_bound_as_a_value", "state": "active"}
+{"kind": "test", "id": "pytest-013314", "node_id": "tests/test_issue_184_document_emission.py::test_a_semantic_refusal_serves_its_table_text_on_the_typed_routes", "state": "active"}
+{"kind": "test", "id": "pytest-013315", "node_id": "tests/test_issue_184_document_emission.py::test_a_missing_table_entry_fails_the_served_witnesses", "state": "active"}
+{"kind": "test", "id": "pytest-013316", "node_id": "tests/test_process_ir_served_text_enforcement.py::test_every_code_two_tables_serve_serves_one_remediation", "state": "active"}
+{"kind": "test", "id": "pytest-013317", "node_id": "tests/test_process_ir_served_text_enforcement.py::test_a_divergent_shared_remediation_fails_the_parity_invariant", "state": "active"}
+{"kind": "test", "id": "pytest-013318", "node_id": "tests/test_process_ir_served_text_enforcement.py::test_every_raised_code_serves_its_own_table_text", "state": "active"}
+{"kind": "test", "id": "pytest-013319", "node_id": "tests/test_process_ir_served_text_enforcement.py::test_a_missing_table_entry_fails_the_raised_code_invariant", "state": "active"}
+{"kind": "test", "id": "pytest-013320", "node_id": "tests/test_process_ir_served_text_enforcement.py::test_no_served_remediation_names_an_internal_constant", "state": "active"}
+{"kind": "test", "id": "pytest-013321", "node_id": "tests/test_process_ir_served_text_enforcement.py::test_a_served_internal_name_fails_the_constant_name_invariant", "state": "active"}
+{"kind": "test", "id": "pytest-013322", "node_id": "tests/test_process_ir_served_text_enforcement.py::test_every_served_remediation_is_pasteable", "state": "active"}
+{"kind": "test", "id": "pytest-013323", "node_id": "tests/test_process_ir_served_text_enforcement.py::test_a_placeholder_fails_the_pasteable_invariant", "state": "active"}

@@ -12184,11 +12184,11 @@ def _reject_invalid_process_ir(exc, action: str) -> Dict[str, Any]:
             for d in sorted(diagnostics, key=lambda d: (d["path"], d["code"]))
         ],
         "hint": (
-            "Fetch the grammar with get_schema_template(schema_name='ProcessIRV1') "
-            "and the behavioural rules with "
-            "get_schema_template(schema_name='process_ir_authoring', "
-            "authoring_entry_id=<the id cited above>). Values are deliberately "
-            "omitted from this envelope."
+            "Fetch the grammar with get_schema_template(schema_name='ProcessIRV1'), "
+            "and the behavioural rules by passing each id a diagnostic above carries "
+            "in authoring_contract_entry_ids as authoring_entry_id to "
+            "get_schema_template(schema_name='process_ir_authoring'). Values are "
+            "deliberately omitted from this envelope."
         ),
     }
     if action == "apply":

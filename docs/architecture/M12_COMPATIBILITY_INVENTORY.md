@@ -1,25 +1,6 @@
 # M12 Compatibility Inventory
 
-**Status:** 
-**Stage-2 correction batch 13 (QA-184-s1-r13-01) re-ran it.** Batch 13 makes a typed apply refuse when its own
-recompile could not build the component plan from the account, so a binding is never confirmed against an
-account that did not answer. The census, the ledger rows and `schema_revision` did not move, and the §11
-tables were re-spliced for moved `Baseline line` values. Revisions after batch 13: `capability_revision`
-`sha256:522cbf7d…` and `compiler_revision` `sha256:99a0c28d…`; `schema_revision` stays `sha256:c9583e6b…`.
-
-**Stage-2 correction batch 14 (QA-184-s1-r14-01 and the document-emission witnesses) re-ran it.** Batch 14
-serves only the control-body placements a document can compile with, adds the planned document-emission test
-module, binds the scheduled start's measured rule in the capture index and cites the two non-emission measured
-rules at their source authorities. The census, the ledger rows and `schema_revision` did not move, and the §11
-tables were re-spliced for moved `Baseline line` values. Revisions after batch 14:
-`capability_revision` `sha256:05d6312b…` and `compiler_revision` `sha256:bd4429f9…`; `schema_revision` stays `sha256:c9583e6b…`.
-
-**Stage-2 correction batch 15 (QA-184-s1-r15-01) re-ran it.** Batch 15 returns the control-body step placement
-entries to naming only the body-placement code, so a cardinality refusal no longer cites them. The census, the
-ledger rows and `schema_revision` did not move, and the §11 tables were re-spliced for moved `Baseline line`
-values. Revisions after batch 15: `capability_revision` `sha256:6c763af4…` and `compiler_revision` `sha256:c754c598…`; `schema_revision`
-stays `sha256:c9583e6b…`.
-evolving — this file is the M12 migration ledger and is UPDATED as M12 issues land
+**Status:** evolving — this file is the M12 migration ledger and is UPDATED as M12 issues land
 (unlike [ADR-001](ADR-001-process-ir-authority.md), which is immutable once accepted).
 **Measured baseline:** 2026-07-13, extended with review-round re-measurements dated inline as
 2026-07-14 (issue #135, epic #134). Every `file:line` below was read and verified against the
@@ -3070,11 +3051,14 @@ again, re-serving the new revisions; the census, the ledger rows, the contract s
 did not move, and the §11 tables were re-spliced for moved `Baseline line` values. Revisions after batch 4:
 `capability_revision` `sha256:7d216451…` and `compiler_revision` `sha256:7afb22d7…`; `schema_revision` stays `sha256:c9583e6b…`.
 
-**Stage-2 correction batch 16 (SELF-184-37) re-ran it.** Batch 16 makes the body-placement code's served
-remediation name both rules that raise it, slot admission and the connector/process-call mixing gate. The census,
-the ledger rows and `schema_revision` did not move, and the §11 tables were re-spliced for moved `Baseline line`
-values. Revisions after batch 16: `capability_revision` `sha256:ac27d76d…` and `compiler_revision` `sha256:42a1b1ba…`; `schema_revision`
-stays `sha256:c9583e6b…`.
+**Stage-2 correction batch 5 (CDX-184-r4-01..03, QA-184-s1-r5-01) re-ran it.** Batch 5 keeps a written
+spec's own facts, gives a reference apply does not write only the facts every written config agrees on,
+and refuses a map effect declaration whose written configs derive different effects. It also restates the
+served `PROCESS_IR_SEMANTIC_PROFILE_MISMATCH` message, remediation and taxonomy summary so they name every
+site that reports the code, which moves the authoring contract snapshot as well. The census, the ledger
+rows and `schema_revision` did not move, and the §11 tables were re-spliced for moved `Baseline line`
+values. Revisions after batch 5: `capability_revision` `sha256:5482101c…` and `compiler_revision` `sha256:e7eced4d…`;
+`schema_revision` stays `sha256:c9583e6b…`.
 
 **Stage-2 correction batch 6 (CDX-184-r5-01..02, QA-184-s1-r6-01) re-ran it.** Batch 6 refuses a request
 in which more than one component spec writes one existing component, with the new served code
@@ -3123,3 +3107,34 @@ revision witness the plan route's identity readings, derived from the route's im
 and `schema_revision` did not move, and the §11 tables were re-spliced for moved `Baseline line` values.
 Revisions after batch 12: `capability_revision` `sha256:4153bfe0…` and `compiler_revision` `sha256:99a0c28d…`; `schema_revision`
 stays `sha256:c9583e6b…`.
+
+**Stage-2 correction batch 13 (QA-184-s1-r13-01) re-ran it.** Batch 13 makes a typed apply refuse when its own
+recompile could not build the component plan from the account, so a binding is never confirmed against an
+account that did not answer. The census, the ledger rows and `schema_revision` did not move, and the §11
+tables were re-spliced for moved `Baseline line` values. Revisions after batch 13: `capability_revision`
+`sha256:522cbf7d…` and `compiler_revision` `sha256:99a0c28d…`; `schema_revision` stays `sha256:c9583e6b…`.
+
+**Stage-2 correction batch 14 (QA-184-s1-r14-01 and the document-emission witnesses) re-ran it.** Batch 14
+serves only the control-body placements a document can compile with, adds the planned document-emission test
+module, binds the scheduled start's measured rule in the capture index and cites the two non-emission measured
+rules at their source authorities. The census, the ledger rows and `schema_revision` did not move, and the §11
+tables were re-spliced for moved `Baseline line` values. Revisions after batch 14:
+`capability_revision` `sha256:05d6312b…` and `compiler_revision` `sha256:bd4429f9…`; `schema_revision` stays `sha256:c9583e6b…`.
+
+**Stage-2 correction batch 15 (QA-184-s1-r15-01) re-ran it.** Batch 15 returns the control-body step placement
+entries to naming only the body-placement code, so a cardinality refusal no longer cites them. The census, the
+ledger rows and `schema_revision` did not move, and the §11 tables were re-spliced for moved `Baseline line`
+values. Revisions after batch 15: `capability_revision` `sha256:6c763af4…` and `compiler_revision` `sha256:c754c598…`; `schema_revision`
+stays `sha256:c9583e6b…`.
+
+**Stage-2 correction batch 16 (SELF-184-37) re-ran it.** Batch 16 makes the body-placement code's served
+remediation name both rules that raise it, slot admission and the connector/process-call mixing gate. The census,
+the ledger rows and `schema_revision` did not move, and the §11 tables were re-spliced for moved `Baseline line`
+values. Revisions after batch 16: `capability_revision` `sha256:ac27d76d…` and `compiler_revision` `sha256:42a1b1ba…`; `schema_revision`
+stays `sha256:c9583e6b…`.
+
+**Stage-2 correction batch 17 (QA-184-s1-r17-01 and -02) re-ran it.** Batch 17 serves every raised code's own
+table text (no fallback), states the nesting bound's value, and gives every code both tables carry one text. The
+census, the ledger rows and `schema_revision` did not move, and the §11 tables were re-spliced for moved `Baseline
+line` values. Revisions after batch 17: `capability_revision` `sha256:f90456f0…` and `compiler_revision` `sha256:e77d7867…`;
+`schema_revision` stays `sha256:c9583e6b…`.

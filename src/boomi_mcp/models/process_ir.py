@@ -4299,9 +4299,13 @@ _REMEDIATION = {
         "node_kind='process_call')."
     ),
     PROCESS_IR_SEMANTIC_NESTING_LIMIT: (
-        "Reduce Branch/Decision nesting to at most "
-        "PROCESS_IR_V1_MAX_CONTROL_DEPTH levels, or move the deeper routing into a "
-        "subprocess. This is a ProcessIR v1 compiler bound, not a Boomi platform limit."
+        # QA-184-s1-r17-01: this served the constant's NAME, which no served page
+        # resolves, while the message already stated the number. The bound is
+        # formatted from the constant when the table is built, so it cannot drift
+        # from the rule. Same words as the compiler's table.
+        "Reduce Branch/Decision nesting to at most {0} levels, or move the deeper "
+        "routing into a subprocess. This is a ProcessIR v1 compiler bound, not a "
+        "Boomi platform limit.".format(PROCESS_IR_V1_MAX_CONTROL_DEPTH)
     ),
     PROCESS_IR_SCHEMA_RETRY_COUNT: (
         "Use an integer from 0 through 5 for the retry count (the platform's own "
