@@ -967,6 +967,7 @@ def derive_child_entry_facts(child_ir: Any, symbols: Any, capabilities: Any = No
     )
     from ..compiler.process_ir.semantic_validation.lineage import (
         _trusted_effects,
+        proved_removals,
         walk_lineage,
     )
 
@@ -998,11 +999,15 @@ def derive_child_entry_facts(child_ir: Any, symbols: Any, capabilities: Any = No
                 removed.add(semantic.cache_ref)
         elif kind == "process_call":
             contract = base.child_entry_contract(semantic.process_ref)
+            # OUTSIDE the write-completeness gate, and through the same rule every other
+            # site asks: a removal the walk PROVES is an existence claim, so a call that
+            # hides OTHER writes erases none of it. Inside the gate, a process that merely
+            # forwarded a call dropped the removal its own child proved (round r18).
+            removed.update(proved_removals(contract))
             if contract is None or not (contract.state_known or contract.cache_writes_known):
                 caches_known = False
             else:
                 mutated.update((key[0], key[1]) for key in contract.mutated_state if key[0] == "cache")
-                removed.update(contract.removed_caches)
             if contract is None or not contract.state_known:
                 known = False
             else:
@@ -1031,8 +1036,21 @@ def derive_child_entry_facts(child_ir: Any, symbols: Any, capabilities: Any = No
     # property never lands on a caller's sibling copies, and a key the walk was only
     # handed is no write of the child's.
     listed = set(facts["mutated_state"])
+    # ... and only writes the walk proved would RUN, read off the walk's PER-PATH meet
+    # (`guaranteed_at_exit`). A step that may hand on zero documents leaves the writer behind
+    # it unexecuted while the process still completes normally, so a key established only by
+    # such a write is established on no completion the caller can rely on. The lattice
+    # records such a write like any other — that stance is the in-process model's and does
+    # not move — so the walk carries the proof beside the establishment and the guarantee,
+    # which is what crosses the boundary, is the meet of the two (amendment 1 rule 7:
+    # conservative transfer).
+    #
+    # The meet is the rule, not a subtraction: subtracting a union over paths from the meet
+    # over exits withheld keys EVERY completion establishes, because one other path also
+    # wrote that key behind a possibly-empty step, and refused compositions that always set
+    # it at runtime (round r19).
     facts["guaranteed_state"] = tuple(sorted(
-        (key[0], key[1]) for key in walk.established_at_exit
+        (key[0], key[1]) for key in walk.guaranteed_at_exit
         if key[0] != "ddp" and (key[0], key[1]) in listed
     ))
     reads = tuple(sorted({(key[0], key[1]) for key in walk.unestablished_reads}))

@@ -45,6 +45,7 @@ from boomi_mcp.errors import (  # noqa: E402
     PROCESS_IR_CAPABILITY_PROCESS_CALL_PLACEMENT_UNSUPPORTED,
     PROCESS_IR_SEMANTIC_DYNAMIC_PATH_DDP_NOT_ESTABLISHED,
     PROCESS_IR_SEMANTIC_DYNAMIC_PATH_NO_DYNAMIC_SEGMENT,
+    PROCESS_IR_SEMANTIC_LINEAGE_BRANCH_ORDER_INVALID,
     PROCESS_IR_SEMANTIC_LINEAGE_CACHE_WRITER_MISSING,
     PROCESS_IR_SEMANTIC_LINEAGE_DDP_SCOPE_INVALID,
     PROCESS_IR_SEMANTIC_LINEAGE_EXTERNAL_WRITER_ASSUMED,
@@ -312,6 +313,24 @@ _BOUNDARY = {
         "carried by the content cells: every cache a child may write gets an unknown cohort",
     ("cohorts", "guaranteed_effect"):
         "withheld: the properties a child stores stay an unknown possibility too",
+    ("sealed", "requirement"):
+        "withheld: a caller owes nothing for a cache the CHILD emptied — the seal decides "
+        "whose obligation a cached property is inside one process, at its own calls",
+    ("sealed", "possible_effect"):
+        "carried by `removed_caches`: what crosses the boundary is the removal itself, and "
+        "each caller seals its own path from it",
+    ("sealed", "guaranteed_effect"):
+        "withheld: a caller's own later writes can refill the cache, so a child's removal "
+        "guarantees its caller no such exclusivity",
+    ("proved", "requirement"):
+        "withheld: a child requires no proof of its caller's, only the state itself — what "
+        "it needs before the call is `required_reads`",
+    ("proved", "possible_effect"):
+        "carried by `mutated_state`: a POSSIBLE write is recorded whether or not the path "
+        "proves it runs, which is what makes this compartment a separate question",
+    # The guarantee is the MEET of the two execution-scoped compartments: established at
+    # every normal exit, and established there by a write the path proved would run.
+    ("proved", "guaranteed_effect"): ("guaranteed_state",),
 }
 
 _WRITER = [("PARENT", _legs({"steps": [], "terminal": _call("WRITER", wait=True, abort_on_error=True)},
@@ -709,7 +728,7 @@ def test_the_shared_cache_obligation_travelling_upward_is_load_bearing(monkeypat
     x_less = _chain({"steps": [_GET], "terminal": _PUT})
     assert (_NOT_ESTABLISHED, _AT_THE_CALL) in _errors(x_less, "PARENT")
     monkeypatch.setattr(lineage, "_caller_owes_a_cached_property",
-                        lambda cache_ref, name, capabilities: False)
+                        lambda cache_ref, name, capabilities, state: False)
     assert _row(x_less, "PARENT", "MID").cache_property_requirements == ()
     assert _errors(x_less, "PARENT") == []
 
@@ -1027,8 +1046,33 @@ _FILLS_THE_CACHE = {"steps": [_GET], "terminal": _PUT}
 _EMPTIES_IT = {"steps": [], "terminal": _REMOVE}
 #: fills the cache on one leg, empties it on the next
 _PUTS_THEN_EMPTIES = _legs(_FILLS_THE_CACHE, _EMPTIES_IT)
-#: empties it first and fills it again, so every completion leaves it filled
+#: empties it first and fills it again — but BEHIND a retrieve, so the refill may not run
 _EMPTIES_THEN_PUTS = _legs(_EMPTIES_IT, _FILLS_THE_CACHE)
+#: A cache write on a path the walk proves runs. The documents in front of it are the
+#: PASSTHROUGH entry's — its caller's group, which the gate at that call proved non-empty —
+#: handed on one for one by the Message. Every root below that uses this leg is therefore a
+#: passthrough root: on a scheduled root an Add to Cache has no documents to store and is
+#: refused A4 CARDINALITY_MISMATCH, so a scheduled "proved fill" is not authorable at all
+#: and the witnesses that used one pinned caller verdicts against a child that cannot ship
+#: (round r19b).
+_FILLS_ON_A_PROVED_PATH = {"steps": [_MSG], "terminal": _PUT}
+
+
+def _passthrough_root(*legs):
+    """A Data Passthrough root whose Branch runs ``legs``."""
+    return _doc(_ENTRY, {"kind": "branch", "legs": list(legs)})
+#: The same empty-then-refill authored as a PASSTHROUGH child, so the CHILD ITSELF is
+#: valid. An Add to Cache on the bare scheduled entry is refused A4 CARDINALITY_MISMATCH,
+#: which is the only reason round r18's control dropped the child from its clean-verdict
+#: loop rather than fixing its fixture. A passthrough entry hands the leg its caller's
+#: documents, so the put is legal AND on a path the walk proves — and the control can
+#: assert what it asserted before r18: the caller and the child are both clean (round r19).
+_PASSTHROUGH_EMPTIES_THEN_REFILLS = _doc(_ENTRY, {"kind": "branch", "legs": [
+    _EMPTIES_IT, {"steps": [], "terminal": _PUT}, {"steps": [_MSG], "terminal": _STOP}]})
+#: fills the cache where the walk proves the write runs, then empties it on the next leg.
+#: The removal is then the ONLY reason the guarantee does not cross, which is what the
+#: witnesses below neutralise one hunk at a time (round r18).
+_PUTS_ON_A_PROVED_PATH_THEN_EMPTIES = _passthrough_root(_FILLS_ON_A_PROVED_PATH, _EMPTIES_IT)
 _ONLY_EMPTIES = _legs(_EMPTIES_IT, {"steps": [_MSG], "terminal": _STOP})
 _AT_THE_CACHE_READ = "/body/steps/0/legs/1/steps/0"
 
@@ -1042,8 +1086,9 @@ def _calls_then_reads_the_cache(child_key, **call):
 def _removal_chain(**inner):
     """PARENT -> MID -> HIDES, where MID fills the cache and HIDES empties it."""
     return [("PARENT", _calls_then_reads_the_cache("MID")),
-            ("MID", _legs(_FILLS_THE_CACHE,
-                          {"steps": [], "terminal": _call("HIDES", **dict(_WAITS_AND_ABORTS, **inner))})),
+            ("MID", _passthrough_root(
+                _FILLS_ON_A_PROVED_PATH,
+                {"steps": [], "terminal": _call("HIDES", **dict(_WAITS_AND_ABORTS, **inner))})),
             ("HIDES", _ONLY_EMPTIES)]
 
 
@@ -1052,16 +1097,33 @@ def test_a_child_that_empties_the_cache_guarantees_it_to_nobody():
     it emits no documents. The child fills the cache on one leg and empties it on the next,
     so the caller's later read of that cache is refused again — the guarantee this batch
     added must not outlive the removal that undid the write behind it."""
-    roots = [("PARENT", _calls_then_reads_the_cache("WRITER")), ("WRITER", _PUTS_THEN_EMPTIES)]
+    roots = [("PARENT", _calls_then_reads_the_cache("WRITER")),
+             ("WRITER", _PUTS_ON_A_PROVED_PATH_THEN_EMPTIES)]
     row = _row(roots, "PARENT", "WRITER")
     assert row.removed_caches == ("$ref:CACHE",)
     assert row.guaranteed_state == ()
     assert (_CACHE_WRITER_MISSING, _AT_THE_CACHE_READ) in _errors(roots, "PARENT")
     assert (_CACHE_WRITER_MISSING, _AT_THE_CACHE_READ) in _compile_errors(roots, "PARENT")
-    # CONTROL: the same child that empties the cache and fills it again on every completion
-    # still guarantees it, so the correction refuses the removal and not the removal step.
-    refilled = [("PARENT", _calls_then_reads_the_cache("WRITER")), ("WRITER", _EMPTIES_THEN_PUTS)]
+    # A refill BEHIND A RETRIEVE does not bring the guarantee back: a retrieve that returns
+    # nothing leaves the Add to Cache unrun while the child still completes normally, so the
+    # caller's later read is refused for that child too (amendment 1 rule 7). Round r18
+    # corrected this control, which pinned the opposite; the defect it witnesses is
+    # unchanged, and the refill's own case is measured just below.
+    behind_a_retrieve = [("PARENT", _calls_then_reads_the_cache("WRITER")),
+                         ("WRITER", _EMPTIES_THEN_PUTS)]
+    assert _row(behind_a_retrieve, "PARENT", "WRITER").guaranteed_state == ()
+    assert _row(behind_a_retrieve, "PARENT", "WRITER").removed_caches == ("$ref:CACHE",)
+    assert (_CACHE_WRITER_MISSING, _AT_THE_CACHE_READ) in _errors(behind_a_retrieve, "PARENT")
+    # CONTROL: the same child whose refill runs on a path the walk PROVES still guarantees
+    # the cache, so the correction refuses the removal and not the removal step. The child
+    # is a PASSTHROUGH root so that it is valid on its own, and BOTH roots are asserted
+    # clean — round r18 repaired this control by deleting the child half of that assertion,
+    # its scheduled fixture being refused A4 CARDINALITY_MISMATCH; a fixture satisfying the
+    # original assertion exists, so the assertion is restored rather than dropped (r19).
+    refilled = [("PARENT", _calls_then_reads_the_cache("WRITER")),
+                ("WRITER", _PASSTHROUGH_EMPTIES_THEN_REFILLS)]
     assert _row(refilled, "PARENT", "WRITER").guaranteed_state == (("cache", "$ref:CACHE"),)
+    assert _row(refilled, "PARENT", "WRITER").removed_caches == ("$ref:CACHE",)
     for key in ("PARENT", "WRITER"):
         assert _errors(refilled, key) == [], key
         assert _compile_errors(refilled, key) == [], key
@@ -1087,14 +1149,15 @@ def test_each_removal_gate_is_load_bearing(monkeypatch):
     """Mutation witnesses, each neutralising one hunk: the pre-batch removal that cleared
     the content and left the cache established, a call that inherits no removal from its
     child, and the primitive both paths share."""
-    own = [("PARENT", _calls_then_reads_the_cache("WRITER")), ("WRITER", _PUTS_THEN_EMPTIES)]
+    own = [("PARENT", _calls_then_reads_the_cache("WRITER")),
+           ("WRITER", _PUTS_ON_A_PROVED_PATH_THEN_EMPTIES)]
     chain = _removal_chain()
     assert _errors(own, "PARENT") != []
     assert _errors(chain, "PARENT") != []
 
     with monkeypatch.context() as patched:
         patched.setattr(lineage, "_after_a_whole_cache_removal",
-                        lambda state, cache_ref: state.without_content(cache_ref))
+                        lambda state, cache_ref, proved_to_run: state.without_content(cache_ref))
         assert _errors(own, "PARENT") == []
     with monkeypatch.context() as patched:
         patched.setattr(lineage, "_caches_a_call_may_remove", lambda cache_refs, contract: ())
@@ -1232,6 +1295,600 @@ def test_the_proved_removal_surviving_an_unknown_call_is_load_bearing(monkeypatc
     assert _errors(roots, "PARENT") == []
 
 
+# ---------------------------------------------------------------------------
+# Stage-2 review round r18: ONE rule for a proved removal, at every site
+# ---------------------------------------------------------------------------
+
+
+def _forwards_to(key):
+    """A pure forwarder: one leg calls ``key`` and the other touches no cache."""
+    return _legs({"steps": [], "terminal": _call(key, **_WAITS_AND_ABORTS)},
+                 {"steps": [_MSG], "terminal": _STOP})
+
+
+#: Every way a proved removal reaches a caller: the child's own body, and one or two pure
+#: forwarding hops. The removing leaf is `_EMPTIES_AND_CALLS_UNKNOWN` in each, so its cache
+#: writes are NOT all known — which is the point: `mutated_state` is rightly blanked for it
+#: and the removal beside it must survive anyway, at whatever distance.
+_REMOVAL_REACHES = {
+    "the_childs_own_body": [("PARENT", _fills_calls_then_reads("MID")),
+                            ("MID", _EMPTIES_AND_CALLS_UNKNOWN)],
+    "one_forwarding_hop": [("PARENT", _fills_calls_then_reads("MID")),
+                           ("MID", _forwards_to("HIDES")),
+                           ("HIDES", _EMPTIES_AND_CALLS_UNKNOWN)],
+    "two_forwarding_hops": [("PARENT", _fills_calls_then_reads("MIDP")),
+                            ("MIDP", _forwards_to("MID")),
+                            ("MID", _forwards_to("HIDES")),
+                            ("HIDES", _EMPTIES_AND_CALLS_UNKNOWN)],
+}
+
+
+@pytest.mark.parametrize("channel", sorted(_REMOVAL_REACHES))
+def test_a_proved_removal_reaches_every_caller_it_travels_to(channel):
+    """Amendment 3 §8: a removal the walk proves is an EXISTENCE claim, so every hop carries
+    it whether or not that hop's child has all its cache writes known.
+
+    Batch 18 ungated the child's own body and the call that consumes the list, and left the
+    inheritance hop inside the write-completeness gate — so a process that only FORWARDED
+    the call dropped the removal, and a parent that filled the cache, called the forwarder
+    and read the cache afterwards was admitted while the identical composition one hop
+    closer was refused. It compounded: each further forwarder dropped it again."""
+    roots = _REMOVAL_REACHES[channel]
+    keys = [key for key, _ir in roots]
+    for index in range(len(keys) - 1):
+        assert _row(roots, keys[index], keys[index + 1]).removed_caches == ("$ref:CACHE",), (
+            channel, keys[index])
+    assert (_CACHE_WRITER_MISSING, _AT_A_LATER_LEGS_READ) in _errors(roots, "PARENT"), channel
+    assert (_CACHE_WRITER_MISSING, _AT_A_LATER_LEGS_READ) in _compile_errors(roots, "PARENT")
+
+
+def test_unknowability_alone_still_removes_nothing_through_a_forwarder():
+    """The control the one rule must not break: `contract is None` contributes no removal, so
+    a chain of forwarders ending at a process nothing derives leaves its caller's cache
+    established — the rule the round before this one established, at a new distance."""
+    nothing = [("PARENT", _fills_calls_then_reads("MID")), ("MID", _forwards_to("HIDES")),
+               ("HIDES", _forwards_to("EXTERNAL"))]
+    assert _row(nothing, "PARENT", "MID").removed_caches == ()
+    assert _row(nothing, "MID", "HIDES").removed_caches == ()
+    assert _errors(nothing, "PARENT") == []
+    assert _compile_errors(nothing, "PARENT") == []
+    # ... while a forwarded remover whose own cache writes ARE all known is refused as before
+    plain = [("PARENT", _fills_calls_then_reads("MID")), ("MID", _forwards_to("HIDES")),
+             ("HIDES", _ONLY_EMPTIES)]
+    assert _row(plain, "PARENT", "MID").removed_caches == ("$ref:CACHE",)
+    assert (_CACHE_WRITER_MISSING, _AT_A_LATER_LEGS_READ) in _errors(plain, "PARENT")
+
+
+def test_the_one_rule_every_removal_site_reads_is_load_bearing(monkeypatch):
+    """Non-vacuity of the structural fix: with the write-completeness gate restored INSIDE
+    the one rule, the forwarded removal disappears from the contract AND the direct one stops
+    reaching its consumer — both, from one perturbation, because there is only one site left
+    to gate. That is what replacing the enumeration with an invariant bought."""
+    forwarded = _REMOVAL_REACHES["one_forwarding_hop"]
+    direct = _REMOVAL_REACHES["the_childs_own_body"]
+    assert _errors(forwarded, "PARENT") != []
+    assert _errors(direct, "PARENT") != []
+
+    def gated_by_write_completeness(contract):
+        if contract is None or not (contract.state_known or contract.cache_writes_known):
+            return ()
+        return tuple(contract.removed_caches)
+
+    monkeypatch.setattr(lineage, "proved_removals", gated_by_write_completeness)
+    assert _row(forwarded, "PARENT", "MID").removed_caches == ()
+    assert _errors(forwarded, "PARENT") == []
+    assert _errors(direct, "PARENT") == []
+
+
+#: Every place in the server that READS a child contract's `removed_caches`, by file and
+#: enclosing function, with why it is the only one there.
+_REMOVAL_READERS = {
+    ("compiler/process_ir/semantic_validation/lineage.py", "proved_removals"):
+        "THE rule: every producer and consumer of a proved removal asks it",
+    ("compiler/process_ir/semantic_validation/context.py", "contract"):
+        "not a reader: the cache-identity canonicalization REWRITES the field into one "
+        "spelling per component and decides nothing about it",
+}
+
+
+def test_every_proved_removal_is_read_through_one_rule():
+    """The structural fix for `call-side-unknowability-modelled-as-a-removal`, whose second
+    instance was the forwarding hop. An enumeration — one gate per site, each free to
+    disagree with the next — is replaced by an invariant stated once, and this is what keeps
+    it one: every attribute read of `removed_caches` in the server is either that rule or a
+    justified non-decision, so a fourth site cannot quietly gate it differently.
+
+    The sibling sweep it enumerates is the three ways a proved removal reaches a caller —
+    the child's own body and a child it calls, which produce the field in
+    `derive_child_entry_facts`, and the call that consumes it in `_caches_a_call_may_remove`
+    — each measured end to end by the channel test above."""
+    import ast
+
+    source_root = _ROOT / "src" / "boomi_mcp"
+    found = set()
+
+    def walk(node, owner, relative):
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, ast.Attribute) and child.attr == "removed_caches":
+                found.add((relative, owner))
+            walk(child,
+                 child.name if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)) else owner,
+                 relative)
+
+    for path in sorted(source_root.rglob("*.py")):
+        walk(ast.parse(path.read_text(encoding="utf-8")), None, str(path.relative_to(source_root)))
+    assert found == set(_REMOVAL_READERS), {
+        "unjustified": sorted(found - set(_REMOVAL_READERS)),
+        "justified_but_absent": sorted(set(_REMOVAL_READERS) - found),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Stage-2 review round r18: a guarantee only for writes the path proves it runs
+# ---------------------------------------------------------------------------
+
+#: The finding's own child: a connector retrieve, then the writer whose value its caller reads.
+_BEHIND_A_RETRIEVE = _doc(_GET, _SET_K, _STOP)
+
+
+def test_a_child_guarantees_only_what_its_own_path_proves_it_runs():
+    """Amendment 1 rule 7: "Child state changes need conservative transfer". A retrieve that
+    returns no documents leaves the steps behind it unrun while the process still completes
+    NORMALLY, so a write behind one is established on no completion a caller can rely on and
+    no guarantee crosses the boundary for it. The lattice's in-process stance is unchanged —
+    inside one process a read is still assumed to produce documents for the steps behind
+    it — and the child is still valid on its own; only what it EXPORTS narrows."""
+    behind = [("PARENT", _call_then_read(**_WAITS_AND_ABORTS)), ("WRITER", _BEHIND_A_RETRIEVE)]
+    assert _row(behind, "PARENT", "WRITER").guaranteed_state == ()
+    assert _errors(behind, "WRITER") == []
+    assert (_READ_BEFORE_WRITE, _LATER_READ) in _errors(behind, "PARENT")
+    assert (_READ_BEFORE_WRITE, _LATER_READ) in _compile_errors(behind, "PARENT")
+    # CONTROL: the same write with nothing in front of it keeps its guarantee.
+    proved = [("PARENT", _call_then_read(**_WAITS_AND_ABORTS)), ("WRITER", _SETS_K)]
+    assert _row(proved, "PARENT", "WRITER").guaranteed_state == (("dpp", "K"),)
+    assert _errors(proved, "PARENT") == []
+    # CONTROL, capture `cap184-dpp-both-ways`: a passthrough child receives its caller's
+    # documents as one group, which the gate at that call already proved non-empty, so
+    # everything behind its entry runs and the property still reaches the parent's later leg.
+    passthrough = [("PARENT", _call_then_read(**_WAITS_AND_ABORTS)),
+                   ("WRITER", _doc(_ENTRY, _arms([_SET_K], [_SET_K])))]
+    assert _row(passthrough, "PARENT", "WRITER").guaranteed_state == (("dpp", "K"),)
+    assert _errors(passthrough, "PARENT") == []
+
+
+#: Two legs that BOTH write K, one on a proved path and one behind a retrieve. Every normal
+#: completion writes K — leg 1 always runs — so the guarantee holds; a rule that subtracted
+#: one union over all paths from the meet over exits withheld it (round r19).
+_WRITES_K_PROVED_AND_BEHIND_A_GET = _legs({"steps": [_MSG, _SET_K], "terminal": _STOP},
+                                          {"steps": [_GET, _SET_K], "terminal": _STOP})
+
+
+def test_a_guarantee_is_a_meet_over_paths_not_a_subtraction_across_them():
+    """Round r19: the proof is carried PER PATH and met over the normal exits — never one
+    union over all paths subtracted from that meet.
+
+    Subtracting withheld a key every normal completion establishes, the moment any ONE other
+    path also wrote that key behind a possibly-empty step, and refused a caller's later read
+    of a property the child always sets. The meet keeps that key, because every completion
+    proved a write of it, and still withholds a key no completion proves.
+    """
+    admitted = [("PARENT", _call_then_read(**_WAITS_AND_ABORTS)),
+                ("WRITER", _WRITES_K_PROVED_AND_BEHIND_A_GET)]
+    assert _row(admitted, "PARENT", "WRITER").guaranteed_state == (("dpp", "K"),)
+    assert _errors(admitted, "PARENT") == []
+    assert _compile_errors(admitted, "PARENT") == []
+    # A meet does not depend on which leg is written first; the subtraction did not either,
+    # and withheld both orders.
+    reversed_legs = [("PARENT", _call_then_read(**_WAITS_AND_ABORTS)),
+                     ("WRITER", _legs({"steps": [_GET, _SET_K], "terminal": _STOP},
+                                      {"steps": [_MSG, _SET_K], "terminal": _STOP}))]
+    assert _row(reversed_legs, "PARENT", "WRITER").guaranteed_state == (("dpp", "K"),)
+    assert _errors(reversed_legs, "PARENT") == []
+    # CDX-184-r18-02 STAYS FIXED: where the ONLY path writes behind a possibly-empty step,
+    # no completion proves the write and nothing crosses.
+    only = [("PARENT", _call_then_read(**_WAITS_AND_ABORTS)), ("WRITER", _BEHIND_A_RETRIEVE)]
+    assert _row(only, "PARENT", "WRITER").guaranteed_state == ()
+    assert (_READ_BEFORE_WRITE, _LATER_READ) in _errors(only, "PARENT")
+    # ... and so does the Decision whose arms disagree. Arms are EXCLUSIVE, so a completion
+    # that took the unproved arm never made the write: crediting a key because SOME path
+    # proved it — the other way to stop subtracting — would be unsound here, and the meet
+    # is what refuses it.
+    arms = [("PARENT", _call_then_read(**_WAITS_AND_ABORTS)),
+            ("WRITER", _doc(_arms([_SET_K], [_GET, _SET_K])))]
+    assert _row(arms, "PARENT", "WRITER").guaranteed_state == ()
+    assert (_READ_BEFORE_WRITE, _LATER_READ) in _errors(arms, "PARENT")
+
+
+def test_the_per_path_meet_on_a_guarantee_is_load_bearing(monkeypatch):
+    """Non-vacuity: with an unproved write UN-proving the key for every path — the
+    union-over-paths stance this correction replaced, expressed on the lattice — the child
+    that writes K on every normal completion exports nothing again and its caller is
+    refused. The lever is the rule, not an assertion: nothing below is weakened."""
+    roots = [("PARENT", _call_then_read(**_WAITS_AND_ABORTS)),
+             ("WRITER", _WRITES_K_PROVED_AND_BEHIND_A_GET)]
+    assert _errors(roots, "PARENT") == []
+    real = lineage._State.with_write
+
+    def un_proves(self, key, proved=False):
+        after = real(self, key, proved=proved)
+        if proved or key[0] in lineage._DOCUMENT_LIFETIME_SCOPES:
+            return after
+        return lineage._State(after.document, after.execution, after.content, after.cohorts,
+                              after.sealed, after.proved - {key})
+
+    monkeypatch.setattr(lineage._State, "with_write", un_proves)
+    assert _row(roots, "PARENT", "WRITER").guaranteed_state == ()
+    assert (_READ_BEFORE_WRITE, _LATER_READ) in _errors(roots, "PARENT")
+
+
+def test_the_proved_path_gate_on_a_guarantee_is_load_bearing(monkeypatch):
+    """Non-vacuity: with every path counted as proved — the rule before this correction — the
+    child exports a guarantee for a writer a zero-document retrieve skips, and the parent's
+    later read of it is admitted again."""
+    behind = [("PARENT", _call_then_read(**_WAITS_AND_ABORTS)), ("WRITER", _BEHIND_A_RETRIEVE)]
+    assert (_READ_BEFORE_WRITE, _LATER_READ) in _errors(behind, "PARENT")
+    monkeypatch.setattr(lineage, "_path_provably_runs", lambda stream: True)
+    assert _row(behind, "PARENT", "WRITER").guaranteed_state == (("dpp", "K"),)
+    assert _errors(behind, "PARENT") == []
+
+
+# ---------------------------------------------------------------------------
+# Stage-2 review round r18: a proved removal and refill ends the upward obligation
+# ---------------------------------------------------------------------------
+
+_X_LESS_INTO_THE_CACHE = {"steps": [_GET], "terminal": _PUT}
+_FORWARDS_TO_THE_CACHE_CHILD = {"steps": [], "terminal": _call("CACHE_CHILD")}
+_REMOVES_THEN_STAGES = _legs(_EMPTIES_IT, _STAGES_X, _FORWARDS_TO_THE_CACHE_CHILD)
+_STAGES_ONLY = _legs(_STAGES_X, _FORWARDS_TO_THE_CACHE_CHILD)
+_WRITES_THE_CACHE = ("MIDP", _passthrough_root(_FILLS_ON_A_PROVED_PATH,
+                                               {"steps": [_MSG], "terminal": _STOP}))
+
+
+def _outer_caller_of(mid, use="no_data_bound"):
+    """PARENT stores documents WITHOUT X in the shared cache, then calls MID."""
+    return [("PARENT", _legs(_X_LESS_INTO_THE_CACHE, {"steps": [], "terminal": _call("MID")})),
+            ("MID", mid), ("CACHE_CHILD", _USES[use][0])]
+
+
+def test_a_whole_cache_removal_and_refill_ends_the_upward_obligation():
+    """The row a grandchild's cached property puts on the callers above it asks one question:
+    can a document THIS process did not write reach that cache? Usually nothing inside a
+    process can answer no. Here the walk proves it: the whole cache was emptied on this path
+    and refilled only from this process's own writes, each judged at this same call.
+
+    Without it the parent was refused at its call while the process it called, the grandchild
+    and the flattened graph of the same legs all validated."""
+    removes = _outer_caller_of(_REMOVES_THEN_STAGES)
+    assert _row(removes, "PARENT", "MID").cache_property_requirements == ()
+    for key in ("PARENT", "MID", "CACHE_CHILD"):
+        assert _errors(removes, key) == [], key
+        assert _compile_errors(removes, key) == [], key
+    # The model's own flattening of the same legs agrees, as it did not before.
+    flat = _legs(_X_LESS_INTO_THE_CACHE, _EMPTIES_IT, _STAGES_X,
+                 {"steps": [_READ, _BOUND_GET], "terminal": _STOP})
+    assert _errors([("PARENT", flat)], "PARENT") == []
+    # The ordinary-read channel answers the same way.
+    read = _outer_caller_of(_REMOVES_THEN_STAGES, "no_data_read")
+    assert _row(read, "PARENT", "MID").cache_property_requirements == ()
+    assert _errors(read, "PARENT") == []
+    # CONTROL, the fail-open batch 18 closed, unmoved: with no removal the row still travels
+    # up and the X-LESS caller is still refused AT ITS CALL, in both channels and on both
+    # routes, exactly as its flattened twin is.
+    stages = _outer_caller_of(_STAGES_ONLY)
+    assert _row(stages, "PARENT", "MID").cache_property_requirements == (
+        ("$ref:CACHE", "X", None, True),)
+    assert (_NOT_ESTABLISHED, _AT_THE_CALL) in _errors(stages, "PARENT")
+    assert (_NOT_ESTABLISHED, _AT_THE_CALL) in _compile_errors(stages, "PARENT")
+    stages_read = _outer_caller_of(_STAGES_ONLY, "no_data_read")
+    assert _row(stages_read, "PARENT", "MID").cache_property_requirements == (
+        ("$ref:CACHE", "X", None, False),)
+    assert (_READ_BEFORE_WRITE, "/body/steps/0/legs/1/terminal") in _errors(stages_read, "PARENT")
+    twin = _legs(_X_LESS_INTO_THE_CACHE, _STAGES_X,
+                 {"steps": [_READ, _BOUND_GET], "terminal": _STOP})
+    assert _errors([("PARENT", twin)], "PARENT") != []
+
+
+#: A foreign document can reach the cache again after the refill, so the obligation stays
+#: where it was: ``(the middle, the pointer its OWN refusal carries)``.
+_FOREIGN_AFTER_THE_REFILL = {
+    "a_child_that_may_write_the_cache": _legs(
+        _EMPTIES_IT, _STAGES_X, {"steps": [], "terminal": _call("MIDP", **_WAITS_AND_ABORTS)},
+        _FORWARDS_TO_THE_CACHE_CHILD),
+    "a_child_nothing_derives": _legs(
+        _EMPTIES_IT, _STAGES_X, {"steps": [], "terminal": _call("EXTERNAL", **_WAITS_AND_ABORTS)},
+        _FORWARDS_TO_THE_CACHE_CHILD),
+}
+
+
+@pytest.mark.parametrize("shape", sorted(_FOREIGN_AFTER_THE_REFILL))
+def test_a_foreign_write_after_the_refill_ends_the_proof(shape):
+    """Each of these lets a document nobody here wrote back into the cache between the refill
+    and the call, so the middle process cannot prove the grandchild's property of what it
+    retrieves and is refused at its own call — which is where an unmet obligation of its
+    child belongs. Nothing ships either way."""
+    roots = _outer_caller_of(_FOREIGN_AFTER_THE_REFILL[shape]) + [_WRITES_THE_CACHE]
+    pointer = "/body/steps/0/legs/3/terminal/process_ref"
+    assert (_NOT_ESTABLISHED, pointer) in _errors(roots, "MID"), shape
+    assert (_NOT_ESTABLISHED, pointer) in _compile_errors(roots, "MID"), shape
+
+
+def test_a_removal_with_nothing_refilled_leaves_the_caller_nothing_to_prove():
+    """The cache is EMPTY at the call, so no document of the caller's can reach the
+    grandchild and the row ends here too — while the middle is refused for its own read of a
+    cache nothing filled, so again nothing ships. ``(the middle, its own pointer)``."""
+    for mid, pointer in ((_legs(_STAGES_X, _EMPTIES_IT, _FORWARDS_TO_THE_CACHE_CHILD),
+                          "/body/steps/0/legs/2/terminal"),
+                         (_legs(_EMPTIES_IT, _FORWARDS_TO_THE_CACHE_CHILD),
+                          "/body/steps/0/legs/1/terminal")):
+        roots = _outer_caller_of(mid)
+        assert _row(roots, "PARENT", "MID").cache_property_requirements == ()
+        assert (_CACHE_WRITER_MISSING, pointer) in _errors(roots, "MID"), pointer
+        assert _errors(roots, "PARENT") == [], pointer
+
+
+def test_the_removed_and_refilled_proof_is_load_bearing(monkeypatch):
+    """Non-vacuity: with nothing ever sealed — the rule before this correction, where a
+    removal proved nothing about who filled the cache afterwards — the row travels up again
+    and the parent is refused at its call for documents that cannot reach the grandchild."""
+    removes = _outer_caller_of(_REMOVES_THEN_STAGES)
+    assert _errors(removes, "PARENT") == []
+    monkeypatch.setattr(lineage._State, "with_sealed_cache", lambda self, cache_ref: self)
+    assert _row(removes, "PARENT", "MID").cache_property_requirements == (
+        ("$ref:CACHE", "X", None, True),)
+    assert (_NOT_ESTABLISHED, _AT_THE_CALL) in _errors(removes, "PARENT")
+
+
+#: The same chain with ONE leg changed: the whole-cache removal sits behind a connector call
+#: that may return no rows, so the removal may never execute while MID still completes
+#: normally (round r19).
+_REMOVES_BEHIND_A_RETRIEVE = _legs({"steps": [_GET], "terminal": _REMOVE},
+                                   _STAGES_X, _FORWARDS_TO_THE_CACHE_CHILD)
+
+
+def test_the_seal_needs_the_same_proof_the_writes_need():
+    """Round r19: the seal may not rest on a removal the same walk marks as possibly skipped.
+
+    The two halves of a whole-cache removal take OPPOSITE directions from the same doubt.
+    Un-establishing is fail-closed and stays unconditional. The seal is the only PERMISSIVE
+    consumer — it stops charging a caller for documents it declares gone — so it needs the
+    proof the writes on this path need. Behind a connector call that may return no rows the
+    terminal remove never runs on that execution, the caller's documents are all still in the
+    shared cache, and the grandchild's cached-property row must still travel up.
+    """
+    may_skip = _outer_caller_of(_REMOVES_BEHIND_A_RETRIEVE)
+    assert _row(may_skip, "PARENT", "MID").cache_property_requirements == (
+        ("$ref:CACHE", "X", None, True),)
+    assert (_NOT_ESTABLISHED, _AT_THE_CALL) in _errors(may_skip, "PARENT")
+    assert (_NOT_ESTABLISHED, _AT_THE_CALL) in _compile_errors(may_skip, "PARENT")
+    # The removal itself still crosses: a removal that MAY run is one nobody above can rule
+    # out, which is the fail-closed half and is not gated.
+    assert _row(may_skip, "PARENT", "MID").removed_caches == ("$ref:CACHE",)
+    # CONTROL: the PROVED removal still ends the obligation, so what is refused is the
+    # unproved removal and not the shape.
+    proved = _outer_caller_of(_REMOVES_THEN_STAGES)
+    assert _row(proved, "PARENT", "MID").cache_property_requirements == ()
+    assert _errors(proved, "PARENT") == []
+
+
+def test_the_proof_gate_on_the_seal_is_load_bearing(monkeypatch):
+    """Non-vacuity: sealing whatever the proof says — the rule before this correction — drops
+    the row and re-admits the whole chain for a removal that may never have run."""
+    may_skip = _outer_caller_of(_REMOVES_BEHIND_A_RETRIEVE)
+    assert (_NOT_ESTABLISHED, _AT_THE_CALL) in _errors(may_skip, "PARENT")
+
+    def always_seals(state, cache_ref, proved_to_run):
+        return lineage._without_cache_establishment(
+            state.without_content(cache_ref), cache_ref).with_sealed_cache(cache_ref)
+
+    monkeypatch.setattr(lineage, "_after_a_whole_cache_removal", always_seals)
+    assert _row(may_skip, "PARENT", "MID").cache_property_requirements == ()
+    assert _errors(may_skip, "PARENT") == []
+
+
+def test_a_foreign_cohort_and_the_meet_each_end_the_removal_proof():
+    """The two ways the proof ends, measured where they are decided.
+
+    The meet is witnessed at the lattice rather than through a graph because no graph can
+    OBSERVE it: a one-arm whole-cache removal can never be followed by a call that reads the
+    seal. Two of its three spellings are refused outright — a `cache_remove` true-arm
+    terminal inside a Branch leg is `…NODE_NOT_ALLOWED_IN_BODY` and the nested-branch form
+    there is `…NESTING_LIMIT` — but the third, a root-sequence Decision whose true arm ends
+    in a nested Branch carrying the removal, PARSES AND VALIDATES CLEAN; what stops it is
+    that a Decision cannot be followed by further steps (`…CONTROL_CONTINUATION_UNSUPPORTED`),
+    so the forward call never exists. The earlier docstring gave the first reason for all
+    three spellings, which is false as written (round r19b). The lattice below is therefore
+    the instrument, and it is the same `merged_with` every verdict above rests on."""
+    empty = lineage._State()
+    sealed = empty.with_sealed_cache("$ref:CACHE")
+    assert sealed.sealed == frozenset({"$ref:CACHE"})
+    # This process's own executing write keeps the proof; every other cohort ends it.
+    ours = sealed.with_cohort("$ref:CACHE", lineage._caller_cohort(("X",)), ours=True)
+    assert ours.sealed == frozenset({"$ref:CACHE"})
+    foreign = sealed.with_cohort("$ref:CACHE", lineage.UNKNOWN_COHORT)
+    assert foreign.sealed == frozenset()
+    # The meet intersects it, so a removal on one arm of a Decision never counts.
+    assert sealed.merged_with(empty).sealed == frozenset()
+    assert sealed.merged_with(sealed).sealed == frozenset({"$ref:CACHE"})
+    # And the gate reads exactly those three answers. The declared external writer is NOT a
+    # fourth: that case never reaches this gate, and is measured where it is decided by
+    # `test_a_declared_external_writer_is_refused_before_the_seal_is_consulted`.
+    plain = DEFAULT_VALIDATION_CAPABILITIES
+    owes = lineage._caller_owes_a_cached_property
+    assert owes("$ref:CACHE", "X", plain, empty) is True
+    assert owes("$ref:CACHE", "X", plain, sealed) is False
+    assert owes("$ref:CACHE", "X", plain, foreign) is True
+
+
+def test_a_declared_external_writer_is_refused_before_the_seal_is_consulted(monkeypatch):
+    """Round r19b: what keeps a proved removal safe against an OUTSIDE writer, measured.
+
+    It is not an escape clause in `_caller_owes_a_cached_property`. That clause — "unless a
+    declared external writer writes this cache" — could never fire at the gate's only call
+    site, and the batch cited it as the reason the seal was safe. A declared external writer
+    makes `_call_stores_nothing_in` false, so the call takes the retrieve overlay, which
+    seeds an unknown cohort; the meet there is empty, nothing at that call is proved, and the
+    gate is never consulted at all. The middle process is refused at its own forward instead,
+    so nothing ships. The clause is gone and this is what replaces the claim."""
+    flagged = {"steps": [dict(_READ, external_writer=True), _READS_X], "terminal": _STOP}
+    roots = _outer_caller_of(
+        _legs(flagged, _EMPTIES_IT, _STAGES_X, _FORWARDS_TO_THE_CACHE_CHILD))
+    asked = []
+    real = lineage._caller_owes_a_cached_property
+
+    def recording(cache_ref, name, capabilities, state):
+        asked.append((cache_ref in state.sealed,
+                      bool(capabilities.writes_cache_externally(cache_ref))))
+        return real(cache_ref, name, capabilities, state)
+
+    monkeypatch.setattr(lineage, "_caller_owes_a_cached_property", recording)
+    declared = _cell(roots, _external_writer_declaration(), key="MID")
+    at_the_forward = "/body/steps/0/legs/3/terminal/process_ref"
+    assert (_NOT_ESTABLISHED, at_the_forward) in declared["errors"]
+    assert (_NOT_ESTABLISHED, at_the_forward) in declared["compile_errors"]
+    assert asked == [], asked
+    # With no external writer declared the gate IS consulted — and only ever about a cache
+    # no external writer touches, which is exactly why the removed clause could not fire.
+    asked.clear()
+    for key in ("PARENT", "MID"):
+        _cell(roots, None, key=key)
+    assert asked, "the gate was never consulted, so the control proves nothing"
+    assert all(external is False for _sealed, external in asked), asked
+
+
+# ---------------------------------------------------------------------------
+# Stage-2 review round r19b: the proof is about documents, not about a marker
+# ---------------------------------------------------------------------------
+
+#: One body, authored under both entry forms: a Message — which the walk's own
+#: `_COUNT_PRESERVING_KINDS` calls a step that hands on exactly the documents it received —
+#: standing in front of the write whose value the caller reads in a later leg.
+_A_MESSAGE_THEN_THE_WRITE = {"kind": "branch", "legs": [
+    {"steps": [_MSG, _SET_K], "terminal": _STOP}, {"steps": [_MSG], "terminal": _STOP}]}
+#: The same body with a step that MAY hand on no documents in front of the write.
+_A_RETRIEVE_THEN_THE_WRITE = {"kind": "branch", "legs": [
+    {"steps": [_GET, _SET_K], "terminal": _STOP}, {"steps": [_MSG], "terminal": _STOP}]}
+
+
+def test_a_count_preserving_step_keeps_the_proof_its_entry_gave_it():
+    """Round r19b: the proof a guarantee rests on is about the DOCUMENTS in front of the
+    write — may they be zero — and not about the stream's state token.
+
+    Read off the token, the proof named the Data Passthrough entry itself, so any
+    stream-replacing step destroyed it: a Message withdrew the guarantee for a passthrough
+    child and kept it for the No Data twin, whose proof rides the count. Same steps, same
+    write, opposite answers — and the caller of the passthrough form was refused a
+    composition that always sets the key at runtime, on validate, on compile and on the
+    public typed-plan route, in both blocking scopes."""
+    passthrough = [("PARENT", _call_then_read(**_WAITS_AND_ABORTS)),
+                   ("WRITER", _doc(_ENTRY, _A_MESSAGE_THEN_THE_WRITE))]
+    assert _row(passthrough, "PARENT", "WRITER").guaranteed_state == (("dpp", "K"),)
+    for key in ("PARENT", "WRITER"):
+        assert _errors(passthrough, key) == [], key
+        assert _compile_errors(passthrough, key) == [], key
+    # The No Data twin answers the same, as it did before: one rule, both entry forms
+    # (capture `cap184-dpp-both-ways`).
+    scheduled = [("PARENT", _call_then_read(**_WAITS_AND_ABORTS)),
+                 ("WRITER", _doc(_A_MESSAGE_THEN_THE_WRITE))]
+    assert _row(scheduled, "PARENT", "WRITER").guaranteed_state == (("dpp", "K"),)
+    assert _errors(scheduled, "PARENT") == []
+    # The CACHE scope of the same shape, the other blocking scope the withholding reached.
+    cached = [("PARENT", _calls_then_reads_the_cache("WRITER")),
+              ("WRITER", _passthrough_root(_FILLS_ON_A_PROVED_PATH,
+                                           {"steps": [_MSG], "terminal": _STOP}))]
+    assert _row(cached, "PARENT", "WRITER").guaranteed_state == (("cache", "$ref:CACHE"),)
+    for key in ("PARENT", "WRITER"):
+        assert _errors(cached, key) == [], key
+        assert _compile_errors(cached, key) == [], key
+    # THE OTHER DIRECTION, unmoved: a step that may hand on NO documents still ends the
+    # proof — in the passthrough form too, where the entry no longer carries it past one.
+    behind = [("PARENT", _call_then_read(**_WAITS_AND_ABORTS)),
+              ("WRITER", _doc(_ENTRY, _A_RETRIEVE_THEN_THE_WRITE))]
+    assert _row(behind, "PARENT", "WRITER").guaranteed_state == ()
+    assert (_READ_BEFORE_WRITE, _LATER_READ) in _errors(behind, "PARENT")
+    assert (_READ_BEFORE_WRITE, _LATER_READ) in _compile_errors(behind, "PARENT")
+
+
+def test_the_carried_non_emptiness_proof_is_load_bearing(monkeypatch):
+    """Non-vacuity: with the proof read off the stream's STATE again — the rule this
+    correction replaced, restored verbatim — the passthrough child's guarantee disappears
+    the moment a Message stands in front of the write, and its caller is refused."""
+    roots = [("PARENT", _call_then_read(**_WAITS_AND_ABORTS)),
+             ("WRITER", _doc(_ENTRY, _A_MESSAGE_THEN_THE_WRITE))]
+    assert _errors(roots, "PARENT") == []
+
+    def from_the_stream_state(stream):
+        if stream.state == lineage.STREAM_ABSENT:
+            return False
+        return stream.count == lineage.COUNT_ONE or stream.state == lineage.STREAM_CALLER_ENTRY
+
+    monkeypatch.setattr(lineage, "_path_provably_runs", from_the_stream_state)
+    assert _row(roots, "PARENT", "WRITER").guaranteed_state == ()
+    assert (_READ_BEFORE_WRITE, _LATER_READ) in _errors(roots, "PARENT")
+
+
+# ---------------------------------------------------------------------------
+# Stage-2 review round r19b: what a call contributes to the leg-order diagnostic
+# ---------------------------------------------------------------------------
+
+_BRANCH_ORDER_INVALID = PROCESS_IR_SEMANTIC_LINEAGE_BRANCH_ORDER_INVALID
+_SCRIPT = {"kind": "data_process", "steps": [
+    {"operation": "custom_scripting", "script": "// nothing states what this does"}]}
+#: The served oracle's `writes_a_property_after_an_uninspectable_step`.
+_WRITES_K_AFTER_AN_UNINSPECTABLE_STEP = _doc(_GET, _SCRIPT, _SET_K, _STOP)
+#: A NON-STRICT read: a Decision operand tolerates a property nobody wrote (it is a defined
+#: empty string on the wire), but not a writer it can never see.
+_TRACKS_K = {"steps": [], "terminal": {
+    "kind": "decision", "comparison": "equals",
+    "left": {"value_type": "track", "property_id": "process.K"},
+    "right": {"value_type": "static", "static_value": "x"},
+    "true_arm": {"steps": [_MSG], "terminal": _STOP},
+    "false_arm": {"steps": [], "terminal": _STOP}}}
+
+
+def _reads_then_calls(read, made):
+    """A caller that reads in its FIRST leg and calls in its second — the leg-order case."""
+    return _legs(read, {"steps": [], "terminal": made})
+
+
+def test_a_calls_later_leg_write_is_what_it_guarantees_not_what_it_may_write():
+    """The one row of the served child-call oracle that moved from a REFUSAL to an
+    ADMISSION, pinned with the reason that is true of it.
+
+    `_leg_write_index` asks `_awaited_guarantee` for a call's contribution, so what a later
+    leg "writes" is what the call ESTABLISHES for later paths — never the child's
+    `mutated_state`. When the guarantee is correctly withheld there is no later-leg write for
+    the earlier leg to be ordered against, and a non-strict read is admitted. That is the
+    model's standing stance and not a hole this batch opened: the unwaited control below,
+    whose child's `mutated_state` carries K and whose guarantee does not cross, was admitted
+    at 6ac8031 too. The recorded justification it replaces — "there is no later-leg write" —
+    was false as stated, because the child's write of K is still in the contract."""
+    waited = _call("WRITER", **_WAITS_AND_ABORTS)
+    uninspectable = [("PARENT", _reads_then_calls(_TRACKS_K, waited)),
+                     ("WRITER", _WRITES_K_AFTER_AN_UNINSPECTABLE_STEP)]
+    row = _row(uninspectable, "PARENT", "WRITER")
+    assert row.guaranteed_state == ()
+    assert ("dpp", "K") in row.mutated_state
+    assert _errors(uninspectable, "PARENT") == []
+    assert _compile_errors(uninspectable, "PARENT") == []
+    # The hazard is NOT undiagnosed: the strict twin of the same graph is still refused.
+    strict = [("PARENT", _reads_then_calls(_READS_K_LATER, waited)),
+              ("WRITER", _WRITES_K_AFTER_AN_UNINSPECTABLE_STEP)]
+    assert (_READ_BEFORE_WRITE, "/body/steps/0/legs/0/steps/0") in _errors(strict, "PARENT")
+    assert (_READ_BEFORE_WRITE, "/body/steps/0/legs/0/steps/0") in _compile_errors(strict, "PARENT")
+    # A call whose guarantee DOES cross is still ordered ...
+    guaranteed = [("PARENT", _reads_then_calls(_TRACKS_K, waited)), ("WRITER", _SETS_K)]
+    assert (_BRANCH_ORDER_INVALID, "/body/steps/0/legs/0/terminal") in _errors(guaranteed, "PARENT")
+    # ... and one whose guarantee does not was never ordered, whatever it may write.
+    unwaited = [("PARENT", _reads_then_calls(_TRACKS_K, _call("WRITER", wait=False,
+                                                              abort_on_error=False))),
+                ("WRITER", _SETS_K)]
+    assert ("dpp", "K") in _row(unwaited, "PARENT", "WRITER").mutated_state
+    assert _errors(unwaited, "PARENT") == []
+    # A DIRECT later-leg write is still ordered, so the rule itself is alive.
+    direct = [("PARENT", _legs(_TRACKS_K, {"steps": [_SET_K], "terminal": _STOP}))]
+    assert (_BRANCH_ORDER_INVALID, "/body/steps/0/legs/0/terminal") in _errors(direct, "PARENT")
+
+
 _DDP_SCOPE_INVALID = PROCESS_IR_SEMANTIC_LINEAGE_DDP_SCOPE_INVALID
 _EXTERNAL_WRITER_ASSUMED = PROCESS_IR_SEMANTIC_LINEAGE_EXTERNAL_WRITER_ASSUMED
 _ORDERING_UNSAFE = PROCESS_IR_SEMANTIC_SIDE_EFFECT_ORDERING_UNSAFE
@@ -1361,6 +2018,11 @@ def _boundary_measurements():
         measured[("external_writer", where, "walk")] = _cell(roots)
         measured[("external_writer", where, "declared")] = _cell(
             roots, _external_writer_declaration())
+    # Round r19: the sentence's own narrowing, at the gated shape it narrows — the same
+    # caller as ("dpp", "gated", "walk") with the write moved behind a possibly-empty step.
+    measured[("dpp_behind_a_possibly_empty_step", "gated", "walk")] = _cell(
+        [("PARENT", _call_then_read(**_BOUNDARY_SHAPES["gated"])),
+         ("WRITER", _BEHIND_A_RETRIEVE)])
     measured[("identity", "a map", "declared")] = _cell(
         [("PARENT", _call_then_read(**_WAITS_AND_ABORTS)), ("WRITER", _SETS_K)],
         _subprocess_declaration("$ref:M12", ("dpp", "K"), True))
@@ -1430,6 +2092,14 @@ def _a_document_property_never_reaches(m):
                for shape in _BOUNDARY_SHAPES for route in ("walk", "declared"))
 
 
+def _a_write_behind_a_possibly_empty_step_establishes_nothing(m):
+    """Round r19's narrowing of the served sentence, measured at the shape it narrows: at the
+    SAME gated call, a child whose write stands behind a step that may hand on no documents
+    establishes nothing, while the child that proves its write on every completion does."""
+    return (_refused(m[("dpp_behind_a_possibly_empty_step", "gated", "walk")])
+            and not _refused(m[("dpp", "gated", "walk")]))
+
+
 def _inert_is_not_an_error(m):
     return all(m[("unwalkable", shape, "declared")]["ok"]
                and _refused(m[("unwalkable", shape, "declared")])
@@ -1492,8 +2162,15 @@ _PROCESS_CALL_CLAIMS = (
     ("the-gated-call-establishes",
      "A call with wait=true and abort_on_error=true on a path that provably carries "
      "exactly one document establishes, for later paths, the process properties and "
-     "caches its child writes on every normal completion.",
+     "caches the child writes on every normal completion at a step its own documents "
+     "provably reach.",
      _the_gated_call_establishes),
+    ("a-write-behind-a-possibly-empty-step-establishes-nothing",
+     "A write the child makes behind a step that may hand on no documents — a connector "
+     "call that may return no rows, a retrieve of a cache that may be empty — establishes "
+     "nothing for the caller, because a completion that skipped it is still a normal "
+     "completion.",
+     _a_write_behind_a_possibly_empty_step_establishes_nothing),
     ("every-other-call-carries-nothing",
      "After any other call with wait=true those writes reach later paths only when a "
      "verified subprocess effect declaration states them; after wait=false nothing "
@@ -1995,3 +2672,87 @@ def test_each_call_side_cached_origin_is_load_bearing(monkeypatch):
     assert (_READ_BEFORE_WRITE, "/body/steps/0/legs/0/terminal") in _errors(ordinary, "MID")
     assert _row(bound, "PARENT", "MID").cache_property_requirements == ()
     assert _row(ordinary, "PARENT", "MID").cache_property_requirements == ()
+
+
+# ---------------------------------------------------------------------------
+# Stage-2 review round r19c: a retrieve carries the fill proof the walk already has
+# ---------------------------------------------------------------------------
+
+#: Leg 0 fills the cache on a path the passthrough entry proves; leg 1 retrieves THAT cache
+#: and writes K behind it. Legs run in order, so the retrieve provably hands on a document
+#: and K is written on every normal completion.
+_PROVED_FILL_THEN_RETRIEVE_THEN_WRITE = _passthrough_root(
+    _FILLS_ON_A_PROVED_PATH,
+    {"steps": [_READ, _SET_K], "terminal": _STOP},
+    {"steps": [_MSG], "terminal": _STOP})
+#: The same shape whose fill stands behind a producer that may return no rows, so the cache
+#: itself may be empty at the retrieve ...
+_UNPROVED_FILL_THEN_RETRIEVE_THEN_WRITE = _passthrough_root(
+    {"steps": [_GET], "terminal": _PUT},
+    {"steps": [_READ, _SET_K], "terminal": _STOP},
+    {"steps": [_MSG], "terminal": _STOP})
+#: ... and the same shape with no fill at all, where only a caller can have stored anything.
+_NO_FILL_THEN_RETRIEVE_THEN_WRITE = _passthrough_root(
+    {"steps": [_MSG], "terminal": _STOP},
+    {"steps": [_READ, _SET_K], "terminal": _STOP},
+    {"steps": [_MSG], "terminal": _STOP})
+
+
+def test_a_retrieve_of_a_cache_this_path_proved_it_filled_keeps_the_proof():
+    """Round r19c: the non-emptiness proof is carried across the one other step that can be
+    PROVED to hand on a document — a retrieve of a cache this path's own proved write filled.
+
+    Dropping it at every step that is not count-preserving is right for a producer, whose
+    rows may be zero, and wrong here: the walk already holds the fill proof in
+    `_State.proved` and the retrieve did not consult it, so a caller composition the server
+    admitted before the carry existed was refused on validate AND compile — and only in the
+    Data Passthrough form, because the No Data twin's proof rides `count`. That is the same
+    one-rule-both-entry-forms asymmetry the carry exists to remove (capture
+    `cap184-dpp-both-ways`), reappearing on the cache channel."""
+    proved = [("PARENT", _call_then_read(**_WAITS_AND_ABORTS)),
+              ("WRITER", _PROVED_FILL_THEN_RETRIEVE_THEN_WRITE)]
+    row = _row(proved, "PARENT", "WRITER")
+    assert ("dpp", "K") in row.guaranteed_state, row.guaranteed_state
+    assert ("cache", "$ref:CACHE") in row.guaranteed_state, row.guaranteed_state
+    for key in ("PARENT", "WRITER"):
+        assert _errors(proved, key) == [], key
+        assert _compile_errors(proved, key) == [], key
+    # WITHHELD, and the discriminator is the FILL's own proof: behind a producer that may
+    # return no rows the cache may be empty at the retrieve, so nothing behind it is proved.
+    unproved = [("PARENT", _call_then_read(**_WAITS_AND_ABORTS)),
+                ("WRITER", _UNPROVED_FILL_THEN_RETRIEVE_THEN_WRITE)]
+    assert _row(unproved, "PARENT", "WRITER").guaranteed_state == ()
+    assert (_READ_BEFORE_WRITE, _LATER_READ) in _errors(unproved, "PARENT")
+    assert (_READ_BEFORE_WRITE, _LATER_READ) in _compile_errors(unproved, "PARENT")
+    # WITHHELD for the same reason where nothing filled the cache at all: a retrieve of a
+    # cache nobody here proved filled proves nothing, which is the served sentence's own
+    # second exclusion.
+    unfilled = [("PARENT", _call_then_read(**_WAITS_AND_ABORTS)),
+                ("WRITER", _NO_FILL_THEN_RETRIEVE_THEN_WRITE)]
+    assert _row(unfilled, "PARENT", "WRITER").guaranteed_state == ()
+    assert (_READ_BEFORE_WRITE, _LATER_READ) in _errors(unfilled, "PARENT")
+    assert (_READ_BEFORE_WRITE, _LATER_READ) in _compile_errors(unfilled, "PARENT")
+
+
+def test_the_retrieve_fill_proof_is_load_bearing(monkeypatch):
+    """Non-vacuity, bracketed in both directions, with the rule as the lever and no assertion
+    weakened. Consulting nothing at a retrieve — the rule this correction replaced — withdraws
+    the guarantee from a write every normal completion makes; treating EVERY retrieve as
+    proved restores it for the cache nothing filled, which must stay withheld. So the recorded
+    answers rest on the fill proof itself and not on the shape of the graph."""
+    proved = [("PARENT", _call_then_read(**_WAITS_AND_ABORTS)),
+              ("WRITER", _PROVED_FILL_THEN_RETRIEVE_THEN_WRITE)]
+    unfilled = [("PARENT", _call_then_read(**_WAITS_AND_ABORTS)),
+                ("WRITER", _NO_FILL_THEN_RETRIEVE_THEN_WRITE)]
+    assert _errors(proved, "PARENT") == []
+    with monkeypatch.context() as patched:
+        patched.setattr(lineage, "_retrieve_of_a_proved_cache",
+                        lambda semantic, state: False)
+        assert ("dpp", "K") not in _row(proved, "PARENT", "WRITER").guaranteed_state
+        assert (_READ_BEFORE_WRITE, _LATER_READ) in _errors(proved, "PARENT")
+    with monkeypatch.context() as patched:
+        patched.setattr(lineage, "_retrieve_of_a_proved_cache",
+                        lambda semantic, state: True)
+        assert ("dpp", "K") in _row(unfilled, "PARENT", "WRITER").guaranteed_state
+    assert _errors(proved, "PARENT") == []
+    assert _row(unfilled, "PARENT", "WRITER").guaranteed_state == ()

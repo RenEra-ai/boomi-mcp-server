@@ -3146,3 +3146,11 @@ boundary, the raw route's trusted context, the sink renderers' own wire refusal,
 lineage module. The census, the ledger rows and `schema_revision` did not move, and the §11 tables were re-spliced for
 moved `Baseline line` values. Revisions after batch 18: `capability_revision` `sha256:70d4cc4a…` and `compiler_revision` `sha256:a5a548dc…`;
 `schema_revision` stays `sha256:c9583e6b…`.
+
+**Architect-review correction batch 19 (CDX-184-r18-01 to -03) re-ran it.** Batch 19 corrects what the commit review
+of batch 18 found in the batch's own new code: a removal the walk proves now survives every hop to a caller, a child
+guarantee is exported only for writes its own path proves run, and an upward cache obligation ends where the walk
+proves this path removed the whole cache and refilled it. The census, the ledger rows and `schema_revision` did not
+move, and the §11 tables were re-spliced for moved `Baseline line` values. Revisions after batch 19:
+`capability_revision` `sha256:194aa6c8…` and `compiler_revision` `sha256:40def511…`;
+`schema_revision` stays `sha256:c9583e6b…`.

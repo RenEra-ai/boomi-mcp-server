@@ -439,10 +439,13 @@ class ChildEntryContractV1(_ValidationModel):
       their writers to pass the binding checks at the call.
     - ``mutated_state``: execution-scoped keys the child may write or remove.
     - ``guaranteed_state``: execution-scoped keys the child establishes on every normal
-      completion, a subset of ``mutated_state``. A waited call with ``abort_on_error``
-      that provably runs the child establishes them for later paths (amendment 1 rule
-      7). No document property is among them: a child's document properties never
-      land on its caller's sibling copies.
+      completion, at a step its own documents provably reach — a subset of
+      ``mutated_state``. A waited call with ``abort_on_error`` that provably runs the
+      child establishes them for later paths (amendment 1 rule 7). A write standing
+      behind a step that may hand on no documents is NOT among them, on any path: the
+      child completes normally without having made it, so the caller is promised
+      nothing. No document property is among them either: a child's document properties
+      never land on its caller's sibling copies.
     - ``removed_caches``: the document caches the child may REMOVE outright, its own
       terminal removes and every removal it inherits from a child it calls — every removal
       the walk PROVES, whether or not the child's cache writes are all known. Not a subset

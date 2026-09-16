@@ -2209,6 +2209,16 @@ def _state_cohorts(facts):
     )
 
 
+def _state_sealed(refs):
+    """The caches a path emptied and refilled only from its own writes, as sorted refs."""
+    return sorted(refs)
+
+
+def _state_proved(keys):
+    """The execution-scoped keys a path established with a write the walk proved would run."""
+    return _state_keys(keys)
+
+
 #: How each component of the lineage lattice's state is recorded in the revision, keyed
 #: by the component's own name.
 _STATE_COMPONENT_PROJECTIONS = {
@@ -2216,6 +2226,8 @@ _STATE_COMPONENT_PROJECTIONS = {
     "execution": _state_keys,
     "content": _state_content,
     "cohorts": _state_cohorts,
+    "sealed": _state_sealed,
+    "proved": _state_proved,
 }
 
 
@@ -2337,16 +2349,24 @@ def _retrieve_overlay_behaviour_oracle():
     # every case. Without a seeded one the row could not tell a retrieve that hands them
     # on from one that drops them, which is the half ARCH-184-r1-09 left open.
     carried_states = {
-        "nothing_else": (frozenset(), frozenset()),
-        "a_property_the_cache_and_its_content": (
+        "nothing_else": (frozenset(), frozenset(), frozenset(), frozenset()),
+        "a_property_the_cache_its_content_and_an_emptied_cache": (
             frozenset({(lineage.DPP, "K"), (lineage.CACHE, "$ref:CACHE")}),
             frozenset({("$ref:CACHE", ("PROFILE-ONE", "json"))}),
+            # A retrieve stores nothing, so a cache this path emptied and refilled from its
+            # own writes is still that afterwards: the seal is the retrieve's to hand on,
+            # not to drop (#184 amendment 3 §7-§8).
+            frozenset({"$ref:CACHE"}),
+            # Nor does a retrieve un-write anything, so the proof behind a carried execution
+            # key crosses it too. A retrieve that dropped this would withdraw a guarantee the
+            # child's own path proved (amendment 1 rule 7).
+            frozenset({(lineage.DPP, "K")}),
         ),
     }
     transfer = []
     for cohort_set in cohort_sets:
         for carried in sorted(carried_states):
-            execution, content = carried_states[carried]
+            execution, content, sealed, proved = carried_states[carried]
             for stream_count in (lineage.COUNT_ONE, lineage.COUNT_UNKNOWN):
                 for external in (False, True):
                     for current in (False, True):
@@ -2355,6 +2375,7 @@ def _retrieve_overlay_behaviour_oracle():
                             document=document, execution=execution, content=content,
                             cohorts=frozenset(
                                 ("$ref:CACHE", cohort) for _label, cohort in cohort_set),
+                            sealed=sealed, proved=proved,
                         )
                         after, writers, on_documents, invalidated, count = lineage._overlay_cache_read(
                             lineage._RetrieveAtCall("$ref:CACHE", external), state,
@@ -2415,7 +2436,7 @@ def _child_call_state_oracle():
         sym("cache", "documentcache"),
         # A SECOND reference to the one document cache the row above names.
         ComponentSymbolV1(ref="$ref:cache_alias", component_id="CACHE", component_type="documentcache"),
-    ) + tuple(sym(key, "process") for key in ("parent", "mid", "child")))
+    ) + tuple(sym(key, "process") for key in ("parent", "mid", "child", "writer")))
 
     stop = {"kind": "stop"}
     message = {"kind": "message", "text": "m"}
@@ -2485,20 +2506,50 @@ def _child_call_state_oracle():
             "warnings": sorted([item.code, item.path] for item in report.warnings),
         }
 
-    def verdicts_of(roots, reported, declarations=None):
-        """Resolve a chain through the server's own resolver and report each root asked."""
+    def calls_among(ir, keys):
+        """The chain roots this root's own body CALLS, read off the IR (#184 round r19c).
+
+        Derived from the graph, never from a naming convention: a root that calls nobody is
+        a leaf child, whose contract facts the recorded verdicts above it are computed from,
+        while a root that calls another IS the caller under measurement.
+        """
+        found, stack = set(), [ir.model_dump(mode="json")]
+        while stack:
+            node = stack.pop()
+            if isinstance(node, dict):
+                if node.get("kind") == "process_call" and node.get("process_ref"):
+                    found.add(node["process_ref"])
+                stack.extend(node.values())
+            elif isinstance(node, list):
+                stack.extend(node)
+        return sorted(ref for ref in found if ref[len("$ref:"):] in keys)
+
+    def verdicts_of(roots, declarations=None):
+        """Resolve a chain through the server's own resolver and report EVERY root.
+
+        Reporting a hand-picked subset is the mechanism the structural fix was mandated for:
+        a section resolved four roots and recorded two, so a child the validator refuses
+        could contribute the facts a recorded verdict was computed over with nothing in the
+        served payload saying so. The reported set is now the RESOLVED set — an invariant
+        over the resolver's own root list rather than an enumeration — and each answer
+        carries what that root calls, so the guard can tell a leaf child from a caller
+        (round r19c).
+        """
         parsed = [(key, ir) for key, ir in roots]
+        keys = [key for key, _ir in parsed]
         resolution = resolve_process_ir_effect_declarations(
             parsed, declarations, symbols, [],
             child_roots={"$ref:" + key: ir for key, ir in parsed})
         answers = {}
-        for key in reported:
-            ir = dict(parsed)[key]
+        for key, ir in parsed:
             context = resolution.capabilities_by_root.get(key)
-            answers[key] = reported_by(
-                validate_process_ir(ir, symbols, capabilities=context)
-                if context is not None
-                else validate_process_ir(ir, symbols)
+            answers[key] = dict(
+                reported_by(
+                    validate_process_ir(ir, symbols, capabilities=context)
+                    if context is not None
+                    else validate_process_ir(ir, symbols)
+                ),
+                calls=calls_among(ir, keys),
             )
         return resolution, answers
 
@@ -2507,10 +2558,40 @@ def _child_call_state_oracle():
         "writes_a_property_on_every_completion": doc(arms([sets("K")], [sets("K")])),
         # Its own effects are not all knowable, so nothing it does is guaranteed.
         "writes_a_property_after_an_uninspectable_step": doc(get_p1, script, sets("K"), stop),
+        # The write sits behind a retrieve that may return nothing, so the child completes
+        # normally without it: no guarantee crosses (amendment 1 rule 7, round r18).
         "fills_the_cache": legs({"steps": [get_p1], "terminal": put()},
                                 {"steps": [message], "terminal": stop}),
+        # The same write on a path the walk proves runs, which is what a guarantee needs.
+        # A PASSTHROUGH child, because on a scheduled root an Add to Cache has no documents
+        # to store and is refused A4 CARDINALITY_MISMATCH: the only cache fill the walk can
+        # prove stands on its caller's group, which the Message hands on one for one. Stated
+        # as a scheduled root, this case recorded a guarantee for a child the validator
+        # refuses (round r19b).
+        "fills_the_cache_on_a_proved_path": doc(entry, {"kind": "branch", "legs": [
+            {"steps": [message], "terminal": put()},
+            {"steps": [message], "terminal": stop}]}),
         "fills_then_empties_the_cache": legs({"steps": [get_p1], "terminal": put()},
                                              {"steps": [], "terminal": remove()}),
+        # One key, written on BOTH a proved path and an unproved one. Every normal
+        # completion establishes K — the first leg always runs — so the guarantee holds,
+        # and a rule that subtracted a union over paths from the meet over exits withheld
+        # it. The oracle had no such child, so that rule could be reverted with the served
+        # revision standing still (round r19b).
+        "writes_a_property_on_a_proved_and_an_unproved_path": legs(
+            {"steps": [message, sets("K")], "terminal": stop},
+            {"steps": [get_p1, sets("K")], "terminal": stop}),
+        # The write stands behind a RETRIEVE — but of a cache this child's own earlier leg
+        # provably filled, so the retrieve provably hands on a document and every normal
+        # completion makes the write. Withholding it refused a composition the server
+        # admitted before the non-emptiness carry existed, in the passthrough form alone;
+        # the oracle had no such child, so the rule that reads the walk's own fill proof
+        # could be dropped with the served revision standing still (round r19c).
+        "writes_a_property_behind_a_retrieve_of_a_cache_it_filled": doc(
+            entry, {"kind": "branch", "legs": [
+                {"steps": [message], "terminal": put()},
+                {"steps": [read_cache(), sets("K")], "terminal": stop},
+                {"steps": [message], "terminal": stop}]}),
     }
     #: How the call is made.
     call_forms = {
@@ -2554,11 +2635,18 @@ def _child_call_state_oracle():
             for form in sorted(call_forms):
                 roots = [("parent", callers[caller](call("child", **call_forms[form]))),
                          ("child", children[child])]
-                resolution, answers = verdicts_of(roots, ("parent",))
+                # The CHILD's own verdict is recorded beside the caller's. Reporting the
+                # caller alone is what let a child the validator refuses sit in this
+                # vocabulary: the row then measured what a call establishes on a graph that
+                # cannot ship, twice over, and nothing in the served payload said so. With
+                # the child's verdict in the row a caller — and the guard in
+                # `test_issue_184_revision_coverage.py` — can see it (round r19b).
+                resolution, answers = verdicts_of(roots)
                 context = resolution.capabilities_by_root.get("parent")
                 row = context.child_entry_contract("$ref:child") if context is not None else None
                 calls.append([child, caller, form, answers["parent"],
-                              None if row is None else row.model_dump(mode="json")])
+                              None if row is None else row.model_dump(mode="json"),
+                              answers["child"]])
 
     #: A property the child uses on documents a caller cached, through a middle process:
     #: one case per requirement channel the contract carries it on.
@@ -2576,7 +2664,7 @@ def _child_call_state_oracle():
                          {"steps": [message], "terminal": stop})),
             ("child", doc(entry, uses[use], stop)),
         ]
-        resolution, answers = verdicts_of(roots, ("parent", "mid", "child"))
+        resolution, answers = verdicts_of(roots)
         context = resolution.capabilities_by_root.get("parent")
         row = context.child_entry_contract("$ref:mid") if context is not None else None
         forwarded[use] = {"roots": answers,
@@ -2623,6 +2711,48 @@ def _child_call_state_oracle():
         "row_at_the_caller": mid_row.model_dump(mode="json"),
     }
 
+    #: Amendment 3 §7-§8: whether a grandchild's cached-property row travels past a middle
+    #: process that emptied the WHOLE cache before forwarding. The row is the caller's
+    #: obligation exactly while a document the middle did not write can be in that cache, so
+    #: these record the three answers: a proved removal with the middle's own writes behind
+    #: it ends it, no removal keeps it (the fail-open batch 18 closed), and a child that may
+    #: write the cache lets a foreign document back in and keeps it too.
+    x_less_then_call = legs({"steps": [get_p1], "terminal": put()},
+                            {"steps": [], "terminal": call("mid")})
+    stage = {"steps": [get_p1, dynamic("X")], "terminal": put()}
+    empty = {"steps": [], "terminal": remove()}
+    forward = {"steps": [], "terminal": call("child")}
+    removal_mids = {
+        "removes_then_stages": legs(empty, stage, forward),
+        "stages_only": legs(stage, forward),
+        # The PERMISSIVE direction of the seal's proof gate, which had no case at all: this
+        # removal stands behind a producer that may return no rows, so it may never execute
+        # while the middle still completes normally and the caller's documents are all still
+        # in the shared cache. Sealing it anyway drops the grandchild's row and admits the
+        # whole chain — a verdict flip the served revision could not see, because every case
+        # here used a removal the walk proves runs (round r19c).
+        "removes_behind_a_producer_then_stages": legs(
+            {"steps": [get_p1], "terminal": remove()}, stage, forward),
+        "removes_stages_then_calls_a_cache_writing_child": legs(
+            empty, stage, {"steps": [], "terminal": call("writer")}, forward),
+    }
+    removed_and_refilled = {}
+    for label in sorted(removal_mids):
+        roots = [("parent", x_less_then_call), ("mid", removal_mids[label]),
+                 ("child", doc(read_cache(), bound("X"), stop)),
+                 # A passthrough root for the same reason the proved-path filler above is
+                 # one: a scheduled child's Add to Cache is refused A4 CARDINALITY_MISMATCH.
+                 ("writer", doc(entry, {"kind": "branch", "legs": [
+                     {"steps": [message], "terminal": put()},
+                     {"steps": [message], "terminal": stop}]}))]
+        resolution, answers = verdicts_of(roots)
+        context = resolution.capabilities_by_root.get("parent")
+        row = context.child_entry_contract("$ref:mid") if context is not None else None
+        removed_and_refilled[label] = {
+            "roots": answers,
+            "row_at_the_caller": None if row is None else row.model_dump(mode="json"),
+        }
+
     #: Each cache-keyed fact of a child contract, stated through a SECOND reference to the
     #: one cache: only the cache-identity canonicalization makes the two spellings one, so
     #: a fact that stopped going through it would refuse a graph that runs.
@@ -2632,11 +2762,18 @@ def _child_call_state_oracle():
                             {"steps": [], "terminal": call("child")})),
             ("child", doc(read_cache(), bound("X"), stop)),
         ],
+        # The child's write is on a path the walk proves runs, so a guarantee exists for the
+        # two spellings to agree about: behind a retrieve there would be none either way,
+        # and the case would measure the canonicalization no longer (round r18). The child
+        # is a PASSTHROUGH root because a scheduled one's Add to Cache is refused A4
+        # CARDINALITY_MISMATCH, which made this case measure the canonicalization on a
+        # guarantee derived from a graph that cannot ship (round r19b).
         "guaranteed_state": lambda ref: [
             ("parent", legs({"steps": [], "terminal": call("child", wait=True, abort_on_error=True)},
                             {"steps": [read_cache(), message], "terminal": stop})),
-            ("child", legs({"steps": [get_p1], "terminal": put(ref)},
-                           {"steps": [message], "terminal": stop})),
+            ("child", doc(entry, {"kind": "branch", "legs": [
+                {"steps": [message], "terminal": put(ref)},
+                {"steps": [message], "terminal": stop}]})),
         ],
         "removed_caches": lambda ref: [
             ("parent", legs({"steps": [], "terminal": call("child", wait=True, abort_on_error=True)},
@@ -2693,7 +2830,7 @@ def _child_call_state_oracle():
         aliased[field] = {"derived_from_the_child": {}, "stated_by_a_caller": {}}
         for spelling in sorted(spellings):
             ref = spellings[spelling]
-            _resolution, answers = verdicts_of(alias_cases[field](ref), ("parent", "child"))
+            _resolution, answers = verdicts_of(alias_cases[field](ref))
             aliased[field]["derived_from_the_child"][spelling] = answers
             graph, row = stated_by_a_caller(field, ref)
             capabilities = ProcessIRValidationCapabilitiesV1(
@@ -2702,7 +2839,8 @@ def _child_call_state_oracle():
             )
             aliased[field]["stated_by_a_caller"][spelling] = reported_by(
                 validate_process_ir(graph, symbols, capabilities=capabilities))
-    return {"calls": calls, "forwarded_cached_properties": forwarded, "one_cache_two_refs": aliased}
+    return {"calls": calls, "forwarded_cached_properties": forwarded, "one_cache_two_refs": aliased,
+            "a_removed_and_refilled_cache": removed_and_refilled}
 
 
 def _lineage_read_behaviour_oracle():

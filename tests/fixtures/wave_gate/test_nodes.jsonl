@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 13245, "minimum_collected": 13245, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 13274, "minimum_collected": 13274, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -13343,3 +13343,32 @@
 {"kind": "test", "id": "pytest-013342", "node_id": "tests/test_wave_gate_goldens.py::test_golden_manifest_row[golden-000086]", "state": "active"}
 {"kind": "test", "id": "pytest-013343", "node_id": "tests/test_wave_gate_goldens.py::test_golden_manifest_row[golden-000087]", "state": "active"}
 {"kind": "test", "id": "pytest-013344", "node_id": "tests/test_wave_gate_goldens.py::test_golden_manifest_row[golden-000088]", "state": "active"}
+{"kind": "test", "id": "pytest-013345", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_proved_removal_reaches_every_caller_it_travels_to[one_forwarding_hop]", "state": "active"}
+{"kind": "test", "id": "pytest-013346", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_proved_removal_reaches_every_caller_it_travels_to[the_childs_own_body]", "state": "active"}
+{"kind": "test", "id": "pytest-013347", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_proved_removal_reaches_every_caller_it_travels_to[two_forwarding_hops]", "state": "active"}
+{"kind": "test", "id": "pytest-013348", "node_id": "tests/test_issue_184_child_state_transfer.py::test_unknowability_alone_still_removes_nothing_through_a_forwarder", "state": "active"}
+{"kind": "test", "id": "pytest-013349", "node_id": "tests/test_issue_184_child_state_transfer.py::test_the_one_rule_every_removal_site_reads_is_load_bearing", "state": "active"}
+{"kind": "test", "id": "pytest-013350", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_proved_removal_is_read_through_one_rule", "state": "active"}
+{"kind": "test", "id": "pytest-013351", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_child_guarantees_only_what_its_own_path_proves_it_runs", "state": "active"}
+{"kind": "test", "id": "pytest-013352", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_guarantee_is_a_meet_over_paths_not_a_subtraction_across_them", "state": "active"}
+{"kind": "test", "id": "pytest-013353", "node_id": "tests/test_issue_184_child_state_transfer.py::test_the_per_path_meet_on_a_guarantee_is_load_bearing", "state": "active"}
+{"kind": "test", "id": "pytest-013354", "node_id": "tests/test_issue_184_child_state_transfer.py::test_the_proved_path_gate_on_a_guarantee_is_load_bearing", "state": "active"}
+{"kind": "test", "id": "pytest-013355", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_whole_cache_removal_and_refill_ends_the_upward_obligation", "state": "active"}
+{"kind": "test", "id": "pytest-013356", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_foreign_write_after_the_refill_ends_the_proof[a_child_nothing_derives]", "state": "active"}
+{"kind": "test", "id": "pytest-013357", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_foreign_write_after_the_refill_ends_the_proof[a_child_that_may_write_the_cache]", "state": "active"}
+{"kind": "test", "id": "pytest-013358", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_removal_with_nothing_refilled_leaves_the_caller_nothing_to_prove", "state": "active"}
+{"kind": "test", "id": "pytest-013359", "node_id": "tests/test_issue_184_child_state_transfer.py::test_the_removed_and_refilled_proof_is_load_bearing", "state": "active"}
+{"kind": "test", "id": "pytest-013360", "node_id": "tests/test_issue_184_child_state_transfer.py::test_the_seal_needs_the_same_proof_the_writes_need", "state": "active"}
+{"kind": "test", "id": "pytest-013361", "node_id": "tests/test_issue_184_child_state_transfer.py::test_the_proof_gate_on_the_seal_is_load_bearing", "state": "active"}
+{"kind": "test", "id": "pytest-013362", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_foreign_cohort_and_the_meet_each_end_the_removal_proof", "state": "active"}
+{"kind": "test", "id": "pytest-013363", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_declared_external_writer_is_refused_before_the_seal_is_consulted", "state": "active"}
+{"kind": "test", "id": "pytest-013364", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_count_preserving_step_keeps_the_proof_its_entry_gave_it", "state": "active"}
+{"kind": "test", "id": "pytest-013365", "node_id": "tests/test_issue_184_child_state_transfer.py::test_the_carried_non_emptiness_proof_is_load_bearing", "state": "active"}
+{"kind": "test", "id": "pytest-013366", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_calls_later_leg_write_is_what_it_guarantees_not_what_it_may_write", "state": "active"}
+{"kind": "test", "id": "pytest-013367", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_retrieve_of_a_cache_this_path_proved_it_filled_keeps_the_proof", "state": "active"}
+{"kind": "test", "id": "pytest-013368", "node_id": "tests/test_issue_184_child_state_transfer.py::test_the_retrieve_fill_proof_is_load_bearing", "state": "active"}
+{"kind": "test", "id": "pytest-013369", "node_id": "tests/test_issue_184_revision_coverage.py::test_a_retrieve_that_drops_one_component_of_its_answer_moves_the_revision[proved]", "state": "active"}
+{"kind": "test", "id": "pytest-013370", "node_id": "tests/test_issue_184_revision_coverage.py::test_a_retrieve_that_drops_one_component_of_its_answer_moves_the_revision[sealed]", "state": "active"}
+{"kind": "test", "id": "pytest-013371", "node_id": "tests/test_issue_184_revision_coverage.py::test_each_call_state_rule_moves_the_revision_through_its_own_row[a_guarantee_is_a_union_over_paths_not_a_meet]", "state": "active"}
+{"kind": "test", "id": "pytest-013372", "node_id": "tests/test_issue_184_revision_coverage.py::test_each_call_state_rule_moves_the_revision_through_its_own_row[an_unproved_removal_seals_all_the_same]", "state": "active"}
+{"kind": "test", "id": "pytest-013373", "node_id": "tests/test_issue_184_revision_coverage.py::test_every_child_any_call_state_section_measures_is_a_graph_that_can_ship", "state": "active"}

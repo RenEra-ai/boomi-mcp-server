@@ -337,6 +337,24 @@ class _Stream(NamedTuple):
     #: always the cache the property came from: a child that re-caches what it read
     #: binds on documents its caller may also have stored in the second cache.
     retrieved_from: Optional[str] = None
+    #: #184 amendment 1 rule 7: True when this path provably carries AT LEAST ONE document,
+    #: whatever their number — the question a write behind a step asks, which `count` can
+    #: only answer for the proved singleton.
+    #:
+    #: Set where non-emptiness is PROVED and nowhere else: a Data Passthrough entry, whose
+    #: caller's group the gate at that call already proved non-empty, and a retrieve of a
+    #: cache this path's own proved write filled (`_retrieve_of_a_proved_cache`). Carried
+    #: across steps that hand on exactly the documents they received
+    #: (`_COUNT_PRESERVING_KINDS`) and dropped by every other step, so a producer that may
+    #: return no rows ends it — and so does a retrieve of a cache nothing here proved
+    #: filled. Defaults to False, the fail-closed direction: a stream channel added later
+    #: proves nothing until someone states that its documents exist.
+    #:
+    #: Separate from `count` because a passthrough entry is not count-preserving — its group
+    #: is of a size no child can know — so the marker WAS the proof, and any stream-replacing
+    #: step destroyed it. A Message then withdrew a guarantee for a Data Passthrough child
+    #: while its No Data twin, whose proof rides `count`, kept it (round r19b).
+    provably_nonempty: bool = False
 
 
 def cache_content_judgement(stream: "_Stream", identity) -> Optional[bool]:
@@ -451,7 +469,7 @@ class _State:
     from :data:`STATE_VISIBILITY_V1`, not restated here.
     """
 
-    __slots__ = ("document", "execution", "content", "cohorts")
+    __slots__ = ("document", "execution", "content", "cohorts", "sealed", "proved")
 
     def __init__(
         self,
@@ -459,6 +477,8 @@ class _State:
         execution: Optional[FrozenSet[StateKey]] = None,
         content: "Optional[FrozenSet[CacheContentFact]]" = None,
         cohorts: "Optional[FrozenSet[Tuple[str, _Cohort]]]" = None,
+        sealed: "Optional[FrozenSet[str]]" = None,
+        proved: "Optional[FrozenSet[StateKey]]" = None,
     ) -> None:
         self.document: FrozenSet[StateKey] = document or frozenset()
         self.execution: FrozenSet[StateKey] = execution or frozenset()
@@ -475,24 +495,79 @@ class _State:
         #: exactly like ``content`` — Add to Cache appends, whole-cache removal
         #: clears, convergence unions — and read by the retrieve overlay.
         self.cohorts: "FrozenSet[Tuple[str, _Cohort]]" = cohorts or frozenset()
+        #: #184 amendment 3 §7-§8: the caches this PATH emptied outright and has refilled
+        #: only from its own writes since. A MUST set — the only one about a cache — so it
+        #: converges by INTERSECTION and a removal on one Decision arm never counts.
+        #:
+        #: It answers one question, for `_caller_owes_a_cached_property`: can a document
+        #: this process did not write still be in that cache? Normally nothing inside a
+        #: process can rule that out, because the cache is shared with every caller. A
+        #: proved whole-cache removal on this path CAN: it took the caller's documents
+        #: away, and every write since is one this process's own call-side check judges.
+        #: Anything that lets a foreign document back in — a child that may write the
+        #: cache, a declared external writer, an unknown cohort an opaque contract stores —
+        #: clears the mark again, which is why this is set in exactly one place and
+        #: cleared wherever a cohort nobody in this process wrote enters.
+        self.sealed: "FrozenSet[str]" = sealed or frozenset()
+        #: #184 amendment 1 rule 7: the execution-scoped keys this PATH established with a
+        #: write the walk proved would RUN (`_path_provably_runs`). A MUST set, a subset of
+        #: ``execution``, converging by INTERSECTION exactly like it.
+        #:
+        #: ``execution`` answers the in-process question — may a later step read this key —
+        #: and a write behind a step that may hand on zero documents answers it yes, because
+        #: within one process a read is assumed to produce documents for the steps behind it.
+        #: This set answers the BOUNDARY question instead: did every normal completion
+        #: actually make the write. A completion that skipped the writer is still normal, so
+        #: a key established only by such a write is one no caller may be promised.
+        #:
+        #: Kept as a separate compartment rather than by narrowing ``execution`` because the
+        #: two answers genuinely differ and the in-process stance does not move. Kept per
+        #: PATH rather than as one union over paths because the guarantee is a meet: a key
+        #: every completion proves is guaranteed even where another path also writes it
+        #: behind a possibly-empty step, and a key only one arm proves is not (round r19).
+        self.proved: FrozenSet[StateKey] = proved or frozenset()
 
-    def with_write(self, key: StateKey) -> "_State":
+    def with_write(self, key: StateKey, proved: bool = False) -> "_State":
+        """``proved``: the walk proved the documents in front of this write reach it.
+
+        Defaulting to False is the fail-closed direction — a write channel added later
+        promises nothing across the boundary until someone states that its path runs.
+        """
         if key[0] in _DOCUMENT_LIFETIME_SCOPES:
-            return _State(self.document | {key}, self.execution, self.content, self.cohorts)
-        return _State(self.document, self.execution | {key}, self.content, self.cohorts)
+            return _State(self.document | {key}, self.execution, self.content, self.cohorts,
+                          self.sealed, self.proved)
+        return _State(self.document, self.execution | {key}, self.content, self.cohorts,
+                      self.sealed, (self.proved | {key}) if proved else self.proved)
 
     def with_content(self, cache_ref: str, identity) -> "_State":
         """This cache may now also hold documents of ``identity`` (None: unknown)."""
         return _State(
-            self.document, self.execution, self.content | {(cache_ref, identity)}, self.cohorts
+            self.document, self.execution, self.content | {(cache_ref, identity)}, self.cohorts,
+            self.sealed, self.proved,
         )
 
-    def with_cohort(self, cache_ref: str, cohort: "_Cohort") -> "_State":
-        """This cache may now also hold documents carrying ``cohort``'s properties."""
-        return _State(self.document, self.execution, self.content, self.cohorts | {(cache_ref, cohort)})
+    def with_cohort(self, cache_ref: str, cohort: "_Cohort", ours: bool = False) -> "_State":
+        """This cache may now also hold documents carrying ``cohort``'s properties.
+
+        ``ours`` marks a cohort THIS process's own executing Add to Cache froze. Any other
+        cohort — a child's possible write, a contracted effect's, a caller's seed — is a
+        document nobody here wrote, so it ends any proof that a removal on this path left
+        the cache holding this process's own documents alone (`sealed`). Defaulting to
+        False is the fail-closed direction: a cohort channel added later ends the proof
+        until someone states that the write is this process's.
+        """
+        return _State(self.document, self.execution, self.content,
+                      self.cohorts | {(cache_ref, cohort)},
+                      self.sealed if ours else self.sealed - {cache_ref},
+                      self.proved)
 
     def cohorts_of(self, cache_ref: str) -> "FrozenSet[_Cohort]":
         return frozenset(fact[1] for fact in self.cohorts if fact[0] == cache_ref)
+
+    def with_sealed_cache(self, cache_ref: str) -> "_State":
+        """This path emptied the cache: nothing a caller stored in it is still there (§7-§8)."""
+        return _State(self.document, self.execution, self.content, self.cohorts,
+                      self.sealed | {cache_ref}, self.proved)
 
     def without_content(self, cache_ref: str) -> "_State":
         """A whole-cache removal: nothing written before it is still there."""
@@ -501,6 +576,8 @@ class _State:
             self.execution,
             frozenset(fact for fact in self.content if fact[0] != cache_ref),
             frozenset(fact for fact in self.cohorts if fact[0] != cache_ref),
+            self.sealed,
+            self.proved,
         )
 
     def content_of(self, cache_ref: str) -> "FrozenSet[Optional[Tuple[str, str]]]":
@@ -520,7 +597,8 @@ class _State:
         every copy. Execution state survives too, and additionally accumulates
         across legs — see ``collect_lineage_findings``.
         """
-        return _State(self.document, self.execution, self.content, self.cohorts)
+        return _State(self.document, self.execution, self.content, self.cohorts, self.sealed,
+                      self.proved)
 
     def merged_with(self, other: "_State") -> "_State":
         """Meet over converging paths: only what BOTH establish survives.
@@ -533,12 +611,23 @@ class _State:
         Cache CONTENT is the exception and merges by union (see ``content``):
         it records what a read may hand on, and dropping a possibility is the
         unsound direction there.
+
+        ``sealed`` is a MUST set like the two compartments and intersects with them: a
+        whole-cache removal on ONE Decision arm proves nothing about the path that took
+        the other, so it never survives the meet.
+
+        ``proved`` intersects for the same reason, and it is what makes the guarantee a
+        MEET rather than a global subtraction: a key one arm establishes with a proved
+        write and the other only behind a possibly-empty step is established after the
+        merge and guaranteed to nobody.
         """
         return _State(
             self.document & other.document,
             self.execution & other.execution,
             self.content | other.content,
             self.cohorts | other.cohorts,
+            self.sealed & other.sealed,
+            self.proved & other.proved,
         )
 
 
@@ -728,7 +817,8 @@ def _drop_replaced_document_keys(state: "_State", keep) -> "Tuple[_State, Frozen
     """
     dropped = frozenset(key for key in state.document if key not in keep)
     return (
-        _State(state.document - dropped, state.execution, state.content, state.cohorts),
+        _State(state.document - dropped, state.execution, state.content, state.cohorts,
+               state.sealed, state.proved),
         frozenset(key for key in dropped if key[0] == DDP),
     )
 
@@ -836,6 +926,12 @@ def _overlay_cache_read(semantic, state, writers, on_documents, invalidated, str
         state.execution,
         state.content,
         state.cohorts,
+        # A retrieve READS the cache. It stores nothing, so it lets no foreign document
+        # into one this path emptied: the seal crosses it like the execution state does.
+        state.sealed,
+        # ... and so does the proof behind each execution-scoped key: a retrieve un-writes
+        # nothing, so a write that already ran on this path still ran.
+        state.proved,
     )
     count = next(iter(cohorts)).count if len(cohorts) == 1 else COUNT_UNKNOWN
     invalidated = invalidated | (before - guaranteed) | {CACHE_TRANSFER_UNPROVED}
@@ -926,6 +1022,74 @@ def _child_guarantee(semantic, contract, stream) -> Tuple[StateKey, ...]:
     if stream.state == STREAM_ABSENT or stream.count != COUNT_ONE:
         return ()
     return _awaited_guarantee(semantic, contract)
+
+
+def _path_provably_runs(stream) -> bool:
+    """Whether a write on THIS path is proved to execute at all (#184 amendment 1 rule 7).
+
+    What a child GUARANTEES its caller is what every normal completion establishes, and a
+    completion that skipped the writer establishes nothing. A step whose documents may be
+    zero — a connector call that returns no rows, a retrieve of a cache that may be empty —
+    hands the steps behind it nothing to run on, so the process still completes normally
+    with the write never made. Amendment 1 rule 7 heads its paragraph "Child state changes
+    need conservative transfer" and says a waited child MAY establish guarantees; exporting
+    one the path cannot prove is not conservative, so those writes are withheld.
+
+    Deliberately NOT the same predicate as `_child_guarantee`'s, which asks the CALLER's
+    path for exactly one document. The two ask different questions and the answers differ
+    for one state: at a call, `count == one` is what proves the child runs at all, because a
+    No Data child runs once per arriving document and a passthrough child needs a non-empty
+    group. INSIDE a process the question is only whether documents reach the step, so the
+    caller's group — proved non-empty by the very gate at that call, and of a size no child
+    can know — runs everything behind the entry. Answering the inside question with the call
+    gate would withhold every passthrough child's guarantee, which capture
+    `cap184-dpp-both-ways` measures crossing the boundary for BOTH entry forms.
+
+    Asked of what it is ABOUT — may the documents in front of this write be zero — and not
+    of the stream's STATE. Reading the state named the passthrough entry itself, so any
+    stream-replacing step destroyed the proof: a Message, which `_COUNT_PRESERVING_KINDS`
+    declares hands on exactly the documents it received and so cannot reduce a group to
+    zero, withdrew the guarantee for a Data Passthrough child while its No Data twin kept it
+    — same steps, same write, opposite answers, and the caller of the passthrough form was
+    refused a composition that always sets the key at runtime (round r19b). Both carriers of
+    non-emptiness are therefore read here: the proved singleton, and `provably_nonempty`,
+    which the controller carries across count-preserving steps and no other kind.
+    """
+    if stream.state == STREAM_ABSENT:
+        return False
+    return stream.count == COUNT_ONE or stream.provably_nonempty
+
+
+def _retrieve_of_a_proved_cache(semantic, state: "_State") -> bool:
+    """Whether a retrieve hands on AT LEAST ONE document (#184 amendment 1 rule 7).
+
+    A retrieve is the other step this path can prove non-empty, and the walk already holds
+    the proof: ``_State.proved`` carries ``(CACHE, ref)`` exactly when an Add to Cache the
+    walk proved would RUN stored documents in that cache and nothing since has taken them
+    away. A removal on this path drops the key (`_without_cache_establishment`), a call that
+    MAY remove the cache drops it at the call, and the meet intersects it — so the key is
+    there only while this path's own proved fill still stands.
+
+    Asked because the general rule — a step that is not count-preserving ends the
+    proof — is right for a PRODUCER, whose rows may be zero, and wrong here. A write behind
+    a retrieve of a cache an earlier leg provably filled runs on every normal completion, so
+    withholding its guarantee refused a composition the server admitted before the carry
+    existed, in the Data Passthrough form only: the No Data twin's proof rides ``count``,
+    which a passthrough entry never sets to ``COUNT_ONE`` — the same one-rule-both-entry-
+    forms asymmetry the carry was added to remove, reappearing on the cache channel
+    (round r19c). A retrieve of a cache NOTHING proved filled still proves nothing: only a
+    caller may have stored documents there, and the served sentence's "a retrieve of a cache
+    that may be empty" is exactly that case.
+
+    Not narrowed further for a declared external writer. That channel states cache WRITES,
+    never removals, so it can only add documents to the cache this path proved it filled;
+    a remover this walk cannot see is outside the model for every cache alike, and the
+    establishment compartment beside this one already rests on the same stance.
+    """
+    if semantic.semantic_kind not in TRIGGERED_REPLACEMENT_SEMANTIC_KINDS:
+        return False
+    cache_ref = getattr(semantic, "cache_ref", None)
+    return cache_ref is not None and (CACHE, cache_ref) in state.proved
 
 
 def _caller_cached_origin(key, stream, invalidated) -> Optional[str]:
@@ -1056,10 +1220,15 @@ def _without_cache_establishment(state: "_State", cache_ref: str) -> "_State":
         frozenset(key for key in state.execution if key != (CACHE, cache_ref)),
         state.content,
         state.cohorts,
+        state.sealed,
+        # The proof goes with the establishment it was a proof OF. Keeping it would let a
+        # path that filled the cache on a proved path, emptied it, and refilled it behind a
+        # possibly-empty step guarantee a cache that may be empty at exit.
+        frozenset(key for key in state.proved if key != (CACHE, cache_ref)),
     )
 
 
-def _after_a_whole_cache_removal(state: "_State", cache_ref: str) -> "_State":
+def _after_a_whole_cache_removal(state: "_State", cache_ref: str, proved_to_run: bool) -> "_State":
     """A whole-cache removal on THIS path: nothing written before it is still there.
 
     Content, cohorts and the establishment all go. Clearing only the first two left the
@@ -1069,8 +1238,24 @@ def _after_a_whole_cache_removal(state: "_State", cache_ref: str) -> "_State":
     a terminal remove invalidates execution-cache guarantees even though it emits no
     documents). The walk's meet over normal exits then answers both: a path that removes
     ends with the cache unestablished, so no guarantee crosses the boundary for it.
+
+    It also SEALS the cache on this path (amendment 3 §7-§8), but ONLY when the walk proves
+    the removal runs: every document a caller stored in it is gone, so until something lets
+    a foreign one back in, the only documents it can hold are this process's own writes —
+    which each call of this process judges for itself. That is the one way the walk can
+    answer "can a document this process did not write reach that cache" with no.
+
+    The two halves take OPPOSITE directions from the same doubt, which is why one predicate
+    gates one of them. Un-establishing is fail-closed: a removal that may not run may still
+    run, so the cache stops being established either way. The seal is the only PERMISSIVE
+    consumer of a removal — it stops charging a caller for documents it says are gone — so
+    an unproved removal must not grant it. A removal standing behind a step that may hand on
+    zero documents never executes on that run while the process still completes normally,
+    and the caller's documents are all still in the cache (round r19). It is the same proof
+    the writes on this path ask, for the same reason, asked through `_path_provably_runs`.
     """
-    return _without_cache_establishment(state.without_content(cache_ref), cache_ref)
+    after = _without_cache_establishment(state.without_content(cache_ref), cache_ref)
+    return after.with_sealed_cache(cache_ref) if proved_to_run else after
 
 
 def _seeds_an_unknown_cohort(cache_ref: str, cohort_names) -> bool:
@@ -1088,6 +1273,30 @@ def _seeds_an_unknown_cohort(cache_ref: str, cohort_names) -> bool:
     behind and refuse the child's bound path.
     """
     return cache_ref not in cohort_names
+
+
+def proved_removals(contract) -> Tuple[str, ...]:
+    """Every whole-cache removal ONE child contract PROVES (#184 amendment 3 §8).
+
+    THE rule, and the only place the compiler reads `removed_caches`: a removal list is an
+    EXISTENCE claim — the walk proved these happen — while `mutated_state` beside it is a
+    COMPLETENESS claim — nothing else is written. The two fail in OPPOSITE directions, so
+    what a call cannot know blanks the second and must never blank the first. Gated on the
+    contract existing and on nothing else: a child with no derivable contract proves no
+    removal, and unknowability is answered on the write side, where
+    `_caches_a_call_may_write` records it as an unknown possibility.
+
+    Stated once because the same defect class was patched per site. The child's own body
+    was ungated first (correction batch 18); the INHERITANCE hop in
+    `derive_child_entry_facts` stayed inside the write-completeness gate, so a process that
+    only FORWARDED the call dropped a removal its own child proved — and a parent that
+    filled that cache, called the forwarder and read the cache afterwards was admitted,
+    while the identical composition one hop closer was refused (Stage-2 review round r18).
+    Every site now asks this function, so there is no site left to gate differently.
+    """
+    if contract is None:
+        return ()
+    return tuple(contract.removed_caches)
 
 
 def _caches_a_call_may_remove(cache_refs, contract) -> Tuple[str, ...]:
@@ -1113,9 +1322,7 @@ def _caches_a_call_may_remove(cache_refs, contract) -> Tuple[str, ...]:
     can be ruled out. A child that is not waited for, or that the caller continues past,
     may have emptied the cache all the same.
     """
-    if contract is None:
-        return ()
-    return tuple(contract.removed_caches)
+    return proved_removals(contract)
 
 
 def _call_stores_nothing_in(state: "_State", cache_ref: str, external_writer: bool) -> bool:
@@ -1138,21 +1345,43 @@ def _call_stores_nothing_in(state: "_State", cache_ref: str, external_writer: bo
     return not (state.cohorts_of(cache_ref) or external_writer)
 
 
-def _caller_owes_a_cached_property(cache_ref: str, name: str, capabilities) -> bool:
+def _caller_owes_a_cached_property(cache_ref: str, name: str, capabilities, state: "_State") -> bool:
     """Whether a child's cached-property row travels on to THIS process's callers (#184 §7-§8).
 
     The question is never "did this call prove the row" but "can documents this process did
     not write reach that cache". A document cache is execution-scoped and shared with every
-    caller (capture `cap184-shared-cache`), and nothing inside the process rules that out:
-    its own caller may have filled the cache before it ran, a declared external writer may
-    fill it, a child it calls may write it, and an unproved cohort says one did. So the row
-    travels up — fail closed — and each caller proves it against its own writes.
+    caller (capture `cap184-shared-cache`), and usually nothing inside the process rules that
+    out: its own caller may have filled the cache before it ran, a declared external writer
+    may fill it, a child it calls may write it, and an unproved cohort says one did. So the
+    row travels up — fail closed — and each caller proves it against its own writes.
 
-    ONE exception, and it is bookkeeping rather than a proof of exclusivity: when a caller
-    cohort for that (cache, property) is already seeded, the obligation is already somebody's
-    row. `_caller_cached_properties` measures which rows a seeded cohort clears by walking
-    twice and comparing, so recording it again under the seed would erase the very
+    TWO exceptions. The first is bookkeeping rather than a proof of exclusivity: when a
+    caller cohort for that (cache, property) is already seeded, the obligation is already
+    somebody's row. `_caller_cached_properties` measures which rows a seeded cohort clears by
+    walking twice and comparing, so recording it again under the seed would erase the very
     measurement that keeps it.
+
+    The second IS a proof, and it is the one case the walk can answer with no: this path
+    emptied the WHOLE cache and only this process's own writes have refilled it since
+    (`_State.sealed`). Then no document of a caller's is in that cache to prove anything
+    about, and every document that IS in it was stored by a write this same call already
+    judged. The invariant is unchanged — documents this process did not write may reach that
+    cache — with one more way to know the answer.
+
+    A declared external writer is NOT excepted here, because it never reaches here. Its
+    documents are stored by nobody this walk can see, but the question is decided one step
+    earlier and more strictly: `_call_stores_nothing_in` is false for such a cache, so the
+    call takes the overlay branch, `_RetrieveAtCall(external=True)` seeds `UNKNOWN_COHORT`,
+    the meet at the retrieve is empty, and no key at that call is ever `proved` — so this
+    gate is not consulted and the composition is refused at the call itself. An escape
+    clause here read as the reason the seal was safe against an outside writer while being
+    unable to fire: measured, the only (sealed, external) pairs this gate is ever asked are
+    (false, false) and (true, false) (round r19b).
+
+    Without it a parent was refused at its call while the process it called, the grandchild
+    and the flattened equivalent all validated: the middle emptied the cache, staged
+    replacements carrying the property and forwarded, so the parent's own documents could not
+    reach the grandchild at all (Stage-2 review round r18).
 
     Recording only a REFUSAL instead admitted a grandparent that stored X-LESS documents in
     the same cache: the middle process that staged the property proved the row against the
@@ -1160,7 +1389,11 @@ def _caller_owes_a_cached_property(cache_ref: str, name: str, capabilities) -> b
     unconditionally, without the vacuous case above, refused the forwarder that stores
     nothing. Both shapes are decided here and in `_call_stores_nothing_in`, one each.
     """
-    return (cache_ref, name) not in capabilities.caller_cache_cohorts
+    if (cache_ref, name) in capabilities.caller_cache_cohorts:
+        return False
+    if cache_ref in state.sealed:
+        return False
+    return True
 
 
 def _repetition_unstable_caches(contract, cache_refs) -> Tuple[str, ...]:
@@ -1241,6 +1474,20 @@ class LineageWalkV1(NamedTuple):
     #: binds on documents its caller may also have stored in the second cache — so the
     #: obligation a seeded cohort produces is credited to both.
     binding_cache_origins: Tuple[Tuple[str, str], ...] = ()
+    #: #184 amendment 1 rule 7: the execution-scoped keys EVERY normal completion
+    #: established with a write the walk proved would run (`_State.proved`). A MUST set and
+    #: a subset of `established_at_exit`, computed by the same meet over normal exits.
+    #:
+    #: This is the boundary's half of `established_at_exit`'s question. That set says a key
+    #: is established however the process finishes; this one adds that every finish actually
+    #: made the write, rather than completing normally with a possibly-empty step in front
+    #: of it. Only this set may cross a call.
+    #:
+    #: Derived per PATH and met, never by subtracting a union over paths from the meet:
+    #: subtracting withheld keys every completion establishes, because one other path wrote
+    #: the same key behind a possibly-empty step (round r19). The meet keeps those and still
+    #: withholds a key no path proves, which is the finding r18 raised.
+    guaranteed_at_exit: Tuple[StateKey, ...] = ()
     # #184 D12 withdrew ``truncated``. The walk had a depth bound of 256, and a
     # caller trusting the state sets had to treat a walk that hit it as no
     # answer. The controller is now iterative with no depth bound: every node of
@@ -1729,7 +1976,7 @@ def _walk_lineage(
         elif stream.caller_cache is not None:
             cache_requirement_refs.append((stream.caller_cache, ref))
 
-    def _advance_stream(node, semantic, state, stream, legacy):
+    def _advance_stream(node, semantic, state, stream, legacy, provably_runs):
         """Check this node's profile consumers against the reaching stream, then step it (#184 D2).
 
         Returns ``(state, stream, legacy)``; ``state`` changes only in its cache
@@ -1784,7 +2031,8 @@ def _walk_lineage(
                             mismatch(node, sub_path)
                     elif stream.state == STREAM_CALLER_ENTRY:
                         if stream.identity is None:
-                            stream = _Stream(STREAM_CALLER_ENTRY, identity)
+                            stream = _Stream(STREAM_CALLER_ENTRY, identity,
+                                             provably_nonempty=stream.provably_nonempty)
                         elif identity != stream.identity:
                             mismatch(node, sub_path)
                     elif stream.state == STREAM_EMPTY_ENTRY or (
@@ -1810,7 +2058,8 @@ def _walk_lineage(
                     _requires(stream, required, ref)
                     if stream.state == STREAM_CALLER_ENTRY:
                         if stream.identity is None:
-                            stream = _Stream(STREAM_CALLER_ENTRY, required)
+                            stream = _Stream(STREAM_CALLER_ENTRY, required,
+                                             provably_nonempty=stream.provably_nonempty)
                         elif required != stream.identity:
                             mismatch(node, "/process_ref")
                     elif stream.state != STREAM_KNOWN or required is None or required != stream.identity:
@@ -1818,7 +2067,9 @@ def _walk_lineage(
             return state, stream, legacy
 
         if kind == "passthrough":
-            return state, _Stream(STREAM_CALLER_ENTRY), legacy
+            # The caller's documents, as one group the gate at that call proved non-empty:
+            # the one place non-emptiness is established rather than carried.
+            return state, _Stream(STREAM_CALLER_ENTRY, provably_nonempty=True), legacy
 
         if kind == "connector":
             if semantic.role == "source":
@@ -1977,7 +2228,11 @@ def _walk_lineage(
             # establishment, and hands on no documents: the path ends here, exactly as
             # after a cache write.
             if getattr(semantic, "remove_all_documents", False):
-                state = _after_a_whole_cache_removal(state, semantic.cache_ref)
+                # The SAME proof the transfer above applied, threaded rather than re-derived:
+                # two sites apply this one rule, so one of them answering the question
+                # differently is exactly how the seal came to be granted for a removal the
+                # walk marks as possibly skipped (round r19).
+                state = _after_a_whole_cache_removal(state, semantic.cache_ref, provably_runs)
             if kind in ZERO_EMISSION_SEMANTIC_KINDS:
                 return state, _Stream(STREAM_ABSENT), legacy
             return state, stream, legacy
@@ -2002,6 +2257,9 @@ def _walk_lineage(
         A child shares its caller's document caches (capture `cap184-shared-cache`),
         and what it stores carries a profile and a property cohort this process cannot
         see. Which caches those are is `_caches_a_call_may_write`.
+
+        A child that may write one also ends any proof that a removal on this path left it
+        holding this process's own documents alone (amendment 3 §7-§8).
         """
         for ref in _caches_a_call_may_write(cache_refs, contract):
             state = state.with_content(ref, None).with_cohort(ref, UNKNOWN_COHORT)
@@ -2114,7 +2372,7 @@ def _walk_lineage(
                             invalidated=invalidated | {CACHE_TRANSFER_UNPROVED},
                             cached_from=cache_ref,
                         )
-            if proved and _caller_owes_a_cached_property(cache_ref, name, capabilities):
+            if proved and _caller_owes_a_cached_property(cache_ref, name, capabilities, state):
                 unestablished_cached_keys.append((
                     node.source_path + ("/process_ref" if bound else ""),
                     cache_ref, name, request_profile_ref if bound else None, bound,
@@ -2141,8 +2399,13 @@ def _walk_lineage(
         # Amendment 1 rule 7: a waited child that completed normally established what its
         # contract guarantees. Execution state only: a child's document properties never
         # land on this process's sibling copies.
+        # `proved`: `_child_guarantee` returns nothing unless exactly one document reaches
+        # this call, which is strictly stronger than `_path_provably_runs` asks of a write
+        # here — so a guarantee that crosses at all crossed on a path that runs, and a
+        # process that forwards one keeps it. What it guarantees is already only what its
+        # OWN every-completion proof allowed, so the proof composes rather than restarting.
         for key in _child_guarantee(semantic, contract, stream):
-            state = state.with_write(key)
+            state = state.with_write(key, proved=True)
         return state
 
     def _transfer(node, state, leg, writers, on_documents, invalidated, stream, legacy):
@@ -2173,6 +2436,10 @@ def _walk_lineage(
         # stream still writes onto the documents it emits, so its own writes
         # must survive its own replacement.
         established_here = set()
+        # #184 amendment 1 rule 7: whether the documents reaching this node prove its
+        # writes run at all. Read from the INCOMING stream, before the tail below rebuilds
+        # it, so a write is judged against what was in front of it.
+        provably_runs = _path_provably_runs(stream)
 
         semantic = node.semantic
 
@@ -2239,11 +2506,13 @@ def _walk_lineage(
             for key in effect.writes:
                 if key[0] == CACHE:
                     state = state.with_content(key[1], None)
+                    # Not `ours`: documents this walk cannot see enter the cache here, so a
+                    # removal before it no longer proves the cache holds this process's own.
                     state = state.with_cohort(key[1], UNKNOWN_COHORT)
             if not establishes:
                 continue
             for key in effect.writes:
-                state = state.with_write((key[0], key[1]))
+                state = state.with_write((key[0], key[1]), proved=provably_runs)
                 if key[0] == DDP:
                     on_documents = on_documents | {(key[0], key[1])}
                     established_here.add((key[0], key[1]))
@@ -2315,7 +2584,7 @@ def _walk_lineage(
                     unmet_here = unmet_here + (key,)
                 writer_records[node.node_id] = (semantic, unmet_here)
                 writers = {**writers, key: (node.node_id,)}
-            state = state.with_write(key)
+            state = state.with_write(key, proved=provably_runs)
             if key[0] == DDP:
                 on_documents = on_documents | {key}
                 established_here.add(key)
@@ -2339,10 +2608,10 @@ def _walk_lineage(
         if kind == "cache_put" and stream.state != STREAM_ABSENT:
             # #184 amendment 3 §7: the cohort the executing write stores, frozen now.
             state = state.with_cohort(
-                semantic.cache_ref, _cohort_at_write(on_documents, writers, stream)
+                semantic.cache_ref, _cohort_at_write(on_documents, writers, stream), ours=True
             )
         if kind == "cache_remove" and getattr(semantic, "remove_all_documents", False):
-            state = _after_a_whole_cache_removal(state, semantic.cache_ref)
+            state = _after_a_whole_cache_removal(state, semantic.cache_ref, provably_runs)
         if kind in TRIGGERED_REPLACEMENT_SEMANTIC_KINDS:
             if stream.state == STREAM_ABSENT:
                 count = COUNT_UNKNOWN
@@ -2371,7 +2640,8 @@ def _walk_lineage(
             invalidated = invalidated | dropped
 
         # --- the stream profile (#184 D2) ----------------------------------
-        state, stream, legacy = _advance_stream(node, semantic, state, stream, legacy)
+        state, stream, legacy = _advance_stream(
+            node, semantic, state, stream, legacy, provably_runs)
 
         # --- the proved count and property knowledge (#184 amendment 3 §7) ---
         # Applied after the profile step, which rebuilds the stream, and independent
@@ -2382,8 +2652,26 @@ def _walk_lineage(
             next_count = COUNT_UNKNOWN
         if kind == "passthrough" or _opaque_reason(semantic, capabilities) in ("map", "script"):
             properties_unknown = True
+        # #184 amendment 1 rule 7: non-emptiness travels the same way the count does, and
+        # for the same reason — a step that hands on exactly the documents it received
+        # cannot reduce a non-empty group to zero. `or` rather than a plain assignment
+        # because the stream step itself ESTABLISHES the fact at a passthrough entry, whose
+        # own kind preserves no count; a producer that may return no rows drops it, which is
+        # the fail-closed half.
+        #
+        # A retrieve is the one other step this path can PROVE non-empty, and only from a
+        # fact the walk already holds: a cache this path's own proved write filled
+        # (`_retrieve_of_a_proved_cache`). Gated on `provably_runs` exactly as the
+        # count-preserving carry is — a retrieve nothing reaches never runs, so what it
+        # would hand on is not the question — and on nothing else: a retrieve of a cache
+        # that may be empty still ends the proof.
         stream = stream._replace(
             count=next_count,
+            provably_nonempty=(
+                stream.provably_nonempty
+                or (provably_runs and kind in _COUNT_PRESERVING_KINDS)
+                or (provably_runs and _retrieve_of_a_proved_cache(semantic, state))
+            ),
             properties_unknown=properties_unknown,
             native_kind=_native_work_marker(
                 incoming_native, kind, getattr(_authored_at(prepared.ir, node.source_path), "kind", None)
@@ -2506,12 +2794,16 @@ def _walk_lineage(
                     # ending in a Decision with one throwing arm hands back a state
                     # missing whatever only the normal arm wrote.
                     "leg_documents": [], "guaranteed": entry.execution,
+                    # The proof travels with the guarantee, accumulated leg by leg exactly
+                    # like it: every leg runs, so a key an earlier leg proved still holds.
+                    "proved": entry.proved,
                     "first": len(normal_exits), "after": after,
                 }
                 work.append(("branch_leg_done", branch))
                 edge = edges[0]
                 work.append(("visit", edge.target_node_id, (
-                    _State(entry.document, entry.execution, entry.content, entry.cohorts),
+                    _State(entry.document, entry.execution, entry.content, entry.cohorts,
+                           entry.sealed, entry.proved),
                     (node.node_id, edge.leg_ordinal or edge.local_ordinal),
                 ) + after))
                 continue
@@ -2543,6 +2835,10 @@ def _walk_lineage(
                 scope = {
                     "edges": edges, "index": 0, "state": state, "leg": leg,
                     "content": state.content, "cohorts": state.cohorts, "after": after,
+                    # The MUST set goes the other way: a removal inside either body may not
+                    # have happened, and a write inside either may have, so a cache counts
+                    # as emptied-and-ours after the scope only where every outcome agrees.
+                    "sealed": state.sealed,
                 }
                 work.append(("try_edge_done", scope))
                 work.append(("visit", edges[0].target_node_id, (
@@ -2561,13 +2857,16 @@ def _walk_lineage(
             leg_end = returned
             # What this leg STARTED from: everything the earlier legs left established.
             seeded = branch["carried"].execution
+            seeded_proved = branch["carried"].proved
             completions = normal_exits[branch["first"]:]
             if completions:
                 leg_document = completions[0].document
                 leg_execution = completions[0].execution
+                leg_proved = completions[0].proved
                 for other in completions[1:]:
                     leg_document = leg_document & other.document
                     leg_execution = leg_execution & other.execution
+                    leg_proved = leg_proved & other.proved
                 branch["leg_documents"].append(leg_document)
                 # Every leg RUNS, so what a leg guarantees holds afterwards — and what a
                 # leg UN-establishes stops holding, however early it was written (#184
@@ -2577,6 +2876,10 @@ def _walk_lineage(
                 # write outlive the removal that undid it, so a process whose last leg
                 # emptied a cache still guaranteed it to its caller.
                 branch["guaranteed"] = (branch["guaranteed"] | leg_execution) - (seeded - leg_execution)
+                # The same accumulation for the proof, against the proved set this leg
+                # started from: a key this leg un-established loses its proof with it, and a
+                # key this leg proved is proved for every completion after it.
+                branch["proved"] = (branch["proved"] | leg_proved) - (seeded_proved - leg_proved)
             # The NEXT leg is seeded from the CONTINUATION, which is throw-aware at
             # the Decision. Seeding it from this leg's normal COMPLETIONS instead
             # broke sequencing: a leg ending in a WAITING `process_call` recorded no
@@ -2596,6 +2899,12 @@ def _walk_lineage(
                 leg_end.execution,
                 leg_end.content,
                 leg_end.cohorts,
+                # Legs run in order, so a cache an earlier leg emptied and refilled from its
+                # own writes is still that at the next leg's call (amendment 3 §7-§8).
+                leg_end.sealed,
+                # Read off the continuation for the same reason its execution state is: it
+                # already holds every earlier leg's proof that this leg did not undo.
+                leg_end.proved,
             )
             branch["carried"] = carried
             branch["index"] += 1
@@ -2604,7 +2913,8 @@ def _walk_lineage(
                 branch["first"] = len(normal_exits)
                 work.append(("branch_leg_done", branch))
                 work.append(("visit", edge.target_node_id, (
-                    _State(branch["entry"].document, carried.execution, carried.content, carried.cohorts),
+                    _State(branch["entry"].document, carried.execution, carried.content,
+                           carried.cohorts, carried.sealed, carried.proved),
                     (branch["node"].node_id, edge.leg_ordinal or edge.local_ordinal),
                 ) + branch["after"]))
                 continue
@@ -2614,7 +2924,8 @@ def _walk_lineage(
             # nothing rather than promising the meet of abnormal paths.
             del normal_exits[branch["recorded_before"]:]
             for leg_document in branch["leg_documents"]:
-                normal_exits.append(_State(leg_document, branch["guaranteed"]))
+                normal_exits.append(
+                    _State(leg_document, branch["guaranteed"], proved=branch["proved"]))
             returned = carried
             continue
 
@@ -2647,6 +2958,7 @@ def _walk_lineage(
             scope = frame[1]
             scope["content"] = scope["content"] | returned.content
             scope["cohorts"] = scope["cohorts"] | returned.cohorts
+            scope["sealed"] = scope["sealed"] & returned.sealed
             scope["index"] += 1
             if scope["index"] < len(scope["edges"]):
                 edge = scope["edges"][scope["index"]]
@@ -2658,7 +2970,11 @@ def _walk_lineage(
                 )))
                 continue
             returned = _State(
-                scope["state"].document, scope["state"].execution, scope["content"], scope["cohorts"]
+                scope["state"].document, scope["state"].execution, scope["content"],
+                scope["cohorts"], scope["sealed"],
+                # Scope-entry, like the execution state beside it: a write inside either
+                # body may not have happened, so neither may its proof.
+                scope["state"].proved,
             )
             continue
 
@@ -2702,6 +3018,14 @@ def _walk_lineage(
             key=lambda row: (row[0], row[1], row[2], row[3] or "", row[4]),
         )),
         binding_cache_origins=tuple(sorted(set(binding_cache_origins))),
+        # The same meet, over the same exits, asked of the proof rather than the
+        # establishment — so a key survives only where EVERY normal completion made the
+        # write, and where one completion's write sat behind a possibly-empty step it does
+        # not (round r19). `_State.proved` is execution-scoped, so this is already free of
+        # document properties.
+        guaranteed_at_exit=(
+            () if established is None else tuple(sorted(established.proved))
+        ),
         profile_proof=profile_proof,
     )
 

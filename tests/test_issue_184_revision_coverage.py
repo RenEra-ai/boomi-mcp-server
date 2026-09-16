@@ -156,15 +156,23 @@ def _perturbations():
         ("lineage", "_opaque_reason"): lambda semantic, capabilities: None,
         ("lineage", "_caches_a_call_may_write"): lambda cache_refs, contract: (),
         ("lineage", "_caches_a_call_may_remove"): lambda cache_refs, contract: (),
+        # The one rule every site reads a proved removal through, and the proved-path gate
+        # on what a child may guarantee at all.
+        ("lineage", "proved_removals"): lambda contract: (),
+        ("lineage", "_path_provably_runs"): lambda stream: True,
+        # The other carrier of non-emptiness: the walk's own proof that an earlier write
+        # filled the cache this retrieve reads. Dropping it withholds the guarantee behind
+        # every such retrieve again.
+        ("lineage", "_retrieve_of_a_proved_cache"): lambda semantic, state: False,
         # The two halves of the shared-cache obligation: what a call can check, and what it
         # owes its own callers. Dropping either re-opens one of the two shapes.
         ("lineage", "_call_stores_nothing_in"):
             lambda state, cache_ref, external_writer: False,
         ("lineage", "_caller_owes_a_cached_property"):
-            lambda cache_ref, name, capabilities: False,
+            lambda cache_ref, name, capabilities, state: False,
         ("lineage", "_without_cache_establishment"): lambda state, cache_ref: state,
         ("lineage", "_after_a_whole_cache_removal"):
-            lambda state, cache_ref: state.without_content(cache_ref),
+            lambda state, cache_ref, proved_to_run: state.without_content(cache_ref),
         ("lineage", "_seeds_an_unknown_cohort"): lambda cache_ref, cohort_names: True,
         ("lineage", "_repetition_unstable_caches"): lambda contract, cache_refs: (),
         ("lineage", "_leg_member_index"): lambda prepared: {},
@@ -172,11 +180,16 @@ def _perturbations():
         ("lineage", "_written_in_a_later_leg"): lambda leg_writes, leg, key: False,
         ("lineage", "_written_anywhere"): lambda prepared, key, capabilities=None: False,
         # --- lineage: the lattice's transfer and meet -----------------------------------
-        ("lineage", "_State.with_write"): lambda self, key: self,
+        ("lineage", "_State.with_write"): lambda self, key, proved=False: self,
         ("lineage", "_State.with_content"): lambda self, cache_ref, identity: self,
-        ("lineage", "_State.with_cohort"): lambda self, cache_ref, cohort: self,
+        ("lineage", "_State.with_cohort"): lambda self, cache_ref, cohort, ours=False: self,
         ("lineage", "_State.cohorts_of"): lambda self, cache_ref: frozenset(),
         ("lineage", "_State.without_content"): lambda self, cache_ref: self,
+        # Never sealing re-opens the false refusal a proved removal and refill ends. The
+        # opposite direction — clearing the seal when a foreign cohort enters — is a guard
+        # inside `_State.with_cohort`, not a decision of its own, and is witnessed by
+        # `test_issue_184_child_state_transfer.py::test_a_foreign_cohort_and_the_meet_each_end_the_removal_proof`.
+        ("lineage", "_State.with_sealed_cache"): lambda self, cache_ref: self,
         ("lineage", "_State.content_of"): lambda self, cache_ref: frozenset(),
         ("lineage", "_State.establishes"): lambda self, key: False,
         ("lineage", "_State.entering_branch_leg"):
@@ -450,6 +463,31 @@ def _still_opaque(semantic, capabilities):
 
 
 _REAL_OPAQUE_REASON = lineage._opaque_reason
+_REAL_WITH_WRITE = lineage._State.with_write
+_REAL_AFTER_A_WHOLE_CACHE_REMOVAL = lineage._after_a_whole_cache_removal
+
+
+def _seals_whatever_the_walk_proved(state, cache_ref, proved_to_run):
+    """The PERMISSIVE half of the seal gate, neutralised: a whole-cache removal the walk
+    marks as possibly skipped seals the cache all the same — the rule before round r19.
+
+    Its mirror (never sealing) is already a perturbation of `_State.with_sealed_cache`, and
+    that direction moved the revision. This one did not: the section added for the seal used
+    a provably-running removal in every case, so the gate inside the function the
+    `a_whole_cache_removal_only_clears_the_content` rule perturbs was unbound (round r19c).
+    """
+    return _REAL_AFTER_A_WHOLE_CACHE_REMOVAL(state, cache_ref, True)
+
+
+def _a_union_over_paths(self, key, proved=False):
+    """The stance the per-path meet replaced: ONE unproved write un-proves the key for every
+    path, so a key every normal completion establishes is withheld the moment some other path
+    also wrote it behind a possibly-empty step."""
+    after = _REAL_WITH_WRITE(self, key, proved=proved)
+    if proved or key[0] in lineage._DOCUMENT_LIFETIME_SCOPES:
+        return after
+    return lineage._State(after.document, after.execution, after.content, after.cohorts,
+                          after.sealed, after.proved - {key})
 
 #: One per rule of this batch that decides what a call does to its caller's state and
 #: that no table states: the row it must move, and the pre-batch answer that neutralises
@@ -463,7 +501,19 @@ _CALL_STATE_RULES = {
         "child_call_state", "_caller_cached_origin", lambda key, stream, invalidated: None),
     "a_whole_cache_removal_only_clears_the_content": (
         "property_survival", "_after_a_whole_cache_removal",
-        lambda state, cache_ref: state.without_content(cache_ref)),
+        lambda state, cache_ref, proved_to_run: state.without_content(cache_ref)),
+    # Round r19b: the per-path meet was revision-SILENT — reverting it left the compiler
+    # revision byte-identical, because the oracle's child vocabulary had no child writing one
+    # key on both a proved and an unproved path. The shape the rule exists for is now a case,
+    # so the rule cannot be reverted with this payload standing still.
+    "a_guarantee_is_a_union_over_paths_not_a_meet": (
+        "child_call_state", "_State.with_write", _a_union_over_paths),
+    # Round r19c: the seal's own proof gate was revision-silent in the direction it exists
+    # to block. The `a_whole_cache_removal_only_clears_the_content` row above drops the
+    # WHOLE transform and moves the revision; removing only the gate inside it moved a real
+    # caller from refused to admitted with the served bytes unchanged.
+    "an_unproved_removal_seals_all_the_same": (
+        "child_call_state", "_after_a_whole_cache_removal", _seals_whatever_the_walk_proved),
 }
 
 
@@ -477,7 +527,9 @@ def test_each_call_state_rule_moves_the_revision_through_its_own_row(rule, monke
     baseline_payload = authoring_contract._compiler_revision_payload()
     baseline = authoring_contract.sha256_fingerprint(baseline_payload)
     with monkeypatch.context() as patched:
-        patched.setattr(lineage, target, replacement)
+        # `_patch` rather than a bare setattr: a rule may live on a method of the lattice
+        # (`_State.with_write`), which only the dotted form reaches.
+        _patch(patched, ("lineage", target), replacement)
         payload = authoring_contract._compiler_revision_payload()
     assert sorted(row for row, value in payload.items() if value == "unavailable") == []
     assert payload[row_name] != baseline_payload[row_name], rule
@@ -570,6 +622,59 @@ def test_the_two_reference_cases_rest_on_the_cache_identity_canonicalization(mon
         for halves in cases.values()
     ), cases
     assert authoring_contract.sha256_fingerprint(payload) != baseline
+
+
+def _recorded_root_verdicts(row):
+    """Every root verdict anywhere in the child-call-state row, split by leaf and caller.
+
+    Found by walking the payload rather than by naming the sections: a section added later
+    is covered the moment its roots go through `verdicts_of`, which is what records the
+    `calls` list each verdict carries.
+    """
+    leaves, callers, stack = [], [], [(("child_call_state",), row)]
+    while stack:
+        path, node = stack.pop()
+        if isinstance(node, dict):
+            if "calls" in node and "errors" in node:
+                (leaves if node["calls"] == [] else callers).append((path, node))
+                continue
+            stack.extend((path + (str(key),), value) for key, value in node.items())
+        elif isinstance(node, list):
+            stack.extend((path + (str(index),), value) for index, value in enumerate(node))
+    return leaves, callers
+
+
+def test_every_child_any_call_state_section_measures_is_a_graph_that_can_ship():
+    """The structural half of `an oracle case built on a graph the validator refuses`.
+
+    The class appeared three times in this slice — the `fills_the_cache_on_a_proved_path`
+    child, the `one_cache_two_refs` guarantee child, and the test fixtures that copied their
+    shape — because the row recorded only the CALLER's verdict, so a child refused
+    `…CARDINALITY_MISMATCH` still contributed a `guaranteed_state` the served compiler and
+    capability revisions were computed over. The first fix put the child's verdict into the
+    `calls` rows; that left the mechanism alive in every OTHER section, and the batch's own
+    `a_removed_and_refilled_cache` resolved four roots while recording two — so swapping its
+    writer back to the refused shape moved no served byte and tripped nothing (round r19c).
+
+    The enumeration is therefore gone on both sides. Every root a section resolves is
+    recorded, because the reported set IS the resolver's root list; and this guard reads
+    every recorded verdict anywhere in the row, keyed on what each root CALLS rather than on
+    its name. A root that calls nobody is a leaf child, whose contract facts the verdicts
+    above it are derived from, and it must be a graph that can ship. A root that calls
+    another is the caller under measurement, and its refusal is often the recorded answer."""
+    row = authoring_contract._compiler_revision_payload()["child_call_state"]
+    assert all(len(case) == 6 for case in row["calls"]), "a case carries no child verdict"
+    leaves, callers = _recorded_root_verdicts(row)
+    refused = sorted(path for path, verdict in leaves if verdict["errors"])
+    assert refused == [], refused
+    # Non-vacuity, three ways: the walk reaches leaves in more than one section, the `calls`
+    # rows' own child verdicts are among them, and the SAME measurement reports errors where
+    # there are any — so an empty leaf-error list is a measured fact, not an empty shape.
+    assert len({path[1] for path, _verdict in leaves}) > 1, sorted(
+        {path[1] for path, _verdict in leaves})
+    assert len(leaves) >= len(row["calls"]), (len(leaves), len(row["calls"]))
+    assert any(case[3]["errors"] for case in row["calls"])
+    assert any(verdict["errors"] for _path, verdict in callers)
 
 
 def test_the_call_state_row_reaches_every_case_of_its_vocabularies():
